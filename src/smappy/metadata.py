@@ -79,7 +79,8 @@ class CameraMetadata:
         if missing:
             raise ValueError(
                 "missing camera metadata: " + ", ".join(missing) +
-                ". Supply it via a camera preset or explicitly, e.g. "
+                ". State it in the camera config file, pass it as an option "
+                "(--pixelsize, --conversion, --offset), or give it directly: "
                 "CameraMetadata(conversion=6.7, offset=398.6, pixelsize_um=0.127)"
             )
 

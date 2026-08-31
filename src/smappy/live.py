@@ -221,9 +221,11 @@ def live_view(data, camera: CameraMetadata, finder, model,
 
     writer = None
     if output is not None:
+        # a source that is not a file -- frames pushed in -- describes itself
+        files = getattr(source, "files", None)
         writer = LocalizationWriter(output)
         writer.set_metadata(provenance(camera, finder, model, settings,
-                                       source=getattr(source, "files", [data])[0]))
+                                       source=files[0] if files else source))
 
     fit = LiveFit(frames, camera, finder, model, settings, live,
                   sink=None if writer is None else writer.append,

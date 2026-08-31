@@ -37,6 +37,7 @@ making it larger renders a finer image rather than scaling one up.
 from __future__ import annotations
 
 import time
+from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -922,11 +923,21 @@ class Viewer:
                     box.eventson = events
 
 
-def show(locs: Localizations, settings: Optional[RenderSettings] = None,
+def show(locs, settings: Optional[RenderSettings] = None,
          display: Optional[DisplaySettings] = None, block: bool = True,
          group_settings: Optional[GroupSettings] = None) -> Viewer:
-    """Open a viewer on a localization table."""
+    """Open a viewer on a localization table, or on a file holding one.
+
+    This opens a window and, with ``block=True``, does not return until it is
+    closed -- and matplotlib wants the main thread for it.  Inside a program
+    that has its own event loop, run it as a separate process (``smappy-view
+    FILE``), or use `smappy.render.save_image` for a picture with no window.
+    """
     import matplotlib.pyplot as plt
+
+    if isinstance(locs, (str, Path)):
+        from .io.hdf5 import load_localizations
+        locs = load_localizations(locs)
 
     viewer = Viewer(ViewState(locs, settings, display),
                     group_settings=group_settings)

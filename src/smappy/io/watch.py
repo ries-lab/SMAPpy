@@ -61,6 +61,12 @@ def watch_stack(path, chunk: int = 100, settings: Optional[WatchSettings] = None
     progress line.
     """
     settings = settings or WatchSettings()
+    ndtiff = _wait_for_ndtiff(path, settings, stop_event)
+    if ndtiff is not None:
+        yield from ndtiff.watch(chunk=chunk, settings=settings, start=start,
+                                stop=stop, stop_event=stop_event, on_wait=on_wait)
+        return
+
     first = _wait_for_file(path, settings, stop_event)
     if first is None:
         return
@@ -131,6 +137,10 @@ def open_growing_stack(path, settings: Optional[WatchSettings] = None,
     written by the time it was opened.  Use `watch_stack` for the frames.
     """
     settings = settings or WatchSettings()
+    ndtiff = _wait_for_ndtiff(path, settings, stop_event)
+    if ndtiff is not None:
+        return ndtiff
+
     first = _wait_for_file(path, settings, stop_event)
     if first is None:
         raise TimeoutError(f"no readable TIFF appeared at {path} within "
@@ -149,6 +159,40 @@ def open_growing_stack(path, settings: Optional[WatchSettings] = None,
 
 
 # ------------------------------------------------------------------- internals
+def _wait_for_ndtiff(path, settings: WatchSettings, stop_event):
+    """The dataset, once its index lists a complete image -- else ``None``.
+
+    ``None`` means "not an NDTiff dataset", which is the ordinary case and sends
+    the caller on to the TIFF path.  A directory that does not exist yet is
+    waited for either way, so this only gives up once something else appears.
+    """
+    from .ndtiff import INDEX_NAME, is_ndtiff, open_ndtiff
+
+    deadline = time.monotonic() + settings.appear_timeout
+    directory = Path(path)
+    while not _stopped(stop_event):
+        if is_ndtiff(directory):
+            try:
+                return open_ndtiff(directory)
+            except (OSError, ValueError):
+                pass           # the index exists but has no complete image yet
+        elif directory.exists() and not _looks_like_ndtiff(directory):
+            return None        # a TIFF is there; that is what is being written
+        if time.monotonic() > deadline:
+            return None
+        _sleep(settings.poll, stop_event)
+    return None
+
+
+def _looks_like_ndtiff(directory: Path) -> bool:
+    """A directory an NDTiff dataset is still being created in.
+
+    NDTiffStorage writes its stack file before the index, so between the two
+    there is a moment that would otherwise be read as a Micro-Manager series.
+    """
+    return directory.is_dir() and any(directory.glob("*NDTiffStack*.tif"))
+
+
 def _read_new_pages(path: Path, page_i: int, hold_last: bool
                     ) -> Tuple[List[np.ndarray], int, bool]:
     """Pages of ``path`` from ``page_i`` on, and whether the file is exhausted.

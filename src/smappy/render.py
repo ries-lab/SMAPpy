@@ -461,3 +461,39 @@ def render_locs(locs: Localizations, fov: FieldOfView,
     return render(x, y, fov, sigma=sigma, weights=weights, colors=colors,
                   roi_sigma=settings.roi_sigma, n_threads=n_threads,
                   use_extension=use_extension)
+
+
+def save_image(locs, path, pixelsize: float = 10.0,
+               settings: Optional[RenderSettings] = None,
+               display: Optional[DisplaySettings] = None, select=None,
+               fov: Optional[FieldOfView] = None, margin: float = 0.0) -> "Path":
+    """Render a table and write it as an image file.  Returns the path.
+
+    The whole picture with no window and no event loop, for a program that has
+    its own -- a report, a thumbnail, a tile in a web page.  ``pixelsize`` is the
+    rendered pixel in the units of the table (nm, normally); ``fov`` frames it
+    somewhere other than around the data.
+
+    Needs Pillow, which is what writes the file.
+    """
+    from pathlib import Path as _Path
+
+    try:
+        from PIL import Image
+    except ImportError:            # pragma: no cover - depends on the install
+        raise ImportError("save_image writes the file with Pillow: "
+                          "pip install pillow") from None
+
+    if isinstance(locs, (str, _Path)):
+        from .io.hdf5 import load_localizations
+        locs = load_localizations(locs)
+
+    if fov is None:
+        x, y = positions(locs, getattr(select, "indices", select))
+        fov = FieldOfView.around(x, y, pixelsize=pixelsize, margin=margin)
+    rendered = render_locs(locs, fov, settings, display, select=select)
+    rgb = (display or DisplaySettings()).apply(rendered)
+
+    path = _Path(path)
+    Image.fromarray(np.asarray(rgb, dtype=np.uint8)).save(path)
+    return path

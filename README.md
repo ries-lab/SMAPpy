@@ -3,28 +3,54 @@
 Python implementation of the SMAP single-molecule fitting pipeline: camera
 conversion, filtering, peak finding, ROI cutting, maximum-likelihood fitting
 with a Gaussian or experimental (cubic-spline) PSF, and streaming output to
-HDF5.  Reads SMAP `_3Dcal.mat` calibration files and Micro-Manager TIFF stacks.
+HDF5.  Reads SMAP `_3Dcal.mat` calibration files, Micro-Manager TIFF stacks and
+NDTiff datasets (pycro-manager).
 
 See [NOTES.md](NOTES.md) for the design decisions and open questions.
 
 ## Install
 
     /usr/bin/python3 -m venv .venv                 # native arm64 on Apple silicon
-    .venv/bin/python -m pip install numpy scipy tifffile h5py pybind11 pyyaml pytest
-    .venv/bin/python setup.py build_ext --build-lib src
+    .venv/bin/python -m pip install ".[viewer]"
+
+That builds the C++ extensions and installs the `smappy-fit`, `smappy-live`,
+`smappy-view` and `smappy-drift` commands.  For work on smappy itself, `-e` and
+`pytest` instead; `scripts/*.py` run from a checkout without installing
+anything.
 
 ## Use
 
+    import smappy
+
+    locs = smappy.fit(data, out="OUT.h5",
+                      camera={"conversion": 6.7, "offset": 400,
+                              "pixelsize_um": 0.127},
+                      calibration="..._3dcal.mat")
+    smappy.view("OUT.h5")
+
+`data` is a path to an acquisition, an image source, an array of frames, or any
+iterable of `(first_frame, block)` -- so images already in memory need no file.
+A path may be a Micro-Manager TIFF series or an NDTiff dataset directory; which
+one it is follows from what is there, and nothing above `open_stack` has to
+know.
+`camera` is a dict of the fields, a `CameraMetadata` or the path of a YAML
+config, and overrides whatever the image metadata says; `calibration` is a
+`_3dcal.mat`, and without one the fit is Gaussian and there is no z.  The table
+is returned whether or not it is also written; `collect=False` streams to the
+file alone, for an acquisition too long to hold in memory.
+
+`smappy.fit` only assembles the stages, and they are equally available on their
+own -- this is the same fit written out:
+
     from smappy.io.tiff import open_stack, camera_metadata
-    from smappy.io.cameras_mat import CameraPresets
     from smappy.io.calibration import load_spline_calibration
     from smappy.detect import DoGFilter, DynamicCutoff, PeakFinder
-    from smappy.psf import SplinePSF, GaussianPSF
+    from smappy.psf import SplinePSF
     from smappy.pipeline import FitSettings, fit_stack
 
     source = open_stack("...MMStack_Default.ome.tif")
-    camera = camera_metadata(source, CameraPresets.load("RiesLab_cameras.mat"),
-                             {"pixelsize_um": 0.127})
+    camera = camera_metadata(source, overrides={"conversion": 6.7, "offset": 400,
+                                                "pixelsize_um": 0.127})
     model = SplinePSF(load_spline_calibration("..._3dcal.mat"))
     finder = PeakFinder(DoGFilter(1.2), DynamicCutoff(1.7))
 
@@ -61,8 +87,7 @@ errors added in quadrature, precisions added in inverse quadrature), plus
 
 To look at the result:
 
-    from smappy.viewer import show
-    show(locs)                       # or: scripts/view_locs.py OUT.h5
+    smappy.view(locs)                # a table, or the path of a saved file
 
 The image and the controls open as two windows.  The image window holds nothing
 but the image, so it can be resized to whatever the screen allows -- any shape,
@@ -92,8 +117,39 @@ Needs matplotlib (`pip install matplotlib`).
 
 Or from the command line:
 
-    .venv/bin/python scripts/fit_dataset.py DATA CAMERAS.mat CONFIG.yaml OUT.h5 \
-        --cal CAL_3dcal.mat --units nm
+    smappy-fit DATA OUT.h5 \
+        --camera camera.yaml --cal CAL_3dcal.mat --units nm
+
+The camera is stated in a YAML config (`examples/camera_evolve512.yaml`) or
+directly on the command line -- `--pixelsize 0.127 --conversion 6.7 --offset
+400` does the same thing without a file, and either overrides what the image
+metadata says.  A lab that keeps a SMAP `*_cameras.mat` can pass it with
+`--cameras` for the conversion and the per-camera metadata rules, but nothing
+requires one.  In Python the same layers are `camera_metadata(source, presets,
+overrides)`, where `overrides` is a `CameraMetadata`, a dict or a YAML path and
+wins over everything else.
+
+## NDTiff
+
+pycro-manager writes NDTiff: a directory with an `NDTiff.index` and one or more
+`*NDTiffStack*.tif`.  The index is a flat table giving, per image, the file and
+the byte offset of its pixels, so images are read by seeking and the TIFF page
+chain is never walked: opening costs about 7 us per frame against the ~120 us a
+page walk takes, so a 46 k-frame dataset is ready in 0.3 s rather than 5 s.  `open_stack` returns an `NDTiffSource` for such a directory and
+an `ImageSource` for a Micro-Manager series; everything downstream is the same.
+
+The reader is a port of SMAP's MATLAB loader (`shared/imageloaders/`), including
+the parts that are not in any specification: the index table is zero-padded, the
+bytes per pixel are more reliably derived from where the metadata starts than
+from the declared pixel type, and an interrupted acquisition leaves records
+describing images that were never written -- those are dropped rather than read
+as noise.
+
+That last rule is also what makes a growing dataset safe to read: a record is
+used only once the bytes it points at are there.  Following an acquisition is
+therefore just re-reading the index, with none of the care a growing TIFF page
+chain needs, and `live_fit.py` takes an NDTiff directory exactly as it takes a
+TIFF.
 
 ## Drift correction
 
@@ -103,7 +159,7 @@ reference structure.  It is an optional dependency; the source is vendored:
 
     .venv/bin/python -m pip install -e externaltools/Comet/Python_interface
 
-    .venv/bin/python scripts/drift_correct.py OUT.h5 \
+    smappy-drift OUT.h5 \
         --filter loc_precision_nm - 20 --filter logl_rel -2 - \
         --frames-per-window 500 --max-drift 300 --plot
 
@@ -165,7 +221,7 @@ is a reasonable set for a 3D dataset.
 
 ## Online: fit while the microscope writes
 
-    .venv/bin/python scripts/live_fit.py DATA CAMERAS.mat CONFIG.yaml OUT.h5 \
+    smappy-live DATA OUT.h5 --camera camera.yaml \
         --cal CAL_3dcal.mat --update 3 --timeout 30
 
 `DATA` is the growing Micro-Manager TIFF, or the directory it is being written
@@ -191,9 +247,43 @@ From Python:
 `LiveFit` is the same thing without a window: it runs the pipeline in a thread
 and queues finished blocks, for a different front end or a headless run.
 
-For online analysis, drive `LocalizationEngine` directly: `push(frames)` returns
-localizations once enough ROIs have accumulated, `flush()` forces a partial
-block.  Nothing asks how many frames there will be.
+### Frames that are never written to a file
+
+A control program may have the images already -- pycro-manager hands each one to
+a callback, a camera API returns them from a buffer.  `QueueSource` is the same
+`ImageSource` interface for that: the producer pushes, the pipeline reads.
+
+    source = smappy.queue_source(shape=(512, 512))
+
+    source.push(image)               # from the acquisition thread, or a hook
+    source.close()                   # the acquisition ended
+
+    smappy.live_view(source, camera, finder, model, settings, output="OUT.h5")
+
+Frames are numbered as they are pushed; `push(image, first_frame=n)` states the
+acquisition's own number instead, and a gap in the numbering ends a block rather
+than being papered over.  `maxsize` bounds the queue for a producer that can
+outrun the fit, which then waits -- the only honest answer when the alternative
+is growing until memory runs out.
+
+The lower level is there too: drive `LocalizationEngine` directly and
+`push(frames)` returns localizations once enough ROIs have accumulated, `flush()`
+forces a partial block.  Nothing asks how many frames there will be.
+
+### A window is not the only output
+
+`show` and `live_view` open a matplotlib window and want the main thread, which
+a program with its own event loop cannot give them.  Two ways round it:
+
+    smappy.save_image(locs, "image.png", pixelsize=10.0)   # no window at all
+
+`save_image` takes a table or a saved file, and the same `RenderSettings`,
+`DisplaySettings` and filter the viewer takes, so what it writes is what the
+viewer would show.  It needs Pillow.
+
+For a window, run `smappy-view FILE` as a separate process.  And `LiveFit` is
+`live_view` without a window: the fit in a thread, finished blocks on a queue,
+for a front end of your own.
 
 ## Scripts
 
@@ -203,9 +293,9 @@ block.  Nothing asks how many frames there will be.
 | `check_stack.py` | what the image metadata provides, and what is missing |
 | `check_detection.py` | filtering, peak finding and ROI cutting on real frames |
 | `check_fit.py` | spline fits on real data, with and without the mirror flip |
-| `fit_dataset.py` | the whole pipeline, to HDF5 |
-| `view_locs.py` | opens the viewer on a saved localization file |
-| `drift_correct.py` | drift-corrects a saved file with COMET |
+| `fit_dataset.py` | the whole pipeline, to HDF5 (`smappy-fit`) |
+| `view_locs.py` | opens the viewer on a saved localization file (`smappy-view`) |
+| `drift_correct.py` | drift-corrects a saved file with COMET (`smappy-drift`) |
 
 ## Tests
 

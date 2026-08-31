@@ -3,25 +3,30 @@
 Also fits the same ROIs with and without the x-flip demanded by a mirrored
 calibration: the correct orientation must give the better log-likelihood.
 """
-import sys, time
+import argparse, sys, time
 from pathlib import Path
 import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from smappy.io.tiff import open_stack, camera_metadata
-from smappy.io.cameras_mat import CameraPresets
+from smappy.io.tiff import open_stack
+from smappy.cli.camera_args import add_camera_arguments, camera_from_args
 from smappy.io.calibration import load_spline_calibration, warn_on_em_mismatch
 from smappy.camera import to_photons
 from smappy.detect import DoGFilter, DynamicCutoff, PeakFinder
 from smappy.roi import cut_rois
 from smappy.psf import SplinePSF
 
-data, cameras, config, calfile = sys.argv[1:5]
-nframes = int(sys.argv[5]) if len(sys.argv) > 5 else 50
-roisize = int(sys.argv[6]) if len(sys.argv) > 6 else 13
+ap = argparse.ArgumentParser(description=__doc__)
+ap.add_argument("data")
+ap.add_argument("cal", help="_3dcal.mat")
+ap.add_argument("nframes", nargs="?", type=int, default=50)
+ap.add_argument("roisize", nargs="?", type=int, default=13)
+add_camera_arguments(ap)
+a = ap.parse_args()
+nframes, roisize = a.nframes, a.roisize
 
-src = open_stack(data)
-cam = camera_metadata(src, CameraPresets.load(cameras), config)
-cal = load_spline_calibration(calfile)
+src = open_stack(a.data)
+cam = camera_from_args(src, a)
+cal = load_spline_calibration(a.cal)
 warn_on_em_mismatch(cal, cam.em_on)
 model = SplinePSF(cal)
 print(f"{cam}\n{model}\ncalibration mirrored: {model.mirror}\n")

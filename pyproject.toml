@@ -1,5 +1,8 @@
 [build-system]
-requires = ["setuptools>=64"]
+# pybind11 is imported by setup.py, so it has to be here as well as in the
+# environment: an isolated build (which is what `pip install .` does) sees only
+# what this list names.
+requires = ["setuptools>=64", "pybind11>=2.10"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,10 +10,38 @@ name = "smappy"
 version = "0.1.0dev"
 description = "Single-molecule localization fitting pipeline (Python port of the SMAP fast-simple workflow)"
 requires-python = ">=3.9"
-dependencies = ["numpy>=1.22", "scipy>=1.8", "tifffile>=2022.5", "h5py>=3.6"]
+# Floors only, no caps: smappy has to install into an environment that already
+# pins these (microclaw asks for numpy>=1.26, scipy>=1.12, tifffile>=2024.1.1),
+# so anything tighter here would force a downgrade there.
+dependencies = [
+    "numpy>=1.22",
+    "scipy>=1.8",
+    "tifffile>=2022.5",
+    "h5py>=3.6",
+    "pyyaml>=5.4",      # camera configs: CameraMetadata.from_yaml
+]
 
 [project.optional-dependencies]
 viewer = ["matplotlib>=3.4"]   # RangeSlider
+image = ["pillow>=9.0"]        # save_image, for a picture without a window
+
+[project.scripts]
+smappy-fit = "smappy.cli.fit:main"
+smappy-live = "smappy.cli.live:main"
+smappy-view = "smappy.cli.view:main"
+smappy-drift = "smappy.cli.drift:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.cibuildwheel]
+# numpy is deliberately not a build dependency: the extensions include only
+# pybind11/numpy.h, which carries its own ABI declarations and binds to numpy at
+# run time, so one wheel serves numpy 1.x and 2.x alike.  The test command below
+# is what proves that rather than assuming it.
+build = "cp39-* cp310-* cp311-* cp312-* cp313-*"
+skip = "pp* *-musllinux_*"
+# Importing the modules proves only that they load.  ci/smoke.py fits a frame
+# with a known emitter in it, so a wheel whose compiler produced subtly wrong
+# code fails here rather than in a lab.
+test-command = "python {project}/ci/smoke.py"

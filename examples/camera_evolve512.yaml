@@ -1,7 +1,13 @@
-# Values that override whatever the image metadata provides.
-# Anything left out is taken from the file (and, for the conversion, from the
-# SMAP camera settings file if one is given).
+# A complete camera.  This file alone is enough to fit a dataset:
+#
+#   python scripts/fit_dataset.py DATA OUT.h5 --camera examples/camera_evolve512.yaml
+#
+# Anything left out falls back to the image metadata (and, if a SMAP settings
+# file is passed with --cameras, to that).  Anything set here wins over both.
 camera:
-  pixelsize_um: 0.127     # not recorded by Micro-Manager for this setup
-  # conversion: 6.7       # e-/ADU, normally from the settings file
-  # offset: 400           # ADU, normally from the image metadata
+  conversion: 6.7         # e- per ADU
+  offset: 400             # camera baseline, ADU
+  pixelsize_um: 0.127     # effective pixel size in the sample
+  # em_on: true           # EM amplification used
+  # emgain: 200
+  camera_name: Evolve512

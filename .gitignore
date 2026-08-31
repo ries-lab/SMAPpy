@@ -4,3 +4,6 @@ build/
 *.png
 __pycache__/
 *.egg-info/
+.DS_Store
+externaltools/Comet/test_dataset/
+dist/

@@ -3,24 +3,29 @@
 Writes a PNG showing the photon image, the filtered image with the detected
 candidates, and a montage of the first ROIs.
 """
+import argparse
 import sys
 from pathlib import Path
 import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from smappy.io.tiff import open_stack, camera_metadata
-from smappy.io.cameras_mat import CameraPresets
+from smappy.io.tiff import open_stack
+from smappy.cli.camera_args import add_camera_arguments, camera_from_args
 from smappy.camera import to_photons
 from smappy.detect import DoGFilter, GaussFilter, DynamicCutoff, AbsoluteCutoff, PeakFinder
 from smappy.roi import cut_rois
 
-data, cameras, config = sys.argv[1], sys.argv[2], sys.argv[3]
-mode = sys.argv[4] if len(sys.argv) > 4 else "dog"
-cutoff_value = float(sys.argv[5]) if len(sys.argv) > 5 else 1.7
-nframes = int(sys.argv[6]) if len(sys.argv) > 6 else 20
-roisize = int(sys.argv[7]) if len(sys.argv) > 7 else 13
+ap = argparse.ArgumentParser(description=__doc__)
+ap.add_argument("data")
+ap.add_argument("mode", nargs="?", default="dog", choices=["dog", "gauss"])
+ap.add_argument("cutoff", nargs="?", type=float, default=1.7)
+ap.add_argument("nframes", nargs="?", type=int, default=20)
+ap.add_argument("roisize", nargs="?", type=int, default=13)
+add_camera_arguments(ap)
+a = ap.parse_args()
+mode, cutoff_value, nframes, roisize = a.mode, a.cutoff, a.nframes, a.roisize
 
-src = open_stack(data)
-cam = camera_metadata(src, CameraPresets.load(cameras), config)
+src = open_stack(a.data)
+cam = camera_from_args(src, a)
 print(f"{cam}\n")
 
 flt = DoGFilter(1.2) if mode == "dog" else GaussFilter(1.2)

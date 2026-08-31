@@ -93,7 +93,17 @@ class ImageSource:
 
 
 def open_stack(path) -> ImageSource:
-    """Open a Micro-Manager TIFF acquisition, including its continuation files."""
+    """Open an acquisition: a Micro-Manager TIFF series, or an NDTiff dataset.
+
+    Which one it is follows from what is there -- an NDTiff dataset is a
+    directory with an ``NDTiff.index`` -- so nothing above this has to know
+    which format the microscope wrote.
+    """
+    from .ndtiff import is_ndtiff, open_ndtiff   # NDTiff imports this module
+
+    if is_ndtiff(path):
+        return open_ndtiff(path)
+
     path = Path(path)
     if path.is_dir():
         candidates = sorted(path.glob("*.tif")) + sorted(path.glob("*.tiff"))
@@ -155,16 +165,23 @@ def metadata_from_stack(source: ImageSource,
                         presets=None) -> CameraMetadata:
     """Extract what the image file knows about the camera.
 
-    ``presets`` is an optional :class:`~smappy.io.cameras_mat.CameraPresets`.
-    It supplies the e-/ADU conversion, which Micro-Manager does not record, and
-    the per-camera rules that say which metadata key carries the EM mode, the
-    EM gain and the offset -- those differ between an Evolve and an iXon.
+    ``presets`` is optional: a :class:`~smappy.io.cameras_mat.CameraPresets`,
+    or the path of a SMAP ``*_cameras.mat`` to load one from.  It supplies the
+    e-/ADU conversion, which Micro-Manager does not record, and the per-camera
+    rules that say which metadata key carries the EM mode, the EM gain and the
+    offset -- those differ between an Evolve and an iXon.  It is a convenience
+    for a lab that already has such a file; the same values can simply be
+    stated in the camera config or passed to the fitter directly.
 
     The offset is taken from the image metadata.  Some cameras (e.g. the iXon)
     do not report it at all; in that case the value stored in the settings file
     for the matching readout mode is used and a warning is issued.  Values that
     remain unknown stay ``None`` and must be supplied by the user.
     """
+    if presets is not None and not hasattr(presets, "interpret"):
+        from .cameras_mat import CameraPresets   # scipy, so only when asked for
+        presets = CameraPresets.load(presets)
+
     mm = source.mm_metadata
     device = str(mm.get("Core-Camera") or mm.get("Camera") or "").strip()
 
@@ -217,7 +234,10 @@ def camera_metadata(source: ImageSource, presets=None, overrides=None,
     """Camera metadata for a stack: file metadata, then user overrides.
 
     ``overrides`` may be a :class:`~smappy.metadata.CameraMetadata`, a dict, or
-    a path to a YAML file.  Anything set there wins over the image metadata.
+    a path to a YAML file, and is the ordinary way to state the conversion, the
+    offset and the pixel size.  Anything set there wins over the image metadata
+    and over ``presets``, so a ``*_cameras.mat`` is never needed to get a
+    complete camera -- it only saves typing where one exists.
     With ``require=True`` the result is checked for completeness, so a missing
     pixel size fails here rather than silently producing wrong nm coordinates.
     """
