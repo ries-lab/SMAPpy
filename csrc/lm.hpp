@@ -13,7 +13,7 @@
 
 #include "linalg.hpp"
 
-namespace smapfit {
+namespace smappy {
 
 constexpr float TOLERANCE = 1e-6f;
 constexpr float INIT_LAMBDA = 0.1f;
@@ -172,4 +172,4 @@ inline void lm_fit(const Model& model, const float* data, int sz, int iterations
     crlb_and_logl(model, data, sz, theta, crlb, logl);
 }
 
-}  // namespace smapfit
+}  // namespace smappy

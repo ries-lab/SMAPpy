@@ -190,7 +190,7 @@ def fit_stack(frames: Iterable[Tuple[int, np.ndarray]], camera: CameraMetadata,
     """Run the pipeline over an iterable of ``(first_frame, block)``.
 
     ``sink`` is called with each finished block of localizations -- pass the
-    ``append`` method of a :class:`~smapfit.io.hdf5.LocalizationWriter` to
+    ``append`` method of a :class:`~smappy.io.hdf5.LocalizationWriter` to
     stream to disk instead of keeping everything in memory.
 
     ``read_ahead`` blocks are fetched from ``frames`` by a background thread;
@@ -228,7 +228,7 @@ def provenance(camera: CameraMetadata, finder: PeakFinder, model: PSFModel,
                 "rois_per_block": settings.block_rois(),
                 "max_fit_distance": settings.max_fit_distance,
                 "output_unit": settings.output_unit},
-        "smapfit_version": _version(),
+        "smappy_version": _version(),
     }
     calibration = getattr(model, "calibration", None)
     if calibration is not None:
@@ -245,6 +245,6 @@ def provenance(camera: CameraMetadata, finder: PeakFinder, model: PSFModel,
 def _version() -> str:
     try:
         from importlib.metadata import version
-        return version("smapfit")
+        return version("smappy")
     except Exception:
         return "0.1.0dev"

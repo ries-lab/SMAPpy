@@ -2,7 +2,7 @@
 
 The two halves already existed and are deliberately not merged here: the
 fitter is `LocalizationEngine` driven by a file that is still being written
-(`smapfit.io.watch`), the view is `ViewState`, which can be appended to.  All
+(`smappy.io.watch`), the view is `ViewState`, which can be appended to.  All
 this module adds is the join between them, which is a **queue and a timer**.
 
 * The fitter runs in its own thread and puts each finished block on a queue.
@@ -85,7 +85,7 @@ class LiveFit:
     # ----------------------------------------------------------------- running
     def start(self) -> "LiveFit":
         self._t0 = time.monotonic()
-        self._thread = threading.Thread(target=self._run, name="smapfit-live",
+        self._thread = threading.Thread(target=self._run, name="smappy-live",
                                         daemon=True)
         self._thread.start()
         return self

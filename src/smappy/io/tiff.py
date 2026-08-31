@@ -78,7 +78,7 @@ class ImageSource:
 
         Yields the frames already there and then whatever arrives, stopping
         when nothing new has for a while.  See
-        :func:`smapfit.io.watch.watch_stack` for the timing and the options;
+        :func:`smappy.io.watch.watch_stack` for the timing and the options;
         it is imported here rather than at the top because it is the one part
         of reading a stack that waits.
         """
@@ -155,7 +155,7 @@ def metadata_from_stack(source: ImageSource,
                         presets=None) -> CameraMetadata:
     """Extract what the image file knows about the camera.
 
-    ``presets`` is an optional :class:`~smapfit.io.cameras_mat.CameraPresets`.
+    ``presets`` is an optional :class:`~smappy.io.cameras_mat.CameraPresets`.
     It supplies the e-/ADU conversion, which Micro-Manager does not record, and
     the per-camera rules that say which metadata key carries the EM mode, the
     EM gain and the offset -- those differ between an Evolve and an iXon.
@@ -216,7 +216,7 @@ def camera_metadata(source: ImageSource, presets=None, overrides=None,
                     require: bool = True) -> CameraMetadata:
     """Camera metadata for a stack: file metadata, then user overrides.
 
-    ``overrides`` may be a :class:`~smapfit.metadata.CameraMetadata`, a dict, or
+    ``overrides`` may be a :class:`~smappy.metadata.CameraMetadata`, a dict, or
     a path to a YAML file.  Anything set there wins over the image metadata.
     With ``require=True`` the result is checked for completeness, so a missing
     pixel size fails here rather than silently producing wrong nm coordinates.

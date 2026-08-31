@@ -10,7 +10,7 @@
 #include <thread>
 #include <vector>
 
-namespace smapfit {
+namespace smappy {
 
 // Resolve a thread count: 0 or negative means "one per core".
 inline int resolve_threads(int requested, long long items) {
@@ -42,4 +42,4 @@ void parallel_ranges(long long n, int n_threads, Body body) {
     for (auto& th : pool) th.join();
 }
 
-}  // namespace smapfit
+}  // namespace smappy

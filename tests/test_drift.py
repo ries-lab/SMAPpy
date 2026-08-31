@@ -2,10 +2,10 @@
 import numpy as np
 import pytest
 
-from smapfit.drift import (Drift, DriftSettings, correct_drift, drift_corrected_path,
+from smappy.drift import (Drift, DriftSettings, correct_drift, drift_corrected_path,
                            estimate_drift, load_drift, save_drift_corrected)
-from smapfit.filter import LocFilter
-from smapfit.locs import Localizations
+from smappy.filter import LocFilter
+from smappy.locs import Localizations
 
 comet = pytest.importorskip("comet")
 
@@ -81,7 +81,7 @@ def test_save_and_reload(tmp_path):
     drift = Drift(np.arange(150, dtype=float).reshape(50, 3))
     path = save_drift_corrected(tmp_path / "run_driftc.hdf5", drift.apply(locs), drift)
 
-    from smapfit.io.hdf5 import load_localizations
+    from smappy.io.hdf5 import load_localizations
     assert len(load_localizations(path)) == len(locs)
     assert np.allclose(load_drift(path).drift, drift.drift)
     assert drift_corrected_path(tmp_path / "run.hdf5").name == "run_driftc.hdf5"

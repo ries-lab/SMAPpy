@@ -1,4 +1,4 @@
-# smapfit
+# smappy
 
 Python implementation of the SMAP single-molecule fitting pipeline: camera
 conversion, filtering, peak finding, ROI cutting, maximum-likelihood fitting
@@ -15,12 +15,12 @@ See [NOTES.md](NOTES.md) for the design decisions and open questions.
 
 ## Use
 
-    from smapfit.io.tiff import open_stack, camera_metadata
-    from smapfit.io.cameras_mat import CameraPresets
-    from smapfit.io.calibration import load_spline_calibration
-    from smapfit.detect import DoGFilter, DynamicCutoff, PeakFinder
-    from smapfit.psf import SplinePSF, GaussianPSF
-    from smapfit.pipeline import FitSettings, fit_stack
+    from smappy.io.tiff import open_stack, camera_metadata
+    from smappy.io.cameras_mat import CameraPresets
+    from smappy.io.calibration import load_spline_calibration
+    from smappy.detect import DoGFilter, DynamicCutoff, PeakFinder
+    from smappy.psf import SplinePSF, GaussianPSF
+    from smappy.pipeline import FitSettings, fit_stack
 
     source = open_stack("...MMStack_Default.ome.tif")
     camera = camera_metadata(source, CameraPresets.load("RiesLab_cameras.mat"),
@@ -33,8 +33,8 @@ See [NOTES.md](NOTES.md) for the design decisions and open questions.
 
 To render an image from a localization table:
 
-    from smapfit.filter import LocFilter
-    from smapfit.render import (FieldOfView, RenderSettings, DisplaySettings,
+    from smappy.filter import LocFilter
+    from smappy.render import (FieldOfView, RenderSettings, DisplaySettings,
                                 render_locs)
 
     keep = LocFilter(locs, loc_precision_nm=(None, 20), logl_rel=(-2, 0))
@@ -50,7 +50,7 @@ re-rendering.
 
 To merge localizations of the same emitter across consecutive frames:
 
-    from smapfit.group import group, GroupSettings
+    from smappy.group import group, GroupSettings
 
     grouped, group_index = group(locs, GroupSettings(dx=50.0, dt=1))
 
@@ -61,7 +61,7 @@ errors added in quadrature, precisions added in inverse quadrature), plus
 
 To look at the result:
 
-    from smapfit.viewer import show
+    from smappy.viewer import show
     show(locs)                       # or: scripts/view_locs.py OUT.h5
 
 The image and the controls open as two windows.  The image window holds nothing
@@ -116,7 +116,7 @@ localization file the viewer opens unchanged, with the drift curve kept in a
 
 From Python:
 
-    from smapfit.drift import DriftSettings, correct_drift, save_drift_corrected
+    from smappy.drift import DriftSettings, correct_drift, save_drift_corrected
 
     keep = LocFilter(locs, loc_precision_nm=(None, 20), logl_rel=(-2, None))
     corrected, drift = correct_drift(locs, DriftSettings(segmentation_var=500),
@@ -183,7 +183,7 @@ marked stale and rebuilt when it is next asked for.
 
 From Python:
 
-    from smapfit.live import LiveSettings, live_view
+    from smappy.live import LiveSettings, live_view
 
     live_view(directory, camera, finder, model, FitSettings(output_unit="nm"),
               output="OUT.h5", live=LiveSettings(update_seconds=3.0))
@@ -209,4 +209,4 @@ block.  Nothing asks how many frames there will be.
 
 ## Tests
 
-    SMAPFIT_TEST_CAL=/path/to/_3dcal.mat PYTHONPATH=src .venv/bin/python -m pytest tests/
+    SMAPPY_TEST_CAL=/path/to/_3dcal.mat PYTHONPATH=src .venv/bin/python -m pytest tests/

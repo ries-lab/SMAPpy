@@ -2,8 +2,8 @@
 import numpy as np
 import pytest
 
-from smapfit import lut as luts
-from smapfit.render import (FieldOfView, SigmaSettings, normalize, render,
+from smappy import lut as luts
+from smappy.render import (FieldOfView, SigmaSettings, normalize, render,
                             render_histogram, to_rgb)
 
 

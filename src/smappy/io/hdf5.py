@@ -46,7 +46,7 @@ class LocalizationWriter:
         self._datasets: Dict[str, h5py.Dataset] = {}
         self._metadata: Dict[str, object] = {}
         self._n = 0
-        self._file.attrs["format"] = "smapfit-localizations"
+        self._file.attrs["format"] = "smappy-localizations"
         self._file.attrs["format_version"] = FORMAT_VERSION
         if metadata:
             self.set_metadata(metadata)

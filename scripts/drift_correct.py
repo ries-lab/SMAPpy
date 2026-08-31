@@ -16,10 +16,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from smapfit.drift import DriftSettings, correct_drift, drift_corrected_path, save_drift_corrected
-from smapfit.rcc import RCCSettings, estimate_drift_rcc
-from smapfit.filter import LocFilter
-from smapfit.io.hdf5 import load_localizations
+from smappy.drift import DriftSettings, correct_drift, drift_corrected_path, save_drift_corrected
+from smappy.rcc import RCCSettings, estimate_drift_rcc
+from smappy.filter import LocFilter
+from smappy.io.hdf5 import load_localizations
 
 
 def main() -> None:

@@ -15,16 +15,16 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from smapfit.detect import (AbsoluteCutoff, DoGFilter, DynamicCutoff,  # noqa: E402
+from smappy.detect import (AbsoluteCutoff, DoGFilter, DynamicCutoff,  # noqa: E402
                             GaussFilter, PeakFinder)
-from smapfit.io.calibration import load_spline_calibration, warn_on_em_mismatch  # noqa: E402
-from smapfit.io.cameras_mat import CameraPresets  # noqa: E402
-from smapfit.io.tiff import camera_metadata  # noqa: E402
-from smapfit.io.watch import WatchSettings, open_growing_stack  # noqa: E402
-from smapfit.live import LiveSettings, live_view  # noqa: E402
-from smapfit.pipeline import FitSettings  # noqa: E402
-from smapfit.psf import GaussianPSF, SplinePSF  # noqa: E402
-from smapfit.render import RenderSettings  # noqa: E402
+from smappy.io.calibration import load_spline_calibration, warn_on_em_mismatch  # noqa: E402
+from smappy.io.cameras_mat import CameraPresets  # noqa: E402
+from smappy.io.tiff import camera_metadata  # noqa: E402
+from smappy.io.watch import WatchSettings, open_growing_stack  # noqa: E402
+from smappy.live import LiveSettings, live_view  # noqa: E402
+from smappy.pipeline import FitSettings  # noqa: E402
+from smappy.psf import GaussianPSF, SplinePSF  # noqa: E402
+from smappy.render import RenderSettings  # noqa: E402
 
 ap = argparse.ArgumentParser()
 ap.add_argument("data", help="growing MM TIFF, or the directory it goes into")

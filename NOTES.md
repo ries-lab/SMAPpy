@@ -345,7 +345,7 @@ nm.
 ## Online analysis
 
 Fitting an acquisition while the microscope writes it and watching the image
-build up (`smapfit.live`, `smapfit.io.watch`).
+build up (`smappy.live`, `smappy.io.watch`).
 
 **The bridge between the fitter and the viewer is a queue in one process, not
 the HDF5 file.**  The file is still written, and it is still the result -- but
@@ -436,7 +436,7 @@ and it is deliberately thin -- an array in, a per-frame drift table out.
   not -- otherwise changing a filter afterwards would mean re-running it.
 * **COMET's file I/O is not wrapped.** It can load ThunderSTORM CSV and write
   molecule sets; we hand it a `(N, 4)` array and read the drift back, so the
-  corrected file stays an ordinary smapfit HDF5 that the viewer opens unchanged.
+  corrected file stays an ordinary smappy HDF5 that the viewer opens unchanged.
   The drift curve rides along in a `/drift` group, which readers ignore.
 * **The drift table is indexed by frame.** COMET interpolates onto
   `arange(0, max_frame + 1)`, so applying it is one fancy-index per coordinate.
@@ -608,7 +608,7 @@ give the drift curve error bars, which nothing currently does.
 
 ### Redundant cross-correlation
 
-`smapfit.rcc` is the other classical estimator -- bin the acquisition into time
+`smappy.rcc` is the other classical estimator -- bin the acquisition into time
 windows, render each, and measure how far one has moved against another by
 cross-correlation -- ported from SMAP's `finddriftfeature.m` /
 `finddisplacementZ2.m`.  It shares no code and almost no assumptions with the

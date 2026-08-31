@@ -13,7 +13,7 @@
 #include <cmath>
 #include <vector>
 
-namespace smapfit {
+namespace smappy {
 
 // Normalized Gaussian kernel with 2*radius+1 taps.
 inline std::vector<float> gauss_kernel(float sigma, int radius) {
@@ -160,4 +160,4 @@ inline void gauss_frame(const float* img, float* out, int ny, int nx,
     }
 }
 
-}  // namespace smapfit
+}  // namespace smappy

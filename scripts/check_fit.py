@@ -7,13 +7,13 @@ import sys, time
 from pathlib import Path
 import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from smapfit.io.tiff import open_stack, camera_metadata
-from smapfit.io.cameras_mat import CameraPresets
-from smapfit.io.calibration import load_spline_calibration, warn_on_em_mismatch
-from smapfit.camera import to_photons
-from smapfit.detect import DoGFilter, DynamicCutoff, PeakFinder
-from smapfit.roi import cut_rois
-from smapfit.psf import SplinePSF
+from smappy.io.tiff import open_stack, camera_metadata
+from smappy.io.cameras_mat import CameraPresets
+from smappy.io.calibration import load_spline_calibration, warn_on_em_mismatch
+from smappy.camera import to_photons
+from smappy.detect import DoGFilter, DynamicCutoff, PeakFinder
+from smappy.roi import cut_rois
+from smappy.psf import SplinePSF
 
 data, cameras, config, calfile = sys.argv[1:5]
 nframes = int(sys.argv[5]) if len(sys.argv) > 5 else 50

@@ -12,9 +12,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from smapfit.io.hdf5 import load_localizations
-from smapfit.render import DisplaySettings, RenderSettings
-from smapfit.viewer import show
+from smappy.io.hdf5 import load_localizations
+from smappy.render import DisplaySettings, RenderSettings
+from smappy.viewer import show
 
 
 def main() -> None:

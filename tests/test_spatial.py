@@ -2,7 +2,7 @@
 import numpy as np
 import pytest
 
-from smapfit.spatial import SpatialIndex
+from smappy.spatial import SpatialIndex
 
 
 def _points(n=20000, seed=0):

@@ -30,7 +30,7 @@
 #include <cmath>
 #include <vector>
 
-namespace smapfit {
+namespace smappy {
 
 // Localizations, already in the coordinate system the caller wants; the render
 // converts to pixels itself so no temporary arrays are needed.
@@ -170,4 +170,4 @@ inline long long render_hist_rows(const RenderInput& in, const RenderTarget& out
     return counted;
 }
 
-}  // namespace smapfit
+}  // namespace smappy

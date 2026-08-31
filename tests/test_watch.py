@@ -11,8 +11,8 @@ import numpy as np
 import pytest
 import tifffile
 
-from smapfit.io.tiff import open_stack
-from smapfit.io.watch import (WatchSettings, _read_new_pages,
+from smappy.io.tiff import open_stack
+from smappy.io.watch import (WatchSettings, _read_new_pages,
                               open_growing_stack, watch_stack)
 
 

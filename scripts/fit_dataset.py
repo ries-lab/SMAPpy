@@ -10,14 +10,14 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from smapfit.detect import (AbsoluteCutoff, DoGFilter, DynamicCutoff,  # noqa: E402
+from smappy.detect import (AbsoluteCutoff, DoGFilter, DynamicCutoff,  # noqa: E402
                             GaussFilter, PeakFinder)
-from smapfit.io.calibration import load_spline_calibration, warn_on_em_mismatch  # noqa: E402
-from smapfit.io.cameras_mat import CameraPresets  # noqa: E402
-from smapfit.io.hdf5 import LocalizationWriter  # noqa: E402
-from smapfit.io.tiff import camera_metadata, open_stack  # noqa: E402
-from smapfit.pipeline import FitSettings, fit_stack, provenance  # noqa: E402
-from smapfit.psf import GaussianPSF, SplinePSF  # noqa: E402
+from smappy.io.calibration import load_spline_calibration, warn_on_em_mismatch  # noqa: E402
+from smappy.io.cameras_mat import CameraPresets  # noqa: E402
+from smappy.io.hdf5 import LocalizationWriter  # noqa: E402
+from smappy.io.tiff import camera_metadata, open_stack  # noqa: E402
+from smappy.pipeline import FitSettings, fit_stack, provenance  # noqa: E402
+from smappy.psf import GaussianPSF, SplinePSF  # noqa: E402
 
 ap = argparse.ArgumentParser()
 ap.add_argument("data")

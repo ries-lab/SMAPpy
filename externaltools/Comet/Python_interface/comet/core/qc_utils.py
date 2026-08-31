@@ -42,7 +42,7 @@ def plot_q_with_baseline(q_obs, q_null_mean, pairs=None, window=None, ax=None, t
     return idx_flaw
 
 
-# --- smapfit -----------------------------------------------------------------
+# --- smappy -----------------------------------------------------------------
 def flag_flawed_segments_by_lift(q_obs, q_null_mean, min_lift=0.0):
     """Segments whose fitted drift does not improve their own overlap.
 

@@ -19,7 +19,7 @@
 #include "models.hpp"
 
 namespace py = pybind11;
-using smapfit::lm_fit;
+using smappy::lm_fit;
 
 namespace {
 
@@ -95,12 +95,12 @@ py::tuple as_tuple(Output&& o) {
 
 py::tuple fit_gauss_free(const Array& rois, float sigma, int iterations,
                          int n_threads) {
-    return as_tuple(run(smapfit::GaussFree(sigma), rois, iterations, n_threads));
+    return as_tuple(run(smappy::GaussFree(sigma), rois, iterations, n_threads));
 }
 
 py::tuple fit_gauss_xy(const Array& rois, float sigma, int iterations,
                        int n_threads) {
-    return as_tuple(run(smapfit::GaussXY(sigma), rois, iterations, n_threads));
+    return as_tuple(run(smappy::GaussXY(sigma), rois, iterations, n_threads));
 }
 
 py::tuple fit_cspline(const Array& rois, const Array& coeff, float z_start,
@@ -111,7 +111,7 @@ py::tuple fit_cspline(const Array& rois, const Array& coeff, float z_start,
     const int nz = static_cast<int>(coeff.shape(1));
     const int ny = static_cast<int>(coeff.shape(2));
     const int nx = static_cast<int>(coeff.shape(3));
-    smapfit::CSpline model(coeff.data(), nx, ny, nz, z_start);
+    smappy::CSpline model(coeff.data(), nx, ny, nz, z_start);
     return as_tuple(run(model, rois, iterations, n_threads));
 }
 
@@ -129,28 +129,28 @@ Array filter_images(const Array& images, float sigma, float sigma_wide,
     float* dst = out.mutable_data();
 
     const bool dog = sigma_wide > 0.0f;
-    const std::vector<float> kn = smapfit::gauss_kernel(sigma, radius);
+    const std::vector<float> kn = smappy::gauss_kernel(sigma, radius);
     const std::vector<float> kw =
-        dog ? smapfit::gauss_kernel(sigma_wide, radius) : kn;
+        dog ? smappy::gauss_kernel(sigma_wide, radius) : kn;
 
     std::vector<float> k2d;
-    if (!separable) k2d = smapfit::dog_kernel_2d(sigma, sigma_wide, radius);
+    if (!separable) k2d = smappy::dog_kernel_2d(sigma, sigma_wide, radius);
 
     {
         py::gil_scoped_release release;
-        smapfit::parallel_ranges(n, n_threads, [&](long long begin, long long end, int) {
+        smappy::parallel_ranges(n, n_threads, [&](long long begin, long long end, int) {
             // scratch space is per thread, so the passes never share memory
             std::vector<float> tmp(static_cast<size_t>(ny) * nx * (dog ? 2 : 1));
             for (long long f = begin; f < end; ++f) {
                 const float* src = in + f * ny * nx;
                 float* d = dst + f * ny * nx;
                 if (!separable)
-                    smapfit::dog2d_frame(src, d, ny, nx, k2d.data(), radius);
+                    smappy::dog2d_frame(src, d, ny, nx, k2d.data(), radius);
                 else if (dog)
-                    smapfit::dog_frame(src, d, ny, nx, kn.data(), kw.data(),
+                    smappy::dog_frame(src, d, ny, nx, kn.data(), kw.data(),
                                        radius, tmp.data());
                 else
-                    smapfit::gauss_frame(src, d, ny, nx, kn.data(), radius,
+                    smappy::gauss_frame(src, d, ny, nx, kn.data(), radius,
                                          tmp.data());
             }
         });
@@ -170,15 +170,15 @@ py::tuple find_maxima(const Array& images, float threshold, int n_threads) {
     const int nx = static_cast<int>(images.shape(2));
     const float* data = images.data();
 
-    const int threads = smapfit::resolve_threads(n_threads, n);
-    std::vector<std::vector<smapfit::Maximum>> per_thread(threads);
+    const int threads = smappy::resolve_threads(n_threads, n);
+    std::vector<std::vector<smappy::Maximum>> per_thread(threads);
     {
         py::gil_scoped_release release;
-        smapfit::parallel_ranges(n, threads, [&](long long begin, long long end, int t) {
+        smappy::parallel_ranges(n, threads, [&](long long begin, long long end, int t) {
             auto& found = per_thread[t];
             found.reserve(static_cast<size_t>(end - begin) * 64);
             for (long long f = begin; f < end; ++f)
-                smapfit::find_maxima_frame(data + f * ny * nx, ny, nx,
+                smappy::find_maxima_frame(data + f * ny * nx, ny, nx,
                                            static_cast<int>(f), threshold, found);
         });
     }
@@ -187,7 +187,7 @@ py::tuple find_maxima(const Array& images, float threshold, int n_threads) {
     // per-frame cutoff relies on
     size_t total = 0;
     for (const auto& v : per_thread) total += v.size();
-    std::vector<smapfit::Maximum> found;
+    std::vector<smappy::Maximum> found;
     found.reserve(total);
     for (auto& v : per_thread)
         found.insert(found.end(), v.begin(), v.end());

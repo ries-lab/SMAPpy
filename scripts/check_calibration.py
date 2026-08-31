@@ -16,7 +16,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from smapfit.io.calibration import load_spline_calibration, evaluate_spline  # noqa: E402
+from smappy.io.calibration import load_spline_calibration, evaluate_spline  # noqa: E402
 
 
 def main(path: str) -> int:

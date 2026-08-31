@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 from scipy.special import erf
 
-from smapfit.psf import GaussianPSF
+from smappy.psf import GaussianPSF
 
 
 def simulate(x, y, photons, background, sigma, roisize=13, seed=None,

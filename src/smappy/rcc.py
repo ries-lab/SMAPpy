@@ -1,6 +1,6 @@
 """Redundant cross-correlation drift estimation.
 
-The other estimator in this package (:mod:`smapfit.drift`) maximises the
+The other estimator in this package (:mod:`smappy.drift`) maximises the
 overlap of individual localizations.  This one works on *images*: bin the
 acquisition into time windows, render each one, and measure how far one has
 moved against another by cross-correlation.  It is the classical method --
@@ -91,7 +91,7 @@ def estimate_drift_rcc(locs: Localizations, settings: Optional[RCCSettings] = No
                        display: bool = False) -> Drift:
     """Estimate drift by correlating every pair of time windows.
 
-    Takes and returns the same things as :func:`smapfit.drift.estimate_drift`,
+    Takes and returns the same things as :func:`smappy.drift.estimate_drift`,
     so the two are interchangeable and their results directly comparable.
     """
     settings = settings or RCCSettings()

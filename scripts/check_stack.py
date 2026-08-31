@@ -3,8 +3,8 @@ import sys, time
 from pathlib import Path
 import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from smapfit.io.tiff import open_stack, metadata_from_stack
-from smapfit.io.cameras_mat import CameraPresets
+from smappy.io.tiff import open_stack, metadata_from_stack
+from smappy.io.cameras_mat import CameraPresets
 
 src = open_stack(sys.argv[1])
 presets = CameraPresets.load(sys.argv[2]) if len(sys.argv) > 2 else None
@@ -37,7 +37,7 @@ print(f"last frame : median={np.median(last):.0f} (non-zero => not padding)")
 
 # optional third argument: a YAML file with user overrides
 if len(sys.argv) > 3:
-    from smapfit.io.tiff import camera_metadata
+    from smappy.io.tiff import camera_metadata
     cam2 = camera_metadata(src, presets, sys.argv[3])
     print(f"\nwith config : {cam2}")
     print(f"              complete, adu->photons = {cam2.adu_to_photons:.5f}")

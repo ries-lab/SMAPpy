@@ -25,7 +25,7 @@ py::tuple connect(const Doubles& x, const Doubles& y, const Frames& frame,
     int64_t groups = 0;
     {
         py::gil_scoped_release release;   // sequential, but long-running
-        groups = smapfit::connect_single(x.data(), y.data(), frame.data(), n, dx,
+        groups = smappy::connect_single(x.data(), y.data(), frame.data(), n, dx,
                                          dt, list.mutable_data());
     }
     return py::make_tuple(list, groups);

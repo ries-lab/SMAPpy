@@ -10,7 +10,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace smapfit {
+namespace smappy {
 
 struct Maximum {
     int32_t frame, y, x;
@@ -38,4 +38,4 @@ inline void find_maxima_frame(const float* img, int ny, int nx, int frame,
     }
 }
 
-}  // namespace smapfit
+}  // namespace smappy

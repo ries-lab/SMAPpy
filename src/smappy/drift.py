@@ -20,7 +20,7 @@ coordinate.
 
 Not wrapped: COMET's own file I/O, plotting and molecule-set output.  We hand it
 an array and get an array back; reading and writing stays with `io.hdf5`, so the
-corrected file is an ordinary smapfit file that the viewer opens unchanged.
+corrected file is an ordinary smappy file that the viewer opens unchanged.
 
 Units: COMET works in nm.  A table in pixels is converted for the estimate and
 the drift is divided back by the pixel size when applied, so the corrected table
@@ -417,7 +417,7 @@ def drift_corrected_path(path) -> Path:
 def save_drift_corrected(path, locs: Localizations, drift: Drift) -> Path:
     """Write the corrected table, with the drift curve alongside it.
 
-    The file is an ordinary smapfit localization file -- the viewer and every
+    The file is an ordinary smappy localization file -- the viewer and every
     other reader take it as it is -- plus a ``/drift`` group, so the correction
     that was applied can be inspected or undone later.
     """

@@ -2,9 +2,9 @@
 import numpy as np
 import pytest
 
-from smapfit.detect import (AbsoluteCutoff, DoGFilter, DynamicCutoff, GaussFilter,
+from smappy.detect import (AbsoluteCutoff, DoGFilter, DynamicCutoff, GaussFilter,
                             PeakFinder, find_candidates, local_maxima)
-from smapfit.roi import cut_rois
+from smappy.roi import cut_rois
 
 
 def _spots(positions, shape=(64, 60), amplitude=100.0, sigma=1.2, background=10.0):

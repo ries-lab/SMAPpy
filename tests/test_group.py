@@ -2,8 +2,8 @@
 import numpy as np
 import pytest
 
-from smapfit.group import COMBINE_MODES, GroupSettings, combine, connect, group
-from smapfit.locs import Localizations
+from smappy.group import COMBINE_MODES, GroupSettings, combine, connect, group
+from smappy.locs import Localizations
 
 
 def _runs(spec, dx_jitter=0.0, seed=0):

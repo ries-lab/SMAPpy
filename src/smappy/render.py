@@ -423,7 +423,7 @@ def render_locs(locs: Localizations, fov: FieldOfView,
                 n_threads: int = 0, use_extension: bool = True) -> RenderedImage:
     """Render a localization table.
 
-    ``select`` narrows the table to a subset: a :class:`~smapfit.filter.LocFilter`,
+    ``select`` narrows the table to a subset: a :class:`~smappy.filter.LocFilter`,
     a boolean mask, or an index array.  Only the three or four columns the render
     needs are indexed, so filtering never copies the table.
     """

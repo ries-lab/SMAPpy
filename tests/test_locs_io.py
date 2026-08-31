@@ -2,8 +2,8 @@
 import numpy as np
 import pytest
 
-from smapfit.locs import Localizations, to_nm
-from smapfit.io.hdf5 import LocalizationWriter, load_localizations
+from smappy.locs import Localizations, to_nm
+from smappy.io.hdf5 import LocalizationWriter, load_localizations
 
 
 def _table(n=100, seed=0):
@@ -93,7 +93,7 @@ def test_mismatched_columns_are_refused(tmp_path):
 
 
 def test_prefetch_preserves_order_and_content():
-    from smapfit.pipeline import prefetch
+    from smappy.pipeline import prefetch
     source = [(i, np.full((2, 3), i, np.float32)) for i in range(20)]
     out = list(prefetch(iter(source), depth=3))
     assert [i for i, _ in out] == list(range(20))
@@ -101,7 +101,7 @@ def test_prefetch_preserves_order_and_content():
 
 
 def test_prefetch_reraises_reader_errors():
-    from smapfit.pipeline import prefetch
+    from smappy.pipeline import prefetch
 
     def broken():
         yield (0, np.zeros((2, 2), np.float32))

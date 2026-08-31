@@ -2,9 +2,9 @@
 import numpy as np
 import pytest
 
-from smapfit.filter import LocFilter, quantile_range
-from smapfit.locs import Localizations
-from smapfit.render import (DisplaySettings, FieldOfView, RenderSettings,
+from smappy.filter import LocFilter, quantile_range
+from smappy.locs import Localizations
+from smappy.render import (DisplaySettings, FieldOfView, RenderSettings,
                             render_locs)
 
 

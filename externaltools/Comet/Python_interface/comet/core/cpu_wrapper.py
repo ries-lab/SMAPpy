@@ -212,7 +212,7 @@ def cpu_wrapper_chunked_fast(mu, locs_coords, locs_time, idx_i, idx_j, sigma, si
     return -total, -gradient.flatten()
 
 
-# --- smapfit: approximate kernel ---------------------------------------------
+# --- smappy: approximate kernel ---------------------------------------------
 # `exp` is 54% of the kernel's runtime on ARM (measured: replacing it with a
 # polynomial of the wrong value takes 0.65 s down to 0.30 s), so it is worth
 # computing it approximately: the cost is a sum over 3e8 pairs and a relative
@@ -293,7 +293,7 @@ def cpu_wrapper_chunked_approx(mu, locs_coords, locs_time, idx_i, idx_j, sigma, 
     return -total, -gradient.flatten()
 
 
-# --- smapfit: quality control on the CPU -------------------------------------
+# --- smappy: quality control on the CPU -------------------------------------
 # The overlap a segment actually achieves, against the overlap it would have
 # with no drift correction at all.  A segment whose pairs do not overlap better
 # than that null is not supported by its own data -- its drift is a guess -- and

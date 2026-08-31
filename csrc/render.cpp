@@ -49,34 +49,34 @@ py::tuple render(const Array& x, const Array& y, const Array& sigma_x,
     if (colored)
         std::fill_n(color_image.mutable_data(), static_cast<size_t>(nx) * ny * 3, 0.0f);
 
-    smapfit::RenderInput in{x.data(), y.data(), sigma_x.data(), sigma_y.data(),
+    smappy::RenderInput in{x.data(), y.data(), sigma_x.data(), sigma_y.data(),
                             weight.data(), colored ? color.data() : nullptr, n,
                             gaussian ? broadcast_stride(sigma_x, n, "sigma") : 0,
                             broadcast_stride(weight, n, "weight")};
     if (gaussian && broadcast_stride(sigma_y, n, "sigma") != in.sigma_stride)
         throw std::invalid_argument("sigma_x and sigma_y must broadcast alike");
 
-    smapfit::RenderTarget out{weight_image.mutable_data(),
+    smappy::RenderTarget out{weight_image.mutable_data(),
                               colored ? color_image.mutable_data() : nullptr,
                               nx, ny, x0, y0, 1.0f / pixelsize};
 
     // One contiguous band of rows per thread; a localization contributes to
     // whichever bands its kernel reaches, and each band writes only its own
     // rows.  With no shared pixels there is nothing to synchronise.
-    const int threads = smapfit::resolve_threads(n_threads, ny);
+    const int threads = smappy::resolve_threads(n_threads, ny);
     std::vector<long long> counted(threads, 0);
     {
         py::gil_scoped_release release;
         const int band = (ny + threads - 1) / threads;
-        smapfit::parallel_ranges(threads, threads, [&](long long b0, long long b1, int) {
+        smappy::parallel_ranges(threads, threads, [&](long long b0, long long b1, int) {
             for (long long b = b0; b < b1; ++b) {
                 const int begin = static_cast<int>(b) * band;
                 const int end = std::min(begin + band, ny);
                 if (begin >= end) continue;
                 counted[b] = gaussian
-                    ? smapfit::render_gauss_rows(in, out, roiks, max_halfwidth,
+                    ? smappy::render_gauss_rows(in, out, roiks, max_halfwidth,
                                                  begin, end)
-                    : smapfit::render_hist_rows(in, out, begin, end);
+                    : smappy::render_hist_rows(in, out, begin, end);
             }
         });
     }

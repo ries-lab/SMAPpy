@@ -2,7 +2,7 @@
 import numpy as np
 import pytest
 
-from smapfit.rcc import RCCSettings, estimate_drift_rcc, _solve
+from smappy.rcc import RCCSettings, estimate_drift_rcc, _solve
 from tests.test_drift import simulate
 
 

@@ -7,11 +7,11 @@ import sys
 from pathlib import Path
 import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from smapfit.io.tiff import open_stack, camera_metadata
-from smapfit.io.cameras_mat import CameraPresets
-from smapfit.camera import to_photons
-from smapfit.detect import DoGFilter, GaussFilter, DynamicCutoff, AbsoluteCutoff, PeakFinder
-from smapfit.roi import cut_rois
+from smappy.io.tiff import open_stack, camera_metadata
+from smappy.io.cameras_mat import CameraPresets
+from smappy.camera import to_photons
+from smappy.detect import DoGFilter, GaussFilter, DynamicCutoff, AbsoluteCutoff, PeakFinder
+from smappy.roi import cut_rois
 
 data, cameras, config = sys.argv[1], sys.argv[2], sys.argv[3]
 mode = sys.argv[4] if len(sys.argv) > 4 else "dog"

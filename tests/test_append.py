@@ -7,11 +7,11 @@ selection, the same image -- while the settings the user made stay untouched.
 import numpy as np
 import pytest
 
-from smapfit.filter import LocFilter
-from smapfit.locs import Localizations
-from smapfit.render import FieldOfView, RenderSettings, render_locs
-from smapfit.spatial import GrowingIndex, SpatialIndex
-from smapfit.viewer import ViewState
+from smappy.filter import LocFilter
+from smappy.locs import Localizations
+from smappy.render import FieldOfView, RenderSettings, render_locs
+from smappy.spatial import GrowingIndex, SpatialIndex
+from smappy.viewer import ViewState
 
 
 def _table(n=20000, seed=0, first_frame=0):

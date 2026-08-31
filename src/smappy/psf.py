@@ -99,7 +99,7 @@ class SplinePSF(PSFModel):
     ``z_start`` is the starting z in nm relative to focus; it is converted to
     the spline's index units.  ``mirror`` reports whether the calibration was
     computed from mirrored bead images, in which case the ROIs must be flipped
-    in x before fitting (see :func:`smapfit.roi.cut_rois`).
+    in x before fitting (see :func:`smappy.roi.cut_rois`).
     """
 
     calibration: SplineCalibration

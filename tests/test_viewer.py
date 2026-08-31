@@ -5,11 +5,11 @@ import pytest
 matplotlib = pytest.importorskip("matplotlib")
 matplotlib.use("Agg")
 
-from smapfit.filter import LocFilter                      # noqa: E402
-from smapfit.locs import Localizations                    # noqa: E402
-from smapfit.render import (DisplaySettings, FieldOfView,  # noqa: E402
+from smappy.filter import LocFilter                      # noqa: E402
+from smappy.locs import Localizations                    # noqa: E402
+from smappy.render import (DisplaySettings, FieldOfView,  # noqa: E402
                             RenderSettings, render_locs)
-from smapfit.viewer import ViewState, Viewer, _nice_length  # noqa: E402
+from smappy.viewer import ViewState, Viewer, _nice_length  # noqa: E402
 
 
 def _table(n=20000, seed=0):
@@ -212,7 +212,7 @@ def test_the_additive_switch_only_redisplays():
 
 # ------------------------------------------------------------ colour coding
 def _viewer(locs=None, **kwargs):
-    from smapfit.viewer import Viewer
+    from smappy.viewer import Viewer
     return Viewer(ViewState(locs if locs is not None else _table()), **kwargs)
 
 
@@ -284,8 +284,8 @@ def test_a_field_the_table_does_not_carry_is_refused_not_crashed():
 
 def test_opening_already_coloured_shows_that_in_the_panel():
     """`view_locs.py --color z_nm` must not open a panel saying "intensity"."""
-    from smapfit.render import RenderSettings as RS
-    from smapfit.viewer import Viewer
+    from smappy.render import RenderSettings as RS
+    from smappy.viewer import Viewer
 
     locs = _table()
     state = ViewState(locs, RS(color_field="z_nm", color_range=(-200.0, 200.0)))
@@ -297,8 +297,8 @@ def test_opening_already_coloured_shows_that_in_the_panel():
 
 
 def test_a_column_outside_the_usual_choices_gets_its_own_entry():
-    from smapfit.render import RenderSettings as RS
-    from smapfit.viewer import Viewer
+    from smappy.render import RenderSettings as RS
+    from smappy.viewer import Viewer
 
     locs = _table()
     viewer = Viewer(ViewState(locs, RS(color_field="logl_rel")))
@@ -326,7 +326,7 @@ def test_a_click_does_not_force_a_blocking_redraw_per_text_box():
     motion event of a drag arrives -- a fifth of a second here, near a second
     on a retina canvas, felt as the image lagging the mouse.
     """
-    from smapfit.viewer import Viewer
+    from smappy.viewer import Viewer
 
     viewer = Viewer(ViewState(_table()))
     send = _events(viewer)
@@ -341,7 +341,7 @@ def test_a_click_does_not_force_a_blocking_redraw_per_text_box():
 
 def test_panning_does_not_drift_even_though_it_renders_as_it_goes():
     """The grabbed point must stay under the cursor for the whole drag."""
-    from smapfit.viewer import Viewer
+    from smappy.viewer import Viewer
 
     viewer = Viewer(ViewState(_table()))
     send = _events(viewer)
@@ -359,7 +359,7 @@ def test_panning_does_not_drift_even_though_it_renders_as_it_goes():
 
 
 def test_a_fast_render_happens_inside_the_gesture():
-    from smapfit.viewer import Viewer
+    from smappy.viewer import Viewer
 
     viewer = Viewer(ViewState(_table()))
     send = _events(viewer)
@@ -377,7 +377,7 @@ def test_a_fast_render_happens_inside_the_gesture():
 
 
 def test_a_slow_render_is_deferred_instead_of_making_the_gesture_lurch():
-    from smapfit.viewer import Viewer
+    from smappy.viewer import Viewer
 
     viewer = Viewer(ViewState(_table()))
     send = _events(viewer)
@@ -396,7 +396,7 @@ def test_a_slow_render_is_deferred_instead_of_making_the_gesture_lurch():
 
 
 def test_a_queued_render_does_not_land_in_the_middle_of_a_drag():
-    from smapfit.viewer import Viewer
+    from smappy.viewer import Viewer
 
     viewer = Viewer(ViewState(_table()))
     send = _events(viewer)

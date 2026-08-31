@@ -66,7 +66,7 @@ extra_compile_args += _macos_libcxx_workaround()
 
 ext_modules = [
     Pybind11Extension(
-        "smapfit._fit3d",
+        "smappy._fit3d",
         ["csrc/fit.cpp"],
         include_dirs=["csrc"],
         cxx_std=17,
@@ -74,7 +74,7 @@ ext_modules = [
         extra_link_args=extra_link_args,
     ),
     Pybind11Extension(
-        "smapfit._group",
+        "smappy._group",
         ["csrc/group.cpp"],
         include_dirs=["csrc"],
         cxx_std=17,
@@ -82,7 +82,7 @@ ext_modules = [
         extra_link_args=extra_link_args,
     ),
     Pybind11Extension(
-        "smapfit._render",
+        "smappy._render",
         ["csrc/render.cpp"],
         include_dirs=["csrc"],
         cxx_std=17,

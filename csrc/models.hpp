@@ -23,7 +23,7 @@
 #include <cmath>
 #include <cstring>
 
-namespace smapfit {
+namespace smappy {
 
 constexpr float PI_F = 3.141592f;
 
@@ -190,7 +190,7 @@ inline void compute_delta3d(float dx, float dy, float dz, float* f, float* dfx,
 
 // Cubic spline PSF.  theta = (x, y, N, bg, z)
 // Coefficients are (64, nz, ny, nx) C-contiguous, x fastest; see
-// smapfit.io.calibration for how the SMAP calibration is converted.
+// smappy.io.calibration for how the SMAP calibration is converted.
 struct CSpline {
     static constexpr int NV = 5;
 
@@ -263,4 +263,4 @@ struct CSpline {
     }
 };
 
-}  // namespace smapfit
+}  // namespace smappy

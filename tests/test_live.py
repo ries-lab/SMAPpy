@@ -13,16 +13,16 @@ import pytest
 matplotlib = pytest.importorskip("matplotlib")
 matplotlib.use("Agg")
 
-from smapfit.detect import AbsoluteCutoff, DoGFilter, PeakFinder  # noqa: E402
-from smapfit.io.hdf5 import load_localizations                    # noqa: E402
-from smapfit.io.watch import WatchSettings                        # noqa: E402
-from smapfit.live import (LiveFit, LiveSettings, LiveViewer,      # noqa: E402
+from smappy.detect import AbsoluteCutoff, DoGFilter, PeakFinder  # noqa: E402
+from smappy.io.hdf5 import load_localizations                    # noqa: E402
+from smappy.io.watch import WatchSettings                        # noqa: E402
+from smappy.live import (LiveFit, LiveSettings, LiveViewer,      # noqa: E402
                           camera_extent, expected_filter_fields)
-from smapfit.locs import Localizations                            # noqa: E402
-from smapfit.metadata import CameraMetadata                       # noqa: E402
-from smapfit.pipeline import FitSettings                          # noqa: E402
-from smapfit.psf import GaussianPSF                               # noqa: E402
-from smapfit.viewer import ViewState                              # noqa: E402
+from smappy.locs import Localizations                            # noqa: E402
+from smappy.metadata import CameraMetadata                       # noqa: E402
+from smappy.pipeline import FitSettings                          # noqa: E402
+from smappy.psf import GaussianPSF                               # noqa: E402
+from smappy.viewer import ViewState                              # noqa: E402
 
 from test_watch import Microscope                                 # noqa: E402
 
@@ -53,7 +53,7 @@ def _pipeline():
 
 
 def _run(directory, out=None, frames=12, live=FAST):
-    from smapfit.io.watch import watch_stack
+    from smappy.io.watch import watch_stack
     finder, model = _pipeline()
     stream = watch_stack(directory, chunk=live.chunk, settings=live.watch)
     fit = LiveFit(stream, CAMERA, finder, model,
@@ -145,7 +145,7 @@ def test_the_view_is_framed_by_the_camera_before_any_data_arrives(tmp_path):
 
 
 def test_the_result_file_and_the_view_agree(tmp_path):
-    from smapfit.io.hdf5 import LocalizationWriter
+    from smappy.io.hdf5 import LocalizationWriter
 
     scope = Blinking(tmp_path)
     scope.write(8)
@@ -182,7 +182,7 @@ def test_live_view_wires_the_whole_thing_up(tmp_path):
     """The entry point itself: an empty window, then a fit filling it in."""
     import matplotlib.pyplot as plt
 
-    from smapfit.live import live_view
+    from smappy.live import live_view
 
     data = tmp_path / "acq"
     data.mkdir()

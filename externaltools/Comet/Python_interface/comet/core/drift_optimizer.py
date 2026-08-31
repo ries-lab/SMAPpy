@@ -26,10 +26,10 @@ except ModuleNotFoundError:
 from comet.core.segmenter import segmentation_wrapper
 from comet.core.cpu_wrapper import cpu_wrapper_chunked, cpu_wrapper_chunked_qc
 
-# --- smapfit ----------------------------------------------------------------
+# --- smappy ----------------------------------------------------------------
 # Two knobs, so the CPU path can be changed from outside without changing what
 # this module does by default: the values below reproduce upstream COMET
-# exactly.  smapfit sets them (see pysmap/src/smapfit/drift.py and NOTES.md):
+# exactly.  smappy sets them (see SMAPpy/src/smappy/drift.py and NOTES.md):
 # `cpu_wrapper_chunked_fast` drops the per-call array conversions, and a looser
 # `ftol` cuts the number of cost evaluations by ~2.7x for a sub-nm change in the
 # estimated drift.
@@ -43,7 +43,7 @@ LBFGSB_OPTIONS_COARSE = None
 # which time windows were discarded rather than only getting a curve back.
 LAST_QUALITY_CONTROL = None
 # Which segments quality control discards.  Upstream's rule is the default; see
-# `flag_flawed_segments_by_lift` in qc_utils for why smapfit replaces it.
+# `flag_flawed_segments_by_lift` in qc_utils for why smappy replaces it.
 FLAG_SEGMENTS = flag_flawed_segments
 # ----------------------------------------------------------------------------
 from comet.core.interpolation import interpolate_drift

@@ -1,17 +1,17 @@
 """Axis-convention tests for the spline calibration reader.
 
-These need a real SMAP _3Dcal.mat; set SMAPFIT_TEST_CAL to point at one.
+These need a real SMAP _3Dcal.mat; set SMAPPY_TEST_CAL to point at one.
 """
 import os
 import numpy as np
 import pytest
 
-from smapfit.io.calibration import (
+from smappy.io.calibration import (
     compute_delta3d, evaluate_spline, load_spline_calibration,
 )
 
-CAL = os.environ.get("SMAPFIT_TEST_CAL")
-needs_cal = pytest.mark.skipif(not CAL, reason="set SMAPFIT_TEST_CAL")
+CAL = os.environ.get("SMAPPY_TEST_CAL")
+needs_cal = pytest.mark.skipif(not CAL, reason="set SMAPPY_TEST_CAL")
 
 
 def test_compute_delta3d_ordering():

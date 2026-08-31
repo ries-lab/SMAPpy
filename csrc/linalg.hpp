@@ -9,7 +9,7 @@
 #include <cmath>
 #include <cstring>
 
-namespace smapfit {
+namespace smappy {
 
 // Cholesky-like decomposition of a symmetric matrix A (n x n, row major).
 // Returns 1 if A is not positive definite, in which case L/U are unusable.
@@ -96,4 +96,4 @@ inline void mat_inv_n(float* M, float* Minv, float* diag, int n) {
         for (int ii = 0; ii < n; ++ii) diag[ii] = Minv[ii * n + ii];
 }
 
-}  // namespace smapfit
+}  // namespace smappy

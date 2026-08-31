@@ -4,7 +4,7 @@ Only what the fitting pipeline actually needs is kept.  Values can come from
 three places, in increasing priority:
 
 1. the image file itself (Micro-Manager / OME tags)
-2. a camera preset (:mod:`smapfit.io.cameras_mat`, SMAP's ``*_cameras.mat``)
+2. a camera preset (:mod:`smappy.io.cameras_mat`, SMAP's ``*_cameras.mat``)
 3. explicit user input -- a dict or a YAML file
 
 Missing required values raise a clear error rather than silently defaulting.

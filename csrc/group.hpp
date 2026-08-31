@@ -26,7 +26,7 @@
 
 #include <cstdint>
 
-namespace smapfit {
+namespace smappy {
 
 inline int64_t connect_single(const double* x, const double* y,
                               const int64_t* frame, int64_t n, double dx,
@@ -72,4 +72,4 @@ inline int64_t connect_single(const double* x, const double* y,
     return particle;
 }
 
-}  // namespace smapfit
+}  // namespace smappy

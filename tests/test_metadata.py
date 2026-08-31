@@ -1,9 +1,9 @@
 """Metadata merging and Micro-Manager parsing rules."""
 import pytest
 
-from smapfit.metadata import CameraMetadata
-from smapfit.io.tiff import _parse_roi
-from smapfit.io.cameras_mat import _eval_expr
+from smappy.metadata import CameraMetadata
+from smappy.io.tiff import _parse_roi
+from smappy.io.cameras_mat import _eval_expr
 
 
 def test_roi_separator_is_not_a_minus_sign():
