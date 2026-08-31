@@ -2,11 +2,26 @@ import subprocess
 import sys
 from pathlib import Path
 
-from pybind11.setup_helpers import Pybind11Extension, build_ext
+from pybind11.setup_helpers import Pybind11Extension, build_ext as pybind11_build_ext
 from setuptools import setup
 
-extra_compile_args = ["-O3"]
+# Optimization is asked for per compiler, not per platform: MSVC does not know
+# -O3 and would fail on it, and the flag has to be chosen when the compiler is
+# known, which is inside build_ext rather than here.
+OPTIMIZE = {"msvc": ["/O2"], "unix": ["-O3"], "mingw32": ["-O3"]}
+
+extra_compile_args = []
 extra_link_args = []
+
+
+class build_ext(pybind11_build_ext):
+    """Add the compiler's own optimization flag once the compiler is known."""
+
+    def build_extensions(self):
+        flags = OPTIMIZE.get(self.compiler.compiler_type, [])
+        for extension in self.extensions:
+            extension.extra_compile_args = list(extension.extra_compile_args) + flags
+        super().build_extensions()
 
 
 def _macos_libcxx_workaround():
@@ -64,10 +79,13 @@ def _compiles(flags):
 
 extra_compile_args += _macos_libcxx_workaround()
 
+HEADERS = sorted(str(h) for h in Path("csrc").glob("*.hpp"))
+
 ext_modules = [
     Pybind11Extension(
         "smappy._fit3d",
         ["csrc/fit.cpp"],
+        depends=HEADERS,          # a changed header rebuilds the module
         include_dirs=["csrc"],
         cxx_std=17,
         extra_compile_args=extra_compile_args,
@@ -76,6 +94,7 @@ ext_modules = [
     Pybind11Extension(
         "smappy._group",
         ["csrc/group.cpp"],
+        depends=HEADERS,
         include_dirs=["csrc"],
         cxx_std=17,
         extra_compile_args=extra_compile_args,
@@ -84,6 +103,7 @@ ext_modules = [
     Pybind11Extension(
         "smappy._render",
         ["csrc/render.cpp"],
+        depends=HEADERS,
         include_dirs=["csrc"],
         cxx_std=17,
         extra_compile_args=extra_compile_args,

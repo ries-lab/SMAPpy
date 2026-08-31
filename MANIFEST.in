@@ -1,0 +1,7 @@
+# The extensions are compiled from the sdist, so everything the compiler reads
+# has to be in it: setuptools ships the .cpp files it was told to build, but not
+# the headers they include, and without these the sdist builds nowhere.
+include csrc/*.hpp
+include ci/*.py
+include examples/*.yaml
+recursive-include tests *.py

@@ -1,0 +1,85 @@
+# Binary wheels for every platform a microscope runs on.
+#
+# smappy carries three C++ extension modules, so installing it from source needs
+# a compiler -- which is fine for a developer and a wall for anyone installing
+# it to use a microscope, on Windows above all.  This builds a wheel per
+# (platform, Python), fits a synthetic frame inside each one, and publishes them
+# on a version tag.
+name: wheels
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - "csrc/**"
+      - "setup.py"
+      - "pyproject.toml"
+      - "ci/**"
+      - ".github/workflows/wheels.yml"
+  workflow_dispatch:
+
+jobs:
+  wheels:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false          # one platform failing must not hide the others
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-14, macos-13]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Installed rather than used as an action so the version is visible in the
+      # log and can be pinned here once the matrix is known to be green.
+      - name: Install cibuildwheel
+        run: python -m pip install cibuildwheel
+
+      - name: Build and test wheels
+        run: python -m cibuildwheel --output-dir wheelhouse
+        env:
+          # macos-14 is arm64 and macos-13 is x86_64; each builds what it runs,
+          # so every wheel is tested on the architecture it was built for
+          # (cibuildwheel cannot run the tests for a cross-compiled wheel).
+          CIBW_ARCHS: auto64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}
+          path: wheelhouse/*.whl
+
+  sdist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install build
+      - run: python -m build --sdist
+      # the sdist has to build on a machine that only has the sdist
+      - run: python -m pip install dist/*.tar.gz
+      - run: python ci/smoke.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+
+  publish:
+    # only a version tag publishes, and only if every wheel built and passed
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [wheels, sdist]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write           # trusted publishing: no API token in the repo
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: pypa/gh-action-pypi-publish@release/v1
