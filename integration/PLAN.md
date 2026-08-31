@@ -170,14 +170,19 @@ Only after 1–3 land:
 | 6 microclaw wiring | 1–3 | small |
 
 
-## Publishing wheels
+## Publishing wheels — **the repository is split; publishing is not set up**
 
 The blocker for step 1's last item is not the build, it is where the wheels come
 from and where they go.  What has to be true: `pip install microclaw[analysis]`
 downloads a binary on Windows, macOS and Linux, and nobody needs a compiler.
 
-**Move smappy to its own repository.**  It makes every following step the
-default rather than a special case:
+**Move smappy to its own repository.**  **Done**: `git filter-repo` over a
+clone of SMAP, filtering `pysmap` and `SMAPpy` to the root, so all eight commits
+of the port kept their history and their messages.  The repository has no remote
+and nothing has been pushed.  SMAP still holds its own copy under `SMAPpy/`;
+removing it, or carrying it back as a submodule, is a separate decision.
+
+It makes every following step the default rather than a special case:
 
 - cibuildwheel and the `pypa/cibuildwheel` action assume the package is at the
   repository root; from a subdirectory every job needs `package-dir: SMAPpy` and
@@ -196,22 +201,29 @@ default rather than a special case:
 keeps the history.  SMAP can carry it back as a submodule if the sources should
 stay visible from the MATLAB side.
 
-**Then, in the new repository:**
+**In the new repository:**
 
-1. `.github/workflows/wheels.yml` running `pypa/cibuildwheel` on
-   `ubuntu-latest` (x86_64), `windows-latest`, `macos-14` (arm64) and
-   `macos-13` (x86_64), plus one `sdist` job.  The existing
-   `[tool.cibuildwheel]` section already says which interpreters and what to
-   test; `CIBW_TEST_COMMAND` should fit a synthetic frame, not merely import the
-   modules, so a wheel that loads but cannot compute never ships.
-2. Publish to PyPI on a version tag with trusted publishing (OIDC), so there is
-   no API token in the repository.
-3. Only then does microclaw's `analysis` extra resolve by name.  Until it does,
+1. **Done**: `.github/workflows/wheels.yml` builds on `ubuntu-latest`,
+   `windows-latest`, `macos-14` (arm64) and `macos-13` (x86_64), each for the
+   architecture it runs on, plus an `sdist` job that installs the tarball and
+   runs the smoke test.  `ci/smoke.py` fits a frame with an emitter at a known
+   position rather than merely importing the modules.
+2. **Done**: the sdist was missing `csrc/*.hpp` -- setuptools ships the `.cpp`
+   files it compiles but not the headers they include -- so it could not have
+   built anywhere.  `MANIFEST.in` fixes it and the sdist job is what would have
+   caught it.  Verified locally: the tarball builds from scratch in a clean venv
+   and passes the smoke test.
+3. **Open**, and all of it needs the user: create the GitHub repository, push,
+   register a PyPI trusted publisher for `smappy` naming that repository and
+   `wheels.yml`, create the `pypi` environment, then tag `v0.1.0`.  The workflow
+   runs on pull requests as well, so the matrix can be seen green before any tag.
+4. Only then does microclaw's `analysis` extra resolve by name.  Until it does,
    `pip install microclaw[analysis]` fails with "No matching distribution found
    for smappy" -- clear, but a dead end, which is why the extra carries a comment
    naming the checkout to install from.
 
-**What Windows may still cost.**  The sources are portable in the ways that
+**What Windows may still cost.**  The `-O3` problem is fixed (`setup.py` now
+chooses `/O2` under MSVC).  The sources are portable in the ways that
 usually bite -- `py::ssize_t` rather than POSIX `ssize_t`, no VLAs, no
 `unistd.h`, threads through `<thread>` -- and the flag problem is fixed, so the
 expected outcome is that it simply builds.  What CI will tell you and a Mac
