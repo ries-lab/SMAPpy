@@ -226,9 +226,9 @@ stay visible from the MATLAB side.
    blank project page needs.  The version is `0.1.0`, not `0.1.0dev`: a dev
    version is a pre-release, which `pip install` skips without `--pre` and which
    `>=0.1` does not match.
-5. **Open**, and all of it needs the repository owner: create the GitHub
-   repository, push, register a PyPI trusted publisher for `smappy-smlm` naming
-   that repository and `wheels.yml`, create the `pypi` environment, then tag
+5. **Open**, and all of it needs the repository owner: push to `ries-lab/SMAPpy`,
+   register a PyPI trusted publisher for `smappy-smlm` naming that repository
+   and `wheels.yml`, create the `pypi` environment, then tag
    `v0.1.0`.  The workflow runs on pull requests and on demand, so the matrix can
    be seen green before any tag.
 6. Only then does microclaw's `analysis` extra resolve by name.  Until it does,

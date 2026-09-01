@@ -38,8 +38,8 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/jries/smappy"
-Source = "https://github.com/jries/smappy"
+Homepage = "https://github.com/ries-lab/SMAPpy"
+Source = "https://github.com/ries-lab/SMAPpy"
 
 [project.optional-dependencies]
 viewer = ["matplotlib>=3.4"]   # RangeSlider
