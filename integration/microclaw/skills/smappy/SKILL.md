@@ -139,6 +139,33 @@ Two constraints that matter inside microclaw:
   `maxsize=N` bounds the queue if the acquisition can outrun the fit; pushing
   then waits rather than growing until memory runs out.
 
+### Reading the density while the fit runs
+
+`on_block(locs)` is called with each finished block as it comes out, so the
+session can act on the result before the acquisition ends:
+
+```python
+def density(locs):
+    frames = locs["frame"]
+    return len(locs) / (frames.max() - frames.min() + 1)   # locs per frame
+
+smappy.fit(data, out=out_h5, camera=camera, calibration=cal,
+           chunk=25, on_block=lambda block: log(density(block)))
+```
+
+`chunk` sets the cadence: a block is fitted at the end of a chunk of frames, so
+25 frames at 100 ms is a reading every 2.5 s. `progress(engine)` is cheaper
+still — `engine.stats["candidates"]` counts *detected* spots and needs no fit,
+which makes it the better signal when the question is density rather than
+position.
+
+**This does not by itself make a feedback loop.** Changing the 405 nm activation
+power from it is an image-driven `SetIlluminationPower`, which needs the user's
+`illumination_envelope` authorized before the run and stays bounded by its
+ceiling and write budget — see `load_skill(name="smlm")` for what is and is not
+allowed today. Report the density and propose the change; do not invent a
+control path around the envelope.
+
 ---
 
 ## The output file

@@ -275,6 +275,33 @@ The lower level is there too: drive `LocalizationEngine` directly and
 `push(frames)` returns localizations once enough ROIs have accumulated, `flush()`
 forces a partial block.  Nothing asks how many frames there will be.
 
+### Reading the result while it is still being fitted
+
+`on_block(locs)` is called with each finished block as it comes out, which is
+what a control loop needs -- the localizations per frame are a measure of the
+blinking density, and the density is what the activation laser is there to hold
+steady:
+
+    def density(locs):
+        frames = locs["frame"]
+        per_frame = len(locs) / (frames.max() - frames.min() + 1)
+        ...                          # act on it
+
+    smappy.fit(data, out="OUT.h5", camera=camera, calibration=cal,
+               chunk=25, on_block=density)
+
+**`chunk` sets how often that happens**, because a block is fitted at the end of
+a chunk of frames: 25 frames at 100 ms is a reading every 2.5 s.  Smaller chunks
+cost a little throughput and buy a shorter loop.  On a real dSTORM acquisition
+this reads 109, 107, 105, 104, 103, 98, 92, 93 localizations per frame over the
+first 200 frames -- the density decaying as the dye bleaches, which is the signal
+to act on.
+
+`progress(engine)` is the cheaper hook: it gives the running counts, including
+`stats["candidates"]`, the *detected* spots.  That number needs no fit at all, so
+it is available sooner and is the better control signal when the point is
+density rather than positions.
+
 ### A window is not the only output
 
 `show` and `live_view` open a matplotlib window and want the main thread, which

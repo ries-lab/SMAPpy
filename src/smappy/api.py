@@ -29,7 +29,7 @@ def fit(data, out=None, camera: CameraLike = None, calibration=None, *,
         cutoff: float = 1.7, filter: str = "dog", roisize: int = 13,
         max_fit_distance: Optional[float] = None, threads: int = 0,
         chunk: int = 200, frames: Optional[int] = None,
-        settings: Optional[FitSettings] = None, progress=None,
+        settings: Optional[FitSettings] = None, progress=None, on_block=None,
         read_ahead: int = 2, collect: bool = True) -> Localizations:
     """Fit a dataset and, with ``out``, write it to HDF5.
 
@@ -52,6 +52,14 @@ def fit(data, out=None, camera: CameraLike = None, calibration=None, *,
     The table is returned whether or not it is also written.  For a long
     acquisition, ``collect=False`` streams to ``out`` alone and returns an empty
     table -- the file is then the result, and memory does not grow with it.
+
+    ``on_block(locs)`` is called with each finished block of localizations as it
+    comes out, before the caller gets anything back, so a program can act on the
+    result while the fit is still running -- counting localizations per frame to
+    hold the blinking density steady, say.  It is called from the fitting loop,
+    so it should return quickly; ``progress(engine)`` is the cheaper hook when
+    only the running counts are wanted, and those include the *candidate* count,
+    which is available before anything is fitted.
     """
     from .io.hdf5 import LocalizationWriter
 
@@ -75,6 +83,8 @@ def fit(data, out=None, camera: CameraLike = None, calibration=None, *,
     def sink(block: Localizations) -> None:
         if writer is not None:
             writer.append(block)
+        if on_block is not None:
+            on_block(block)
         if collect:
             if not collected.columns:
                 collected.metadata.update(block.metadata)

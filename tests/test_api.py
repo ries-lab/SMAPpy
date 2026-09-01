@@ -123,3 +123,32 @@ def test_the_viewer_opens_on_a_file_as_well_as_a_table(tmp_path, monkeypatch):
         assert len(viewer.state.locs) == len(locs)
     finally:
         plt.close("all")
+
+
+def test_blocks_reach_the_caller_as_they_are_fitted():
+    """A control loop needs the result while the fit is still running."""
+    seen = []
+    stack = frames(8)
+    locs = smappy.fit(stack, on_block=seen.append,
+                      settings=None, **dict(FIT, roisize=9))
+
+    assert seen, "on_block was never called"
+    assert sum(len(block) for block in seen) == len(locs)
+    assert all("x_nm" in block.keys() for block in seen)
+
+
+def test_a_block_says_which_frames_it_covers():
+    """Localizations per frame is the density signal; a block has to date itself."""
+    seen = []
+    smappy.fit(frames(8), on_block=seen.append, **FIT)
+    covered = np.concatenate([block["frame"] for block in seen])
+    assert covered.min() >= 0 and covered.max() < 8
+
+
+def test_progress_reports_candidates_before_anything_is_fitted():
+    """The cheaper density signal: detected spots, no fit needed."""
+    counts = []
+    smappy.fit(frames(8), progress=lambda engine: counts.append(
+        (engine.stats["frames"], engine.stats["candidates"])), **FIT)
+    assert counts and counts[-1][0] == 8
+    assert counts[-1][1] >= 8       # at least the one emitter per frame
