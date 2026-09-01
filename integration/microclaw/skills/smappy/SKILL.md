@@ -25,6 +25,10 @@ available = importlib.util.find_spec("smappy") is not None
 If it is missing, say so and fall back to the external-software table in
 `load_skill(name="smlm")`. Do not attempt to install or build it mid-session —
 it has C++ extension modules and building is a setup step, not a session step.
+For the user to do later: `pip install smappy-smlm` (or
+`pip install microclaw[analysis]`). The distribution is `smappy-smlm` while the
+import name is `smappy` — plain `smappy` on PyPI is an unrelated package, so
+never tell a user to install that.
 
 ---
 
