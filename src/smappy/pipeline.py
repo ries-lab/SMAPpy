@@ -243,8 +243,15 @@ def provenance(camera: CameraMetadata, finder: PeakFinder, model: PSFModel,
 
 
 def _version() -> str:
+    """The installed version, for the provenance of every output file.
+
+    The distribution is ``smappy-smlm`` while the import name is ``smappy``, so
+    the lookup has to use the distribution's name -- asking for "smappy" finds
+    nothing (or, worse, an unrelated package of that name) and would quietly
+    stamp every file with the fallback.
+    """
     try:
         from importlib.metadata import version
-        return version("smappy")
+        return version("smappy-smlm")
     except Exception:
-        return "0.1.0dev"
+        return "0.1.0.dev0+unknown"

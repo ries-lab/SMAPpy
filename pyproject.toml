@@ -2,14 +2,30 @@
 # pybind11 is imported by setup.py, so it has to be here as well as in the
 # environment: an isolated build (which is what `pip install .` does) sees only
 # what this list names.
-requires = ["setuptools>=64", "pybind11>=2.10"]
+# setuptools 77 is the floor for PEP 639 (`license` as an SPDX string
+# and `license-files`), which is how the licence is declared below.
+requires = ["setuptools>=77", "pybind11>=2.10"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "smappy"
-version = "0.1.0dev"
+# The distribution is `smappy-smlm` because `smappy` on PyPI is an unrelated
+# package (a Smappee energy-monitor wrapper, last released in 2018).  The import
+# name is unaffected: `pip install smappy-smlm`, then `import smappy`.
+name = "smappy-smlm"
+version = "0.1.0"
 description = "Single-molecule localization fitting pipeline (Python port of the SMAP fast-simple workflow)"
+readme = "README.md"
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
+authors = [{name = "Jonas Ries", email = "ries@embl.de"}]
 requires-python = ">=3.9"
+keywords = ["SMLM", "super-resolution", "localization microscopy", "PALM", "STORM"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Image Recognition",
+    "Programming Language :: Python :: 3",
+]
 # Floors only, no caps: smappy has to install into an environment that already
 # pins these (microclaw asks for numpy>=1.26, scipy>=1.12, tifffile>=2024.1.1),
 # so anything tighter here would force a downgrade there.
@@ -20,6 +36,10 @@ dependencies = [
     "h5py>=3.6",
     "pyyaml>=5.4",      # camera configs: CameraMetadata.from_yaml
 ]
+
+[project.urls]
+Homepage = "https://github.com/jries/smappy"
+Source = "https://github.com/jries/smappy"
 
 [project.optional-dependencies]
 viewer = ["matplotlib>=3.4"]   # RangeSlider

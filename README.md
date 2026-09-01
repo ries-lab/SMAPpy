@@ -10,6 +10,11 @@ See [NOTES.md](NOTES.md) for the design decisions and open questions.
 
 ## Install
 
+    pip install smappy-smlm[viewer]
+
+The distribution is `smappy-smlm` because `smappy` on PyPI is an unrelated
+package; the import name is `smappy` either way.  From a checkout:
+
     /usr/bin/python3 -m venv .venv                 # native arm64 on Apple silicon
     .venv/bin/python -m pip install ".[viewer]"
 

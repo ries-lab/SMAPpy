@@ -144,7 +144,7 @@ neither can be called inside microclaw's server process.
 
 Only after 1–3 land:
 
-- add `smappy` to microclaw's `[project.optional-dependencies]` as an
+- add `smappy-smlm` to microclaw's `[project.optional-dependencies]` as an
   `analysis` extra, never a hard dependency;
 - copy `integration/microclaw/skills/smappy/SKILL.md` to
   `microclaw/skills/smappy/SKILL.md` (its frontmatter already satisfies
@@ -213,14 +213,28 @@ stay visible from the MATLAB side.
    built anywhere.  `MANIFEST.in` fixes it and the sdist job is what would have
    caught it.  Verified locally: the tarball builds from scratch in a clean venv
    and passes the smoke test.
-3. **Open**, and all of it needs the user: create the GitHub repository, push,
-   register a PyPI trusted publisher for `smappy` naming that repository and
-   `wheels.yml`, create the `pypi` environment, then tag `v0.1.0`.  The workflow
-   runs on pull requests as well, so the matrix can be seen green before any tag.
-4. Only then does microclaw's `analysis` extra resolve by name.  Until it does,
+3. **Done**: the distribution is named `smappy-smlm`.  `smappy` on PyPI is an
+   unrelated package -- a Smappee energy-monitor wrapper, last released in 2018
+   -- so it could not have been published under that name, and `pip install
+   smappy` would have installed something else entirely.  The import name is
+   unchanged.  `provenance()` had to follow: `importlib.metadata.version` takes
+   the *distribution* name, so asking it for "smappy" would have stamped every
+   output file with the fallback version, or with a stranger's.
+4. **Done**: BSD 3-Clause, matching microclaw, with `LICENSE`,
+   `THIRD_PARTY_NOTICES.md` (COMET is MIT and vendored but not distributed) and
+   the PyPI metadata -- readme, author, URLs, classifiers -- that an otherwise
+   blank project page needs.  The version is `0.1.0`, not `0.1.0dev`: a dev
+   version is a pre-release, which `pip install` skips without `--pre` and which
+   `>=0.1` does not match.
+5. **Open**, and all of it needs the repository owner: create the GitHub
+   repository, push, register a PyPI trusted publisher for `smappy-smlm` naming
+   that repository and `wheels.yml`, create the `pypi` environment, then tag
+   `v0.1.0`.  The workflow runs on pull requests and on demand, so the matrix can
+   be seen green before any tag.
+6. Only then does microclaw's `analysis` extra resolve by name.  Until it does,
    `pip install microclaw[analysis]` fails with "No matching distribution found
-   for smappy" -- clear, but a dead end, which is why the extra carries a comment
-   naming the checkout to install from.
+   for smappy-smlm" -- clear, but a dead end, which is why the extra carries a
+   comment naming the checkout to install from.
 
 **What Windows may still cost.**  The `-O3` problem is fixed (`setup.py` now
 chooses `/O2` under MSVC).  The sources are portable in the ways that
