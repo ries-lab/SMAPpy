@@ -1,0 +1,77 @@
+diff --git a/microclaw/skills/smlm/SKILL.md b/microclaw/skills/smlm/SKILL.md
+index 6254c42..557ef87 100644
+--- a/microclaw/skills/smlm/SKILL.md
++++ b/microclaw/skills/smlm/SKILL.md
+@@ -16,11 +16,15 @@ super-resolution image from the accumulated localizations.
+ Microclaw's role is to:
+   1. Help the user set up the correct acquisition parameters.
+   2. Run the raw-frame stack with run_timelapse (interval_s=0 for max frame rate).
+-  3. Export the dataset with export_dataset_as_tiff so external software can analyse it.
++  3. Hand the dataset to localization software — `load_skill(name="smappy")` when
++     SMAPpy is installed, which reads the saved NDTiff directly; otherwise export
++     with export_dataset_as_tiff for an external tool.
+   4. Optionally attach an observation-only hook for real-time density logging.
+ 
+-Microclaw does NOT perform localization fitting — that requires external software
+-such as ThunderSTORM (FIJI plugin), SMAP, DECODE, or Picasso (see Software section).
++Microclaw itself performs no localization fitting: it drives the microscope. The
++fitting is done by separate software, either SMAPpy called from the session (see
++`load_skill(name="smappy")`) or an external tool such as ThunderSTORM, SMAP,
++DECODE or Picasso (see Software section).
+ 
+ ---
+ 
+@@ -312,11 +316,20 @@ until a single-field adaptive timelapse route exists.
+ 
+ ## Post-processing (external software)
+ 
+-Microclaw produces an NDTiff dataset or a TIFF stack. The user must run
+-localization fitting in one of these tools:
++Microclaw produces an NDTiff dataset or a TIFF stack, which still has to be
++fitted to localizations.
++
++**If SMAPpy is installed, call `load_skill(name="smappy")`** — it is the SMAP
++pipeline as a Python package, it reads the NDTiff dataset directly (no TIFF
++export), writes an HDF5 of localizations, and can fit while the acquisition is
++still being written. The filtering, drift-correction and grouping advice below
++applies to it unchanged; that skill has the calls.
++
++Otherwise the user runs the fit in one of these tools:
+ 
+ | Software        | Platform    | Notes                                  |
+ |-----------------|-------------|----------------------------------------|
++| SMAPpy          | Python      | SMAP's MLE pipeline as a package; 3D, live |
+ | ThunderSTORM    | FIJI plugin | Widely used, good for 2D dSTORM/PALM  |
+ | SMAP            | MATLAB/GUI  | State-of-art MLE, 3D, PSF calibration |
+ | DECODE          | Python/GPU  | Deep-learning, very fast               |
+@@ -324,8 +337,8 @@ localization fitting in one of these tools:
+ | ZOLA-3D         | FIJI plugin | 3D PSF engineering                     |
+ 
+ Suggest the appropriate tool based on the technique:
+-- dSTORM 2D → ThunderSTORM or SMAP
+-- dSTORM/PALM 3D → SMAP or ZOLA-3D
++- dSTORM 2D → SMAPpy, ThunderSTORM or SMAP
++- dSTORM/PALM 3D → SMAPpy, SMAP or ZOLA-3D
+ - DNA-PAINT → Picasso
+ - High-throughput / GPU → DECODE
+ 
+diff --git a/pyproject.toml b/pyproject.toml
+index 2e99aa1..7b9ec94 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -19,6 +19,15 @@ dependencies = [
+ ilastik = [
+     "h5py>=3.10",
+ ]
++# SMLM localization fitting, called from the session via the `smappy` skill.
++# Optional on purpose: it carries compiled extensions, and microclaw drives a
++# microscope perfectly well without ever fitting anything.  The distribution is
++# `smappy-smlm` (the import name is `smappy`; `smappy` on PyPI is an unrelated
++# package).  Not published yet -- until it is, install it from a checkout:
++# pip install path/to/smappy
++analysis = [
++    "smappy-smlm>=0.1",
++]
+ # `microclaw serve` only. keyring brokers the API key to the OS credential
+ # store; without it serve falls back to a user-level config file.
+ serve = [
