@@ -26,7 +26,11 @@ jobs:
     strategy:
       fail-fast: false          # one platform failing must not hide the others
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-14, macos-13]
+        # macos-15 is Apple silicon and macos-15-intel is x86_64.  The older
+        # pair (macos-14 / macos-13) is deprecated and retired respectively: a
+        # macos-13 job is never assigned a runner and queues until it is
+        # cancelled, which looks like a hang rather than a configuration error.
+        os: [ubuntu-latest, windows-latest, macos-15, macos-15-intel]
     steps:
       - uses: actions/checkout@v4
 
@@ -42,9 +46,9 @@ jobs:
       - name: Build and test wheels
         run: python -m cibuildwheel --output-dir wheelhouse
         env:
-          # macos-14 is arm64 and macos-13 is x86_64; each builds what it runs,
-          # so every wheel is tested on the architecture it was built for
-          # (cibuildwheel cannot run the tests for a cross-compiled wheel).
+          # Each runner builds for the architecture it runs on, so every wheel
+          # is tested where it was built (cibuildwheel cannot run the tests for
+          # a cross-compiled wheel).
           CIBW_ARCHS: auto64
 
       - uses: actions/upload-artifact@v4
