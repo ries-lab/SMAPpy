@@ -19,7 +19,13 @@ debug_mode = False  # Set True for visual debugging
 # drift correction -- which draws nothing -- depend on a plotting library.
 class _LazyPyplot:
     def __getattr__(self, name):
-        import matplotlib.pyplot as plt
+        try:
+            import matplotlib.pyplot as plt
+        except ImportError:
+            raise ImportError(
+                "this draws a diagnostic plot, which needs matplotlib: "
+                "pip install smappy-smlm[drift]. The drift correction itself "
+                "does not need it.") from None
         return getattr(plt, name)
 
 

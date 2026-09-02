@@ -199,7 +199,11 @@ class Drift:
 
     def plot(self, ax=None):
         """Drift vs frame, the standard sanity check."""
-        import matplotlib.pyplot as plt
+        try:
+            import matplotlib.pyplot as plt
+        except ImportError:
+            raise ImportError("plotting the drift needs matplotlib: "
+                              "pip install smappy-smlm[drift]") from None
 
         if ax is None:
             _, ax = plt.subplots()
@@ -475,7 +479,11 @@ def _without_blocking_plots(active: bool):
         yield
         return
     try:
-        import matplotlib.pyplot as plt
+        try:
+            import matplotlib.pyplot as plt
+        except ImportError:
+            raise ImportError("plotting the drift needs matplotlib: "
+                              "pip install smappy-smlm[drift]") from None
     except ImportError:
         yield
         return
