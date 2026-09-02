@@ -12,7 +12,7 @@ build-backend = "setuptools.build_meta"
 # package (a Smappee energy-monitor wrapper, last released in 2018).  The import
 # name is unaffected: `pip install smappy-smlm`, then `import smappy`.
 name = "smappy-smlm"
-version = "0.1.0"
+version = "0.1.1"
 description = "Single-molecule localization fitting pipeline (Python port of the SMAP fast-simple workflow)"
 readme = "README.md"
 license = "BSD-3-Clause"
