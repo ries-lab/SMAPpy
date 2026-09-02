@@ -92,6 +92,15 @@ ext_modules = [
         extra_link_args=extra_link_args,
     ),
     Pybind11Extension(
+        "smappy._drift",
+        ["csrc/drift.cpp"],
+        depends=HEADERS,
+        include_dirs=["csrc"],
+        cxx_std=17,
+        extra_compile_args=extra_compile_args,
+        extra_link_args=extra_link_args,
+    ),
+    Pybind11Extension(
         "smappy._group",
         ["csrc/group.cpp"],
         depends=HEADERS,

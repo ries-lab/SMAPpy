@@ -42,6 +42,16 @@ def main() -> int:
     assert image.n_locs == len(locs) and image.weight.sum() > 0, \
         "the render produced nothing"
 
+    # the drift cost function, which is the fourth extension module
+    from smappy import _drift
+    coords = np.array([[0., 0., 0.], [10., 0., 0.]])
+    times = np.array([0, 1])
+    pairs = np.array([0]), np.array([1])
+    mu = np.zeros((2, 3))
+    cost, grad = _drift.cost_and_gradient(coords, times, pairs[0], pairs[1], mu,
+                                          30.0, 1.0)
+    assert cost > 0 and grad.shape == (2, 3), "the drift kernel is not working"
+
     print(f"smappy {smappy.__version__} on {sys.platform}: "
           f"fitted ({x:.2f}, {y:.2f}) px, {len(locs)} localizations")
     return 0

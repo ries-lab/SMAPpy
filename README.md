@@ -165,7 +165,10 @@ the parts smappy calls are vendored in `src/smappy/_comet`, so it needs no
 separate install, and a corrected file records the method and its version in its
 `/drift` group.  **Cite COMET** if you publish work that used it.
 
-    pip install smappy-smlm[drift]        # numba, which its kernels need
+COMET's cost function -- the sum over every neighbour pair that is the whole
+running time of a drift correction -- is compiled with smappy rather than with
+numba, so there is nothing extra to install.  `pip install smappy-smlm[cuda]`
+adds numba for COMET's NVIDIA GPU backend, which the CPU path rarely needs.
 
     smappy-drift OUT.h5 \
         --filter loc_precision_nm - 20 --filter logl_rel -2 - \

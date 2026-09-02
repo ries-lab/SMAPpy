@@ -17,18 +17,25 @@ Two implementations of the same maths live here:
     A plain Python loop, one pair at a time. Slow, but it is the readable
     statement of what the cost function *is*, and every other backend is
     checked against it.
-``_cost_and_gradient_njit``
-    The same loop compiled with numba. This is what actually runs.
+``smappy._drift``
+    The same loop in C++, threaded, built with the package. This is what runs.
 
-numba is already a hard dependency -- it is what the CUDA kernels are built on
--- so the compiled path costs nothing extra to install. It is roughly 700x
-faster than the interpreted loop and agrees with it to ~1e-18.
+smappy: upstream compiles this loop with numba, which is a 40 MB dependency
+carrying its own LLVM and compiling on first call. smappy already ships three
+pybind11 extensions and wheels for every platform, so the same loop moved to
+`csrc/drift.hpp` costs no dependency at all and no compile at run time. numba
+remains only for the CUDA backend, which is an optional extra.
+
+The kernels take the caller's dtypes as they are -- the optimizer builds float32
+coordinates and int32 indices once and reuses them -- so nothing is copied per
+evaluation.
 """
 
 import math
 
 import numpy as np
-from numba import njit, prange
+
+from ... import _drift
 
 # Below this many pairs, thread start-up costs more than the parallel loop saves.
 PARALLEL_PAIR_THRESHOLD = 200_000
@@ -84,80 +91,24 @@ def _cost_and_gradient_reference(coords, times, idx_i, idx_j, mu, sigma, sigma_f
     return total, deri
 
 
-@njit(cache=True, fastmath=True, nogil=True)
 def _cost_and_gradient_njit(coords, times, idx_i, idx_j, mu, sigma, sigma_factor):
-    """Compiled equivalent of :func:`_cost_and_gradient_reference`."""
-    sigma_sq = (2.0 * sigma * sigma_factor) ** 2
-    inv_sigma = 1.0 / (sigma * sigma_factor)
-    deri = np.zeros_like(mu)
-    total = 0.0
-
-    for p in range(idx_i.shape[0]):
-        i = idx_i[p]
-        j = idx_j[p]
-        ti = times[i]
-        tj = times[j]
-
-        dx = (coords[i, 0] - mu[ti, 0]) - (coords[j, 0] - mu[tj, 0])
-        dy = (coords[i, 1] - mu[ti, 1]) - (coords[j, 1] - mu[tj, 1])
-        dz = (coords[i, 2] - mu[ti, 2]) - (coords[j, 2] - mu[tj, 2])
-
-        val = math.exp(-(dx * dx + dy * dy + dz * dz) / sigma_sq) * inv_sigma
-        total += val
-
-        for d in range(3):
-            contrib = 2.0 * val * (coords[j, d] - coords[i, d] + mu[ti, d] - mu[tj, d]) / sigma_sq
-            deri[tj, d] += contrib
-            deri[ti, d] -= contrib
-
-    return total, deri
+    """The compiled kernel, single-threaded.  Kept under its upstream name so
+    the wrappers below and anything importing them are unchanged."""
+    return _drift.cost_and_gradient(coords, times, idx_i, idx_j, mu,
+                                    float(sigma), float(sigma_factor),
+                                    0.0, 1)
 
 
-@njit(cache=True, fastmath=True, nogil=True, parallel=True)
-def _cost_and_gradient_njit_parallel(coords, times, idx_i, idx_j, mu, sigma, sigma_factor):
-    """Parallel variant.
+def _cost_and_gradient_njit_parallel(coords, times, idx_i, idx_j, mu, sigma,
+                                     sigma_factor):
+    """The compiled kernel, one thread per core.
 
-    The gradient update is a scatter-add, which cannot be expressed as a numba
-    reduction, so each block accumulates into its own buffer and the buffers are
-    summed at the end. Blocks are used rather than thread ids because
-    numba.get_thread_id() is not available on the oldest supported numba.
+    The gradient is a scatter-add, so each thread accumulates into its own
+    (n_segments, 3) buffer and the buffers are summed at the end -- the same
+    arrangement the numba version used blocks for.
     """
-    sigma_sq = (2.0 * sigma * sigma_factor) ** 2
-    inv_sigma = 1.0 / (sigma * sigma_factor)
-    n_pairs = idx_i.shape[0]
-    n_segments = mu.shape[0]
-
-    deri_blocks = np.zeros((_N_BLOCKS, n_segments, 3))
-    totals = np.zeros(_N_BLOCKS)
-    block_size = (n_pairs + _N_BLOCKS - 1) // _N_BLOCKS
-
-    for b in prange(_N_BLOCKS):
-        start = b * block_size
-        stop = min(start + block_size, n_pairs)
-        local_total = 0.0
-        for p in range(start, stop):
-            i = idx_i[p]
-            j = idx_j[p]
-            ti = times[i]
-            tj = times[j]
-
-            dx = (coords[i, 0] - mu[ti, 0]) - (coords[j, 0] - mu[tj, 0])
-            dy = (coords[i, 1] - mu[ti, 1]) - (coords[j, 1] - mu[tj, 1])
-            dz = (coords[i, 2] - mu[ti, 2]) - (coords[j, 2] - mu[tj, 2])
-
-            val = math.exp(-(dx * dx + dy * dy + dz * dz) / sigma_sq) * inv_sigma
-            local_total += val
-
-            for d in range(3):
-                contrib = 2.0 * val * (coords[j, d] - coords[i, d] + mu[ti, d] - mu[tj, d]) / sigma_sq
-                deri_blocks[b, tj, d] += contrib
-                deri_blocks[b, ti, d] -= contrib
-        totals[b] = local_total
-
-    deri = np.zeros_like(mu)
-    for b in range(_N_BLOCKS):
-        deri += deri_blocks[b]
-    return totals.sum(), deri
+    return _drift.cost_and_gradient(coords, times, idx_i, idx_j, mu,
+                                    float(sigma), float(sigma_factor), 0.0, 0)
 
 
 def cpu_wrapper_chunked(mu, locs_coords, locs_time, idx_i, idx_j, sigma, sigma_factor,
@@ -239,59 +190,20 @@ CUTOFF_SIGMAS = 6.0
 _EXPTAB = np.exp(-np.arange(float(int(CUTOFF_SIGMAS ** 2 / 4.0) + 2)))
 
 
-@njit(cache=True, fastmath=True, nogil=True, parallel=True)
 def _cost_and_gradient_njit_parallel_approx(coords, times, idx_i, idx_j, mu,
-                                            sigma, sigma_factor, cutoff_sigmas, exptab):
-    """`_cost_and_gradient_njit_parallel` with a tabulated exp and a cutoff."""
-    s_eff = sigma * sigma_factor
-    inv_sigma = 1.0 / s_eff
-    # one reciprocal, hoisted: the exact kernel divides by sigma_sq four times
-    # per pair (once for the exponent, once per gradient component)
-    inv_sigma_sq = 1.0 / (2.0 * s_eff) ** 2
-    cutoff_sq = (cutoff_sigmas * s_eff) ** 2
+                                            sigma, sigma_factor, cutoff_sigmas,
+                                            exptab=None):
+    """The compiled kernel with the distance cutoff.
 
-    n_pairs = idx_i.shape[0]
-    n_segments = mu.shape[0]
-    deri_blocks = np.zeros((_N_BLOCKS, n_segments, 3))
-    totals = np.zeros(_N_BLOCKS)
-    block_size = (n_pairs + _N_BLOCKS - 1) // _N_BLOCKS
-
-    for b in prange(_N_BLOCKS):
-        start = b * block_size
-        stop = min(start + block_size, n_pairs)
-        local_total = 0.0
-        for p in range(start, stop):
-            i = idx_i[p]
-            j = idx_j[p]
-            ti = times[i]
-            tj = times[j]
-
-            dx = (coords[i, 0] - mu[ti, 0]) - (coords[j, 0] - mu[tj, 0])
-            dy = (coords[i, 1] - mu[ti, 1]) - (coords[j, 1] - mu[tj, 1])
-            dz = (coords[i, 2] - mu[ti, 2]) - (coords[j, 2] - mu[tj, 2])
-            diff_sq = dx * dx + dy * dy + dz * dz
-            if diff_sq > cutoff_sq:  # contributes less than exp(-cutoff^2/4)
-                continue
-
-            u = diff_sq * inv_sigma_sq
-            k = int(u)
-            f = u - k
-            series = 1.0 + f * (-1.0 + f * (0.5 + f * (-1.0 / 6.0 + f * (
-                1.0 / 24.0 + f * (-1.0 / 120.0 + f * (1.0 / 720.0 - f / 5040.0))))))
-            val = exptab[k] * series * inv_sigma
-            local_total += val
-
-            weight = 2.0 * val * inv_sigma_sq
-            for d in range(3):
-                contrib = weight * (coords[j, d] - coords[i, d] + mu[ti, d] - mu[tj, d])
-                deri_blocks[b, tj, d] += contrib
-                deri_blocks[b, ti, d] -= contrib
-        totals[b] = local_total
-
-    deri = np.zeros_like(mu)
-    for b in range(_N_BLOCKS):
-        deri += deri_blocks[b]
-    return totals.sum(), deri
+    smappy: upstream approximates `exp` with a table and a Taylor series because
+    numba's is slow.  The C++ kernel calls `std::exp` and keeps the cutoff, which
+    is where the saving actually was -- most pairs are beyond it once sigma has
+    tightened.  The result is exact rather than accurate to 4e-4, so `exptab` is
+    accepted and ignored, for the upstream signature.
+    """
+    return _drift.cost_and_gradient(coords, times, idx_i, idx_j, mu,
+                                    float(sigma), float(sigma_factor),
+                                    float(cutoff_sigmas), 0)
 
 
 def cpu_wrapper_chunked_approx(mu, locs_coords, locs_time, idx_i, idx_j, sigma, sigma_factor,
@@ -311,54 +223,15 @@ def cpu_wrapper_chunked_approx(mu, locs_coords, locs_time, idx_i, idx_j, sigma, 
 # `flag_flawed_segments` marks it so the optimizer can set it to NaN and let the
 # spline bridge it.  COMET computes this on its cuda_qc / torch_qc backends
 # only; this is the same quantity for the CPU path, run once after the fit.
-@njit(cache=True, fastmath=True, nogil=True, parallel=True)
 def _overlap_per_segment_njit(coords, times, idx_i, idx_j, mu, sigma, sigma_factor):
-    """Per-segment overlap sums with the fitted drift, with none, and pair counts.
+    """Per-segment overlap with the fitted drift, with none, and pair counts.
 
     Same-segment pairs are excluded: their overlap does not depend on the drift,
-    so they say nothing about whether this segment's estimate is any good.  Each
+    so they say nothing about whether that segment's estimate is any good.  Each
     pair counts for both of its segments, as in the GPU version.
     """
-    sigma_sq = (2.0 * sigma * sigma_factor) ** 2
-    inv_sigma = 1.0 / (sigma * sigma_factor)
-    n_segments = mu.shape[0]
-    n_pairs = idx_i.shape[0]
-
-    obs_blocks = np.zeros((_N_BLOCKS, n_segments))
-    null_blocks = np.zeros((_N_BLOCKS, n_segments))
-    count_blocks = np.zeros((_N_BLOCKS, n_segments))
-    block_size = (n_pairs + _N_BLOCKS - 1) // _N_BLOCKS
-
-    for b in prange(_N_BLOCKS):
-        start = b * block_size
-        stop = min(start + block_size, n_pairs)
-        for p in range(start, stop):
-            i = idx_i[p]
-            j = idx_j[p]
-            ti = times[i]
-            tj = times[j]
-            if ti == tj:
-                continue
-
-            ux = coords[i, 0] - coords[j, 0]
-            uy = coords[i, 1] - coords[j, 1]
-            uz = coords[i, 2] - coords[j, 2]
-
-            dx = ux - (mu[ti, 0] - mu[tj, 0])
-            dy = uy - (mu[ti, 1] - mu[tj, 1])
-            dz = uz - (mu[ti, 2] - mu[tj, 2])
-
-            val = math.exp(-(dx * dx + dy * dy + dz * dz) / sigma_sq) * inv_sigma
-            null = math.exp(-(ux * ux + uy * uy + uz * uz) / sigma_sq) * inv_sigma
-
-            obs_blocks[b, ti] += val
-            obs_blocks[b, tj] += val
-            null_blocks[b, ti] += null
-            null_blocks[b, tj] += null
-            count_blocks[b, ti] += 1.0
-            count_blocks[b, tj] += 1.0
-
-    return obs_blocks.sum(axis=0), null_blocks.sum(axis=0), count_blocks.sum(axis=0)
+    return _drift.overlap_per_segment(coords, times, idx_i, idx_j, mu,
+                                      float(sigma), float(sigma_factor), 0)
 
 
 def cpu_wrapper_chunked_qc(mu, locs_coords, locs_time, idx_i, idx_j, sigma, sigma_factor,

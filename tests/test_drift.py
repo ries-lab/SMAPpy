@@ -7,9 +7,8 @@ from smappy.drift import (Drift, DriftSettings, correct_drift, drift_corrected_p
 from smappy.filter import LocFilter
 from smappy.locs import Localizations
 
-# COMET is vendored (smappy._comet), so the estimator is always there; what can
-# be missing is numba, which its kernels are compiled with.
-pytest.importorskip("numba")
+# COMET is vendored (smappy._comet) and its cost function is compiled with the
+# package, so drift correction has nothing optional left to skip on.
 from smappy import _comet as comet                                # noqa: E402
 
 
@@ -144,3 +143,75 @@ def test_spline_penalty_smooths():
         for p in (0.0, 1e4))
     curvature = lambda d: np.abs(np.diff(d, 2, axis=0)).mean()
     assert curvature(smooth) < curvature(rough)
+
+
+# --- the compiled cost function ---------------------------------------------
+# COMET's reference implementation is the specification; the kernel that runs is
+# C++ (csrc/drift.hpp), so what has to be checked is that they agree.
+
+def _cost_case(seed=3, n=1500, pairs=15_000, segments=30):
+    rng = np.random.default_rng(seed)
+    coords = rng.random((n, 3)) * 2000.0
+    times = rng.integers(0, segments, n).astype(np.int64)
+    idx_i = rng.integers(0, n, pairs).astype(np.int64)
+    idx_j = rng.integers(0, n, pairs).astype(np.int64)
+    mu = rng.normal(0, 20, (segments, 3))
+    return coords, times, idx_i, idx_j, mu
+
+
+def test_the_compiled_kernel_matches_comets_reference():
+    from smappy import _drift
+    from smappy._comet.core.cpu_wrapper import _cost_and_gradient_reference
+
+    case = _cost_case()
+    want_total, want_grad = _cost_and_gradient_reference(*case, 30.0, 1.0)
+    got_total, got_grad = _drift.cost_and_gradient(*case, 30.0, 1.0)
+
+    assert got_total == pytest.approx(want_total, rel=1e-12)
+    assert np.allclose(got_grad, want_grad, rtol=1e-10, atol=1e-15)
+
+
+def test_threading_does_not_change_the_answer():
+    """The gradient is a scatter-add; per-thread buffers must sum to the same."""
+    from smappy import _drift
+
+    case = _cost_case()
+    one = _drift.cost_and_gradient(*case, 30.0, 1.0, 0.0, 1)
+    many = _drift.cost_and_gradient(*case, 30.0, 1.0, 0.0, 8)
+    assert many[0] == pytest.approx(one[0], rel=1e-12)
+    assert np.allclose(many[1], one[1], rtol=1e-10, atol=1e-15)
+
+
+def test_the_cutoff_costs_little_accuracy():
+    """Pairs beyond six sigma contribute less than the estimate's own noise."""
+    from smappy import _drift
+
+    case = _cost_case()
+    exact_total, exact_grad = _drift.cost_and_gradient(*case, 30.0, 1.0)
+    cut_total, cut_grad = _drift.cost_and_gradient(*case, 30.0, 1.0, 6.0)
+    assert cut_total == pytest.approx(exact_total, rel=1e-3)
+    assert np.abs(cut_grad - exact_grad).max() < 1e-2 * np.abs(exact_grad).max()
+
+
+def test_the_kernel_takes_the_optimizers_own_dtypes():
+    """float32 coords and int32 indices must not be copied on every call."""
+    from smappy import _drift
+
+    coords, times, idx_i, idx_j, mu = _cost_case()
+    small = (coords.astype(np.float32), times.astype(np.int32),
+             idx_i.astype(np.int32), idx_j.astype(np.int32), mu)
+    wide = _drift.cost_and_gradient(coords, times, idx_i, idx_j, mu, 30.0, 1.0)
+    narrow = _drift.cost_and_gradient(*small, 30.0, 1.0)
+    # float32 coordinates, so agreement is to single precision, not double
+    assert narrow[0] == pytest.approx(wide[0], rel=1e-5)
+
+
+def test_quality_control_counts_match_the_reference():
+    from smappy import _drift
+
+    coords, times, idx_i, idx_j, mu = _cost_case()
+    observed, null, counts = _drift.overlap_per_segment(
+        coords, times, idx_i, idx_j, mu, 30.0, 1.0)
+    cross = times[idx_i] != times[idx_j]
+    assert counts.sum() == pytest.approx(2 * cross.sum())
+    assert (observed >= 0).all() and (null >= 0).all()

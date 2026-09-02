@@ -44,9 +44,14 @@ Source = "https://github.com/ries-lab/SMAPpy"
 [project.optional-dependencies]
 viewer = ["matplotlib>=3.4"]   # RangeSlider
 image = ["pillow>=9.0"]        # save_image, for a picture without a window
-# Drift correction runs on a vendored copy of COMET (src/smappy/_comet), whose
-# cost-function kernels are numba-compiled.  Everything else works without it.
-drift = ["numba>=0.57", "matplotlib>=3.4"]
+# Drift correction runs on a vendored copy of COMET (src/smappy/_comet); its
+# cost function is compiled with the package, so this extra is only the plotting
+# COMET's diagnostics use.
+drift = ["matplotlib>=3.4"]
+# COMET's GPU backend is written in numba-CUDA, so numba is needed only to use
+# an NVIDIA GPU.  The CPU path is compiled either way and is what runs without
+# this: 1:17 for a 46k-frame dataset, 5 s with --spline --group.
+cuda = ["numba>=0.57"]
 
 [project.scripts]
 smappy-fit = "smappy.cli.fit:main"

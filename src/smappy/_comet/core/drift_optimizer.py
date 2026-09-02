@@ -17,12 +17,19 @@ import warnings
 import h5py
 import matplotlib.pyplot as plt
 import numpy as np
-from numba import cuda
 from scipy.ndimage import convolve
 from scipy.optimize import minimize
 from .backends import best_backend
-from .cuda_wrapper import cuda_wrapper_chunked
-from .cuda_wrapper.cuda_wrapper_qc import cuda_wrapper_chunked_qc
+try:
+    # smappy: the CUDA kernels are numba's, and numba is an optional extra
+    # (`pip install smappy-smlm[cuda]`).  Without it the CPU backend is used,
+    # which is compiled either way -- see cpu_wrapper.
+    from numba import cuda
+    from .cuda_wrapper import cuda_wrapper_chunked
+    from .cuda_wrapper.cuda_wrapper_qc import cuda_wrapper_chunked_qc
+except ImportError:
+    cuda = None
+    cuda_wrapper_chunked = cuda_wrapper_chunked_qc = None
 from .pair_indices import pair_indices_kdtree
 
 from .pair_indices import estimate_pairs
