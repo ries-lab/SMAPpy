@@ -15,7 +15,6 @@
 import warnings
 
 import h5py
-import matplotlib.pyplot as plt
 import numpy as np
 from scipy.ndimage import convolve
 from scipy.optimize import minimize
@@ -49,6 +48,18 @@ from .cpu_wrapper import cpu_wrapper_chunked, cpu_wrapper_chunked_qc
 
 # smappy: these three reach for tkinter and pandas, which the fit itself never
 # needs.  Importing them where they are used keeps a headless install working.
+# smappy: matplotlib is imported where it is used rather than at module level.
+# Every use is a diagnostic plot behind a flag, and importing it up here made a
+# drift correction -- which draws nothing -- depend on a plotting library.
+class _LazyPyplot:
+    def __getattr__(self, name):
+        import matplotlib.pyplot as plt
+        return getattr(plt, name)
+
+
+plt = _LazyPyplot()
+
+
 def _ask_save_filename(*args, **kwargs):
     from ._dialogs import ask_save_filename
     return ask_save_filename(*args, **kwargs)

@@ -9,12 +9,23 @@
 import math
 import numpy as np
 from numba import cuda
-import matplotlib.pyplot as plt
 
 debug_mode = False  # Set True for visual debugging
 
 
 # Numba cuda code of cost-function --> quantized overlap of pairs of localizations, gaussian mixture model
+# smappy: matplotlib is imported where it is used rather than at module level.
+# Every use is a diagnostic plot behind a flag, and importing it up here made a
+# drift correction -- which draws nothing -- depend on a plotting library.
+class _LazyPyplot:
+    def __getattr__(self, name):
+        import matplotlib.pyplot as plt
+        return getattr(plt, name)
+
+
+plt = _LazyPyplot()
+
+
 @cuda.jit
 def cost_function_full_3d_chunked(d_locs_time, start_idx, chunk_size, d_idx_i, d_idx_j, d_sigma, d_sigma_factor, d_val,
                                   d_val_sum, d_deri, d_locs_coords, mu):

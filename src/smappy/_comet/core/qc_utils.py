@@ -6,8 +6,19 @@
 # Changed here: absolute ``comet.`` imports are relative, so this copy is
 # self-contained and cannot collide with an installed COMET.
 
-import matplotlib.pyplot as plt
 import numpy as np
+
+
+# smappy: matplotlib is imported where it is used rather than at module level.
+# Every use is a diagnostic plot behind a flag, and importing it up here made a
+# drift correction -- which draws nothing -- depend on a plotting library.
+class _LazyPyplot:
+    def __getattr__(self, name):
+        import matplotlib.pyplot as plt
+        return getattr(plt, name)
+
+
+plt = _LazyPyplot()
 
 
 def flag_flawed_segments(q_obs, q_null_mean):

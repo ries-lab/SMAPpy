@@ -9,10 +9,21 @@
 import numpy as np
 import pandas as pd
 import h5py
-import matplotlib.pyplot as plt
 import csv
 
 from ._dialogs import ask_open_filename, ask_save_filename
+
+
+# smappy: matplotlib is imported where it is used rather than at module level.
+# Every use is a diagnostic plot behind a flag, and importing it up here made a
+# drift correction -- which draws nothing -- depend on a plotting library.
+class _LazyPyplot:
+    def __getattr__(self, name):
+        import matplotlib.pyplot as plt
+        return getattr(plt, name)
+
+
+plt = _LazyPyplot()
 
 
 def load_thunderstorm_csv(filename=None, return_essentials=True):

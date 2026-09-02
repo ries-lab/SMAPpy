@@ -12,7 +12,7 @@ build-backend = "setuptools.build_meta"
 # package (a Smappee energy-monitor wrapper, last released in 2018).  The import
 # name is unaffected: `pip install smappy-smlm`, then `import smappy`.
 name = "smappy-smlm"
-version = "0.1.1"
+version = "0.1.2"
 description = "Single-molecule localization fitting pipeline (Python port of the SMAP fast-simple workflow)"
 readme = "README.md"
 license = "BSD-3-Clause"
@@ -44,9 +44,9 @@ Source = "https://github.com/ries-lab/SMAPpy"
 [project.optional-dependencies]
 viewer = ["matplotlib>=3.4"]   # RangeSlider
 image = ["pillow>=9.0"]        # save_image, for a picture without a window
-# Drift correction runs on a vendored copy of COMET (src/smappy/_comet); its
-# cost function is compiled with the package, so this extra is only the plotting
-# COMET's diagnostics use.
+# Drift correction itself needs nothing: COMET is vendored and its cost function
+# is compiled with the package.  This extra is only COMET's diagnostic plots,
+# which are all behind flags.
 drift = ["matplotlib>=3.4"]
 # COMET's GPU backend is written in numba-CUDA, so numba is needed only to use
 # an NVIDIA GPU.  The CPU path is compiled either way and is what runs without

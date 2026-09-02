@@ -215,3 +215,42 @@ def test_quality_control_counts_match_the_reference():
     cross = times[idx_i] != times[idx_j]
     assert counts.sum() == pytest.approx(2 * cross.sum())
     assert (observed >= 0).all() and (null >= 0).all()
+
+
+def test_drift_correction_needs_no_plotting_library(monkeypatch):
+    """A bare `pip install smappy-smlm` has no matplotlib; drift must still run.
+
+    COMET imports pyplot at module level for diagnostics that are all behind
+    flags, which made a correction that draws nothing depend on a plotting
+    library.  The vendored copy imports it where it is used.
+    """
+    import subprocess
+    import sys
+
+    code = '''
+import sys
+class Blocker:
+    def find_module(self, name, path=None):
+        if name.split(".")[0] == "matplotlib":
+            return self
+    def load_module(self, name):
+        raise ImportError("no matplotlib")
+sys.meta_path.insert(0, Blocker())
+
+import numpy as np
+from smappy.drift import DriftSettings, estimate_drift
+from smappy.locs import Localizations
+
+rng = np.random.default_rng(0)
+n = 2000
+locs = Localizations({"x_nm": rng.uniform(0, 3000, n), "y_nm": rng.uniform(0, 3000, n),
+                      "frame": rng.integers(0, 60, n).astype(np.int64),
+                      "loc_precision_nm": np.full(n, 5.0)}, {"units": "nm"})
+drift = estimate_drift(locs, DriftSettings(segmentation_var=10, use_z=False))
+assert len(drift.frames) > 0
+assert "matplotlib" not in sys.modules
+print("ok")
+'''
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr[-2000:]
+    assert out.stdout.strip().endswith("ok")
