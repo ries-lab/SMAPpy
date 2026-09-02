@@ -160,9 +160,12 @@ TIFF.
 
 Sample drift is estimated with [COMET](https://github.com/gpufit/Comet), which
 maximises the overlap of localizations between time windows -- no fiducials, no
-reference structure.  It is an optional dependency; the source is vendored:
+reference structure.  COMET is somebody else's published method, MIT licensed;
+the parts smappy calls are vendored in `src/smappy/_comet`, so it needs no
+separate install, and a corrected file records the method and its version in its
+`/drift` group.  **Cite COMET** if you publish work that used it.
 
-    .venv/bin/python -m pip install -e externaltools/Comet/Python_interface
+    pip install smappy-smlm[drift]        # numba, which its kernels need
 
     smappy-drift OUT.h5 \
         --filter loc_precision_nm - 20 --filter logl_rel -2 - \

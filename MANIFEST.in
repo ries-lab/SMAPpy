@@ -6,3 +6,4 @@ include ci/*.py
 include examples/*.yaml
 recursive-include tests *.py
 include THIRD_PARTY_NOTICES.md
+include src/smappy/_comet/LICENSE.txt

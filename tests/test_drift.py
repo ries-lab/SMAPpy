@@ -7,7 +7,10 @@ from smappy.drift import (Drift, DriftSettings, correct_drift, drift_corrected_p
 from smappy.filter import LocFilter
 from smappy.locs import Localizations
 
-comet = pytest.importorskip("comet")
+# COMET is vendored (smappy._comet), so the estimator is always there; what can
+# be missing is numba, which its kernels are compiled with.
+pytest.importorskip("numba")
+from smappy import _comet as comet                                # noqa: E402
 
 
 def simulate(n_points=200, n_frames=50, per_frame=30, seed=1):

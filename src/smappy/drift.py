@@ -222,11 +222,11 @@ def estimate_drift(locs: Localizations, settings: Optional[DriftSettings] = None
     index array, or None for everything.  The result covers every frame of the
     input table, not only the selected ones.
     """
-    from comet import best_backend, comet_run_kd  # optional; see NOTES.md
-    from comet.core import drift_optimizer
-    from comet.core.qc_utils import flag_flawed_segments_by_lift
-    from comet.core.cpu_wrapper import (cpu_wrapper_chunked_approx,
-                                        cpu_wrapper_chunked_fast)
+    from ._comet import best_backend, comet_run_kd   # vendored; see _comet/
+    from ._comet.core import drift_optimizer
+    from ._comet.core.qc_utils import flag_flawed_segments_by_lift
+    from ._comet.core.cpu_wrapper import (cpu_wrapper_chunked_approx,
+                                          cpu_wrapper_chunked_fast)
 
     settings = settings or DriftSettings()
     if settings.quality_control and settings.spline:
@@ -315,8 +315,8 @@ def _estimate_spline(locs: Localizations, settings: DriftSettings, select,
     carries its own frame, so `mu` handed to the kernel is the drift *per
     frame*, and the chain rule to the coefficients is one matrix product.
     """
-    from comet.core.cpu_wrapper import cpu_wrapper_chunked_approx
-    from comet.core.pair_indices import pair_indices_kdtree
+    from ._comet.core.cpu_wrapper import cpu_wrapper_chunked_approx
+    from ._comet.core.pair_indices import pair_indices_kdtree
     from scipy.optimize import minimize
 
     all_frames = np.asarray(locs["frame"], dtype=np.int64)
@@ -425,12 +425,18 @@ def save_drift_corrected(path, locs: Localizations, drift: Drift) -> Path:
 
     from .io.hdf5 import save_localizations
 
+    from . import _comet
+
     path = save_localizations(path, locs)
     with h5py.File(path, "a") as f:
         group = f.create_group("drift")
         for axis, name in enumerate(("x_nm", "y_nm", "z_nm")):
             group.create_dataset(name, data=drift.drift[:, axis].astype(np.float32))
         group.create_dataset("frame", data=drift.frames.astype(np.int64))
+        # the estimator is somebody else's published method: say so in the file,
+        # so a result can be traced -- and cited -- back to it
+        group.attrs["method"] = _comet.UPSTREAM
+        group.attrs["method_version"] = _comet.__version__
     return path
 
 

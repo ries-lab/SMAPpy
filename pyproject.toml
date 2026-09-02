@@ -44,6 +44,9 @@ Source = "https://github.com/ries-lab/SMAPpy"
 [project.optional-dependencies]
 viewer = ["matplotlib>=3.4"]   # RangeSlider
 image = ["pillow>=9.0"]        # save_image, for a picture without a window
+# Drift correction runs on a vendored copy of COMET (src/smappy/_comet), whose
+# cost-function kernels are numba-compiled.  Everything else works without it.
+drift = ["numba>=0.57", "matplotlib>=3.4"]
 
 [project.scripts]
 smappy-fit = "smappy.cli.fit:main"
@@ -53,6 +56,11 @@ smappy-drift = "smappy.cli.drift:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+# COMET's licence has to travel with the copy of COMET, in the wheel as well as
+# in the repository -- that is what the MIT licence asks for.
+"smappy._comet" = ["LICENSE.txt"]
 
 [tool.cibuildwheel]
 # numpy is deliberately not a build dependency: the extensions include only

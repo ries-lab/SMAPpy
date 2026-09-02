@@ -5,19 +5,33 @@ license in `LICENSE`.
 
 ## Vendored: COMET
 
-`externaltools/Comet/` is a copy of
-[COMET](https://github.com/gpufit/Comet) ("Cost-function Optimized Maximal
-Overlap Drift EsTimation"), Copyright (c) 2025 Lenny Reinkensmeier & Mark Bates,
-licensed under the MIT license (`externaltools/Comet/Python_interface/LICENSE.txt`,
-which must be preserved in any redistribution). It carries local changes for the
-smappy drift correction; see the commit that vendored it.
+`src/smappy/_comet/` is a copy of the parts of
+[COMET](https://github.com/gpufit/Comet) 1.1.0 ("Cost-function Optimized Maximal
+Overlap Drift EsTimation") that smappy's drift correction calls, Copyright (c)
+2025 Lenny Reinkensmeier & Mark Bates, MIT licensed.
+`src/smappy/_comet/LICENSE.txt` carries their notice and **ships inside every
+wheel and source distribution**, which is what that licence asks for.
 
-COMET is an **optional** dependency, installed separately
-(`pip install -e externaltools/Comet/Python_interface`), and is not part of the
-published `smappy-smlm` distribution: neither the source distribution nor the
-wheels contain it. Only drift correction uses it, and only when it is installed.
+It is vendored rather than depended on because COMET publishes no distribution
+on the Python package index -- the name `comet` there belongs to an unrelated
+project -- and drift correction that only works from a git checkout is drift
+correction almost nobody runs.  It is in the published package, so
+`pip install smappy-smlm[drift]` is all a user needs; the extra brings in numba,
+which COMET's cost-function kernels are compiled with.
 
-If you publish drift-corrected results, cite COMET as its `CITATION.cff` asks.
+Only the modules the drift correction reaches are included.  COMET's CLI, batch
+runner, utilities, its own test suite, its documentation, and its IDL and
+CUDA/C++ bindings are not here; use upstream for those.  The changes to what is
+here are: absolute imports made relative, so the copy is self-contained and
+cannot collide with an installed COMET; two imports made lazy, so pandas and
+tkinter are needed only if COMET's own saving paths are taken; and two
+cost-function fast paths added for smappy (see the commit that vendored COMET
+for the measurements).  Each file says all of this in its header.
+
+**COMET is a published method, and smappy is not its author.**  Drift-corrected
+files record it in the `/drift` group's attributes, so a result can be traced
+back to the method that produced it.  If you publish work that used it, cite it
+as `externaltools/Comet/CITATION.cff` asks.
 
 ## Dependencies
 
@@ -36,6 +50,7 @@ the versions they distribute.
 | PyYAML | runtime | MIT |
 | Matplotlib | optional `viewer` | Matplotlib license (BSD-compatible, PSF-derived) |
 | Pillow | optional `image` | MIT-CMU (HPND) |
+| numba | optional `drift` | BSD 2-Clause (pulls in llvmlite, BSD 2-Clause) |
 | pybind11 | build only, and its headers are compiled into the extension modules | BSD 3-Clause |
 | setuptools | build only | MIT |
 | pytest | test only | MIT |
