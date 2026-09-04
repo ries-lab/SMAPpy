@@ -43,10 +43,25 @@ reasoning is here so that it does not have to be re-derived.
   filters them; once there are many plugins a tree chooser is added for the
   long tail.
 
+* **Fitters are plugins assembled from parts.**  Source, camera, detection,
+  PSF model, fit and output are each a small settings dataclass; a fitter's
+  `Settings` has one field per part, which the form shows as a section.  Two
+  wrappers so far, Gaussian 2D and Spline 3D; they differ only in the model
+  part.  *Live* is a checkbox in the source part: keep watching the file.
+* **Long plugins stream.**  `run` gets a `stream(event, payload)` callback:
+  `"start"` with the view extent, then `"block"` per finished block.  The GUI
+  turns that into `Session.begin_live` / `Session.append`, so the image builds
+  up during the fit; a script ignores it.
+* **Plugins may react to edits.**  `react(changed, settings)` returns values
+  to set: choosing a source fills the camera from its metadata, choosing a
+  preset fills it from the YAML.  Presets are `*.yaml` in `~/.smappy/cameras`,
+  `$SMAPPY_CAMERAS`, or the checkout's `examples/`.
+
 ## Code map
 
     smappy/plugins/__init__.py   Plugin, Result, Selection, param(), registry
     smappy/plugins/drift_comet.py  the first plugin: COMET drift correction
+    smappy/plugins/fit.py        the parts, and the Gaussian 2D / Spline 3D fitters
     smappy/session.py            Session: table, layers, undo, history (no Qt)
     smappy/gui/params.py         Settings dataclass -> form widget, and back
     smappy/gui/widgets.py        CollapsibleSection
@@ -81,6 +96,7 @@ Scripting: `Dbscan()(locs, selection, radius_nm=30)` or
 
 1. ROI tab: `pg.ROI` rectangles/polygons, saved with the file, into `Selection.roi`.
 2. Per-layer colour for multi-layer images; filter presets.
-3. Localize tab: `smappy.fit` and `smappy.live` as plugins.
+3. Localize: a stop button; flush fitted blocks on a timer as `LiveFit`
+   does, so a sparse live acquisition shows up before 9000 ROIs are in.
 4. Tree chooser over the registry; entry points so other packages register plugins.
 5. 3D view (`pyqtgraph.opengl`), then retire `viewer.py`.

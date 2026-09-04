@@ -28,10 +28,11 @@ class Layer:
     def __init__(self, locs: Localizations, name: str = "layer 1",
                  defaults: bool = True,
                  settings: Optional[RenderSettings] = None,
-                 display: Optional[DisplaySettings] = None):
+                 display: Optional[DisplaySettings] = None,
+                 live: bool = False, extent=None):
         self.name = name
         self.visible = True
-        self.state = ViewState(locs, settings, display)
+        self.state = ViewState(locs, settings, display, live=live, extent=extent)
         if defaults:
             for field, (lo, hi) in DEFAULT_BOUNDS.items():
                 if field in locs:
@@ -55,6 +56,16 @@ class Layer:
                 self.filter.set(field, lo, hi)
         if old.use_grouped:
             self.state.show_grouped(True)
+
+    def append(self, block: Localizations) -> int:
+        """Take in a block of a table that is still being produced."""
+        first = not len(self.locs)
+        n = self.state.append(block)
+        if first:
+            for field, (lo, hi) in DEFAULT_BOUNDS.items():
+                if field in block:
+                    self.filter.set(field, lo, hi)
+        return n
 
     @property
     def grouped(self) -> bool:
@@ -81,6 +92,7 @@ class Session:
         self.layers: List[Layer] = [Layer(self.locs)]
         self.history: List[Dict] = []
         self._undo: Optional[Localizations] = None
+        self._live = False                 # the table is being appended to
         self._listeners: List[Callable[[str], None]] = []
 
     # ----------------------------------------------------------- observers
@@ -111,13 +123,17 @@ class Session:
         return path
 
     def set_locs(self, locs: Localizations, undoable: bool = True) -> None:
-        self._undo = self.locs if undoable else None
-        self.locs = locs
-        if undoable:                       # the same data, corrected: keep the layers
+        if self._live:                     # the finished form of the live table
+            self.layers = [Layer(locs)]    # (undo already points before the run)
+            self._live = False
+        elif undoable:                     # the same data, corrected: keep the layers
+            self._undo = self.locs
             for layer in self.layers:
                 layer.rebind(locs)
         else:                              # a new file: start over with one layer
+            self._undo = None
             self.layers = [Layer(locs)]
+        self.locs = locs
         self.changed("locs")
 
     def add_layer(self) -> Layer:
@@ -131,6 +147,31 @@ class Session:
         if len(self.layers) > 1:
             del self.layers[index]
             self.changed("layers")
+
+    # ------------------------------------------------------------ streaming
+    def begin_live(self, extent=None, path=None) -> None:
+        """Start an empty table that `append` grows, for a running fit.
+
+        ``extent`` (x0, x1, y0, y1) frames the view before any data arrives.
+        The old table is kept for undo.
+        """
+        self._undo = self.locs if len(self.locs) else None
+        self._live = True
+        self.locs = Localizations({}, {})
+        self.layers = [Layer(self.locs, live=True, extent=extent)]
+        if path is not None:
+            self.path = Path(path)
+        self.changed("locs")
+
+    def append(self, block: Localizations) -> int:
+        """Add a block to the live table; every layer takes it in."""
+        n = 0
+        for layer in self.layers:
+            n = layer.append(block)
+        self.locs = self.layers[0].state.sets["ungrouped"].locs
+        if n:
+            self.changed("append")
+        return n
 
     @property
     def can_undo(self) -> bool:

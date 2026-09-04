@@ -318,6 +318,7 @@ class RenderTab(QWidget):
         self.contrast.valueChanged.connect(self._on_display)
         self.gamma.valueChanged.connect(self._on_display)
         self.grouped.toggled.connect(self._on_grouped)
+        self._appended = 0
         session.on_change(self._on_session)
         self._bind_layer(0)
 
@@ -330,6 +331,10 @@ class RenderTab(QWidget):
             self._bind_layer(self.strip.current)
         elif what == "layers":
             self.strip.rebuild()
+        elif what == "append":
+            self._appended += 1
+            if self._appended % 5 == 1:      # the histogram need not follow every block
+                self.filter.bind(self.layer)
 
     def _bind_layer(self, index: int) -> None:
         """Point every control at one layer, without firing their signals."""

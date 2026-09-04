@@ -28,9 +28,11 @@ class ParamInfo:
     min: Optional[float] = None
     max: Optional[float] = None
     step: Optional[float] = None
-    choices: Optional[Sequence] = None
+    choices: Optional[Sequence] = None   # values, or (value, label) pairs; may be a callable
     advanced: bool = False      # hidden behind "more" unless the plugin lists it
     hidden: bool = False        # scripting only
+    kind: Optional[str] = None  # "open_file", "save_file", "dir": a path with a browse button
+    file_filter: str = ""       # a Qt-style name filter for those, "TIFF (*.tif)"
 
 
 def param(default: Any = MISSING, *, default_factory: Any = MISSING, **info):
@@ -58,6 +60,8 @@ class ParamSpec:
     optional: bool          # may be None ("auto")
     default: Any
     info: ParamInfo
+    # for a field that is itself a settings dataclass (a *part*): its specs
+    children: Optional[Dict[str, "ParamSpec"]] = None
 
 
 def param_specs(settings_cls: type, extra: Optional[Dict[str, ParamInfo]] = None
@@ -65,9 +69,12 @@ def param_specs(settings_cls: type, extra: Optional[Dict[str, ParamInfo]] = None
     """Every field of a settings dataclass with its presentation.
 
     ``extra`` supplies infos for fields that were not declared with `param`,
-    so a plain dataclass such as `DriftSettings` needs no changes.
+    so a plain dataclass such as `DriftSettings` needs no changes.  A field
+    that is itself a dataclass is a part; its own fields come back under
+    ``children``, and ``extra`` reaches them with dotted keys, ``"fit.roisize"``.
     """
     hints = typing.get_type_hints(settings_cls)
+    extra = extra or {}
     specs = {}
     for f in fields(settings_cls):
         if not f.init:
@@ -76,8 +83,16 @@ def param_specs(settings_cls: type, extra: Optional[Dict[str, ParamInfo]] = None
         default = (f.default if f.default is not MISSING
                    else f.default_factory() if f.default_factory is not MISSING
                    else None)
-        info = (extra or {}).get(f.name) or f.metadata.get(_META) or ParamInfo()
-        specs[f.name] = ParamSpec(f.name, tp, optional, default, info)
+        info = extra.get(f.name) or f.metadata.get(_META) or ParamInfo()
+        spec = ParamSpec(f.name, tp, optional, default, info)
+        if dataclasses.is_dataclass(tp) and isinstance(tp, type):
+            prefix = f.name + "."
+            below = {k[len(prefix):]: v for k, v in extra.items() if k.startswith(prefix)}
+            spec.children = param_specs(tp, below)
+            if default is not None:        # the parent's default instance wins
+                for child in spec.children.values():
+                    child.default = getattr(default, child.name)
+        specs[f.name] = spec
     return specs
 
 
@@ -141,8 +156,21 @@ class Plugin:
     main: Optional[Sequence[str]] = None
 
     def run(self, locs: Localizations, selection: Selection, settings,
-            progress: Optional[Callable[[str], None]] = None) -> Result:
+            progress: Optional[Callable[[str], None]] = None,
+            stream: Optional[Callable[[str, Any], None]] = None) -> Result:
+        """Do the work.  ``progress(text)`` reports; ``stream(event, payload)``
+        hands partial results on while running: ``("start", {"extent": ...})``
+        once, then ``("block", Localizations)`` per finished block, for a
+        plugin that produces localizations over minutes.  Both may be None."""
         raise NotImplementedError
+
+    def react(self, changed: str, settings) -> Optional[Dict[str, Any]]:
+        """A parameter was edited: ``changed`` is its dotted name.
+
+        Return values to set in reply, keyed by dotted name -- a camera read
+        from the file that was just chosen, say -- or None.  The GUI calls this;
+        a script may too."""
+        return None
 
     def __call__(self, locs: Localizations, selection: Optional[Selection] = None,
                  settings=None, **overrides) -> Result:
@@ -169,7 +197,7 @@ class Plugin:
 # ------------------------------------------------------------------ registry
 
 _REGISTRY: Dict[str, Type[Plugin]] = {}
-_BUILTIN = ("smappy.plugins.drift_comet",)
+_BUILTIN = ("smappy.plugins.fit", "smappy.plugins.drift_comet")
 
 
 def register(path: str):

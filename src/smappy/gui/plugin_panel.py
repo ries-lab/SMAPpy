@@ -21,15 +21,20 @@ class _Worker(QObject):
     done = Signal(object)
     failed = Signal(str)
     progress = Signal(str)
+    streamed = Signal(str, object)
 
     def __init__(self, plugin, locs, selection, settings):
         super().__init__()
         self.args = (plugin, locs, selection, settings)
 
+    def _stream(self, event: str, payload) -> None:
+        self.streamed.emit(event, payload)
+
     def run(self) -> None:
         plugin, locs, selection, settings = self.args
         try:
-            self.done.emit(plugin.run(locs, selection, settings, self.progress.emit))
+            self.done.emit(plugin.run(locs, selection, settings, self.progress.emit,
+                                      self._stream))
         except Exception:
             self.failed.emit(traceback.format_exc())
 
@@ -67,6 +72,22 @@ class PluginPanel(QWidget):
 
         self.run_button.clicked.connect(self.run)
         self.plot_button.clicked.connect(self.plot)
+        self.form.field_changed.connect(self._react)
+
+    def _react(self, path: str) -> None:
+        """Let the plugin answer an edit, e.g. fill the camera from the file."""
+        try:
+            updates = self.plugin.react(path, self.form.value())
+        except (ValueError, TypeError):
+            return
+        if updates:
+            self.form.set_values(updates)
+
+    def _on_stream(self, event: str, payload) -> None:
+        if event == "start":
+            self.session.begin_live(payload.get("extent"), payload.get("path"))
+        elif event == "block":
+            self.session.append(payload)
 
     def run(self) -> None:
         try:
@@ -78,10 +99,14 @@ class PluginPanel(QWidget):
         self.run_button.setEnabled(False)
         self.status.setText("running...")
         self._thread = QThread()
+        # Qt's default thread stack (512 kB on macOS) is too small for HDF5 and
+        # the fitter's own threads' bookkeeping: a bus error, not an exception
+        self._thread.setStackSize(32 * 1024 * 1024)
         self._worker = _Worker(self.plugin, self.session.locs, selection, settings)
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
         self._worker.progress.connect(self.status.setText)
+        self._worker.streamed.connect(self._on_stream)
         self._worker.done.connect(self._on_done)
         self._worker.failed.connect(self._on_failed)
         for sig in (self._worker.done, self._worker.failed):

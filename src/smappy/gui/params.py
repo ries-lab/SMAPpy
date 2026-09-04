@@ -1,12 +1,17 @@
-"""A settings dataclass as a form, and the form back as a dataclass."""
+"""A settings dataclass as a form, and the form back as a dataclass.
+
+A field that is itself a dataclass (a *part*) becomes a collapsible section
+with its own form inside, so a fitter assembled from parts reads as one.
+"""
 from __future__ import annotations
 
 import dataclasses
 from typing import Any, Dict, Optional
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QFormLayout, QHBoxLayout,
-                               QLabel, QLineEdit, QSpinBox, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFormLayout,
+                               QHBoxLayout, QLabel, QLineEdit, QSpinBox,
+                               QToolButton, QVBoxLayout, QWidget)
 
 from ..plugins import ParamSpec, param_specs
 from .widgets import CollapsibleSection
@@ -24,10 +29,11 @@ class _Field(QWidget):
         row = QHBoxLayout(self)
         row.setContentsMargins(0, 0, 0, 0)
         self.auto: Optional[QCheckBox] = None
-        if info.choices:
+        choices = info.choices() if callable(info.choices) else info.choices
+        if choices is not None:
             self.widget = QComboBox()
             self._values = []
-            choices = list(info.choices)
+            choices = list(choices)
             if spec.optional:
                 choices.insert(0, (None, "auto"))
             for choice in choices:
@@ -35,6 +41,13 @@ class _Field(QWidget):
                 self.widget.addItem(label, value)
                 self._values.append(value)
             self.widget.currentIndexChanged.connect(self.changed)
+        elif info.kind in ("open_file", "save_file", "dir"):
+            self.widget = QLineEdit()
+            self.widget.editingFinished.connect(self.changed)
+            browse = QToolButton(text="...")
+            browse.clicked.connect(self._browse)
+            row.addWidget(self.widget, 1)
+            row.addWidget(browse)
         elif spec.type is bool and spec.optional:   # three states: on, off, auto
             self.widget = QCheckBox(tristate=True)
             self.widget.stateChanged.connect(self.changed)
@@ -54,14 +67,16 @@ class _Field(QWidget):
             self.widget = QLineEdit()
             self.widget.setMaximumWidth(80)
             self.widget.editingFinished.connect(self.changed)
-        row.addWidget(self.widget)
-        if spec.optional and not info.choices and spec.type is not bool:
+        if info.kind not in ("open_file", "save_file", "dir"):
+            row.addWidget(self.widget)
+        if spec.optional and choices is None and spec.type is not bool:
             self.auto = QCheckBox("auto")
             self.auto.toggled.connect(self._on_auto)
             row.addWidget(self.auto)
         if info.unit:
             row.addWidget(QLabel(info.unit))
-        row.addStretch(1)
+        if info.kind not in ("open_file", "save_file", "dir"):
+            row.addStretch(1)
         if info.help:
             self.setToolTip(info.help)
         self.set(spec.default)
@@ -69,6 +84,19 @@ class _Field(QWidget):
     def _on_auto(self, on: bool) -> None:
         self.widget.setEnabled(not on)
         self.changed.emit()
+
+    def _browse(self) -> None:
+        kind, name_filter = self.spec.info.kind, self.spec.info.file_filter
+        current = self.widget.text()
+        if kind == "open_file":
+            path, _ = QFileDialog.getOpenFileName(self, self.spec.name, current, name_filter)
+        elif kind == "save_file":
+            path, _ = QFileDialog.getSaveFileName(self, self.spec.name, current, name_filter)
+        else:
+            path = QFileDialog.getExistingDirectory(self, self.spec.name, current)
+        if path:
+            self.widget.setText(path)
+            self.changed.emit()
 
     def set(self, value: Any) -> None:
         if self.auto is not None:
@@ -114,18 +142,22 @@ class _Field(QWidget):
 class SettingsForm(QWidget):
     """The fields of a settings dataclass; ``value()`` builds the instance.
 
-    Fields marked advanced sit under a collapsed "more" section.
+    Fields marked advanced sit under a collapsed "more" section; a part (a
+    dataclass-typed field) is a section of its own, open unless advanced.
+    ``field_changed`` carries the dotted name of what was edited.
     """
 
     changed = Signal()
+    field_changed = Signal(str)
 
     def __init__(self, settings_cls: type, specs: Optional[Dict[str, ParamSpec]] = None,
                  parent=None):
         super().__init__(parent)
         self.settings_cls = settings_cls
-        self.fields: Dict[str, _Field] = {}
+        self.fields: Dict[str, Any] = {}          # _Field or SettingsForm
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
         main, more = QFormLayout(), QFormLayout()
         for form in (main, more):
             form.setContentsMargins(0, 0, 0, 0)
@@ -133,11 +165,21 @@ class SettingsForm(QWidget):
         for name, spec in (specs or param_specs(settings_cls)).items():
             if spec.info.hidden:
                 continue
+            if spec.children is not None:
+                part = SettingsForm(spec.type, spec.children)
+                part.field_changed.connect(lambda sub, n=name: self.field_changed.emit(f"{n}.{sub}"))
+                part.changed.connect(self.changed)
+                self.fields[name] = part
+                layout.addWidget(CollapsibleSection(spec.info.label or name, part,
+                                                    expanded=not spec.info.advanced))
+                continue
             w = _Field(spec)
             w.changed.connect(self.changed)
+            w.changed.connect(lambda n=name: self.field_changed.emit(n))
             self.fields[name] = w
             (more if spec.info.advanced else main).addRow(spec.info.label or name, w)
-        layout.addLayout(main)
+        if main.rowCount():
+            layout.addLayout(main)
         if more.rowCount():
             box = QWidget()
             box.setLayout(more)
@@ -149,3 +191,16 @@ class SettingsForm(QWidget):
     def set(self, settings) -> None:
         for name, f in self.fields.items():
             f.set(getattr(settings, name))
+
+    def set_values(self, values: Dict[str, Any]) -> None:
+        """Set some fields by dotted name, without firing `field_changed`."""
+        for path, value in values.items():
+            target = self
+            parts = path.split(".")
+            for part in parts[:-1]:
+                target = target.fields[part]
+            field = target.fields[parts[-1]]
+            field.blockSignals(True)
+            field.set(value)
+            field.blockSignals(False)
+        self.changed.emit()

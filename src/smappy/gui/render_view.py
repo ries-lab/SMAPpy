@@ -43,7 +43,7 @@ class RenderView(QWidget):
     def _on_session(self, what: str) -> None:
         if what == "locs":
             self.reset()
-        elif what in ("layer", "layers"):
+        elif what in ("layer", "layers", "append"):
             self.schedule()
 
     def schedule(self) -> None:
@@ -52,7 +52,8 @@ class RenderView(QWidget):
     def reset(self) -> None:
         """Show everything."""
         layer = self.session.layers[0]
-        if not len(self.session.locs):
+        if not len(self.session.locs) and layer.state.index.n_localizations == 0 \
+                and not getattr(layer.state.index, "extent", None):
             self.image.clear()
             return
         (x0, x1), (y0, y1) = layer.state.full_view()
@@ -62,6 +63,7 @@ class RenderView(QWidget):
     def render(self) -> None:
         """Render every visible layer and add them up, as SMAP does."""
         if not len(self.session.locs):
+            self.image.clear()
             return
         rect = self.view.viewRect()
         size = self.graphics.size()
@@ -78,7 +80,8 @@ class RenderView(QWidget):
         self.image.setRect(QRectF(fov.x0, fov.y0, fov.x1 - fov.x0, fov.y1 - fov.y0))
         self.fov = fov
         self.scalebar.size = _nice(0.2 * (fov.x1 - fov.x0))
-        self.scalebar.text.setText(pg.functions.siFormat(self.scalebar.size, suffix="nm"))
+        size = self.scalebar.size
+        self.scalebar.text.setText(f"{size / 1000:g} µm" if size >= 1000 else f"{size:g} nm")
         self.scalebar.updateBar()
 
 
