@@ -26,14 +26,21 @@ class Layer:
     """
 
     def __init__(self, locs: Localizations, name: str = "layer 1",
+                 defaults: bool = True,
                  settings: Optional[RenderSettings] = None,
                  display: Optional[DisplaySettings] = None):
         self.name = name
         self.visible = True
         self.state = ViewState(locs, settings, display)
-        for field, (lo, hi) in DEFAULT_BOUNDS.items():
-            if field in locs:
-                self.filter.set(field, lo, hi)
+        if defaults:
+            for field, (lo, hi) in DEFAULT_BOUNDS.items():
+                if field in locs:
+                    self.filter.set(field, lo, hi)
+
+    @property
+    def locs(self) -> Localizations:
+        """The table this layer draws: grouped or not."""
+        return self.state.locs
 
     @property
     def filter(self) -> LocFilter:
@@ -43,12 +50,28 @@ class Layer:
         """Point at a new table, keeping the bounds and display the user set."""
         old = self.state
         self.state = ViewState(locs, old.settings, old.display)
-        for field, (lo, hi) in old.filter.ranges.items():
+        for field, (lo, hi) in old.sets["ungrouped"].filter.ranges.items():
             if field in locs:
                 self.filter.set(field, lo, hi)
+        if old.use_grouped:
+            self.state.show_grouped(True)
+
+    @property
+    def grouped(self) -> bool:
+        return self.state.use_grouped
+
+    def show_grouped(self, on: bool) -> None:
+        """Draw one entry per blink instead of one per frame.  Links on first use."""
+        self.state.show_grouped(on)
 
     def selection(self, index: int = 0) -> Selection:
-        return Selection(self.filter.mask, layer=index, name=self.name)
+        """The *ungrouped* localizations this layer's filter keeps.
+
+        Plugins work on the full table, so a grouped layer hands back the
+        ungrouped filter, which is what it would apply to it.
+        """
+        f = self.state.sets["ungrouped"].filter
+        return Selection(f.mask, layer=index, name=self.name)
 
 
 class Session:
@@ -62,7 +85,8 @@ class Session:
 
     # ----------------------------------------------------------- observers
     def on_change(self, callback: Callable[[str], None]) -> None:
-        """``callback(what)``; ``what`` is "locs", "layer" or "history"."""
+        """``callback(what)``: "locs" (new table), "layer" (a filter or display
+        setting changed), "layers" (added/removed/visibility) or "history"."""
         self._listeners.append(callback)
 
     def changed(self, what: str) -> None:
@@ -89,9 +113,24 @@ class Session:
     def set_locs(self, locs: Localizations, undoable: bool = True) -> None:
         self._undo = self.locs if undoable else None
         self.locs = locs
-        for layer in self.layers:
-            layer.rebind(locs)
+        if undoable:                       # the same data, corrected: keep the layers
+            for layer in self.layers:
+                layer.rebind(locs)
+        else:                              # a new file: start over with one layer
+            self.layers = [Layer(locs)]
         self.changed("locs")
+
+    def add_layer(self) -> Layer:
+        """A new layer on the same table, with a fresh (default) filter."""
+        layer = Layer(self.locs, name=f"layer {len(self.layers) + 1}")
+        self.layers.append(layer)
+        self.changed("layers")
+        return layer
+
+    def remove_layer(self, index: int) -> None:
+        if len(self.layers) > 1:
+            del self.layers[index]
+            self.changed("layers")
 
     @property
     def can_undo(self) -> bool:

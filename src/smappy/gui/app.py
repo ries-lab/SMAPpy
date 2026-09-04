@@ -18,7 +18,7 @@ from .render_tab import RenderTab
 from .render_view import RenderView
 from .widgets import CollapsibleSection
 
-TABS = ("File", "Localize", "Render", "Analysis", "ROI")
+TABS = ("Localize", "Render", "Analysis", "ROI")
 
 
 class PluginTab(QWidget):
@@ -75,12 +75,11 @@ class ControlWindow(QMainWindow):
         self.setWindowTitle("smappy")
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
-        self.tabs.addTab(QLabel("open/save are in the File menu"), "File")
         self.tabs.addTab(PluginTab("Localize", session), "Localize")
         self.tabs.addTab(RenderTab(session), "Render")
         self.tabs.addTab(PluginTab("Analysis", session), "Analysis")
         self.tabs.addTab(PluginTab("ROI", session), "ROI")
-        self.tabs.setCurrentIndex(2)
+        self.tabs.setCurrentIndex(1)
         self.setCentralWidget(self.tabs)
         self.resize(360, 640)
 

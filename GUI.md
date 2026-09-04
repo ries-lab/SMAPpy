@@ -29,11 +29,17 @@ reasoning is here so that it does not have to be re-derived.
 * **Results go back through a `Result`**: new localizations (or none), text,
   a plot callback and the settings used.  The session replaces the table with
   one level of undo and appends to a history, like SMAP's `addhistory`.
-* **Layers are modelled now, one is shown.**  A `Layer` is a filter plus render
-  and display settings; a `Selection` names the layer it was built from.
+* **Layers.**  A `Layer` is a filter plus render and display settings over the
+  same table; visible layers are rendered separately and added, as in SMAP.  A
+  `Selection` names the layer it was built from.  Each layer keeps its own
+  spatial index for now (cheap next to the render; share it if memory bites).
 * **Layout**: two windows, the render view (most of the screen) and a compact
-  control window with tabs File / Localize / Render / Analysis / ROI.  Inside a
-  tab plugins are collapsible sections, one open at a time.  A search box
+  control window with tabs Localize / Render / Analysis / ROI (open/save live
+  in the File menu).  Inside a
+  tab plugins are collapsible sections, one open at a time.  The Render tab
+  filters one field at a time: quick buttons for the usual fields, a drop-down
+  for the rest, a histogram whose shaded region is the range (dragged to the
+  edge = no bound), and the numbers.  A search box
   filters them; once there are many plugins a tree chooser is added for the
   long tail.
 
@@ -74,7 +80,7 @@ Scripting: `Dbscan()(locs, selection, radius_nm=30)` or
 ## Next steps
 
 1. ROI tab: `pg.ROI` rectangles/polygons, saved with the file, into `Selection.roi`.
-2. Layers in the GUI (a layer strip in the Render tab) and grouped display.
+2. Per-layer colour for multi-layer images; filter presets.
 3. Localize tab: `smappy.fit` and `smappy.live` as plugins.
 4. Tree chooser over the registry; entry points so other packages register plugins.
 5. 3D view (`pyqtgraph.opengl`), then retire `viewer.py`.

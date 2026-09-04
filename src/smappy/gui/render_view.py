@@ -43,7 +43,7 @@ class RenderView(QWidget):
     def _on_session(self, what: str) -> None:
         if what == "locs":
             self.reset()
-        elif what == "layer":
+        elif what in ("layer", "layers"):
             self.schedule()
 
     def schedule(self) -> None:
@@ -60,7 +60,7 @@ class RenderView(QWidget):
         self.schedule()
 
     def render(self) -> None:
-        layer = self.session.layers[0]
+        """Render every visible layer and add them up, as SMAP does."""
         if not len(self.session.locs):
             return
         rect = self.view.viewRect()
@@ -68,8 +68,11 @@ class RenderView(QWidget):
         nx, ny = max(size.width(), 16), max(size.height(), 16)
         fov = FieldOfView.fit((rect.left(), rect.right()),
                               (rect.top(), rect.bottom()), nx, ny)
-        rgb, _ = layer.state.image(fov)
-        rgb = np.ascontiguousarray(rgb)
+        rgb = np.zeros((fov.ny, fov.nx, 3), np.float32)
+        for layer in self.session.layers:
+            if layer.visible:
+                rgb += layer.state.image(fov)[0]
+        rgb = np.clip(rgb, 0, 1)
         self.image.setImage(rgb, levels=[0, 1] if rgb.dtype.kind == "f" else None,
                             autoLevels=False)
         self.image.setRect(QRectF(fov.x0, fov.y0, fov.x1 - fov.x0, fov.y1 - fov.y0))
