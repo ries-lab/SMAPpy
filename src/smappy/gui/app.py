@@ -15,8 +15,8 @@ from .. import plugins
 from ..session import Session
 from .plugin_panel import PluginPanel
 from .render_tab import RenderTab
-from .render_view import RenderView
-from .widgets import CollapsibleSection
+from .render_view import RenderToolBar, RenderView
+from .widgets import CollapsibleSection, FloatingWindow
 
 TABS = ("Localize", "Render", "Analysis", "ROI")
 
@@ -41,8 +41,9 @@ class PluginTab(QWidget):
         self.stack.setContentsMargins(0, 0, 0, 0)
         for path, cls in plugins.available(tab + "/").items():
             title = path[len(tab) + 1:]
-            section = CollapsibleSection(title, PluginPanel(cls, session))
+            section = CollapsibleSection(title, PluginPanel(cls, session), detachable=True)
             section.toggled.connect(lambda on, s=section: self._one_open(s, on))
+            section.detach_requested.connect(lambda s=section: self._detach(s))
             self.sections.append(section)
             self.stack.addWidget(section)
         if not self.sections:
@@ -54,6 +55,14 @@ class PluginTab(QWidget):
         layout.addWidget(scroll)
         if self.sections:
             self.sections[0].set_expanded(True)
+
+    def _detach(self, section: CollapsibleSection) -> None:
+        """Move a plugin to its own window, so several can be open at once."""
+        window = FloatingWindow(section.title, section.detach(), parent=self.window())
+        window.closed.connect(section.reattach)
+        window.resize(section.content.sizeHint().width() + 20, 400)
+        window.show()
+        self._windows = getattr(self, "_windows", []) + [window]
 
     def _one_open(self, opened: CollapsibleSection, on: bool) -> None:
         if on:
@@ -76,7 +85,7 @@ class ControlWindow(QMainWindow):
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
         self.tabs.addTab(PluginTab("Localize", session), "Localize")
-        self.tabs.addTab(RenderTab(session), "Render")
+        self.tabs.addTab(RenderTab(session, render.view), "Render")
         self.tabs.addTab(PluginTab("Analysis", session), "Analysis")
         self.tabs.addTab(PluginTab("ROI", session), "ROI")
         self.tabs.setCurrentIndex(1)
@@ -137,6 +146,7 @@ class RenderWindow(QMainWindow):
         super().__init__()
         self.view = RenderView(session)
         self.setCentralWidget(self.view)
+        self.addToolBar(RenderToolBar(self.view))
         self.resize(900, 900)
 
 

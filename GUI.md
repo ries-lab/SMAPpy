@@ -39,7 +39,12 @@ reasoning is here so that it does not have to be re-derived.
   tab plugins are collapsible sections, one open at a time.  The Render tab
   filters one field at a time: quick buttons for the usual fields, a drop-down
   for the rest, a histogram whose shaded region is the range (dragged to the
-  edge = no bound), and the numbers.  A search box
+  edge = no bound), and the numbers.  Below it an overview of the whole field
+  of view; a click there centres the image.  A plugin section can be detached
+  into its own window (the arrow on its title), so several stay open.  The
+  render window has a toolbar: *Save* (PNG as shown, or a TIFF re-rendered at
+  a chosen pixel size, colour or float intensity, with the pixel size in the
+  resolution tags) and *ROI*, empty until ROIs exist.  A search box
   filters them; once there are many plugins a tree chooser is added for the
   long tail.
 
@@ -61,6 +66,7 @@ reasoning is here so that it does not have to be re-derived.
 
     smappy/plugins/__init__.py   Plugin, Result, Selection, param(), registry
     smappy/plugins/drift_comet.py  the first plugin: COMET drift correction
+    smappy/plugins/drift_rcc.py  RCC, the same contract
     smappy/plugins/fit.py        the parts, and the Gaussian 2D / Spline 3D fitters
     smappy/session.py            Session: table, layers, undo, history (no Qt)
     smappy/gui/params.py         Settings dataclass -> form widget, and back
@@ -94,7 +100,8 @@ Scripting: `Dbscan()(locs, selection, radius_nm=30)` or
 
 ## Next steps
 
-1. ROI tab: `pg.ROI` rectangles/polygons, saved with the file, into `Selection.roi`.
+1. ROIs: the toolbar's rectangle / polygon / line (with a width), drawn with
+   `pg.ROI`, saved with the file, into `Selection.roi`.
 2. Per-layer colour for multi-layer images; filter presets.
 3. Localize: a stop button; flush fitted blocks on a timer as `LiveFit`
    does, so a sparse live acquisition shows up before 9000 ROIs are in.

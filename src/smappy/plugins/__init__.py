@@ -197,7 +197,8 @@ class Plugin:
 # ------------------------------------------------------------------ registry
 
 _REGISTRY: Dict[str, Type[Plugin]] = {}
-_BUILTIN = ("smappy.plugins.fit", "smappy.plugins.drift_comet")
+_BUILTIN = ("smappy.plugins.fit", "smappy.plugins.drift_comet",
+            "smappy.plugins.drift_rcc")
 
 
 def register(path: str):

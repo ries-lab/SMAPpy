@@ -36,3 +36,12 @@ def test_plugin_runs_as_a_function_and_through_a_session():
     assert corrected_span < 0                      # drift removed: tighter
     session.undo()
     assert session.locs is before and not session.can_undo
+
+
+def test_rcc_is_registered_and_runs():
+    from smappy.rcc import RCCSettings
+    locs, truth, _ = simulate(n_frames=200, per_frame=60)
+    plugin = plugins.get("Analysis/Drift/RCC")()
+    result = plugin(locs, Selection.all(len(locs)),
+                    RCCSettings(n_timepoints=5, pixelsize_nm=20, group=False, use_z=False))
+    assert result.locs is not None and "drift over 200 frames" in result.text

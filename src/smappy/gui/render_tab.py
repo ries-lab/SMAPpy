@@ -12,13 +12,14 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QRectF, Qt, Signal
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout,
                                QHBoxLayout, QLabel, QLineEdit, QPushButton,
                                QToolButton, QVBoxLayout, QWidget)
 
 from .. import lut as luts
 from ..filter import quantile_range
+from ..render import FieldOfView
 from ..session import Layer, Session
 from ..viewer import COLOR_FIELDS, FIELD_LUT, INTENSITY_LUT
 from .widgets import CollapsibleSection
@@ -218,7 +219,12 @@ class LayerStrip(QWidget):
         self.layout_ = QHBoxLayout(self)
         self.layout_.setContentsMargins(0, 0, 0, 0)
         self.buttons: List[QToolButton] = []
-        self.visible = QCheckBox("visible")
+        self.visible = QCheckBox()
+        self.visible.setToolTip("visible")
+        self.name = QLineEdit()
+        self.name.setToolTip("layer name")
+        self.name.setMaximumWidth(110)
+        self.name.editingFinished.connect(self._on_name)
         self.add = QToolButton(text="+")
         self.remove = QToolButton(text="-")
         self.add.clicked.connect(self._add)
@@ -229,7 +235,8 @@ class LayerStrip(QWidget):
     def rebuild(self) -> None:
         while self.layout_.count():
             item = self.layout_.takeAt(0)
-            if item.widget() and item.widget() not in (self.visible, self.add, self.remove):
+            if item.widget() and item.widget() not in (self.visible, self.name,
+                                                       self.add, self.remove):
                 item.widget().deleteLater()
         self.buttons = []
         for i, layer in enumerate(self.session.layers):
@@ -241,6 +248,7 @@ class LayerStrip(QWidget):
         self.layout_.addWidget(self.add)
         self.layout_.addWidget(self.remove)
         self.layout_.addWidget(self.visible)
+        self.layout_.addWidget(self.name)
         self.layout_.addStretch(1)
         self.remove.setEnabled(len(self.buttons) > 1)
         self.select(min(self.current, len(self.buttons) - 1))
@@ -251,7 +259,13 @@ class LayerStrip(QWidget):
         self.visible.blockSignals(True)
         self.visible.setChecked(self.session.layers[i].visible)
         self.visible.blockSignals(False)
+        self.name.setText(self.session.layers[i].name)
         self.selected.emit(i)
+
+    def _on_name(self) -> None:
+        layer = self.session.layers[self.current]
+        layer.name = self.name.text().strip() or f"layer {self.current + 1}"
+        self.buttons[self.current].setToolTip(layer.name)
 
     def _add(self) -> None:
         self.session.add_layer()
@@ -265,8 +279,66 @@ class LayerStrip(QWidget):
         self.session.changed("layers")
 
 
+class Overview(QWidget):
+    """The whole field of view, small; click to centre the main image there."""
+
+    def __init__(self, session: Session, view, parent=None):
+        super().__init__(parent)
+        self.session = session
+        self.view = view
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
+        self.graphics = pg.GraphicsLayoutWidget()
+        self.graphics.setFixedHeight(150)
+        self.box = self.graphics.addViewBox(lockAspect=True, invertY=True,
+                                           enableMenu=False, enableMouse=False)
+        self.image = pg.ImageItem(axisOrder="row-major")
+        self.box.addItem(self.image)
+        self.frame = pg.QtWidgets.QGraphicsRectItem()
+        self.frame.setPen(pg.mkPen((255, 255, 0), width=1))
+        self.frame.setBrush(pg.mkBrush(None))
+        self.box.addItem(self.frame)
+        layout.addWidget(self.graphics)
+        row = QHBoxLayout()
+        self.update_button = QPushButton("update")
+        self.update_button.setToolTip("re-render with the current layers")
+        row.addWidget(self.update_button)
+        row.addStretch(1)
+        layout.addLayout(row)
+        self.update_button.clicked.connect(self.update_image)
+        self.image.mouseClickEvent = self._on_click
+        if view is not None:
+            view.view.sigRangeChanged.connect(self._track)
+        session.on_change(lambda what: self.update_image() if what == "locs" else None)
+
+    def update_image(self) -> None:
+        if self.view is None or not len(self.session.locs):
+            self.image.clear()
+            return
+        (x0, x1), (y0, y1) = self.session.layers[0].state.full_view()
+        fov = FieldOfView.fit((x0, x1), (y0, y1), 300, 200)
+        rgb, _ = self.view.composite(fov)
+        self.image.setImage(np.ascontiguousarray(rgb), levels=[0, 1], autoLevels=False)
+        self.image.setRect(QRectF(fov.x0, fov.y0, fov.x1 - fov.x0, fov.y1 - fov.y0))
+        self.box.setRange(QRectF(fov.x0, fov.y0, fov.x1 - fov.x0, fov.y1 - fov.y0),
+                          padding=0)
+        self._track()
+
+    def _track(self) -> None:
+        if self.view is not None:
+            self.frame.setRect(self.view.view.viewRect())
+
+    def _on_click(self, event) -> None:
+        if self.view is None:
+            return
+        pos = self.image.mapToView(event.pos())
+        self.view.center_on(pos.x(), pos.y())
+        event.accept()
+
+
 class RenderTab(QWidget):
-    def __init__(self, session: Session, parent=None):
+    def __init__(self, session: Session, view=None, parent=None):
         super().__init__(parent)
         self.session = session
         layout = QVBoxLayout(self)
@@ -307,6 +379,8 @@ class RenderTab(QWidget):
         more_form.addRow("gamma", self.gamma)
         form.addRow(CollapsibleSection("more", more, expanded=False))
         layout.addWidget(CollapsibleSection("display", display, expanded=True))
+        self.overview = Overview(session, view)
+        layout.addWidget(CollapsibleSection("overview", self.overview, expanded=True))
         layout.addStretch(1)
 
         self.strip.selected.connect(self._bind_layer)
