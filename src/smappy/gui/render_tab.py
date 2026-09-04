@@ -22,7 +22,7 @@ from ..filter import quantile_range
 from ..render import FieldOfView
 from ..session import Layer, Session
 from ..viewer import COLOR_FIELDS, FIELD_LUT, INTENSITY_LUT
-from .widgets import CollapsibleSection
+from .widgets import CollapsibleSection, detach_to_window
 
 # the fields with a quick button, best-named alternative first
 QUICK_FIELDS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
@@ -55,9 +55,11 @@ class FilterWidget(QWidget):
 
     changed = Signal()
 
-    def __init__(self, parent=None):
+    def __init__(self, session: Optional[Session] = None, parent=None):
         super().__init__(parent)
+        self.session = session
         self.layer: Optional[Layer] = None
+        self.layer_index = 0
         self._hist_cache: Dict[Tuple[int, str], tuple] = {}
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -173,7 +175,10 @@ class FilterWidget(QWidget):
 
     def _update_count(self) -> None:
         f = self.layer.filter
-        self.count.setText(f"{len(f)} / {len(self.layer.locs)}")
+        text = f"{len(f)} / {len(self.layer.locs)}"
+        if self.session is not None and self.session.roi is not None:
+            text += f", {len(self.session.selection(self.layer_index))} in ROI"
+        self.count.setText(text)
         bounded = set(f.ranges)
         for n, b in self.quick.items():
             b.setStyleSheet("font-weight: bold" if n in bounded and
@@ -183,10 +188,9 @@ class FilterWidget(QWidget):
     def _apply(self, lo: Optional[float], hi: Optional[float]) -> None:
         name = self.field.currentText()
         if lo is None and hi is None:
-            if name in self.layer.filter:
-                self.layer.filter.remove(name)
+            self.layer.remove_bound(name)
         else:
-            self.layer.filter.set(name, lo, hi)
+            self.layer.set_bound(name, lo, hi)
         self._show_field()
         self.changed.emit()
 
@@ -241,8 +245,11 @@ class LayerStrip(QWidget):
         self.buttons = []
         for i, layer in enumerate(self.session.layers):
             b = QToolButton(text=str(i + 1), checkable=True, autoExclusive=True)
-            b.setToolTip(layer.name)
+            b.setToolTip(f"{layer.name}\nright-click: show / hide")
             b.clicked.connect(lambda _=False, i=i: self.select(i))
+            b.setContextMenuPolicy(Qt.CustomContextMenu)
+            b.customContextMenuRequested.connect(lambda _, i=i: self._toggle_visible(i))
+            self._style(b, layer.visible)
             self.buttons.append(b)
             self.layout_.addWidget(b)
         self.layout_.addWidget(self.add)
@@ -276,7 +283,23 @@ class LayerStrip(QWidget):
 
     def _on_visible(self, on: bool) -> None:
         self.session.layers[self.current].visible = on
+        self._style(self.buttons[self.current], on)
         self.session.changed("layers")
+
+    def _toggle_visible(self, i: int) -> None:
+        """Right-click on a layer's number: show or hide it, stay where we are."""
+        layer = self.session.layers[i]
+        layer.visible = not layer.visible
+        self._style(self.buttons[i], layer.visible)
+        if i == self.current:
+            self.visible.blockSignals(True)
+            self.visible.setChecked(layer.visible)
+            self.visible.blockSignals(False)
+        self.session.changed("layers")
+
+    @staticmethod
+    def _style(button: QToolButton, visible: bool) -> None:
+        button.setStyleSheet("" if visible else "color: gray; text-decoration: line-through")
 
 
 class Overview(QWidget):
@@ -333,6 +356,7 @@ class Overview(QWidget):
         if self.view is None:
             return
         pos = self.image.mapToView(event.pos())
+        self.view.window().show()          # closed by accident: bring it back
         self.view.center_on(pos.x(), pos.y())
         event.accept()
 
@@ -347,7 +371,7 @@ class RenderTab(QWidget):
 
         self.strip = LayerStrip(session)
         layout.addWidget(self.strip)
-        self.filter = FilterWidget()
+        self.filter = FilterWidget(session)
         layout.addWidget(CollapsibleSection("filter", self.filter, expanded=True))
 
         display = QWidget()
@@ -375,18 +399,25 @@ class RenderTab(QWidget):
         self.sigma = QDoubleSpinBox(minimum=0.1, maximum=1000, singleStep=1, decimals=1)
         self.sigma.setToolTip("rendering sigma for mode 'gauss', in data units")
         self.gamma = QDoubleSpinBox(minimum=0.1, maximum=3, singleStep=0.1, decimals=2)
+        self.factor = QDoubleSpinBox(minimum=0.05, maximum=5, singleStep=0.1, decimals=2)
+        self.factor.setToolTip("rendering sigma = factor x localization precision "
+                               "(mode 'precision')")
         more_form.addRow("sigma (gauss)", self.sigma)
+        more_form.addRow("precision factor", self.factor)
         more_form.addRow("gamma", self.gamma)
         form.addRow(CollapsibleSection("more", more, expanded=False))
         layout.addWidget(CollapsibleSection("display", display, expanded=True))
         self.overview = Overview(session, view)
-        layout.addWidget(CollapsibleSection("overview", self.overview, expanded=True))
+        section = CollapsibleSection("overview", self.overview, expanded=True, detachable=True)
+        section.detach_requested.connect(lambda: detach_to_window(section, self.window()))
+        layout.addWidget(section)
         layout.addStretch(1)
 
         self.strip.selected.connect(self._bind_layer)
         self.filter.changed.connect(lambda: session.changed("layer"))
         self.mode.currentTextChanged.connect(self._on_render_settings)
         self.sigma.valueChanged.connect(self._on_render_settings)
+        self.factor.valueChanged.connect(self._on_render_settings)
         self.color.currentIndexChanged.connect(self._on_color)
         self.lut.currentTextChanged.connect(self._on_display)
         self.contrast.valueChanged.connect(self._on_display)
@@ -405,6 +436,8 @@ class RenderTab(QWidget):
             self._bind_layer(self.strip.current)
         elif what == "layers":
             self.strip.rebuild()
+        elif what in ("roi", "roi-edited"):
+            self.filter._update_count()
         elif what == "append":
             self._appended += 1
             if self._appended % 5 == 1:      # the histogram need not follow every block
@@ -413,8 +446,9 @@ class RenderTab(QWidget):
     def _bind_layer(self, index: int) -> None:
         """Point every control at one layer, without firing their signals."""
         layer = self.session.layers[index]
-        widgets = (self.mode, self.sigma, self.color, self.lut, self.contrast,
-                   self.gamma, self.grouped)
+        self.filter.layer_index = index
+        widgets = (self.mode, self.sigma, self.factor, self.color, self.lut,
+                   self.contrast, self.gamma, self.grouped)
         for w in widgets:
             w.blockSignals(True)
         self.filter.bind(layer)
@@ -428,6 +462,7 @@ class RenderTab(QWidget):
         settings, display = layer.state.settings, layer.state.display
         self.mode.setCurrentText(settings.mode)
         self.sigma.setValue(settings.sigma)
+        self.factor.setValue(settings.sigma_settings.factor)
         i = self.color.findData(settings.color_field)
         self.color.setCurrentIndex(max(i, 0))
         self.lut.setCurrentText(display.lut if isinstance(display.lut, str) else "hot")
@@ -439,8 +474,9 @@ class RenderTab(QWidget):
 
     def _on_render_settings(self) -> None:
         state = self.layer.state
+        sigmas = dataclasses.replace(state.settings.sigma_settings, factor=self.factor.value())
         state.settings = dataclasses.replace(state.settings, mode=self.mode.currentText(),
-                                             sigma=self.sigma.value())
+                                             sigma=self.sigma.value(), sigma_settings=sigmas)
         self.session.changed("layer")
 
     def _on_color(self) -> None:

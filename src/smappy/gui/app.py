@@ -5,9 +5,10 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSettings, Qt
 from PySide6.QtGui import QAction, QKeySequence
-from PySide6.QtWidgets import (QApplication, QFileDialog, QLabel, QLineEdit,
+from PySide6.QtWidgets import (QApplication, QCheckBox, QFileDialog, QHBoxLayout,
+                               QLabel, QLineEdit,
                                QMainWindow, QScrollArea, QTabWidget, QVBoxLayout,
                                QWidget)
 
@@ -16,7 +17,7 @@ from ..session import Session
 from .plugin_panel import PluginPanel
 from .render_tab import RenderTab
 from .render_view import RenderToolBar, RenderView
-from .widgets import CollapsibleSection, FloatingWindow
+from .widgets import CollapsibleSection, detach_to_window
 
 TABS = ("Localize", "Render", "Analysis", "ROI")
 
@@ -24,45 +25,104 @@ TABS = ("Localize", "Render", "Analysis", "ROI")
 class PluginTab(QWidget):
     """Every plugin registered under one tab, as collapsible sections.
 
-    One section is open at a time, and the search box narrows them by name.
+    Without *all* ticked only the favourites show, flat; with it the full
+    tree, grouped by the path between the tab and the plugin.  A star on a
+    section toggles favourite (kept in the user's settings), the arrow moves
+    the plugin to its own window, and one section is open at a time.
     """
 
     def __init__(self, tab: str, session: Session, parent=None):
         super().__init__(parent)
+        self.tab = tab
+        self.settings = QSettings("smappy", "gui")
         self.sections: List[CollapsibleSection] = []
+        self.panels: Dict[str, PluginPanel] = {}
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
+        top = QHBoxLayout()
         self.search = QLineEdit(placeholderText="find plugin...")
         self.search.setClearButtonEnabled(True)
         self.search.textChanged.connect(self._filter)
-        layout.addWidget(self.search)
-        inner = QWidget()
-        self.stack = QVBoxLayout(inner)
+        self.all = QCheckBox("all")
+        self.all.setToolTip("every plugin, as a tree; otherwise the favourites")
+        self.all.setChecked(self.settings.value(f"{tab}/all", False, type=bool))
+        self.all.toggled.connect(self.rebuild)
+        top.addWidget(self.search, 1)
+        top.addWidget(self.all)
+        layout.addLayout(top)
+        self.inner = QWidget()
+        self.stack = QVBoxLayout(self.inner)
         self.stack.setContentsMargins(0, 0, 0, 0)
-        for path, cls in plugins.available(tab + "/").items():
-            title = path[len(tab) + 1:]
-            section = CollapsibleSection(title, PluginPanel(cls, session), detachable=True)
-            section.toggled.connect(lambda on, s=section: self._one_open(s, on))
-            section.detach_requested.connect(lambda s=section: self._detach(s))
-            self.sections.append(section)
-            self.stack.addWidget(section)
-        if not self.sections:
-            self.stack.addWidget(QLabel("no plugins yet"))
-        self.stack.addStretch(1)
         scroll = QScrollArea(widgetResizable=True)
-        scroll.setWidget(inner)
+        scroll.setWidget(self.inner)
         scroll.setFrameShape(QScrollArea.NoFrame)
         layout.addWidget(scroll)
+        for path, cls in plugins.available(tab + "/").items():
+            self.panels[path] = PluginPanel(cls, session)
+        self.rebuild()
+
+    # ---------------------------------------------------------- favourites
+    def is_favorite(self, path: str) -> bool:
+        return self.settings.value(f"favorite/{path}", self.panels[path].plugin.favorite,
+                                   type=bool)
+
+    def _set_favorite(self, path: str, on: bool) -> None:
+        self.settings.setValue(f"favorite/{path}", on)
+        if not self.all.isChecked() and not on:
+            self.rebuild()
+
+    # ------------------------------------------------------------- building
+    def rebuild(self) -> None:
+        self.settings.setValue(f"{self.tab}/all", self.all.isChecked())
+        # take every panel out of its section before the sections go
+        for section in self.sections:
+            if section.content.parent() is section.frame:
+                section.detach()
+        while self.stack.count():
+            item = self.stack.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self.sections = []
+        prefix = len(self.tab) + 1
+        shown = {p: panel for p, panel in self.panels.items()
+                 if self.all.isChecked() or self.is_favorite(p)}
+        if self.all.isChecked():
+            groups: Dict[str, List[str]] = {}
+            for path in shown:
+                group, _, _ = path[prefix:].rpartition("/")
+                groups.setdefault(group, []).append(path)
+            for group, paths in groups.items():
+                box = QWidget()
+                inner = QVBoxLayout(box)
+                inner.setContentsMargins(0, 0, 0, 0)
+                for path in paths:
+                    inner.addWidget(self._section(path, path.rsplit("/", 1)[-1]))
+                if group:
+                    self.stack.addWidget(CollapsibleSection(group, box, expanded=True))
+                else:
+                    self.stack.addWidget(box)
+        else:
+            for path in shown:
+                self.stack.addWidget(self._section(path, path[prefix:]))
+        if not shown:
+            self.stack.addWidget(QLabel("no plugins yet" if not self.panels
+                                        else "no favourites: tick 'all'"))
+        self.stack.addStretch(1)
         if self.sections:
             self.sections[0].set_expanded(True)
+        self._filter(self.search.text())
 
-    def _detach(self, section: CollapsibleSection) -> None:
-        """Move a plugin to its own window, so several can be open at once."""
-        window = FloatingWindow(section.title, section.detach(), parent=self.window())
-        window.closed.connect(section.reattach)
-        window.resize(section.content.sizeHint().width() + 20, 400)
-        window.show()
-        self._windows = getattr(self, "_windows", []) + [window]
+    def _section(self, path: str, title: str) -> CollapsibleSection:
+        panel = self.panels[path]
+        if panel.parent() is not None:         # still inside a floating window
+            panel.setParent(None)
+        section = CollapsibleSection(title, panel, detachable=True,
+                                     star=self.is_favorite(path))
+        section.toggled.connect(lambda on, s=section: self._one_open(s, on))
+        section.detach_requested.connect(lambda s=section: detach_to_window(s, self.window()))
+        section.starred.connect(lambda on, p=path: self._set_favorite(p, on))
+        self.sections.append(section)
+        return section
 
     def _one_open(self, opened: CollapsibleSection, on: bool) -> None:
         if on:
@@ -113,6 +173,8 @@ class ControlWindow(QMainWindow):
         return action
 
     def _on_session(self, what: str) -> None:
+        if what in ("layer", "layers", "locs", "roi") and not self.render_window.isVisible():
+            self.render_window.show()      # closed by accident: a change wants it back
         self.undo_action.setEnabled(self.session.can_undo)
         name = self.session.path.name if self.session.path else "no file"
         n = len(self.session.locs)

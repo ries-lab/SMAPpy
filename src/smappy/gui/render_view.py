@@ -7,17 +7,21 @@ pyqtgraph's pan/zoom acts on the localization coordinates directly.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import QRectF, QTimer
-from PySide6.QtGui import QAction, QImage
+from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
+from PySide6.QtGui import QAction, QActionGroup, QImage
 from PySide6.QtWidgets import (QFileDialog, QInputDialog, QMenu, QToolBar,
                                QToolButton, QVBoxLayout, QWidget)
 
+from ..regions import Region
 from ..render import FieldOfView
 from ..session import Session
+
+ROI_PEN = pg.mkPen((255, 255, 0), width=1)
+DRAW_PEN = pg.mkPen((255, 255, 0), width=1, style=Qt.DashLine)
 
 
 class RenderView(QWidget):
@@ -42,6 +46,19 @@ class RenderView(QWidget):
         self.view.sigRangeChanged.connect(self.schedule)
         session.on_change(self._on_session)
         self.fov = None
+
+        # ROI drawing: click to start, click to finish (polygon: click per
+        # vertex, double-click to close), Escape to cancel
+        self.roi_item = None
+        self.drawing: Optional[str] = None
+        self.line_width = 100.0
+        self._points: List[QPointF] = []
+        self._preview = pg.PlotDataItem(pen=DRAW_PEN)
+        self.view.addItem(self._preview)
+        self.graphics.scene().sigMouseClicked.connect(self._on_click)
+        self.graphics.scene().sigMouseMoved.connect(self._on_move)
+        self.graphics.setFocusPolicy(Qt.StrongFocus)
+        self.graphics.keyPressEvent = self._on_key
         self.reset()
 
     # ---------------------------------------------------------------- flow
@@ -50,6 +67,8 @@ class RenderView(QWidget):
             self.reset()
         elif what in ("layer", "layers", "append"):
             self.schedule()
+        elif what == "roi":
+            self._show_roi(self.session.roi)
 
     def schedule(self) -> None:
         self._timer.start()
@@ -107,6 +126,115 @@ class RenderView(QWidget):
         self.scalebar.updateBar()
 
 
+    # ---------------------------------------------------------------- roi
+    def start_drawing(self, kind: str) -> None:
+        """Begin a new ROI of ``kind``; the old one goes."""
+        self.clear_roi()
+        self.drawing = kind
+        self._points = []
+        self.view.setMouseEnabled(False, False)
+        self.graphics.setCursor(Qt.CrossCursor)
+        self.graphics.setFocus()
+
+    def clear_roi(self) -> None:
+        if self.roi_item is not None:
+            self.view.removeItem(self.roi_item)
+            self.roi_item = None
+        if self.session.roi is not None:
+            self.session.set_roi(None)
+
+    def _stop_drawing(self) -> None:
+        self.drawing = None
+        self._points = []
+        self._preview.setData([], [])
+        self.view.setMouseEnabled(True, True)
+        self.graphics.unsetCursor()
+
+    def _on_key(self, event) -> None:
+        if event.key() == Qt.Key_Escape and self.drawing:
+            self._stop_drawing()
+        else:
+            pg.GraphicsLayoutWidget.keyPressEvent(self.graphics, event)
+
+    def _on_click(self, event) -> None:
+        if not self.drawing:
+            return
+        pos = self.view.mapSceneToView(event.scenePos())
+        event.accept()
+        if event.button() == Qt.RightButton or event.double():
+            if self.drawing == "polygon" and len(self._points) >= 3:
+                self._finish(self._points)
+            return
+        self._points.append(pos)
+        if self.drawing in ("rect", "line") and len(self._points) == 2:
+            self._finish(self._points)
+
+    def _on_move(self, scene_pos) -> None:
+        if not self.drawing or not self._points:
+            return
+        pos = self.view.mapSceneToView(scene_pos)
+        pts = self._points + [pos]
+        if self.drawing == "rect":
+            (x0, y0), (x1, y1) = (pts[0].x(), pts[0].y()), (pos.x(), pos.y())
+            xs, ys = [x0, x1, x1, x0, x0], [y0, y0, y1, y1, y0]
+        else:
+            xs, ys = [p.x() for p in pts], [p.y() for p in pts]
+        self._preview.setData(xs, ys)
+
+    def _finish(self, pts: List[QPointF]) -> None:
+        kind = self.drawing
+        self._stop_drawing()
+        if kind == "rect":
+            region = Region.rect(pts[0].x(), pts[0].y(), pts[1].x(), pts[1].y())
+        elif kind == "line":
+            region = Region.line((pts[0].x(), pts[0].y()), (pts[1].x(), pts[1].y()),
+                                 self.line_width)
+        else:
+            region = Region("polygon", [(p.x(), p.y()) for p in pts])
+        self._show_roi(region)
+        self.session.set_roi(region)
+
+    def _show_roi(self, region: Optional[Region]) -> None:
+        """An editable pyqtgraph ROI for the region; edits go back to the session."""
+        if self.roi_item is not None:
+            self.view.removeItem(self.roi_item)
+            self.roi_item = None
+        if region is None:
+            return
+        if region.kind == "rect":
+            x0, y0, x1, y1 = region.bounds
+            item = pg.RectROI([x0, y0], [x1 - x0, y1 - y0], pen=ROI_PEN)
+            item.addScaleHandle([0, 0], [1, 1])
+        elif region.kind == "line":
+            p = region.points                      # corners: p0+n, p1+n, p1-n, p0-n
+            start, end = (p[0] + p[3]) / 2, (p[1] + p[2]) / 2
+            item = pg.LineROI(start, end, region.width, pen=ROI_PEN)
+        else:
+            item = pg.PolyLineROI(region.points.tolist(), closed=True, pen=ROI_PEN)
+        item.sigRegionChangeFinished.connect(self._roi_edited)
+        self.view.addItem(item)
+        self.roi_item = item
+
+    def _roi_edited(self) -> None:
+        item, old = self.roi_item, self.session.roi
+        if item is None or old is None:
+            return
+        if old.kind == "rect":
+            pos, size = item.pos(), item.size()
+            region = Region.rect(pos.x(), pos.y(), pos.x() + size.x(), pos.y() + size.y())
+        elif old.kind == "line":
+            size = item.size()
+            corners = [item.mapToParent(QPointF(x, y)) for x, y in
+                       ((0, 0), (size.x(), 0), (size.x(), size.y()), (0, size.y()))]
+            start = ((corners[0].x() + corners[3].x()) / 2, (corners[0].y() + corners[3].y()) / 2)
+            end = ((corners[1].x() + corners[2].x()) / 2, (corners[1].y() + corners[2].y()) / 2)
+            region = Region.line(start, end, size.y())
+        else:
+            pts = [item.mapToParent(pg.Point(p)) for p in item.getState()["points"]]
+            region = Region("polygon", [(p.x(), p.y()) for p in pts])
+        self.session.roi = region                  # no redraw: the item is the truth
+        self.session.changed("roi-edited")
+
     # ------------------------------------------------------------- saving
     def save_png(self, path) -> None:
         """The image as displayed, 8-bit RGB."""
@@ -152,16 +280,40 @@ class RenderToolBar(QToolBar):
         save.setMenu(menu)
         self.addWidget(save)
 
-        roi = QToolButton(text="ROI", popupMode=QToolButton.InstantPopup)
-        roi_menu = QMenu(roi)
-        for name in ("rectangle", "polygon", "line (width...)"):
-            action = roi_menu.addAction(name)
-            action.setEnabled(False)
-            action.setToolTip("not there yet")
-        roi.setMenu(roi_menu)
-        self.addWidget(roi)
+        self.roi_button = QToolButton(text="ROI: rectangle")
+        self.roi_button.setToolTip("left: draw a new ROI; right: choose the kind")
+        self.roi_menu = QMenu(self.roi_button)
+        kinds = QActionGroup(self.roi_menu)
+        self.kind = "rect"
+        for kind, name in (("rect", "rectangle"), ("polygon", "polygon"), ("line", "line")):
+            action = self.roi_menu.addAction(name)
+            action.setCheckable(True)
+            action.setChecked(kind == "rect")
+            action.triggered.connect(lambda _=False, k=kind, n=name: self._set_kind(k, n))
+            kinds.addAction(action)
+        self.roi_menu.addSeparator()
+        self.roi_menu.addAction("line width...", self._line_width)
+        self.roi_menu.addAction("clear ROI", view.clear_roi)
+        self.roi_button.clicked.connect(lambda: view.start_drawing(self.kind))
+        self.roi_button.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.roi_button.customContextMenuRequested.connect(
+            lambda pos: self.roi_menu.exec(self.roi_button.mapToGlobal(pos)))
+        self.addWidget(self.roi_button)
 
         self.addAction(QAction("Reset view", self, triggered=view.reset))
+
+    def _set_kind(self, kind: str, name: str) -> None:
+        self.kind = kind
+        self.roi_button.setText(f"ROI: {name}")
+
+    def _line_width(self) -> None:
+        width, ok = QInputDialog.getDouble(self, "Line ROI", "width (data units):",
+                                           self.view.line_width, 0.1, 1e6, 1)
+        if ok:
+            self.view.line_width = width
+            if self.view.session.roi is not None and self.view.session.roi.kind == "line":
+                p = self.view.session.roi.points
+                self.view.session.set_roi(Region.line((p[0] + p[3]) / 2, (p[1] + p[2]) / 2, width))
 
     def _default(self, suffix: str) -> str:
         path = self.view.session.path

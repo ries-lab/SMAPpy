@@ -45,3 +45,21 @@ def test_rcc_is_registered_and_runs():
     result = plugin(locs, Selection.all(len(locs)),
                     RCCSettings(n_timepoints=5, pixelsize_nm=20, group=False, use_z=False))
     assert result.locs is not None and "drift over 200 frames" in result.text
+
+
+def test_regions_mask_and_selection_in_roi():
+    from smappy.regions import Region
+    locs, _, _ = simulate()
+    x, y = locs["x_nm"], locs["y_nm"]
+    rect = Region.rect(200, 200, 600, 700)
+    assert rect.mask(x, y).sum() == ((x >= 200) & (x <= 600) & (y >= 200) & (y <= 700)).sum()
+    tri = Region("polygon", [(100, 100), (900, 100), (900, 900)])
+    assert tri.mask(x, y).sum() == ((x >= 100) & (x <= 900) & (y >= 100) & (y <= x)).sum()
+    line = Region.line((0, 500), (1000, 500), 100)         # a horizontal band
+    assert line.mask(x, y).sum() == ((x >= 0) & (x <= 1000) & (abs(y - 500) <= 50)).sum()
+    assert Region.from_dict(line.to_dict()).kind == "line"
+
+    session = Session(locs)
+    session.set_roi(rect)
+    sel = session.selection(0)
+    assert sel.roi is rect and len(sel) == (session.layers[0].selection().mask & rect.mask(x, y)).sum()

@@ -1,6 +1,8 @@
 """Small widgets the panels are built from."""
 from __future__ import annotations
 
+from typing import Optional
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QFrame, QHBoxLayout, QToolButton, QVBoxLayout,
                                QWidget)
@@ -16,9 +18,10 @@ class CollapsibleSection(QWidget):
 
     toggled = Signal(bool)
     detach_requested = Signal()
+    starred = Signal(bool)
 
     def __init__(self, title: str, content: QWidget, expanded: bool = False,
-                 detachable: bool = False, parent=None):
+                 detachable: bool = False, star: Optional[bool] = None, parent=None):
         super().__init__(parent)
         self.content = content
         self.button = QToolButton(text=title, checkable=True, checked=expanded)
@@ -28,6 +31,13 @@ class CollapsibleSection(QWidget):
         header.setContentsMargins(0, 0, 0, 0)
         header.addWidget(self.button)
         header.addStretch(1)
+        self.star_button = None
+        if star is not None:
+            self.star_button = QToolButton(checkable=True, checked=star, autoRaise=True)
+            self.star_button.setToolTip("favourite: shown without 'all'")
+            self.star_button.toggled.connect(self._on_star)
+            self._on_star(star)
+            header.addWidget(self.star_button)
         self.detach_button = None
         if detachable:
             self.detach_button = QToolButton(text="↗", autoRaise=True)
@@ -46,6 +56,10 @@ class CollapsibleSection(QWidget):
         layout.addWidget(self.frame)
         self.button.toggled.connect(self.set_expanded)
         self.set_expanded(expanded)
+
+    def _on_star(self, on: bool) -> None:
+        self.star_button.setText("★" if on else "☆")
+        self.starred.emit(on)
 
     @property
     def title(self) -> str:
@@ -76,6 +90,16 @@ class CollapsibleSection(QWidget):
         if self.detach_button:
             self.detach_button.show()
         self.set_expanded(self.button.isChecked())
+
+
+def detach_to_window(section: CollapsibleSection, parent=None) -> "FloatingWindow":
+    """Move a section's content to its own window; closing it puts it back."""
+    window = FloatingWindow(section.title, section.detach(), parent=parent)
+    window.closed.connect(section.reattach)
+    window.resize(max(section.content.sizeHint().width() + 20, 320), 400)
+    window.show()
+    section._window = window            # keep it alive
+    return window
 
 
 class FloatingWindow(QWidget):

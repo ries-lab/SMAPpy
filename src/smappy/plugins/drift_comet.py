@@ -41,7 +41,7 @@ class CometDrift(Plugin):
     }
 
     def run(self, locs, selection: Selection, settings: DriftSettings,
-            progress=None) -> Result:
+            progress=None, stream=None) -> Result:
         if progress:
             progress(f"estimating drift from {selection}")
         corrected, drift = correct_drift(locs, settings, select=selection.mask)

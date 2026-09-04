@@ -9,6 +9,7 @@ import traceback
 from typing import Optional, Type
 
 from PySide6.QtCore import QObject, QThread, Signal
+from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (QHBoxLayout, QLabel, QPlainTextEdit, QPushButton,
                                QVBoxLayout, QWidget)
 
@@ -46,6 +47,7 @@ class PluginPanel(QWidget):
         self.session = session
         self.result: Optional[Result] = None
         self._thread: Optional[QThread] = None
+        self._progress_lines = 0
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -60,14 +62,15 @@ class PluginPanel(QWidget):
         buttons = QHBoxLayout()
         self.run_button = QPushButton("Run")
         self.plot_button = QPushButton("Plot")
+        self.plot_button.setToolTip("show the plugin's result figure (the drift curves, say)")
         self.plot_button.setEnabled(False)
         self.status = QLabel("")
         buttons.addWidget(self.run_button)
         buttons.addWidget(self.plot_button)
         buttons.addWidget(self.status, 1)
         layout.addLayout(buttons)
-        self.output = QPlainTextEdit(readOnly=True, maximumBlockCount=200)
-        self.output.setFixedHeight(60)
+        self.output = QPlainTextEdit(readOnly=True, maximumBlockCount=500)
+        self.output.setFixedHeight(90)
         layout.addWidget(self.output)
 
         self.run_button.clicked.connect(self.run)
@@ -98,6 +101,7 @@ class PluginPanel(QWidget):
         selection = self.session.selection()
         self.run_button.setEnabled(False)
         self.status.setText("running...")
+        self._progress_lines = 0
         self._thread = QThread()
         # Qt's default thread stack (512 kB on macOS) is too small for HDF5 and
         # the fitter's own threads' bookkeeping: a bus error, not an exception
@@ -105,7 +109,7 @@ class PluginPanel(QWidget):
         self._worker = _Worker(self.plugin, self.session.locs, selection, settings)
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
-        self._worker.progress.connect(self.status.setText)
+        self._worker.progress.connect(self._on_progress)
         self._worker.streamed.connect(self._on_stream)
         self._worker.done.connect(self._on_done)
         self._worker.failed.connect(self._on_failed)
@@ -113,16 +117,32 @@ class PluginPanel(QWidget):
             sig.connect(self._thread.quit)
         self._thread.start()
 
+    def _on_progress(self, text: str) -> None:
+        """Progress replaces the last line while it is a progress line, so a
+        long fit does not scroll its own summary away."""
+        cursor = self.output.textCursor()
+        if self._progress_lines:
+            cursor.movePosition(QTextCursor.MoveOperation.End)
+            cursor.select(QTextCursor.SelectionType.LineUnderCursor)
+            cursor.removeSelectedText()
+            cursor.insertText(text)
+        else:
+            self.output.appendPlainText(text)
+        self._progress_lines += 1
+        self.output.verticalScrollBar().setValue(self.output.verticalScrollBar().maximum())
+
     def _on_done(self, result: Result) -> None:
         self.result = result
         self.session.apply(self.plugin, result)
         self.output.appendPlainText(result.text)
+        self._progress_lines = 0
         self.status.setText("done")
         self.run_button.setEnabled(True)
         self.plot_button.setEnabled(result.plot is not None)
 
     def _on_failed(self, text: str) -> None:
         self.output.appendPlainText(text.strip().splitlines()[-1])
+        self._progress_lines = 0
         print(text)
         self.status.setText("failed")
         self.run_button.setEnabled(True)

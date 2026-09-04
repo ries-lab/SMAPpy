@@ -9,13 +9,25 @@ import dataclasses
 from dataclasses import asdict, is_dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 
 from .filter import LocFilter
 from .locs import Localizations
 from .plugins import Plugin, Result, Selection
-from .render import DisplaySettings, RenderSettings
-from .viewer import DEFAULT_BOUNDS, ViewState
+from .regions import Region
+from .render import DisplaySettings, RenderSettings, SigmaSettings, positions
+from .viewer import ViewState
+
+# The bounds a layer opens with: what is thrown away is on screen, not hidden.
+DEFAULT_BOUNDS: Dict[str, Tuple[Optional[float], Optional[float]]] = {
+    "loc_precision_nm": (None, 25.0),
+    "logl_rel": (-2.0, None),
+    "z_nm": (-500.0, 500.0),
+}
+# only for a 2D table: a 3D fit's PSF size varies with z by design
+DEFAULT_BOUNDS_2D = {"sigma_nm": (None, 180.0)}
+PRECISION_FACTOR = 0.5           # rendering sigma = factor * localization precision
+GROUPED_BY_DEFAULT = True
 
 
 class Layer:
@@ -32,11 +44,34 @@ class Layer:
                  live: bool = False, extent=None):
         self.name = name
         self.visible = True
+        if settings is None:
+            settings = RenderSettings(sigma_settings=SigmaSettings(factor=PRECISION_FACTOR))
         self.state = ViewState(locs, settings, display, live=live, extent=extent)
         if defaults:
-            for field, (lo, hi) in DEFAULT_BOUNDS.items():
-                if field in locs:
-                    self.filter.set(field, lo, hi)
+            self.apply_defaults()
+        if GROUPED_BY_DEFAULT and not live and len(locs) and "frame" in locs:
+            self.show_grouped(True)
+
+    def apply_defaults(self) -> None:
+        locs = self.locs
+        bounds = dict(DEFAULT_BOUNDS)
+        if "z_nm" not in locs:
+            bounds.update(DEFAULT_BOUNDS_2D)
+        for field, (lo, hi) in bounds.items():
+            if field in locs:
+                self.set_bound(field, lo, hi)
+
+    def set_bound(self, field: str, lo: Optional[float], hi: Optional[float]) -> None:
+        """A bound applies to the grouped and the ungrouped table alike, so
+        what is drawn and what a plugin gets never disagree."""
+        for locset in self.state.sets.values():
+            if field in locset.locs:
+                locset.filter.set(field, lo, hi)
+
+    def remove_bound(self, field: str) -> None:
+        for locset in self.state.sets.values():
+            if field in locset.filter:
+                locset.filter.remove(field)
 
     @property
     def locs(self) -> Localizations:
@@ -62,9 +97,7 @@ class Layer:
         first = not len(self.locs)
         n = self.state.append(block)
         if first:
-            for field, (lo, hi) in DEFAULT_BOUNDS.items():
-                if field in block:
-                    self.filter.set(field, lo, hi)
+            self.apply_defaults()
         return n
 
     @property
@@ -73,7 +106,11 @@ class Layer:
 
     def show_grouped(self, on: bool) -> None:
         """Draw one entry per blink instead of one per frame.  Links on first use."""
+        fresh = on and "grouped" not in self.state.sets
         self.state.show_grouped(on)
+        if fresh:                    # the new table gets the bounds already set
+            for field, (lo, hi) in self.state.sets["ungrouped"].filter.ranges.items():
+                self.set_bound(field, lo, hi)
 
     def selection(self, index: int = 0) -> Selection:
         """The *ungrouped* localizations this layer's filter keeps.
@@ -90,6 +127,7 @@ class Session:
         self.locs = locs if locs is not None else Localizations({}, {})
         self.path: Optional[Path] = Path(path) if path else None
         self.layers: List[Layer] = [Layer(self.locs)]
+        self.roi: Optional[Region] = None
         self.history: List[Dict] = []
         self._undo: Optional[Localizations] = None
         self._live = False                 # the table is being appended to
@@ -111,6 +149,8 @@ class Session:
         self.path = Path(path)
         self.set_locs(load_localizations(path), undoable=False)
         self.history.clear()
+        saved = self.locs.metadata.get("roi")
+        self.set_roi(Region.from_dict(saved) if saved else None)
         self.log("load", str(self.path))
 
     def save(self, path=None) -> Path:
@@ -118,6 +158,8 @@ class Session:
         path = Path(path or self.path)
         metadata = dict(self.locs.metadata)
         metadata["history"] = self.history
+        if self.roi is not None:
+            metadata["roi"] = self.roi.to_dict()
         save_localizations(path, self.locs, metadata)
         self.path = path
         return path
@@ -185,9 +227,21 @@ class Session:
             self.log("undo")
             self.changed("locs")
 
+    # ----------------------------------------------------------------- roi
+    def set_roi(self, roi: Optional[Region]) -> None:
+        self.roi = roi
+        self.changed("roi")
+
     # ------------------------------------------------------------- plugins
     def selection(self, layer: int = 0) -> Selection:
-        return self.layers[layer].selection(layer)
+        """What a plugin looks at: the layer's filter, inside the ROI if any."""
+        sel = self.layers[layer].selection(layer)
+        if self.roi is not None and len(self.locs):
+            x, y = positions(self.locs)
+            sel.mask &= self.roi.mask(x, y)
+            sel.roi = self.roi
+            sel.name += f", {self.roi}"
+        return sel
 
     def run(self, plugin: Plugin, settings=None, layer: int = 0,
             progress: Optional[Callable[[str], None]] = None) -> Result:

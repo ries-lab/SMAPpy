@@ -36,8 +36,9 @@ class SourceSettings:
     path: str = param("", label="file", kind="open_file", file_filter=TIFF_FILTER,
                       help="a Micro-Manager TIFF (any file of the series) or "
                            "an NDTiff directory")
-    start: int = param(0, label="first frame", min=0)
-    stop: Optional[int] = param(None, label="last frame", min=1, help="auto: to the end")
+    start: int = param(0, label="first frame", min=0, advanced=True)
+    stop: Optional[int] = param(None, label="last frame", min=1, advanced=True,
+                                help="auto: to the end")
     live: bool = param(False, label="live",
                        help="the file is still being written: fit what is there "
                             "and keep watching for new frames")
@@ -144,7 +145,7 @@ FIT_PARAMS = {
     "iterations": ParamInfo(min=1, advanced=True),
     "max_block_rois": ParamInfo(label="ROIs per fit", min=100, advanced=True),
     "n_threads": ParamInfo(label="threads", min=0, help="0: one per core", advanced=True),
-    "max_fit_distance": ParamInfo(label="max fit distance", unit="pix",
+    "max_fit_distance": ParamInfo(label="max fit distance", unit="pix", advanced=True,
                                   help="reject fits that ran off; auto: keep all"),
     "output_unit": ParamInfo(label="units", choices=("nm", "pixel", "pixel+nm")),
 }

@@ -148,6 +148,7 @@ class Plugin:
     name: str = ""                 # set by `register` from the path's last part
     path: str = ""                 # "Analysis/Drift/COMET"
     description: str = ""
+    favorite: bool = True          # shown without "all" ticked, until the user says otherwise
     Settings: type = None
     # presentation for fields that were not declared with `param`
     params: Dict[str, ParamInfo] = {}

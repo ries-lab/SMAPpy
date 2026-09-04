@@ -44,9 +44,17 @@ reasoning is here so that it does not have to be re-derived.
   into its own window (the arrow on its title), so several stay open.  The
   render window has a toolbar: *Save* (PNG as shown, or a TIFF re-rendered at
   a chosen pixel size, colour or float intensity, with the pixel size in the
-  resolution tags) and *ROI*, empty until ROIs exist.  A search box
+  resolution tags) and *ROI*: left-click draws one (click, click; polygon:
+  click per vertex, double-click closes; Escape cancels), right-click picks
+  the kind, the line width, or clears.  The ROI is a `Region` (`regions.py`)
+  in the session; a plugin's `Selection` is the layer's filter *inside* the
+  ROI, and it is saved with the file.  A search box
   filters them; once there are many plugins a tree chooser is added for the
-  long tail.
+  long tail.  Each plugin tab shows the favourites (the star on a section,
+  kept in QSettings) or, with *all* ticked, the whole tree.
+* **Defaults**: grouped on, precision <= 25 nm, log-likelihood >= -2,
+  z within +-500 nm, PSF size <= 180 nm for a 2D table, rendering sigma =
+  0.5 x precision.  Bounds apply to the grouped and ungrouped table alike.
 
 * **Fitters are plugins assembled from parts.**  Source, camera, detection,
   PSF model, fit and output are each a small settings dataclass; a fitter's
@@ -100,8 +108,7 @@ Scripting: `Dbscan()(locs, selection, radius_nm=30)` or
 
 ## Next steps
 
-1. ROIs: the toolbar's rectangle / polygon / line (with a width), drawn with
-   `pg.ROI`, saved with the file, into `Selection.roi`.
+1. Several ROIs, and the line ROI as a profile tool (SMAP's GUI Format).
 2. Per-layer colour for multi-layer images; filter presets.
 3. Localize: a stop button; flush fitted blocks on a timer as `LiveFit`
    does, so a sparse live acquisition shows up before 9000 ROIs are in.
