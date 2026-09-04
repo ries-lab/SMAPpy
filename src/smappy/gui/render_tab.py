@@ -21,7 +21,7 @@ from .. import lut as luts
 from ..filter import quantile_range
 from ..render import FieldOfView
 from ..session import Layer, Session
-from ..viewer import COLOR_FIELDS, FIELD_LUT, INTENSITY_LUT
+from ..viewer import FIELD_LUT, INTENSITY_LUT
 from .widgets import CollapsibleSection, detach_to_window
 
 # the fields with a quick button, best-named alternative first
@@ -147,7 +147,7 @@ class FilterWidget(QWidget):
         key = (id(self.layer.locs), name)
         if key not in self._hist_cache:
             values = np.asarray(self.layer.locs[name], dtype=np.float64)
-            lo, hi = quantile_range(self.layer.locs, name, 0.001, 0.999)
+            lo, hi = quantile_range(self.layer.locs, name, 0.01, 0.99)   # not the outliers
             if hi <= lo:
                 hi = lo + 1.0
             counts, edges = np.histogram(values, bins=HIST_BINS, range=(lo, hi))
@@ -381,6 +381,14 @@ class RenderTab(QWidget):
         self.mode = QComboBox()
         self.mode.addItems(["precision", "gauss", "hist"])
         self.color = QComboBox()
+        self.color.addItem("intensity", None)
+        self.color.addItem("field", "field")
+        self.color_field = QComboBox()
+        self.color_field.setToolTip("the column the colour encodes")
+        color_row = QHBoxLayout()
+        color_row.setContentsMargins(0, 0, 0, 0)
+        color_row.addWidget(self.color)
+        color_row.addWidget(self.color_field, 1)
         self.lut = QComboBox()
         self.lut.addItems(luts.names())
         self.contrast = QDoubleSpinBox(minimum=0, maximum=6, singleStep=0.1, decimals=2)
@@ -388,7 +396,7 @@ class RenderTab(QWidget):
         self.grouped.setToolTip("one entry per blink instead of one per frame; "
                                 "links the table on first use")
         form.addRow("render", self.mode)
-        form.addRow("colour by", self.color)
+        form.addRow("colour by", color_row)
         form.addRow("LUT", self.lut)
         form.addRow("contrast", self.contrast)
         form.addRow("", self.grouped)
@@ -419,6 +427,7 @@ class RenderTab(QWidget):
         self.sigma.valueChanged.connect(self._on_render_settings)
         self.factor.valueChanged.connect(self._on_render_settings)
         self.color.currentIndexChanged.connect(self._on_color)
+        self.color_field.currentIndexChanged.connect(self._on_color)
         self.lut.currentTextChanged.connect(self._on_display)
         self.contrast.valueChanged.connect(self._on_display)
         self.gamma.valueChanged.connect(self._on_display)
@@ -447,24 +456,24 @@ class RenderTab(QWidget):
         """Point every control at one layer, without firing their signals."""
         layer = self.session.layers[index]
         self.filter.layer_index = index
-        widgets = (self.mode, self.sigma, self.factor, self.color, self.lut,
-                   self.contrast, self.gamma, self.grouped)
+        widgets = (self.mode, self.sigma, self.factor, self.color, self.color_field,
+                   self.lut, self.contrast, self.gamma, self.grouped)
         for w in widgets:
             w.blockSignals(True)
         self.filter.bind(layer)
         locs = layer.locs
-        self.color.clear()
-        self.color.addItem("intensity", None)
-        for label, names in COLOR_FIELDS:
-            field = next((f for f in names if f in locs), None)
-            if field:
-                self.color.addItem(label, field)
+        numeric = [n for n in locs if np.asarray(locs[n]).dtype.kind in "iuf"
+                   and np.asarray(locs[n]).ndim == 1]
+        self.color_field.clear()
+        self.color_field.addItems(numeric)
         settings, display = layer.state.settings, layer.state.display
+        field = settings.color_field or ("z_nm" if "z_nm" in locs else (numeric[0] if numeric else ""))
+        self.color_field.setCurrentText(field)
+        self.color.setCurrentIndex(1 if settings.color_field else 0)
+        self.color_field.setEnabled(settings.color_field is not None)
         self.mode.setCurrentText(settings.mode)
         self.sigma.setValue(settings.sigma)
         self.factor.setValue(settings.sigma_settings.factor)
-        i = self.color.findData(settings.color_field)
-        self.color.setCurrentIndex(max(i, 0))
         self.lut.setCurrentText(display.lut if isinstance(display.lut, str) else "hot")
         self.contrast.setValue(display.contrast)
         self.gamma.setValue(display.gamma)
@@ -481,9 +490,13 @@ class RenderTab(QWidget):
 
     def _on_color(self) -> None:
         state = self.layer.state
-        field = self.color.currentData()
-        state.settings = dataclasses.replace(state.settings, color_field=field)
-        self.lut.setCurrentText(INTENSITY_LUT if field is None else FIELD_LUT)
+        by_field = self.color.currentData() == "field"
+        field = self.color_field.currentText() if by_field else None
+        self.color_field.setEnabled(by_field)
+        was = state.settings.color_field
+        state.settings = dataclasses.replace(state.settings, color_field=field or None)
+        if (was is None) != (field is None):            # switching kind: a fitting LUT
+            self.lut.setCurrentText(INTENSITY_LUT if field is None else FIELD_LUT)
         self.session.changed("layer")
 
     def _on_display(self) -> None:

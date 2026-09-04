@@ -238,7 +238,8 @@ class Session:
         sel = self.layers[layer].selection(layer)
         if self.roi is not None and len(self.locs):
             x, y = positions(self.locs)
-            sel.mask &= self.roi.mask(x, y)
+            sel.mask = sel.mask & self.roi.mask(x, y)     # never in place: the
+            # filter's cached mask is what `Selection` was handed
             sel.roi = self.roi
             sel.name += f", {self.roi}"
         return sel

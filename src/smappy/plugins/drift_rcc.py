@@ -28,6 +28,7 @@ class RCCDrift(Plugin):
 
     def run(self, locs, selection: Selection, settings: RCCSettings,
             progress=None, stream=None) -> Result:
+        selection.require(5000, progress, "a drift estimate")
         if progress:
             progress(f"correlating {selection}")
         drift = estimate_drift_rcc(locs, settings, select=selection.mask)

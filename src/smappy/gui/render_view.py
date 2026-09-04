@@ -13,7 +13,7 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QImage
-from PySide6.QtWidgets import (QFileDialog, QInputDialog, QMenu, QToolBar,
+from PySide6.QtWidgets import (QFileDialog, QInputDialog, QLabel, QMenu, QToolBar,
                                QToolButton, QVBoxLayout, QWidget)
 
 from ..regions import Region
@@ -301,6 +301,24 @@ class RenderToolBar(QToolBar):
         self.addWidget(self.roi_button)
 
         self.addAction(QAction("Reset view", self, triggered=view.reset))
+        self.counts = QLabel("")
+        self.counts.setStyleSheet("padding-left: 12px")
+        self.addWidget(self.counts)
+        view.session.on_change(self._update_counts)
+        self._update_counts("locs")
+
+    def _update_counts(self, what: str) -> None:
+        """Localizations per layer, and inside the ROI when there is one."""
+        if what not in ("locs", "layer", "layers", "append", "roi", "roi-edited"):
+            return
+        session = self.view.session
+        parts = []
+        for i, layer in enumerate(session.layers):
+            n = len(layer.filter)
+            if session.roi is not None:
+                n = f"{len(session.selection(i))} in {session.roi}"
+            parts.append(f"{layer.name}: {n}")
+        self.counts.setText("   ".join(parts))
 
     def _set_kind(self, kind: str, name: str) -> None:
         self.kind = kind
