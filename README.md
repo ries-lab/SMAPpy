@@ -19,7 +19,8 @@ package; the import name is `smappy` either way.  From a checkout:
     .venv/bin/python -m pip install ".[viewer]"
 
 That builds the C++ extensions and installs the `smappy-fit`, `smappy-live`,
-`smappy-view` and `smappy-drift` commands.  For work on smappy itself, `-e` and
+`smappy-view` and `smappy-drift` commands; with `[gui]` also the Qt GUI,
+`smappy-gui [FILE.hdf5]` (see [GUI.md](GUI.md) for its plugin architecture).  For work on smappy itself, `-e` and
 `pytest` instead; `scripts/*.py` run from a checkout without installing
 anything.
 

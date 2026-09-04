@@ -52,12 +52,15 @@ drift = ["matplotlib>=3.4"]
 # an NVIDIA GPU.  The CPU path is compiled either way and is what runs without
 # this: 1:17 for a 46k-frame dataset, 5 s with --spline --group.
 cuda = ["numba>=0.57"]
+# The Qt GUI.  matplotlib is for the plugins' result plots.
+gui = ["PySide6>=6.6", "pyqtgraph>=0.13", "matplotlib>=3.4"]
 
 [project.scripts]
 smappy-fit = "smappy.cli.fit:main"
 smappy-live = "smappy.cli.live:main"
 smappy-view = "smappy.cli.view:main"
 smappy-drift = "smappy.cli.drift:main"
+smappy-gui = "smappy.cli.gui:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
