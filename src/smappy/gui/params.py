@@ -27,7 +27,9 @@ class _Field(QWidget):
         self.spec = spec
         info = spec.info
         row = QHBoxLayout(self)
-        row.setContentsMargins(0, 0, 0, 0)
+        # the macOS style paints a check box wider than its size hint and
+        # clips it at zero margin; a little slack on every row fixes that
+        row.setContentsMargins(2, 0, 6, 0)
         self.auto: Optional[QCheckBox] = None
         choices = info.choices() if callable(info.choices) else info.choices
         if choices is not None:
@@ -79,6 +81,9 @@ class _Field(QWidget):
             row.addStretch(1)
         if info.help:
             self.setToolTip(info.help)
+        for box in (self.widget, self.auto):
+            if isinstance(box, QCheckBox):
+                box.setMinimumWidth(box.sizeHint().width() + 12)
         self.set(spec.default)
 
     def _on_auto(self, on: bool) -> None:
