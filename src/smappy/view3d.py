@@ -162,7 +162,7 @@ class Projection:
     slices: int = 32                # depth slices for the opacity compositing
     color_by_depth: bool = False    # override the layers' colour field
     engine: str = "cpu"             # "cpu", "gpu" (same image), or "points" (GPU sprites)
-    point_size: float = 2.0         # points mode: radius in screen pixels
+    point_size: float = 0.0         # points mode: radius in nm; 0 = the median precision
     point_alpha: float = 0.5        # points mode: sprite opacity
 
     def __post_init__(self):
@@ -379,6 +379,27 @@ def _depth_front_and_range(projection: Projection, slab: Optional[Slab], locs: L
     return float(d.max()), (float(d.min()), float(d.max()))
 
 
+_median_cache: dict = {}
+
+
+def point_radius_nm(locs: Localizations, select: np.ndarray, prec_name: Optional[str],
+                    projection: Projection) -> float:
+    """The sprite radius: what was asked, or the shown points' median precision."""
+    if projection.point_size > 0:
+        return projection.point_size
+    if prec_name is None:
+        return 10.0
+    key = (id(locs), id(select), prec_name)
+    if key not in _median_cache:
+        values = np.asarray(locs[prec_name], np.float32)
+        values = values[select] if select.dtype == bool else values[np.asarray(select)]
+        values = values[np.isfinite(values)]
+        if len(_median_cache) > 8:
+            _median_cache.clear()
+        _median_cache[key] = float(np.median(values)) if values.size else 10.0
+    return _median_cache[key]
+
+
 def render_layer_gpu(engine, locs: Localizations, select: np.ndarray, projection: Projection,
                      slab: Optional[Slab], fov: FieldOfView, settings: RenderSettings,
                      display: DisplaySettings, median_precision: float = 0.0,
@@ -412,9 +433,9 @@ def render_layer_gpu(engine, locs: Localizations, select: np.ndarray, projection
                 floor=floor, cap=cap, use_weight=settings.weight_field is not None,
                 depth_lambda=projection.depth_lambda, depth_front=front,
                 color_mode=color_mode, color_range=color_range,
-                # the radius is in screen pixels: on a coarser preview grid
-                # (bigger pixels) it shrinks, so points look the same size
-                radius=projection.point_size * projection.zoom / fov.pixelsize,
+                # the radius is in nm, so it scales with the zoom (and is the
+                # same on the coarser preview grid); 0 = the median precision
+                radius=point_radius_nm(locs, select, prec_name, projection) / fov.pixelsize,
                 alpha=projection.point_alpha)
     lut, invert = display.lut, display.invert
     if projection.engine == "points":

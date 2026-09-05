@@ -407,8 +407,11 @@ class SlabPanel(QWidget):
         self.engine.setToolTip("CPU and GPU give the same image; GPU points draws "
                                "sprites with alpha, back to front")
         self.engine.currentIndexChanged.connect(self._on_projection_settings)
-        self.point_size = QDoubleSpinBox(minimum=0.5, maximum=50, decimals=1, suffix=" px")
-        self.point_size.setValue(2.0)
+        self.point_size = QDoubleSpinBox(minimum=0, maximum=10000, decimals=1, suffix=" nm")
+        self.point_size.setSpecialValueText("median precision")
+        self.point_size.setToolTip("sprite radius in nm, scales with the zoom; "
+                                   "0 = the median precision of the shown localizations")
+        self.point_size.setValue(0.0)
         self.point_alpha = QDoubleSpinBox(minimum=0.01, maximum=1, singleStep=0.1, decimals=2)
         self.point_alpha.setValue(0.5)
         for w in (self.point_size, self.point_alpha):
