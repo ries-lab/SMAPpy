@@ -13,9 +13,10 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QRectF, Qt, Signal
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout,
-                               QHBoxLayout, QLabel, QLineEdit, QPushButton,
-                               QToolButton, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog,
+                               QFormLayout, QHBoxLayout, QLabel, QLineEdit,
+                               QListWidget, QListWidgetItem, QMenu, QPushButton,
+                               QSlider, QToolButton, QVBoxLayout, QWidget)
 
 from .. import lut as luts
 from ..filter import quantile_range
@@ -32,6 +33,7 @@ QUICK_FIELDS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
     ("z", ("z_nm",)),
     ("phot", ("photons",)),
     ("PSF", ("sigma_nm", "sigma_pix")),
+    ("file", ("filenumber",)),
 )
 HIST_BINS = 120
 
@@ -73,6 +75,12 @@ class FilterWidget(QWidget):
         row.addWidget(self.field)
         layout.addLayout(row)
 
+        # for the file column: names to tick, not a histogram
+        self.files = QListWidget()
+        self.files.setFixedHeight(110)
+        self.files.itemChanged.connect(self._on_files)
+        self.files.hide()
+        layout.addWidget(self.files)
         self.plot = pg.PlotWidget(background=None)
         self.plot.setFixedHeight(110)
         self.plot.setMenuEnabled(False)
@@ -104,6 +112,11 @@ class FilterWidget(QWidget):
         self.lo.editingFinished.connect(self._on_numbers)
         self.hi.editingFinished.connect(self._on_numbers)
         self.clear.clicked.connect(self._on_clear)
+        self.all_files = QPushButton("all")
+        self.all_files.setToolTip("tick every file")
+        self.all_files.clicked.connect(self._all_files)
+        self.all_files.hide()
+        numbers.insertWidget(numbers.count() - 1, self.all_files)
 
     # ------------------------------------------------------------ binding
     def bind(self, layer: Layer) -> None:
@@ -160,6 +173,16 @@ class FilterWidget(QWidget):
             return
         for n, b in self.quick.items():
             b.setChecked(n == name)
+        by_file = name == "filenumber" and self.session is not None
+        self.files.setVisible(by_file)
+        self.plot.setVisible(not by_file)
+        for w in (self.lo, self.hi, self.clear):
+            w.setVisible(not by_file)
+        self.all_files.setVisible(by_file)
+        if by_file:
+            self._show_files()
+            self._update_count()
+            return
         counts, edges = self._histogram(name)
         self.bars.setData(edges, counts.astype(np.float64))
         lo, hi = self.layer.filter.ranges.get(name, (None, None))
@@ -172,6 +195,31 @@ class FilterWidget(QWidget):
         self.region.blockSignals(False)
         self.plot.setXRange(edges[0], edges[-1], padding=0.02)
         self._update_count()
+
+    def _show_files(self) -> None:
+        """One tickable row per file, plus 'all'."""
+        chosen = self.layer.filter._masks.get("files")
+        present = {int(n) for n in np.unique(self.layer.locs["filenumber"])}  # float once grouped
+        self.files.blockSignals(True)
+        self.files.clear()
+        names = self.session.file_names()
+        for number in sorted(present):
+            name = names[number] if number < len(names) else f"file {number}"
+            item = QListWidgetItem(name)
+            item.setData(Qt.UserRole, number)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            on = chosen is None or bool(chosen[self.layer.locs["filenumber"] == number].any())
+            item.setCheckState(Qt.Checked if on else Qt.Unchecked)
+            self.files.addItem(item)
+        self.files.blockSignals(False)
+
+    def _on_files(self) -> None:
+        numbers = [self.files.item(i).data(Qt.UserRole) for i in range(self.files.count())
+                   if self.files.item(i).checkState() == Qt.Checked]
+        every = numbers and len(numbers) == self.files.count()
+        self.layer.set_files(None if every else numbers)
+        self._update_count()
+        self.changed.emit()
 
     def _update_count(self) -> None:
         f = self.layer.filter
@@ -210,11 +258,18 @@ class FilterWidget(QWidget):
     def _on_clear(self) -> None:
         self._apply(None, None)
 
+    def _all_files(self) -> None:
+        self.layer.set_files(None)
+        self._show_files()
+        self._update_count()
+        self.changed.emit()
+
 
 class LayerStrip(QWidget):
     """One button per layer (which one the tab edits), a visible box, add/remove."""
 
     selected = Signal(int)
+    add_image_requested = Signal()
 
     def __init__(self, session: Session, parent=None):
         super().__init__(parent)
@@ -229,9 +284,13 @@ class LayerStrip(QWidget):
         self.name.setToolTip("layer name")
         self.name.setMaximumWidth(110)
         self.name.editingFinished.connect(self._on_name)
-        self.add = QToolButton(text="+")
+        self.add = QToolButton(text="+", popupMode=QToolButton.InstantPopup)
+        self.add.setToolTip("add a layer")
+        menu = QMenu(self.add)
+        menu.addAction("localizations", self._add)
+        menu.addAction("image...", self.add_image_requested)
+        self.add.setMenu(menu)
         self.remove = QToolButton(text="-")
-        self.add.clicked.connect(self._add)
         self.remove.clicked.connect(self._remove)
         self.visible.toggled.connect(self._on_visible)
         self.rebuild()
@@ -244,7 +303,8 @@ class LayerStrip(QWidget):
                 item.widget().deleteLater()
         self.buttons = []
         for i, layer in enumerate(self.session.layers):
-            b = QToolButton(text=str(i + 1), checkable=True, autoExclusive=True)
+            b = QToolButton(text=str(i + 1) + ("i" if layer.is_image else ""),
+                            checkable=True, autoExclusive=True)
             b.setToolTip(f"{layer.name}\nright-click: show / hide")
             b.clicked.connect(lambda _=False, i=i: self.select(i))
             b.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -333,13 +393,14 @@ class Overview(QWidget):
         self.image.mouseClickEvent = self._on_click
         if view is not None:
             view.view.sigRangeChanged.connect(self._track)
-        session.on_change(lambda what: self.update_image() if what == "locs" else None)
+        session.on_change(lambda what: self.update_image() if what in ("locs", "layers") else None)
 
     def update_image(self) -> None:
-        if self.view is None or not len(self.session.locs):
+        if self.view is None or not (len(self.session.locs)
+                                     or any(l.is_image for l in self.session.layers)):
             self.image.clear()
             return
-        (x0, x1), (y0, y1) = self.session.layers[0].state.full_view()
+        (x0, x1), (y0, y1) = self.session.full_view()
         fov = FieldOfView.fit((x0, x1), (y0, y1), 300, 200)
         rgb, _ = self.view.composite(fov)
         self.image.setImage(np.ascontiguousarray(rgb), levels=[0, 1], autoLevels=False)
@@ -372,7 +433,29 @@ class RenderTab(QWidget):
         self.strip = LayerStrip(session)
         layout.addWidget(self.strip)
         self.filter = FilterWidget(session)
-        layout.addWidget(CollapsibleSection("filter", self.filter, expanded=True))
+        self.filter_section = CollapsibleSection("filter", self.filter, expanded=True)
+        layout.addWidget(self.filter_section)
+
+        image = QWidget()
+        image_form = QFormLayout(image)
+        image_form.setContentsMargins(0, 0, 0, 0)
+        image_form.setVerticalSpacing(2)
+        self.image_name = QLabel("")
+        self.image_pixelsize = QDoubleSpinBox(minimum=0.01, maximum=1e6, decimals=2)
+        self.image_x0 = QDoubleSpinBox(minimum=-1e9, maximum=1e9, decimals=1)
+        self.image_y0 = QDoubleSpinBox(minimum=-1e9, maximum=1e9, decimals=1)
+        self.image_frame = QSlider(Qt.Horizontal)
+        image_form.addRow("file", self.image_name)
+        image_form.addRow("pixel size (nm)", self.image_pixelsize)
+        image_form.addRow("x0 (nm)", self.image_x0)
+        image_form.addRow("y0 (nm)", self.image_y0)
+        image_form.addRow("frame", self.image_frame)
+        self.image_section = CollapsibleSection("image", image, expanded=True)
+        self.image_section.hide()
+        layout.addWidget(self.image_section)
+        for w in (self.image_pixelsize, self.image_x0, self.image_y0):
+            w.valueChanged.connect(self._on_image)
+        self.image_frame.valueChanged.connect(self._on_image)
 
         display = QWidget()
         form = QFormLayout(display)
@@ -422,6 +505,7 @@ class RenderTab(QWidget):
         layout.addStretch(1)
 
         self.strip.selected.connect(self._bind_layer)
+        self.strip.add_image_requested.connect(self._add_image)
         self.filter.changed.connect(lambda: session.changed("layer"))
         self.mode.currentTextChanged.connect(self._on_render_settings)
         self.sigma.valueChanged.connect(self._on_render_settings)
@@ -457,9 +541,30 @@ class RenderTab(QWidget):
         layer = self.session.layers[index]
         self.filter.layer_index = index
         widgets = (self.mode, self.sigma, self.factor, self.color, self.color_field,
-                   self.lut, self.contrast, self.gamma, self.grouped)
+                   self.lut, self.contrast, self.gamma, self.grouped,
+                   self.image_pixelsize, self.image_x0, self.image_y0, self.image_frame)
         for w in widgets:
             w.blockSignals(True)
+        self.filter_section.setVisible(not layer.is_image)
+        self.image_section.setVisible(layer.is_image)
+        for w in (self.mode, self.color, self.color_field, self.grouped, self.sigma, self.factor):
+            w.setEnabled(not layer.is_image)
+        if layer.is_image:
+            img = layer.image
+            self.image_name.setText(img.name)
+            self.image_pixelsize.setValue(img.pixelsize)
+            self.image_x0.setValue(img.x0)
+            self.image_y0.setValue(img.y0)
+            self.image_frame.setRange(0, img.n_frames - 1)
+            self.image_frame.setValue(img.frame)
+            self.image_frame.setEnabled(img.n_frames > 1)
+            display = layer.get_display()
+            self.lut.setCurrentText(display.lut if isinstance(display.lut, str) else "gray")
+            self.contrast.setValue(display.contrast)
+            self.gamma.setValue(display.gamma)
+            for w in widgets:
+                w.blockSignals(False)
+            return
         self.filter.bind(layer)
         locs = layer.locs
         numeric = [n for n in locs if np.asarray(locs[n]).dtype.kind in "iuf"
@@ -500,11 +605,37 @@ class RenderTab(QWidget):
         self.session.changed("layer")
 
     def _on_display(self) -> None:
-        state = self.layer.state
-        state.display = dataclasses.replace(state.display, lut=self.lut.currentText(),
-                                            contrast=self.contrast.value(),
-                                            gamma=self.gamma.value())
+        layer = self.layer
+        layer.set_display(dataclasses.replace(layer.get_display(), lut=self.lut.currentText(),
+                                              contrast=self.contrast.value(),
+                                              gamma=self.gamma.value()))
         self.session.changed("layer")
+
+    def _on_image(self) -> None:
+        img = self.layer.image
+        if img is None:
+            return
+        img.pixelsize = self.image_pixelsize.value()
+        img.x0, img.y0 = self.image_x0.value(), self.image_y0.value()
+        img.frame = self.image_frame.value()
+        self.session.changed("layer")
+
+    def _add_image(self) -> None:
+        from .dialogs import PixelSizeDialog
+        from PySide6.QtWidgets import QDialog
+        start = str(self.session.path.parent) if self.session.path else ""
+        path, _ = QFileDialog.getOpenFileName(self, "Open image", start,
+                                              "Images (*.tif *.tiff *.png)")
+        if not path:
+            return
+        try:
+            self.session.open_image(path)
+        except ValueError:
+            dialog = PixelSizeDialog(path.rsplit("/", 1)[-1], parent=self)
+            if dialog.exec() == QDialog.Accepted:
+                px, x0, y0 = dialog.values()
+                self.session.open_image(path, px, x0, y0)
+        self.strip.current = len(self.session.layers) - 1
 
     def _on_grouped(self, on: bool) -> None:
         self.layer.show_grouped(on)      # links on first use: a moment

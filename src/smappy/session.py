@@ -9,11 +9,14 @@ import dataclasses
 from dataclasses import asdict, is_dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple
+import numpy as np
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from .filter import LocFilter
-from .locs import Localizations
+from .images import ImageData, load_image
+from .locs import Localizations, concat
 from .plugins import Plugin, Result, Selection
+from .io.formats import FileInfo, load as load_any
 from .regions import Region
 from .render import DisplaySettings, RenderSettings, SigmaSettings, positions
 from .viewer import ViewState
@@ -31,10 +34,12 @@ GROUPED_BY_DEFAULT = True
 
 
 class Layer:
-    """A filter and how its localizations are drawn.
+    """A filter and how its localizations are drawn -- or a pixel image.
 
-    Wraps a `ViewState`, which owns the filter, the spatial index and the
-    render/display settings -- everything the render view needs per layer.
+    A ``"locs"`` layer wraps a `ViewState`, which owns the filter, the
+    spatial index and the render/display settings -- everything the render
+    view needs per layer.  An ``"image"`` layer holds an `ImageData` and only
+    the display settings; it is resampled onto the view instead of rendered.
     """
 
     def __init__(self, locs: Localizations, name: str = "layer 1",
@@ -42,6 +47,8 @@ class Layer:
                  settings: Optional[RenderSettings] = None,
                  display: Optional[DisplaySettings] = None,
                  live: bool = False, extent=None):
+        self.kind = "locs"
+        self.image: Optional[ImageData] = None
         self.name = name
         self.visible = True
         if settings is None:
@@ -51,6 +58,44 @@ class Layer:
             self.apply_defaults()
         if GROUPED_BY_DEFAULT and not live and len(locs) and "frame" in locs:
             self.show_grouped(True)
+
+    @classmethod
+    def from_image(cls, image: ImageData, name: Optional[str] = None,
+                   display: Optional[DisplaySettings] = None) -> "Layer":
+        layer = cls.__new__(cls)
+        layer.kind = "image"
+        layer.image = image
+        layer.name = name or image.name or "image"
+        layer.visible = True
+        layer.state = None
+        layer.display = display or DisplaySettings(lut="gray")
+        return layer
+
+    @property
+    def is_image(self) -> bool:
+        return self.kind == "image"
+
+    def get_display(self) -> DisplaySettings:
+        return self.display if self.is_image else self.state.display
+
+    def set_display(self, display: DisplaySettings) -> None:
+        if self.is_image:
+            self.display = display
+        else:
+            self.state.display = display
+
+    def render(self, fov):
+        """RGB in [0, 1] and the intensity plane on ``fov``, whatever the kind."""
+        if self.is_image:
+            rendered = self.image.resample(fov)
+            return self.display.apply(rendered), rendered
+        return self.state.image(fov)
+
+    def bounds(self):
+        """(x0, y0, x1, y1) this layer covers."""
+        if self.is_image:
+            return self.image.bounds
+        return self.state.index.bounds
 
     def apply_defaults(self) -> None:
         locs = self.locs
@@ -82,8 +127,19 @@ class Layer:
     def filter(self) -> LocFilter:
         return self.state.filter
 
+    def set_files(self, files: Optional[Sequence[int]]) -> None:
+        """Restrict to these file numbers; None means every file."""
+        for locset in self.state.sets.values():
+            if files is None:
+                if "files" in locset.filter:
+                    locset.filter.remove("files")
+            elif "filenumber" in locset.locs:
+                locset.filter.set_mask("files", np.isin(locset.locs["filenumber"], list(files)))
+
     def rebind(self, locs: Localizations) -> None:
         """Point at a new table, keeping the bounds and display the user set."""
+        if self.is_image:
+            return
         old = self.state
         self.state = ViewState(locs, old.settings, old.display)
         for field, (lo, hi) in old.sets["ungrouped"].filter.ranges.items():
@@ -128,6 +184,7 @@ class Session:
         self.path: Optional[Path] = Path(path) if path else None
         self.layers: List[Layer] = [Layer(self.locs)]
         self.roi: Optional[Region] = None
+        self.files: List[FileInfo] = []
         self.history: List[Dict] = []
         self._undo: Optional[Localizations] = None
         self._live = False                 # the table is being appended to
@@ -144,13 +201,66 @@ class Session:
             cb(what)
 
     # ---------------------------------------------------------------- data
-    def load(self, path) -> None:
-        from .io.hdf5 import load_localizations
-        self.path = Path(path)
-        self.set_locs(load_localizations(path), undoable=False)
-        self.history.clear()
-        saved = self.locs.metadata.get("roi")
-        self.set_roi(Region.from_dict(saved) if saved else None)
+    def load(self, path, append: bool = False, **reader_args) -> FileInfo:
+        """Open a localization file of any known format.
+
+        With ``append`` it joins the table as one more file (a ``filenumber``
+        column tells them apart, and the layers can pick); otherwise it
+        replaces everything.
+        """
+        locs, info = load_any(path, **reader_args)
+        return self.add_file(locs, info, append=append)
+
+    def add_file(self, locs: Localizations, info: FileInfo, append: bool = False) -> FileInfo:
+        if not append or not len(self.locs):
+            self.files = []
+            self.path = Path(info.path)
+        number = len(self.files)
+        self.files.append(info)
+        columns = dict(locs.columns)
+        columns["filenumber"] = np.full(len(locs), number, np.int32)
+        locs = Localizations(columns, dict(locs.metadata))
+        if number == 0:
+            self.set_locs(locs, undoable=False)
+            self.history.clear()
+            saved = self.locs.metadata.get("roi")
+            self.set_roi(Region.from_dict(saved) if saved else None)
+        else:
+            merged = concat([self.locs, locs])
+            merged.metadata = dict(self.locs.metadata)
+            self.set_locs(merged, undoable=True, keep_layers=True)
+        self.locs.metadata["files"] = [f.to_dict() for f in self.files]
+        self.log("load", str(info.path), append=append)
+        return info
+
+    def file_names(self) -> List[str]:
+        return [f.name for f in self.files]
+
+    # -------------------------------------------------------------- images
+    def add_image(self, image: ImageData, name: Optional[str] = None) -> Layer:
+        layer = Layer.from_image(image, name)
+        self.layers.append(layer)
+        self.changed("layers")
+        return layer
+
+    def open_image(self, path, pixelsize: Optional[float] = None,
+                   x0: float = 0.0, y0: float = 0.0) -> Layer:
+        return self.add_image(load_image(path, pixelsize, x0, y0))
+
+    def full_view(self, margin_fraction: float = 0.01):
+        """The ranges covering every visible layer -- or all, if none is."""
+        boxes = [l.bounds() for l in self.layers if l.visible] or \
+                [l.bounds() for l in self.layers]
+        boxes = [b for b in boxes if b is not None]
+        if not boxes:
+            return (0.0, 1.0), (0.0, 1.0)
+        b = np.array(boxes)
+        x0, y0, x1, y1 = b[:, 0].min(), b[:, 1].min(), b[:, 2].max(), b[:, 3].max()
+        mx, my = (x1 - x0) * margin_fraction, (y1 - y0) * margin_fraction
+        return (x0 - mx, x1 + mx), (y0 - my, y1 + my)
+
+    def first_locs_layer(self) -> int:
+        return next((i for i, l in enumerate(self.layers) if not l.is_image), 0)
         self.log("load", str(self.path))
 
     def save(self, path=None) -> Path:
@@ -164,17 +274,19 @@ class Session:
         self.path = path
         return path
 
-    def set_locs(self, locs: Localizations, undoable: bool = True) -> None:
+    def set_locs(self, locs: Localizations, undoable: bool = True,
+                 keep_layers: bool = False) -> None:
         if self._live:                     # the finished form of the live table
             self.layers = [Layer(locs)]    # (undo already points before the run)
             self._live = False
-        elif undoable:                     # the same data, corrected: keep the layers
-            self._undo = self.locs
+        elif undoable or keep_layers:      # the same data, corrected: keep the layers
+            self._undo = self.locs if undoable else None
             for layer in self.layers:
                 layer.rebind(locs)
         else:                              # a new file: start over with one layer
             self._undo = None
-            self.layers = [Layer(locs)]
+            self.layers = [l for l in self.layers if l.is_image]
+            self.layers.insert(0, Layer(locs))
         self.locs = locs
         self.changed("locs")
 
@@ -209,8 +321,9 @@ class Session:
         """Add a block to the live table; every layer takes it in."""
         n = 0
         for layer in self.layers:
-            n = layer.append(block)
-        self.locs = self.layers[0].state.sets["ungrouped"].locs
+            if not layer.is_image:
+                n = layer.append(block)
+        self.locs = self.layers[self.first_locs_layer()].state.sets["ungrouped"].locs
         if n:
             self.changed("append")
         return n
@@ -224,6 +337,8 @@ class Session:
             self.locs, self._undo = self._undo, None
             for layer in self.layers:
                 layer.rebind(self.locs)
+            self.files = [FileInfo(**{k: v for k, v in f.items() if k != "n"})
+                          for f in self.locs.metadata.get("files", [])] or self.files
             self.log("undo")
             self.changed("locs")
 
@@ -234,7 +349,12 @@ class Session:
 
     # ------------------------------------------------------------- plugins
     def selection(self, layer: int = 0) -> Selection:
-        """What a plugin looks at: the layer's filter, inside the ROI if any."""
+        """What a plugin looks at: the layer's filter, inside the ROI if any.
+
+        An image layer has no localizations; the first locs layer stands in.
+        """
+        if self.layers[layer].is_image:
+            layer = self.first_locs_layer()
         sel = self.layers[layer].selection(layer)
         if self.roi is not None and len(self.locs):
             x, y = positions(self.locs)

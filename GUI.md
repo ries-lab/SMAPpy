@@ -70,13 +70,35 @@ reasoning is here so that it does not have to be re-derived.
   preset fills it from the YAML.  Presets are `*.yaml` in `~/.smappy/cameras`,
   `$SMAPPY_CAMERAS`, or the checkout's `examples/`.
 
+* **Several files, one table.**  Loading more files (File -> Add file, or
+  several at once) concatenates them, as SMAP does, with a ``filenumber``
+  column; unlike columns are joined with NaN (`locs.concat`).  Grouping does
+  not link across files.  A layer picks files in its filter: the *file*
+  quick button shows a tickable list of names instead of a histogram, and
+  the mask composes with the bounds and the ROI, so plugins get it too.
+* **Formats are a registry** (`io/formats.py`): smappy HDF5, SMAP
+  `_sml.mat` (v7.3 and older), MINFLUX exports (npy, zip, json; last
+  iteration, valid only, m -> nm, ``frame`` is the rank in time), and csv
+  (ThunderSTORM and SMAP headers recognised; otherwise a mapping dialog,
+  also for positions in pixels).  A reader returns smappy's columns and a
+  `FileInfo`; SMAP frames become 0-based.
+* **Image layers** (`images.py`): a layer is ``"locs"`` or ``"image"``; an
+  image holds pixels with a pixel size and origin in nm (from the TIFF
+  resolution tags, or asked for) and is resampled onto the view, so LUT,
+  contrast and gamma apply unchanged.  Added from the layer strip's ``+``
+  menu or File -> Open image; the Render tab shows pixel size, origin and
+  a frame slider in place of the filter.
+
 ## Code map
 
     smappy/plugins/__init__.py   Plugin, Result, Selection, param(), registry
     smappy/plugins/drift_comet.py  the first plugin: COMET drift correction
     smappy/plugins/drift_rcc.py  RCC, the same contract
     smappy/plugins/fit.py        the parts, and the Gaussian 2D / Spline 3D fitters
-    smappy/session.py            Session: table, layers, undo, history (no Qt)
+    smappy/session.py            Session: table, files, layers, ROI, undo, history (no Qt)
+    smappy/io/formats.py         readers: smappy, SMAP, MINFLUX, csv
+    smappy/images.py             pixel images as layers
+    smappy/regions.py            ROIs and their masks
     smappy/gui/params.py         Settings dataclass -> form widget, and back
     smappy/gui/widgets.py        CollapsibleSection
     smappy/gui/render_view.py    pyqtgraph view that re-renders on pan/zoom

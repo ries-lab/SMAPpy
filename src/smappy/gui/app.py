@@ -7,12 +7,15 @@ from typing import Dict, List, Optional
 
 from PySide6.QtCore import QSettings, Qt
 from PySide6.QtGui import QAction, QKeySequence
-from PySide6.QtWidgets import (QApplication, QCheckBox, QFileDialog, QHBoxLayout,
+from PySide6.QtWidgets import (QApplication, QCheckBox, QDialog, QFileDialog, QHBoxLayout,
+                               QMessageBox,
                                QLabel, QLineEdit,
                                QMainWindow, QScrollArea, QTabWidget, QVBoxLayout,
                                QWidget)
 
 from .. import plugins
+from ..io.formats import csv_columns, guess_csv_mapping, name_filter, reader_for
+from .dialogs import CsvMappingDialog, PixelSizeDialog
 from ..session import Session
 from .plugin_panel import PluginPanel
 from .render_tab import RenderTab
@@ -154,6 +157,8 @@ class ControlWindow(QMainWindow):
 
         menu = self.menuBar().addMenu("File")
         self._action(menu, "Open...", QKeySequence.Open, self.open)
+        self._action(menu, "Add file...", "Ctrl+Shift+O", lambda: self.open(append=True))
+        self._action(menu, "Open image...", None, self.open_image)
         self._action(menu, "Save", QKeySequence.Save, self.save)
         self._action(menu, "Save as...", QKeySequence.SaveAs, self.save_as)
         menu.addSeparator()
@@ -176,17 +181,53 @@ class ControlWindow(QMainWindow):
         if what in ("layer", "layers", "locs", "roi") and not self.render_window.isVisible():
             self.render_window.show()      # closed by accident: a change wants it back
         self.undo_action.setEnabled(self.session.can_undo)
-        name = self.session.path.name if self.session.path else "no file"
+        names = self.session.file_names()
+        name = (names[0] if len(names) == 1 else f"{len(names)} files") if names else "no file"
         n = len(self.session.locs)
         self.statusBar().showMessage(f"{name}: {n} localizations")
         self.render_window.setWindowTitle(f"smappy - {name}")
 
-    def open(self) -> None:
+    def open(self, append: bool = False) -> None:
+        """One or more files; the first replaces (unless appending), the rest join."""
         start = str(self.session.path.parent) if self.session.path else ""
-        path, _ = QFileDialog.getOpenFileName(self, "Open localizations", start,
-                                              "HDF5 (*.h5 *.hdf5)")
-        if path:
-            self.session.load(path)
+        paths, _ = QFileDialog.getOpenFileNames(self, "Add localizations" if append
+                                                else "Open localizations", start, name_filter())
+        for i, path in enumerate(paths):
+            args = {}
+            if self._needs_mapping(path):
+                dialog = CsvMappingDialog(path, self)
+                if dialog.exec() != QDialog.Accepted:
+                    continue
+                args = dialog.reader_args()
+            try:
+                self.session.load(path, append=append or i > 0, **args)
+            except Exception as e:                      # a bad file is not a crash
+                QMessageBox.warning(self, "could not open", f"{Path(path).name}:\n{e}")
+
+    @staticmethod
+    def _needs_mapping(path: str) -> bool:
+        """A csv whose headers do not say where x and y are."""
+        try:
+            if "mapping" not in reader_for(path).needs:
+                return False
+        except ValueError:
+            return False
+        guessed = set(guess_csv_mapping(csv_columns(Path(path))[0]).values())
+        return not {"x_nm", "y_nm"} <= guessed
+
+    def open_image(self) -> None:
+        start = str(self.session.path.parent) if self.session.path else ""
+        path, _ = QFileDialog.getOpenFileName(self, "Open image", start,
+                                              "Images (*.tif *.tiff *.png)")
+        if not path:
+            return
+        try:
+            self.session.open_image(path)
+        except ValueError:                                  # no pixel size in the file
+            dialog = PixelSizeDialog(Path(path).name, parent=self)
+            if dialog.exec() == QDialog.Accepted:
+                px, x0, y0 = dialog.values()
+                self.session.open_image(path, px, x0, y0)
 
     def save(self) -> None:
         if self.session.path is None:

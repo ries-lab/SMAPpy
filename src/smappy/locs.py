@@ -17,7 +17,7 @@ pixel equivalent, so ``z_nm`` is always in nm.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Iterator, Optional
+from typing import Sequence, Dict, Iterator, Optional
 
 import numpy as np
 
@@ -206,3 +206,31 @@ def valid(locs: Localizations, max_fit_distance: Optional[float] = None
         mask &= (np.abs(locs["x_pix"] - locs["peak_x_pix"]) < max_fit_distance)
         mask &= (np.abs(locs["y_pix"] - locs["peak_y_pix"]) < max_fit_distance)
     return mask
+
+
+def concat(tables: "Sequence[Localizations]") -> Localizations:
+    """Stack tables that need not share columns; a missing one is NaN.
+
+    Integer columns missing from a table (``frame``, ids) become 0 there, so
+    they stay integer.  Metadata comes from the first table.
+    """
+    tables = [t for t in tables if len(t)]
+    if not tables:
+        return Localizations({}, {})
+    names = []
+    for t in tables:
+        names += [n for n in t.columns if n not in names]
+    columns = {}
+    for name in names:
+        parts = []
+        dtype = np.result_type(*[np.asarray(t[name]).dtype for t in tables if name in t])
+        fill = 0 if dtype.kind in "iu" else np.nan
+        if dtype.kind in "iu" and any(name not in t for t in tables):
+            pass                      # zeros keep the column integer
+        elif fill is np.nan and dtype.kind not in "f":
+            dtype = np.float32
+        for t in tables:
+            parts.append(np.asarray(t[name], dtype=dtype) if name in t
+                         else np.full(len(t), fill, dtype=dtype))
+        columns[name] = np.concatenate(parts)
+    return Localizations(columns, dict(tables[0].metadata))

@@ -75,14 +75,18 @@ class RenderView(QWidget):
 
     def reset(self) -> None:
         """Show everything."""
-        layer = self.session.layers[0]
-        if not len(self.session.locs) and layer.state.index.n_localizations == 0 \
-                and not getattr(layer.state.index, "extent", None):
+        if not self._has_content():
             self.image.clear()
             return
-        (x0, x1), (y0, y1) = layer.state.full_view()
+        (x0, x1), (y0, y1) = self.session.full_view()
         self.view.setRange(QRectF(x0, y0, x1 - x0, y1 - y0), padding=0)
         self.schedule()
+
+    def _has_content(self) -> bool:
+        if any(l.is_image for l in self.session.layers) or len(self.session.locs):
+            return True
+        state = self.session.layers[0].state
+        return state is not None and bool(getattr(state.index, "extent", None))
 
     def composite(self, fov: FieldOfView) -> Tuple[np.ndarray, np.ndarray]:
         """Every visible layer rendered on ``fov`` and added up, as SMAP does.
@@ -93,7 +97,7 @@ class RenderView(QWidget):
         weight = np.zeros((fov.ny, fov.nx), np.float32)
         for layer in self.session.layers:
             if layer.visible:
-                image, rendered = layer.state.image(fov)
+                image, rendered = layer.render(fov)
                 rgb += image
                 weight += rendered.weight
         return np.clip(rgb, 0, 1), weight
@@ -111,7 +115,7 @@ class RenderView(QWidget):
         self.view.setRange(rect, padding=0)
 
     def render(self) -> None:
-        if not len(self.session.locs):
+        if not self._has_content():
             self.image.clear()
             return
         fov = self.current_fov()
@@ -314,6 +318,9 @@ class RenderToolBar(QToolBar):
         session = self.view.session
         parts = []
         for i, layer in enumerate(session.layers):
+            if layer.is_image:
+                parts.append(f"{layer.name}: image")
+                continue
             n = len(layer.filter)
             if session.roi is not None:
                 n = f"{len(session.selection(i))} in {session.roi}"
