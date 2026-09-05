@@ -59,3 +59,53 @@ def test_points_mode_draws_something():
     proj = Projection(pivot=[500, 400, 0], zoom=5.0, engine="points", point_size=3, point_alpha=0.6)
     rgb, _ = render_3d(s.layers, proj, None, proj.fov(200, 160), engine=ENGINE)
     assert rgb.shape == (160, 200, 3) and 0 < rgb.max() <= 1
+
+
+def test_spheres_are_shaded_and_occlude_by_depth():
+    from smappy import lut as luts
+    from smappy.render import DisplaySettings
+    one = Localizations({"x_nm": np.array([500.0], np.float32), "y_nm": np.array([500.0], np.float32),
+                         "z_nm": np.zeros(1, np.float32)}, {})
+    s = Session(one)
+    proj = Projection(pivot=[500, 500, 0], zoom=2.0, engine="spheres", point_size=100, ssao_strength=0.0)
+    rgb, _ = render_3d(s.layers, proj, None, proj.fov(200, 200), engine=ENGINE)
+    g = rgb.max(axis=2)
+    iy, ix = np.unravel_index(g.argmax(), g.shape)
+    assert iy < 100 and ix < 100                          # lit from the upper left
+    assert 7000 < (g > 0.05).sum() < 8200                  # a disc of radius 50 px
+    # the nearer sphere (larger depth) hides the farther one, whatever the draw order
+    t = luts.get("turbo")
+    for zs in ([200.0, -200.0], [-200.0, 200.0]):
+        two = Localizations({"x_nm": np.array([500.0, 520.0], np.float32),
+                             "y_nm": np.array([500.0, 500.0], np.float32),
+                             "z_nm": np.array(zs, np.float32)}, {})
+        s2 = Session(two)
+        s2.layers[0].state.settings = RenderSettings(color_field="z_nm", color_range=(-200, 200))
+        s2.layers[0].state.display = DisplaySettings(lut="turbo")
+        p2 = Projection(pivot=[510, 500, 0], zoom=2.0, engine="spheres", point_size=100, ssao_strength=0.0)
+        mid = render_3d(s2.layers, p2, None, p2.fov(200, 200), engine=ENGINE)[0][100, 100]
+        assert np.abs(mid - t[-1]).sum() < np.abs(mid - t[0]).sum()
+
+
+def test_ssao_darkens_a_crevice_and_not_the_open():
+    from smappy.render import DisplaySettings
+    rng = np.random.default_rng(0)
+    n = 40000
+    x, y = rng.uniform(0, 2000, n), rng.uniform(0, 2000, n)
+    blob = rng.normal(size=(3000, 3)) * 60
+    blob[:, 2] = np.abs(blob[:, 2]) + 40
+    locs = Localizations({"x_nm": np.r_[x, 1000 + blob[:, 0]].astype(np.float32),
+                          "y_nm": np.r_[y, 1000 + blob[:, 1]].astype(np.float32),
+                          "z_nm": np.r_[np.zeros(n), blob[:, 2]].astype(np.float32)}, {})
+    s = Session(locs)
+    s.layers[0].state.display = DisplaySettings(lut="gray")
+
+    def render(strength):
+        p = Projection(pivot=[1000, 1000, 0], zoom=4.0, engine="spheres", point_size=20,
+                       ssao_strength=strength)
+        return render_3d(s.layers, p, None, p.fov(500, 500), engine=ENGINE)[0]
+
+    on, off = render(0.9), render(0.0)
+    foot, open_ = (slice(280, 300), slice(240, 260)), (slice(50, 70), slice(50, 70))
+    assert on[foot].mean() < off[foot].mean() * 0.9
+    assert np.allclose(on[open_].mean(), off[open_].mean(), atol=0.02)

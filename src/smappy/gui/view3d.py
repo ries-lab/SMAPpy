@@ -60,6 +60,8 @@ class _Renderer3D(QObject):
         if projection.engine != "cpu" and engine is None:
             projection = copy.copy(projection)
             projection.engine = "cpu"
+        if projection.engine == "spheres" and preview:
+            preview = False                      # the g-buffer look must not change mid-drag
         try:
             rgb, hist = render_3d(session.layers, projection, slab, fov, preview, engine)
         except Exception as e:                      # the table changed under us
@@ -404,6 +406,7 @@ class SlabPanel(QWidget):
         self.engine.addItem("CPU", "cpu")
         self.engine.addItem("GPU", "gpu")
         self.engine.addItem("GPU points", "points")
+        self.engine.addItem("GPU spheres", "spheres")
         self.engine.setToolTip("CPU and GPU give the same image; GPU points draws "
                                "sprites with alpha, back to front")
         self.engine.currentIndexChanged.connect(self._on_projection_settings)
@@ -415,6 +418,15 @@ class SlabPanel(QWidget):
         self.point_alpha = QDoubleSpinBox(minimum=0.01, maximum=1, singleStep=0.1, decimals=2)
         self.point_alpha.setValue(0.5)
         for w in (self.point_size, self.point_alpha):
+            w.setKeyboardTracking(False)
+            w.valueChanged.connect(self._on_projection_settings)
+        self.ssao = QDoubleSpinBox(minimum=0, maximum=1, singleStep=0.1, decimals=2)
+        self.ssao.setValue(0.7)
+        self.ssao.setToolTip("spheres: ambient occlusion strength, 0 = off")
+        self.ssao_radius = QDoubleSpinBox(minimum=0, maximum=10000, decimals=0, suffix=" nm")
+        self.ssao_radius.setSpecialValueText("3 x radius")
+        self.ssao_radius.setToolTip("spheres: how far the occlusion looks; 0 = 3 x the sphere radius")
+        for w in (self.ssao, self.ssao_radius):
             w.setKeyboardTracking(False)
             w.valueChanged.connect(self._on_projection_settings)
         self.gpu_name = QLabel("")
@@ -433,6 +445,8 @@ class SlabPanel(QWidget):
         form.addRow("", self.gpu_name)
         form.addRow("point size", self.point_size)
         form.addRow("point alpha", self.point_alpha)
+        form.addRow("occlusion", self.ssao)
+        form.addRow("occlusion radius", self.ssao_radius)
         self.box = QCheckBox("show box")
         self.box.setChecked(True)
         self.box.toggled.connect(self._on_box)
@@ -521,6 +535,8 @@ class SlabPanel(QWidget):
         proj.engine = self.engine.currentData()
         proj.point_size = self.point_size.value()
         proj.point_alpha = self.point_alpha.value()
+        proj.ssao_strength = self.ssao.value()
+        proj.ssao_radius = self.ssao_radius.value()
         self.view3d._draw_box()
         self.view3d.schedule()
 

@@ -36,6 +36,8 @@ struct Params {
     depth: vec4<f32>,       // attenuation length (0 off), front, colour mode (0 none, 1 field, 2 depth), n
     crange: vec4<f32>,      // colour lo, hi, point radius (px), point alpha
     dclip: vec4<f32>,       // depth lo, hi, 1 if the clip applies, pad
+    sph: vec4<f32>,         // spheres: depth min, depth max (front), SSAO radius (px), SSAO strength
+    light: vec4<f32>,       // light direction in view space (x right, y down, z to the viewer), ambient
 };
 struct Pt { x: f32, y: f32, z: f32, prec: f32, w: f32, cval: f32, p0: f32, p1: f32 };
 @group(0) @binding(0) var<uniform> P: Params;
@@ -216,6 +218,151 @@ fn fs(in: VOut) -> @location(0) vec4<f32> {
 """
 
 
+SPHERES = COMMON + """
+struct VOut { @builtin(position) pos: vec4<f32>,
+              @location(0) @interpolate(flat) centre: vec3<f32>,   // px, py, depth (nm)
+              @location(1) @interpolate(flat) radius: f32,
+              @location(2) @interpolate(flat) rgb: vec3<f32> };
+
+@vertex
+fn vs(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> VOut {
+    var corners = array<vec2<f32>, 6>(vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 0.0), vec2<f32>(1.0, 1.0),
+                                      vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 1.0), vec2<f32>(0.0, 1.0));
+    let p = pts[sel[ii]];
+    let pr = project(p);
+    var out: VOut;
+    out.centre = vec3<f32>(pr.px, pr.py, pr.d);
+    out.radius = P.crange.z;
+    var rgb = colour(p, pr.d);
+    if (P.depth.z < 0.5) { rgb = lut[255].xyz; }
+    out.rgb = rgb * weight(p, pr.d);               // depth dimming, if asked for
+    let r = P.crange.z + 1.0;
+    if (!pr.inside) {
+        out.pos = vec4<f32>(-2.0, -2.0, 0.0, 1.0);
+        return out;
+    }
+    let q = mix(vec2<f32>(pr.px - r, pr.py - r), vec2<f32>(pr.px + r, pr.py + r), corners[vi]);
+    out.pos = vec4<f32>(q.x / P.size.x * 2.0 - 1.0, 1.0 - q.y / P.size.y * 2.0, 0.0, 1.0);
+    return out;
+}
+
+struct FOut { @location(0) albedo: vec4<f32>, @location(1) normal_depth: vec4<f32>,
+              @builtin(frag_depth) depth: f32 };
+
+@fragment
+fn fs(in: VOut) -> FOut {
+    // a ray along the depth axis through this pixel: where does it meet the sphere?
+    let q = in.pos.xy - in.centre.xy;                     // pixels from the centre
+    let r2 = in.radius * in.radius;
+    let h2 = r2 - dot(q, q);
+    if (h2 < 0.0) { discard; }
+    let dz = sqrt(h2);                                    // pixels towards the viewer
+    let surface = in.centre.z + dz * P.fov.z;             // depth in nm (bigger = nearer)
+    let n = normalize(vec3<f32>(q.x, q.y, dz) / in.radius);
+    var out: FOut;
+    out.albedo = vec4<f32>(in.rgb, 1.0);
+    out.normal_depth = vec4<f32>(n, surface - P.sph.x + 1.0);   // 0 stays "nothing here"
+    out.depth = clamp((P.sph.y - surface) / max(P.sph.y - P.sph.x, 1e-6), 0.0, 1.0);
+    return out;
+}
+"""
+
+SHADE = """
+struct Params {
+    m0: vec4<f32>, m1: vec4<f32>, m2: vec4<f32>, pivot: vec4<f32>, slab_c: vec4<f32>,
+    slab_h: vec4<f32>, fov: vec4<f32>, size: vec4<f32>, sig: vec4<f32>, depth: vec4<f32>,
+    crange: vec4<f32>, dclip: vec4<f32>, sph: vec4<f32>, light: vec4<f32>,
+};
+@group(0) @binding(0) var<uniform> P: Params;
+@group(0) @binding(1) var albedo: texture_2d<f32>;
+@group(0) @binding(2) var gbuf: texture_2d<f32>;
+@group(0) @binding(3) var<storage, read_write> ao_out: array<f32>;
+@group(0) @binding(4) var<storage, read_write> rgb_out: array<vec4<f32>>;
+
+fn hash(p: vec2<i32>) -> f32 {
+    let x = f32(p.x) * 12.9898 + f32(p.y) * 78.233;
+    return fract(sin(x) * 43758.5453);
+}
+
+// 16 hemisphere samples (z up), denser near the centre
+const KERNEL = array<vec3<f32>, 16>(
+    vec3<f32>(0.10, 0.02, 0.15), vec3<f32>(-0.05, 0.12, 0.10), vec3<f32>(0.02, -0.09, 0.20),
+    vec3<f32>(-0.14, -0.06, 0.12), vec3<f32>(0.22, 0.11, 0.30), vec3<f32>(-0.18, 0.21, 0.25),
+    vec3<f32>(0.05, -0.28, 0.35), vec3<f32>(-0.30, -0.15, 0.40), vec3<f32>(0.38, -0.12, 0.45),
+    vec3<f32>(-0.10, 0.42, 0.50), vec3<f32>(0.25, 0.35, 0.55), vec3<f32>(-0.45, 0.10, 0.60),
+    vec3<f32>(0.15, -0.52, 0.65), vec3<f32>(-0.35, -0.40, 0.70), vec3<f32>(0.55, 0.25, 0.75),
+    vec3<f32>(-0.20, 0.60, 0.85));
+
+@compute @workgroup_size(16, 16)
+fn ao(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let nx = i32(P.size.x);
+    let ny = i32(P.size.y);
+    let x = i32(gid.x);
+    let y = i32(gid.y);
+    if (x >= nx || y >= ny) { return; }
+    let g = textureLoad(gbuf, vec2<i32>(x, y), 0);
+    let idx = u32(y * nx + x);
+    if (g.w <= 0.0) { ao_out[idx] = 1.0; return; }
+    let n = g.xyz;
+    let d = g.w;
+    let R = P.sph.z;                                   // pixels
+    // a tangent frame, turned by a per-pixel angle so banding becomes noise
+    let a = hash(vec2<i32>(x, y)) * 6.2831853;
+    var up = vec3<f32>(cos(a), sin(a), 0.0);
+    let t = normalize(up - n * dot(up, n));
+    let b = cross(n, t);
+    var occluded = 0.0;
+    for (var i = 0; i < 16; i = i + 1) {
+        let k = KERNEL[i];
+        let s = (t * k.x + b * k.y + n * k.z) * R;    // pixels; z in pixels of depth too
+        let sx = x + i32(round(s.x));
+        let sy = y + i32(round(s.y));
+        if (sx < 0 || sy < 0 || sx >= nx || sy >= ny) { continue; }
+        let sample_depth = d + s.z * P.fov.z;         // nm
+        let there = textureLoad(gbuf, vec2<i32>(sx, sy), 0).w;
+        if (there <= 0.0) { continue; }
+        let dz = there - sample_depth;                // > 0: the surface there is in front of the sample
+        if (dz > 0.05 * R * P.fov.z && dz < 2.0 * R * P.fov.z) { occluded = occluded + 1.0; }
+    }
+    ao_out[idx] = 1.0 - P.sph.w * occluded / 16.0;
+}
+
+@compute @workgroup_size(16, 16)
+fn shade(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let nx = i32(P.size.x);
+    let ny = i32(P.size.y);
+    let x = i32(gid.x);
+    let y = i32(gid.y);
+    if (x >= nx || y >= ny) { return; }
+    let idx = u32(y * nx + x);
+    let g = textureLoad(gbuf, vec2<i32>(x, y), 0);
+    if (g.w <= 0.0) { rgb_out[idx] = vec4<f32>(0.0, 0.0, 0.0, 1.0); return; }
+    // a 4x4 box blur of the noisy occlusion
+    var ao = 0.0;
+    var cnt = 0.0;
+    for (var j = -2; j < 2; j = j + 1) {
+        for (var i = -2; i < 2; i = i + 1) {
+            let sx = x + i;
+            let sy = y + j;
+            if (sx < 0 || sy < 0 || sx >= nx || sy >= ny) { continue; }
+            if (textureLoad(gbuf, vec2<i32>(sx, sy), 0).w <= 0.0) { continue; }
+            ao = ao + ao_out[u32(sy * nx + sx)];
+            cnt = cnt + 1.0;
+        }
+    }
+    ao = ao / max(cnt, 1.0);
+    let n = normalize(g.xyz);
+    let l = normalize(P.light.xyz);
+    let v = vec3<f32>(0.0, 0.0, 1.0);
+    let diffuse = max(dot(n, l), 0.0);
+    let spec = pow(max(dot(reflect(-l, n), v), 0.0), 32.0);
+    let base = textureLoad(albedo, vec2<i32>(x, y), 0).xyz;
+    let c = base * (P.light.w + (1.0 - P.light.w) * diffuse) * ao + vec3<f32>(0.25 * spec * ao);
+    rgb_out[idx] = vec4<f32>(c, 1.0);
+}
+"""
+
+
 class GPUEngine:
     """One device; tables cached on it; renders on demand."""
 
@@ -251,6 +398,35 @@ class GPUEngine:
             primitive={"topology": wgpu.PrimitiveTopology.triangle_list},
             fragment={"module": pm, "entry_point": "fs",
                       "targets": [{"format": "rgba16float", "blend": {"color": over, "alpha": over}}]})
+        # spheres: a g-buffer pass with a depth buffer, then SSAO and shading
+        sm = dev.create_shader_module(code=SPHERES)
+        self.spheres = dev.create_render_pipeline(
+            layout=dev.create_pipeline_layout(bind_group_layouts=[self.points_layout]),
+            vertex={"module": sm, "entry_point": "vs"},
+            primitive={"topology": wgpu.PrimitiveTopology.triangle_list},
+            depth_stencil={"format": "depth24plus", "depth_write_enabled": True,
+                           "depth_compare": wgpu.CompareFunction.less},
+            fragment={"module": sm, "entry_point": "fs",
+                      "targets": [{"format": "rgba16float"}, {"format": "rgba16float"}]})
+        self.shade_layout = dev.create_bind_group_layout(entries=[
+            {"binding": 0, "visibility": wgpu.ShaderStage.COMPUTE,
+             "buffer": {"type": wgpu.BufferBindingType.uniform}},
+            {"binding": 1, "visibility": wgpu.ShaderStage.COMPUTE,
+             "texture": {"sample_type": wgpu.TextureSampleType.unfilterable_float}},
+            {"binding": 2, "visibility": wgpu.ShaderStage.COMPUTE,
+             "texture": {"sample_type": wgpu.TextureSampleType.unfilterable_float}},
+            {"binding": 3, "visibility": wgpu.ShaderStage.COMPUTE,
+             "buffer": {"type": wgpu.BufferBindingType.storage}},
+            {"binding": 4, "visibility": wgpu.ShaderStage.COMPUTE,
+             "buffer": {"type": wgpu.BufferBindingType.storage}}])
+        shade_module = dev.create_shader_module(code=SHADE)
+        shade_pl = dev.create_pipeline_layout(bind_group_layouts=[self.shade_layout])
+        self.ao_pipeline = dev.create_compute_pipeline(
+            layout=shade_pl, compute={"module": shade_module, "entry_point": "ao"})
+        self.shade_pipeline = dev.create_compute_pipeline(
+            layout=shade_pl, compute={"module": shade_module, "entry_point": "shade"})
+        self._gbuf = None
+        self._gbuf_shape = None
         self._tables: Dict[tuple, tuple] = {}        # key -> (buffer, n)
         self._selection: Dict[tuple, tuple] = {}     # key -> (buffer, n)
         self._luts: Dict[tuple, object] = {}
@@ -281,18 +457,21 @@ class GPUEngine:
         self._tables.clear()                         # one table at a time on the GPU
         self._tables[key] = (buf, n)
         self._selection.clear()
+        # keys carry Python ids; keep what they refer to alive so an id is not
+        # reused by a new object while the cache still names the old one
+        self._keepalive = [x, y]
         return n
 
     def selection(self, key, indices: np.ndarray):
         if key in self._selection:
-            return self._selection[key]
+            return self._selection[key][:2]
         idx = np.ascontiguousarray(indices, dtype=np.uint32)
         buf = self.device.create_buffer_with_data(data=idx.tobytes() if idx.size else bytes(4),
                                                   usage=self.wgpu.BufferUsage.STORAGE)
         if len(self._selection) > 4:
             self._selection.clear()
-        self._selection[key] = (buf, int(idx.size))
-        return self._selection[key]
+        self._selection[key] = (buf, int(idx.size), indices)   # the array itself keeps its id
+        return self._selection[key][:2]
 
     def lut_buffer(self, lut, invert: bool):
         key = (lut if isinstance(lut, str) else id(lut), invert)
@@ -311,7 +490,10 @@ class GPUEngine:
                depth_lambda: Optional[float] = None, depth_front: float = 0.0,
                color_mode: int = 0, color_range=(0.0, 1.0), n: int = 0,
                radius: float = 2.0, alpha: float = 0.5,
-               depth_clip: Optional[Tuple[float, float]] = None) -> np.ndarray:
+               depth_clip: Optional[Tuple[float, float]] = None,
+               depth_range: Tuple[float, float] = (0.0, 1.0),
+               ssao_radius: float = 8.0, ssao_strength: float = 0.7,
+               light=(-0.4, -0.6, 0.7), ambient: float = 0.25) -> np.ndarray:
         m = np.eye(3) if matrix is None else np.asarray(matrix, float)
         rows = [np.r_[m[i], 0.0] for i in range(3)]
         px, py, pz = pivot
@@ -329,7 +511,9 @@ class GPUEngine:
             [factor, floor, cap, 1.0 if use_weight else 0.0],
             [depth_lambda or 0.0, depth_front, float(color_mode), float(n)],
             [color_range[0], color_range[1], radius, alpha],
-            [depth_clip[0], depth_clip[1], 1.0, 0.0] if depth_clip else [0.0, 0.0, 0.0, 0.0]
+            [depth_clip[0], depth_clip[1], 1.0, 0.0] if depth_clip else [0.0, 0.0, 0.0, 0.0],
+            [depth_range[0], depth_range[1], ssao_radius, ssao_strength],
+            [light[0], light[1], light[2], ambient],
         ]).astype(np.float32)
 
     # ------------------------------------------------------------- render
@@ -410,6 +594,72 @@ class GPUEngine:
         raw = np.frombuffer(out.read_mapped(), np.uint8).reshape(ny, row)
         out.unmap()
         rgba = raw[:, :nx * 8].view(np.float16).reshape(ny, nx, 4).astype(np.float32)
+        return np.clip(rgba[..., :3], 0, 1)
+
+    def render_spheres(self, draws, fov: FieldOfView, shade_params: np.ndarray) -> np.ndarray:
+        """Opaque shaded spheres.  ``draws`` are (table_key, selection, params,
+        lut, invert) per layer, all into one depth buffer, so spheres of one
+        layer hide those of another.  Returns RGB in [0, 1]."""
+        wgpu, dev = self.wgpu, self.device
+        nx, ny = fov.nx, fov.ny
+        if self._gbuf_shape != (nx, ny):
+            usage = wgpu.TextureUsage.RENDER_ATTACHMENT | wgpu.TextureUsage.TEXTURE_BINDING
+            self._gbuf = (dev.create_texture(size=(nx, ny, 1), format="rgba16float", usage=usage),
+                          dev.create_texture(size=(nx, ny, 1), format="rgba16float", usage=usage),
+                          dev.create_texture(size=(nx, ny, 1), format="depth24plus",
+                                             usage=wgpu.TextureUsage.RENDER_ATTACHMENT))
+            self._gbuf_shape = (nx, ny)
+        albedo, gbuf, depth = self._gbuf
+        enc = dev.create_command_encoder()
+        rp = enc.begin_render_pass(
+            color_attachments=[{"view": albedo.create_view(), "clear_value": (0, 0, 0, 0),
+                                "load_op": wgpu.LoadOp.clear, "store_op": wgpu.StoreOp.store},
+                               {"view": gbuf.create_view(), "clear_value": (0, 0, 0, 0),
+                                "load_op": wgpu.LoadOp.clear, "store_op": wgpu.StoreOp.store}],
+            depth_stencil_attachment={"view": depth.create_view(), "depth_clear_value": 1.0,
+                                      "depth_load_op": wgpu.LoadOp.clear,
+                                      "depth_store_op": wgpu.StoreOp.store})
+        rp.set_pipeline(self.spheres)
+        keep = []
+        for table_key, (sbuf, n), params, lut, invert in draws:
+            tbuf, _ = self._tables[table_key]
+            ubuf = dev.create_buffer_with_data(data=params.tobytes(), usage=wgpu.BufferUsage.UNIFORM)
+            bind = dev.create_bind_group(layout=self.points_layout, entries=[
+                {"binding": 0, "resource": {"buffer": ubuf, "offset": 0, "size": ubuf.size}},
+                {"binding": 1, "resource": {"buffer": tbuf, "offset": 0, "size": tbuf.size}},
+                {"binding": 2, "resource": {"buffer": sbuf, "offset": 0, "size": sbuf.size}},
+                {"binding": 3, "resource": {"buffer": self.lut_buffer(lut, invert), "offset": 0,
+                                            "size": 256 * 16}}])
+            keep.append((ubuf, bind))
+            rp.set_bind_group(0, bind)
+            if n:
+                rp.draw(6, n, 0, 0)
+        rp.end()
+        # SSAO, then blur + shade
+        ubuf = dev.create_buffer_with_data(data=shade_params.tobytes(), usage=wgpu.BufferUsage.UNIFORM)
+        ao_buf = dev.create_buffer(size=nx * ny * 4, usage=wgpu.BufferUsage.STORAGE)
+        out_buf = dev.create_buffer(size=nx * ny * 16, usage=wgpu.BufferUsage.STORAGE
+                                    | wgpu.BufferUsage.COPY_SRC)
+        bind = dev.create_bind_group(layout=self.shade_layout, entries=[
+            {"binding": 0, "resource": {"buffer": ubuf, "offset": 0, "size": ubuf.size}},
+            {"binding": 1, "resource": albedo.create_view()},
+            {"binding": 2, "resource": gbuf.create_view()},
+            {"binding": 3, "resource": {"buffer": ao_buf, "offset": 0, "size": ao_buf.size}},
+            {"binding": 4, "resource": {"buffer": out_buf, "offset": 0, "size": out_buf.size}}])
+        groups = ((nx + 15) // 16, (ny + 15) // 16)
+        for pipeline in (self.ao_pipeline, self.shade_pipeline):
+            cp = enc.begin_compute_pass()
+            cp.set_pipeline(pipeline)
+            cp.set_bind_group(0, bind)
+            cp.dispatch_workgroups(*groups)
+            cp.end()
+        read = dev.create_buffer(size=nx * ny * 16, usage=wgpu.BufferUsage.COPY_DST
+                                 | wgpu.BufferUsage.MAP_READ)
+        enc.copy_buffer_to_buffer(out_buf, 0, read, 0, nx * ny * 16)
+        dev.queue.submit([enc.finish()])
+        read.map_sync(wgpu.MapMode.READ)
+        rgba = np.frombuffer(read.read_mapped(), np.float32).reshape(ny, nx, 4).copy()
+        read.unmap()
         return np.clip(rgba[..., :3], 0, 1)
 
     # ------------------------------------------------- the 2D convenience

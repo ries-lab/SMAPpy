@@ -161,9 +161,11 @@ class Projection:
     opacity: float = 0.0            # 0: plain sum; 1: the front hides the back
     slices: int = 32                # depth slices for the opacity compositing
     color_by_depth: bool = False    # override the layers' colour field
-    engine: str = "cpu"             # "cpu", "gpu" (same image), or "points" (GPU sprites)
+    engine: str = "cpu"             # "cpu", "gpu" (same image), "points" or "spheres" (GPU)
     point_size: float = 0.0         # points mode: radius in nm; 0 = the median precision
     point_alpha: float = 0.5        # points mode: sprite opacity
+    ssao_strength: float = 0.7      # spheres mode: ambient occlusion, 0 = off
+    ssao_radius: float = 0.0        # spheres mode: in nm; 0 = 3 x the sphere radius
 
     def __post_init__(self):
         self.pivot = np.asarray(self.pivot, dtype=np.float64).reshape(3)
@@ -379,6 +381,15 @@ def _depth_front_and_range(projection: Projection, slab: Optional[Slab], locs: L
     return float(d.max()), (float(d.min()), float(d.max()))
 
 
+def _table_key(locs: Localizations, *extra):
+    """A key that dies with the table: an object stored on it, not a bare id."""
+    token = locs.metadata.get("_gpu_token")
+    if token is None:
+        token = object()
+        locs.metadata["_gpu_token"] = token
+    return (id(token), len(locs)) + extra
+
+
 _median_cache: dict = {}
 
 
@@ -389,15 +400,52 @@ def point_radius_nm(locs: Localizations, select: np.ndarray, prec_name: Optional
         return projection.point_size
     if prec_name is None:
         return 10.0
-    key = (id(locs), id(select), prec_name)
+    key = _table_key(locs, id(select), prec_name)
     if key not in _median_cache:
         values = np.asarray(locs[prec_name], np.float32)
         values = values[select] if select.dtype == bool else values[np.asarray(select)]
         values = values[np.isfinite(values)]
         if len(_median_cache) > 8:
             _median_cache.clear()
-        _median_cache[key] = float(np.median(values)) if values.size else 10.0
-    return _median_cache[key]
+        # the mask is kept with the value so its id cannot be reused meanwhile
+        _median_cache[key] = (float(np.median(values)) if values.size else 10.0, select)
+    return _median_cache[key][0]
+
+
+def sphere_draw(engine, locs: Localizations, select: np.ndarray, projection: Projection,
+                slab: Optional[Slab], fov: FieldOfView, settings: RenderSettings,
+                display: DisplaySettings):
+    """One layer's contribution to `GPUEngine.render_spheres`."""
+    x, y = positions(locs)
+    z = locs["z_nm"] if "z_nm" in locs else None
+    prec_name = next((n for n in ("loc_precision_nm", "loc_precision_pix") if n in locs), None)
+    color_field = "depth" if projection.color_by_depth else settings.color_field
+    key = _table_key(locs, prec_name, settings.weight_field, color_field)
+    cvalues = (locs[color_field] if color_field and color_field != "depth" and color_field in locs
+               else None)
+    engine.table(key, x, y, z, locs[prec_name] if prec_name else None,
+                 locs[settings.weight_field] if settings.weight_field else None, cvalues)
+    idx = np.flatnonzero(select) if select.dtype == bool else np.asarray(select)
+    sel = engine.selection((key, id(select)), idx)
+    front, drange = _depth_front_and_range(projection, slab, locs)
+    if color_field == "depth":
+        color_mode, color_range = 2, (settings.color_range or drange)
+    elif cvalues is not None:
+        color_mode, color_range = 1, (settings.color_range or column_range(locs, color_field))
+    else:
+        color_mode, color_range = 0, (0.0, 1.0)
+    radius_nm = point_radius_nm(locs, select, prec_name, projection)
+    radius_px = radius_nm / fov.pixelsize
+    ssao_nm = projection.ssao_radius or 3.0 * radius_nm
+    pad = radius_nm * 2
+    params = engine.params(
+        fov=fov, matrix=projection.matrix, pivot=projection.pivot, focal=projection.focal,
+        slab=slab, sigma_mode=settings.mode, sigma=settings.sigma, use_weight=False,
+        depth_lambda=projection.depth_lambda, depth_front=front, color_mode=color_mode,
+        color_range=color_range, n=sel[1], radius=radius_px,
+        depth_range=(drange[0] - pad, drange[1] + pad),
+        ssao_radius=ssao_nm / fov.pixelsize, ssao_strength=projection.ssao_strength)
+    return (key, sel, params, display.lut, display.invert), params
 
 
 def render_layer_gpu(engine, locs: Localizations, select: np.ndarray, projection: Projection,
@@ -410,7 +458,7 @@ def render_layer_gpu(engine, locs: Localizations, select: np.ndarray, projection
     z = locs["z_nm"] if "z_nm" in locs else None
     prec_name = next((n for n in ("loc_precision_nm", "loc_precision_pix") if n in locs), None)
     color_field = "depth" if projection.color_by_depth else settings.color_field
-    key = (id(locs), prec_name, settings.weight_field, color_field)
+    key = _table_key(locs, prec_name, settings.weight_field, color_field)
     cvalues = (locs[color_field] if color_field and color_field != "depth" and color_field in locs
                else None)
     engine.table(key, x, y, z, locs[prec_name] if prec_name else None,
@@ -477,11 +525,23 @@ def render_3d(layers, projection: Projection, slab: Optional[Slab], fov: FieldOf
     """
     rgb = np.zeros((fov.ny, fov.nx, 3), np.float32)
     depths: List[np.ndarray] = []
+    if engine is not None and projection.engine == "spheres":
+        draws, shade_params = [], None
+        for layer in layers:
+            if layer.visible and not layer.is_image:
+                st = layer.state
+                draw, shade_params = sphere_draw(engine, st.locs, st.filter.mask, projection, slab,
+                                                 fov, st.settings, st.display)
+                draws.append(draw)
+        if draws:
+            rgb = engine.render_spheres(draws, fov, shade_params)
     for layer in layers:
         if not layer.visible or layer.is_image:
             continue
         state = layer.state
-        if engine is not None and projection.engine in ("gpu", "points"):
+        if engine is not None and projection.engine == "spheres":
+            image = 0.0
+        elif engine is not None and projection.engine in ("gpu", "points"):
             image, _ = render_layer_gpu(engine, state.locs, state.filter.mask, projection, slab,
                                         fov, state.settings, state.display,
                                         state.current.median_precision, preview)

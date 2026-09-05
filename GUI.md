@@ -215,7 +215,13 @@ with attenuation, colour by depth and slices).  Depth is defined by the
 slab's corners in both engines, so colour scale, slices and attenuation do
 not move with the filter.  The points mode draws alpha sprites, back to
 front for up to 2 M points, coloured by the field or depth through the LUT.
-The 3D panel picks CPU / GPU / GPU points, point size and alpha.
+The 3D panel picks CPU / GPU / GPU points / GPU spheres, point size (nm,
+default the shown points' median precision) and alpha.  *Spheres* draws
+every localization as an opaque shaded sphere impostor (a ray-sphere
+intersection per fragment, true depth into a depth buffer shared by all
+layers, so overlapping spheres form a surface), then screen-space ambient
+occlusion (16 hemisphere samples, 4x4 blur) and Phong shading in a compute
+pass.  Fill-rate bound: ~0.1 s for 2 M points at 900x900.
 
 Measured on an M1 Pro, 5 M points, 900x900: CPU (8 cores) 0.10 s, GPU
 0.08 s after a one-time 0.09 s upload -- the gain is rotation without any
