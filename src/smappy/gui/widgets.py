@@ -114,6 +114,8 @@ class FloatingWindow(QWidget):
         layout.setContentsMargins(6, 6, 6, 6)
         layout.addWidget(content)
         self.content = content
+        from .app import window_shortcuts
+        window_shortcuts(self)
 
     def closeEvent(self, event) -> None:
         self.layout().removeWidget(self.content)

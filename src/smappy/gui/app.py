@@ -139,6 +139,17 @@ class PluginTab(QWidget):
             s.setVisible(text in s.title.lower())
 
 
+def window_shortcuts(window: QWidget) -> None:
+    """Cmd/Ctrl+W closes this window, Cmd/Ctrl+Q quits: on every window."""
+    close = QAction("Close window", window, shortcut=QKeySequence.Close,
+                    triggered=window.close)
+    quit_ = QAction("Quit", window, shortcut=QKeySequence.Quit,
+                    triggered=lambda: QApplication.instance().quit())
+    for action in (close, quit_):
+        action.setShortcutContext(Qt.WindowShortcut)
+        window.addAction(action)
+
+
 class ControlWindow(QMainWindow):
     def __init__(self, session: Session, render: "RenderWindow"):
         super().__init__()
@@ -163,6 +174,9 @@ class ControlWindow(QMainWindow):
         self._action(menu, "Save as...", QKeySequence.SaveAs, self.save_as)
         menu.addSeparator()
         self.undo_action = self._action(menu, "Undo", QKeySequence.Undo, session.undo)
+        menu.addSeparator()
+        self._action(menu, "Quit", QKeySequence.Quit, lambda: QApplication.instance().quit())
+        window_shortcuts(self)
         view = self.menuBar().addMenu("View")
         self.view3d_window = None
         self._action(view, "3D view", "Ctrl+3", self.show_3d)
@@ -183,10 +197,16 @@ class ControlWindow(QMainWindow):
         if self.view3d_window is None:
             from .view3d import View3DWindow
             self.view3d_window = View3DWindow(self.session)
+            window_shortcuts(self.view3d_window)
             QApplication.instance().aboutToQuit.connect(self.view3d_window.view.shutdown)
             self.view3d_window.move(self.render_window.x(), self.render_window.y() + 60)
         self.view3d_window.show()
         self.view3d_window.raise_()
+
+    def closeEvent(self, event) -> None:
+        """The control window is the program: closing it quits."""
+        super().closeEvent(event)
+        QApplication.instance().quit()
 
     def _on_session(self, what: str) -> None:
         if what in ("layer", "layers", "locs", "roi") and not self.render_window.isVisible():
@@ -262,6 +282,7 @@ class RenderWindow(QMainWindow):
         self.setCentralWidget(self.view)
         self.addToolBar(RenderToolBar(self.view))
         self.resize(900, 900)
+        window_shortcuts(self)
 
 
 def main(argv: Optional[List[str]] = None) -> int:
