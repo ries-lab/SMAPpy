@@ -90,13 +90,16 @@ class RenderView(QWidget):
         self._points: List[QPointF] = []
         self._preview = pg.PlotDataItem(pen=DRAW_PEN)
         self.view.addItem(self._preview)
-        self.graphics.scene().sigMouseClicked.connect(self._on_click)
         self.graphics.scene().sigMouseMoved.connect(self._on_move)
+        self._pressed = False
         self.graphics.setFocusPolicy(Qt.StrongFocus)
         self.graphics.keyPressEvent = self._on_key
         self.reset()
 
     def eventFilter(self, obj, event) -> bool:
+        if self.drawing and event.type() in (QEvent.MouseButtonPress, QEvent.MouseButtonRelease,
+                                             QEvent.MouseButtonDblClick):
+            return self._draw_event(event)
         if event.type() == QEvent.NativeGesture and \
                 event.gestureType() == Qt.NativeGestureType.ZoomNativeGesture:
             factor = 1.0 / (1.0 + event.value())
@@ -259,18 +262,32 @@ class RenderView(QWidget):
         else:
             pg.GraphicsLayoutWidget.keyPressEvent(self.graphics, event)
 
-    def _on_click(self, event) -> None:
-        if not self.drawing:
-            return
-        pos = self.view.mapSceneToView(event.scenePos())
-        event.accept()
-        if event.button() == Qt.RightButton or event.double():
+    def _draw_event(self, event) -> bool:
+        """Rectangle and line: press, drag, release.  Polygon: a press per
+        vertex, a double-click (or right button) closes it."""
+        pos = self.view.mapSceneToView(self.graphics.mapToScene(event.position().toPoint()))
+        kind = event.type()
+        if kind == QEvent.MouseButtonDblClick or event.button() == Qt.RightButton:
             if self.drawing == "polygon" and len(self._points) >= 3:
                 self._finish(self._points)
-            return
-        self._points.append(pos)
-        if self.drawing in ("rect", "line") and len(self._points) == 2:
-            self._finish(self._points)
+            return True
+        if kind == QEvent.MouseButtonPress:
+            self._pressed = True
+            if self.drawing == "polygon":
+                self._points.append(pos)
+            else:
+                self._points = [pos]
+            return True
+        if kind == QEvent.MouseButtonRelease and self._pressed:
+            self._pressed = False
+            if self.drawing in ("rect", "line") and self._points:
+                start = self._points[0]
+                if (pos - start).manhattanLength() > 0:        # a drag, not a tap
+                    self._finish([start, pos])
+                else:
+                    self._points = []
+            return True
+        return True
 
     def _on_move(self, scene_pos) -> None:
         if not self.drawing or not self._points:
@@ -383,15 +400,16 @@ class RenderToolBar(QToolBar):
         save.setMenu(menu)
         self.addWidget(save)
 
-        self.roi_button = QToolButton(text="ROI: rectangle")
-        self.roi_button.setToolTip("left: draw a new ROI; right: choose the kind")
+        self.roi_button = QToolButton(text="ROI: line")
+        self.roi_button.setToolTip("left: draw a new ROI (press, drag, release; polygon: "
+                                   "click per vertex, double-click closes); right: the kind")
         self.roi_menu = QMenu(self.roi_button)
         kinds = QActionGroup(self.roi_menu)
-        self.kind = "rect"
-        for kind, name in (("rect", "rectangle"), ("polygon", "polygon"), ("line", "line")):
+        self.kind = "line"
+        for kind, name in (("line", "line"), ("rect", "rectangle"), ("polygon", "polygon")):
             action = self.roi_menu.addAction(name)
             action.setCheckable(True)
-            action.setChecked(kind == "rect")
+            action.setChecked(kind == "line")
             action.triggered.connect(lambda _=False, k=kind, n=name: self._set_kind(k, n))
             kinds.addAction(action)
         self.roi_menu.addSeparator()

@@ -110,6 +110,8 @@ class View3D(QWidget):
         self.graphics.mouseMoveEvent = self._move
         self.graphics.mouseReleaseEvent = self._release
         self.graphics.wheelEvent = self._wheel
+        self.graphics.keyPressEvent = self._key
+        self.graphics.setFocusPolicy(Qt.StrongFocus)
         self.graphics.viewport().installEventFilter(self)
         session.on_change(self._on_session)
 
@@ -234,7 +236,26 @@ class View3D(QWidget):
         return self.image.image
 
     # -------------------------------------------------------------- mouse
+    def _key(self, event) -> None:
+        """Arrows: left / right turn about z, up / down tilt the z axis."""
+        step = 5.0
+        turns = {Qt.Key_Left: (-step, 0.0), Qt.Key_Right: (step, 0.0),
+                 Qt.Key_Up: (0.0, -step), Qt.Key_Down: (0.0, step)}
+        if event.key() in turns:
+            az, el = turns[event.key()]
+            proj = self.projection
+            proj.roll = 0.0
+            proj.azimuth = (proj.azimuth + az) % 360
+            proj.elevation = (proj.elevation + el) % 360
+            self._draw_box()
+            self.changed.emit()
+            self.schedule()
+            event.accept()
+        else:
+            pg.GraphicsLayoutWidget.keyPressEvent(self.graphics, event)
+
     def _press(self, event) -> None:
+        self.graphics.setFocus()
         self._last = event.position()
         self._dragging = True
         self._face = self._face_at(event.position()) if event.button() == Qt.LeftButton else None
