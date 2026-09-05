@@ -16,7 +16,7 @@ from PySide6.QtCore import QRectF, Qt, Signal
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog,
                                QFormLayout, QHBoxLayout, QLabel, QLineEdit,
                                QListWidget, QListWidgetItem, QMenu, QPushButton,
-                               QSlider, QToolButton, QVBoxLayout, QWidget)
+                               QScrollArea, QSlider, QToolButton, QVBoxLayout, QWidget)
 
 from .. import lut as luts
 from ..filter import quantile_range
@@ -33,6 +33,7 @@ QUICK_FIELDS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
     ("z", ("z_nm",)),
     ("phot", ("photons",)),
     ("PSF", ("sigma_nm", "sigma_pix")),
+    ("ch", ("channel",)),
     ("file", ("filenumber",)),
 )
 HIST_BINS = 120
@@ -115,8 +116,12 @@ class FilterWidget(QWidget):
         self.all_files = QPushButton("all")
         self.all_files.setToolTip("tick every file")
         self.all_files.clicked.connect(self._all_files)
-        self.all_files.hide()
-        numbers.insertWidget(numbers.count() - 1, self.all_files)
+        self.no_files = QPushButton("none")
+        self.no_files.setToolTip("untick every file")
+        self.no_files.clicked.connect(self._no_files)
+        for b in (self.all_files, self.no_files):
+            b.hide()
+            numbers.insertWidget(numbers.count() - 1, b)
 
     # ------------------------------------------------------------ binding
     def bind(self, layer: Layer) -> None:
@@ -179,6 +184,7 @@ class FilterWidget(QWidget):
         for w in (self.lo, self.hi, self.clear):
             w.setVisible(not by_file)
         self.all_files.setVisible(by_file)
+        self.no_files.setVisible(by_file)
         if by_file:
             self._show_files()
             self._update_count()
@@ -260,6 +266,12 @@ class FilterWidget(QWidget):
 
     def _all_files(self) -> None:
         self.layer.set_files(None)
+        self._show_files()
+        self._update_count()
+        self.changed.emit()
+
+    def _no_files(self) -> None:
+        self.layer.set_files([])
         self._show_files()
         self._update_count()
         self.changed.emit()
@@ -426,7 +438,15 @@ class RenderTab(QWidget):
     def __init__(self, session: Session, view=None, parent=None):
         super().__init__(parent)
         self.session = session
-        layout = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea(widgetResizable=True)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        inner = QWidget()
+        scroll.setWidget(inner)
+        outer.addWidget(scroll)
+        layout = QVBoxLayout(inner)              # the tab's content; scrolls when short
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(4)
 

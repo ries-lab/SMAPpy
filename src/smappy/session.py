@@ -293,6 +293,8 @@ class Session:
     def add_layer(self) -> Layer:
         """A new layer on the same table, with a fresh (default) filter."""
         layer = Layer(self.locs, name=f"layer {len(self.layers) + 1}")
+        if "filenumber" in self.locs:
+            layer.set_files([])            # starts empty: pick the file(s) it shows
         self.layers.append(layer)
         self.changed("layers")
         return layer
