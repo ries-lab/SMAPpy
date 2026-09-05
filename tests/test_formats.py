@@ -116,3 +116,20 @@ def test_image_layer_resamples_and_reads_pixel_size(tmp_path):
     assert layer.is_image and s.full_view()[0][1] >= 400
     rgb, _ = layer.render(FieldOfView(0, 0, 100.0, 4, 4))
     assert rgb.shape == (4, 4, 3)
+
+
+def test_remove_file_renumbers_and_keeps_layer_choices():
+    from smappy.io.formats import FileInfo
+    s = Session()
+    for i in range(3):
+        t = Localizations({"x_nm": np.full(4, i, np.float32), "y_nm": np.zeros(4, np.float32),
+                           "frame": np.arange(4)}, {})
+        s.add_file(t, FileInfo(f"f{i}", f"/f{i}", "t"), append=i > 0)
+    layer = s.add_layer()
+    layer.set_files([2])
+    s.remove_file(1)
+    assert s.file_names() == ["f0", "f2"] and len(s.locs) == 8
+    assert set(np.unique(s.locs["filenumber"])) == {0, 1}
+    assert len(s.selection(1)) == 4 and s.locs["x_nm"][s.selection(1).mask].min() == 2
+    s.undo()
+    assert len(s.locs) == 12

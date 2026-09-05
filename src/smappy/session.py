@@ -49,6 +49,7 @@ class Layer:
                  live: bool = False, extent=None):
         self.kind = "locs"
         self.image: Optional[ImageData] = None
+        self.files: Optional[List[int]] = None     # file numbers shown; None = all
         self.name = name
         self.visible = True
         if settings is None:
@@ -129,6 +130,7 @@ class Layer:
 
     def set_files(self, files: Optional[Sequence[int]]) -> None:
         """Restrict to these file numbers; None means every file."""
+        self.files = None if files is None else sorted(int(f) for f in files)
         for locset in self.state.sets.values():
             if files is None:
                 if "files" in locset.filter:
@@ -147,6 +149,8 @@ class Layer:
                 self.filter.set(field, lo, hi)
         if old.use_grouped:
             self.state.show_grouped(True)
+        if self.files is not None:
+            self.set_files(self.files)
 
     def append(self, block: Localizations) -> int:
         """Take in a block of a table that is still being produced."""
@@ -235,6 +239,25 @@ class Session:
 
     def file_names(self) -> List[str]:
         return [f.name for f in self.files]
+
+    def remove_file(self, number: int) -> None:
+        """Drop one file's localizations; the others are renumbered densely."""
+        if not 0 <= number < len(self.files):
+            return
+        numbers = np.asarray(self.locs["filenumber"])
+        keep = numbers != number
+        columns = {k: np.asarray(v)[keep] for k, v in self.locs.columns.items()}
+        renumbered = columns["filenumber"].copy()
+        renumbered[renumbered > number] -= 1
+        columns["filenumber"] = renumbered
+        removed = self.files.pop(number)
+        locs = Localizations(columns, dict(self.locs.metadata))
+        locs.metadata["files"] = [f.to_dict() for f in self.files]
+        for layer in self.layers:               # a layer's file choice follows the numbering
+            if not layer.is_image and layer.files is not None:
+                layer.files = [n - 1 if n > number else n for n in layer.files if n != number]
+        self.set_locs(locs, undoable=True, keep_layers=True)
+        self.log("remove file", removed.name)
 
     # -------------------------------------------------------------- images
     def add_image(self, image: ImageData, name: Optional[str] = None) -> Layer:

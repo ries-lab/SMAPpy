@@ -80,6 +80,9 @@ class FilterWidget(QWidget):
         self.files = QListWidget()
         self.files.setFixedHeight(110)
         self.files.itemChanged.connect(self._on_files)
+        self.files.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.files.customContextMenuRequested.connect(self._files_menu)
+        self.files.setToolTip("tick the files this layer shows; right-click to remove a file")
         self.files.hide()
         layout.addWidget(self.files)
         self.plot = pg.PlotWidget(background=None)
@@ -218,6 +221,16 @@ class FilterWidget(QWidget):
             item.setCheckState(Qt.Checked if on else Qt.Unchecked)
             self.files.addItem(item)
         self.files.blockSignals(False)
+
+    def _files_menu(self, pos) -> None:
+        item = self.files.itemAt(pos)
+        if item is None:
+            return
+        number = item.data(Qt.UserRole)
+        menu = QMenu(self)
+        menu.addAction(f"remove '{item.text()}' from the session",
+                       lambda: self.session.remove_file(number))
+        menu.exec(self.files.mapToGlobal(pos))
 
     def _on_files(self) -> None:
         numbers = [self.files.item(i).data(Qt.UserRole) for i in range(self.files.count())
