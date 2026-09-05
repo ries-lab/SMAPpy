@@ -246,7 +246,7 @@ class View3D(QWidget):
         self._last = pos
         if self._mode == "rotate":
             # screen y grows downward: a drag down tips the top towards the viewer
-            self.projection.rotate_view(-dx * DEGREES_PER_PIXEL, -dy * DEGREES_PER_PIXEL)
+            self.projection.rotate_view(dx * DEGREES_PER_PIXEL, -dy * DEGREES_PER_PIXEL)
         elif self._mode == "face":
             self._drag_face(dx, dy)
         else:
