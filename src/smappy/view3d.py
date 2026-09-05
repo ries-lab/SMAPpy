@@ -412,7 +412,10 @@ def render_layer_gpu(engine, locs: Localizations, select: np.ndarray, projection
                 floor=floor, cap=cap, use_weight=settings.weight_field is not None,
                 depth_lambda=projection.depth_lambda, depth_front=front,
                 color_mode=color_mode, color_range=color_range,
-                radius=projection.point_size, alpha=projection.point_alpha)
+                # the radius is in screen pixels: on a coarser preview grid
+                # (bigger pixels) it shrinks, so points look the same size
+                radius=projection.point_size * projection.zoom / fov.pixelsize,
+                alpha=projection.point_alpha)
     lut, invert = display.lut, display.invert
     if projection.engine == "points":
         idx = np.flatnonzero(mask) if mask is not None else np.asarray(select)
