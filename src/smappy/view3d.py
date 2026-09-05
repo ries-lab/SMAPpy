@@ -212,8 +212,11 @@ class Projection:
         self.offset = self.offset + shift[:2]
         self.pivot = pivot
 
-    def preset(self, name: str) -> None:
-        self.azimuth, self.elevation, self.roll = PRESETS[name]
+    def preset(self, name: str, slab_angle: float = 0.0) -> None:
+        """Top / front / side of the *slab*: its long axis is the screen's x
+        in the front view, its depth in the side view."""
+        az, el, roll = PRESETS[name]
+        self.azimuth, self.elevation, self.roll = (az - slab_angle) % 360, el, roll
 
     def fov(self, nx: int, ny: int, scale: int = 1) -> FieldOfView:
         """The render grid for a canvas of ``nx`` x ``ny`` pixels, view centred."""
@@ -275,6 +278,12 @@ def project_layer(locs: Localizations, select: np.ndarray, projection: Projectio
     return Localizations(columns, {"units": "nm"}), idx
 
 
+def column_range(locs: Localizations, name: str) -> Tuple[float, float]:
+    values = np.asarray(locs[name], np.float32)
+    finite = values[np.isfinite(values)]
+    return (float(finite.min()), float(finite.max())) if finite.size else (0.0, 1.0)
+
+
 def render_layer_3d(locs: Localizations, select: np.ndarray, projection: Projection,
                     slab: Optional[Slab], fov: FieldOfView, settings: RenderSettings,
                     display: DisplaySettings, preview: bool = False,
@@ -289,6 +298,10 @@ def render_layer_3d(locs: Localizations, select: np.ndarray, projection: Project
     """
     if projection.color_by_depth:
         settings = replace(settings, color_field="depth", color_range=None)
+    elif settings.color_field and settings.color_range is None and settings.color_field in locs:
+        # one colour scale for the whole table, whatever the slab, slice or
+        # preview holds -- as the GPU engine has it
+        settings = replace(settings, color_range=column_range(locs, settings.color_field))
     # depth is defined by the slab's corners (or the table's box), so that the
     # colour scale, the slices and the attenuation do not move with the filter
     front, drange = _depth_front_and_range(projection, slab, locs)
@@ -386,10 +399,8 @@ def render_layer_gpu(engine, locs: Localizations, select: np.ndarray, projection
     if color_field == "depth":
         color_mode, color_range = 2, (settings.color_range or drange)
     elif cvalues is not None:
-        finite = cvalues[np.isfinite(cvalues)]
         color_mode = 1
-        color_range = settings.color_range or ((float(finite.min()), float(finite.max()))
-                                               if finite.size else (0.0, 1.0))
+        color_range = settings.color_range or column_range(locs, color_field)
     else:
         color_mode, color_range = 0, (0.0, 1.0)
     ss = settings.sigma_settings

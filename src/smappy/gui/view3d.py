@@ -10,7 +10,7 @@ from typing import List, Optional
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import QObject, QPointF, QRectF, Qt, QThread, QTimer, Signal
+from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QAction, QImage
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDial, QDockWidget, QDoubleSpinBox,
                                QFileDialog, QFormLayout, QGridLayout, QHBoxLayout,
@@ -108,6 +108,8 @@ class View3D(QWidget):
         self.graphics.mouseMoveEvent = self._move
         self.graphics.mouseReleaseEvent = self._release
         self.graphics.wheelEvent = self._wheel
+        self.graphics.viewport().installEventFilter(self)
+        self.graphics.installEventFilter(self)
         session.on_change(self._on_session)
 
     # ------------------------------------------------------------ session
@@ -299,10 +301,24 @@ class View3D(QWidget):
             slab.size[axis] = max(slab.size[axis] * (1.1 ** -steps), 1.0)
             self.session.changed("slab")
         else:
-            self.projection.zoom *= 1.15 ** -steps
-            self.changed.emit()
-            self.schedule()
+            self.zoom_by(1.15 ** -steps)
         self._draw_box()
+
+    def zoom_by(self, factor: float) -> None:
+        """Zoom continuously: a preview now, the exact image once it settles."""
+        self.projection.zoom *= factor
+        self.changed.emit()
+        self._draw_box()
+        self.schedule(preview=True)
+        self._timer.start()
+
+    def eventFilter(self, obj, event) -> bool:
+        # the trackpad's pinch arrives as a native gesture on macOS
+        if event.type() == QEvent.NativeGesture and \
+                event.gestureType() == Qt.NativeGestureType.ZoomNativeGesture:
+            self.zoom_by(1.0 / (1.0 + event.value()))
+            return True
+        return super().eventFilter(obj, event)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -486,7 +502,8 @@ class SlabPanel(QWidget):
         self.view3d.schedule()
 
     def _preset(self, name: str) -> None:
-        self.view3d.projection.preset(name)
+        slab = self.session.slab
+        self.view3d.projection.preset(name, slab.angle if slab is not None else 0.0)
         self.refresh()
         self.view3d._draw_box()
         self.view3d.schedule()
