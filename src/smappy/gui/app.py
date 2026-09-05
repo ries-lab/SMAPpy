@@ -141,10 +141,10 @@ class PluginTab(QWidget):
 
 def window_shortcuts(window: QWidget) -> None:
     """Cmd/Ctrl+W closes this window, Cmd/Ctrl+Q quits: on every window."""
-    close = QAction("Close window", window, shortcut=QKeySequence.Close,
-                    triggered=window.close)
-    quit_ = QAction("Quit", window, shortcut=QKeySequence.Quit,
-                    triggered=lambda: QApplication.instance().quit())
+    close = QAction("Close window", window, triggered=window.close)
+    close.setShortcuts([QKeySequence(QKeySequence.Close), QKeySequence("Ctrl+W")])
+    quit_ = QAction("Quit", window, triggered=lambda: QApplication.instance().quit())
+    quit_.setShortcuts([QKeySequence(QKeySequence.Quit), QKeySequence("Ctrl+Q")])
     for action in (close, quit_):
         action.setShortcutContext(Qt.WindowShortcut)
         window.addAction(action)
