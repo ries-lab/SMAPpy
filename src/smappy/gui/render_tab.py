@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog
                                QScrollArea, QSlider, QToolButton, QVBoxLayout, QWidget)
 
 from .. import lut as luts
-from ..filter import quantile_range
+from ..filter import quantile_range  # noqa: F401  (kept for callers)
 from ..render import FieldOfView
 from ..session import Layer, Session
 from ..viewer import FIELD_LUT, INTENSITY_LUT
@@ -37,6 +37,7 @@ QUICK_FIELDS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
     ("file", ("filenumber",)),
 )
 HIST_BINS = 120
+HIST_SAMPLE = 2_000_000     # beyond this the histogram is of a random sample
 
 
 class _Bound(QLineEdit):
@@ -167,8 +168,14 @@ class FilterWidget(QWidget):
     def _histogram(self, name: str):
         key = (id(self.layer.locs), name)
         if key not in self._hist_cache:
-            values = np.asarray(self.layer.locs[name], dtype=np.float64)
-            lo, hi = quantile_range(self.layer.locs, name, 0.01, 0.99)   # not the outliers
+            values = np.asarray(self.layer.locs[name])
+            if values.size > HIST_SAMPLE:        # a sample says the same, 25x faster
+                pick = np.random.default_rng(0).integers(0, values.size, HIST_SAMPLE)
+                values = values[pick]
+            values = values.astype(np.float64)
+            finite = values[np.isfinite(values)]
+            lo, hi = ((float(np.quantile(finite, 0.01)), float(np.quantile(finite, 0.99)))
+                      if finite.size else (0.0, 1.0))                  # not the outliers
             if hi <= lo:
                 hi = lo + 1.0
             counts, edges = np.histogram(values, bins=HIST_BINS, range=(lo, hi))
@@ -464,6 +471,11 @@ class RenderTab(QWidget):
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(4)
 
+        # the whole picture, every visible layer, above the layer strip
+        self.overview = Overview(session, view)
+        section = CollapsibleSection("overview", self.overview, expanded=True, detachable=True)
+        section.detach_requested.connect(lambda: detach_to_window(section, self.window()))
+        layout.addWidget(section)
         self.strip = LayerStrip(session)
         layout.addWidget(self.strip)
         self.filter = FilterWidget(session)
@@ -532,10 +544,6 @@ class RenderTab(QWidget):
         more_form.addRow("gamma", self.gamma)
         form.addRow(CollapsibleSection("more", more, expanded=False))
         layout.addWidget(CollapsibleSection("display", display, expanded=True))
-        self.overview = Overview(session, view)
-        section = CollapsibleSection("overview", self.overview, expanded=True, detachable=True)
-        section.detach_requested.connect(lambda: detach_to_window(section, self.window()))
-        layout.addWidget(section)
         layout.addStretch(1)
 
         self.strip.selected.connect(self._bind_layer)
