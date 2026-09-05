@@ -81,12 +81,6 @@ class RenderView(QWidget):
         if app is not None:
             app.aboutToQuit.connect(self.shutdown)
 
-    def shutdown(self) -> None:
-        """Stop the render thread; called on the GUI thread at exit."""
-        thread = self._renderer.thread
-        thread.quit()
-        thread.wait(2000)
-
         # ROI drawing: click to start, click to finish (polygon: click per
         # vertex, double-click to close), Escape to cancel
         self.roi_item = None
@@ -100,6 +94,12 @@ class RenderView(QWidget):
         self.graphics.setFocusPolicy(Qt.StrongFocus)
         self.graphics.keyPressEvent = self._on_key
         self.reset()
+
+    def shutdown(self) -> None:
+        """Stop the render thread; called on the GUI thread at exit."""
+        thread = self._renderer.thread
+        thread.quit()
+        thread.wait(2000)
 
     # ---------------------------------------------------------------- flow
     def _on_session(self, what: str) -> None:
