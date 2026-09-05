@@ -139,13 +139,28 @@ class PluginTab(QWidget):
             s.setVisible(text in s.title.lower())
 
 
-def window_shortcuts(window: QWidget) -> None:
+def _keys(standard, fallback: str):
+    """The platform's standard sequence, plus the fallback if it is different
+    (a duplicate would make the shortcut ambiguous and dead)."""
+    keys = [QKeySequence(standard), QKeySequence(fallback)]
+    unique, seen = [], set()
+    for k in keys:
+        if k.toString() and k.toString() not in seen:
+            unique.append(k)
+            seen.add(k.toString())
+    return unique
+
+
+def window_shortcuts(window: QWidget, with_quit: bool = True) -> None:
     """Cmd/Ctrl+W closes this window, Cmd/Ctrl+Q quits: on every window."""
     close = QAction("Close window", window, triggered=window.close)
-    close.setShortcuts([QKeySequence(QKeySequence.Close), QKeySequence("Ctrl+W")])
-    quit_ = QAction("Quit", window, triggered=lambda: QApplication.instance().quit())
-    quit_.setShortcuts([QKeySequence(QKeySequence.Quit), QKeySequence("Ctrl+Q")])
-    for action in (close, quit_):
+    close.setShortcuts(_keys(QKeySequence.Close, "Ctrl+W"))
+    actions = [close]
+    if with_quit:
+        quit_ = QAction("Quit", window, triggered=lambda: QApplication.instance().quit())
+        quit_.setShortcuts(_keys(QKeySequence.Quit, "Ctrl+Q"))
+        actions.append(quit_)
+    for action in actions:
         action.setShortcutContext(Qt.WindowShortcut)
         window.addAction(action)
 
@@ -175,8 +190,9 @@ class ControlWindow(QMainWindow):
         menu.addSeparator()
         self.undo_action = self._action(menu, "Undo", QKeySequence.Undo, session.undo)
         menu.addSeparator()
-        self._action(menu, "Quit", QKeySequence.Quit, lambda: QApplication.instance().quit())
-        window_shortcuts(self)
+        quit_ = self._action(menu, "Quit", None, lambda: QApplication.instance().quit())
+        quit_.setShortcuts(_keys(QKeySequence.Quit, "Ctrl+Q"))
+        window_shortcuts(self, with_quit=False)
         view = self.menuBar().addMenu("View")
         self.view3d_window = None
         self._action(view, "3D view", "Ctrl+3", self.show_3d)
