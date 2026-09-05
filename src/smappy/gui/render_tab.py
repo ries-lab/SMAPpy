@@ -425,8 +425,8 @@ class Overview(QWidget):
         self.image.mouseClickEvent = self._on_click
         if view is not None:
             view.view.sigRangeChanged.connect(self._track)
-        # a full-field render: automatic only for a new table, else the button
-        session.on_change(lambda what: self.update_image() if what == "locs" else None)
+        # a full-field render costs seconds on a big table: only on the button
+        session.on_change(lambda what: self.image.clear() if what == "locs" else None)
 
     def update_image(self) -> None:
         if self.view is None or not (len(self.session.locs)
