@@ -96,9 +96,22 @@ class LocSet:
 
     def __init__(self, locs: Localizations, filter: Optional[LocFilter] = None,
                  extent: Optional[Sequence[float]] = None,
-                 growable: bool = False):
+                 growable: bool = False, share: Optional["LocSet"] = None):
+        """``share`` is another set over the *same* table: its index and its
+        median precision are reused, since both depend on the table alone and
+        building the index is what a new layer would otherwise spend on."""
         self.locs = locs
         self.filter = filter if filter is not None else LocFilter(locs)
+        self._precision_field: Optional[str] = None
+        for name in ("loc_precision_nm", "loc_precision_pix"):
+            if name in locs:
+                self._precision_field = name
+                break
+        if share is not None and share.locs is locs:
+            self.index = share.index
+            self.median_precision = share.median_precision
+            self._precision_n = share._precision_n
+            return
         # a live view is opened before the first block has been fitted, so an
         # empty table is a normal starting point, not an error
         empty = np.empty(0, np.float32)
@@ -108,11 +121,6 @@ class LocSet:
 
         # for the query margin: how far the widest blob reaches beyond the view
         self.median_precision = 0.0
-        self._precision_field: Optional[str] = None
-        for name in ("loc_precision_nm", "loc_precision_pix"):
-            if name in locs:
-                self._precision_field = name
-                break
         self._precision_n = 0
         self._update_precision()
 
@@ -167,15 +175,23 @@ class ViewState:
                  filter: Optional[LocFilter] = None,
                  grouped: Optional[Localizations] = None,
                  live: bool = False,
-                 extent: Optional[Sequence[float]] = None):
+                 extent: Optional[Sequence[float]] = None,
+                 share: Optional["ViewState"] = None):
         """``live`` prepares the table for `append`; ``extent`` fixes the area
-        the index covers, so the full view does not move as data arrives."""
+        the index covers, so the full view does not move as data arrives.
+        ``share`` is another state over the same table, whose indices (and
+        grouped table, if built) are reused instead of rebuilt."""
         self.settings = settings or RenderSettings()
         self.display = display or DisplaySettings()
         self.n_threads = 0
+        shared = share.sets.get("ungrouped") if share is not None else None
         self.sets: Dict[str, LocSet] = {
-            "ungrouped": LocSet(locs, filter, extent=extent, growable=live)}
-        if grouped is not None:
+            "ungrouped": LocSet(locs, filter, extent=extent, growable=live, share=shared)}
+        if grouped is None and share is not None and "grouped" in share.sets \
+                and shared is not None and shared.locs is locs and not share.grouped_stale:
+            other = share.sets["grouped"]
+            self.sets["grouped"] = LocSet(other.locs, share=other)
+        elif grouped is not None:
             self.sets["grouped"] = LocSet(grouped)
         self.use_grouped = False
         self.grouped_stale = False
@@ -202,17 +218,25 @@ class ViewState:
     def has_grouped(self) -> bool:
         return "grouped" in self.sets
 
-    def group(self, settings: Optional[GroupSettings] = None) -> LocSet:
+    def group(self, settings: Optional[GroupSettings] = None,
+              share: Optional["ViewState"] = None) -> LocSet:
         """Build the grouped table, once.  This is the slow part.
 
         Grouping links localizations across frames and has no incremental form,
         so an append cannot extend it: the table is marked stale instead and
-        rebuilt the next time it is asked for.
+        rebuilt the next time it is asked for.  ``share`` is a state over the
+        same table that already has it: then nothing is rebuilt.
         """
         if "grouped" not in self.sets or self.grouped_stale:
-            grouped, _ = group(self.sets["ungrouped"].locs, settings)
             keep = self.sets.get("grouped")
-            self.sets["grouped"] = LocSet(grouped)
+            other = share.sets.get("grouped") if share is not None else None
+            if other is not None and not share.grouped_stale \
+                    and share.sets["ungrouped"].locs is self.sets["ungrouped"].locs:
+                grouped = other.locs
+                self.sets["grouped"] = LocSet(grouped, share=other)
+            else:
+                grouped, _ = group(self.sets["ungrouped"].locs, settings)
+                self.sets["grouped"] = LocSet(grouped)
             if keep is not None:      # a rebuild: the bounds the user set stand
                 for field, (lo, hi) in keep.filter.ranges.items():
                     if field in grouped:
@@ -233,9 +257,10 @@ class ViewState:
         return n
 
     def show_grouped(self, on: bool,
-                     settings: Optional[GroupSettings] = None) -> None:
+                     settings: Optional[GroupSettings] = None,
+                     share: Optional["ViewState"] = None) -> None:
         if on:
-            self.group(settings)
+            self.group(settings, share)
         self.use_grouped = bool(on)
 
     def full_view(self, margin_fraction: float = 0.01) -> Tuple[tuple, tuple]:

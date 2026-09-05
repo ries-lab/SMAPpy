@@ -418,7 +418,8 @@ class Overview(QWidget):
         self.image.mouseClickEvent = self._on_click
         if view is not None:
             view.view.sigRangeChanged.connect(self._track)
-        session.on_change(lambda what: self.update_image() if what in ("locs", "layers") else None)
+        # a full-field render: automatic only for a new table, else the button
+        session.on_change(lambda what: self.update_image() if what == "locs" else None)
 
     def update_image(self) -> None:
         if self.view is None or not (len(self.session.locs)
@@ -671,6 +672,6 @@ class RenderTab(QWidget):
         self.strip.current = len(self.session.layers) - 1
 
     def _on_grouped(self, on: bool) -> None:
-        self.layer.show_grouped(on)      # links on first use: a moment
+        self.session.show_grouped(self.strip.current, on)   # links once per table
         self.filter.bind(self.layer)     # the grouped table has its own filter
         self.session.changed("layer")

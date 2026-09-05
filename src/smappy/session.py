@@ -46,7 +46,9 @@ class Layer:
                  defaults: bool = True,
                  settings: Optional[RenderSettings] = None,
                  display: Optional[DisplaySettings] = None,
-                 live: bool = False, extent=None):
+                 live: bool = False, extent=None, share: Optional["Layer"] = None):
+        """``share`` is a layer over the same table whose spatial index (and
+        grouped table) this one reuses -- a new layer then costs nothing."""
         self.kind = "locs"
         self.image: Optional[ImageData] = None
         self.files: Optional[List[int]] = None     # file numbers shown; None = all
@@ -54,11 +56,12 @@ class Layer:
         self.visible = True
         if settings is None:
             settings = RenderSettings(sigma_settings=SigmaSettings(factor=PRECISION_FACTOR))
-        self.state = ViewState(locs, settings, display, live=live, extent=extent)
+        other = share.state if share is not None and not share.is_image else None
+        self.state = ViewState(locs, settings, display, live=live, extent=extent, share=other)
         if defaults:
             self.apply_defaults()
         if GROUPED_BY_DEFAULT and not live and len(locs) and "frame" in locs:
-            self.show_grouped(True)
+            self.show_grouped(True, share)
 
     @classmethod
     def from_image(cls, image: ImageData, name: Optional[str] = None,
@@ -138,17 +141,18 @@ class Layer:
             elif "filenumber" in locset.locs:
                 locset.filter.set_mask("files", np.isin(locset.locs["filenumber"], list(files)))
 
-    def rebind(self, locs: Localizations) -> None:
+    def rebind(self, locs: Localizations, share: Optional["Layer"] = None) -> None:
         """Point at a new table, keeping the bounds and display the user set."""
         if self.is_image:
             return
         old = self.state
-        self.state = ViewState(locs, old.settings, old.display)
+        other = share.state if share is not None and not share.is_image else None
+        self.state = ViewState(locs, old.settings, old.display, share=other)
         for field, (lo, hi) in old.sets["ungrouped"].filter.ranges.items():
             if field in locs:
                 self.filter.set(field, lo, hi)
         if old.use_grouped:
-            self.state.show_grouped(True)
+            self.state.show_grouped(True, share=other)
         if self.files is not None:
             self.set_files(self.files)
 
@@ -164,10 +168,12 @@ class Layer:
     def grouped(self) -> bool:
         return self.state.use_grouped
 
-    def show_grouped(self, on: bool) -> None:
-        """Draw one entry per blink instead of one per frame.  Links on first use."""
+    def show_grouped(self, on: bool, share: Optional["Layer"] = None) -> None:
+        """Draw one entry per blink instead of one per frame.  Links on first
+        use -- unless ``share``, a layer over the same table, has it already."""
         fresh = on and "grouped" not in self.state.sets
-        self.state.show_grouped(on)
+        other = share.state if share is not None and not share.is_image else None
+        self.state.show_grouped(on, share=other)
         if fresh:                    # the new table gets the bounds already set
             for field, (lo, hi) in self.state.sets["ungrouped"].filter.ranges.items():
                 self.set_bound(field, lo, hi)
@@ -304,8 +310,12 @@ class Session:
             self._live = False
         elif undoable or keep_layers:      # the same data, corrected: keep the layers
             self._undo = self.locs if undoable else None
+            first = None                   # one index for the table, shared by all
             for layer in self.layers:
-                layer.rebind(locs)
+                if layer.is_image:
+                    continue
+                layer.rebind(locs, share=first)
+                first = first or layer
         else:                              # a new file: start over with one layer
             self._undo = None
             self.layers = [l for l in self.layers if l.is_image]
@@ -313,9 +323,20 @@ class Session:
         self.locs = locs
         self.changed("locs")
 
+    def _locs_layer(self) -> Optional[Layer]:
+        return next((l for l in self.layers if not l.is_image), None)
+
+    def show_grouped(self, index: int, on: bool) -> None:
+        """Grouped display for one layer, reusing another layer's grouped table."""
+        layer = self.layers[index]
+        partner = next((l for l in self.layers if l is not layer and not l.is_image
+                        and "grouped" in l.state.sets), None)
+        layer.show_grouped(on, partner)
+
     def add_layer(self) -> Layer:
         """A new layer on the same table, with a fresh (default) filter."""
-        layer = Layer(self.locs, name=f"layer {len(self.layers) + 1}")
+        layer = Layer(self.locs, name=f"layer {len(self.layers) + 1}",
+                      share=self._locs_layer())
         if "filenumber" in self.locs:
             layer.set_files([])            # starts empty: pick the file(s) it shows
         self.layers.append(layer)
@@ -360,8 +381,12 @@ class Session:
     def undo(self) -> None:
         if self._undo is not None:
             self.locs, self._undo = self._undo, None
+            first = None
             for layer in self.layers:
-                layer.rebind(self.locs)
+                if layer.is_image:
+                    continue
+                layer.rebind(self.locs, share=first)
+                first = first or layer
             self.files = [FileInfo(**{k: v for k, v in f.items() if k != "n"})
                           for f in self.locs.metadata.get("files", [])] or self.files
             self.log("undo")

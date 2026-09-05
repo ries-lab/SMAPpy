@@ -11,7 +11,7 @@ from typing import List, Optional, Tuple
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
+from PySide6.QtCore import QObject, QPointF, QRectF, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QAction, QActionGroup, QImage
 from PySide6.QtWidgets import (QFileDialog, QInputDialog, QLabel, QMenu, QToolBar,
                                QToolButton, QVBoxLayout, QWidget)
@@ -20,11 +20,35 @@ from ..regions import Region
 from ..render import FieldOfView
 from ..session import Session
 
+TILE = 1.5          # render this many view widths, so a pan needs no render
 ROI_PEN = pg.mkPen((255, 255, 0), width=1)
 DRAW_PEN = pg.mkPen((255, 255, 0), width=1, style=Qt.DashLine)
 
 
+class _Renderer(QObject):
+    """Renders on its own thread; the view keeps answering to the mouse."""
+
+    done = Signal(object, object, int)      # rgb, fov, generation
+
+    def __init__(self):
+        super().__init__()
+        self.thread = QThread()
+        self.thread.setStackSize(32 * 1024 * 1024)
+        self.moveToThread(self.thread)
+        self.thread.start()
+
+    def render(self, view: "RenderView", fov: FieldOfView, generation: int) -> None:
+        try:
+            rgb, _ = view.composite(fov)
+        except Exception as e:           # a table swapped mid-render: try again
+            print(f"render failed: {e}")
+            return
+        self.done.emit(rgb, fov, generation)
+
+
 class RenderView(QWidget):
+    render_requested = Signal(object, object, int)
+
     def __init__(self, session: Session, parent=None):
         super().__init__(parent)
         self.session = session
@@ -45,7 +69,23 @@ class RenderView(QWidget):
         self._timer.timeout.connect(self.render)
         self.view.sigRangeChanged.connect(self.schedule)
         session.on_change(self._on_session)
-        self.fov = None
+        self.fov = None                  # the field of view of the shown tile
+        self.tile_valid = False
+        self._generation = 0             # the newest request; older results are dropped
+        self._busy = False
+        self._pending = False
+        self._renderer = _Renderer()
+        self.render_requested.connect(self._renderer.render)
+        self._renderer.done.connect(self._on_rendered)
+        app = pg.QtWidgets.QApplication.instance()
+        if app is not None:
+            app.aboutToQuit.connect(self.shutdown)
+
+    def shutdown(self) -> None:
+        """Stop the render thread; called on the GUI thread at exit."""
+        thread = self._renderer.thread
+        thread.quit()
+        thread.wait(2000)
 
         # ROI drawing: click to start, click to finish (polygon: click per
         # vertex, double-click to close), Escape to cancel
@@ -64,8 +104,10 @@ class RenderView(QWidget):
     # ---------------------------------------------------------------- flow
     def _on_session(self, what: str) -> None:
         if what == "locs":
+            self.tile_valid = False
             self.reset()
         elif what in ("layer", "layers", "append"):
+            self.tile_valid = False      # the picture changed, not just the view
             self.schedule()
         elif what == "roi":
             self._show_roi(self.session.roi)
@@ -114,21 +156,67 @@ class RenderView(QWidget):
         rect.moveCenter(rect.center().__class__(x, y))
         self.view.setRange(rect, padding=0)
 
+    def _covered(self, view: FieldOfView) -> bool:
+        """Does the shown tile cover this view at (nearly) this pixel size?"""
+        t = self.fov
+        if t is None or not self.tile_valid:
+            return False
+        return (abs(t.pixelsize / view.pixelsize - 1) < 0.02
+                and t.x0 <= view.x0 and t.y0 <= view.y0
+                and t.x1 >= view.x1 and t.y1 >= view.y1)
+
     def render(self) -> None:
+        """Ask for a tile around the current view; nothing here blocks.
+
+        The tile is TILE view widths across at the view's pixel size, so a
+        pan inside it needs no render, and the last tile stays on screen --
+        scaled by the view -- until the new one arrives.
+        """
         if not self._has_content():
             self.image.clear()
+            self.fov = None
             return
+        view = self.current_fov()
+        self._update_scalebar(view)
+        if self._covered(view):
+            return
+        if self._busy:                   # one at a time; the newest view wins
+            self._pending = True
+            return
+        w, h = view.x1 - view.x0, view.y1 - view.y0
+        tile = FieldOfView.fit((view.x0 - (TILE - 1) / 2 * w, view.x1 + (TILE - 1) / 2 * w),
+                               (view.y0 - (TILE - 1) / 2 * h, view.y1 + (TILE - 1) / 2 * h),
+                               int(view.nx * TILE), int(view.ny * TILE))
+        self._generation += 1
+        self._busy = True
+        self.render_requested.emit(self, tile, self._generation)
+
+    def _on_rendered(self, rgb, fov: FieldOfView, generation: int) -> None:
+        self._busy = False
+        if generation != self._generation:      # superseded while it ran
+            self._pending = True
+        else:
+            rgb = np.ascontiguousarray(rgb)
+            self.image.setImage(rgb, levels=[0, 1] if rgb.dtype.kind == "f" else None,
+                                autoLevels=False)
+            self.image.setRect(QRectF(fov.x0, fov.y0, fov.x1 - fov.x0, fov.y1 - fov.y0))
+            self.fov = fov
+            self.tile_valid = True
+        if self._pending:
+            self._pending = False
+            self.render()
+
+    def render_now(self) -> np.ndarray:
+        """Synchronous: the exact current view, for saving and tests."""
         fov = self.current_fov()
         rgb, _ = self.composite(fov)
-        self.image.setImage(rgb, levels=[0, 1] if rgb.dtype.kind == "f" else None,
-                            autoLevels=False)
-        self.image.setRect(QRectF(fov.x0, fov.y0, fov.x1 - fov.x0, fov.y1 - fov.y0))
-        self.fov = fov
+        return np.ascontiguousarray(rgb)
+
+    def _update_scalebar(self, fov: FieldOfView) -> None:
         self.scalebar.size = _nice(0.2 * (fov.x1 - fov.x0))
         size = self.scalebar.size
         self.scalebar.text.setText(f"{size / 1000:g} µm" if size >= 1000 else f"{size:g} nm")
         self.scalebar.updateBar()
-
 
     # ---------------------------------------------------------------- roi
     def start_drawing(self, kind: str) -> None:
@@ -241,8 +329,8 @@ class RenderView(QWidget):
 
     # ------------------------------------------------------------- saving
     def save_png(self, path) -> None:
-        """The image as displayed, 8-bit RGB."""
-        rgb = (np.ascontiguousarray(self.image.image) * 255).astype(np.uint8)
+        """The view as displayed, 8-bit RGB."""
+        rgb = (self.render_now() * 255).astype(np.uint8)
         h, w, _ = rgb.shape
         QImage(rgb.data, w, h, 3 * w, QImage.Format_RGB888).save(str(path))
 
