@@ -136,3 +136,64 @@ Scripting: `Dbscan()(locs, selection, radius_nm=30)` or
    does, so a sparse live acquisition shows up before 9000 ROIs are in.
 4. Tree chooser over the registry; entry points so other packages register plugins.
 5. 3D view (`pyqtgraph.opengl`), then retire `viewer.py`.
+
+## 3D viewer: plan (decided 2026-09-05)
+
+### Model
+
+`Projection` (no Qt): rotation (three angles, kept as a 3x3 matrix), the
+point the view turns about, zoom (nm per screen pixel), perspective focal
+length (None = orthographic), and the **slab**: a box in data coordinates
+with centre, size (x, y, z) and an in-plane rotation, which is the 3D ROI.
+The slab and the projection are session state next to the ROI, so a script
+can set them and every engine and every panel reads the same object.
+
+`Slab.mask(x, y, z)` selects; `Projection.apply(x, y, z)` returns
+`(x', y', depth)` in view coordinates, with perspective as a scale by
+`1 / (1 + depth / f)`.
+
+### Engines, one interface
+
+    engine.render(layers, projection, fov, preview=False) -> rgb, planes
+
+* **A (first)**: rotate the slab's selected points, then `render_locs` on
+  `(x', y')` with each point's own sigma -- the 2D kernel, the layer's
+  render and display settings, the same sum-of-Gaussians image as the 2D
+  window.  Depth cues as weights and colour: attenuation
+  `exp(-depth / lambda)`, colour by depth; later slice opacity (K renders
+  composited front to back) and perspective.  Runs on the render worker;
+  while the mouse drags, a preview at half resolution and at most ~2 M
+  points, the exact image on release.
+* **GPU (later)**: instanced quads with the same erf kernel in the shader,
+  accumulated additively into a float framebuffer, display pass or readback.
+  Library decided then: vispy (OpenGL, deprecated on macOS) or pygfx/wgpu
+  (Metal).  Tested image-for-image against A.
+* Point-cloud mode (sprites, alpha) comes with the GPU engine.
+
+### Window and controls
+
+A separate 3D window (toolbar: save, presets top/front/side, reset; a
+collapsible side panel).  Layers, filters and display stay in the Render
+tab and drive both windows.  Mouse: left-drag rotates, shift + left-drag or
+middle-drag pans, wheel zooms, ctrl + wheel moves the slab along the depth
+axis, shift + wheel changes its thickness.
+
+The slab has three handles that edit the same box:
+1. the 2D window: a rectangle ROI is the footprint; a line ROI is a rotated
+   footprint (length x width) whose long axis is x' (SMAP's way); z from
+   the layer's z filter until set otherwise;
+2. the 3D window: the box is drawn, its faces drag, wheel modifiers above;
+3. the side panel: three range sliders with numbers, azimuth / elevation /
+   roll dials, presets, and a depth histogram of the slab's localizations.
+
+### Phases
+
+1. `Projection` + slab, slab from the 2D ROI, engine A with rotation, zoom,
+   pan and depth attenuation, the window with the mouse, the side panel
+   (ranges, dials, presets).  Tests: a rotated render of a known structure
+   equals the 2D render of the rotated table; the slab mask; preview vs
+   full agree in the limit.
+2. Slice opacity, perspective, colour by depth, draggable box faces,
+   depth histogram, save at pixel size (TIFF/PNG), a 3D `Selection` for
+   plugins (the slab as ROI).
+3. GPU engine and point-cloud mode.
