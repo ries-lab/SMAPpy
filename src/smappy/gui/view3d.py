@@ -368,17 +368,11 @@ class SlabPanel(QWidget):
         layout.addLayout(row)
 
         layout.addWidget(QLabel("<b>view</b>"))
-        dials = QGridLayout()
-        self.dials: List[QDial] = []
-        for i, name in enumerate(("azimuth", "elevation", "roll")):
-            dial = QDial(minimum=-180 if i != 1 else 0, maximum=180, wrapping=i != 1,
-                         notchesVisible=True)
-            dial.setFixedSize(56, 56)
-            dial.valueChanged.connect(lambda v, i=i: self._on_dial(i, v))
-            dials.addWidget(dial, 0, i, Qt.AlignCenter)
-            dials.addWidget(QLabel(name), 1, i, Qt.AlignCenter)
-            self.dials.append(dial)
-        layout.addLayout(dials)
+        self.fix_roll = QCheckBox("fix roll: turn about z, tilt z forward / back")
+        self.fix_roll.setToolTip("off: a trackball, the drag turns about the screen's axes")
+        self.fix_roll.setChecked(view.projection.fix_roll)
+        self.fix_roll.toggled.connect(self._on_fix_roll)
+        layout.addWidget(self.fix_roll)
         presets = QHBoxLayout()
         for name in PRESETS:
             b = QPushButton(name)
@@ -488,7 +482,7 @@ class SlabPanel(QWidget):
 
     def refresh(self) -> None:
         slab, proj = self.session.slab, self.view3d.projection
-        widgets = [w for pair in self.ranges for w in pair] + [self.angle] + self.dials
+        widgets = [w for pair in self.ranges for w in pair] + [self.angle]
         for w in widgets:
             w.blockSignals(True)
         if slab is not None:
@@ -497,12 +491,6 @@ class SlabPanel(QWidget):
                 lo.setValue(a)
                 hi.setValue(b)
             self.angle.setValue(slab.angle)
-        az = ((proj.azimuth + 180) % 360) - 180
-        roll = ((proj.roll + 180) % 360) - 180
-        el = proj.elevation % 360
-        el = el if el <= 180 else 360 - el          # the dial shows the ZXZ range
-        for dial, v in zip(self.dials, (az, el, roll)):
-            dial.setValue(int(round(v)))
         self.follow.setChecked(self.session.slab_follows_roi)
         for w in widgets:
             w.blockSignals(False)
@@ -522,9 +510,12 @@ class SlabPanel(QWidget):
         if on:
             self.session.slab_from_roi()
 
-    def _on_dial(self, i: int, value: int) -> None:
+    def _on_fix_roll(self, on: bool) -> None:
         proj = self.view3d.projection
-        setattr(proj, ("azimuth", "elevation", "roll")[i], float(value))
+        proj.fix_roll = on
+        if on:                                   # level the horizon now
+            proj.set_matrix(proj.matrix)
+            proj.roll = 0.0
         self.view3d._draw_box()
         self.view3d.schedule()
 

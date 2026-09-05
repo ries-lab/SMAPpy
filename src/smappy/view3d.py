@@ -161,6 +161,7 @@ class Projection:
     opacity: float = 0.0            # 0: plain sum; 1: the front hides the back
     slices: int = 32                # depth slices for the opacity compositing
     color_by_depth: bool = False    # override the layers' colour field
+    fix_roll: bool = True           # turntable: turn about data z, tilt z forward / back
     engine: str = "cpu"             # "cpu", "gpu" (same image), "points" or "spheres" (GPU)
     point_size: float = 0.0         # points mode: radius in nm; 0 = the median precision
     point_alpha: float = 0.5        # points mode: sprite opacity
@@ -202,9 +203,15 @@ class Projection:
         self.azimuth, self.elevation, self.roll = euler_zxz(np.asarray(R, float))
 
     def rotate_view(self, about_vertical: float, about_horizontal: float) -> None:
-        """Turn about the view's own axes (degrees): a drag to the right turns
-        about the screen's vertical axis, a drag upward tips the top away.
-        Continuous in every direction, no pole."""
+        """A mouse drag (degrees).  With ``fix_roll`` (turntable) a horizontal
+        drag turns about the data's z axis and a vertical one tilts that axis
+        forward or back, and the horizon stays level.  Otherwise a trackball:
+        the drag turns about the screen's own axes, continuous, no pole."""
+        if self.fix_roll:
+            self.roll = 0.0
+            self.azimuth = (self.azimuth + about_vertical) % 360
+            self.elevation = (self.elevation + about_horizontal) % 360
+            return
         self.set_matrix(_ry(about_vertical) @ _rx(about_horizontal) @ self.matrix)
 
     def move_pivot(self, pivot) -> None:

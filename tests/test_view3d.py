@@ -163,3 +163,16 @@ def test_pivot_moves_without_the_image():
     xv2, yv2, _ = proj.apply([100.0], [200.0], [50.0])
     fov1 = proj.fov(100, 100)
     assert np.allclose(xv - fov0.x0, xv2 - fov1.x0) and np.allclose(yv - fov0.y0, yv2 - fov1.y0)
+
+
+def test_fixed_roll_is_a_turntable():
+    proj = Projection(fix_roll=True)
+    for _ in range(10):
+        proj.rotate_view(7.0, 3.0)
+    assert proj.roll == 0.0 and abs(proj.azimuth - 70) < 1e-9 and abs(proj.elevation - 30) < 1e-9
+    # the data's z axis stays vertical on screen: no x' component
+    zx, zy, _ = proj.apply([0.0], [0.0], [1.0])
+    assert abs(zx[0]) < 1e-9
+    free = Projection(fix_roll=False)
+    free.rotate_view(30.0, 0.0)
+    assert free.roll != 0.0 or free.azimuth != 0.0
