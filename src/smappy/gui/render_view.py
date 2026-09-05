@@ -11,7 +11,7 @@ from typing import List, Optional, Tuple
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import QObject, QPointF, QRectF, Qt, QThread, QTimer, Signal
+from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QAction, QActionGroup, QImage
 from PySide6.QtWidgets import (QFileDialog, QInputDialog, QLabel, QMenu, QToolBar,
                                QToolButton, QVBoxLayout, QWidget)
@@ -68,6 +68,7 @@ class RenderView(QWidget):
         self._timer = QTimer(singleShot=True, interval=40)
         self._timer.timeout.connect(self.render)
         self.view.sigRangeChanged.connect(self.schedule)
+        self.graphics.viewport().installEventFilter(self)     # the trackpad's pinch
         session.on_change(self._on_session)
         self.fov = None                  # the field of view of the shown tile
         self.tile_valid = False
@@ -94,6 +95,16 @@ class RenderView(QWidget):
         self.graphics.setFocusPolicy(Qt.StrongFocus)
         self.graphics.keyPressEvent = self._on_key
         self.reset()
+
+    def eventFilter(self, obj, event) -> bool:
+        if event.type() == QEvent.NativeGesture and \
+                event.gestureType() == Qt.NativeGestureType.ZoomNativeGesture:
+            factor = 1.0 / (1.0 + event.value())
+            centre = self.view.mapSceneToView(self.graphics.mapToScene(event.position().toPoint()))
+            self.view.scaleBy((factor, factor), centre)
+            event.accept()
+            return True
+        return super().eventFilter(obj, event)
 
     def shutdown(self) -> None:
         """Stop the render thread; called on the GUI thread at exit."""

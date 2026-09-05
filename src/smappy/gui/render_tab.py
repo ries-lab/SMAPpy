@@ -518,6 +518,19 @@ class RenderTab(QWidget):
         color_row.setContentsMargins(0, 0, 0, 0)
         color_row.addWidget(self.color)
         color_row.addWidget(self.color_field, 1)
+        self.color_lo, self.color_hi = _Bound(), _Bound()
+        self.color_auto = QPushButton("auto")
+        self.color_auto.setToolTip("the field's 0.5-99.5% range")
+        range_row = QHBoxLayout()
+        range_row.setContentsMargins(0, 0, 0, 0)
+        for w in (self.color_lo, QLabel("to"), self.color_hi, self.color_auto):
+            range_row.addWidget(w)
+        range_row.addStretch(1)
+        self.color_range_row = QWidget()
+        self.color_range_row.setLayout(range_row)
+        self.color_lo.editingFinished.connect(self._on_color_range)
+        self.color_hi.editingFinished.connect(self._on_color_range)
+        self.color_auto.clicked.connect(self._auto_color_range)
         self.lut = QComboBox()
         self.lut.addItems(luts.names())
         self.contrast = QDoubleSpinBox(minimum=0, maximum=6, singleStep=0.1, decimals=2)
@@ -526,6 +539,7 @@ class RenderTab(QWidget):
                                 "links the table on first use")
         form.addRow("render", self.mode)
         form.addRow("colour by", color_row)
+        form.addRow("colour range", self.color_range_row)
         form.addRow("LUT", self.lut)
         form.addRow("contrast", self.contrast)
         form.addRow("", self.grouped)
@@ -618,6 +632,10 @@ class RenderTab(QWidget):
         self.color_field.setCurrentText(field)
         self.color.setCurrentIndex(1 if settings.color_field else 0)
         self.color_field.setEnabled(settings.color_field is not None)
+        self.color_range_row.setEnabled(settings.color_field is not None)
+        lo, hi = settings.color_range or (None, None)
+        self.color_lo.set(lo)
+        self.color_hi.set(hi)
         self.mode.setCurrentText(settings.mode)
         self.sigma.setValue(settings.sigma)
         self.factor.setValue(settings.sigma_settings.factor)
@@ -641,10 +659,48 @@ class RenderTab(QWidget):
         field = self.color_field.currentText() if by_field else None
         self.color_field.setEnabled(by_field)
         was = state.settings.color_field
-        state.settings = dataclasses.replace(state.settings, color_field=field or None)
+        # a new field starts on its 99% range: one scale for the 2D and 3D views
+        color_range = (self._field_range(field) if field and field != was
+                       else state.settings.color_range)
+        state.settings = dataclasses.replace(state.settings, color_field=field or None,
+                                             color_range=color_range if field else None)
+        self.color_range_row.setEnabled(field is not None)
+        lo, hi = color_range or (None, None)
+        self.color_lo.set(lo)
+        self.color_hi.set(hi)
         if (was is None) != (field is None):            # switching kind: a fitting LUT
             self.lut.setCurrentText(INTENSITY_LUT if field is None else FIELD_LUT)
         self.session.changed("layer")
+
+    def _field_range(self, field: str):
+        locs = self.layer.locs
+        if field not in locs:
+            return None
+        values = np.asarray(locs[field], np.float64)
+        finite = values[np.isfinite(values)]
+        if not finite.size:
+            return None
+        return (float(np.quantile(finite, 0.005)), float(np.quantile(finite, 0.995)))
+
+    def _on_color_range(self) -> None:
+        state = self.layer.state
+        try:
+            lo, hi = self.color_lo.value(), self.color_hi.value()
+        except ValueError:
+            return
+        if lo is None or hi is None or hi <= lo:
+            return
+        state.settings = dataclasses.replace(state.settings, color_range=(lo, hi))
+        self.session.changed("layer")
+
+    def _auto_color_range(self) -> None:
+        field = self.layer.state.settings.color_field
+        rng = self._field_range(field) if field else None
+        if rng is None:
+            return
+        self.color_lo.set(rng[0])
+        self.color_hi.set(rng[1])
+        self._on_color_range()
 
     def _on_display(self) -> None:
         layer = self.layer

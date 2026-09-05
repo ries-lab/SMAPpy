@@ -4,7 +4,7 @@ import numpy as np
 
 from smappy.locs import Localizations
 from smappy.regions import Region
-from smappy.render import DisplaySettings, FieldOfView, RenderSettings, render_locs
+from smappy.render import DisplaySettings, FieldOfView, RenderSettings, normalize, render_locs
 from smappy.view3d import Projection, Slab, project_layer, render_layer_3d
 
 
@@ -95,10 +95,19 @@ def test_opacity_zero_is_the_plain_sum_and_one_hides_the_back():
     assert np.allclose(plain.weight, composed.weight)
     front_only = render_layer_3d(locs[z > 100], np.ones(n // 2, bool), proj, None, fov,
                                  settings, display)[1]
+    back_only = render_layer_3d(locs[z < 100], np.ones(n // 2, bool), proj, None, fov,
+                                settings, display)[1]
+    # a fixed scale at half the front sheet's peak: there the front saturates
+    imax = float(front_only.weight.max()) * 0.5
     opaque = render_layer_3d(locs, sel, replace(proj, opacity=1.0, slices=8), None, fov,
-                             settings, display)[1]
+                             settings, DisplaySettings(imax=imax))[1]
     assert opaque.weight.sum() < plain.weight.sum()
-    assert opaque.weight.sum() >= front_only.weight.sum() * 0.99
+    # where the front sheet saturates, the back sheet must be gone: the image
+    # there is the front sheet, not the back one
+    covered = front_only.weight >= imax
+    assert covered.any()
+    assert np.allclose(opaque.weight[covered], front_only.weight[covered], rtol=1e-4)
+    assert not np.allclose(opaque.weight[covered], back_only.weight[covered] + front_only.weight[covered])
 
 
 def test_render_3d_gives_depth_histogram_and_selection_in_slab():

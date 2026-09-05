@@ -342,16 +342,17 @@ def composite_slices(table: Localizations, fov: FieldOfView, settings: RenderSet
 
 def composite_depth(whole: RenderedImage, slices: int, render_slice, display: DisplaySettings,
                     opacity: float) -> RenderedImage:
-    """Walk the slices from the front (largest depth, index ``slices - 1``)
-    to the back; each hides what is behind it by ``opacity`` x its coverage
-    on the scale the plain image is shown at."""
+    """Painter's order: from the back (slice 0, smallest depth) to the front
+    (largest depth, towards the viewer).  Each slice hides what is already
+    there behind it by ``opacity`` x its coverage on the scale the plain image
+    is shown at, and adds itself on top."""
     _, imax = normalize(whole.weight, display.imax, display.contrast)
     if imax <= 0:
         return whole
     fov = whole.fov
     weight = np.zeros(fov.shape, np.float32)
     color = np.zeros((*fov.shape, 3), np.float32) if whole.is_colored else None
-    for k in range(slices - 1, -1, -1):
+    for k in range(slices):
         part = render_slice(k)
         if part is None:
             continue
