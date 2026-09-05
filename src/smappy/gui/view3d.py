@@ -447,6 +447,16 @@ class SlabPanel(QWidget):
         form.addRow("point alpha", self.point_alpha)
         form.addRow("occlusion", self.ssao)
         form.addRow("occlusion radius", self.ssao_radius)
+        self._form = form
+        # which controls each engine reads; the others are greyed
+        self._uses = {
+            "cpu": {self.attenuation, self.opacity, self.slices, self.perspective, self.depth_color},
+            "gpu": {self.attenuation, self.opacity, self.slices, self.perspective, self.depth_color},
+            "points": {self.perspective, self.depth_color, self.point_size, self.point_alpha},
+            "spheres": {self.attenuation, self.perspective, self.depth_color, self.point_size,
+                        self.ssao, self.ssao_radius},
+        }
+        self._update_enabled()
         self.box = QCheckBox("show box")
         self.box.setChecked(True)
         self.box.toggled.connect(self._on_box)
@@ -525,7 +535,18 @@ class SlabPanel(QWidget):
         self.view3d._draw_box()
         self.view3d.schedule()
 
+    def _update_enabled(self) -> None:
+        used = self._uses[self.engine.currentData()]
+        for widgets in self._uses.values():
+            for w in widgets:
+                on = w in used
+                w.setEnabled(on)
+                label = self._form.labelForField(w)
+                if label is not None:
+                    label.setEnabled(on)
+
     def _on_projection_settings(self) -> None:
+        self._update_enabled()
         proj = self.view3d.projection
         proj.depth_lambda = self.attenuation.value() or None
         proj.opacity = self.opacity.value()
