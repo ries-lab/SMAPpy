@@ -109,7 +109,6 @@ class View3D(QWidget):
         self.graphics.mouseReleaseEvent = self._release
         self.graphics.wheelEvent = self._wheel
         self.graphics.viewport().installEventFilter(self)
-        self.graphics.installEventFilter(self)
         session.on_change(self._on_session)
 
     # ------------------------------------------------------------ session
@@ -317,6 +316,7 @@ class View3D(QWidget):
         if event.type() == QEvent.NativeGesture and \
                 event.gestureType() == Qt.NativeGestureType.ZoomNativeGesture:
             self.zoom_by(1.0 / (1.0 + event.value()))
+            event.accept()
             return True
         return super().eventFilter(obj, event)
 
