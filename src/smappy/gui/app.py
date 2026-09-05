@@ -219,10 +219,6 @@ class ControlWindow(QMainWindow):
         self.view3d_window.show()
         self.view3d_window.raise_()
 
-    def closeEvent(self, event) -> None:
-        """The control window is the program: closing it quits."""
-        super().closeEvent(event)
-        QApplication.instance().quit()
 
     def _on_session(self, what: str) -> None:
         if what in ("layer", "layers", "locs", "roi") and not self.render_window.isVisible():
