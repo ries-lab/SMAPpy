@@ -109,14 +109,16 @@ def _mode(name: str) -> str:
 
 
 def connect(x, y, frame, dx: float = 50.0, dt: int = 1,
-            blocks: Optional[np.ndarray] = None) -> np.ndarray:
+            blocks: Optional[np.ndarray] = None, z=None,
+            dz: Optional[float] = None) -> np.ndarray:
     """Assign every localization a 1-based group id, in the input order.
 
     ``dx`` is the half-width of the search box in the units of x and y, ``dt``
     the number of dark frames a particle may skip.  ``blocks`` labels groups of
     localizations that linking may not cross (a file or channel number); linking
     is run once per block, rather than SMAP's trick of zeroing the frame at each
-    boundary, which leaves the array no longer sorted by frame.
+    boundary, which leaves the array no longer sorted by frame.  With ``z``
+    and ``dz`` a link also needs the two to be within ``dz`` in z.
     """
     if _group is None:
         raise RuntimeError("the _group extension is not built; "
@@ -147,7 +149,9 @@ def connect(x, y, frame, dx: float = 50.0, dt: int = 1,
     offset = 0
     for begin, end in zip(edges[:-1], edges[1:]):
         block = order[begin:end]
-        ids, n_groups = _group.connect(x[block], y[block], frame[block], dx, dt)
+        zb = None if z is None or dz is None else np.asarray(z, np.float64)[block]
+        ids, n_groups = _group.connect(x[block], y[block], frame[block], dx, dt,
+                                       zb, 0.0 if dz is None else float(dz))
         out[block] = ids + offset
         offset += n_groups
     return out
@@ -244,6 +248,8 @@ class GroupSettings:
 
     dx: float = 50.0
     dt: int = 1
+    # link only within this in z too (nm); None: z is not looked at, as SMAP
+    dz: Optional[float] = None
     block_fields: Sequence[str] = ("filenumber", "channel")
 
 
@@ -263,5 +269,7 @@ def group(locs: Localizations, settings: Optional[GroupSettings] = None
 
     present = [locs[name] for name in settings.block_fields if name in locs]
     blocks = np.stack(present, axis=1) if present else None
-    group_index = connect(x, y, locs["frame"], settings.dx, settings.dt, blocks)
+    z = locs["z_nm"] if settings.dz is not None and "z_nm" in locs else None
+    group_index = connect(x, y, locs["frame"], settings.dx, settings.dt, blocks,
+                          z=z, dz=settings.dz)
     return combine(locs, group_index), group_index

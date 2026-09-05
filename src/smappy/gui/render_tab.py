@@ -419,6 +419,10 @@ class Overview(QWidget):
         self.update_button = QPushButton("update")
         self.update_button.setToolTip("re-render with the current layers")
         row.addWidget(self.update_button)
+        self.parameters_button = QPushButton("parameters...")
+        self.parameters_button.setToolTip("settings that are not a layer's: grouping")
+        self.parameters_button.clicked.connect(self._parameters)
+        row.addWidget(self.parameters_button)
         row.addStretch(1)
         layout.addLayout(row)
         self.update_button.clicked.connect(self.update_image)
@@ -427,6 +431,11 @@ class Overview(QWidget):
             view.view.sigRangeChanged.connect(self._track)
         # a full-field render costs seconds on a big table: only on the button
         session.on_change(lambda what: self.image.clear() if what == "locs" else None)
+
+    def _parameters(self) -> None:
+        from .dialogs import ParametersDialog
+        dialog = ParametersDialog(self.session, self)
+        dialog.exec()
 
     def update_image(self) -> None:
         if self.view is None or not (len(self.session.locs)
@@ -585,6 +594,8 @@ class RenderTab(QWidget):
             self._bind_layer(self.strip.current)
         elif what == "layers":
             self.strip.rebuild()
+        elif what == "regrouped":
+            self._bind_layer(self.strip.current)
         elif what in ("roi", "roi-edited"):
             self.filter._update_count()
         elif what == "append":

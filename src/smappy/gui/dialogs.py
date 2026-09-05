@@ -67,6 +67,44 @@ class CsvMappingDialog(QDialog):
                 "pixelsize_nm": self.pixelsize.value() if units == "px" else None}
 
 
+class ParametersDialog(QDialog):
+    """Session-wide parameters that belong to no layer: how localizations are
+    grouped into blinks.  OK regroups every layer."""
+
+    def __init__(self, session, parent=None):
+        super().__init__(parent)
+        from ..group import GroupSettings
+        from ..plugins import ParamInfo, param_specs
+        from .params import SettingsForm
+        self.session = session
+        self.setWindowTitle("parameters")
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("<b>grouping</b>: localizations of one blink are merged"))
+        infos = {"dx": ParamInfo(label="link within", unit="nm", min=0,
+                                 help="half-width of the box a localization may move per frame"),
+                 "dt": ParamInfo(label="gap", unit="frames", min=0,
+                                 help="frames a blink may be dark and still continue"),
+                 "dz": ParamInfo(label="z window", unit="nm", min=0,
+                                 help="link only within this in z; auto: z is not looked at"),
+                 "block_fields": ParamInfo(hidden=True)}
+        self.form = SettingsForm(GroupSettings, param_specs(GroupSettings, infos))
+        self.form.set(session.group_settings)
+        layout.addWidget(self.form)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self._apply)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _apply(self) -> None:
+        try:
+            settings = self.form.value()
+        except ValueError:
+            return
+        if settings != self.session.group_settings:
+            self.session.set_group_settings(settings)
+        self.accept()
+
+
 class PixelSizeDialog(QDialog):
     """An image without a pixel size in its tags: ask, plus where it sits."""
 

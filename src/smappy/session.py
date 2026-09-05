@@ -13,6 +13,7 @@ import numpy as np
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from .filter import LocFilter
+from .group import GroupSettings
 from .images import ImageData, load_image
 from .locs import Localizations, concat
 from .plugins import Plugin, Result, Selection
@@ -32,6 +33,9 @@ DEFAULT_BOUNDS: Dict[str, Tuple[Optional[float], Optional[float]]] = {
 DEFAULT_BOUNDS_2D = {"sigma_nm": (None, 180.0)}
 PRECISION_FACTOR = 0.5           # rendering sigma = factor * localization precision
 GROUPED_BY_DEFAULT = True
+# grouping in the GUI: SMAP's 50 nm / 1 frame, plus a z window so that two
+# emitters above each other (a 3D table) are not merged into one
+DEFAULT_GROUP_SETTINGS = GroupSettings(dx=50.0, dt=1, dz=100.0)
 
 
 class Layer:
@@ -47,7 +51,8 @@ class Layer:
                  defaults: bool = True,
                  settings: Optional[RenderSettings] = None,
                  display: Optional[DisplaySettings] = None,
-                 live: bool = False, extent=None, share: Optional["Layer"] = None):
+                 live: bool = False, extent=None, share: Optional["Layer"] = None,
+                 group_settings: Optional[GroupSettings] = None):
         """``share`` is a layer over the same table whose spatial index (and
         grouped table) this one reuses -- a new layer then costs nothing."""
         self.kind = "locs"
@@ -58,6 +63,7 @@ class Layer:
         if settings is None:
             settings = RenderSettings(sigma_settings=SigmaSettings(factor=PRECISION_FACTOR))
         other = share.state if share is not None and not share.is_image else None
+        self.group_settings = group_settings or DEFAULT_GROUP_SETTINGS
         self.state = ViewState(locs, settings, display, live=live, extent=extent, share=other)
         if defaults:
             self.apply_defaults()
@@ -149,6 +155,8 @@ class Layer:
         old = self.state
         other = share.state if share is not None and not share.is_image else None
         self.state = ViewState(locs, old.settings, old.display, share=other)
+        if share is not None and not share.is_image:
+            self.group_settings = share.group_settings
         for field, (lo, hi) in old.sets["ungrouped"].filter.ranges.items():
             if field in locs:
                 self.filter.set(field, lo, hi)
@@ -172,9 +180,9 @@ class Layer:
     def show_grouped(self, on: bool, share: Optional["Layer"] = None) -> None:
         """Draw one entry per blink instead of one per frame.  Links on first
         use -- unless ``share``, a layer over the same table, has it already."""
-        fresh = on and "grouped" not in self.state.sets
+        fresh = on and ("grouped" not in self.state.sets or self.state.grouped_stale)
         other = share.state if share is not None and not share.is_image else None
-        self.state.show_grouped(on, share=other)
+        self.state.show_grouped(on, self.group_settings, share=other)
         if fresh:                    # the new table gets the bounds already set
             for field, (lo, hi) in self.state.sets["ungrouped"].filter.ranges.items():
                 self.set_bound(field, lo, hi)
@@ -327,6 +335,31 @@ class Session:
             self.layers.insert(0, Layer(locs))
         self.locs = locs
         self.changed("locs")
+
+    @property
+    def group_settings(self) -> GroupSettings:
+        layer = self._locs_layer()
+        return layer.group_settings if layer is not None else DEFAULT_GROUP_SETTINGS
+
+    def set_group_settings(self, settings: GroupSettings) -> None:
+        """New linking parameters: every grouped table is rebuilt (once, shared)."""
+        first = None
+        for layer in self.layers:
+            if layer.is_image:
+                continue
+            layer.group_settings = settings
+            layer.state.grouped_stale = True
+            was_on = layer.grouped
+            if "grouped" in layer.state.sets:
+                bounds = dict(layer.state.sets["ungrouped"].filter.ranges)
+                layer.show_grouped(True, first)
+                layer.state.use_grouped = was_on
+                for field, (lo, hi) in bounds.items():
+                    layer.set_bound(field, lo, hi)
+                if layer.files is not None:
+                    layer.set_files(layer.files)
+            first = first or layer
+        self.changed("regrouped")
 
     def _locs_layer(self) -> Optional[Layer]:
         return next((l for l in self.layers if not l.is_image), None)

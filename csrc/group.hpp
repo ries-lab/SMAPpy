@@ -28,9 +28,12 @@
 
 namespace smappy {
 
+// `z` may be null: then z is not looked at; otherwise a link also needs
+// |z - zh| < dz, so two emitters above each other stay two.
 inline int64_t connect_single(const double* x, const double* y,
                               const int64_t* frame, int64_t n, double dx,
-                              int64_t dt, int64_t* list) {
+                              int64_t dt, int64_t* list,
+                              const double* z = nullptr, double dz = 0.0) {
     int64_t entry = 0, particle = 0;
 
     while (entry < n) {
@@ -39,6 +42,7 @@ inline int64_t connect_single(const double* x, const double* y,
 
         list[entry] = ++particle;
         double xh = x[entry], yh = y[entry];
+        double zh = z ? z[entry] : 0.0;
         int64_t fh = frame[entry], dark = 0, test = entry;
 
         while (test < n && dark <= dt) {
@@ -52,11 +56,13 @@ inline int64_t connect_single(const double* x, const double* y,
             while (test < n && frame[test] == next && x[test] < xh - dx) ++test;
 
             while (test < n && frame[test] == next && x[test] < xh + dx) {
-                if (list[test] == 0 && y[test] > yh - dx && y[test] < yh + dx) {
+                if (list[test] == 0 && y[test] > yh - dx && y[test] < yh + dx
+                    && (!z || (z[test] > zh - dz && z[test] < zh + dz))) {
                     found = true;
                     list[test] = particle;
                     xh = (x[test] + xh) / 2;
                     yh = (y[test] + yh) / 2;
+                    if (z) zh = (z[test] + zh) / 2;
                     fh = next;
                     dark = 0;
                     break;

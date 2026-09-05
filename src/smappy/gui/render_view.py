@@ -120,7 +120,7 @@ class RenderView(QWidget):
         if what == "locs":
             self.tile_valid = False
             self.reset()
-        elif what in ("layer", "layers", "append"):
+        elif what in ("layer", "layers", "append", "regrouped"):
             self.tile_valid = False      # the picture changed, not just the view
             self.schedule()
         elif what == "roi":
