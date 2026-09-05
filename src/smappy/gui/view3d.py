@@ -14,20 +14,19 @@ from PySide6.QtCore import QObject, QPointF, QRectF, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QAction, QImage
 from PySide6.QtWidgets import (QCheckBox, QDial, QDockWidget, QDoubleSpinBox,
                                QFileDialog, QFormLayout, QGridLayout, QHBoxLayout,
-                               QLabel, QMainWindow, QPushButton, QToolBar,
-                               QVBoxLayout, QWidget)
+                               QInputDialog, QLabel, QMainWindow, QMenu, QPushButton,
+                               QToolBar, QToolButton, QVBoxLayout, QWidget)
 
 from ..render import FieldOfView
 from ..session import Session
-from ..view3d import (PRESETS, PREVIEW_SCALE, Projection, Slab, render_layer_3d,
-                      upscale)
+from ..view3d import PRESETS, PREVIEW_SCALE, Projection, Slab, render_3d, upscale
 
 BOX_PEN = pg.mkPen((255, 255, 0, 160), width=1)
 DEGREES_PER_PIXEL = 0.4
 
 
 class _Renderer3D(QObject):
-    done = Signal(object, object, int)
+    done = Signal(object, object, object, int)      # rgb, fov, depth histogram, generation
 
     def __init__(self):
         super().__init__()
@@ -40,20 +39,12 @@ class _Renderer3D(QObject):
                preview: bool, generation: int) -> None:
         scale = PREVIEW_SCALE if preview else 1
         fov = projection.fov(nx, ny, scale)
-        rgb = np.zeros((fov.ny, fov.nx, 3), np.float32)
         try:
-            for layer in session.layers:
-                if not layer.visible or layer.is_image:
-                    continue
-                state = layer.state
-                image, _ = render_layer_3d(state.locs, state.filter.mask, projection, slab,
-                                           fov, state.settings, state.display, preview,
-                                           n_threads=state.n_threads)
-                rgb += image
+            rgb, hist = render_3d(session.layers, projection, slab, fov, preview)
         except Exception as e:                      # the table changed under us
             print(f"3D render failed: {e}")
             return
-        self.done.emit(upscale(np.clip(rgb, 0, 1), scale, ny, nx), fov, generation)
+        self.done.emit(upscale(rgb, scale, ny, nx), fov, hist, generation)
 
 
 class View3D(QWidget):
@@ -61,6 +52,7 @@ class View3D(QWidget):
 
     render_requested = Signal(object, object, object, int, int, bool, int)
     changed = Signal()          # projection or slab edited here
+    depth_histogram = Signal(object)
 
     def __init__(self, session: Session, parent=None):
         super().__init__(parent)
@@ -73,7 +65,10 @@ class View3D(QWidget):
         self.view.addItem(self.image)
         self.box = pg.PlotDataItem(pen=BOX_PEN, connect="pairs")
         self.view.addItem(self.box)
+        self.handles = pg.ScatterPlotItem(size=10, pen=BOX_PEN, brush=(255, 255, 0, 60))
+        self.view.addItem(self.handles)
         self.show_box = True
+        self._face: Optional[tuple] = None       # (axis, sign) while a face drags
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.graphics)
@@ -134,9 +129,10 @@ class View3D(QWidget):
                                    max(size.width(), 16), max(size.height(), 16),
                                    preview, self._generation)
 
-    def _on_rendered(self, rgb, fov: FieldOfView, generation: int) -> None:
+    def _on_rendered(self, rgb, fov: FieldOfView, hist, generation: int) -> None:
         self._busy = False
         if generation == self._generation:
+            self.depth_histogram.emit(hist)
             self.image.setImage(np.ascontiguousarray(rgb), levels=[0, 1], autoLevels=False)
             self.image.setRect(QRectF(fov.x0, fov.y0, fov.x1 - fov.x0, fov.y1 - fov.y0))
             self.view.setRange(QRectF(fov.x0, fov.y0, fov.x1 - fov.x0, fov.y1 - fov.y0),
@@ -146,10 +142,18 @@ class View3D(QWidget):
             preview, self._pending = self._pending, None
             self.render(preview)
 
+    def _face_centers(self, slab: Slab) -> np.ndarray:
+        """(6, 3) data points at the face centres, ordered (axis, sign)."""
+        c = slab.corners().reshape(2, 2, 2, 3)      # [sx, sy, sz]
+        return np.array([c[0].mean(axis=(0, 1)), c[1].mean(axis=(0, 1)),
+                         c[:, 0].mean(axis=(0, 1)), c[:, 1].mean(axis=(0, 1)),
+                         c[:, :, 0].mean(axis=(0, 1)), c[:, :, 1].mean(axis=(0, 1))])
+
     def _draw_box(self) -> None:
         slab = self.session.slab
         if slab is None or not self.show_box:
             self.box.setData([], [])
+            self.handles.setData([], [])
             return
         c = slab.corners()
         xv, yv, _ = self.projection.apply(c[:, 0], c[:, 1], c[:, 2])
@@ -158,6 +162,44 @@ class View3D(QWidget):
         xs = [xv[i] for e in edges for i in e]
         ys = [yv[i] for e in edges for i in e]
         self.box.setData(xs, ys)
+        f = self._face_centers(slab)
+        fx, fy, _ = self.projection.apply(f[:, 0], f[:, 1], f[:, 2])
+        self.handles.setData(fx, fy)
+
+    def _face_at(self, pos: QPointF) -> Optional[tuple]:
+        """Which face handle is under a widget position, if any."""
+        slab = self.session.slab
+        if slab is None or not self.show_box:
+            return None
+        f = self._face_centers(slab)
+        fx, fy, _ = self.projection.apply(f[:, 0], f[:, 1], f[:, 2])
+        scene = self.graphics.mapToScene(pos.toPoint())
+        view = self.view.mapSceneToView(scene)
+        d = np.hypot(fx - view.x(), fy - view.y()) / self.projection.zoom    # pixels
+        i = int(np.argmin(d))
+        return (i // 2, 1 if i % 2 else -1) if d[i] < 12 else None
+
+    def _drag_face(self, dx: float, dy: float) -> None:
+        """Move the dragged face along its axis by the mouse's component on it."""
+        slab = self.session.slab
+        axis, sign = self._face
+        unit = np.zeros(3)
+        unit[axis] = 1.0
+        if axis < 2:                                   # the slab's in-plane rotation
+            a = np.radians(slab.angle)
+            unit = np.array([[np.cos(a), -np.sin(a), 0], [np.sin(a), np.cos(a), 0],
+                             [0, 0, 1]]) @ unit
+        screen = (self.projection.matrix @ unit)[:2]  # nm on screen per nm along the axis
+        norm = float(screen @ screen)
+        if norm < 1e-9:
+            return
+        step = float(np.array([dx, dy]) * self.projection.zoom @ screen) / norm
+        lo, hi = slab.axis_range(axis)
+        if sign > 0:
+            hi = max(hi + step, lo + 1.0)
+        else:
+            lo = min(lo + step, hi - 1.0)
+        slab.set_axis_range(axis, lo, hi)
 
     def image_rgb(self) -> Optional[np.ndarray]:
         return self.image.image
@@ -166,7 +208,8 @@ class View3D(QWidget):
     def _press(self, event) -> None:
         self._last = event.position()
         self._dragging = True
-        self._mode = ("pan" if event.button() == Qt.MiddleButton
+        self._face = self._face_at(event.position()) if event.button() == Qt.LeftButton else None
+        self._mode = ("face" if self._face else "pan" if event.button() == Qt.MiddleButton
                       or event.modifiers() & Qt.ShiftModifier else "rotate")
 
     def _move(self, event) -> None:
@@ -177,6 +220,8 @@ class View3D(QWidget):
         self._last = pos
         if self._mode == "rotate":
             self.projection.rotate_by(dx * DEGREES_PER_PIXEL, dy * DEGREES_PER_PIXEL)
+        elif self._mode == "face":
+            self._drag_face(dx, dy)
         else:
             self.projection.offset -= np.array([dx, dy]) * self.projection.zoom
         self._draw_box()
@@ -185,7 +230,35 @@ class View3D(QWidget):
 
     def _release(self, event) -> None:
         self._dragging = False
+        if self._mode == "face" and self.session.slab is not None:
+            self.session.set_slab(self.session.slab, follow_roi=False)
+        self._face = None
         self.schedule(preview=False)
+
+    def render_at(self, pixelsize: float, what: str = "rgb") -> np.ndarray:
+        """Synchronous: the slab at ``pixelsize`` nm per pixel, for saving."""
+        proj = copy.deepcopy(self.projection)
+        slab = self.session.slab
+        c = slab.corners() if slab is not None else None
+        if c is not None:
+            xv, yv, _ = proj.apply(c[:, 0], c[:, 1], c[:, 2])
+            proj.offset = np.array([(xv.min() + xv.max()) / 2, (yv.min() + yv.max()) / 2])
+            nx, ny = int(np.ptp(xv) / pixelsize) + 2, int(np.ptp(yv) / pixelsize) + 2
+        else:
+            size = self.graphics.size()
+            nx, ny = size.width(), size.height()
+        proj.zoom = pixelsize
+        fov = proj.fov(nx, ny)
+        if what == "rgb":
+            return render_3d(self.session.layers, proj, slab, fov)[0]
+        weight = np.zeros((fov.ny, fov.nx), np.float32)
+        from ..view3d import render_layer_3d
+        for layer in self.session.layers:
+            if layer.visible and not layer.is_image:
+                st = layer.state
+                weight += render_layer_3d(st.locs, st.filter.mask, proj, slab, fov,
+                                          st.settings, st.display)[1].weight
+        return weight
 
     def _wheel(self, event) -> None:
         steps = event.angleDelta().y() / 120.0
@@ -274,14 +347,47 @@ class SlabPanel(QWidget):
         form = QFormLayout()
         self.attenuation = QDoubleSpinBox(minimum=0, maximum=1e6, decimals=0, suffix=" nm")
         self.attenuation.setToolTip("depth attenuation length; 0 = off")
-        self.attenuation.setKeyboardTracking(False)
-        self.attenuation.valueChanged.connect(self._on_attenuation)
+        self.opacity = QDoubleSpinBox(minimum=0, maximum=1, singleStep=0.1, decimals=2)
+        self.opacity.setToolTip("how much the front hides the back; 0 = plain sum "
+                                "(fast), 1 = opaque.  Rendered in depth slices.")
+        self.slices = QDoubleSpinBox(minimum=2, maximum=256, decimals=0)
+        self.slices.setValue(32)
+        self.perspective = QDoubleSpinBox(minimum=0, maximum=1e7, decimals=0, suffix=" nm")
+        self.perspective.setToolTip("focal distance; 0 = orthographic")
+        for w in (self.attenuation, self.opacity, self.slices, self.perspective):
+            w.setKeyboardTracking(False)
+            w.valueChanged.connect(self._on_projection_settings)
+        self.depth_color = QCheckBox("colour by depth")
+        self.depth_color.setToolTip("overrides the layers' colour field with the view depth")
+        self.depth_color.toggled.connect(self._on_projection_settings)
         form.addRow("dim with depth", self.attenuation)
+        form.addRow("opacity", self.opacity)
+        form.addRow("slices", self.slices)
+        form.addRow("perspective", self.perspective)
+        form.addRow("", self.depth_color)
         self.box = QCheckBox("show box")
         self.box.setChecked(True)
         self.box.toggled.connect(self._on_box)
         form.addRow("", self.box)
+        self.in_slab = QCheckBox("plugins use the slab")
+        self.in_slab.setToolTip("a plugin's selection is restricted to the slab")
+        self.in_slab.setChecked(session.select_in_slab)
+        self.in_slab.toggled.connect(self._on_in_slab)
+        form.addRow("", self.in_slab)
         layout.addLayout(form)
+
+        layout.addWidget(QLabel("<b>depth</b> of the slab's localizations"))
+        self.hist = pg.PlotWidget(background=None)
+        self.hist.setFixedHeight(90)
+        self.hist.hideAxis("left")
+        self.hist.setMenuEnabled(False)
+        self.hist.setMouseEnabled(x=False, y=False)
+        self.hist_bars = pg.PlotCurveItem([0.0, 1.0], [0.0], pen=None,
+                                          brush=(120, 120, 120, 160), fillLevel=0,
+                                          stepMode="center")
+        self.hist.addItem(self.hist_bars)
+        layout.addWidget(self.hist)
+        view.depth_histogram.connect(self._on_histogram)
         layout.addStretch(1)
 
         session.on_change(lambda what: self.refresh() if what in ("slab", "roi", "locs") else None)
@@ -334,9 +440,28 @@ class SlabPanel(QWidget):
         self.view3d._draw_box()
         self.view3d.schedule()
 
-    def _on_attenuation(self, value: float) -> None:
-        self.view3d.projection.depth_lambda = value or None
+    def _on_projection_settings(self) -> None:
+        proj = self.view3d.projection
+        proj.depth_lambda = self.attenuation.value() or None
+        proj.opacity = self.opacity.value()
+        proj.slices = int(self.slices.value())
+        proj.focal = self.perspective.value() or None
+        proj.color_by_depth = self.depth_color.isChecked()
+        self.view3d._draw_box()
         self.view3d.schedule()
+
+    def _on_in_slab(self, on: bool) -> None:
+        self.session.select_in_slab = on
+        self.session.changed("slab")
+
+    def _on_histogram(self, hist) -> None:
+        centres, counts = hist[:, 0], hist[:, 1]
+        if counts.sum() <= 0:
+            self.hist_bars.setData([0.0, 1.0], [0.0])
+            return
+        step = centres[1] - centres[0] if len(centres) > 1 else 1.0
+        edges = np.r_[centres - step / 2, centres[-1] + step / 2]
+        self.hist_bars.setData(edges, counts)
 
     def _on_box(self, on: bool) -> None:
         self.view3d.show_box = on
@@ -352,7 +477,13 @@ class View3DWindow(QMainWindow):
         self.setCentralWidget(self.view)
         bar = QToolBar("3d")
         bar.setMovable(False)
-        bar.addAction(QAction("Save PNG...", self, triggered=self._save))
+        save = QToolButton(text="Save", popupMode=QToolButton.InstantPopup)
+        menu = QMenu(save)
+        menu.addAction("PNG as displayed...", self._save)
+        menu.addAction("TIFF, colour at pixel size...", lambda: self._tiff("rgb"))
+        menu.addAction("TIFF, intensity (float) at pixel size...", lambda: self._tiff("intensity"))
+        save.setMenu(menu)
+        bar.addWidget(save)
         for name in PRESETS:
             bar.addAction(QAction(name, self, triggered=lambda _=False, n=name: self._preset(n)))
         bar.addAction(QAction("fit", self, triggered=self.view.fit))
@@ -379,6 +510,24 @@ class View3DWindow(QMainWindow):
             data = (np.ascontiguousarray(rgb) * 255).astype(np.uint8)
             h, w, _ = data.shape
             QImage(data.data, w, h, 3 * w, QImage.Format_RGB888).save(path)
+
+    def _tiff(self, what: str) -> None:
+        pixelsize, ok = QInputDialog.getDouble(self, "Pixel size", "nm per pixel:",
+                                               round(self.view.projection.zoom, 2), 0.1, 10000, 2)
+        if not ok:
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "Save 3D TIFF", "", "TIFF (*.tif *.tiff)")
+        if not path:
+            return
+        import tifffile
+        data = self.view.render_at(pixelsize, what)
+        data = (data * 255).astype(np.uint8) if what == "rgb" else data.astype(np.float32)
+        px_um = pixelsize / 1000.0
+        tifffile.imwrite(path, data, imagej=True, resolution=(1 / px_um, 1 / px_um),
+                         metadata={"unit": "um", "pixelsize_nm": pixelsize,
+                                   "projection": str(self.view.projection.to_dict()),
+                                   "slab": str(self.view.session.slab.to_dict()
+                                               if self.view.session.slab else None)})
 
     def showEvent(self, event) -> None:
         super().showEvent(event)

@@ -197,6 +197,7 @@ class Session:
         self.roi: Optional[Region] = None
         self.slab: Optional[Slab] = None          # the 3D view's volume
         self.slab_follows_roi = True              # the 2D ROI sets its footprint
+        self.select_in_slab = False               # plugins see only the slab
         self.projection = Projection()
         self.files: List[FileInfo] = []
         self.history: List[Dict] = []
@@ -450,6 +451,12 @@ class Session:
             # filter's cached mask is what `Selection` was handed
             sel.roi = self.roi
             sel.name += f", {self.roi}"
+        if self.select_in_slab and self.slab is not None and len(self.locs):
+            x, y = positions(self.locs)
+            z = self.locs["z_nm"] if "z_nm" in self.locs else None
+            sel.mask = sel.mask & self.slab.mask(x, y, z)
+            sel.roi = self.slab
+            sel.name += f", {self.slab}"
         return sel
 
     def run(self, plugin: Plugin, settings=None, layer: int = 0,

@@ -190,11 +190,16 @@ The slab has three handles that edit the same box:
 
 ### Status
 
-Phase 1 is in (`view3d.py`, `gui/view3d.py`; View -> 3D view, Ctrl+3):
-projection and slab in the session, slab from the 2D ROI (following it
-until edited by hand), engine A on its own worker with the half-resolution
-2 M-point preview while dragging, depth attenuation, the box, the mouse as
-above, the side panel with ranges, angle, dials, presets, fit.
+Phases 1 and 2 are in (`view3d.py`, `gui/view3d.py`; View -> 3D view,
+Ctrl+3): projection and slab in the session, slab from the 2D ROI
+(following it until edited by hand), engine A on its own worker with the
+half-resolution 2 M-point preview while dragging, the box with draggable
+face handles, the mouse as above, the side panel with ranges, angle, dials,
+presets, fit, depth attenuation, slice opacity (front-to-back compositing
+on the linear planes, exact sum at 0), perspective, colour by depth, a
+depth histogram, and *plugins use the slab* (the slab as the `Selection`'s
+ROI).  Save: PNG as shown, or a TIFF of the slab at a pixel size, colour or
+float intensity, with projection and slab in the ImageJ metadata.
 
 ### Phases
 

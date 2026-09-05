@@ -17,7 +17,7 @@ import numpy as np
 from .locs import Localizations
 from .regions import Region
 from .render import (DisplaySettings, FieldOfView, RenderSettings, RenderedImage,
-                     positions, render_locs)
+                     normalize, positions, render_locs)
 
 PREVIEW_POINTS = 2_000_000       # at most this many while the mouse drags
 PREVIEW_SCALE = 2                # and at this many times coarser pixels
@@ -124,6 +124,9 @@ class Projection:
     offset: np.ndarray = field(default_factory=lambda: np.zeros(2))   # pan, view nm
     focal: Optional[float] = None   # perspective: None = orthographic
     depth_lambda: Optional[float] = None   # attenuation length; None = off
+    opacity: float = 0.0            # 0: plain sum; 1: the front hides the back
+    slices: int = 32                # depth slices for the opacity compositing
+    color_by_depth: bool = False    # override the layers' colour field
 
     def __post_init__(self):
         self.pivot = np.asarray(self.pivot, dtype=np.float64).reshape(3)
@@ -220,17 +223,85 @@ def render_layer_3d(locs: Localizations, select: np.ndarray, projection: Project
                     slab: Optional[Slab], fov: FieldOfView, settings: RenderSettings,
                     display: DisplaySettings, preview: bool = False,
                     n_threads: int = 0) -> Tuple[np.ndarray, RenderedImage]:
-    """Engine A for one layer: RGB in [0, 1] and the planes."""
+    """Engine A for one layer: RGB in [0, 1] and the planes.
+
+    With ``projection.opacity`` > 0 the slab is rendered in depth slices and
+    composited front to back on the accumulated planes: each slice hides
+    what is behind it by ``opacity`` times its own coverage, where coverage
+    is the slice's intensity on the scale the plain image would be shown at.
+    At 0 this is exactly the plain sum.
+    """
+    if projection.color_by_depth:
+        settings = replace(settings, color_field="depth", color_range=None)
     table, _ = project_layer(locs, select, projection, slab, settings, preview)
     weight = "_weight" if "_weight" in table else settings.weight_field
-    color = settings.color_field
-    if color == "depth":
+    if settings.color_field == "depth":
         color_range = settings.color_range or (
             (float(table["depth"].min()), float(table["depth"].max())) if len(table) else None)
         settings = replace(settings, color_range=color_range)
     settings = replace(settings, weight_field=weight)
-    rendered = render_locs(table, fov, settings, display, n_threads=n_threads)
+    if projection.opacity <= 0 or projection.slices < 2 or len(table) < 2:
+        rendered = render_locs(table, fov, settings, display, n_threads=n_threads)
+        return display.apply(rendered), rendered
+    rendered = composite_slices(table, fov, settings, display, projection.opacity,
+                                max(2, projection.slices // (2 if preview else 1)), n_threads)
     return display.apply(rendered), rendered
+
+
+def composite_slices(table: Localizations, fov: FieldOfView, settings: RenderSettings,
+                     display: DisplaySettings, opacity: float, slices: int,
+                     n_threads: int = 0) -> RenderedImage:
+    """Front-to-back compositing of depth slices on the linear planes."""
+    depth = np.asarray(table["depth"])
+    whole = render_locs(table, fov, settings, display, n_threads=n_threads)
+    _, imax = normalize(whole.weight, display.imax, display.contrast)
+    if imax <= 0:
+        return whole
+    edges = np.linspace(depth.min(), depth.max(), slices + 1)
+    order = np.argsort(depth)                    # back to front, then walk from the front
+    bins = np.searchsorted(edges[1:-1], depth[order])
+    starts = np.searchsorted(bins, np.arange(slices + 1))
+    weight = np.zeros(fov.shape, np.float32)
+    color = np.zeros((*fov.shape, 3), np.float32) if whole.is_colored else None
+    for k in range(slices - 1, -1, -1):          # the front slice has the largest depth
+        idx = order[starts[k]:starts[k + 1]]
+        if idx.size == 0:
+            continue
+        part = render_locs(table, fov, settings, display, select=idx, n_threads=n_threads)
+        cover = np.clip(part.weight / imax, 0.0, 1.0) * opacity
+        weight = weight * (1.0 - cover) + part.weight
+        if color is not None:
+            color = color * (1.0 - cover)[..., None] + part.color
+    return RenderedImage(fov, weight, color, n_locs=whole.n_locs)
+
+
+def render_3d(layers, projection: Projection, slab: Optional[Slab], fov: FieldOfView,
+              preview: bool = False) -> Tuple[np.ndarray, np.ndarray]:
+    """Every visible localization layer, added up; also the depth histogram.
+
+    ``layers`` are session layers.  Returns the RGB image and a (64, 2)
+    array of depth-bin centres and counts over the slab's points.
+    """
+    rgb = np.zeros((fov.ny, fov.nx, 3), np.float32)
+    depths: List[np.ndarray] = []
+    for layer in layers:
+        if not layer.visible or layer.is_image:
+            continue
+        state = layer.state
+        image, _ = render_layer_3d(state.locs, state.filter.mask, projection, slab, fov,
+                                   state.settings, state.display, preview,
+                                   n_threads=state.n_threads)
+        rgb += image
+        table, _ = project_layer(state.locs, state.filter.mask, projection, slab,
+                                 state.settings, preview=True)
+        depths.append(np.asarray(table["depth"]))
+    hist = np.zeros((64, 2), np.float64)
+    if depths:
+        d = np.concatenate(depths)
+        if d.size:
+            counts, edges = np.histogram(d, bins=64)
+            hist[:, 0], hist[:, 1] = (edges[:-1] + edges[1:]) / 2, counts
+    return np.clip(rgb, 0, 1), hist
 
 
 def upscale(rgb: np.ndarray, scale: int, ny: int, nx: int) -> np.ndarray:
