@@ -80,12 +80,24 @@ class Slab:
         rot = np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]])
         return local @ rot.T + self.center
 
+    def axis_unit(self, axis: int) -> np.ndarray:
+        """The data-space direction of the slab's own axis 0, 1 or 2."""
+        c, s = math.cos(math.radians(self.angle)), math.sin(math.radians(self.angle))
+        return np.array([[c, s, 0.0], [-s, c, 0.0], [0.0, 0.0, 1.0]][axis])
+
     def axis_range(self, axis: int) -> Tuple[float, float]:
-        return (self.center[axis] - self.size[axis] / 2, self.center[axis] + self.size[axis] / 2)
+        """The extent along the slab's own axis, as a coordinate on that axis
+        (for an unrotated slab: the plain x, y or z range)."""
+        mid = float(self.center @ self.axis_unit(axis))
+        return (mid - self.size[axis] / 2, mid + self.size[axis] / 2)
 
     def set_axis_range(self, axis: int, lo: float, hi: float) -> None:
+        """Move only what changes: the other face stays where it is."""
         lo, hi = sorted((float(lo), float(hi)))
-        self.center[axis], self.size[axis] = (lo + hi) / 2, max(hi - lo, 1e-6)
+        unit = self.axis_unit(axis)
+        mid = float(self.center @ unit)
+        self.center = self.center + unit * ((lo + hi) / 2 - mid)
+        self.size[axis] = max(hi - lo, 1e-6)
 
     def to_dict(self) -> dict:
         return {"center": self.center.tolist(), "size": self.size.tolist(), "angle": self.angle}
@@ -112,12 +124,34 @@ def _rx(a):
 PRESETS = {"top": (0.0, 0.0, 0.0), "front": (0.0, 90.0, 0.0), "side": (90.0, 90.0, 0.0)}
 
 
+def _ry(a):
+    c, s = math.cos(math.radians(a)), math.sin(math.radians(a))
+    return np.array([[c, 0, s], [0, 1, 0], [-s, 0, c]])
+
+
+def euler_zxz(R: np.ndarray) -> Tuple[float, float, float]:
+    """(azimuth, elevation, roll) with ``R = Rz(roll) Rx(elevation) Rz(azimuth)``,
+    elevation in [0, 180]."""
+    el = math.degrees(math.atan2(math.hypot(R[2, 0], R[2, 1]), R[2, 2]))
+    if abs(math.sin(math.radians(el))) < 1e-9:      # gimbal: all of it is one turn about z
+        az = math.degrees(math.atan2(R[1, 0], R[0, 0])) * (1 if R[2, 2] > 0 else -1)
+        return az % 360, el, 0.0
+    az = math.degrees(math.atan2(R[2, 0], R[2, 1]))          # R[2] = sinEl (sinAz, cosAz, .)
+    roll = math.degrees(math.atan2(R[0, 2], -R[1, 2]))       # R[:, 2] = sinEl (sinRoll, -cosRoll, .)
+    return az % 360, el, roll % 360
+
+
 @dataclass
 class Projection:
     """Data -> view: ``v = R (p - pivot)``; ``(v_x, v_y)`` on screen, ``v_z``
-    is depth (towards the viewer positive)."""
+    is depth (towards the viewer positive).
+
+    ``azimuth`` (about data z), ``elevation`` (tilt about view x) and ``roll``
+    (about the depth axis) compose ``R``; `rotate_view` turns about the
+    view's own axes and re-derives them, so a mouse can rotate without end.
+    """
     azimuth: float = 0.0        # about the data z axis
-    elevation: float = 0.0      # tilt about the view x axis
+    elevation: float = 0.0      # tilt about the view x axis, 0 = top view
     roll: float = 0.0           # about the view depth axis
     pivot: np.ndarray = field(default_factory=lambda: np.zeros(3))
     zoom: float = 10.0          # nm per screen pixel
@@ -157,9 +191,26 @@ class Projection:
         return self.matrix[axis]
 
     def rotate_by(self, d_azimuth: float, d_elevation: float, d_roll: float = 0.0) -> None:
+        """Change the angles themselves (the dials)."""
         self.azimuth = (self.azimuth + d_azimuth) % 360
-        self.elevation = max(-90.0, min(90.0, self.elevation + d_elevation))
+        self.elevation = (self.elevation + d_elevation) % 360
         self.roll = (self.roll + d_roll) % 360
+
+    def set_matrix(self, R: np.ndarray) -> None:
+        self.azimuth, self.elevation, self.roll = euler_zxz(np.asarray(R, float))
+
+    def rotate_view(self, about_vertical: float, about_horizontal: float) -> None:
+        """Turn about the view's own axes (degrees): a drag to the right turns
+        about the screen's vertical axis, a drag upward tips the top away.
+        Continuous in every direction, no pole."""
+        self.set_matrix(_ry(about_vertical) @ _rx(about_horizontal) @ self.matrix)
+
+    def move_pivot(self, pivot) -> None:
+        """A new centre of rotation, without the image moving."""
+        pivot = np.asarray(pivot, float).reshape(3)
+        shift = self.matrix @ (self.pivot - pivot)
+        self.offset = self.offset + shift[:2]
+        self.pivot = pivot
 
     def preset(self, name: str) -> None:
         self.azimuth, self.elevation, self.roll = PRESETS[name]

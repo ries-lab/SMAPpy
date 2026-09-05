@@ -112,3 +112,45 @@ def test_render_3d_gives_depth_histogram_and_selection_in_slab():
     assert rgb.shape == (160, 200, 3) and hist[:, 1].sum() > 0 and abs(hist[:, 0]).max() <= 100
     s.select_in_slab = True
     assert np.abs(locs["z_nm"][s.selection(0).mask]).max() <= 100
+
+
+def test_view_rotation_is_continuous_and_angles_round_trip():
+    proj = Projection(azimuth=20, elevation=70, roll=10)
+    R = proj.matrix
+    proj.set_matrix(R)
+    assert np.allclose(proj.matrix, R, atol=1e-9)
+    # past the side view and on: no pole, the matrix keeps turning the same way
+    proj = Projection()
+    before = None
+    for _ in range(12):                              # 12 x 30 deg = a full turn
+        proj.rotate_view(0.0, 30.0)
+        if before is not None:
+            step = proj.matrix @ before.T             # the relative rotation
+            assert np.allclose(step, _rx_matrix(30.0), atol=1e-9)
+        before = proj.matrix
+    assert np.allclose(proj.matrix, np.eye(3), atol=1e-9)
+
+
+def _rx_matrix(deg):
+    from smappy.view3d import _rx
+    return _rx(deg)
+
+
+def test_rotated_slab_faces_move_one_at_a_time():
+    slab = Slab.from_region(Region.line((0, 0), (1000, 1000), 200), (-100, 100))
+    lo, hi = slab.axis_range(0)
+    far_face = slab.corners()[[0, 1, 2, 3]].mean(axis=0)      # the -x face centre
+    slab.set_axis_range(0, lo, hi + 300)                     # push the +x face out
+    assert np.allclose(slab.corners()[[0, 1, 2, 3]].mean(axis=0), far_face)
+    assert abs(slab.size[0] - (hi - lo + 300)) < 1e-9
+    assert abs(slab.angle - 45) < 1e-9
+
+
+def test_pivot_moves_without_the_image():
+    proj = Projection(azimuth=30, elevation=50, pivot=[0, 0, 0], zoom=2.0)
+    xv, yv, _ = proj.apply([100.0], [200.0], [50.0])
+    fov0 = proj.fov(100, 100)
+    proj.move_pivot([300, -100, 20])
+    xv2, yv2, _ = proj.apply([100.0], [200.0], [50.0])
+    fov1 = proj.fov(100, 100)
+    assert np.allclose(xv - fov0.x0, xv2 - fov1.x0) and np.allclose(yv - fov0.y0, yv2 - fov1.y0)

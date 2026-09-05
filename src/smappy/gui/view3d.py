@@ -113,8 +113,13 @@ class View3D(QWidget):
     # ------------------------------------------------------------ session
     def _on_session(self, what: str) -> None:
         if what in ("locs", "layer", "layers", "append", "slab", "roi"):
-            if what in ("locs",):
+            if what == "locs":
                 self.fit()
+            elif what == "slab" and self.session.slab is not None:
+                # the slab's centre is the centre of rotation; follow it in place
+                self.projection.move_pivot(self.session.slab.center)
+                self._draw_box()
+                self.changed.emit()
             self.schedule()
 
     def shutdown(self) -> None:
@@ -240,7 +245,8 @@ class View3D(QWidget):
         dx, dy = pos.x() - self._last.x(), pos.y() - self._last.y()
         self._last = pos
         if self._mode == "rotate":
-            self.projection.rotate_by(dx * DEGREES_PER_PIXEL, dy * DEGREES_PER_PIXEL)
+            # screen y grows downward: a drag down tips the top towards the viewer
+            self.projection.rotate_view(-dx * DEGREES_PER_PIXEL, -dy * DEGREES_PER_PIXEL)
         elif self._mode == "face":
             self._drag_face(dx, dy)
         else:
@@ -347,8 +353,8 @@ class SlabPanel(QWidget):
         dials = QGridLayout()
         self.dials: List[QDial] = []
         for i, name in enumerate(("azimuth", "elevation", "roll")):
-            dial = QDial(minimum=-180 if i != 1 else -90, maximum=180 if i != 1 else 90,
-                         wrapping=i != 1, notchesVisible=True)
+            dial = QDial(minimum=-180 if i != 1 else 0, maximum=180, wrapping=i != 1,
+                         notchesVisible=True)
             dial.setFixedSize(56, 56)
             dial.valueChanged.connect(lambda v, i=i: self._on_dial(i, v))
             dials.addWidget(dial, 0, i, Qt.AlignCenter)
@@ -450,7 +456,9 @@ class SlabPanel(QWidget):
             self.angle.setValue(slab.angle)
         az = ((proj.azimuth + 180) % 360) - 180
         roll = ((proj.roll + 180) % 360) - 180
-        for dial, v in zip(self.dials, (az, proj.elevation, roll)):
+        el = proj.elevation % 360
+        el = el if el <= 180 else 360 - el          # the dial shows the ZXZ range
+        for dial, v in zip(self.dials, (az, el, roll)):
             dial.setValue(int(round(v)))
         self.follow.setChecked(self.session.slab_follows_roi)
         for w in widgets:
@@ -533,8 +541,8 @@ class View3DWindow(QMainWindow):
         for name in PRESETS:
             bar.addAction(QAction(name, self, triggered=lambda _=False, n=name: self._preset(n)))
         bar.addAction(QAction("fit", self, triggered=self.view.fit))
-        self.hint = QLabel("  drag: rotate   shift-drag: pan   wheel: zoom   "
-                           "ctrl-wheel: slab depth   shift-wheel: thickness")
+        self.hint = QLabel("  drag: rotate about the slab centre   shift-drag: pan   "
+                           "wheel: zoom   ctrl-wheel: slab depth   shift-wheel: thickness")
         bar.addWidget(self.hint)
         self.addToolBar(bar)
         self.panel = SlabPanel(session, self.view)
