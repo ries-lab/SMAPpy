@@ -99,6 +99,8 @@ reasoning is here so that it does not have to be re-derived.
     smappy/io/formats.py         readers: smappy, SMAP, MINFLUX, csv
     smappy/images.py             pixel images as layers
     smappy/regions.py            ROIs and their masks
+    smappy/view3d.py             Projection, Slab, engine A (no Qt)
+    smappy/gui/view3d.py         the 3D window, its panel and mouse
     smappy/gui/params.py         Settings dataclass -> form widget, and back
     smappy/gui/widgets.py        CollapsibleSection
     smappy/gui/render_view.py    pyqtgraph view that re-renders on pan/zoom
@@ -185,6 +187,14 @@ The slab has three handles that edit the same box:
 2. the 3D window: the box is drawn, its faces drag, wheel modifiers above;
 3. the side panel: three range sliders with numbers, azimuth / elevation /
    roll dials, presets, and a depth histogram of the slab's localizations.
+
+### Status
+
+Phase 1 is in (`view3d.py`, `gui/view3d.py`; View -> 3D view, Ctrl+3):
+projection and slab in the session, slab from the 2D ROI (following it
+until edited by hand), engine A on its own worker with the half-resolution
+2 M-point preview while dragging, depth attenuation, the box, the mouse as
+above, the side panel with ranges, angle, dials, presets, fit.
 
 ### Phases
 

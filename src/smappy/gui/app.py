@@ -164,6 +164,8 @@ class ControlWindow(QMainWindow):
         menu.addSeparator()
         self.undo_action = self._action(menu, "Undo", QKeySequence.Undo, session.undo)
         view = self.menuBar().addMenu("View")
+        self.view3d_window = None
+        self._action(view, "3D view", "Ctrl+3", self.show_3d)
         self._action(view, "Reset view", "Ctrl+0", render.view.reset)
         self._action(view, "Show render window", None, render.show)
         session.on_change(self._on_session)
@@ -176,6 +178,15 @@ class ControlWindow(QMainWindow):
         action.triggered.connect(slot)
         menu.addAction(action)
         return action
+
+    def show_3d(self) -> None:
+        if self.view3d_window is None:
+            from .view3d import View3DWindow
+            self.view3d_window = View3DWindow(self.session)
+            QApplication.instance().aboutToQuit.connect(self.view3d_window.view.shutdown)
+            self.view3d_window.move(self.render_window.x(), self.render_window.y() + 60)
+        self.view3d_window.show()
+        self.view3d_window.raise_()
 
     def _on_session(self, what: str) -> None:
         if what in ("layer", "layers", "locs", "roi") and not self.render_window.isVisible():

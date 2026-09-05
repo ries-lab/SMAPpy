@@ -18,6 +18,7 @@ from .locs import Localizations, concat
 from .plugins import Plugin, Result, Selection
 from .io.formats import FileInfo, load as load_any
 from .regions import Region
+from .view3d import Projection, Slab
 from .render import DisplaySettings, RenderSettings, SigmaSettings, positions
 from .viewer import ViewState
 
@@ -194,6 +195,9 @@ class Session:
         self.path: Optional[Path] = Path(path) if path else None
         self.layers: List[Layer] = [Layer(self.locs)]
         self.roi: Optional[Region] = None
+        self.slab: Optional[Slab] = None          # the 3D view's volume
+        self.slab_follows_roi = True              # the 2D ROI sets its footprint
+        self.projection = Projection()
         self.files: List[FileInfo] = []
         self.history: List[Dict] = []
         self._undo: Optional[Localizations] = None
@@ -395,7 +399,41 @@ class Session:
     # ----------------------------------------------------------------- roi
     def set_roi(self, roi: Optional[Region]) -> None:
         self.roi = roi
+        if self.slab_follows_roi:
+            self.slab_from_roi()
         self.changed("roi")
+
+    # ---------------------------------------------------------------- 3D
+    def z_range(self) -> Tuple[float, float]:
+        """The z the first locs layer's filter keeps, else the data's."""
+        layer = self._locs_layer()
+        if layer is None or "z_nm" not in self.locs or not len(self.locs):
+            return (-1.0, 1.0)
+        lo, hi = layer.state.sets["ungrouped"].filter.ranges.get("z_nm", (None, None))
+        z = np.asarray(self.locs["z_nm"])
+        finite = z[np.isfinite(z)]
+        dlo, dhi = (float(finite.min()), float(finite.max())) if finite.size else (-1.0, 1.0)
+        return (dlo if lo is None else lo, dhi if hi is None else hi)
+
+    def slab_from_roi(self) -> Slab:
+        """The slab from the ROI (or the whole field), z from the filter."""
+        z0, z1 = self.z_range()
+        if self.roi is not None:
+            self.slab = Slab.from_region(self.roi, (z0, z1))
+        else:
+            (x0, x1), (y0, y1) = self.full_view(0.0)
+            self.slab = Slab.from_bounds(x0, x1, y0, y1, z0, z1)
+        self.changed("slab")
+        return self.slab
+
+    def set_slab(self, slab: Slab, follow_roi: bool = False) -> None:
+        self.slab = slab
+        self.slab_follows_roi = follow_roi
+        self.changed("slab")
+
+    def set_projection(self, projection: Projection) -> None:
+        self.projection = projection
+        self.changed("projection")
 
     # ------------------------------------------------------------- plugins
     def selection(self, layer: int = 0) -> Selection:
