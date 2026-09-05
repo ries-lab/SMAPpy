@@ -54,6 +54,8 @@ drift = ["matplotlib>=3.4"]
 cuda = ["numba>=0.57"]
 # The Qt GUI.  matplotlib is for the plugins' result plots.
 gui = ["PySide6>=6.6", "pyqtgraph>=0.13", "matplotlib>=3.4"]
+# The GPU engine of the 3D viewer: wgpu-py (Metal / Vulkan / DX12, headless).
+gpu = ["wgpu>=0.19"]
 
 [project.scripts]
 smappy-fit = "smappy.cli.fit:main"

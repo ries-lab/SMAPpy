@@ -127,6 +127,9 @@ class Projection:
     opacity: float = 0.0            # 0: plain sum; 1: the front hides the back
     slices: int = 32                # depth slices for the opacity compositing
     color_by_depth: bool = False    # override the layers' colour field
+    engine: str = "cpu"             # "cpu", "gpu" (same image), or "points" (GPU sprites)
+    point_size: float = 2.0         # points mode: radius in screen pixels
+    point_alpha: float = 0.5        # points mode: sprite opacity
 
     def __post_init__(self):
         self.pivot = np.asarray(self.pivot, dtype=np.float64).reshape(3)
@@ -187,7 +190,8 @@ class Projection:
 # --------------------------------------------------------------- engine A
 def project_layer(locs: Localizations, select: np.ndarray, projection: Projection,
                   slab: Optional[Slab], settings: RenderSettings,
-                  preview: bool = False) -> Tuple[Localizations, np.ndarray]:
+                  preview: bool = False, front: Optional[float] = None
+                  ) -> Tuple[Localizations, np.ndarray]:
     """The selected rows of a table, rotated into a 2D table for the renderer.
 
     Returns the table (``x_nm``/``y_nm`` are the view coordinates, ``depth``
@@ -212,7 +216,8 @@ def project_layer(locs: Localizations, select: np.ndarray, projection: Projectio
             columns[name] = np.asarray(locs[name])[idx]
     if projection.depth_lambda:
         # dimmer towards the back; the front of the slab is at full weight
-        front = depth.max() if depth.size else 0.0
+        if front is None:
+            front = depth.max() if depth.size else 0.0
         attenuation = np.exp(-(front - depth) / projection.depth_lambda).astype(np.float32)
         base = columns.get(settings.weight_field) if settings.weight_field else None
         columns["_weight"] = attenuation if base is None else attenuation * np.asarray(base, np.float32)
@@ -233,54 +238,155 @@ def render_layer_3d(locs: Localizations, select: np.ndarray, projection: Project
     """
     if projection.color_by_depth:
         settings = replace(settings, color_field="depth", color_range=None)
-    table, _ = project_layer(locs, select, projection, slab, settings, preview)
+    # depth is defined by the slab's corners (or the table's box), so that the
+    # colour scale, the slices and the attenuation do not move with the filter
+    front, drange = _depth_front_and_range(projection, slab, locs)
+    table, _ = project_layer(locs, select, projection, slab, settings, preview, front)
     weight = "_weight" if "_weight" in table else settings.weight_field
     if settings.color_field == "depth":
-        color_range = settings.color_range or (
-            (float(table["depth"].min()), float(table["depth"].max())) if len(table) else None)
-        settings = replace(settings, color_range=color_range)
+        settings = replace(settings, color_range=settings.color_range or drange)
     settings = replace(settings, weight_field=weight)
     if projection.opacity <= 0 or projection.slices < 2 or len(table) < 2:
         rendered = render_locs(table, fov, settings, display, n_threads=n_threads)
         return display.apply(rendered), rendered
     rendered = composite_slices(table, fov, settings, display, projection.opacity,
-                                max(2, projection.slices // (2 if preview else 1)), n_threads)
+                                max(2, projection.slices // (2 if preview else 1)), n_threads,
+                                drange)
     return display.apply(rendered), rendered
 
 
 def composite_slices(table: Localizations, fov: FieldOfView, settings: RenderSettings,
                      display: DisplaySettings, opacity: float, slices: int,
-                     n_threads: int = 0) -> RenderedImage:
-    """Front-to-back compositing of depth slices on the linear planes."""
+                     n_threads: int = 0, depth_range=None) -> RenderedImage:
+    """Front-to-back compositing of depth slices on the linear planes (CPU)."""
     depth = np.asarray(table["depth"])
     whole = render_locs(table, fov, settings, display, n_threads=n_threads)
+    lo, hi = depth_range or (depth.min(), depth.max())
+    edges = np.linspace(lo, hi, slices + 1)
+    order = np.argsort(depth)
+    bins = np.searchsorted(edges[1:-1], depth[order])
+    starts = np.searchsorted(bins, np.arange(slices + 1))
+
+    def render_slice(k: int) -> Optional[RenderedImage]:
+        idx = order[starts[k]:starts[k + 1]]
+        if idx.size == 0:
+            return None
+        return render_locs(table, fov, settings, display, select=idx, n_threads=n_threads)
+
+    return composite_depth(whole, slices, render_slice, display, opacity)
+
+
+def composite_depth(whole: RenderedImage, slices: int, render_slice, display: DisplaySettings,
+                    opacity: float) -> RenderedImage:
+    """Walk the slices from the front (largest depth, index ``slices - 1``)
+    to the back; each hides what is behind it by ``opacity`` x its coverage
+    on the scale the plain image is shown at."""
     _, imax = normalize(whole.weight, display.imax, display.contrast)
     if imax <= 0:
         return whole
-    edges = np.linspace(depth.min(), depth.max(), slices + 1)
-    order = np.argsort(depth)                    # back to front, then walk from the front
-    bins = np.searchsorted(edges[1:-1], depth[order])
-    starts = np.searchsorted(bins, np.arange(slices + 1))
+    fov = whole.fov
     weight = np.zeros(fov.shape, np.float32)
     color = np.zeros((*fov.shape, 3), np.float32) if whole.is_colored else None
-    for k in range(slices - 1, -1, -1):          # the front slice has the largest depth
-        idx = order[starts[k]:starts[k + 1]]
-        if idx.size == 0:
+    for k in range(slices - 1, -1, -1):
+        part = render_slice(k)
+        if part is None:
             continue
-        part = render_locs(table, fov, settings, display, select=idx, n_threads=n_threads)
         cover = np.clip(part.weight / imax, 0.0, 1.0) * opacity
         weight = weight * (1.0 - cover) + part.weight
-        if color is not None:
+        if color is not None and part.color is not None:
             color = color * (1.0 - cover)[..., None] + part.color
     return RenderedImage(fov, weight, color, n_locs=whole.n_locs)
 
 
+# ------------------------------------------------------------ engine: GPU
+def _depth_front_and_range(projection: Projection, slab: Optional[Slab], locs: Localizations):
+    """The depth range of the slab's corners (or the table's bounding box)."""
+    if slab is not None:
+        c = slab.corners()
+    else:
+        x, y = positions(locs)
+        z = locs["z_nm"] if "z_nm" in locs else np.zeros(1)
+        lo = [np.nanmin(x), np.nanmin(y), np.nanmin(z)]
+        hi = [np.nanmax(x), np.nanmax(y), np.nanmax(z)]
+        c = np.array([[a, b, d] for a in (lo[0], hi[0]) for b in (lo[1], hi[1])
+                      for d in (lo[2], hi[2])])
+    _, _, d = projection.apply(c[:, 0], c[:, 1], c[:, 2])
+    return float(d.max()), (float(d.min()), float(d.max()))
+
+
+def render_layer_gpu(engine, locs: Localizations, select: np.ndarray, projection: Projection,
+                     slab: Optional[Slab], fov: FieldOfView, settings: RenderSettings,
+                     display: DisplaySettings, median_precision: float = 0.0,
+                     preview: bool = False):
+    """Engine A on the GPU for one layer: the same planes as `render_layer_3d`,
+    or, with ``projection.engine == "points"``, an RGB sprite image."""
+    x, y = positions(locs)
+    z = locs["z_nm"] if "z_nm" in locs else None
+    prec_name = next((n for n in ("loc_precision_nm", "loc_precision_pix") if n in locs), None)
+    color_field = "depth" if projection.color_by_depth else settings.color_field
+    key = (id(locs), prec_name, settings.weight_field, color_field)
+    cvalues = (locs[color_field] if color_field and color_field != "depth" and color_field in locs
+               else None)
+    engine.table(key, x, y, z, locs[prec_name] if prec_name else None,
+                 locs[settings.weight_field] if settings.weight_field else None, cvalues)
+    mask = select if select.dtype == bool else None
+    sel_key = (key, id(select))
+    front, drange = _depth_front_and_range(projection, slab, locs)
+    if color_field == "depth":
+        color_mode, color_range = 2, (settings.color_range or drange)
+    elif cvalues is not None:
+        finite = cvalues[np.isfinite(cvalues)]
+        color_mode = 1
+        color_range = settings.color_range or ((float(finite.min()), float(finite.max()))
+                                               if finite.size else (0.0, 1.0))
+    else:
+        color_mode, color_range = 0, (0.0, 1.0)
+    ss = settings.sigma_settings
+    floor = max(ss.min_sigma, ss.min_sigma_pixels * fov.pixelsize)
+    cap = ss.max_factor * median_precision if median_precision > 0 else 1e30
+    base = dict(fov=fov, matrix=projection.matrix, pivot=projection.pivot, focal=projection.focal,
+                slab=slab, sigma_mode=settings.mode, sigma=settings.sigma, factor=ss.factor,
+                floor=floor, cap=cap, use_weight=settings.weight_field is not None,
+                depth_lambda=projection.depth_lambda, depth_front=front,
+                color_mode=color_mode, color_range=color_range,
+                radius=projection.point_size, alpha=projection.point_alpha)
+    lut, invert = display.lut, display.invert
+    if projection.engine == "points":
+        idx = np.flatnonzero(mask) if mask is not None else np.asarray(select)
+        if idx.size <= PREVIEW_POINTS:          # back to front, for the alpha to be right
+            _, _, d = projection.apply(x[idx], y[idx], None if z is None else z[idx])
+            idx = idx[np.argsort(d)]
+            sel = engine.selection((sel_key, "sorted", projection.azimuth, projection.elevation,
+                                    projection.roll), idx)
+        else:
+            sel = engine.selection(sel_key, idx)
+        params = engine.params(n=sel[1], **base)
+        return engine.render_points(key, sel, fov, params, lut, invert), None
+    idx = np.flatnonzero(mask) if mask is not None else np.asarray(select)
+    sel = engine.selection(sel_key, idx)
+    colored = color_mode > 0
+    whole = engine.render_planes(key, sel, fov, engine.params(n=sel[1], **base), lut, invert,
+                                 colored)
+    if projection.opacity > 0 and projection.slices >= 2:
+        slices = max(2, projection.slices // (2 if preview else 1))
+        edges = np.linspace(drange[0], drange[1], slices + 1)
+
+        def render_slice(k: int):
+            params = engine.params(n=sel[1], depth_clip=(edges[k], edges[k + 1]), **base)
+            return engine.render_planes(key, sel, fov, params, lut, invert, colored)
+
+        whole = composite_depth(whole, slices, render_slice, display, projection.opacity)
+    return display.apply(whole), whole
+
+
 def render_3d(layers, projection: Projection, slab: Optional[Slab], fov: FieldOfView,
-              preview: bool = False) -> Tuple[np.ndarray, np.ndarray]:
+              preview: bool = False, engine=None) -> Tuple[np.ndarray, np.ndarray]:
     """Every visible localization layer, added up; also the depth histogram.
 
-    ``layers`` are session layers.  Returns the RGB image and a (64, 2)
-    array of depth-bin centres and counts over the slab's points.
+    ``layers`` are session layers.  ``engine`` is a `smappy.gpu.GPUEngine`
+    for ``projection.engine`` "gpu" or "points"; None means the CPU.
+    Returns the RGB image and a (64, 2) array of depth-bin centres and
+    counts over the slab's points.
     """
     rgb = np.zeros((fov.ny, fov.nx, 3), np.float32)
     depths: List[np.ndarray] = []
@@ -288,9 +394,14 @@ def render_3d(layers, projection: Projection, slab: Optional[Slab], fov: FieldOf
         if not layer.visible or layer.is_image:
             continue
         state = layer.state
-        image, _ = render_layer_3d(state.locs, state.filter.mask, projection, slab, fov,
-                                   state.settings, state.display, preview,
-                                   n_threads=state.n_threads)
+        if engine is not None and projection.engine in ("gpu", "points"):
+            image, _ = render_layer_gpu(engine, state.locs, state.filter.mask, projection, slab,
+                                        fov, state.settings, state.display,
+                                        state.current.median_precision, preview)
+        else:
+            image, _ = render_layer_3d(state.locs, state.filter.mask, projection, slab, fov,
+                                       state.settings, state.display, preview,
+                                       n_threads=state.n_threads)
         rgb += image
         table, _ = project_layer(state.locs, state.filter.mask, projection, slab,
                                  state.settings, preview=True)

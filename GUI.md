@@ -99,7 +99,8 @@ reasoning is here so that it does not have to be re-derived.
     smappy/io/formats.py         readers: smappy, SMAP, MINFLUX, csv
     smappy/images.py             pixel images as layers
     smappy/regions.py            ROIs and their masks
-    smappy/view3d.py             Projection, Slab, engine A (no Qt)
+    smappy/view3d.py             Projection, Slab, engine A, GPU glue (no Qt)
+    smappy/gpu.py                the wgpu engine: compute splat, point sprites
     smappy/gui/view3d.py         the 3D window, its panel and mouse
     smappy/gui/params.py         Settings dataclass -> form widget, and back
     smappy/gui/widgets.py        CollapsibleSection
@@ -200,6 +201,26 @@ on the linear planes, exact sum at 0), perspective, colour by depth, a
 depth histogram, and *plugins use the slab* (the slab as the `Selection`'s
 ROI).  Save: PNG as shown, or a TIFF of the slab at a pixel size, colour or
 float intensity, with projection and slab in the ImageJ metadata.
+
+Phase 3 is in (`gpu.py`, extra ``[gpu]``): the GPU engine on wgpu-py
+(Metal on macOS, Vulkan / DX12 elsewhere, headless).  A table is uploaded
+once (x, y, z, precision, weight, colour value); a compute shader projects,
+clips to the slab, derives the sigma as `SigmaSettings` does, and splats the
+C++ kernel (same erf integral, same ROI, same normalisation) into 64-bit
+fixed-point accumulators with atomics -- exact, where 16-bit float blending
+rounds and 32-bit float blending is not offered by this wgpu build.  The
+planes come back to the CPU for the display step.  Tested against the CPU
+engine image-for-image (< 1e-3 of the maximum in 2D; < 0.02 in RGB tilted
+with attenuation, colour by depth and slices).  Depth is defined by the
+slab's corners in both engines, so colour scale, slices and attenuation do
+not move with the filter.  The points mode draws alpha sprites, back to
+front for up to 2 M points, coloured by the field or depth through the LUT.
+The 3D panel picks CPU / GPU / GPU points, point size and alpha.
+
+Measured on an M1 Pro, 5 M points, 900x900: CPU (8 cores) 0.10 s, GPU
+0.08 s after a one-time 0.09 s upload -- the gain is rotation without any
+re-upload or CPU projection, and scaling to tens of millions; the CPU
+engine stays the default.
 
 ### Phases
 

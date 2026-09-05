@@ -12,7 +12,7 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QObject, QPointF, QRectF, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QAction, QImage
-from PySide6.QtWidgets import (QCheckBox, QDial, QDockWidget, QDoubleSpinBox,
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDial, QDockWidget, QDoubleSpinBox,
                                QFileDialog, QFormLayout, QGridLayout, QHBoxLayout,
                                QInputDialog, QLabel, QMainWindow, QMenu, QPushButton,
                                QToolBar, QToolButton, QVBoxLayout, QWidget)
@@ -28,19 +28,40 @@ DEGREES_PER_PIXEL = 0.4
 class _Renderer3D(QObject):
     done = Signal(object, object, object, int)      # rgb, fov, depth histogram, generation
 
+    engine_ready = Signal(str)            # the GPU's name, or "" if there is none
+
     def __init__(self):
         super().__init__()
         self.thread = QThread()
         self.thread.setStackSize(32 * 1024 * 1024)
         self.moveToThread(self.thread)
         self.thread.start()
+        self._gpu = None
+        self._gpu_tried = False
+
+    def gpu(self):
+        """The GPU engine, made on this thread on first use; None without one."""
+        if not self._gpu_tried:
+            self._gpu_tried = True
+            try:
+                from ..gpu import GPUEngine
+                self._gpu = GPUEngine()
+                self.engine_ready.emit(self._gpu.name)
+            except Exception as e:
+                print(f"no GPU engine: {e}")
+                self.engine_ready.emit("")
+        return self._gpu
 
     def render(self, session: Session, projection: Projection, slab, nx: int, ny: int,
                preview: bool, generation: int) -> None:
         scale = PREVIEW_SCALE if preview else 1
         fov = projection.fov(nx, ny, scale)
+        engine = self.gpu() if projection.engine != "cpu" else None
+        if projection.engine != "cpu" and engine is None:
+            projection = copy.copy(projection)
+            projection.engine = "cpu"
         try:
-            rgb, hist = render_3d(session.layers, projection, slab, fov, preview)
+            rgb, hist = render_3d(session.layers, projection, slab, fov, preview, engine)
         except Exception as e:                      # the table changed under us
             print(f"3D render failed: {e}")
             return
@@ -357,6 +378,24 @@ class SlabPanel(QWidget):
         for w in (self.attenuation, self.opacity, self.slices, self.perspective):
             w.setKeyboardTracking(False)
             w.valueChanged.connect(self._on_projection_settings)
+        self.engine = QComboBox()
+        self.engine.addItem("CPU", "cpu")
+        self.engine.addItem("GPU", "gpu")
+        self.engine.addItem("GPU points", "points")
+        self.engine.setToolTip("CPU and GPU give the same image; GPU points draws "
+                               "sprites with alpha, back to front")
+        self.engine.currentIndexChanged.connect(self._on_projection_settings)
+        self.point_size = QDoubleSpinBox(minimum=0.5, maximum=50, decimals=1, suffix=" px")
+        self.point_size.setValue(2.0)
+        self.point_alpha = QDoubleSpinBox(minimum=0.01, maximum=1, singleStep=0.1, decimals=2)
+        self.point_alpha.setValue(0.5)
+        for w in (self.point_size, self.point_alpha):
+            w.setKeyboardTracking(False)
+            w.valueChanged.connect(self._on_projection_settings)
+        self.gpu_name = QLabel("")
+        self.gpu_name.setStyleSheet("color: gray")
+        view._renderer.engine_ready.connect(
+            lambda name: self.gpu_name.setText(name or "no GPU: CPU used"))
         self.depth_color = QCheckBox("colour by depth")
         self.depth_color.setToolTip("overrides the layers' colour field with the view depth")
         self.depth_color.toggled.connect(self._on_projection_settings)
@@ -365,6 +404,10 @@ class SlabPanel(QWidget):
         form.addRow("slices", self.slices)
         form.addRow("perspective", self.perspective)
         form.addRow("", self.depth_color)
+        form.addRow("engine", self.engine)
+        form.addRow("", self.gpu_name)
+        form.addRow("point size", self.point_size)
+        form.addRow("point alpha", self.point_alpha)
         self.box = QCheckBox("show box")
         self.box.setChecked(True)
         self.box.toggled.connect(self._on_box)
@@ -447,6 +490,9 @@ class SlabPanel(QWidget):
         proj.slices = int(self.slices.value())
         proj.focal = self.perspective.value() or None
         proj.color_by_depth = self.depth_color.isChecked()
+        proj.engine = self.engine.currentData()
+        proj.point_size = self.point_size.value()
+        proj.point_alpha = self.point_alpha.value()
         self.view3d._draw_box()
         self.view3d.schedule()
 
