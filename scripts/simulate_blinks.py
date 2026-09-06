@@ -7,7 +7,10 @@ Emitters sit on a 3D structure (a tilted ring, two crossing lines, a few
 scattered points) spread over ~10 um, far apart compared with a PSF.  Each
 one blinks a few times; a blink lasts one to a few frames and every frame
 gives one localization with noise from its photon count (precision ~
-150 / sqrt(N) nm laterally, three times that in z).  The drifted copy adds a
+150 / sqrt(N) nm laterally, three times that in z).  Two emitters that are
+active in the same frame closer than ``--min-separation`` (a PSF width)
+could not have been fitted apart, so both are dropped -- the labelling is
+dense, the activation sparse, as in a real experiment.  The drifted copy adds a
 smooth random walk plus a slow linear creep of ~100 nm; the true drift per
 frame is stored in the file's metadata as ``drift_truth`` (x, y, z in nm).
 """
@@ -25,26 +28,45 @@ from smappy.locs import Localizations           # noqa: E402
 
 def structure(rng) -> np.ndarray:
     """Emitter positions (n, 3) in nm."""
-    n_ring = 160
+    n_ring = 1200
     t = np.linspace(0, 2 * np.pi, n_ring, endpoint=False) + rng.normal(0, 0.01, n_ring)
     ring = np.column_stack([5000 + 2500 * np.cos(t), 5000 + 2500 * np.sin(t),
                             300 * np.sin(2 * t)])                 # a tilted, wavy ring
-    s = np.linspace(0, 1, 60)
-    line1 = np.column_stack([1000 + 8000 * s, 1500 + 6000 * s, -200 + 400 * s])
-    line2 = np.column_stack([1500 + 7000 * s, 8500 - 7000 * s, 150 * np.ones_like(s)])
-    scatter = np.column_stack([rng.uniform(500, 9500, 40), rng.uniform(500, 9500, 40),
-                               rng.uniform(-300, 300, 40)])
+    s = np.linspace(0, 1, 500)
+    jitter = rng.normal(0, 15, (len(s), 3))          # the lines are not razor thin
+    line1 = np.column_stack([1000 + 8000 * s, 1500 + 6000 * s, -200 + 400 * s]) + jitter
+    line2 = np.column_stack([1500 + 7000 * s, 8500 - 7000 * s, 150 * np.ones_like(s)]) \
+        + rng.normal(0, 15, (len(s), 3))
+    scatter = np.column_stack([rng.uniform(500, 9500, 120), rng.uniform(500, 9500, 120),
+                               rng.uniform(-300, 300, 120)])
     return np.vstack([ring, line1, line2, scatter])
 
 
-def simulate(n_frames: int, seed: int, drift: bool):
+def unresolvable(x, y, frame, min_separation: float) -> np.ndarray:
+    """True where another emitter is active in the same frame within a PSF."""
+    from scipy.spatial import cKDTree
+    drop = np.zeros(len(frame), bool)
+    order = np.argsort(frame, kind="stable")
+    edges = np.flatnonzero(np.diff(frame[order]) != 0) + 1
+    for block in np.split(order, edges):
+        if block.size < 2:
+            continue
+        pairs = cKDTree(np.column_stack([x[block], y[block]])).query_pairs(
+            min_separation, output_type="ndarray")
+        if pairs.size:
+            drop[block[np.unique(pairs)]] = True
+    return drop
+
+
+def simulate(n_frames: int, seed: int, drift: bool, density: float = 1.0,
+             min_separation: float = 250.0):
     rng = np.random.default_rng(seed)
     emitters = structure(rng)
     rows = []
     for i, (x, y, z) in enumerate(emitters):
-        for _ in range(rng.poisson(6) + 1):                 # blinks per emitter
+        for _ in range(rng.poisson(12 * density) + 1):      # blinks per emitter
             start = rng.integers(0, n_frames)
-            length = rng.geometric(0.4)                      # 1, 2, 3 ... frames on
+            length = rng.geometric(0.35)                     # 1, 2, 3 ... frames on
             for f in range(start, min(start + length, n_frames)):
                 rows.append((i, f))
     rows = np.array(rows)
@@ -55,6 +77,10 @@ def simulate(n_frames: int, seed: int, drift: bool):
     photons = rng.gamma(4.0, 500.0, n).astype(np.float32)          # mean 2000
     prec = (150.0 / np.sqrt(photons)).astype(np.float32)             # ~3-10 nm
     prec_z = (3 * prec).astype(np.float32)
+    # two emitters within a PSF in one frame are one blob: neither is fitted
+    lost = unresolvable(emitters[emitter, 0], emitters[emitter, 1], frame, min_separation)
+    emitter, frame, n = emitter[~lost], frame[~lost], int((~lost).sum())
+    photons, prec, prec_z = photons[~lost], prec[~lost], prec_z[~lost]
     true = emitters[emitter]
     xyz = true + np.column_stack([rng.normal(0, prec), rng.normal(0, prec), rng.normal(0, prec_z)])
     drift_nm = np.zeros((n_frames, 3))
@@ -76,6 +102,7 @@ def simulate(n_frames: int, seed: int, drift: bool):
     }
     metadata = {"units": "nm", "simulation": "smappy sparse blinks", "seed": seed,
                 "n_emitters": len(emitters), "n_frames": n_frames,
+                "min_separation_nm": min_separation, "n_unresolvable_dropped": int(lost.sum()),
                 "drift_truth": drift_nm.round(3).tolist() if drift else None}
     return Localizations(columns, metadata)
 
@@ -85,14 +112,21 @@ def main() -> None:
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--out", default=".", help="directory (default: here)")
     p.add_argument("--frames", type=int, default=20000)
+    p.add_argument("--density", type=float, default=1.0,
+                   help="scale the number of blinks per emitter")
+    p.add_argument("--min-separation", type=float, default=250.0,
+                   help="two emitters closer than this in one frame are both dropped (nm)")
     p.add_argument("--seed", type=int, default=0)
     args = p.parse_args()
     out = Path(args.out)
     for drift, name in ((False, "sim_blinks.hdf5"), (True, "sim_blinks_drift.hdf5")):
-        locs = simulate(args.frames, args.seed, drift)
+        locs = simulate(args.frames, args.seed, drift, args.density, args.min_separation)
         save_localizations(out / name, locs)
+        per_frame = len(locs) / args.frames
         print(f"{name}: {len(locs)} localizations, {locs.metadata['n_emitters']} emitters, "
-              f"{args.frames} frames" + (", drift ~100 nm" if drift else ""))
+              f"{args.frames} frames, {per_frame:.1f} per frame"
+              + f", {locs.metadata['n_unresolvable_dropped']} overlapping dropped"
+              + (", drift ~150 nm" if drift else ""))
 
 
 if __name__ == "__main__":
