@@ -33,9 +33,11 @@ DEFAULT_BOUNDS: Dict[str, Tuple[Optional[float], Optional[float]]] = {
 DEFAULT_BOUNDS_2D = {"sigma_nm": (None, 180.0)}
 PRECISION_FACTOR = 0.5           # rendering sigma = factor * localization precision
 GROUPED_BY_DEFAULT = True
-# grouping in the GUI: SMAP's 50 nm / 1 frame, plus a z window so that two
-# emitters above each other (a 3D table) are not merged into one
-DEFAULT_GROUP_SETTINGS = GroupSettings(dx=50.0, dt=1, dz=100.0)
+# grouping in the GUI: SMAP's 50 nm / 1 frame, xy only.  Two emitters within
+# that box in consecutive frames have overlapping PSFs and could not have been
+# fitted apart anyway, so a z window would only split real blinks; it stays an
+# option in the parameters dialog, with that caveat.
+DEFAULT_GROUP_SETTINGS = GroupSettings(dx=50.0, dt=1, dz=None)
 
 
 class Layer:

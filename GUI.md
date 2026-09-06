@@ -55,10 +55,11 @@ reasoning is here so that it does not have to be re-derived.
 * **Defaults**: grouped on, precision <= 25 nm, log-likelihood >= -2,
   z within +-500 nm, PSF size <= 180 nm for a 2D table, rendering sigma =
   0.5 x precision.  Bounds apply to the grouped and ungrouped table alike.
-  Grouping links within 50 nm, 1 dark frame, and 100 nm in z (SMAP looks at
-  xy only, which merges emitters above each other in a 3D table); the
-  *parameters...* button next to the overview's *update* opens the dialog
-  for these session-wide settings, and OK regroups every layer.
+  Grouping links within 50 nm and 1 dark frame in xy, as SMAP: emitters
+  that close in consecutive frames overlap in the raw data and were fitted
+  as one anyway, so a z window (available, off) would mostly split real
+  blinks.  The *parameters...* button next to the overview's *update* opens
+  the dialog for these session-wide settings; OK regroups every layer.
 
 * **Fitters are plugins assembled from parts.**  Source, camera, detection,
   PSF model, fit and output are each a small settings dataclass; a fitter's
