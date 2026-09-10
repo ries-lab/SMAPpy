@@ -156,6 +156,31 @@ therefore just re-reading the index, with none of the care a growing TIFF page
 chain needs, and `live_fit.py` takes an NDTiff directory exactly as it takes a
 TIFF.
 
+## Bead PSF calibration
+
+Create a single-channel spline PSF from Micro-Manager OME-TIFF or NDTiff bead
+z-stacks with `smappy-calibrate`. Add files or multiple directories, pool their
+stacks, review automatically selected beads, and optionally exclude beads and
+rebuild. The GUI uses Tk and the existing `[viewer]` extra.
+
+The localization viewer also exposes **tools → bead calibration…** in its
+controls window. It opens the same calibration GUI in an independent process,
+so neither window blocks the other.
+
+    smappy-calibrate /path/to/bead_acquisitions
+
+For scripts, use `from smappy.calibrate import calibrate, CalibrationSettings`.
+The native calibration HDF5 loads directly through `load_spline_calibration`
+and `smappy-fit --cal`. Calibration uses pixels laterally and nanometres axially;
+no camera pixel size or mirroring is required. See [calibration documentation](docs/bead_calibration.md)
+for settings, examples, validation results, and differences from MATLAB.
+
+Split-frame dual-color bead calibration is available via the calibration window's
+**Calibration mode → Dual color** selector or `smappy-calibrate --layout 'up-down mirrored'
+--main-channel lower`. It builds a paired PSF model and projective transformation,
+with selectable geometry and pair exclusion/rebuild. See
+[dual-color calibration](docs/dual_color_calibration.md) for conventions and usage.
+
 ## Drift correction
 
 Sample drift is estimated with [COMET](https://github.com/gpufit/Comet), which

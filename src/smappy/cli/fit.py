@@ -24,7 +24,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("data")
     ap.add_argument("out")
-    ap.add_argument("--cal", default=None, help="_3dcal.mat; without it, Gaussian fit")
+    ap.add_argument("--cal", default=None, help="calibration HDF5 or _3dcal.mat; without it, Gaussian fit")
     ap.add_argument("--frames", type=int, default=None)
     ap.add_argument("--chunk", type=int, default=200)
     ap.add_argument("--roisize", type=int, default=13)

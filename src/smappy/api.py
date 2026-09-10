@@ -45,7 +45,7 @@ def fit(data, out=None, camera: CameraLike = None, calibration=None, *,
     and coordinates are then relative to the image, unless ``roi`` says where on
     the chip it sat.
 
-    ``calibration`` is a ``_3dcal.mat`` path (or a loaded calibration, or a
+    ``calibration`` is a native calibration HDF5 or ``_3dcal.mat`` path (or a loaded calibration, or a
     ready :class:`~smappy.psf.PSFModel`); without one the fit is Gaussian and
     there is no z.
 
