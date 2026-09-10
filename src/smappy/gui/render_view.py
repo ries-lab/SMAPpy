@@ -6,6 +6,7 @@ pyqtgraph's pan/zoom acts on the localization coordinates directly.
 """
 from __future__ import annotations
 
+import atexit
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -21,6 +22,23 @@ from ..render import FieldOfView
 from ..session import Session
 
 TILE = 1.5          # render this many view widths, so a pan needs no render
+_LIVE_THREADS = []  # every render thread, so exit can stop them all
+
+
+def stop_render_threads() -> None:
+    """Stop every render thread.  A QThread destroyed while it runs aborts the
+    process, so this runs on aboutToQuit *and* at interpreter exit."""
+    while _LIVE_THREADS:
+        thread = _LIVE_THREADS.pop()
+        try:
+            if thread.isRunning():
+                thread.quit()
+                thread.wait(2000)
+        except RuntimeError:                 # already gone
+            pass
+
+
+atexit.register(stop_render_threads)
 ROI_PEN = pg.mkPen((255, 255, 0), width=1)
 DRAW_PEN = pg.mkPen((255, 255, 0), width=1, style=Qt.DashLine)
 
@@ -36,6 +54,7 @@ class _Renderer(QObject):
         self.thread.setStackSize(32 * 1024 * 1024)
         self.moveToThread(self.thread)
         self.thread.start()
+        _LIVE_THREADS.append(self.thread)
 
     def render(self, view: "RenderView", fov: FieldOfView, generation: int) -> None:
         try:
@@ -48,6 +67,7 @@ class _Renderer(QObject):
 
 class RenderView(QWidget):
     render_requested = Signal(object, object, int)
+    picked = Signal(float, float)          # a plain click in the image, in nm
 
     def __init__(self, session: Session, parent=None):
         super().__init__(parent)
@@ -82,6 +102,10 @@ class RenderView(QWidget):
         if app is not None:
             app.aboutToQuit.connect(self.shutdown)
 
+        # analysis ROIs (the ROI tab), one outline item per state colour
+        self.roi_outlines = {}
+        self._roi_press = None
+
         # ROI drawing: click to start, click to finish (polygon: click per
         # vertex, double-click to close), Escape to cancel
         self.roi_item = None
@@ -100,6 +124,15 @@ class RenderView(QWidget):
         if self.drawing and event.type() in (QEvent.MouseButtonPress, QEvent.MouseButtonRelease,
                                              QEvent.MouseButtonDblClick):
             return self._draw_event(event)
+        # a click that did not drag is a pick, not a pan
+        if event.type() == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
+            self._roi_press = event.position()
+        elif event.type() == QEvent.MouseButtonRelease and self._roi_press is not None:
+            moved = (event.position() - self._roi_press).manhattanLength()
+            self._roi_press = None
+            if moved <= 3:
+                p = self.view.mapSceneToView(self.graphics.mapToScene(event.position().toPoint()))
+                self.picked.emit(p.x(), p.y())
         if event.type() == QEvent.NativeGesture and \
                 event.gestureType() == Qt.NativeGestureType.ZoomNativeGesture:
             factor = 1.0 / (1.0 + event.value())
@@ -111,9 +144,7 @@ class RenderView(QWidget):
 
     def shutdown(self) -> None:
         """Stop the render thread; called on the GUI thread at exit."""
-        thread = self._renderer.thread
-        thread.quit()
-        thread.wait(2000)
+        stop_render_threads()
 
     # ---------------------------------------------------------------- flow
     def _on_session(self, what: str) -> None:
@@ -355,6 +386,49 @@ class RenderView(QWidget):
         self.session.roi = region                  # no redraw: the item is the truth
         self.session.changed("roi-edited")
 
+    # ------------------------------------------------- analysis ROIs
+    def show_rois(self, project, file_id, active=None) -> None:
+        """Outlines for one file's analysis ROIs, coloured by their state."""
+        from .roi_tab import roi_colour
+        groups = {}
+        rois = project.rois_of(file_id) if file_id else []
+        for roi in rois:
+            xs, ys = _roi_outline(roi, project.shape, project.size_nm)
+            colour = roi_colour(roi, roi.id == active)
+            gx, gy = groups.setdefault(colour, ([], []))
+            gx.extend(xs)
+            gy.extend(ys)
+        empty = np.array([], float)
+        for colour, item in list(self.roi_outlines.items()):
+            if colour not in groups:
+                item.setData(empty, empty)
+        for colour, (xs, ys) in groups.items():
+            item = self.roi_outlines.get(colour)
+            if item is None:
+                width = 2 if colour == "#2f7fd0" else 1
+                item = pg.PlotDataItem(pen=pg.mkPen(colour, width=width), connect="finite")
+                self.view.addItem(item)
+                self.roi_outlines[colour] = item
+            item.setData(np.array(xs), np.array(ys), connect="finite")
+
+    def roi_at(self, project, file_id, x: float, y: float):
+        """The ROI whose shape covers (x, y), nearest first; None if none does."""
+        best, best_d = None, np.inf
+        for roi in (project.rois_of(file_id) if file_id else []):
+            cx, cy = roi.center
+            d = float(np.hypot(x - cx, y - cy))
+            if roi.polygon is not None:
+                from ..roi_manager.core import inside_polygon
+                inside = bool(inside_polygon(np.array([x]), np.array([y]), roi.polygon)[0])
+            elif project.shape == "circle":
+                inside = d <= project.size_nm / 2
+            else:
+                half = project.size_nm / 2
+                inside = abs(x - cx) <= half and abs(y - cy) <= half
+            if inside and d < best_d:
+                best, best_d = roi, d
+        return best
+
     # ------------------------------------------------------------- saving
     def save_png(self, path) -> None:
         """The view as displayed, 8-bit RGB."""
@@ -477,6 +551,24 @@ class RenderToolBar(QToolBar):
                                               "TIFF (*.tif *.tiff)")
         if path:
             self.view.save_tiff(path, pixelsize, what)
+
+
+def _roi_outline(roi, shape: str, size_nm: float):
+    """The closed outline of one ROI, ending in NaN so items can be joined."""
+    if roi.polygon is not None:
+        v = np.asarray(roi.polygon, float)
+        xs, ys = list(v[:, 0]) + [v[0, 0], np.nan], list(v[:, 1]) + [v[0, 1], np.nan]
+        return xs, ys
+    cx, cy = roi.center
+    if shape == "circle":
+        t = np.linspace(0, 2 * np.pi, 49)
+        xs = list(cx + size_nm / 2 * np.cos(t)) + [np.nan]
+        ys = list(cy + size_nm / 2 * np.sin(t)) + [np.nan]
+        return xs, ys
+    h = size_nm / 2
+    xs = [cx - h, cx + h, cx + h, cx - h, cx - h, np.nan]
+    ys = [cy - h, cy - h, cy + h, cy + h, cy - h, np.nan]
+    return xs, ys
 
 
 def _nice(span: float) -> float:

@@ -19,6 +19,7 @@ from .dialogs import CsvMappingDialog, PixelSizeDialog
 from ..session import Session
 from .plugin_panel import PluginPanel
 from .render_tab import RenderTab
+from .roi_tab import ROITab
 from .render_view import RenderToolBar, RenderView
 from .widgets import CollapsibleSection, detach_to_window
 
@@ -189,7 +190,8 @@ class ControlWindow(QMainWindow):
              "bead z-stacks; opens its own window", self.open_calibration)]), "Localize")
         self.tabs.addTab(RenderTab(session, render.view), "Render")
         self.tabs.addTab(PluginTab("Analysis", session), "Analysis")
-        self.tabs.addTab(PluginTab("ROI", session), "ROI")
+        self.roi_tab = ROITab(session, render.view)
+        self.tabs.addTab(self.roi_tab, "ROI")
         self.tabs.setCurrentIndex(1)
         self.setCentralWidget(self.tabs)
         self.resize(360, 640)

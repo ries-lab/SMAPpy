@@ -204,7 +204,8 @@ class Session:
         self.locs = locs if locs is not None else Localizations({}, {})
         self.path: Optional[Path] = Path(path) if path else None
         self.layers: List[Layer] = [Layer(self.locs)]
-        self.roi: Optional[Region] = None
+        self.roi: Optional[Region] = None          # the drawn 2D ROI (regions.py)
+        self._rois = None                          # the ROI manager's project
         self.slab: Optional[Slab] = None          # the 3D view's volume
         self.slab_follows_roi = True              # the 2D ROI sets its footprint
         self.select_in_slab = False               # plugins see only the slab
@@ -250,6 +251,8 @@ class Session:
             self.history.clear()
             saved = self.locs.metadata.get("roi")
             self.set_roi(Region.from_dict(saved) if saved else None)
+            self._rois = None            # this file's own ROIs, read on first use
+            self.changed("rois")
         else:
             merged = concat([self.locs, locs])
             merged.metadata = dict(self.locs.metadata)
@@ -314,6 +317,9 @@ class Session:
         metadata["history"] = self.history
         if self.roi is not None:
             metadata["roi"] = self.roi.to_dict()
+        rois = self.roi_state()
+        if rois and (rois["rois"] or rois["runs"]):
+            metadata["roi_project"] = rois
         save_localizations(path, self.locs, metadata)
         self.path = path
         return path
@@ -431,6 +437,30 @@ class Session:
                           for f in self.locs.metadata.get("files", [])] or self.files
             self.log("undo")
             self.changed("locs")
+
+    # -------------------------------------------------------- ROI manager
+    @property
+    def rois(self):
+        """The ROI manager's project over this session's files.
+
+        Separate from `roi`, the rectangle or line drawn in the 2D view: this
+        is the collection of analysis ROIs, their review state and their
+        evaluation runs, and it is saved with the localization file.
+        """
+        if self._rois is None:
+            from .roi_manager.link import SessionROIs
+            self._rois = SessionROIs(self)
+            saved = self.locs.metadata.get("roi_project")
+            self._rois.sync()
+            if saved:
+                self._rois.from_dict(saved)
+        else:
+            self._rois.sync()
+        return self._rois
+
+    def roi_state(self) -> Optional[dict]:
+        """The ROI manager's project as data, or None if it was never opened."""
+        return None if self._rois is None else self._rois.to_dict()
 
     # ----------------------------------------------------------------- roi
     def set_roi(self, roi: Optional[Region]) -> None:

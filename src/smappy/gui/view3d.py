@@ -36,6 +36,8 @@ class _Renderer3D(QObject):
         self.thread.setStackSize(32 * 1024 * 1024)
         self.moveToThread(self.thread)
         self.thread.start()
+        from .render_view import _LIVE_THREADS
+        _LIVE_THREADS.append(self.thread)
         self._gpu = None
         self._gpu_tried = False
 
@@ -128,8 +130,8 @@ class View3D(QWidget):
             self.schedule()
 
     def shutdown(self) -> None:
-        self._renderer.thread.quit()
-        self._renderer.thread.wait(2000)
+        from .render_view import stop_render_threads
+        stop_render_threads()
 
     # ---------------------------------------------------------- rendering
     def fit(self) -> None:

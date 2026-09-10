@@ -94,6 +94,20 @@ reasoning is here so that it does not have to be re-derived.
   menu or File -> Open image; the Render tab shows pixel size, origin and
   a frame slider in place of the filter.
 
+* **Analysis ROIs are part of the session.**  `smappy.roi_manager`'s project
+  model (ROIs, review flags, finder provenance, evaluation runs) is backed by
+  the session through `SessionROIs`: sources are the session's files, and the
+  filters and grouping are the layer's, so an ROI sees what the image shows.
+  The project travels in the localization file's metadata, so ROIs and their
+  results are saved by *File -> Save* and come back -- geometry, review state,
+  the selected ROI -- when the file is opened again.  A run whose data,
+  filter or geometry has changed since is reported as outdated rather than
+  silently reused.  This is separate from `session.roi`, the rectangle or
+  line drawn in the 2D view.
+* **Bead calibration is its own application.**  Tk cannot share a process
+  with Qt and the window wants 1250x850, so the Localize tab's button and the
+  Tools menu start `smappy-calibrate` as a separate process.
+
 ## Code map
 
     smappy/plugins/__init__.py   Plugin, Result, Selection, param(), registry
@@ -107,6 +121,8 @@ reasoning is here so that it does not have to be re-derived.
     smappy/view3d.py             Projection, Slab, engine A, GPU glue (no Qt)
     smappy/gpu.py                the wgpu engine: compute splat, point sprites
     smappy/gui/view3d.py         the 3D window, its panel and mouse
+    smappy/gui/roi_tab.py        the ROI tab: files, geometry, find, review, evaluate
+    smappy/roi_manager/link.py   the ROI project backed by the session
     smappy/gui/params.py         Settings dataclass -> form widget, and back
     smappy/gui/widgets.py        CollapsibleSection
     smappy/gui/render_view.py    pyqtgraph view that re-renders on pan/zoom
