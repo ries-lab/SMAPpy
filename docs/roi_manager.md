@@ -37,8 +37,15 @@ scriptable, including `save` and `load` of a sidecar project file.
    deletes it, and previous run records stay in the history.
 
 There is no review step: an ROI counts from the moment it is made, and *use* is
-what excludes one.  Polygons and direction lines are still part of the model and
-of saved projects; only drawing them by hand awaits the new interface.
+what excludes one.
+
+**Polygon** draws an outline in the ROI image: a click per vertex, and the first
+vertex or a double-click closes it.  A closed polygon replaces the global circle
+or square for that ROI and moves its centre to the centroid; **Clear shape**
+gives the global geometry back.  **Direction** takes two clicks, start then end,
+and records an arrow the analysis plugins can read; it does not rotate anything.
+**Clear line** removes it.  Escape abandons a drawing.  Both apply to the
+selected ROI, or to a draft, which then carries them when **Add** stores it.
 
 The default circle has a **300 nm diameter**.  For a square, the global size is
 its **side length**; both are set in the ROI tab and apply to every ROI at once.
@@ -80,7 +87,8 @@ structures of about 100 nm diameter:
 | Min count | 10 | Minimum filtered localizations within that radius |
 
 These are detection settings, separate from the analysis ROI size. Outlines are amber, grey when the ROI is excluded, green when it is selected,
-and a draft is blue and dashed.
+and a draft is blue and dashed; a drawing in progress is a dashed cyan rubber
+line and a direction is a magenta arrow.
 
 **Evaluate all** runs on every included ROI across all files. The
 statistics evaluator returns localization count, arithmetic mean lateral

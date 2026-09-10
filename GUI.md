@@ -107,7 +107,8 @@ reasoning is here so that it does not have to be re-derived.
   between the two.  Choosing and judging ROIs happens in the ROI manager
   window: the file, the zoom and the ROI in three quadrants, the files and
   the ROIs in the fourth, a click in the zoom drafting an ROI that *Add*
-  stores.  The ROI tab keeps what applies to every ROI -- geometry, the
+  stores.  *Polygon* and *Direction* draw an ROI's own outline and its arrow
+  in the ROI image.  The ROI tab keeps what applies to every ROI -- geometry, the
   finder, the evaluation.  There is no review step: an ROI counts from the
   moment it is made, and *use* is what excludes one.
 * **Bead calibration is a Qt window in this process** (`calibrate/qt_gui.py`),

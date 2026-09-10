@@ -24,6 +24,8 @@ from ..render import FieldOfView
 from ..session import Session
 
 DRAFT_PEN = pg.mkPen("#2f7fd0", width=2, style=Qt.DashLine)
+DRAWING_PEN = pg.mkPen("#00c4ff", width=2, style=Qt.DashLine)
+DIRECTION_PEN = pg.mkPen("#e05fd0", width=2)
 ROI_PEN = pg.mkPen("#2e9e4f", width=2)          # the selected ROI
 EXCLUDED_PEN = pg.mkPen("#8a8a8a", width=1)     # not used
 EXCLUDED_ACTIVE_PEN = pg.mkPen("#8a8a8a", width=2)
@@ -31,6 +33,21 @@ OTHER_PEN = pg.mkPen("#ffb300", width=1)
 FRAME_PEN = pg.mkPen("#ffd54a", width=1)
 DETAIL_NM = 3000.0            # the zoom's width to start with
 RIM_PIXELS = 6.0              # how near the outline a click must be to select
+
+
+def arrow(direction):
+    """A line with a small head at its end, for a direction."""
+    (x0, y0), (x1, y1) = np.asarray(direction, float)
+    d = np.array([x1 - x0, y1 - y0])
+    length = float(np.hypot(*d)) or 1.0
+    unit = d / length
+    side = np.array([-unit[1], unit[0]])
+    head = 0.18 * length
+    left = np.array([x1, y1]) - head * unit + 0.5 * head * side
+    right = np.array([x1, y1]) - head * unit - 0.5 * head * side
+    xs = [x0, x1, np.nan, left[0], x1, right[0]]
+    ys = [y0, y1, np.nan, left[1], y1, right[1]]
+    return xs, ys
 
 
 def rim_distance(x: float, y: float, center, shape: str, size: float, polygon=None) -> float:
@@ -72,6 +89,7 @@ class ImagePane(QWidget):
     """One rendered quadrant: an image, outlines over it, and clicks."""
 
     clicked = Signal(float, float)
+    moved = Signal(float, float)           # only while `tracking` is on
     zoomed = Signal(float)
     panned = Signal(float, float)          # how far to move the view, in nm
 
@@ -93,19 +111,25 @@ class ImagePane(QWidget):
                        for name, pen in (("others", OTHER_PEN), ("excluded", EXCLUDED_PEN),
                                          ("excluded_active", EXCLUDED_ACTIVE_PEN),
                                          ("roi", ROI_PEN), ("draft", DRAFT_PEN),
-                                         ("frame", FRAME_PEN))}
+                                         ("direction", DIRECTION_PEN),
+                                         ("drawing", DRAWING_PEN), ("frame", FRAME_PEN))}
         for item in self.shapes.values():
             self.view.addItem(item)
         layout.addWidget(self.graphics)
         self.width_nm = DETAIL_NM
         self.zoomable = zoomable
         self.pannable = pannable
-        self.graphics.viewport().installEventFilter(self)
-        self.graphics.viewport().setMouseTracking(False)
         self.fov: Optional[FieldOfView] = None
         self._press = None
         self._last = None
         self._dragged = False
+        self.tracking = False
+        self.graphics.viewport().installEventFilter(self)
+
+    def set_tracking(self, on: bool) -> None:
+        """Report the mouse without a button held, for a rubber line."""
+        self.tracking = bool(on)
+        self.graphics.viewport().setMouseTracking(bool(on))
 
     def eventFilter(self, obj, event) -> bool:
         kind = event.type()
@@ -115,6 +139,10 @@ class ImagePane(QWidget):
         if kind == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
             self._press = self._last = event.position()
             self._dragged = False
+        elif kind == QEvent.MouseMove and self.tracking and self.fov is not None:
+            p = self.view.mapSceneToView(self.graphics.mapToScene(event.position().toPoint()))
+            self.moved.emit(p.x(), p.y())
+            return False
         elif kind == QEvent.MouseMove and self._press is not None and self.pannable:
             # drag to move the view; a click that never moves still counts
             delta = event.position() - self._last
@@ -173,6 +201,11 @@ class ROIManagerWindow(QMainWindow):
         self.session = session
         self.active: Optional[str] = None
         self.draft: Optional[np.ndarray] = None
+        self.draft_polygon: Optional[list] = None
+        self.draft_direction: Optional[list] = None
+        self.drawing: Optional[str] = None       # "polygon" or "direction"
+        self._points: list = []
+        self._hover: Optional[np.ndarray] = None
         self.zoom_center: Optional[np.ndarray] = None
         self._loading = False
 
@@ -219,11 +252,36 @@ class ROIManagerWindow(QMainWindow):
         toggle = QShortcut(QKeySequence(Qt.Key_Space), self)
         toggle.setContext(Qt.WindowShortcut)
         toggle.activated.connect(self._toggle)
+        cancel = QShortcut(QKeySequence(Qt.Key_Escape), self)
+        cancel.setContext(Qt.WindowShortcut)
+        cancel.activated.connect(self._cancel_drawing)
 
         roi_side = QWidget()
         rlayout = QVBoxLayout(roi_side)
         rlayout.setContentsMargins(0, 0, 0, 0)
         rlayout.addWidget(self.roi_pane, 1)
+        tools = QHBoxLayout()
+        tools.setSpacing(3)
+        self.polygon_button = QPushButton("Polygon")
+        self.polygon_button.setCheckable(True)
+        self.polygon_button.setToolTip("draw an outline in this image: a click per "
+                                       "vertex, the first vertex or a double-click "
+                                       "closes it, Escape cancels")
+        self.polygon_button.clicked.connect(lambda: self._start_drawing("polygon"))
+        self.direction_button = QPushButton("Direction")
+        self.direction_button.setCheckable(True)
+        self.direction_button.setToolTip("two clicks, start then end: an arrow the "
+                                         "analysis plugins can read")
+        self.direction_button.clicked.connect(lambda: self._start_drawing("direction"))
+        self.clear_shape_button = QPushButton("Clear shape")
+        self.clear_shape_button.setToolTip("back to the global circle or square")
+        self.clear_shape_button.clicked.connect(self._clear_shape)
+        self.clear_line_button = QPushButton("Clear line")
+        self.clear_line_button.clicked.connect(self._clear_line)
+        for b in (self.polygon_button, self.direction_button,
+                  self.clear_shape_button, self.clear_line_button):
+            tools.addWidget(b)
+        rlayout.addLayout(tools)
         self.add_button = QPushButton("Add")
         self.add_button.setToolTip("store the drafted ROI (Enter)")
         self.add_button.setShortcut(Qt.Key_Return)
@@ -248,6 +306,7 @@ class ROIManagerWindow(QMainWindow):
         self.file_pane.clicked.connect(self._file_clicked)
         self.zoom_pane.clicked.connect(self._zoom_clicked)
         self.roi_pane.clicked.connect(self._roi_clicked)
+        self.roi_pane.moved.connect(self._roi_hover)
         self.zoom_pane.zoomed.connect(lambda _: self.redraw())
         self.zoom_pane.panned.connect(self._zoom_panned)
         self.roi_pane.zoomed.connect(self._preview_zoomed)
@@ -364,6 +423,13 @@ class ROIManagerWindow(QMainWindow):
                 xs.extend(list(ox) + [np.nan])
                 ys.extend(list(oy) + [np.nan])
             pane.draw(name, xs, ys)
+        dx, dy = [], []
+        for roi in rois:
+            if roi.direction:
+                ax, ay = arrow(roi.direction)
+                dx.extend(list(ax) + [np.nan])
+                dy.extend(list(ay) + [np.nan])
+        pane.draw("direction", dx, dy)
 
     def _draw_roi_pane(self, state) -> None:
         project = self.project
@@ -377,13 +443,15 @@ class ROIManagerWindow(QMainWindow):
         self.roi_pane.width_nm = project.preview_width
         self.roi_pane.render(state, centre[0] - half, centre[0] + half,
                              centre[1] - half, centre[1] + half)
-        polygon = roi.polygon if (roi is not None and self.draft is None) else None
-        xs, ys = outline(centre, project.shape, project.size_nm, polygon)
         drafted = self.draft is not None
+        polygon = self.draft_polygon if drafted else (roi.polygon if roi is not None else None)
+        direction = self.draft_direction if drafted else (roi.direction if roi is not None else None)
+        xs, ys = outline(centre, project.shape, project.size_nm, polygon)
         used = drafted or roi is None or roi.use
         for name in ("draft", "roi", "excluded_active"):
             self.roi_pane.draw(name)
         self.roi_pane.draw("draft" if drafted else ("roi" if used else "excluded_active"), xs, ys)
+        self.roi_pane.draw("direction", *(arrow(direction) if direction else ([], [])))
         self.roi_pane.label.setText("ROI (draft)" if drafted else "ROI")
         self.add_button.setEnabled(drafted)
 
@@ -426,12 +494,16 @@ class ROIManagerWindow(QMainWindow):
             self.select(hit.id)
             return
         self.draft = np.array([x, y])
+        self.draft_polygon = self.draft_direction = None
         self.redraw()
 
     def _roi_clicked(self, x: float, y: float) -> None:
-        """A click in the ROI image recentres the draft."""
+        """A click in the ROI image: place a vertex, or recentre the draft."""
         if np.isnan(x):
             self.redraw()
+            return
+        if self.drawing:
+            self._place(x, y)
             return
         hit = self._roi_at(x, y, self.roi_pane)
         if hit is not None and self.draft is None:
@@ -439,6 +511,119 @@ class ROIManagerWindow(QMainWindow):
         elif self.draft is not None:
             self.draft = np.array([x, y])
             self.redraw()
+
+    def _roi_hover(self, x: float, y: float) -> None:
+        if self.drawing and self._points:
+            self._hover = np.array([x, y])
+            self._draw_in_progress()
+
+    # ----------------------------------------------- polygon and direction
+    def _start_drawing(self, kind: str) -> None:
+        """Draw an outline or a direction in the ROI image."""
+        if self.drawing == kind:
+            self._cancel_drawing()
+            return
+        if self.roi_pane.fov is None:
+            self._cancel_drawing()
+            self.status.showMessage("select or draft an ROI first")
+            return
+        self.drawing = kind
+        self._points = []
+        self._hover = None
+        self.roi_pane.set_tracking(True)
+        self.polygon_button.setChecked(kind == "polygon")
+        self.direction_button.setChecked(kind == "direction")
+        self.status.showMessage("a click per vertex; the first vertex or a "
+                                "double-click closes it, Escape cancels" if kind == "polygon"
+                                else "click the start, then the end")
+
+    def _cancel_drawing(self) -> None:
+        self.drawing = None
+        self._points = []
+        self._hover = None
+        self.roi_pane.set_tracking(False)
+        self.polygon_button.setChecked(False)
+        self.direction_button.setChecked(False)
+        self.roi_pane.draw("drawing")
+        self.redraw()
+
+    def _place(self, x: float, y: float) -> None:
+        point = np.array([x, y], float)
+        if self.drawing == "direction":
+            self._points.append(point)
+            if len(self._points) == 2:
+                self._finish_direction()
+            else:
+                self._draw_in_progress()
+            return
+        near = self.roi_pane.fov.pixelsize * 8 if self.roi_pane.fov else 1.0
+        if len(self._points) >= 3 and np.hypot(*(point - self._points[0])) <= near:
+            self._finish_polygon()                 # clicked the first vertex
+            return
+        self._points.append(point)
+        self._draw_in_progress()
+
+    def _draw_in_progress(self) -> None:
+        points = list(self._points)
+        if self._hover is not None:
+            points = points + [self._hover]
+        if not points:
+            self.roi_pane.draw("drawing")
+            return
+        v = np.array(points, float)
+        if self.drawing == "polygon" and len(v) > 2:
+            v = np.vstack([v, v[0]])               # show how it would close
+        self.roi_pane.draw("drawing", v[:, 0], v[:, 1])
+
+    def _finish_polygon(self) -> None:
+        polygon = [[float(p[0]), float(p[1])] for p in self._points]
+        self._cancel_drawing()
+        if len(polygon) < 3:
+            return
+        centre = np.asarray(polygon, float).mean(axis=0)
+        roi = self._selected()
+        if self.draft is not None or roi is None:
+            self.draft = centre                    # a drafted ROI with this outline
+            self.draft_polygon = polygon
+        else:
+            roi.polygon = polygon
+            roi.center = [float(centre[0]), float(centre[1])]
+            self.changed.emit()
+        self.redraw()
+
+    def _finish_direction(self) -> None:
+        line = [[float(p[0]), float(p[1])] for p in self._points]
+        self._cancel_drawing()
+        roi = self._selected()
+        if self.draft is not None or roi is None:
+            if self.draft is None:
+                self.draft = np.asarray(line, float).mean(axis=0)
+            self.draft_direction = line
+        else:
+            roi.direction = line
+            self.changed.emit()
+        self.redraw()
+
+    def _clear_shape(self) -> None:
+        """Back to the global circle or square."""
+        self._cancel_drawing()
+        if self.draft is not None:
+            self.draft_polygon = None
+        roi = self._selected()
+        if roi is not None and self.draft is None:
+            roi.polygon = None
+            self.changed.emit()
+        self.redraw()
+
+    def _clear_line(self) -> None:
+        self._cancel_drawing()
+        if self.draft is not None:
+            self.draft_direction = None
+        roi = self._selected()
+        if roi is not None and self.draft is None:
+            roi.direction = None
+            self.changed.emit()
+        self.redraw()
 
     def _roi_at(self, x: float, y: float, pane=None):
         """The ROI whose outline the click landed on, if any.
@@ -481,7 +666,7 @@ class ROIManagerWindow(QMainWindow):
         if roi is None:
             return
         self.active = roi_id
-        self.draft = None
+        self.draft = self.draft_polygon = self.draft_direction = None
         project.navigation["roi"] = roi_id
         if roi.file_id != self.current_file():
             ids = list(project.sources)
@@ -500,8 +685,10 @@ class ROIManagerWindow(QMainWindow):
         file_id = self.current_file()
         if file_id is None or self.draft is None:
             return
-        roi = self.project.add_roi(file_id, [float(self.draft[0]), float(self.draft[1])])
-        self.draft = None
+        roi = self.project.add_roi(file_id, [float(self.draft[0]), float(self.draft[1])],
+                                   polygon=self.draft_polygon)
+        roi.direction = self.draft_direction
+        self.draft = self.draft_polygon = self.draft_direction = None
         self.active = roi.id
         self._fill_table()
         self.redraw()

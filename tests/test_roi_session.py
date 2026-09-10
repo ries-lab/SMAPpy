@@ -129,3 +129,99 @@ def test_numbering_is_stable_and_names_the_file(tmp_path):
     assert project.file_number(file_id) == 1
     project.rois.pop(a.id)
     assert project.numbers() == {b.id: 1}
+
+
+def _manager(tmp_path, qtbot=None):
+    """A manager window over a small file, for the drawing tests."""
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    path = tmp_path / "locs.hdf5"
+    save_localizations(path, _table(2000))
+    s = Session()
+    s.load(path)
+    from smappy.gui.roi_window import ROIManagerWindow
+    window = ROIManagerWindow(s)
+    window.resize(900, 700)
+    return s, window
+
+
+def test_a_drawn_polygon_becomes_the_roi_and_selects_by_it(tmp_path):
+    session, window = _manager(tmp_path)
+    file_id = next(iter(session.rois.sources))
+    roi = session.rois.add_roi(file_id, [2000, 2000])
+    window.refresh()
+    window.select(roi.id)
+
+    window._start_drawing("polygon")
+    square = [(1800, 1800), (2200, 1800), (2200, 2200), (1800, 2200)]
+    for x, y in square:
+        window._roi_clicked(float(x), float(y))
+    window._roi_clicked(*square[0])                 # closing on the first vertex
+    assert window.drawing is None
+    assert roi.polygon is not None and len(roi.polygon) == 4
+    assert np.allclose(roi.center, [2000, 2000])    # the centroid
+
+    # the model now selects by the polygon, not by the global circle
+    inside = session.rois.extract(roi)
+    assert len(inside) > 0
+    assert inside["x_nm"].min() >= 1800 and inside["x_nm"].max() <= 2200
+    assert "polygon" in session.rois.geometry(roi)
+
+    window._clear_shape()
+    assert roi.polygon is None
+
+
+def test_direction_takes_two_clicks_and_is_saved_with_the_file(tmp_path):
+    session, window = _manager(tmp_path)
+    file_id = next(iter(session.rois.sources))
+    roi = session.rois.add_roi(file_id, [2000, 2000])
+    window.refresh()
+    window.select(roi.id)
+
+    window._start_drawing("direction")
+    window._roi_clicked(1900.0, 2000.0)
+    assert roi.direction is None                    # one click is not a direction
+    window._roi_clicked(2100.0, 2050.0)
+    assert roi.direction == [[1900.0, 2000.0], [2100.0, 2050.0]]
+    assert window.drawing is None
+
+    out = session.save(tmp_path / "with_direction.hdf5")
+    back = Session()
+    back.load(out)
+    restored = next(iter(back.rois.rois.values()))
+    assert restored.direction == roi.direction
+
+    window._clear_line()
+    assert roi.direction is None
+
+
+def test_escape_abandons_a_half_drawn_polygon(tmp_path):
+    session, window = _manager(tmp_path)
+    file_id = next(iter(session.rois.sources))
+    roi = session.rois.add_roi(file_id, [2000, 2000])
+    window.refresh()
+    window.select(roi.id)
+    window._start_drawing("polygon")
+    window._roi_clicked(1900.0, 1900.0)
+    window._roi_clicked(2100.0, 1900.0)
+    window._cancel_drawing()
+    assert window.drawing is None and window._points == [] and roi.polygon is None
+
+
+def test_a_drafted_roi_keeps_the_shape_it_was_drawn_with(tmp_path):
+    session, window = _manager(tmp_path)
+    window.refresh()
+    window._zoom_clicked(3000.0, 3000.0)            # a draft
+    assert window.draft is not None
+    window._start_drawing("polygon")
+    for x, y in ((2900, 2900), (3100, 2900), (3000, 3150)):
+        window._roi_clicked(float(x), float(y))
+    window._roi_clicked(2900.0, 2900.0)
+    assert window.draft_polygon is not None and window.draft is not None
+    before = len(session.rois.rois)
+    window._add()
+    assert len(session.rois.rois) == before + 1
+    stored = list(session.rois.rois.values())[-1]
+    assert stored.polygon is not None and len(stored.polygon) == 3
+    assert window.draft is None and window.draft_polygon is None
