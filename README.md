@@ -325,6 +325,23 @@ For a window, run `smappy-view FILE` as a separate process.  And `LiveFit` is
 `live_view` without a window: the fit in a thread, finished blocks on a queue,
 for a front end of your own.
 
+## ROI manager
+
+Select and analyze regions in localization files with three linked views:
+file overview, movable detail view, and ROI preview. ROIs belong directly to
+files. Circles and squares use a global size; individual polygons and direction
+lines are also supported.
+
+    python -m smappy.cli.roi localizations.h5
+    python -m smappy.cli.roi --project experiment.rois.h5
+
+The first analysis workflow finds cluster candidates, lets you review them,
+computes localization count, mean precision and mean photons, and displays
+linked histograms. Rendering and analysis share global localization filters.
+Projects save ROI annotations, settings and analysis history alongside references
+to the source files. See the [ROI manager guide](docs/roi_manager.md) for manual
+selection, finder settings, project storage, and the Python plugin interfaces.
+
 ## Scripts
 
 | script | what it checks |
