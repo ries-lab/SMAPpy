@@ -37,7 +37,8 @@ __all__ = [
     "save_image", "show",
     "correct_drift", "DriftSettings",
     "LiveFit", "LiveSettings", "live_view", "QueueSource", "queue_source",
-    "__version__",
+    "CalibrationSettings", "save_spline_calibration", "DualColorSettings",
+    "DualColorCalibration", "calibrate_dual", "load_dual_color_calibration", "__version__",
 ]
 
 _EXPORTS = {
@@ -52,6 +53,12 @@ _EXPORTS = {
     "DynamicCutoff": "detect", "AbsoluteCutoff": "detect",
     "SplinePSF": "psf", "GaussianPSF": "psf",
     "load_spline_calibration": "io.calibration",
+    "save_spline_calibration": "io.calibration",
+    "CalibrationSettings": "calibrate",
+    "DualColorSettings": "calibrate",
+    "DualColorCalibration": "calibrate",
+    "calibrate_dual": "calibrate",
+    "load_dual_color_calibration": "calibrate",
     "LocalizationWriter": "io.hdf5", "save_localizations": "io.hdf5",
     "load_localizations": "io.hdf5",
     "LocFilter": "filter",

@@ -374,7 +374,7 @@ class Viewer:
                  group_settings: Optional[GroupSettings] = None,
                  control_width: float = 4.6):
         import matplotlib.pyplot as plt
-        from matplotlib.widgets import CheckButtons, RadioButtons, Slider
+        from matplotlib.widgets import Button, CheckButtons, RadioButtons, Slider
         from matplotlib.widgets import TextBox as _MplTextBox
 
         TextBox = _patched_text_box(_MplTextBox)
@@ -413,7 +413,8 @@ class Viewer:
         # whatever the number of filter fields or colour choices.
         row, box_h, slider_h, gap, pad = 0.34, 0.24, 0.16, 0.12, 0.16
         block = max(0.95, 0.20 * len(self.color_choices) + 0.30)
-        height = (pad + block + 0.34 + 2 * (slider_h + 0.16) + gap
+        tool_h = 0.26
+        height = (pad + tool_h + 0.42 + block + 0.34 + 2 * (slider_h + 0.16) + gap
                   + (len(fields) + 1) * row + pad)
         self.controls = plt.figure(figsize=(control_width, height))
         _window_title(self.controls, "smappy controls")
@@ -427,6 +428,13 @@ class Viewer:
                                       fontsize=7, color="0.45")
 
         y = pad
+        tool_ax = place(0.18, y, 0.64, tool_h)
+        tool_ax.set_title("tools", fontsize=8, color="0.3")
+        self.bead_calibration = Button(tool_ax, "bead calibration…")
+        self.bead_calibration.label.set_fontsize(8)
+        self.bead_calibration.on_clicked(self._open_bead_calibration)
+        y += tool_h + 0.42
+
         # "grouped" rebuilds the table (once); "additive" only changes how the
         # colour planes are composited, so it re-displays without re-rendering
         ax = place(0.52, y, 0.44, block)
@@ -884,6 +892,20 @@ class Viewer:
             self._on_additive(bool(self.switches.get_status()[1]))
         else:
             self._on_grouped()
+
+    def _open_bead_calibration(self, _event=None) -> None:
+        """Open calibration in its own process so Tk cannot block this GUI loop."""
+        import subprocess
+        import sys
+
+        try:
+            subprocess.Popen([sys.executable, "-m", "smappy.cli.calibrate"])
+        except OSError as exc:
+            self.status = f"could not open bead calibration: {exc}"
+        else:
+            self.status = "opened bead calibration"
+        self._update_title()
+        self.figure.canvas.draw_idle()
 
     def _on_additive(self, on: bool) -> None:
         """Switch the composite for field-coloured images.

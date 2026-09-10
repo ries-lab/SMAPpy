@@ -219,6 +219,17 @@ def _viewer(locs=None, **kwargs):
     return Viewer(ViewState(locs if locs is not None else _table()), **kwargs)
 
 
+def test_bead_calibration_tool_opens_the_existing_gui_in_an_independent_process(monkeypatch):
+    import sys
+
+    commands = []
+    monkeypatch.setattr("subprocess.Popen", lambda command: commands.append(command))
+    viewer = _viewer()
+    viewer._open_bead_calibration()
+    assert commands == [[sys.executable, "-m", "smappy.cli.calibrate"]]
+    assert viewer.status == "opened bead calibration"
+
+
 def test_the_colour_control_offers_intensity_and_what_the_table_carries():
     viewer = _viewer()
     labels = [name for name, _ in viewer.color_choices]

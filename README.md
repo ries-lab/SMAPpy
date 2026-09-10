@@ -157,6 +157,31 @@ therefore just re-reading the index, with none of the care a growing TIFF page
 chain needs, and `live_fit.py` takes an NDTiff directory exactly as it takes a
 TIFF.
 
+## Bead PSF calibration
+
+Create a single-channel spline PSF from Micro-Manager OME-TIFF or NDTiff bead
+z-stacks with `smappy-calibrate`. Add files or multiple directories, pool their
+stacks, review automatically selected beads, and optionally exclude beads and
+rebuild. The GUI uses Tk and the existing `[viewer]` extra.
+
+The localization viewer also exposes **tools → bead calibration…** in its
+controls window. It opens the same calibration GUI in an independent process,
+so neither window blocks the other.
+
+    smappy-calibrate /path/to/bead_acquisitions
+
+For scripts, use `from smappy.calibrate import calibrate, CalibrationSettings`.
+The native calibration HDF5 loads directly through `load_spline_calibration`
+and `smappy-fit --cal`. Calibration uses pixels laterally and nanometres axially;
+no camera pixel size or mirroring is required. See [calibration documentation](docs/bead_calibration.md)
+for settings, examples, validation results, and differences from MATLAB.
+
+Split-frame dual-color bead calibration is available via the calibration window's
+**Calibration mode → Dual color** selector or `smappy-calibrate --layout 'up-down mirrored'
+--main-channel lower`. It builds a paired PSF model and projective transformation,
+with selectable geometry and pair exclusion/rebuild. See
+[dual-color calibration](docs/dual_color_calibration.md) for conventions and usage.
+
 ## Drift correction
 
 Sample drift is estimated with [COMET](https://github.com/gpufit/Comet), which
@@ -325,6 +350,23 @@ viewer would show.  It needs Pillow.
 For a window, run `smappy-view FILE` as a separate process.  And `LiveFit` is
 `live_view` without a window: the fit in a thread, finished blocks on a queue,
 for a front end of your own.
+
+## ROI manager
+
+Select and analyze regions in localization files with three linked views:
+file overview, movable detail view, and ROI preview. ROIs belong directly to
+files. Circles and squares use a global size; individual polygons and direction
+lines are also supported.
+
+    python -m smappy.cli.roi localizations.h5
+    python -m smappy.cli.roi --project experiment.rois.h5
+
+The first analysis workflow finds cluster candidates, lets you review them,
+computes localization count, mean precision and mean photons, and displays
+linked histograms. Rendering and analysis share global localization filters.
+Projects save ROI annotations, settings and analysis history alongside references
+to the source files. See the [ROI manager guide](docs/roi_manager.md) for manual
+selection, finder settings, project storage, and the Python plugin interfaces.
 
 ## Scripts
 

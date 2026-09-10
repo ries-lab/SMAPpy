@@ -1,4 +1,4 @@
-"""Reading of SMAP ``*_3Dcal.mat`` cubic-spline PSF calibration files.
+"""Native HDF5 and SMAP ``*_3Dcal.mat`` cubic-spline PSF calibration files.
 
 This is the one module that has to understand MATLAB's array conventions.
 Everything downstream works in a single, explicit convention:
@@ -33,7 +33,7 @@ import scipy.io
 
 @dataclass
 class SplineCalibration:
-    """A cubic-spline PSF model loaded from a SMAP ``_3Dcal.mat`` file."""
+    """A cubic-spline PSF model in the layout consumed by the SMAPpy fitter."""
 
     coeff: np.ndarray  # (64, nz, ny, nx) float32, C-contiguous
     dz: float  # z spacing of the calibration stack, nm
@@ -84,8 +84,11 @@ def _to_scalar(v, default=None):
 
 
 def load_spline_calibration(path) -> SplineCalibration:
-    """Load a SMAP ``_3Dcal.mat`` file (MATLAB v7 or v7.3)."""
+    """Load a native SMAPpy HDF5 calibration or SMAP MATLAB v7 calibration."""
     path = Path(path)
+    import h5py
+    if h5py.is_hdf5(path):
+        return _load_native_calibration(path)
     mat = scipy.io.loadmat(path, struct_as_record=False, squeeze_me=True)
 
     params = mat.get("parameters")
@@ -222,3 +225,82 @@ def warn_on_em_mismatch(cal: SplineCalibration, data_em_on: Optional[bool]) -> N
             "relative to the data. Acquire both with the same EM setting.",
             stacklevel=2,
         )
+
+
+def _validate_native_calibration(cal):
+    c = np.asarray(cal.coeff)
+    if c.ndim != 4 or c.shape[0] != 64 or min(c.shape[1:]) < 3 or not np.isfinite(c).all():
+        raise ValueError('invalid spline coefficient array: expected finite (64,nz,ny,nx)')
+    if not np.isfinite(cal.dz) or cal.dz <= 0:
+        raise ValueError('calibration dz must be positive and finite')
+    if not np.isfinite(cal.z0) or not 0 <= cal.z0 <= c.shape[1]:
+        raise ValueError('calibration z0 is outside the spline grid')
+    if cal.psf is not None:
+        if cal.psf.shape != tuple(n+1 for n in c.shape[1:]) or not np.isfinite(cal.psf).all():
+            raise ValueError('native PSF must contain the finite spline knots, shape (nz+1,ny+1,nx+1)')
+
+
+def save_spline_calibration(path, cal, diagnostics=None, overwrite=False):
+    """Save native HDF5, atomically; default refuses an existing destination.
+
+    Arrays stay in fitter order. JSON records carry settings and acquisition
+    provenance without Python pickles or MATLAB-specific structures.
+    """
+    import json
+    import os
+    import tempfile
+    import h5py
+    path = Path(path)
+    _validate_native_calibration(cal)
+    if path.exists() and not overwrite:
+        raise FileExistsError(path)
+    fd, tmp = tempfile.mkstemp(prefix='.'+path.name, suffix='.tmp', dir=path.parent)
+    os.close(fd)
+    try:
+        with h5py.File(tmp, 'w') as f:
+            f.attrs.update(format='smappy-spline-calibration', version=1,
+                           coefficient_order='64,z,y,x;16*pz+4*py+px',
+                           lateral_unit='pixel', axial_unit='nm',
+                           dz=cal.dz, z0=cal.z0, em_mirror=bool(cal.em_mirror))
+            if cal.x0 is not None:
+                f.attrs['x0'] = cal.x0
+            f.create_dataset('coeff', data=cal.coeff, compression='gzip')
+            if cal.psf is not None:
+                f.create_dataset('psf', data=cal.psf, compression='gzip')
+            f.create_dataset('parameters_json', data=json.dumps(cal.parameters))
+            g = f.create_group('diagnostics')
+            for key, value in (diagnostics or {}).items():
+                if key.endswith('_json'):
+                    g.create_dataset(key, data=json.dumps(value))
+                else:
+                    a = np.asarray(value)
+                    g.create_dataset(key, data=a, compression='gzip' if a.ndim else None)
+        if overwrite:
+            os.replace(tmp, path)
+        else:
+            os.link(tmp, path)  # no overwrite race with another writer
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
+def _load_native_calibration(path):
+    import json
+    import h5py
+    with h5py.File(path, 'r') as f:
+        if f.attrs.get('format') == 'smappy-dual-color-calibration':
+            raise ValueError('Dual-color calibration: use load_dual_color_calibration() and select .main or .secondary')
+        if f.attrs.get('format') != 'smappy-spline-calibration' or f.attrs.get('version') != 1:
+            raise ValueError(f'{path}: unsupported HDF5 calibration format/version')
+        if f.attrs.get('coefficient_order') != '64,z,y,x;16*pz+4*py+px':
+            raise ValueError('unsupported calibration coefficient convention')
+        if f.attrs.get('lateral_unit') != 'pixel' or f.attrs.get('axial_unit') != 'nm':
+            raise ValueError('unsupported calibration coordinate units')
+        cal = SplineCalibration(
+            coeff=np.ascontiguousarray(f['coeff'][...], dtype=np.float32),
+            dz=float(f.attrs['dz']), z0=float(f.attrs['z0']),
+            x0=f.attrs.get('x0'), psf=f['psf'][...] if 'psf' in f else None,
+            em_mirror=bool(f.attrs.get('em_mirror', False)), source=Path(path),
+            parameters=json.loads(f['parameters_json'][()]))
+    _validate_native_calibration(cal)
+    return cal
