@@ -377,6 +377,7 @@ class ROIManagerWindow(QMainWindow):
         self.zoom_center = None
         self.draft = None
         self.redraw()
+        self.changed.emit()          # the tab names the file the finder acts on
 
     def _zoom_panned(self, dx: float, dy: float) -> None:
         if self.zoom_center is not None:

@@ -45,14 +45,11 @@ class ROITab(QWidget):
         self.open_button.clicked.connect(self.open_manager)
         layout.addWidget(self.open_button)
 
-        row = QHBoxLayout()
-        self.file = QComboBox()
-        self.file.setToolTip("the file the finder works on")
-        self.file.currentIndexChanged.connect(self._on_file)
+        # which file this acts on is chosen in the manager; here it is only named
         self.file_count = QLabel("")
-        row.addWidget(self.file, 1)
-        row.addWidget(self.file_count)
-        layout.addLayout(row)
+        self.file_count.setWordWrap(True)
+        self.file_count.setStyleSheet("color: gray")
+        layout.addWidget(self.file_count)
 
         # -------------------------------------------------------- geometry
         geometry = QWidget()
@@ -141,7 +138,12 @@ class ROITab(QWidget):
         return self.session.rois
 
     def current_file(self) -> Optional[str]:
-        return self.file.currentData()
+        """The file chosen in the manager window."""
+        project = self.project
+        chosen = project.navigation.get("file")
+        if chosen in project.sources:
+            return chosen
+        return next(iter(project.sources), None)
 
     def _on_session(self, what: str) -> None:
         if what in ("locs", "layers", "rois"):
@@ -170,13 +172,6 @@ class ROITab(QWidget):
         self._loading = True
         self.preview.setValue(project.preview_nm)
         if files_changed:
-            current = self.current_file()
-            self.file.clear()
-            for source in project.sources.values():
-                self.file.addItem(f"{source.number + 1}. {source.name}", source.id)
-            index = self.file.findData(current if current is not None
-                                       else project.navigation.get("file"))
-            self.file.setCurrentIndex(max(index, 0))
             self.shape.setCurrentText(project.shape)
             self.size.setValue(project.size_nm)
             self.preview.setValue(project.preview_nm)
@@ -186,21 +181,17 @@ class ROITab(QWidget):
 
     def _update_counts(self) -> None:
         project = self.project
-        rois = project.rois_of(self.current_file())
+        file_id = self.current_file()
+        source = project.sources.get(file_id)
+        rois = project.rois_of(file_id)
         used = sum(1 for r in rois if r.use)
-        self.file_count.setText(f"{len(rois)} ROIs, {used} used")
+        name = f"{source.number + 1}. {source.name}" if source else "no file"
+        self.file_count.setText(f"{name} - {len(rois)} ROIs, {used} used")
         rows = project.results()
         self.summary.setText(f"{len(rows)} current results over all files"
                              if rows else "no current results")
 
     # -------------------------------------------------------------- edits
-    def _on_file(self) -> None:
-        if self._loading:
-            return
-        self.project.navigation["file"] = self.current_file()
-        self._update_counts()
-        self._notify()
-
     def _on_geometry(self) -> None:
         if self._loading:
             return
