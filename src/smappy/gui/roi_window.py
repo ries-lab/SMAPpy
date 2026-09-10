@@ -24,8 +24,9 @@ from ..render import FieldOfView
 from ..session import Session
 
 DRAFT_PEN = pg.mkPen("#2f7fd0", width=2, style=Qt.DashLine)
-ROI_PEN = pg.mkPen("#2e9e4f", width=2)
-EXCLUDED_PEN = pg.mkPen("#8a8a8a", width=2)
+ROI_PEN = pg.mkPen("#2e9e4f", width=2)          # the selected ROI
+EXCLUDED_PEN = pg.mkPen("#8a8a8a", width=1)     # not used
+EXCLUDED_ACTIVE_PEN = pg.mkPen("#8a8a8a", width=2)
 OTHER_PEN = pg.mkPen("#ffb300", width=1)
 FRAME_PEN = pg.mkPen("#ffd54a", width=1)
 DETAIL_NM = 3000.0            # the zoom's width to start with
@@ -90,6 +91,7 @@ class ImagePane(QWidget):
         self.view.addItem(self.image)
         self.shapes = {name: pg.PlotDataItem(pen=pen, connect="finite")
                        for name, pen in (("others", OTHER_PEN), ("excluded", EXCLUDED_PEN),
+                                         ("excluded_active", EXCLUDED_ACTIVE_PEN),
                                          ("roi", ROI_PEN), ("draft", DRAFT_PEN),
                                          ("frame", FRAME_PEN))}
         for item in self.shapes.values():
@@ -181,22 +183,35 @@ class ROIManagerWindow(QMainWindow):
         lists = QWidget()
         llayout = QVBoxLayout(lists)
         llayout.setContentsMargins(2, 2, 2, 2)
-        llayout.addWidget(QLabel("<b>files</b>"))
+        llayout.setSpacing(2)
+        side = QHBoxLayout()
+        side.setSpacing(6)
+        file_side = QVBoxLayout()
+        file_side.setSpacing(1)
+        file_side.addWidget(QLabel("<b>files</b>"))
         self.files = QListWidget()
-        self.files.setMaximumHeight(110)
         self.files.currentRowChanged.connect(self._on_file)
-        llayout.addWidget(self.files)
-        llayout.addWidget(QLabel("<b>ROIs</b>"))
+        file_side.addWidget(self.files, 1)
+        side.addLayout(file_side, 1)
+        roi_side_list = QVBoxLayout()
+        roi_side_list.setSpacing(1)
+        roi_side_list.addWidget(QLabel("<b>ROIs</b>"))
         self.table = QTableWidget(0, 3)
         self.table.setHorizontalHeaderLabels(["ROI", "file", "use"])
         self.table.verticalHeader().setVisible(False)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeToContents)
+        header.setStretchLastSection(False)
+        self.table.verticalHeader().setDefaultSectionSize(20)
         self.table.itemSelectionChanged.connect(self._on_select)
         self.table.itemChanged.connect(self._on_item)
-        llayout.addWidget(self.table, 1)
+        self.table.setMaximumWidth(190)          # the numbers need no more
+        roi_side_list.addWidget(self.table, 1)
+        side.addLayout(roi_side_list, 0)
+        llayout.addLayout(side, 1)
         self.remove_button = QPushButton("Remove")
         self.remove_button.setToolTip("remove the selected ROI")
         self.remove_button.clicked.connect(self._remove)
@@ -313,15 +328,7 @@ class ROIManagerWindow(QMainWindow):
         rois = project.rois_of(file_id)
 
         # the file: every ROI, small
-        for name, chosen in (("others", [r for r in rois if r.use and r.id != self.active]),
-                             ("excluded", [r for r in rois if not r.use]),
-                             ("roi", [r for r in rois if r.id == self.active])):
-            xs, ys = [], []
-            for roi in chosen:
-                ox, oy = outline(roi.center, project.shape, project.size_nm, roi.polygon)
-                xs.extend(list(ox) + [np.nan])
-                ys.extend(list(oy) + [np.nan])
-            self.file_pane.draw(name, xs, ys)
+        self._draw_outlines(self.file_pane, rois)
 
         centre = self.zoom_center
         if centre is None:
@@ -330,15 +337,7 @@ class ROIManagerWindow(QMainWindow):
         half = self.zoom_pane.width_nm / 2
         self.zoom_pane.render(state, centre[0] - half, centre[0] + half,
                               centre[1] - half, centre[1] + half)
-        for name, chosen in (("others", [r for r in rois if r.use and r.id != self.active]),
-                             ("excluded", [r for r in rois if not r.use]),
-                             ("roi", [r for r in rois if r.id == self.active])):
-            xs, ys = [], []
-            for roi in chosen:
-                ox, oy = outline(roi.center, project.shape, project.size_nm, roi.polygon)
-                xs.extend(list(ox) + [np.nan])
-                ys.extend(list(oy) + [np.nan])
-            self.zoom_pane.draw(name, xs, ys)
+        self._draw_outlines(self.zoom_pane, rois)
         self.zoom_pane.draw("draft", *([[], []] if self.draft is None else
                                        outline(self.draft, project.shape, project.size_nm)))
         # the frame the zoom covers, on the file image
@@ -348,6 +347,23 @@ class ROIManagerWindow(QMainWindow):
                             [centre[1] - half, centre[1] - half, centre[1] + half,
                              centre[1] + half, centre[1] - half])
         self._draw_roi_pane(state)
+
+    def _draw_outlines(self, pane, rois) -> None:
+        """Every ROI on one pane: grey when it is not used, green when selected."""
+        project = self.project
+        groups = {"others": [], "excluded": [], "excluded_active": [], "roi": []}
+        for roi in rois:
+            active = roi.id == self.active
+            name = ("excluded_active" if active else "excluded") if not roi.use else (
+                "roi" if active else "others")
+            groups[name].append(roi)
+        for name, chosen in groups.items():
+            xs, ys = [], []
+            for roi in chosen:
+                ox, oy = outline(roi.center, project.shape, project.size_nm, roi.polygon)
+                xs.extend(list(ox) + [np.nan])
+                ys.extend(list(oy) + [np.nan])
+            pane.draw(name, xs, ys)
 
     def _draw_roi_pane(self, state) -> None:
         project = self.project
@@ -364,8 +380,10 @@ class ROIManagerWindow(QMainWindow):
         polygon = roi.polygon if (roi is not None and self.draft is None) else None
         xs, ys = outline(centre, project.shape, project.size_nm, polygon)
         drafted = self.draft is not None
-        self.roi_pane.draw("draft", xs if drafted else [], ys if drafted else [])
-        self.roi_pane.draw("roi", [] if drafted else xs, [] if drafted else ys)
+        used = drafted or roi is None or roi.use
+        for name in ("draft", "roi", "excluded_active"):
+            self.roi_pane.draw(name)
+        self.roi_pane.draw("draft" if drafted else ("roi" if used else "excluded_active"), xs, ys)
         self.roi_pane.label.setText("ROI (draft)" if drafted else "ROI")
         self.add_button.setEnabled(drafted)
 
