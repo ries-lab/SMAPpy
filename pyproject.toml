@@ -59,6 +59,7 @@ smappy-live = "smappy.cli.live:main"
 smappy-view = "smappy.cli.view:main"
 smappy-drift = "smappy.cli.drift:main"
 smappy-calibrate = "smappy.cli.calibrate:main"
+smappy-roi = "smappy.cli.roi:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
