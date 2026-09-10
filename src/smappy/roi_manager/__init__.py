@@ -1,21 +1,19 @@
-"""Analysis ROI projects and an optional matplotlib selection interface."""
+"""Analysis ROI projects: the model, the plugins and their storage.
+
+The interface lives in the GUI (`smappy.gui.roi_window` and the control
+window's ROI tab), which drives this model over the session's files.  A
+project can also be built and evaluated from a script, with no window::
+
+    from smappy.roi_manager import ROIProject
+
+    project = ROIProject()
+    source = project.add_file("localizations.h5")
+    project.set_geometry(300, "circle")
+    project.find(source.id)
+    project.evaluate()
+    rows = project.results()
+"""
 from .core import ROI, ROIProject
-from .plugins import DensityPeaks, Statistics, Histograms
+from .plugins import DensityPeaks, Histograms, Statistics
 
-
-def show(project=None, files=(), block=True):
-    """Open a project, optionally adding localization HDF5 files."""
-    import matplotlib.pyplot as plt
-    from .gui import ROIManager
-    if isinstance(project, (str, bytes)) or hasattr(project, '__fspath__'):
-        project = ROIProject.load(project)
-    if project is None:
-        project = ROIProject()
-    for path in files:
-        project.add_file(path)
-    manager = ROIManager(project)
-    plt.show(block=block)
-    return manager
-
-
-__all__ = ['ROI', 'ROIProject', 'DensityPeaks', 'Statistics', 'Histograms', 'show']
+__all__ = ['ROI', 'ROIProject', 'DensityPeaks', 'Statistics', 'Histograms']

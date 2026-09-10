@@ -1,5 +1,4 @@
 """Analysis selection, provenance and an end-to-end synthetic NPC workflow."""
-from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -215,38 +214,3 @@ def test_plugin_error_does_not_abort_other_rois():
     run = p.evaluate(Plugin())
     assert sum('error' in r for r in run['records'].values()) == 1
     assert p.results('example')[0]['roi_id'] == good.id
-
-
-def test_gui_manual_selection_grid_polygon_review_and_histogram(tmp_path):
-    matplotlib = pytest.importorskip('matplotlib')
-    matplotlib.use('Agg')
-    import matplotlib.pyplot as plt
-    from smappy.roi_manager.gui import ROIManager
-    p = ROIProject()
-    locs, _ = pores()
-    source_path = tmp_path / 'locs.h5'
-    save_localizations(source_path, locs)
-    source = p.add_file(source_path)
-    gui = ROIManager(p, tmp_path / 'rois.h5')
-    gui.new_candidate([300, 300])
-    gui.add_candidate()
-    roi = p.rois[gui.selected_id]
-    position = roi.center.copy()
-    gui.step_grid(1)
-    assert roi.center == position
-    gui.start_polygon()
-    gui.draw()  # selector must survive redraws
-    assert gui.selector.active
-    gui._polygon_done([[200, 200], [400, 200], [400, 400], [200, 400]])
-    assert gui.selector is None
-    gui.evaluate()
-    assert p.results()[0]['n_localizations'] == 30
-    gui.histograms()
-    bar = next(b for b, ids in gui.hist_pick.items() if ids)
-    gui._hist_click(SimpleNamespace(artist=bar))
-    assert gui.selected_id == roi.id
-    gui.save()
-    gui.open_project()
-    assert gui.project.results()[0]['n_localizations'] == 30
-    gui.draw()
-    plt.close('all')

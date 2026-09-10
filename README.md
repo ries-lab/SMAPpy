@@ -353,20 +353,20 @@ for a front end of your own.
 
 ## ROI manager
 
-Select and analyze regions in localization files with three linked views:
-file overview, movable detail view, and ROI preview. ROIs belong directly to
-files. Circles and squares use a global size; individual polygons and direction
-lines are also supported.
+Select and analyze regions in localization files.  The manager window of the
+GUI shows the file, a zoom and the ROI, with the files and the ROIs beside
+them; ROIs belong to files, and circles and squares share a global size while
+polygons keep their own outline.
 
-    python -m smappy.cli.roi localizations.h5
-    python -m smappy.cli.roi --project experiment.rois.h5
+    python -m smappy.gui.app localizations.h5      # then Tools -> ROI manager
 
-The first analysis workflow finds cluster candidates, lets you review them,
-computes localization count, mean precision and mean photons, and displays
-linked histograms. Rendering and analysis share global localization filters.
-Projects save ROI annotations, settings and analysis history alongside references
-to the source files. See the [ROI manager guide](docs/roi_manager.md) for manual
-selection, finder settings, project storage, and the Python plugin interfaces.
+The first analysis workflow finds cluster candidates, lets you include or
+exclude them, computes localization count, mean precision and mean photons,
+and shows histograms. What an ROI sees is what the image shows: the layer's
+filters and grouping. ROIs, their flags and their evaluation runs are saved
+inside the localization file, so they come back when it is opened. See the
+[ROI manager guide](docs/roi_manager.md) for the finder settings, the storage
+and the Python plugin interfaces.
 
 ## Scripts
 

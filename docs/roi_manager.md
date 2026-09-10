@@ -1,75 +1,68 @@
 # ROI manager
 
-The ROI manager organizes **files → ROIs**. The three linked images are a file
-overview, a movable detail view, and an ROI preview. The detail view is only a
-navigation aid: there are no stored cells, and moving through the file never
-moves ROIs.
+The ROI manager organizes **files → ROIs**.  Its window has four quadrants: the
+whole file, a zoom, the ROI itself, and the file and ROI lists.  The zoom is a
+navigation aid; moving through the file never moves ROIs.
 
 ## Open the manager
 
-Use the existing `viewer` extra for matplotlib. From a source checkout:
+Start the GUI and open the manager from the ROI tab's **Open ROI manager**, from
+**Tools → ROI manager**, or with Ctrl+R:
 
 ```sh
-python -m smappy.cli.roi localizations.h5
-python -m smappy.cli.roi first.h5 second.h5
-python -m smappy.cli.roi --project experiment.rois.h5
+python -m smappy.gui.app localizations.h5
 ```
 
-An installation made after this change also provides `smappy-roi` with the same
-arguments. Starting without arguments opens an empty manager; enter a localization
-file path in the controls window and click **Add file**. Use **Previous file** and
-**Next file** to navigate the loaded files.
+The files are the ones the session has loaded, so *File → Open* and *Add file*
+are how sources arrive; a fitted or drift-corrected table can be used without
+saving it first.  Inputs are SMAPpy localization HDF5 files, SMAP `_sml.mat`,
+MINFLUX exports and csv, whatever the session can read.  Coordinates must be in
+nm, or carry `pixelsize_nm` metadata for conversion.
 
-Inputs are SMAPpy localization HDF5 files. Coordinates must be in nm, or contain
-pixel coordinates and `pixelsize_nm` metadata for conversion. SMAP `_sml.mat`
-projects are not imported by this first version.
+The matplotlib interface and the `smappy-roi` command that this guide first
+described are gone; `ROIProject` and its plugins are unchanged and still
+scriptable, including `save` and `load` of a sidecar project file.
 
 ## Manual selection
 
-1. Click the overview to position the detail view. Alternatively, use **Next
-   tile** and **Previous tile** for a serpentine grid with spacing equal to the
-   detail width.
-2. Click the detail view to create a draft ROI. Click in its preview to recenter
-   it, then use **Add ROI** or Enter to store it. Manual additions are reviewed.
-3. To create an individual boundary, click **Polygon**, place vertices in the
-   preview, and close the polygon by clicking its first vertex. Esc cancels the
-   drawing tool. **Clear shape** restores the global circle/square boundary.
-4. **Direction** takes two clicks, start then end. It records an arrow available
-   to analysis plugins; it does not rotate the global square. **Clear line**
-   removes it. Comments are stored with **Set comment**.
-5. Click a table row to inspect a saved ROI. Left/right arrow keys step through
-   the current file's ROIs. Right-click its preview to translate the ROI,
-   including its polygon and direction line. **Remove ROI** removes it from the
-   collection; previous run records remain in the project history.
+1. Click the file image to move the zoom there, or drag inside the zoom.
+2. Click empty space in the zoom to draft an ROI.  The ROI image shows it;
+   click there to recentre it, then **Add** or Enter stores it.
+3. Click an ROI's *outline* to select it.  A click inside one drafts a new ROI
+   instead, which is what makes overlapping ROIs drawable.
+4. A region drawn in the 2D view becomes an ROI with **Add the drawn region as
+   an ROI** in the tab, keeping its rectangle, line or polygon outline.
+5. Select an ROI in the list to jump to its file and centre the zoom on it.
+   The **use** checkbox, or the space bar, includes or excludes it; **Remove**
+   deletes it, and previous run records stay in the history.
 
-The default circle has a **300 nm diameter**. For a square, the global size is
-its **side length**. **Apply geometry** updates all ROIs using global geometry.
-Polygons retain their individually drawn boundaries. Detail and preview widths
-control the visible neighborhood independently of analysis geometry.
+There is no review step: an ROI counts from the moment it is made, and *use* is
+what excludes one.  Polygons and direction lines are still part of the model and
+of saved projects; only drawing them by hand awaits the new interface.
+
+The default circle has a **300 nm diameter**.  For a square, the global size is
+its **side length**; both are set in the ROI tab and apply to every ROI at once.
+Polygons keep their own boundaries.  **ROI view** sets what the ROI image shows
+around the ROI, independently of the analysis geometry.
 
 The boundary is inclusive for circles, squares and polygon edges. Overlapping
 ROIs are independent: a localization in their overlap contributes to both.
 
 ## Filters and grouping
 
-Global range filters apply to rendering, cluster finding and analysis. The
-starting bounds match `smappy-view`: precision at most 25 nm, relative
-log-likelihood at least -1.5, and z between -500 and 500 nm, wherever those
-columns exist. Photons and frame are initially unbounded. Blank fields remove a
-bound; click **Apply filters** after editing.
+Filters and grouping come from the render layer, so what an ROI measures is what
+the image shows; there is no separate filter panel.  Change them in the Render
+tab and the ROIs follow.
 
 A field absent from a source is not filtered; absent fields are named above the
 views. The Python API supports additional range filters. File-selection filters
 (`filenumber`, `file_id`) are ignored: each ROI is always extracted from its own
 source file. The detail view and preview limits never restrict analysis.
 
-**Grouped** followed by **Apply grouping** switches both rendering and analysis
-to grouped localizations using SMAPpy's existing grouping implementation. The
-default link distance is 50 nm and frame gap is 1. Filters are applied *after*
-grouping. Thus the localization count counts groups, and photons are the photon
-sums of those groups. Different grouping settings can be supplied through the
-Python API. This manager has its own global filter settings; a separately opened
-`smappy-view` window is not synchronized with it.
+The layer's **grouped** switch applies to the ROIs as well: the localization
+count then counts groups, and photons are the photon sums of those groups.  The
+linking parameters are session-wide, under *parameters...* next to the
+overview's *update*.
 
 ## Find, review, evaluate, histogram
 
@@ -86,13 +79,10 @@ structures of about 100 nm diameter:
 | Count radius | 75 nm | Neighborhood used to recenter and check count |
 | Min count | 10 | Minimum filtered localizations within that radius |
 
-These are detection settings, separate from the analysis ROI size. Results are
-**unreviewed** until **Accept ROI** or **Accept file ROIs**. **Toggle use** controls
-inclusion independently of review; bulk acceptance does not change use flags.
-Unreviewed outlines are amber, reviewed outlines green, excluded outlines gray,
-and the active ROI blue.
+These are detection settings, separate from the analysis ROI size. Outlines are amber, grey when the ROI is excluded, green when it is selected,
+and a draft is blue and dashed.
 
-**Evaluate all** runs on all reviewed, included ROIs across all files. The
+**Evaluate all** runs on every included ROI across all files. The
 statistics evaluator returns localization count, arithmetic mean lateral
 localization precision (`loc_precision_nm`), and arithmetic mean photons.
 Nonfinite measurement values are omitted from each mean; their finite sample
@@ -100,11 +90,9 @@ counts are saved separately. Empty selections return count zero and NaN means.
 Missing required measurement columns produce a per-ROI error without stopping
 other ROIs. Select the error row to see its message.
 
-**Histograms** plots current successful results for reviewed, included ROIs.
-NaN means are omitted, with the number of missing values shown. Click a bar to
-inspect an ROI in that bin; repeated clicks cycle through its ROIs. A histogram
-is a snapshot: if inputs, inclusion or results change, the window asks you to
-refresh it with **Histograms**.
+**Histograms** plots the current results for included ROIs.  NaN means are
+omitted, with the number of missing values shown.  A histogram is a snapshot:
+press **Histograms** again after anything changes.
 
 Synthetic tests cover two 100 nm rings and two blobs, each with 30 localizations.
 Detection settings still need checking on experimental NPC data, especially for
@@ -114,17 +102,16 @@ exceeds that limit.
 
 ## Saving and reproducibility
 
-Enter a project path and click **Save**. **Open** replaces the current project;
-save your changes before opening another one. Close does not automatically save.
-Draft ROIs are not saved until added to the collection.
+ROIs are part of the session: **File → Save** writes them into the localization
+file's metadata, together with the geometry, the use flags, the finder
+provenance, the evaluation runs and which ROI was selected.  Opening that file
+brings all of it back.  Draft ROIs are not saved until added.
 
-A project is a versioned HDF5 sidecar containing source references, ROI geometry,
-review and use flags, comments, finder provenance, navigation, global settings,
-and evaluation-run history. Source paths are relative to the project, so a
-folder containing both can be moved together. Source columns and metadata are
-fingerprinted; reopening a project rejects changed source contents. Source data
-are held as immutable snapshots while the manager is open. In-memory sources
-must have been saved as localization files before saving a project.
+`ROIProject.save` and `ROIProject.load` still write and read the versioned HDF5
+sidecar described below, for scripts that want ROIs in a file of their own; the
+GUI does not use it.  That sidecar holds source references, geometry, flags,
+comments, provenance, settings and run history, with source paths relative to
+the project.
 
 Every evaluation records its plugin name/version, parameters, timestamp, source
 fingerprint, effective filters, grouping settings, and geometry. A changed
@@ -136,7 +123,7 @@ numerical results. Old runs remain available in `project.runs`.
 ## Python API and plugins
 
 ```python
-from smappy.roi_manager import ROIProject, Histograms, show
+from smappy.roi_manager import ROIProject, Histograms
 
 project = ROIProject()
 source = project.add_file("localizations.h5")
@@ -144,10 +131,8 @@ project.set_geometry(300, "circle")
 project.set_filters({"loc_precision_nm": (None, 25), "photons": (500, None)})
 
 candidates = project.find(source.id, parameters={"min_count": 15})
-# Inspect candidates in the GUI before marking them reviewed.
-manager = show(project)
 
-# Or add a manually specified ROI:
+# Or add one by hand:
 roi = project.add_roi(source.id, [1500, 2500])
 locs = project.extract(roi)
 run = project.evaluate()
@@ -156,6 +141,8 @@ histograms = Histograms().analyze(rows, {"bins": 20})
 project.save("experiment.rois.h5")
 ```
 
+In the GUI the project is a `SessionROIs`, the same model with the session's
+files as its sources and the layer's filters and grouping instead of its own.
 The GUI uses the built-in plugins. Scripts can pass another plugin object to
 `project.find(..., plugin=...)` or `project.evaluate(plugin=...)`. Plugins declare
 stable `name` and `version` strings and use these interfaces:
