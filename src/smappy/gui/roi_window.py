@@ -14,6 +14,7 @@ from typing import Optional
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QRectF, Qt, Signal
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (QAbstractItemView, QHBoxLayout, QHeaderView, QLabel,
                                QListWidget, QListWidgetItem, QMainWindow, QPushButton,
                                QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout,
@@ -28,7 +29,28 @@ EXCLUDED_PEN = pg.mkPen("#8a8a8a", width=2)
 OTHER_PEN = pg.mkPen("#ffb300", width=1)
 FRAME_PEN = pg.mkPen("#ffd54a", width=1)
 DETAIL_NM = 3000.0            # the zoom's width to start with
-PREVIEW_FACTOR = 3.0          # the ROI image covers this many ROI widths
+RIM_PIXELS = 6.0              # how near the outline a click must be to select
+
+
+def rim_distance(x: float, y: float, center, shape: str, size: float, polygon=None) -> float:
+    """Distance from a point to an ROI's outline, in data units.
+
+    Selection asks for this rather than for "inside", so that a click in the
+    middle of an ROI is free to start a new, overlapping one.
+    """
+    p = np.array([x, y], float)
+    if polygon is not None:
+        v = np.asarray(polygon, float)
+        a, b = v, np.roll(v, -1, axis=0)
+        ab = b - a
+        t = np.clip(np.einsum("ij,ij->i", p - a, ab) / np.maximum((ab ** 2).sum(1), 1e-12), 0, 1)
+        return float(np.min(np.linalg.norm(a + t[:, None] * ab - p, axis=1)))
+    d = p - np.asarray(center, float)
+    if shape == "circle":
+        return abs(float(np.hypot(*d)) - size / 2)
+    q = np.abs(d) - size / 2                     # signed distance to the square
+    inside = min(max(q[0], q[1]), 0.0)
+    return abs(float(np.linalg.norm(np.maximum(q, 0.0)) + inside))
 
 
 def outline(center, shape: str, size: float, polygon=None):
@@ -49,8 +71,11 @@ class ImagePane(QWidget):
     """One rendered quadrant: an image, outlines over it, and clicks."""
 
     clicked = Signal(float, float)
+    zoomed = Signal(float)
+    panned = Signal(float, float)          # how far to move the view, in nm
 
-    def __init__(self, title: str, zoomable: bool = False, parent=None):
+    def __init__(self, title: str, zoomable: bool = False, pannable: bool = False,
+                 parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(2, 2, 2, 2)
@@ -72,9 +97,13 @@ class ImagePane(QWidget):
         layout.addWidget(self.graphics)
         self.width_nm = DETAIL_NM
         self.zoomable = zoomable
+        self.pannable = pannable
         self.graphics.viewport().installEventFilter(self)
+        self.graphics.viewport().setMouseTracking(False)
         self.fov: Optional[FieldOfView] = None
         self._press = None
+        self._last = None
+        self._dragged = False
 
     def eventFilter(self, obj, event) -> bool:
         kind = event.type()
@@ -82,18 +111,29 @@ class ImagePane(QWidget):
             pass
         from PySide6.QtCore import QEvent
         if kind == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
-            self._press = event.position()
+            self._press = self._last = event.position()
+            self._dragged = False
+        elif kind == QEvent.MouseMove and self._press is not None and self.pannable:
+            # drag to move the view; a click that never moves still counts
+            delta = event.position() - self._last
+            if self._dragged or (event.position() - self._press).manhattanLength() > 3:
+                self._dragged = True
+                self._last = event.position()
+                if self.fov is not None:
+                    self.panned.emit(-delta.x() * self.fov.pixelsize,
+                                     -delta.y() * self.fov.pixelsize)
+                return True
         elif kind == QEvent.MouseButtonRelease and self._press is not None:
             moved = (event.position() - self._press).manhattanLength()
-            self._press = None
-            if moved <= 3 and self.fov is not None:
+            dragged, self._press, self._dragged = self._dragged, None, False
+            if not dragged and moved <= 3 and self.fov is not None:
                 p = self.view.mapSceneToView(self.graphics.mapToScene(event.position().toPoint()))
                 self.clicked.emit(p.x(), p.y())
                 return True
         elif kind == QEvent.Wheel and self.zoomable:
             steps = event.angleDelta().y() / 120.0
             self.width_nm = float(np.clip(self.width_nm * 1.2 ** -steps, 50.0, 1e7))
-            self.clicked.emit(np.nan, np.nan)          # ask for a redraw at the new width
+            self.zoomed.emit(self.width_nm)
             return True
         return super().eventFilter(obj, event)
 
@@ -135,9 +175,8 @@ class ROIManagerWindow(QMainWindow):
         self._loading = False
 
         self.file_pane = ImagePane("file")
-        self.zoom_pane = ImagePane("zoom", zoomable=True)
+        self.zoom_pane = ImagePane("zoom", zoomable=True, pannable=True)
         self.roi_pane = ImagePane("ROI", zoomable=True)
-        self.roi_pane.width_nm = 0.0                    # follows the geometry
 
         lists = QWidget()
         llayout = QVBoxLayout(lists)
@@ -156,17 +195,15 @@ class ROIManagerWindow(QMainWindow):
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.table.itemSelectionChanged.connect(self._on_select)
+        self.table.itemChanged.connect(self._on_item)
         llayout.addWidget(self.table, 1)
-        buttons = QHBoxLayout()
-        self.toggle_button = QPushButton("Toggle use")
-        self.toggle_button.setToolTip("include or exclude the selected ROI")
-        self.toggle_button.clicked.connect(self._toggle)
         self.remove_button = QPushButton("Remove")
         self.remove_button.setToolTip("remove the selected ROI")
         self.remove_button.clicked.connect(self._remove)
-        buttons.addWidget(self.toggle_button)
-        buttons.addWidget(self.remove_button)
-        llayout.addLayout(buttons)
+        llayout.addWidget(self.remove_button)
+        toggle = QShortcut(QKeySequence(Qt.Key_Space), self)
+        toggle.setContext(Qt.WindowShortcut)
+        toggle.activated.connect(self._toggle)
 
         roi_side = QWidget()
         rlayout = QVBoxLayout(roi_side)
@@ -196,6 +233,9 @@ class ROIManagerWindow(QMainWindow):
         self.file_pane.clicked.connect(self._file_clicked)
         self.zoom_pane.clicked.connect(self._zoom_clicked)
         self.roi_pane.clicked.connect(self._roi_clicked)
+        self.zoom_pane.zoomed.connect(lambda _: self.redraw())
+        self.zoom_pane.panned.connect(self._zoom_panned)
+        self.roi_pane.zoomed.connect(self._preview_zoomed)
         session.on_change(self._on_session)
         self.refresh(files=True)
 
@@ -236,20 +276,26 @@ class ROIManagerWindow(QMainWindow):
 
     def _fill_table(self) -> None:
         project = self.project
+        was_loading, self._loading = self._loading, True
         numbers = project.numbers()
         self._rows = list(project.rois)
         self.table.setRowCount(len(self._rows))
         for row, roi_id in enumerate(self._rows):
             roi = project.rois[roi_id]
             for column, text in ((0, str(numbers[roi_id])),
-                                 (1, str(project.file_number(roi.file_id))),
-                                 (2, "yes" if roi.use else "no")):
+                                 (1, str(project.file_number(roi.file_id)))):
                 item = QTableWidgetItem(text)
                 if not roi.use:
                     item.setForeground(pg.mkColor("#8a8a8a"))
                 self.table.setItem(row, column, item)
+            use = QTableWidgetItem()
+            use.setFlags((use.flags() | Qt.ItemIsUserCheckable) & ~Qt.ItemIsEditable)
+            use.setCheckState(Qt.Checked if roi.use else Qt.Unchecked)
+            use.setToolTip("include this ROI in the evaluation (space toggles it)")
+            self.table.setItem(row, 2, use)
             if roi_id == self.active:
                 self.table.selectRow(row)
+        self._loading = was_loading
         self.status.showMessage(f"{len(self._rows)} ROIs, "
                                 f"{sum(1 for r in project.rois.values() if r.use)} used")
 
@@ -311,8 +357,8 @@ class ROIManagerWindow(QMainWindow):
         if centre is None:
             self.roi_pane.clear()
             return
-        width = self.roi_pane.width_nm or PREVIEW_FACTOR * project.size_nm
-        half = width / 2
+        half = project.preview_width / 2
+        self.roi_pane.width_nm = project.preview_width
         self.roi_pane.render(state, centre[0] - half, centre[0] + half,
                              centre[1] - half, centre[1] + half)
         polygon = roi.polygon if (roi is not None and self.draft is None) else None
@@ -330,6 +376,17 @@ class ROIManagerWindow(QMainWindow):
         self.project.navigation["file"] = self.current_file()
         self.zoom_center = None
         self.draft = None
+        self.redraw()
+
+    def _zoom_panned(self, dx: float, dy: float) -> None:
+        if self.zoom_center is not None:
+            self.zoom_center = self.zoom_center + np.array([dx, dy])
+            self.redraw()
+
+    def _preview_zoomed(self, width: float) -> None:
+        """The wheel over the ROI image sets the overview width everywhere."""
+        self.project.preview_nm = float(width)
+        self.changed.emit()
         self.redraw()
 
     def _file_clicked(self, x: float, y: float) -> None:
@@ -357,18 +414,38 @@ class ROIManagerWindow(QMainWindow):
         if np.isnan(x):
             self.redraw()
             return
-        if self.draft is not None:
+        hit = self._roi_at(x, y, self.roi_pane)
+        if hit is not None and self.draft is None:
+            self.select(hit.id)
+        elif self.draft is not None:
             self.draft = np.array([x, y])
             self.redraw()
 
-    def _roi_at(self, x: float, y: float):
+    def _roi_at(self, x: float, y: float, pane=None):
+        """The ROI whose outline the click landed on, if any.
+
+        Only the rim counts: clicking inside an ROI starts a new one, which is
+        what makes overlapping ROIs drawable.
+        """
         project = self.project
+        pane = pane or self.zoom_pane
+        tolerance = RIM_PIXELS * (pane.fov.pixelsize if pane.fov is not None else 1.0)
         best, best_d = None, np.inf
         for roi in project.rois_of(self.current_file()):
-            d = float(np.hypot(x - roi.center[0], y - roi.center[1]))
-            if d <= project.size_nm / 2 and d < best_d:
+            d = rim_distance(x, y, roi.center, project.shape, project.size_nm, roi.polygon)
+            if d <= tolerance and d < best_d:
                 best, best_d = roi, d
         return best
+
+    def _on_item(self, item) -> None:
+        """The use box in the table."""
+        if self._loading or item.column() != 2 or item.row() >= len(self._rows):
+            return
+        roi = self.project.rois[self._rows[item.row()]]
+        roi.use = item.checkState() == Qt.Checked
+        self._fill_table()
+        self.redraw()
+        self.changed.emit()
 
     def _on_select(self) -> None:
         if self._loading:
@@ -415,6 +492,7 @@ class ROIManagerWindow(QMainWindow):
         return self.project.rois.get(self.active) if self.active else None
 
     def _toggle(self) -> None:
+        """Space: include or exclude the selected ROI."""
         roi = self._selected()
         if roi is not None:
             roi.use = not roi.use

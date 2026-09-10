@@ -66,8 +66,14 @@ class ROITab(QWidget):
         self.size.setKeyboardTracking(False)
         self.shape.currentTextChanged.connect(self._on_geometry)
         self.size.valueChanged.connect(self._on_geometry)
+        self.preview = QDoubleSpinBox(minimum=0, maximum=1e6, decimals=0, suffix=" nm")
+        self.preview.setSpecialValueText("3 x ROI size")
+        self.preview.setToolTip("what the ROI image shows around the ROI")
+        self.preview.setKeyboardTracking(False)
+        self.preview.valueChanged.connect(self._on_geometry)
         form.addRow("shape", self.shape)
         form.addRow("size", self.size)
+        form.addRow("ROI view", self.preview)
         self.from_region = QPushButton("Add the drawn region as an ROI")
         self.from_region.setToolTip("turn the rectangle, line or polygon drawn in the "
                                     "2D view into an analysis ROI")
@@ -162,6 +168,7 @@ class ROITab(QWidget):
     def refresh(self, files_changed: bool = False) -> None:
         project = self.project
         self._loading = True
+        self.preview.setValue(project.preview_nm)
         if files_changed:
             current = self.current_file()
             self.file.clear()
@@ -172,6 +179,7 @@ class ROITab(QWidget):
             self.file.setCurrentIndex(max(index, 0))
             self.shape.setCurrentText(project.shape)
             self.size.setValue(project.size_nm)
+            self.preview.setValue(project.preview_nm)
         self._loading = False
         self._update_counts()
         self._show_result()
@@ -201,6 +209,7 @@ class ROITab(QWidget):
         except ValueError as e:
             QMessageBox.warning(self, "geometry", str(e))
             return
+        self.project.preview_nm = self.preview.value()
         self._notify()
 
     def _from_region(self) -> None:

@@ -54,6 +54,7 @@ class SessionROIs(ROIProject):
         # review is not exposed in the GUI: an ROI counts as reviewed when it
         # is made, and `use` is what includes or excludes it
         self.auto_review = True
+        self.preview_nm = 0.0        # the ROI image's width; 0 = three ROI widths
         self._states: Dict[str, ViewState] = {}
         self._built = None            # what the sources were built from
 
@@ -152,6 +153,7 @@ class SessionROIs(ROIProject):
         """The project as JSON-compatible data, for the localization file."""
         return {"format_version": FORMAT_VERSION,
                 "size_nm": self.size_nm, "shape": self.shape,
+                "preview_nm": self.preview_nm,
                 "navigation": self.navigation,
                 "sources": [{"id": s.id, "number": s.number, "name": s.name}
                             for s in self.sources.values()],
@@ -169,6 +171,7 @@ class SessionROIs(ROIProject):
         if doc.get("format_version", FORMAT_VERSION) > FORMAT_VERSION:
             raise ValueError("this file's ROIs were written by a newer smappy")
         self.set_geometry(doc.get("size_nm", self.size_nm), doc.get("shape", self.shape))
+        self.preview_nm = float(doc.get("preview_nm", 0.0) or 0.0)
         self.navigation = doc.get("navigation", {})
         # ids the file used, mapped onto the files this session has
         by_number = {s.number: s for s in self.sources.values()}
@@ -196,6 +199,11 @@ class SessionROIs(ROIProject):
             reviewed = self.auto_review
         return super().add_roi(file_id, center, polygon,
                                reviewed or self.auto_review, origin)
+
+    @property
+    def preview_width(self) -> float:
+        """What the ROI image covers, in nm."""
+        return self.preview_nm or 3.0 * self.size_nm
 
     def rois_of(self, file_id) -> List[ROI]:
         return [r for r in self.rois.values() if r.file_id == file_id]
