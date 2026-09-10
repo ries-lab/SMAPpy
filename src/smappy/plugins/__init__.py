@@ -43,6 +43,23 @@ def param(default: Any = MISSING, *, default_factory: Any = MISSING, **info):
     return field(default=default, metadata=metadata)
 
 
+_TEXT_TYPES = {"int": int, "float": float, "str": str, "bool": bool}
+
+
+def _hint_from_text(annotation):
+    """A best effort at a type from a string annotation."""
+    if not isinstance(annotation, str):
+        return annotation
+    text = annotation.replace(" ", "")
+    optional = False
+    if text.endswith("|None"):
+        text, optional = text[:-len("|None")], True
+    elif text.startswith("Optional[") and text.endswith("]"):
+        text, optional = text[len("Optional["):-1], True
+    base = _TEXT_TYPES.get(text, Any)
+    return typing.Optional[base] if optional and base is not Any else base
+
+
 def _unwrap_optional(tp) -> Tuple[Any, bool]:
     """``Optional[int]`` -> ``(int, True)``; anything else -> ``(tp, False)``."""
     if typing.get_origin(tp) is typing.Union:
@@ -73,7 +90,12 @@ def param_specs(settings_cls: type, extra: Optional[Dict[str, ParamInfo]] = None
     that is itself a dataclass is a part; its own fields come back under
     ``children``, and ``extra`` reaches them with dotted keys, ``"fit.roisize"``.
     """
-    hints = typing.get_type_hints(settings_cls)
+    try:
+        hints = typing.get_type_hints(settings_cls)
+    except TypeError:
+        # a `X | None` annotation under `from __future__ import annotations`
+        # cannot be evaluated before Python 3.10; read what we can from text
+        hints = {f.name: _hint_from_text(f.type) for f in fields(settings_cls)}
     extra = extra or {}
     specs = {}
     for f in fields(settings_cls):

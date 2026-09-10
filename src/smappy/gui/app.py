@@ -210,6 +210,7 @@ class ControlWindow(QMainWindow):
         window_shortcuts(self, with_quit=False)
         view = self.menuBar().addMenu("View")
         self.view3d_window = None
+        self.calibration_window = None
         self._action(view, "3D view", "Ctrl+3", self.show_3d)
         tools = self.menuBar().addMenu("Tools")
         self._action(tools, "ROI manager", "Ctrl+R", lambda: self.roi_tab.open_manager())
@@ -231,23 +232,29 @@ class ControlWindow(QMainWindow):
         return action
 
     def open_calibration(self, dual: bool = False) -> None:
-        """The calibration GUI, in its own process.
+        """The calibration window: bead stacks in, a spline calibration out.
 
-        It is written in Tk, whose event loop cannot share a process with Qt's,
-        and it wants 1250x850 of its own; so it is a separate application that
-        this button starts.  Its result is a ``_3dcal`` file the fitters read.
+        A window of its own, like the 3D viewer, but in this process, so a
+        saved calibration can go straight into the Spline 3D fitter.
         """
-        import subprocess
-        import sys
-        command = [sys.executable, "-m", "smappy.cli.calibrate"]
+        from ..calibrate.qt_gui import CalibrationWindow
+        if self.calibration_window is None:
+            self.calibration_window = CalibrationWindow(parent=self)
+            self.calibration_window.calibrated.connect(self.use_calibration)
         if dual:
-            command += ["--layout", "right-left"]
-        try:
-            subprocess.Popen(command)
-        except OSError as e:
-            QMessageBox.warning(self, "could not start", f"bead calibration: {e}")
-        else:
-            self.statusBar().showMessage("bead calibration opened in its own window", 5000)
+            self.calibration_window.mode_box.setCurrentText("Dual colour")
+        self.calibration_window.show()
+        self.calibration_window.raise_()
+
+    def use_calibration(self, path: str) -> None:
+        """Put a fresh calibration into the Spline 3D fitter's settings."""
+        from .plugin_panel import PluginPanel
+        for panel in self.tabs.widget(0).findChildren(PluginPanel):
+            if panel.plugin.path.endswith("Spline 3D"):
+                panel.form.set_values({"model.calibration": str(path)})
+                self.statusBar().showMessage(
+                    f"the Spline 3D fitter now uses {Path(path).name}", 8000)
+                return
 
     def show_3d(self) -> None:
         if self.view3d_window is None:

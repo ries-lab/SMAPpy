@@ -110,9 +110,16 @@ reasoning is here so that it does not have to be re-derived.
   stores.  The ROI tab keeps what applies to every ROI -- geometry, the
   finder, the evaluation.  There is no review step: an ROI counts from the
   moment it is made, and *use* is what excludes one.
-* **Bead calibration is its own application.**  Tk cannot share a process
-  with Qt and the window wants 1250x850, so the Localize tab's button and the
-  Tools menu start `smappy-calibrate` as a separate process.
+* **Bead calibration is a Qt window in this process** (`calibrate/qt_gui.py`),
+  opened from the Localize tab or the Tools menu.  Only the widgets are new:
+  the work is `calibrate.core` and `calibrate.dual` as before, and the five
+  plot pages are drawn by the very methods the Tk window uses -- they touch
+  nothing but a matplotlib figure and a little state, so they are borrowed
+  and given stand-ins for the Tk variables, the bead table and the notebook.
+  Single channel and dual colour both run.  A saved calibration goes straight
+  into the Spline 3D fitter's settings.  The Tk interface is still there
+  (`smappy-calibrate --tk`) but macOS ships Tk 8.5, which draws blank
+  windows, so the Qt one is the default.
 
 ## Code map
 
@@ -129,6 +136,7 @@ reasoning is here so that it does not have to be re-derived.
     smappy/gui/view3d.py         the 3D window, its panel and mouse
     smappy/gui/roi_tab.py        the ROI tab: geometry, find, evaluate
     smappy/gui/roi_window.py     the ROI manager window: four quadrants
+    smappy/calibrate/qt_gui.py   bead calibration in Qt, borrowing the plots
     smappy/roi_manager/link.py   the ROI project backed by the session
     smappy/gui/params.py         Settings dataclass -> form widget, and back
     smappy/gui/widgets.py        CollapsibleSection

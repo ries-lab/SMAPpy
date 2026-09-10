@@ -8,6 +8,8 @@ import os
 import tempfile
 import warnings
 
+from typing import Optional
+
 import numpy as np
 from scipy import ndimage, optimize
 from scipy.spatial import cKDTree, ConvexHull, QhullError
@@ -24,7 +26,7 @@ LAYOUTS = ('right-left', 'right-left mirrored', 'up-down', 'up-down mirrored')
 class DualColorSettings(CalibrationSettings):
     layout: str = 'up-down mirrored'
     main_channel: str = 'upper'
-    split_position: int | None = None
+    split_position: Optional[int] = None
     min_pairs: int = 8
     reprojection_threshold_px: float = 2.
     transform_axis_limit_px: float = .15
