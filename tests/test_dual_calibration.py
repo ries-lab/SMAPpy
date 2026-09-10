@@ -195,3 +195,25 @@ def test_saturation_rejects_whole_pair_and_acquisitions_cannot_cross_match():
     for rec in result.beads.records:
         assert rec['channel_records'][0]['stack'] == rec['channel_records'][1]['stack']
     assert sum('saturated' in reason for reason in result.reasons) == 2
+
+
+def test_a_tiny_axis_limit_is_reported_as_such_not_as_an_optimizer_failure():
+    """The screen's own message must survive a pathological limit.
+
+    Half the axis limit is the soft-L1 scale, so a minuscule limit used to make
+    the round-one refinement diverge and hide why nothing was accepted.
+    """
+    rng = np.random.default_rng(5)
+    source = rng.uniform(0, 400, (60, 2))
+    truth = np.array([[1.0, .01, 5], [-.01, 1.0, -3], [0, 0, 1.]])
+    target = map_points(truth, source) + rng.normal(0, .004, source.shape)
+    settings = DualColorSettings()
+    for limit in (1e-7, 1e-5, 1e-4):
+        with pytest.raises(ValueError, match='dx/dy limit'):
+            fit_dual_transform(source, target, replace(settings,
+                                                       transform_axis_limit_px=limit))
+    # the floor does not touch a normal limit: the fit is what it was
+    reference = fit_dual_transform(source, target, settings)
+    assert reference.accepted.sum() >= settings.min_pairs
+    from smappy.calibrate.dual import MIN_LOSS_SCALE_PX
+    assert MIN_LOSS_SCALE_PX < settings.transform_axis_limit_px / 2

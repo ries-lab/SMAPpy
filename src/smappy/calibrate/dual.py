@@ -20,6 +20,10 @@ from .input import BeadStack, discover_acquisitions, read_bead_stacks
 from ..io.calibration import SplineCalibration, _validate_native_calibration
 
 LAYOUTS = ('right-left', 'right-left mirrored', 'up-down', 'up-down mirrored')
+# Smallest soft-L1 transition used in the geometric refinement, in main-channel
+# pixels.  Far below any achievable registration accuracy, so it never binds on
+# a sane axis limit; it only keeps a pathological one numerically sane.
+MIN_LOSS_SCALE_PX = 1e-3
 
 
 @dataclass
@@ -177,7 +181,11 @@ def fit_dual_transform(source, target, settings):
     source, target = np.asarray(source, float), np.asarray(target, float)
     initial, coarse, _ = robust_projective(source, target,
                     settings.reprojection_threshold_px, settings.min_pairs)
-    scale = settings.transform_axis_limit_px/2
+    # Half the axis limit, as documented, but never below MIN_LOSS_SCALE_PX:
+    # with a smaller soft-L1 scale every residual sits deep in the linear
+    # regime and the refinement stops converging, which would hide the real
+    # cause -- an axis limit no pair can meet -- behind an optimizer failure.
+    scale = max(settings.transform_axis_limit_px/2, MIN_LOSS_SCALE_PX)
     initial = refine_projective(source[coarse], target[coarse], initial, scale)
     delta1 = map_points(initial, source)-target
     good = coarse & np.all(np.abs(delta1) <= settings.transform_axis_limit_px, axis=1)
