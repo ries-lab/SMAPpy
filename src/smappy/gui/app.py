@@ -8,7 +8,7 @@ from typing import Dict, List, Optional
 from PySide6.QtCore import QSettings, Qt
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (QApplication, QCheckBox, QDialog, QFileDialog, QHBoxLayout,
-                               QMessageBox,
+                               QMessageBox, QPushButton,
                                QLabel, QLineEdit,
                                QMainWindow, QScrollArea, QTabWidget, QVBoxLayout,
                                QWidget)
@@ -34,7 +34,9 @@ class PluginTab(QWidget):
     the plugin to its own window, and one section is open at a time.
     """
 
-    def __init__(self, tab: str, session: Session, parent=None):
+    def __init__(self, tab: str, session: Session, tools=(), parent=None):
+        """``tools`` are (label, tooltip, callback) buttons above the plugins,
+        for things that are whole applications rather than plugins."""
         super().__init__(parent)
         self.tab = tab
         self.settings = QSettings("smappy", "gui")
@@ -53,6 +55,15 @@ class PluginTab(QWidget):
         top.addWidget(self.search, 1)
         top.addWidget(self.all)
         layout.addLayout(top)
+        if tools:
+            row = QHBoxLayout()
+            for label, tip, callback in tools:
+                button = QPushButton(label)
+                button.setToolTip(tip)
+                button.clicked.connect(callback)
+                row.addWidget(button)
+            row.addStretch(1)
+            layout.addLayout(row)
         self.inner = QWidget()
         self.stack = QVBoxLayout(self.inner)
         self.stack.setContentsMargins(0, 0, 0, 0)
@@ -173,7 +184,9 @@ class ControlWindow(QMainWindow):
         self.setWindowTitle("smappy")
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
-        self.tabs.addTab(PluginTab("Localize", session), "Localize")
+        self.tabs.addTab(PluginTab("Localize", session, tools=[
+            ("Bead calibration...", "build an experimental spline PSF calibration from "
+             "bead z-stacks; opens its own window", self.open_calibration)]), "Localize")
         self.tabs.addTab(RenderTab(session, render.view), "Render")
         self.tabs.addTab(PluginTab("Analysis", session), "Analysis")
         self.tabs.addTab(PluginTab("ROI", session), "ROI")
@@ -196,6 +209,10 @@ class ControlWindow(QMainWindow):
         view = self.menuBar().addMenu("View")
         self.view3d_window = None
         self._action(view, "3D view", "Ctrl+3", self.show_3d)
+        tools = self.menuBar().addMenu("Tools")
+        self._action(tools, "Bead calibration...", None, self.open_calibration)
+        self._action(tools, "Dual-colour calibration...", None,
+                     lambda: self.open_calibration(dual=True))
         self._action(view, "Reset view", "Ctrl+0", render.view.reset)
         self._action(view, "Show render window", None, render.show)
         session.on_change(self._on_session)
@@ -208,6 +225,25 @@ class ControlWindow(QMainWindow):
         action.triggered.connect(slot)
         menu.addAction(action)
         return action
+
+    def open_calibration(self, dual: bool = False) -> None:
+        """The calibration GUI, in its own process.
+
+        It is written in Tk, whose event loop cannot share a process with Qt's,
+        and it wants 1250x850 of its own; so it is a separate application that
+        this button starts.  Its result is a ``_3dcal`` file the fitters read.
+        """
+        import subprocess
+        import sys
+        command = [sys.executable, "-m", "smappy.cli.calibrate"]
+        if dual:
+            command += ["--layout", "right-left"]
+        try:
+            subprocess.Popen(command)
+        except OSError as e:
+            QMessageBox.warning(self, "could not start", f"bead calibration: {e}")
+        else:
+            self.statusBar().showMessage("bead calibration opened in its own window", 5000)
 
     def show_3d(self) -> None:
         if self.view3d_window is None:
