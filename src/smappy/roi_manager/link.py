@@ -51,6 +51,9 @@ class SessionROIs(ROIProject):
         super().__init__()
         self.session = session
         self.layer = 0
+        # review is not exposed in the GUI: an ROI counts as reviewed when it
+        # is made, and `use` is what includes or excludes it
+        self.auto_review = True
         self._states: Dict[str, ViewState] = {}
         self._built = None            # what the sources were built from
 
@@ -70,6 +73,8 @@ class SessionROIs(ROIProject):
         self.filters = ranges
         self.grouped = layer.grouped
         self.group_settings = layer.group_settings
+        self.render = layer.state.settings          # so the manager's images
+        self.display = layer.state.display          # look like the main view
         for source in self.sources.values():         # the states follow the layer
             if source.state is not None:
                 self._apply(source)
@@ -114,10 +119,13 @@ class SessionROIs(ROIProject):
         return locs[np.asarray(locs["filenumber"]) == source.number]
 
     def _apply(self, source: SessionSource) -> None:
-        """Put the layer's bounds and grouping on this source's own state."""
+        """Put the layer's bounds, grouping and look on this source's state."""
         state = source.state
         if state is None:
             return
+        settings, display = getattr(self, "render", None), getattr(self, "display", None)
+        if settings is not None:
+            state.settings, state.display = settings, display
         key = digest(asdict(self.group_settings))
         if self.grouped and (source.group_key != key or "grouped" not in state.sets):
             state.sets.pop("grouped", None)
@@ -183,8 +191,22 @@ class SessionROIs(ROIProject):
                 self.runs.append({**run, "records": records})
 
     # ---------------------------------------------------------------- misc
+    def add_roi(self, file_id, center, polygon=None, reviewed=None, origin=None):
+        if reviewed is None:
+            reviewed = self.auto_review
+        return super().add_roi(file_id, center, polygon,
+                               reviewed or self.auto_review, origin)
+
     def rois_of(self, file_id) -> List[ROI]:
         return [r for r in self.rois.values() if r.file_id == file_id]
+
+    def numbers(self) -> Dict[str, int]:
+        """A 1-based number per ROI, in the order they were made."""
+        return {roi_id: i + 1 for i, roi_id in enumerate(self.rois)}
+
+    def file_number(self, file_id) -> int:
+        source = self.sources.get(file_id)
+        return source.number + 1 if source is not None else 0
 
     def source_of(self, number: int) -> Optional[SessionSource]:
         return next((s for s in self.sources.values() if s.number == number), None)

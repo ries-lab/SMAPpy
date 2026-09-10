@@ -212,6 +212,8 @@ class ControlWindow(QMainWindow):
         self.view3d_window = None
         self._action(view, "3D view", "Ctrl+3", self.show_3d)
         tools = self.menuBar().addMenu("Tools")
+        self._action(tools, "ROI manager", "Ctrl+R", lambda: self.roi_tab.open_manager())
+        tools.addSeparator()
         self._action(tools, "Bead calibration...", None, self.open_calibration)
         self._action(tools, "Dual-colour calibration...", None,
                      lambda: self.open_calibration(dual=True))

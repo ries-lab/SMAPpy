@@ -103,7 +103,13 @@ reasoning is here so that it does not have to be re-derived.
   the selected ROI -- when the file is opened again.  A run whose data,
   filter or geometry has changed since is reported as outdated rather than
   silently reused.  This is separate from `session.roi`, the rectangle or
-  line drawn in the 2D view.
+  line drawn in the 2D view; *Add the drawn region as an ROI* is the bridge
+  between the two.  Choosing and judging ROIs happens in the ROI manager
+  window: the file, the zoom and the ROI in three quadrants, the files and
+  the ROIs in the fourth, a click in the zoom drafting an ROI that *Add*
+  stores.  The ROI tab keeps what applies to every ROI -- geometry, the
+  finder, the evaluation.  There is no review step: an ROI counts from the
+  moment it is made, and *use* is what excludes one.
 * **Bead calibration is its own application.**  Tk cannot share a process
   with Qt and the window wants 1250x850, so the Localize tab's button and the
   Tools menu start `smappy-calibrate` as a separate process.
@@ -121,7 +127,8 @@ reasoning is here so that it does not have to be re-derived.
     smappy/view3d.py             Projection, Slab, engine A, GPU glue (no Qt)
     smappy/gpu.py                the wgpu engine: compute splat, point sprites
     smappy/gui/view3d.py         the 3D window, its panel and mouse
-    smappy/gui/roi_tab.py        the ROI tab: files, geometry, find, review, evaluate
+    smappy/gui/roi_tab.py        the ROI tab: geometry, find, evaluate
+    smappy/gui/roi_window.py     the ROI manager window: four quadrants
     smappy/roi_manager/link.py   the ROI project backed by the session
     smappy/gui/params.py         Settings dataclass -> form widget, and back
     smappy/gui/widgets.py        CollapsibleSection

@@ -97,3 +97,35 @@ def test_a_changed_table_makes_results_outdated(tmp_path):
     assert project.results() == []                        # outdated, not silently reused
     _, stale = project.latest(roi.id)
     assert stale
+
+
+def test_new_rois_count_without_a_review_step(tmp_path):
+    """Review is not exposed in the GUI, so an ROI counts as soon as it exists."""
+    path = tmp_path / "locs.hdf5"
+    save_localizations(path, _table(1000))
+    s = Session()
+    s.load(path)
+    project = s.rois
+    file_id = next(iter(project.sources))
+    found = project.find(file_id, parameters={"min_count": 5})
+    manual = project.add_roi(file_id, [2000, 2000])
+    assert found and all(r.reviewed for r in project.rois.values())
+    project.evaluate()
+    assert len(project.results()) == len(found) + 1
+    manual.use = False
+    assert len(project.results()) == len(found)      # `use` is what excludes
+
+
+def test_numbering_is_stable_and_names_the_file(tmp_path):
+    path = tmp_path / "locs.hdf5"
+    save_localizations(path, _table(500))
+    s = Session()
+    s.load(path)
+    project = s.rois
+    file_id = next(iter(project.sources))
+    a = project.add_roi(file_id, [1000, 1000])
+    b = project.add_roi(file_id, [2000, 2000])
+    assert project.numbers() == {a.id: 1, b.id: 2}
+    assert project.file_number(file_id) == 1
+    project.rois.pop(a.id)
+    assert project.numbers() == {b.id: 1}
