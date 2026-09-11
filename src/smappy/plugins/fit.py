@@ -172,6 +172,12 @@ class _FitPlugin(Plugin):
     def model(self, settings, camera: CameraMetadata):
         raise NotImplementedError
 
+    def engine(self, settings, camera: CameraMetadata, finder, model):
+        """What consumes the frames.  One ROI per candidate by default; the
+        two-channel fitter overrides this with one pair per candidate."""
+        from ..pipeline import LocalizationEngine
+        return LocalizationEngine(camera, finder, model, settings.fit)
+
     def react(self, changed: str, settings) -> Optional[Dict[str, Any]]:
         if changed == "source.path" and settings.source.path:
             try:
@@ -237,8 +243,9 @@ class _FitPlugin(Plugin):
                 progress(f"{s['frames']} frames, {s['localizations']} localizations")
 
         try:
-            _, engine = fit_stack(blocks, camera, finder, model, fit, sink=sink,
-                                  progress=report, read_ahead=2)
+            from ..pipeline import drive
+            engine = self.engine(settings, camera, finder, model)
+            drive(engine, blocks, sink=sink, progress=report, read_ahead=2)
             if writer is not None:
                 writer.set_metadata({"stats": dict(engine.stats)})
         finally:
@@ -280,6 +287,55 @@ class SplineFitSettings:
     output: OutputSettings = field(default_factory=OutputSettings)
 
 
+@dataclass
+class DualModelSettings:
+    """A dual-colour calibration, and which parameters the channels share."""
+    calibration: str = param("", label="calibration", kind="open_file",
+                             file_filter="Dual-colour calibration (*.h5 *.hdf5)",
+                             help="from Bead calibration in *Dual colour* mode")
+    link_xy: bool = param(True, label="link x, y",
+                          help="one position for both channels, through the "
+                               "registration; unlink only to check the transform")
+    link_z: bool = param(True, label="link z",
+                         help="one z for both channels: this is the sqrt(2)")
+    link_photons: bool = param(False, label="link photons",
+                               help="off for two colours -- the photon ratio is "
+                                    "what tells the dyes apart; on for biplane")
+    link_background: bool = param(False, label="link background", advanced=True)
+    photon_ratio: Optional[float] = param(None, label="photon ratio", min=0,
+                                          advanced=True,
+                                          help="secondary / main; auto: from the "
+                                               "calibration's beads")
+
+    def shared(self) -> tuple:
+        return (self.link_xy, self.link_xy, self.link_photons,
+                self.link_background, self.link_z)
+
+    def load(self):
+        from ..calibrate.dual import load_dual_color_calibration
+        if not self.calibration:
+            raise ValueError("a two-channel fit needs a dual-colour calibration")
+        return load_dual_color_calibration(self.calibration)
+
+    def model(self, calibration, camera: Optional[CameraMetadata] = None):
+        from ..io.calibration import warn_on_em_mismatch
+        from ..psf import GlobalSplinePSF
+        if camera is not None:
+            warn_on_em_mismatch(calibration.main, camera.em_on)
+        return GlobalSplinePSF((calibration.main, calibration.secondary),
+                               self.shared())
+
+
+@dataclass
+class DualSplineFitSettings:
+    source: SourceSettings = field(default_factory=SourceSettings)
+    camera: CameraSettings = field(default_factory=CameraSettings)
+    detection: DetectionSettings = field(default_factory=DetectionSettings)
+    model: DualModelSettings = field(default_factory=DualModelSettings)
+    fit: FitSettings = field(default_factory=lambda: FitSettings(output_unit="nm"))
+    output: OutputSettings = field(default_factory=OutputSettings)
+
+
 @register("Localize/Gaussian 2D")
 class GaussianFit(_FitPlugin):
     description = "Detect and fit with a free-width Gaussian PSF: x, y, photons, sigma."
@@ -298,4 +354,30 @@ class SplineFit(_FitPlugin):
 
     def model(self, settings, camera):
         return settings.model.model(camera)
+
+
+@register("Localize/Spline 3D 2C")
+class DualSplineFit(_FitPlugin):
+    """The 3D two-channel workflow: one emitter, both halves of a split frame.
+
+    Candidates are found over the whole frame and combined, each gets an ROI
+    in both channels, and the pair is fitted at once with the parameters the
+    form links -- SMAP's ``fit_global_dualchannel``.  Beyond x, y and z it
+    yields ``ratio``, the fraction of the photons in the secondary channel,
+    which is what separates the two dyes.
+    """
+
+    description = ("Detect and fit both halves of a split frame as one emitter, "
+                   "sharing x, y and z: adds the photon ratio that tells the "
+                   "two colours apart.")
+    Settings = DualSplineFitSettings
+    params = GaussianFit.params
+
+    def model(self, settings, camera):
+        return settings.model.model(settings.model.load(), camera)
+
+    def engine(self, settings, camera, finder, model):
+        from ..dualfit import DualChannelEngine
+        return DualChannelEngine(camera, finder, model, settings.model.load(),
+                                 settings.fit, settings.model.photon_ratio)
 

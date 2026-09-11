@@ -63,9 +63,15 @@ reasoning is here so that it does not have to be re-derived.
 
 * **Fitters are plugins assembled from parts.**  Source, camera, detection,
   PSF model, fit and output are each a small settings dataclass; a fitter's
-  `Settings` has one field per part, which the form shows as a section.  Two
-  wrappers so far, Gaussian 2D and Spline 3D; they differ only in the model
-  part.  *Live* is a checkbox in the source part: keep watching the file.
+  `Settings` has one field per part, which the form shows as a section.  Three
+  wrappers so far, Gaussian 2D, Spline 3D and Spline 3D 2C; the first two
+  differ only in the model part.  *Spline 3D 2C* is the two-channel workflow:
+  it takes a dual-colour bead calibration, finds candidates over the whole
+  split frame, combines the two halves' peaks into one list, cuts an ROI in
+  each channel and fits the pair at once with x, y and z shared, so z gains
+  the sqrt(2) of both channels and the photon ratio -- free, and the colour
+  readout -- comes out per localization.  Which parameters are linked is on
+  the form, as in SMAP.  *Live* is a checkbox in the source part: keep watching the file.
 * **Long plugins stream.**  `run` gets a `stream(event, payload)` callback:
   `"start"` with the view extent, then `"block"` per finished block.  The GUI
   turns that into `Session.begin_live` / `Session.append`, so the image builds
@@ -122,7 +128,8 @@ reasoning is here so that it does not have to be re-derived.
   nothing but a matplotlib figure and a little state, so they are borrowed
   and given stand-ins for the Tk variables, the bead table and the notebook.
   Single channel and dual colour both run.  A saved calibration goes straight
-  into the Spline 3D fitter's settings.  The Tk interface is still there
+  into the Spline 3D fitter's settings -- or, for a dual-colour one, into
+  Spline 3D 2C's.  The Tk interface is still there
   (`smappy-calibrate --tk`) but macOS ships Tk 8.5, which draws blank
   windows, so the Qt one is the default.
 
@@ -131,7 +138,8 @@ reasoning is here so that it does not have to be re-derived.
     smappy/plugins/__init__.py   Plugin, Result, Selection, param(), registry
     smappy/plugins/drift_comet.py  the first plugin: COMET drift correction
     smappy/plugins/drift_rcc.py  RCC, the same contract
-    smappy/plugins/fit.py        the parts, and the Gaussian 2D / Spline 3D fitters
+    smappy/plugins/fit.py        the parts, and the Gaussian 2D / Spline 3D / 3D 2C fitters
+    smappy/dualfit.py            split frames: combining peaks, paired ROIs, the 2C engine
     smappy/session.py            Session: table, files, layers, ROI, undo, history (no Qt)
     smappy/io/formats.py         readers: smappy, SMAP, MINFLUX, csv
     smappy/images.py             pixel images as layers

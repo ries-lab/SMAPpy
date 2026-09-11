@@ -197,6 +197,20 @@ def fit_stack(frames: Iterable[Tuple[int, np.ndarray]], camera: CameraMetadata,
     set it to 0 to read strictly in step with processing.
     """
     engine = LocalizationEngine(camera, finder, model, settings or FitSettings())
+    return drive(engine, frames, sink=sink, progress=progress,
+                 read_ahead=read_ahead), engine
+
+
+def drive(engine, frames: Iterable[Tuple[int, np.ndarray]],
+          sink: Optional[Callable[[Localizations], None]] = None,
+          progress: Optional[Callable[[object], None]] = None,
+          read_ahead: int = 2) -> Localizations:
+    """Push blocks through anything with ``push`` and ``flush``.
+
+    Split out of `fit_stack` so that the dual-channel engine
+    (`smappy.dualfit.DualChannelEngine`), which buffers pairs of ROIs rather
+    than single ones, is driven by the same loop.
+    """
     collected = Localizations()
 
     def emit(locs: Optional[Localizations]) -> None:
@@ -212,8 +226,7 @@ def fit_stack(frames: Iterable[Tuple[int, np.ndarray]], camera: CameraMetadata,
         if progress is not None:
             progress(engine)
     emit(engine.flush())
-
-    return collected, engine
+    return collected
 
 
 def provenance(camera: CameraMetadata, finder: PeakFinder, model: PSFModel,
