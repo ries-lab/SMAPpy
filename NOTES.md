@@ -831,13 +831,27 @@ Worth it for a first look at a large dataset, not for the final result.
   72 s -- they are comparison sorts at those widths); block+frame first then
   threaded lexsorts of x inside each bucket (exact, 5.1 s); discretizing x to
   one 16-bit digit (0.4 s faster, 0.19% of localizations change places).
-* What is left of that 64 s: 30 s read, 17 s `combine`, 5.5 s the linking walk,
-  5 s the sort, 6 s the indices and filters.  `combine` is per column and
-  parallel as it stands -- the obvious next one, and exact.  The walk can be
-  cut into frame chunks and stitched (`smappy._group_chunked`, 5.5 s to 1.1 s,
-  0.99995 of localizations in exactly the sequential group) but that is an
-  approximation for 4 s.  The read is 30 s of which better than half is columns
-  nothing uses: 30 are loaded, 13 are read by anything, four `bg*` are float64.
+* The linking runs in chunks now (`GroupSettings.link_chunks`, default 8):
+  13 s to 6 s.  It is not exact -- a trace cut at a seam is put back together
+  by `smappy._group_chunked._stitch`, but the sequential walk *claims*
+  localizations as it goes and a chunk cannot know about the claims reaching
+  into it, so about 1 in 20,000 localizations lands in a different group.
+  Different, not worse: the walk claims the first match in x order rather than
+  the nearest, so which of two candidates wins was never meaningful.  The cut
+  points come from the data and not from the core count, so a file groups the
+  same way on any machine; `link_chunks=1` is the sequential walk exactly.
+* **`combine` does not parallelize, and that was worth finding out.**  The
+  columns are independent and numpy drops the GIL, but a column in flight holds
+  a float64 output over the groups and a float64 temporary over the table --
+  0.78 GB on that file, against 20 GB already resident.  Threads against
+  seconds: 1: 12.5, 2: 10.5, 3: 12.9, 4: 14.8, 6: 23.1, 8: 31.8.  So the worker
+  count comes from a memory budget, which threads small tables properly and
+  large ones barely at all.  What actually helped there was the per-group sort:
+  `np.argsort(kind="stable")` on the group ids is 3.8 s, by 16-bit digits 2.1.
+* What is left of the 53 s: 31 s read, 10.5 s `combine`, 6 s linking, 2 s sort,
+  6 s indices and filters.  The read is the target now, and it takes `combine`
+  with it: 30 columns are loaded, 13 are read by anything downstream, and the
+  four `bg*` ones are float64.
 * `group()` numbers groups from 1, a leftover from the MATLAB original, so the
   row of the grouped table is `group_index - 1`.  Worth rebasing to 0 at some
   point, together with the C++ `connect`.

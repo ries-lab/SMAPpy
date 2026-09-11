@@ -95,7 +95,8 @@ class ParametersDialog(QDialog):
                                       "not looked at.  Emitters that close in xy overlap in "
                                       "the raw frames and are not fitted apart, so a window "
                                       "mostly splits real blinks whose z scatters."),
-                 "block_fields": ParamInfo(hidden=True)}
+                 "block_fields": ParamInfo(hidden=True),
+                 "link_chunks": ParamInfo(hidden=True)}
         self.form = SettingsForm(GroupSettings, param_specs(GroupSettings, infos))
         self.form.set(session.group_settings)
         layout.addWidget(self.form)

@@ -48,18 +48,18 @@ recomputed when the display switches between them.
 Most of what grouping cost was not the linking.  On a 57 M localization file
 `connect` took 71.7 s, and 68 s of that was the `np.lexsort` in front of the
 walk; the walk itself is 5.5 s.  `sorted_order` below returns the same order --
-element for element -- in 2.1 s, which took opening that file from 134 s to
-66 s without changing a single group.
+element for element -- in 2.1 s.
 
-What is left, on that file: `combine` 17 s, the walk 5.5 s, the sort 2 s.
+Opening that file went 134 s -> 53 s over three changes: the sort, the linking
+cut into chunks that run at once (`link_chunks`, and `smappy._group_chunked`
+for what it costs in exactness), and `combine`'s per-group sort made a radix
+one.  What is left of the 53 s: 31 s reading the file, 10.5 s `combine`, 6 s
+the linking, 2 s the sort, 6 s the indices and filters.
 
-**To revisit.**  `combine` is per column and parallel as it stands; it is the
-biggest piece of grouping now and has not been threaded.  For the walk,
-`smappy._group_chunked` cuts the frame axis, links the pieces in threads and
-repairs the seams: 5.5 s to 1.1 s, with 0.99995 of localizations landing in
-exactly the group the sequential walk gives them.  It is not on by default --
-it is an approximation worth 4 s, and there are exact seconds still on the
-table.  ``scripts/check_chunked_grouping.py`` is how it was measured.
+**To revisit: read fewer columns.**  The largest thing left is not in this
+module.  30 columns are read from that file and 13 are read by anything
+downstream; the four `bg*` ones are float64.  Dropping the rest would take the
+31 s read to about 13 and `combine` -- which is one pass per column -- with it.
 """
 
 from __future__ import annotations
@@ -138,6 +138,11 @@ def _mode(name: str) -> str:
 DIGIT = 16
 MASK = (1 << DIGIT) - 1
 
+# How much `combine` may have in flight across its threads.  See the note in
+# `combine`: past a couple of columns at this size the machine spends longer
+# finding the memory than doing the sum.
+COMBINE_BUDGET = 2 * 1024 ** 3
+
 
 def _monotonic(x: np.ndarray) -> Tuple[np.ndarray, int]:
     """``x`` as an unsigned integer that sorts the way the float does.
@@ -165,6 +170,24 @@ def _digits(u: np.ndarray, bits: int) -> List[np.ndarray]:
     """``u`` cut into 16-bit digits, least significant first."""
     return [((u >> np.uint64(s)) & np.uint64(MASK)).astype(np.uint16)
             for s in range(0, bits, DIGIT)]
+
+
+def radix_argsort(values: np.ndarray) -> np.ndarray:
+    """Stable argsort of non-negative integers, by 16-bit digits.
+
+    The same trick `sorted_order` runs on: numpy's stable sort is a radix sort
+    for uint16 and a comparison sort for int64.  Grouping 57 M localizations
+    into 40 M groups, this is 1.5 s where ``np.argsort(kind="stable")`` is 4.4.
+    Identical output -- both are stable.
+    """
+    u = np.asarray(values).astype(np.uint64)
+    bits = max(DIGIT, int(int(u.max()).bit_length() if u.size else 1))
+    bits = ((bits + DIGIT - 1) // DIGIT) * DIGIT
+    order = None
+    for d in _digits(u, bits):
+        order = (np.argsort(d, kind="stable") if order is None
+                 else order[np.argsort(d[order], kind="stable")])
+    return order
 
 
 def _codes(keys) -> Optional[Tuple[np.ndarray, int]]:
@@ -349,7 +372,8 @@ def _weights(locs: Localizations) -> np.ndarray:
 
 def combine(locs: Localizations, group_index: np.ndarray,
             fields: Optional[Sequence[str]] = None,
-            progress: Optional[Progress] = None) -> Localizations:
+            progress: Optional[Progress] = None,
+            workers: Optional[int] = None) -> Localizations:
     """Reduce each group to one row, one column at a time by its own rule.
 
     ``progress(text, fraction)`` is called per column, which is the natural
@@ -367,51 +391,80 @@ def combine(locs: Localizations, group_index: np.ndarray,
         "": np.bincount(gi, weights=default_w, minlength=size)[1:]}
     n_in_group = np.bincount(gi, minlength=size)[1:]
 
-    def weighting(name: str) -> Tuple[np.ndarray, np.ndarray]:
-        """The weight for this column: its own uncertainty if it has one."""
-        for column in WEIGHT_FOR.get(name, ()):
-            if column in locs:
-                if column not in weights:
-                    weights[column] = _inverse_variance(locs[column])
-                    sums[column] = np.bincount(gi, weights=weights[column],
-                                               minlength=size)[1:]
-                return weights[column], sums[column]
-        return weights[""], sums[""]
-
     names = list(fields) if fields is not None else \
         [n for n in locs.keys() if n not in DROP_ON_GROUPING]
+
+    def weight_column(name: str) -> str:
+        """Which weight this column is combined with: its own, or the pooled."""
+        for column in WEIGHT_FOR.get(name, ()):
+            if column in locs:
+                return column
+        return ""
+
+    # every weight the columns will ask for, built before they run: the
+    # column loop is threaded below and may not be filling a shared cache
+    for column in {weight_column(n) for n in names} - {""}:
+        weights[column] = _inverse_variance(locs[column])
+        sums[column] = np.bincount(gi, weights=weights[column], minlength=size)[1:]
+
+    def weighting(name: str) -> Tuple[np.ndarray, np.ndarray]:
+        column = weight_column(name)
+        return weights[column], sums[column]
 
     # min and max need a per-group reduction; sorting once beats np.minimum.at,
     # which is unbuffered and slow
     extremes = any(_mode(n) in ("min", "max") for n in names)
     if extremes:
-        order = np.argsort(gi, kind="stable")
+        order = radix_argsort(gi)
         starts = np.concatenate(
             ([0], np.flatnonzero(gi[order][1:] != gi[order][:-1]) + 1))
 
-    columns: Dict[str, np.ndarray] = {}
-    for i, name in enumerate(names):
-        if progress is not None:
-            progress(f"combine ({i + 1}/{len(names)})", i / len(names))
+    def reduce_column(name: str) -> np.ndarray:
         values = np.asarray(locs[name], np.float64)
         mode = _mode(name)
         if mode == "mean":
             w, sum_w = weighting(name)
-            result = np.bincount(gi, weights=values * w, minlength=size)[1:] / sum_w
-        elif mode == "sum":
-            result = np.bincount(gi, weights=values, minlength=size)[1:]
-        elif mode == "precision":
-            result = 1.0 / np.sqrt(
+            return np.bincount(gi, weights=values * w, minlength=size)[1:] / sum_w
+        if mode == "sum":
+            return np.bincount(gi, weights=values, minlength=size)[1:]
+        if mode == "precision":
+            return 1.0 / np.sqrt(
                 np.bincount(gi, weights=1.0 / values ** 2, minlength=size)[1:])
-        elif mode == "quad":   # the error of a sum, not of a mean
-            result = np.sqrt(
-                np.bincount(gi, weights=values ** 2, minlength=size)[1:])
-        elif mode in ("min", "max"):
+        if mode == "quad":     # the error of a sum, not of a mean
+            return np.sqrt(np.bincount(gi, weights=values ** 2, minlength=size)[1:])
+        if mode in ("min", "max"):
             reduce = np.minimum if mode == "min" else np.maximum
-            result = reduce.reduceat(values[order], starts)
-        else:
-            raise ValueError(f"unknown combine mode {mode!r} for {name!r}")
-        columns[name] = result.astype(np.float32)
+            return reduce.reduceat(values[order], starts)
+        raise ValueError(f"unknown combine mode {mode!r} for {name!r}")
+
+    # One pass over the table per column, and the columns do not touch each
+    # other, so they can run at once -- numpy drops the GIL inside bincount.
+    # How *many* at once is the question, and the answer is "few": a column in
+    # flight holds a float64 output over the groups and a float64 temporary
+    # over the table, 0.78 GB together on a 57 M localization file, and this
+    # is memory-bound work.  Measured on that file, threads against seconds:
+    # 1: 12.5, 2: 10.5, 3: 12.9, 4: 14.8, 6: 23.1, 8: 31.8.  So the worker
+    # count comes from a memory budget rather than from the core count, which
+    # leaves small tables threading properly and large ones barely at all.
+    columns: Dict[str, np.ndarray] = {}
+    done = [0]
+
+    def one(name: str) -> None:
+        result = reduce_column(name).astype(np.float32)
+        columns[name] = result
+        done[0] += 1
+        if progress is not None:
+            progress(f"combine ({done[0]}/{len(names)})", done[0] / len(names))
+
+    in_flight = (size + len(gi)) * 8           # the output and the temporary
+    n_workers = workers or int(np.clip(COMBINE_BUDGET // max(in_flight, 1),
+                                       1, min(len(names), os.cpu_count() or 4)))
+    if n_workers <= 1:
+        for name in names:
+            one(name)
+    else:
+        with ThreadPoolExecutor(max_workers=n_workers) as pool:
+            list(pool.map(one, names))
 
     for name in ("frame", "iterations"):
         if name in columns:
@@ -433,6 +486,13 @@ class GroupSettings:
     # link only within this in z too (nm); None: z is not looked at, as SMAP
     dz: Optional[float] = None
     block_fields: Sequence[str] = ("filenumber", "channel")
+    # How many pieces the frame axis is cut into for the linking, which runs
+    # one thread per piece.  Not a free choice: a cut trace is repaired at the
+    # seam but the repair is not exact (see `smappy._group_chunked`), so the
+    # grouping depends on this number.  It is a setting rather than a thread
+    # count for that reason -- the same file groups the same way on any
+    # machine, whatever it has to run on.  1 is the sequential walk.
+    link_chunks: int = 8
 
 
 def group(locs: Localizations, settings: Optional[GroupSettings] = None,
@@ -456,6 +516,12 @@ def group(locs: Localizations, settings: Optional[GroupSettings] = None,
     present = [locs[name] for name in settings.block_fields if name in locs]
     blocks = np.stack(present, axis=1) if present else None
     z = locs["z_nm"] if settings.dz is not None and "z_nm" in locs else None
-    group_index = connect(x, y, locs["frame"], settings.dx, settings.dt, blocks,
-                          z=z, dz=settings.dz, progress=progress)
+    if settings.link_chunks > 1:
+        from ._group_chunked import connect_chunked
+        group_index = connect_chunked(x, y, locs["frame"], settings.dx, settings.dt,
+                                      blocks, z=z, dz=settings.dz,
+                                      n_chunks=settings.link_chunks, progress=progress)
+    else:
+        group_index = connect(x, y, locs["frame"], settings.dx, settings.dt, blocks,
+                              z=z, dz=settings.dz, progress=progress)
     return combine(locs, group_index, progress=progress), group_index

@@ -353,3 +353,70 @@ def test_frames_that_do_not_start_at_zero_or_run_in_order():
                   rng.choice([3, 999_999], 20_000)):           # two, far apart
         frame = frame.astype(np.int64)
         assert np.array_equal(sorted_order(x, frame), np.lexsort((x, frame)))
+
+
+# ------------------------------------------------ threaded, and repeatable ---
+# `combine` runs its columns across threads and `group()` links across chunks.
+# Neither may make the answer depend on what the machine happened to do.
+
+def test_group_ids_do_not_depend_on_the_thread_count():
+    """`link_chunks` is a setting, not a thread count: the cut points come
+    from the data, so the same file groups the same way on any machine."""
+    from smappy._group_chunked import connect_chunked
+    x, y, f = _blinking(n_emitters=4000, frames=600, seed=2)
+    first = connect_chunked(x, y, f, 50.0, 1, n_chunks=8, workers=1)
+    for workers in (2, 4, 16):
+        assert np.array_equal(connect_chunked(x, y, f, 50.0, 1, n_chunks=8,
+                                              workers=workers), first)
+
+
+def test_grouping_uses_the_chunked_linker_and_can_be_told_not_to():
+    x, y, f = _blinking(n_emitters=4000, frames=600, seed=3)
+    locs = Localizations({"x_nm": x.astype(np.float32), "y_nm": y.astype(np.float32),
+                          "frame": f, "photons": np.ones(len(x), np.float32),
+                          "loc_precision_nm": np.full(len(x), 10.0, np.float32)},
+                         {"units": "nm"})
+    assert GroupSettings().link_chunks == 8
+    chunked, _ = group(locs, GroupSettings())
+    exact, index = group(locs, GroupSettings(link_chunks=1))
+    assert np.array_equal(index, connect(x, y, f, 50.0, 1))   # 1 chunk is the walk
+    assert abs(len(chunked) - len(exact)) / len(exact) < 1e-3
+
+
+def test_combine_is_the_same_table_however_its_columns_are_scheduled():
+    rng = np.random.default_rng(5)
+    x, y, f = _blinking(n_emitters=2000, frames=300, seed=4)
+    n = len(x)
+    locs = Localizations({
+        "x_nm": x.astype(np.float32), "y_nm": y.astype(np.float32), "frame": f,
+        "photons": rng.uniform(100, 900, n).astype(np.float32),
+        "photons_err": rng.uniform(5, 40, n).astype(np.float32),
+        "loc_precision_nm": rng.uniform(5, 25, n).astype(np.float32),
+        "x_err_nm": rng.uniform(5, 25, n).astype(np.float32),
+        "y_err_nm": rng.uniform(5, 25, n).astype(np.float32),
+        "logl_rel": rng.uniform(-2, 0, n).astype(np.float32),
+    }, {"units": "nm"})
+    gi = connect(x, y, f, 50.0, 1)
+    once, twice = combine(locs, gi), combine(locs, gi)
+    for name in once.keys():
+        assert np.array_equal(np.asarray(once[name]), np.asarray(twice[name]),
+                              equal_nan=True), name
+
+    # and the values are still the per-column rules, checked against the slow way
+    size = int(gi.max())
+    frame_min = np.full(size, np.iinfo(np.int64).max, np.int64)
+    np.minimum.at(frame_min, gi - 1, np.asarray(f))
+    assert np.array_equal(np.asarray(once["frame"]), frame_min)
+    photons = np.zeros(size)
+    np.add.at(photons, gi - 1, np.asarray(locs["photons"], np.float64))
+    assert np.allclose(np.asarray(once["photons"]), photons.astype(np.float32), rtol=1e-5)
+
+
+def test_radix_argsort_is_the_stable_argsort_it_replaces():
+    from smappy.group import radix_argsort
+    rng = np.random.default_rng(6)
+    for values in (rng.integers(0, 5, 1000), rng.integers(0, 10 ** 7, 50_000),
+                   np.zeros(100, np.int64), np.arange(999, -1, -1)):
+        values = np.asarray(values, np.int64)
+        assert np.array_equal(radix_argsort(values),
+                              np.argsort(values, kind="stable"))
