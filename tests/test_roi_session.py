@@ -225,3 +225,76 @@ def test_a_drafted_roi_keeps_the_shape_it_was_drawn_with(tmp_path):
     stored = list(session.rois.rois.values())[-1]
     assert stored.polygon is not None and len(stored.polygon) == 3
     assert window.draft is None and window.draft_polygon is None
+
+
+# --------------------------------------------------------------------- tiles
+def test_tiles_cover_the_file_and_are_walked_in_reading_order(tmp_path):
+    """A grid is the point of the feature: every part of the data comes up
+    once, in a fixed order, rather than whichever bright spot the eye found."""
+    session, window = _manager(tmp_path)
+    project = session.rois
+    file_id = next(iter(project.sources))
+    x0, y0, x1, y1 = project.state(file_id).index.bounds
+
+    project.set_tiles(2000.0)
+    tiles = project.tiles(file_id)
+    nx = int(np.ceil((x1 - x0) / 2000.0))
+    ny = int(np.ceil((y1 - y0) / 2000.0))
+    assert len(tiles) == nx * ny
+    assert tiles[0][:2] == (x0, y0)                      # from the corner
+    assert tiles[1][0] > tiles[0][0] and tiles[1][1] == tiles[0][1]   # along a row
+    assert tiles[nx][1] > tiles[0][1]                    # then the next row
+    assert tiles[-1][2] >= x1 and tiles[-1][3] >= y1     # and they cover it all
+
+    project.set_tiles(0.0)
+    assert project.tiles(file_id) == []
+
+
+def test_the_arrow_keys_walk_the_tiles_and_move_the_zoom(tmp_path):
+    session, window = _manager(tmp_path)
+    window.tile_size.setValue(2000.0)
+    window.tiles_button.setChecked(True)
+    window._on_tiles(True)
+
+    tiles = session.rois.tiles(window.current_file())
+    assert window.tile == 0
+    assert window.zoom_pane.width_nm == pytest.approx(2000.0)
+    x0, y0, x1, y1 = tiles[0]
+    assert window.zoom_center == pytest.approx([(x0 + x1) / 2, (y0 + y1) / 2])
+
+    window._step_tile(1)
+    assert window.tile == 1
+    window._step_tile(-1)
+    assert window.tile == 0
+    window._step_tile(-1)                       # wraps at the start of the file
+    assert window.tile == len(tiles) - 1
+
+
+def test_a_click_on_a_tile_edge_goes_there_and_one_inside_still_centres(tmp_path):
+    session, window = _manager(tmp_path)
+    window.tile_size.setValue(2000.0)
+    window._on_tiles(True)
+    window.redraw()                             # the file pane needs its fov
+    tiles = session.rois.tiles(window.current_file())
+    x0, y0, x1, y1 = tiles[2]
+
+    window._file_clicked(float(x0), float((y0 + y1) / 2))     # on the left edge
+    assert window.tile == 2
+
+    inside = ((x0 + x1) / 2, (y0 + y1) / 2 + (y1 - y0) / 4)
+    window._file_clicked(*map(float, inside))
+    assert window.tile == 2                     # unchanged: a free look, not a tile
+    assert window.zoom_center == pytest.approx(list(inside))
+
+
+def test_the_tile_grid_travels_with_the_file(tmp_path):
+    path = tmp_path / "locs.hdf5"
+    save_localizations(path, _table())
+    session = Session()
+    session.load(path)
+    session.rois.set_tiles(1500.0)
+    session.save(path)
+
+    reopened = Session()
+    reopened.load(path)
+    assert reopened.rois.tile_nm == 1500.0

@@ -15,10 +15,10 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QRectF, Qt, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
-from PySide6.QtWidgets import (QAbstractItemView, QHBoxLayout, QHeaderView, QLabel,
-                               QListWidget, QListWidgetItem, QMainWindow, QPushButton,
-                               QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout,
-                               QWidget)
+from PySide6.QtWidgets import (QAbstractItemView, QDoubleSpinBox, QHBoxLayout,
+                               QHeaderView, QLabel, QListWidget, QListWidgetItem,
+                               QMainWindow, QPushButton, QSplitter, QTableWidget,
+                               QTableWidgetItem, QVBoxLayout, QWidget)
 
 from ..render import FieldOfView
 from ..session import Session
@@ -31,7 +31,10 @@ EXCLUDED_PEN = pg.mkPen("#8a8a8a", width=1)     # not used
 EXCLUDED_ACTIVE_PEN = pg.mkPen("#8a8a8a", width=2)
 OTHER_PEN = pg.mkPen("#ffb300", width=1)
 FRAME_PEN = pg.mkPen("#ffd54a", width=1)
+TILE_PEN = pg.mkPen("#5a6a7a", width=1)         # the grid
+TILE_HERE_PEN = pg.mkPen("#00c4ff", width=2)    # the tile being looked at
 DETAIL_NM = 3000.0            # the zoom's width to start with
+DEFAULT_TILE_NM = 5000.0      # a tile to start from
 RIM_PIXELS = 6.0              # how near the outline a click must be to select
 
 
@@ -112,7 +115,8 @@ class ImagePane(QWidget):
                                          ("excluded_active", EXCLUDED_ACTIVE_PEN),
                                          ("roi", ROI_PEN), ("draft", DRAFT_PEN),
                                          ("direction", DIRECTION_PEN),
-                                         ("drawing", DRAWING_PEN), ("frame", FRAME_PEN))}
+                                         ("drawing", DRAWING_PEN), ("frame", FRAME_PEN),
+                                         ("tiles", TILE_PEN), ("tile", TILE_HERE_PEN))}
         for item in self.shapes.values():
             self.view.addItem(item)
         layout.addWidget(self.graphics)
@@ -213,6 +217,38 @@ class ROIManagerWindow(QMainWindow):
         self.zoom_pane = ImagePane("zoom", zoomable=True, pannable=True)
         self.roi_pane = ImagePane("ROI", zoomable=True)
 
+        # tiles: a grid over the whole file, walked one square at a time, so a
+        # dataset can be gone through systematically instead of by eye
+        file_column = QWidget()
+        flayout = QVBoxLayout(file_column)
+        flayout.setContentsMargins(0, 0, 0, 0)
+        flayout.addWidget(self.file_pane, 1)
+        trow = QHBoxLayout()
+        trow.setSpacing(3)
+        self.tiles_button = QPushButton("Tiles")
+        self.tiles_button.setCheckable(True)
+        self.tiles_button.setToolTip("cover the file with a grid; click a tile's edge "
+                                     "to look at it, the arrow keys walk through them")
+        self.tiles_button.clicked.connect(self._on_tiles)
+        self.tile_size = QDoubleSpinBox(minimum=100, maximum=1e7, decimals=0, suffix=" nm")
+        self.tile_size.setSingleStep(1000)
+        self.tile_size.setKeyboardTracking(False)
+        self.tile_size.setToolTip("the side of one tile")
+        self.tile_size.valueChanged.connect(self._on_tile_size)
+        self.tile_label = QLabel("")
+        self.tile_label.setStyleSheet("color: gray")
+        self.previous_tile = QPushButton("<")
+        self.previous_tile.setToolTip("the tile before this one (left arrow)")
+        self.previous_tile.clicked.connect(lambda: self._step_tile(-1))
+        self.next_tile = QPushButton(">")
+        self.next_tile.setToolTip("the tile after this one (right arrow)")
+        self.next_tile.clicked.connect(lambda: self._step_tile(1))
+        for w in (self.tiles_button, self.tile_size, self.previous_tile,
+                  self.next_tile, self.tile_label):
+            trow.addWidget(w)
+        trow.addStretch(1)
+        flayout.addLayout(trow)
+
         lists = QWidget()
         llayout = QVBoxLayout(lists)
         llayout.setContentsMargins(2, 2, 2, 2)
@@ -255,6 +291,10 @@ class ROIManagerWindow(QMainWindow):
         cancel = QShortcut(QKeySequence(Qt.Key_Escape), self)
         cancel.setContext(Qt.WindowShortcut)
         cancel.activated.connect(self._cancel_drawing)
+        for key, step in ((Qt.Key_Right, 1), (Qt.Key_Left, -1)):
+            walk = QShortcut(QKeySequence(key), self)
+            walk.setContext(Qt.WindowShortcut)
+            walk.activated.connect(lambda step=step: self._step_tile(step))
 
         roi_side = QWidget()
         rlayout = QVBoxLayout(roi_side)
@@ -289,7 +329,7 @@ class ROIManagerWindow(QMainWindow):
         rlayout.addWidget(self.add_button)
 
         top = QSplitter(Qt.Horizontal)
-        top.addWidget(self.file_pane)
+        top.addWidget(file_column)
         top.addWidget(self.zoom_pane)
         bottom = QSplitter(Qt.Horizontal)
         bottom.addWidget(lists)
@@ -345,6 +385,8 @@ class ROIManagerWindow(QMainWindow):
                 row = ids.index(saved)
             self.files.setCurrentRow(max(0, min(row, self.files.count() - 1)))
         self._fill_table()
+        self.tiles_button.setChecked(bool(self.project.tile_nm))
+        self.tile_size.setValue(self.project.tile_nm or DEFAULT_TILE_NM)
         self._loading = False
         self.redraw()
 
@@ -386,8 +428,9 @@ class ROIManagerWindow(QMainWindow):
         self.file_pane.render(state, x0, x1, y0, y1)
         rois = project.rois_of(file_id)
 
-        # the file: every ROI, small
+        # the file: every ROI, small, over the tile grid
         self._draw_outlines(self.file_pane, rois)
+        self._draw_tiles(file_id)
 
         centre = self.zoom_center
         if centre is None:
@@ -406,6 +449,76 @@ class ROIManagerWindow(QMainWindow):
                             [centre[1] - half, centre[1] - half, centre[1] + half,
                              centre[1] + half, centre[1] - half])
         self._draw_roi_pane(state)
+
+    # ----------------------------------------------------------------- tiles
+    @property
+    def tile(self) -> Optional[int]:
+        """Which tile the zoom is on, or None."""
+        index = self.project.navigation.get("tile")
+        return int(index) if isinstance(index, (int, float)) else None
+
+    def _draw_tiles(self, file_id) -> None:
+        """The grid, and the one square being looked at, on the file image."""
+        tiles = self.project.tiles(file_id)
+        xs, ys = [], []
+        for x0, y0, x1, y1 in tiles:
+            xs.extend([x0, x1, x1, x0, x0, np.nan])
+            ys.extend([y0, y0, y1, y1, y0, np.nan])
+        self.file_pane.draw("tiles", xs, ys)
+        here = self.tile
+        if tiles and here is not None and 0 <= here < len(tiles):
+            x0, y0, x1, y1 = tiles[here]
+            box = ([x0, x1, x1, x0, x0], [y0, y0, y1, y1, y0])
+            self.file_pane.draw("tile", *box)
+            # and in the zoom, which is wider than the tile where the pane is:
+            # the outline says where the square being walked actually ends
+            self.zoom_pane.draw("tile", *box)
+            self.tile_label.setText(f"tile {here + 1} / {len(tiles)}")
+        else:
+            self.file_pane.draw("tile")
+            self.zoom_pane.draw("tile")
+            self.tile_label.setText(f"{len(tiles)} tiles" if tiles else "")
+        for w in (self.previous_tile, self.next_tile):
+            w.setEnabled(bool(tiles))
+
+    def _on_tiles(self, on: bool) -> None:
+        """The button: lay a grid over the file, or take it away."""
+        self.project.set_tiles(self.tile_size.value() if on else 0.0)
+        self.project.navigation.pop("tile", None)
+        if on:
+            self._go_to_tile(0)
+        else:
+            self.redraw()
+
+    def _on_tile_size(self) -> None:
+        if self._loading or not self.tiles_button.isChecked():
+            return
+        self.project.set_tiles(self.tile_size.value())
+        self._go_to_tile(min(self.tile or 0, max(0, len(self.project.tiles(
+            self.current_file())) - 1)))
+
+    def _step_tile(self, step: int) -> None:
+        """The arrow keys: the next tile, wrapping at the end of the file."""
+        tiles = self.project.tiles(self.current_file())
+        if not tiles:
+            return
+        here = self.tile
+        self._go_to_tile(0 if here is None else (here + step) % len(tiles))
+
+    def _go_to_tile(self, index: int) -> None:
+        """Put the zoom on one tile: it fills the pane, and the draft is dropped."""
+        tiles = self.project.tiles(self.current_file())
+        if not tiles:
+            self.redraw()
+            return
+        index = int(np.clip(index, 0, len(tiles) - 1))
+        x0, y0, x1, y1 = tiles[index]
+        self.project.navigation["tile"] = index
+        self.zoom_center = np.array([(x0 + x1) / 2, (y0 + y1) / 2])
+        self.zoom_pane.width_nm = max(x1 - x0, y1 - y0)
+        self.draft = self.draft_polygon = self.draft_direction = None
+        self.redraw()
+        self.status.showMessage(f"tile {index + 1} of {len(tiles)}")
 
     def _draw_outlines(self, pane, rois) -> None:
         """Every ROI on one pane: grey when it is not used, green when selected."""
@@ -462,7 +575,11 @@ class ROIManagerWindow(QMainWindow):
         self.project.navigation["file"] = self.current_file()
         self.zoom_center = None
         self.draft = None
-        self.redraw()
+        self.project.navigation.pop("tile", None)
+        if self.project.tile_nm:     # a new file: start its walk at the first tile
+            self._go_to_tile(0)
+        else:
+            self.redraw()
         self.changed.emit()          # the tab names the file the finder acts on
 
     def _zoom_panned(self, dx: float, dy: float) -> None:
@@ -477,11 +594,33 @@ class ROIManagerWindow(QMainWindow):
         self.redraw()
 
     def _file_clicked(self, x: float, y: float) -> None:
+        """Centre the zoom here -- or, on a tile's edge, go to that tile.
+
+        Only the edge counts, so a click inside a tile still centres freely,
+        the way it does without a grid.
+        """
         if np.isnan(x):
             self.redraw()
             return
+        index = self._tile_edge_at(x, y)
+        if index is not None:
+            self._go_to_tile(index)
+            return
         self.zoom_center = np.array([x, y])
         self.redraw()
+
+    def _tile_edge_at(self, x: float, y: float) -> Optional[int]:
+        """The tile whose outline the click landed on, within a few pixels."""
+        file_id = self.current_file()
+        index = self.project.tile_at(file_id, x, y)
+        if index is None:
+            return None
+        x0, y0, x1, y1 = self.project.tiles(file_id)[index]
+        fov = self.file_pane.fov
+        tolerance = RIM_PIXELS * (fov.pixelsize if fov is not None else 1.0)
+        near = (min(abs(x - x0), abs(x - x1)) <= tolerance
+                or min(abs(y - y0), abs(y - y1)) <= tolerance)
+        return index if near else None
 
     def _zoom_clicked(self, x: float, y: float) -> None:
         """A click drafts an ROI there, unless it lands on a stored one."""

@@ -153,7 +153,7 @@ class SessionROIs(ROIProject):
         """The project as JSON-compatible data, for the localization file."""
         return {"format_version": FORMAT_VERSION,
                 "size_nm": self.size_nm, "shape": self.shape,
-                "preview_nm": self.preview_nm,
+                "preview_nm": self.preview_nm, "tile_nm": self.tile_nm,
                 "navigation": self.navigation,
                 "sources": [{"id": s.id, "number": s.number, "name": s.name}
                             for s in self.sources.values()],
@@ -172,6 +172,7 @@ class SessionROIs(ROIProject):
             raise ValueError("this file's ROIs were written by a newer smappy")
         self.set_geometry(doc.get("size_nm", self.size_nm), doc.get("shape", self.shape))
         self.preview_nm = float(doc.get("preview_nm", 0.0) or 0.0)
+        self.set_tiles(doc.get("tile_nm", 0.0) or 0.0)
         self.navigation = doc.get("navigation", {})
         # ids the file used, mapped onto the files this session has
         by_number = {s.number: s for s in self.sources.values()}

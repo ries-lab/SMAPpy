@@ -133,6 +133,7 @@ class ROIProject:
         self.rois: Dict[str, ROI] = {}
         self.size_nm = 300.0  # circle diameter or square side length
         self.shape = "circle"
+        self.tile_nm = 0.0    # a grid over each file for a systematic walk; 0 = none
         self.filters = dict(DEFAULT_BOUNDS)
         self.grouped = False
         self.group_settings = GroupSettings()
@@ -158,6 +159,43 @@ class ROIProject:
         if shape not in ("circle", "square"):
             raise ValueError("Shape must be circle or square")
         self.size_nm, self.shape = size, shape
+
+    def set_tiles(self, size_nm):
+        """Cover each file with a grid of squares this wide; 0 turns it off."""
+        self.tile_nm = 0.0 if not size_nm else positive(size_nm, "Tile size")
+
+    def tiles(self, file_id):
+        """The grid over one file, row by row: ``(x0, y0, x1, y1)`` in nm.
+
+        Tiles are not stored: they follow the file's extent and the one size,
+        so they never go stale.  What they are for is a systematic walk --
+        every part of the data looked at once, in a fixed order, rather than
+        whichever bright spot the eye landed on.
+        """
+        if not self.tile_nm or file_id not in self.sources:
+            return []
+        x0, y0, x1, y1 = self.state(file_id).index.bounds
+        size = self.tile_nm
+        nx = max(1, int(np.ceil((x1 - x0) / size)))
+        ny = max(1, int(np.ceil((y1 - y0) / size)))
+        return [(x0 + i * size, y0 + j * size, x0 + (i + 1) * size, y0 + (j + 1) * size)
+                for j in range(ny) for i in range(nx)]
+
+    def tile_at(self, file_id, x, y):
+        """The index of the tile a point falls in, or None outside the grid.
+
+        Tiles share their edges, so the ranges are half open: a point on a
+        boundary belongs to the tile it opens, and only the far edge of the
+        last row and column falls back to the tile it closes.
+        """
+        tiles = self.tiles(file_id)
+        for i, (tx0, ty0, tx1, ty1) in enumerate(tiles):
+            if tx0 <= x < tx1 and ty0 <= y < ty1:
+                return i
+        for i, (tx0, ty0, tx1, ty1) in enumerate(tiles):
+            if tx0 <= x <= tx1 and ty0 <= y <= ty1:
+                return i
+        return None
 
     def set_filters(self, ranges):
         normalized = {}
@@ -319,7 +357,8 @@ class ROIProject:
                 raise ValueError(f"Save localization source {source.name!r} before saving the project")
             if path == Path(source.path):
                 raise ValueError("The project must not overwrite a localization source")
-        doc = {"size_nm": self.size_nm, "shape": self.shape, "filters": self.filters,
+        doc = {"size_nm": self.size_nm, "shape": self.shape, "tile_nm": self.tile_nm,
+               "filters": self.filters,
                "grouped": self.grouped, "group_settings": asdict(self.group_settings),
                "navigation": self.navigation, "rois": [asdict(r) for r in self.rois.values()],
                "runs": self.runs,
@@ -349,6 +388,7 @@ class ROIProject:
             doc = json.loads(f['project'][()])
         project = cls()
         project.set_geometry(doc['size_nm'], doc['shape'])
+        project.set_tiles(doc.get('tile_nm', 0.0))
         project.set_filters(doc['filters'])
         project.grouped = doc['grouped']
         project.group_settings = GroupSettings(**doc['group_settings'])

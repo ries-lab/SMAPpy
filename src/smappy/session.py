@@ -335,7 +335,9 @@ class Session:
         if self.roi is not None:
             metadata["roi"] = self.roi.to_dict()
         rois = self.roi_state()
-        if rois and (rois["rois"] or rois["runs"]):
+        # a tile grid alone is worth keeping: it is where a systematic walk
+        # through the file was left off
+        if rois and (rois["rois"] or rois["runs"] or rois.get("tile_nm")):
             metadata["roi_project"] = rois
         save_localizations(path, self.locs, metadata)
         self.path = path

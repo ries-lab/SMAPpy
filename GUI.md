@@ -107,7 +107,11 @@ reasoning is here so that it does not have to be re-derived.
   between the two.  Choosing and judging ROIs happens in the ROI manager
   window: the file, the zoom and the ROI in three quadrants, the files and
   the ROIs in the fourth, a click in the zoom drafting an ROI that *Add*
-  stores.  *Polygon* and *Direction* draw an ROI's own outline and its arrow
+  stores.  *Tiles* and a size lay a grid over the file so a dataset can be
+  gone through systematically rather than by eye: a click on a tile's edge
+  in the file image puts the zoom on it, the arrow keys walk to the next and
+  previous one, and the grid follows the file's extent rather than being
+  stored, so it never goes stale.  *Polygon* and *Direction* draw an ROI's own outline and its arrow
   in the ROI image.  The ROI tab keeps what applies to every ROI -- geometry, the
   finder, the evaluation.  There is no review step: an ROI counts from the
   moment it is made, and *use* is what excludes one.
