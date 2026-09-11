@@ -816,16 +816,23 @@ Worth it for a first look at a large dataset, not for the final result.
   so the settings file is used with a warning.  Should that be a hard error?
 * RCC's slice width, z bin width and number of time windows are SMAP's values,
   which were set by hand rather than optimized; there is likely room there.
-* **Parallelize `connect`.**  Opening a 57 M localization `_sml.mat` costs
-  134 s, of which the linking is 79 s and the combine 17 s: 72% of opening a
-  file goes on grouping it, which the GUI now does in a worker with the stages
-  in its status bar, but which is still the wait.  Linking looks only `dt`
-  frames back, so the frame axis can be cut into chunks linked in parallel and
-  stitched at the seams -- each chunk needs the previous one's last `dt + 1`
-  frames to decide its first links, and the group ids renumbered across the
-  join.  `combine` is per column and parallel as it stands.  The read is
-  another 31 s, of which better than half is columns nothing uses: 30 are
-  loaded, 13 are read by anything, and the four `bg*` ones are float64.
+* **Opening a 57 M localization `_sml.mat`** was 134 s and is 64 s.  What
+  looked like 79 s of linking was 68 s of `np.lexsort` and 5.5 s of the walk:
+  the sort, not the link, was the cost.  `sorted_order` sorts the block keys
+  and the frame first (integers, a bounded range), which leaves buckets of 38
+  localizations, and sorts x only inside them, in slices, threaded -- 5.1 s,
+  and the same permutation to the element.  Slice *size* is what matters:
+  lexsort degrades with length, so 1024 slices take 1.2 s where 8 take 15.
+  Sorting x once and radix-passing frame and block over it is exact too, and
+  72 s: sorting 57 M x globally is more work than sorting them in buckets of
+  38, and each pass is another gather of the whole table.
+* What is left of that 64 s: 30 s read, 17 s `combine`, 5.5 s the linking walk,
+  5 s the sort, 6 s the indices and filters.  `combine` is per column and
+  parallel as it stands -- the obvious next one, and exact.  The walk can be
+  cut into frame chunks and stitched (`smappy._group_chunked`, 5.5 s to 1.1 s,
+  0.99995 of localizations in exactly the sequential group) but that is an
+  approximation for 4 s.  The read is 30 s of which better than half is columns
+  nothing uses: 30 are loaded, 13 are read by anything, four `bg*` are float64.
 * `group()` numbers groups from 1, a leftover from the MATLAB original, so the
   row of the grouped table is `group_index - 1`.  Worth rebasing to 0 at some
   point, together with the C++ `connect`.

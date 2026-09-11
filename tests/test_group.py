@@ -212,3 +212,109 @@ def test_a_z_window_keeps_stacked_emitters_apart():
     stacked, _ = group(locs, GroupSettings(dx=50, dt=1, dz=100))
     assert len(flat) == 1 and len(stacked) == 2
     assert sorted(np.round(stacked["z_nm"]).tolist()) == [0.0, 400.0]
+
+
+# --------------------------------------------------------------- the sort ---
+# `sorted_order` replaced the `np.lexsort` in front of the linking walk (70 s of
+# `connect`'s 71.7 s on a 57 M localization file).  It is only allowed to exist
+# if it returns *the same permutation*, ties and all, so that is what is pinned.
+
+def _orders_match(x, frame, keys=()):
+    from smappy.group import sorted_order
+    x = np.asarray(x, np.float64)
+    frame = np.asarray(frame, np.int64)
+    mine = sorted_order(x, frame, keys)
+    lex = np.lexsort((x, frame) + tuple(reversed(keys)))
+    return np.array_equal(mine, lex)
+
+
+@pytest.mark.parametrize("name, n, frames", [
+    ("empty", 0, 1), ("one", 1, 1), ("one frame", 1000, 1),
+    ("one localization per frame", 1000, 1000), ("dense", 5000, 40),
+    ("sparse", 30, 1_000_000), ("two localizations", 2, 1),
+])
+def test_sorted_order_is_the_lexsort_it_replaces(name, n, frames):
+    rng = np.random.default_rng(abs(hash(name)) % 2**32)
+    x = rng.random(n)
+    frame = rng.integers(0, frames, n).astype(np.int64)
+    assert _orders_match(x, frame)
+    assert _orders_match(x, frame, (rng.integers(0, 3, n).astype(np.int64),))
+    assert _orders_match(x, frame, (rng.integers(0, 2, n).astype(np.int64),
+                                    rng.integers(0, 3, n).astype(np.int64)))
+
+
+def test_sorted_order_keeps_the_order_of_ties():
+    """Equal (frame, x) must come out in input order: both sorts are stable,
+    and the linker claims the first match, so a swap here changes groups."""
+    x = np.repeat([1.0, 2.0], 8)
+    frame = np.zeros(16, np.int64)
+    assert _orders_match(x, frame)
+    assert _orders_match(x, frame, (np.arange(16) % 2,))
+
+
+def test_sorted_order_handles_negative_and_far_apart_frames():
+    rng = np.random.default_rng(7)
+    x = rng.random(2000)
+    assert _orders_match(x, rng.integers(-500, 500, 2000).astype(np.int64))
+    assert _orders_match(x, (rng.integers(0, 4, 2000) * 10 ** 7).astype(np.int64))
+
+
+# ----------------------------------------------------- chunked linking ------
+# `smappy._group_chunked` links slices of the frame axis in parallel and repairs
+# the seams.  It is an approximation and is not wired into `group()`; these pin
+# the two things that make it usable at all -- that one chunk is the sequential
+# walk exactly, and that more chunks stay within a hair of it.
+
+def _blinking(n_emitters=3000, frames=400, mean_on=3.0, seed=0):
+    rng = np.random.default_rng(seed)
+    ex, ey = rng.uniform(0, 5000, n_emitters), rng.uniform(0, 5000, n_emitters)
+    xs, ys, fs = [], [], []
+    start = rng.integers(0, frames, n_emitters)
+    length = 1 + rng.geometric(1.0 / mean_on, n_emitters)
+    for e in range(n_emitters):
+        k = int(min(length[e], frames - start[e]))
+        if k <= 0:
+            continue
+        xs.append(rng.normal(ex[e], 12.0, k))
+        ys.append(rng.normal(ey[e], 12.0, k))
+        fs.append(np.arange(start[e], start[e] + k))
+    return (np.concatenate(xs), np.concatenate(ys),
+            np.concatenate(fs).astype(np.int64))
+
+
+def _same_partition(a, b):
+    """Fraction of localizations whose group holds the same localizations."""
+    pair = a.astype(np.int64) * (int(b.max()) + 1) + b
+    _, inv, count = np.unique(pair, return_inverse=True, return_counts=True)
+    return float(((count[inv] == np.bincount(a)[a])
+                  & (count[inv] == np.bincount(b)[b])).sum()) / len(a)
+
+
+def test_one_chunk_is_the_sequential_walk():
+    from smappy._group_chunked import connect_chunked
+    x, y, f = _blinking()
+    assert np.array_equal(connect_chunked(x, y, f, 50.0, 1, n_chunks=1),
+                          connect(x, y, f, 50.0, 1))
+
+
+def test_chunked_linking_stays_within_a_hair_of_the_control():
+    from smappy._group_chunked import connect_chunked
+    x, y, f = _blinking()
+    control = connect(x, y, f, 50.0, 1)
+    for n_chunks in (2, 4, 8):
+        stats = {}
+        ids = connect_chunked(x, y, f, 50.0, 1, n_chunks=n_chunks, stats=stats)
+        assert ids.min() == 1 and len(np.unique(ids)) == ids.max()   # no gaps
+        assert _same_partition(control, ids) > 0.999
+        assert stats["rejoined"] > 0            # seams were found and repaired
+
+
+def test_chunked_linking_keeps_blocks_apart():
+    """Localizations of different channels may not be linked, however the
+    frame axis is cut."""
+    from smappy._group_chunked import connect_chunked
+    x, y, f = _blinking(n_emitters=800, frames=200)
+    channel = (np.arange(len(x)) % 2).astype(np.int64)
+    ids = connect_chunked(x, y, f, 50.0, 1, channel[:, None], n_chunks=4)
+    for g in np.unique(ids):
+        assert len(np.unique(channel[ids == g])) == 1

@@ -45,20 +45,28 @@ Grouping is expensive (the linking is sequential and cannot be vectorised), so
 it is done once and the grouped table kept alongside the original rather than
 recomputed when the display switches between them.
 
-**To revisit: parallelizing `connect`.**  On a 57 M localization file (SMAP
-``_sml.mat``, 2 channels) the open costs 134 s, of which `connect` is 79 s and
-`combine` 17 s -- 72% of the time to open a file goes on grouping it.  `connect`
-already runs per block, but a file has one or two blocks, so that buys nothing.
-The linking only ever looks `dt` frames back, so the frame axis could be cut
-into chunks that are linked in parallel and stitched where they meet: a chunk
-boundary needs the last `dt + 1` frames of the previous chunk to decide its
-first links, and group ids then have to be renumbered across the seam.  The
-combine is per column and embarrassingly parallel as it stands.
+Most of what grouping cost was not the linking.  On a 57 M localization file
+`connect` took 71.7 s, and 68 s of that was the `np.lexsort` in front of the
+walk; the walk itself is 5.5 s.  `sorted_order` below returns the same order --
+element for element -- in 5.1 s, which took opening that file from 134 s to
+64 s without changing a single group.
+
+What is left, on that file: `combine` 17 s, the walk 5.5 s, the sort 5 s.
+
+**To revisit.**  `combine` is per column and parallel as it stands; it is the
+biggest piece of grouping now and has not been threaded.  For the walk,
+`smappy._group_chunked` cuts the frame axis, links the pieces in threads and
+repairs the seams: 5.5 s to 1.1 s, with 0.99995 of localizations landing in
+exactly the group the sequential walk gives them.  It is not on by default --
+it is an approximation worth 4 s, and there are exact seconds still on the
+table.  ``scripts/check_chunked_grouping.py`` is how it was measured.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
+from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, Dict, Optional, Sequence, Tuple
 
 import numpy as np
@@ -123,6 +131,77 @@ def _mode(name: str) -> str:
     return "precision" if name.endswith(("_err", "err")) else "mean"
 
 
+# Localizations per slice of the x-inside-a-bucket sort.  Smaller is faster
+# until the per-slice overhead shows: 64 k measures 1.2 s on a 57 M table where
+# one slice per thread measures 15.
+SLICE = 64 * 1024
+
+
+def sorted_order(x, frame, keys=(), workers: Optional[int] = None) -> np.ndarray:
+    """The (block, frame, x) order `connect_single` wants, without lexsort.
+
+    This sort, not the linking, is what grouping a large table costs: on a
+    57 M localization file `np.lexsort` takes **70 s** and the C++ walk after
+    it 5.5 s.  lexsort is a stable argsort per key through an index, and at
+    this size every pass is a cache miss per element.
+
+    The order is reachable far more cheaply.  Sorting by the block keys and the
+    frame -- integers, a bounded range -- is 3.1 s of that; it leaves the table
+    in one bucket per (block, frame), 38 localizations each on that file, and
+    all that is left is to sort x *inside* the buckets.  That work is
+    independent per bucket, so it is cut into slices and threaded.
+
+    The slices are small on purpose, and that matters more than the threads do:
+    `np.lexsort` degrades badly with length (cache, one indirection per
+    element), so the same work over 1024 slices takes 1.2 s where over 8 it
+    takes 15.  `SLICE` is the localizations per slice that aims for.
+
+    4.3 s in total against lexsort's 67 s, and the result is element for
+    element what ``np.lexsort((x, frame) + keys)`` returns -- ties included,
+    since every sort in the chain is stable.
+
+    Sorting x once up front and then radix-passing the frame and block keys
+    over it -- the textbook least-significant-digit order -- is also exact, and
+    measures 72 s: sorting 57 M x values globally is far more work than sorting
+    them in buckets of 38, and each further pass is another gather of the whole
+    table.
+    """
+    x = np.asarray(x)
+    frame = np.asarray(frame)
+    if len(frame) < 2:                      # nothing to order, and the bucket
+        return np.arange(len(frame), dtype=np.intp)   # arithmetic below wants n >= 2
+    first = (np.lexsort((frame,) + tuple(reversed(keys))) if keys
+             else np.argsort(frame, kind="stable"))
+    fs, xs = frame[first], x[first]
+    if keys:
+        stacked = np.stack([np.asarray(k)[first] for k in keys], axis=1)
+        same = np.all(stacked[1:] == stacked[:-1], axis=1) & (fs[1:] == fs[:-1])
+    else:
+        same = fs[1:] == fs[:-1]
+    # one non-decreasing id per (block, frame): sorting x inside it is the
+    # only thing left to do, whatever the keys were
+    bucket = np.concatenate(([0], np.cumsum(~same)))
+    edges = np.concatenate(([0], np.flatnonzero(~same) + 1, [len(fs)]))
+    n_buckets = len(edges) - 1
+    slices = int(np.clip(len(fs) // SLICE, 1, n_buckets))
+    cuts = edges[np.linspace(0, n_buckets, slices + 1).astype(int)]
+
+    def part(k):
+        # x inside each frame, not across the slice: the slice holds whole
+        # frames and their order has to survive
+        lo, hi = int(cuts[k]), int(cuts[k + 1])
+        if hi <= lo:
+            return np.empty(0, np.int64)
+        return lo + np.lexsort((xs[lo:hi], bucket[lo:hi]))
+
+    if len(cuts) <= 2:
+        return first[np.lexsort((xs, bucket))]
+    with ThreadPoolExecutor(max_workers=workers or min(32, (os.cpu_count() or 4))) as pool:
+        parts = list(pool.map(part, range(len(cuts) - 1)))
+    return first[np.concatenate(parts)]
+
+
+
 def connect(x, y, frame, dx: float = 50.0, dt: int = 1,
             blocks: Optional[np.ndarray] = None, z=None,
             dz: Optional[float] = None,
@@ -151,7 +230,7 @@ def connect(x, y, frame, dx: float = 50.0, dt: int = 1,
         keys = tuple(b.T) if b.ndim == 2 else (b,)
 
     # the linker needs (frame, x) ascending, within a block
-    order = np.lexsort((x, frame) + tuple(reversed(keys)))
+    order = sorted_order(x, frame, keys)
     out = np.zeros(x.size, np.int64)
 
     if keys:
