@@ -355,6 +355,8 @@ class LayerStrip(QWidget):
     def select(self, i: int) -> None:
         self.current = i
         self.buttons[i].setChecked(True)
+        for j, button in enumerate(self.buttons):
+            self._style(button, self.session.layers[j].visible)
         self.visible.blockSignals(True)
         self.visible.setChecked(self.session.layers[i].visible)
         self.visible.blockSignals(False)
@@ -367,8 +369,10 @@ class LayerStrip(QWidget):
         self.buttons[self.current].setToolTip(layer.name)
 
     def _add(self) -> None:
-        self.session.add_layer()
-        self.current = len(self.session.layers) - 1
+        """The new layer copies this one, and the tab moves onto it: `rebuild`
+        has already run from the session's change, so this only re-selects."""
+        self.session.add_layer(like=self.current)
+        self.select(len(self.session.layers) - 1)
 
     def _remove(self) -> None:
         self.session.remove_layer(self.current)
@@ -389,9 +393,19 @@ class LayerStrip(QWidget):
             self.visible.blockSignals(False)
         self.session.changed("layers")
 
-    @staticmethod
-    def _style(button: QToolButton, visible: bool) -> None:
-        button.setStyleSheet("" if visible else "color: gray; text-decoration: line-through")
+    def _style(self, button: QToolButton, visible: bool) -> None:
+        """Two cues that must not be confused.  *Visible* is the text: bold
+        when the layer is drawn, struck through and grey when it is not.
+        *Selected* -- the layer every control below edits -- is the highlighted
+        background, so toggling visibility never loses track of it.
+        """
+        chosen = 0 <= self.current < len(self.buttons) and button is self.buttons[self.current]
+        colour = "palette(highlighted-text)" if chosen else ("palette(text)" if visible else "gray")
+        text = ("font-weight: bold" if visible else "text-decoration: line-through")
+        background = ("background-color: palette(highlight); "
+                      "border: 1px solid palette(highlight)"
+                      if chosen else "border: 1px solid transparent")
+        button.setStyleSheet(f"QToolButton {{ color: {colour}; {text}; {background} }}")
 
 
 class Overview(QWidget):
@@ -542,6 +556,13 @@ class RenderTab(QWidget):
         self.color_auto.clicked.connect(self._auto_color_range)
         self.lut = QComboBox()
         self.lut.addItems(luts.names())
+        self.invert = QCheckBox("invert")
+        self.invert.setToolTip("reverse the LUT, as SMAP's inverse LUT does: "
+                               "a dark structure on a light background")
+        lut_row = QHBoxLayout()
+        lut_row.setContentsMargins(0, 0, 0, 0)
+        lut_row.addWidget(self.lut, 1)
+        lut_row.addWidget(self.invert)
         self.contrast = QDoubleSpinBox(minimum=0, maximum=6, singleStep=0.1, decimals=2)
         self.grouped = QCheckBox("grouped")
         self.grouped.setToolTip("one entry per blink instead of one per frame; "
@@ -549,7 +570,7 @@ class RenderTab(QWidget):
         form.addRow("render", self.mode)
         form.addRow("colour by", color_row)
         form.addRow("colour range", self.color_range_row)
-        form.addRow("LUT", self.lut)
+        form.addRow("LUT", lut_row)
         form.addRow("contrast", self.contrast)
         form.addRow("", self.grouped)
         more = QWidget()
@@ -578,6 +599,7 @@ class RenderTab(QWidget):
         self.color.currentIndexChanged.connect(self._on_color)
         self.color_field.currentIndexChanged.connect(self._on_color)
         self.lut.currentTextChanged.connect(self._on_display)
+        self.invert.toggled.connect(self._on_display)
         self.contrast.valueChanged.connect(self._on_display)
         self.gamma.valueChanged.connect(self._on_display)
         self.grouped.toggled.connect(self._on_grouped)
@@ -608,7 +630,7 @@ class RenderTab(QWidget):
         layer = self.session.layers[index]
         self.filter.layer_index = index
         widgets = (self.mode, self.sigma, self.factor, self.color, self.color_field,
-                   self.lut, self.contrast, self.gamma, self.grouped,
+                   self.lut, self.invert, self.contrast, self.gamma, self.grouped,
                    self.image_pixelsize, self.image_x0, self.image_y0, self.image_frame)
         for w in widgets:
             w.blockSignals(True)
@@ -627,6 +649,7 @@ class RenderTab(QWidget):
             self.image_frame.setEnabled(img.n_frames > 1)
             display = layer.get_display()
             self.lut.setCurrentText(display.lut if isinstance(display.lut, str) else "gray")
+            self.invert.setChecked(display.invert)
             self.contrast.setValue(display.contrast)
             self.gamma.setValue(display.gamma)
             for w in widgets:
@@ -651,6 +674,7 @@ class RenderTab(QWidget):
         self.sigma.setValue(settings.sigma)
         self.factor.setValue(settings.sigma_settings.factor)
         self.lut.setCurrentText(display.lut if isinstance(display.lut, str) else "hot")
+        self.invert.setChecked(display.invert)
         self.contrast.setValue(display.contrast)
         self.gamma.setValue(display.gamma)
         self.grouped.setChecked(layer.grouped)
@@ -716,6 +740,7 @@ class RenderTab(QWidget):
     def _on_display(self) -> None:
         layer = self.layer
         layer.set_display(dataclasses.replace(layer.get_display(), lut=self.lut.currentText(),
+                                              invert=self.invert.isChecked(),
                                               contrast=self.contrast.value(),
                                               gamma=self.gamma.value()))
         self.session.changed("layer")
@@ -744,7 +769,7 @@ class RenderTab(QWidget):
             if dialog.exec() == QDialog.Accepted:
                 px, x0, y0 = dialog.values()
                 self.session.open_image(path, px, x0, y0)
-        self.strip.current = len(self.session.layers) - 1
+        self.strip.select(len(self.session.layers) - 1)
 
     def _on_grouped(self, on: bool) -> None:
         self.session.show_grouped(self.strip.current, on)   # links once per table

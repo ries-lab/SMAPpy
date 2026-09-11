@@ -14,8 +14,8 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QAction, QActionGroup, QImage
-from PySide6.QtWidgets import (QFileDialog, QInputDialog, QLabel, QMenu, QToolBar,
-                               QToolButton, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QFileDialog, QGraphicsPathItem, QInputDialog, QLabel,
+                               QMenu, QToolBar, QToolButton, QVBoxLayout, QWidget)
 
 from ..regions import Region
 from ..render import FieldOfView
@@ -39,8 +39,14 @@ def stop_render_threads() -> None:
 
 
 atexit.register(stop_render_threads)
-ROI_PEN = pg.mkPen((255, 255, 0), width=1)
-DRAW_PEN = pg.mkPen((255, 255, 0), width=1, style=Qt.DashLine)
+# A thin yellow line disappears over a bright render, so every ROI outline is
+# drawn twice: a broad dark line first, the yellow one on top of it.  The pens
+# are cosmetic (pyqtgraph's default), so the widths are screen pixels and the
+# outline stays equally readable at any zoom.
+ROI_PEN = pg.mkPen((255, 255, 0), width=2)
+ROI_HALO_PEN = pg.mkPen((0, 0, 0, 200), width=5)
+DRAW_PEN = pg.mkPen((255, 255, 0), width=2, style=Qt.DashLine)
+DRAW_HALO_PEN = pg.mkPen((0, 0, 0, 200), width=5)
 
 
 class _Renderer(QObject):
@@ -107,8 +113,11 @@ class RenderView(QWidget):
         self.drawing: Optional[str] = None
         self.line_width = 100.0
         self._points: List[QPointF] = []
+        self._preview_halo = pg.PlotDataItem(pen=DRAW_HALO_PEN)
         self._preview = pg.PlotDataItem(pen=DRAW_PEN)
-        self.view.addItem(self._preview)
+        self.roi_halo: Optional[QGraphicsPathItem] = None
+        for item in (self._preview_halo, self._preview):
+            self.view.addItem(item)
         self.graphics.scene().sigMouseMoved.connect(self._on_move)
         self._pressed = False
         self.graphics.setFocusPolicy(Qt.StrongFocus)
@@ -270,6 +279,7 @@ class RenderView(QWidget):
         self.drawing = None
         self._points = []
         self._preview.setData([], [])
+        self._preview_halo.setData([], [])
         self.view.setMouseEnabled(True, True)
         self.graphics.unsetCursor()
 
@@ -316,6 +326,7 @@ class RenderView(QWidget):
             xs, ys = [x0, x1, x1, x0, x0], [y0, y0, y1, y1, y0]
         else:
             xs, ys = [p.x() for p in pts], [p.y() for p in pts]
+        self._preview_halo.setData(xs, ys)
         self._preview.setData(xs, ys)
 
     def _finish(self, pts: List[QPointF]) -> None:
@@ -336,6 +347,9 @@ class RenderView(QWidget):
         if self.roi_item is not None:
             self.view.removeItem(self.roi_item)
             self.roi_item = None
+        if self.roi_halo is not None:
+            self.view.removeItem(self.roi_halo)
+            self.roi_halo = None
         if region is None:
             return
         if region.kind == "rect":
@@ -349,8 +363,21 @@ class RenderView(QWidget):
         else:
             item = pg.PolyLineROI(region.points.tolist(), closed=True, pen=ROI_PEN)
         item.sigRegionChangeFinished.connect(self._roi_edited)
+        self.roi_halo = QGraphicsPathItem()
+        self.roi_halo.setPen(ROI_HALO_PEN)
+        self.roi_halo.setBrush(Qt.NoBrush)
+        self.roi_halo.setZValue(item.zValue() - 1)
+        self.view.addItem(self.roi_halo)
         self.view.addItem(item)
         self.roi_item = item
+        item.sigRegionChanged.connect(self._track_halo)
+        self._track_halo()
+
+    def _track_halo(self) -> None:
+        """The dark line under the outline, in the ROI's own shape."""
+        if self.roi_halo is None or self.roi_item is None:
+            return
+        self.roi_halo.setPath(self.roi_item.mapToParent(self.roi_item.shape()))
 
     def _roi_edited(self) -> None:
         item, old = self.roi_item, self.session.roi

@@ -7,6 +7,11 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QFrame, QHBoxLayout, QToolButton, QVBoxLayout,
                                QWidget)
 
+# The control window's width.  A tab whose content would ask for more (a long
+# file name in a wrapping label) caps its own hint at this, so one tab never
+# widens the window for the other three.
+CONTROL_WIDTH = 380
+
 
 class CollapsibleSection(QWidget):
     """A title bar with an arrow; click it to show or hide the content.

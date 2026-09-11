@@ -22,7 +22,7 @@ from .plugin_panel import PluginPanel
 from .render_tab import RenderTab
 from .roi_tab import ROITab
 from .render_view import RenderToolBar, RenderView
-from .widgets import CollapsibleSection, detach_to_window
+from .widgets import CONTROL_WIDTH, CollapsibleSection, detach_to_window
 
 TABS = ("Localize", "Render", "Analysis", "ROI")
 
@@ -232,7 +232,12 @@ class ControlWindow(QMainWindow):
         self.tabs.addTab(self.roi_tab, "ROI")
         self.tabs.setCurrentIndex(1)
         self.setCentralWidget(self.tabs)
-        self.resize(360, 640)
+        # tall on purpose: with a file open the Render tab's own content wants
+        # some 700 px, and scrolling for the display settings every time is
+        # what one notices.  Capped so it still fits a laptop screen.
+        screen = QApplication.primaryScreen()
+        height = screen.availableGeometry().height() - 60 if screen else 900
+        self.resize(CONTROL_WIDTH, max(640, min(1000, height)))
 
         # Loading runs in a LoadTask; these hold its state.  `_load_locked` is
         # everything that would change the table under a running one.

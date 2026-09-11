@@ -326,7 +326,6 @@ class Session:
 
     def first_locs_layer(self) -> int:
         return next((i for i, l in enumerate(self.layers) if not l.is_image), 0)
-        self.log("load", str(self.path))
 
     def save(self, path=None) -> Path:
         from .io.hdf5 import save_localizations
@@ -398,12 +397,35 @@ class Session:
                         and "grouped" in l.state.sets), None)
         layer.show_grouped(on, partner)
 
-    def add_layer(self) -> Layer:
-        """A new layer on the same table, with a fresh (default) filter."""
+    def add_layer(self, like: Optional[int] = None) -> Layer:
+        """A new layer on the same table.
+
+        ``like`` is the index of a localization layer to copy: bounds, files,
+        render and display settings, grouping.  A second layer is nearly
+        always the first one with one thing changed, so copying is the useful
+        start; without ``like`` (or when it names an image) the layer gets the
+        defaults and shows no file until one is ticked.
+        """
+        template = None
+        if like is not None and 0 <= like < len(self.layers) and not self.layers[like].is_image:
+            template = self.layers[like]
         layer = Layer(self.locs, name=f"layer {len(self.layers) + 1}",
-                      share=self._locs_layer())
-        if "filenumber" in self.locs:
-            layer.set_files([])            # starts empty: pick the file(s) it shows
+                      share=self._locs_layer(),
+                      defaults=template is None,
+                      settings=(dataclasses.replace(template.state.settings)
+                                if template is not None else None),
+                      display=(dataclasses.replace(template.get_display())
+                               if template is not None else None),
+                      group_settings=template.group_settings if template is not None else None)
+        if template is None:
+            if "filenumber" in self.locs:
+                layer.set_files([])        # starts empty: pick the file(s) it shows
+        else:
+            for field, (lo, hi) in template.state.sets["ungrouped"].filter.ranges.items():
+                layer.set_bound(field, lo, hi)
+            layer.set_files(template.files)
+            if layer.grouped != template.grouped:
+                layer.show_grouped(template.grouped, template)
         self.layers.append(layer)
         self.changed("layers")
         return layer

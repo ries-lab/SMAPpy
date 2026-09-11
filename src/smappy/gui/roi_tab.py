@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Dict, Optional
 
 import numpy as np
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (QComboBox, QDoubleSpinBox, QFormLayout, QHBoxLayout,
                                QHeaderView, QLabel, QMessageBox, QProgressDialog,
                                QPushButton, QScrollArea, QSpinBox, QTableWidget,
@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (QComboBox, QDoubleSpinBox, QFormLayout, QHBoxLayo
 
 from ..roi_manager.plugins import DensityPeaks, Histograms
 from ..session import Session
-from .widgets import CollapsibleSection
+from .widgets import CONTROL_WIDTH, CollapsibleSection
 
 
 class ROITab(QWidget):
@@ -131,6 +131,13 @@ class ROITab(QWidget):
 
         session.on_change(self._on_session)
         self.refresh(files_changed=True)
+
+    def sizeHint(self) -> QSize:
+        """Never wider than the control window.  The file and summary lines
+        wrap, and a QLabel that wraps still asks for its whole text on one
+        line, so a long file name would otherwise stretch the window."""
+        hint = super().sizeHint()
+        return QSize(min(hint.width(), CONTROL_WIDTH), hint.height())
 
     # ---------------------------------------------------------------- data
     @property
