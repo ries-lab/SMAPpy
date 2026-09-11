@@ -9,17 +9,26 @@ calibration files, Micro-Manager TIFF stacks and NDTiff datasets
 
 ## Install
 
-    pip install "smappy-smlm[gui]"
+    pip install smappy-smlm
 
-The distribution is `smappy-smlm` because `smappy` on PyPI is an unrelated
-package; the import name is `smappy` either way.  From a checkout, which builds
-the C++ extensions:
+That is the whole install: the GUI comes with it, and there are binary wheels
+for CPython 3.9-3.13 on macOS (Intel and Apple silicon), Linux x86_64 and
+Windows, so nothing is compiled.  The distribution is `smappy-smlm` because
+`smappy` on PyPI is an unrelated package; the import name is `smappy` either
+way.  [`uv`](https://docs.astral.sh/uv/) installs the same wheels from the same
+index, several times faster, and can keep the GUI in an environment of its own:
+
+    uv tool install smappy-smlm        # `smappy-gui` on PATH, isolated
+    uvx --from smappy-smlm smappy-gui  # run it without installing at all
+
+Qt costs about 400 MB, which a headless fitting machine pays for nothing --
+though it imports nothing either, since Qt is loaded inside `smappy-gui` and
+not at `import smappy`.  `[gpu]` adds wgpu for the 3D viewer's GPU engine.
+
+From a checkout, which builds the C++ extensions:
 
     /usr/bin/python3 -m venv .venv                 # native arm64 on Apple silicon
-    .venv/bin/python -m pip install -e ".[gui]"
-
-`[gui]` pulls PySide6, pyqtgraph and matplotlib.  Without it the library and the
-command-line tools still work; `[gpu]` adds wgpu for the 3D viewer.
+    .venv/bin/python -m pip install -e .
 
 ## Start the GUI
 

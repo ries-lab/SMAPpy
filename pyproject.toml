@@ -12,7 +12,7 @@ build-backend = "setuptools.build_meta"
 # package (a Smappee energy-monitor wrapper, last released in 2018).  The import
 # name is unaffected: `pip install smappy-smlm`, then `import smappy`.
 name = "smappy-smlm"
-version = "0.1.2"
+version = "0.2.0"
 description = "Single-molecule localization fitting pipeline (Python port of the SMAP fast-simple workflow)"
 readme = "README.md"
 license = "BSD-3-Clause"
@@ -35,6 +35,21 @@ dependencies = [
     "tifffile>=2022.5",
     "h5py>=3.6",
     "pyyaml>=5.4",      # camera configs: CameraMetadata.from_yaml
+    # The GUI is how smappy is used, so it installs by default: `pip install
+    # smappy-smlm` has to be the whole story, and an extra is opt-in by
+    # definition -- there is no "on unless excluded" in the metadata, and uv
+    # has no `default-extras` to lean on either.  The cost is ~400 MB on a
+    # headless fitting box, which nothing there will import: `smappy.cli.gui`
+    # imports Qt inside `main()`.
+    #
+    # PySide6-Essentials, not PySide6: the whole codebase imports QtCore,
+    # QtGui and QtWidgets and nothing else, and pyqtgraph is happy with them.
+    # The PySide6 meta-package additionally pulls PySide6-Addons (QtWebEngine,
+    # Qt3D, Multimedia, ...), which measures 800 MB installed for nothing.
+    # 6.11 dropped to cp310-abi3 wheels, so Python 3.9 resolves to 6.10.3.
+    "PySide6-Essentials>=6.6",
+    "pyqtgraph>=0.13",
+    "matplotlib>=3.4",  # the render LUTs, and the plugins' result plots
 ]
 
 [project.urls]
@@ -42,6 +57,10 @@ Homepage = "https://github.com/ries-lab/SMAPpy"
 Source = "https://github.com/ries-lab/SMAPpy"
 
 [project.optional-dependencies]
+# matplotlib is a base dependency now, so `viewer` and `drift` are satisfied by
+# a plain install.  They stay because they are named in the docs and in other
+# people's scripts, and an extra that has gone quiet is kinder than one that
+# errors.
 viewer = ["matplotlib>=3.4"]   # RangeSlider
 image = ["pillow>=9.0"]        # save_image, for a picture without a window
 # Drift correction itself needs nothing: COMET is vendored and its cost function
@@ -50,10 +69,11 @@ image = ["pillow>=9.0"]        # save_image, for a picture without a window
 drift = ["matplotlib>=3.4"]
 # COMET's GPU backend is written in numba-CUDA, so numba is needed only to use
 # an NVIDIA GPU.  The CPU path is compiled either way and is what runs without
-# this: 1:17 for a 46k-frame dataset, 5 s with --spline --group.
+# this: 1:17 for a 46k-frame dataset, 5 s at the grouped spline default.
 cuda = ["numba>=0.57"]
-# The Qt GUI.  matplotlib is for the plugins' result plots.
-gui = ["PySide6>=6.6", "pyqtgraph>=0.13", "matplotlib>=3.4"]
+# Empty: the GUI is in `dependencies` above.  `smappy-smlm[gui]` is kept
+# working for anyone who wrote it down while it was an extra.
+gui = []
 # The GPU engine of the 3D viewer: wgpu-py (Metal / Vulkan / DX12, headless).
 gpu = ["wgpu>=0.19"]
 
