@@ -48,10 +48,10 @@ recomputed when the display switches between them.
 Most of what grouping cost was not the linking.  On a 57 M localization file
 `connect` took 71.7 s, and 68 s of that was the `np.lexsort` in front of the
 walk; the walk itself is 5.5 s.  `sorted_order` below returns the same order --
-element for element -- in 5.1 s, which took opening that file from 134 s to
-64 s without changing a single group.
+element for element -- in 2.1 s, which took opening that file from 134 s to
+66 s without changing a single group.
 
-What is left, on that file: `combine` 17 s, the walk 5.5 s, the sort 5 s.
+What is left, on that file: `combine` 17 s, the walk 5.5 s, the sort 2 s.
 
 **To revisit.**  `combine` is per column and parallel as it stands; it is the
 biggest piece of grouping now and has not been threaded.  For the walk,
@@ -67,7 +67,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import os
 from concurrent.futures import ThreadPoolExecutor
-from typing import Callable, Dict, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -131,75 +131,151 @@ def _mode(name: str) -> str:
     return "precision" if name.endswith(("_err", "err")) else "mean"
 
 
-# Localizations per slice of the x-inside-a-bucket sort.  Smaller is faster
-# until the per-slice overhead shows: 64 k measures 1.2 s on a 57 M table where
-# one slice per thread measures 15.
-SLICE = 64 * 1024
+# One 16-bit digit per radix pass: numpy's stable sort is a real radix sort for
+# uint8 and uint16 and a comparison sort for everything wider.  On 20 M values
+# that is 0.18 s against 9.9 s for the same numbers as int64, which is the whole
+# reason this module sorts the way it does.
+DIGIT = 16
+MASK = (1 << DIGIT) - 1
+
+
+def _monotonic(x: np.ndarray) -> Tuple[np.ndarray, int]:
+    """``x`` as an unsigned integer that sorts the way the float does.
+
+    IEEE 754 floats are already ordered by their bit pattern within a sign, so
+    flipping the sign bit for positives and every bit for negatives gives a
+    plain unsigned key.  float32-valued data -- which is what smappy stores --
+    needs half the digits, so it is worth the one pass to notice.
+    """
+    narrow = x.astype(np.float32)
+    if np.array_equal(narrow.astype(np.float64), x):
+        u = narrow.view(np.uint32).copy()
+        sign = (u >> np.uint32(31)).astype(bool)
+        u[sign] = ~u[sign]
+        u[~sign] = u[~sign] | np.uint32(0x80000000)
+        return u.astype(np.uint64), 32
+    u = np.ascontiguousarray(x, np.float64).view(np.uint64).copy()
+    sign = (u >> np.uint64(63)).astype(bool)
+    u[sign] = ~u[sign]
+    u[~sign] = u[~sign] | (np.uint64(1) << np.uint64(63))
+    return u, 64
+
+
+def _digits(u: np.ndarray, bits: int) -> List[np.ndarray]:
+    """``u`` cut into 16-bit digits, least significant first."""
+    return [((u >> np.uint64(s)) & np.uint64(MASK)).astype(np.uint16)
+            for s in range(0, bits, DIGIT)]
+
+
+def _codes(keys) -> Optional[Tuple[np.ndarray, int]]:
+    """The block keys as one dense integer, or None if they are not integers.
+
+    Block keys are file and channel numbers: a handful of small integers, so
+    subtracting the minimum is all the packing they need and no sort is
+    involved in working out the codes.
+    """
+    code = np.zeros(1, np.uint64)
+    span = 1
+    for k in keys:                      # keys[0] is the most significant
+        a = np.asarray(k)
+        if a.dtype.kind not in "iub":
+            return None
+        lo, hi = int(a.min()), int(a.max())
+        width = hi - lo + 1
+        if width <= 0 or span * width > MASK + 1:
+            return None
+        code = code * np.uint64(width) + (a.astype(np.int64) - lo).astype(np.uint64)
+        span *= width
+    return code, span
+
+
+def _radix_order(x, frame, keys, workers) -> Optional[np.ndarray]:
+    """The (keys, frame, x) order by radix, or None if this data does not suit.
+
+    The sort key is cut where it can be: everything above the low 16 bits of
+    the frame -- the block keys and the frame's high bits -- is a *partition*,
+    computed straight from the values with no sort at all, and a partition is
+    then sorted on its own by 16-bit digits.
+
+    Nothing here assumes the input is in any order.  A partition is a *key*
+    every localization carries, and the pass that gathers them is itself a
+    stable counting sort, so the grouping is produced rather than found: an
+    arbitrarily shuffled table gives the same permutation as a tidy one.  Partitions are independent, so
+    they go across threads; within one, the digits are ``x`` low to high and
+    then the frame's low half, least significant first, as a radix sort wants.
+    """
+    if np.isnan(x).any():               # the bit trick has no answer for NaN
+        return None
+    block = _codes(keys)
+    if block is None:
+        return None
+    code, span = block
+    fu = (frame - int(frame.min())).astype(np.uint64)
+    chunks = int(fu.max() >> np.uint64(DIGIT)) + 1
+    if span * chunks > MASK + 1:        # the partition must fit one radix pass
+        return None
+    part = (code * np.uint64(chunks) + (fu >> np.uint64(DIGIT))).astype(np.uint16)
+
+    u, bits = _monotonic(np.asarray(x, np.float64))
+    digits = _digits(u, bits) + [(fu & np.uint64(MASK)).astype(np.uint16)]
+
+    base = np.argsort(part, kind="stable")           # one radix pass, O(n)
+    edges = np.flatnonzero(part[base][1:] != part[base][:-1]) + 1
+    edges = np.concatenate(([0], edges, [len(base)]))
+
+    def one(k):
+        piece = base[edges[k]:edges[k + 1]]
+        for d in digits:
+            piece = piece[np.argsort(d[piece], kind="stable")]
+        return piece
+
+    if len(edges) <= 2:
+        return one(0)
+    with ThreadPoolExecutor(max_workers=workers or min(16, (os.cpu_count() or 4))) as pool:
+        return np.concatenate(list(pool.map(one, range(len(edges) - 1))))
 
 
 def sorted_order(x, frame, keys=(), workers: Optional[int] = None) -> np.ndarray:
     """The (block, frame, x) order `connect_single` wants, without lexsort.
 
-    This sort, not the linking, is what grouping a large table costs: on a
-    57 M localization file `np.lexsort` takes **70 s** and the C++ walk after
-    it 5.5 s.  lexsort is a stable argsort per key through an index, and at
-    this size every pass is a cache miss per element.
+    This sort, not the linking, is what grouping a large table cost: on a 57 M
+    localization file `np.lexsort` takes **66 s** and the C++ walk after it
+    5.5 s.  lexsort is a stable argsort per key through an index, and at this
+    size every pass is a cache miss per element.
 
-    The order is reachable far more cheaply.  Sorting by the block keys and the
-    frame -- integers, a bounded range -- is 3.1 s of that; it leaves the table
-    in one bucket per (block, frame), 38 localizations each on that file, and
-    all that is left is to sort x *inside* the buckets.  That work is
-    independent per bucket, so it is cut into slices and threaded.
+    A radix sort is the alternative, and numpy has one hiding in it: its stable
+    sort is radix for uint8 and uint16 and a comparison sort above that, 55x
+    apart on the same numbers.  So the key is cut into 16-bit digits and passed
+    least significant first -- x, then the frame -- which is the textbook
+    least-significant-digit order.
 
-    The slices are small on purpose, and that matters more than the threads do:
-    `np.lexsort` degrades badly with length (cache, one indirection per
-    element), so the same work over 1024 slices takes 1.2 s where over 8 it
-    takes 15.  `SLICE` is the localizations per slice that aims for.
+    The part above the frame's low 16 bits does not need sorting at all: the
+    block keys and the frame's high bits are a partition, worked out from the
+    values, and each partition is then sorted by itself on a thread.  **2.1 s**
+    on that file, and element for element what ``np.lexsort((x, frame) +
+    keys)`` returns -- ties included, since every pass is stable.
 
-    4.3 s in total against lexsort's 67 s, and the result is element for
-    element what ``np.lexsort((x, frame) + keys)`` returns -- ties included,
-    since every sort in the chain is stable.
+    Data the digit trick has no answer for (NaN in x, block keys that are not
+    small integers) falls back to lexsort rather than guessing.
 
-    Sorting x once up front and then radix-passing the frame and block keys
-    over it -- the textbook least-significant-digit order -- is also exact, and
-    measures 72 s: sorting 57 M x values globally is far more work than sorting
-    them in buckets of 38, and each further pass is another gather of the whole
-    table.
+    Three things that were tried and are not here.  Sorting x *globally* first
+    and radix-passing the frame over it with numpy's own stable sorts is exact
+    and 72 s -- those sorts are comparison sorts at these widths, which is the
+    whole point of cutting the key into 16-bit digits instead.  Sorting the
+    block keys and the frame first and then x inside each (block, frame) bucket
+    with threaded lexsorts is exact and 5.1 s.  Discretizing x into a single
+    16-bit digit saves 0.4 s and stops being exact -- 0.19% of localizations
+    change places with a neighbour -- a bad trade when the control is the
+    sequential walk.
     """
     x = np.asarray(x)
     frame = np.asarray(frame)
-    if len(frame) < 2:                      # nothing to order, and the bucket
-        return np.arange(len(frame), dtype=np.intp)   # arithmetic below wants n >= 2
-    first = (np.lexsort((frame,) + tuple(reversed(keys))) if keys
-             else np.argsort(frame, kind="stable"))
-    fs, xs = frame[first], x[first]
-    if keys:
-        stacked = np.stack([np.asarray(k)[first] for k in keys], axis=1)
-        same = np.all(stacked[1:] == stacked[:-1], axis=1) & (fs[1:] == fs[:-1])
-    else:
-        same = fs[1:] == fs[:-1]
-    # one non-decreasing id per (block, frame): sorting x inside it is the
-    # only thing left to do, whatever the keys were
-    bucket = np.concatenate(([0], np.cumsum(~same)))
-    edges = np.concatenate(([0], np.flatnonzero(~same) + 1, [len(fs)]))
-    n_buckets = len(edges) - 1
-    slices = int(np.clip(len(fs) // SLICE, 1, n_buckets))
-    cuts = edges[np.linspace(0, n_buckets, slices + 1).astype(int)]
-
-    def part(k):
-        # x inside each frame, not across the slice: the slice holds whole
-        # frames and their order has to survive
-        lo, hi = int(cuts[k]), int(cuts[k + 1])
-        if hi <= lo:
-            return np.empty(0, np.int64)
-        return lo + np.lexsort((xs[lo:hi], bucket[lo:hi]))
-
-    if len(cuts) <= 2:
-        return first[np.lexsort((xs, bucket))]
-    with ThreadPoolExecutor(max_workers=workers or min(32, (os.cpu_count() or 4))) as pool:
-        parts = list(pool.map(part, range(len(cuts) - 1)))
-    return first[np.concatenate(parts)]
-
+    if len(frame) < 2:
+        return np.arange(len(frame), dtype=np.intp)
+    order = _radix_order(x, frame, keys, workers)
+    if order is None:
+        return np.lexsort((x, frame) + tuple(reversed(keys)))
+    return order
 
 
 def connect(x, y, frame, dx: float = 50.0, dt: int = 1,

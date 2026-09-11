@@ -2,7 +2,8 @@
 import numpy as np
 import pytest
 
-from smappy.group import COMBINE_MODES, GroupSettings, combine, connect, group
+from smappy.group import (COMBINE_MODES, GroupSettings, combine, connect, group,
+                          sorted_order)
 from smappy.locs import Localizations
 
 
@@ -318,3 +319,37 @@ def test_chunked_linking_keeps_blocks_apart():
     ids = connect_chunked(x, y, f, 50.0, 1, channel[:, None], n_chunks=4)
     for g in np.unique(ids):
         assert len(np.unique(channel[ids == g])) == 1
+
+
+def test_the_sort_assumes_nothing_about_the_order_it_is_given():
+    """The radix partitions on a key every localization carries, not on where
+    it sits, so a table straight out of a plugin that reordered everything
+    sorts the same as a tidy one -- and `connect` answers in input order."""
+    rng = np.random.default_rng(11)
+    n = 50_000
+    x = rng.random(n) * 40_000
+    frame = rng.integers(0, 90_000, n).astype(np.int64)      # spans two chunks
+    channel = rng.integers(0, 3, n).astype(np.int64)
+    filenumber = rng.integers(0, 2, n).astype(np.int64)
+    keys = (filenumber, channel)
+    assert np.array_equal(sorted_order(x, frame, keys),
+                          np.lexsort((x, frame, channel, filenumber)))
+
+    shuffle = rng.permutation(n)
+    y = rng.random(n) * 40_000
+    blocks = np.stack(keys, axis=1)
+    here = connect(x, y, frame, 50.0, 1, blocks)
+    there = connect(x[shuffle], y[shuffle], frame[shuffle], 50.0, 1, blocks[shuffle])
+    # ids are handed back against the rows they came in as, so the two
+    # labellings have to be the same partition of the same localizations
+    assert _same_partition(here[shuffle], there)== 1.0
+
+
+def test_frames_that_do_not_start_at_zero_or_run_in_order():
+    rng = np.random.default_rng(12)
+    x = rng.random(20_000) * 1000
+    for frame in (rng.integers(500_000, 700_000, 20_000),      # far from zero
+                  rng.integers(-40_000, -30_000, 20_000),      # negative
+                  rng.choice([3, 999_999], 20_000)):           # two, far apart
+        frame = frame.astype(np.int64)
+        assert np.array_equal(sorted_order(x, frame), np.lexsort((x, frame)))

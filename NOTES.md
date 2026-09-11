@@ -818,14 +818,19 @@ Worth it for a first look at a large dataset, not for the final result.
   which were set by hand rather than optimized; there is likely room there.
 * **Opening a 57 M localization `_sml.mat`** was 134 s and is 64 s.  What
   looked like 79 s of linking was 68 s of `np.lexsort` and 5.5 s of the walk:
-  the sort, not the link, was the cost.  `sorted_order` sorts the block keys
-  and the frame first (integers, a bounded range), which leaves buckets of 38
-  localizations, and sorts x only inside them, in slices, threaded -- 5.1 s,
-  and the same permutation to the element.  Slice *size* is what matters:
-  lexsort degrades with length, so 1024 slices take 1.2 s where 8 take 15.
-  Sorting x once and radix-passing frame and block over it is exact too, and
-  72 s: sorting 57 M x globally is more work than sorting them in buckets of
-  38, and each pass is another gather of the whole table.
+  the sort, not the link, was the cost.  It is a radix sort now -- 2.1 s, the
+  same permutation to the element.  numpy has a radix sort in it for uint8 and
+  uint16 and a comparison sort above that (0.18 s against 9.9 s on 20 M of the
+  same numbers), so the key goes in 16-bit digits, least significant first.
+  Everything above the frame's low 16 bits -- the block keys and the frame's
+  high bits -- is not sorted at all but computed per localization as a
+  partition, and the partitions sort independently across threads.  Nothing
+  assumes an input order: the partition is a key each localization carries and
+  the pass that gathers them is itself a counting sort.
+  Not taken: numpy's own stable sorts LSD-style over x, frame, block (exact,
+  72 s -- they are comparison sorts at those widths); block+frame first then
+  threaded lexsorts of x inside each bucket (exact, 5.1 s); discretizing x to
+  one 16-bit digit (0.4 s faster, 0.19% of localizations change places).
 * What is left of that 64 s: 30 s read, 17 s `combine`, 5.5 s the linking walk,
   5 s the sort, 6 s the indices and filters.  `combine` is per column and
   parallel as it stands -- the obvious next one, and exact.  The walk can be
