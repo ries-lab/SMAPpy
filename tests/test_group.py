@@ -383,7 +383,7 @@ def test_grouping_uses_the_chunked_linker_and_can_be_told_not_to():
     assert abs(len(chunked) - len(exact)) / len(exact) < 1e-3
 
 
-def test_combine_is_the_same_table_however_its_columns_are_scheduled():
+def test_combine_reduces_each_column_by_its_own_rule():
     rng = np.random.default_rng(5)
     x, y, f = _blinking(n_emitters=2000, frames=300, seed=4)
     n = len(x)

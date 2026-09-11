@@ -113,6 +113,13 @@ SML_COLUMNS = {
     "photerr": "photons_err", "iterations": "iterations",
     "xpix": "x_pix", "ypix": "y_pix", "PSFxpix": "sigma_pix",
 }
+# Columns to skip.  This is the wrong shape and is kept until the thing that
+# replaces it exists: a per-format set of columns to *keep*, chosen in a
+# settings dialog and remembered, rather than a hard-coded list of names to
+# drop.  It matters more than it looks -- of the 30 columns read from a real
+# `_sml.mat`, 13 are read by anything downstream, and opening a 57 M
+# localization one peaks at 20 GB, which is more memory than a microscope PC
+# has.  See "Loading only the columns that are used" in NOTES.md.
 SML_DROP = ("filenumber", "xnmf", "ynmf", "xpixf", "ypixf", "xpixerr", "ypixerr",
             "PSFypix")
 

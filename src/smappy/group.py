@@ -56,10 +56,13 @@ for what it costs in exactness), and `combine`'s per-group sort made a radix
 one.  What is left of the 53 s: 31 s reading the file, 10.5 s `combine`, 6 s
 the linking, 2 s the sort, 6 s the indices and filters.
 
-**To revisit: read fewer columns.**  The largest thing left is not in this
-module.  30 columns are read from that file and 13 are read by anything
-downstream; the four `bg*` ones are float64.  Dropping the rest would take the
-31 s read to about 13 and `combine` -- which is one pass per column -- with it.
+**To revisit: read fewer columns**, which is a memory problem before it is a
+speed one.  30 columns are read from that file and 13 are read by anything
+downstream; the four `bg*` ones are float64.  Opening it peaks at 20 GB, so it
+does not open at all on the 8-16 GB a microscope PC usually has.  Keeping only
+the columns that are used would take that to about 8 GB, the 31 s read to about
+13, and `combine` -- one pass per column -- with it.  See NOTES.md: which
+columns those are is per format and belongs in a setting, not in a constant.
 """
 
 from __future__ import annotations
@@ -138,10 +141,6 @@ def _mode(name: str) -> str:
 DIGIT = 16
 MASK = (1 << DIGIT) - 1
 
-# How much `combine` may have in flight across its threads.  See the note in
-# `combine`: past a couple of columns at this size the machine spends longer
-# finding the memory than doing the sum.
-COMBINE_BUDGET = 2 * 1024 ** 3
 
 
 def _monotonic(x: np.ndarray) -> Tuple[np.ndarray, int]:
@@ -372,8 +371,7 @@ def _weights(locs: Localizations) -> np.ndarray:
 
 def combine(locs: Localizations, group_index: np.ndarray,
             fields: Optional[Sequence[str]] = None,
-            progress: Optional[Progress] = None,
-            workers: Optional[int] = None) -> Localizations:
+            progress: Optional[Progress] = None) -> Localizations:
     """Reduce each group to one row, one column at a time by its own rule.
 
     ``progress(text, fraction)`` is called per column, which is the natural
@@ -418,53 +416,61 @@ def combine(locs: Localizations, group_index: np.ndarray,
         order = radix_argsort(gi)
         starts = np.concatenate(
             ([0], np.flatnonzero(gi[order][1:] != gi[order][:-1]) + 1))
+    # One float64 buffer over the table, reused by every column.  Columns are
+    # stored as float32, so each of `values`, `values * w`, `values ** 2` would
+    # otherwise be a fresh 457 MB array on a 57 M localization file, allocated
+    # and thrown away 30 times over.  `np.bincount` has no `out=`, so its own
+    # float64 output over the groups is not avoidable this way; what is
+    # avoidable is everything feeding it.  18% faster and 0.6 GB less in
+    # flight, which is the half that matters on a 16 GB machine.
+    scratch = np.empty(len(gi), np.float64)
+    # min and max read the table in group order, and `np.take` into its own
+    # input is not something numpy promises anything about, so the gather gets
+    # a buffer of its own -- only when a column actually reduces that way.
+    gathered = np.empty(len(gi), np.float64) if extremes else None
 
     def reduce_column(name: str) -> np.ndarray:
-        values = np.asarray(locs[name], np.float64)
+        values = locs[name]
         mode = _mode(name)
         if mode == "mean":
             w, sum_w = weighting(name)
-            return np.bincount(gi, weights=values * w, minlength=size)[1:] / sum_w
+            np.multiply(values, w, out=scratch)          # cast and scale in one
+            return np.bincount(gi, weights=scratch, minlength=size)[1:] / sum_w
         if mode == "sum":
-            return np.bincount(gi, weights=values, minlength=size)[1:]
+            np.copyto(scratch, values, casting="unsafe")
+            return np.bincount(gi, weights=scratch, minlength=size)[1:]
         if mode == "precision":
-            return 1.0 / np.sqrt(
-                np.bincount(gi, weights=1.0 / values ** 2, minlength=size)[1:])
+            np.copyto(scratch, values, casting="unsafe")
+            np.multiply(scratch, scratch, out=scratch)
+            np.divide(1.0, scratch, out=scratch)
+            return 1.0 / np.sqrt(np.bincount(gi, weights=scratch, minlength=size)[1:])
         if mode == "quad":     # the error of a sum, not of a mean
-            return np.sqrt(np.bincount(gi, weights=values ** 2, minlength=size)[1:])
+            np.copyto(scratch, values, casting="unsafe")
+            np.multiply(scratch, scratch, out=scratch)
+            return np.sqrt(np.bincount(gi, weights=scratch, minlength=size)[1:])
         if mode in ("min", "max"):
+            np.copyto(scratch, values, casting="unsafe")
+            np.take(scratch, order, out=gathered)
             reduce = np.minimum if mode == "min" else np.maximum
-            return reduce.reduceat(values[order], starts)
+            return reduce.reduceat(gathered, starts)
         raise ValueError(f"unknown combine mode {mode!r} for {name!r}")
 
-    # One pass over the table per column, and the columns do not touch each
-    # other, so they can run at once -- numpy drops the GIL inside bincount.
-    # How *many* at once is the question, and the answer is "few": a column in
-    # flight holds a float64 output over the groups and a float64 temporary
-    # over the table, 0.78 GB together on a 57 M localization file, and this
-    # is memory-bound work.  Measured on that file, threads against seconds:
-    # 1: 12.5, 2: 10.5, 3: 12.9, 4: 14.8, 6: 23.1, 8: 31.8.  So the worker
-    # count comes from a memory budget rather than from the core count, which
-    # leaves small tables threading properly and large ones barely at all.
+    # One column at a time, on purpose.  The columns are independent and numpy
+    # drops the GIL inside bincount, so threading them looks free and is not:
+    # a column in flight holds a float64 output over the groups and a float64
+    # temporary over the table -- 0.78 GB on a 57 M localization file, where
+    # the table itself is already 8 GB.  Measured there, threads against
+    # seconds: 1: 12.5, 2: 10.5, 3: 12.9, 4: 14.8, 6: 23.1, 8: 31.8.  Two
+    # threads win 2 s and every further one loses more, and that is on a
+    # machine with 34 GB; on the 8-16 GB a microscope PC usually has, the
+    # second thread is what pushes it into swap.  The way to make this faster
+    # is to give it fewer columns, not more threads -- see the note at the top
+    # of the module.
     columns: Dict[str, np.ndarray] = {}
-    done = [0]
-
-    def one(name: str) -> None:
-        result = reduce_column(name).astype(np.float32)
-        columns[name] = result
-        done[0] += 1
+    for i, name in enumerate(names):
         if progress is not None:
-            progress(f"combine ({done[0]}/{len(names)})", done[0] / len(names))
-
-    in_flight = (size + len(gi)) * 8           # the output and the temporary
-    n_workers = workers or int(np.clip(COMBINE_BUDGET // max(in_flight, 1),
-                                       1, min(len(names), os.cpu_count() or 4)))
-    if n_workers <= 1:
-        for name in names:
-            one(name)
-    else:
-        with ThreadPoolExecutor(max_workers=n_workers) as pool:
-            list(pool.map(one, names))
+            progress(f"combine ({i + 1}/{len(names)})", i / len(names))
+        columns[name] = reduce_column(name).astype(np.float32)
 
     for name in ("frame", "iterations"):
         if name in columns:

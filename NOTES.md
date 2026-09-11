@@ -843,15 +843,39 @@ Worth it for a first look at a large dataset, not for the final result.
 * **`combine` does not parallelize, and that was worth finding out.**  The
   columns are independent and numpy drops the GIL, but a column in flight holds
   a float64 output over the groups and a float64 temporary over the table --
-  0.78 GB on that file, against 20 GB already resident.  Threads against
-  seconds: 1: 12.5, 2: 10.5, 3: 12.9, 4: 14.8, 6: 23.1, 8: 31.8.  So the worker
-  count comes from a memory budget, which threads small tables properly and
-  large ones barely at all.  What actually helped there was the per-group sort:
+  0.78 GB on that file, where the table is already 8 GB.  Threads against
+  seconds: 1: 12.5, 2: 10.5, 3: 12.9, 4: 14.8, 6: 23.1, 8: 31.8.  Two threads
+  win 2 s and each further one loses more, on a 34 GB machine; on the 8-16 GB a
+  microscope PC has, the second thread is what starts the swapping.  So it runs
+  one column at a time.  What did help there was the per-group sort:
   `np.argsort(kind="stable")` on the group ids is 3.8 s, by 16-bit digits 2.1.
-* What is left of the 53 s: 31 s read, 10.5 s `combine`, 6 s linking, 2 s sort,
-  6 s indices and filters.  The read is the target now, and it takes `combine`
-  with it: 30 columns are loaded, 13 are read by anything downstream, and the
-  four `bg*` ones are float64.
+* What is left of the 53 s: 31 s read, 12.5 s `combine`, 6 s linking, 2 s sort,
+  6 s indices and filters.
+
+## Loading only the columns that are used
+
+The next thing to do, and a memory problem before it is a speed one.  Opening
+the 57 M localization `_sml.mat` peaks at **20 GB**: 30 columns are read and 13
+are read by anything downstream, and four of the unused ones (`bg1`, `bg1err`,
+`bg2`, `bg2err`) are float64, 457 MB each.  Microscope PCs have 8-16 GB, so
+that file does not open on one at all.  Keeping only the used columns takes the
+peak to about 8 GB, the read from 31 s to about 13, and `combine` -- one pass
+per column -- down with it.
+
+Which columns those are is **per format**, not global: a SMAP `_sml.mat` names
+them `xnm`, `locprecnm`, `LLrel`; a MINFLUX export names them `loc`, `efo`,
+`cfr`; a csv names whatever the operator called them.  `SML_DROP` in
+`io/formats.py` is today's version of this and is the wrong shape -- a
+hard-coded list of eight names to skip, where what is wanted is a keep-list
+that can be seen and changed.
+
+So it wants a settings file and a dialog, one section per reader: the columns
+the format offers, which are kept by default, and a tick per column, remembered
+between sessions.  The reader takes the set it is given and reads no more;
+opening a file it has never seen shows the list first.  Worth doing together
+with the readers' `needs` mechanism (`Reader.needs`), which already exists for
+asking the user something before a file can be read -- the csv column mapping
+goes through it.
 * `group()` numbers groups from 1, a leftover from the MATLAB original, so the
   row of the grouped table is `group_index - 1`.  Worth rebasing to 0 at some
   point, together with the C++ `connect`.
