@@ -816,6 +816,16 @@ Worth it for a first look at a large dataset, not for the final result.
   so the settings file is used with a warning.  Should that be a hard error?
 * RCC's slice width, z bin width and number of time windows are SMAP's values,
   which were set by hand rather than optimized; there is likely room there.
+* **Parallelize `connect`.**  Opening a 57 M localization `_sml.mat` costs
+  134 s, of which the linking is 79 s and the combine 17 s: 72% of opening a
+  file goes on grouping it, which the GUI now does in a worker with the stages
+  in its status bar, but which is still the wait.  Linking looks only `dt`
+  frames back, so the frame axis can be cut into chunks linked in parallel and
+  stitched at the seams -- each chunk needs the previous one's last `dt + 1`
+  frames to decide its first links, and the group ids renumbered across the
+  join.  `combine` is per column and parallel as it stands.  The read is
+  another 31 s, of which better than half is columns nothing uses: 30 are
+  loaded, 13 are read by anything, and the four `bg*` ones are float64.
 * `group()` numbers groups from 1, a leftover from the MATLAB original, so the
   row of the grouped table is `group_index - 1`.  Worth rebasing to 0 at some
   point, together with the C++ `connect`.

@@ -44,16 +44,31 @@ Two departures, both because the blanket rule is wrong for the column:
 Grouping is expensive (the linking is sequential and cannot be vectorised), so
 it is done once and the grouped table kept alongside the original rather than
 recomputed when the display switches between them.
+
+**To revisit: parallelizing `connect`.**  On a 57 M localization file (SMAP
+``_sml.mat``, 2 channels) the open costs 134 s, of which `connect` is 79 s and
+`combine` 17 s -- 72% of the time to open a file goes on grouping it.  `connect`
+already runs per block, but a file has one or two blocks, so that buys nothing.
+The linking only ever looks `dt` frames back, so the frame axis could be cut
+into chunks that are linked in parallel and stitched where they meet: a chunk
+boundary needs the last `dt + 1` frames of the previous chunk to decide its
+first links, and group ids then have to be renumbered across the seam.  The
+combine is per column and embarrassingly parallel as it stands.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Optional, Sequence, Tuple
+from typing import Callable, Dict, Optional, Sequence, Tuple
 
 import numpy as np
 
 from .locs import Localizations
+
+# ``progress(text, fraction)``: what stage this is in, and how far through the
+# table it is.  Both are advisory -- the fraction is coarse and the text is for
+# a human to read, not to branch on.
+Progress = Callable[[str, float], None]
 
 try:
     from . import _group
@@ -110,7 +125,8 @@ def _mode(name: str) -> str:
 
 def connect(x, y, frame, dx: float = 50.0, dt: int = 1,
             blocks: Optional[np.ndarray] = None, z=None,
-            dz: Optional[float] = None) -> np.ndarray:
+            dz: Optional[float] = None,
+            progress: Optional[Progress] = None) -> np.ndarray:
     """Assign every localization a 1-based group id, in the input order.
 
     ``dx`` is the half-width of the search box in the units of x and y, ``dt``
@@ -147,7 +163,11 @@ def connect(x, y, frame, dx: float = 50.0, dt: int = 1,
         edges = np.array([0, x.size])
 
     offset = 0
-    for begin, end in zip(edges[:-1], edges[1:]):
+    n_blocks = len(edges) - 1
+    for i, (begin, end) in enumerate(zip(edges[:-1], edges[1:])):
+        if progress is not None:
+            label = "connect" if n_blocks == 1 else f"connect (block {i + 1}/{n_blocks})"
+            progress(label, begin / max(x.size, 1))
         block = order[begin:end]
         zb = None if z is None or dz is None else np.asarray(z, np.float64)[block]
         ids, n_groups = _group.connect(x[block], y[block], frame[block], dx, dt,
@@ -173,8 +193,13 @@ def _weights(locs: Localizations) -> np.ndarray:
 
 
 def combine(locs: Localizations, group_index: np.ndarray,
-            fields: Optional[Sequence[str]] = None) -> Localizations:
-    """Reduce each group to one row, one column at a time by its own rule."""
+            fields: Optional[Sequence[str]] = None,
+            progress: Optional[Progress] = None) -> Localizations:
+    """Reduce each group to one row, one column at a time by its own rule.
+
+    ``progress(text, fraction)`` is called per column, which is the natural
+    unit here: every column is one pass of the same shape over the table.
+    """
     gi = np.asarray(group_index, np.int64)
     if gi.size and gi.min() < 1:
         raise ValueError("group ids must be 1-based")
@@ -210,7 +235,9 @@ def combine(locs: Localizations, group_index: np.ndarray,
             ([0], np.flatnonzero(gi[order][1:] != gi[order][:-1]) + 1))
 
     columns: Dict[str, np.ndarray] = {}
-    for name in names:
+    for i, name in enumerate(names):
+        if progress is not None:
+            progress(f"combine ({i + 1}/{len(names)})", i / len(names))
         values = np.asarray(locs[name], np.float64)
         mode = _mode(name)
         if mode == "mean":
@@ -253,12 +280,16 @@ class GroupSettings:
     block_fields: Sequence[str] = ("filenumber", "channel")
 
 
-def group(locs: Localizations, settings: Optional[GroupSettings] = None
+def group(locs: Localizations, settings: Optional[GroupSettings] = None,
+          progress: Optional[Progress] = None
           ) -> Tuple[Localizations, np.ndarray]:
     """Group a table.  Returns the grouped table and the per-input group id.
 
     The ids are **1-based**, as `connect` produces them, so the row of the
     grouped table a localization ended up in is ``group_index - 1``.
+
+    ``progress(text, fraction)`` reports the two stages; it is what the GUI
+    puts in its status bar while this runs off the main thread.
     """
     settings = settings or GroupSettings()
     from .render import positions
@@ -271,5 +302,5 @@ def group(locs: Localizations, settings: Optional[GroupSettings] = None
     blocks = np.stack(present, axis=1) if present else None
     z = locs["z_nm"] if settings.dz is not None and "z_nm" in locs else None
     group_index = connect(x, y, locs["frame"], settings.dx, settings.dt, blocks,
-                          z=z, dz=settings.dz)
-    return combine(locs, group_index), group_index
+                          z=z, dz=settings.dz, progress=progress)
+    return combine(locs, group_index, progress=progress), group_index

@@ -54,9 +54,16 @@ class Layer:
                  settings: Optional[RenderSettings] = None,
                  display: Optional[DisplaySettings] = None,
                  live: bool = False, extent=None, share: Optional["Layer"] = None,
-                 group_settings: Optional[GroupSettings] = None):
+                 group_settings: Optional[GroupSettings] = None,
+                 grouped: Optional[Localizations] = None):
         """``share`` is a layer over the same table whose spatial index (and
-        grouped table) this one reuses -- a new layer then costs nothing."""
+        grouped table) this one reuses -- a new layer then costs nothing.
+
+        ``grouped`` is that table already linked -- by a worker thread, off the
+        GUI's, which is the only way opening a large file does not freeze the
+        window.  Given it, the `show_grouped` below finds the set already there
+        and links nothing.
+        """
         self.kind = "locs"
         self.image: Optional[ImageData] = None
         self.files: Optional[List[int]] = None     # file numbers shown; None = all
@@ -66,7 +73,8 @@ class Layer:
             settings = RenderSettings(sigma_settings=SigmaSettings(factor=PRECISION_FACTOR))
         other = share.state if share is not None and not share.is_image else None
         self.group_settings = group_settings or DEFAULT_GROUP_SETTINGS
-        self.state = ViewState(locs, settings, display, live=live, extent=extent, share=other)
+        self.state = ViewState(locs, settings, display, grouped=grouped, live=live,
+                               extent=extent, share=other)
         if defaults:
             self.apply_defaults()
         if GROUPED_BY_DEFAULT and not live and len(locs) and "frame" in locs:
@@ -237,7 +245,13 @@ class Session:
         locs, info = load_any(path, **reader_args)
         return self.add_file(locs, info, append=append)
 
-    def add_file(self, locs: Localizations, info: FileInfo, append: bool = False) -> FileInfo:
+    def add_file(self, locs: Localizations, info: FileInfo, append: bool = False,
+                 grouped: Optional[Localizations] = None) -> FileInfo:
+        """``grouped`` is ``locs`` already linked, for a caller that did the
+        slow part in a worker thread.  It is only used for the first file: an
+        append re-links the merged table anyway, since linking cannot be
+        extended, and a second file's ids would not follow the first's.
+        """
         if not append or not len(self.locs):
             self.files = []
             self.path = Path(info.path)
@@ -247,7 +261,11 @@ class Session:
         columns["filenumber"] = np.full(len(locs), number, np.int32)
         locs = Localizations(columns, dict(locs.metadata))
         if number == 0:
-            self.set_locs(locs, undoable=False)
+            if grouped is not None:      # the same column, on the linked table
+                gc = dict(grouped.columns)
+                gc["filenumber"] = np.full(len(grouped), number, np.int32)
+                grouped = Localizations(gc, dict(grouped.metadata))
+            self.set_locs(locs, undoable=False, grouped=grouped)
             self.history.clear()
             saved = self.locs.metadata.get("roi")
             self.set_roi(Region.from_dict(saved) if saved else None)
@@ -325,7 +343,8 @@ class Session:
         return path
 
     def set_locs(self, locs: Localizations, undoable: bool = True,
-                 keep_layers: bool = False) -> None:
+                 keep_layers: bool = False,
+                 grouped: Optional[Localizations] = None) -> None:
         if self._live:                     # the finished form of the live table
             self.layers = [Layer(locs)]    # (undo already points before the run)
             self._live = False
@@ -340,7 +359,7 @@ class Session:
         else:                              # a new file: start over with one layer
             self._undo = None
             self.layers = [l for l in self.layers if l.is_image]
-            self.layers.insert(0, Layer(locs))
+            self.layers.insert(0, Layer(locs, grouped=grouped))
         self.locs = locs
         self.changed("locs")
 
