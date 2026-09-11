@@ -16,6 +16,7 @@
 #include "lm.hpp"
 #include "maxima.hpp"
 #include "parallel.hpp"
+#include "global.hpp"
 #include "models.hpp"
 
 namespace py = pybind11;
@@ -113,6 +114,84 @@ py::tuple fit_cspline(const Array& rois, const Array& coeff, float z_start,
     const int nx = static_cast<int>(coeff.shape(3));
     smappy::CSpline model(coeff.data(), nx, ny, nz, z_start);
     return as_tuple(run(model, rois, iterations, n_threads));
+}
+
+// Global (multi-channel) cubic-spline fit.  One emitter, one ROI per channel,
+// with the parameters the caller marks shared fitted once for all channels.
+//
+// rois   (n, C, sz, sz)      the same emitter in every channel
+// coeff  (C, 64, nz, ny, nx) that channel's spline
+// link   (n, 2, C, 5)        per fit: the offset, then the factor, of each of
+//                            (x, y, photons, background, z) in each channel
+// shared (5,)                which of the five are fitted once for all
+//
+// Returns theta and crlb with NV = sum over the five of (1 if shared else C)
+// columns, laid out in parameter order with a free parameter's C values
+// contiguous.
+py::tuple fit_cspline_global(const Array& rois, const Array& coeff, const Array& link,
+                             const py::array_t<int, py::array::c_style |
+                                                py::array::forcecast>& shared,
+                             float z_start, int iterations, int n_threads) {
+    constexpr int P = smappy::CSpline::NV;
+    if (rois.ndim() != 4 || rois.shape(2) != rois.shape(3))
+        throw std::invalid_argument("rois must have shape (n, channels, sz, sz), square");
+    const py::ssize_t n = rois.shape(0);
+    const int channels = static_cast<int>(rois.shape(1));
+    const int sz = static_cast<int>(rois.shape(2));
+    if (channels < 1 || channels > smappy::MAX_CHANNELS)
+        throw std::invalid_argument("between one and four channels");
+    if (coeff.ndim() != 5 || coeff.shape(0) != channels || coeff.shape(1) != 64)
+        throw std::invalid_argument(
+            "spline coefficients must have shape (channels, 64, nz, ny, nx)");
+    if (link.ndim() != 4 || link.shape(0) != n || link.shape(1) != 2 ||
+        link.shape(2) != channels || link.shape(3) != P)
+        throw std::invalid_argument("link must have shape (n, 2, channels, 5)");
+    if (shared.ndim() != 1 || shared.shape(0) != P)
+        throw std::invalid_argument("shared must have five flags");
+
+    const int nz = static_cast<int>(coeff.shape(2));
+    const int ny = static_cast<int>(coeff.shape(3));
+    const int nx = static_cast<int>(coeff.shape(4));
+    const py::ssize_t plane = py::ssize_t(64) * nz * ny * nx;
+
+    smappy::Link plan{};
+    plan.shared = shared.data();
+    plan.n_channels = channels;
+    plan.plan(P);
+    const int nv = plan.nv;
+
+    Output out{Array({n, py::ssize_t(nv)}), Array({n, py::ssize_t(nv)}),
+               Array(n), py::array_t<int>(n)};
+
+    const float* data = rois.data();
+    const float* links = link.data();
+    float* theta = out.theta.mutable_data();
+    float* crlb = out.crlb.mutable_data();
+    float* logl = out.logl.mutable_data();
+    int* iters = out.iterations.mutable_data();
+
+    std::vector<smappy::CSpline> models;
+    models.reserve(channels);
+    for (int c = 0; c < channels; ++c)
+        models.emplace_back(coeff.data() + c * plane, nx, ny, nz, z_start);
+
+    {
+        py::gil_scoped_release release;
+        smappy::parallel_ranges(n, n_threads, [&](long long begin, long long end, int) {
+            std::vector<smappy::CSpline> local(models);   // the spline keeps scratch
+            std::vector<const float*> planes(channels);
+            smappy::Link mine = plan;
+            for (long long i = begin; i < end; ++i) {
+                for (int c = 0; c < channels; ++c)
+                    planes[c] = data + ((i * channels + c) * sz) * sz;
+                mine.offset = links + i * 2 * channels * P;
+                mine.factor = mine.offset + channels * P;
+                smappy::global_fit(local.data(), planes.data(), sz, mine, iterations,
+                                   theta + i * nv, crlb + i * nv, logl + i, iters + i);
+            }
+        });
+    }
+    return as_tuple(std::move(out));
 }
 
 // Difference-of-Gaussians / Gaussian filtering of a block of images.
@@ -236,4 +315,10 @@ PYBIND11_MODULE(_fit3d, m) {
     m.def("fit_cspline", &fit_cspline, py::arg("rois"), py::arg("coeff"),
           py::arg("z_start"), py::arg("iterations") = 50, py::arg("n_threads") = 0,
           "Fit (x, y, photons, background, z) with a cubic-spline PSF.");
+
+    m.def("fit_cspline_global", &fit_cspline_global, py::arg("rois"),
+          py::arg("coeff"), py::arg("link"), py::arg("shared"), py::arg("z_start"),
+          py::arg("iterations") = 50, py::arg("n_threads") = 0,
+          "Fit one emitter across several channels with a spline PSF each, "
+          "sharing the parameters marked in `shared`.");
 }

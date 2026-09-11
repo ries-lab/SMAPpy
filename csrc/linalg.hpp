@@ -11,6 +11,12 @@
 
 namespace smappy {
 
+// The largest parameter vector these solvers handle.  The single-channel
+// fitter needs at most six; the global one needs five per channel with
+// nothing shared, so this is sized the way GlobLoc sizes its own scratch
+// (`5 * Max_No_Channel`), with room to spare.
+constexpr int MAX_NV = 32;
+
 // Cholesky-like decomposition of a symmetric matrix A (n x n, row major).
 // Returns 1 if A is not positive definite, in which case L/U are unusable.
 inline int cholesky(const float* A, int n, float* L, float* U) {
@@ -34,7 +40,7 @@ inline int cholesky(const float* A, int n, float* L, float* U) {
 // Solve A x = b given the decomposition from cholesky().
 inline void lu_evaluate(const float* L, const float* U, const float* b, int n,
                         float* x) {
-    float y[8] = {0};
+    float y[MAX_NV] = {0};
     for (int i = 0; i < n; ++i) {
         y[i] = b[i];
         for (int j = 0; j < i; ++j) y[i] -= L[j * n + i] * y[j];
@@ -51,7 +57,7 @@ inline void lu_evaluate(const float* L, const float* U, const float* b, int n,
 // M is overwritten. Used for the Cramer-Rao lower bounds.
 inline void mat_inv_n(float* M, float* Minv, float* diag, int n) {
     float tmp1 = 0.0f;
-    float yy[8];
+    float yy[MAX_NV];
 
     for (int jj = 0; jj < n; ++jj) {
         for (int ii = 0; ii <= jj; ++ii) {
