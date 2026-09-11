@@ -31,7 +31,9 @@ The algorithm, in the order the code does it:
     ``gi.max()``, so a gap in the ids would become an empty row with a zero
     ``n_in_group`` and NaNs across it.
 
-Where this differs from the sequential walk, and it does differ:
+**This is not exact, and cannot be made exact by a better stitch.**  It lands
+0.9999-ish of localizations in the group the sequential walk gives them, and the
+rest are at the seams.  Why, and what exactness would actually take:
 
 * The sequential walk seeds particles in (frame, x) order over the whole table,
   and a particle claims localizations as it goes, taking them out of reach of
@@ -39,17 +41,30 @@ Where this differs from the sequential walk, and it does differ:
   own particles with no knowledge of the tails reaching into it.  The stitch
   restores the first link across the seam but not the consequences of the
   claims that link would have prevented.
-* A tail is offered the heads in order of where it ends, which is the
-  sequential order only to the extent that a trace's seed order follows its
-  end order.
+* Tails are offered the heads in the order the traces were *seeded*, which is
+  the order the sequential walk considers particles in.  Offering them by where
+  they end instead measures slightly worse (0.99948 against 0.99967 over 16
+  chunks), which is the useful part of the experiment: the residual is the
+  claim cascade above, not the order of the stitch.  Nothing about the stitch
+  reaches it.
 * Rebuilding the running position folds only the members the chunk holds.  The
   fold halves the weight of every earlier member, so a member more than ~24
   links back is below float precision anyway; a trace that started in an
   *earlier chunk* is the real case, and there the tail starts from its own
   chunk-local seed rather than the true one.
 
-None of that is worth fixing blind -- it is worth measuring, which is what
-``scripts/check_chunked_grouping.py`` does against the sequential result.
+Exactness would need the walk itself to take a handoff: `connect_single` would
+have to start with the previous chunk's tails already active, running positions
+and all, so that chunk k+1 is linked with the claims that reach into it.  That
+serializes the chunks -- unless each one is linked speculatively as here and
+then re-linked from the seam forward until the assignment stops changing, which
+is exact if the re-link is carried far enough to converge and is a change to the
+C++ walk, not to this file.
+
+Which is why this is not wired into `group()`.  The walk is 5.5 s of a 66 s
+open; `combine` is 17 s, exact, and parallel as it stands.  There are exact
+seconds on the table and these are approximate ones.
+``scripts/check_chunked_grouping.py`` measures both against the sequential walk.
 """
 from __future__ import annotations
 
@@ -200,10 +215,10 @@ def _stitch(x, y, frame, z, dx, dt, dz, ids, a, b, c, merges) -> Tuple[int, int]
         if int(m_f[e - 1]) < first - reach:               # died before the seam
             continue
         xh, yh, zh = _running_state(m_x[s:e], m_y[s:e], None if m_z is None else m_z[s:e])
-        tails.append((int(m_f[e - 1]), xh, yh, zh, int(m_ids[s])))
+        tails.append((int(m_f[s]), float(m_x[s]), int(m_f[e - 1]), xh, yh, zh, int(m_ids[s])))
     if not tails:
         return 0, 0
-    tails.sort()                    # by where they end, then by position
+    tails.sort()                    # by where the trace was SEEDED
 
     # --- the heads: the first frames of chunk k+1, and which of them seed ----
     head_to = b + int(np.searchsorted(frame[b:c], first + reach, side="right"))
@@ -218,7 +233,7 @@ def _stitch(x, y, frame, z, dx, dt, dz, ids, a, b, c, merges) -> Tuple[int, int]
     taken = np.zeros(len(h_ids), bool)
 
     joined = 0
-    for fh, xh, yh, zh, gid in tails:
+    for _sf, _sx, fh, xh, yh, zh, gid in tails:
         dark = 0
         while dark <= dt:
             nxt = fh + 1
