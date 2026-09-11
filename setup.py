@@ -120,4 +120,10 @@ ext_modules = [
     ),
 ]
 
-setup(ext_modules=ext_modules, cmdclass={"build_ext": build_ext})
+# The package lives under src/, which pyproject.toml tells `packages.find` but
+# not `build_ext`: without this, `build_ext --inplace` writes the modules to a
+# non-existent ./smappy/, fails on the first one and leaves every extension at
+# whatever it was last built as -- a stale binary that imports fine and is
+# missing the functions added since.
+setup(package_dir={"": "src"}, ext_modules=ext_modules,
+      cmdclass={"build_ext": build_ext})
