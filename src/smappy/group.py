@@ -50,11 +50,12 @@ Most of what grouping cost was not the linking.  On a 57 M localization file
 walk; the walk itself is 5.5 s.  `sorted_order` below returns the same order --
 element for element -- in 2.1 s.
 
-Opening that file went 134 s -> 53 s over three changes: the sort, the linking
-cut into chunks that run at once (`link_chunks`, and `smappy._group_chunked`
-for what it costs in exactness), and `combine`'s per-group sort made a radix
-one.  What is left of the 53 s: 31 s reading the file, 10.5 s `combine`, 6 s
-the linking, 2 s the sort, 6 s the indices and filters.
+Opening that file went 134 s -> 56 s, and its peak memory 20 GB -> 9.7: the
+sort, the linking cut into chunks that run at once (`link_chunks`, and
+`smappy._group_chunked` for what it costs in exactness), and the reduction
+compiled (`csrc/combine.hpp`).  What is left of the 56 s: 32 s reading the
+file, 9 s `combine`, 6 s the linking, 2 s the sort, 6 s the indices and
+filters.
 
 **To revisit: read fewer columns**, which is a memory problem before it is a
 speed one.  30 columns are read from that file and 13 are read by anything
@@ -385,12 +386,47 @@ def combine(locs: Localizations, group_index: np.ndarray,
 
     default_w = _weights(locs)
     weights: Dict[str, np.ndarray] = {"": default_w}
-    sums: Dict[str, np.ndarray] = {
-        "": np.bincount(gi, weights=default_w, minlength=size)[1:]}
+    sums: Dict[str, np.ndarray] = {}
     n_in_group = np.bincount(gi, minlength=size)[1:]
 
     names = list(fields) if fields is not None else \
         [n for n in locs.keys() if n not in DROP_ON_GROUPING]
+
+    # Group order, built once and read by every column.  `connect` numbers
+    # groups densely, so `starts` has one entry per group plus the end.
+    order = radix_argsort(gi)
+    starts = np.concatenate(
+        ([0], np.flatnonzero(gi[order][1:] != gi[order][:-1]) + 1, [len(gi)]))
+    # How each combine mode accumulates.  The C++ side sums (or takes the
+    # extreme); what turns a sum into a mean, a precision or an error in
+    # quadrature is the cheap per-group arithmetic below, which stays here
+    # where the rules are written down.
+    ACCUMULATE = {"sum": 0, "mean": 1, "precision": 2, "quad": 3, "min": 4, "max": 5}
+
+    def accumulate(values, kind: int, w=None) -> np.ndarray:
+        """One pass over the table for one column, in C++ if it is built.
+
+        The numpy fallback is the reference the tests compare against, and is
+        what runs if the extension is missing.  It needs the column as float64
+        and the weighted product as an array -- two 457 MB temporaries on a
+        57 M localization table -- which is most of why the other one exists.
+        """
+        if _group is not None and hasattr(_group, "combine"):
+            return np.asarray(_group.combine(np.ascontiguousarray(values),
+                                             w if kind == 1 else None,
+                                             order, starts, kind))
+        v = np.asarray(values, np.float64)
+        if kind == 0:
+            return np.bincount(gi, weights=v, minlength=size)[1:]
+        if kind == 1:
+            return np.bincount(gi, weights=v * w, minlength=size)[1:]
+        if kind == 2:
+            return np.bincount(gi, weights=1.0 / v ** 2, minlength=size)[1:]
+        if kind == 3:
+            return np.bincount(gi, weights=v ** 2, minlength=size)[1:]
+        reduce = np.minimum if kind == 4 else np.maximum
+        return reduce.reduceat(v[order], starts[:-1])
+
 
     def weight_column(name: str) -> str:
         """Which weight this column is combined with: its own, or the pooled."""
@@ -399,60 +435,28 @@ def combine(locs: Localizations, group_index: np.ndarray,
                 return column
         return ""
 
-    # every weight the columns will ask for, built before they run: the
-    # column loop is threaded below and may not be filling a shared cache
-    for column in {weight_column(n) for n in names} - {""}:
-        weights[column] = _inverse_variance(locs[column])
-        sums[column] = np.bincount(gi, weights=weights[column], minlength=size)[1:]
+    # every weight the columns will ask for, and its per-group sum
+    for column in {weight_column(n) for n in names}:
+        if column:
+            weights[column] = _inverse_variance(locs[column])
+        sums[column] = accumulate(weights[column], 0)
 
     def weighting(name: str) -> Tuple[np.ndarray, np.ndarray]:
         column = weight_column(name)
         return weights[column], sums[column]
-
-    # min and max need a per-group reduction; sorting once beats np.minimum.at,
-    # which is unbuffered and slow
-    extremes = any(_mode(n) in ("min", "max") for n in names)
-    if extremes:
-        order = radix_argsort(gi)
-        starts = np.concatenate(
-            ([0], np.flatnonzero(gi[order][1:] != gi[order][:-1]) + 1))
-    # One float64 buffer over the table, reused by every column.  Columns are
-    # stored as float32, so each of `values`, `values * w`, `values ** 2` would
-    # otherwise be a fresh 457 MB array on a 57 M localization file, allocated
-    # and thrown away 30 times over.  `np.bincount` has no `out=`, so its own
-    # float64 output over the groups is not avoidable this way; what is
-    # avoidable is everything feeding it.  18% faster and 0.6 GB less in
-    # flight, which is the half that matters on a 16 GB machine.
-    scratch = np.empty(len(gi), np.float64)
-    # min and max read the table in group order, and `np.take` into its own
-    # input is not something numpy promises anything about, so the gather gets
-    # a buffer of its own -- only when a column actually reduces that way.
-    gathered = np.empty(len(gi), np.float64) if extremes else None
 
     def reduce_column(name: str) -> np.ndarray:
         values = locs[name]
         mode = _mode(name)
         if mode == "mean":
             w, sum_w = weighting(name)
-            np.multiply(values, w, out=scratch)          # cast and scale in one
-            return np.bincount(gi, weights=scratch, minlength=size)[1:] / sum_w
-        if mode == "sum":
-            np.copyto(scratch, values, casting="unsafe")
-            return np.bincount(gi, weights=scratch, minlength=size)[1:]
+            return accumulate(values, 1, w) / sum_w
         if mode == "precision":
-            np.copyto(scratch, values, casting="unsafe")
-            np.multiply(scratch, scratch, out=scratch)
-            np.divide(1.0, scratch, out=scratch)
-            return 1.0 / np.sqrt(np.bincount(gi, weights=scratch, minlength=size)[1:])
+            return 1.0 / np.sqrt(accumulate(values, 2))
         if mode == "quad":     # the error of a sum, not of a mean
-            np.copyto(scratch, values, casting="unsafe")
-            np.multiply(scratch, scratch, out=scratch)
-            return np.sqrt(np.bincount(gi, weights=scratch, minlength=size)[1:])
-        if mode in ("min", "max"):
-            np.copyto(scratch, values, casting="unsafe")
-            np.take(scratch, order, out=gathered)
-            reduce = np.minimum if mode == "min" else np.maximum
-            return reduce.reduceat(gathered, starts)
+            return np.sqrt(accumulate(values, 3))
+        if mode in ACCUMULATE:
+            return accumulate(values, ACCUMULATE[mode])
         raise ValueError(f"unknown combine mode {mode!r} for {name!r}")
 
     # One column at a time, on purpose.  The columns are independent and numpy

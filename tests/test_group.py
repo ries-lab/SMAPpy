@@ -420,3 +420,83 @@ def test_radix_argsort_is_the_stable_argsort_it_replaces():
         values = np.asarray(values, np.int64)
         assert np.array_equal(radix_argsort(values),
                               np.argsort(values, kind="stable"))
+
+
+# ------------------------------------------------- the compiled combiner -----
+# `combine` reduces each column in C++ when the extension is built and in numpy
+# when it is not.  The two have to agree, mode for mode, or the compiled one is
+# quietly changing what a grouped table means.
+
+def _numpy_combine(locs, gi, monkeypatch):
+    """`combine` with the compiled reducer hidden, i.e. the numpy reference."""
+    import smappy.group as g
+    monkeypatch.setattr(g, "_group", None)
+    return g.combine(locs, gi)
+
+
+def test_the_compiled_combiner_agrees_with_numpy_in_every_mode(monkeypatch):
+    from smappy import group as g
+    pytest.importorskip("smappy._group")
+    rng = np.random.default_rng(9)
+    x, y, f = _blinking(n_emitters=3000, frames=400, seed=9)
+    n = len(x)
+    locs = Localizations({                      # one column per combine mode
+        "x_nm": x.astype(np.float32),           # mean, weighted by x_err_nm
+        "y_nm": y.astype(np.float32),           # mean, weighted by y_err_nm
+        "z_nm": rng.normal(0, 300, n).astype(np.float32),
+        "frame": f,                             # min, and an int64 column
+        "photons": rng.uniform(100, 900, n).astype(np.float32),        # sum
+        "background": rng.uniform(1, 50, n).astype(np.float32),        # sum
+        "photons_err": rng.uniform(5, 40, n).astype(np.float32),       # quad
+        "loc_precision_nm": rng.uniform(5, 25, n).astype(np.float32),  # precision
+        "x_err_nm": rng.uniform(5, 25, n).astype(np.float32),
+        "y_err_nm": rng.uniform(5, 25, n).astype(np.float32),
+        "z_err_nm": rng.uniform(20, 90, n).astype(np.float32),
+        "logl_rel": rng.uniform(-2, 0, n).astype(np.float32),          # max
+        "iterations": rng.integers(1, 30, n).astype(np.int32),         # max, int32
+        "sigma_nm": rng.uniform(90, 180, n).astype(np.float32),        # mean
+    }, {"units": "nm"})
+    gi = connect(x, y, f, 50.0, 1)
+
+    modes = {name: g._mode(name) for name in locs.keys()}
+    assert set(modes.values()) == {"mean", "sum", "quad", "precision", "min", "max"}
+
+    compiled = g.combine(locs, gi)
+    reference = _numpy_combine(locs, gi, monkeypatch)
+    assert set(compiled.keys()) == set(reference.keys())
+    for name in compiled.keys():
+        a, b = np.asarray(compiled[name]), np.asarray(reference[name])
+        assert a.dtype == b.dtype, name
+        assert np.allclose(a, b, rtol=1e-5, atol=1e-5, equal_nan=True), name
+
+
+def test_the_compiled_combiner_gives_the_same_answer_on_any_thread_count():
+    from smappy import _group
+    pytest.importorskip("smappy._group")
+    rng = np.random.default_rng(10)
+    n, n_groups = 40_000, 9_000
+    gi = np.sort(rng.integers(1, n_groups + 1, n))
+    order = np.argsort(gi, kind="stable")
+    starts = np.concatenate(([0], np.flatnonzero(gi[order][1:] != gi[order][:-1]) + 1,
+                             [n]))
+    values = rng.random(n).astype(np.float32)
+    weights = rng.random(n) + 0.5
+    for mode in range(6):
+        one = _group.combine(values, weights, order, starts, mode, 1)
+        for threads in (2, 4, 8):
+            assert np.array_equal(
+                _group.combine(values, weights, order, starts, mode, threads), one)
+
+
+def test_a_group_of_one_survives_every_mode():
+    """Groups of a single localization are most of a real table; min, max and
+    the sums all have to give that localization's own value back."""
+    from smappy import _group
+    pytest.importorskip("smappy._group")
+    values = np.array([3.0, 5.0, 7.0], np.float32)
+    weights = np.ones(3)
+    order = np.array([0, 1, 2], np.int64)
+    starts = np.array([0, 1, 2, 3], np.int64)
+    for mode, expect in [(0, [3, 5, 7]), (1, [3, 5, 7]), (4, [3, 5, 7]), (5, [3, 5, 7])]:
+        assert np.allclose(_group.combine(values, weights, order, starts, mode, 1),
+                           expect)

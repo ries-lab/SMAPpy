@@ -849,7 +849,18 @@ Worth it for a first look at a large dataset, not for the final result.
   microscope PC has, the second thread is what starts the swapping.  So it runs
   one column at a time.  What did help there was the per-group sort:
   `np.argsort(kind="stable")` on the group ids is 3.8 s, by 16-bit digits 2.1.
-* What is left of the 53 s: 31 s read, 12.5 s `combine`, 6 s linking, 2 s sort,
+* `combine` is compiled now (`csrc/combine.hpp`): 17.3 s to 9.1 s, and the peak
+  for the whole open from 20 GB to 9.7.  The memory is the point.  numpy wants
+  the column as float64 and the weighted product as an array, so a float32
+  column costs two 457 MB temporaries before `np.bincount` allocates its own
+  output; in C++ the cast, the weight and the sum are one pass and there are no
+  temporaries.  It also threads properly, which the numpy version could not:
+  every thread wanted its own accumulator over all 40 M groups, where
+  partitioning by *group* gives each thread a disjoint slice of one output and
+  nothing to coordinate.  All six modes (mean, sum, precision, quad, min, max)
+  and the per-coordinate weighting are unchanged -- C++ accumulates, Python
+  finishes, and the numpy path stays as the reference the tests compare to.
+* What is left of the 56 s: 32 s read, 9 s `combine`, 6 s linking, 2 s sort,
   6 s indices and filters.
 
 ## Loading only the columns that are used
