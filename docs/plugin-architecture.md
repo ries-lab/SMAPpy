@@ -252,8 +252,11 @@ the plugin state (tabs, instances, values) but *not* the window geometry.
 Geometry is machine-specific -- it travels badly to a colleague's screen and is
 the only part that is worthless as provenance -- while the plugin state is small
 (a few kB of JSON) and is genuinely a record of how the file was produced.  A
-preference turns the embedding off for anyone who wants their data files to
-contain only data.  Values are a flat map of dotted names read off the form
+preference turns the embedding off (`save_gui_state_in_files`) for anyone who
+wants their data files to contain only data.  Reading it back is deliberately
+*not* automatic: rearranging someone's tabs because they opened a colleague's
+dataset would be a surprise, and their own last session is already restored from
+the auto-saved workspace, so it is a menu item, *Restore GUI state from file*.  Values are a flat map of dotted names read off the form
 widgets -- so a form left mid-edit with an unparseable number is still saveable,
 and a panel never opened keeps the values it was given rather than being
 blanked -- and are read back a field at a time: a name the plugin no longer has
@@ -272,23 +275,40 @@ calls them.
 
 `io/formats.py` keeps `Reader` as the low-level mechanism -- the CLI and scripts
 use it and should not have to go through a plugin -- and gains a matching
-`Writer` registry.  A `File/Load/<name>` plugin is generated per reader, so
-adding a format stays a one-line `register(Reader(...))`.
+`Writer` registry.  The `File/Load/<name>` plugins are written out rather than
+generated: a generated set could not be declared to the AST scanner without
+duplicating the reader list, and a format has its own settings anyway -- only
+csv needs a column mapping.  Adding a format is still a one-line
+`register(Reader(...))`; giving it a plugin of its own is optional, and the
+`Auto` loader picks it up either way.
 
 ### The File tab
 
 Seeded with:
 
-    File/Load/Auto            dispatch by extension; format choice, append,
-                              reset view, and a reader's own needs (csv mapping)
-    File/Load/<format>        smappy HDF5, SMAP _sml.mat, MINFLUX, csv
-    File/Save/smappy HDF5
+    File/Load/Auto            by extension; append, and whether to link blinks
+    File/Load/<format>        smappy HDF5, SMAP _sml.mat, MINFLUX, csv --
+                              present but unpinned, since Auto covers them
+    File/Save/smappy HDF5     with the GUI state, or without
     File/Export/Image         the rendered view as a picture
-    File/Simulate/Blinking Structure   scripts/simulate_blinks.py, into the session
+    File/Simulate/Blinking Structure   `smappy.simulate`, into the session
 
-`File -> Open` in the menu runs `File/Load/Auto` rather than reimplementing it,
-so there is one loading path; the menu's separate append action becomes the
-plugin's `append` checkbox.
+A named loader *means* it: `load` takes an explicit reader, because dispatching
+by extension underneath would have `File/Load/SMAP` on a `.hdf5` quietly read it
+as smappy.
+
+The menu and the plugins share one *reading* implementation,
+`session.read_and_group`, which the window's `LoadTask`, `Session.load` and
+every loader plugin call.  `File -> Open` still drives it through `LoadTask`
+rather than through the plugin: the menu owns a multi-file queue, a progress
+line and the csv mapping dialog, none of which a panel expresses, and routing it
+through the plugin would add indirection without removing code.  What the tab
+adds is the options as checkboxes -- append, and whether to link blinks -- beside
+the menu's separate *Add file* action.
+
+A loader runs in the panel's worker thread and must not touch the session, so it
+returns its work as `Result.files` and `Session.apply` adds it on the thread
+that owns the session -- the same reason `Context` snapshots its table.
 
 ## Order of work
 
@@ -298,6 +318,9 @@ plugin's `append` checkbox.
 3. *Done.* `Instance`, the tab widget, the plugin chooser dialog, lazy panels.
 4. *Done.* The workspace file, the shipped default, the preferences dialog.
 5. *Done.* The ROI rewrite, the pipeline, and the Evaluation window.
-6. The `Writer` registry, the File tab, and the `/gui` group in the file format.
+6. *Done.* The `Writer` registry, the File tab, and the `/gui` group.
+
+Every step is in.  What is left is the ordinary work of writing more plugins,
+which is now a file copy.
 
 Each step leaves the GUI working; nothing here needs a flag day.

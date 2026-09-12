@@ -31,6 +31,8 @@ WORKSPACE_NAME = "workspace.yaml"
 # from whatever plugins are actually installed; afterwards the workspace is
 # data and a tab is whatever the user made of it.
 DEFAULT_TABS = (
+    {"name": "File", "kind": "plugins",
+     "seed": ("File/Load/", "File/Save/", "File/Export/", "File/Simulate/")},
     {"name": "Localize", "kind": "plugins", "header": "localize", "seed": "Localize/"},
     {"name": "Render", "kind": "render"},
     {"name": "Analysis", "kind": "plugins", "seed": "Analysis/"},

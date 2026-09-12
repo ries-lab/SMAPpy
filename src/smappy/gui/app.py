@@ -17,7 +17,7 @@ from .. import plugins, workspace as workspace_module
 from ..io.formats import (csv_columns, guess_csv_mapping, load as load_any,
                           name_filter, reader_for)
 from .dialogs import CsvMappingDialog, PixelSizeDialog
-from ..session import GROUPED_BY_DEFAULT, Session
+from ..session import Session, read_and_group
 from ..workspace import Workspace
 from .plugin_tab import PluginTab
 from .preferences import PreferencesDialog
@@ -51,15 +51,9 @@ class LoadTask(QThread):
 
     def run(self) -> None:
         try:
-            self.progress.emit("loading")
-            locs, info = load_any(self.path, **self.args)
-            grouped = None
-            if not self.append and GROUPED_BY_DEFAULT and len(locs) and "frame" in locs:
-                from ..group import group
-                grouped, _ = group(
-                    locs, self.group_settings,
-                    progress=lambda text, _f: self.progress.emit(f"Grouper: {text}"))
-            self.loaded.emit(locs, info, grouped)
+            self.loaded.emit(*read_and_group(self.path, self.group_settings,
+                                             append=self.append,
+                                             progress=self.progress.emit, **self.args))
         except Exception as e:                   # a bad file is not a crash
             self.failed.emit(f"{e}")
 
@@ -135,6 +129,8 @@ class ControlWindow(QMainWindow):
         self.undo_action = self._action(menu, "Undo", QKeySequence.Undo, session.undo)
         self._load_locked = [open_, add, image, save, save_as, self.undo_action]
         menu.addSeparator()
+        self._action(menu, "Restore GUI state from file...", None,
+                     self.restore_state_from_file)
         self._action(menu, "Save workspace as...", None, self.save_workspace_as)
         self._action(menu, "Open workspace...", None, self.load_workspace_from)
         self._action(menu, "Preferences...", QKeySequence.Preferences,
@@ -158,6 +154,7 @@ class ControlWindow(QMainWindow):
         self._action(view, "Show render window", None, render.show)
         QApplication.instance().aboutToQuit.connect(self.stop_loading)
         QApplication.instance().aboutToQuit.connect(self.save_workspace)
+        session.gui_state_provider = self.plugin_state
         session.on_change(self._on_session)
         self._on_session("locs")
         self.restore_layout()
@@ -221,6 +218,45 @@ class ControlWindow(QMainWindow):
         self.save_workspace()
 
     # ---------------------------------------------------------- workspace
+    def plugin_state(self) -> dict:
+        """What goes into a localization file's `gui` group.
+
+        The plugin state but *not* the window geometry: geometry is
+        machine-specific, travels badly to a colleague's screen, and is the one
+        part that is worthless as a record of how the file was made.
+        """
+        state = self.collect_workspace().to_dict()
+        state["layout"] = {k: v for k, v in state.get("layout", {}).items()
+                           if k != "geometry"}
+        return state
+
+    def restore_state_from_file(self) -> None:
+        """Take the tabs and their parameters from a file that carries them.
+
+        Not done automatically on open: rearranging someone's tabs because they
+        looked at a colleague's dataset would be a surprise, and the auto-saved
+        workspace already restores their own last session.
+        """
+        from ..io.hdf5 import load_gui_state
+        start = str(self.session.path) if self.session.path else ""
+        path, _ = QFileDialog.getOpenFileName(self, "Restore GUI state from",
+                                              start, name_filter())
+        if not path:
+            return
+        state = load_gui_state(path)
+        if not state:
+            QMessageBox.information(self, "Restore GUI state",
+                                    "that file carries no GUI state")
+            return
+        self.workspace = Workspace.from_dict(state)
+        missing = self.workspace.prune(list(plugins.refs()))
+        self.build_tabs()
+        if missing:
+            QMessageBox.information(
+                self, "Restore GUI state",
+                "restored, without plugins that are not installed here:\n"
+                + "\n".join(sorted(set(missing))))
+
     def collect_workspace(self) -> Workspace:
         """The workspace as it stands: values, order, and where the window is."""
         opened = {}

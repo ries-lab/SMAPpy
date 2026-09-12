@@ -38,7 +38,7 @@ def test_moving_stops_at_the_ends():
 
 def test_the_default_workspace_is_seeded_from_what_is_installed():
     ws = Workspace.default()
-    assert [t.name for t in ws.tabs] == ["Localize", "Render", "Analysis", "ROI"]
+    assert [t.name for t in ws.tabs] == ["File", "Localize", "Render", "Analysis", "ROI"]
     analysis = next(t for t in ws.tabs if t.name == "Analysis")
     assert sorted(i.plugin for i in analysis.instances) == [COMET, RCC]
     assert next(t for t in ws.tabs if t.name == "Render").kind == "render"
@@ -84,7 +84,8 @@ def test_a_missing_file_gives_the_default(tmp_path):
 def test_a_broken_file_gives_the_default_rather_than_no_tabs(tmp_path):
     path = tmp_path / "w.yaml"
     path.write_text("tabs: [oh dear\n")
-    assert [t.name for t in load(path).tabs] == ["Localize", "Render", "Analysis", "ROI"]
+    assert [t.name for t in load(path).tabs] == ["File", "Localize", "Render",
+                                                 "Analysis", "ROI"]
 
 
 def test_unrecognised_entries_are_dropped_not_raised(tmp_path):
@@ -135,17 +136,26 @@ def window(app, tmp_path, monkeypatch):
     return ControlWindow(session, render)
 
 
+def tab_named(window, name):
+    """By name, not by index: the strip's order is the user's to change."""
+    for i in range(window.tabs.count()):
+        if window.tabs.tabText(i) == name:
+            return window.tabs.widget(i)
+    raise AssertionError(f"no {name} tab in "
+                         f"{[window.tabs.tabText(i) for i in range(window.tabs.count())]}")
+
+
 def test_the_window_opens_the_shipped_tabs(window):
     assert [window.tabs.tabText(i) for i in range(window.tabs.count())] == \
-        ["Localize", "Render", "Analysis", "ROI"]
-    localize = window.tabs.widget(0)
+        ["File", "Localize", "Render", "Analysis", "ROI"]
+    localize = tab_named(window, "Localize")
     assert [s.title for s in localize.sections] == \
         ["Gaussian 2D", "Spline 3D", "Spline 3D 2C"]
 
 
 def test_opening_a_section_is_what_imports_the_plugin(window):
     import sys
-    tab = window.tabs.widget(2)                       # Analysis
+    tab = tab_named(window, "Analysis")
     instance = tab.tab.instances[0]
     assert tab.slots[instance.id].panel is None       # nothing built yet
     tab.open_section(instance.id)
@@ -154,7 +164,7 @@ def test_opening_a_section_is_what_imports_the_plugin(window):
 
 
 def test_only_one_section_is_open_at_a_time(window):
-    tab = window.tabs.widget(2)
+    tab = tab_named(window, "Analysis")
     first, second = tab.tab.instances[:2]
     tab.open_section(first.id)
     tab.open_section(second.id)
@@ -164,7 +174,7 @@ def test_only_one_section_is_open_at_a_time(window):
 
 def test_a_pin_that_is_not_installed_says_so_instead_of_crashing(window):
     from smappy.workspace import Instance
-    tab = window.tabs.widget(2)
+    tab = tab_named(window, "Analysis")
     ghost = Instance(plugin="Gone/Away", label="Ghost")
     tab.tab.instances.append(ghost)
     tab.rebuild()
@@ -174,7 +184,7 @@ def test_a_pin_that_is_not_installed_says_so_instead_of_crashing(window):
 
 
 def test_values_survive_being_saved_and_reopened(window, tmp_path):
-    tab = window.tabs.widget(2)
+    tab = tab_named(window, "Analysis")
     instance = tab.tab.instances[0]
     tab.open_section(instance.id)
     tab.slots[instance.id].panel.form.restore({"segmentation_var": 11})
@@ -192,7 +202,7 @@ def test_values_survive_being_saved_and_reopened(window, tmp_path):
 
 def test_an_unopened_panel_keeps_the_values_it_was_given(window, tmp_path):
     """Saving must not blank the plugins you never looked at."""
-    tab = window.tabs.widget(2)
+    tab = tab_named(window, "Analysis")
     instance = tab.tab.instances[1]
     instance.values = {"pixelsize_nm": 42.0}
     assert tab.slots[instance.id].panel is None
@@ -203,7 +213,7 @@ def test_an_unopened_panel_keeps_the_values_it_was_given(window, tmp_path):
 
 
 def test_removing_and_reordering_from_the_tab_edits_the_workspace(window):
-    tab = window.tabs.widget(2)
+    tab = tab_named(window, "Analysis")
     first, second = tab.tab.instances[:2]
     tab.tab.move(first.id, 1)
     tab.rebuild()
@@ -220,7 +230,7 @@ def test_a_tab_the_user_adds_starts_empty_and_builds(window):
     window.build_tabs()
     names = [window.tabs.tabText(i) for i in range(window.tabs.count())]
     assert names[-1] == "MyLab"
-    assert window.tabs.widget(len(names) - 1).sections == []
+    assert tab_named(window, "MyLab").sections == []
 
 
 def test_a_plugin_dropped_in_a_folder_reaches_a_tab_and_runs(app, tmp_path, monkeypatch):
@@ -277,7 +287,7 @@ class CountNeighbours(Plugin):
             Tab(name="MyLab", instances=[Instance(plugin=ref.path)]))
         window.build_tabs()
 
-        tab = window.tabs.widget(window.tabs.count() - 1)
+        tab = tab_named(window, "MyLab")
         instance = tab.tab.instances[0]
         tab.open_section(instance.id)
         panel = tab.slots[instance.id].panel

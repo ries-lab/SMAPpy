@@ -114,6 +114,46 @@ def save_localizations(path, locs: Localizations,
     return Path(path)
 
 
+# ------------------------------------------------------------------ GUI state
+#
+# The evaluation pipeline is provenance -- the columns of a site table mean
+# nothing without knowing which evaluators produced them -- so it travels with
+# the data, and the rest of the GUI state may come along so that reopening a
+# file restores the session that made it.
+#
+# In a dataset and not in `f.attrs`: an HDF5 attribute is bounded by the object
+# header, in practice about 64 kB, which a long pipeline plus a state snapshot
+# can pass.  The failure would show up late and only on big projects.
+
+GUI_GROUP = "gui"
+GUI_STATE = "gui/state"
+
+
+def save_gui_state(path, state: Optional[Dict[str, object]]) -> None:
+    """Write (or clear) the GUI state of an existing localization file."""
+    import h5py
+    with h5py.File(path, "a") as f:
+        if GUI_STATE in f:
+            del f[GUI_STATE]
+        if not state:
+            return
+        f.require_group(GUI_GROUP)
+        f.create_dataset(GUI_STATE, data=json.dumps(state, default=_json_default),
+                         dtype=h5py.string_dtype("utf-8"))
+
+
+def load_gui_state(path) -> Optional[Dict[str, object]]:
+    """The GUI state saved with a file, or None.  Never raises on a bad one."""
+    import h5py
+    try:
+        with h5py.File(path, "r") as f:
+            if GUI_STATE not in f:
+                return None
+            return json.loads(f[GUI_STATE][()])
+    except (OSError, KeyError, ValueError):
+        return None
+
+
 def load_localizations(path) -> Localizations:
     """Read a table written by :class:`LocalizationWriter`."""
     with h5py.File(path, "r") as f:

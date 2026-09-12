@@ -65,12 +65,47 @@ def reader_for(path) -> Reader:
                      + ", ".join(f"{r.name} ({' '.join(r.suffixes)})" for r in READERS))
 
 
-def load(path, **kwargs) -> Tuple[Localizations, FileInfo]:
-    """Read any known format.  ``kwargs`` go to the reader (a csv mapping, say)."""
-    reader = reader_for(path)
+def load(path, reader: Optional[Reader] = None, **kwargs) -> Tuple[Localizations, FileInfo]:
+    """Read any known format.  ``kwargs`` go to the reader (a csv mapping, say).
+
+    ``reader`` forces one instead of choosing by the file name, which is how a
+    `File/Load/<format>` plugin means what it says: without it a `.hdf5` opened
+    as SMAP would quietly be read as smappy.
+    """
+    reader = reader or reader_for(path)
     locs, info = reader.load(Path(path), **kwargs)
     info.n = len(locs)
     return locs, info
+
+
+@dataclass
+class Writer:
+    name: str
+    suffixes: Tuple[str, ...]          # the first is the default
+    save: Callable[..., Path]
+    needs: Tuple[str, ...] = ()        # extra arguments a GUI must ask for
+
+
+WRITERS: List[Writer] = []
+
+
+def register_writer(writer: Writer) -> Writer:
+    WRITERS.append(writer)
+    return writer
+
+
+def writer_for(path) -> Writer:
+    name = Path(path).name.lower()
+    for w in WRITERS:
+        if any(name.endswith(s) for s in w.suffixes):
+            return w
+    raise ValueError(f"no writer for {Path(path).name}; known: "
+                     + ", ".join(f"{w.name} ({' '.join(w.suffixes)})" for w in WRITERS))
+
+
+def save(locs, path, metadata=None, **kwargs) -> Path:
+    """Write a table in whichever format the name asks for."""
+    return writer_for(path).save(locs, Path(path), metadata=metadata, **kwargs)
 
 
 def name_filter() -> str:
@@ -79,6 +114,21 @@ def name_filter() -> str:
     parts = [f"Localizations ({every})"]
     parts += [f"{r.name} ({' '.join('*' + s for s in r.suffixes)})" for r in READERS]
     return ";;".join(parts + ["All files (*)"])
+
+
+def save_filter() -> str:
+    """The same, over every writer."""
+    parts = [f"{w.name} ({' '.join('*' + s for s in w.suffixes)})" for w in WRITERS]
+    return ";;".join(parts + ["All files (*)"])
+
+
+def reader_names() -> List[str]:
+    """For a format dropdown; the order the readers were registered in."""
+    return [r.name for r in READERS]
+
+
+def reader_named(name: str) -> Optional[Reader]:
+    return next((r for r in READERS if r.name == name), None)
 
 
 # ------------------------------------------------------------------ smappy
@@ -101,6 +151,14 @@ def _is_smappy(path: Path) -> bool:
 
 
 register(Reader("smappy HDF5", (".hdf5", ".h5"), _load_smappy, _is_smappy))
+
+
+def _save_smappy(locs, path: Path, metadata=None) -> Path:
+    from .hdf5 import save_localizations
+    return save_localizations(path, locs, metadata)
+
+
+register_writer(Writer("smappy HDF5", (".hdf5", ".h5"), _save_smappy))
 
 
 # --------------------------------------------------------------- SMAP sml

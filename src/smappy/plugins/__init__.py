@@ -302,6 +302,10 @@ class Context:
 class Result:
     """What a plugin hands back.  Every part is optional."""
     locs: Optional[Localizations] = None    # replaces the session's table
+    # loaded files, as (locs, info, grouped): a loader runs in a worker thread
+    # and must not touch the session, so it hands them back and `Session.apply`
+    # adds them on the thread that owns the session.
+    files: Sequence = ()
     text: str = ""                          # shown, and logged
     plot: Optional[Callable] = None         # plot(ax) draws into a matplotlib axis
     data: Dict[str, Any] = field(default_factory=dict)  # anything else

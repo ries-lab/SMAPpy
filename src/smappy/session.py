@@ -207,6 +207,32 @@ class Layer:
         return Selection(f.mask, layer=index, name=self.name)
 
 
+def read_and_group(path, group_settings: GroupSettings, append: bool = False,
+                   progress: Optional[Callable[[str], None]] = None,
+                   group: Optional[bool] = None, reader=None, **reader_args):
+    """Read a localization file and link it: ``(locs, info, grouped)``.
+
+    The one implementation, used by the GUI's `LoadTask`, by `Session.load` and
+    by the `File/Load` plugins -- all of which need the slow half off whatever
+    thread owns the session, and none of which should own a copy of it.
+
+    An appended file is not linked: `Session.add_file` re-links the merged
+    table anyway, so linking here would be work done twice.
+    """
+    if progress:
+        progress("loading")
+    locs, info = load_any(path, reader=reader, **reader_args)
+    if group is None:
+        group = GROUPED_BY_DEFAULT
+    grouped = None
+    if not append and group and len(locs) and "frame" in locs:
+        from .group import group as link
+        grouped, _ = link(locs, group_settings,
+                          progress=(lambda text, _f: progress(f"Grouper: {text}"))
+                          if progress else None)
+    return locs, info, grouped
+
+
 class Session:
     def __init__(self, locs: Optional[Localizations] = None, path=None):
         self.locs = locs if locs is not None else Localizations({}, {})
@@ -223,6 +249,9 @@ class Session:
         self._undo: Optional[Localizations] = None
         self._live = False                 # the table is being appended to
         self._listeners: List[Callable[[str], None]] = []
+        # set by the GUI: what to write into the file's `gui` group.  A session
+        # in a script has none, and saves only data.
+        self.gui_state_provider: Optional[Callable[[], Dict]] = None
 
     # ----------------------------------------------------------- observers
     def on_change(self, callback: Callable[[str], None]) -> None:
@@ -235,15 +264,16 @@ class Session:
             cb(what)
 
     # ---------------------------------------------------------------- data
-    def load(self, path, append: bool = False, **reader_args) -> FileInfo:
+    def load(self, path, append: bool = False, progress=None, **reader_args) -> FileInfo:
         """Open a localization file of any known format.
 
         With ``append`` it joins the table as one more file (a ``filenumber``
         column tells them apart, and the layers can pick); otherwise it
         replaces everything.
         """
-        locs, info = load_any(path, **reader_args)
-        return self.add_file(locs, info, append=append)
+        locs, info, grouped = read_and_group(path, self.group_settings, append=append,
+                                             progress=progress, **reader_args)
+        return self.add_file(locs, info, append=append, grouped=grouped)
 
     def add_file(self, locs: Localizations, info: FileInfo, append: bool = False,
                  grouped: Optional[Localizations] = None) -> FileInfo:
@@ -327,8 +357,14 @@ class Session:
     def first_locs_layer(self) -> int:
         return next((i for i, l in enumerate(self.layers) if not l.is_image), 0)
 
-    def save(self, path=None) -> Path:
-        from .io.hdf5 import save_localizations
+    def save(self, path=None, gui_state: Optional[bool] = None) -> Path:
+        """Write the table, its history, its ROIs and -- optionally -- the GUI.
+
+        `gui_state` defaults to the `save_gui_state_in_files` preference.  What
+        gets written is whatever `gui_state_provider` returns, so the session
+        stays ignorant of tabs and windows; the GUI sets it.
+        """
+        from .io.hdf5 import save_gui_state, save_localizations
         path = Path(path or self.path)
         metadata = dict(self.locs.metadata)
         metadata["history"] = self.history
@@ -340,6 +376,18 @@ class Session:
         if rois and (rois["rois"] or rois["runs"] or rois.get("tile_nm")):
             metadata["roi_project"] = rois
         save_localizations(path, self.locs, metadata)
+        if gui_state is None:
+            from . import config
+            gui_state = bool(config.get("save_gui_state_in_files", True))
+        if gui_state and self.gui_state_provider is not None:
+            try:
+                save_gui_state(path, self.gui_state_provider())
+            except Exception as e:
+                # deliberately everything: the localizations are already on
+                # disk by now, and the GUI state is a convenience.  Whatever a
+                # provider manages to raise must not turn a good save into a
+                # reported failure.
+                self.log("save", f"the GUI state was not saved: {e}")
         self.path = path
         return path
 
@@ -596,6 +644,11 @@ class Session:
         settings = result.settings
         self.log(plugin.path, result.text,
                  settings=asdict(settings) if is_dataclass(settings) else settings)
+        for n, (locs, info, grouped) in enumerate(result.files or ()):
+            # the first replaces unless the plugin asked to append; the rest
+            # always join, or opening three files would keep only the last
+            self.add_file(locs, info, append=result.data.get("append", False) or n > 0,
+                          grouped=grouped)
         if result.locs is not None:
             self.set_locs(result.locs)
 
