@@ -15,6 +15,7 @@ from smappy.dualfit import (DualChannelEngine, LINK_XYZ, combine_peaks,
 from smappy.io.calibration import SplineCalibration, evaluate_spline
 from smappy.metadata import CameraMetadata
 from smappy.pipeline import FitSettings
+from smappy.plugins import Context
 from smappy.psf import GlobalSplinePSF
 
 SPLIT = 32           # the frame is 64 x 64, upper half main, lower half secondary
@@ -268,7 +269,7 @@ def test_the_3d_2c_workflow_runs_from_a_tiff_and_a_saved_calibration(tmp_path):
         fit=PipelineFitSettings(roisize=13, output_unit="nm"),
         output=OutputSettings(path=str(tmp_path / "out.hdf5")))
 
-    result = DualSplineFit().run(None, None, settings)
+    result = DualSplineFit().run(Context(), settings)
     locs = result.locs
 
     assert len(locs) > 15

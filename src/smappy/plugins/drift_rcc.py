@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from ..rcc import RCCSettings, estimate_drift_rcc
-from . import ParamInfo, Plugin, Result, Selection, register
+from . import Context, ParamInfo, Plugin, Result, register
 
 
 @register("Analysis/Drift/RCC")
@@ -26,11 +26,9 @@ class RCCDrift(Plugin):
         "tile_y_nm": ParamInfo(label="tile y", unit="nm", min=1),
     }
 
-    def run(self, locs, selection: Selection, settings: RCCSettings,
-            progress=None, stream=None) -> Result:
-        selection.require(5000, progress, "a drift estimate")
-        if progress:
-            progress(f"correlating {selection}")
-        drift = estimate_drift_rcc(locs, settings, select=selection.mask)
-        return Result(locs=drift.apply(locs), text=str(drift), plot=drift.plot,
+    def run(self, ctx: Context, settings: RCCSettings) -> Result:
+        ctx.selection.require(5000, ctx.report, "a drift estimate")
+        ctx.report(f"correlating {ctx.selection}")
+        drift = estimate_drift_rcc(ctx.locs, settings, select=ctx.selection.mask)
+        return Result(locs=drift.apply(ctx.locs), text=str(drift), plot=drift.plot,
                       data={"drift": drift}, settings=settings)

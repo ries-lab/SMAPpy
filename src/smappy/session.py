@@ -16,7 +16,7 @@ from .filter import LocFilter
 from .group import GroupSettings
 from .images import ImageData, load_image
 from .locs import Localizations, concat
-from .plugins import Plugin, Result, Selection
+from .plugins import Context, Plugin, Result, Selection
 from .io.formats import FileInfo, load as load_any
 from .regions import Region
 from .view3d import Projection, Slab
@@ -567,14 +567,28 @@ class Session:
             sel.name += f", {self.slab}"
         return sel
 
+    def context(self, layer: int = 0,
+                progress: Optional[Callable[[str], None]] = None,
+                stream: Optional[Callable[[str, Any], None]] = None,
+                **extra) -> Context:
+        """What a plugin run against this session is given.
+
+        Built on the caller's thread: the table and the selection are read
+        here, so handing the context to a worker cannot race a live fit
+        rebinding them.
+        """
+        return Context(session=self, layer=layer, progress=progress,
+                       stream=stream, **extra)
+
     def run(self, plugin: Plugin, settings=None, layer: int = 0,
-            progress: Optional[Callable[[str], None]] = None) -> Result:
+            progress: Optional[Callable[[str], None]] = None,
+            stream: Optional[Callable[[str, Any], None]] = None) -> Result:
         """Run a plugin on this session's table; apply what comes back.
 
         The plugin runs on whatever thread calls this; only `apply` touches
         the session, so a GUI can run the plugin in a worker and apply here.
         """
-        result = plugin.run(self.locs, self.selection(layer), settings, progress)
+        result = plugin.run(self.context(layer, progress, stream), settings)
         self.apply(plugin, result)
         return result
 

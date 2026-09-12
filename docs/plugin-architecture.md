@@ -108,7 +108,10 @@ def run(self, ctx: Context, settings) -> Result
 
 `Context` carries `session` (None in a script), `locs`, `selection`, `rois`,
 `site`, `site_table`, and the two callbacks as `ctx.report(text)` and
-`ctx.emit(event, payload)`.  A processor still returns `Result(locs=...)`; a
+`ctx.emit(event, payload)`; `ctx.for_site(site, ...)` derives the per-ROI one.
+When a session is given, the table and the selection are read *at construction*,
+because the GUI builds the context on its thread and hands it to a worker --
+reading them later would race a live fit rebinding them.  A processor still returns `Result(locs=...)`; a
 loader calls `ctx.session.add_file(...)`; an ROI finder returns
 `Result(data={"rois": [...]})`.  One base class, one panel widget, one tree --
 so loaders, savers, the simulator and the ROI plugins all get favourites,
@@ -127,7 +130,10 @@ it is a property of the plugin, not of its folder -- which is what lets the
 evaluation window filter correctly under one global tree.
 
 `Plugin.__call__` keeps the scripting shape: `plugin(locs, sel, radius_nm=30)`
-builds the context itself.
+builds the context itself, and `locs` may be left out entirely for a plugin that
+makes its own.  A plugin still written against the old signature is refused by
+`__init_subclass__` with a message saying what to do, rather than being handed a
+`Context` as its `locs` and failing somewhere far away.
 
 ### A tab is a named list of instances
 

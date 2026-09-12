@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from ..drift import DriftSettings, correct_drift
-from . import ParamInfo, Plugin, Result, Selection, register
+from . import Context, ParamInfo, Plugin, Result, register
 
 
 @register("Analysis/Drift/COMET")
@@ -40,11 +40,9 @@ class CometDrift(Plugin):
         "backend": ParamInfo(choices=("cuda", "torch", "cpu")),
     }
 
-    def run(self, locs, selection: Selection, settings: DriftSettings,
-            progress=None, stream=None) -> Result:
-        selection.require(5000, progress, "a drift estimate")
-        if progress:
-            progress(f"estimating drift from {selection}")
-        corrected, drift = correct_drift(locs, settings, select=selection.mask)
+    def run(self, ctx: Context, settings: DriftSettings) -> Result:
+        ctx.selection.require(5000, ctx.report, "a drift estimate")
+        ctx.report(f"estimating drift from {ctx.selection}")
+        corrected, drift = correct_drift(ctx.locs, settings, select=ctx.selection.mask)
         return Result(locs=corrected, text=str(drift), plot=drift.plot,
                       data={"drift": drift}, settings=settings)

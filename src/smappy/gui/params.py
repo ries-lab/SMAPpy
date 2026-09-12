@@ -167,7 +167,11 @@ class SettingsForm(QWidget):
         for form in (main, more):
             form.setContentsMargins(0, 0, 0, 0)
             form.setVerticalSpacing(2)
-        for name, spec in (specs or param_specs(settings_cls)).items():
+        # `specs if None`, not `specs or`: {} is a plugin that declares no
+        # settings at all -- a loader with sensible defaults, say -- and it
+        # must give an empty form rather than fall back to introspection
+        for name, spec in (param_specs(settings_cls) if specs is None
+                           else specs).items():
             if spec.info.hidden:
                 continue
             if spec.children is not None:
@@ -191,6 +195,8 @@ class SettingsForm(QWidget):
             layout.addWidget(CollapsibleSection("more", box, expanded=False))
 
     def value(self):
+        if self.settings_cls is None:
+            return None                     # a plugin with nothing to configure
         return self.settings_cls(**{n: f.value() for n, f in self.fields.items()})
 
     def set(self, settings) -> None:

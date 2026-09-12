@@ -24,7 +24,7 @@ from ..locs import Localizations
 from ..metadata import CameraMetadata
 from ..pipeline import FitSettings, fit_stack, provenance
 from ..psf import GaussianPSF, SplinePSF
-from . import ParamInfo, Plugin, Result, Selection, param, register
+from . import Context, ParamInfo, Plugin, Result, param, register
 
 TIFF_FILTER = "Image stacks (*.tif *.tiff *.ome.tif);;All files (*)"
 
@@ -196,8 +196,7 @@ class _FitPlugin(Plugin):
                     and v is not None}
         return None
 
-    def run(self, locs, selection: Selection, settings, progress=None,
-            stream=None) -> Result:
+    def run(self, ctx: Context, settings) -> Result:
         from ..io.hdf5 import LocalizationWriter
         from ..live import camera_extent
 
@@ -219,9 +218,8 @@ class _FitPlugin(Plugin):
             stop = min(src.stop, source.n_frames) if src.stop else None
             blocks = source.frames(chunk=src.chunk, start=src.start, stop=stop)
 
-        if stream:
-            stream("start", {"extent": camera_extent(camera, source.shape, fit.output_unit),
-                             "path": out})
+        ctx.emit("start", {"extent": camera_extent(camera, source.shape, fit.output_unit),
+                           "path": out})
         writer = None
         if out is not None:
             writer = LocalizationWriter(out)
@@ -234,13 +232,11 @@ class _FitPlugin(Plugin):
             if not collected.columns:
                 collected.metadata.update(block.metadata)
             collected.extend(block)
-            if stream:
-                stream("block", block)
+            ctx.emit("block", block)
 
         def report(engine) -> None:
-            if progress:
-                s = engine.stats
-                progress(f"{s['frames']} frames, {s['localizations']} localizations")
+            s = engine.stats
+            ctx.report(f"{s['frames']} frames, {s['localizations']} localizations")
 
         try:
             from ..pipeline import drive

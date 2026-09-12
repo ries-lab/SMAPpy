@@ -7,6 +7,7 @@ declarations to build its widgets.
 from __future__ import annotations
 
 import dataclasses
+import inspect
 import typing
 from dataclasses import MISSING, dataclass, field, fields
 from pathlib import Path
@@ -86,11 +87,16 @@ def param_specs(settings_cls: type, extra: Optional[Dict[str, ParamInfo]] = None
                 ) -> Dict[str, ParamSpec]:
     """Every field of a settings dataclass with its presentation.
 
+    A plugin need not have settings at all, so ``None`` and anything that is
+    not a dataclass come back empty rather than raising.
+
     ``extra`` supplies infos for fields that were not declared with `param`,
     so a plain dataclass such as `DriftSettings` needs no changes.  A field
     that is itself a dataclass is a part; its own fields come back under
     ``children``, and ``extra`` reaches them with dotted keys, ``"fit.roisize"``.
     """
+    if settings_cls is None or not dataclasses.is_dataclass(settings_cls):
+        return {}
     try:
         hints = typing.get_type_hints(settings_cls)
     except TypeError:
@@ -166,6 +172,71 @@ class Selection:
         return f"{len(self)} localizations ({self.name or 'selection'})"
 
 
+class Context:
+    """What a plugin is given to work with.
+
+    `run(ctx, settings)` replaced `run(locs, selection, settings, progress,
+    stream)` because that signature could only describe a plugin that
+    transforms a table.  A loader has no input localizations, a simulator has no
+    input at all, and an evaluator runs once per ROI -- all of which fit here
+    without a second base class.
+
+    Everything is optional, so a script can say `Context(locs=locs)` and a
+    plugin called through `Plugin.__call__` never sees the difference.  When a
+    session is given, `locs` and `selection` are read from it *once, now*: the
+    GUI builds the context on its own thread and hands it to a worker, so
+    reading them later would race with a live fit rebinding the table.
+    """
+
+    def __init__(self, session=None, locs: Optional[Localizations] = None,
+                 selection: Optional["Selection"] = None, layer: int = 0,
+                 progress: Optional[Callable[[str], None]] = None,
+                 stream: Optional[Callable[[str, Any], None]] = None,
+                 site=None, site_table: Optional[Sequence[Dict[str, Any]]] = None):
+        self.session = session
+        self.layer = layer
+        self.site = site                    # the ROI, for a scope="site" plugin
+        self.site_table = site_table        # the rows evaluation produced
+        self._progress = progress
+        self._stream = stream
+        if locs is None:
+            locs = session.locs if session is not None else Localizations({}, {})
+        self.locs = locs
+        if selection is None:
+            selection = (session.selection(layer) if session is not None
+                         else Selection.all(len(locs)))
+        self.selection = selection
+
+    @property
+    def rois(self):
+        """The ROI manager's project, or None outside a session."""
+        return None if self.session is None else self.session.rois
+
+    def report(self, text: str) -> None:
+        """Say what is happening.  A no-op when nobody is listening."""
+        if self._progress:
+            self._progress(text)
+
+    def emit(self, event: str, payload: Any) -> None:
+        """Hand a partial result on while still running.
+
+        ``("start", {"extent": ...})`` once, then ``("block", Localizations)``
+        per finished block, for a plugin that produces localizations over
+        minutes.  A no-op when nobody is listening.
+        """
+        if self._stream:
+            self._stream(event, payload)
+
+    def for_site(self, site, locs: Optional[Localizations] = None,
+                 selection: Optional["Selection"] = None) -> "Context":
+        """This context aimed at one ROI, for a ``scope = "site"`` plugin."""
+        return Context(session=self.session,
+                       locs=self.locs if locs is None else locs,
+                       selection=self.selection if selection is None else selection,
+                       layer=self.layer, progress=self._progress,
+                       stream=self._stream, site=site, site_table=self.site_table)
+
+
 @dataclass
 class Result:
     """What a plugin hands back.  Every part is optional."""
@@ -182,7 +253,12 @@ class Plugin:
     name: str = ""                 # set by `register` from the path's last part
     path: str = ""                 # "Analysis/Drift/COMET"
     description: str = ""
-    favorite: bool = True          # shown without "all" ticked, until the user says otherwise
+    favorite: bool = True          # pinned in the shipped workspace
+    # "locs": run once over the selection.  "site": run once per ROI, with
+    # `ctx.site` set -- what makes a plugin an ROI evaluator.  It is a property
+    # of the plugin, not of its folder, which is what lets the evaluation
+    # window filter correctly when every plugin lives in one tree.
+    scope: str = "locs"
     Settings: type = None
     # presentation for fields that were not declared with `param`
     params: Dict[str, ParamInfo] = {}
@@ -190,13 +266,35 @@ class Plugin:
     # fields not marked advanced.
     main: Optional[Sequence[str]] = None
 
-    def run(self, locs: Localizations, selection: Selection, settings,
-            progress: Optional[Callable[[str], None]] = None,
-            stream: Optional[Callable[[str, Any], None]] = None) -> Result:
-        """Do the work.  ``progress(text)`` reports; ``stream(event, payload)``
-        hands partial results on while running: ``("start", {"extent": ...})``
-        once, then ``("block", Localizations)`` per finished block, for a
-        plugin that produces localizations over minutes.  Both may be None."""
+    def __init_subclass__(cls, **kwargs):
+        """Catch a plugin written against the old signature with a real error.
+
+        `run(locs, selection, settings, ...)` would otherwise be handed a
+        `Context` as its `locs` and the settings as its `selection`, and fail
+        somewhere far away.
+        """
+        super().__init_subclass__(**kwargs)
+        run = cls.__dict__.get("run")
+        if run is None:
+            return
+        try:
+            names = list(inspect.signature(run).parameters)
+        except (TypeError, ValueError):
+            return
+        if len(names) > 1 and names[1] in ("locs", "localizations"):
+            raise TypeError(
+                f"{cls.__name__}.run takes {names[1]!r}: plugins now take a "
+                "Context, `def run(self, ctx, settings)`.  ctx.locs and "
+                "ctx.selection replace the first two arguments, ctx.report "
+                "replaces progress, ctx.emit replaces stream.")
+
+    def run(self, ctx: Context, settings) -> Result:
+        """Do the work.
+
+        `ctx` carries the localizations, the selection, the session and the
+        ROI, and `ctx.report(text)` / `ctx.emit(event, payload)` report progress
+        and hand partial results on.  See `Context`.
+        """
         raise NotImplementedError
 
     def react(self, changed: str, settings) -> Optional[Dict[str, Any]]:
@@ -207,16 +305,23 @@ class Plugin:
         a script may too."""
         return None
 
-    def __call__(self, locs: Localizations, selection: Optional[Selection] = None,
-                 settings=None, **overrides) -> Result:
-        """The scripting entry: ``plugin(locs, sel, radius_nm=30)``."""
+    def __call__(self, locs: Optional[Localizations] = None,
+                 selection: Optional[Selection] = None,
+                 settings=None, *, ctx: Optional[Context] = None,
+                 progress: Optional[Callable[[str], None]] = None,
+                 **overrides) -> Result:
+        """The scripting entry: ``plugin(locs, sel, radius_nm=30)``.
+
+        `locs` may be omitted entirely for a plugin that makes its own -- a
+        loader or the simulator.
+        """
         if settings is None:
             settings = self.Settings() if self.Settings else None
         if overrides:
             settings = dataclasses.replace(settings, **overrides)
-        if selection is None:
-            selection = Selection.all(len(locs))
-        return self.run(locs, selection, settings)
+        if ctx is None:
+            ctx = Context(locs=locs, selection=selection, progress=progress)
+        return self.run(ctx, settings)
 
     @classmethod
     def specs(cls) -> Dict[str, ParamSpec]:

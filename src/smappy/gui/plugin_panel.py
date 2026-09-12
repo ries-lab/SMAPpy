@@ -21,26 +21,27 @@ from .params import SettingsForm
 class _Worker(QObject):
     done = Signal(object)
     failed = Signal(str)
-    progress = Signal(str)
-    streamed = Signal(str, object)
 
-    def __init__(self, plugin, locs, selection, settings):
+    def __init__(self, plugin, context, settings):
         super().__init__()
-        self.args = (plugin, locs, selection, settings)
-
-    def _stream(self, event: str, payload) -> None:
-        self.streamed.emit(event, payload)
+        self.args = (plugin, context, settings)
 
     def run(self) -> None:
-        plugin, locs, selection, settings = self.args
+        plugin, context, settings = self.args
         try:
-            self.done.emit(plugin.run(locs, selection, settings, self.progress.emit,
-                                      self._stream))
+            self.done.emit(plugin.run(context, settings))
         except Exception:
             self.failed.emit(traceback.format_exc())
 
 
 class PluginPanel(QWidget):
+    # The context is built before the worker exists, so progress cannot go
+    # through a worker signal any more.  These belong to the panel, which lives
+    # on the GUI thread: emitting them from the worker delivers queued, which
+    # is what keeps `_on_progress` and `_on_stream` off that thread.
+    progressed = Signal(str)
+    streamed = Signal(str, object)
+
     def __init__(self, plugin_cls: Type[Plugin], session: Session, parent=None):
         super().__init__(parent)
         self.plugin = plugin_cls()
@@ -76,6 +77,8 @@ class PluginPanel(QWidget):
         self.run_button.clicked.connect(self.run)
         self.plot_button.clicked.connect(self.plot)
         self.form.field_changed.connect(self._react)
+        self.progressed.connect(self._on_progress)
+        self.streamed.connect(self._on_stream)
 
     def _react(self, path: str) -> None:
         """Let the plugin answer an edit, e.g. fill the camera from the file."""
@@ -98,7 +101,10 @@ class PluginPanel(QWidget):
         except ValueError as e:
             self.status.setText(f"bad value: {e}")
             return
-        selection = self.session.selection()
+        # built here, on the GUI thread: the context reads the table and the
+        # selection now, so the worker cannot race a live fit rebinding them
+        context = self.session.context(progress=self.progressed.emit,
+                                       stream=self.streamed.emit)
         self.run_button.setEnabled(False)
         self.status.setText("running...")
         self._progress_lines = 0
@@ -106,11 +112,9 @@ class PluginPanel(QWidget):
         # Qt's default thread stack (512 kB on macOS) is too small for HDF5 and
         # the fitter's own threads' bookkeeping: a bus error, not an exception
         self._thread.setStackSize(32 * 1024 * 1024)
-        self._worker = _Worker(self.plugin, self.session.locs, selection, settings)
+        self._worker = _Worker(self.plugin, context, settings)
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
-        self._worker.progress.connect(self._on_progress)
-        self._worker.streamed.connect(self._on_stream)
         self._worker.done.connect(self._on_done)
         self._worker.failed.connect(self._on_failed)
         for sig in (self._worker.done, self._worker.failed):

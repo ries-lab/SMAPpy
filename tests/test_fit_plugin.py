@@ -4,6 +4,7 @@ import pytest
 import tifffile
 
 from smappy import plugins
+from smappy.plugins import Context
 from smappy.plugins.fit import (CameraSettings, DetectionSettings, GaussianFit,
                                 GaussianFitSettings, OutputSettings, SourceSettings)
 
@@ -42,8 +43,8 @@ def test_fit_runs_without_a_gui_and_streams(stack, tmp_path):
         detection=DetectionSettings(cutoff_mode="absolute", cutoff=40.0),
         output=OutputSettings(path=str(tmp_path / "out.hdf5")))
     events, messages = [], []
-    result = GaussianFit().run(None, None, settings, progress=messages.append,
-                               stream=lambda e, p: events.append((e, p)))
+    ctx = Context(progress=messages.append, stream=lambda e, p: events.append((e, p)))
+    result = GaussianFit().run(ctx, settings)
     assert messages and "localizations" in messages[-1]
     assert 50 <= len(result.locs) <= 60          # 3 per frame, some overlap
     assert (tmp_path / "out.hdf5").exists()
