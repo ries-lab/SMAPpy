@@ -93,16 +93,22 @@ class ImageSource:
 
 
 def open_stack(path) -> ImageSource:
-    """Open an acquisition: a Micro-Manager TIFF series, or an NDTiff dataset.
+    """Open an acquisition: a TIFF series, an NDTiff dataset, or single images.
 
     Which one it is follows from what is there -- an NDTiff dataset is a
-    directory with an ``NDTiff.index`` -- so nothing above this has to know
-    which format the microscope wrote.
+    directory with an ``NDTiff.index``, a one-file-per-frame acquisition is a
+    folder of numbered single-page TIFFs -- so nothing above this has to know
+    which format the microscope wrote.  In every case *any* file of the set
+    stands for the set: picking one image in a file dialog opens the whole
+    acquisition, which is the only thing a user could mean by it.
     """
     from .ndtiff import is_ndtiff, open_ndtiff   # NDTiff imports this module
+    from .singles import is_single_image_set, open_singles
 
     if is_ndtiff(path):
         return open_ndtiff(path)
+    if is_single_image_set(path):
+        return open_singles(path)
 
     path = Path(path)
     if path.is_dir():
