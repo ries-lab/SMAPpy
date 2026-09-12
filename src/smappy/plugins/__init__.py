@@ -7,14 +7,15 @@ declarations to build its widgets.
 from __future__ import annotations
 
 import dataclasses
-import importlib
 import typing
 from dataclasses import MISSING, dataclass, field, fields
-from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Type
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Type
 
 import numpy as np
 
 from ..locs import Localizations
+from .discovery import Diagnostic, PluginRef, scan
 
 _META = "smappy"
 
@@ -229,10 +230,19 @@ class Plugin:
 
 
 # ------------------------------------------------------------------ registry
+#
+# Two halves.  `_REGISTRY` is filled by `@register` when a module is imported;
+# `_REFS` is filled by the scanner, which reads the files without importing
+# them (see `discovery`).  The refs are what the GUI builds its tree from, so
+# starting up costs one parse per plugin and no imports at all; `get` and
+# `available` import on demand and are what a script uses.
 
 _REGISTRY: Dict[str, Type[Plugin]] = {}
-_BUILTIN = ("smappy.plugins.fit", "smappy.plugins.drift_comet",
-            "smappy.plugins.drift_rcc")
+_REFS: Dict[str, PluginRef] = {}
+_PROBLEMS: List[Diagnostic] = []
+_SCANNED = False
+
+BUILTIN_ROOT = Path(__file__).resolve().parent
 
 
 def register(path: str):
@@ -245,28 +255,65 @@ def register(path: str):
     return wrap
 
 
-def load_builtin() -> None:
-    for module in _BUILTIN:
-        importlib.import_module(module)
+def roots() -> List[Tuple[str, Path]]:
+    """Where to look, in priority order: the shipped plugins, then the user's.
+
+    A later root wins a collision, so a user can shadow a shipped plugin by
+    putting their own at the same path.
+    """
+    from .. import config
+    found = [("builtin", BUILTIN_ROOT)]
+    for directory in config.plugin_roots():
+        found.append((str(directory), directory))
+    return found
 
 
-def available(prefix: str = "") -> Dict[str, Type[Plugin]]:
-    load_builtin()
-    return {p: c for p, c in sorted(_REGISTRY.items()) if p.startswith(prefix)}
+def discover(force: bool = False) -> Dict[str, PluginRef]:
+    """Scan the roots.  Cheap, and idempotent unless ``force``."""
+    global _SCANNED, _REFS, _PROBLEMS
+    if _SCANNED and not force:
+        return _REFS
+    _REFS, _PROBLEMS = scan(roots())
+    _SCANNED = True
+    return _REFS
+
+
+def refs(prefix: str = "") -> Dict[str, PluginRef]:
+    """Every plugin under ``prefix``, as refs -- nothing is imported."""
+    return {p: r for p, r in discover().items() if p.startswith(prefix)}
+
+
+def problems() -> List[Diagnostic]:
+    """Files that should have held a plugin and did not.  For the GUI to show."""
+    discover()
+    return list(_PROBLEMS)
 
 
 def get(path: str) -> Type[Plugin]:
-    load_builtin()
-    return _REGISTRY[path]
+    """The plugin class at ``path``, importing its module the first time."""
+    if path in _REGISTRY:
+        return _REGISTRY[path]
+    ref = discover().get(path)
+    if ref is None:
+        raise KeyError(path)
+    return ref.load()
 
 
-def tree() -> Dict[str, Any]:
-    """The registry as nested dicts, leaves being plugin classes."""
+def available(prefix: str = "") -> Dict[str, Type[Plugin]]:
+    """Every plugin under ``prefix``, as classes -- so this imports them all.
+
+    Prefer `refs` for anything that only needs to *show* the plugins.
+    """
+    return {p: get(p) for p in sorted(refs(prefix))}
+
+
+def tree(prefix: str = "") -> Dict[str, Any]:
+    """The registry as nested dicts, the leaves being `PluginRef`s."""
     out: Dict[str, Any] = {}
-    for path, cls in available().items():
+    for path, ref in refs(prefix).items():
         node = out
         *groups, leaf = path.split("/")
         for g in groups:
             node = node.setdefault(g, {})
-        node[leaf] = cls
+        node[leaf] = ref
     return out
