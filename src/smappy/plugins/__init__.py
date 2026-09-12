@@ -362,6 +362,31 @@ class Plugin:
         """
         raise NotImplementedError
 
+    # a plugin that can show one frame's worth of work before committing to
+    # the whole acquisition overrides `preview`; the GUI grows a button and a
+    # frame number for it when it is overridden, and nothing when it is not
+    def preview(self, ctx: Context, settings, frame: int = 0) -> Result:
+        """One frame, drawn rather than saved: is this set up right?
+
+        Same settings and the same code as `run`, on a single frame, returning
+        a `Result` that is only looked at -- never applied to the session.
+        """
+        raise NotImplementedError
+
+    @classmethod
+    def has_preview(cls) -> bool:
+        return cls.preview is not Plugin.preview
+
+    def hints(self, settings) -> Optional[Dict[str, Any]]:
+        """What the settings' *automatic* fields currently resolve to.
+
+        Keyed by dotted name, like `react`, but these are never written into
+        the settings: the GUI shows them greyed in the fields that are set to
+        auto, so "auto" says what it will do rather than only that it will do
+        something.  Return None when nothing can be resolved yet.
+        """
+        return None
+
     def react(self, changed: str, settings) -> Optional[Dict[str, Any]]:
         """A parameter was edited: ``changed`` is its dotted name.
 

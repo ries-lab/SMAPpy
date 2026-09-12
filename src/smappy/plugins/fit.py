@@ -15,9 +15,11 @@ expandable section.
 from __future__ import annotations
 
 import os
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+import numpy as np
 
 from ..detect import AbsoluteCutoff, DoGFilter, DynamicCutoff, GaussFilter, PeakFinder
 from ..locs import Localizations
@@ -34,8 +36,9 @@ TIFF_FILTER = "Image stacks (*.tif *.tiff *.ome.tif);;All files (*)"
 class SourceSettings:
     """Where the frames come from."""
     path: str = param("", label="file", kind="open_file", file_filter=TIFF_FILTER,
-                      help="a Micro-Manager TIFF (any file of the series) or "
-                           "an NDTiff directory")
+                      help="any file of the acquisition: a Micro-Manager TIFF "
+                           "series, an NDTiff directory, or one image out of a "
+                           "folder written one file per frame")
     start: int = param(0, label="first frame", min=0, advanced=True)
     stop: Optional[int] = param(None, label="last frame", min=1, advanced=True,
                                 help="auto: to the end")
@@ -178,6 +181,45 @@ class _FitPlugin(Plugin):
         from ..pipeline import LocalizationEngine
         return LocalizationEngine(camera, finder, model, settings.fit)
 
+    CAMERA_FIELDS = ("conversion", "offset", "pixelsize_um", "em_on", "emgain")
+
+    def _camera(self, settings) -> Optional[CameraMetadata]:
+        """The camera as it stands: the file's metadata under the user's values.
+
+        Cached on the source path, because this opens the acquisition and the
+        GUI asks after every keystroke that changes a field.
+        """
+        path = settings.source.path
+        if not path:
+            return None
+        key = (path, settings.camera.preset, tuple(
+            getattr(settings.camera, name) for name in self.CAMERA_FIELDS))
+        if getattr(self, "_camera_key", None) == key:
+            return self._camera_value
+        try:
+            from ..io.tiff import camera_metadata
+            source = _open(settings.source, watch=False)
+            overrides = settings.camera.overrides()
+            if settings.camera.preset:
+                preset = asdict(CameraMetadata.from_yaml(settings.camera.preset))
+                overrides = {**{k: v for k, v in preset.items() if v is not None},
+                             **overrides}
+            # require=False: a camera that is still missing a field has to
+            # hint at the fields it does know, not refuse the lot
+            camera = camera_metadata(source, overrides=overrides, require=False)
+        except Exception:
+            return None
+        self._camera_key, self._camera_value = key, camera
+        return camera
+
+    def hints(self, settings) -> Optional[Dict[str, Any]]:
+        """What the camera fields left on *auto* will actually be."""
+        camera = self._camera(settings)
+        if camera is None:
+            return None
+        return {f"camera.{name}": getattr(camera, name)
+                for name in self.CAMERA_FIELDS}
+
     def react(self, changed: str, settings) -> Optional[Dict[str, Any]]:
         if changed == "source.path" and settings.source.path:
             try:
@@ -187,14 +229,113 @@ class _FitPlugin(Plugin):
             except Exception:
                 return None
             return {f"camera.{k}": v for k, v in asdict(cam).items()
-                    if k in ("conversion", "offset", "pixelsize_um", "em_on", "emgain")
-                    and v is not None}
+                    if k in self.CAMERA_FIELDS and v is not None}
         if changed == "camera.preset" and settings.camera.preset:
             cam = CameraMetadata.from_yaml(settings.camera.preset)
             return {f"camera.{k}": v for k, v in asdict(cam).items()
-                    if k in ("conversion", "offset", "pixelsize_um", "em_on", "emgain")
-                    and v is not None}
+                    if k in self.CAMERA_FIELDS and v is not None}
         return None
+
+    def preview(self, ctx: Context, settings, frame: int = 0) -> Result:
+        """Detect and fit one frame, and draw what came out.
+
+        Detection is the part a threshold is set by, so it never depends on
+        the fit: a missing or unreadable calibration costs the fitted markers
+        and earns a line saying why, while the candidates are still drawn over
+        the frame they were found in.
+        """
+        from ..camera import to_photons
+
+        src = settings.source
+        if not src.path:
+            raise ValueError("choose a source file")
+        source = _open(src, watch=False)
+        index = int(np.clip(frame, 0, max(source.n_frames-1, 0)))
+        # not `resolve`: that insists on a complete camera, and a preview is
+        # how a threshold gets set -- a missing pixel size must not stand in
+        # the way of looking at one frame.  What detection needs (conversion
+        # and offset) still fails loudly if it is missing.
+        camera = self._camera(settings)
+        if camera is None:
+            raise ValueError(f"could not read the camera from {src.path}")
+        camera.require("conversion", "offset")
+        fit = settings.fit
+        finder = settings.detection.finder(fit.n_threads)
+
+        raw = source.frame(index)
+        photons = to_photons(raw, camera)/camera.excess_noise
+        candidates, filtered = finder(photons[None], first_frame=index)
+        maxima = filtered[0][filtered[0] > np.percentile(filtered[0], 99)]
+        cutoff = float(finder.cutoff(maxima)) if maxima.size else float("nan")
+
+        locs, trouble = None, ""
+        try:
+            model = self.model(settings, camera)
+            engine = self.engine(settings, camera, finder, model)
+            if camera.pixelsize_um is None:
+                # pixels, then: a preview is about detection and shape, and
+                # nm coordinates would only fail on the missing pixel size
+                engine.settings = replace(engine.settings, output_unit="pixel")
+            engine.push(raw[None], first_frame=index)
+            locs = engine.flush()
+        except Exception as error:
+            trouble = f"{type(error).__name__}: {error}"
+
+        lines = [f"frame {index} of {source.n_frames}: {len(candidates)} candidates, "
+                 f"cutoff {cutoff:.3g} on the filtered image"]
+        if locs is not None:
+            lines.append(f"{len(locs)} fitted")
+        if trouble:
+            lines.append("not fitted -- " + trouble)
+        text = "; ".join(lines)
+
+        unit = "nm" if (locs is not None and "x_nm" in locs.columns) else "pix"
+        fitted = None
+        if locs is not None and len(locs):
+            scale = (1000.0*float(camera.pixelsize_um)
+                     if unit == "nm" and camera.pixelsize_um else 1.0)
+            names = ("x_nm", "y_nm") if unit == "nm" else ("x_pix", "y_pix")
+            offset = camera.roi_offset if unit == "nm" else (0, 0)
+            fitted = (np.asarray(locs[names[0]])/scale-offset[0],
+                      np.asarray(locs[names[1]])/scale-offset[1])
+
+        def plot(ax) -> None:
+            """Two panels: what was seen, and what the finder saw."""
+            figure = ax.figure
+            ax.remove()
+            figure.set_size_inches(10, 6)
+            figure.set_layout_engine("constrained")
+            left, right = figure.subplots(1, 2, sharex=True, sharey=True)
+            left.imshow(photons, cmap="gray",
+                        vmax=np.percentile(photons, 99.8) or None)
+            left.plot(candidates.x, candidates.y, "o", mfc="none", mec="lime",
+                      ms=9, mew=1, label=f"{len(candidates)} candidates")
+            if fitted is not None:
+                left.plot(*fitted, "+", color="gold", ms=7,
+                          label=f"{len(fitted[0])} fitted")
+            left.set(title=f"frame {index} (photons)")
+            left.legend(fontsize=7, loc="upper right")
+            # scaled to the cutoff, not to the brightest pixel: the question
+            # this panel answers is how far the peaks sit above the threshold,
+            # and a single bright molecule would otherwise flatten the rest
+            top = float(cutoff*2) if np.isfinite(cutoff) and cutoff > 0 else None
+            image = right.imshow(filtered[0], cmap="viridis", vmin=0, vmax=top)
+            bar = figure.colorbar(image, ax=right, fraction=0.046)
+            if top is not None:
+                bar.ax.axhline(cutoff, color="red", lw=1.5)
+            right.plot(candidates.x, candidates.y, ".", color="red", ms=3)
+            right.set(title=f"{settings.detection.filter} filtered; red line at "
+                            f"the cutoff, {cutoff:.3g}")
+            for panel in (left, right):
+                panel.title.set_fontsize(9)
+                panel.tick_params(labelsize=8)
+            if trouble:
+                figure.suptitle("detection only -- " + trouble, fontsize=8,
+                                color="#a05000")
+
+        return Result(text=text, plot=plot, settings=settings,
+                      data={"frame": index, "candidates": len(candidates),
+                            "cutoff": cutoff, "locs": locs, "error": trouble})
 
     def run(self, ctx: Context, settings) -> Result:
         from ..io.hdf5 import LocalizationWriter

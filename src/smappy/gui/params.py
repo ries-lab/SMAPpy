@@ -18,13 +18,20 @@ from .widgets import CollapsibleSection
 
 
 class _Field(QWidget):
-    """One parameter.  Optional ones get an "auto" box that stands for None."""
+    """One parameter.  Optional ones get an "auto" box that stands for None.
+
+    An auto field still shows a number: whatever *auto* would resolve to, in
+    grey, put there by `set_hint`.  "auto" alone tells the user that the value
+    comes from somewhere else but not what it is, and the camera fields are
+    read far more often than they are typed.
+    """
 
     changed = Signal()
 
     def __init__(self, spec: ParamSpec):
         super().__init__()
         self.spec = spec
+        self._hint = ""
         info = spec.info
         row = QHBoxLayout(self)
         # the macOS style paints a check box wider than its size hint and
@@ -88,7 +95,34 @@ class _Field(QWidget):
 
     def _on_auto(self, on: bool) -> None:
         self.widget.setEnabled(not on)
+        if on and self._hint and isinstance(self.widget, QLineEdit):
+            self.widget.setText(self._hint)      # leaving it blank says less
+        self._paint()
         self.changed.emit()
+
+    def _paint(self) -> None:
+        """Grey while the value on show is a hint rather than a setting."""
+        if isinstance(self.widget, QLineEdit):
+            hinting = self.auto is not None and self.auto.isChecked()
+            self.widget.setStyleSheet("color: gray; font-style: italic"
+                                      if hinting else "")
+
+    def set_hint(self, value: Any) -> None:
+        """What *auto* currently resolves to, for showing greyed out.
+
+        A hint is never a value: `value()` still returns None while auto is
+        on, so nothing here can turn a read-from-the-file number into one the
+        user is taken to have set.
+        """
+        if self.auto is None or not isinstance(self.widget, QLineEdit):
+            return
+        self._hint = ("" if value is None else f"{value:g}"
+                      if isinstance(value, float) else str(value))
+        self.setToolTip("\n".join(filter(None, (
+            self.spec.info.help, f"auto: {self._hint}" if self._hint else ""))))
+        if self.auto.isChecked():
+            self.widget.setText(self._hint)
+            self._paint()
 
     def _browse(self) -> None:
         kind, name_filter = self.spec.info.kind, self.spec.info.file_filter
@@ -106,7 +140,10 @@ class _Field(QWidget):
     def set(self, value: Any) -> None:
         if self.auto is not None:
             self.auto.setChecked(value is None)
+            self._paint()
             if value is None:
+                if isinstance(self.widget, QLineEdit):
+                    self.widget.setText(self._hint)
                 return
         w = self.widget
         if isinstance(w, QComboBox):
@@ -234,6 +271,25 @@ class SettingsForm(QWidget):
             except (KeyError, AttributeError, ValueError, TypeError):
                 dropped.append(path)
         return dropped
+
+    def set_hints(self, values: Dict[str, Any]) -> None:
+        """Show, by dotted name, what each field's *auto* resolves to.
+
+        Unknown names are ignored rather than raised: a hint is an extra, and
+        a plugin that offers one for a field it no longer has must not break
+        the form the way a stale saved value must not.
+        """
+        for path, value in values.items():
+            target = self
+            parts = path.split(".")
+            try:
+                for part in parts[:-1]:
+                    target = target.fields[part]
+                field = target.fields[parts[-1]]
+            except (KeyError, AttributeError):
+                continue
+            if hasattr(field, "set_hint"):
+                field.set_hint(value)
 
     def set_values(self, values: Dict[str, Any]) -> None:
         """Set some fields by dotted name, without firing `field_changed`."""

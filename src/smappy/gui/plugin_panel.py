@@ -11,7 +11,7 @@ from typing import Optional, Type
 from PySide6.QtCore import QObject, QThread, Signal
 from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (QHBoxLayout, QLabel, QPlainTextEdit, QPushButton,
-                               QVBoxLayout, QWidget)
+                               QSpinBox, QVBoxLayout, QWidget)
 
 from ..plugins import Plugin, Result
 from ..session import Session
@@ -22,14 +22,17 @@ class _Worker(QObject):
     done = Signal(object)
     failed = Signal(str)
 
-    def __init__(self, plugin, context, settings):
+    def __init__(self, plugin, context, settings, job="run", **kwargs):
         super().__init__()
         self.args = (plugin, context, settings)
+        self.job = job
+        self.kwargs = kwargs
 
     def run(self) -> None:
         plugin, context, settings = self.args
         try:
-            self.done.emit(plugin.run(context, settings))
+            work = getattr(plugin, self.job)
+            self.done.emit(work(context, settings, **self.kwargs))
         except Exception:
             self.failed.emit(traceback.format_exc())
 
@@ -49,6 +52,7 @@ class PluginPanel(QWidget):
         self.result: Optional[Result] = None
         self._thread: Optional[QThread] = None
         self._progress_lines = 0
+        self._job = "run"
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -62,11 +66,29 @@ class PluginPanel(QWidget):
 
         buttons = QHBoxLayout()
         self.run_button = QPushButton("Run")
+        buttons.addWidget(self.run_button)
+        # a preview sits next to Run because it answers the question Run asks:
+        # is this set up right?  One frame, drawn, nothing saved.
+        self.preview_button: Optional[QPushButton] = None
+        self.preview_frame: Optional[QSpinBox] = None
+        if plugin_cls.has_preview():
+            self.preview_button = QPushButton("Preview")
+            self.preview_button.setToolTip(
+                "run one frame and draw it: the detected candidates over the "
+                "image, and the filtered image the threshold acts on. "
+                "Nothing is saved and the session is not touched.")
+            self.preview_button.clicked.connect(self.preview)
+            self.preview_frame = QSpinBox()
+            self.preview_frame.setRange(0, 10**9)
+            self.preview_frame.setToolTip("which frame to preview")
+            self.preview_frame.setPrefix("frame ")
+            self.preview_frame.setMaximumWidth(110)
+            buttons.addWidget(self.preview_button)
+            buttons.addWidget(self.preview_frame)
         self.plot_button = QPushButton("Plot")
         self.plot_button.setToolTip("show the plugin's result figure (the drift curves, say)")
         self.plot_button.setEnabled(False)
         self.status = QLabel("")
-        buttons.addWidget(self.run_button)
         buttons.addWidget(self.plot_button)
         buttons.addWidget(self.status, 1)
         layout.addLayout(buttons)
@@ -88,6 +110,21 @@ class PluginPanel(QWidget):
             return
         if updates:
             self.form.set_values(updates)
+        self._hints()
+
+    def _hints(self) -> None:
+        """Refresh what the fields left on *auto* say they will resolve to.
+
+        Best effort on purpose: working this out means opening the file, which
+        may be missing, half-written or not an image at all, and none of that
+        is worth an error in a field the user has not finished typing.
+        """
+        try:
+            hints = self.plugin.hints(self.form.value())
+        except Exception:
+            return
+        if hints:
+            self.form.set_hints(hints)
 
     def _on_stream(self, event: str, payload) -> None:
         if event == "start":
@@ -95,7 +132,15 @@ class PluginPanel(QWidget):
         elif event == "block":
             self.session.append(payload)
 
+    def preview(self) -> None:
+        """One frame, shown and thrown away."""
+        self._start("preview", "previewing...",
+                    frame=self.preview_frame.value())
+
     def run(self) -> None:
+        self._start("run", "running...")
+
+    def _start(self, job: str, message: str, **kwargs) -> None:
         try:
             settings = self.form.value()
         except ValueError as e:
@@ -105,14 +150,16 @@ class PluginPanel(QWidget):
         # selection now, so the worker cannot race a live fit rebinding them
         context = self.session.context(progress=self.progressed.emit,
                                        stream=self.streamed.emit)
-        self.run_button.setEnabled(False)
-        self.status.setText("running...")
+        self._job = job
+        for button in self._buttons():
+            button.setEnabled(False)
+        self.status.setText(message)
         self._progress_lines = 0
         self._thread = QThread()
         # Qt's default thread stack (512 kB on macOS) is too small for HDF5 and
         # the fitter's own threads' bookkeeping: a bus error, not an exception
         self._thread.setStackSize(32 * 1024 * 1024)
-        self._worker = _Worker(self.plugin, context, settings)
+        self._worker = _Worker(self.plugin, context, settings, job, **kwargs)
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
         self._worker.done.connect(self._on_done)
@@ -135,21 +182,31 @@ class PluginPanel(QWidget):
         self._progress_lines += 1
         self.output.verticalScrollBar().setValue(self.output.verticalScrollBar().maximum())
 
+    def _buttons(self):
+        return [b for b in (self.run_button, self.preview_button) if b is not None]
+
     def _on_done(self, result: Result) -> None:
         self.result = result
-        self.session.apply(self.plugin, result)
+        # a preview is looked at, never applied: it exists so that the session
+        # is not changed before the settings are right
+        if self._job != "preview":
+            self.session.apply(self.plugin, result)
         self.output.appendPlainText(result.text)
         self._progress_lines = 0
         self.status.setText("done")
-        self.run_button.setEnabled(True)
+        for button in self._buttons():
+            button.setEnabled(True)
         self.plot_button.setEnabled(result.plot is not None)
+        if self._job == "preview" and result.plot is not None:
+            self.plot()
 
     def _on_failed(self, text: str) -> None:
         self.output.appendPlainText(text.strip().splitlines()[-1])
         self._progress_lines = 0
         print(text)
         self.status.setText("failed")
-        self.run_button.setEnabled(True)
+        for button in self._buttons():
+            button.setEnabled(True)
 
     def plot(self) -> None:
         if self.result is None or self.result.plot is None:
