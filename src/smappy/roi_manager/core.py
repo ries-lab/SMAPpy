@@ -139,6 +139,10 @@ class ROIProject:
         self.group_settings = GroupSettings()
         self.runs = []
         self.navigation = {}  # GUI state only; never used for extraction
+        # The evaluation pipeline, as `workspace.Instance`s.  It travels with
+        # the project because the columns of a site table mean nothing without
+        # knowing which evaluators produced them, with what parameters.
+        self.pipeline = []
         self._filter_keys = {}
 
     def add_file(self, path):
@@ -291,62 +295,87 @@ class ROIProject:
                 "grouped": self.grouped,
                 "group_settings": asdict(self.group_settings) if self.grouped else None}
 
-    def evaluate(self, plugin=None, roi_ids=None, parameters=None, progress=None):
-        from .plugins import Statistics
-        plugin = plugin or Statistics()
-        parameters = parameters or {}
+    def evaluate(self, instances=None, roi_ids=None, progress=None, steps=None):
+        """Run a pipeline over every reviewed, included ROI.
+
+        `instances` is a list of `workspace.Instance` -- the same type a tab
+        pins -- resolved here into steps.  Each step contributes columns to a
+        site's row, and a step that raises costs its own columns and not the
+        ROI, nor the ROIs after it.
+        """
+        from . import pipeline as pipeline_module
+        if steps is None:
+            if instances is None:
+                instances = pipeline_module.default_instances()
+            steps = pipeline_module.resolve(instances)
         ids = list(self.rois) if roi_ids is None else list(roi_ids)
         ids = [i for i in ids if self.rois[i].reviewed and self.rois[i].use]
         run = {"id": uuid4().hex, "time": datetime.now(timezone.utc).isoformat(),
-               "plugin": plugin.name, "version": plugin.version,
-               "parameters": json.loads(json_text(parameters)), "records": {}}
+               "pipeline": [step.as_record() for step in steps], "records": {}}
         for n, roi_id in enumerate(ids):
             roi = self.rois[roi_id]
             inputs = json.loads(json_text(self.inputs(roi)))
+            locs = self.extract(roi)
+            geometry = json.loads(json_text(self.geometry(roi)))
             record = {"inputs": inputs, "signature": digest(inputs),
-                      "file_id": roi.file_id}
-            try:
-                record['values'] = json.loads(json_text(plugin.evaluate(
-                    self.extract(roi), json.loads(json_text(self.geometry(roi))),
-                    json.loads(json_text(run['parameters'])))))
-            except Exception as error:
-                record['error'] = f"{type(error).__name__}: {error}"
-            run['records'][roi_id] = record
+                      "file_id": roi.file_id, "steps": {}}
+            for step in steps:
+                record["steps"][step.label] = self._one_step(step, roi, locs, geometry)
+            run["records"][roi_id] = record
             if progress:
                 progress(n + 1, len(ids))
         self.runs.append(run)
         return run
 
-    def latest(self, roi_id, plugin="statistics"):
+    def _one_step(self, step, roi, locs, geometry):
+        """One evaluator on one ROI.  Its failure is recorded, not raised."""
+        from ..plugins import Context
+        try:
+            context = Context(locs=locs, site=geometry, rois=self)
+            result = step.plugin.run(context, step.settings)
+            return {"values": json.loads(json_text(result.data or {}))}
+        except Exception as error:
+            return {"error": f"{type(error).__name__}: {error}"}
+
+    def latest(self, roi_id):
+        """The newest record for this ROI, and whether its inputs have changed."""
         for run in reversed(self.runs):
-            if run['plugin'] == plugin and roi_id in run['records']:
-                record = run['records'][roi_id]
-                return record, record['signature'] != digest(self.inputs(self.rois[roi_id]))
+            if roi_id in run.get("records", {}):
+                record = run["records"][roi_id]
+                return record, record["signature"] != digest(self.inputs(self.rois[roi_id]))
         return None, False
 
-    def results(self, plugin="statistics"):
-        """Current successful results for reviewed, included ROIs only."""
+    def results(self):
+        """Current successful rows for reviewed, included ROIs only."""
+        from . import pipeline as pipeline_module
         rows = []
         for roi in self.rois.values():
             if not roi.reviewed or not roi.use:
                 continue
-            record, stale = self.latest(roi.id, plugin)
-            if record is not None and not stale and 'values' in record:
-                rows.append({"roi_id": roi.id, "file_id": roi.file_id,
-                             **record['values']})
+            record, stale = self.latest(roi.id)
+            if record is None or stale:
+                continue
+            values = pipeline_module.merged_values(record)
+            if values:
+                rows.append({"roi_id": roi.id, "file_id": roi.file_id, **values})
         return rows
 
-    def find(self, file_id, plugin=None, parameters=None):
-        from .plugins import DensityPeaks
-        plugin = plugin or DensityPeaks()
-        parameters = {**getattr(plugin, 'defaults', {}), **(parameters or {})}
+    def find(self, file_id, plugin=None, settings=None, parameters=None):
+        """Propose candidate ROIs on one file with a segmentation plugin."""
+        from ..plugins import settings_from, settings_values
+        from ..plugins.roi import DensityPeaks
+        if plugin is None:
+            plugin = DensityPeaks()
+        if settings is None:
+            settings = settings_from(plugin.Settings, parameters or {})
         state = self.state(file_id)
-        origin = {"method": plugin.name, "version": plugin.version,
-                  "parameters": parameters, "filters": state.filter.ranges,
-                  "grouped": self.grouped,
+        origin = {"method": getattr(plugin, "path", "") or getattr(plugin, "name", ""),
+                  "version": str(getattr(plugin, "version", "1")),
+                  "parameters": settings_values(settings),
+                  "filters": state.filter.ranges, "grouped": self.grouped,
                   "group_settings": asdict(self.group_settings) if self.grouped else None}
         existing = [roi.center for roi in self.rois.values() if roi.file_id == file_id]
-        centers = plugin.find(state.locs[state.filter.indices], parameters, existing)
+        centers = plugin.propose(state.locs[state.filter.indices], settings, existing)
         return [self.add_roi(file_id, c, reviewed=False, origin=origin) for c in centers]
 
     def save(self, path):
@@ -361,7 +390,7 @@ class ROIProject:
                "filters": self.filters,
                "grouped": self.grouped, "group_settings": asdict(self.group_settings),
                "navigation": self.navigation, "rois": [asdict(r) for r in self.rois.values()],
-               "runs": self.runs,
+               "runs": self.runs, "pipeline": [asdict(i) for i in self.pipeline],
                "sources": [{"id": s.id, "name": s.name,
                             "path": os.path.relpath(s.path, path.parent),
                             "fingerprint": s.fingerprint} for s in self.sources.values()]}
@@ -408,4 +437,6 @@ class ROIProject:
             project.rois[roi.id] = roi
         project.runs = doc['runs']
         project.navigation = doc['navigation']
+        from .pipeline import from_dict as pipeline_from_dict
+        project.pipeline = pipeline_from_dict(doc)
         return project

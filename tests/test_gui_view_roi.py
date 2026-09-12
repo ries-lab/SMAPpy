@@ -46,9 +46,10 @@ def test_every_region_gets_the_dark_line_under_its_outline(app, region):
     assert view.roi_halo is None
 
 
-def test_the_roi_tab_never_widens_the_control_window(app):
-    from smappy.gui.roi_tab import ROITab
+def test_the_roi_header_never_widens_the_control_window(app):
+    from smappy.gui.roi_tab import ROIHeader
     from smappy.gui.widgets import CONTROL_WIDTH
-    tab = ROITab(Session(table()))
-    tab.file_count.setText("1. " + "a_long_experiment_name" * 4 + "_sml.hdf5 - 128 ROIs")
-    assert tab.sizeHint().width() <= CONTROL_WIDTH
+    header = ROIHeader(Session(table()))
+    header.file_count.setText("1. " + "a_long_experiment_name" * 4
+                              + "_sml.hdf5 - 128 ROIs")
+    assert header.sizeHint().width() <= CONTROL_WIDTH

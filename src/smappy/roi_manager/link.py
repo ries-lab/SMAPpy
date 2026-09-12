@@ -158,13 +158,17 @@ class SessionROIs(ROIProject):
                 "sources": [{"id": s.id, "number": s.number, "name": s.name}
                             for s in self.sources.values()],
                 "rois": [asdict(r) for r in self.rois.values()],
-                "runs": self.runs}
+                "runs": self.runs,
+                # the pipeline is provenance for the columns in `runs`, so it
+                # is saved with them rather than only in the workspace
+                "pipeline": [asdict(i) for i in self.pipeline]}
 
     def from_dict(self, doc: Optional[dict]) -> None:
         """Restore ROIs, runs and navigation saved with a file."""
         self.rois = {}
         self.runs = []
         self.navigation = {}
+        self.pipeline = []
         if not doc:
             return
         doc = json.loads(json_text(doc)) if not isinstance(doc, dict) else doc
@@ -193,6 +197,8 @@ class SessionROIs(ROIProject):
             records = {i: r for i, r in run.get("records", {}).items() if i in self.rois}
             if records:
                 self.runs.append({**run, "records": records})
+        from .pipeline import from_dict as pipeline_from_dict
+        self.pipeline = pipeline_from_dict(doc)
 
     # ---------------------------------------------------------------- misc
     def add_roi(self, file_id, center, polygon=None, reviewed=None, origin=None):

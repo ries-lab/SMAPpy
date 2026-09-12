@@ -22,7 +22,7 @@ from ..workspace import Workspace
 from .plugin_tab import PluginTab
 from .preferences import PreferencesDialog
 from .render_tab import RenderTab
-from .roi_tab import ROITab
+from .roi_tab import ROIHeader
 from .render_view import RenderToolBar, RenderView
 from .widgets import CONTROL_WIDTH
 
@@ -104,7 +104,7 @@ class ControlWindow(QMainWindow):
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
         self.plugin_tabs: List[PluginTab] = []
-        self.roi_tab: Optional[ROITab] = None
+        self.roi_tab: Optional[ROIHeader] = None
         self.build_tabs()
         self.setCentralWidget(self.tabs)
         # tall on purpose: with a file open the Render tab's own content wants
@@ -148,7 +148,8 @@ class ControlWindow(QMainWindow):
         self.calibration_window = None
         self._action(view, "3D view", "Ctrl+3", self.show_3d)
         tools = self.menuBar().addMenu("Tools")
-        self._action(tools, "ROI manager", "Ctrl+R", lambda: self.roi_tab.open_manager())
+        self._action(tools, "ROI manager", "Ctrl+R", self._open_manager)
+        self._action(tools, "ROI evaluation...", None, self._open_evaluation)
         tools.addSeparator()
         self._action(tools, "Bead calibration...", None, self.open_calibration)
         self._action(tools, "Dual-colour calibration...", None,
@@ -167,6 +168,9 @@ class ControlWindow(QMainWindow):
 
         Which is why ROImanager and Localize need no class of their own.
         """
+        if name == "roi":
+            self.roi_tab = ROIHeader(self.session, self.render_window.view)
+            return self.roi_tab
         if name != "localize":
             return None
         box = QWidget()
@@ -191,8 +195,6 @@ class ControlWindow(QMainWindow):
         for tab in self.workspace.tabs:
             if tab.kind == "render":
                 widget = RenderTab(self.session, self.render_window.view)
-            elif tab.kind == "roi":
-                widget = self.roi_tab = ROITab(self.session, self.render_window.view)
             else:
                 widget = PluginTab(tab, self.session, header=self.header_for(tab.header))
                 widget.changed.connect(self.save_workspace)
@@ -263,6 +265,14 @@ class ControlWindow(QMainWindow):
         self.workspace.prune(list(plugins.refs()))
         self.build_tabs()
         self.restore_layout()
+
+    def _open_manager(self) -> None:
+        if self.roi_tab is not None:
+            self.roi_tab.open_manager()
+
+    def _open_evaluation(self) -> None:
+        if self.roi_tab is not None:
+            self.roi_tab.open_evaluation()
 
     def _action(self, menu, text, shortcut, slot) -> QAction:
         action = QAction(text, self)

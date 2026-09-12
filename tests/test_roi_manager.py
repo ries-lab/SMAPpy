@@ -7,6 +7,8 @@ from smappy.io.hdf5 import save_localizations
 from smappy.locs import Localizations
 from smappy.group import GroupSettings
 from smappy.roi_manager import ROIProject, DensityPeaks, Histograms
+from smappy.roi_manager.pipeline import Step, errors, merged_values
+from smappy.plugins.roi import HistogramSettings, histograms
 
 
 def table(x, y=None):
@@ -44,8 +46,9 @@ def test_statistics_review_and_stale_results():
     assert not p.evaluate()['records']
     roi.reviewed = True
     run = p.evaluate()
-    values = run['records'][roi.id]['values']
+    values = merged_values(run['records'][roi.id])
     assert values['n_localizations'] == 3
+    assert [step['label'] for step in run['pipeline']] == ['Statistics']
     assert values['mean_precision_nm'] == 11
     assert values['mean_photons'] == 200
     assert len(p.results()) == 1
@@ -97,7 +100,7 @@ def test_empty_and_nonfinite_measurements():
     assert rows[0]['mean_photons_n'] == 2
     assert rows[1]['n_localizations'] == 0
     assert np.isnan(rows[1]['mean_photons'])
-    hist = Histograms().analyze(rows)
+    hist = histograms(rows, HistogramSettings(bins=10))
     assert hist['n_localizations']['counts'].sum() == 2
     assert hist['mean_photons']['counts'].sum() == 1
     assert hist['mean_photons']['missing'] == 1
@@ -193,24 +196,56 @@ def test_find_rings_and_blobs_review_evaluate_histogram():
         roi.reviewed = True
     p.evaluate()
     assert [row['n_localizations'] for row in p.results()] == [30] * 4
-    assert Histograms().analyze(p.results())['n_localizations']['counts'].sum() == 4
+    hist = histograms(p.results(), HistogramSettings(bins=10))
+    assert hist['n_localizations']['counts'].sum() == 4
     p.set_filters({'photons': [2000, None]})
     assert not p.find(s.id)
     assert not p.results()
 
 
-def test_plugin_error_does_not_abort_other_rois():
-    class Plugin:
-        name, version = 'example', '1'
+def test_a_failing_step_costs_its_columns_and_not_the_run():
+    from smappy.plugins import Plugin, Result
 
-        def evaluate(self, locs, geometry, parameters):
-            if not len(locs):
+    class Mean(Plugin):
+        name, version = 'example', '1'
+        scope = 'site'
+
+        def run(self, ctx, settings):
+            if not len(ctx.locs):
                 raise ValueError('empty ROI')
-            return {'x': float(locs['x_nm'].mean())}
+            return Result(data={'x': float(ctx.locs['x_nm'].mean())})
+
     p = ROIProject()
     s = p.add_source(table([0]))
-    p.add_roi(s.id, [1000, 0])
+    empty = p.add_roi(s.id, [1000, 0])
     good = p.add_roi(s.id, [0, 0])
-    run = p.evaluate(Plugin())
-    assert sum('error' in r for r in run['records'].values()) == 1
-    assert p.results('example')[0]['roi_id'] == good.id
+    step = Step(label='Mean', path='Test/Mean', plugin=Mean(), settings=None)
+    run = p.evaluate(steps=[step])
+    assert list(errors(run['records'][empty.id])) == ['Mean']
+    assert not errors(run['records'][good.id])
+    rows = p.results()
+    assert [row['roi_id'] for row in rows] == [good.id]
+    assert rows[0]['x'] == 0.0
+
+
+def test_two_steps_share_a_row_and_collisions_are_qualified():
+    from smappy.plugins import Plugin, Result
+
+    class Count(Plugin):
+        scope = 'site'
+
+        def run(self, ctx, settings):
+            return Result(data={'n': len(ctx.locs), 'only_here': 1})
+
+    p = ROIProject()
+    s = p.add_source(table([0, 10]))
+    p.set_filters({})
+    roi = p.add_roi(s.id, [0, 0])
+    steps = [Step(label='first', path='T/C', plugin=Count(), settings=None),
+             Step(label='second', path='T/C', plugin=Count(), settings=None)]
+    p.evaluate(steps=steps)
+    row = p.results()[0]
+    # 'n' is produced by both steps, so each is qualified; nothing is lost
+    assert row['first.n'] == 2 and row['second.n'] == 2
+    assert 'n' not in row
+    assert row['first.only_here'] == 1 and row['second.only_here'] == 1

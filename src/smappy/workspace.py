@@ -34,7 +34,9 @@ DEFAULT_TABS = (
     {"name": "Localize", "kind": "plugins", "header": "localize", "seed": "Localize/"},
     {"name": "Render", "kind": "render"},
     {"name": "Analysis", "kind": "plugins", "seed": "Analysis/"},
-    {"name": "ROI", "kind": "roi"},
+    # a tuple seeds in the order given: finding sites comes before summarising them
+    {"name": "ROI", "kind": "plugins", "header": "roi",
+     "seed": ("ROIManager/Segment/", "ROIManager/Analyze/")},
 )
 
 
@@ -103,10 +105,16 @@ class Workspace:
             refs = plugins.refs()
         tabs = []
         for spec in DEFAULT_TABS:
-            seed = spec.get("seed")
+            seed = spec.get("seed") or ()
+            prefixes = (seed,) if isinstance(seed, str) else tuple(seed)
+            # scope="site" is skipped: an evaluator measures one ROI and has no
+            # meaning outside the evaluation pipeline, so a tab's Run button
+            # could only fail.
             instances = [Instance(plugin=path)
+                         for prefix in prefixes
                          for path, ref in sorted(refs.items())
-                         if seed and path.startswith(seed) and ref.favorite]
+                         if path.startswith(prefix) and ref.favorite
+                         and ref.scope == "locs"]
             tabs.append(Tab(name=spec["name"], kind=spec.get("kind", "plugins"),
                             header=spec.get("header", ""), instances=instances))
         return cls(tabs=tabs)

@@ -12,8 +12,15 @@ project can also be built and evaluated from a script, with no window::
     project.find(source.id)
     project.evaluate()
     rows = project.results()
+
+The plugins themselves live in `smappy.plugins.roi`, with everything else, so
+that the folder tree stays the plugin tree; they are re-exported here because
+this is where one goes looking for them.
 """
 from .core import ROI, ROIProject
-from .plugins import DensityPeaks, Histograms, Statistics
+from ..plugins.roi import (DensityPeaks, Histograms, Statistics, density_peaks,
+                           histograms, site_statistics)
+from .pipeline import Step
 
-__all__ = ['ROI', 'ROIProject', 'DensityPeaks', 'Statistics', 'Histograms']
+__all__ = ['ROI', 'ROIProject', 'Step', 'DensityPeaks', 'Statistics', 'Histograms',
+           'density_peaks', 'site_statistics', 'histograms']

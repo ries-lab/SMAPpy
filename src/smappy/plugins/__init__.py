@@ -125,6 +125,58 @@ def param_specs(settings_cls: type, extra: Optional[Dict[str, ParamInfo]] = None
     return specs
 
 
+def settings_values(settings) -> Dict[str, Any]:
+    """A settings dataclass as a flat map of dotted names.
+
+    The same shape a form saves, so a workspace, a pipeline file and a plugin
+    panel all speak one language.
+    """
+    out: Dict[str, Any] = {}
+    if not dataclasses.is_dataclass(settings):
+        return out
+    for f in fields(settings):
+        if not f.init:
+            continue
+        value = getattr(settings, f.name)
+        if dataclasses.is_dataclass(value):
+            out.update({f"{f.name}.{k}": v for k, v in settings_values(value).items()})
+        else:
+            out[f.name] = value
+    return out
+
+
+def settings_from(settings_cls: Optional[type], values: Optional[Dict[str, Any]] = None):
+    """Build settings from a flat dotted map, tolerantly.
+
+    Saved values outlive the plugin that wrote them, so a name the plugin no
+    longer has is dropped and a name it has gained keeps its default: a renamed
+    field must cost that field, not the whole pipeline.
+    """
+    if settings_cls is None or not dataclasses.is_dataclass(settings_cls):
+        return None
+    nested: Dict[str, Dict[str, Any]] = {}
+    flat: Dict[str, Any] = {}
+    for key, value in (values or {}).items():
+        head, dot, rest = key.partition(".")
+        if dot:
+            nested.setdefault(head, {})[rest] = value
+        else:
+            flat[head] = value
+    kwargs = {}
+    specs = param_specs(settings_cls)
+    for name, spec in specs.items():
+        if spec.children is not None:
+            child = settings_from(spec.type, nested.get(name))
+            if child is not None:
+                kwargs[name] = child
+        elif name in flat:
+            kwargs[name] = flat[name]
+    try:
+        return settings_cls(**kwargs)
+    except (TypeError, ValueError):
+        return settings_cls()          # a value the class refuses costs the map
+
+
 class Selection:
     """Which localizations a plugin should *look at*.
 
@@ -192,11 +244,13 @@ class Context:
                  selection: Optional["Selection"] = None, layer: int = 0,
                  progress: Optional[Callable[[str], None]] = None,
                  stream: Optional[Callable[[str, Any], None]] = None,
-                 site=None, site_table: Optional[Sequence[Dict[str, Any]]] = None):
+                 site=None, site_table: Optional[Sequence[Dict[str, Any]]] = None,
+                 rois=None):
         self.session = session
         self.layer = layer
         self.site = site                    # the ROI, for a scope="site" plugin
         self.site_table = site_table        # the rows evaluation produced
+        self._rois = rois                   # a project without a session
         self._progress = progress
         self._stream = stream
         if locs is None:
@@ -209,7 +263,13 @@ class Context:
 
     @property
     def rois(self):
-        """The ROI manager's project, or None outside a session."""
+        """The ROI manager's project: given explicitly, else the session's.
+
+        The evaluation driver passes it directly, because it runs a pipeline
+        over a project that may not belong to any session.
+        """
+        if self._rois is not None:
+            return self._rois
         return None if self.session is None else self.session.rois
 
     def report(self, text: str) -> None:
@@ -234,7 +294,8 @@ class Context:
                        locs=self.locs if locs is None else locs,
                        selection=self.selection if selection is None else selection,
                        layer=self.layer, progress=self._progress,
-                       stream=self._stream, site=site, site_table=self.site_table)
+                       stream=self._stream, site=site, site_table=self.site_table,
+                       rois=self._rois)
 
 
 @dataclass

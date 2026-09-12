@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QDialog, QDialogButtonBox,
 from .. import config, plugins
 from ..workspace import Tab, Workspace
 
-BESPOKE = {"render": "the render view", "roi": "the ROI manager"}
+BESPOKE = {"render": "the render view"}
 
 
 def _buttons(*pairs) -> QHBoxLayout:

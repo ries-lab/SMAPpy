@@ -194,7 +194,13 @@ startup, and a workspace naming plugins that have gone is pruned with a line
 saying which.
 
 The ROI tab is one of these, holding `ROIManager/Segment/*` and
-`ROIManager/Analyze/*` pins -- ordinary run-once plugins -- plus its header.
+`ROIManager/Analyze/*` pins -- ordinary run-once plugins -- plus its header,
+which carries the geometry every ROI shares and the ways into the two windows.
+
+The chooser opened from a tab offers only `scope == "locs"` plugins.  That is a
+restriction of the contract and not of the folder: an evaluator has no site in a
+tab, so pinning one there could only produce a Run button that fails.  Any
+*runnable* plugin, from any branch of the tree, can still be pinned to any tab.
 
 ### The ROI evaluation pipeline is a separate window
 
@@ -210,6 +216,12 @@ be reordered, renamed, duplicated and removed, and the selected instance's
 parameter form on the right.  Its `+` opens the same plugin chooser, filtered to
 `scope == "site"`.  The list is `list[Instance]` -- the same type a tab holds --
 so ordering, renaming and duplicate handling are one implementation.
+
+A step whose plugin raises costs its own columns and not the ROI, nor the ROIs
+after it; the failure is recorded against that step.  Steps share a site's row,
+and a column keeps its plain name while only one step produces it -- qualified
+with the step's label when two would collide, so the common case reads as it
+always did and the ambiguous one is never silently lost.
 
 A pipeline is saveable to its own named file, so an NPC recipe can be kept with
 a project or sent to a colleague without dragging a window layout along.
@@ -285,7 +297,7 @@ plugin's `append` checkbox.
 2. *Done.* `Context`, the new `run`, `scope`; the five built-in plugins ported.
 3. *Done.* `Instance`, the tab widget, the plugin chooser dialog, lazy panels.
 4. *Done.* The workspace file, the shipped default, the preferences dialog.
-5. The ROI rewrite and the Evaluation window.
+5. *Done.* The ROI rewrite, the pipeline, and the Evaluation window.
 6. The `Writer` registry, the File tab, and the `/gui` group in the file format.
 
 Each step leaves the GUI working; nothing here needs a flag day.

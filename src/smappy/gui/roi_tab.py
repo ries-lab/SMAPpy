@@ -1,8 +1,11 @@
-"""The ROI tab: what an analysis ROI is, and what to compute on it.
+"""The ROI tab's header: what an analysis ROI *is*, and the way in.
 
-Choosing and judging ROIs happens in the ROI manager window
-(`roi_window.py`); this tab holds the geometry, the candidate finder and the
-evaluation, which apply to every ROI alike.
+The tab itself is an ordinary `PluginTab` over whatever the user pinned from
+`ROIManager/*` -- the segmenters and the analyses, ordinary run-once plugins.
+What cannot be a pinned plugin sits above them, in this header: the geometry
+every ROI shares, the way into the ROI manager window where sites are chosen
+and judged, and the way into the evaluation window, whose ordered pipeline is a
+different object from a tab's list of pins.
 """
 from __future__ import annotations
 
@@ -10,22 +13,23 @@ from typing import Dict, Optional
 
 import numpy as np
 from PySide6.QtCore import QSize, Qt
-from PySide6.QtWidgets import (QComboBox, QDoubleSpinBox, QFormLayout, QHBoxLayout,
-                               QHeaderView, QLabel, QMessageBox, QProgressDialog,
-                               QPushButton, QScrollArea, QSpinBox, QTableWidget,
+from PySide6.QtWidgets import (QComboBox, QDoubleSpinBox, QFormLayout,
+                               QHeaderView, QLabel, QMessageBox,
+                               QPushButton, QScrollArea, QTableWidget,
                                QTableWidgetItem, QVBoxLayout, QWidget)
 
-from ..roi_manager.plugins import DensityPeaks, Histograms
+from ..roi_manager import pipeline as pipeline_module
 from ..session import Session
 from .widgets import CONTROL_WIDTH, CollapsibleSection
 
 
-class ROITab(QWidget):
+class ROIHeader(QWidget):
     def __init__(self, session: Session, view=None, parent=None):
         super().__init__(parent)
         self.session = session
         self.view = view
         self.manager: Optional[QWidget] = None     # not `window`: that is a QWidget method
+        self.evaluation: Optional[QWidget] = None
         self._loading = False
 
         outer = QVBoxLayout(self)
@@ -78,44 +82,15 @@ class ROITab(QWidget):
         form.addRow(self.from_region)
         layout.addWidget(CollapsibleSection("geometry", geometry, expanded=True))
 
-        # ------------------------------------------------------------ find
-        find = QWidget()
-        fform = QFormLayout(find)
-        fform.setContentsMargins(0, 0, 0, 0)
-        fform.setVerticalSpacing(2)
-        self.finder: Dict[str, QWidget] = {}
-        labels = {"bin_nm": "bin", "sigma_nm": "smoothing", "separation_nm": "separation",
-                  "count_radius_nm": "count radius", "min_count": "min localizations"}
-        for name, default in DensityPeaks.defaults.items():
-            if isinstance(default, int) and not isinstance(default, bool):
-                w = QSpinBox(minimum=1, maximum=10 ** 6)
-                w.setValue(default)
-            else:
-                w = QDoubleSpinBox(minimum=0.1, maximum=1e6, decimals=1, suffix=" nm")
-                w.setValue(float(default))
-            w.setKeyboardTracking(False)
-            self.finder[name] = w
-            fform.addRow(labels.get(name, name), w)
-        self.find_button = QPushButton("Find candidates")
-        self.find_button.setToolTip("density peaks in this file's filtered localizations")
-        self.find_button.clicked.connect(self._find)
-        fform.addRow(self.find_button)
-        layout.addWidget(CollapsibleSection("find", find, expanded=True))
-
         # -------------------------------------------------------- evaluate
         evaluate = QWidget()
         elayout = QVBoxLayout(evaluate)
         elayout.setContentsMargins(0, 0, 0, 0)
-        brow = QHBoxLayout()
-        self.evaluate_button = QPushButton("Evaluate all")
-        self.evaluate_button.setToolTip("statistics for every included ROI")
-        self.evaluate_button.clicked.connect(self._evaluate)
-        self.histogram_button = QPushButton("Histograms")
-        self.histogram_button.setToolTip("histograms of the current results")
-        self.histogram_button.clicked.connect(self._histograms)
-        brow.addWidget(self.evaluate_button)
-        brow.addWidget(self.histogram_button)
-        elayout.addLayout(brow)
+        self.evaluate_button = QPushButton("Evaluation pipeline...")
+        self.evaluate_button.setToolTip("choose the evaluators to run on every ROI, "
+                                        "order them and set them up; opens its own window")
+        self.evaluate_button.clicked.connect(self.open_evaluation)
+        elayout.addWidget(self.evaluate_button)
         self.results = QTableWidget(0, 2)
         self.results.setHorizontalHeaderLabels(["measure", "value"])
         self.results.verticalHeader().setVisible(False)
@@ -232,40 +207,32 @@ class ROITab(QWidget):
         self.summary.setText(f"added the drawn {region.kind} as an ROI")
 
     # --------------------------------------------------------------- work
-    def _find(self) -> None:
-        file_id = self.current_file()
-        if file_id is None:
-            return
-        parameters = {name: (w.value() if isinstance(w, QSpinBox) else float(w.value()))
-                      for name, w in self.finder.items()}
-        try:
-            found = self.project.find(file_id, parameters=parameters)
-        except Exception as e:
-            QMessageBox.warning(self, "find candidates", f"{type(e).__name__}: {e}")
-            return
-        self._update_counts()
-        self._notify()
-        self.summary.setText(f"{len(found)} candidates found")
+    def open_evaluation(self) -> None:
+        """The pipeline window, one per session, reusing what it was left with.
 
-    def _evaluate(self) -> None:
+        The pipeline itself lives on the project, not on the window: closing
+        the window must not lose the steps, and the project is what gets saved
+        into the localization file beside the results they produce.
+        """
+        from .evaluation import EvaluationWindow
         project = self.project
-        ids = [r.id for r in project.rois.values() if r.use]
-        if not ids:
-            QMessageBox.information(self, "evaluate", "no included ROI")
-            return
-        progress = QProgressDialog("evaluating ROIs...", "stop", 0, len(ids), self)
-        progress.setWindowModality(Qt.WindowModal)
+        if not project.pipeline:
+            project.pipeline = pipeline_module.default_instances()
+        if self.evaluation is None:
+            self.evaluation = EvaluationWindow(self.session, project.pipeline, self)
+            self.evaluation.ran.connect(self._evaluated)
+        self.evaluation.show()
+        self.evaluation.raise_()
 
-        def report(done, total):
-            progress.setValue(done)
-
-        run = project.evaluate(progress=report)
-        progress.setValue(len(ids))
-        failed = sum(1 for r in run["records"].values() if "error" in r)
+    def _evaluated(self, run) -> None:
+        failed = sum(1 for record in run["records"].values()
+                     if pipeline_module.errors(record))
+        self.project.pipeline = self.evaluation.save_values()
         self._update_counts()
         self._show_result()
-        self.summary.setText(f"{len(run['records']) - failed} evaluated"
-                             + (f", {failed} failed" if failed else ""))
+        self.summary.setText(f"{len(run['records'])} evaluated"
+                             + (f", {failed} with a failing step" if failed else ""))
+        self._notify()
 
     def _show_result(self) -> None:
         project = self.project
@@ -279,31 +246,12 @@ class ROITab(QWidget):
             self.results.setRowCount(1)
             self.results.setItem(0, 0, QTableWidgetItem("not evaluated"))
             return
-        values = record.get("values") or {"error": record.get("error", "")}
+        values = dict(pipeline_module.merged_values(record))
+        values.update({f"{label} failed": text
+                       for label, text in pipeline_module.errors(record).items()})
         self.results.setRowCount(len(values))
         for row, (name, value) in enumerate(sorted(values.items())):
             self.results.setItem(row, 0, QTableWidgetItem(name))
             text = f"{value:.4g}" if isinstance(value, (int, float)) else str(value)
             self.results.setItem(row, 1,
                                  QTableWidgetItem(text + (" (outdated)" if stale else "")))
-
-    def _histograms(self) -> None:
-        rows = self.project.results()
-        if not rows:
-            QMessageBox.information(self, "histograms", "evaluate some ROIs first")
-            return
-        data = Histograms().analyze(rows, {"bins": 20})
-        import matplotlib
-        matplotlib.use("QtAgg")
-        import matplotlib.pyplot as plt
-        fig, axes = plt.subplots(len(data), 1, figsize=(5, 2.2 * len(data)),
-                                 constrained_layout=True)
-        for ax, (field, d) in zip(np.atleast_1d(axes), data.items()):
-            ax.bar(d["edges"][:-1], d["counts"], width=np.diff(d["edges"]), align="edge",
-                   color="0.6", edgecolor="0.3")
-            ax.set_xlabel(field.replace("_", " "))
-            ax.set_ylabel("ROIs")
-            if d["missing"]:
-                ax.set_title(f"{d['missing']} missing", fontsize=8, color="0.4")
-        fig.canvas.manager.set_window_title(f"ROI histograms ({len(rows)} ROIs)")
-        fig.show()
