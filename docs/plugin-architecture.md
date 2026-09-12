@@ -164,9 +164,12 @@ calibration buttons -- so File and Analysis are nothing but ordinary tabs, and a
 special one costs a header, not a class.
 
 Because a fresh install would otherwise be a blank window, smappy ships a
-default workspace seeding File, Localize, Render, Analysis and ROI with sensible
-pins.  *Empty by default* applies to tabs the user adds.  Shipping it as a
-workspace rather than as code also gives us *Reset to defaults* for free.
+default workspace.  It is *seeded* rather than listed: each shipped tab names a
+path prefix used once, at first run, to pin the installed plugins that ask for
+it (`Plugin.favorite`).  So the defaults adapt to what is installed, and after
+that run the workspace is data and a tab is whatever the user made of it -- the
+prefix has no further meaning.  *Empty by default* applies to tabs the user
+adds.  This also gives *Reset tabs to defaults* for free.
 
 ### The tab shows favourites; a chooser shows the tree
 
@@ -176,9 +179,19 @@ user's order, one open at a time, showing only the plugin's main parameters
 menu gives move up / move down / rename / duplicate / unpin / detach.
 
 A `+` button opens the **plugin chooser**: the full tree, collapsed, with search
-and a description pane.  Picking a leaf pins a new instance to the current tab.
-One tree widget exists, built once, instead of every tab rendering its own copy,
-and the tab has a single layout to build and to persist.
+and a description pane, built from `PluginRef`s so that opening it imports
+nothing.  Picking a leaf pins a new instance to the current tab.  One tree
+widget exists, built once, instead of every tab rendering its own copy, and the
+tab has a single layout to build and to persist.  The chooser also shows a count
+of any files that could not be read, which is where the scanner's diagnostics
+surface.
+
+A section's panel is built the first time it is opened, not when the tab is.
+Together with the scanner that means starting smappy imports no plugin at all,
+and a tab of thirty costs thirty parsed files.  A pin whose plugin is no longer
+installed becomes a section with a message in it rather than an exception during
+startup, and a workspace naming plugins that have gone is pruned with a line
+saying which.
 
 The ROI tab is one of these, holding `ROIManager/Segment/*` and
 `ROIManager/Analyze/*` pins -- ordinary run-once plugins -- plus its header.
@@ -228,9 +241,11 @@ Geometry is machine-specific -- it travels badly to a colleague's screen and is
 the only part that is worthless as provenance -- while the plugin state is small
 (a few kB of JSON) and is genuinely a record of how the file was produced.  A
 preference turns the embedding off for anyone who wants their data files to
-contain only data.  Values are read back tolerantly through the `ParamSpec`
-types: an unknown key is dropped with a warning and a missing one keeps its
-default, so a file survives a plugin renaming a field.
+contain only data.  Values are a flat map of dotted names read off the form
+widgets -- so a form left mid-edit with an unparseable number is still saveable,
+and a panel never opened keeps the values it was given rather than being
+blanked -- and are read back a field at a time: a name the plugin no longer has
+costs that field and not the form.
 
 Localizations, layers and ROI geometry are unaffected; they stay where they are.
 
@@ -265,11 +280,11 @@ plugin's `append` checkbox.
 
 ## Order of work
 
-1. `PluginRef`, the AST scanner, the roots, the preferences for extra folders.
-   Registry keeps its `get`/`available`/`tree` API on top of refs.
-2. `Context`, the new `run`, `scope`; port the five built-in plugins.
-3. `Instance`, the tab widget, the plugin chooser dialog, lazy panels.
-4. The workspace file, the shipped default, the preferences dialog.
+1. *Done.* `PluginRef`, the AST scanner, the roots, `smappy.config`.
+   The registry keeps its `get`/`available`/`tree` API on top of refs.
+2. *Done.* `Context`, the new `run`, `scope`; the five built-in plugins ported.
+3. *Done.* `Instance`, the tab widget, the plugin chooser dialog, lazy panels.
+4. *Done.* The workspace file, the shipped default, the preferences dialog.
 5. The ROI rewrite and the Evaluation window.
 6. The `Writer` registry, the File tab, and the `/gui` group in the file format.
 

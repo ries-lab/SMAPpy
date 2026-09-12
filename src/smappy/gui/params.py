@@ -6,7 +6,7 @@ with its own form inside, so a fitter assembled from parts reads as one.
 from __future__ import annotations
 
 import dataclasses
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFormLayout,
@@ -202,6 +202,38 @@ class SettingsForm(QWidget):
     def set(self, settings) -> None:
         for name, f in self.fields.items():
             f.set(getattr(settings, name))
+
+    def values(self) -> Dict[str, Any]:
+        """Every field by dotted name, for saving.
+
+        Reads the widgets rather than building the settings object: a form
+        left mid-edit with a bad number still has to be saveable, and a value
+        that will not parse is simply left out.
+        """
+        out: Dict[str, Any] = {}
+        for name, f in self.fields.items():
+            if isinstance(f, SettingsForm):
+                out.update({f"{name}.{k}": v for k, v in f.values().items()})
+                continue
+            try:
+                out[name] = f.value()
+            except (ValueError, TypeError):
+                pass
+        return out
+
+    def restore(self, values: Dict[str, Any]) -> List[str]:
+        """Set what we recognise and report what we did not.
+
+        Saved values outlive the plugin that wrote them, so a renamed or
+        removed field must cost that field and not the whole form.
+        """
+        dropped = []
+        for path, value in values.items():
+            try:
+                self.set_values({path: value})
+            except (KeyError, AttributeError, ValueError, TypeError):
+                dropped.append(path)
+        return dropped
 
     def set_values(self, values: Dict[str, Any]) -> None:
         """Set some fields by dotted name, without firing `field_changed`."""

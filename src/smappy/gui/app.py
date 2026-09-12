@@ -13,18 +13,18 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QDialog, QFileDialog, QH
                                QMainWindow, QScrollArea, QTabWidget, QVBoxLayout,
                                QWidget)
 
-from .. import plugins
+from .. import plugins, workspace as workspace_module
 from ..io.formats import (csv_columns, guess_csv_mapping, load as load_any,
                           name_filter, reader_for)
 from .dialogs import CsvMappingDialog, PixelSizeDialog
 from ..session import GROUPED_BY_DEFAULT, Session
-from .plugin_panel import PluginPanel
+from ..workspace import Workspace
+from .plugin_tab import PluginTab
+from .preferences import PreferencesDialog
 from .render_tab import RenderTab
 from .roi_tab import ROITab
 from .render_view import RenderToolBar, RenderView
-from .widgets import CONTROL_WIDTH, CollapsibleSection, detach_to_window
-
-TABS = ("Localize", "Render", "Analysis", "ROI")
+from .widgets import CONTROL_WIDTH
 
 
 class LoadTask(QThread):
@@ -64,131 +64,6 @@ class LoadTask(QThread):
             self.failed.emit(f"{e}")
 
 
-class PluginTab(QWidget):
-    """Every plugin registered under one tab, as collapsible sections.
-
-    Without *all* ticked only the favourites show, flat; with it the full
-    tree, grouped by the path between the tab and the plugin.  A star on a
-    section toggles favourite (kept in the user's settings), the arrow moves
-    the plugin to its own window, and one section is open at a time.
-    """
-
-    def __init__(self, tab: str, session: Session, tools=(), parent=None):
-        """``tools`` are (label, tooltip, callback) buttons above the plugins,
-        for things that are whole applications rather than plugins."""
-        super().__init__(parent)
-        self.tab = tab
-        self.settings = QSettings("smappy", "gui")
-        self.sections: List[CollapsibleSection] = []
-        self.panels: Dict[str, PluginPanel] = {}
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(4, 4, 4, 4)
-        top = QHBoxLayout()
-        self.search = QLineEdit(placeholderText="find plugin...")
-        self.search.setClearButtonEnabled(True)
-        self.search.textChanged.connect(self._filter)
-        self.all = QCheckBox("all")
-        self.all.setToolTip("every plugin, as a tree; otherwise the favourites")
-        self.all.setChecked(self.settings.value(f"{tab}/all", False, type=bool))
-        self.all.toggled.connect(self.rebuild)
-        top.addWidget(self.search, 1)
-        top.addWidget(self.all)
-        layout.addLayout(top)
-        if tools:
-            row = QHBoxLayout()
-            for label, tip, callback in tools:
-                button = QPushButton(label)
-                button.setToolTip(tip)
-                button.clicked.connect(callback)
-                row.addWidget(button)
-            row.addStretch(1)
-            layout.addLayout(row)
-        self.inner = QWidget()
-        self.stack = QVBoxLayout(self.inner)
-        self.stack.setContentsMargins(0, 0, 0, 0)
-        scroll = QScrollArea(widgetResizable=True)
-        scroll.setWidget(self.inner)
-        scroll.setFrameShape(QScrollArea.NoFrame)
-        layout.addWidget(scroll)
-        for path, cls in plugins.available(tab + "/").items():
-            self.panels[path] = PluginPanel(cls, session)
-        self.rebuild()
-
-    # ---------------------------------------------------------- favourites
-    def is_favorite(self, path: str) -> bool:
-        return self.settings.value(f"favorite/{path}", self.panels[path].plugin.favorite,
-                                   type=bool)
-
-    def _set_favorite(self, path: str, on: bool) -> None:
-        self.settings.setValue(f"favorite/{path}", on)
-        if not self.all.isChecked() and not on:
-            self.rebuild()
-
-    # ------------------------------------------------------------- building
-    def rebuild(self) -> None:
-        self.settings.setValue(f"{self.tab}/all", self.all.isChecked())
-        # take every panel out of its section before the sections go
-        for section in self.sections:
-            if section.content.parent() is section.frame:
-                section.detach()
-        while self.stack.count():
-            item = self.stack.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-        self.sections = []
-        prefix = len(self.tab) + 1
-        shown = {p: panel for p, panel in self.panels.items()
-                 if self.all.isChecked() or self.is_favorite(p)}
-        if self.all.isChecked():
-            groups: Dict[str, List[str]] = {}
-            for path in shown:
-                group, _, _ = path[prefix:].rpartition("/")
-                groups.setdefault(group, []).append(path)
-            for group, paths in groups.items():
-                box = QWidget()
-                inner = QVBoxLayout(box)
-                inner.setContentsMargins(0, 0, 0, 0)
-                for path in paths:
-                    inner.addWidget(self._section(path, path.rsplit("/", 1)[-1]))
-                if group:
-                    self.stack.addWidget(CollapsibleSection(group, box, expanded=True))
-                else:
-                    self.stack.addWidget(box)
-        else:
-            for path in shown:
-                self.stack.addWidget(self._section(path, path[prefix:]))
-        if not shown:
-            self.stack.addWidget(QLabel("no plugins yet" if not self.panels
-                                        else "no favourites: tick 'all'"))
-        self.stack.addStretch(1)
-        if self.sections:
-            self.sections[0].set_expanded(True)
-        self._filter(self.search.text())
-
-    def _section(self, path: str, title: str) -> CollapsibleSection:
-        panel = self.panels[path]
-        if panel.parent() is not None:         # still inside a floating window
-            panel.setParent(None)
-        section = CollapsibleSection(title, panel, detachable=True,
-                                     star=self.is_favorite(path))
-        section.toggled.connect(lambda on, s=section: self._one_open(s, on))
-        section.detach_requested.connect(lambda s=section: detach_to_window(s, self.window()))
-        section.starred.connect(lambda on, p=path: self._set_favorite(p, on))
-        self.sections.append(section)
-        return section
-
-    def _one_open(self, opened: CollapsibleSection, on: bool) -> None:
-        if on:
-            for s in self.sections:
-                if s is not opened and s.button.isChecked():
-                    s.set_expanded(False)
-
-    def _filter(self, text: str) -> None:
-        text = text.lower()
-        for s in self.sections:
-            s.setVisible(text in s.title.lower())
-
-
 def _keys(standard, fallback: str):
     """The platform's standard sequence, plus the fallback if it is different
     (a duplicate would make the shortcut ambiguous and dead)."""
@@ -221,16 +96,16 @@ class ControlWindow(QMainWindow):
         self.session = session
         self.render_window = render
         self.setWindowTitle("smappy")
+        self.workspace = workspace_module.load()
+        missing = self.workspace.prune(list(plugins.refs()))
+        if missing:
+            print("workspace: dropped pins for plugins that are not installed: "
+                  + ", ".join(sorted(set(missing))))
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
-        self.tabs.addTab(PluginTab("Localize", session, tools=[
-            ("Bead calibration...", "build an experimental spline PSF calibration from "
-             "bead z-stacks; opens its own window", self.open_calibration)]), "Localize")
-        self.tabs.addTab(RenderTab(session, render.view), "Render")
-        self.tabs.addTab(PluginTab("Analysis", session), "Analysis")
-        self.roi_tab = ROITab(session, render.view)
-        self.tabs.addTab(self.roi_tab, "ROI")
-        self.tabs.setCurrentIndex(1)
+        self.plugin_tabs: List[PluginTab] = []
+        self.roi_tab: Optional[ROITab] = None
+        self.build_tabs()
         self.setCentralWidget(self.tabs)
         # tall on purpose: with a file open the Render tab's own content wants
         # some 700 px, and scrolling for the display settings every time is
@@ -260,6 +135,11 @@ class ControlWindow(QMainWindow):
         self.undo_action = self._action(menu, "Undo", QKeySequence.Undo, session.undo)
         self._load_locked = [open_, add, image, save, save_as, self.undo_action]
         menu.addSeparator()
+        self._action(menu, "Save workspace as...", None, self.save_workspace_as)
+        self._action(menu, "Open workspace...", None, self.load_workspace_from)
+        self._action(menu, "Preferences...", QKeySequence.Preferences,
+                     self.open_preferences)
+        menu.addSeparator()
         quit_ = self._action(menu, "Quit", None, lambda: QApplication.instance().quit())
         quit_.setShortcuts(_keys(QKeySequence.Quit, "Ctrl+Q"))
         window_shortcuts(self, with_quit=False)
@@ -276,8 +156,113 @@ class ControlWindow(QMainWindow):
         self._action(view, "Reset view", "Ctrl+0", render.view.reset)
         self._action(view, "Show render window", None, render.show)
         QApplication.instance().aboutToQuit.connect(self.stop_loading)
+        QApplication.instance().aboutToQuit.connect(self.save_workspace)
         session.on_change(self._on_session)
         self._on_session("locs")
+        self.restore_layout()
+
+    # --------------------------------------------------------------- tabs
+    def header_for(self, name: str) -> Optional[QWidget]:
+        """A "special" tab is an ordinary one with controls above the list.
+
+        Which is why ROImanager and Localize need no class of their own.
+        """
+        if name != "localize":
+            return None
+        box = QWidget()
+        row = QHBoxLayout(box)
+        row.setContentsMargins(0, 0, 0, 0)
+        button = QPushButton("Bead calibration...")
+        button.setToolTip("build an experimental spline PSF calibration from "
+                          "bead z-stacks; opens its own window")
+        button.clicked.connect(self.open_calibration)
+        row.addWidget(button)
+        row.addStretch(1)
+        return box
+
+    def build_tabs(self) -> None:
+        """(Re)build the tab strip from the workspace."""
+        current = self.tabs.tabText(self.tabs.currentIndex()) if self.tabs.count() else ""
+        for tab in self.plugin_tabs:                # keep the values before the
+            tab.save_values()                       # widgets go
+        while self.tabs.count():
+            self.tabs.removeTab(0)
+        self.plugin_tabs = []
+        for tab in self.workspace.tabs:
+            if tab.kind == "render":
+                widget = RenderTab(self.session, self.render_window.view)
+            elif tab.kind == "roi":
+                widget = self.roi_tab = ROITab(self.session, self.render_window.view)
+            else:
+                widget = PluginTab(tab, self.session, header=self.header_for(tab.header))
+                widget.changed.connect(self.save_workspace)
+                self.plugin_tabs.append(widget)
+            self.tabs.addTab(widget, tab.name)
+        wanted = self.workspace.layout.get("active_tab", current) or "Render"
+        for i in range(self.tabs.count()):
+            if self.tabs.tabText(i) == wanted:
+                self.tabs.setCurrentIndex(i)
+                break
+        for tab, widget in zip(self.workspace.tabs, self._tab_widgets()):
+            opened = self.workspace.layout.get("open", {}).get(tab.name)
+            if opened and isinstance(widget, PluginTab):
+                widget.open_section(opened)
+
+    def _tab_widgets(self) -> List[QWidget]:
+        return [self.tabs.widget(i) for i in range(self.tabs.count())]
+
+    def open_preferences(self) -> None:
+        before = [(t.name, t.kind) for t in self.workspace.tabs]
+        PreferencesDialog(self.workspace, self).exec()
+        if [(t.name, t.kind) for t in self.workspace.tabs] != before:
+            self.build_tabs()
+        self.save_workspace()
+
+    # ---------------------------------------------------------- workspace
+    def collect_workspace(self) -> Workspace:
+        """The workspace as it stands: values, order, and where the window is."""
+        opened = {}
+        for tab, widget in zip(self.workspace.tabs, self._tab_widgets()):
+            if isinstance(widget, PluginTab):
+                widget.save_values()
+                which = widget.open_instance()
+                if which:
+                    opened[tab.name] = which
+        self.workspace.layout = {
+            "active_tab": self.tabs.tabText(self.tabs.currentIndex()),
+            "open": opened,
+            "geometry": bytes(self.saveGeometry().toBase64()).decode(),
+        }
+        return self.workspace
+
+    def save_workspace(self, path=None) -> None:
+        try:
+            self.collect_workspace().save(path)
+        except OSError as e:                 # a read-only config dir must not
+            print(f"could not save the workspace: {e}")      # cost you the quit
+
+    def restore_layout(self) -> None:
+        geometry = self.workspace.layout.get("geometry")
+        if not geometry:
+            return
+        from PySide6.QtCore import QByteArray
+        self.restoreGeometry(QByteArray.fromBase64(geometry.encode()))
+
+    def save_workspace_as(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(self, "Save workspace", "",
+                                              "Workspace (*.yaml)")
+        if path:
+            self.collect_workspace().save(path)
+
+    def load_workspace_from(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "Open workspace", "",
+                                              "Workspace (*.yaml)")
+        if not path:
+            return
+        self.workspace = workspace_module.load(path)
+        self.workspace.prune(list(plugins.refs()))
+        self.build_tabs()
+        self.restore_layout()
 
     def _action(self, menu, text, shortcut, slot) -> QAction:
         action = QAction(text, self)
