@@ -299,7 +299,6 @@ class ROIManagerWindow(QMainWindow):
         roi_side = QWidget()
         rlayout = QVBoxLayout(roi_side)
         rlayout.setContentsMargins(0, 0, 0, 0)
-        rlayout.addWidget(self.roi_pane, 1)
         tools = QHBoxLayout()
         tools.setSpacing(3)
         self.polygon_button = QPushButton("Polygon")
@@ -321,10 +320,20 @@ class ROIManagerWindow(QMainWindow):
         for b in (self.polygon_button, self.direction_button,
                   self.clear_shape_button, self.clear_line_button):
             tools.addWidget(b)
+        # the tools that say what to draw sit above the image they draw into;
+        # *Add*, the one button that is pressed over and over, sits directly
+        # under it, where the eye already is after judging the ROI
         rlayout.addLayout(tools)
+        rlayout.addWidget(self.roi_pane, 1)
         self.add_button = QPushButton("Add")
         self.add_button.setToolTip("store the drafted ROI (Enter)")
         self.add_button.setShortcut(Qt.Key_Return)
+        self.add_button.setDefault(True)
+        self.add_button.setStyleSheet(
+            "QPushButton { background: #2e9e4f; color: white; font-weight: bold;"
+            " border: 1px solid #24783c; border-radius: 3px; padding: 5px; }"
+            "QPushButton:pressed { background: #24783c; }"
+            "QPushButton:disabled { background: #8a8a8a; border-color: #6e6e6e; }")
         self.add_button.clicked.connect(self._add)
         rlayout.addWidget(self.add_button)
 
