@@ -53,6 +53,11 @@ def fit_bead_diagnostics(result, bead_ids=None, plane_stride=5):
     """
     from ..psf import SplinePSF
     cal, beads = result.calibration, result.beads
+    if not hasattr(beads, 'volumes'):
+        raise TypeError('a dual-colour result has two channels per bead: use '
+                        'fit_paired_bead_diagnostics for the two-channel fit, '
+                        'or calibrate.dual.channel_result(result, channel) to '
+                        'look at one channel on its own')
     if not isinstance(plane_stride, (int, np.integer)) or plane_stride < 1:
         raise ValueError('plane_stride must be a positive integer')
     ids = list(np.flatnonzero(result.accepted) if bead_ids is None else bead_ids)
@@ -121,3 +126,122 @@ def fit_bead_diagnostics(result, bead_ids=None, plane_stride=5):
             'y_px': best.theta[:, 1], 'log_likelihood': best.logl,
             'fit_valid': valid,
             'at_z_boundary': (best.theta[:, 4] < 1) | (best.theta[:, 4] > cal.shape[0]-1)}
+
+
+def paired_bead_rois(result, bead_ids=None, plane_stride=5):
+    """Both channels of every bead pair, as camera ADU, plane by plane.
+
+    The paired collection holds the two channels already brought into one
+    frame -- the secondary de-mirrored and shifted onto the main by the
+    transformation -- which is the frame its channel models were built in, so
+    the pair can go straight into the global fitter with an identity link.
+    """
+    r = result.registration
+    beads = r.beads
+    if beads.volumes.ndim != 5:
+        raise ValueError('paired diagnostics need a dual-colour result')
+    if not isinstance(plane_stride, (int, np.integer)) or plane_stride < 1:
+        raise ValueError('plane_stride must be a positive integer')
+    ids = list(np.flatnonzero(r.accepted) if bead_ids is None else bead_ids)
+    if not set(ids).issubset(range(len(beads.records))):
+        raise ValueError('unknown bead pair ID')
+    cal = r.calibration
+    size = beads.settings.roi_size-4    # leave two pixels for fitted lateral shifts
+    radius = size//2
+    c = beads.volumes.shape[-1]//2
+    cut = (slice(None), slice(c-radius, c+radius+1), slice(c-radius, c+radius+1))
+    raw, expected, identity = [], [], []
+    for i in ids:
+        rec = beads.records[i]
+        # brightness_adu of a pair is the sum of both channels', which is what
+        # the paired volumes were divided by; the background was removed per
+        # channel and has to go back per channel.
+        background = np.array([[[part['background_adu']]]
+                               for part in rec['channel_records']], float)
+        for plane in range(2, beads.volumes.shape[2]-2, plane_stride):
+            index = plane+r.shifts[i, 0]-r.z_crop_start
+            if not 2 <= index <= cal.shape[0]-2:
+                continue
+            pair = beads.volumes[i][(slice(None), plane)+cut[1:]]
+            raw.append(pair*rec['brightness_adu']+background)
+            expected.append(cal.z_index_to_nm(index))
+            identity.append((i, plane))
+    # The aligned average pair as its own curve, at a representative scale.
+    average = np.asarray(r.channel_raw_psfs, float)
+    brightness = float(np.median([beads.records[i]['brightness_adu'] for i in ids]))
+    background = np.array([[[np.median([beads.records[i]['channel_records'][ch]
+                                        ['background_adu'] for i in ids])]]
+                           for ch in range(average.shape[0])], float)
+    ac = average.shape[-1]//2
+    acut = (slice(None), slice(ac-radius, ac+radius+1), slice(ac-radius, ac+radius+1))
+    for plane in range(2, average.shape[1]-2, plane_stride):
+        pair = average[(slice(None), plane)+acut[1:]]
+        raw.append(np.maximum(pair*brightness+background, 0))
+        expected.append(cal.z_index_to_nm(plane))
+        identity.append((-1, plane))
+    if not raw:
+        raise ValueError('no bead planes available for validation')
+    return (np.ascontiguousarray(raw, np.float32), np.asarray(expected),
+            np.asarray(identity))
+
+
+def fit_paired_bead_diagnostics(result, bead_ids=None, plane_stride=5):
+    """Refit the calibration beads with the *two-channel* fitter.
+
+    This is the workflow a dual-colour dataset is actually fitted with --
+    `smappy.dualfit`'s global spline with x, y and z shared and the photons
+    free per channel -- run backwards on the beads that built the calibration.
+    There is one z per bead *pair*, not one per channel, which is the whole
+    point of the global fit, so the result is a single set of curves.
+
+    In-sample, like the single-channel version: for a real accuracy estimate
+    pass IDs that were excluded when the calibration was built.
+    """
+    from ..dualfit import LINK_XYZ
+    from ..psf import GlobalSplinePSF
+
+    r = result.registration
+    models = list(r.channel_calibrations)
+    if len(models) != 2:
+        raise ValueError('paired diagnostics need two channel models')
+    raw, expected, identity = paired_bead_rois(result, bead_ids, plane_stride)
+    cal = r.calibration
+    model = GlobalSplinePSF(tuple(models), shared=LINK_XYZ)
+    # The production link, on ROIs that are already aligned: no sub-pixel
+    # offset and no local scale left to correct, only the splitter's photon
+    # ratio, so that channel 1's photons are read in channel 0's units.
+    link = np.zeros((len(raw), 2, 2, 5), np.float32)
+    link[:, 1] = 1.0
+    link[:, 1, 1, 2] = float(result.calibration.parameters.get(
+        'secondary_main_brightness_ratio', 1.0)) or 1.0
+
+    best = None
+    zmax = cal.shape[0]-1
+    for z in np.linspace(1, zmax, 5):
+        model.z_start_nm = float(cal.z_index_to_nm(z))
+        fit = model.fit(raw, link=link, iterations=75)
+        if best is None:
+            best = fit
+        else:
+            keep = np.isfinite(fit.logl) & (~np.isfinite(best.logl) | (fit.logl > best.logl))
+            for key in ('theta', 'crlb', 'logl', 'iterations'):
+                getattr(best, key)[keep] = getattr(fit, key)[keep]
+    values = model.unpack(best)
+    fitted = values['z_nm']
+    valid = np.isfinite(best.logl) & np.isfinite(best.theta).all(axis=1)
+    fitted = np.where(valid, fitted, np.nan)
+    error = fitted-expected
+    centered = error.copy()
+    for i in list(np.unique(identity[:, 0])):
+        use = identity[:, 0] == i
+        if np.any(use & valid):
+            centered[use] -= np.median(error[use & valid])
+    z_index = best.theta[:, model.slot(4)]
+    return {'bead_id': identity[:, 0], 'plane': identity[:, 1],
+            'expected_z_nm': expected, 'fitted_z_nm': fitted,
+            'centered_error_nm': centered,
+            'x_px': values['x_roi'], 'y_px': values['y_roi'],
+            'ratio': np.where(valid, values['ratio'], np.nan),
+            'photons': values['photons'],
+            'log_likelihood': best.logl, 'fit_valid': valid,
+            'at_z_boundary': (z_index < 1) | (z_index > cal.shape[0]-1)}

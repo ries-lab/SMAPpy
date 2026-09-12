@@ -300,16 +300,34 @@ def test_brightness_range_and_integer_saturation_reject_but_retain_beads():
 
 
 def test_calibration_save_defaults_and_single_extension(tmp_path):
+    """A calibration names the day, the dataset, the scope and the mode."""
+    import re
     from smappy.calibrate.gui import calibration_save_defaults, calibration_save_path
     dataset = tmp_path/'bead_dataset'
     stack = dataset/'Pos0'
     stack.mkdir(parents=True)
     image = stack/'beads.ome.tif'
     image.touch()
-    assert calibration_save_defaults([image]) == (dataset, 'bead_dataset_calibration')
-    assert calibration_save_defaults([stack]) == (dataset, 'bead_dataset_calibration')
+    for given in (image, stack):
+        folder, name = calibration_save_defaults([given])
+        assert folder == dataset
+        assert re.fullmatch(r'\d{6}_bead_dataset_3Dcal', name), name
+        assert calibration_save_defaults([given], dual=True)[1].endswith('_2Ccal')
     for name in ('result', 'result.h5', 'result.h5.h5', 'result.H5.h5'):
         assert calibration_save_path(dataset/name) == dataset/'result.h5'
+
+
+def test_a_name_that_already_says_the_date_or_the_microscope_does_not_repeat_it(tmp_path):
+    from smappy.calibrate.gui import calibration_save_defaults
+    stack = tmp_path/'230501_Ulf_NPC_M5'/'Pos0'
+    stack.mkdir(parents=True)
+    (stack/'beads.ome.tif').touch()
+    assert calibration_save_defaults([stack])[1] == '230501_Ulf_NPC_M5_3Dcal'
+    # a microscope named only in the stack folder is carried up into the name
+    other = tmp_path/'Ulf_NPC'/'M7_Pos0'
+    other.mkdir(parents=True)
+    (other/'beads.ome.tif').touch()
+    assert calibration_save_defaults([other])[1].endswith('_Ulf_NPC_M7_3Dcal')
 
 
 def test_save_dialog_normalizes_before_overwrite_check(tmp_path, monkeypatch):
@@ -320,7 +338,8 @@ def test_save_dialog_normalizes_before_overwrite_check(tmp_path, monkeypatch):
     stack.mkdir(parents=True)
     image = stack/'beads.ome.tif'
     image.touch()
-    destination = stack.parent/'bead_dataset_calibration.h5'
+    from smappy.calibrate.gui import calibration_save_defaults
+    destination = stack.parent/(calibration_save_defaults([image])[1]+'.h5')
     destination.touch()
     dialogs, saved, confirmations = [], [], []
     def choose(**kwargs):
@@ -337,6 +356,6 @@ def test_save_dialog_normalizes_before_overwrite_check(tmp_path, monkeypatch):
         paths=[image], result_paths=[image], status=SimpleNamespace(set=lambda value:None), error=unexpected_error)
     CalibrationWindow.save(window)
     assert dialogs[0]['initialdir'] == str(stack.parent)
-    assert dialogs[0]['initialfile'] == 'bead_dataset_calibration'
+    assert dialogs[0]['initialfile'].endswith('bead_dataset_3Dcal')
     assert saved == [(destination, True)]
     assert confirmations[0][1] == str(destination)

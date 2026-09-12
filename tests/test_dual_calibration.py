@@ -217,3 +217,28 @@ def test_a_tiny_axis_limit_is_reported_as_such_not_as_an_optimizer_failure():
     assert reference.accepted.sum() >= settings.min_pairs
     from smappy.calibrate.dual import MIN_LOSS_SCALE_PX
     assert MIN_LOSS_SCALE_PX < settings.transform_axis_limit_px / 2
+
+
+def test_the_two_channel_fitter_refits_the_calibration_beads():
+    """Fit quality for 2C goes through the workflow the data will meet.
+
+    One z per bead *pair*, from the global fit, not one per channel -- and the
+    single-channel entry point says so instead of failing on an attribute.
+    """
+    from smappy.calibrate.validation import (fit_bead_diagnostics,
+                                             fit_paired_bead_diagnostics)
+    stack, settings = synthetic('up-down mirrored', 'upper')
+    result = calibrate_dual([stack], settings)
+
+    fitted = fit_paired_bead_diagnostics(result)
+    beads = fitted['bead_id'] >= 0
+    assert set(np.unique(fitted['bead_id'])) == set(range(9)) | {-1}
+    good = fitted['fit_valid'] & beads
+    assert good.sum() > .8*beads.sum()
+    # a shared z is the point of the global fit: it must land on the plane
+    assert np.nanstd(fitted['centered_error_nm'][good]) < 20
+    # channel 1 is twice as bright, and the link divides that ratio out
+    assert abs(np.nanmedian(fitted['ratio'][good])-.5) < .1
+
+    with pytest.raises(TypeError, match='fit_paired_bead_diagnostics'):
+        fit_bead_diagnostics(result)

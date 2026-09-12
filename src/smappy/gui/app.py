@@ -333,15 +333,38 @@ class ControlWindow(QMainWindow):
         self.calibration_window.show()
         self.calibration_window.raise_()
 
-    def use_calibration(self, path: str) -> None:
-        """Put a fresh calibration into the Spline 3D fitter's settings."""
-        from .plugin_panel import PluginPanel
-        for panel in self.tabs.widget(0).findChildren(PluginPanel):
-            if panel.plugin.path.endswith("Spline 3D"):
+    def use_calibration(self, path: str, dual: bool = False) -> None:
+        """Put a fresh calibration into the fitter it belongs to.
+
+        A dual-colour calibration is no use to the single-channel fitter, so
+        which one gets it follows from the mode it was built in.  The panel is
+        built and its section opened on the way: a tab imports a plugin only
+        when it is first looked at, and a calibration that lands in a plugin
+        nobody has opened yet would land nowhere.
+        """
+        wanted = "Localize/Spline 3D 2C" if dual else "Localize/Spline 3D"
+        for index in range(self.tabs.count()):
+            tab = self.tabs.widget(index)
+            slots = getattr(tab, "slots", None)
+            if not slots:
+                continue
+            for instance in tab.tab.instances:
+                if instance.plugin != wanted:
+                    continue
+                panel = slots[instance.id].ensure()
+                if panel is None:
+                    break
+                self.tabs.setCurrentIndex(index)
+                tab.open_section(instance.id)
                 panel.form.set_values({"model.calibration": str(path)})
                 self.statusBar().showMessage(
-                    f"the Spline 3D fitter now uses {Path(path).name}", 8000)
+                    f"the {wanted.split('/')[-1]} fitter now uses {Path(path).name}",
+                    8000)
                 return
+        self.statusBar().showMessage(
+            f"{Path(path).name} was saved, but no {wanted.split('/')[-1]} "
+            "fitter is pinned to a tab - add one with + and set its "
+            "calibration field", 12000)
 
     def show_3d(self) -> None:
         if self.view3d_window is None:

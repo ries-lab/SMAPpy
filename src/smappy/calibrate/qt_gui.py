@@ -17,7 +17,7 @@ import numpy as np
 from PySide6.QtCore import QObject, Qt, QThread, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QFileDialog,
-                               QFormLayout, QHBoxLayout, QLabel, QListWidget,
+                               QHBoxLayout, QLabel, QListWidget,
                                QMainWindow, QMessageBox, QPushButton, QScrollArea,
                                QSplitter, QTabWidget, QTableWidget, QTableWidgetItem,
                                QVBoxLayout, QWidget)
@@ -155,7 +155,9 @@ class _Worker(QObject):
 class CalibrationWindow(QMainWindow):
     """Files and settings on the left, plots and the bead table on the right."""
 
-    calibrated = Signal(str)          # the path a saved calibration was written to
+    # the path a saved calibration was written to, and whether it is dual
+    # colour -- which decides *which* fitter it belongs in
+    calibrated = Signal(str, bool)
 
     # borrowed from the Tk implementation: pure matplotlib over the state below
     draw = TkUnified.draw
@@ -163,12 +165,10 @@ class CalibrationWindow(QMainWindow):
     draw_transformation = TkUnified.draw_transformation
     draw_field_diagnostics = TkUnified.draw_field_diagnostics
     draw_bead_diagnostics = TkUnified.draw_bead_diagnostics
-    draw_quality = TkUnified.draw_quality
     draw_current = TkUnified.draw_current
     redraw_profiles = TkUnified.redraw_profiles
     origin = TkUnified.origin
     acquisitions = TkUnified.acquisitions
-    slice_count = TkCalibration.__dict__.get("slice_count", None)
 
     def __init__(self, paths=(), settings=None, parent=None):
         super().__init__(parent)
@@ -184,13 +184,8 @@ class CalibrationWindow(QMainWindow):
         self._thread = None
 
         # the state the borrowed drawing code reads
-        self.auto_contrast = _Var(True)
-        self.contrast_factor = _Var(1.0)
-        self.linked = _Var(True)
-        self.native = _Var(False)
-        self.orientation = _Var("xy")
-        self.position = _Var(0)
         self.mode = _Var("Single channel")
+        self.stack_viewer: Optional[QWidget] = None
         self.table = _Selection(self)   # what the borrowed plots read
 
         control = self._controls(settings)
@@ -325,25 +320,12 @@ class CalibrationWindow(QMainWindow):
         self.use_button.setEnabled(False)
         layout.addWidget(self.use_button)
 
-        view = QWidget()
-        vform = QFormLayout(view)
-        vform.setContentsMargins(0, 0, 0, 0)
-        self.orientation_box = QComboBox()
-        self.orientation_box.addItems(["xy", "xz", "yz"])
-        self.orientation_box.currentTextChanged.connect(self._on_view)
-        self.auto_box = QCheckBox("auto contrast to the slice maximum")
-        self.auto_box.setChecked(True)
-        self.auto_box.toggled.connect(self._on_view)
-        self.native_box = QCheckBox("native camera orientation")
-        self.native_box.toggled.connect(self._on_view)
-        self.linked_box = QCheckBox("linked channel contrast")
-        self.linked_box.setChecked(True)
-        self.linked_box.toggled.connect(self._on_view)
-        vform.addRow("slice", self.orientation_box)
-        vform.addRow("", self.auto_box)
-        vform.addRow("", self.native_box)
-        vform.addRow("", self.linked_box)
-        layout.addWidget(CollapsibleSection("view", view, expanded=False))
+        self.browse_button = QPushButton("Browse average stack...")
+        self.browse_button.setToolTip("look through the averaged bead stack slice "
+                                      "by slice, in its own window")
+        self.browse_button.clicked.connect(self.browse_stack)
+        self.browse_button.setEnabled(False)
+        layout.addWidget(self.browse_button)
         layout.addStretch(1)
         return panel
 
@@ -386,6 +368,7 @@ class CalibrationWindow(QMainWindow):
         self.showing_quality = False
         self.excluded.clear()
         self.bead_table.setRowCount(0)
+        self.browse_button.setEnabled(False)
         self._show_form()
         self.update_mode()
         for figure, canvas in self.pages:
@@ -397,8 +380,6 @@ class CalibrationWindow(QMainWindow):
     def update_mode(self) -> None:
         for index in (1, 3):                       # transformation pages: dual only
             self.tabs.setTabEnabled(index, self.is_dual)
-        self.linked_box.setEnabled(self.is_dual)
-        self.native_box.setEnabled(self.is_dual)
 
     # --------------------------------------------------------------- files
     def _refresh_files(self) -> None:
@@ -477,7 +458,10 @@ class CalibrationWindow(QMainWindow):
             self.diagnostics = self.profile_data = None
             self.showing_quality = False
             self.use_button.setEnabled(False)
+            self.browse_button.setEnabled(True)
             self.refresh_table()
+            self._refresh_stack_viewer()
+            self._show_resolved_settings(value)
             self.status_bar.showMessage(f"{int(np.sum(value.accepted))} of "
                                     f"{len(value.beads.records)} beads used")
         elif kind == "quality":
@@ -521,16 +505,32 @@ class CalibrationWindow(QMainWindow):
         self._work("result", job)
 
     def fit_quality(self) -> None:
+        """Refit the calibration beads with the fitter the data will meet.
+
+        Single channel that is the spline fitter on one ROI per bead; dual
+        colour it is `smappy.dualfit`'s global fit over both channels at once,
+        sharing x, y and z -- the two-colour workflow itself, run backwards on
+        the beads.  A pair therefore has one z, not one per channel.
+        """
         if self.result is None:
             return
         result = self.result
-        ids = sorted(self.selected_beads())
+        dual = self.is_dual
 
         def job():
-            from .validation import aligned_midline_profiles, fit_bead_diagnostics
+            from .validation import (aligned_midline_profiles,
+                                     fit_bead_diagnostics,
+                                     fit_paired_bead_diagnostics)
+            if dual:
+                from .unified_gui import paired_profiles
+                fitted = fit_paired_bead_diagnostics(result)
+                result.registration.refits = {"global": fitted}
+                return fitted, paired_profiles(result)
             return (fit_bead_diagnostics(result), aligned_midline_profiles(result))
 
-        self.status_bar.showMessage("fitting the beads back...")
+        self.status_bar.showMessage("fitting the beads back with the "
+                                    + ("two-channel" if dual else "spline")
+                                    + " fitter...")
         self._work("quality", job)
 
     # -------------------------------------------------------------- table
@@ -600,18 +600,162 @@ class CalibrationWindow(QMainWindow):
         if index < self.bead_table.rowCount():
             self.bead_table.selectRow(index)
 
-    def _on_view(self, *_) -> None:
-        self.orientation.set(self.orientation_box.currentText())
-        self.auto_contrast.set(self.auto_box.isChecked())
-        self.native.set(self.native_box.isChecked())
-        self.linked.set(self.linked_box.isChecked())
-        self.redraw()
+    def _show_resolved_settings(self, result) -> None:
+        """Put the values a run actually used behind its *auto* fields.
+
+        The settings that say "auto" resolve against the bead stacks -- the z
+        step from the acquisition, the saturation from the camera's integer
+        type, the split from the image width -- and until a run has happened
+        there is nothing to resolve them against.  Afterwards there is, so the
+        fields say what they did rather than only that they decided.
+        """
+        beads = result.beads
+        channels = getattr(beads, 'channels', None)     # dual: the two halves
+        hints = {'dz_nm': getattr(channels[0] if channels else beads,
+                                  'dz_nm', None)}
+        records = list(getattr(beads, 'records', ()) or ())
+        if records:
+            # a pair's record wraps one per channel; both saw the same camera
+            first = records[0].get('channel_records', [records[0]])[0]
+            hints['saturation_adu'] = first.get('saturation_adu')
+        geometry = getattr(result.calibration, 'geometry', None)
+        if isinstance(geometry, dict):
+            hints['split_position'] = geometry.get('split_position')
+        self.form.set_hints({k: v for k, v in hints.items() if v is not None})
+
+    # ------------------------------------------------------- fit quality
+    def draw_quality(self) -> None:
+        """Single channel borrows the Tk page; dual colour has its own."""
+        if not self.is_dual:
+            return TkCalibration.draw_quality(self)
+        if self.diagnostics is None:
+            return
+        d = self.diagnostics
+        selected = set(self.selected_beads())
+        acquisitions = set(self.acquisitions())
+        records = self.result.beads.records
+        self.figure.clear()
+        axes = self.figure.subplots(2, 4)
+
+        def shown(i):
+            return i < 0 or records[int(i)]["stack"] in acquisitions
+
+        for i in np.unique(d["bead_id"]):
+            if not shown(i):
+                continue
+            use = d["bead_id"] == i
+            order = np.argsort(d["expected_z_nm"][use])
+            style = (dict(color="black", lw=2.5, zorder=5) if i == -1 else
+                     dict(lw=2 if i in selected else 0.7, alpha=0.8))
+            for column, key in ((0, "fitted_z_nm"), (1, "centered_error_nm"),
+                                (2, "ratio")):
+                axes[0, column].plot(d["expected_z_nm"][use][order],
+                                     d[key][use][order], **style)
+        limits = [float(np.min(d["expected_z_nm"])), float(np.max(d["expected_z_nm"]))]
+        axes[0, 0].plot(limits, limits, "k--", lw=0.5)
+        axes[0, 0].set(title="two-channel fit: z", xlabel="expected z (nm)",
+                       ylabel="fitted z (nm)")
+        axes[0, 1].axhline(0, color="gray", lw=0.5)
+        axes[0, 1].set(title="centered z error", xlabel="expected z (nm)",
+                       ylabel="error (nm)")
+        ratio = self.result.calibration.parameters.get(
+            "secondary_main_brightness_ratio")
+        if ratio:
+            # the splitter's ratio is divided out in the link, so a correctly
+            # fitted pair sits at one half, not at the raw brightness ratio
+            axes[0, 2].axhline(0.5, color="gray", lw=0.5)
+        # a fraction, so the axis is the whole fraction: left to itself
+        # matplotlib would show a 1e-6 offset around a constant ratio and say
+        # nothing about how well the colour actually separates
+        axes[0, 2].set(title="fitted photon ratio", xlabel="expected z (nm)",
+                       ylabel="secondary / total", ylim=(0, 1))
+        error = d["centered_error_nm"][np.isfinite(d["centered_error_nm"])
+                                       & (d["bead_id"] >= 0)]
+        if len(error):
+            axes[0, 3].hist(error, bins=min(40, max(8, len(error)//10)),
+                            color="steelblue")
+            axes[0, 3].axvline(0, color="gray", lw=0.5)
+            axes[0, 3].set(title=f"z error: {np.std(error):.1f} nm rms",
+                           xlabel="centered z error (nm)", ylabel="bead planes")
+        else:
+            axes[0, 3].set_axis_off()
+
+        for ch, name in enumerate(("main", "secondary")):
+            profiles = self.profile_data[ch]
+            # the profiles come back in native camera orientation, so the
+            # model has to be the native one too, not the mirrored twin the
+            # registration worked in
+            psf = (self.result.calibration.main if ch == 0
+                   else self.result.calibration.secondary).psf
+            models = (("x", psf[len(psf)//2, psf.shape[1]//2]),
+                      ("z", psf[:, psf.shape[1]//2, psf.shape[2]//2]))
+            for offset, (axis, model) in enumerate(models):
+                ax = axes[1, 2*ch+offset]
+                coord = profiles[axis+("_px" if axis == "x" else "_nm")]
+                for i, curve in zip(profiles["bead_id"], profiles[axis+"_profiles"]):
+                    if shown(i):
+                        ax.plot(coord, curve, lw=2 if i in selected else 0.6, alpha=0.6)
+                ax.plot(coord, profiles["average_"+axis], "k", lw=2, label="average")
+                ax.plot(coord, model, "--", color="royalblue", lw=2, label="spline")
+                ax.set(title=f"{name} {axis} profile",
+                       xlabel=axis+(" (pixels)" if axis == "x" else " (nm)"),
+                       ylabel="intensity (calibration scale)")
+                ax.legend(fontsize=7)
+                ax.margins(x=0.02, y=0.05)
+        for ax in axes.ravel():
+            ax.title.set_fontsize(9)
+            ax.tick_params(labelsize=8)
+            ax.xaxis.label.set_size(9)
+            ax.yaxis.label.set_size(9)
+        self.figure.suptitle("beads refitted with the two-channel global fit: "
+                             "one shared z per pair; black is the averaged pair",
+                             fontsize=9)
+        self.canvas.draw_idle()
+
+    # -------------------------------------------------------- stack viewer
+    def average_stacks(self):
+        """The averaged bead stack(s) to browse, and what to call them.
+
+        The *raw* average, not the smoothed spline model: it is what the
+        beads actually gave, so a bad bead or a registration error still shows
+        in it.  Dual colour has one per channel, on a shared z grid.
+        """
+        result = self.result
+        if result is None:
+            return [], [], None
+        channels = getattr(getattr(result, "registration", None),
+                           "channel_raw_psfs", None)
+        if channels is not None and len(channels) > 1:
+            return (list(channels), ["main", "secondary"],
+                    result.beads.geometry.get("mirror_axis_xy"))
+        return [np.asarray(result.raw_psf)], ["average bead stack"], None
+
+    def browse_stack(self) -> None:
+        volumes, titles, mirror = self.average_stacks()
+        if not volumes:
+            QMessageBox.information(self, "no stack", "calibrate first")
+            return
+        from .stack_view import StackViewer
+        calibration = self.result.calibration
+        if self.stack_viewer is None:
+            self.stack_viewer = StackViewer(volumes, calibration, titles, mirror, self)
+        else:
+            self.stack_viewer.calibration = calibration
+            self.stack_viewer.mirror_axis = mirror
+            self.stack_viewer.set_volumes(volumes, titles)
+        self.stack_viewer.show()
+        self.stack_viewer.raise_()
+
+    def _refresh_stack_viewer(self) -> None:
+        """A recalculated result belongs in an already open viewer."""
+        if self.stack_viewer is not None and self.stack_viewer.isVisible():
+            self.browse_stack()
 
     # ------------------------------------------------------------- saving
     def save(self) -> None:
         if self.result is None:
             return
-        folder, name = calibration_save_defaults(self.paths)
+        folder, name = calibration_save_defaults(self.paths, dual=self.is_dual)
         path, _ = QFileDialog.getSaveFileName(self, "Save calibration",
                                               str(Path(folder) / (name + ".h5")),
                                               "Calibration (*.h5 *.hdf5)")
@@ -623,15 +767,19 @@ class CalibrationWindow(QMainWindow):
             self.error(error)
             return
         self.saved_path = path
+        self.saved_dual = self.is_dual
         self.use_button.setEnabled(True)
         self.status_bar.showMessage(f"saved {path}")
-        self.calibrated.emit(path)
+        self.calibrated.emit(path, self.is_dual)
 
     def _use_in_fitter(self) -> None:
         path = getattr(self, "saved_path", None)
-        if path:
-            self.calibrated.emit(path)
-            self.status_bar.showMessage(f"the Spline 3D fitter now uses {Path(path).name}")
+        if not path:
+            return
+        dual = getattr(self, "saved_dual", self.is_dual)
+        self.calibrated.emit(path, dual)
+        fitter = "Spline 3D 2C" if dual else "Spline 3D"
+        self.status_bar.showMessage(f"the {fitter} fitter now uses {Path(path).name}")
 
 
 def show_calibration_qt(paths=(), settings=None):
