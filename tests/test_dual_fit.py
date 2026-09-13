@@ -355,3 +355,53 @@ def test_a_2c_preview_shows_projected_peaks_left_and_fits_only_in_channel_1(
     assert np.all(drawn[:, 1] < SPLIT)                   # the main half only
     np.testing.assert_allclose(np.sort(drawn[:, 1]), [15, 21], atol=0.5)
     plt.close(figure)
+
+
+def _mirrored_calibration(dx=0.37, dy=-0.21, ratio=0.3):
+    """Main upper, secondary lower *and flipped in y* -- an image splitter
+    with a mirror in one path.  The secondary spline is stored as the camera
+    sees it, flipped too, the way `calibrate.dual` saves it."""
+    transformation = np.array([[1., 0., -dx],
+                               [0., -1., 2 * SPLIT - 1 + dy],
+                               [0., 0., 1.]])
+    volume = np.flip(psf_volume(astigmatism=-0.6), axis=1).copy()
+    secondary = SplineCalibration(spline_coefficients(volume), 10., 20., x0=8.0,
+                                  psf=volume, em_mirror=False, parameters={})
+    geometry = {"layout": "up-down mirrored", "main_channel": "upper",
+                "split_position": SPLIT, "image_shape": list(SHAPE),
+                "coordinate_system": "camera-chip", "mirror_axis_xy": 1}
+    return DualColorCalibration(spline(0.6), secondary, transformation, geometry,
+                                {"secondary_main_brightness_ratio": ratio / (1 - ratio)})
+
+
+@pytest.mark.parametrize("mirrored", [False, True])
+def test_a_mirrored_splitter_keeps_its_colour(mirrored):
+    """The photon split survives a mirror in the secondary path.
+
+    The link scales the partner channel's coordinates by the transformation's
+    local factor, -1 along a mirrored axis.  Anchored at the ROI corner instead
+    of its centre, that put the partner channel's emitter outside its ROI: x, y
+    and z still came out right, from the main channel alone, while the
+    secondary photons fitted to nothing and every ratio read zero.
+    """
+    cal = _mirrored_calibration() if mirrored else dual_calibration(ratio=0.3)
+    rng = np.random.default_rng(1)
+    truth = [(25.0, 12.0), (42.0, 20.0)]
+    frames = np.stack([split_frame(truth, 24.0, 9000., 0.3, 30., rng, cal)
+                       for _ in range(30)])
+    model = GlobalSplinePSF((cal.main, cal.secondary), LINK_XYZ)
+    engine = DualChannelEngine(camera(), finder(), model, cal,
+                               FitSettings(roisize=13, output_unit="pixel"))
+    engine.push(frames)
+    locs = engine.flush()
+
+    assert engine.stats["matched"] == 60                 # every emitter paired
+    assert len(locs) == 60
+    assert np.median(locs["ratio"]) == pytest.approx(0.3, abs=0.03)
+    assert np.median(locs["photons_ch1"]) > 1000
+    assert np.median(locs["z_nm"]) == pytest.approx(-40, abs=5)
+    for x0, y0 in truth:
+        mine = np.hypot(locs["x_pix"] - x0, locs["y_pix"] - y0) < 3
+        assert mine.sum() == 30
+        assert np.median(np.abs(locs["x_pix"][mine] - x0)) < 0.1
+        assert np.median(np.abs(locs["y_pix"][mine] - y0)) < 0.1

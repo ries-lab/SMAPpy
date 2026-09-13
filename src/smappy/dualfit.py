@@ -262,14 +262,25 @@ def _match(a: np.ndarray, b: np.ndarray, tolerance: float):
 def build_link(reference: Candidates, secondary: Candidates, residual: np.ndarray,
                calibration: DualColorCalibration,
                origin: Tuple[float, float] = (0.0, 0.0),
-               photon_ratio: Optional[float] = None) -> np.ndarray:
+               photon_ratio: Optional[float] = None,
+               roisize: Optional[int] = None) -> np.ndarray:
     """The ``(n, 2, 2, 5)`` link the global fitter takes.
 
-    Offsets are the sub-pixel residuals for x and y; the factors are the local
-    scale of the transformation for x and y, and the splitter's photon ratio
-    for the photon number, so that a shared photon parameter means the *total*
-    as channel 0 sees it.  Everything else is offset 0, factor 1: the two
+    The fitter evaluates each channel at ``factor * global + offset``, in that
+    channel's own ROI pixel coordinates.  The factors are the local scale of
+    the transformation for x and y, and the splitter's photon ratio for the
+    photon number, so that a shared photon parameter means the *total* as
+    channel 0 sees it.  Everything else is offset 0, factor 1: the two
     calibrations are checked on load to share one z grid, so z needs neither.
+
+    The x and y offsets are the sub-pixel residual *plus* ``(1 - factor) *
+    half``: the scale acts about the ROI centre, where both ROIs were cut, not
+    about the ROI's corner.  For a splitter that is nearly a translation the
+    term is a hundredth of a pixel; for a *mirrored* splitter the factor is -1
+    and without it the partner channel is evaluated at a negative coordinate,
+    outside its ROI -- its photons fit to nothing and the colour is lost.
+    ``roisize`` is required for that; without it the old corner-anchored form
+    is kept, for callers that build a link by hand.
     """
     n = len(reference)
     link = np.zeros((n, 2, 2, 5), np.float32)
@@ -282,6 +293,10 @@ def build_link(reference: Candidates, secondary: Candidates, residual: np.ndarra
                         reference.x + ox, reference.y + oy)
     link[:, 1, 1, 0] = fx
     link[:, 1, 1, 1] = fy
+    if roisize is not None:
+        half = (int(roisize) - 1) / 2.0
+        link[:, 0, 1, 0] += (1.0 - fx) * half
+        link[:, 0, 1, 1] += (1.0 - fy) * half
     if photon_ratio is None:
         photon_ratio = calibration.parameters.get(
             "secondary_main_brightness_ratio", 1.0)
@@ -315,7 +330,8 @@ def cut_paired_rois(photons: np.ndarray, reference: Candidates, secondary: Candi
         cut.append(photons[index[:, None, None], rows[:, :, None], cols[:, None, :]])
     images = np.ascontiguousarray(np.stack(cut, axis=1), np.float32)
 
-    link = build_link(reference, secondary, residual, calibration, origin, photon_ratio)
+    link = build_link(reference, secondary, residual, calibration, origin, photon_ratio,
+                      roisize=roisize)
     return PairedROIs(images, link, reference, roisize, residual)
 
 
