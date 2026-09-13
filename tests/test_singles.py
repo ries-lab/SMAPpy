@@ -82,3 +82,17 @@ def test_a_folder_without_metadata_still_opens(tmp_path):
     assert source.n_frames == 4 and source.n_frames_declared is None
     with pytest.raises(NotImplementedError):
         next(source.watch())
+
+
+def test_a_folder_of_ordinary_stacks_is_not_one_acquisition(tmp_path):
+    """run1.tif and run2.tif side by side are two acquisitions, not frames.
+
+    Picking one must open that stack alone: counting TIFFs is not enough, a
+    one-file-per-frame set is defined by each file holding a single page.
+    """
+    for name, value in (("run1.tif", 1), ("run2.tif", 2)):
+        tifffile.imwrite(tmp_path / name, np.full((5, 6, 6), value, np.uint16))
+    assert single_image_files(tmp_path) == []
+    source = open_stack(tmp_path / "run2.tif")
+    assert source.n_frames == 5
+    assert int(source.frame(0)[0, 0]) == 2

@@ -57,7 +57,19 @@ def single_image_files(folder) -> List[Path]:
              if p.is_file() and p.suffix.lower() in (".tif", ".tiff")]
     if len(files) < 2 or any(OME_SERIES.search(p.name) for p in files):
         return []
-    return sorted(files, key=_order)
+    files = sorted(files, key=_order)
+    # one page per file is what *makes* a one-file-per-frame acquisition; a
+    # folder of several ordinary stacks (run1.tif, run2.tif) is not one, and
+    # reading it as one would silently fuse unrelated acquisitions.  Both ends
+    # are checked, which costs two file opens however many images there are.
+    for end in (files[0], files[-1]):
+        try:
+            with tifffile.TiffFile(end) as tf:
+                if len(tf.pages) != 1:
+                    return []
+        except Exception:
+            return []
+    return files
 
 
 def is_single_image_set(path) -> bool:
