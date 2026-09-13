@@ -900,6 +900,19 @@ goes through it.
   on the first append would be friendlier.
 * Online drift correction, and an online estimate of the labelling density:
   both want the whole table, which is what an appended view already has.
+* The EM readout mirror between a bead calibration and two-colour data.  An
+  EMCCD's EM register reads out mirrored in x relative to its normal port, so
+  a dual-colour calibration from beads on one port does not line up with data
+  on the other: the transformation pairs almost no peaks and the photon ratio
+  means nothing.  Seen on the 2019 NPC4C data (Evolve512, beads on `Normal`,
+  data on `Multiplication Gain`): flipping the data in x about the chip before
+  pairing lined up nearly every peak of the dimmer channel, and the ratios
+  spread the way four ratiometric dyes should.  Deliberately not handled.  The
+  calibration does not record the bead port, and the correction is not an
+  image flip alone -- the camera ROI has to be mirrored on the chip too, and
+  which axis and which chip width differ between cameras.  SMAP records
+  `emmirror` with a bead calibration and has a `mirrorem` loader option.  It
+  belongs with a camera manager; until then, take beads and data on one port.
 
 ## Environment
 
