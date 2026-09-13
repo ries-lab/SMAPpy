@@ -13,6 +13,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QRectF, Qt, Signal
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog,
                                QFormLayout, QHBoxLayout, QLabel, QLineEdit,
                                QListWidget, QListWidgetItem, QMenu, QPushButton,
@@ -133,13 +134,15 @@ class FilterWidget(QWidget):
         self.layer = layer
         self._hist_cache.clear()
         locs = layer.locs
-        current = self.field.currentText()
+        current = self.current_field()
         numeric = [n for n in locs if np.asarray(locs[n]).dtype.kind in "iuf"
                    and np.asarray(locs[n]).ndim == 1]
         self.field.blockSignals(True)
         self.field.clear()
-        self.field.addItems(numeric)
+        for name in numeric:
+            self.field.addItem(name, name)   # the data stays the plain name
         self.field.blockSignals(False)
+        self._mark_bounded()
 
         for b in self.quick.values():
             b.deleteLater()
@@ -150,19 +153,54 @@ class FilterWidget(QWidget):
                 continue
             b = QToolButton(text=label, checkable=True, autoExclusive=True)
             b.setToolTip(name)
-            b.clicked.connect(lambda _=False, n=name: self.field.setCurrentText(n))
+            b.clicked.connect(lambda _=False, n=name: self._select(n))
             self.quick[name] = b
             self.quick_row.insertWidget(len(self.quick) - 1, b)
         first = current if current in numeric else next(iter(self.quick), None)
         if first is None and numeric:
             first = numeric[0]
         if first:
-            self.field.setCurrentText(first)
+            self._select(first)
         self._show_field()
 
     def refresh(self) -> None:
         """The filter changed elsewhere (undo, new table): redraw."""
         self._show_field()
+
+    def current_field(self) -> str:
+        """The column shown, without the marker a bounded field carries."""
+        name = self.field.currentData()
+        return name if isinstance(name, str) else self.field.currentText()
+
+    def _select(self, name: str) -> None:
+        index = self.field.findData(name)
+        if index >= 0:
+            self.field.setCurrentIndex(index)
+
+    def _mark_bounded(self) -> None:
+        """Bold, with a dot, every field that has a bound on it.
+
+        A filter on a field that is not the one on show is otherwise invisible,
+        and a table that renders black because of a bound nobody remembers
+        setting is the result.  An unbounded range -- (None, None) -- is no
+        bound and is not marked.
+        """
+        if self.layer is None:
+            return
+        ranges = self.layer.filter.ranges
+        bounded = {n for n, r in ranges.items() if r != (None, None)}
+        plain, bold = QFont(self.field.font()), QFont(self.field.font())
+        bold.setBold(True)
+        for i in range(self.field.count()):
+            name = self.field.itemData(i)
+            on = name in bounded
+            self.field.setItemText(i, f"\u25cf {name}" if on else name)
+            self.field.setItemData(i, bold if on else plain, Qt.FontRole)
+            lo, hi = ranges.get(name, (None, None))
+            self.field.setItemData(
+                i, (f"filtered: {'' if lo is None else f'{lo:g}'} .. "
+                    f"{'' if hi is None else f'{hi:g}'}") if on else None,
+                Qt.ToolTipRole)
 
     # ------------------------------------------------------------- showing
     def _histogram(self, name: str):
@@ -183,7 +221,7 @@ class FilterWidget(QWidget):
         return self._hist_cache[key]
 
     def _show_field(self) -> None:
-        name = self.field.currentText()
+        name = self.current_field()
         if self.layer is None or not name or name not in self.layer.locs:
             return
         for n, b in self.quick.items():
@@ -257,10 +295,11 @@ class FilterWidget(QWidget):
         for n, b in self.quick.items():
             b.setStyleSheet("font-weight: bold" if n in bounded and
                             f.ranges[n] != (None, None) else "")
+        self._mark_bounded()
 
     # ------------------------------------------------------------ editing
     def _apply(self, lo: Optional[float], hi: Optional[float]) -> None:
-        name = self.field.currentText()
+        name = self.current_field()
         if lo is None and hi is None:
             self.layer.remove_bound(name)
         else:
@@ -270,7 +309,7 @@ class FilterWidget(QWidget):
 
     def _on_region(self) -> None:
         lo, hi = self.region.getRegion()
-        _, edges = self._histogram(self.field.currentText())
+        _, edges = self._histogram(self.current_field())
         # dragged to the edge means "no bound", so the tail is not cut off
         self._apply(None if lo <= edges[0] else float(lo),
                     None if hi >= edges[-1] else float(hi))

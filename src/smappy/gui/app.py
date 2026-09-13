@@ -384,8 +384,30 @@ class ControlWindow(QMainWindow):
         names = self.session.file_names()
         name = (names[0] if len(names) == 1 else f"{len(names)} files") if names else "no file"
         n = len(self.session.locs)
-        self.statusBar().showMessage(f"{name}: {n} localizations")
-        self.render_window.setWindowTitle(f"smappy - {name}")
+        shown = self._shown_text()
+        self.statusBar().showMessage(f"{name}: {n} localizations" + (f", {shown}" if shown else ""))
+        self.render_window.setWindowTitle(f"smappy - {name}" + (f" - {shown}" if shown else ""))
+
+    def _shown_text(self) -> str:
+        """What the render window actually draws: kept by each visible layer.
+
+        The table's length says what was fitted, not what is on screen -- the
+        filter and the grouping both stand between them, and a picture that
+        looks empty needs the number that explains it.  Per layer when there
+        are several, since two layers over one table would otherwise count
+        the same localizations twice.
+        """
+        layers = [l for l in self.session.layers if not l.is_image and l.visible]
+        if not layers or not len(self.session.locs):
+            return ""
+
+        def one(layer) -> str:
+            kept, of = len(layer.filter), len(layer.locs)
+            return f"{kept:,} of {of:,}" + (" grouped" if layer.grouped else "") + " shown"
+
+        if len(layers) == 1:
+            return one(layers[0])
+        return "; ".join(f"{l.name}: {one(l)}" for l in layers)
 
     def open(self, append: bool = False) -> None:
         """One or more files; the first replaces (unless appending), the rest join.

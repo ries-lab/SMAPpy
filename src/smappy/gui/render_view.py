@@ -6,6 +6,8 @@ pyqtgraph's pan/zoom acts on the localization coordinates directly.
 """
 from __future__ import annotations
 
+import traceback
+
 import atexit
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -53,6 +55,7 @@ class _Renderer(QObject):
     """Renders on its own thread; the view keeps answering to the mouse."""
 
     done = Signal(object, object, int)      # rgb, fov, generation
+    failed = Signal(str, int)               # what went wrong, generation
 
     def __init__(self):
         super().__init__()
@@ -65,14 +68,20 @@ class _Renderer(QObject):
     def render(self, view: "RenderView", fov: FieldOfView, generation: int) -> None:
         try:
             rgb, _ = view.composite(fov)
-        except Exception as e:           # a table swapped mid-render: try again
-            print(f"render failed: {e}")
+        except Exception as e:
+            # Always answer.  Returning in silence left the view waiting for
+            # this render forever, so it never asked for another: one failure
+            # -- a table swapped mid-render, a layer that cannot be drawn --
+            # and the image stayed black for good.
+            traceback.print_exc()
+            self.failed.emit(f"{type(e).__name__}: {e}", generation)
             return
         self.done.emit(rgb, fov, generation)
 
 
 class RenderView(QWidget):
     render_requested = Signal(object, object, int)
+    render_failed = Signal(str)             # shown by the window, not swallowed
 
     def __init__(self, session: Session, parent=None):
         super().__init__(parent)
@@ -100,9 +109,11 @@ class RenderView(QWidget):
         self._generation = 0             # the newest request; older results are dropped
         self._busy = False
         self._pending = False
+        self.last_error = ""
         self._renderer = _Renderer()
         self.render_requested.connect(self._renderer.render)
         self._renderer.done.connect(self._on_rendered)
+        self._renderer.failed.connect(self._on_render_failed)
         app = pg.QtWidgets.QApplication.instance()
         if app is not None:
             app.aboutToQuit.connect(self.shutdown)
@@ -242,6 +253,19 @@ class RenderView(QWidget):
             self.image.setRect(QRectF(fov.x0, fov.y0, fov.x1 - fov.x0, fov.y1 - fov.y0))
             self.fov = fov
             self.tile_valid = True
+        if self._pending:
+            self._pending = False
+            self.render()
+
+    def _on_render_failed(self, message: str, generation: int) -> None:
+        """Free the view for the next render, and say why this one is missing.
+
+        The last good tile stays on screen.  Only a newer request is retried:
+        re-running the one that just failed would fail the same way, in a loop.
+        """
+        self._busy = False
+        self.last_error = message
+        self.render_failed.emit(message)
         if self._pending:
             self._pending = False
             self.render()
