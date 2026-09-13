@@ -131,16 +131,37 @@ class OutputSettings:
     save: bool = param(True, label="save HDF5")
     path: str = param("", label="file", kind="save_file",
                       file_filter="HDF5 (*.hdf5 *.h5)",
-                      help="empty: next to the source, as <name>_locs.hdf5")
+                      help="filled from the source: <acquisition>_locs.hdf5 "
+                           "next to the folder the images are in")
 
     def resolve(self, source_path: str) -> Optional[Path]:
         if not self.save:
             return None
         if self.path:
             return Path(self.path)
-        src = Path(source_path)
-        name = src.name.replace(".ome", "").rsplit(".", 1)[0] if src.is_file() else src.name
-        return (src if src.is_dir() else src.parent) / f"{name}_locs.hdf5"
+        return default_output_path(source_path)
+
+
+def default_output_path(source_path) -> Path:
+    """Where a fit of ``source_path`` is saved unless told otherwise.
+
+    An acquisition that is a folder -- one file per frame, an NDTiff dataset,
+    or a Micro-Manager OME series in its own directory -- is named by that
+    folder, and the result goes *next to* it rather than into it: the image
+    folder stays images only, and ``img_000000000_Default_000`` or
+    ``run_MMStack_Pos0`` would name nothing anyway.  A lone stack file is named
+    after itself and saved beside it.
+    """
+    from ..io.ndtiff import is_ndtiff
+    from ..io.singles import is_single_image_set
+
+    src = Path(source_path)
+    series = src.is_file() and src.name.lower().endswith((".ome.tif", ".ome.tiff"))
+    if src.is_dir() or series or is_single_image_set(src) or is_ndtiff(src):
+        folder = src if src.is_dir() else src.parent
+        return folder.parent / f"{folder.name}_locs.hdf5"
+    name = src.name.rsplit(".", 1)[0]
+    return src.parent / f"{name}_locs.hdf5"
 
 
 FIT_PARAMS = {
@@ -222,14 +243,22 @@ class _FitPlugin(Plugin):
 
     def react(self, changed: str, settings) -> Optional[Dict[str, Any]]:
         if changed == "source.path" and settings.source.path:
+            updates: Dict[str, Any] = {}
+            # the output follows the source, but only while it is ours: a path
+            # the user typed is theirs and survives choosing another input
+            default = str(default_output_path(settings.source.path))
+            if settings.output.path in ("", getattr(self, "_default_output", None)):
+                updates["output.path"] = default
+                self._default_output = default
             try:
                 source = _open(settings.source, watch=False)
                 from ..io.tiff import camera_metadata
                 cam = camera_metadata(source, require=False)
             except Exception:
-                return None
-            return {f"camera.{k}": v for k, v in asdict(cam).items()
-                    if k in self.CAMERA_FIELDS and v is not None}
+                return updates or None
+            updates.update({f"camera.{k}": v for k, v in asdict(cam).items()
+                            if k in self.CAMERA_FIELDS and v is not None})
+            return updates
         if changed == "camera.preset" and settings.camera.preset:
             cam = CameraMetadata.from_yaml(settings.camera.preset)
             return {f"camera.{k}": v for k, v in asdict(cam).items()

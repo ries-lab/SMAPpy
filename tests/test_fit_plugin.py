@@ -61,3 +61,45 @@ def test_react_fills_the_camera_from_a_preset(tmp_path):
     updates = GaussianFit().react("camera.preset", settings)
     assert updates == {"camera.conversion": 6.7, "camera.offset": 400,
                        "camera.pixelsize_um": 0.127}
+
+
+def test_the_default_output_goes_next_to_the_image_folder(tmp_path):
+    """Named by the acquisition, beside the folder its images are in."""
+    from smappy.plugins.fit import default_output_path
+    singles = tmp_path / "Nup96_EM100_2_Pos0"
+    singles.mkdir()
+    for i in range(3):
+        tifffile.imwrite(singles / f"img_{i:09d}_Default_000.tif",
+                         np.zeros((4, 4), np.uint16))
+    expected = tmp_path / "Nup96_EM100_2_Pos0_locs.hdf5"
+    assert default_output_path(singles) == expected
+    assert default_output_path(singles / "img_000000001_Default_000.tif") == expected
+
+    series = tmp_path / "run_1"
+    series.mkdir()
+    tifffile.imwrite(series / "run_1_MMStack_Pos0.ome.tif", np.zeros((2, 4, 4), np.uint16))
+    assert default_output_path(series / "run_1_MMStack_Pos0.ome.tif") == \
+        tmp_path / "run_1_locs.hdf5"
+
+    lone = tmp_path / "stack.tif"
+    tifffile.imwrite(lone, np.zeros((2, 4, 4), np.uint16))
+    assert default_output_path(lone) == tmp_path / "stack_locs.hdf5"
+
+
+def test_choosing_a_source_fills_the_output_but_keeps_a_typed_one(stack, tmp_path):
+    plugin = GaussianFit()
+    settings = GaussianFitSettings(source=SourceSettings(path=str(stack)))
+    updates = plugin.react("source.path", settings)
+    assert updates["output.path"].endswith("_locs.hdf5")
+
+    # the default follows a new source while it is still the default ...
+    settings.output.path = updates["output.path"]
+    other = tmp_path / "other.tif"
+    tifffile.imwrite(other, np.zeros((2, 8, 8), np.uint16))
+    settings.source.path = str(other)
+    assert plugin.react("source.path", settings)["output.path"] == \
+        str(tmp_path / "other_locs.hdf5")
+
+    # ... and a path the user typed is left alone
+    settings.output.path = str(tmp_path / "mine.hdf5")
+    assert "output.path" not in (plugin.react("source.path", settings) or {})
