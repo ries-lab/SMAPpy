@@ -134,6 +134,24 @@ def _linearise(transform: np.ndarray, x: np.ndarray, y: np.ndarray,
             (along_y[:, 1] - here[:, 1]) / step)
 
 
+def secondary_to_reference(x: np.ndarray, y: np.ndarray,
+                           calibration: DualColorCalibration,
+                           origin: Tuple[float, float] = (0.0, 0.0)) -> np.ndarray:
+    """Positions on the secondary half, seen from the reference channel.
+
+    The one mapping `combine_peaks` pairs peaks with, and what a preview
+    draws the secondary peaks back-projected by -- so that when a projected
+    peak does not land on its partner, the offset on screen is the offset the
+    combiner works with, not a copy of it.  ``origin`` is the camera ROI's
+    corner on the chip, since the transformation is in chip coordinates.
+    """
+    x, y = np.asarray(x, float), np.asarray(y, float)
+    if not len(x):
+        return np.empty((0, 2))
+    ox, oy = origin
+    return map_points(calibration.transformation, np.c_[x + ox, y + oy]) - (ox, oy)
+
+
 # ------------------------------------------------------------------ combining
 def combine_peaks(candidates: Candidates, calibration: DualColorCalibration,
                   image_shape: Tuple[int, int], roisize: int,
@@ -176,9 +194,7 @@ def combine_peaks(candidates: Candidates, calibration: DualColorCalibration,
         ref = candidates[on_frame & is_reference]
         other = candidates[on_frame & ~is_reference]
         # the secondary peaks, seen from the reference channel
-        mapped = (map_points(calibration.transformation,
-                             np.c_[other.x + ox, other.y + oy]) - (ox, oy)
-                  if len(other) else np.empty((0, 2)))
+        mapped = secondary_to_reference(other.x, other.y, calibration, origin)
         here = np.c_[ref.x, ref.y].astype(float)
 
         weight_ref = np.sqrt(np.maximum(ref.value, 0.0))

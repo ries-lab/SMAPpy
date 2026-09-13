@@ -289,3 +289,69 @@ def test_the_link_flags_reach_the_model():
     assert everything.shared() == (True, True, True, True, True)
     unlinked = DualModelSettings(link_xy=False, link_z=False)
     assert unlinked.shared() == (False, False, False, False, False)
+
+
+@pytest.mark.parametrize("pixelsize", [0.1, None])
+def test_a_2c_preview_shows_projected_peaks_left_and_fits_only_in_channel_1(
+        tmp_path, pixelsize):
+    """Peaks come from both halves; localizations only from the main one.
+
+    Every secondary peak is mapped into the main channel and each pair is
+    fitted as one emitter at the *reference* position, so nothing fitted can
+    lie on the secondary half.  The peak panel shows the secondary peaks
+    back-projected, so a registration error is visible as a + beside its o.
+    The preview once drew fits one chip-ROI offset away whenever it fell back
+    to pixel units, which put them on the secondary half anyway.
+    """
+    import tifffile
+    from dataclasses import replace
+    import matplotlib
+    matplotlib.use("Agg")
+    from matplotlib import pyplot as plt
+    from smappy.plugins.fit import DualSplineFit
+
+    oy = 20                                  # a chip ROI that starts 20 px down
+    rng = np.random.default_rng(6)
+    cal = dual_calibration(ratio=0.3)
+    frame = split_frame([(25.0, 15.0), (42.0, 21.0)], 24.0, 9000., 0.3, 30., rng, cal)
+    tifffile.imwrite(tmp_path / "split.tif", (frame[None] + 100).astype(np.uint16))
+    cal.geometry = dict(cal.geometry, split_position=SPLIT + oy)  # chip coordinates
+    calibration_file = _dual_calibration_file(tmp_path / "dual.h5", cal)
+
+    plugin = DualSplineFit()
+    settings = plugin.Settings()
+    settings.source.path = str(tmp_path / "split.tif")
+    settings.camera.conversion, settings.camera.offset = 1.0, 100.0
+    settings.camera.pixelsize_um = pixelsize
+    settings.detection.cutoff_mode, settings.detection.cutoff = "absolute", 20.0
+    settings.model.calibration = str(calibration_file)
+    settings.fit.roisize = 13
+    read = plugin._camera
+    plugin._camera = lambda s: replace(read(s), roi=(0, oy, 64, 64))
+
+    result = plugin.preview(Context(), settings, frame=0)
+    assert result.data["error"] == "" and len(result.data["locs"]) == 2
+
+    figure, ax = plt.subplots()
+    result.plot(ax)
+    panels = {a.get_title().split(":")[-1].strip(): a for a in figure.axes
+              if a.get_title()}
+    peaks, fits = panels["peaks found"], panels["fitted"]
+
+    def marked(panel, marker):
+        line = next(l for l in panel.lines if l.get_marker() == marker)
+        return np.c_[line.get_xdata(), line.get_ydata()]
+
+    found = marked(peaks, "o")
+    assert set(np.rint(found[:, 1]).astype(int)) == {15, 21, 47, 53}  # both halves
+    projected = marked(peaks, "+")
+    assert len(projected) == 2 and np.all(projected[:, 1] < SPLIT)
+    # each back-projected peak lands on its main-channel partner
+    main = found[found[:, 1] < SPLIT]
+    nearest = np.min(np.linalg.norm(projected[:, None] - main[None], axis=2), axis=1)
+    assert np.all(nearest < 1.0)
+
+    drawn = marked(fits, "+")
+    assert np.all(drawn[:, 1] < SPLIT)                   # the main half only
+    np.testing.assert_allclose(np.sort(drawn[:, 1]), [15, 21], atol=0.5)
+    plt.close(figure)

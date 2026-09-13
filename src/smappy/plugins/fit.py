@@ -265,6 +265,16 @@ class _FitPlugin(Plugin):
                     if k in self.CAMERA_FIELDS and v is not None}
         return None
 
+    def back_projected(self, settings, camera: CameraMetadata, candidates):
+        """Peaks from a second channel, drawn where the first channel sees them.
+
+        None for a single-channel fitter.  The two-channel one returns the
+        secondary half's peaks mapped into the reference channel, which is the
+        cheapest check of a transformation there is: a projected peak that
+        misses its partner shows the registration error directly.
+        """
+        return None
+
     def preview(self, ctx: Context, settings, frame: int = 0) -> Result:
         """Detect and fit one frame, and draw what came out.
 
@@ -297,6 +307,11 @@ class _FitPlugin(Plugin):
         maxima = filtered[0][filtered[0] > np.percentile(filtered[0], 99)]
         cutoff = float(finder.cutoff(maxima)) if maxima.size else float("nan")
 
+        try:
+            projected = self.back_projected(settings, camera, candidates)
+        except Exception:
+            projected = None      # no calibration: the fit will say so below
+
         locs, trouble = None, ""
         try:
             model = self.model(settings, camera)
@@ -324,38 +339,61 @@ class _FitPlugin(Plugin):
             scale = (1000.0*float(camera.pixelsize_um)
                      if unit == "nm" and camera.pixelsize_um else 1.0)
             names = ("x_nm", "y_nm") if unit == "nm" else ("x_pix", "y_pix")
-            offset = camera.roi_offset if unit == "nm" else (0, 0)
+            # both columns are chip coordinates -- x_pix has the camera ROI
+            # offset added when it is made, x_nm inherits it -- while the image
+            # drawn is the ROI, so the offset comes off in either unit.  Taking
+            # it off only for nm put every fit of a pixel-unit preview one ROI
+            # offset away, onto the other half of a split frame.
+            offset = camera.roi_offset
             fitted = (np.asarray(locs[names[0]])/scale-offset[0],
                       np.asarray(locs[names[1]])/scale-offset[1])
 
         def plot(ax) -> None:
-            """Two panels: what was seen, and what the finder saw."""
+            """Detection on the left, the fit on the right.
+
+            Every peak the finder found, and for two channels the secondary
+            peaks projected into the reference channel; the filtered image
+            the cutoff acts on; and only what was actually fitted -- which for
+            a two-channel fit is one position per emitter, in the reference
+            channel, however many halves the peaks were found on.
+            """
             figure = ax.figure
             ax.remove()
-            figure.set_size_inches(10, 6)
+            figure.set_size_inches(15, 6)
             figure.set_layout_engine("constrained")
-            left, right = figure.subplots(1, 2, sharex=True, sharey=True)
-            left.imshow(photons, cmap="gray",
-                        vmax=np.percentile(photons, 99.8) or None)
-            left.plot(candidates.x, candidates.y, "o", mfc="none", mec="lime",
-                      ms=9, mew=1, label=f"{len(candidates)} candidates")
-            if fitted is not None:
-                left.plot(*fitted, "+", color="gold", ms=7,
-                          label=f"{len(fitted[0])} fitted")
-            left.set(title=f"frame {index} (photons)")
-            left.legend(fontsize=7, loc="upper right")
+            peaks, filtered_ax, fits = figure.subplots(1, 3, sharex=True, sharey=True)
+            shown = np.percentile(photons, 99.8) or None
+
+            peaks.imshow(photons, cmap="gray", vmax=shown)
+            peaks.plot(candidates.x, candidates.y, "o", mfc="none", mec="lime",
+                       ms=9, mew=1, label=f"{len(candidates)} peaks")
+            if projected is not None and len(projected[0]):
+                peaks.plot(*projected, "+", color="cyan", ms=9, mew=1.5,
+                           label=f"{len(projected[0])} channel 2 peaks, "
+                                 "back-projected")
+            peaks.set(title=f"frame {index}: peaks found")
+            peaks.legend(fontsize=7, loc="upper right")
+
             # scaled to the cutoff, not to the brightest pixel: the question
             # this panel answers is how far the peaks sit above the threshold,
             # and a single bright molecule would otherwise flatten the rest
             top = float(cutoff*2) if np.isfinite(cutoff) and cutoff > 0 else None
-            image = right.imshow(filtered[0], cmap="viridis", vmin=0, vmax=top)
-            bar = figure.colorbar(image, ax=right, fraction=0.046)
+            image = filtered_ax.imshow(filtered[0], cmap="viridis", vmin=0, vmax=top)
+            bar = figure.colorbar(image, ax=filtered_ax, fraction=0.046)
             if top is not None:
                 bar.ax.axhline(cutoff, color="red", lw=1.5)
-            right.plot(candidates.x, candidates.y, ".", color="red", ms=3)
-            right.set(title=f"{settings.detection.filter} filtered; red line at "
-                            f"the cutoff, {cutoff:.3g}")
-            for panel in (left, right):
+            filtered_ax.plot(candidates.x, candidates.y, ".", color="red", ms=3)
+            filtered_ax.set(title=f"{settings.detection.filter} filtered; red "
+                                  f"line at the cutoff, {cutoff:.3g}")
+
+            fits.imshow(photons, cmap="gray", vmax=shown)
+            if fitted is not None:
+                fits.plot(*fitted, "+", color="gold", ms=9, mew=1.5,
+                          label=f"{len(fitted[0])} fitted")
+                fits.legend(fontsize=7, loc="upper right")
+            fits.set(title="fitted" if locs is not None else "not fitted")
+
+            for panel in (peaks, filtered_ax, fits):
                 panel.title.set_fontsize(9)
                 panel.tick_params(labelsize=8)
             if trouble:
@@ -541,6 +579,17 @@ class DualSplineFit(_FitPlugin):
 
     def model(self, settings, camera):
         return settings.model.model(settings.model.load(), camera)
+
+    def back_projected(self, settings, camera, candidates):
+        from ..dualfit import secondary_to_reference, which_channel
+        calibration = settings.model.load()
+        ox, oy = camera.roi_offset
+        secondary = ~which_channel(candidates.x + ox, candidates.y + oy,
+                                   calibration.geometry)
+        mapped = secondary_to_reference(candidates.x[secondary],
+                                        candidates.y[secondary],
+                                        calibration, (ox, oy))
+        return mapped[:, 0], mapped[:, 1]
 
     def engine(self, settings, camera, finder, model):
         from ..dualfit import DualChannelEngine
