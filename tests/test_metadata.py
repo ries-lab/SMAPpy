@@ -42,3 +42,34 @@ def test_overrides_win_when_set():
 def test_missing_values_are_reported():
     with pytest.raises(ValueError, match="pixelsize_um"):
         CameraMetadata(conversion=6.7, offset=400.0).require()
+
+
+def test_shipped_camera_presets_are_complete():
+    """Every camera YAML in ``examples`` is a camera you can fit with.
+
+    A preset that left out the conversion or the offset would only fail once
+    the metadata failed to fill it in -- for an iXon, which reports no
+    baseline, that is at the fit.
+    """
+    from pathlib import Path
+
+    presets = sorted((Path(__file__).resolve().parents[1] / "examples").glob("*.yaml"))
+    assert [p.stem for p in presets] == ["camera_andor_ixon897", "camera_evolve512"]
+    for path in presets:
+        CameraMetadata.from_yaml(path).require()
+
+
+def test_andor_preset_matches_the_smap_settings_file():
+    """The iXon preset holds one readout state of SMAP's RiesLab_cameras.mat.
+
+    The values are the mode the camera is normally run in (pre-amp Gain 1,
+    10 MHz, electron multiplying); EM is left to the image metadata, which
+    records it per acquisition.
+    """
+    from pathlib import Path
+
+    cam = CameraMetadata.from_yaml(
+        Path(__file__).resolve().parents[1] / "examples" / "camera_andor_ixon897.yaml")
+    assert (cam.conversion, cam.offset) == (15.8, 196)
+    assert cam.pixelsize_um == 0.127
+    assert cam.em_on is None and cam.emgain is None

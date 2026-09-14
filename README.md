@@ -72,7 +72,8 @@ plugin's declaration -- nothing in the plugin or session layer imports Qt.  See
 | `smappy-calibrate /path/to/bead_acquisitions` | bead PSF calibration |
 | `smappy-view FILE.h5` | the older matplotlib viewer |
 
-The camera is a YAML config (`examples/camera_evolve512.yaml`) or flags
+The camera is a YAML config (`examples/camera_evolve512.yaml`,
+`examples/camera_andor_ixon897.yaml`) or flags
 (`--pixelsize 0.127 --conversion 6.7 --offset 400`); either overrides what the
 image metadata says.  A SMAP `*_cameras.mat` can be passed with `--cameras`, but
 nothing requires one.

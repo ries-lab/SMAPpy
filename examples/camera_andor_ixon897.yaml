@@ -1,0 +1,34 @@
+# The M1 Andor iXon Ultra 897 (DU897_BV, serial 8172), as SMAP's
+# settings/RiesLab_cameras.mat describes it:
+#
+#   python scripts/fit_dataset.py DATA OUT.h5 --camera examples/camera_andor_ixon897.yaml
+#
+# An iXon does not report its baseline in the image metadata, so the offset has
+# to come from here (or from --cameras RiesLab_cameras.mat).  The conversion is
+# not in the metadata either, for any camera.
+#
+# Both are state dependent: the values below are the pre-amp gain and readout
+# rate the camera is usually run at -- Gain 1, 10 MHz, electron multiplying.
+# The image metadata says which mode a dataset actually used, in
+# `Andor-Pre-Amp-Gain` and `Andor-ReadoutMode`; if it is not this one, take the
+# pair from the table at the bottom.
+camera:
+  conversion: 15.8        # e- per ADU
+  offset: 196             # camera baseline, ADU
+  pixelsize_um: 0.127     # effective pixel size in the sample
+  # em_on / emgain are left to the image metadata: `Andor-EMSwitch` and
+  # `Andor-Gain` are recorded per acquisition and change between them.
+  camera_name: Andor
+  comment: M1 Andor iXon Ultra 897, Gain 1 / 10 MHz / electron multiplying
+
+# The other readout modes in RiesLab_cameras.mat, all electron multiplying:
+#
+#   pre-amp   readout    conversion   offset
+#   Gain 1    10 MHz          15.8     196      <- the values above
+#   Gain 1    17 MHz         14.61     187
+#   Gain 2    10 MHz           7.7     200.17
+#   Gain 2    17 MHz           9.3     201
+#   Gain 3    10 MHz          4.55     200.5
+#   Gain 3    17 MHz          4.81     201
+#   Gain 3     1 MHz           3.7     200
+#   Gain 3     3 MHz          2.85     200
