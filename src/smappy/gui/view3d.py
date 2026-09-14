@@ -19,7 +19,8 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDial, QDockWidget, QDouble
 
 from ..render import FieldOfView
 from ..session import Session
-from ..view3d import PRESETS, PREVIEW_SCALE, Projection, Slab, render_3d, upscale
+from ..view3d import (PRESETS, PREVIEW_SCALE, PreviewBudget, Projection, Slab, render_3d,
+                      upscale)
 
 BOX_PEN = pg.mkPen((255, 255, 0, 160), width=1)
 DEGREES_PER_PIXEL = 0.4
@@ -40,6 +41,10 @@ class _Renderer3D(QObject):
         _LIVE_THREADS.append(self.thread)
         self._gpu = None
         self._gpu_tried = False
+        # one per engine: a drag frame costs an order of magnitude more on the
+        # CPU than on the GPU, so a rate learned under one says nothing about
+        # the next.  Keyed by the engine that was actually used, not asked for.
+        self._budgets: dict = {}
 
     def gpu(self):
         """The GPU engine, made on this thread on first use; None without one."""
@@ -64,8 +69,10 @@ class _Renderer3D(QObject):
             projection.engine = "cpu"
         if projection.engine == "spheres" and preview:
             preview = False                      # the g-buffer look must not change mid-drag
+        budget = self._budgets.setdefault(projection.engine, PreviewBudget())
         try:
-            rgb, hist = render_3d(session.layers, projection, slab, fov, preview, engine)
+            rgb, hist = render_3d(session.layers, projection, slab, fov, preview, engine,
+                                  budget=budget)
         except Exception as e:                      # the table changed under us
             print(f"3D render failed: {e}")
             return

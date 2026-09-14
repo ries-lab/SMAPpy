@@ -233,3 +233,61 @@ def test_a_sampled_histogram_keeps_the_shape_of_the_whole_one():
     # same shape, different scale: compare the normalised profiles
     a, b = a / a.sum(), b / b.sum()
     assert np.abs(a - b).sum() < 0.15
+
+
+def test_thinning_keeps_the_count_the_order_and_the_density():
+    from smappy.view3d import thinned
+    rng = np.random.default_rng(3)
+    rows = np.sort(rng.choice(400_000, 300_000, replace=False))
+    assert thinned(rows, None) is rows and thinned(rows, 400_000) is rows   # nothing to do
+    cut = thinned(rows, 20_000)
+    assert cut.size == 20_000                       # exactly the budget, not about it
+    assert np.all(np.diff(cut) > 0)                 # ascending: the gather stays tidy
+    assert set(cut.tolist()) <= set(rows.tolist())
+    # unbiased in space: the sample's density matches the whole, as a draw would
+    locs = _table(300_000, seed=5)
+    x = np.asarray(locs["x_nm"])[rows % 300_000]
+    bins = np.linspace(x.min(), x.max(), 33)
+    whole, _ = np.histogram(x, bins=bins)
+    part, _ = np.histogram(np.asarray(locs["x_nm"])[cut % 300_000], bins=bins)
+    a, b = part / part.sum(), whole / whole.sum()
+    assert np.abs(a - b).sum() < 0.05
+
+
+def test_the_budget_settles_on_the_frame_rate_it_is_asked_for():
+    """A fixed point count cannot serve a base M1 and a 3090, so it is timed."""
+    from smappy.view3d import PreviewBudget
+    from smappy.render import FieldOfView
+    fov = FieldOfView(0, 0, 10.0, 450, 350)
+    for rate, overhead in ((60e6, 0.004), (6e6, 0.002), (400e6, 0.010)):
+        budget, seconds = PreviewBudget(), None
+        for _ in range(30):                          # a machine: fixed cost + per point
+            drawn = min(budget.points(fov), 20_000_000)
+            seconds = overhead + drawn / rate
+            budget.record(drawn, seconds)
+        assert 1 / seconds > 20, f"{rate:g}: settled at {1 / seconds:.1f} fps"
+        # either it is hitting the target, or it is already drawing all it can see
+        assert abs(seconds - budget.target) < 0.35 * budget.target \
+            or budget.points(fov) >= budget.per_pixel * fov.nx * fov.ny * 0.99
+
+
+def test_a_preview_is_bounded_by_the_budget_and_a_final_frame_is_not():
+    from smappy.session import Session
+    from smappy.view3d import PreviewBudget, project_layer, render_3d
+    locs = _table(400_000)
+    s = Session(locs)
+    slab = Slab.from_bounds(0, 1000, 0, 800, -300, 300)
+    s.set_slab(slab)
+    proj = Projection(pivot=slab.center, zoom=5.0)
+    st = s.layers[0].state
+    budget = PreviewBudget(per_pixel=0.5, minimum=1000)      # 200x160 -> 16,000
+    limit = budget.points(proj.fov(200, 160))
+    assert limit < len(st.locs)
+    drawn = project_layer(st.locs, st.filter.mask, proj, slab, st.settings,
+                          preview=True, index=st.index, budget=limit)[1]
+    assert drawn.size <= limit
+    whole = project_layer(st.locs, st.filter.mask, proj, slab, st.settings)[1]
+    assert whole.size > limit                                 # the final frame is all of it
+    rgb, hist = render_3d(s.layers, proj, slab, proj.fov(200, 160), True, budget=budget)
+    assert rgb.shape == (160, 200, 3) and hist[:, 1].sum() > 0
+    assert budget.rate is not None                            # and it timed itself

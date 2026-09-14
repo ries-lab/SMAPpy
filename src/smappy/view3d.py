@@ -9,6 +9,7 @@ layer's own settings.  Nothing here imports Qt.
 from __future__ import annotations
 
 import math
+import time
 from dataclasses import dataclass, field, replace
 from typing import List, Optional, Sequence, Tuple
 
@@ -23,6 +24,12 @@ PREVIEW_POINTS = 2_000_000       # at most this many while the mouse drags
 PREVIEW_SCALE = 2                # and at this many times coarser pixels
 HIST_POINTS = 200_000            # the depth histogram is taken from this many
 HIST_BINS = 64
+
+# A drag frame draws a sample, never the whole table.  Two things bound it: what
+# can be seen, and what the machine can do in time.
+PREVIEW_PER_PIXEL = 13.0         # points per rendered pixel; beyond this the
+                                 # extra ones land on top of each other
+TARGET_FPS = 27.0                # the middle of a 25-30 fps band
 
 
 def _view_dtype(*arrays) -> np.dtype:
@@ -358,6 +365,73 @@ def selection_rows(locs: Localizations, select: np.ndarray, slab: Optional[Slab]
     return rows
 
 
+def thinned(rows: np.ndarray, budget: Optional[int]) -> np.ndarray:
+    """``budget`` of these rows, evenly spaced; all of them if they already fit.
+
+    Evenly spaced rather than drawn at random.  A draw is what you would reach
+    for, but `Generator.choice(n, k, replace=False)` permutes n first (73 ms at
+    35 M) and comes back unsorted, so the gather that follows it scatters over
+    the table.  `linspace` costs the k it returns, comes back ascending, and is
+    deterministic -- so the same budget asks the GPU for the same selection and
+    the buffer is reused rather than re-uploaded.
+
+    It is a systematic sample, which is only as good as the row order is
+    unrelated to position.  Localization tables are in acquisition order, and
+    grouping renumbers but does not sort by position, so it holds: measured on
+    a 3 M row file against a random draw of the same size, the sampled density
+    over a 64 x 64 grid differed by L1 0.2305 against the draw's 0.2349, and
+    both correlate with the whole table at 0.95.  A reader that ever returns a
+    spatially sorted table would break this, and want a shuffle instead.
+
+    Thinning is unbiased: every pixel keeps the same fraction, so a preview is
+    what a shorter acquisition would have looked like -- noisier, never
+    rearranged.  Merging neighbours instead would hold the total but move it,
+    which can make a sparse filament look continuous; see NOTES.md.
+    """
+    if budget is None or rows.size <= budget or budget < 1:
+        return rows
+    return rows[np.linspace(0, rows.size - 1, int(budget)).astype(np.int64)]
+
+
+@dataclass
+class PreviewBudget:
+    """How many localizations a drag frame may draw, learned from the clock.
+
+    One number cannot serve a base M1 and a 3090 -- and the same machine is an
+    order of magnitude apart between a sub-pixel blob zoomed out and a fat one
+    zoomed in -- so the budget is what this machine actually got through, at
+    this zoom, in ``1 / TARGET_FPS`` seconds.  `record` is fed by `render_3d`.
+
+    Two bounds, and the smaller wins:
+
+    * **what can be seen.**  ``per_pixel`` points per rendered pixel; past that
+      they land on each other.  This one applies from the first frame, before
+      anything has been timed, and is what stops the opening frame of a whole
+      field being the 18 M points it used to be.
+    * **what there is time for.**  ``rate`` is points per second, an EMA over
+      recent drag frames, so a slower machine simply draws fewer.
+    """
+    per_pixel: float = PREVIEW_PER_PIXEL
+    target: float = 1.0 / TARGET_FPS
+    minimum: int = 50_000            # below this, thin no further: it is cheap
+    smoothing: float = 0.35          # EMA weight on the newest frame
+    rate: Optional[float] = None     # points per second, None until timed
+
+    def points(self, fov: FieldOfView) -> int:
+        """The budget for a frame on this grid."""
+        seen = self.per_pixel * fov.nx * fov.ny
+        timed = self.rate * self.target if self.rate else seen
+        return max(self.minimum, int(min(seen, timed)))
+
+    def record(self, drawn: int, seconds: float) -> None:
+        """What the last drag frame managed, to size the next one."""
+        if drawn <= 0 or seconds <= 0:
+            return
+        rate = drawn / seconds
+        self.rate = rate if self.rate is None else \
+            self.smoothing * rate + (1.0 - self.smoothing) * self.rate
+
+
 def depth_sample(locs: Localizations, select: np.ndarray, projection: Projection,
                  slab: Optional[Slab], index=None, limit: int = HIST_POINTS) -> np.ndarray:
     """Depths of up to ``limit`` of the slab's localizations.
@@ -410,23 +484,27 @@ def depth_histogram(depths: Sequence[np.ndarray]) -> np.ndarray:
 def project_layer(locs: Localizations, select: np.ndarray, projection: Projection,
                   slab: Optional[Slab], settings: RenderSettings,
                   preview: bool = False, front: Optional[float] = None,
-                  index=None) -> Tuple[Localizations, np.ndarray]:
+                  index=None, budget: Optional[int] = None
+                  ) -> Tuple[Localizations, np.ndarray]:
     """The selected rows of a table, rotated into a 2D table for the renderer.
 
     Returns the table (``x_nm``/``y_nm`` are the view coordinates, ``depth``
     a column, the precision and any colour/weight column carried over) and
     the indices it was built from.  ``index`` is the layer's spatial index,
-    which narrows the rows the slab is tested against (`slab_candidates`).
+    which narrows the rows the slab is tested against (`slab_candidates`);
+    ``budget`` caps how many are drawn (`thinned`), and defaults on a preview
+    to `PREVIEW_POINTS` so an unbudgeted caller behaves as it always did.
     """
+    if preview and budget is None:
+        budget = PREVIEW_POINTS
     x, y = positions(locs)
     z = locs["z_nm"] if "z_nm" in locs else None
-    idx = selection_rows(locs, select, slab, index)
+    # thinned before the mask and the gather, not after: the budget is there to
+    # bound the work, and the rows are already the slab's neighbourhood
+    idx = thinned(selection_rows(locs, select, slab, index), budget)
     if slab is not None and idx.size:
         keep = slab.mask(x[idx], y[idx], None if z is None else z[idx])
         idx = idx[keep]
-    if preview and idx.size > PREVIEW_POINTS:
-        idx = idx[np.random.default_rng(0).choice(idx.size, PREVIEW_POINTS, replace=False)]
-        idx.sort()
     xv, yv, depth = projection.apply(x[idx], y[idx], None if z is None else z[idx])
     columns = {"x_nm": xv.astype(np.float32), "y_nm": yv.astype(np.float32),
                "depth": depth.astype(np.float32)}
@@ -453,7 +531,8 @@ def column_range(locs: Localizations, name: str) -> Tuple[float, float]:
 def render_layer_3d(locs: Localizations, select: np.ndarray, projection: Projection,
                     slab: Optional[Slab], fov: FieldOfView, settings: RenderSettings,
                     display: DisplaySettings, preview: bool = False,
-                    n_threads: int = 0, index=None) -> Tuple[np.ndarray, RenderedImage]:
+                    n_threads: int = 0, index=None,
+                    budget: Optional[int] = None) -> Tuple[np.ndarray, RenderedImage]:
     """Engine A for one layer: RGB in [0, 1] and the planes.
 
     With ``projection.opacity`` > 0 the slab is rendered in depth slices and
@@ -471,7 +550,8 @@ def render_layer_3d(locs: Localizations, select: np.ndarray, projection: Project
     # depth is defined by the slab's corners (or the table's box), so that the
     # colour scale, the slices and the attenuation do not move with the filter
     front, drange = _depth_front_and_range(projection, slab, locs)
-    table, _ = project_layer(locs, select, projection, slab, settings, preview, front, index)
+    table, _ = project_layer(locs, select, projection, slab, settings, preview, front,
+                             index, budget)
     weight = "_weight" if "_weight" in table else settings.weight_field
     if settings.color_field == "depth":
         settings = replace(settings, color_range=settings.color_range or drange)
@@ -615,7 +695,7 @@ def sphere_draw(engine, locs: Localizations, select: np.ndarray, projection: Pro
 def render_layer_gpu(engine, locs: Localizations, select: np.ndarray, projection: Projection,
                      slab: Optional[Slab], fov: FieldOfView, settings: RenderSettings,
                      display: DisplaySettings, median_precision: float = 0.0,
-                     preview: bool = False, index=None):
+                     preview: bool = False, index=None, budget: Optional[int] = None):
     """Engine A on the GPU for one layer: the same planes as `render_layer_3d`,
     or, with ``projection.engine == "points"``, an RGB sprite image."""
     x, y = positions(locs)
@@ -627,7 +707,7 @@ def render_layer_gpu(engine, locs: Localizations, select: np.ndarray, projection
                else None)
     engine.table(key, x, y, z, locs[prec_name] if prec_name else None,
                  locs[settings.weight_field] if settings.weight_field else None, cvalues)
-    sel_key = (key, id(select), _slab_key(slab))
+    sel_key = (key, id(select), _slab_key(slab), budget)
     front, drange = _depth_front_and_range(projection, slab, locs)
     if color_field == "depth":
         color_mode, color_range = 2, (settings.color_range or drange)
@@ -649,7 +729,7 @@ def render_layer_gpu(engine, locs: Localizations, select: np.ndarray, projection
                 radius=point_radius_nm(locs, select, prec_name, projection) / fov.pixelsize,
                 alpha=projection.point_alpha)
     lut, invert = display.lut, display.invert
-    idx = selection_rows(locs, select, slab, index)
+    idx = thinned(selection_rows(locs, select, slab, index), budget)
     if projection.engine == "points":
         if not preview and idx.size <= PREVIEW_POINTS:
             # Back to front, so the alpha reads right -- but not while the mouse
@@ -681,16 +761,28 @@ def render_layer_gpu(engine, locs: Localizations, select: np.ndarray, projection
 
 
 def render_3d(layers, projection: Projection, slab: Optional[Slab], fov: FieldOfView,
-              preview: bool = False, engine=None) -> Tuple[np.ndarray, np.ndarray]:
+              preview: bool = False, engine=None,
+              budget: Optional[PreviewBudget] = None) -> Tuple[np.ndarray, np.ndarray]:
     """Every visible localization layer, added up; also the depth histogram.
 
     ``layers`` are session layers.  ``engine`` is a `smappy.gpu.GPUEngine`
     for ``projection.engine`` "gpu" or "points"; None means the CPU.
     Returns the RGB image and a (64, 2) array of depth-bin centres and
     counts over the slab's points.
+
+    ``budget`` bounds a *preview* frame and is timed by it, so a drag settles
+    at `TARGET_FPS` on whatever machine it is running on; None draws every row
+    the slab holds.  A final frame is never budgeted -- the image you measure
+    or export is the whole table, and only the drag is a sample.
     """
     rgb = np.zeros((fov.ny, fov.nx, 3), np.float32)
     depths: List[np.ndarray] = []
+    limit = budget.points(fov) if (preview and budget is not None) else None
+    started, drawn = time.perf_counter(), 0
+    # A final frame is timed too, though it is never thinned: it gives the first
+    # drag a rate to start from instead of the visible cap, which on a whole
+    # field is one slow frame.  Its grid is PREVIEW_SCALE times finer, so the
+    # rate it reports is pessimistic -- the safe direction to be wrong in.
     if engine is not None and projection.engine == "spheres":
         draws, shade_params = [], None
         for layer in layers:
@@ -698,7 +790,7 @@ def render_3d(layers, projection: Projection, slab: Optional[Slab], fov: FieldOf
                 st = layer.state
                 draw, shade_params = sphere_draw(engine, st.locs, st.filter.mask, projection, slab,
                                                  fov, st.settings, st.display,
-                                                 index=getattr(st, "index", None))
+                                                 index=getattr(st, "index", None))     # opaque: no budget
                 draws.append(draw)
         if draws:
             rgb = engine.render_spheres(draws, fov, shade_params)
@@ -707,19 +799,26 @@ def render_3d(layers, projection: Projection, slab: Optional[Slab], fov: FieldOf
             continue
         state = layer.state
         index = getattr(state, "index", None)
+        # memoised, so this is the count the engines are about to work on
+        drawn += min(selection_rows(state.locs, state.filter.mask, slab, index).size,
+                     limit if limit is not None else np.iinfo(np.int64).max)
         if engine is not None and projection.engine == "spheres":
             image = 0.0
         elif engine is not None and projection.engine in ("gpu", "points"):
             image, _ = render_layer_gpu(engine, state.locs, state.filter.mask, projection, slab,
                                         fov, state.settings, state.display,
-                                        state.current.median_precision, preview, index=index)
+                                        state.current.median_precision, preview, index=index,
+                                        budget=limit)
         else:
             image, _ = render_layer_3d(state.locs, state.filter.mask, projection, slab, fov,
                                        state.settings, state.display, preview,
-                                       n_threads=state.n_threads, index=index)
+                                       n_threads=state.n_threads, index=index, budget=limit)
         rgb += image
         depths.append(depth_sample(state.locs, state.filter.mask, projection, slab, index))
-    return np.clip(rgb, 0, 1), depth_histogram(depths)
+    out = np.clip(rgb, 0, 1), depth_histogram(depths)
+    if budget is not None:
+        budget.record(drawn, time.perf_counter() - started)
+    return out
 
 
 def upscale(rgb: np.ndarray, scale: int, ny: int, nx: int) -> np.ndarray:

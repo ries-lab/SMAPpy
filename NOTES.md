@@ -325,11 +325,56 @@ on the CPU, 33.6 on the GPU**; a 1 um crop 150 / 108.  Below ~100k points the
 CPU wins again -- the GPU round trip is ~8 ms of readback whatever it drew, so
 a 300 nm crop is 246 fps on the CPU and 117 on the GPU.
 
-What is left, and where the games answer applies: the full field is 8.4 fps
-because 18 M points are genuinely drawn into a 450x350 preview -- **116 points
-per rendered pixel**.  A point budget would cut that to the ~2 M where it stops
-mattering (45 fps, measured); an LOD octree over the table is the same idea
-done properly.  Neither is built.
+### The preview point budget
+
+The full field was 8.4 fps because 18 M points were drawn into a 450x350
+preview -- **116 points per rendered pixel**, so 99% of the work could not
+change one.  A drag frame now draws a sample (`thinned`, `PreviewBudget`); a
+final frame never does, so the image anyone measures or exports is still the
+whole table.
+
+**Thinned, not merged.**  An SMLM image is a density map, and dropping a fixed
+fraction scales every pixel alike: a preview is what a shorter acquisition
+would have looked like, which is a degradation that cannot be misread.
+Merging neighbours into superpixels holds the total but *moves* it, and can
+make a sparse filament look continuous -- an artifact that appears only while
+the mouse is down and is gone before it can be checked.  Merging becomes right
+when the ratio is 100x+ rather than the 9x wanted here, and then the criterion
+is to merge only *below the rendered pixel*: the kernel is already floored at
+`max(min_sigma, min_sigma_pixels * pixelsize)`, so points closer than that
+cannot be told apart in the image.  That is an LOD octree, and it is the build
+to do at 10^8 localizations, not at 10^7.
+
+**Evenly spaced, not drawn.**  `choice(n, k, replace=False)` permutes n first
+(73 ms at 35 M) and returns an unsorted list, which then scatters the gather.
+`linspace` costs the k it returns, comes back ascending, and is deterministic,
+so the same budget asks the GPU for the same selection and the buffer is
+reused.  It is a systematic sample and only as good as row order being
+unrelated to position -- measured against a random draw of the same size on a
+3 M row file, sampled density over a 64 x 64 grid differed by L1 0.2305 against
+the draw's 0.2349, on the grouped table as well as the raw one.
+
+**Timed, not fixed.**  No constant serves a base M1 and a 3090, and the same
+machine is an order of magnitude apart between a sub-pixel blob and a fat one.
+The budget is the smaller of what can be seen (13 points per rendered pixel)
+and what the machine got through last frame at `TARGET_FPS`.  The visible cap
+applies before anything has been timed, and final frames are timed too, so the
+first frame of the first drag already has a rate to work from.  The loop is a
+contraction while the fixed per-frame overhead is under the target; past that
+it falls to `minimum` and simply runs slower, which is the honest outcome.
+
+Rotating a 900x700 preview on the 46 M file, before -> settled:
+
+| slab | CPU | GPU planes | GPU points |
+| --- | --- | --- | --- |
+| whole field | 6.2 -> **25.8** | 9.0 -> **24.5** | 5.4 -> **23.3** |
+| 10 um crop | 4.9 -> **25.5** | 31.1 -> **27.1** | 25.4 -> **28.1** |
+| 1 um crop | 123 -> 122 | 102 -> 105 | 125 -> 116 |
+
+The 1 um row does not move because the slab holds fewer points than the budget:
+nothing is thinned, and a crop is drawn whole.  The whole field on the CPU
+settles at 1.4 points per pixel, which is visibly sparse -- that is what a CPU
+can do at 25 fps with 18 M points, and the GPU holds 11/px for the same rate.
 
 Rendering at *display* resolution rather than a fixed nm/pixel is what bounds
 this: zoomed out the kernels collapse onto the `mingausspix` floor, zoomed in
