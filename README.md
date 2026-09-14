@@ -45,8 +45,8 @@ Two windows open: the render view, and a compact control window with four tabs.
   histogram (drag the shaded range to the edge for "no bound"); contrast, gamma,
   LUT and colour-by are applied after rendering, so they change without
   re-rendering.
-* **Analysis** -- drift correction (COMET or RCC) and whatever else is
-  registered.
+* **Analysis** -- drift correction (COMET or RCC), colour assignment for
+  two-channel data, and whatever else is registered.
 * **ROI** -- the regions drawn in the render window; they are saved inside the
   localization file.
 

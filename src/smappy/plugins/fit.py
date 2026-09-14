@@ -193,6 +193,10 @@ def _preset_choices() -> List:
 class _FitPlugin(Plugin):
     """What both fitters share: opening the source, streaming, saving."""
 
+    preview_help = ("run one frame and draw it: the detected candidates over "
+                    "the image, and the filtered image the threshold acts on. "
+                    "Nothing is saved and the session is not touched.")
+
     def model(self, settings, camera: CameraMetadata):
         raise NotImplementedError
 

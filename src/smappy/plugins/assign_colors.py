@@ -1,0 +1,597 @@
+"""Colours from the photon split between two detection channels.
+
+A ratiometric two-colour experiment reads a molecule's species from how its
+emission divides between the channels.  The dual-channel global fit leaves that
+split free while sharing x, y and z (`dualfit.LINK_XYZ`), so the two photon
+numbers it returns are the colour; this turns them into a ``channel`` label.
+
+    r = (N1 - N2) / (N1 + N2)
+
+is the coordinate throughout: bounded, symmetric between the channels, and
+with a noise that has a closed form -- ``var(r) = (1 - r^2) / N`` for pure shot
+noise, which is exactly the binomial variance of the split.  Two ways to cut it
+up:
+
+* **minima** -- the modes of the histogram of r are the species, the lowest
+  point between two modes is the boundary, and ``dr`` around a boundary is left
+  unassigned.  One decision for every localization, however bright.
+* **probabilistic** -- each localization gets the posterior of each species
+  given *its own* photon numbers and errors, and is assigned only if the best
+  posterior reaches ``1 - crosstalk``.  The rejected band then narrows as
+  1/N: a bright localization is assigned right up to the boundary, a dim one
+  is not assigned at all.
+
+`docs/dual_color_assignment.md` derives both, and in particular why the allowed
+crosstalk is an upper bound on the expected fraction of misassigned
+localizations among the assigned ones.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Optional, Sequence, Tuple
+
+import numpy as np
+
+from ..locs import Localizations
+from . import Context, Plugin, Result, param, register
+
+# candidate column pairs, in the order they are looked for: what the paired
+# fit writes first, then the 1-based spelling a SMAP or hand-made table uses
+CHANNEL_COLUMNS: Sequence[Tuple[str, str]] = (
+    ("photons_ch0", "photons_ch1"),
+    ("photons_ch1", "photons_ch2"),
+    ("intensity_ch0", "intensity_ch1"),
+    ("intensity_ch1", "intensity_ch2"),
+)
+# how far apart two maxima must be, in smoothing widths: below this they are
+# one mode that the smoothing has not quite joined up
+MIN_SEPARATION = 3.0
+MAX_COLORS = 6
+HWHM_PER_SIGMA = np.sqrt(2 * np.log(2))     # 1.1774: a Gaussian's HWHM
+# a palette for the modes, in r order.  Red first because the channel the
+# splitter sends the long wavelengths to is conventionally channel 1.
+PALETTE = ("#d62728", "#2ca02c", "#1f77b4", "#ff7f0e", "#9467bd", "#8c564b")
+
+
+def error_column(name: str) -> str:
+    """The column holding ``name``'s fitted error.
+
+    ``photons_ch0`` -> ``photons_err_ch0``, following `psf.GlobalSplinePSF`;
+    anything else just gains the suffix.
+    """
+    head, sep, tail = name.rpartition("_ch")
+    return f"{head}_err{sep}{tail}" if sep else f"{name}_err"
+
+
+def channel_columns(locs: Localizations, first: Optional[str] = None,
+                    second: Optional[str] = None) -> Tuple[str, str]:
+    """Which two columns hold the per-channel photons.
+
+    Named explicitly, or the first pair of `CHANNEL_COLUMNS` the table has.
+    """
+    if first or second:
+        if not (first and second):
+            raise ValueError("name both channel columns, or neither")
+        for name in (first, second):
+            if name not in locs:
+                raise ValueError(f"no column {name!r}; the table has "
+                                 f"{', '.join(sorted(locs.keys()))}")
+        return first, second
+    for pair in CHANNEL_COLUMNS:
+        if all(name in locs for name in pair):
+            return pair
+    raise ValueError("no per-channel photon columns in the table: fit with "
+                     "'Localize/Spline 3D 2C', or name the columns yourself")
+
+
+@dataclass
+class Ratios:
+    """The colour coordinate and how well each localization measures it.
+
+    ``n_eff`` is the localization's worth *in photons*: the total when the
+    errors are Poisson, and less when background or EM gain has cost
+    information (see the doc).  ``valid`` is where any of it means anything.
+    """
+
+    r: np.ndarray               # (n,) in [-1, 1], NaN where invalid
+    total: np.ndarray           # (n,) N1 + N2
+    n_eff: np.ndarray           # (n,) effective photons behind r
+    valid: np.ndarray           # (n,) bool
+    columns: Tuple[str, str]
+    fitted_errors: bool         # were per-channel CRLBs used for n_eff?
+
+
+def ratios(locs: Localizations, first: Optional[str] = None,
+           second: Optional[str] = None, use_errors: bool = True,
+           min_photons: float = 0.0) -> Ratios:
+    """r, the total, and the effective photon number behind r."""
+    one, two = channel_columns(locs, first, second)
+    n1 = np.asarray(locs[one], dtype=float)
+    n2 = np.asarray(locs[two], dtype=float)
+    total = n1 + n2
+    valid = np.isfinite(n1) & np.isfinite(n2) & (total > 0)
+    if min_photons > 0:
+        valid &= total >= min_photons
+
+    with np.errstate(invalid="ignore", divide="ignore"):
+        r = np.where(valid, (n1 - n2) / np.where(valid, total, 1.0), np.nan)
+    # a fit may put a channel slightly below zero; the coordinate is still
+    # meaningful at the end of its range, the variance formula is not
+    r = np.clip(r, -1.0, 1.0)
+
+    errors = [error_column(one), error_column(two)]
+    fitted = use_errors and all(name in locs for name in errors)
+    if fitted:
+        s1 = np.asarray(locs[errors[0]], dtype=float)
+        s2 = np.asarray(locs[errors[1]], dtype=float)
+        good = valid & np.isfinite(s1) & np.isfinite(s2) & (s1 > 0) & (s2 > 0)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            var_r = 4 * (n2 ** 2 * s1 ** 2 + n1 ** 2 * s2 ** 2) / total ** 4
+            # N_eff is defined by matching the shot-noise form at the measured
+            # point, which keeps var(r) = (1 - rho^2)/N_eff usable under any
+            # hypothesis rho -- the plug-in variance would collapse at |r| = 1
+            n_eff = np.where(good & (var_r > 0), (1 - r ** 2) / var_r, np.nan)
+        # r exactly at an end leaves 1 - r^2 = 0 and no information at all;
+        # the raw total is the honest fallback there, as it is for a localization
+        # whose per-channel error did not come out of the fit
+        n_eff = np.where(np.isfinite(n_eff) & (n_eff > 0), n_eff, total)
+        fitted = bool(good.any())
+    else:
+        n_eff = total.copy()
+    n_eff = np.where(valid, n_eff, np.nan)
+    return Ratios(r=r, total=total, n_eff=n_eff, valid=valid,
+                  columns=(one, two), fitted_errors=fitted)
+
+
+@dataclass
+class Modes:
+    """What the histogram of r says the species are."""
+
+    maxima: np.ndarray          # (k,) mode positions, ascending
+    minima: np.ndarray          # (k-1,) boundaries between them
+    prior: np.ndarray           # (k,) fraction of the sample in each mode
+    centers: np.ndarray         # the histogram it was read from
+    counts: np.ndarray
+    density: np.ndarray         # smoothed counts
+
+    def __len__(self) -> int:
+        return len(self.maxima)
+
+
+def _refine(index: int, y: np.ndarray, centers: np.ndarray) -> float:
+    """A parabola through three bins, so a mode is not stuck on a bin centre."""
+    if index <= 0 or index >= len(y) - 1:
+        return float(centers[index])
+    a, b, c = y[index - 1], y[index], y[index + 1]
+    denominator = a - 2 * b + c
+    if denominator == 0:
+        return float(centers[index])
+    shift = 0.5 * (a - c) / denominator
+    return float(centers[index] + np.clip(shift, -1, 1) * (centers[1] - centers[0]))
+
+
+def find_modes(r: np.ndarray, colors: int = 2, bins: int = 200,
+               smoothing: float = 2.0,
+               expected: Optional[Sequence[float]] = None) -> Modes:
+    """The `colors` strongest modes of the histogram of r, and the dips between.
+
+    The histogram is smoothed first: unsmoothed counts have a local maximum
+    every few bins, and every one of them would be a species.  ``expected``
+    takes the species' ratios as given -- measured on a single-label sample, or
+    computed from the dyes' spectra and the splitter, as DECODE-Plex does --
+    and only the boundaries and the abundances are then read off the histogram.
+    """
+    from scipy.ndimage import gaussian_filter1d, maximum_filter1d
+
+    r = np.asarray(r, dtype=float)
+    r = r[np.isfinite(r)]
+    if len(r) < 2:
+        raise ValueError("no localizations with two-channel photons to histogram")
+    if not 1 <= colors <= MAX_COLORS:
+        raise ValueError(f"colours must be between 1 and {MAX_COLORS}")
+    counts, edges = np.histogram(r, bins=int(bins), range=(-1.0, 1.0))
+    centers = 0.5 * (edges[:-1] + edges[1:])
+    density = (gaussian_filter1d(counts.astype(float), max(smoothing, 1e-3),
+                                 mode="nearest") if smoothing > 0
+               else counts.astype(float))
+
+    if expected is not None:
+        maxima = np.sort(np.asarray(expected, dtype=float))
+        if not (len(maxima) and np.all(np.abs(maxima) <= 1)):
+            raise ValueError("expected ratios must lie in [-1, 1]")
+        chosen = [int(np.argmin(np.abs(centers - rho))) for rho in maxima]
+    else:
+        peaks = np.flatnonzero((density == maximum_filter1d(density, 3, mode="nearest"))
+                               & (density > 0))
+        separation = max(int(round(MIN_SEPARATION * smoothing)), 1)
+        chosen = []
+        for index in peaks[np.argsort(density[peaks])[::-1]]:
+            if all(abs(index - taken) >= separation for taken in chosen):
+                chosen.append(int(index))
+            if len(chosen) == colors:
+                break
+        if len(chosen) < colors:
+            raise ValueError(
+                f"found {len(chosen)} mode(s) in the histogram of r, not "
+                f"{colors}: lower the smoothing, raise the number of bins, ask "
+                "for fewer colours, or give the expected ratios")
+        chosen.sort()
+        maxima = np.array([_refine(i, density, centers) for i in chosen])
+
+    minima, cuts = [], []
+    for (left, right), (rho_l, rho_r) in zip(zip(chosen, chosen[1:]),
+                                             zip(maxima, maxima[1:])):
+        if right - left < 2:            # two modes inside one bin: split them
+            minima.append(float(rho_l + rho_r) / 2)
+            cuts.append(minima[-1])
+            continue
+        # the middle of the lowest stretch, not its left edge: two well
+        # separated species leave a wide valley of exactly zero, and the
+        # boundary belongs in the middle of it
+        valley = density[left:right + 1]
+        lowest = np.flatnonzero(valley <= valley.min())
+        dip = left + int(lowest[len(lowest) // 2])
+        minima.append(_refine(dip, -density, centers))
+        cuts.append(float(centers[dip]))
+    minima = np.array(minima)
+    # the prior is what the histogram gives away for free: how much of the
+    # sample sits under each mode, between the dips that bound it
+    counted = np.histogram(r, bins=np.concatenate(([-np.inf], cuts, [np.inf])))[0]
+    prior = counted / max(counted.sum(), 1)
+    return Modes(maxima=maxima, minima=minima, prior=prior.astype(float),
+                 centers=centers, counts=counts, density=density)
+
+
+def assign_by_minima(r: np.ndarray, modes: Modes, exclusion: float = 0.0
+                     ) -> np.ndarray:
+    """1..k by which side of each minimum r falls, 0 within ``exclusion``."""
+    r = np.asarray(r, dtype=float)
+    channel = (np.searchsorted(modes.minima, r) + 1).astype(np.int32)
+    channel[~np.isfinite(r)] = 0
+    if exclusion > 0 and len(modes.minima):
+        near = np.min(np.abs(r[:, None] - modes.minima[None, :]), axis=1)
+        channel[np.isfinite(near) & (near < exclusion)] = 0
+    return channel
+
+
+def posteriors(r: np.ndarray, n_eff: np.ndarray, modes: Modes,
+               spread: float = 0.0, use_prior: bool = True) -> np.ndarray:
+    """P(species | r, photons) per localization, as (n, k).
+
+    The width of species k at this localization is the shot noise of the split
+    it hypothesises, ``(1 - rho_k^2) / n_eff``, plus whatever intrinsic spread
+    the species is given.
+    """
+    r = np.asarray(r, dtype=float)[:, None]
+    n_eff = np.asarray(n_eff, dtype=float)[:, None]
+    rho = np.asarray(modes.maxima, dtype=float)[None, :]
+    with np.errstate(invalid="ignore", divide="ignore"):
+        var = (1 - rho ** 2) / n_eff + spread ** 2
+        var = np.maximum(var, np.finfo(float).tiny)
+        log_l = -0.5 * (r - rho) ** 2 / var - 0.5 * np.log(var)
+    if use_prior:
+        log_l = log_l + np.log(np.maximum(modes.prior, 1e-12))[None, :]
+    log_l -= log_l.max(axis=1, keepdims=True)      # softmax, without overflow
+    weight = np.exp(log_l)
+    out = weight / weight.sum(axis=1, keepdims=True)
+    return np.where(np.isfinite(out), out, np.nan)
+
+
+def assign_by_probability(r: np.ndarray, n_eff: np.ndarray, modes: Modes,
+                          crosstalk: float = 0.05, spread: float = 0.0,
+                          use_prior: bool = True
+                          ) -> Tuple[np.ndarray, np.ndarray]:
+    """Chow's rule: the best species, if its posterior reaches 1 - crosstalk.
+
+    Returns the channel (0 where it does not) and the posterior of the winner,
+    which is what makes the achieved crosstalk reportable rather than assumed.
+    """
+    p = posteriors(r, n_eff, modes, spread=spread, use_prior=use_prior)
+    best = np.nanargmax(np.where(np.isfinite(p), p, -1.0), axis=1)
+    top = p[np.arange(len(best)), best]
+    channel = (best + 1).astype(np.int32)
+    channel[~(np.isfinite(top) & (top >= 1.0 - crosstalk))] = 0
+    return channel, top
+
+
+def _expected_ratios(settings: "AssignColorSettings") -> Optional[np.ndarray]:
+    """The ratios typed into the *expected r* field, as numbers."""
+    text = (settings.expected or "").strip()
+    if not text:
+        return None
+    try:
+        values = np.array([float(part) for part in text.replace(";", ",").split(",")
+                           if part.strip()])
+    except ValueError:
+        raise ValueError(f"expected r: {text!r} is not a list of numbers")
+    if len(values) != settings.colors:
+        raise ValueError(f"expected r has {len(values)} ratios but {settings.colors} "
+                         "colours were asked for")
+    return values
+
+
+@dataclass
+class AssignColorSettings:
+    mode: str = param("minima", label="method",
+                      choices=(("minima", "split at the minima"),
+                               ("probabilistic", "probabilistic")),
+                      help="a cut in r, or a posterior per localization")
+    colors: int = param(2, label="colours", min=1, max=MAX_COLORS,
+                        help="how many species the histogram of r holds")
+    exclusion: float = param(0.05, label="exclusion dr", min=0.0,
+                             help="minima: leave this much of r on either side "
+                                  "of a boundary unassigned")
+    crosstalk: float = param(0.05, label="allowed crosstalk", min=1e-6, max=0.5,
+                             help="probabilistic: the largest expected fraction "
+                                  "of wrongly assigned localizations; a "
+                                  "localization is assigned only if its "
+                                  "posterior reaches 1 - this")
+    spread: float = param(0.0, label="extra spread", min=0.0,
+                          help="probabilistic: a species' own width in r, added "
+                               "in quadrature to the shot noise. 0: shot noise "
+                               "alone (the preview prints what the modes suggest)")
+    use_errors: bool = param(True, label="use fitted errors",
+                             help="take the photon errors from the fit where "
+                                  "the table has them; otherwise sqrt(photons)")
+    use_prior: bool = param(True, label="use abundances", advanced=True,
+                            help="probabilistic: weight each species by how much "
+                                 "of the sample sits under its mode")
+    min_photons: float = param(0.0, label="minimum photons", min=0.0,
+                               advanced=True,
+                               help="localizations with fewer photons in total "
+                                    "are ignored and left unassigned")
+    bins: int = param(200, label="histogram bins", min=10, max=2000,
+                      advanced=True)
+    smoothing: float = param(2.0, label="smoothing", unit="bins", min=0.0,
+                             advanced=True,
+                             help="the histogram is smoothed by this much "
+                                  "before its maxima are looked for; it also "
+                                  "sets how far apart two modes must be")
+    expected: Optional[str] = param(None, label="expected r", advanced=True,
+                                    help="the species' ratios, comma separated "
+                                         "(\"-0.65, 0.96\"), measured on "
+                                         "single-label samples or computed from "
+                                         "the spectra. auto: the histogram's "
+                                         "own maxima")
+    channel1: Optional[str] = param(None, label="channel 1 column", advanced=True,
+                                    help="auto: photons_ch0, or the first pair "
+                                         "of per-channel columns in the table")
+    channel2: Optional[str] = param(None, label="channel 2 column", advanced=True)
+
+
+@register("Analysis/Dual-Color/AssignColors")
+class AssignColors(Plugin):
+    name = "Assign colours"
+    description = ("Colour two-channel localizations by their photon split, "
+                   "r = (ch1 - ch2) / (ch1 + ch2): cut the histogram of r at "
+                   "its minima, or assign each localization by its own "
+                   "posterior within a crosstalk budget.  Writes `channel`.")
+    preview_help = ("draw the histogram of r with the modes, the boundaries "
+                    "and what would be assigned.  Nothing is saved and the "
+                    "session is not touched.")
+    Settings = AssignColorSettings
+    main = ("mode", "colors", "exclusion", "crosstalk", "spread", "use_errors")
+
+    def run(self, ctx: Context, settings: AssignColorSettings) -> Result:
+        return self._work(ctx, settings, apply=True)
+
+    def preview(self, ctx: Context, settings: AssignColorSettings) -> Result:
+        """The same decision, drawn instead of written."""
+        return self._work(ctx, settings, apply=False)
+
+    # ------------------------------------------------------------------ work
+    def _work(self, ctx: Context, settings: AssignColorSettings,
+              apply: bool) -> Result:
+        ctx.selection.require(50, ctx.report, "a colour histogram")
+        values = ratios(ctx.locs, settings.channel1, settings.channel2,
+                        use_errors=settings.use_errors,
+                        min_photons=settings.min_photons)
+        ctx.report(f"r from {values.columns[0]} and {values.columns[1]}"
+                   + ("" if values.fitted_errors else ", errors from sqrt(photons)"))
+
+        # the modes are read from what the user is looking at and applied to
+        # the whole table: a molecule's colour does not depend on the ROI
+        seen = ctx.selection.mask & values.valid
+        if not seen.any():
+            raise ValueError("no selected localization has two-channel photons")
+        expected = _expected_ratios(settings)
+        modes = find_modes(values.r[seen], colors=settings.colors,
+                           bins=settings.bins, smoothing=settings.smoothing,
+                           expected=expected)
+        if expected is not None:
+            given = ", ".join(f"{v:+.3f}" for v in expected)
+            ctx.report(f"expected ratios given: {given}")
+
+        if settings.mode == "probabilistic":
+            channel, probability = assign_by_probability(
+                values.r, values.n_eff, modes, crosstalk=settings.crosstalk,
+                spread=settings.spread, use_prior=settings.use_prior)
+        elif settings.mode == "minima":
+            channel = assign_by_minima(values.r, modes, settings.exclusion)
+            probability = np.where(channel > 0, 1.0, 0.0)
+        else:
+            raise ValueError(f"unknown method {settings.mode!r}")
+        channel[~values.valid] = 0
+        probability = np.where(channel > 0, probability, 0.0)
+
+        locs = Localizations(dict(ctx.locs.columns), dict(ctx.locs.metadata))
+        locs.columns["channel"] = channel
+        locs.columns["color_ratio"] = values.r.astype(np.float32)
+        locs.columns["channel_p"] = probability.astype(np.float32)
+
+        text = self._summary(values, modes, channel, probability, settings, seen)
+        ctx.report(text.splitlines()[0])
+        return Result(locs=locs if apply else None, text=text,
+                      plot=_plotter(values, modes, channel, settings, seen),
+                      data={"modes": modes, "ratios": values,
+                            "channel": channel, "probability": probability},
+                      settings=settings)
+
+    def _summary(self, values: Ratios, modes: Modes, channel: np.ndarray,
+                 probability: np.ndarray, settings: AssignColorSettings,
+                 seen: np.ndarray) -> str:
+        n = int(values.valid.sum())
+        assigned = channel > 0
+        lines = [f"{int(assigned.sum())} of {n} localizations assigned to "
+                 f"{len(modes)} colours "
+                 f"({100 * assigned.sum() / max(n, 1):.1f}% kept)"]
+        for k, rho in enumerate(modes.maxima, 1):
+            count = int((channel == k).sum())
+            lines.append(f"  colour {k}: r = {rho:+.3f}, {count} localizations "
+                         f"({100 * modes.prior[k - 1]:.0f}% of the sample)")
+        if len(modes.minima):
+            lines.append("  boundaries at r = "
+                         + ", ".join(f"{m:+.3f}" for m in modes.minima))
+        if settings.mode == "probabilistic":
+            achieved = (float(np.mean(1 - probability[assigned]))
+                        if assigned.any() else 0.0)
+            lines.append(f"  crosstalk: {100 * achieved:.2f}% expected among the "
+                         f"assigned, budget {100 * settings.crosstalk:.2f}%")
+            if len(modes) == 2:
+                # the exclusion zone this is equivalent to, for a median
+                # localization: what mode 1 would have to be told by hand
+                n_eff = float(np.nanmedian(values.n_eff[seen]))
+                gap = abs(modes.maxima[1] - modes.maxima[0])
+                middle = float(np.mean(modes.maxima))
+                width = ((1 - middle ** 2) / n_eff + settings.spread ** 2) \
+                    * np.log((1 - settings.crosstalk) / settings.crosstalk) / gap
+                lines.append(f"  equivalent to dr = {width:.3f} at the median "
+                             f"{n_eff:.0f} effective photons")
+        else:
+            lines.append(f"  exclusion zone dr = {settings.exclusion:.3f}")
+        # what the modes are worth: the observed width against the shot noise,
+        # which is how `spread` gets set by looking rather than by guessing
+        strongest = int(np.argmin(np.abs(
+            modes.maxima - modes.centers[int(np.argmax(modes.density))])))
+        inside = seen & (assign_by_minima(values.r, modes) == strongest + 1)
+        shot = float(np.nanmedian(np.sqrt(
+            max(1 - modes.maxima[strongest] ** 2, 0.0) / values.n_eff[inside])))
+        observed = _mode_width(modes, strongest, settings.smoothing)
+        if np.isfinite(observed):
+            lines.append(f"  colour {strongest + 1} is {observed:.3f} wide against "
+                         f"{shot:.3f} from photon statistics"
+                         + ("" if observed <= shot else
+                            f"; spread = {np.sqrt(observed ** 2 - shot ** 2):.3f} "
+                            "would account for the rest"))
+        if not values.fitted_errors:
+            lines.append("  no per-channel photon errors in the table: "
+                         "sqrt(photons) used")
+        return "\n".join(lines)
+
+
+def _mode_width(modes: Modes, index: int, smoothing: float = 0.0) -> float:
+    """Mode `index`'s width in r, as a standard deviation; NaN if unmeasurable.
+
+    Read off the smoothed histogram rather than fitted: it is a number to look
+    at next to the shot-noise width, not a parameter of anything.  It is taken
+    from a *flank* -- the half-maximum crossing on one side, doubled -- because
+    two modes that overlap never fall to half between them, and a full width
+    across both of them would measure their separation instead of their width.
+    A flank that runs into the neighbouring boundary before it crosses is
+    discarded for the same reason; when both do, there is nothing to report.
+
+    Two conversions make what is left comparable: a Gaussian's half width at
+    half maximum is 1.177 sigma, and the smoothing applied to find the maxima
+    has widened the mode by its own sigma, which comes back off in quadrature.
+    """
+    peak = int(np.argmin(np.abs(modes.centers - modes.maxima[index])))
+    half = modes.density[peak] / 2
+    if not half > 0:
+        return float("nan")
+    lo = (0 if index == 0
+          else int(np.searchsorted(modes.centers, modes.minima[index - 1])))
+    hi = (len(modes.centers) - 1 if index == len(modes) - 1
+          else int(np.searchsorted(modes.centers, modes.minima[index])))
+    flanks = []
+    for step, limit in ((-1, lo), (1, hi)):
+        i = peak
+        while i != limit and modes.density[i] > half:
+            i += step
+        if modes.density[i] > half:
+            continue                      # ran into the neighbour, not a flank
+        # where the crossing actually lies, between the two bins around it
+        above, below = modes.density[i - step], modes.density[i]
+        fraction = ((above - half) / (above - below)) if above > below else 0.0
+        crossing = modes.centers[i - step] + step * fraction * (
+            modes.centers[1] - modes.centers[0])
+        flanks.append(abs(crossing - modes.maxima[index]))
+    if not flanks:
+        return float("nan")
+    sigma = float(np.mean(flanks)) / HWHM_PER_SIGMA
+    step = float(modes.centers[1] - modes.centers[0])
+    return float(np.sqrt(max(sigma ** 2 - (smoothing * step) ** 2, 0.0)))
+
+
+def _plotter(values: Ratios, modes: Modes, channel: np.ndarray,
+             settings: AssignColorSettings, seen: np.ndarray):
+    """A closure over the numbers, so the figure is drawn on the GUI thread."""
+    r = values.r[seen]
+    assigned = channel[seen]
+    n_eff = float(np.nanmedian(values.n_eff[seen]))
+
+    def plot(ax) -> None:
+        edges = np.linspace(-1, 1, settings.bins + 1)
+        ax.hist(r, bins=edges, color="0.85", label="all")
+        for k in range(1, len(modes) + 1):
+            part = r[assigned == k]
+            if len(part):
+                ax.hist(part, bins=edges, color=PALETTE[(k - 1) % len(PALETTE)],
+                        alpha=0.75, label=f"colour {k} ({len(part)})")
+        ax.plot(modes.centers, modes.density, color="0.35", lw=1)
+        for rho in modes.maxima:
+            ax.axvline(rho, color="0.2", ls=":", lw=1)
+        for m in modes.minima:
+            ax.axvline(m, color="k", lw=1.2)
+            if settings.mode == "minima" and settings.exclusion > 0:
+                ax.axvspan(m - settings.exclusion, m + settings.exclusion,
+                           color="k", alpha=0.10, lw=0)
+        if settings.mode == "probabilistic":
+            _draw_posteriors(ax, modes, n_eff, settings)
+        rejected = int((assigned == 0).sum())
+        ax.set_xlabel("r = (ch1 - ch2) / (ch1 + ch2)")
+        ax.set_ylabel("localizations")
+        ax.set_title(f"{settings.mode}: {len(r) - rejected} assigned, "
+                     f"{rejected} left at 0")
+        # r lives in [-1, 1] and the histogram is always binned over all of it,
+        # so that two runs are comparable; the view is where the data is
+        low, high = np.nanpercentile(r, (0.1, 99.9))
+        margin = max(0.1 * (high - low), 2 * (edges[1] - edges[0]))
+        ax.set_xlim(max(low - margin, -1), min(high + margin, 1))
+        # room above the tallest bar for the legend, which would otherwise sit
+        # on the posterior curves -- they run to 1 across the whole width
+        ax.set_ylim(0, ax.get_ylim()[1] * 1.28)
+        ax.legend(fontsize=8, loc="upper right", framealpha=0.9)
+
+    return plot
+
+
+def _draw_posteriors(ax, modes: Modes, n_eff: float,
+                     settings: AssignColorSettings) -> None:
+    """The decision as a median localization sees it, on a right-hand axis.
+
+    The real boundaries are per-localization -- that is the whole point of the
+    method -- so what is drawn is the posterior curve at the median effective
+    photon number, with the shaded band where such a localization would be
+    rejected.
+    """
+    if not np.isfinite(n_eff) or n_eff <= 0:
+        return
+    grid = np.linspace(-1, 1, 801)
+    p = posteriors(grid, np.full_like(grid, n_eff), modes,
+                   spread=settings.spread, use_prior=settings.use_prior)
+    twin = ax.twinx()
+    for k in range(len(modes)):
+        twin.plot(grid, p[:, k], color=PALETTE[k % len(PALETTE)], lw=1, ls="--")
+    twin.axhline(1 - settings.crosstalk, color="0.4", lw=0.8, ls=":")
+    rejected = np.nanmax(p, axis=1) < 1 - settings.crosstalk
+    for start, stop in _runs(rejected):
+        ax.axvspan(grid[start], grid[stop], color="k", alpha=0.10, lw=0)
+    twin.set_ylim(0, 1.28)
+    twin.set_yticks((0, 0.5, 1))
+    twin.set_ylabel(f"posterior at {n_eff:.0f} photons")
+
+
+def _runs(mask: np.ndarray):
+    """The (first, last) index of each run of True."""
+    edges = np.flatnonzero(np.diff(np.concatenate(([0], mask.view(np.int8), [0]))))
+    return list(zip(edges[::2], edges[1::2] - 1))

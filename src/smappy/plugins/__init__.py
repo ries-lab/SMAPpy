@@ -330,6 +330,9 @@ class Plugin:
     # fields shown by default; everything else goes under "more".  None: all
     # fields not marked advanced.
     main: Optional[Sequence[str]] = None
+    # what the Preview button's tooltip says, when the generic sentence is
+    # not enough; empty means the generic one
+    preview_help: str = ""
 
     def __init_subclass__(cls, **kwargs):
         """Catch a plugin written against the old signature with a real error.
@@ -362,9 +365,11 @@ class Plugin:
         """
         raise NotImplementedError
 
-    # a plugin that can show one frame's worth of work before committing to
-    # the whole acquisition overrides `preview`; the GUI grows a button and a
-    # frame number for it when it is overridden, and nothing when it is not
+    # a plugin that can show its work before committing to it overrides
+    # `preview`; the GUI grows a button for it when it is overridden, and
+    # nothing when it is not.  Dropping the `frame` argument says the preview
+    # is of the whole selection rather than of one frame -- see
+    # `preview_wants_frame` -- and the GUI then asks for no frame number
     def preview(self, ctx: Context, settings, frame: int = 0) -> Result:
         """One frame, drawn rather than saved: is this set up right?
 
@@ -376,6 +381,22 @@ class Plugin:
     @classmethod
     def has_preview(cls) -> bool:
         return cls.preview is not Plugin.preview
+
+    @classmethod
+    def preview_wants_frame(cls) -> bool:
+        """Whether the preview is of one *frame*.
+
+        A fit previews frame 17; a plugin that works on the finished table --
+        a colour assignment previewing its histogram -- previews the whole
+        selection and has no frame to be asked for.  The GUI reads this to
+        decide whether the Preview button comes with a frame number.
+        """
+        if not cls.has_preview():
+            return False
+        try:
+            return "frame" in inspect.signature(cls.preview).parameters
+        except (TypeError, ValueError):
+            return True
 
     def preflight(self, ctx: Context, settings) -> Optional[str]:
         """Anything to put to the user before `run` starts, or None to start.

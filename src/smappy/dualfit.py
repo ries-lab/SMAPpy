@@ -369,7 +369,10 @@ def paired_to_localizations(result, pairs: PairedROIs, model, cam) -> "Localizat
         "iterations": result.iterations.astype(np.int32),
     }
     for channel in range(model.n_channels):
-        for name in (f"photons_ch{channel}", f"background_ch{channel}"):
+        # the per-channel errors travel with the counts: a colour assignment
+        # downstream weighs the split by how well each half was measured
+        for name in (f"photons_ch{channel}", f"background_ch{channel}",
+                     f"photons_err_ch{channel}", f"background_err_ch{channel}"):
             if name in p:
                 cols[name] = p[name] * excess
     cols["loc_precision_pix"] = np.sqrt((cols["x_err_pix"] ** 2

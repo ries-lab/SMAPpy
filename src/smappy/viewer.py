@@ -57,6 +57,7 @@ FILTER_FIELDS: Sequence[Tuple[str, ...]] = (
     ("sigma_nm", "sigma_pix"),
     ("logl_rel",),
     ("frame",),
+    ("channel",),
 )
 
 # What an image can be coloured by, beside plain intensity: a short label and
@@ -68,6 +69,7 @@ COLOR_FIELDS: Sequence[Tuple[str, Tuple[str, ...]]] = (
     ("frame", ("frame",)),
     ("precision", ("loc_precision_nm", "loc_precision_pix")),
     ("photons", ("photons",)),
+    ("colour", ("channel",)),
 )
 
 # The bounds a window opens with.  Every one of them throws localizations

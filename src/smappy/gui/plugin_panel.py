@@ -68,23 +68,26 @@ class PluginPanel(QWidget):
         self.run_button = QPushButton("Run")
         buttons.addWidget(self.run_button)
         # a preview sits next to Run because it answers the question Run asks:
-        # is this set up right?  One frame, drawn, nothing saved.
+        # is this set up right?  The work, drawn, and nothing saved.
         self.preview_button: Optional[QPushButton] = None
         self.preview_frame: Optional[QSpinBox] = None
         if plugin_cls.has_preview():
             self.preview_button = QPushButton("Preview")
             self.preview_button.setToolTip(
-                "run one frame and draw it: the detected candidates over the "
-                "image, and the filtered image the threshold acts on. "
-                "Nothing is saved and the session is not touched.")
+                plugin_cls.preview_help or
+                "do the work and draw it, without saving anything: "
+                "the session is not touched.")
             self.preview_button.clicked.connect(self.preview)
-            self.preview_frame = QSpinBox()
-            self.preview_frame.setRange(0, 10**9)
-            self.preview_frame.setToolTip("which frame to preview")
-            self.preview_frame.setPrefix("frame ")
-            self.preview_frame.setMaximumWidth(110)
             buttons.addWidget(self.preview_button)
-            buttons.addWidget(self.preview_frame)
+            # only a preview *of a frame* asks which one; a plugin that
+            # previews the whole selection has nothing to ask
+            if plugin_cls.preview_wants_frame():
+                self.preview_frame = QSpinBox()
+                self.preview_frame.setRange(0, 10**9)
+                self.preview_frame.setToolTip("which frame to preview")
+                self.preview_frame.setPrefix("frame ")
+                self.preview_frame.setMaximumWidth(110)
+                buttons.addWidget(self.preview_frame)
         self.plot_button = QPushButton("Plot")
         self.plot_button.setToolTip("show the plugin's result figure (the drift curves, say)")
         self.plot_button.setEnabled(False)
@@ -133,9 +136,10 @@ class PluginPanel(QWidget):
             self.session.append(payload)
 
     def preview(self) -> None:
-        """One frame, shown and thrown away."""
-        self._start("preview", "previewing...",
-                    frame=self.preview_frame.value())
+        """The work, shown and thrown away."""
+        extra = ({} if self.preview_frame is None
+                 else {"frame": self.preview_frame.value()})
+        self._start("preview", "previewing...", **extra)
 
     def run(self) -> None:
         self._start("run", "running...")

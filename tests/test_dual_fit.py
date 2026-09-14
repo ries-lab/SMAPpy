@@ -399,6 +399,10 @@ def test_a_mirrored_splitter_keeps_its_colour(mirrored):
     assert len(locs) == 60
     assert np.median(locs["ratio"]) == pytest.approx(0.3, abs=0.03)
     assert np.median(locs["photons_ch1"]) > 1000
+    # the per-channel errors travel with the counts, for a colour assignment
+    # to weigh the split by how well each half was measured
+    assert np.all(locs["photons_err_ch0"] > 0)
+    assert np.median(locs["photons_err_ch1"]) < np.median(locs["photons_ch1"])
     assert np.median(locs["z_nm"]) == pytest.approx(-40, abs=5)
     for x0, y0 in truth:
         mine = np.hypot(locs["x_pix"] - x0, locs["y_pix"] - y0) < 3

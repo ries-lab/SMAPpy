@@ -35,6 +35,15 @@ def test_only_a_plugin_that_can_preview_grows_the_button(app):
     assert PluginPanel(Plain, Session()).preview_button is None
 
 
+def test_a_preview_that_is_not_of_a_frame_gets_no_frame_number(app):
+    """A colour assignment previews the whole selection; there is no frame."""
+    from smappy import plugins
+    from smappy.gui.plugin_panel import PluginPanel
+
+    panel = PluginPanel(plugins.get("Analysis/Dual-Color/AssignColors"), Session())
+    assert panel.preview_button is not None and panel.preview_frame is None
+
+
 def test_an_auto_field_shows_what_auto_resolves_to_in_grey(app):
     from dataclasses import dataclass
     from typing import Optional
