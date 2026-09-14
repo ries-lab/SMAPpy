@@ -310,7 +310,8 @@ class View3D(QWidget):
             if layer.visible and not layer.is_image:
                 st = layer.state
                 weight += render_layer_3d(st.locs, st.filter.mask, proj, slab, fov,
-                                          st.settings, st.display)[1].weight
+                                          st.settings, st.display,
+                                          index=getattr(st, "index", None))[1].weight
         return weight
 
     def _wheel(self, event) -> None:

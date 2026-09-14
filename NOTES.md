@@ -270,6 +270,32 @@ The spatial index over 5M localizations builds in 100 ms and answers in
 narrow integer keys and falls back to a comparison sort for wide ones, so the
 obvious `argsort` on a combined cell id costs 1.5 s instead of 60 ms.
 
+### The 3D view queries the same index
+
+The 3D view did not, and every frame walked the whole table to find the slab's
+localizations, so cropping to a 300 nm box did not make it faster -- on a 46 M
+localization file (35.4 M after the filter) a drag frame was ~0.5 s for a tiny
+crop and ~1.2 s for the whole field.  Three things, in the order they cost:
+
+* the **depth histogram** was a second full `project_layer` per layer per frame
+  -- the projection the render had just done and dropped.  It is a shape, not a
+  count (the panel hides the axis), so `depth_sample` takes `HIST_POINTS` of
+  the slab's rows.  This one is paid by the GPU engines too: it runs on the CPU
+  whatever `Projection.engine` says, which is why "slow in every mode" was the
+  symptom.
+* `slab_candidates` asks the index for the slab's bounding rectangle instead of
+  reading every row.  The candidates are **not** sorted back into table order:
+  sorting 3 M indices costs 126 ms, more than the tidier gather saves.
+* `Projection.apply` and `Slab.to_local` promoted float32 tables to float64 and
+  `apply` built an (N, 3) stack for the matmul -- 2.2 GB of temporaries per
+  call.  Row by row in the table's own precision is 2.2x faster and half the
+  memory; nanometres over a few hundred microns resolve to ~4 pm in float32,
+  far below any rendered pixel.
+
+A drag frame, 900x700, same file: whole field **1176 -> 543 ms**, a 10 um crop
+**1123 -> 384 ms**, a 300 nm crop **519 -> 5.0 ms**.  The whole-field case is
+now the render itself, which is the 2 M points it is asked to draw.
+
 Rendering at *display* resolution rather than a fixed nm/pixel is what bounds
 this: zoomed out the kernels collapse onto the `mingausspix` floor, zoomed in
 there are fewer localizations in view.  The zoomed numbers are floored by every

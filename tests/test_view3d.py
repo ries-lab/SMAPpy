@@ -176,3 +176,60 @@ def test_fixed_roll_is_a_turntable():
     free = Projection(fix_roll=False)
     free.rotate_view(30.0, 0.0)
     assert free.roll != 0.0 or free.azimuth != 0.0
+
+
+def test_the_index_picks_the_same_rows_as_a_walk_over_the_table():
+    """The spatial index only avoids reading rows that cannot be in the slab."""
+    from smappy.spatial import SpatialIndex
+    from smappy.view3d import slab_candidates
+    locs = _table(20_000)
+    index = SpatialIndex(np.asarray(locs["x_nm"]), np.asarray(locs["y_nm"]))
+    select = np.asarray(locs["z_nm"]) > -100            # a filter, not everything
+    proj = Projection(azimuth=25, elevation=55, zoom=5.0)
+    for slab in (Slab.from_bounds(200, 400, 300, 500, -50, 50),      # a crop
+                 Slab.from_bounds(0, 1000, 0, 800, -300, 300),       # the whole table
+                 Slab([500, 400, 0], [300, 120, 200], angle=35.0)):  # rotated in plane
+        walked = slab_candidates(locs, select, slab, None)
+        indexed = slab_candidates(locs, select, slab, index)
+        # the index hands back a superset of the slab's rows; the slab decides
+        assert set(np.asarray(indexed)) <= set(np.asarray(walked))
+        a = project_layer(locs, select, proj, slab, RenderSettings())[1]
+        b = project_layer(locs, select, proj, slab, RenderSettings(), index=index)[1]
+        assert np.array_equal(np.sort(a), np.sort(b)) and a.size
+
+
+def test_the_depth_histogram_is_the_slabs_depths_with_or_without_an_index():
+    """Sampling stands in for every row -- the panel hides the count axis --
+    but it has to sample the slab, not the table around it."""
+    from smappy.spatial import SpatialIndex
+    from smappy.view3d import depth_histogram, depth_sample
+    locs = _table(50_000)
+    index = SpatialIndex(np.asarray(locs["x_nm"]), np.asarray(locs["y_nm"]))
+    select = np.ones(len(locs), bool)
+    slab = Slab.from_bounds(400, 600, 300, 500, -100, 100)    # a small part of the table
+    proj = Projection(azimuth=20, elevation=50, pivot=slab.center, zoom=5.0)
+    walked = depth_sample(locs, select, proj, slab, None)
+    indexed = depth_sample(locs, select, proj, slab, index)
+    exact = project_layer(locs, select, proj, slab, RenderSettings())[0]["depth"]
+    assert walked.size == indexed.size == len(exact)          # small enough to be whole
+    assert abs(float(np.mean(indexed)) - float(np.mean(exact))) < 1e-3
+    hist = depth_histogram([indexed])
+    assert hist[:, 1].sum() == len(exact)
+    lo, hi = float(np.min(exact)), float(np.max(exact))
+    assert lo - 1 <= hist[0, 0] and hist[-1, 0] <= hi + 1
+
+
+def test_a_sampled_histogram_keeps_the_shape_of_the_whole_one():
+    from smappy.view3d import HIST_POINTS, depth_histogram, depth_sample
+    locs = _table(HIST_POINTS)                      # comfortably over the limit below
+    select = np.ones(len(locs), bool)
+    proj = Projection(azimuth=15, elevation=40, zoom=5.0)
+    limit = 20_000        # 64 bins of ~300: the sampling noise is well under the bound
+    sampled = depth_sample(locs, select, proj, None, None, limit=limit)
+    whole = project_layer(locs, select, proj, None, RenderSettings())[0]["depth"]
+    assert sampled.size <= limit < len(whole)
+    a = depth_histogram([sampled])[:, 1]
+    b = depth_histogram([np.asarray(whole)])[:, 1]
+    # same shape, different scale: compare the normalised profiles
+    a, b = a / a.sum(), b / b.sum()
+    assert np.abs(a - b).sum() < 0.15

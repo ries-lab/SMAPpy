@@ -21,6 +21,22 @@ from .render import (DisplaySettings, FieldOfView, RenderSettings, RenderedImage
 
 PREVIEW_POINTS = 2_000_000       # at most this many while the mouse drags
 PREVIEW_SCALE = 2                # and at this many times coarser pixels
+HIST_POINTS = 200_000            # the depth histogram is taken from this many
+HIST_BINS = 64
+
+
+def _view_dtype(*arrays) -> np.dtype:
+    """The precision to project a batch of coordinates in.
+
+    float32 for a float32 table, which is what every reader produces, and
+    float64 only if something handed in needs it (the slab's corners, a test
+    with Python floats).  Localization coordinates are nanometres over a
+    field of a few hundred microns: float32 resolves that to ~4 pm, far below
+    a pixel of the finest render, so the promotion these functions used to do
+    bought nothing and cost a copy of the table per call.
+    """
+    seen = [np.asarray(a).dtype for a in arrays if a is not None]
+    return np.dtype(np.result_type(np.float32, *seen) if seen else np.float32)
 
 
 # ------------------------------------------------------------------- slab
@@ -58,18 +74,29 @@ class Slab:
         x0, y0, x1, y1 = region.bounds
         return cls.from_bounds(x0, x1, y0, y1, z0, z1)
 
-    def to_local(self, x, y, z) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Data -> slab frame: centred, in-plane rotation undone."""
-        c, s = math.cos(math.radians(self.angle)), math.sin(math.radians(self.angle))
-        dx, dy = np.asarray(x, float) - self.center[0], np.asarray(y, float) - self.center[1]
-        return c * dx + s * dy, -s * dx + c * dy, np.asarray(z, float) - self.center[2]
+    def to_local(self, x, y, z=None) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Data -> slab frame: centred, in-plane rotation undone.
+
+        Kept in the inputs' precision (`_view_dtype`): a float32 table used to
+        be promoted to float64 here, which on a 46 M localization file is
+        three 366 MB temporaries per call for no accuracy that survives into a
+        pixel.  ``z`` None means the slab's own centre plane, and comes back
+        as the scalar 0.0 rather than an array of them.
+        """
+        dtype = _view_dtype(x, y, z)
+        c = dtype.type(math.cos(math.radians(self.angle)))
+        s = dtype.type(math.sin(math.radians(self.angle)))
+        dx = np.subtract(x, float(self.center[0]), dtype=dtype)
+        dy = np.subtract(y, float(self.center[1]), dtype=dtype)
+        w = 0.0 if z is None else np.subtract(z, float(self.center[2]), dtype=dtype)
+        return c * dx + s * dy, -s * dx + c * dy, w
 
     def mask(self, x, y, z=None) -> np.ndarray:
-        if z is None:
-            z = np.zeros_like(np.asarray(x, float)) + self.center[2]
         u, v, w = self.to_local(x, y, z)
         h = self.size / 2
-        return (np.abs(u) <= h[0]) & (np.abs(v) <= h[1]) & (np.abs(w) <= h[2])
+        inside = (np.abs(u) <= h[0]) & (np.abs(v) <= h[1])
+        # z None is the centre plane, which is inside every slab: no array for it
+        return inside if z is None else inside & (np.abs(w) <= h[2])
 
     def corners(self) -> np.ndarray:
         """The 8 corners in data coordinates, (8, 3)."""
@@ -177,13 +204,26 @@ class Projection:
         return _rz(self.roll) @ _rx(self.elevation) @ _rz(self.azimuth)
 
     def apply(self, x, y, z=None) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """(x', y', depth) for data points; z defaults to the pivot's."""
-        x = np.asarray(x, np.float64)
-        z = np.full_like(x, self.pivot[2]) if z is None else np.asarray(z, np.float64)
-        p = np.column_stack([x - self.pivot[0], np.asarray(y, np.float64) - self.pivot[1],
-                             z - self.pivot[2]])
-        v = p @ self.matrix.T
-        xv, yv, d = v[:, 0], v[:, 1], v[:, 2]
+        """(x', y', depth) for data points; z defaults to the pivot's.
+
+        The rotation is written out row by row rather than done as
+        ``column_stack(...) @ R.T``: the stack and the product are each an
+        (N, 3) array, so on a 46 M localization table that pair was 2.2 GB of
+        temporaries per call in float64.  Row by row in the table's own
+        precision (`_view_dtype`) it is three N-vectors, and 2.2x faster.
+        """
+        dtype = _view_dtype(x, y, z)
+        m = self.matrix.astype(dtype)
+        dx = np.subtract(x, float(self.pivot[0]), dtype=dtype)
+        dy = np.subtract(y, float(self.pivot[1]), dtype=dtype)
+        dz = None if z is None else np.subtract(z, float(self.pivot[2]), dtype=dtype)
+
+        def row(i):
+            # z None is the pivot's own plane: its term is zero, not an array
+            v = m[i, 0] * dx + m[i, 1] * dy
+            return v if dz is None else v + m[i, 2] * dz
+
+        xv, yv, d = row(0), row(1), row(2)
         if self.focal:
             s = 1.0 / np.maximum(1.0 - d / self.focal, 0.05)
             xv, yv = xv * s, yv * s
@@ -251,19 +291,100 @@ class Projection:
 
 
 # --------------------------------------------------------------- engine A
+def slab_candidates(locs: Localizations, select: np.ndarray, slab: Optional[Slab],
+                    index=None) -> np.ndarray:
+    """The rows worth looking at: the filter's, narrowed to the slab's footprint.
+
+    Without ``index`` this is every row the filter keeps, and finding the few
+    thousand inside a small slab then costs a pass over the whole table -- on
+    a 46 M localization file, half a second per frame that a crop does not
+    reduce, which is what made the 3D view slow however little of it was
+    shown.  The index (`smappy.spatial`, the same one the 2D view queries)
+    answers the slab's *bounding rectangle* in time proportional to the
+    answer; the slab's own mask still decides, so this only avoids reading
+    rows that cannot be inside it.
+
+    ``index`` must be over the same table as ``locs``; None is always correct,
+    only slower.  A non-boolean ``select`` is already a list of rows, and is
+    passed through rather than intersected.
+    """
+    if select.dtype != bool:
+        return np.asarray(select)
+    if index is not None and slab is not None:
+        c = slab.corners()
+        cand = index.query(float(c[:, 0].min()), float(c[:, 0].max()),
+                           float(c[:, 1].min()), float(c[:, 1].max()))
+        if cand.size < index.n_localizations:      # a crop: the index earned its keep
+            # not sorted back into table order: sorting 3 M indices costs more
+            # than the tidier gather saves, and the 2D view queries the same
+            # index the same way.  Cell order is piecewise ascending anyway.
+            return cand[select[cand]]
+    return np.flatnonzero(select)
+
+
+def depth_sample(locs: Localizations, select: np.ndarray, projection: Projection,
+                 slab: Optional[Slab], index=None, limit: int = HIST_POINTS) -> np.ndarray:
+    """Depths of up to ``limit`` of the slab's localizations.
+
+    Only the depth *histogram* wants this, and that histogram is a shape --
+    the panel hides its count axis -- so a sample says the same thing as every
+    row.  It used to be a second full `project_layer` per layer per frame,
+    which is the projection the render had just done and thrown away; on a
+    46 M localization file that was a second of every frame, and because it
+    runs on the CPU whatever `Projection.engine` says, the GPU engines paid it
+    too.  Sampling the candidate *rows* before touching a coordinate keeps it
+    at ``limit`` however large the table.
+    """
+    x, y = positions(locs)
+    z = locs["z_nm"] if "z_nm" in locs else None
+    idx = slab_candidates(locs, select, slab, index)
+    if index is None and slab is not None and idx.size:
+        # With an index the candidates are already the slab's own neighbourhood,
+        # so thinning them first keeps the sample inside it.  Without one they
+        # are the whole table, and a stride over that would land almost
+        # entirely outside a small slab -- so the slab has to be applied first,
+        # at the cost of the full pass the index exists to avoid.
+        idx = idx[slab.mask(x[idx], y[idx], None if z is None else z[idx])]
+    if idx.size > limit:
+        # a stride, not a draw: `choice(n, k, replace=False)` permutes n first,
+        # which is the cost this is here to avoid.  Rows are in acquisition
+        # order, which is not an order in depth.
+        idx = idx[::max(1, idx.size // limit)]
+    if not idx.size:
+        return np.empty(0, np.float32)
+    xs, ys = x[idx], y[idx]
+    zs = None if z is None else z[idx]
+    if slab is not None:
+        keep = slab.mask(xs, ys, zs)
+        xs, ys = xs[keep], ys[keep]
+        zs = None if zs is None else zs[keep]
+    return projection.apply(xs, ys, zs)[2]
+
+
+def depth_histogram(depths: Sequence[np.ndarray]) -> np.ndarray:
+    """``(HIST_BINS, 2)`` of bin centre and count, over every layer's depths."""
+    hist = np.zeros((HIST_BINS, 2), np.float64)
+    d = np.concatenate(list(depths)) if depths else np.empty(0, np.float32)
+    if d.size:
+        counts, edges = np.histogram(d, bins=HIST_BINS)
+        hist[:, 0], hist[:, 1] = (edges[:-1] + edges[1:]) / 2, counts
+    return hist
+
+
 def project_layer(locs: Localizations, select: np.ndarray, projection: Projection,
                   slab: Optional[Slab], settings: RenderSettings,
-                  preview: bool = False, front: Optional[float] = None
-                  ) -> Tuple[Localizations, np.ndarray]:
+                  preview: bool = False, front: Optional[float] = None,
+                  index=None) -> Tuple[Localizations, np.ndarray]:
     """The selected rows of a table, rotated into a 2D table for the renderer.
 
     Returns the table (``x_nm``/``y_nm`` are the view coordinates, ``depth``
     a column, the precision and any colour/weight column carried over) and
-    the indices it was built from.
+    the indices it was built from.  ``index`` is the layer's spatial index,
+    which narrows the rows the slab is tested against (`slab_candidates`).
     """
     x, y = positions(locs)
     z = locs["z_nm"] if "z_nm" in locs else None
-    idx = np.flatnonzero(select) if select.dtype == bool else np.asarray(select)
+    idx = slab_candidates(locs, select, slab, index)
     if slab is not None and idx.size:
         keep = slab.mask(x[idx], y[idx], None if z is None else z[idx])
         idx = idx[keep]
@@ -296,7 +417,7 @@ def column_range(locs: Localizations, name: str) -> Tuple[float, float]:
 def render_layer_3d(locs: Localizations, select: np.ndarray, projection: Projection,
                     slab: Optional[Slab], fov: FieldOfView, settings: RenderSettings,
                     display: DisplaySettings, preview: bool = False,
-                    n_threads: int = 0) -> Tuple[np.ndarray, RenderedImage]:
+                    n_threads: int = 0, index=None) -> Tuple[np.ndarray, RenderedImage]:
     """Engine A for one layer: RGB in [0, 1] and the planes.
 
     With ``projection.opacity`` > 0 the slab is rendered in depth slices and
@@ -314,7 +435,7 @@ def render_layer_3d(locs: Localizations, select: np.ndarray, projection: Project
     # depth is defined by the slab's corners (or the table's box), so that the
     # colour scale, the slices and the attenuation do not move with the filter
     front, drange = _depth_front_and_range(projection, slab, locs)
-    table, _ = project_layer(locs, select, projection, slab, settings, preview, front)
+    table, _ = project_layer(locs, select, projection, slab, settings, preview, front, index)
     weight = "_weight" if "_weight" in table else settings.weight_field
     if settings.color_field == "depth":
         settings = replace(settings, color_range=settings.color_range or drange)
@@ -546,6 +667,7 @@ def render_3d(layers, projection: Projection, slab: Optional[Slab], fov: FieldOf
         if not layer.visible or layer.is_image:
             continue
         state = layer.state
+        index = getattr(state, "index", None)
         if engine is not None and projection.engine == "spheres":
             image = 0.0
         elif engine is not None and projection.engine in ("gpu", "points"):
@@ -555,18 +677,10 @@ def render_3d(layers, projection: Projection, slab: Optional[Slab], fov: FieldOf
         else:
             image, _ = render_layer_3d(state.locs, state.filter.mask, projection, slab, fov,
                                        state.settings, state.display, preview,
-                                       n_threads=state.n_threads)
+                                       n_threads=state.n_threads, index=index)
         rgb += image
-        table, _ = project_layer(state.locs, state.filter.mask, projection, slab,
-                                 state.settings, preview=True)
-        depths.append(np.asarray(table["depth"]))
-    hist = np.zeros((64, 2), np.float64)
-    if depths:
-        d = np.concatenate(depths)
-        if d.size:
-            counts, edges = np.histogram(d, bins=64)
-            hist[:, 0], hist[:, 1] = (edges[:-1] + edges[1:]) / 2, counts
-    return np.clip(rgb, 0, 1), hist
+        depths.append(depth_sample(state.locs, state.filter.mask, projection, slab, index))
+    return np.clip(rgb, 0, 1), depth_histogram(depths)
 
 
 def upscale(rgb: np.ndarray, scale: int, ny: int, nx: int) -> np.ndarray:
