@@ -603,6 +603,64 @@ they are not tried again:
 * the PyTorch/MPS backend on Apple silicon: the index tensors alone are 5 GB on
   the device and a single cost evaluation did not finish in ten minutes.
 
+### Saying what it will cost, before it costs it
+
+A 8.4 M-localization, 93 k-frame dataset with `max_drift_nm = 500` does not run
+at all: 2.75 M localizations survive the standard filter, grouping leaves
+1.7 M, and the neighbour search within 500 nm wants **4 x 10^9 pairs**.  scipy
+hands those back as one int64 `(N, 2)` array and `pair_indices_kdtree` copies
+them into two int32 arrays -- 24 bytes a pair alive at once, 97 GB, before
+counting the vector scipy builds the array from.  On a 34 GB machine that is
+tens of minutes in swap and then a dead process, and the optimization it never
+reached would have been another 19 minutes (4 x 10^9 pairs x 136 evaluations x
+2 ns).  Nothing said so: `pair_indices_safety_check` is only on the segmented
+path, and the spline is the default; it warns through `warnings.warn`, which in
+the GUI goes to a terminal nobody is reading; and its `estimate_pairs` counts
+only within-cell pairs, which came out 40% low on the two datasets checked.
+
+`estimate_cost` answers the question in **0.2-0.4 s** instead, for both paths.
+Pairs are counted on a sample and scaled: the count grows as N^2 for a fixed
+field, so a sample of 60 k localizations answers for millions.  Measured
+against the pair count the real run then built: **0.1%** out ungrouped, 7%
+grouped -- and grouped needs the sample to be grouped too, since grouping is
+exactly what removes the densest, shortest-range pairs.  The sample is a
+stretch of frames from the middle of the acquisition, which is a fair sample of
+the field because every frame images the same one, and the ratio it groups by
+is the ratio the whole table groups by.
+
+From the pair count both numbers follow, with constants measured here and kept
+in one place at the top of the estimator: ~2 ns per pair per cost evaluation,
+~16 ns per pair for the KD-tree search, ~23 evaluations per sigma level (136
+over 6 levels on the dataset above, 154 over 6 on the clathrin one), 24 bytes
+per pair.  They are only ever used to decide whether to warn.  The GUI asks
+before starting when the estimate is over five minutes, or when the pairs want
+more than half the machine's memory -- the table, its index and the rendered
+view are already resident, and the pair figure is a floor.
+
+The asking is `Plugin.preflight`, called on the session's own thread before the
+worker exists, so a "no" is no work at all rather than a thread started and
+abandoned, and the dialog is an ordinary modal one rather than something
+marshalled off a worker.  A preflight that raises is ignored: an estimate is a
+courtesy, and one that cannot be made must not be what stops a run.
+
+### What it says while it runs
+
+A drift estimate is one call that can take minutes, and silence is
+indistinguishable from a hang -- which is what a 4 x 10^9-pair run looks like
+from the outside.  `correct_drift`, `estimate_drift` and the spline estimator
+take a `progress` callback (the GUI passes the plugin panel's `ctx.report`, the
+command line still uses `display`), and report the stages that take the time:
+grouping and what it left, the neighbour search and its radius *before* it
+starts -- that call is uninterruptible, so a run that dies in it at least says
+what it was asked for -- the pair count, and then each sigma level.
+
+Inside the optimizer the evaluations all cost the same, one pass over the
+pairs, so two of them are enough to say how long the rest will take: the line
+is "evaluation 12 of about 138, 8.1 s each, ~17 min left", rewritten at most
+once a second because each one is a queued signal into the GUI thread and on a
+small dataset they arrive hundreds of times a second.  The total is
+approximate -- L-BFGS-B decides when it is done -- which is why it says "about".
+
 ### Two more that were tried
 
 * **A looser tolerance for the coarse sigma steps** -- the idea being that they

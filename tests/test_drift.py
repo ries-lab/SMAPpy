@@ -1,9 +1,12 @@
 """Drift correction: recover a known drift, and correct everything with it."""
+import re
+
 import numpy as np
 import pytest
 
-from smappy.drift import (Drift, DriftSettings, correct_drift, drift_corrected_path,
-                           estimate_drift, load_drift, save_drift_corrected)
+from smappy.drift import (Drift, DriftCost, DriftSettings, correct_drift,
+                           drift_corrected_path, estimate_cost, estimate_drift,
+                           load_drift, save_drift_corrected)
 from smappy.filter import LocFilter
 from smappy.locs import Localizations
 
@@ -254,3 +257,96 @@ print("ok")
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
     assert out.returncode == 0, out.stderr[-2000:]
     assert out.stdout.strip().endswith("ok")
+
+
+# --------------------------------------------- what it will cost, before running
+
+def _pairs_reported(lines):
+    """The pair count the estimator says it actually built."""
+    match = re.search(r"([\d,]+) pairs", " ".join(lines))
+    return int(match.group(1).replace(",", ""))
+
+
+@pytest.mark.parametrize("group", [False, True])
+def test_the_cost_estimate_predicts_the_pairs_that_get_built(group):
+    """The estimate is the whole point: it has to be right before the run.
+
+    Pairs are counted on a sample and scaled by N^2, and with grouping on the
+    sample is grouped too -- so this compares the prediction against the pair
+    count the real run reports, on a table large enough (80 k) that the
+    sampling is exercised rather than bypassed.
+    """
+    locs, _, _ = simulate(n_points=500, n_frames=800, per_frame=100)
+    settings = DriftSettings(max_drift_nm=150, target_sigma_nm=30, group=group)
+
+    cost = estimate_cost(locs, settings)
+    lines = []
+    estimate_drift(locs, settings, progress=lines.append)
+
+    assert 0.8 < cost.n_pairs / _pairs_reported(lines) < 1.25
+    assert cost.seconds > 0 and cost.memory_bytes > 0
+
+
+def test_the_cost_grows_with_the_search_radius():
+    """`max_drift_nm` is the neighbour radius, which is why a round number
+    picked for safety is expensive rather than free."""
+    locs, _, _ = simulate(n_points=300, n_frames=400, per_frame=40)
+    near = estimate_cost(locs, DriftSettings(max_drift_nm=100, group=False))
+    far = estimate_cost(locs, DriftSettings(max_drift_nm=300, group=False))
+    assert far.n_pairs > 3 * near.n_pairs
+    assert far.seconds > near.seconds
+
+
+def test_a_cheap_run_is_not_worth_asking_about():
+    locs, _, _ = simulate()
+    cost = estimate_cost(locs, DriftSettings(max_drift_nm=100, group=False))
+    assert cost.question() is None
+
+
+def test_a_slow_run_asks_first_and_says_what_it_will_cost():
+    cost = DriftCost(n_localizations=2_000_000, n_pairs=4e9, n_evaluations=138,
+                     seconds=1400.0, memory_bytes=96e9, max_drift_nm=500.0,
+                     machine_bytes=34_000_000_000)
+    question = cost.question()
+    assert question is not None
+    assert "23 min" in question and "96.0 GB" in question
+    assert not cost.fits_in_memory        # 96 GB into 34 GB of machine
+    assert "max drift" in question        # and what to do about it
+
+
+def test_a_run_that_fits_and_is_quick_enough_asks_nothing():
+    cost = DriftCost(n_localizations=200_000, n_pairs=3e8, n_evaluations=138,
+                     seconds=90.0, memory_bytes=7e9, max_drift_nm=150.0,
+                     machine_bytes=34_000_000_000)
+    assert cost.fits_in_memory and cost.question() is None
+
+
+def test_an_empty_selection_costs_nothing_rather_than_raising():
+    locs, _, _ = simulate()
+    cost = estimate_cost(locs, DriftSettings(), select=np.zeros(len(locs), bool))
+    assert cost.n_pairs == 0 and cost.question() is None
+
+
+# ------------------------------------------------------------------- progress
+
+def test_the_estimate_reports_each_stage_it_spends_time_in():
+    """A drift estimate is minutes of one call; silence is indistinguishable
+    from a hang, which is what this is here to prevent."""
+    locs, _, _ = simulate(n_points=300, n_frames=400, per_frame=40)
+    lines = []
+    correct_drift(locs, DriftSettings(max_drift_nm=150, target_sigma_nm=30,
+                                      group=True),
+                  progress=lines.append)
+    text = "\n".join(lines)
+    assert "grouping" in text                  # what it is doing now
+    assert "neighbour pairs within 150 nm" in text
+    assert "sigma" in text                     # and how far through it is
+    assert "applying the drift" in text
+    assert any("left" in line for line in lines)   # with an estimate of what is left
+
+
+def test_progress_is_optional_everywhere():
+    """Every caller that does not want progress must be unaffected by it."""
+    locs, _, _ = simulate()
+    drift = estimate_drift(locs, DriftSettings(max_drift_nm=100, group=False))
+    assert len(drift) == 50

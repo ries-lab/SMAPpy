@@ -187,3 +187,64 @@ def test_a_plugin_with_no_settings_gets_an_empty_form_not_a_crash():
     assert param_specs(None) == {} and param_specs(int) == {}
     form = SettingsForm(None, {})
     assert form.fields == {} and form.value() is None
+
+
+def test_a_declined_preflight_question_does_not_run_the_plugin(monkeypatch):
+    """The preflight runs before the worker exists, so 'no' means no work at
+    all -- not a thread started and abandoned."""
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication, QMessageBox
+
+    app = QApplication.instance() or QApplication([])
+    seen = {"ran": False}
+
+    class Expensive(Plugin):
+        path = "Test/Expensive"
+        name = "Expensive"
+
+        def preflight(self, ctx, settings):
+            ctx.report("this will take 3 hours")
+            return "3 hours. Run it?"
+
+        def run(self, ctx, settings):
+            seen["ran"] = True
+            return Result(locs=ctx.locs[:10])
+
+    from smappy.gui.plugin_panel import PluginPanel
+    panel = PluginPanel(Expensive, Session(table()))
+
+    answer = {"button": QMessageBox.StandardButton.No}
+    monkeypatch.setattr(QMessageBox, "question",
+                        lambda *a, **k: answer["button"], raising=False)
+
+    panel.run()
+    app.processEvents()
+    assert seen["ran"] is False
+    assert panel.status.text() == "cancelled"
+    # what it would have cost is in the log either way, so a 'no' is informed
+    assert "this will take 3 hours" in panel.output.toPlainText()
+
+    answer["button"] = QMessageBox.StandardButton.Yes
+    assert panel._preflight(None) is True         # and 'yes' lets the run start
+
+
+def test_a_preflight_that_fails_does_not_block_the_run():
+    """An estimate is a courtesy; a table it cannot read must not stop work."""
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication
+
+    QApplication.instance() or QApplication([])
+
+    class Broken(Plugin):
+        path = "Test/Broken"
+        name = "Broken"
+
+        def preflight(self, ctx, settings):
+            raise ValueError("this table is in pixels and has no pixel size")
+
+        def run(self, ctx, settings):
+            return Result(locs=ctx.locs[:10])
+
+    from smappy.gui.plugin_panel import PluginPanel
+    panel = PluginPanel(Broken, Session(table()))
+    assert panel._preflight(None) is True

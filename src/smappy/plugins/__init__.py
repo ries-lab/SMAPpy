@@ -377,6 +377,17 @@ class Plugin:
     def has_preview(cls) -> bool:
         return cls.preview is not Plugin.preview
 
+    def preflight(self, ctx: Context, settings) -> Optional[str]:
+        """Anything to put to the user before `run` starts, or None to start.
+
+        Returning a string makes the GUI ask it, and run only on a yes.  This
+        is called on the thread that owns the session, *before* the worker
+        exists, so it has to be quick -- it is where a run whose cost can be
+        known in a fraction of a second says so, rather than finding out over
+        the following twenty minutes.  `ctx.report` from here reaches the log.
+        """
+        return None
+
     def hints(self, settings) -> Optional[Dict[str, Any]]:
         """What the settings' *automatic* fields currently resolve to.
 

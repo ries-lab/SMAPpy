@@ -1,7 +1,9 @@
 """COMET drift correction as a plugin.  The work is in :mod:`smappy.drift`."""
 from __future__ import annotations
 
-from ..drift import DriftSettings, correct_drift
+from typing import Optional
+
+from ..drift import DriftSettings, correct_drift, estimate_cost
 from . import Context, ParamInfo, Plugin, Result, register
 
 
@@ -40,9 +42,28 @@ class CometDrift(Plugin):
         "backend": ParamInfo(choices=("cuda", "torch", "cpu")),
     }
 
+    # Longer than this and the run is worth agreeing to first.  Five minutes
+    # is where waiting stops being waiting and starts being a decision.
+    slow_seconds = 300.0
+
+    def preflight(self, ctx: Context, settings: DriftSettings) -> Optional[str]:
+        """What this is going to cost, and a question if that is a lot.
+
+        Time and memory both follow from the neighbour-pair count, which grows
+        with the square of the localization count and steeply with the search
+        radius -- so a dataset twice the size of the one the defaults were
+        chosen on is not twice the wait, and the difference between a minute
+        and an afternoon is not visible in the settings.
+        """
+        cost = estimate_cost(ctx.locs, settings, select=ctx.selection.mask)
+        ctx.report(str(cost))
+        return cost.question(self.slow_seconds)
+
     def run(self, ctx: Context, settings: DriftSettings) -> Result:
         ctx.selection.require(5000, ctx.report, "a drift estimate")
         ctx.report(f"estimating drift from {ctx.selection}")
-        corrected, drift = correct_drift(ctx.locs, settings, select=ctx.selection.mask)
+        corrected, drift = correct_drift(ctx.locs, settings,
+                                         select=ctx.selection.mask,
+                                         progress=ctx.report)
         return Result(locs=corrected, text=str(drift), plot=drift.plot,
                       data={"drift": drift}, settings=settings)

@@ -10,8 +10,8 @@ from typing import Optional, Type
 
 from PySide6.QtCore import QObject, QThread, Signal
 from PySide6.QtGui import QTextCursor
-from PySide6.QtWidgets import (QHBoxLayout, QLabel, QPlainTextEdit, QPushButton,
-                               QSpinBox, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QHBoxLayout, QLabel, QMessageBox, QPlainTextEdit,
+                               QPushButton, QSpinBox, QVBoxLayout, QWidget)
 
 from ..plugins import Plugin, Result
 from ..session import Session
@@ -146,6 +146,8 @@ class PluginPanel(QWidget):
         except ValueError as e:
             self.status.setText(f"bad value: {e}")
             return
+        if job == "run" and not self._preflight(settings):
+            return
         # built here, on the GUI thread: the context reads the table and the
         # selection now, so the worker cannot race a live fit rebinding them
         context = self.session.context(progress=self.progressed.emit,
@@ -167,6 +169,38 @@ class PluginPanel(QWidget):
         for sig in (self._worker.done, self._worker.failed):
             sig.connect(self._thread.quit)
         self._thread.start()
+
+    def _preflight(self, settings) -> bool:
+        """Ask the plugin whether this run wants agreeing to first.
+
+        On the GUI thread and before the worker exists, so the dialog is an
+        ordinary modal one.  What the plugin reports here is written straight
+        into the log rather than through `progressed`: it is a standing record
+        of what was agreed to, and the progress lines that follow overwrite
+        each other on the line below it.
+        """
+        try:
+            context = self.session.context(progress=self.output.appendPlainText)
+            question = self.plugin.preflight(context, settings)
+        except Exception as e:
+            # An estimate is a courtesy.  One that cannot be made -- a table in
+            # pixels with no pixel size, a plugin that does not expect this
+            # data -- must not be what stops the run the user asked for.  It
+            # says so rather than vanishing, so that a broken preflight is
+            # visible as one.
+            self.output.appendPlainText(f"(no estimate: {type(e).__name__}: {e})")
+            return True
+        if not question:
+            return True
+        answer = QMessageBox.question(
+            self, f"{self.plugin.name}: before running", question,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No)
+        if answer == QMessageBox.StandardButton.Yes:
+            return True
+        self.output.appendPlainText("not run")
+        self.status.setText("cancelled")
+        return False
 
     def _on_progress(self, text: str) -> None:
         """Progress replaces the last line while it is a progress line, so a

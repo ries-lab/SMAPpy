@@ -12,7 +12,10 @@ Needs COMET:  pip install -e externaltools/Comet/Python_interface
 import argparse
 
 
-from ..drift import DriftSettings, correct_drift, drift_corrected_path, save_drift_corrected
+import sys
+
+from ..drift import (DriftSettings, correct_drift, drift_corrected_path,
+                     estimate_cost, save_drift_corrected)
 from ..rcc import RCCSettings, estimate_drift_rcc
 from ..filter import LocFilter
 from ..io.hdf5 import load_localizations
@@ -77,6 +80,8 @@ def main() -> None:
                    help="discard time windows whose estimate does not beat the "
                         "no-correction overlap, and interpolate across them")
     p.add_argument("--plot", action="store_true", help="show the drift curve")
+    p.add_argument("--yes", action="store_true",
+                   help="do not ask before a run the cost estimate calls slow")
     a = p.parse_args()
 
     locs = load_localizations(a.file)
@@ -111,6 +116,16 @@ def main() -> None:
             select=keep, pixelsize_nm=a.pixelsize, display=True)
         corrected = drift.apply(locs, a.pixelsize)
     else:
+        cost = estimate_cost(locs, settings, select=keep, pixelsize_nm=a.pixelsize)
+        print(cost)
+        question = cost.question()
+        if question and not a.yes:
+            if not sys.stdin.isatty():
+                raise SystemExit(
+                    f"{question}\n\nRefusing to start unattended; pass --yes "
+                    f"to run it anyway.")
+            if input("continue? [y/N] ").strip().lower() not in ("y", "yes"):
+                raise SystemExit("not run")
         corrected, drift = correct_drift(locs, settings, select=keep,
                                          pixelsize_nm=a.pixelsize, display=True)
     print(drift)
