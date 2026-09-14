@@ -109,3 +109,21 @@ def test_ssao_darkens_a_crevice_and_not_the_open():
     foot, open_ = (slice(280, 300), slice(240, 260)), (slice(50, 70), slice(50, 70))
     assert on[foot].mean() < off[foot].mean() * 0.9
     assert np.allclose(on[open_].mean(), off[open_].mean(), atol=0.02)
+
+
+def test_the_dispatch_grid_covers_every_point_and_respects_the_limit():
+    """A 1-D dispatch tops out at 16,776,960 points; a localization file is larger."""
+    import numpy as np
+    from smappy.gpu import MAX_GROUPS, N_EXACT, WORKGROUP, GPUEngine, dispatch_grid
+    from smappy.render import FieldOfView
+    for n in (0, 1, 255, 256, 257, 16_776_960, 16_776_961, 18_254_496, 45_787_510):
+        gx, gy = dispatch_grid(n)
+        assert 0 < gx <= MAX_GROUPS and 0 < gy <= MAX_GROUPS
+        groups = max(1, -(-n // WORKGROUP))
+        assert gx * gy >= groups                         # every point is reached
+        assert gx * (gy - 1) < groups                    # a row fewer would not reach them
+        if gy == 1:
+            assert gx == groups                          # 1-D while it fits in one row
+        # the shader compares against an exact u32: f32 stops counting at 2^24
+        params = GPUEngine.params(FieldOfView(0, 0, 10.0, 64, 64), n=n)
+        assert int(params[N_EXACT].view(np.uint32)) == n

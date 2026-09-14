@@ -296,6 +296,41 @@ A drag frame, 900x700, same file: whole field **1176 -> 543 ms**, a 10 um crop
 **1123 -> 384 ms**, a 300 nm crop **519 -> 5.0 ms**.  The whole-field case is
 now the render itself, which is the 2 M points it is asked to draw.
 
+### The GPU engines, and why they were not faster
+
+Three things kept them from being the fast proxy they are meant to be, all
+found by running them on a 46 M localization file for the first time:
+
+* the splat compute shader dispatched a **1-D** grid.  A dimension is capped at
+  65535 workgroups, so at 256 threads it covered 16,776,960 points and a larger
+  table failed validation outright -- "GPU" mode could not open this file at
+  all.  The grid is 2-D now (`dispatch_grid`), and the count is compared as a
+  u32: it used to ride in `depth.w` as an f32, which stops counting exactly at
+  2^24 -- the same 16.7 M boundary, by coincidence of 256 x 65535.
+* the selection was the whole filtered table, every frame, with the slab
+  applied per point **inside** the shader.  So the GPU repeated what the CPU
+  engine used to: a crop cost what the full field cost.  `selection_rows`
+  narrows it through the index and memoises it on (filter, slab) -- neither of
+  which a rotation changes, so a drag reuses the array *and* the GPU buffer
+  built from it, which is keyed on that array's identity.
+* points mode sorted back to front for the alpha, keyed on the three angles, so
+  every frame of a drag re-sorted on the CPU and re-uploaded.  This made a
+  small selection slower than a large one -- 1 M points ran at 8 fps where 2 M
+  ran at 45, because 2 M was over `PREVIEW_POINTS` and skipped the sort.  The
+  sort is now skipped while previewing, which is exactly when it does not
+  matter.
+
+Rotating a 900x700 preview, same file, after all three: a 10 um crop **3.3 fps
+on the CPU, 33.6 on the GPU**; a 1 um crop 150 / 108.  Below ~100k points the
+CPU wins again -- the GPU round trip is ~8 ms of readback whatever it drew, so
+a 300 nm crop is 246 fps on the CPU and 117 on the GPU.
+
+What is left, and where the games answer applies: the full field is 8.4 fps
+because 18 M points are genuinely drawn into a 450x350 preview -- **116 points
+per rendered pixel**.  A point budget would cut that to the ~2 M where it stops
+mattering (45 fps, measured); an LOD octree over the table is the same idea
+done properly.  Neither is built.
+
 Rendering at *display* resolution rather than a fixed nm/pixel is what bounds
 this: zoomed out the kernels collapse onto the `mingausspix` floor, zoomed in
 there are fewer localizations in view.  The zoomed numbers are floored by every

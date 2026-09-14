@@ -322,6 +322,42 @@ def slab_candidates(locs: Localizations, select: np.ndarray, slab: Optional[Slab
     return np.flatnonzero(select)
 
 
+_rows_cache: dict = {}
+
+
+def _slab_key(slab: Optional[Slab]):
+    """A hashable slab: a cache on it survives a rotation, not a moved box."""
+    return None if slab is None else (tuple(slab.center), tuple(slab.size), slab.angle)
+
+
+def selection_rows(locs: Localizations, select: np.ndarray, slab: Optional[Slab],
+                   index=None) -> np.ndarray:
+    """`slab_candidates`, memoised on the filter and the slab.
+
+    A rotation changes neither -- only the projection -- so every frame of a
+    drag asks the same question, and each engine asks it more than once (the
+    render and the depth histogram both need these rows).  Answering it costs
+    an index query, or `np.flatnonzero` over the whole table when the slab is
+    everything (31 ms at 35 M).
+
+    On the GPU this also keeps the *buffer*: `GPUEngine.selection` is keyed on
+    the identity of the array handed to it, so returning the same array means
+    the selection is uploaded once per slab rather than once per frame.
+
+    The array is shared -- callers index it, and must not write to it.
+    """
+    key = _table_key(locs, id(select), _slab_key(slab))
+    hit = _rows_cache.get(key)
+    if hit is not None and hit[1] is select:
+        return hit[0]
+    rows = slab_candidates(locs, select, slab, index)
+    if len(_rows_cache) > 4:
+        _rows_cache.clear()
+    # the mask is kept beside the rows so its id cannot be reused meanwhile
+    _rows_cache[key] = (rows, select)
+    return rows
+
+
 def depth_sample(locs: Localizations, select: np.ndarray, projection: Projection,
                  slab: Optional[Slab], index=None, limit: int = HIST_POINTS) -> np.ndarray:
     """Depths of up to ``limit`` of the slab's localizations.
@@ -337,7 +373,7 @@ def depth_sample(locs: Localizations, select: np.ndarray, projection: Projection
     """
     x, y = positions(locs)
     z = locs["z_nm"] if "z_nm" in locs else None
-    idx = slab_candidates(locs, select, slab, index)
+    idx = selection_rows(locs, select, slab, index)
     if index is None and slab is not None and idx.size:
         # With an index the candidates are already the slab's own neighbourhood,
         # so thinning them first keeps the sample inside it.  Without one they
@@ -384,7 +420,7 @@ def project_layer(locs: Localizations, select: np.ndarray, projection: Projectio
     """
     x, y = positions(locs)
     z = locs["z_nm"] if "z_nm" in locs else None
-    idx = slab_candidates(locs, select, slab, index)
+    idx = selection_rows(locs, select, slab, index)
     if slab is not None and idx.size:
         keep = slab.mask(x[idx], y[idx], None if z is None else z[idx])
         idx = idx[keep]
@@ -542,7 +578,7 @@ def point_radius_nm(locs: Localizations, select: np.ndarray, prec_name: Optional
 
 def sphere_draw(engine, locs: Localizations, select: np.ndarray, projection: Projection,
                 slab: Optional[Slab], fov: FieldOfView, settings: RenderSettings,
-                display: DisplaySettings):
+                display: DisplaySettings, index=None):
     """One layer's contribution to `GPUEngine.render_spheres`."""
     x, y = positions(locs)
     z = locs["z_nm"] if "z_nm" in locs else None
@@ -553,8 +589,8 @@ def sphere_draw(engine, locs: Localizations, select: np.ndarray, projection: Pro
                else None)
     engine.table(key, x, y, z, locs[prec_name] if prec_name else None,
                  locs[settings.weight_field] if settings.weight_field else None, cvalues)
-    idx = np.flatnonzero(select) if select.dtype == bool else np.asarray(select)
-    sel = engine.selection((key, id(select)), idx)
+    idx = selection_rows(locs, select, slab, index)
+    sel = engine.selection((key, id(select), _slab_key(slab)), idx)
     front, drange = _depth_front_and_range(projection, slab, locs)
     if color_field == "depth":
         color_mode, color_range = 2, (settings.color_range or drange)
@@ -579,7 +615,7 @@ def sphere_draw(engine, locs: Localizations, select: np.ndarray, projection: Pro
 def render_layer_gpu(engine, locs: Localizations, select: np.ndarray, projection: Projection,
                      slab: Optional[Slab], fov: FieldOfView, settings: RenderSettings,
                      display: DisplaySettings, median_precision: float = 0.0,
-                     preview: bool = False):
+                     preview: bool = False, index=None):
     """Engine A on the GPU for one layer: the same planes as `render_layer_3d`,
     or, with ``projection.engine == "points"``, an RGB sprite image."""
     x, y = positions(locs)
@@ -591,8 +627,7 @@ def render_layer_gpu(engine, locs: Localizations, select: np.ndarray, projection
                else None)
     engine.table(key, x, y, z, locs[prec_name] if prec_name else None,
                  locs[settings.weight_field] if settings.weight_field else None, cvalues)
-    mask = select if select.dtype == bool else None
-    sel_key = (key, id(select))
+    sel_key = (key, id(select), _slab_key(slab))
     front, drange = _depth_front_and_range(projection, slab, locs)
     if color_field == "depth":
         color_mode, color_range = 2, (settings.color_range or drange)
@@ -614,9 +649,13 @@ def render_layer_gpu(engine, locs: Localizations, select: np.ndarray, projection
                 radius=point_radius_nm(locs, select, prec_name, projection) / fov.pixelsize,
                 alpha=projection.point_alpha)
     lut, invert = display.lut, display.invert
+    idx = selection_rows(locs, select, slab, index)
     if projection.engine == "points":
-        idx = np.flatnonzero(mask) if mask is not None else np.asarray(select)
-        if idx.size <= PREVIEW_POINTS:          # back to front, for the alpha to be right
+        if not preview and idx.size <= PREVIEW_POINTS:
+            # Back to front, so the alpha reads right -- but not while the mouse
+            # is down: the order depends on the angle, so a drag would re-sort
+            # and re-upload every frame, which is why a small selection used to
+            # rotate *slower* than a large one (8 fps at 1 M, 45 at 2 M).
             _, _, d = projection.apply(x[idx], y[idx], None if z is None else z[idx])
             idx = idx[np.argsort(d)]
             sel = engine.selection((sel_key, "sorted", projection.azimuth, projection.elevation,
@@ -625,7 +664,6 @@ def render_layer_gpu(engine, locs: Localizations, select: np.ndarray, projection
             sel = engine.selection(sel_key, idx)
         params = engine.params(n=sel[1], **base)
         return engine.render_points(key, sel, fov, params, lut, invert), None
-    idx = np.flatnonzero(mask) if mask is not None else np.asarray(select)
     sel = engine.selection(sel_key, idx)
     colored = color_mode > 0
     whole = engine.render_planes(key, sel, fov, engine.params(n=sel[1], **base), lut, invert,
@@ -659,7 +697,8 @@ def render_3d(layers, projection: Projection, slab: Optional[Slab], fov: FieldOf
             if layer.visible and not layer.is_image:
                 st = layer.state
                 draw, shade_params = sphere_draw(engine, st.locs, st.filter.mask, projection, slab,
-                                                 fov, st.settings, st.display)
+                                                 fov, st.settings, st.display,
+                                                 index=getattr(st, "index", None))
                 draws.append(draw)
         if draws:
             rgb = engine.render_spheres(draws, fov, shade_params)
@@ -673,7 +712,7 @@ def render_3d(layers, projection: Projection, slab: Optional[Slab], fov: FieldOf
         elif engine is not None and projection.engine in ("gpu", "points"):
             image, _ = render_layer_gpu(engine, state.locs, state.filter.mask, projection, slab,
                                         fov, state.settings, state.display,
-                                        state.current.median_precision, preview)
+                                        state.current.median_precision, preview, index=index)
         else:
             image, _ = render_layer_3d(state.locs, state.filter.mask, projection, slab, fov,
                                        state.settings, state.display, preview,

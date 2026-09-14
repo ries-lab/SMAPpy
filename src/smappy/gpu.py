@@ -23,6 +23,21 @@ from .render import FieldOfView, RenderedImage, ROI_SIGMA
 
 SCALE = 2.0 ** 20            # fixed point: 1.0 -> 2^20; 64 bits hold 1.7e13 per pixel
 WORKGROUP = 256
+MAX_GROUPS = 65535          # per dispatch dimension, by the WebGPU limits
+N_EXACT = 47                # params slot dclip.w: the point count, as u32 bits
+
+
+def dispatch_grid(n: int) -> Tuple[int, int]:
+    """Workgroups for ``n`` points, as (x, y).
+
+    One dimension is capped at 65535 workgroups, so a 1-D grid tops out at
+    16,776,960 points -- under half of a large localization file.  The splat
+    shader unrolls the second dimension with `num_workgroups`, so the grid has
+    only to cover ``n``; the shader drops the overhang.
+    """
+    groups = max(1, (n + WORKGROUP - 1) // WORKGROUP)      # n = 0: one empty group
+    gx = min(groups, MAX_GROUPS)
+    return gx, (groups + gx - 1) // gx
 
 COMMON = """
 struct Params {
@@ -35,7 +50,7 @@ struct Params {
     sig: vec4<f32>,         // factor, floor, cap, use weight column
     depth: vec4<f32>,       // attenuation length (0 off), front, colour mode (0 none, 1 field, 2 depth), n
     crange: vec4<f32>,      // colour lo, hi, point radius (px), point alpha
-    dclip: vec4<f32>,       // depth lo, hi, 1 if the clip applies, pad
+    dclip: vec4<f32>,       // depth lo, hi, 1 if the clip applies, n as u32 bits
     sph: vec4<f32>,         // spheres: depth min, depth max (front), SSAO radius (px), SSAO strength
     light: vec4<f32>,       // light direction in view space (x right, y down, z to the viewer), ambient
 };
@@ -128,9 +143,14 @@ fn add64(base: u32, v: f32) {
 }
 
 @compute @workgroup_size(256)
-fn splat(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let i = gid.x;
-    if (f32(i) >= P.depth.w) { return; }
+fn splat(@builtin(global_invocation_id) gid: vec3<u32>,
+         @builtin(num_workgroups) nwg: vec3<u32>) {
+    // A dispatch dimension is capped at 65535 workgroups, which at 256 threads
+    // is 16,776,960 points -- smaller than a localization file, so the grid is
+    // 2-D and the row is unrolled here.  The count is compared as u32: f32
+    // stops counting exactly at 2^24, which is the same 16.7 M boundary.
+    let i = gid.x + gid.y * nwg.x * 256u;
+    if (i >= bitcast<u32>(P.dclip.w)) { return; }
     let p = pts[sel[i]];
     let pr = project(p);
     if (!pr.inside) { return; }
@@ -503,7 +523,7 @@ class GPUEngine:
         else:
             sc, sh = np.zeros(4), np.zeros(4)
         mode = {"hist": 0.0, "gauss": 1.0, "precision": 2.0}[sigma_mode]
-        return np.concatenate([
+        out = np.concatenate([
             rows[0], rows[1], rows[2],
             [px, py, pz, focal or 0.0], sc, sh,
             [fov.x0, fov.y0, fov.pixelsize, ROI_SIGMA],
@@ -515,6 +535,10 @@ class GPUEngine:
             [depth_range[0], depth_range[1], ssao_radius, ssao_strength],
             [light[0], light[1], light[2], ambient],
         ]).astype(np.float32)
+        # `n` also rides in depth.w as a float, which the splat shader cannot
+        # use above 2^24; the spare dclip slot carries its exact bits instead.
+        out[N_EXACT] = np.uint32(n).view(np.float32)
+        return out
 
     # ------------------------------------------------------------- render
     def render_planes(self, table_key, selection, fov: FieldOfView, params: np.ndarray,
@@ -543,7 +567,7 @@ class GPUEngine:
         cp.set_pipeline(self.splat)
         cp.set_bind_group(0, bind)
         if n:
-            cp.dispatch_workgroups((n + WORKGROUP - 1) // WORKGROUP)
+            cp.dispatch_workgroups(*dispatch_grid(n))
         cp.end()
         enc.copy_buffer_to_buffer(self._acc, 0, out, 0, size)
         dev.queue.submit([enc.finish()])
