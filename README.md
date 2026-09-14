@@ -25,14 +25,30 @@ Qt costs about 400 MB, which a headless fitting machine pays for nothing --
 though it imports nothing either, since Qt is loaded inside `smappy-gui` and
 not at `import smappy`.  `[gpu]` adds wgpu for the 3D viewer's GPU engine.
 
-From a checkout, which builds the C++ extensions:
+From a checkout, which builds the C++ extensions.  On Apple silicon,
+`/usr/bin/python3` is the native arm64 one:
 
-    /usr/bin/python3 -m venv .venv                 # native arm64 on Apple silicon
+    /usr/bin/python3 -m venv .venv
     .venv/bin/python -m pip install -e .
+
+Keep the comment off that first line if you paste it: `venv` takes *several*
+target directories, so a trailing `# native arm64 on Apple silicon` makes a
+venv called `#`, one called `native`, and four more.  Editable installs need
+pip 21.3 or newer -- an older one falls back to `setup.py develop`, which
+current setuptools refuses to run -- so upgrade pip inside the venv first if it
+came with an old one.
 
 ## Start the GUI
 
     smappy-gui                      # or: smappy-gui FILE.hdf5
+
+That is the command after `pip install smappy-smlm` or `uv tool install`, which
+put it on PATH.  A checkout installed into a venv of its own does not: either
+activate the venv (`source .venv/bin/activate`), which puts all six
+`smappy-*` commands on PATH along with that venv's `python`, or call the one
+you want by path and leave the rest of the shell alone:
+
+    .venv/bin/smappy-gui            # or link it: ln -s "$PWD/.venv/bin/smappy-gui" ~/bin/
 
 Equivalently, without the console script:
 
