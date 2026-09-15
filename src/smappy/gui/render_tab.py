@@ -666,6 +666,32 @@ class RenderTab(QWidget):
             self._appended += 1
             if self._appended % 5 == 1:      # the histogram need not follow every block
                 self.filter.bind(self.layer)
+                self._fill_color_fields(self.layer)
+
+    def _fill_color_fields(self, layer: Layer) -> None:
+        """The columns this layer could be coloured by.
+
+        Called again as a live fit runs: a fit starts with an empty table and
+        the columns -- z_nm among them -- exist only once the first block is
+        in, so a list filled once at the start stayed empty for the whole run.
+        Rebuilt only when the columns actually change, so the choice the user
+        made survives every block after that.
+        """
+        locs = layer.locs
+        numeric = [n for n in locs if np.asarray(locs[n]).dtype.kind in "iuf"
+                   and np.asarray(locs[n]).ndim == 1]
+        if numeric == [self.color_field.itemText(i)
+                       for i in range(self.color_field.count())]:
+            return
+        settings = layer.state.settings
+        chosen = settings.color_field or ("z_nm" if "z_nm" in locs
+                                          else (numeric[0] if numeric else ""))
+        blocked = self.color_field.signalsBlocked()
+        self.color_field.blockSignals(True)
+        self.color_field.clear()
+        self.color_field.addItems(numeric)
+        self.color_field.setCurrentText(chosen)
+        self.color_field.blockSignals(blocked)
 
     def _bind_layer(self, index: int) -> None:
         """Point every control at one layer, without firing their signals."""
@@ -699,13 +725,8 @@ class RenderTab(QWidget):
             return
         self.filter.bind(layer)
         locs = layer.locs
-        numeric = [n for n in locs if np.asarray(locs[n]).dtype.kind in "iuf"
-                   and np.asarray(locs[n]).ndim == 1]
-        self.color_field.clear()
-        self.color_field.addItems(numeric)
+        self._fill_color_fields(layer)
         settings, display = layer.state.settings, layer.state.display
-        field = settings.color_field or ("z_nm" if "z_nm" in locs else (numeric[0] if numeric else ""))
-        self.color_field.setCurrentText(field)
         self.color.setCurrentIndex(1 if settings.color_field else 0)
         self.color_field.setEnabled(settings.color_field is not None)
         self.color_range_row.setEnabled(settings.color_field is not None)
