@@ -277,7 +277,7 @@ class RenderView(QWidget):
         return np.ascontiguousarray(rgb)
 
     def _update_scalebar(self, fov: FieldOfView) -> None:
-        self.scalebar.size = _nice(0.2 * (fov.x1 - fov.x0))
+        self.scalebar.size = nice_step(0.2 * (fov.x1 - fov.x0))
         size = self.scalebar.size
         self.scalebar.text.setText(f"{size / 1000:g} µm" if size >= 1000 else f"{size:g} nm")
         self.scalebar.updateBar()
@@ -420,8 +420,7 @@ class RenderView(QWidget):
         else:
             pts = [item.mapToParent(pg.Point(p)) for p in item.getState()["points"]]
             region = Region("polygon", [(p.x(), p.y()) for p in pts])
-        self.session.roi = region                  # no redraw: the item is the truth
-        self.session.changed("roi-edited")
+        self.session.roi_edited(region)            # no redraw: the item is the truth
 
     # ------------------------------------------------------------- saving
     def save_png(self, path) -> None:
@@ -547,7 +546,7 @@ class RenderToolBar(QToolBar):
             self.view.save_tiff(path, pixelsize, what)
 
 
-def _nice(span: float) -> float:
+def nice_step(span: float) -> float:
     decade = 10 ** np.floor(np.log10(span))
     for m in (1, 2, 5, 10):
         if m * decade >= span:

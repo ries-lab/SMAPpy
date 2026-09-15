@@ -4,6 +4,7 @@ import pytest
 
 from smappy.io.hdf5 import save_localizations
 from smappy.locs import Localizations
+from smappy.regions import Region
 from smappy.session import Session
 
 
@@ -298,3 +299,19 @@ def test_the_tile_grid_travels_with_the_file(tmp_path):
     reopened = Session()
     reopened.load(path)
     assert reopened.rois.tile_nm == 1500.0
+
+
+def test_dragging_a_line_roi_wider_takes_the_slab_with_it():
+    """`from ROI` is for taking an ROI the slab is *not* following.  While it
+    is following, the width the line is dragged to is the box's second axis."""
+    session = Session(_table())
+    session.set_roi(Region.line((1000, 1000), (3000, 2000), 250.0))
+    assert session.slab_follows_roi
+    assert session.slab.size[1] == pytest.approx(250.0)
+
+    session.roi_edited(Region.line((1000, 1000), (3000, 2000), 700.0))
+    assert session.slab.size[1] == pytest.approx(700.0)
+
+    session.set_slab(session.slab, follow_roi=False)     # a dragged face stops it
+    session.roi_edited(Region.line((1000, 1000), (3000, 2000), 100.0))
+    assert session.slab.size[1] == pytest.approx(700.0)

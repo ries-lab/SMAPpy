@@ -588,6 +588,19 @@ class Session:
         self.changed("slab")
         return self.slab
 
+    def roi_edited(self, roi: Region) -> None:
+        """The same ROI, dragged or resized on screen.
+
+        Not `set_roi`: the item under the mouse is the truth and redrawing it
+        from here would fight the drag.  The slab still follows it, which is
+        what made a 3D view of a line ROI stale until `from ROI` was pressed --
+        including the width, which is the one thing a line ROI is dragged for.
+        """
+        self.roi = roi
+        if self.slab_follows_roi:
+            self.slab_from_roi()
+        self.changed("roi-edited")
+
     def set_slab(self, slab: Slab, follow_roi: bool = False) -> None:
         self.slab = slab
         self.slab_follows_roi = follow_roi
