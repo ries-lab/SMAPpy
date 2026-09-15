@@ -319,19 +319,75 @@ def assign_by_minima(r: np.ndarray, modes: Modes, exclusion: float = 0.0
     return channel
 
 
+def _concentration(rho: np.ndarray, spread: float) -> np.ndarray:
+    """The Beta prior's concentration for a species whose own ratio wanders.
+
+    ``spread`` is that wandering as a standard deviation in r.  A Beta with
+    mean p = (1+rho)/2 has var(p) = p(1-p)/(kappa+1), and var(r) = 4 var(p),
+    so kappa = (1 - rho^2)/spread^2 - 1 is the concentration that reproduces
+    it.  A spread wider than the ratio axis allows at that mean is clamped:
+    past that there is no Beta with that variance, and the species has stopped
+    saying anything about the split.
+    """
+    return np.maximum((1 - rho ** 2) / max(spread, 1e-12) ** 2 - 1, 1e-3)
+
+
+def log_likelihoods(r: np.ndarray, n_eff: np.ndarray, modes: Modes,
+                    spread: float = 0.0) -> np.ndarray:
+    """log P(the observed split | species), as (n, k), up to a common constant.
+
+    The exact thing, not a Gaussian.  Photon counting is Poisson, and a Poisson
+    pair factorizes into the total and the split,
+
+        P(I1, I2 | lambda, c) = Poisson(N | lambda) Binomial(I1 | N, p_c),
+
+    where only the second factor knows the colour and only the first knows the
+    brightness.  So the brightness cancels out of the posterior without ever
+    being modelled, and what is left is a binomial in the split -- whose log is
+    *linear* in the two counts, ``I1 log p + I2 log(1-p)``, where a Gaussian's
+    is quadratic in r.  The difference is small when both channels collect
+    many photons and large when one collects few, which is exactly the
+    ratiometric case worth having: a dye that sends 2% of its light to one
+    channel.
+
+    With ``spread``, p is itself drawn from a Beta of the same mean, and the
+    split is beta-binomial -- the same closed form, and the same cancellation.
+    """
+    from scipy.special import gammaln
+
+    r = np.clip(np.asarray(r, dtype=float), -1.0, 1.0)[:, None]
+    n = np.asarray(n_eff, dtype=float)[:, None]
+    rho = np.asarray(modes.maxima, dtype=float)[None, :]
+    p = np.clip((1 + rho) / 2, 1e-12, 1 - 1e-12)
+    # the effective counts: what n_eff photons split as r would have been
+    first = n * (1 + r) / 2
+    second = n - first
+    with np.errstate(invalid="ignore", divide="ignore"):
+        if spread <= 0:
+            return first * np.log(p) + second * np.log1p(-p)
+        kappa = _concentration(rho, spread)
+        a, b = p * kappa, (1 - p) * kappa
+        return (gammaln(first + a) + gammaln(second + b) - gammaln(n + a + b)
+                - gammaln(a) - gammaln(b) + gammaln(a + b))
+
+
 def variances(n_eff: np.ndarray, modes: Modes, spread: float = 0.0) -> np.ndarray:
     """var(r) under each species, as (n, k).
 
     The shot noise of the split each species hypothesises, ``(1 - rho_k^2) /
-    n_eff``, plus whatever intrinsic spread the species is given -- a dye whose
-    own splitting ratio varies, across the field or between molecules, is
-    broader than photon statistics and says so here.
+    n_eff``, widened by whatever intrinsic spread the species is given.  Under
+    the beta-binomial the two combine as ``(1 - rho^2)(n + kappa) /
+    (n (kappa + 1))``, which is the sum in quadrature to first order and right
+    at both ends: pure shot noise as spread -> 0, pure spread as n -> infinity.
     """
-    n_eff = np.asarray(n_eff, dtype=float)[:, None]
+    n = np.asarray(n_eff, dtype=float)[:, None]
     rho = np.asarray(modes.maxima, dtype=float)[None, :]
     with np.errstate(invalid="ignore", divide="ignore"):
-        var = (1 - rho ** 2) / n_eff + spread ** 2
-    return np.maximum(var, np.finfo(float).tiny)
+        shot = (1 - rho ** 2) / n
+        if spread > 0:
+            kappa = _concentration(rho, spread)
+            shot = shot * (n + kappa) / (kappa + 1)
+    return np.maximum(shot, np.finfo(float).tiny)
 
 
 def deviations(r: np.ndarray, n_eff: np.ndarray, modes: Modes,
@@ -356,11 +412,7 @@ def posteriors(r: np.ndarray, n_eff: np.ndarray, modes: Modes,
     of the species offered, and divides the evidence between them.  See
     `deviations` for the question it cannot answer.
     """
-    r = np.asarray(r, dtype=float)[:, None]
-    rho = np.asarray(modes.maxima, dtype=float)[None, :]
-    with np.errstate(invalid="ignore", divide="ignore"):
-        var = variances(n_eff, modes, spread)
-        log_l = -0.5 * (r - rho) ** 2 / var - 0.5 * np.log(var)
+    log_l = log_likelihoods(r, n_eff, modes, spread=spread)
     if use_prior:
         log_l = log_l + np.log(np.maximum(modes.prior, 1e-12))[None, :]
     log_l -= log_l.max(axis=1, keepdims=True)      # softmax, without overflow
@@ -477,9 +529,11 @@ class AssignColors(Plugin):
     name = "Assign colours"
     description = ("Colour two-channel localizations by their photon split, "
                    "r = (ch1 - ch2) / (ch1 + ch2): cut the histogram of r at "
-                   "its minima, or assign each localization by its own "
-                   "posterior within a crosstalk budget, refusing any that no "
-                   "colour could have produced.  Writes `channel`.")
+                   "its minima, or give each localization the probability of "
+                   "every colour from its own photon counts.  Writes those "
+                   "probabilities, and `channel`: the colour decided on, or 0 "
+                   "where the probabilities are too close to choose between "
+                   "and where no colour fits at all.")
     preview_help = ("draw the histogram of r with the modes, the boundaries "
                     "and what would be assigned, and the same decision over "
                     "the two channels' intensities.  Nothing is saved and the "
@@ -528,6 +582,12 @@ class AssignColors(Plugin):
             given = ", ".join(f"{v:+.3f}" for v in expected)
             ctx.report(f"expected ratios given: {given}")
 
+        # The result is a probability for each colour.  `channel` is the
+        # decision that follows from it -- and 0, undecided, wherever the
+        # probabilities are too close together to choose between.
+        per_colour = posteriors(values.r, values.n_eff, modes,
+                                spread=settings.spread,
+                                use_prior=settings.use_prior)
         if settings.mode == "probabilistic":
             channel, probability = assign_by_probability(
                 values.r, values.n_eff, modes, crosstalk=settings.crosstalk,
@@ -554,6 +614,11 @@ class AssignColors(Plugin):
         locs.columns["color_ratio"] = values.r.astype(np.float32)
         locs.columns["channel_p"] = probability.astype(np.float32)
         locs.columns["channel_sigma"] = sigma.astype(np.float32)
+        for k in range(len(modes)):
+            # P(colour k+1 | this molecule's photons), for every row: the
+            # answer itself, which a single label cannot hold
+            locs.columns[f"channel_p{k + 1}"] = np.where(
+                values.valid, per_colour[:, k], np.nan).astype(np.float32)
 
         text = self._summary(values, modes, channel, probability, settings, seen)
         ctx.report(text.splitlines()[0])
@@ -562,7 +627,8 @@ class AssignColors(Plugin):
                       plots={"intensities":
                              _intensity_plotter(values, modes, settings, seen)},
                       data={"modes": modes, "ratios": values, "channel": channel,
-                            "probability": probability, "sigma": sigma},
+                            "probability": probability, "sigma": sigma,
+                            "posteriors": per_colour},
                       settings=settings)
 
     def _summary(self, values: Ratios, modes: Modes, channel: np.ndarray,

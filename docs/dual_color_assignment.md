@@ -89,6 +89,108 @@ and the preview prints the observed mode width next to the median shot-noise
 width so it can be set by looking rather than by guessing.  It is 0 by default:
 shot noise only.
 
+## The probability of each colour, derived
+
+The question, exactly as it should be asked: *the expected ratios rho_c are
+known (from the histogram maxima, or measured); this molecule gave I1 and I2
+photons; what is P(colour 1) and what is P(colour 2)?*
+
+Photons arrive as counts, so start there rather than at r.  A molecule of
+species c whose emission is collected with expected total lambda sends each
+detected photon to channel 1 with probability
+
+    p_c = (1 + rho_c) / 2,
+
+and the two detector counts are independent Poissons,
+
+    I1 ~ Poisson(lambda p_c),   I2 ~ Poisson(lambda (1 - p_c)).
+
+**The brightness cancels.** A pair of independent Poissons factorizes into
+their total and their split,
+
+    P(I1, I2 | lambda, c) = Poisson(N | lambda) * Binomial(I1 | N, p_c),
+    N = I1 + I2,
+
+and the two factors separate what we do not know from what we want: the total
+depends on lambda and not on the colour, the split on the colour and not on
+lambda.  Marginalizing over an unknown brightness distribution f(lambda)
+therefore leaves that unknown entirely in the first factor,
+
+    P(I1, I2 | c) = [ integral Poisson(N | lambda) f(lambda) d lambda ]
+                    * Binomial(I1 | N, p_c),
+
+and the bracket -- whatever it is, and it is the hard part to model -- is the
+same for every colour, so it cancels in Bayes' rule.  Nothing about how bright
+the dyes are, or how their blinking is distributed, enters the answer.  (It
+would if the species had *different* brightness distributions; that
+information is real, and deliberately not used, because it would assign
+colours by brightness.)
+
+So, with pi_c the fraction of the sample that is species c:
+
+    P(c | I1, I2) = pi_c Binomial(I1 | N, p_c) / sum_j pi_j Binomial(I1 | N, p_j)
+
+and the binomial coefficient C(N, I1) is common to every species too, leaving
+
+    P(c | I1, I2) = pi_c p_c^I1 (1-p_c)^I2 / sum_j pi_j p_j^I1 (1-p_j)^I2.
+
+That is the whole answer, in closed form, with no approximation.  For two
+colours it is a logistic function of the counts, and the log-odds are
+**linear** in them:
+
+    log [ P(1 | I1, I2) / P(2 | I1, I2) ]
+        = I1 log(p_1/p_2) + I2 log((1-p_1)/(1-p_2)) + log(pi_1/pi_2).
+
+Three things follow.  The decision boundary is a straight line in the (I1, I2)
+plane -- through the origin when the priors are equal, which is why the regions
+in the intensity figure are wedges.  The evidence accumulates *per photon*:
+each photon in channel 1 adds log(p_1/p_2) to the log-odds, so a molecule twice
+as bright is twice as certain, on a log scale.  And the certainty is a property
+of the counts, not of r: two molecules with the same ratio and different
+brightness get different probabilities, which is the whole difference from
+cutting the histogram.
+
+A species whose own splitting ratio wanders -- across the field, between
+molecules -- is the same derivation with p_c drawn from a Beta of mean p_c
+rather than fixed.  The split is then beta-binomial, still closed-form, still
+independent of the brightness:
+
+    P(I1, I2 | c) ~ B(I1 + a_c, I2 + b_c) / B(a_c, b_c),
+    a_c = p_c kappa_c,  b_c = (1 - p_c) kappa_c,
+    kappa_c = (1 - rho_c^2) / spread^2 - 1,
+
+where `spread` is that wandering as a standard deviation in r and kappa is the
+concentration that reproduces it (var(p) = p(1-p)/(kappa+1), var(r) = 4 var(p)).
+As spread -> 0, kappa -> infinity and it becomes the binomial again.
+
+### Why not the Gaussian
+
+The Gaussian in r is the normal approximation to this: substituting
+I1 = N(1+r)/2 and Np_c = N(1+rho_c)/2 into the normal approximation of the
+binomial gives back exactly
+
+    (r - rho_c)^2 / (2 s_c^2),   s_c^2 = (1 - rho_c^2)/N,
+
+so the two agree whenever both channels collect many photons -- the log-odds
+are then quadratic in r instead of linear in the counts, and the difference is
+second order.  They part company when one channel collects few, which is
+precisely the ratiometric case worth having.  For two dyes splitting
+2%/98% and 17%/83% (DECODE-Plex's validation pair, rho = -0.654 and +0.962) the
+exact boundary is at r = +0.370 and the Gaussian's at r = +0.533, and
+simulating from the true model at 8 detected photons:
+
+| model | really misassigned | model claims |
+|---|---|---|
+| exact binomial | 0.303% | 0.310% |
+| Gaussian in r  | 0.575% | 0.169% |
+
+The Gaussian misassigns twice as many *and* under-states its own error by a
+factor of three; the exact form is calibrated to the third digit.  For
+symmetric ratios the two are indistinguishable.  Since the crosstalk budget is
+only worth stating if the model can be believed, the implementation uses the
+exact form -- `log_likelihoods` -- and keeps the Gaussian only as the variance
+that the sigma-tolerance is measured in.
+
 ## Mode 2: probabilistic assignment with a crosstalk budget
 
 With the modes rho_k as the hypotheses and pi_k as the prior fraction of each
@@ -251,6 +353,10 @@ Greying is presentation only -- the value stays, and a script sees every field.
   quick filter for it, so one column makes the result filterable, renderable
   and safe to group.
 * `color_ratio` -- r itself, so it can be filtered and inspected.
+* `channel_p1` ... `channel_pk` -- P(colour k | this molecule's counts), the
+  answer itself.  `channel` is the decision that follows from it and cannot
+  replace it: a molecule at 0.55 / 0.45 and one at 0.999 / 0.001 both read
+  "colour 1".
 * `channel_p` -- the posterior of the assigned species in mode 2, and 1 for an
   assigned localization in mode 1, where the decision carries no probability.
   0 wherever `channel` is 0.  Worth knowing what it is not: a *relative*

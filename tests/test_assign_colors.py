@@ -138,6 +138,16 @@ def test_the_plugin_writes_a_channel_column_and_the_preview_does_not():
     assert "color_ratio" in result.locs and "channel_p" in result.locs
     # the distance to the nearest colour is written for every row, assigned or
     # not: it is what says *why* something was refused
+    # a probability per colour, which is the actual answer; they sum to one
+    p1, p2 = result.locs["channel_p1"], result.locs["channel_p2"]
+    assert np.allclose(p1 + p2, 1.0, atol=1e-5)
+    assert np.all((channel != 1) | (p1 >= p2))
+    assert np.all((channel != 2) | (p2 >= p1))
+    # undecided means the two are close, not that something went wrong
+    undecided = (channel == 0) & (result.locs["channel_sigma"] < 3)
+    if undecided.any():
+        assert np.max(np.abs(p1 - p2)[undecided]) < 1.0
+
     sigma = result.locs["channel_sigma"]
     assert np.isfinite(sigma).all() and (sigma >= 0).all()
     assert sigma[channel > 0].mean() < sigma[channel == 0].mean()
