@@ -256,6 +256,26 @@ def test_how_far_each_localization_sits_from_each_species():
     assert wide.min() < z.min()
 
 
+def test_keeping_the_tails_refuses_only_between_the_colours():
+    """Past the outermost mode there is no other species to be confused with."""
+    locs, truth = coincident()
+    values = ratios(locs)
+    modes = find_modes(values.r, colors=2)
+    outside = (values.r < modes.maxima[0]) | (values.r > modes.maxima[-1])
+    between = truth == 0
+
+    strict = assign_by_probability(values.r, values.n_eff, modes, tolerance=3.0)[0]
+    tails = assign_by_probability(values.r, values.n_eff, modes, tolerance=3.0,
+                                  keep_tails=True)[0]
+    # the valley is refused either way: that is the point of the sigma test
+    assert (strict[between] == 0).all() and (tails[between] == 0).all()
+    # but a far-out localization is kept rather than thrown away
+    lost = outside & (strict == 0)
+    assert lost.sum() > 0
+    assert (tails[lost] > 0).all()
+    assert np.array_equal(strict[~outside], tails[~outside])
+
+
 def test_a_population_between_the_modes_is_reported_and_does_not_move_the_cut():
     locs, truth = coincident()
     values = ratios(locs)

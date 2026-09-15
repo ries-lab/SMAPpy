@@ -423,7 +423,8 @@ def posteriors(r: np.ndarray, n_eff: np.ndarray, modes: Modes,
 
 def assign_by_probability(r: np.ndarray, n_eff: np.ndarray, modes: Modes,
                           crosstalk: float = 0.05, spread: float = 0.0,
-                          use_prior: bool = True, tolerance: float = 0.0
+                          use_prior: bool = True, tolerance: float = 0.0,
+                          keep_tails: bool = False
                           ) -> Tuple[np.ndarray, np.ndarray]:
     """The best species, if it is both the clear winner and a possible one.
 
@@ -434,7 +435,11 @@ def assign_by_probability(r: np.ndarray, n_eff: np.ndarray, modes: Modes,
       localizations among the assigned ones.
     * *Inconsistent* -- the winner must also lie within ``tolerance`` sigma of
       the observed split, so that a localization no species could have produced
-      is refused rather than handed to the nearest one.  0 turns it off.
+      is refused rather than handed to the nearest one.  0 turns it off, and
+      ``keep_tails`` applies it only *between* the outermost species: past the
+      first or the last mode there is no competing hypothesis, so being far out
+      says the ratio is unusual rather than that the molecule is something
+      else, and whether that is worth refusing is an experiment's own business.
 
     Returns the channel (0 where either test refuses) and the posterior of the
     winner, which is what makes the achieved crosstalk reportable rather than
@@ -448,7 +453,12 @@ def assign_by_probability(r: np.ndarray, n_eff: np.ndarray, modes: Modes,
     channel[~(np.isfinite(top) & (top >= 1.0 - crosstalk))] = 0
     if tolerance > 0:
         z = deviations(r, n_eff, modes, spread=spread)[rows, best]
-        channel[~(np.isfinite(z) & (z <= tolerance))] = 0
+        refuse = ~(np.isfinite(z) & (z <= tolerance))
+        if keep_tails:
+            beyond = ((np.asarray(r) < modes.maxima[0])
+                      | (np.asarray(r) > modes.maxima[-1]))
+            refuse &= ~beyond
+        channel[refuse] = 0
     return channel, top
 
 
@@ -479,16 +489,23 @@ class AssignColorSettings:
     exclusion: float = param(0.05, label="exclusion dr", min=0.0,
                              help="minima: leave this much of r on either side "
                                   "of a boundary unassigned")
+    tolerance: float = param(3.0, label="sigma", min=0.0,
+                             help="probabilistic: a colour is given only within "
+                                  "this many sigma of its expected split, the "
+                                  "sigma being that localization's own photon "
+                                  "statistics plus any extra spread. 0: assign "
+                                  "to the nearest colour however far away")
+    keep_tails: bool = param(False, label="keep the tails",
+                             help="probabilistic: apply the sigma test only "
+                                  "between the outermost colours, so a "
+                                  "localization more extreme than the first or "
+                                  "the last mode is kept rather than refused")
     crosstalk: float = param(0.05, label="allowed crosstalk", min=1e-6, max=0.5,
-                             help="probabilistic: the largest expected fraction "
-                                  "of wrongly assigned localizations; a "
-                                  "localization is assigned only if its "
-                                  "posterior reaches 1 - this")
-    tolerance: float = param(3.0, label="consistency", unit="sigma", min=0.0,
-                             help="probabilistic: refuse a localization whose "
-                                  "split is further than this from every "
-                                  "species' expected ratio, in its own sigma. "
-                                  "0: assign it to the nearest one anyway")
+                             help="probabilistic: refuse what is too close to "
+                                  "call as well -- the largest expected "
+                                  "fraction of wrongly assigned localizations. "
+                                  "Narrow beside the sigma test, and what "
+                                  "matters where two colours overlap")
     spread: float = param(0.0, label="extra spread", min=0.0,
                           help="probabilistic: a species' own width in r, added "
                                "in quadrature to the shot noise, for a dye whose "
@@ -539,12 +556,13 @@ class AssignColors(Plugin):
                     "the two channels' intensities.  Nothing is saved and the "
                     "session is not touched.")
     Settings = AssignColorSettings
-    main = ("mode", "colors", "exclusion", "crosstalk", "tolerance", "spread",
-            "use_errors")
+    main = ("mode", "colors", "exclusion", "tolerance", "keep_tails",
+            "crosstalk", "spread", "use_errors")
     # which fields each method actually reads; the GUI greys out the rest, so
     # that a number that does nothing does not look like a number that does
     USED = {"minima": ("exclusion",),
-            "probabilistic": ("crosstalk", "tolerance", "spread", "use_prior")}
+            "probabilistic": ("tolerance", "keep_tails", "crosstalk", "spread",
+                              "use_prior")}
 
     def active(self, settings: AssignColorSettings) -> Dict[str, bool]:
         """Only the chosen method's parameters are live."""
@@ -592,7 +610,7 @@ class AssignColors(Plugin):
             channel, probability = assign_by_probability(
                 values.r, values.n_eff, modes, crosstalk=settings.crosstalk,
                 spread=settings.spread, use_prior=settings.use_prior,
-                tolerance=settings.tolerance)
+                tolerance=settings.tolerance, keep_tails=settings.keep_tails)
         elif settings.mode == "minima":
             channel = assign_by_minima(values.r, modes, settings.exclusion)
             probability = np.where(channel > 0, 1.0, 0.0)
@@ -809,7 +827,8 @@ def _decide(first: np.ndarray, second: np.ndarray, modes: Modes,
     else:
         channel = assign_by_probability(
             r, n_eff, modes, crosstalk=settings.crosstalk, spread=settings.spread,
-            use_prior=settings.use_prior, tolerance=settings.tolerance)[0]
+            use_prior=settings.use_prior, tolerance=settings.tolerance,
+            keep_tails=settings.keep_tails)[0]
     return channel.reshape(shape)
 
 
@@ -825,6 +844,10 @@ def _intensity_plotter(values: Ratios, modes: Modes, settings: "AssignColorSetti
     a constant ratio is a straight line of slope 1, so the regions are bands
     along the diagonal, and a band's width in this plane is what `dr` sets by
     hand and what the probabilistic method sets per localization.
+
+    Drawn: each colour's sigma line, the band it is given; its own ratio as a
+    dotted ray; and in grey what fits no colour at all, which is where most of
+    the plane ends up once the species are apart.
     """
     first = values.first[seen]
     second = values.second[seen]
@@ -842,15 +865,36 @@ def _intensity_plotter(values: Ratios, modes: Modes, settings: "AssignColorSetti
         lo = min(np.percentile(x, 0.2), np.percentile(y, 0.2)) - 0.1
         hi = max(np.percentile(x, 99.8), np.percentile(y, 99.8)) + 0.1
 
-        # the regions, evaluated on a grid and drawn underneath
+        # the decision, evaluated on a grid and drawn underneath
         edges = np.linspace(lo, hi, 400)
         gx, gy = np.meshgrid(edges, edges)
         region = _decide(10 ** gx, 10 ** gy, modes, settings, efficiency)
+        # what no colour fits, which in a well separated experiment is most of
+        # the plane: grey, like the band in the histogram
+        ax.contourf(gx, gy, (region == 0).astype(float), levels=(0.5, 1.5),
+                    colors=["0.55"], alpha=0.25)
         for k in range(1, len(modes) + 1):
+            colour = PALETTE[(k - 1) % len(PALETTE)]
             ax.contourf(gx, gy, (region == k).astype(float), levels=(0.5, 1.5),
-                        colors=[PALETTE[(k - 1) % len(PALETTE)]], alpha=0.22)
-            ax.contour(gx, gy, (region == k).astype(float), levels=(0.5,),
-                       colors=[PALETTE[(k - 1) % len(PALETTE)]], linewidths=1)
+                        colors=[colour], alpha=0.22)
+        # the sigma lines themselves, around each colour's own ratio: this is
+        # the decision as it was set, before the crosstalk band trims a sliver
+        # out of the middle of it
+        if settings.mode == "probabilistic" and settings.tolerance > 0:
+            total = 10 ** gx + 10 ** gy
+            with np.errstate(invalid="ignore", divide="ignore"):
+                grid_r = (10 ** gx - 10 ** gy) / total
+            z = deviations(np.ravel(grid_r),
+                           np.ravel(np.maximum(total * efficiency, 1e-9)),
+                           modes, spread=settings.spread)
+            for k in range(len(modes)):
+                ax.contour(gx, gy, z[:, k].reshape(gx.shape),
+                           levels=(settings.tolerance,),
+                           colors=[PALETTE[k % len(PALETTE)]], linewidths=1.2)
+        else:
+            for k in range(1, len(modes) + 1):
+                ax.contour(gx, gy, (region == k).astype(float), levels=(0.5,),
+                           colors=[PALETTE[(k - 1) % len(PALETTE)]], linewidths=1)
         # and the species themselves: lines of constant splitting ratio
         for k, rho in enumerate(modes.maxima, 1):
             offset = np.log10(max((1 - rho) / (1 + rho), 1e-12))
@@ -865,13 +909,16 @@ def _intensity_plotter(values: Ratios, modes: Modes, settings: "AssignColorSetti
         ax.set_xlim(lo, hi)
         ax.set_ylim(lo, hi)
         ax.set_aspect("equal")
-        note = (f"dr = {settings.exclusion:g}" if settings.mode == "minima" else
-                f"crosstalk {settings.crosstalk:g}, "
-                + (f"{settings.tolerance:g} sigma" if settings.tolerance > 0
-                   else "no consistency test"))
+        if settings.mode == "minima":
+            note, under = f"dr = {settings.exclusion:g}", ""
+        else:
+            note = ((f"within {settings.tolerance:g} sigma of a colour"
+                     + (", tails kept" if settings.keep_tails else ""))
+                    if settings.tolerance > 0 else "no sigma test")
+            under = (f"crosstalk {settings.crosstalk:g}, "
+                     f"n_eff = {efficiency:.2f} N")
         ax.set_title(f"{settings.mode}: {note}"
-                     + (f", n_eff = {efficiency:.2f} N" if settings.mode
-                        == "probabilistic" else ""))
+                     + (f"\n{under}" if under else ""), fontsize=10)
 
     return plot
 
@@ -901,7 +948,10 @@ def _draw_posteriors(ax, modes: Modes, n_eff: float,
         # far apart, which is the point of it; shade it lightly enough that
         # the histogram still reads through
         z = np.nanmin(deviations(grid, flat, modes, spread=settings.spread), axis=1)
-        rejected |= z > settings.tolerance
+        far = z > settings.tolerance
+        if settings.keep_tails:
+            far &= (grid >= modes.maxima[0]) & (grid <= modes.maxima[-1])
+        rejected |= far
     for start, stop in _runs(rejected):
         ax.axvspan(grid[start], grid[stop], color="k", alpha=0.07, lw=0)
     twin.set_ylim(0, 1.28)

@@ -52,6 +52,7 @@ def test_a_method_greys_out_the_other_methods_parameters(app):
     panel._react("mode")
     assert form.fields["crosstalk"].isEnabled() and form.labels["crosstalk"].isEnabled()
     assert form.fields["tolerance"].isEnabled()
+    assert form.fields["keep_tails"].isEnabled()
     assert not form.fields["exclusion"].isEnabled()
     # greying is cosmetic: the value is still there and still comes back
     assert form.value().exclusion == AssignColorSettings().exclusion

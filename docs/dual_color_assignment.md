@@ -275,7 +275,9 @@ experiment the consistency test is all of it.  The same N = 100 example, with a
 A colour is given only within 3 sigma of its own expectation -- I1 - I2 within
 +-24 photons of -60, or of +60 -- and the whole 72-photon middle is left at 0.
 That is the band the shot noise implies, and it is the consistency test that
-draws it, not the crosstalk budget.
+draws it, not the crosstalk budget.  It is also what the intensity figure
+draws: one line per colour at `sigma` from its ratio, with everything outside
+every line in grey.
 
 ### The posterior is relative, and that is not enough
 
@@ -307,8 +309,17 @@ species is not a hard call between two colours, it is a molecule that is
 neither: two dyes at once, two emitters in one ROI, a fit that failed.  The two
 tests refuse different things and are reported apart.
 
-`tolerance = 0` turns it off and recovers the pure posterior, which is what
+`sigma = 0` turns it off and recovers the pure posterior, which is what
 DECODE-Plex's rejection does.
+
+The test is two-sided by default and `keep the tails` makes it one: a
+localization *between* two colours has a rival hypothesis on each side and
+being far from both is evidence that it is neither, while one beyond the
+outermost colour has nothing out there to be confused with, so being far out
+says only that its ratio came out unusual.  Whether that is a molecule worth
+keeping is an experiment's own business -- a splitter whose ratio drifts across
+the field, or a channel whose fit occasionally collapses, argue opposite ways
+-- so it is a switch and not a decision made here.
 
 ### A population in the valley is not a boundary problem
 
