@@ -252,8 +252,30 @@ requirement grows as ln(1/c), so a thousand-fold tighter budget asks for two
 and a half times as many photons.  In the intensity plane it is a strip of
 constant width along the boundary, which is what makes it a wedge in log-log.
 
-This is also why the band alone is not enough -- it is about two photons wide,
-and a localization that is no colour at all is nowhere near it.
+Two photons sounds far too few beside the shot noise, and it is worth being
+clear about why it is not wrong and yet not the whole story.  At N = 100 with a
+20/80 splitter, each colour's split has a standard deviation of 4 photons in
+I1, so 8 in I1 - I2; the two colours sit 120 photons apart in I1 - I2, which is
+15 sigma.  When two hypotheses are 15 sigma apart, one photon off the midpoint
+really does make one of them four times likelier *than the other*, and the
+region where they are within a factor of 19 is two photons wide.  That is the
+correct answer to the relative question and a useless answer to the one being
+asked, because a molecule at the midpoint is 7.5 sigma from *both* colours and
+is neither.
+
+So the grey region is the union of the two tests, and in any well separated
+experiment the consistency test is all of it.  The same N = 100 example, with a
+5% budget and a 3 sigma tolerance:
+
+| grey because | region in r | width in I1 - I2 |
+|---|---|---|
+| too close to call | +-0.021 | 2 photons |
+| fits no colour | outside +-3 sigma of either | 176 of 200 photons |
+
+A colour is given only within 3 sigma of its own expectation -- I1 - I2 within
++-24 photons of -60, or of +60 -- and the whole 72-photon middle is left at 0.
+That is the band the shot noise implies, and it is the consistency test that
+draws it, not the crosstalk budget.
 
 ### The posterior is relative, and that is not enough
 
