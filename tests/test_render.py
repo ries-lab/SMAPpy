@@ -85,7 +85,17 @@ def test_luts_are_well_formed():
     for name in luts.names():
         table = luts.get(name)
         assert table.shape == (256, 3) and table.min() >= 0 and table.max() <= 1
-    assert np.allclose(luts.get("gray", invert=True), luts.get("gray_inverted"))
+    # inverting is the complementary colour at the same brightness, not a
+    # reversal: a layer and its inverse add to grey, and grey is its own
+    # inverse (black on white is the `gray_inverted` ramp, which is why it
+    # is a LUT of its own)
+    for name in ("hot", "jet", "turbo", "gray"):
+        table, flipped = luts.get(name), luts.get(name, invert=True)
+        total = table + flipped
+        assert np.allclose(total[:, 0], total[:, 1]) and np.allclose(total[:, 1], total[:, 2])
+        assert np.allclose(table.max(1) + table.min(1), flipped.max(1) + flipped.min(1))
+    assert np.allclose(luts.get("gray", invert=True), luts.get("gray"))
+    assert np.allclose(luts.complement(np.array([[1.0, 0.0, 0.0]])), [[0.0, 1.0, 1.0]])
     # values below/above the range clamp to the first/last colour
     ends = luts.colors([-5.0, 5.0], "jet", 0.0, 1.0)
     assert np.allclose(ends, luts.get("jet")[[0, -1]])

@@ -596,8 +596,11 @@ class RenderTab(QWidget):
         self.lut = QComboBox()
         self.lut.addItems(luts.names())
         self.invert = QCheckBox("invert")
-        self.invert.setToolTip("reverse the LUT, as SMAP's inverse LUT does: "
-                               "a dark structure on a light background")
+        self.invert.setToolTip("the complementary colour at the same brightness: "
+                               "red becomes cyan, and a layer over its inverse "
+                               "goes grey where the two coincide.  A grey ramp is "
+                               "its own complement -- for black on white pick the "
+                               "gray_inverted LUT.")
         lut_row = QHBoxLayout()
         lut_row.setContentsMargins(0, 0, 0, 0)
         lut_row.addWidget(self.lut, 1)

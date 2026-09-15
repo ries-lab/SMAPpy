@@ -141,8 +141,27 @@ def names() -> list:
     return sorted(_TABLES)
 
 
+def complement(table: np.ndarray) -> np.ndarray:
+    """The complementary ramp: the same brightness, the opposite colour.
+
+    Entry by entry, ``(max + min) - c``, which is the colour half a turn away
+    on the hue circle at the same HSL lightness -- so the two ramps are equally
+    bright everywhere and, added, make a grey of exactly that brightness.  That
+    is what an inverted LUT is for: two channels drawn one over the other, each
+    keeping its own intensity, and where they coincide the picture goes grey
+    instead of one colour winning.
+
+    Reversing the ramp instead, which is what this used to do, turns a bright
+    localization dark; that is a different thing and lives in its own LUT --
+    `gray_inverted` for black on white.  A grey ramp is its own complement.
+    """
+    table = np.asarray(table, dtype=np.float32)
+    level = table.max(axis=1, keepdims=True) + table.min(axis=1, keepdims=True)
+    return np.clip(level - table, 0.0, 1.0)
+
+
 def get(lut: LUT, invert: bool = False) -> np.ndarray:
-    """Resolve a LUT name (or pass an array through), optionally reversed."""
+    """Resolve a LUT name (or pass an array through), complemented if asked."""
     if isinstance(lut, str):
         try:
             table = _TABLES[lut]
@@ -152,7 +171,7 @@ def get(lut: LUT, invert: bool = False) -> np.ndarray:
         table = np.asarray(lut, dtype=np.float32)
         if table.ndim != 2 or table.shape[1] != 3:
             raise ValueError("a LUT must have shape (n, 3)")
-    return table[::-1].copy() if invert else table
+    return complement(table) if invert else table
 
 
 def register(name: str, table: np.ndarray) -> None:
