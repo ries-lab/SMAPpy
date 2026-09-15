@@ -224,11 +224,15 @@ can set them and every engine and every panel reads the same object.
 
 ### Window and controls
 
-A separate 3D window (toolbar: save, presets top/front/side, reset; a
-collapsible side panel).  Layers, filters and display stay in the Render
-tab and drive both windows.  Mouse: left-drag rotates, shift + left-drag or
-middle-drag pans, wheel zooms, ctrl + wheel moves the slab along the depth
-axis, shift + wheel changes its thickness.
+A separate 3D window (toolbar: save, presets top/front/side, reset), with
+the slab and view controls in a window of their own beside it -- the image
+is what one looks at, and it gets the whole window.  Over the image: the
+same scale bar as the 2D view, and a tripod of the *box's* own x, y and z,
+projected as the data is, so an axis pointing at the viewer is short.
+Layers, filters and display stay in the Render tab and drive both windows.
+Mouse: left-drag rotates, shift + left-drag or middle-drag pans, wheel
+zooms, ctrl + wheel moves the slab along the depth axis, shift + wheel
+changes its thickness.
 
 The slab has three handles that edit the same box:
 1. the 2D window: a rectangle ROI is the footprint; a line ROI is a rotated
@@ -246,8 +250,8 @@ Ctrl+3): projection and slab in the session, slab from the 2D ROI
 half-resolution 2 M-point preview while dragging, the box with draggable
 face handles, the mouse as above, the side panel with ranges, angle, dials,
 presets, fit, depth attenuation, slice opacity (front-to-back compositing
-on the linear planes, exact sum at 0), perspective, colour by depth, a
-depth histogram, and *plugins use the slab* (the slab as the `Selection`'s
+on the linear planes, exact sum at 0), perspective (a tick and a distance in
+µm, ten box lengths by default), colour by depth, a depth histogram, and *plugins use the slab* (the slab as the `Selection`'s
 ROI).  Save: PNG as shown, or a TIFF of the slab at a pixel size, colour or
 float intensity, with projection and slab in the ImageJ metadata.
 
@@ -265,12 +269,16 @@ slab's corners in both engines, so colour scale, slices and attenuation do
 not move with the filter.  The points mode draws alpha sprites, back to
 front for up to 2 M points, coloured by the field or depth through the LUT.
 The 3D panel picks CPU / GPU / GPU points / GPU spheres, point size (nm,
-default the shown points' median precision) and alpha.  *Spheres* draws
+default the shown points' median precision) and alpha (0.05: a point cloud
+piles thousands of sprites onto one pixel).  *Spheres* draws
 every localization as an opaque shaded sphere impostor (a ray-sphere
 intersection per fragment, true depth into a depth buffer shared by all
 layers, so overlapping spheres form a surface), then screen-space ambient
 occlusion (16 hemisphere samples, 4x4 blur) and Phong shading in a compute
-pass.  Fill-rate bound: ~0.1 s for 2 M points at 900x900.
+pass.  The occlusion radius defaults to three sphere radii or a twentieth
+of the box, whichever is larger: one 10 nm sphere's contact shadow is
+invisible at the zoom a whole box is seen at, and the cavities worth seeing
+are the cloud's.  Fill-rate bound: ~0.1 s for 2 M points at 900x900.
 
 Measured on an M1 Pro, 5 M points, 900x900: CPU (8 cores) 0.10 s, GPU
 0.08 s after a one-time 0.09 s upload -- the gain is rotation without any

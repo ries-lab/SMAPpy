@@ -12,18 +12,24 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QAction, QImage
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QDial, QDockWidget, QDoubleSpinBox,
+from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDoubleSpinBox,
                                QFileDialog, QFormLayout, QGridLayout, QHBoxLayout,
                                QInputDialog, QLabel, QMainWindow, QMenu, QPushButton,
-                               QToolBar, QToolButton, QVBoxLayout, QWidget)
+                               QScrollArea, QToolBar, QToolButton, QVBoxLayout, QWidget)
 
 from ..render import FieldOfView
 from ..session import Session
+from .render_view import nice_step
+from .widgets import CONTROL_WIDTH
 from ..view3d import (PRESETS, PREVIEW_SCALE, PreviewBudget, Projection, Slab, render_3d,
                       upscale)
 
 BOX_PEN = pg.mkPen((255, 255, 0, 160), width=1)
 DEGREES_PER_PIXEL = 0.4
+# the slab's own axes, which are the box's edges: x red, y green, z blue
+AXIS_COLORS = ((255, 90, 90), (110, 220, 110), (120, 160, 255))
+AXIS_FRACTION = 0.09        # arm length, as a fraction of the view's width
+AXIS_CORNER = 0.12          # where the tripod sits, from the bottom left corner
 
 
 class _Renderer3D(QObject):
@@ -99,7 +105,22 @@ class View3D(QWidget):
         self.view.addItem(self.box)
         self.handles = pg.ScatterPlotItem(size=10, pen=BOX_PEN, brush=(255, 255, 0, 60))
         self.view.addItem(self.handles)
+        # the same scale bar as the 2D view, and a tripod of the slab's own
+        # axes: a rotated view says nothing about its own orientation, and a
+        # rendered image says nothing about its size
+        self.scalebar = pg.ScaleBar(size=1000, suffix="nm")
+        self.scalebar.setParentItem(self.view)
+        self.scalebar.anchor((1, 1), (1, 1), offset=(-20, -20))
+        self.axes = []
+        for i, color in enumerate(AXIS_COLORS):
+            arm = pg.PlotDataItem(pen=pg.mkPen(color, width=2))
+            label = pg.TextItem("xyz"[i], color=color, anchor=(0.5, 0.5))
+            self.view.addItem(arm)
+            self.view.addItem(label)
+            self.axes.append((arm, label))
         self.show_box = True
+        self.show_guides = True
+        self._fov: Optional[FieldOfView] = None
         self._face: Optional[tuple] = None       # (axis, sign) while a face drags
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -142,7 +163,14 @@ class View3D(QWidget):
 
     # ---------------------------------------------------------- rendering
     def fit(self) -> None:
-        slab = self.session.slab or self.session.slab_from_roi()
+        # While "follow 2D ROI" is on, the ROI is the slab -- including a line
+        # ROI's width, which is the box's second axis.  Opening the window on a
+        # drawn ROI used to show whatever slab was there and wait for `from ROI`.
+        session = self.session
+        if session.slab is None or (session.slab_follows_roi and session.roi is not None):
+            slab = session.slab_from_roi()
+        else:
+            slab = session.slab
         size = self.graphics.size()
         self.projection.fit(slab, max(size.width(), 16), max(size.height(), 16))
         self.changed.emit()
@@ -177,6 +205,7 @@ class View3D(QWidget):
             self.image.setRect(QRectF(fov.x0, fov.y0, fov.x1 - fov.x0, fov.y1 - fov.y0))
             self.view.setRange(QRectF(fov.x0, fov.y0, fov.x1 - fov.x0, fov.y1 - fov.y0),
                                padding=0)
+            self._fov = fov
             self._draw_box()
         if self._pending is not None:
             preview, self._pending = self._pending, None
@@ -190,6 +219,7 @@ class View3D(QWidget):
                          c[:, :, 0].mean(axis=(0, 1)), c[:, :, 1].mean(axis=(0, 1))])
 
     def _draw_box(self) -> None:
+        self._draw_guides()
         slab = self.session.slab
         if slab is None or not self.show_box:
             self.box.setData([], [])
@@ -205,6 +235,39 @@ class View3D(QWidget):
         f = self._face_centers(slab)
         fx, fy, _ = self.projection.apply(f[:, 0], f[:, 1], f[:, 2])
         self.handles.setData(fx, fy)
+
+    def _draw_guides(self) -> None:
+        """The scale bar, and a tripod of the slab's axes in the corner.
+
+        The arms are the *box's* own axes -- the slab's x, y and z, which are
+        the edges the box is drawn with -- projected exactly as the data is,
+        so an axis pointing at the viewer is short and one across the screen
+        is full length.  The scale bar reads the same as the 2D view's.
+        """
+        fov = self._fov
+        on = self.show_guides and fov is not None
+        self.scalebar.setVisible(bool(on))
+        for arm, label in self.axes:
+            arm.setVisible(bool(on))
+            label.setVisible(bool(on))
+        if not on:
+            return
+        span = fov.x1 - fov.x0
+        size = nice_step(0.2 * span)
+        self.scalebar.size = size
+        self.scalebar.text.setText(f"{size / 1000:g} µm" if size >= 1000 else f"{size:g} nm")
+        self.scalebar.updateBar()
+
+        slab = self.session.slab
+        length = AXIS_FRACTION * span
+        ox = fov.x0 + AXIS_CORNER * span
+        oy = fov.y1 - AXIS_CORNER * (fov.y1 - fov.y0)     # y grows downwards here
+        m = self.projection.matrix
+        for i, (arm, label) in enumerate(self.axes):
+            unit = slab.axis_unit(i) if slab is not None else np.eye(3)[i]
+            d = (m @ unit)[:2] * length
+            arm.setData([ox, ox + d[0]], [oy, oy + d[1]])
+            label.setPos(ox + d[0] * 1.25, oy + d[1] * 1.25)
 
     def _face_at(self, pos: QPointF) -> Optional[tuple]:
         """Which face handle is under a widget position, if any."""
@@ -422,8 +485,17 @@ class SlabPanel(QWidget):
                                 "(fast), 1 = opaque.  Rendered in depth slices.")
         self.slices = QDoubleSpinBox(minimum=2, maximum=256, decimals=0)
         self.slices.setValue(32)
-        self.perspective = QDoubleSpinBox(minimum=0, maximum=1e7, decimals=0, suffix=" nm")
-        self.perspective.setToolTip("focal distance; 0 = orthographic")
+        # focal distance in the unit the box is thought of in, and a tick rather
+        # than a magic 0: off is orthographic, on starts at ten box lengths
+        # away, which is a lens that shows depth without distorting it.
+        self.perspective_on = QCheckBox("perspective")
+        self.perspective_on.setToolTip("off: orthographic, parallel edges and no vanishing point")
+        self.perspective_on.toggled.connect(self._on_projection_settings)
+        self.perspective = QDoubleSpinBox(minimum=0.1, maximum=1e6, decimals=1, suffix=" µm")
+        self.perspective.setToolTip("focal distance: how far the eye is from the box")
+        self.perspective.setEnabled(False)
+        self._focal_typed = False
+        self.perspective.valueChanged.connect(lambda _=0.0: setattr(self, "_focal_typed", True))
         for w in (self.attenuation, self.opacity, self.slices, self.perspective):
             w.setKeyboardTracking(False)
             w.valueChanged.connect(self._on_projection_settings)
@@ -440,8 +512,10 @@ class SlabPanel(QWidget):
         self.point_size.setToolTip("sprite radius in nm, scales with the zoom; "
                                    "0 = the median precision of the shown localizations")
         self.point_size.setValue(0.0)
-        self.point_alpha = QDoubleSpinBox(minimum=0.01, maximum=1, singleStep=0.1, decimals=2)
-        self.point_alpha.setValue(0.5)
+        self.point_alpha = QDoubleSpinBox(minimum=0.01, maximum=1, singleStep=0.01, decimals=2)
+        self.point_alpha.setToolTip("sprite opacity: a thousand points on one pixel add up, "
+                                    "so a useful value is small")
+        self.point_alpha.setValue(Projection.point_alpha)
         for w in (self.point_size, self.point_alpha):
             w.setKeyboardTracking(False)
             w.valueChanged.connect(self._on_projection_settings)
@@ -449,8 +523,11 @@ class SlabPanel(QWidget):
         self.ssao.setValue(0.7)
         self.ssao.setToolTip("spheres: ambient occlusion strength, 0 = off")
         self.ssao_radius = QDoubleSpinBox(minimum=0, maximum=10000, decimals=0, suffix=" nm")
-        self.ssao_radius.setSpecialValueText("3 x radius")
-        self.ssao_radius.setToolTip("spheres: how far the occlusion looks; 0 = 3 x the sphere radius")
+        self.ssao_radius.setSpecialValueText("from the box")
+        self.ssao_radius.setToolTip("spheres: how far the occlusion looks.  Left at 0 it is "
+                                    "three sphere radii, or a twentieth of the box if that "
+                                    "is larger -- a sphere's own contact shadow is invisible "
+                                    "at the zoom a whole box is seen at.")
         for w in (self.ssao, self.ssao_radius):
             w.setKeyboardTracking(False)
             w.valueChanged.connect(self._on_projection_settings)
@@ -464,7 +541,7 @@ class SlabPanel(QWidget):
         form.addRow("dim with depth", self.attenuation)
         form.addRow("opacity", self.opacity)
         form.addRow("slices", self.slices)
-        form.addRow("perspective", self.perspective)
+        form.addRow(self.perspective_on, self.perspective)
         form.addRow("", self.depth_color)
         form.addRow("engine", self.engine)
         form.addRow("", self.gpu_name)
@@ -475,17 +552,26 @@ class SlabPanel(QWidget):
         self._form = form
         # which controls each engine reads; the others are greyed
         self._uses = {
-            "cpu": {self.attenuation, self.opacity, self.slices, self.perspective, self.depth_color},
-            "gpu": {self.attenuation, self.opacity, self.slices, self.perspective, self.depth_color},
-            "points": {self.perspective, self.depth_color, self.point_size, self.point_alpha},
-            "spheres": {self.attenuation, self.perspective, self.depth_color, self.point_size,
-                        self.ssao, self.ssao_radius},
+            "cpu": {self.attenuation, self.opacity, self.slices, self.perspective_on,
+                    self.perspective, self.depth_color},
+            "gpu": {self.attenuation, self.opacity, self.slices, self.perspective_on,
+                    self.perspective, self.depth_color},
+            "points": {self.perspective_on, self.perspective, self.depth_color,
+                       self.point_size, self.point_alpha},
+            "spheres": {self.attenuation, self.perspective_on, self.perspective,
+                        self.depth_color, self.point_size, self.ssao, self.ssao_radius},
         }
         self._update_enabled()
         self.box = QCheckBox("show box")
         self.box.setChecked(True)
         self.box.toggled.connect(self._on_box)
         form.addRow("", self.box)
+        self.guides = QCheckBox("show scale bar and axes")
+        self.guides.setToolTip("the bar reads in the plane of the screen; the tripod is "
+                               "the box's own x, y and z")
+        self.guides.setChecked(True)
+        self.guides.toggled.connect(self._on_guides)
+        form.addRow("", self.guides)
         self.in_slab = QCheckBox("plugins use the slab")
         self.in_slab.setToolTip("a plugin's selection is restricted to the slab")
         self.in_slab.setChecked(session.select_in_slab)
@@ -525,6 +611,10 @@ class SlabPanel(QWidget):
         self.follow.setChecked(self.session.slab_follows_roi)
         for w in widgets:
             w.blockSignals(False)
+        if not self._focal_typed:        # follows the box until it is set by hand
+            self.perspective.blockSignals(True)
+            self.perspective.setValue(self._default_focal_um())
+            self.perspective.blockSignals(False)
 
     def _on_range(self, axis) -> None:
         slab = self.session.slab
@@ -566,6 +656,16 @@ class SlabPanel(QWidget):
                 label = self._form.labelForField(w)
                 if label is not None:
                     label.setEnabled(on)
+        # the distance is the tick's own field, so it greys with it as well
+        self.perspective.setEnabled(self.perspective in used
+                                    and self.perspective_on.isChecked())
+
+    def _default_focal_um(self) -> float:
+        """Ten box lengths away: far enough that the box is not distorted, near
+        enough that the far face is visibly smaller than the near one."""
+        slab = self.session.slab
+        box = float(np.max(slab.size)) if slab is not None else 1000.0
+        return max(round(10.0 * box / 1000.0, 1), 0.1)
 
     def _on_projection_settings(self) -> None:
         self._update_enabled()
@@ -573,7 +673,8 @@ class SlabPanel(QWidget):
         proj.depth_lambda = self.attenuation.value() or None
         proj.opacity = self.opacity.value()
         proj.slices = int(self.slices.value())
-        proj.focal = self.perspective.value() or None
+        proj.focal = (self.perspective.value() * 1000.0     # µm -> nm
+                      if self.perspective_on.isChecked() else None)
         proj.color_by_depth = self.depth_color.isChecked()
         proj.engine = self.engine.currentData()
         proj.point_size = self.point_size.value()
@@ -600,12 +701,38 @@ class SlabPanel(QWidget):
         self.view3d.show_box = on
         self.view3d._draw_box()
 
+    def _on_guides(self, on: bool) -> None:
+        self.view3d.show_guides = on
+        self.view3d._draw_guides()
+
+
+class _ControlsWindow(QWidget):
+    """The slab and view panel in its own window, next to the image."""
+
+    def __init__(self, panel: SlabPanel, parent=None):
+        super().__init__(parent, Qt.Window)
+        self.setWindowTitle("smappy 3D - slab and view")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea(widgetResizable=True)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        scroll.setWidget(panel)
+        layout.addWidget(scroll)
+        self.resize(CONTROL_WIDTH, 820)
+
+    def closeEvent(self, event) -> None:
+        window = self.parent()
+        if window is not None and hasattr(window, "controls_action"):
+            window.controls_action.setChecked(False)
+        super().closeEvent(event)
+
 
 class View3DWindow(QMainWindow):
     def __init__(self, session: Session, parent=None):
         super().__init__(parent)
         self.setWindowTitle("smappy 3D")
         self._fitted = False
+        self._placed = False
         self.view = View3D(session)
         self.setCentralWidget(self.view)
         bar = QToolBar("3d")
@@ -620,16 +747,27 @@ class View3DWindow(QMainWindow):
         for name in PRESETS:
             bar.addAction(QAction(name, self, triggered=lambda _=False, n=name: self._preset(n)))
         bar.addAction(QAction("fit", self, triggered=self.view.fit))
+        # the controls are a window of their own, so there has to be a way back
+        # to them once it is closed
+        self.controls_action = QAction("controls", self, checkable=True, checked=True,
+                                       triggered=self._show_controls)
+        bar.addAction(self.controls_action)
         self.hint = QLabel("  drag: rotate about the slab centre   shift-drag: pan   "
                            "wheel: zoom   ctrl-wheel: slab depth   shift-wheel: thickness")
         bar.addWidget(self.hint)
         self.addToolBar(bar)
+        # the controls are their own window rather than a dock: the image is
+        # what one looks at and it should have the whole window, with the
+        # panel beside it where it can be left open or closed on its own.
         self.panel = SlabPanel(session, self.view)
-        dock = QDockWidget("slab and view", self)
-        dock.setWidget(self.panel)
-        dock.setFeatures(QDockWidget.DockWidgetClosable | QDockWidget.DockWidgetMovable)
-        self.addDockWidget(Qt.RightDockWidgetArea, dock)
-        self.resize(1000, 700)
+        self.controls = _ControlsWindow(self.panel, self)
+        self.resize(1100, 820)
+
+    def _show_controls(self, on: bool) -> None:
+        self.controls.setVisible(on)
+        if on:
+            self._place_controls()
+            self.controls.raise_()
 
     def _preset(self, name: str) -> None:
         self.panel._preset(name)
@@ -664,11 +802,33 @@ class View3DWindow(QMainWindow):
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
+        self.controls.setVisible(self.controls_action.isChecked())
+        if not self._placed:
+            self._placed = True
+            self._place_controls()
         if not self._fitted:
             self._fitted = True
             self.view.fit()
         else:
             self.view.schedule()
 
+    def _place_controls(self) -> None:
+        """Beside the image, and on the screen: a panel off the right edge is
+        a panel nobody finds."""
+        frame = self.frameGeometry()
+        x, y = frame.x() + frame.width() + 8, frame.y()
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is not None:
+            room = screen.availableGeometry()
+            if x + self.controls.width() > room.right():
+                x = max(room.left(), room.right() - self.controls.width())
+        self.controls.move(x, y)
+
+    def moveEvent(self, event) -> None:
+        super().moveEvent(event)
+        if self._placed and not self.controls.isVisible():
+            self._placed = False           # re-place it the next time it opens
+
     def closeEvent(self, event) -> None:
+        self.controls.hide()          # hidden, not closed: the tick stays as it is
         super().closeEvent(event)

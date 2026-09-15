@@ -127,3 +127,36 @@ def test_the_dispatch_grid_covers_every_point_and_respects_the_limit():
         # the shader compares against an exact u32: f32 stops counting at 2^24
         params = GPUEngine.params(FieldOfView(0, 0, 10.0, 64, 64), n=n)
         assert int(params[N_EXACT].view(np.uint32)) == n
+
+
+def test_the_default_occlusion_radius_is_visible_at_the_zoom_the_box_is_seen_at():
+    """Three radii of a 10 nm sphere is a shadow 30 nm wide: a percent of one
+    pixel when a whole box is on screen, which read as a control doing nothing.
+    Left at 0 the radius now also reaches a twentieth of the box."""
+    rng = np.random.default_rng(3)
+    n = 60_000
+    locs = Localizations({"x_nm": rng.uniform(0, 4000, n).astype(np.float32),
+                          "y_nm": rng.uniform(0, 4000, n).astype(np.float32),
+                          "z_nm": rng.normal(0, 300, n).astype(np.float32),
+                          "loc_precision_nm": rng.uniform(8, 12, n).astype(np.float32)}, {})
+    s = Session(locs)
+    s.layers[0].state.display = DisplaySettings(lut="gray")
+    slab = Slab.from_bounds(0, 4000, 0, 4000, -900, 900)
+
+    def render(strength, radius=0.0):
+        p = Projection(azimuth=30, elevation=60, engine="spheres",
+                       ssao_strength=strength, ssao_radius=radius)
+        p.fit(slab, 400, 400)
+        return render_3d(s.layers, p, slab, p.fov(400, 400), engine=ENGINE)[0]
+
+    off = render(0.0)
+    lit = off.max(axis=2) > 0.02
+    assert lit.sum() > 5000                          # there is an image to darken
+
+    def change(image):
+        return float(np.median(np.abs(image - off).mean(axis=2)[lit]
+                               / np.maximum(off.mean(axis=2)[lit], 1e-3)))
+
+    assert change(render(1.0)) > 0.08                # the default radius is felt
+    assert change(render(1.0, 200.0)) > change(render(1.0, 20.0))    # and it is a dial
+    assert change(render(0.0, 200.0)) == 0.0         # strength 0 is still off

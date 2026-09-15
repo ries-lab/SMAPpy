@@ -198,7 +198,7 @@ class Projection:
     fix_roll: bool = True           # turntable: turn about data z, tilt z forward / back
     engine: str = "cpu"             # "cpu", "gpu" (same image), "points" or "spheres" (GPU)
     point_size: float = 0.0         # points mode: radius in nm; 0 = the median precision
-    point_alpha: float = 0.5        # points mode: sprite opacity
+    point_alpha: float = 0.05       # points mode: sprite opacity
     ssao_strength: float = 0.7      # spheres mode: ambient occlusion, 0 = off
     ssao_radius: float = 0.0        # spheres mode: in nm; 0 = 3 x the sphere radius
 
@@ -680,7 +680,17 @@ def sphere_draw(engine, locs: Localizations, select: np.ndarray, projection: Pro
         color_mode, color_range = 0, (0.0, 1.0)
     radius_nm = point_radius_nm(locs, select, prec_name, projection)
     radius_px = radius_nm / fov.pixelsize
-    ssao_nm = projection.ssao_radius or 3.0 * radius_nm
+    # How far the occlusion looks, by default.  Three sphere radii is the
+    # contact shadow of one sphere against the next -- a few nanometres, which
+    # at the zoom a whole box is looked at is a percent or two of the pixel it
+    # lands in, so both occlusion controls read as doing nothing.  The cavities
+    # worth seeing are the cloud's, not one sphere's, so the default reaches a
+    # twentieth of the box as well.
+    ssao_nm = projection.ssao_radius
+    if not ssao_nm:
+        ssao_nm = 3.0 * radius_nm
+        if slab is not None:
+            ssao_nm = max(ssao_nm, 0.05 * float(np.min(slab.size)))
     pad = radius_nm * 2
     params = engine.params(
         fov=fov, matrix=projection.matrix, pivot=projection.pivot, focal=projection.focal,
