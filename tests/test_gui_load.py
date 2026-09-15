@@ -89,3 +89,27 @@ def test_open_returns_at_once_and_reports_its_stages(app, tmp_path):
     # and the status bar is back to what it says the rest of the time
     assert "20000 localizations" in control.statusBar().currentMessage()
     control.stop_loading()                      # the quit path, with nothing running
+
+
+def test_a_long_file_name_does_not_push_the_clock_off_the_status_bar(app, tmp_path):
+    """The control window is 380 px wide.  With the name in front, a long one
+    filled the bar on its own and the stage and the clock -- the half that
+    moves -- were elided away, so a load that was running looked stuck."""
+    from smappy.gui.app import ControlWindow, RenderWindow
+
+    session = Session()
+    control = ControlWindow(session, RenderWindow(session))
+    bar = control.statusBar()
+    bar.resize(380, 22)                            # the width it has on screen
+    control._loading_stage = "Grouper: connect"
+
+    control._loading_name = "a" * 300 + "_very_long_name_sml.hdf5"
+    control._tick()
+    message = bar.currentMessage()
+    assert message.startswith("Grouper: connect... (")     # the moving half, first
+    assert control._loading_name not in message            # the name is what gives way
+    assert bar.fontMetrics().horizontalAdvance(message) <= bar.width()
+
+    control._loading_name = "probe.hdf5"           # one that fits is still shown
+    control._tick()
+    assert "probe.hdf5" in bar.currentMessage()

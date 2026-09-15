@@ -473,11 +473,24 @@ class ControlWindow(QMainWindow):
 
     def _tick(self) -> None:
         """The stage plus a clock -- linking reports once and then runs for
-        minutes, and a status bar that never changes reads as a hung window."""
+        minutes, and a status bar that never changes reads as a hung window.
+
+        The stage and the clock come first and the file name last, elided to
+        whatever room is left: this window is 380 px wide, and with the name
+        in front a long one filled the bar on its own, so the half that moves
+        was cut off and the load looked stuck.
+        """
         seconds = self._elapsed.elapsed() // 1000
         clock = f"{seconds // 60}:{seconds % 60:02d}"
-        self.statusBar().showMessage(
-            f"{self._loading_name}: {self._loading_stage}... ({clock})")
+        message = f"{self._loading_stage}... ({clock})"
+        bar = self.statusBar()
+        if self._loading_name:
+            metrics = bar.fontMetrics()
+            room = bar.width() - 24 - metrics.horizontalAdvance(message + "  ")
+            name = metrics.elidedText(self._loading_name, Qt.ElideMiddle, max(room, 0))
+            if name:
+                message = f"{message}  {name}"
+        bar.showMessage(message)
 
     def _loaded(self, locs, info, grouped, append: bool, reset_view: bool) -> None:
         self.session.add_file(locs, info, append=append, grouped=grouped)
