@@ -6,7 +6,7 @@ is applied to the session on the GUI thread.
 from __future__ import annotations
 
 import traceback
-from typing import Optional, Type
+from typing import Dict, Optional, Type
 
 from PySide6.QtCore import QObject, QThread, Signal
 from PySide6.QtGui import QTextCursor
@@ -50,6 +50,10 @@ class PluginPanel(QWidget):
         self.plugin = plugin_cls()
         self.session = session
         self.result: Optional[Result] = None
+        # the figure each named plot was last drawn in, so that running a
+        # plugin again redraws where the user already put the window instead
+        # of stacking another copy of it on the screen
+        self._figures: Dict[str, object] = {}
         self._thread: Optional[QThread] = None
         self._progress_lines = 0
         self._job = "run"
@@ -258,15 +262,30 @@ class PluginPanel(QWidget):
             button.setEnabled(True)
 
     def plot(self) -> None:
-        """Show every figure the result has, one window each."""
+        """Show every figure the result has, one window each.
+
+        The window for a given plot is reused: a plugin run a second time
+        redraws in the window that is already on the screen, where the user
+        put it and at the size they gave it, rather than opening another one
+        on top.  A window they closed is opened again; a `plot(ax)` that
+        repopulates the whole figure (a three-panel preview, say) gets a
+        cleared one, so nothing from the last run is left in it.
+        """
         if self.result is None:
             return
         import matplotlib
         matplotlib.use("QtAgg")
         import matplotlib.pyplot as plt
         for name, draw in self.result.figures():
-            fig, ax = plt.subplots()
+            fig = self._figures.get(name)
+            if fig is not None and plt.fignum_exists(fig.number):
+                fig.clear()
+                ax = fig.subplots()
+            else:
+                fig, ax = plt.subplots()
+                self._figures[name] = fig
             draw(ax)
             fig.canvas.manager.set_window_title(
                 f"{self.plugin.name}: {name}" if name else self.plugin.name)
+            fig.canvas.draw_idle()
             fig.show()
