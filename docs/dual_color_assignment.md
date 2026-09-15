@@ -253,7 +253,13 @@ Greying is presentation only -- the value stays, and a script sees every field.
 * `color_ratio` -- r itself, so it can be filtered and inspected.
 * `channel_p` -- the posterior of the assigned species in mode 2, and 1 for an
   assigned localization in mode 1, where the decision carries no probability.
-  0 wherever `channel` is 0.
+  0 wherever `channel` is 0.  Worth knowing what it is not: a *relative*
+  probability, conditional on the localization being one of the species, so it
+  sits at 0 or 1 everywhere except within a sliver of the boundary.
+* `channel_sigma` -- how far the nearest species is, in its own sigma, for
+  every localization whether assigned or not.  This is the one to filter on:
+  it is what the consistency test cuts, and unlike `channel_p` it distinguishes
+  a localization in a mode from one in the valley.
 
 The modes are estimated from the current selection -- the filter, the ROI --
 and applied to the whole table, as drift correction is.  A colour is a property

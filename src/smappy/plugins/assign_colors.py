@@ -541,10 +541,19 @@ class AssignColors(Plugin):
         channel[~values.valid] = 0
         probability = np.where(channel > 0, probability, 0.0)
 
+        # how far the nearest species is, in its own sigma: the number the
+        # posterior cannot carry.  P(colour) is a *relative* statement and sits
+        # at 0 or 1 almost everywhere, so it says nothing about a localization
+        # that is no colour at all -- this does, for every row, whether or not
+        # it was assigned, and it is what the consistency test cuts on.
+        sigma = np.nanmin(deviations(values.r, values.n_eff, modes,
+                                     spread=settings.spread), axis=1)
+
         locs = Localizations(dict(ctx.locs.columns), dict(ctx.locs.metadata))
         locs.columns["channel"] = channel
         locs.columns["color_ratio"] = values.r.astype(np.float32)
         locs.columns["channel_p"] = probability.astype(np.float32)
+        locs.columns["channel_sigma"] = sigma.astype(np.float32)
 
         text = self._summary(values, modes, channel, probability, settings, seen)
         ctx.report(text.splitlines()[0])
@@ -552,8 +561,8 @@ class AssignColors(Plugin):
                       plot=_plotter(values, modes, channel, settings, seen),
                       plots={"intensities":
                              _intensity_plotter(values, modes, settings, seen)},
-                      data={"modes": modes, "ratios": values,
-                            "channel": channel, "probability": probability},
+                      data={"modes": modes, "ratios": values, "channel": channel,
+                            "probability": probability, "sigma": sigma},
                       settings=settings)
 
     def _summary(self, values: Ratios, modes: Modes, channel: np.ndarray,

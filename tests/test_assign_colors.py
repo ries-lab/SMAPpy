@@ -136,6 +136,11 @@ def test_the_plugin_writes_a_channel_column_and_the_preview_does_not():
     kept = channel > 0
     assert (channel[kept] == truth[kept]).mean() > (channel == truth).mean()
     assert "color_ratio" in result.locs and "channel_p" in result.locs
+    # the distance to the nearest colour is written for every row, assigned or
+    # not: it is what says *why* something was refused
+    sigma = result.locs["channel_sigma"]
+    assert np.isfinite(sigma).all() and (sigma >= 0).all()
+    assert sigma[channel > 0].mean() < sigma[channel == 0].mean()
     assert "2 colours" in result.text and result.plot is not None
 
     session = Session(locs)
