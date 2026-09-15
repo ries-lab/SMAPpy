@@ -171,7 +171,12 @@ class Layer:
             if field in locs:
                 self.filter.set(field, lo, hi)
         if old.use_grouped:
-            self.state.show_grouped(True, share=other)
+            # through the layer, not the state: the grouped table is built
+            # fresh here and `show_grouped` is what copies the bounds onto it.
+            # Going straight to the state would leave the grouped set -- the
+            # one on screen -- unfiltered, so a drift correction or a colour
+            # assignment would look like it had thrown the filters away.
+            self.show_grouped(True, share)
         if self.files is not None:
             self.set_files(self.files)
 
