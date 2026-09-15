@@ -103,3 +103,25 @@ def test_choosing_a_source_fills_the_output_but_keeps_a_typed_one(stack, tmp_pat
     # ... and a path the user typed is left alone
     settings.output.path = str(tmp_path / "mine.hdf5")
     assert "output.path" not in (plugin.react("source.path", settings) or {})
+
+
+def test_progress_counts_the_frames_and_says_how_fast(stack, tmp_path):
+    """A fit runs for minutes, and a count with no rate says nothing about
+    whether it is worth waiting for."""
+    import re
+
+    settings = GaussianFitSettings(
+        source=SourceSettings(path=str(stack), chunk=5),
+        camera=CameraSettings(conversion=1.0, offset=100.0, pixelsize_um=0.1),
+        detection=DetectionSettings(cutoff_mode="absolute", cutoff=40.0),
+        output=OutputSettings(path=""))
+    messages = []
+    result = GaussianFit().run(Context(progress=messages.append), settings)
+
+    assert len(messages) == 4                          # 20 frames in blocks of 5
+    counted = [int(re.search(r"frame ([\d,]+) of", m).group(1).replace(",", ""))
+               for m in messages]
+    assert counted == [5, 10, 15, 20]                  # it counts up
+    assert all("of 20 " in m and "frames/s" in m for m in messages)
+    assert "left" in messages[0] and "left" not in messages[-1]   # not at the end
+    assert "frames/s" in result.text

@@ -15,6 +15,7 @@ expandable section.
 from __future__ import annotations
 
 import os
+import time
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -426,9 +427,11 @@ class _FitPlugin(Plugin):
             from ..io.watch import WatchSettings, watch_stack
             blocks = watch_stack(src.path, chunk=src.chunk, start=src.start, stop=src.stop,
                                  settings=WatchSettings(timeout=src.live_timeout))
+            total = None                 # a growing stack has no end to count to
         else:
             stop = min(src.stop, source.n_frames) if src.stop else None
             blocks = source.frames(chunk=src.chunk, start=src.start, stop=stop)
+            total = max((stop if stop is not None else source.n_frames) - src.start, 0)
 
         ctx.emit("start", {"extent": camera_extent(camera, source.shape, fit.output_unit),
                            "path": out})
@@ -446,9 +449,25 @@ class _FitPlugin(Plugin):
             collected.extend(block)
             ctx.emit("block", block)
 
+        started = time.perf_counter()
+
         def report(engine) -> None:
+            """Where it has got to, how fast, and how much longer.
+
+            A fit runs for minutes and the only thing on screen was a count of
+            frames; the rate is what says whether it is worth waiting for, and
+            is the number one compares between machines and settings.
+            """
             s = engine.stats
-            ctx.report(f"{s['frames']} frames, {s['localizations']} localizations")
+            elapsed = time.perf_counter() - started
+            rate = s["frames"] / elapsed if elapsed > 0 else 0.0
+            where = f"frame {s['frames']:,}" + (f" of {total:,}" if total else "")
+            left = ""
+            if total and rate > 0 and s["frames"] < total:
+                seconds = int((total - s["frames"]) / rate)
+                left = f", {seconds // 60}:{seconds % 60:02d} left"
+            ctx.report(f"{where}  {rate:,.1f} frames/s{left}  "
+                       f"{s['localizations']:,} localizations")
 
         try:
             from ..pipeline import drive
@@ -461,7 +480,10 @@ class _FitPlugin(Plugin):
                 writer.close()
         stats = dict(engine.stats)
         collected.metadata["stats"] = stats
+        seconds = time.perf_counter() - started
+        rate = stats["frames"] / seconds if seconds > 0 else 0.0
         text = (f"{stats['localizations']} localizations from {stats['frames']} frames"
+                f" in {seconds:.1f} s ({rate:,.1f} frames/s)"
                 + (f", saved to {out}" if out else ""))
         return Result(locs=collected.compact(), text=text,
                       data={"stats": stats, "path": out}, settings=settings)
