@@ -223,6 +223,38 @@ both are model-based -- they are as good as the claim that the modes are
 Gaussian in r with the width the photon statistics give, which is why the
 preview shows the fit against the histogram.
 
+### How close is too close
+
+A localization is left grey when the winning probability does not reach
+``1 - crosstalk``: with c = 5%, anything below 0.95.  The threshold is not a
+free knob, because the quantity it controls is the one that was asked for --
+the chance that an assigned localization is wrong is 1 - P(winner), so
+requiring P(winner) >= 1 - c bounds the expected error among the assigned by c.
+It is also the optimal rule rather than a convenient one: under 0-1 loss with a
+cost d for refusing, the Bayes-optimal decision is exactly to refuse when the
+best posterior falls below 1 - d (Chow, 1970), so c is the exchange rate
+between one wrong colour and one discarded localization.
+
+Because the log-odds are linear in the counts, the band has an unusually
+concrete width.  Each photon carries |log(p_1/p_2)| nats of evidence -- 1.386
+for a 20/80 splitter -- and the rule needs ln((1-c)/c) nats, so the grey band
+is a fixed number of *net photons*, whatever the brightness:
+
+| crosstalk | evidence needed | net photons | band in r at N = 20 | at N = 1000 |
+|---|---|---|---|---|
+| 5%   | 2.94 nats | 2.1 | +-0.106 | +-0.0021 |
+| 1%   | 4.60 nats | 3.3 | +-0.166 | +-0.0033 |
+| 0.1% | 6.91 nats | 5.0 | +-0.249 | +-0.0050 |
+
+Two photons of evidence buys 95% confidence, which is why the band is so narrow
+in r for a bright localization and why tightening c does so little: the
+requirement grows as ln(1/c), so a thousand-fold tighter budget asks for two
+and a half times as many photons.  In the intensity plane it is a strip of
+constant width along the boundary, which is what makes it a wedge in log-log.
+
+This is also why the band alone is not enough -- it is about two photons wide,
+and a localization that is no colour at all is nowhere near it.
+
 ### The posterior is relative, and that is not enough
 
 A posterior divides the evidence between the species it was given.  It cannot
