@@ -359,9 +359,17 @@ model claims becomes a shape: a band that pinches in towards the ray as the
 counts grow and flares out towards the origin where they are few.  `dr` draws
 the same picture with the band edges parallel to the ray at a fixed distance,
 and the two together are the argument for the probabilistic method in one look.
-The regions are evaluated over a grid of intensities rather than sampled from
-the data, which needs a stand-in for the fitted errors a grid point has not
-got: the table's median N_eff/N, printed in the title.
+The regions are drawn as polygons: along a line of constant total the decision
+is an interval in r, so sweeping the total and recording where each colour
+starts and stops traces the two edges of its region exactly.  They are found by
+asking the rule rather than by a formula of their own, so a polygon is whatever
+the assignment actually does -- the sigma band, the crosstalk sliver taken out
+of its middle, a kept tail, a cut at a minimum -- and cannot drift out of step
+with it.  Everything no polygon covers is grey, which is to say fits no colour.
+Evaluating the rule away from the measured points needs a stand-in for the
+fitted errors a grid point has not got: the table's median N_eff/N, printed in
+the title.  The axes stop at the 0.1 and 99.1 percentiles of each channel,
+since the rule can be drawn over decades that were never measured.
 
 ## Where this comes from, and where it differs
 

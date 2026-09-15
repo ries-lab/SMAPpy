@@ -312,6 +312,29 @@ def test_only_the_chosen_methods_parameters_are_active():
     assert not probabilistic["exclusion"]
 
 
+def test_the_decided_regions_come_back_as_polygons():
+    """What the intensity plot draws: one closed ring per colour, in counts."""
+    from matplotlib.path import Path
+
+    from smappy.plugins.assign_colors import region_polygons
+
+    locs, _ = coincident()
+    values = ratios(locs)
+    modes = find_modes(values.r, colors=2)
+    settings = AssignColorSettings(mode="probabilistic", tolerance=3.0)
+    rings = region_polygons(modes, settings, np.logspace(1, 4, 120))
+    assert set(rings) == {1, 2}
+    for k, ring in rings.items():
+        assert ring.shape[1] == 2 and len(ring) > 10
+        assert np.all(ring >= 0)
+        # a molecule the rule assigns to this colour lies inside its polygon
+        mine = values.r[np.asarray(
+            assign_by_probability(values.r, values.n_eff, modes,
+                                  tolerance=3.0)[0] == k)]
+        sample = np.column_stack(((1 + mine[:200]) / 2, (1 - mine[:200]) / 2)) * 1000
+        assert Path(ring).contains_points(sample).mean() > 0.95
+
+
 def test_the_result_carries_both_figures():
     locs, _ = coincident()
     plugin = plugins.get("Analysis/Dual-Color/AssignColors")()

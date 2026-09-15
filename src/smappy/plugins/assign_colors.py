@@ -51,6 +51,9 @@ CHANNEL_COLUMNS: Sequence[Tuple[str, str]] = (
 # one mode that the smoothing has not quite joined up
 MIN_SEPARATION = 3.0
 MAX_COLORS = 6
+# where the intensity plot's axes stop: the data, not the rule, which can draw
+# regions over decades nobody measured
+VIEW_PERCENTILES = (0.1, 99.1)
 HWHM_PER_SIGMA = np.sqrt(2 * np.log(2))     # 1.1774: a Gaussian's HWHM
 # a palette for the modes, in r order.  Red first because the channel the
 # splitter sends the long wavelengths to is conventionally channel 1.
@@ -522,6 +525,10 @@ class AssignColorSettings:
                                advanced=True,
                                help="localizations with fewer photons in total "
                                     "are ignored and left unassigned")
+    cmap: str = param("viridis", label="intensity LUT", advanced=True,
+                      choices=("viridis", "cividis", "turbo", "magma", "inferno",
+                               "Greys", "Greys_r"),
+                      help="the colour map of the intensity plot's 2D histogram")
     bins: int = param(200, label="histogram bins", min=10, max=2000,
                       advanced=True)
     smoothing: float = param(2.0, label="smoothing", unit="bins", min=0.0,
@@ -832,6 +839,40 @@ def _decide(first: np.ndarray, second: np.ndarray, modes: Modes,
     return channel.reshape(shape)
 
 
+def region_polygons(modes: Modes, settings: "AssignColorSettings",
+                    totals: np.ndarray, efficiency: float = 1.0,
+                    samples: int = 2001) -> Dict[int, np.ndarray]:
+    """Each colour's decided region, as a polygon in (I1, I2).
+
+    Found rather than derived: along a line of constant total the decision is
+    an interval in r, so sweeping the total and recording where each colour
+    starts and stops traces the region's two edges.  That way the polygon is
+    whatever the rule actually does -- the sigma band, the crosstalk sliver
+    taken out of the middle, a kept tail, or a cut at a minimum -- instead of a
+    formula that has to be kept in step with it.
+    """
+    r = np.linspace(-1, 1, samples)
+    grid_n, grid_r = np.meshgrid(np.asarray(totals, dtype=float), r, indexing="ij")
+    first = grid_n * (1 + grid_r) / 2
+    region = _decide(first, grid_n - first, modes, settings, efficiency)
+    edge = 1 - 1e-9                      # a corner, not an infinity, at r = +-1
+    out: Dict[int, np.ndarray] = {}
+    for k in range(1, len(modes) + 1):
+        low, high = [], []
+        for row, total in enumerate(totals):
+            inside = np.flatnonzero(region[row] == k)
+            if not len(inside):
+                continue
+            low.append((total, np.clip(r[inside[0]], -edge, edge)))
+            high.append((total, np.clip(r[inside[-1]], -edge, edge)))
+        if len(low) < 2:
+            continue
+        ring = np.array(low + high[::-1])
+        total, ratio = ring[:, 0], ring[:, 1]
+        out[k] = np.column_stack((total * (1 + ratio) / 2, total * (1 - ratio) / 2))
+    return out
+
+
 def _intensity_plotter(values: Ratios, modes: Modes, settings: "AssignColorSettings",
                        seen: np.ndarray):
     """The decision in the plane the photons actually live in.
@@ -862,53 +903,43 @@ def _intensity_plotter(values: Ratios, modes: Modes, settings: "AssignColorSetti
                     ha="center", transform=ax.transAxes)
             return
         x, y = np.log10(first), np.log10(second)
-        lo = min(np.percentile(x, 0.2), np.percentile(y, 0.2)) - 0.1
-        hi = max(np.percentile(x, 99.8), np.percentile(y, 99.8)) + 0.1
+        x_lo, x_hi = np.percentile(x, (VIEW_PERCENTILES))
+        y_lo, y_hi = np.percentile(y, (VIEW_PERCENTILES))
+        lo, hi = min(x_lo, y_lo), max(x_hi, y_hi)
 
-        # the decision, evaluated on a grid and drawn underneath
-        edges = np.linspace(lo, hi, 400)
-        gx, gy = np.meshgrid(edges, edges)
-        region = _decide(10 ** gx, 10 ** gy, modes, settings, efficiency)
-        # what no colour fits, which in a well separated experiment is most of
-        # the plane: grey, like the band in the histogram
-        ax.contourf(gx, gy, (region == 0).astype(float), levels=(0.5, 1.5),
-                    colors=["0.55"], alpha=0.25)
-        for k in range(1, len(modes) + 1):
+        # grey underneath, so that whatever no polygon covers is what fits no
+        # colour -- the region is then exact rather than gridded
+        ax.set_facecolor("0.90")
+        totals = np.logspace(min(lo, 0) - 0.5, hi + 0.6, 260)
+        for k, ring in region_polygons(modes, settings, totals, efficiency).items():
             colour = PALETTE[(k - 1) % len(PALETTE)]
-            ax.contourf(gx, gy, (region == k).astype(float), levels=(0.5, 1.5),
-                        colors=[colour], alpha=0.22)
-        # the sigma lines themselves, around each colour's own ratio: this is
-        # the decision as it was set, before the crosstalk band trims a sliver
-        # out of the middle of it
-        if settings.mode == "probabilistic" and settings.tolerance > 0:
-            total = 10 ** gx + 10 ** gy
-            with np.errstate(invalid="ignore", divide="ignore"):
-                grid_r = (10 ** gx - 10 ** gy) / total
-            z = deviations(np.ravel(grid_r),
-                           np.ravel(np.maximum(total * efficiency, 1e-9)),
-                           modes, spread=settings.spread)
-            for k in range(len(modes)):
-                ax.contour(gx, gy, z[:, k].reshape(gx.shape),
-                           levels=(settings.tolerance,),
-                           colors=[PALETTE[k % len(PALETTE)]], linewidths=1.2)
-        else:
-            for k in range(1, len(modes) + 1):
-                ax.contour(gx, gy, (region == k).astype(float), levels=(0.5,),
-                           colors=[PALETTE[(k - 1) % len(PALETTE)]], linewidths=1)
-        # and the species themselves: lines of constant splitting ratio
+            with np.errstate(divide="ignore"):
+                edge = np.log10(np.maximum(ring, 1e-30))
+            ax.fill(edge[:, 0], edge[:, 1], color=colour, alpha=0.20, lw=0,
+                    zorder=1, label=f"colour {k}")
+            ax.plot(np.append(edge[:, 0], edge[0, 0]),
+                    np.append(edge[:, 1], edge[0, 1]),
+                    color=colour, lw=1.2, zorder=2)
+        # the species themselves: lines of constant splitting ratio
         for k, rho in enumerate(modes.maxima, 1):
             offset = np.log10(max((1 - rho) / (1 + rho), 1e-12))
-            ax.plot((lo, hi), (lo + offset, hi + offset), lw=0.8, ls=":",
+            ax.plot((lo - 1, hi + 1), (lo - 1 + offset, hi + 1 + offset),
+                    lw=0.8, ls=":", zorder=3,
                     color=PALETTE[(k - 1) % len(PALETTE)])
 
-        counts, ex, ey = np.histogram2d(x, y, bins=160, range=((lo, hi), (lo, hi)))
-        ax.pcolormesh(ex, ey, np.ma.masked_where(counts.T == 0, counts.T),
-                      cmap="Greys", norm=LogNorm(), rasterized=True)
+        counts, ex, ey = np.histogram2d(x, y, bins=180,
+                                        range=((x_lo, x_hi), (y_lo, y_hi)))
+        mesh = ax.pcolormesh(ex, ey, np.ma.masked_where(counts.T == 0, counts.T),
+                             cmap=settings.cmap, norm=LogNorm(), zorder=4,
+                             rasterized=True)
+        bar = ax.figure.colorbar(mesh, ax=ax, pad=0.02, fraction=0.045)
+        bar.set_label("localizations", fontsize=8)
+        bar.ax.tick_params(labelsize=8)
         ax.set_xlabel(f"log10 {values.columns[0]}")
         ax.set_ylabel(f"log10 {values.columns[1]}")
-        ax.set_xlim(lo, hi)
-        ax.set_ylim(lo, hi)
-        ax.set_aspect("equal")
+        ax.set_xlim(x_lo, x_hi)
+        ax.set_ylim(y_lo, y_hi)
+        ax.legend(fontsize=8, loc="lower right", framealpha=0.85)
         if settings.mode == "minima":
             note, under = f"dr = {settings.exclusion:g}", ""
         else:
