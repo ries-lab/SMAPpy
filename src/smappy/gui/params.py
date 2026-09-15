@@ -197,6 +197,7 @@ class SettingsForm(QWidget):
         super().__init__(parent)
         self.settings_cls = settings_cls
         self.fields: Dict[str, Any] = {}          # _Field or SettingsForm
+        self.labels: Dict[str, QLabel] = {}       # the row label of each field
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(2)
@@ -223,7 +224,11 @@ class SettingsForm(QWidget):
             w.changed.connect(self.changed)
             w.changed.connect(lambda n=name: self.field_changed.emit(n))
             self.fields[name] = w
-            (more if spec.info.advanced else main).addRow(spec.info.label or name, w)
+            label = QLabel(spec.info.label or name)
+            if spec.info.help:
+                label.setToolTip(spec.info.help)
+            self.labels[name] = label
+            (more if spec.info.advanced else main).addRow(label, w)
         if main.rowCount():
             layout.addLayout(main)
         if more.rowCount():
@@ -290,6 +295,27 @@ class SettingsForm(QWidget):
                 continue
             if hasattr(field, "set_hint"):
                 field.set_hint(value)
+
+    def set_active(self, flags: Dict[str, bool]) -> None:
+        """Grey out the fields the current settings do not read.
+
+        Cosmetic on purpose: a disabled widget keeps its value and still
+        answers `value()`, so greying a field cannot change what a run does.
+        Unknown names are ignored, as in `set_hints`.
+        """
+        for path, on in flags.items():
+            target = self
+            parts = path.split(".")
+            try:
+                for part in parts[:-1]:
+                    target = target.fields[part]
+                field = target.fields[parts[-1]]
+            except (KeyError, AttributeError):
+                continue
+            field.setEnabled(bool(on))
+            label = target.labels.get(parts[-1])
+            if label is not None:
+                label.setEnabled(bool(on))
 
     def set_values(self, values: Dict[str, Any]) -> None:
         """Set some fields by dotted name, without firing `field_changed`."""

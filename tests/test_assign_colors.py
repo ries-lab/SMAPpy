@@ -6,8 +6,9 @@ from smappy import plugins
 from smappy.locs import Localizations
 from smappy.plugins import Selection
 from smappy.plugins.assign_colors import (AssignColorSettings, assign_by_minima,
-                                          assign_by_probability, find_modes,
-                                          posteriors, ratios)
+                                          assign_by_probability, deviations,
+                                          find_modes, posteriors, ratios,
+                                          unclaimed_modes)
 from smappy.session import Session
 
 RATIOS = (-0.6, 0.6)            # two dyes, well apart
@@ -178,6 +179,113 @@ def test_the_summary_measures_a_species_wider_than_shot_noise():
     assert crosstalk(0.05) < crosstalk(0.0)
 
 
+def coincident(n=20000, junk=2000, rho=(-0.6, 0.6), photons=2000.0, seed=0):
+    """Two bright, well separated dyes, and a population that is neither.
+
+    Coincident emitters of both colours land near r = 0: far from either
+    species, and exactly what a posterior alone cannot refuse.
+    """
+    rng = np.random.default_rng(seed)
+    species, ratio = [], []
+    for k, one in enumerate(rho, 1):
+        species.append(np.full(n // len(rho), k))
+        ratio.append(np.full(n // len(rho), one))
+    species.append(np.zeros(junk, dtype=int))        # 0: neither
+    ratio.append(np.zeros(junk))
+    species, ratio = np.concatenate(species), np.concatenate(ratio)
+    total = rng.poisson(photons, len(ratio))
+    n1 = rng.binomial(total, (1 + ratio) / 2).astype(float)
+    n2 = total - n1
+    return Localizations({"photons_ch0": n1, "photons_ch1": n2,
+                          "photons_err_ch0": np.sqrt(np.maximum(n1, 1)),
+                          "photons_err_ch1": np.sqrt(np.maximum(n2, 1))}, {}), species
+
+
+def test_the_posterior_alone_assigns_a_localization_that_is_neither_colour():
+    """Why the consistency test exists.
+
+    The posterior is a relative statement: given that this is one of the two,
+    which?  A localization in the valley is far from both and still gets a
+    winner, and tightening the crosstalk budget barely helps -- the ambiguous
+    band only grows as log(1/c).
+    """
+    locs, truth = coincident()
+    values = ratios(locs)
+    modes = find_modes(values.r, colors=2)
+    neither = truth == 0
+
+    loose = assign_by_probability(values.r, values.n_eff, modes, crosstalk=0.05)[0]
+    tight = assign_by_probability(values.r, values.n_eff, modes, crosstalk=1e-4)[0]
+    assert (loose[neither] > 0).mean() > 0.9         # nearly all of it assigned
+    assert (tight[neither] > 0).mean() > 0.8         # and a 500x budget hardly moves it
+
+    # the absolute test refuses it instead, without touching the real species
+    checked = assign_by_probability(values.r, values.n_eff, modes, crosstalk=0.05,
+                                    tolerance=3.0)[0]
+    assert (checked[neither] == 0).all()
+    real = truth > 0
+    assert (checked[real] == truth[real]).mean() > 0.99
+
+
+def test_how_far_each_localization_sits_from_each_species():
+    modes = find_modes(np.linspace(-1, 1, 500), colors=2, expected=(-0.6, 0.6))
+    # a localization at the midpoint with 2000 photons: sigma is about 0.018,
+    # so it is tens of sigma from both, however evenly it is torn between them
+    z = deviations(np.array([0.0]), np.array([2000.0]), modes)
+    assert z.shape == (1, 2)
+    assert z.min() > 20
+    p = posteriors(np.array([0.0]), np.array([2000.0]), modes, use_prior=False)
+    assert p[0, 0] == pytest.approx(0.5)             # and the posterior says 50/50
+    # extra spread widens the sigma and so forgives more
+    wide = deviations(np.array([0.0]), np.array([2000.0]), modes, spread=0.3)
+    assert wide.min() < z.min()
+
+
+def test_a_population_between_the_modes_is_reported_and_does_not_move_the_cut():
+    locs, truth = coincident()
+    values = ratios(locs)
+    modes = find_modes(values.r, colors=2)
+    # the boundary lands in an empty stretch, never on the population itself
+    assert len(modes.minima) == 1
+    assert abs(modes.minima[0]) > 0.1
+    inside = np.abs(values.r - modes.minima[0]) < 0.05
+    assert inside.sum() == 0
+
+    unclaimed = unclaimed_modes(modes)
+    assert len(unclaimed) == 1
+    position, height = unclaimed[0]
+    assert abs(position) < 0.05 and height > 0.05
+
+    plugin = plugins.get("Analysis/Dual-Color/AssignColors")()
+    text = plugin(locs, Selection.all(len(truth)),
+                  AssignColorSettings(mode="minima")).text
+    assert "belongs to no colour" in text
+    # asking for the third colour claims it, and the warning goes away
+    three = plugin(locs, Selection.all(len(truth)),
+                   AssignColorSettings(mode="minima", colors=3))
+    assert "belongs to no colour" not in three.text
+    assert (three.locs["channel"][truth == 0] == 2).mean() > 0.95
+
+
+def test_only_the_chosen_methods_parameters_are_active():
+    plugin = plugins.get("Analysis/Dual-Color/AssignColors")()
+    minima = plugin.active(AssignColorSettings(mode="minima"))
+    assert minima["exclusion"] and not minima["crosstalk"]
+    assert not minima["tolerance"] and not minima["spread"]
+    probabilistic = plugin.active(AssignColorSettings(mode="probabilistic"))
+    assert probabilistic["crosstalk"] and probabilistic["tolerance"]
+    assert not probabilistic["exclusion"]
+
+
+def test_the_result_carries_both_figures():
+    locs, _ = coincident()
+    plugin = plugins.get("Analysis/Dual-Color/AssignColors")()
+    result = plugin(locs, Selection.all(len(locs["photons_ch0"])),
+                    AssignColorSettings(mode="probabilistic"))
+    names = [name for name, _ in result.figures()]
+    assert names == ["", "intensities"]
+
+
 def test_a_table_without_two_channels_says_so():
     locs = Localizations({"photons": np.ones(10)}, {})
     with pytest.raises(ValueError, match="no per-channel photon columns"):
@@ -200,7 +308,8 @@ def test_the_figure_draws(tmp_path):
     for mode in ("minima", "probabilistic"):
         result = plugin(locs, Selection.all(len(locs)),
                         AssignColorSettings(mode=mode))
-        fig, ax = plt.subplots()
-        result.plot(ax)
-        fig.savefig(tmp_path / f"{mode}.png")
-        plt.close(fig)
+        for name, draw in result.figures():
+            fig, ax = plt.subplots()
+            draw(ax)
+            fig.savefig(tmp_path / f"{mode}{name}.png")
+            plt.close(fig)

@@ -121,7 +121,53 @@ both are model-based -- they are as good as the claim that the modes are
 Gaussian in r with the width the photon statistics give, which is why the
 preview shows the fit against the histogram.
 
-For two species this reduces to a likelihood-ratio test, and it is worth
+### The posterior is relative, and that is not enough
+
+A posterior divides the evidence between the species it was given.  It cannot
+say *none of them*, and with well separated modes it barely ever rejects
+anything: the ambiguous band is
+
+    dr_eff = (1 - r^2) ln((1-c)/c) / (N_eff |rho_1 - rho_2|)
+
+wide, which for two dyes 1.2 apart in r at 2000 effective photons and c = 5% is
+0.001 -- a thousandth of the axis.  Worse, the only handle the budget gives is
+logarithmic: going from c = 5% to c = 0.01% widens that band by a factor of
+three, from nothing to nothing.  So a localization sitting in the valley
+between the modes, 20 sigma from either species, is assigned with a posterior
+of 0.999: a hair off the midpoint is enough to make one species overwhelmingly
+likelier *than the other*, which is the only question asked.
+
+Something has to ask the absolute question.  Each species' expected ratio rho_k
+predicts the split of the photons that were actually detected, so the
+observation can be tested against it:
+
+    z_k = |r - rho_k| / s_k,     assign only if z_k* <= tolerance
+
+with the same s_k as above -- shot noise for the photons this localization has,
+plus `spread`.  Under H_k, z_k is a standard normal, so the tolerance is read in
+sigma: 3 loses 0.3% of genuine localizations per species and refuses anything
+the species could not have produced.  A localization that is far from every
+species is not a hard call between two colours, it is a molecule that is
+neither: two dyes at once, two emitters in one ROI, a fit that failed.  The two
+tests refuse different things and are reported apart.
+
+`tolerance = 0` turns it off and recovers the pure posterior, which is what
+DECODE-Plex's rejection does.
+
+### A population in the valley is not a boundary problem
+
+The absolute test also covers the case that breaks *both* methods: a third
+population that is not one of the species asked for.  In the histogram of r it
+is a bump between two modes, with an empty stretch on each side of it -- so
+"the lowest point between two modes" has two equally good answers, and whichever
+is taken swallows that population whole.  Nothing about a boundary can fix
+that, because the model is wrong rather than imprecise, so the summary says so
+and names the bump: ask for another colour, or let the consistency test refuse
+it.
+
+### Two views of one decision
+
+For two species the likelihood-ratio test reduces to a threshold on r, and it is worth
 writing out because it shows what the mode buys over mode 1.  With equal priors
 and s_1 = s_2 = s, the condition is
 
@@ -136,6 +182,19 @@ boundary; a dim one is rejected from a wide band around it; a localization that
 is bright *and* far out is assigned with the confidence it has earned.  Mode 1
 is the special case where every localization is treated as if it had the same
 brightness, and dr has to be chosen for the worst of them.
+
+The histogram of r divides the brightness out, and the brightness is what the
+decision depends on, so there is a second figure: the two channels' counts
+against each other, log-log, with the decided regions drawn over a 2D histogram
+of the data.  A species is a *ray* from the origin there -- one line per
+splitting ratio, a straight line of slope 1 in log-log -- and what the noise
+model claims becomes a shape: a band that pinches in towards the ray as the
+counts grow and flares out towards the origin where they are few.  `dr` draws
+the same picture with the band edges parallel to the ray at a fixed distance,
+and the two together are the argument for the probabilistic method in one look.
+The regions are evaluated over a grid of intensities rather than sampled from
+the data, which needs a stand-in for the fitted errors a grid point has not
+got: the table's median N_eff/N, printed in the title.
 
 ## Where this comes from, and where it differs
 
@@ -163,12 +222,26 @@ two channels make visible.
   mixed sample and no such measurement has.
 * The rejection threshold is stated as a crosstalk budget rather than a
   posterior cut, because 1 - c is the same number with a meaning attached.
+* The rejection is two tests, not one: the posterior threshold DECODE-Plex's
+  rejection amounts to, and an absolute consistency test against each species'
+  expected ratio.  Without the second, a localization that is no colour at all
+  is assigned to the nearer one (see above), which matters more for a
+  histogram-derived rho than for one measured on a single-label sample.
 * `spread` exists because the Gaussian-in-r model is the part most likely to be
   wrong: real modes are broader than photon statistics.  The summary prints the
   strongest mode's measured width next to the shot-noise width, so the model
   can be checked against the histogram it claims to describe -- and when the
   mode is wider, the promised crosstalk is optimistic until `spread` accounts
   for the difference.
+
+## Which parameter belongs to which method
+
+Nothing is shared between the two: `dr` is the minima method's whole
+mechanism and the probabilistic one never reads it, while `crosstalk`,
+`consistency` and `extra spread` are the probabilistic model and the minima
+method never reads them.  The GUI greys out whichever set is not in play,
+because a number that does nothing should not look like a number that does.
+Greying is presentation only -- the value stays, and a script sees every field.
 
 ## What is written
 

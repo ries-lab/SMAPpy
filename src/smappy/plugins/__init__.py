@@ -308,8 +308,18 @@ class Result:
     files: Sequence = ()
     text: str = ""                          # shown, and logged
     plot: Optional[Callable] = None         # plot(ax) draws into a matplotlib axis
+    # further figures, by name: one plugin may have more than one thing to
+    # show, and two views of the same decision belong in two windows rather
+    # than in one crowded axis
+    plots: Dict[str, Callable] = field(default_factory=dict)
     data: Dict[str, Any] = field(default_factory=dict)  # anything else
     settings: Any = None                    # what was actually used
+
+    def figures(self) -> List[Tuple[str, Callable]]:
+        """Everything there is to draw, as (name, plot), the main one first."""
+        found = [("", self.plot)] if self.plot is not None else []
+        return found + [(name, draw) for name, draw in self.plots.items()
+                        if draw is not None]
 
 
 class Plugin:
@@ -416,6 +426,18 @@ class Plugin:
         the settings: the GUI shows them greyed in the fields that are set to
         auto, so "auto" says what it will do rather than only that it will do
         something.  Return None when nothing can be resolved yet.
+        """
+        return None
+
+    def active(self, settings) -> Optional[Dict[str, bool]]:
+        """Which fields the current settings actually read, by dotted name.
+
+        A plugin with alternative methods has parameters that belong to one of
+        them; the GUI greys out the rest, so that a number which does nothing
+        does not look like a number which does.  Nothing is changed by this --
+        a greyed field keeps its value and still comes back from the form -- so
+        it is presentation, and a script may ignore it.  Return None when every
+        field is always live.
         """
         return None
 

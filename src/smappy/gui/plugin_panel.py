@@ -104,6 +104,7 @@ class PluginPanel(QWidget):
         self.form.field_changed.connect(self._react)
         self.progressed.connect(self._on_progress)
         self.streamed.connect(self._on_stream)
+        self._active()
 
     def _react(self, path: str) -> None:
         """Let the plugin answer an edit, e.g. fill the camera from the file."""
@@ -114,6 +115,7 @@ class PluginPanel(QWidget):
         if updates:
             self.form.set_values(updates)
         self._hints()
+        self._active()
 
     def _hints(self) -> None:
         """Refresh what the fields left on *auto* say they will resolve to.
@@ -128,6 +130,15 @@ class PluginPanel(QWidget):
             return
         if hints:
             self.form.set_hints(hints)
+
+    def _active(self) -> None:
+        """Grey out the fields the current settings do not read."""
+        try:
+            flags = self.plugin.active(self.form.value())
+        except (ValueError, TypeError):
+            return
+        if flags:
+            self.form.set_active(flags)
 
     def _on_stream(self, event: str, payload) -> None:
         if event == "start":
@@ -234,8 +245,8 @@ class PluginPanel(QWidget):
         self.status.setText("done")
         for button in self._buttons():
             button.setEnabled(True)
-        self.plot_button.setEnabled(result.plot is not None)
-        if self._job == "preview" and result.plot is not None:
+        self.plot_button.setEnabled(bool(result.figures()))
+        if self._job == "preview" and result.figures():
             self.plot()
 
     def _on_failed(self, text: str) -> None:
@@ -247,12 +258,15 @@ class PluginPanel(QWidget):
             button.setEnabled(True)
 
     def plot(self) -> None:
-        if self.result is None or self.result.plot is None:
+        """Show every figure the result has, one window each."""
+        if self.result is None:
             return
         import matplotlib
         matplotlib.use("QtAgg")
         import matplotlib.pyplot as plt
-        fig, ax = plt.subplots()
-        self.result.plot(ax)
-        fig.canvas.manager.set_window_title(self.plugin.name)
-        fig.show()
+        for name, draw in self.result.figures():
+            fig, ax = plt.subplots()
+            draw(ax)
+            fig.canvas.manager.set_window_title(
+                f"{self.plugin.name}: {name}" if name else self.plugin.name)
+            fig.show()

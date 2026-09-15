@@ -9,6 +9,7 @@ from matplotlib import pyplot as plt     # noqa: E402
 
 from smappy.gui.params import SettingsForm                            # noqa: E402
 from smappy.plugins import param, param_specs                         # noqa: E402
+from smappy.plugins.assign_colors import AssignColorSettings          # noqa: E402
 from smappy.plugins.fit import GaussianFit, SplineFit                 # noqa: E402
 from smappy.session import Session                                    # noqa: E402
 
@@ -33,6 +34,27 @@ def test_only_a_plugin_that_can_preview_grows_the_button(app):
             return Result()
 
     assert PluginPanel(Plain, Session()).preview_button is None
+
+
+def test_a_method_greys_out_the_other_methods_parameters(app):
+    """A number that does nothing must not look like a number that does."""
+    from smappy import plugins
+    from smappy.gui.plugin_panel import PluginPanel
+
+    panel = PluginPanel(plugins.get("Analysis/Dual-Color/AssignColors"), Session())
+    form = panel.form
+    # the panel greys on the way up, before anything is edited
+    assert form.fields["exclusion"].isEnabled()
+    assert not form.fields["crosstalk"].isEnabled()
+    assert not form.labels["crosstalk"].isEnabled()
+
+    form.fields["mode"].set("probabilistic")
+    panel._react("mode")
+    assert form.fields["crosstalk"].isEnabled() and form.labels["crosstalk"].isEnabled()
+    assert form.fields["tolerance"].isEnabled()
+    assert not form.fields["exclusion"].isEnabled()
+    # greying is cosmetic: the value is still there and still comes back
+    assert form.value().exclusion == AssignColorSettings().exclusion
 
 
 def test_a_preview_that_is_not_of_a_frame_gets_no_frame_number(app):
