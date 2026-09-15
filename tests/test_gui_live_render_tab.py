@@ -52,3 +52,20 @@ def test_the_colour_field_list_fills_as_a_fit_produces_columns(app):
     for i in range(1, 12):
         session.append(block(seed=i))
     assert tab.color_field.currentText() == "photons"
+
+
+def test_the_overview_draws_itself_when_a_file_is_loaded(app):
+    """A panel headed "overview" that is blank until a button is found is not
+    an overview.  300 x 200 pixels is 0.4 s for ten million localizations."""
+    from smappy.gui.render_tab import RenderTab
+    from smappy.gui.render_view import RenderView
+
+    session = Session()
+    view = RenderView(session)
+    tab = RenderTab(session, view)
+    assert tab.overview.image.image is None
+
+    session.add_file(block(2000), FileInfo("t.hdf5", "/t.hdf5", "smappy"))
+    app.processEvents()                           # the render is deferred a beat
+    drawn = tab.overview.image.image
+    assert drawn is not None and drawn.shape[2] == 3 and drawn.max() > 0

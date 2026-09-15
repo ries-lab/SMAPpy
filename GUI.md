@@ -40,7 +40,11 @@ reasoning is here so that it does not have to be re-derived.
   filters one field at a time: quick buttons for the usual fields, a drop-down
   for the rest, a histogram whose shaded region is the range (dragged to the
   edge = no bound), and the numbers.  Below it an overview of the whole field
-  of view; a click there centres the image.  A plugin section can be detached
+  of view, drawn as soon as a table arrives; a click there centres the image.
+  *Invert* is the complementary colour at the same brightness (red -> cyan),
+  so a layer over its own inverse goes grey where the two coincide and each
+  keeps its intensity; grey is its own complement, and black on white is the
+  `gray_inverted` ramp.  A plugin section can be detached
   into its own window (the arrow on its title), so several stay open.  The
   render window has a toolbar: *Save* (PNG as shown, or a TIFF re-rendered at
   a chosen pixel size, colour or float intensity, with the pixel size in the

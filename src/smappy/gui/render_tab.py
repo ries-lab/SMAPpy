@@ -12,7 +12,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import QRectF, Qt, Signal
+from PySide6.QtCore import QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog,
                                QFormLayout, QHBoxLayout, QLabel, QLineEdit,
@@ -482,8 +482,18 @@ class Overview(QWidget):
         self.image.mouseClickEvent = self._on_click
         if view is not None:
             view.view.sigRangeChanged.connect(self._track)
-        # a full-field render costs seconds on a big table: only on the button
-        session.on_change(lambda what: self.image.clear() if what == "locs" else None)
+        # A new table draws itself: this is 300 x 200 pixels, which is 0.4 s
+        # for ten million localizations -- next to nothing beside the read and
+        # the linking that have just finished -- and a panel headed "overview"
+        # that is blank until a button is found is not an overview.  Deferred
+        # by a beat so the window paints the new file first; the button stays,
+        # for after a filter or a LUT has been changed.
+        session.on_change(self._on_session)
+
+    def _on_session(self, what: str) -> None:
+        if what == "locs":
+            self.image.clear()
+            QTimer.singleShot(0, self.update_image)
 
     def _parameters(self) -> None:
         from .dialogs import ParametersDialog
