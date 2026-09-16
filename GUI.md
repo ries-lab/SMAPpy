@@ -43,8 +43,13 @@ reasoning is here so that it does not have to be re-derived.
   of view, drawn as soon as a table arrives; a click there centres the image.
   *Invert* is the complementary colour at the same brightness (red -> cyan),
   so a layer over its own inverse goes grey where the two coincide and each
-  keeps its intensity; grey is its own complement, and black on white is the
-  `gray_inverted` ramp.  A plugin section can be detached
+  keeps its intensity; grey is its own complement.  *White background* is the
+  other inversion: the brightness turned over and the hue kept, whatever the
+  LUT, so `red` runs white to red, `hot` white through red and yellow to
+  black, and `gray` is black on white.  It is a property of the picture --
+  every layer takes it and the sum is turned over once, since a white ground
+  added to a white ground swallows whatever is drawn on either.  The two
+  together are the plain photographic negative.  A plugin section can be detached
   into its own window (the arrow on its title), so several stay open.  The
   render window has a toolbar: *Save* (PNG as shown, or a TIFF re-rendered at
   a chosen pixel size, colour or float intensity, with the pixel size in the

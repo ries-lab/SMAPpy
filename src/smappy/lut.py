@@ -160,6 +160,29 @@ def complement(table: np.ndarray) -> np.ndarray:
     return np.clip(level - table, 0.0, 1.0)
 
 
+def on_white(rgb: np.ndarray) -> np.ndarray:
+    """The same colour at the opposite brightness: the picture on white paper.
+
+    Hue and saturation are kept and the HSL lightness is flipped, which works
+    out to ``c + (1 - max - min)``: chroma is unchanged by ``L -> 1 - L``, so
+    only the level moves.  Black becomes white, white becomes black, a fully
+    saturated colour (red, yellow) stays exactly itself, and a faint red spot
+    becomes a pale pink one -- ink on paper, at the same contrast.
+
+    So a ``red`` ramp runs white to red, ``hot`` runs white through red and
+    yellow to black, and a grey one is the black-on-white ramp.  Takes a LUT
+    ``(n, 3)`` or a whole image ``(ny, nx, 3)``; on an intensity image the two
+    are the same thing, and on a field-coloured one, where the colour is baked
+    into the accumulation, only the image can be turned over.
+
+    Combined with `complement` this is the plain photographic negative,
+    ``1 - c``: one flips the hue, the other the brightness.
+    """
+    rgb = np.asarray(rgb, dtype=np.float32)
+    level = rgb.max(axis=-1, keepdims=True) + rgb.min(axis=-1, keepdims=True)
+    return np.clip(rgb + (1.0 - level), 0.0, 1.0)
+
+
 def get(lut: LUT, invert: bool = False) -> np.ndarray:
     """Resolve a LUT name (or pass an array through), complemented if asked."""
     if isinstance(lut, str):

@@ -12,6 +12,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
+from smappy import lut as luts                                         # noqa: E402
 from smappy.io.formats import FileInfo                                # noqa: E402
 from smappy.locs import Localizations                                 # noqa: E402
 from smappy.session import Session                                    # noqa: E402
@@ -111,3 +112,31 @@ def test_invert_reaches_the_layer_and_the_form_reads_it_back(app):
     assert tab.invert.isChecked() and session.layers[1].get_display().invert
     tab._bind_layer(0)
     assert tab.invert.isChecked()
+
+
+def test_white_background_turns_the_picture_over_once(app):
+    """White paper is a property of the picture: every layer takes the setting,
+    and the sum is turned over once -- a white ground added to a white ground
+    would swallow everything drawn on either of them."""
+    from smappy.gui.render_tab import RenderTab
+    from smappy.gui.render_view import RenderView
+
+    session = two_files()
+    view = RenderView(session)
+    tab = RenderTab(session, view)
+    session.add_layer(like=0)
+    fov = view.current_fov(200, 160)
+
+    dark, _ = view.composite(fov)
+    assert dark[0, 0].max() < 0.05                      # the ground is black
+
+    tab.white.setChecked(True)
+    assert all(l.get_display().white_background for l in session.layers)
+    light, _ = view.composite(fov)
+    assert light[0, 0].min() > 0.95                     # ...and now white
+    assert (light.min(axis=2) < 0.6).sum() > 100        # with the ink still on it
+    # the same picture, turned over: brightness flipped, hue kept
+    assert np.allclose(light, luts.on_white(dark), atol=1e-6)
+
+    tab.white.setChecked(False)
+    assert not any(l.get_display().white_background for l in session.layers)

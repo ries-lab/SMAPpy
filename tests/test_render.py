@@ -96,6 +96,18 @@ def test_luts_are_well_formed():
         assert np.allclose(table.max(1) + table.min(1), flipped.max(1) + flipped.min(1))
     assert np.allclose(luts.get("gray", invert=True), luts.get("gray"))
     assert np.allclose(luts.complement(np.array([[1.0, 0.0, 0.0]])), [[0.0, 1.0, 1.0]])
+
+    # on white paper the hue stays and the brightness turns over: a `red` ramp
+    # runs white to red, `hot` white through red and yellow to black, and the
+    # grey one is the black-on-white ramp
+    red = luts.on_white(luts.get("red"))
+    assert np.allclose(red[0], [1, 1, 1]) and np.allclose(red[-1], [1, 0, 0])
+    hot = luts.on_white(luts.get("hot"))
+    assert hot[0].min() > 0.98 and np.allclose(hot[-1], [0, 0, 0])
+    assert np.allclose(luts.on_white(luts.get("gray")), luts.get("gray_inverted"))
+    # and the two inversions together are the plain negative
+    assert np.allclose(luts.on_white(luts.complement(luts.get("jet"))),
+                       1 - luts.get("jet"), atol=1e-6)
     # values below/above the range clamp to the first/last colour
     ends = luts.colors([-5.0, 5.0], "jet", 0.0, 1.0)
     assert np.allclose(ends, luts.get("jet")[[0, -1]])

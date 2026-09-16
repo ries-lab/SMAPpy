@@ -211,13 +211,27 @@ def normalize(image: np.ndarray, imax: Optional[float] = None,
 
 def to_rgb(rendered: RenderedImage, lut: luts.LUT = "hot", invert: bool = False,
            imax: Optional[float] = None, contrast: float = DEFAULT_CONTRAST,
-           gamma: float = 1.0, color_mode: str = "hue") -> np.ndarray:
+           gamma: float = 1.0, color_mode: str = "hue",
+           white_background: bool = False) -> np.ndarray:
     """Turn accumulated planes into a float32 ``(ny, nx, 3)`` RGB image in [0, 1].
 
     For an intensity image ``lut`` recolours the normalised weight plane.  For a
     field-coloured one the LUT was already applied per localization, and
     ``color_mode`` selects the composite (see the module docstring).
+
+    ``white_background`` turns the finished image over (`smappy.lut.on_white`):
+    the empty ground goes white and the colours keep their hue.  It is done to
+    the image rather than to the LUT so that a field-coloured render, where the
+    LUT is baked into the accumulation, is turned over as well -- and, where
+    several layers are summed, so that it can be done once to the sum instead
+    of once per layer, which would wash the picture out.
     """
+    rgb = _to_rgb(rendered, lut, invert, imax, contrast, gamma, color_mode)
+    return luts.on_white(rgb) if white_background else rgb
+
+
+def _to_rgb(rendered: RenderedImage, lut, invert, imax, contrast, gamma,
+            color_mode) -> np.ndarray:
     if rendered.color is None:
         norm, _ = normalize(rendered.weight, imax, contrast)
         if gamma != 1.0:
@@ -411,10 +425,17 @@ class DisplaySettings:
     imax: Optional[float] = None         # an absolute scale, overriding contrast
     gamma: float = 1.0
     color_mode: str = "hue"
+    # the picture on white paper, whatever the LUT.  A property of the picture
+    # rather than of one layer -- what sums several of them turns the sum over
+    # once, with `white_background=False` per layer -- but it is kept here so
+    # that a single-layer render (an export, a script) needs nothing else.
+    white_background: bool = False
 
-    def apply(self, rendered: RenderedImage) -> np.ndarray:
+    def apply(self, rendered: RenderedImage,
+              white_background: Optional[bool] = None) -> np.ndarray:
+        white = self.white_background if white_background is None else white_background
         return to_rgb(rendered, self.lut, self.invert, self.imax, self.contrast,
-                      self.gamma, self.color_mode)
+                      self.gamma, self.color_mode, white)
 
 
 def render_locs(locs: Localizations, fov: FieldOfView,

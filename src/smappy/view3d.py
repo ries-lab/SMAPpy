@@ -558,11 +558,11 @@ def render_layer_3d(locs: Localizations, select: np.ndarray, projection: Project
     settings = replace(settings, weight_field=weight)
     if projection.opacity <= 0 or projection.slices < 2 or len(table) < 2:
         rendered = render_locs(table, fov, settings, display, n_threads=n_threads)
-        return display.apply(rendered), rendered
+        return display.apply(rendered, white_background=False), rendered
     rendered = composite_slices(table, fov, settings, display, projection.opacity,
                                 max(2, projection.slices // (2 if preview else 1)), n_threads,
                                 drange)
-    return display.apply(rendered), rendered
+    return display.apply(rendered, white_background=False), rendered
 
 
 def composite_slices(table: Localizations, fov: FieldOfView, settings: RenderSettings,
@@ -767,7 +767,7 @@ def render_layer_gpu(engine, locs: Localizations, select: np.ndarray, projection
             return engine.render_planes(key, sel, fov, params, lut, invert, colored)
 
         whole = composite_depth(whole, slices, render_slice, display, projection.opacity)
-    return display.apply(whole), whole
+    return display.apply(whole, white_background=False), whole
 
 
 def render_3d(layers, projection: Projection, slab: Optional[Slab], fov: FieldOfView,
@@ -825,7 +825,12 @@ def render_3d(layers, projection: Projection, slab: Optional[Slab], fov: FieldOf
                                        n_threads=state.n_threads, index=index, budget=limit)
         rgb += image
         depths.append(depth_sample(state.locs, state.filter.mask, projection, slab, index))
-    out = np.clip(rgb, 0, 1), depth_histogram(depths)
+    rgb = np.clip(rgb, 0, 1)
+    if any(l.visible and not l.is_image and l.get_display().white_background
+           for l in layers):
+        from .lut import on_white       # once, to the sum, as the 2D view does
+        rgb = on_white(rgb)
+    out = rgb, depth_histogram(depths)
     if budget is not None:
         budget.record(drawn, time.perf_counter() - started)
     return out

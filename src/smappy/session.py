@@ -105,12 +105,16 @@ class Layer:
         else:
             self.state.display = display
 
-    def render(self, fov):
-        """RGB in [0, 1] and the intensity plane on ``fov``, whatever the kind."""
+    def render(self, fov, white_background=None):
+        """RGB in [0, 1] and the intensity plane on ``fov``, whatever the kind.
+
+        ``white_background`` overrides the display's own: what adds several
+        layers up turns the sum over once rather than every layer.
+        """
         if self.is_image:
             rendered = self.image.resample(fov)
-            return self.display.apply(rendered), rendered
-        return self.state.image(fov)
+            return self.display.apply(rendered, white_background), rendered
+        return self.state.image(fov, white_background)
 
     def bounds(self):
         """(x0, y0, x1, y1) this layer covers."""

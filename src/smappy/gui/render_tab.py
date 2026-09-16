@@ -611,10 +611,17 @@ class RenderTab(QWidget):
                                "goes grey where the two coincide.  A grey ramp is "
                                "its own complement -- for black on white pick the "
                                "gray_inverted LUT.")
+        self.white = QCheckBox("white background")
+        self.white.setToolTip("the picture on white paper, whatever the LUT: the "
+                              "brightness is turned over and the hue is kept, so "
+                              "red stays red, hot runs white through red and yellow "
+                              "to black, and grey is black on white.  A property of "
+                              "the picture, so it is set on every layer at once.")
         lut_row = QHBoxLayout()
         lut_row.setContentsMargins(0, 0, 0, 0)
         lut_row.addWidget(self.lut, 1)
         lut_row.addWidget(self.invert)
+        lut_row.addWidget(self.white)
         self.contrast = QDoubleSpinBox(minimum=0, maximum=6, singleStep=0.1, decimals=2)
         self.grouped = QCheckBox("grouped")
         self.grouped.setToolTip("one entry per blink instead of one per frame; "
@@ -652,6 +659,7 @@ class RenderTab(QWidget):
         self.color_field.currentIndexChanged.connect(self._on_color)
         self.lut.currentTextChanged.connect(self._on_display)
         self.invert.toggled.connect(self._on_display)
+        self.white.toggled.connect(self._on_white)
         self.contrast.valueChanged.connect(self._on_display)
         self.gamma.valueChanged.connect(self._on_display)
         self.grouped.toggled.connect(self._on_grouped)
@@ -708,7 +716,8 @@ class RenderTab(QWidget):
         layer = self.session.layers[index]
         self.filter.layer_index = index
         widgets = (self.mode, self.sigma, self.factor, self.color, self.color_field,
-                   self.lut, self.invert, self.contrast, self.gamma, self.grouped,
+                   self.lut, self.invert, self.white, self.contrast, self.gamma,
+                   self.grouped,
                    self.image_pixelsize, self.image_x0, self.image_y0, self.image_frame)
         for w in widgets:
             w.blockSignals(True)
@@ -728,6 +737,7 @@ class RenderTab(QWidget):
             display = layer.get_display()
             self.lut.setCurrentText(display.lut if isinstance(display.lut, str) else "gray")
             self.invert.setChecked(display.invert)
+            self.white.setChecked(display.white_background)
             self.contrast.setValue(display.contrast)
             self.gamma.setValue(display.gamma)
             for w in widgets:
@@ -748,6 +758,7 @@ class RenderTab(QWidget):
         self.factor.setValue(settings.sigma_settings.factor)
         self.lut.setCurrentText(display.lut if isinstance(display.lut, str) else "hot")
         self.invert.setChecked(display.invert)
+        self.white.setChecked(display.white_background)
         self.contrast.setValue(display.contrast)
         self.gamma.setValue(display.gamma)
         self.grouped.setChecked(layer.grouped)
@@ -809,6 +820,14 @@ class RenderTab(QWidget):
         self.color_lo.set(rng[0])
         self.color_hi.set(rng[1])
         self._on_color_range()
+
+    def _on_white(self, on: bool) -> None:
+        """White paper is a property of the picture, not of one layer: every
+        layer takes it, so the panel and the image cannot disagree."""
+        for layer in self.session.layers:
+            layer.set_display(dataclasses.replace(layer.get_display(),
+                                                  white_background=on))
+        self.session.changed("layer")
 
     def _on_display(self) -> None:
         layer = self.layer

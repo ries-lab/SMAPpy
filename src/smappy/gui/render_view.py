@@ -19,6 +19,7 @@ from PySide6.QtGui import QAction, QActionGroup, QImage
 from PySide6.QtWidgets import (QFileDialog, QGraphicsPathItem, QInputDialog, QLabel,
                                QMenu, QToolBar, QToolButton, QVBoxLayout, QWidget)
 
+from .. import lut as luts
 from ..regions import Region
 from ..render import FieldOfView
 from ..session import Session
@@ -188,12 +189,17 @@ class RenderView(QWidget):
         """
         rgb = np.zeros((fov.ny, fov.nx, 3), np.float32)
         weight = np.zeros((fov.ny, fov.nx), np.float32)
+        white = False
         for layer in self.session.layers:
             if layer.visible:
-                image, rendered = layer.render(fov)
+                white = white or layer.get_display().white_background
+                image, rendered = layer.render(fov, white_background=False)
                 rgb += image
                 weight += rendered.weight
-        return np.clip(rgb, 0, 1), weight
+        rgb = np.clip(rgb, 0, 1)
+        # once, to the sum: a white ground added to a white ground is still
+        # white and would swallow everything drawn on either of them
+        return (luts.on_white(rgb) if white else rgb), weight
 
     def current_fov(self, nx: int = None, ny: int = None) -> FieldOfView:
         rect = self.view.viewRect()

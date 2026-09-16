@@ -293,9 +293,10 @@ class ViewState:
         return render_locs(self.locs, fov, self.settings, self.display,
                            select=self.select(fov), n_threads=self.n_threads)
 
-    def image(self, fov: FieldOfView) -> Tuple[np.ndarray, RenderedImage]:
+    def image(self, fov: FieldOfView, white_background=None
+              ) -> Tuple[np.ndarray, RenderedImage]:
         rendered = self.render(fov)
-        return self.display.apply(rendered), rendered
+        return self.display.apply(rendered, white_background), rendered
 
 
 def _nice_length(span: float) -> float:
