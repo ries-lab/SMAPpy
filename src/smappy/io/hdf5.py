@@ -66,9 +66,16 @@ class LocalizationWriter:
             return
         if not self._datasets:
             self._create(locs)
-            # the table itself knows its units; keep that with the provenance
-            if locs.metadata:
-                self.set_metadata(locs.metadata)
+            # The table itself knows its units, so its metadata fills in what
+            # the caller did not give -- but only that.  What the caller passed
+            # is the *newer* of the two: the session's log has the run that
+            # just finished on it and the table's copy is the one it was
+            # loaded with, so updating over the caller here is how a file used
+            # to come back with its previous history instead of its current.
+            fill = {k: v for k, v in (locs.metadata or {}).items()
+                    if k not in self._metadata}
+            if fill:
+                self.set_metadata(fill)
         elif set(self._datasets) != set(locs.keys()):
             raise ValueError(
                 "columns changed between blocks: "

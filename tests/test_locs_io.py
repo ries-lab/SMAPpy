@@ -56,6 +56,21 @@ def test_hdf5_round_trip(tmp_path):
     assert back.metadata["units"] == "pixel"  # taken from the table itself
 
 
+def test_what_the_writer_is_given_wins_over_the_table_s_own_copy(tmp_path):
+    """The caller's metadata is the newer of the two -- the session's log has
+    the run that just finished on it, the table's copy is what it was loaded
+    with -- so the table only fills in what was not given."""
+    locs = _table()
+    locs.metadata["history"] = [{"what": "an old run"}]
+    locs.metadata["source"] = "the file"
+    path = tmp_path / "locs.h5"
+    with LocalizationWriter(path, {"history": [{"what": "the new run"}]}) as writer:
+        writer.append(locs)
+    back = load_localizations(path)
+    assert back.metadata["history"] == [{"what": "the new run"}]
+    assert back.metadata["source"] == "the file"        # nothing said otherwise
+
+
 def test_streaming_equals_one_shot(tmp_path):
     """Appending in blocks must give the same file as writing in one go."""
     locs = _table(300, seed=1)

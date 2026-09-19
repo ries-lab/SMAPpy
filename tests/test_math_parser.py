@@ -287,3 +287,33 @@ def test_choosing_from_the_history_fills_the_fields(config_dir):
         "field": "on_time_ms", "expression": "n_in_group * 20",
         "grouped": "recompute"}
     assert plugin.react("field", MathSettings(recall=label)) is None
+
+
+# ------------------------------------------------- the log the file carries
+
+def test_what_a_plugin_did_is_logged_with_its_settings_and_survives_a_save(
+        tmp_path, config_dir):
+    """Provenance: a saved table says what was done to it, and reopening it
+    continues that record rather than starting a new one."""
+    from smappy.session import Session
+
+    session = Session(table())
+    session.run(MathParser(), MathSettings(field="double", expression="photons * 2"))
+    entry = session.history[-1]
+    assert entry["what"] == "Analysis/Process/Math Parser"
+    assert entry["settings"]["expression"] == "photons * 2"
+
+    path = session.save(tmp_path / "t.h5")
+    reopened = Session()
+    reopened.load(path)
+    done = [e for e in reopened.history if e["what"] == "Analysis/Process/Math Parser"]
+    assert done and done[-1]["settings"]["field"] == "double"
+    assert reopened.history[-1]["what"] == "load"       # and the log goes on
+
+    # a second round trip keeps the first run rather than overwriting it
+    reopened.run(MathParser(), MathSettings(field="half", expression="photons / 2"))
+    again = Session()
+    again.load(reopened.save(tmp_path / "t2.h5"))
+    fields = [e["settings"]["field"] for e in again.history
+              if e["what"] == "Analysis/Process/Math Parser"]
+    assert fields == ["double", "half"]

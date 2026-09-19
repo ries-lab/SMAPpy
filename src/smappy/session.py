@@ -216,6 +216,27 @@ class Layer:
         return Selection(f.mask, layer=index, name=self.name)
 
 
+# How many log entries a file carries.  One entry is a plugin path, a line of
+# text and its settings -- a few hundred bytes -- and the whole metadata block
+# is written as a single HDF5 attribute, so the oldest are dropped rather than
+# risking a file that cannot be written.
+MAX_HISTORY = 500
+
+
+def file_history(locs: Localizations) -> List[Dict]:
+    """What the file says was done to these localizations, read tolerantly.
+
+    The log is provenance: which plugins changed the table since it was
+    loaded, and with which settings.  It is written by another version of the
+    program than the one reading it, so an entry that is not a dictionary is
+    dropped rather than being allowed to stop a file from opening.
+    """
+    found = locs.metadata.get("history") or []
+    if not isinstance(found, list):
+        return []
+    return [dict(e) for e in found if isinstance(e, dict)][-MAX_HISTORY:]
+
+
 def read_and_group(path, group_settings: GroupSettings, append: bool = False,
                    progress: Optional[Callable[[str], None]] = None,
                    group: Optional[bool] = None, reader=None, **reader_args):
@@ -316,7 +337,12 @@ class Session:
                 gc["filenumber"] = np.full(len(grouped), number, np.int32)
                 grouped = Localizations(gc, dict(grouped.metadata))
             self.set_locs(locs, undoable=False, grouped=grouped)
-            self.history.clear()
+            # the file's own log continues rather than starting again: what
+            # was done to these localizations before they were saved is the
+            # part of the record that cannot be reconstructed from anything
+            # else, and clearing it here is what used to lose it -- `save`
+            # writes this list back over the file's
+            self.history = file_history(locs)
             self.results = {}
             saved = self.locs.metadata.get("roi")
             self.set_roi(Region.from_dict(saved) if saved else None)
@@ -394,7 +420,9 @@ class Session:
         from .io.hdf5 import save_gui_state, save_localizations, save_results
         path = Path(path or self.path)
         metadata = dict(self.locs.metadata)
-        metadata["history"] = self.history
+        # all of it goes in one JSON attribute, so the log is capped rather
+        # than allowed to grow without limit over a file's life
+        metadata["history"] = self.history[-MAX_HISTORY:]
         if self.roi is not None:
             metadata["roi"] = self.roi.to_dict()
         rois = self.roi_state()

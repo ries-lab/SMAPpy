@@ -41,6 +41,7 @@ shape, so read the one closest to what you are writing:
 | loads, saves, exports, simulates | `file.py` (a plugin per format, no input table) |
 | finds, measures or summarises ROIs | `roi.py` (segment, `scope = "site"`, analyse) |
 | parts, presets, a C++ backend | `fit.py` (nested settings dataclasses) |
+| adds a derived column, no output | `math_parser.py` (an expression, kept with the table as a recipe) |
 
 A plugin is a settings dataclass plus a `run`:
 
@@ -98,7 +99,10 @@ written this way; it is also what makes the tests readable.
   filter, at `session.layers[i].state.sets["grouped"]`; it exists only once the
   user has switched that layer to grouped, and `state.grouped_stale` says it no
   longer matches the current table.  Linking costs seconds to minutes -- say
-  what is missing instead of doing it behind the user's back.
+  what is missing instead of doing it behind the user's back.  Once it has been
+  built once, `group_id` and `n_in_group` are on the *ungrouped* table too
+  (`group.attach`), so a column computed afterwards can be reduced per blink
+  with a `bincount` and no relinking.
 
 ### The result
 
@@ -110,6 +114,14 @@ and the fit preview all do this).  Never set the figure's size or its layout
 engine: on the window's *All* page a plot is handed a `SubFigure`, which has
 neither, and `size` is the hint the window reads instead.  Return the settings
 that were actually used -- that is what the history records.
+
+Every run is logged: `Session.apply` appends the plugin's path, the result's
+`text` and its settings to `session.history`, which is written into the file
+(`metadata["history"]`, capped at `MAX_HISTORY`) and read back when it is
+reopened, so a table says what was done to it and with which numbers.  That is
+why a plugin returns the settings it actually used, and why one that changes
+the table hands back a new one rather than editing `ctx.locs`: the undo and
+the record both hang off the result.
 
 The figures of one result share a window, a tab each beyond the first, and a
 tab is drawn when it is looked at and not before -- so a plugin with six
@@ -129,13 +141,21 @@ rather than something already drawn.
 | `photons`, `background` | per localization |
 | `loc_precision_nm` | lateral precision; `loc_precision_pix` in a pixel table |
 | `loc_precision_z_nm` | axial precision, when the fit produced one |
-| `n_in_group` | **on-time in frames**, only in a grouped table |
+| `n_in_group` | **on-time in frames**; grouping writes it onto both tables |
+| `group_id` | which group a localization was linked into, 1-based; on the grouped table, its own row |
 | `sigma_nm`, `sigma_y_nm`, `logl_rel` | PSF width and fit quality |
 | `filenumber`, `channel` | which file, which channel |
 
 Prefer `next((n for n in ("loc_precision_nm", "loc_precision_pix") if n in locs), None)`
 over assuming one spelling, and raise a message naming the columns the table
 *does* have when something is missing.
+
+A column defined by an **expression** is a recipe rather than data:
+`mathparse` keeps it in `metadata["derived"]`, and the recipe says what the
+field means once the localizations are grouped -- recomputed from the
+expression there, or reduced by a rule (`mean`, `sum`, `any`, ...).  It is
+`group.combine` that honours it, so a derived column is never averaged by
+accident, and it survives a save.
 
 ## Tests
 

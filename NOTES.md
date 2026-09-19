@@ -183,6 +183,47 @@ for single localizations is the wrong one for groups, and because rebuilding the
 filter caches on every switch would throw away the work.  The viewer's switch is
 then a single assignment; only the first switch pays for the linking.
 
+**Linking writes back.**  `group.attach` puts `group_id` and `n_in_group` onto
+the ungrouped table as well.  The on-time is a property of a localization --
+SMAP's `numberInGroup` is a field of the ungrouped table and its plugins filter
+on it -- and the id is the index a later `bincount` needs, which is what makes
+a column computed *after* the linking combinable without linking again.  The
+walk is the expensive half and it has already been done; keeping its answer
+costs four bytes a localization.  Not on a table that is still growing: a block
+arriving from the fitter would not carry those columns, and `extend` refuses a
+block whose columns do not match.
+
+## A computed field is a recipe
+
+`mathparse.py` and the `Math Parser` plugin let a user define a column from an
+expression in the others -- `on_time_ms = n_in_group * 20`.  What is stored is
+not only the numbers but the **expression**, in `metadata["derived"]`, and that
+is what makes the field mean the same thing on a table that is derived later.
+
+The grouped table is the case that forces the decision, and there is no single
+right answer, so the recipe carries which one was meant:
+
+* **recompute** -- evaluate the expression again on the grouped table.  This is
+  what an expression in `n_in_group` says: it is a statement about a blink, and
+  averaging a per-localization copy of it would be meaningless.
+* **a combine rule** (`mean`, `sum`, `min`, `max`, `any`, `all`) -- reduce the
+  localizations' values as grouping reduces every other column.  This is what a
+  per-localization measurement says.
+
+`group.combine` honours both: a derived column is excluded from the per-column
+rules (so nothing is silently averaged), reduced by its rule, or recomputed,
+and a field defined in `n_in_group` gets its first value from the grouping that
+creates it.  A field computed over a *selection* is not a function of the table
+at all, so its recipe is marked and never recomputed -- only reduced.
+
+The expression is parsed and walked rather than `eval`ed (`mathparse.parse`).
+It travels in a file and in a workspace, so it has to be arithmetic over
+columns and not a program; the walk also yields the names it reads, which is
+what turns a missing column into a message naming what the table does have,
+and lets the three numpy traps -- `and`/`or` on a column, `0 < x < 5`, and
+`a < 25 & b > 100`, whose precedence MATLAB has the other way round -- be
+errors rather than plausible wrong numbers.
+
 ## Conventions
 
 Fixed once, in `io/calibration.py`, so nothing downstream deals with MATLAB's
@@ -984,6 +1025,22 @@ is bounded by the object header, about 64 kB in practice, and a per-frame
 drift curve passes that on any real acquisition.  What is kept is the estimate
 and not the run -- the curve, the settings, the counts -- because the
 localizations it was made from are in the same file.
+
+Separate from the figures, and for every plugin rather than the few that keep
+one, is the **log**: `Session.apply` appends the plugin's path, the line it
+reported and the settings it actually used to `session.history`, which is
+written into the file's metadata and read back when the file is reopened
+(`session.file_history`), so the record continues across sessions instead of
+starting again at each load.  It is capped at `MAX_HISTORY` entries, since all
+of the metadata goes in that one bounded attribute.
+
+Two things had to be fixed for that record to be true.  Opening a file cleared
+the session's log, and saving then wrote the cleared one back over the file's
+-- so the provenance went no further back than the current session.  And the
+HDF5 writer merged the *table's* metadata over what the caller passed, which
+meant the log that was saved was the one the table had been loaded with rather
+than the one with the run that had just finished in it.  The caller's copy is
+the newer of the two; the table's now fills in only what was not given.
 
 ## What is still current, per step
 
