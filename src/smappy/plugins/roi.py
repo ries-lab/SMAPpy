@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional, Sequence
 
 import numpy as np
 
-from . import Context, Plugin, Result, param, register
+from . import Context, Plot, Plugin, Result, param, register
 
 MAX_FINDER_PIXELS = 16_000_000
 
@@ -242,24 +242,19 @@ class Histograms(Plugin):
             if d["missing"]:
                 ax.set_title(f"{d['missing']} missing", fontsize=8, color="0.4")
 
-        def plot(ax) -> None:
+        def plot(figure) -> None:
             """A grid, one histogram per column.
 
-            `Result.plot` is handed a single axis, which is right for a plugin
-            with one figure to draw.  There are as many histograms here as
-            there are columns, so the axis is given back and the figure it
-            belongs to is filled instead -- the caller still gets one window.
+            As many panels as there are columns, which is why this declares
+            them and is handed the figure: a single axis is right for a plugin
+            with one thing to draw and this has as many as the site table has
+            columns.
             """
-            if len(data) == 1:
-                field, d = next(iter(data.items()))
-                one(ax, field, d)
-                return
-            figure = ax.get_figure()
-            figure.delaxes(ax)
-            figure.set_size_inches(5, max(2.2 * len(data), 2.2))
-            for n, (field, d) in enumerate(data.items(), 1):
-                one(figure.add_subplot(len(data), 1, n), field, d)
-            figure.set_layout_engine("constrained")
+            for axis, (field, d) in zip(figure.subplots(len(data), 1, squeeze=False)
+                                        .ravel(), data.items()):
+                one(axis, field, d)
 
-        return Result(text=f"{len(rows)} ROIs, {len(data)} columns", plot=plot,
+        return Result(text=f"{len(rows)} ROIs, {len(data)} columns",
+                      plot=Plot(draw=plot, panels=len(data),
+                                size=(5, max(2.2 * len(data), 2.2))),
                       data={"histograms": data, "rows": rows}, settings=settings)

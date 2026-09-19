@@ -56,9 +56,10 @@ def test_a_preview_detects_and_fits_one_frame_and_changes_nothing(stack):
     assert "4 fitted" in result.text
     assert result.locs is None and not result.files     # nothing to apply
     assert len(session.locs) == 0
-    figure, ax = plt.subplots()
-    result.plot(ax)
-    assert len(figure.axes) >= 2
+    figure = plt.figure()
+    result.plot.draw_into(figure)                     # three panels, declared
+    assert result.plot.panels == 3            # the three, plus a colour bar
+    assert len(figure.axes) == 4
     plt.close(figure)
 
 
@@ -76,8 +77,8 @@ def test_without_a_calibration_the_detections_are_still_drawn(stack):
     assert result.data["locs"] is None
     assert "calibration" in result.data["error"]
     assert "not fitted" in result.text
-    figure, ax = plt.subplots()
-    result.plot(ax)                                   # draws, with the warning
+    figure = plt.figure()
+    result.plot.draw_into(figure)                     # draws, with the warning
     assert figure._suptitle.get_text().startswith("detection only")
     plt.close(figure)
 

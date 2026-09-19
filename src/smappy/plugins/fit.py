@@ -27,7 +27,7 @@ from ..locs import Localizations
 from ..metadata import CameraMetadata
 from ..pipeline import FitSettings, fit_stack, provenance
 from ..psf import GaussianPSF, SplinePSF
-from . import Context, ParamInfo, Plugin, Result, param, register
+from . import Context, ParamInfo, Plot, Plugin, Result, param, register
 
 TIFF_FILTER = "Image stacks (*.tif *.tiff *.ome.tif);;All files (*)"
 
@@ -353,7 +353,7 @@ class _FitPlugin(Plugin):
             fitted = (np.asarray(locs[names[0]])/scale-offset[0],
                       np.asarray(locs[names[1]])/scale-offset[1])
 
-        def plot(ax) -> None:
+        def plot(figure) -> None:
             """Detection on the left, the fit on the right.
 
             Every peak the finder found, and for two channels the secondary
@@ -362,10 +362,6 @@ class _FitPlugin(Plugin):
             a two-channel fit is one position per emitter, in the reference
             channel, however many halves the peaks were found on.
             """
-            figure = ax.figure
-            ax.remove()
-            figure.set_size_inches(15, 6)
-            figure.set_layout_engine("constrained")
             peaks, filtered_ax, fits = figure.subplots(1, 3, sharex=True, sharey=True)
             shown = np.percentile(photons, 99.8) or None
 
@@ -405,7 +401,8 @@ class _FitPlugin(Plugin):
                 figure.suptitle("detection only -- " + trouble, fontsize=8,
                                 color="#a05000")
 
-        return Result(text=text, plot=plot, settings=settings,
+        return Result(text=text, settings=settings,
+                      plot=Plot(draw=plot, panels=3, size=(15, 6)),
                       data={"frame": index, "candidates": len(candidates),
                             "cutoff": cutoff, "locs": locs, "error": trouble})
 
