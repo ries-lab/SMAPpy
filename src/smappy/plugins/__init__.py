@@ -33,7 +33,10 @@ class ParamInfo:
     choices: Optional[Sequence] = None   # values, or (value, label) pairs; may be a callable
     advanced: bool = False      # hidden behind "more" unless the plugin lists it
     hidden: bool = False        # scripting only
-    kind: Optional[str] = None  # "open_file", "save_file", "dir": a path with a browse button
+    # "open_file", "save_file", "dir": a path with a browse button.
+    # "text": a line that is given the width of the form, for something
+    # written rather than dialled -- an expression, a list of names
+    kind: Optional[str] = None
     file_filter: str = ""       # a Qt-style name filter for those, "TIFF (*.tif)"
 
 

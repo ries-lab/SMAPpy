@@ -278,6 +278,9 @@ class PluginPanel(QWidget):
         self.output.appendPlainText(result.text)
         self._progress_lines = 0
         self.status.setText("done")
+        # a run may have added to a list the form offers -- the expressions
+        # the math parser has been given, say
+        self.form.refresh()
         for button in self._buttons():
             button.setEnabled(True)
         self.plot_button.setEnabled(bool(result.figures()))

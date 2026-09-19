@@ -8,6 +8,7 @@ COMET = "Analysis/Drift/COMET"
 RCC = "Analysis/Drift/RCC"
 COLORS = "Analysis/Dual-Color/AssignColors"
 STATS = "Analysis/Measure/Localization Statistics"
+MATH = "Analysis/Process/Math Parser"
 
 
 # ---------------------------------------------------------------- the model
@@ -43,7 +44,7 @@ def test_the_default_workspace_is_seeded_from_what_is_installed():
     assert [t.name for t in ws.tabs] == ["File", "Localize", "Render", "Analysis", "ROI"]
     analysis = next(t for t in ws.tabs if t.name == "Analysis")
     assert sorted(i.plugin for i in analysis.instances) == [
-        COMET, RCC, COLORS, STATS]
+        COMET, RCC, COLORS, STATS, MATH]
     assert next(t for t in ws.tabs if t.name == "Render").kind == "render"
     # a tab the *user* adds starts empty; only the shipped ones are seeded
     assert Tab(name="Mine").instances == []
@@ -72,7 +73,7 @@ def test_a_round_trip_keeps_order_labels_and_values(tmp_path):
     tab = next(t for t in back.tabs if t.name == "Analysis")
     assert [i.title() for i in tab.instances] == [
         "COMET (coarse)", "RCC", "AssignColors", "Localization Statistics",
-        "COMET (coarse)"]
+        "Math Parser", "COMET (coarse)"]
     assert tab.instances[0].values == {"segmentation_var": 12}
     assert back.layout["active_tab"] == "Analysis"
 
@@ -117,7 +118,7 @@ def test_pruning_reports_what_it_dropped():
     tab.instances.append(Instance(plugin="Gone/Away"))
     gone = ws.prune(list(plugins.refs()))
     assert gone == ["Gone/Away"]
-    assert [i.plugin for i in tab.instances] == [COMET, RCC, COLORS, STATS]
+    assert [i.plugin for i in tab.instances] == [COMET, RCC, COLORS, STATS, MATH]
 
 
 # ------------------------------------------------------------------ the GUI

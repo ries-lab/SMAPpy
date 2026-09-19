@@ -239,7 +239,8 @@ def test_refs_and_tree_do_not_import_but_available_does():
     assert set(plugins.refs("Analysis/")) == {
         "Analysis/Drift/COMET", "Analysis/Drift/RCC",
         "Analysis/Dual-Color/AssignColors",
-        "Analysis/Measure/Localization Statistics"}
+        "Analysis/Measure/Localization Statistics",
+        "Analysis/Process/Math Parser"}
     assert isinstance(plugins.tree()["Analysis"]["Drift"]["COMET"], PluginRef)
     classes = plugins.available("Analysis/")
     assert classes["Analysis/Drift/COMET"] is plugins.get("Analysis/Drift/COMET")

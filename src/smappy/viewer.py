@@ -237,7 +237,14 @@ class ViewState:
                 grouped = other.locs
                 self.sets["grouped"] = LocSet(grouped, share=other)
             else:
-                grouped, _ = group(self.sets["ungrouped"].locs, settings)
+                # `group` writes `group_id` and `n_in_group` back onto the
+                # ungrouped table (see `group.attach`) -- but not while the
+                # table is still growing: a block arriving from the fitter
+                # would not carry those columns and `extend` refuses a table
+                # whose columns do not match.
+                table = self.sets["ungrouped"].locs
+                live = isinstance(self.sets["ungrouped"].index, GrowingIndex)
+                grouped, _ = group(table, settings, attach_columns=not live)
                 self.sets["grouped"] = LocSet(grouped)
             if keep is not None:      # a rebuild: the bounds the user set stand
                 for field, (lo, hi) in keep.filter.ranges.items():

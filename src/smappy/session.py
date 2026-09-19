@@ -13,7 +13,7 @@ import numpy as np
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from .filter import LocFilter
-from .group import GroupSettings
+from .group import GROUP_COLUMNS, GroupSettings
 from .images import ImageData, load_image
 from .locs import Localizations, concat
 from .plugins import Context, Plugin, Result, Selection
@@ -325,6 +325,12 @@ class Session:
         else:
             merged = concat([self.locs, locs])
             merged.metadata = dict(self.locs.metadata)
+            # the linking of the first file says nothing about the merged
+            # table, so its group columns go rather than being carried over
+            # as a plausible-looking wrong answer; the next grouping writes
+            # them again (`group.attach`)
+            for column in GROUP_COLUMNS:
+                merged.columns.pop(column, None)
             self.set_locs(merged, undoable=True, keep_layers=True)
         self.locs.metadata["files"] = [f.to_dict() for f in self.files]
         self.log("load", str(info.path), append=append)

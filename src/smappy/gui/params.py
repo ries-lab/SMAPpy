@@ -9,6 +9,7 @@ import dataclasses
 from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QFontDatabase
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFormLayout,
                                QHBoxLayout, QLabel, QLineEdit, QSpinBox,
                                QToolButton, QVBoxLayout, QWidget)
@@ -42,14 +43,16 @@ class _Field(QWidget):
         if choices is not None:
             self.widget = QComboBox()
             self._values = []
-            choices = list(choices)
-            if spec.optional:
-                choices.insert(0, (None, "auto"))
-            for choice in choices:
-                value, label = choice if isinstance(choice, tuple) else (choice, str(choice))
-                self.widget.addItem(label, value)
-                self._values.append(value)
+            self._fill(choices)
             self.widget.currentIndexChanged.connect(self.changed)
+        elif info.kind == "text":
+            # as wide as the form gives it, and monospaced: this is for
+            # something read back character by character -- an expression --
+            # where the 80 px a number gets would show a fifth of it
+            self.widget = QLineEdit()
+            self.widget.setFont(QFontDatabase.systemFont(QFontDatabase.FixedFont))
+            self.widget.editingFinished.connect(self.changed)
+            row.addWidget(self.widget, 1)
         elif info.kind in ("open_file", "save_file", "dir"):
             self.widget = QLineEdit()
             self.widget.editingFinished.connect(self.changed)
@@ -76,7 +79,7 @@ class _Field(QWidget):
             self.widget = QLineEdit()
             self.widget.setMaximumWidth(80)
             self.widget.editingFinished.connect(self.changed)
-        if info.kind not in ("open_file", "save_file", "dir"):
+        if info.kind not in ("open_file", "save_file", "dir", "text"):
             row.addWidget(self.widget)
         if spec.optional and choices is None and spec.type is not bool:
             self.auto = QCheckBox("auto")
@@ -84,7 +87,7 @@ class _Field(QWidget):
             row.addWidget(self.auto)
         if info.unit:
             row.addWidget(QLabel(info.unit))
-        if info.kind not in ("open_file", "save_file", "dir"):
+        if info.kind not in ("open_file", "save_file", "dir", "text"):
             row.addStretch(1)
         if info.help:
             self.setToolTip(info.help)
@@ -92,6 +95,37 @@ class _Field(QWidget):
             if isinstance(box, QCheckBox):
                 box.setMinimumWidth(box.sizeHint().width() + 12)
         self.set(spec.default)
+
+    def _fill(self, choices) -> None:
+        """Put ``choices`` in the box.  Used to build it and to refresh it."""
+        self.widget.clear()
+        self._values = []
+        choices = list(choices)
+        if self.spec.optional:
+            choices.insert(0, (None, "auto"))
+        for choice in choices:
+            value, label = choice if isinstance(choice, tuple) else (choice, str(choice))
+            self.widget.addItem(label, value)
+            self._values.append(value)
+
+    def refresh(self) -> None:
+        """Re-read choices that are computed rather than fixed.
+
+        A panel is built once and lives as long as the session, so a list that
+        the plugin works out -- the expressions used before, the files that are
+        open -- would otherwise be the list as it was when the section was
+        first opened.  What is selected survives if it is still there.
+        """
+        choices = self.spec.info.choices
+        if not callable(choices) or not isinstance(self.widget, QComboBox):
+            return
+        current = self.value()
+        blocked = self.widget.blockSignals(True)
+        try:
+            self._fill(choices())
+            self.set(current)
+        finally:
+            self.widget.blockSignals(blocked)
 
     def _on_auto(self, on: bool) -> None:
         self.widget.setEnabled(not on)
@@ -244,6 +278,11 @@ class SettingsForm(QWidget):
     def set(self, settings) -> None:
         for name, f in self.fields.items():
             f.set(getattr(settings, name))
+
+    def refresh(self) -> None:
+        """Re-read every field whose choices are computed.  See `_Field.refresh`."""
+        for f in self.fields.values():
+            f.refresh()
 
     def values(self) -> Dict[str, Any]:
         """Every field by dotted name, for saving.

@@ -76,6 +76,8 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 from .locs import Localizations
+from .mathparse import (COMBINE_RULES, RECOMPUTE, apply_recipes,
+                        derived_names, recipes)
 
 # ``progress(text, fraction)``: what stage this is in, and how far through the
 # table it is.  Both are advisory -- the fraction is coarse and the text is for
@@ -110,6 +112,14 @@ COMBINE_MODES: Dict[str, str] = {
 
 # Columns that have no meaningful group value; see the module docstring.
 DROP_ON_GROUPING = ("logl",)
+
+# Columns grouping itself writes, on both tables.  `n_in_group` is the on-time
+# in frames and `group_id` says which group a localization went into -- 1-based,
+# as `connect` numbers them, and on the grouped table simply its own row.
+# Keeping the id on the *ungrouped* table is what makes a column computed later
+# combinable without linking again: the expensive part of grouping is the walk,
+# and it has already been done.  It costs 4 bytes a localization.
+GROUP_COLUMNS = ("group_id", "n_in_group")
 
 # The precision columns the general weight is taken from, best first (SMAP's
 # order).  It is a lateral precision, so it is the right weight for x and y.
@@ -389,8 +399,16 @@ def combine(locs: Localizations, group_index: np.ndarray,
     sums: Dict[str, np.ndarray] = {}
     n_in_group = np.bincount(gi, minlength=size)[1:]
 
-    names = list(fields) if fields is not None else \
-        [n for n in locs.keys() if n not in DROP_ON_GROUPING]
+    # A derived column does not follow the per-column rules: its recipe says
+    # what it means on a grouped table -- recomputed from the expression, or
+    # reduced by the rule the user chose.  Both are done below, after the
+    # measured columns.
+    derived = recipes(locs) if fields is None else []
+    if fields is not None:
+        names = list(fields)
+    else:
+        skip = set(DROP_ON_GROUPING) | set(GROUP_COLUMNS) | derived_names(locs)
+        names = [n for n in locs.keys() if n not in skip]
 
     # Group order, built once and read by every column.  `connect` numbers
     # groups densely, so `starts` has one entry per group plus the end.
@@ -481,10 +499,36 @@ def combine(locs: Localizations, group_index: np.ndarray,
             columns[name] = columns[name].astype(np.int64 if name == "frame"
                                                  else np.int32)
     columns["n_in_group"] = n_in_group.astype(np.int32)
+    # the same ids as the ungrouped table's `group_id`, so a row can be found
+    # from a localization and the other way round
+    columns["group_id"] = np.arange(1, size, dtype=np.int32)
+
+    # the derived fields that are *reduced*: one more pass of the same shape,
+    # using the accumulators above rather than a second implementation
+    for recipe in derived:
+        rule = recipe["grouped"]
+        if rule not in COMBINE_RULES or recipe["field"] not in locs:
+            continue                       # recomputed, or left off, below
+        values = locs[recipe["field"]]
+        if rule == "mean":
+            reduced = accumulate(values, ACCUMULATE["sum"]) / n_in_group
+        elif rule in ("any", "all"):
+            extreme = accumulate(values, ACCUMULATE["max" if rule == "any" else "min"])
+            reduced = (extreme != 0).astype(np.float32)
+        else:
+            reduced = accumulate(values, ACCUMULATE[rule])
+        columns[recipe["field"]] = np.asarray(reduced, np.float32)
 
     metadata = dict(locs.metadata)
     metadata["grouped"] = True
-    return Localizations(columns, metadata)
+    grouped = Localizations(columns, metadata)
+    # recomputed here: the ones whose recipe says so, and the ones there was
+    # nothing to reduce -- a field defined in `n_in_group` has no ungrouped
+    # column until the first grouping, which is this one
+    apply_recipes(grouped, only=[r["field"] for r in derived
+                                 if r["grouped"] == RECOMPUTE
+                                 or r["field"] not in locs])
+    return grouped
 
 
 @dataclass(frozen=True)
@@ -505,13 +549,40 @@ class GroupSettings:
     link_chunks: int = 8
 
 
+def attach(locs: Localizations, grouped: Localizations,
+           group_index: np.ndarray) -> None:
+    """Write the group id and the on-time back onto the ungrouped table.
+
+    Grouping is the only thing that knows which localizations belong together,
+    and that answer is as much a property of a localization as its photon
+    count: SMAP's ``numberInGroup`` is a field of the ungrouped table and its
+    plugins filter on it.  Writing it back here is also what lets a field
+    computed afterwards be combined without linking again -- `group_id` is the
+    index a `np.bincount` needs -- and what makes an expression in
+    ``n_in_group`` mean something on both tables.
+
+    Columns are added in place: nothing downstream is derived from *which*
+    columns a table has (the filter keeps the bounds it was given, the index is
+    built from x and y), so a new column costs nothing to add and a new table
+    would cost every layer its state.
+    """
+    gi = np.asarray(group_index, np.int64)
+    locs.columns["group_id"] = gi.astype(np.int32)
+    locs.columns["n_in_group"] = np.asarray(grouped["n_in_group"])[gi - 1]
+    # a recipe in `n_in_group` can only now be computed -- see `mathparse`
+    apply_recipes(locs)
+
+
 def group(locs: Localizations, settings: Optional[GroupSettings] = None,
-          progress: Optional[Progress] = None
+          progress: Optional[Progress] = None, attach_columns: bool = True
           ) -> Tuple[Localizations, np.ndarray]:
     """Group a table.  Returns the grouped table and the per-input group id.
 
     The ids are **1-based**, as `connect` produces them, so the row of the
     grouped table a localization ended up in is ``group_index - 1``.
+
+    ``attach_columns`` writes `group_id` and `n_in_group` onto ``locs`` itself;
+    see `attach` for why that is the default rather than a courtesy.
 
     ``progress(text, fraction)`` reports the two stages; it is what the GUI
     puts in its status bar while this runs off the main thread.
@@ -534,4 +605,7 @@ def group(locs: Localizations, settings: Optional[GroupSettings] = None,
     else:
         group_index = connect(x, y, locs["frame"], settings.dx, settings.dt, blocks,
                               z=z, dz=settings.dz, progress=progress)
-    return combine(locs, group_index, progress=progress), group_index
+    grouped = combine(locs, group_index, progress=progress)
+    if attach_columns:
+        attach(locs, grouped, group_index)
+    return grouped, group_index
