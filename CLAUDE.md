@@ -5,7 +5,9 @@ localization table -> analysis, with a Qt GUI over the same functions.  Read
 `NOTES.md` for the decisions behind the fitting pipeline and
 `docs/plugin-architecture.md` for why the plugin system is shaped as it is.
 This file is the practical part: what a session needs before it can write a
-plugin, and the traps that cost time.
+plugin, and the traps that cost time.  It is a summary written at one moment
+and the code moves, so treat it as a starting point, not as authority -- and
+see "Keeping this file true" at the end.
 
 ## Getting the checkout to run
 
@@ -191,3 +193,23 @@ or American spelling, whichever the file already uses.
 
 Keep changes minimal and finish them: a new plugin means the module, its tests,
 and any exhaustive test that now needs a line.
+
+## Keeping this file true
+
+A stale instruction here is worse than none: it is confidently wrong, and a
+session will follow it instead of reading the code.  So, while you work:
+
+* **Check what you use.**  When this file tells you something you are about to
+  rely on -- a column name, a signature, which test enumerates what -- confirm
+  it in the code as you go.  The code wins, always.
+* **If it disagrees with the code, stop and ask.**  Say which line is wrong and
+  what you found instead, and let the user decide whether the file or the code
+  is the thing to change.  Do not quietly work around it, and do not assume the
+  file is describing an intention that the code has drifted from -- it may be
+  the code that is the mistake.
+* **If your own change makes a line here wrong, say so.**  Adding a plugin
+  shape, moving the grouped table, renaming a column or changing how the tests
+  enumerate plugins all land in this file.  Propose the edit -- quote the old
+  line and the new one -- and ask before making it, in the same message as the
+  work it belongs to.  Keeping this file current is part of finishing the
+  change, not a separate chore, but it is the user's file and their call.
