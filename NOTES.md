@@ -1026,13 +1026,34 @@ drift curve passes that on any real acquisition.  What is kept is the estimate
 and not the run -- the curve, the settings, the counts -- because the
 localizations it was made from are in the same file.
 
-Separate from the figures, and for every plugin rather than the few that keep
-one, is the **log**: `Session.apply` appends the plugin's path, the line it
-reported and the settings it actually used to `session.history`, which is
-written into the file's metadata and read back when the file is reopened
-(`session.file_history`), so the record continues across sessions instead of
-starting again at each load.  It is capped at `MAX_HISTORY` entries, since all
-of the metadata goes in that one bounded attribute.
+Separate from the figures is the **log**: `Session.apply` appends the plugin's
+path, the line it reported and the settings it actually used to
+`session.history`, which is written into the file's metadata and read back
+when the file is reopened (`session.file_history`), so the record continues
+across sessions instead of starting again at each load.  It is capped at
+`MAX_HISTORY` entries, since all of the metadata goes in that one bounded
+attribute.
+
+What belongs in it is **what cannot be worked out again from the file in front
+of you**.  A correction moved every localization and the file no longer says
+by how much, so it is logged, with its settings; a measurement can be repeated
+from the same data, so logging it would record only that somebody looked --
+and on a plugin that prints the log, it would store a copy of the log inside
+the log on every run.  So the default is to log a run that changed the
+localizations and nothing else (`Plugin.logged` overrides it: `True` for a run
+that changes something the log cannot see, such as writing a file or exporting
+a picture).  What a measurement worked out is not lost by this: it goes with
+its result, and the session keeps the settings beside it, which for a
+measurement is the only record there is.
+
+`Analysis/Process/History` is where it is read: the log on screen, optionally
+only the entries that changed the localizations, and an export (`.csv` for a
+spreadsheet, `.yaml`/`.json` to keep the settings as values) because the
+record is most useful outside the program -- in a methods section or in an
+issue about a file that looks wrong.  Reading the log is not an event in it
+(`Plugin.logged`); otherwise every look would store a copy of the whole log
+inside it.  Relinking is, since which `dx` and `dt` produced the grouped table
+cannot be recovered from the file afterwards.
 
 Two things had to be fixed for that record to be true.  Opening a file cleared
 the session's log, and saving then wrote the cleared one back over the file's

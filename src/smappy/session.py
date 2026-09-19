@@ -382,7 +382,7 @@ class Session:
             if not layer.is_image and layer.files is not None:
                 layer.files = [n - 1 if n > number else n for n in layer.files if n != number]
         self.set_locs(locs, undoable=True, keep_layers=True)
-        self.log("remove file", removed.name)
+        self.log("remove file", removed.name, changed=True)
 
     # -------------------------------------------------------------- images
     def add_image(self, image: ImageData, name: Optional[str] = None) -> Layer:
@@ -477,7 +477,12 @@ class Session:
         return layer.group_settings if layer is not None else DEFAULT_GROUP_SETTINGS
 
     def set_group_settings(self, settings: GroupSettings) -> None:
-        """New linking parameters: every grouped table is rebuilt (once, shared)."""
+        """New linking parameters: every grouped table is rebuilt (once, shared).
+
+        Logged like a plugin run: the grouped table is data the user reads
+        numbers off, and which `dx` and `dt` produced it is not recoverable
+        from the file afterwards.
+        """
         first = None
         for layer in self.layers:
             if layer.is_image:
@@ -494,6 +499,9 @@ class Session:
                 if layer.files is not None:
                     layer.set_files(layer.files)
             first = first or layer
+        self.log("regroup", f"dx = {settings.dx:g}, dt = {settings.dt}"
+                 + (f", dz = {settings.dz:g}" if settings.dz else ""),
+                 settings=asdict(settings), changed=True)
         self.changed("regrouped")
 
     def _locs_layer(self) -> Optional[Layer]:
@@ -585,7 +593,7 @@ class Session:
                 first = first or layer
             self.files = [FileInfo(**{k: v for k, v in f.items() if k != "n"})
                           for f in self.locs.metadata.get("files", [])] or self.files
-            self.log("undo")
+            self.log("undo", changed=True)
             self.changed("locs")
 
     # -------------------------------------------------------- ROI manager
@@ -714,8 +722,15 @@ class Session:
 
     def apply(self, plugin: Plugin, result: Result) -> None:
         settings = result.settings
-        self.log(plugin.path, result.text,
-                 settings=asdict(settings) if is_dataclass(settings) else settings)
+        # The log is the provenance of the localizations, so what goes in it
+        # is what changed them -- a measurement can be repeated from the file
+        # and would only record that somebody looked.  `Plugin.logged`
+        # overrides the rule either way; see it for when that is right.
+        changed = result.locs is not None or bool(result.files)
+        if plugin.logged if plugin.logged is not None else changed:
+            self.log(plugin.path, result.text,
+                     settings=asdict(settings) if is_dataclass(settings) else settings,
+                     changed=changed)
         for n, (locs, info, grouped) in enumerate(result.files or ()):
             # the first replaces unless the plugin asked to append; the rest
             # always join, or opening three files would keep only the last
@@ -743,9 +758,14 @@ class Session:
             return
         if not saved:
             return
+        # the settings go with it: a figure a week later has to say what it
+        # was made with, and for a measurement this is the only record there
+        # is -- its run is not in the log, on purpose (see `apply`)
         self.results[plugin.path] = {
             "time": datetime.now().isoformat(timespec="seconds"),
-            "text": result.text, "data": saved}
+            "text": result.text, "data": saved,
+            "settings": (asdict(result.settings) if is_dataclass(result.settings)
+                         else result.settings)}
         self.changed("results")
 
     def restore_result(self, plugin: Plugin) -> Optional[Result]:

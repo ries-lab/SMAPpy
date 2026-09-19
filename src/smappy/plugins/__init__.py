@@ -383,6 +383,18 @@ class Plugin:
     # what the Preview button's tooltip says, when the generic sentence is
     # not enough; empty means the generic one
     preview_help: str = ""
+    # Whether a run of this plugin goes into the session's log.  `None` -- the
+    # default -- means *if it changed something*: the log is the provenance of
+    # the localizations, and what it has to carry is what cannot be worked out
+    # again from the file in front of you.  A measurement can always be
+    # repeated, so logging it records only that somebody looked; a correction
+    # cannot, so it must be recorded, with the numbers it used.  What a
+    # measurement is worth keeping goes with its *result* instead
+    # (`Plugin.keep`, whose settings the session stores beside it).
+    #
+    # True says log it anyway, for a run that changes something the log cannot
+    # see -- writing a file, exporting a picture.  False says never.
+    logged: Optional[bool] = None
 
     def __init_subclass__(cls, **kwargs):
         """Catch a plugin written against the old signature with a real error.

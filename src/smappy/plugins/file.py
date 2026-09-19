@@ -144,6 +144,7 @@ class Save(Plugin):
     """Write the current table, its history and its ROIs."""
 
     Settings = SaveSettings
+    logged = True          # where a file went is not visible in the file
 
     def run(self, ctx: Context, settings: SaveSettings) -> Result:
         if ctx.session is None:
@@ -172,6 +173,7 @@ class ExportImage(Plugin):
     """Render the localizations to a picture file, with no window."""
 
     Settings = ExportImageSettings
+    logged = True          # which picture came from this table, and how
 
     def run(self, ctx: Context, settings: ExportImageSettings) -> Result:
         from ..render import save_image

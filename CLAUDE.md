@@ -42,6 +42,7 @@ shape, so read the one closest to what you are writing:
 | finds, measures or summarises ROIs | `roi.py` (segment, `scope = "site"`, analyse) |
 | parts, presets, a C++ backend | `fit.py` (nested settings dataclasses) |
 | adds a derived column, no output | `math_parser.py` (an expression, kept with the table as a recipe) |
+| reads the session and reports | `history.py` (the log, with an optional export) |
 
 A plugin is a settings dataclass plus a `run`:
 
@@ -115,13 +116,22 @@ engine: on the window's *All* page a plot is handed a `SubFigure`, which has
 neither, and `size` is the hint the window reads instead.  Return the settings
 that were actually used -- that is what the history records.
 
-Every run is logged: `Session.apply` appends the plugin's path, the result's
-`text` and its settings to `session.history`, which is written into the file
-(`metadata["history"]`, capped at `MAX_HISTORY`) and read back when it is
-reopened, so a table says what was done to it and with which numbers.  That is
-why a plugin returns the settings it actually used, and why one that changes
-the table hands back a new one rather than editing `ctx.locs`: the undo and
-the record both hang off the result.
+A run that **changes** the localizations is logged: `Session.apply` appends
+the plugin's path, the result's `text` and its settings to `session.history`,
+which is written into the file (`metadata["history"]`, capped at
+`MAX_HISTORY`) and read back when it is reopened, so a table says what was
+done to it and with which numbers.  A run that only measures is not: it can
+be repeated from the file, and logging it would record only that somebody
+looked.  What a measurement worked out goes with its *result* instead --
+`Plugin.keep`, and the session stores the settings beside it, which for a
+measurement is the only record there is.  `Plugin.logged` overrides the rule
+(`True` for a run that changes something the log cannot see, such as writing
+a file; `False` for never), and `Analysis/Process/History` shows the log and
+exports it.
+
+That is why a plugin returns the settings it actually used, and why one that
+changes the table hands back a new one rather than editing `ctx.locs`: the
+undo and the record both hang off the result.
 
 The figures of one result share a window, a tab each beyond the first, and a
 tab is drawn when it is looked at and not before -- so a plugin with six
