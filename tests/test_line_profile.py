@@ -215,7 +215,8 @@ def test_the_bin_width_for_the_picture_stays_between_two_and_two_hundred_bins():
 def test_the_plugin_reports_every_model_and_draws_what_it_fitted():
     locs = simulate(1500, 0.0, precision=8.0, sigma=14.0, seed=17)
     result = LineProfile().run(context(locs), LineProfileSettings(model="all"))
-    assert set(result.data["fits"]) == {"gauss", "two_gauss", "step"}
+    assert set(result.data["fits"]) == {"gauss", "two_gauss", "step",
+                                       "disk", "ring"}
     assert "best by AIC: Gaussian" in result.text
     assert result.data["values"]["gauss"]["sigma"] == pytest.approx(14.0, abs=2.0)
 
@@ -242,3 +243,138 @@ def _figure():
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     return plt.figure()
+
+
+# ------------------------------------------------------- starting values
+
+def test_the_peak_is_read_off_the_profile_and_not_off_the_median():
+    """A peak sitting on a background: the median follows the background."""
+    rng = np.random.default_rng(20)
+    window = (-100.0, 100.0)
+    peak = rng.normal(30.0, 8.0, 1500)
+    background = rng.uniform(-100.0, 0.0, 1500)      # all on the other side
+    values = np.concatenate([peak, background])
+    from smappy.plugins.line_profile import peak_position
+    assert peak_position(values, window) == pytest.approx(30.0, abs=4.0)
+    assert abs(np.median(values) - 30.0) > 20.0
+
+
+def test_the_half_maximum_span_gives_the_width_the_eye_reads():
+    from smappy.plugins.line_profile import half_max_span
+    values = np.random.default_rng(21).normal(0.0, 20.0, 4000)
+    low, high = half_max_span(values, (-100.0, 100.0))
+    assert (high - low) / 2.355 == pytest.approx(20.0, abs=3.0)
+
+
+def test_the_edge_start_survives_an_empty_margin_and_a_blob_beyond_it():
+    """Both are ordinary: a ROI is wider than the structure, and something
+    bright often sits further along it."""
+    from smappy.plugins.line_profile import edge_position
+    rng = np.random.default_rng(22)
+    window = (-100.0, 100.0)
+    labelled = rng.uniform(-90.0, 10.0, 2000)        # the edge is at +10
+    blob = rng.normal(70.0, 5.0, 300)
+    values = np.concatenate([labelled, blob])
+    assert edge_position(values, window, side=-1.0) == pytest.approx(10.0, abs=6.0)
+    rising = rng.uniform(-20.0, 95.0, 1500)
+    assert edge_position(rising, window, side=1.0) == pytest.approx(-20.0, abs=6.0)
+
+
+def test_em_finds_two_components_that_overlap_and_a_gradient_start_would_miss():
+    """The distance is what people come for and what a bad start loses."""
+    from smappy.plugins.line_profile import em_two_gaussians
+    rng = np.random.default_rng(23)
+    n, window = 3000, (-100.0, 100.0)
+    precision = np.full(n, 8.0)
+    centres = np.where(rng.random(n) < 0.5, -12.5, 12.5)    # 25 nm apart
+    values = centres + rng.normal(0, 8.0, n) + rng.normal(0, precision)
+    found = em_two_gaussians(values, precision, window)
+    assert found["distance"] == pytest.approx(25.0, abs=5.0)
+    assert found["sigma"] == pytest.approx(8.0, abs=2.5)
+
+    # and the likelihood agrees with it rather than improving on it
+    fit = fit_profile(values, precision, model="two_gauss", window=window)
+    assert fit.values()["distance"] == pytest.approx(found["distance"], abs=2.0)
+
+
+def test_em_puts_the_unspecific_localizations_in_the_background_component():
+    from smappy.plugins.line_profile import em_two_gaussians
+    rng = np.random.default_rng(24)
+    window = (-100.0, 100.0)
+    pair = np.where(rng.random(2000) < 0.5, -20.0, 20.0) + rng.normal(0, 6.0, 2000)
+    flat = rng.uniform(-100.0, 100.0, 1000)
+    values = np.concatenate([pair, flat])
+    precision = np.full(len(values), 5.0)
+    found = em_two_gaussians(values, precision, window)
+    assert found["background"] == pytest.approx(1 / 3, abs=0.12)
+    assert found["distance"] == pytest.approx(40.0, abs=5.0)
+
+
+def test_a_bad_start_is_what_the_starting_values_are_there_to_avoid():
+    """The failure the EM start removes, shown on the same data."""
+    from smappy.plugins.line_profile import (TWO_GAUSS, _density_of, _from_fit,
+                                             _to_fit)
+    from scipy.optimize import minimize
+    rng = np.random.default_rng(25)
+    n, window = 2000, (-100.0, 100.0)
+    precision = np.full(n, 8.0)
+    values = (np.where(rng.random(n) < 0.5, -12.5, 12.5)
+              + rng.normal(0, 8.0, n) + rng.normal(0, precision))
+
+    def negative_log_likelihood(vector):
+        vector = _from_fit(np.asarray(vector, float), [2])
+        density = _density_of(TWO_GAUSS, vector[:-1], window, float(vector[-1]),
+                              True, {})
+        return float(-np.sum(np.log(np.maximum(density(values, precision),
+                                               1e-300))))
+
+    bounds = [(-100, 100), (0, 200), (0, 200 ** 2), (0, 1), (0, 0.95)]
+    stuck = minimize(negative_log_likelihood,
+                     _to_fit(np.array([0.0, 2.0, 15.0, 0.5, 0.05]), [2]),
+                     method="L-BFGS-B", bounds=bounds)
+    assert _from_fit(stuck.x, [2])[1] < 10.0            # it never gets out
+    assert fit_profile(values, precision, model="two_gauss",
+                       window=window).values()["distance"] > 20.0
+
+
+# ---------------------------------------------------------- round shapes
+
+def round_shape(kind, radius, n, blur=0.0, precision=8.0, seed=0):
+    """Localizations on a ring, or filling a disk, seen edge-on."""
+    rng = np.random.default_rng(seed)
+    errors = np.full(n, float(precision))
+    angle = rng.uniform(0, 2 * np.pi, n)
+    r = radius if kind == "ring" else radius * np.sqrt(rng.random(n))
+    across = r * np.sin(angle)
+    return across + rng.normal(0, np.hypot(errors, blur)), errors
+
+
+def test_a_ring_and_a_disk_give_back_the_radius_they_were_made_with():
+    window = (-150.0, 150.0)
+    for kind in ("ring", "disk"):
+        values, precision = round_shape(kind, 60.0, 3000, seed=26)
+        fit = fit_profile(values, precision, model=kind, window=window)
+        assert fit.values()["radius"] == pytest.approx(60.0, abs=4.0)
+        assert abs(fit.values()["centre"]) < 4.0
+
+
+def test_a_ring_is_told_from_a_disk_and_from_two_points():
+    """What the comparison is for: three models that all have two humps."""
+    window = (-150.0, 150.0)
+    every = ("gauss", "two_gauss", "step", "disk", "ring")
+    for kind in ("ring", "disk"):
+        values, precision = round_shape(kind, 60.0, 4000, seed=27)
+        best = fit_models(values, precision, models=every, window=window)[0]
+        assert best.model == kind
+
+
+def test_the_round_shapes_are_normalized_over_the_window():
+    """The quadrature is a density, so it has to integrate to one."""
+    from smappy.plugins.line_profile import arc_density
+    integrate = getattr(np, "trapezoid", None) or np.trapz   # numpy 1.26
+    window = (-200.0, 200.0)
+    grid = np.linspace(*window, 4001)
+    for kind in ("ring", "disk"):
+        for blur in (2.0, 20.0):
+            density = arc_density(grid, 0.0, 60.0, blur, window, kind=kind)
+            assert integrate(density, grid) == pytest.approx(1.0, abs=1e-3)

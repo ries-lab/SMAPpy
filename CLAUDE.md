@@ -42,6 +42,8 @@ shape, so read the one closest to what you are writing:
 | finds, measures or summarises ROIs | `roi.py` (segment, `scope = "site"`, analyse) |
 | parts, presets, a C++ backend | `fit.py` (nested settings dataclasses) |
 | adds a derived column, no output | `math_parser.py` (an expression, kept with the table as a recipe) |
+| removes or flags localizations | `remove_locs.py` (a region, a new table or a filtered flag) |
+| fits a model to what is in a ROI | `line_profile.py` (unbinned likelihood, models compared by AIC) |
 | reads the session and reports | `history.py` (the log, with an optional export) |
 
 A plugin is a settings dataclass plus a `run`:
@@ -133,6 +135,11 @@ That is why a plugin returns the settings it actually used, and why one that
 changes the table hands back a new one rather than editing `ctx.locs`: the
 undo and the record both hang off the result.
 
+`Result.data["bounds"] = {field: (lo, hi)}` asks the session to open the
+filter on a column the run has just written -- a plugin cannot set it itself,
+because a filter belongs to the table it was built from and the new table
+exists only once `Session.apply` has set it.
+
 The figures of one result share a window, a tab each beyond the first, and a
 tab is drawn when it is looked at and not before -- so a plugin with six
 figures costs what one costs, and a plot must be a closure over its data
@@ -160,12 +167,15 @@ Prefer `next((n for n in ("loc_precision_nm", "loc_precision_pix") if n in locs)
 over assuming one spelling, and raise a message naming the columns the table
 *does* have when something is missing.
 
-A column defined by an **expression** is a recipe rather than data:
+A column that needs a **rule for grouping** is a recipe rather than data:
 `mathparse` keeps it in `metadata["derived"]`, and the recipe says what the
-field means once the localizations are grouped -- recomputed from the
+field means once the localizations are grouped -- recomputed from its
 expression there, or reduced by a rule (`mean`, `sum`, `any`, ...).  It is
 `group.combine` that honours it, so a derived column is never averaged by
-accident, and it survives a save.
+accident, and it survives a save.  Usually the recipe is an expression
+(`math_parser.py`); a column that was *measured* per localization and only
+needs the rule -- the `use` flag `remove_locs.py` writes -- is a recipe with
+a rule and no expression.
 
 ## Tests
 

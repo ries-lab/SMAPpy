@@ -10,6 +10,12 @@ distribution of one of those coordinates with a model:
   distance between them (a nuclear envelope, the two leaflets, a doublet).
 * **step (error function)** -- an edge: a region that is uniformly labelled on
   one side and empty on the other, blurred by the localization error.
+* **disk** -- a homogeneously filled circle seen edge-on, as SMAP's Disk.
+* **ring** -- a circle seen edge-on, as SMAP's Ring: the profile with the two
+  horns, which is what a vesicle or an NPC gives across a line ROI.
+
+Every model carries a uniform **offset**, the flat fraction of unspecific
+localizations in the ROI, so a peak is not widened to explain them.
 
 SMAP's ``Analyze/measure/lineprofile`` is the original, and it fits the
 *histogram*.  That is the one thing not ported.
@@ -48,6 +54,20 @@ localizations:
   inside the ROI are flat, and a Gaussian asked to explain them alone comes
   back too wide.  One extra parameter, bounded to [0, 1].
 
+**The starting values are read off the data, not guessed.**  A likelihood
+with a distance, a radius or an edge in it is not convex, and a fit finds the
+maximum nearest where it started -- a two-Gaussian fit started on one peak
+reports a distance of zero, which looks like an answer.  So the peak, the
+half-maximum span and the edge come off a coarsely smoothed histogram (the
+profile as the eye reads it, and the one place a bin width enters a number
+here), the width has the localization precision taken out of it in
+quadrature, and the two-Gaussian start comes from **expectation-maximization**
+(`em_two_gaussians`), which moves two overlapping components apart where a
+gradient step cannot.  On a pair 25 nm apart with 8 nm structures and 8 nm
+precision, EM lands on the maximum the likelihood then confirms in one
+iteration; started instead from a distance of 2 nm, the same fit settles at
+4.5 nm and stays there.
+
 What is reported is the fit's log-likelihood with AIC and BIC, so "one
 Gaussian or two?" is answered by a number rather than by eye; `model="all"`
 fits all three and prints the comparison.  Parameter errors come from the
@@ -67,6 +87,7 @@ Everything here is a module-level function over arrays: `project` and
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -87,6 +108,9 @@ FWHM_PER_SIGMA = 2 * np.sqrt(2 * np.log(2))
 # a mixture over the localizations' own widths, and 200 quantiles of them draw
 # the same line as ten thousand
 CURVE_SAMPLES = 200
+# quadrature nodes for the round shapes; see `_arc_nodes`
+ARC_NODES = 32
+EM_ROUNDS = 200             # for the two-Gaussian starting values
 
 
 # ------------------------------------------------------------- the geometry
@@ -186,13 +210,65 @@ def step_density(t, mu, w, window, side: float = 1.0) -> np.ndarray:
     return shape / np.maximum(norm, 1e-12)
 
 
+def _arc_nodes(n: int) -> Tuple[np.ndarray, np.ndarray]:
+    """Quadrature over a circle's angle: where the mass sits, and how much.
+
+    Both round shapes are a circle seen edge-on, so both are an integral over
+    the angle, and in that variable neither has a singularity to integrate
+    through.  With ``u = R sin(theta)``:
+
+        ring   p(u) du = dtheta / pi                 (uniform in theta)
+        disk   p(u) du = (2/pi) cos^2(theta) dtheta
+
+    -- the ring's ``1/sqrt(R^2-u^2)`` edge spike and the disk's square root
+    both cancel against ``du``.  So each shape is a *sum of Gaussians* at
+    ``R sin(theta_k)``, which costs nothing new: the truncation over the
+    window, the per-localization precision and the derivative in ``R`` all
+    come from `gauss_density` as they do everywhere else.
+    """
+    nodes, weights = np.polynomial.legendre.leggauss(int(n))
+    theta = 0.5 * np.pi * nodes                     # [-1, 1] -> [-pi/2, pi/2]
+    return np.sin(theta), weights
+
+
+@lru_cache(maxsize=8)
+def _ring_nodes(n: int) -> Tuple[Tuple[float, ...], Tuple[float, ...]]:
+    offsets, weights = _arc_nodes(n)
+    weights = weights / weights.sum()
+    return tuple(offsets), tuple(weights)
+
+
+@lru_cache(maxsize=8)
+def _disk_nodes(n: int) -> Tuple[Tuple[float, ...], Tuple[float, ...]]:
+    offsets, weights = _arc_nodes(n)
+    weights = weights * (1.0 - offsets ** 2)        # cos^2(theta)
+    weights = weights / weights.sum()
+    return tuple(offsets), tuple(weights)
+
+
+def arc_density(t, mu, radius, w, window, kind: str = "ring") -> np.ndarray:
+    """A ring or a filled disk seen edge-on, blurred by ``w``.
+
+    The quadrature is refined when the blur is small next to the radius,
+    because that is when the projection's edges are sharp and a coarse sum of
+    Gaussians would show as ripples in the curve rather than as a shape.
+    """
+    typical = float(np.median(np.atleast_1d(w)))
+    n = int(np.clip(8 * radius / max(typical, 1e-9), ARC_NODES, 4 * ARC_NODES))
+    offsets, weights = (_ring_nodes if kind == "ring" else _disk_nodes)(n)
+    axis = (len(offsets),) + (1,) * np.broadcast(np.asarray(t), np.asarray(w)).ndim
+    positions = mu + radius * np.asarray(offsets).reshape(axis)
+    return np.sum(np.asarray(weights).reshape(axis)
+                  * gauss_density(t, positions, w, window), axis=0)
+
+
 @dataclass
 class Model:
     """One shape: its parameters, where to start, and what it means."""
     key: str
     label: str
     names: Tuple[str, ...]
-    start: Callable                 # start(t, precision, window) -> list
+    start: Callable                 # start(t, precision, window, **variant)
     bounds: Callable                # bounds(t, window) -> [(lo, hi), ...]
     shape: Callable                 # shape(params, t, precision, window) -> density
     describe: Callable              # describe(params, errors) -> str
@@ -222,11 +298,278 @@ def _pm(value: float, error: float, digits: int = 1) -> str:
     return f"{value:.{digits}f} +- {error:.{digits}f}"
 
 
+# ------------------------------------------------------- starting values
+#
+# A likelihood with a distance, a radius or an edge in it is not convex, and
+# the fit finds the maximum nearest where it was started: a two-Gaussian fit
+# started on one peak stays on one peak and reports a distance of zero.  So
+# the starting values are read off the data rather than guessed, and they are
+# read off a *smoothed histogram* -- the profile as the eye sees it -- which
+# is the one place in this module where a bin width appears in a number.  It
+# only has to land in the right valley; the unbinned likelihood does the rest,
+# and the fitted numbers do not depend on it.
+
+def smoothed_profile(t, window, bins: Optional[int] = None):
+    """A coarse histogram, smoothed: what someone reads off the picture.
+
+    Few bins on purpose.  These are starting values, and a finely binned
+    profile of two hundred localizations has a maximum wherever the noise put
+    one -- which is exactly the failure this is here to avoid.
+    """
+    t = np.asarray(t, float)
+    if bins is None:
+        bins = int(np.clip(len(t) // 10, 12, 60))
+    counts, edges = np.histogram(t, bins=bins, range=window)
+    centres = 0.5 * (edges[:-1] + edges[1:])
+    kernel = np.array([1.0, 2.0, 3.0, 2.0, 1.0])
+    kernel /= kernel.sum()
+    padded = np.pad(counts.astype(float), 2, mode="edge")
+    return centres, np.convolve(padded, kernel, mode="valid")
+
+
+def _top_run(counts: np.ndarray) -> Tuple[int, int]:
+    """The run of bins above half the maximum that contains the maximum.
+
+    The *contiguous* run, so a second structure further along the profile
+    does not drag the centre towards itself.
+    """
+    peak = int(np.argmax(counts))
+    half = 0.5 * counts[peak]
+    low = peak
+    while low > 0 and counts[low - 1] >= half:
+        low -= 1
+    high = peak
+    while high < len(counts) - 1 and counts[high + 1] >= half:
+        high += 1
+    return low, high
+
+
+def peak_position(t, window) -> float:
+    """Where the profile is highest, as the centroid of its top.
+
+    The centroid of the half-maximum run rather than the highest bin: the bin
+    is quantized to the bin width and jumps between neighbours with the noise,
+    the centroid does neither, and a background that is flat under the peak
+    adds to both sides of it and cancels.
+    """
+    t = np.asarray(t, float)
+    centres, counts = smoothed_profile(t, window)
+    if not counts.size or counts.max() <= 0:
+        return float(np.median(t))
+    low, high = _top_run(counts)
+    piece = counts[low:high + 1] - 0.5 * counts[int(np.argmax(counts))]
+    if piece.sum() <= 0:
+        return float(centres[int(np.argmax(counts))])
+    return float(np.average(centres[low:high + 1], weights=piece))
+
+
+def half_max_span(t, window) -> Tuple[float, float]:
+    """Where the profile passes half its maximum, on the way up and down.
+
+    Interpolated between bins, so the width it implies is not quantized, and
+    clamped to the window when the structure runs out of it.
+    """
+    t = np.asarray(t, float)
+    centres, counts = smoothed_profile(t, window)
+    if not counts.size or counts.max() <= 0:
+        return (float(np.min(t)), float(np.max(t)))
+    low, high = _top_run(counts)
+    half = 0.5 * counts.max()
+
+    def crossing(inner: int, outer: int) -> float:
+        """Where the line between two bins passes half the maximum."""
+        if outer < 0 or outer >= len(counts):
+            return float(centres[inner])
+        gap = counts[inner] - counts[outer]
+        if gap <= 0:
+            return float(centres[inner])
+        fraction = (counts[inner] - half) / gap
+        return float(centres[inner] + fraction * (centres[outer] - centres[inner]))
+
+    return crossing(low, low - 1), crossing(high, high + 1)
+
+
+def edge_position(t, window, side: float = 1.0) -> float:
+    """Where a step profile passes half of its plateau.
+
+    Read from the side the localizations are on: the plateau is the median of
+    the smoothed counts over the third of the window where the density is
+    high -- a median, so a bright spot sitting on the plateau does not raise
+    it -- and the edge is where the profile last falls below half of it.
+    Robust in the way that matters here: it does not care what the profile
+    does far from the edge, which is where a second structure would be.
+    """
+    t = np.asarray(t, float)
+    centres, counts = smoothed_profile(t, window)
+    if not counts.size or counts.max() <= 0:
+        return float(np.median(t))
+    third = max(len(counts) // 3, 1)
+    high = counts[-third:] if side > 0 else counts[:third]
+    # the upper quartile of that third, not its median: the ROI usually has
+    # empty margin beyond the structure, and a median that counts the empty
+    # bins halves the plateau and puts the edge in the middle of nowhere
+    plateau = float(np.percentile(high, 75))
+    if plateau <= 0:
+        return float(np.median(t))
+    half = 0.5 * plateau
+    # walk in from the fullest bin of the plateau, not from the window's rim,
+    # for the same reason
+    anchor = int(np.argmax(high)) + (len(counts) - third if side > 0 else 0)
+    order = range(anchor, -1, -1) if side > 0 else range(anchor, len(counts))
+    previous = None
+    for i in order:
+        if counts[i] < half:
+            if previous is None:
+                break
+            gap = counts[previous] - counts[i]
+            fraction = (counts[previous] - half) / gap if gap > 0 else 0.5
+            return float(centres[previous]
+                         + fraction * (centres[i] - centres[previous]))
+        previous = i
+    return float(np.median(t))
+
+
+def _structure_sigma(observed: float, precision) -> float:
+    """The width left over once the localization error is taken out.
+
+    What is measured is ``sqrt(s^2 + sigma^2)``; what is wanted is ``s``.  The
+    subtraction can go negative -- the picture can be narrower than the
+    precisions say it should be, by noise -- and a start of zero is the one
+    place the fit cannot leave, so it keeps a fraction of the width instead.
+    """
+    observed = float(max(observed, 1e-3))
+    if precision is None:
+        return observed
+    typical = float(np.median(np.asarray(precision, float)))
+    return float(max(np.sqrt(max(observed ** 2 - typical ** 2, 0.0)),
+                     0.2 * observed))
+
+
+def em_two_gaussians(t, precision=None, window=None, background: bool = True,
+                     rounds: int = EM_ROUNDS, tolerance: float = 1e-6
+                     ) -> Dict[str, float]:
+    """Starting values for the two-Gaussian fit, by expectation-maximization.
+
+    The distance between two structures is the number people come here for,
+    and it is the one a gradient fit loses most easily: started between two
+    peaks that overlap, the likelihood's nearest maximum is often the single
+    broad Gaussian with the distance at zero.  EM does not have that failure,
+    because it never moves the parameters directly -- it assigns each
+    localization to a component in proportion to how well the component
+    explains it, then re-fits each component to what it was assigned, which
+    moves two peaks apart whenever that describes the data better.
+
+    Three things make it the mixture that is actually meant here:
+
+    * each localization is weighted by its **own precision** -- the component
+      means are inverse-variance weighted, as they should be when the points
+      have known and different errors;
+    * the width is **structural**: the update subtracts each localization's
+      precision, so what comes out is the width of the structure;
+    * the flat **background** is a third component of density ``1/W``, which
+      keeps unspecific localizations from pulling a component out to the edge
+      of the window.
+
+    This is a start, not the answer: it ignores the truncation at the window,
+    where the likelihood that follows does not.  Returns the parameters by
+    name, ready for `Model.start`.
+    """
+    t = np.asarray(t, float)
+    window = window or (float(t.min()), float(t.max()))
+    flat = 1.0 / max(window[1] - window[0], 1e-9)
+    sigma = (np.asarray(precision, float) if precision is not None
+             else np.zeros_like(t))
+
+    # start the two components at the two ends of the profile's top, which is
+    # where two overlapping peaks are, and the width at what is left of it
+    low, high = half_max_span(t, window)
+    centre = peak_position(t, window)
+    mu = np.array([min(low, centre), max(high, centre)], float)
+    if mu[1] - mu[0] < 1e-6:
+        mu = centre + np.array([-1.0, 1.0]) * _spread(t)
+    s = _structure_sigma(0.5 * max(high - low, _spread(t)), precision)
+    weights = np.array([0.5, 0.5]) * (0.95 if background else 1.0)
+    share = 0.05 if background else 0.0
+
+    for _ in range(rounds):
+        w2 = s ** 2 + sigma ** 2
+        gauss = (np.exp(-0.5 * (t[None, :] - mu[:, None]) ** 2 / w2[None, :])
+                 / np.sqrt(2 * np.pi * w2)[None, :])
+        parts = weights[:, None] * gauss
+        total = parts.sum(axis=0) + share * flat
+        total = np.maximum(total, TINY)
+        r = parts / total                            # responsibilities
+        r_background = (share * flat) / total
+
+        new_weights = r.mean(axis=1)
+        new_share = float(r_background.mean()) if background else 0.0
+        inverse = r / w2[None, :]
+        mass = inverse.sum(axis=1)
+        new_mu = np.where(mass > 0, (inverse * t[None, :]).sum(axis=1)
+                          / np.maximum(mass, TINY), mu)
+        # the structural variance: the scatter that the precisions do not
+        # already account for, shared by both components
+        residual = (t[None, :] - new_mu[:, None]) ** 2 - sigma[None, :] ** 2
+        assigned = r.sum()
+        variance = float((r * residual).sum() / assigned) if assigned > 0 else s ** 2
+        new_s = float(np.sqrt(max(variance, (0.05 * _spread(t)) ** 2)))
+
+        moved = (np.max(np.abs(new_mu - mu)) + abs(new_s - s)
+                 + np.max(np.abs(new_weights - weights)))
+        mu, s, weights, share = new_mu, new_s, new_weights, new_share
+        if moved < tolerance:
+            break
+
+    order = np.argsort(mu)
+    mu, weights = mu[order], weights[order]
+    total_weight = float(weights.sum()) or 1.0
+    return {"centre": float(mu.mean()), "distance": float(mu[1] - mu[0]),
+            "sigma": s, "fraction": float(weights[0] / total_weight),
+            "background": float(np.clip(share, 0.0, 0.95))}
+
+
+# -------------------------------------------------------------- the models
+
+def _start_gauss(t, precision, window, **_) -> Dict[str, float]:
+    low, high = half_max_span(t, window)
+    observed = max(high - low, 1e-3) / FWHM_PER_SIGMA
+    return {"centre": peak_position(t, window),
+            "sigma": _structure_sigma(observed, precision)}
+
+
+def _start_two_gauss(t, precision, window, **_) -> Dict[str, float]:
+    return em_two_gaussians(t, precision, window)
+
+
+def _start_step(t, precision, window, side: float = 1.0, **_) -> Dict[str, float]:
+    return {"edge": edge_position(t, window, side),
+            "sigma": _structure_sigma(0.5 * _spread(t), precision)}
+
+
+def _start_round(t, precision, window, **_) -> Dict[str, float]:
+    """Centre and radius of a round shape, from the width of its profile.
+
+    Both projections are as wide as the shape: the profile of a ring runs
+    from ``-R`` to ``R`` with its peaks at the ends, a disk's from ``-R`` to
+    ``R`` with one peak in the middle.  So the half-maximum span is about
+    ``2R`` for the disk and rather less for the ring, and starting both from
+    it puts the radius in the right valley either way.
+    """
+    low, high = half_max_span(t, window)
+    span = max(high - low, 1e-3)
+    return {"centre": peak_position(t, window), "radius": 0.5 * span,
+            "sigma": _structure_sigma(0.25 * span, precision)}
+
+
+def _positive(window) -> Tuple[float, float]:
+    return (0.0, window[1] - window[0])
+
+
 GAUSS = Model(
     key="gauss", label="Gaussian",
     names=("centre", "sigma"),
-    start=lambda t, prec, window: [float(np.median(t)), _spread(t)],
-    bounds=lambda t, window: [window, (0.0, window[1] - window[0])],
+    start=_start_gauss,
+    bounds=lambda t, window: [window, _positive(window)],
     shape=lambda p, t, prec, window: gauss_density(t, p[0],
                                                    _widths(p[1], prec), window),
     describe=lambda p, e: (f"centre {_pm(p[0], e[0])}, sigma {_pm(p[1], e[1])} "
@@ -237,10 +580,9 @@ GAUSS = Model(
 TWO_GAUSS = Model(
     key="two_gauss", label="two Gaussians",
     names=("centre", "distance", "sigma", "fraction"),
-    start=lambda t, prec, window: [float(np.median(t)), 2 * _spread(t),
-                                   0.5 * _spread(t), 0.5],
-    bounds=lambda t, window: [window, (0.0, window[1] - window[0]),
-                              (0.0, window[1] - window[0]), (0.0, 1.0)],
+    start=_start_two_gauss,
+    bounds=lambda t, window: [window, _positive(window), _positive(window),
+                              (0.0, 1.0)],
     shape=lambda p, t, prec, window: (
         p[3] * gauss_density(t, p[0] - 0.5 * p[1], _widths(p[2], prec), window)
         + (1 - p[3]) * gauss_density(t, p[0] + 0.5 * p[1],
@@ -254,8 +596,8 @@ TWO_GAUSS = Model(
 STEP = Model(
     key="step", label="step (error function)",
     names=("edge", "sigma"),
-    start=lambda t, prec, window: [float(np.median(t)), _spread(t)],
-    bounds=lambda t, window: [window, (0.0, window[1] - window[0])],
+    start=_start_step,
+    bounds=lambda t, window: [window, _positive(window)],
     shape=lambda p, t, prec, window, side=1.0: step_density(
         t, p[0], _widths(p[1], prec), window, side),
     describe=lambda p, e: f"edge at {_pm(p[0], e[0])}, blur sigma {_pm(p[1], e[1])}",
@@ -265,7 +607,34 @@ STEP = Model(
     squares=(1,),
 )
 
-MODELS: Dict[str, Model] = {m.key: m for m in (GAUSS, TWO_GAUSS, STEP)}
+DISK = Model(
+    key="disk", label="disk",
+    names=("centre", "radius", "sigma"),
+    start=_start_round,
+    bounds=lambda t, window: [window, _positive(window), _positive(window)],
+    shape=lambda p, t, prec, window: arc_density(t, p[0], p[1],
+                                                 _widths(p[2], prec), window,
+                                                 kind="disk"),
+    describe=lambda p, e: (f"radius {_pm(p[1], e[1])}, centre {_pm(p[0], e[0])}, "
+                           f"blur sigma {_pm(p[2], e[2])}"),
+    squares=(2,),
+)
+
+RING = Model(
+    key="ring", label="ring",
+    names=("centre", "radius", "sigma"),
+    start=_start_round,
+    bounds=lambda t, window: [window, _positive(window), _positive(window)],
+    shape=lambda p, t, prec, window: arc_density(t, p[0], p[1],
+                                                 _widths(p[2], prec), window,
+                                                 kind="ring"),
+    describe=lambda p, e: (f"radius {_pm(p[1], e[1])}, centre {_pm(p[0], e[0])}, "
+                           f"blur sigma {_pm(p[2], e[2])}"),
+    squares=(2,),
+)
+
+MODELS: Dict[str, Model] = {m.key: m for m in (GAUSS, TWO_GAUSS, STEP,
+                                               DISK, RING)}
 
 
 
@@ -518,10 +887,14 @@ def fit_profile(t, precision=None, model: str = "gauss",
 
     best: Optional[Fit] = None
     for variant in spec.variants:
-        start = list(spec.start(t, precision, window))
+        # the starting values are read off the data (see "starting values"):
+        # a model may also say where to start the background, which the
+        # two-Gaussian one does, since its EM has just estimated it
+        guess = dict(spec.start(t, precision, window, **variant))
+        start = [float(guess[name]) for name in spec.names]
         bounds = list(spec.bounds(t, window))
         if background:
-            start.append(0.05)
+            start.append(float(guess.get("background", 0.05)))
             bounds.append((0.0, 0.95))
         squares = list(spec.squares)
         start = _to_fit(np.asarray(start, float), squares)
@@ -681,7 +1054,9 @@ def draw_profile(ax, profile: Profile, fits: Sequence[Fit], bin_size: float) -> 
     ax.bar(edges[:-1], counts, width=np.diff(edges), align="edge",
            color="0.75", edgecolor="0.45", linewidth=0.4)
     grid = np.linspace(profile.window[0], profile.window[1], 400)
-    colours = ("#d62728", "#1f77b4", "#2ca02c")
+    # one per model, best-fitting first, so the red curve is the one the
+    # comparison chose and the rest are there to be seen losing
+    colours = ("#d62728", "#1f77b4", "#2ca02c", "#9467bd", "#8c564b")
     for fit, colour in zip(fits, colours):
         ax.plot(grid, len(profile.values) * bin_size * fit.curve(grid),
                 color=colour, linewidth=1.5, label=fit.label)
@@ -727,7 +1102,9 @@ class LineProfileSettings:
                        choices=(("gauss", "Gaussian"),
                                 ("two_gauss", "two Gaussians (a distance)"),
                                 ("step", "step (error function)"),
-                                ("all", "all three, compared")),
+                                ("disk", "disk, seen edge-on"),
+                                ("ring", "ring, seen edge-on"),
+                                ("all", "all five, compared")),
                        help="what the profile is expected to be")
     method: str = param("mle", label="fit",
                         choices=(("mle", "unbinned, maximum likelihood"),
