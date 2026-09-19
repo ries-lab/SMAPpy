@@ -611,17 +611,10 @@ class RenderTab(QWidget):
                                "goes grey where the two coincide.  A grey ramp is "
                                "its own complement -- for black on white pick the "
                                "gray_inverted LUT.")
-        self.white = QCheckBox("white background")
-        self.white.setToolTip("the picture on white paper, whatever the LUT: the "
-                              "brightness is turned over and the hue is kept, so "
-                              "red stays red, hot runs white through red and yellow "
-                              "to black, and grey is black on white.  A property of "
-                              "the picture, so it is set on every layer at once.")
         lut_row = QHBoxLayout()
         lut_row.setContentsMargins(0, 0, 0, 0)
         lut_row.addWidget(self.lut, 1)
         lut_row.addWidget(self.invert)
-        lut_row.addWidget(self.white)
         self.contrast = QDoubleSpinBox(minimum=0, maximum=6, singleStep=0.1, decimals=2)
         self.grouped = QCheckBox("grouped")
         self.grouped.setToolTip("one entry per blink instead of one per frame; "
@@ -642,9 +635,16 @@ class RenderTab(QWidget):
         self.factor = QDoubleSpinBox(minimum=0.05, maximum=5, singleStep=0.1, decimals=2)
         self.factor.setToolTip("rendering sigma = factor x localization precision "
                                "(mode 'precision')")
+        self.white = QCheckBox("white background")
+        self.white.setToolTip("the picture on white paper, whatever the LUT: the "
+                              "brightness is turned over and the hue is kept, so "
+                              "red stays red, hot runs white through red and yellow "
+                              "to black, and grey is black on white.  A property of "
+                              "the picture, so it is set on every layer at once.")
         more_form.addRow("sigma (gauss)", self.sigma)
         more_form.addRow("precision factor", self.factor)
         more_form.addRow("gamma", self.gamma)
+        more_form.addRow("", self.white)
         form.addRow(CollapsibleSection("more", more, expanded=False))
         layout.addWidget(CollapsibleSection("display", display, expanded=True))
         layout.addStretch(1)
