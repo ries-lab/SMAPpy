@@ -96,8 +96,7 @@ def test_a_changed_table_makes_results_outdated(tmp_path):
     s.set_locs(Localizations(moved, dict(s.locs.metadata)))
     project.sync()
     assert project.results() == []                        # outdated, not silently reused
-    _, stale = project.latest(roi.id)
-    assert stale
+    assert project.stale_steps(roi.id)
 
 
 def test_new_rois_count_without_a_review_step(tmp_path):

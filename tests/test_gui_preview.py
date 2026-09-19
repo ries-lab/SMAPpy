@@ -147,8 +147,8 @@ def test_the_figures_share_one_window_and_draw_when_looked_at(app):
     before = set(plt.get_fignums())
     panel.plot()
     window = panel._window
-    assert window.tabs.count() == 2
-    assert [window.tabs.tabText(i) for i in range(2)] == ["figure", "second"]
+    assert [window.tabs.tabText(i) for i in range(window.tabs.count())] == [
+        "figure", "second", "All"]
     assert drawn == ["first"]                    # the one on screen, no more
     assert not set(plt.get_fignums()) - before   # and pyplot holds none of it
 
@@ -182,7 +182,8 @@ def test_a_tab_can_be_taken_out_into_its_own_window(app):
     window = panel._window
 
     window.detach(1)
-    assert window.tabs.count() == 1
+    assert [window.tabs.tabText(i) for i in range(window.tabs.count())] == [
+        "figure", "All"]
     assert "second" in window.detached
     assert drawn[-1] == "second"                 # on screen, so drawn at once
 
@@ -191,5 +192,5 @@ def test_a_tab_can_be_taken_out_into_its_own_window(app):
     assert sorted(drawn) == ["first", "second"]
 
     window.detached["second"].close()            # closed: the tab comes back
-    assert window.tabs.count() == 2
-    assert [window.tabs.tabText(i) for i in range(2)] == ["figure", "second"]
+    assert [window.tabs.tabText(i) for i in range(window.tabs.count())] == [
+        "figure", "second", "All"]

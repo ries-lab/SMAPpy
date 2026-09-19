@@ -295,37 +295,146 @@ class ROIProject:
                 "grouped": self.grouped,
                 "group_settings": asdict(self.group_settings) if self.grouped else None}
 
-    def evaluate(self, instances=None, roi_ids=None, progress=None, steps=None):
+    # ------------------------------------------------- what is still current
+    def resolved(self, steps=None, instances=None):
+        """The steps that would run: resolved once, for callers that share them.
+
+        The project's pipeline, or -- when it has none -- the pipeline of the
+        newest run, which is what a script that handed its steps straight to
+        `evaluate` leaves behind, and what an older file carries.  Falling
+        back to the installed evaluators instead would report a pipeline
+        nobody ran.
+        """
+        from . import pipeline as pipeline_module
+        if steps is not None:
+            return list(steps)
+        if instances is None:
+            instances = self.pipeline
+        if not instances:
+            for run in reversed(self.runs):
+                instances = pipeline_module.instances_from_run(run.get("pipeline") or [])
+                if instances:
+                    break
+        if not instances:
+            instances = pipeline_module.default_instances()
+        return pipeline_module.resolve(instances)
+
+    def step_signature(self, step, inputs):
+        """What this step's result depends on: the data *and* the parameters.
+
+        The record used to carry one signature over the ROI's inputs alone,
+        so editing an evaluator's parameter left every stored number looking
+        perfectly current -- the one case where "out of date" matters most.
+        """
+        return digest({"inputs": inputs, "step": step.identity()})
+
+    def entries(self, roi_id, steps=None):
+        """The newest stored entry for each step of this ROI, and its state.
+
+        ``{label: (entry or None, state)}`` where state is "current" (same
+        data and same parameters), "stale" (something changed), "unverified"
+        (stored before signatures were per step, so it cannot say) or
+        "missing".  Only the steps that would run are reported: a step taken
+        out of the pipeline stops contributing columns.
+        """
+        steps = self.resolved(steps)
+        inputs = json.loads(json_text(self.inputs(self.rois[roi_id])))
+        wanted = {step.label: self.step_signature(step, inputs) for step in steps}
+        # by signature as well as by label: a step that was renamed, or moved
+        # up the pipeline, measured the same thing and its numbers stand.  The
+        # label is what the columns are called, and calling them something
+        # else is not a reason to run anything again.
+        by_signature: Dict[str, Dict] = {}
+        by_label: Dict[str, Dict] = {}
+        for run in reversed(self.runs):
+            record = (run.get("records") or {}).get(roi_id)
+            for label, entry in ((record or {}).get("steps") or {}).items():
+                by_label.setdefault(label, entry)
+                if entry.get("signature"):
+                    by_signature.setdefault(entry["signature"], entry)
+        found = {}
+        for label, signature in wanted.items():
+            if signature in by_signature:
+                found[label] = (by_signature[signature], "current")
+            elif label in by_label:
+                entry = by_label[label]
+                found[label] = (entry, "stale" if entry.get("signature")
+                                else "unverified")
+            else:
+                found[label] = (None, "missing")
+        return found
+
+    def stale_steps(self, roi_id, steps=None):
+        """The steps of this ROI that would have to run to be sure."""
+        steps = self.resolved(steps)
+        states = self.entries(roi_id, steps)
+        return [step for step in steps
+                if states[step.label][1] != "current"]
+
+    def needs_evaluation(self, steps=None, roi_ids=None):
+        """Which reviewed, included ROIs have a step that is not current."""
+        steps = self.resolved(steps)
+        ids = list(self.rois) if roi_ids is None else list(roi_ids)
+        return [i for i in ids if self.rois[i].reviewed and self.rois[i].use
+                and self.stale_steps(i, steps)]
+
+    # -------------------------------------------------------------- running
+    def evaluate(self, instances=None, roi_ids=None, progress=None, steps=None,
+                 reuse=False):
         """Run a pipeline over every reviewed, included ROI.
 
         `instances` is a list of `workspace.Instance` -- the same type a tab
         pins -- resolved here into steps.  Each step contributes columns to a
         site's row, and a step that raises costs its own columns and not the
         ROI, nor the ROIs after it.
+
+        With `reuse`, a step whose stored result is still current is copied
+        forward instead of run again -- which is what "re-evaluate what
+        changed" means: editing one evaluator's parameter costs that
+        evaluator over the sites, not the whole pipeline over all of them.
         """
-        from . import pipeline as pipeline_module
-        if steps is None:
-            if instances is None:
-                instances = pipeline_module.default_instances()
-            steps = pipeline_module.resolve(instances)
+        steps = self.resolved(steps, instances)
         ids = list(self.rois) if roi_ids is None else list(roi_ids)
         ids = [i for i in ids if self.rois[i].reviewed and self.rois[i].use]
         run = {"id": uuid4().hex, "time": datetime.now(timezone.utc).isoformat(),
                "pipeline": [step.as_record() for step in steps], "records": {}}
         for n, roi_id in enumerate(ids):
-            roi = self.rois[roi_id]
-            inputs = json.loads(json_text(self.inputs(roi)))
-            locs = self.extract(roi)
-            geometry = json.loads(json_text(self.geometry(roi)))
-            record = {"inputs": inputs, "signature": digest(inputs),
-                      "file_id": roi.file_id, "steps": {}}
-            for step in steps:
-                record["steps"][step.label] = self._one_step(step, roi, locs, geometry)[0]
+            record, _ = self._evaluate_record(roi_id, steps, reuse=reuse)
             run["records"][roi_id] = record
             if progress:
                 progress(n + 1, len(ids))
         self.runs.append(run)
         return run
+
+    def _evaluate_record(self, roi_id, steps, reuse=False, force=()):
+        """One ROI: a complete record, and the results of what actually ran.
+
+        `force` names steps to run even when their stored result is current,
+        which is how a figure is got back: the numbers are in the record but
+        a plot is a closure over the data it drew, and nothing in a file can
+        bring that back.
+        """
+        roi = self.rois[roi_id]
+        inputs = json.loads(json_text(self.inputs(roi)))
+        geometry = json.loads(json_text(self.geometry(roi)))
+        known = self.entries(roi_id, steps) if reuse else {}
+        locs = None
+        record = {"inputs": inputs, "signature": digest(inputs),
+                  "file_id": roi.file_id, "steps": {}}
+        results = {}
+        for step in steps:
+            entry, state = known.get(step.label, (None, "missing"))
+            if entry is not None and state == "current" and step.label not in force:
+                record["steps"][step.label] = dict(entry)
+                results[step.label] = None          # kept, so not drawn
+                continue
+            if locs is None:                        # only if something runs
+                locs = self.extract(roi)
+            entry, result = self._one_step(step, roi, locs, geometry)
+            entry["signature"] = self.step_signature(step, inputs)
+            record["steps"][step.label] = entry
+            results[step.label] = result
+        return record, results
 
     def _one_step(self, step, roi, locs, geometry):
         """One evaluator on one ROI, as (what is recorded, what it returned).
@@ -342,7 +451,8 @@ class ROIProject:
         except Exception as error:
             return {"error": f"{type(error).__name__}: {error}"}, None
 
-    def evaluate_one(self, roi_id, instances=None, steps=None):
+    def evaluate_one(self, roi_id, instances=None, steps=None, reuse=False,
+                     force=(), store=False):
         """The pipeline on a single ROI, figures and all.
 
         What `evaluate` does per site, for the one site being looked at, and
@@ -350,44 +460,80 @@ class ROIProject:
         it recorded -- which is what lets the ROI manager draw what the
         evaluators drew while the list is walked through.
 
-        Nothing is stored: a run is a pipeline over every site, and a hundred
-        one-site runs from clicking down a list would be provenance about
-        nothing.  `evaluate` is what records.
+        `reuse` takes the stored numbers for the steps that are still current
+        and runs only the rest, so that a list can be scrolled through
+        without recomputing what has not changed; `force` runs a step anyway,
+        for the figure of the tab being looked at.  With `store` the record
+        joins the runs as a one-site run, which is what makes a re-evaluation
+        on selection worth anything: without it the same stale step would be
+        re-run on every visit and the site table would never catch up.
         """
-        from . import pipeline as pipeline_module
-        roi = self.rois[roi_id]
-        if steps is None:
-            if instances is None:
-                instances = self.pipeline or pipeline_module.default_instances()
-            steps = pipeline_module.resolve(instances)
-        locs = self.extract(roi)
-        geometry = json.loads(json_text(self.geometry(roi)))
-        record = {"inputs": json.loads(json_text(self.inputs(roi))),
-                  "file_id": roi.file_id, "steps": {}}
-        record["signature"] = digest(record["inputs"])
-        results = {}
-        for step in steps:
-            record["steps"][step.label], results[step.label] = \
-                self._one_step(step, roi, locs, geometry)
+        steps = self.resolved(steps, instances)
+        record, results = self._evaluate_record(roi_id, steps, reuse=reuse,
+                                                force=force)
+        if store and any(result is not None for result in results.values()):
+            self.runs.append({"id": uuid4().hex, "scope": "site",
+                              "time": datetime.now(timezone.utc).isoformat(),
+                              "pipeline": [step.as_record() for step in steps],
+                              "records": {roi_id: record}})
         return record, results
 
-    def latest(self, roi_id):
-        """The newest record for this ROI, and whether its inputs have changed."""
-        for run in reversed(self.runs):
-            if roi_id in run.get("records", {}):
-                record = run["records"][roi_id]
-                return record, record["signature"] != digest(self.inputs(self.rois[roi_id]))
-        return None, False
+    def latest(self, roi_id, steps=None):
+        """The newest result for this ROI, step by step, and what it is worth.
 
-    def results(self):
-        """Current successful rows for reviewed, included ROIs only."""
+        ``(record, states)``: a record assembled from the newest entry of
+        each step the pipeline would run, and ``{label: state}`` saying which
+        of them is still current.  `None` when the ROI has nothing stored for
+        any of those steps.
+
+        Per step rather than per record, because the two things that go out
+        of date do not go out of date together: moving an ROI invalidates all
+        of its steps, editing one evaluator's parameter invalidates that
+        evaluator over every ROI.
+        """
+        steps = self.resolved(steps)
+        if not steps:
+            # nothing resolves -- the evaluators that made these numbers are
+            # not installed here.  Show what was stored rather than nothing,
+            # and say that only the data behind it could be checked.
+            for run in reversed(self.runs):
+                record = (run.get("records") or {}).get(roi_id)
+                if record is None:
+                    continue
+                inputs = self.inputs(self.rois[roi_id])
+                state = ("unverified" if record.get("signature") == digest(inputs)
+                         else "stale")
+                return record, {label: state
+                                for label in (record.get("steps") or {})}
+            return None, {}
+        found = self.entries(roi_id, steps)
+        if all(entry is None for entry, _ in found.values()):
+            return None, {label: state for label, (_, state) in found.items()}
+        record = {"file_id": self.rois[roi_id].file_id,
+                  "steps": {label: entry for label, (entry, _) in found.items()
+                            if entry is not None}}
+        return record, {label: state for label, (_, state) in found.items()}
+
+    def results(self, steps=None):
+        """Current successful rows for reviewed, included ROIs only.
+
+        A row is left out while any of its steps is out of date or missing:
+        half a row of this pipeline's numbers and half of the last one's is
+        worse than no row, and `needs_evaluation` says how many are waiting.
+        A step that cannot be checked -- stored before signatures were per
+        step, or produced by an evaluator that is not installed here -- is
+        trusted and reported: it was true when it was written, and dropping
+        it would lose an older file's results on opening it.
+        """
         from . import pipeline as pipeline_module
+        steps = self.resolved(steps)
         rows = []
         for roi in self.rois.values():
             if not roi.reviewed or not roi.use:
                 continue
-            record, stale = self.latest(roi.id)
-            if record is None or stale:
+            record, states = self.latest(roi.id, steps)
+            if record is None or any(state in ("stale", "missing")
+                                     for state in states.values()):
                 continue
             values = pipeline_module.merged_values(record)
             if values:

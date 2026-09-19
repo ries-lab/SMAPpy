@@ -34,6 +34,7 @@ OTHER_PEN = pg.mkPen("#ffb300", width=1)
 FRAME_PEN = pg.mkPen("#ffd54a", width=1)
 TILE_PEN = pg.mkPen("#5a6a7a", width=1)         # the grid
 TILE_HERE_PEN = pg.mkPen("#00c4ff", width=2)    # the tile being looked at
+STALE_COLOUR = "#c07000"        # an ROI whose evaluation is out of date
 DETAIL_NM = 3000.0            # the zoom's width to start with
 DEFAULT_TILE_NM = 5000.0      # a tile to start from
 RIM_PIXELS = 6.0              # how near the outline a click must be to select
@@ -427,6 +428,13 @@ class ROIManagerWindow(QMainWindow):
         was_loading, self._loading = self._loading, True
         numbers = project.numbers()
         self._rows = list(project.rois)
+        # which ROIs are waiting on the evaluation: the numbers a site shows
+        # are only as good as the parameters they were made with, and a list
+        # that does not say so invites reading last week's answer
+        try:
+            waiting = set(project.needs_evaluation())
+        except Exception:
+            waiting = set()
         self.table.setRowCount(len(self._rows))
         for row, roi_id in enumerate(self._rows):
             roi = project.rois[roi_id]
@@ -435,6 +443,10 @@ class ROIManagerWindow(QMainWindow):
                 item = QTableWidgetItem(text)
                 if not roi.use:
                     item.setForeground(pg.mkColor("#8a8a8a"))
+                elif roi_id in waiting:
+                    item.setForeground(pg.mkColor(STALE_COLOUR))
+                    item.setToolTip("the data or the evaluators' parameters have "
+                                    "changed since this ROI was evaluated")
                 self.table.setItem(row, column, item)
             use = QTableWidgetItem()
             use.setFlags((use.flags() | Qt.ItemIsUserCheckable) & ~Qt.ItemIsEditable)
@@ -444,8 +456,9 @@ class ROIManagerWindow(QMainWindow):
             if roi_id == self.active:
                 self.table.selectRow(row)
         self._loading = was_loading
-        self.status.showMessage(f"{len(self._rows)} ROIs, "
-                                f"{sum(1 for r in project.rois.values() if r.use)} used")
+        used = sum(1 for r in project.rois.values() if r.use)
+        self.status.showMessage(f"{len(self._rows)} ROIs, {used} used"
+                                + (f", {len(waiting)} to evaluate" if waiting else ""))
 
     # ------------------------------------------------------------ drawing
     def redraw(self) -> None:

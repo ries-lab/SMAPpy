@@ -53,17 +53,17 @@ def test_statistics_review_and_stale_results():
     assert values['mean_photons'] == 200
     assert len(p.results()) == 1
     roi.comment = 'Good pore'
-    assert not p.latest(roi.id)[1]
+    assert not p.stale_steps(roi.id)
     p.navigation['detail_center'] = [1000, 1000]
     p.state(s.id).display.contrast = 2
-    assert not p.latest(roi.id)[1]
+    assert not p.stale_steps(roi.id)
     p.set_geometry(200)
-    assert p.latest(roi.id)[1]
+    assert p.stale_steps(roi.id)
     assert not p.results()
     p.evaluate()
     assert p.results()[0]['n_localizations'] == 2
     p.set_filters({'photons': [200, None]})
-    assert p.latest(roi.id)[1]
+    assert p.stale_steps(roi.id)
     p.evaluate()
     assert p.results()[0]['n_localizations'] == 1
     roi.use = False
@@ -79,11 +79,11 @@ def test_polygon_ignores_global_size_but_translation_moves_all_geometry():
     roi.direction = [[0, 0], [10, 0]]
     p.evaluate()
     p.set_geometry(500, 'square')
-    assert not p.latest(roi.id)[1]
+    assert not p.stale_steps(roi.id)
     p.move_roi(roi.id, [1000, 0])
     assert roi.direction == [[1000, 0], [1010, 0]]
     assert p.indices(roi).tolist() == [2]
-    assert p.latest(roi.id)[1]
+    assert p.stale_steps(roi.id)
 
 
 def test_empty_and_nonfinite_measurements():
@@ -119,7 +119,7 @@ def test_grouped_render_and_analysis_share_filters_after_regrouping():
     p.evaluate()
     p.group_settings = GroupSettings(dx=.1)
     assert len(p.extract(roi)) == 0
-    assert p.latest(roi.id)[1]
+    assert p.stale_steps(roi.id)
     assert p.state(s.id).filter.ranges['photons'] == (250, None)
 
 

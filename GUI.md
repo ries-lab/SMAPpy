@@ -138,7 +138,11 @@ reasoning is here so that it does not have to be re-derived.
   compares like with like.  *Statistics* draws the site's localizations, which
   is what its three numbers cannot say: two hundred in a ring and two hundred
   in a smear count the same.  Nothing is recorded by that: *Run on every ROI*
-  is what keeps the numbers.
+  is what keeps the numbers.  An ROI whose numbers were measured with data or
+  parameters that have since changed is listed in amber, and *Re-evaluate
+  what changed* in the pipeline window runs only the steps that are out of
+  date -- editing one evaluator's parameter costs that evaluator over the
+  sites, not the whole pipeline over all of them.
 * **A result's figures share one window.**  *Plot* opens a window per plugin,
   reused across runs; a plugin with several figures gets them as tabs of it,
   and a tab is torn off into its own window by double-clicking it (Ctrl+D),

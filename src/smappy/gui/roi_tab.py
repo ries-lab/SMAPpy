@@ -243,17 +243,25 @@ class ROIHeader(QWidget):
         self.results.setRowCount(0)
         if roi is None:
             return
-        record, stale = project.latest(roi.id)
+        record, states = project.latest(roi.id)
         if record is None:
             self.results.setRowCount(1)
             self.results.setItem(0, 0, QTableWidgetItem("not evaluated"))
             return
-        values = dict(pipeline_module.merged_values(record))
-        values.update({f"{label} failed": text
-                       for label, text in pipeline_module.errors(record).items()})
+        # a value is as good as the step that produced it, so the mark goes
+        # per step and not on the whole row: one edited evaluator does not
+        # make the others' numbers wrong
+        marks = {label: "" if state == "current" else f" ({state})"
+                 for label, state in states.items()}
+        values = {}
+        for label, entry in (record.get("steps") or {}).items():
+            for name, value in ((entry.get("values") or {})).items():
+                text = f"{value:.4g}" if isinstance(value, (int, float)) else str(value)
+                values[name if name not in values else f"{label}.{name}"] = \
+                    text + marks.get(label, "")
+            if "error" in entry:
+                values[f"{label} failed"] = entry["error"]
         self.results.setRowCount(len(values))
-        for row, (name, value) in enumerate(sorted(values.items())):
+        for row, (name, text) in enumerate(sorted(values.items())):
             self.results.setItem(row, 0, QTableWidgetItem(name))
-            text = f"{value:.4g}" if isinstance(value, (int, float)) else str(value)
-            self.results.setItem(row, 1,
-                                 QTableWidgetItem(text + (" (outdated)" if stale else "")))
+            self.results.setItem(row, 1, QTableWidgetItem(text))

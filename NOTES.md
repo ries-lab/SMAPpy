@@ -985,6 +985,31 @@ drift curve passes that on any real acquisition.  What is kept is the estimate
 and not the run -- the curve, the settings, the counts -- because the
 localizations it was made from are in the same file.
 
+## What is still current, per step
+
+A record used to carry one signature, over the ROI's inputs -- the source, the
+geometry, the filters, the grouping.  So moving an ROI marked its numbers out
+of date and editing an evaluator's parameter did not, which is the case where
+it matters most: the numbers on screen were measured with parameters nobody
+was using any more, and nothing said so.
+
+Every step now carries its own signature, over the inputs *and* the step's
+identity (plugin, version, parameters -- not its label, which names the
+columns and is not part of the measurement).  That is what makes
+"re-evaluate what changed" possible: editing one evaluator costs that
+evaluator over the sites, and moving one ROI costs that ROI's steps, instead
+of either costing the whole pipeline over everything.
+
+Stored entries are matched by signature first and by label second, so a step
+that was renamed or moved up the pipeline keeps its results.  A state is one
+of four, and the difference between the last two is worth keeping: `current`,
+`stale` (a signature that no longer matches), `unverified` (no per-step
+signature -- an older file, or an evaluator that is not installed here, so it
+cannot be checked) and `missing`.  `results()` drops a row with anything
+stale or missing in it, and reports an unverified one: it was true when it
+was written, and dropping it would lose an older file's results on opening
+it.
+
 ## Evaluating the ROI being looked at
 
 Walking down the ROI list re-runs the pipeline on the site being looked at

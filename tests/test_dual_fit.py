@@ -332,8 +332,8 @@ def test_a_2c_preview_shows_projected_peaks_left_and_fits_only_in_channel_1(
     result = plugin.preview(Context(), settings, frame=0)
     assert result.data["error"] == "" and len(result.data["locs"]) == 2
 
-    figure, ax = plt.subplots()
-    result.plot(ax)
+    figure = plt.figure()
+    result.plot.draw_into(figure)
     panels = {a.get_title().split(":")[-1].strip(): a for a in figure.axes
               if a.get_title()}
     peaks, fits = panels["peaks found"], panels["fitted"]

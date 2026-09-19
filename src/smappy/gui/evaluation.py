@@ -86,6 +86,14 @@ class EvaluationWindow(QWidget):
         bottom = QHBoxLayout()
         self.run_button = QPushButton("Run on every ROI")
         self.run_button.clicked.connect(self.run)
+        # the button that gets pressed after a parameter is edited: one
+        # evaluator over the sites, not the whole pipeline over all of them
+        self.changed_button = QPushButton("Re-evaluate what changed")
+        self.changed_button.setToolTip(
+            "run only the steps whose result is out of date -- a parameter "
+            "edited here, or an ROI that has moved -- and keep the rest")
+        self.changed_button.clicked.connect(lambda: self.run(reuse=True))
+        bottom.addWidget(self.changed_button)
         save = QPushButton("Save pipeline...")
         save.clicked.connect(self.save_as)
         load = QPushButton("Load pipeline...")
@@ -134,6 +142,7 @@ class EvaluationWindow(QWidget):
         if 0 <= row < len(self.instances):
             self.instances[row].enabled = item.checkState() == Qt.Checked
         self.run_button.setEnabled(any(i.enabled for i in self.instances))
+        self.refresh_counts()
 
     def _show_form(self, row: int) -> None:
         instance = self.instances[row] if 0 <= row < len(self.instances) else None
@@ -209,7 +218,14 @@ class EvaluationWindow(QWidget):
                 instance.values = form.values()
         return self.instances
 
-    def run(self) -> None:
+    def run(self, reuse: bool = False) -> None:
+        """Run the pipeline over the ROIs; with `reuse`, only what is stale.
+
+        A re-evaluation still writes a record for every ROI -- the steps that
+        were still current are copied into it -- so what the site table reads
+        afterwards is one complete set of numbers and not a patchwork of
+        runs.
+        """
         project = self.session.rois
         self.save_values()
         ids = [r.id for r in project.rois.values() if r.reviewed and r.use]
@@ -220,17 +236,40 @@ class EvaluationWindow(QWidget):
         if not steps:
             QMessageBox.information(self, "evaluate", "no evaluator is enabled")
             return
+        waiting = len(project.needs_evaluation(steps=steps, roi_ids=ids))
+        if reuse and not waiting:
+            self.status.setText("every ROI is up to date")
+            return
         progress = QProgressDialog("evaluating ROIs...", "stop", 0, len(ids), self)
         progress.setWindowModality(Qt.WindowModal)
-        run = project.evaluate(steps=steps, progress=lambda done, total:
-                               progress.setValue(done))
+        run = project.evaluate(steps=steps, reuse=reuse,
+                               progress=lambda done, total: progress.setValue(done))
         progress.setValue(len(ids))
         failed = sum(1 for record in run["records"].values()
                      if pipeline_module.errors(record))
         self.status.setText(
             f"{len(run['records'])} ROIs, {len(steps)} step(s)"
+            + (f", {waiting} of them out of date" if reuse else "")
             + (f"; {failed} with a failing step" if failed else ""))
+        self.refresh_counts()
         self.ran.emit(run)
+
+    def refresh_counts(self) -> None:
+        """Say how many ROIs the pipeline as it stands has yet to measure.
+
+        Cosmetic, and deliberately not refreshed on every keystroke: the
+        count costs a signature per ROI per step, and the button works
+        whatever the label says -- pressing it with nothing out of date says
+        so and runs nothing.
+        """
+        steps = pipeline_module.resolve(self.save_values())
+        waiting = len(self.session.rois.needs_evaluation(steps=steps)) if steps else 0
+        self.changed_button.setText("Re-evaluate what changed"
+                                    + (f" ({waiting})" if waiting else ""))
+
+    def showEvent(self, event) -> None:            # noqa: N802 (Qt's name)
+        super().showEvent(event)
+        self.refresh_counts()
 
     # -------------------------------------------------------------- files
     def save_as(self) -> None:

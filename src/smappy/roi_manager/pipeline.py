@@ -42,12 +42,37 @@ class Step:
         return {"label": self.label, "plugin": self.path, "version": self.version,
                 "parameters": settings_values(self.settings)}
 
+    def identity(self) -> Dict[str, Any]:
+        """What makes this step's numbers what they are -- all but its name.
+
+        The label is what the columns are called and not part of the
+        measurement, so renaming a step must not make every site's result
+        look out of date.  The plugin, its version and its parameters are
+        exactly what does.
+        """
+        return {k: v for k, v in self.as_record().items() if k != "label"}
+
 
 def default_instances() -> List[Instance]:
     """What a pipeline starts as: every installed evaluator, once."""
     from .. import plugins
     return [Instance(plugin=path)
             for path, ref in sorted(plugins.refs().items()) if ref.scope == SCOPE]
+
+
+def instances_from_run(recorded: Sequence[Dict[str, Any]]) -> List[Instance]:
+    """The instances a recorded run's pipeline describes.
+
+    A project can carry runs and no pipeline of its own -- a script that
+    passed its steps straight to `evaluate`, or a file from before the
+    pipeline travelled with the data -- and the run says exactly what ran,
+    down to the parameters.  Reading it back is what lets the stored numbers
+    still be checked and reported.
+    """
+    return [Instance(plugin=str(step.get("plugin") or ""),
+                     label=str(step.get("label") or ""),
+                     values=dict(step.get("parameters") or {}))
+            for step in recorded if isinstance(step, dict) and step.get("plugin")]
 
 
 def evaluators() -> Dict[str, Any]:
