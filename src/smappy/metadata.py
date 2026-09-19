@@ -14,9 +14,28 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, fields, replace
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Optional, Sequence, Tuple, Union
 
 REQUIRED = ("conversion", "offset", "pixelsize_um")
+
+#: a pixel size is one number or two.  Almost every microscope has square
+#: pixels and says so with one; a camera whose x and y differ says both, and
+#: one number then means the same in both directions rather than only in x.
+PixelSize = Union[float, Sequence[float]]
+
+
+def pixel_sizes(value: Optional[PixelSize]) -> Optional[Tuple[float, float]]:
+    """``(x, y)`` from one number or two.  None stays None."""
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return (float(value), float(value))
+    values = [float(v) for v in value]
+    if not values:
+        return None
+    if len(values) == 1:
+        return (values[0], values[0])
+    return (values[0], values[1])
 
 
 @dataclass
@@ -25,7 +44,8 @@ class CameraMetadata:
 
     conversion: Optional[float] = None  # e- per ADU
     offset: Optional[float] = None  # camera baseline, ADU
-    pixelsize_um: Optional[float] = None  # effective pixel size in the sample
+    # effective pixel size in the sample: one number, or x and y
+    pixelsize_um: Optional[PixelSize] = None
     em_on: Optional[bool] = None  # EM gain used (EMCCD); None = unspecified
     emgain: Optional[float] = None  # EM multiplication gain
     roi: Optional[Sequence[int]] = None  # (x, y, width, height) on the chip
@@ -61,6 +81,22 @@ class CameraMetadata:
         return 2.0 if self.is_em else 1.0
 
     @property
+    def pixelsize_um_xy(self) -> Optional[Tuple[float, float]]:
+        """The pixel size in x and y, in um; one number means both."""
+        return pixel_sizes(self.pixelsize_um)
+
+    @property
+    def pixelsize_nm_xy(self) -> Optional[Tuple[float, float]]:
+        """The pixel size in x and y, in nm -- what a fit converts with."""
+        sizes = self.pixelsize_um_xy
+        return None if sizes is None else (sizes[0] * 1000.0, sizes[1] * 1000.0)
+
+    @property
+    def square_pixels(self) -> bool:
+        sizes = self.pixelsize_um_xy
+        return sizes is None or sizes[0] == sizes[1]
+
+    @property
     def roi_offset(self) -> tuple:
         """(x, y) chip offset of the image, used for absolute nm coordinates."""
         if self.roi is None:
@@ -87,6 +123,11 @@ class CameraMetadata:
     def to_dict(self) -> dict:
         d = asdict(self)
         d["roi"] = None if self.roi is None else [int(v) for v in self.roi]
+        if self.pixelsize_um is not None and not isinstance(self.pixelsize_um,
+                                                            (int, float)):
+            sizes = self.pixelsize_um_xy
+            d["pixelsize_um"] = (float(sizes[0]) if self.square_pixels
+                                 else [float(sizes[0]), float(sizes[1])])
         return d
 
     # ------------------------------------------------------------ contructors
@@ -113,7 +154,9 @@ class CameraMetadata:
             yaml.safe_dump(self.to_dict(), fh, sort_keys=False)
 
     def __str__(self) -> str:
-        px = "?" if self.pixelsize_um is None else f"{self.pixelsize_um:g} um"
+        sizes = self.pixelsize_um_xy
+        px = ("?" if sizes is None else f"{sizes[0]:g} um" if self.square_pixels
+              else f"{sizes[0]:g} x {sizes[1]:g} um")
         em = (f"EM on, gain {self.emgain:g}" if self.is_em
               else ("EM off" if self.em_on is not None else "EM unspecified"))
         return (f"{self.camera_name or 'camera'}: conversion="

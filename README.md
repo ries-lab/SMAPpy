@@ -88,11 +88,20 @@ plugin's declaration -- nothing in the plugin or session layer imports Qt.  See
 | `smappy-calibrate /path/to/bead_acquisitions` | bead PSF calibration |
 | `smappy-view FILE.h5` | the older matplotlib viewer |
 
-The camera is a YAML config (`examples/camera_evolve512.yaml`,
-`examples/camera_andor_ixon897.yaml`) or flags
-(`--pixelsize 0.127 --conversion 6.7 --offset 400`); either overrides what the
-image metadata says.  A SMAP `*_cameras.mat` can be passed with `--cameras`, but
-nothing requires one.
+The camera usually needs no flags: smappy recognises it from the file's own
+tags (a serial number, a camera ID) and takes the numbers Micro-Manager does
+not record -- the e-/ADU conversion, and the baseline an iXon never reports --
+from its **camera database**, which also knows that those two depend on the
+readout mode and reads the mode out of the metadata.  `src/smappy/data/cameras.json`
+ships the Ries lab's cameras; a lab's own go in `cameras.json` next to the
+config file, or in a SMAP `*_cameras.mat` converted with
+`python -m smappy.io.cameras_mat lab_cameras.mat cameras.json`.
+`--camera-name` picks an entry for a file whose camera carries no tag to
+recognise it by.
+
+Anything can still be stated by hand, and what is stated wins: a YAML config
+(`examples/camera_evolve512.yaml`, `examples/camera_andor_ixon897.yaml`) or
+flags (`--pixelsize 0.127 --conversion 6.7 --offset 400`).
 
 ## Python
 

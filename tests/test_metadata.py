@@ -3,7 +3,7 @@ import pytest
 
 from smappy.metadata import CameraMetadata
 from smappy.io.tiff import _parse_roi
-from smappy.io.cameras_mat import _eval_expr
+from smappy.io.cameras_mat import reader_for
 
 
 def test_roi_separator_is_not_a_minus_sign():
@@ -12,12 +12,16 @@ def test_roi_separator_is_not_a_minus_sign():
     assert _parse_roi(None) is None
 
 
-def test_matlab_expressions():
-    assert _eval_expr("str2double(X)", "6.7") == 6.7
-    assert _eval_expr("~strcmp(X,'Normal')", "Multiplication Gain") is True
-    assert _eval_expr("~strcmp(X,'Normal')", "Normal") is False
-    assert _eval_expr("~strcmp(X,'Conventional')", "Electron Multiplying") is True
-    assert _eval_expr("strcmp(X,'On')", "On") is True
+def test_matlab_expressions_become_named_readers():
+    """SMAP stores how to read a tag as a MATLAB expression; the database
+    stores it as a name, and the converter is what translates."""
+    assert reader_for("str2double(X)") == {"read": "number"}
+    assert reader_for("str2num(X)") == {"read": "numbers"}
+    assert reader_for("str2double(X)>0") == {"read": "positive"}
+    assert reader_for("~strcmp(X,'Normal')") == {"read": "not_equals",
+                                                 "argument": "Normal"}
+    assert reader_for("strcmp(X,'On')") == {"read": "equals", "argument": "On"}
+    assert reader_for("") == {"read": "text"}
 
 
 def test_overrides_do_not_clear_unspecified_fields():

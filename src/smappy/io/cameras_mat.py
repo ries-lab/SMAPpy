@@ -1,204 +1,252 @@
-"""Camera information from SMAP's ``settings/*_cameras.mat``.
+"""Reading SMAP's ``settings/*_cameras.mat`` into the camera database.
 
-Micro-Manager does not record the e-/ADU conversion, which depends on the
-readout mode.  SMAP keeps that in a settings file: each camera has a list of
-*states* (readout port, readout rate, gain), and each state carries the
-conversion for that mode.  The conversion is the only measured **value** this
-module takes from the file.
+SMAP keeps its cameras in a MATLAB struct: a table of parameters per camera,
+each row saying whether the value is fixed, read from a metadata tag, or
+depends on the readout mode, plus a list of modes with the tags that identify
+them.  That is the same model `smappy.camera_db` holds in JSON, so this is a
+translation and not an interpretation -- the point of it is that a lab with a
+``*_cameras.mat`` gets its cameras by converting the file once, instead of
+typing eight cameras and thirty readout modes in again.
 
-The file also describes, per camera, *which metadata key* means what -- for an
-Evolve the EM mode is ``Evolve512-Port != 'Normal'``, for an Andor it is
-``Andor-Output_Amplifier != 'Conventional'``.  Those are interpretation rules,
-not values, and we use them so that EM settings are read correctly from the
-image metadata of any camera in the file.
-
-This is a stopgap for compatibility with the existing lab settings file; the
-intended long-term source is a plain config file.
+Two things are translated rather than copied.  SMAP's parameter names become
+smappy's (``cam_pixelsize_um`` -> ``pixelsize_um``, ``EMon`` -> ``em_on``), and
+its MATLAB expressions (``str2double(X)``, ``~strcmp(X,'Conventional')``)
+become the database's named readers.  What is left over -- SMAP's own bookkeeping
+rows, and the frame count and image size, which smappy reads from the file
+itself -- is dropped, because a database is a place to look things up and not
+an archive of another program's internals.
 """
-
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, Optional
 
 import numpy as np
-import scipy.io
 
-# metadata-derived fields we are willing to interpret via the preset rules
-_RULE_FIELDS = {"EMon", "emgain", "exposure", "offset"}
+from ..camera_db import Camera, CameraDatabase, Parameter, State
 
+#: SMAP's names for the things smappy also has.  Anything not here is dropped.
+NAMES = {
+    "EMon": "em_on",
+    "emgain": "emgain",
+    "conversion": "conversion",
+    "offset": "offset",
+    "cam_pixelsize_um": "pixelsize_um",
+    "exposure": "exposure_ms",
+    "roi": "roi",
+    "timediff": "frame_interval_ms",
+    "comment": "comment",
+}
 
-@dataclass
-class MetadataRule:
-    """How to read one quantity out of the Micro-Manager metadata."""
-
-    key: str  # the metadata key to read
-    expression: str  # a small MATLAB expression applied to its value
-
-    def apply(self, mm: Dict[str, object]):
-        if self.key not in mm:
-            return None
-        return _eval_expr(self.expression, str(mm[self.key]))
-
-
-def _eval_expr(expr: str, x: str):
-    """Evaluate the handful of MATLAB expressions used in the settings file."""
-    expr = (expr or "").strip()
-    if not expr or expr == "[]":
-        return x
-    if expr in ("str2double(X)", "str2num(X)"):
-        return _as_float(x)
-    if expr == "str2double(X)>0":
-        v = _as_float(x)
-        return None if v is None else v > 0
-    m = re.fullmatch(r"\(?(~?)strcmp\(X,'([^']*)'\)\)?", expr)
-    if m:
-        equal = x.strip() == m.group(2)
-        return (not equal) if m.group(1) else equal
-    return x
+#: SMAP rows that describe SMAP, or that smappy reads from the image itself.
+DROPPED = ("numberOfFrames", "Width", "Height", "roimode", "correctionfile",
+           "imagemetadata")
 
 
-@dataclass
-class CameraState:
-    """One readout mode: the metadata that identifies it, and its conversion."""
-
-    match: Dict[str, str]
-    conversion: Optional[float]
-    offset: Optional[float] = None
-
-    def matches(self, mm: Dict[str, object]) -> bool:
-        conditions = {k: v for k, v in self.match.items()
-                      if k and k != "select" and v != ""}
-        if not conditions:
-            return False
-        return all(str(mm.get(k, "\0")).strip() == v.strip()
-                   for k, v in conditions.items())
+def _text(value) -> str:
+    """A MATLAB cell entry as a plain string ('' for empty)."""
+    if isinstance(value, np.ndarray):
+        return "" if value.size == 0 else str(value.reshape(-1)[0])
+    return "" if value is None else str(value)
 
 
-@dataclass
-class CameraEntry:
-    name: str
-    id_key: str
-    id_value: str
-    states: List[CameraState]
-    rules: Dict[str, MetadataRule] = field(default_factory=dict)
-
-    def identifies(self, mm: Dict[str, object]) -> bool:
-        if not self.id_key:
-            return False
-        value = mm.get(self.id_key)
-        return value is not None and str(value).strip() == self.id_value.strip()
-
-
-def _s(v) -> str:
-    """MATLAB cell entry -> plain string ('' for empty)."""
-    if isinstance(v, np.ndarray):
-        return "" if v.size == 0 else str(v.reshape(-1)[0])
-    return "" if v is None else str(v)
-
-
-def _as_float(v) -> Optional[float]:
+def _number(value) -> Optional[float]:
     try:
-        return float(v)
+        return float(value)
     except (TypeError, ValueError):
         return None
 
 
-class CameraPresets:
-    """Cameras defined in a SMAP ``*_cameras.mat`` file."""
+def reader_for(expression: str) -> Dict[str, Any]:
+    """One of SMAP's MATLAB expressions as a named reader.
 
-    def __init__(self, cameras: List[CameraEntry], source: Optional[Path] = None):
-        self.cameras = cameras
-        self.source = source
+    The five that the settings files actually use.  Anything else is read as
+    text, which is what SMAP's own empty expression does.
+    """
+    expression = (expression or "").strip()
+    if expression in ("str2double(X)", "str2num(X)"):
+        return {"read": "numbers" if expression == "str2num(X)" else "number"}
+    if expression == "str2double(X)>0":
+        return {"read": "positive"}
+    match = re.fullmatch(r"\(?(~?)strcmp\(X,'([^']*)'\)\)?", expression)
+    if match:
+        return {"read": "not_equals" if match.group(1) else "equals",
+                "argument": match.group(2)}
+    return {"read": "text"}
 
-    @classmethod
-    def load(cls, path) -> "CameraPresets":
-        path = Path(path)
-        mat = scipy.io.loadmat(path, struct_as_record=False, squeeze_me=True)
-        camtab = np.atleast_2d(mat["camtab"])
-        raw = np.atleast_1d(mat["cameras"])
 
-        cameras = []
-        for row, cam in zip(camtab, raw):
-            states = []
-            for st in np.atleast_1d(getattr(cam, "state", [])):
-                if not hasattr(st, "_fieldnames"):
-                    continue
-                values = {_s(r[0]): _s(r[1])
-                          for r in np.atleast_2d(getattr(st, "par", []))}
-                states.append(CameraState(
-                    match={_s(r[0]): _s(r[1])
-                           for r in np.atleast_2d(getattr(st, "defpar", []))},
-                    conversion=_as_float(values.get("conversion")),
-                    offset=_as_float(values.get("offset")),
-                ))
-            rules = {}
-            for r in np.atleast_2d(cam.par):
-                name, mode = _s(r[0]), _s(r[1])
-                if mode == "metadata" and name in _RULE_FIELDS:
-                    rules[name] = MetadataRule(key=_s(r[3]), expression=_s(r[5]))
-            cameras.append(CameraEntry(name=_s(row[0]), id_key=_s(row[1]),
-                                       id_value=_s(row[2]), states=states,
-                                       rules=rules))
-        return cls(cameras, path)
-
-    def identify(self, mm: Dict[str, object]) -> Optional[CameraEntry]:
-        for cam in self.cameras:
-            if cam.identifies(mm):
-                return cam
+def _value(text: str, name: str):
+    """A stored value as the type the parameter wants."""
+    text = (text or "").strip()
+    if text == "":
         return None
-
-    def state_for(self, mm: Dict[str, object]) -> Optional[CameraState]:
-        cam = self.identify(mm)
-        if cam is None:
+    if name == "pixelsize_um":
+        # SMAP keeps x and y; so does a camera here, and one number means the
+        # same in both directions -- which is what almost every entry says
+        numbers = [n for n in (_number(part) for part in text.split()) if n]
+        if not numbers:
             return None
-        for state in cam.states:
-            if state.matches(mm):
-                return state
-        return None
+        if len(numbers) == 1 or numbers[0] == numbers[1]:
+            return numbers[0]
+        return numbers[:2]
+    if name in ("em_on",):
+        from ..camera_db import read_boolean
+        return read_boolean(text)
+    if name in ("roi",):
+        from ..camera_db import read_numbers
+        return read_numbers(text)
+    if name == "comment":
+        return text
+    number = _number(text)
+    return text if number is None else number
 
-    def conversion_for(self, mm: Dict[str, object]) -> Optional[float]:
-        """e-/ADU for the readout mode described by ``mm``, if it can be found."""
-        state = self.state_for(mm)
-        return None if state is None else state.conversion
 
-    def interpret(self, mm: Dict[str, object]) -> dict:
-        """Read camera settings out of image metadata using this camera's rules.
+#: SMAP reads these from the image rather than from a metadata key.  Only the
+#: ROI has an equivalent here; the rest smappy takes from the file itself.
+PSEUDO_TAGS = {"ROI direct": "ROI"}
 
-        Returns a dict that may contain ``em_on``, ``emgain``, ``exposure_ms``
-        and ``offset`` -- all read from the *image metadata*, using the keys and
-        expressions the settings file defines for this camera -- plus
-        ``conversion`` and ``state_offset``, which come from the settings file
-        itself.  Absent entries mean the metadata did not provide them.
-        """
-        cam = self.identify(mm)
-        if cam is None:
-            return {}
 
-        out: dict = {"camera_preset": cam.name}
-        mapping = {"EMon": "em_on", "emgain": "emgain",
-                   "exposure": "exposure_ms", "offset": "offset"}
-        for name, rule in cam.rules.items():
-            value = rule.apply(mm)
+def _prefix_of(camera_tags) -> str:
+    """The Micro-Manager device name every tag of this camera starts with.
+
+    Worth finding, because it is the one thing that changes when a lab renames
+    its device: with a prefix the tags read ``{prefix}-Gain``, and the rename
+    is one field rather than a dozen.  As many whole ``-``-separated segments
+    as every tag shares, so ``Andor iXon X-9603-Gain`` and
+    ``Andor iXon X-9603-Exposure`` give ``Andor iXon X-9603`` and not
+    ``Andor iXon X``.
+    """
+    candidates = [t.split("-") for t in camera_tags if "-" in t]
+    if not candidates:
+        return ""
+    shared = []
+    for parts in zip(*candidates):
+        if len(set(parts)) != 1:
+            break
+        shared.append(parts[0])
+    # the last shared segment may be the start of the parameter's own name
+    # ("Andor-ActualInterval-ms" next to "Andor-Exposure" shares only "Andor")
+    return "-".join(shared[:-1]) if len(shared) == len(min(candidates, key=len)) \
+        else "-".join(shared)
+
+
+def _tag(tag: str, prefix: str) -> str:
+    if prefix and tag.startswith(prefix + "-"):
+        return "{prefix}-" + tag[len(prefix) + 1:]
+    return tag
+
+
+def to_database(path) -> CameraDatabase:
+    """Every camera in a SMAP ``*_cameras.mat``, as a camera database."""
+    import scipy.io                              # only when a .mat is read
+
+    path = Path(path)
+    mat = scipy.io.loadmat(path, struct_as_record=False, squeeze_me=True)
+    table = np.atleast_2d(mat["camtab"])
+    raw_cameras = np.atleast_1d(mat["cameras"])
+
+    cameras = []
+    for row, raw in zip(table, raw_cameras):
+        cameras.append(_camera(row, raw))
+    return CameraDatabase(cameras, [path])
+
+
+def _camera(row, raw) -> Camera:
+    name, id_tag, id_value = _text(row[0]), _text(row[1]), _text(row[2])
+    rows = [[_text(cell) for cell in line] for line in np.atleast_2d(raw.par)]
+
+    tags = [line[3] for line in rows if line[1] == "metadata" and line[3]]
+    states_raw = [st for st in np.atleast_1d(getattr(raw, "state", []))
+                  if hasattr(st, "_fieldnames")]
+    for state in states_raw:
+        tags += [_text(pair[0]) for pair in np.atleast_2d(state.defpar)
+                 if _text(pair[0]) not in ("", "select")]
+    if id_tag and id_tag != "select":
+        tags.append(id_tag)
+    prefix = _prefix_of(tags)
+
+    parameters: Dict[str, Parameter] = {}
+    comment = ""
+    for line in rows:
+        smap_name, mode, fixed, tag, _example, expression = line[:6]
+        if smap_name in DROPPED or smap_name not in NAMES:
+            continue
+        key = NAMES[smap_name]
+        tag = PSEUDO_TAGS.get(tag, tag)
+        if mode == "metadata":
+            # SMAP's editor writes "select" where nothing was chosen, and
+            # "... direct" for what it reads off the image rather than a tag;
+            # either way this camera has no metadata key for the parameter
+            if not tag or tag == "select" or tag.endswith(" direct"):
+                continue
+            reader = reader_for(expression)
+            parameters[key] = Parameter(tag=_tag(tag, prefix),
+                                        read=reader["read"],
+                                        argument=reader.get("argument"))
+        elif mode == "state dependent":
+            parameters[key] = Parameter(state=True)
+        else:                                      # fix
+            value = _value(fixed, key)
+            if key == "comment":
+                text_value = str(value or "")
+                # SMAP's placeholder for a comment nobody wrote
+                comment = "" if text_value == "settings not initialized" else text_value
+                continue
             if value is not None:
-                out[mapping[name]] = value
+                parameters[key] = Parameter(fixed=value)
 
-        if isinstance(out.get("em_on"), str):
-            out["em_on"] = out["em_on"].strip().lower() == "true"
+    states = []
+    for state in states_raw:
+        match = {}
+        for pair in np.atleast_2d(state.defpar):
+            tag, wanted = _text(pair[0]), _text(pair[1])
+            if tag and tag != "select" and wanted:
+                match[_tag(tag, prefix)] = wanted
+        if not match:                              # a state that matches nothing
+            continue
+        values = {}
+        for pair in np.atleast_2d(state.par):
+            smap_name, text = _text(pair[0]), _text(pair[1])
+            key = NAMES.get(smap_name)
+            # only what this camera says is state dependent: the rest of the
+            # column is SMAP's editor filling every row of every state
+            if key and parameters.get(key, Parameter()).state:
+                value = _value(text, key)
+                if value is not None:
+                    values[key] = value
+        if values:
+            states.append(State(match=match, values=values))
 
-        state = self.state_for(mm)
-        if state is not None:
-            out["conversion"] = state.conversion
-            out["state_offset"] = state.offset
-        return out
+    identify = None
+    if id_tag and id_tag != "select" and id_value:
+        identify = Parameter(tag=_tag(id_tag, prefix), read="exact",
+                             argument=id_value)
+    return Camera(name=name, prefix=prefix, comment=comment, identify=identify,
+                  parameters=parameters, states=states)
 
-    def describe(self, mm: Dict[str, object]) -> str:
-        cam = self.identify(mm)
-        if cam is None:
-            return "camera not found in presets"
-        conv = self.conversion_for(mm)
-        if conv is None:
-            return f"{cam.name}: no matching readout state"
-        return f"{cam.name}: conversion {conv} e-/ADU"
+
+def main(argv=None) -> int:
+    """``python -m smappy.io.cameras_mat lab_cameras.mat cameras.json``."""
+    import argparse
+
+    from ..camera_db import user_file
+
+    parser = argparse.ArgumentParser(
+        description="Convert a SMAP *_cameras.mat into a camera database.")
+    parser.add_argument("mat", help="the SMAP settings file to read")
+    parser.add_argument("json", nargs="?", default=None,
+                        help=f"where to write it (default: {user_file()})")
+    args = parser.parse_args(argv)
+
+    database = to_database(args.mat)
+    path = database.save(args.json or user_file())
+    print(f"{len(database)} cameras written to {path}")
+    for camera in database.cameras:
+        states = f", {len(camera.states)} readout modes" if camera.states else ""
+        print(f"  {camera.name}{states}")
+    return 0
+
+
+if __name__ == "__main__":       # pragma: no cover - a convenience entry point
+    raise SystemExit(main())

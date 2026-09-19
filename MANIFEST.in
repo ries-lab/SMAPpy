@@ -4,6 +4,7 @@
 include csrc/*.hpp
 include ci/*.py
 include examples/*.yaml
+include src/smappy/data/*.json
 recursive-include tests *.py
 include THIRD_PARTY_NOTICES.md
 include src/smappy/_comet/LICENSE.txt

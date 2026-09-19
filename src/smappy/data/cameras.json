@@ -1,0 +1,473 @@
+{
+  "version": 1,
+  "cameras": [
+    {
+      "name": "Default",
+      "comment": "Default camera",
+      "parameters": {
+        "em_on": {
+          "fixed": true
+        },
+        "pixelsize_um": {
+          "fixed": 0.1
+        },
+        "conversion": {
+          "fixed": 45.0
+        },
+        "emgain": {
+          "fixed": 300.0
+        },
+        "offset": {
+          "fixed": 100.0
+        },
+        "exposure_ms": {
+          "fixed": 1.0
+        },
+        "frame_interval_ms": {
+          "fixed": 1.0
+        }
+      }
+    },
+    {
+      "name": "M1 Andor",
+      "prefix": "Andor",
+      "identify": {
+        "tag": "{prefix}-Camera",
+        "value": "| iXon Ultra | DU897_BV | 8172 |"
+      },
+      "parameters": {
+        "em_on": {
+          "tag": "{prefix}-Output_Amplifier",
+          "read": "not_equals",
+          "value": "Conventional"
+        },
+        "pixelsize_um": {
+          "fixed": 0.1315
+        },
+        "conversion": {
+          "state": true
+        },
+        "emgain": {
+          "tag": "{prefix}-Gain",
+          "read": "number"
+        },
+        "offset": {
+          "state": true
+        },
+        "roi": {
+          "tag": "ROI",
+          "read": "numbers"
+        },
+        "exposure_ms": {
+          "tag": "{prefix}-Exposure",
+          "read": "number"
+        },
+        "frame_interval_ms": {
+          "tag": "{prefix}-ActualInterval-ms",
+          "read": "number"
+        }
+      },
+      "states": [
+        {
+          "match": {
+            "{prefix}-Pre-Amp-Gain": "Gain 1",
+            "{prefix}-ReadoutMode": "10.000 MHz",
+            "{prefix}-Output_Amplifier": "Electron Multiplying"
+          },
+          "values": {
+            "conversion": 15.8,
+            "offset": 196.0
+          }
+        },
+        {
+          "match": {
+            "{prefix}-Pre-Amp-Gain": "Gain 1",
+            "{prefix}-ReadoutMode": "17.000 MHz",
+            "{prefix}-Output_Amplifier": "Electron Multiplying"
+          },
+          "values": {
+            "conversion": 14.61,
+            "offset": 187.0
+          }
+        },
+        {
+          "match": {
+            "{prefix}-Pre-Amp-Gain": "Gain 2",
+            "{prefix}-ReadoutMode": "10.000 MHz",
+            "{prefix}-Output_Amplifier": "Electron Multiplying"
+          },
+          "values": {
+            "conversion": 7.7,
+            "offset": 200.17
+          }
+        },
+        {
+          "match": {
+            "{prefix}-Pre-Amp-Gain": "Gain 2",
+            "{prefix}-ReadoutMode": "17.000 MHz",
+            "{prefix}-Output_Amplifier": "Electron Multiplying"
+          },
+          "values": {
+            "conversion": 9.3,
+            "offset": 201.0
+          }
+        },
+        {
+          "match": {
+            "{prefix}-Pre-Amp-Gain": "Gain 3",
+            "{prefix}-ReadoutMode": "10.000 MHz",
+            "{prefix}-Output_Amplifier": "Electron Multiplying"
+          },
+          "values": {
+            "conversion": 4.55,
+            "offset": 200.5
+          }
+        },
+        {
+          "match": {
+            "{prefix}-Pre-Amp-Gain": "Gain 3",
+            "{prefix}-ReadoutMode": "17.000 MHz",
+            "{prefix}-Output_Amplifier": "Electron Multiplying"
+          },
+          "values": {
+            "conversion": 4.81,
+            "offset": 201.0
+          }
+        },
+        {
+          "match": {
+            "{prefix}-Pre-Amp-Gain": "Gain 3",
+            "{prefix}-ReadoutMode": "1.000 MHz",
+            "{prefix}-Output_Amplifier": "Electron Multiplying"
+          },
+          "values": {
+            "conversion": 3.7,
+            "offset": 200.0
+          }
+        },
+        {
+          "match": {
+            "{prefix}-Pre-Amp-Gain": "Gain 3",
+            "{prefix}-ReadoutMode": "3.000 MHz",
+            "{prefix}-Output_Amplifier": "Electron Multiplying"
+          },
+          "values": {
+            "conversion": 2.85,
+            "offset": 200.0
+          }
+        }
+      ]
+    },
+    {
+      "name": "M2 Evolve",
+      "prefix": "Evolve512",
+      "identify": {
+        "tag": "{prefix}-SerialNumber",
+        "value": "A14G150010"
+      },
+      "parameters": {
+        "em_on": {
+          "tag": "{prefix}-Port",
+          "read": "not_equals",
+          "value": "Normal"
+        },
+        "pixelsize_um": {
+          "fixed": 0.127
+        },
+        "conversion": {
+          "state": true
+        },
+        "emgain": {
+          "tag": "{prefix}-MultiplierGain",
+          "read": "number"
+        },
+        "offset": {
+          "state": true
+        },
+        "roi": {
+          "tag": "ROI",
+          "read": "numbers"
+        },
+        "exposure_ms": {
+          "tag": "{prefix}-Exposure",
+          "read": "number"
+        }
+      },
+      "states": [
+        {
+          "match": {
+            "{prefix}-Gain": "1",
+            "{prefix}-ReadoutRate": "5MHz 16bit",
+            "{prefix}-Port": "Normal"
+          },
+          "values": {
+            "conversion": 4.7,
+            "offset": 398.6
+          }
+        },
+        {
+          "match": {
+            "{prefix}-Gain": "1",
+            "{prefix}-ReadoutRate": "10MHz 16bit",
+            "{prefix}-Port": "Multiplication Gain"
+          },
+          "values": {
+            "conversion": 6.7,
+            "offset": 398.6
+          }
+        },
+        {
+          "match": {
+            "{prefix}-Gain": "1",
+            "{prefix}-ReadoutRate": "20MHz 16bit",
+            "{prefix}-Port": "Multiplication Gain"
+          },
+          "values": {
+            "conversion": 6.4,
+            "offset": 421.0
+          }
+        },
+        {
+          "match": {
+            "{prefix}-Gain": "2",
+            "{prefix}-ReadoutRate": "5MHz 16bit",
+            "{prefix}-Port": "Normal"
+          },
+          "values": {
+            "conversion": 1.1,
+            "offset": 398.9
+          }
+        },
+        {
+          "match": {
+            "{prefix}-Gain": "1",
+            "{prefix}-ReadoutRate": "0.625MHz 16bit",
+            "{prefix}-Port": "Normal"
+          },
+          "values": {
+            "conversion": 4.4,
+            "offset": 401.0
+          }
+        },
+        {
+          "match": {
+            "{prefix}-Gain": "2",
+            "{prefix}-ReadoutRate": "0.625MHz 16bit",
+            "{prefix}-Port": "Normal"
+          },
+          "values": {
+            "conversion": 1.0,
+            "offset": 402.6
+          }
+        }
+      ]
+    },
+    {
+      "name": "GSDIM ALMF",
+      "identify": {
+        "tag": "ATLCameraSettingDefinition|WideFieldChannelConfigurator|CameraName",
+        "value": "Andor-DU897_BV-5492"
+      },
+      "parameters": {
+        "em_on": {
+          "tag": "ATLCameraSettingDefinition|EMGainValue",
+          "read": "positive"
+        },
+        "pixelsize_um": {
+          "fixed": 0.1
+        },
+        "conversion": {
+          "state": true
+        },
+        "emgain": {
+          "tag": "ATLCameraSettingDefinition|EMGainValue",
+          "read": "number"
+        },
+        "offset": {
+          "state": true
+        }
+      }
+    },
+    {
+      "name": "M3 Evolve",
+      "prefix": "Evolve",
+      "identify": {
+        "tag": "{prefix}-SerialNumber",
+        "value": "A13A118002"
+      },
+      "parameters": {
+        "em_on": {
+          "tag": "{prefix}-Port",
+          "read": "not_equals",
+          "value": "Normal"
+        },
+        "pixelsize_um": {
+          "fixed": 0.128
+        },
+        "conversion": {
+          "state": true
+        },
+        "emgain": {
+          "tag": "{prefix}-MultiplierGain",
+          "read": "number"
+        },
+        "offset": {
+          "state": true
+        },
+        "roi": {
+          "tag": "ROI",
+          "read": "numbers"
+        },
+        "exposure_ms": {
+          "tag": "{prefix}-Exposure",
+          "read": "number"
+        },
+        "frame_interval_ms": {
+          "tag": "{prefix}-ActualInterval-ms",
+          "read": "number"
+        }
+      },
+      "states": [
+        {
+          "match": {
+            "{prefix}-Port": "Multiplication Gain",
+            "{prefix}-Gain": "1",
+            "{prefix}-ReadoutRate": "10MHz 16bit"
+          },
+          "values": {
+            "conversion": 10.9,
+            "offset": 500.0
+          }
+        },
+        {
+          "match": {
+            "{prefix}-Port": "Normal",
+            "{prefix}-Gain": "1",
+            "{prefix}-ReadoutRate": "5MHz 16bit"
+          },
+          "values": {
+            "conversion": 2.9,
+            "offset": 500.0
+          }
+        }
+      ]
+    },
+    {
+      "name": "Jungmann",
+      "prefix": "Andor iXon X-9603",
+      "identify": {
+        "tag": "{prefix}-Camera",
+        "value": "| iXon Ultra | DU897_BV | 9603 |"
+      },
+      "parameters": {
+        "em_on": {
+          "tag": "{prefix}-EMSwitch",
+          "read": "equals",
+          "value": "On"
+        },
+        "pixelsize_um": {
+          "fixed": 0.16
+        },
+        "conversion": {
+          "fixed": 3.7
+        },
+        "emgain": {
+          "tag": "{prefix}-Gain",
+          "read": "number"
+        },
+        "offset": {
+          "fixed": 100.0
+        },
+        "roi": {
+          "tag": "ROI",
+          "read": "numbers"
+        },
+        "exposure_ms": {
+          "tag": "{prefix}-Exposure",
+          "read": "number"
+        },
+        "frame_interval_ms": {
+          "tag": "{prefix}-ActualInterval-ms",
+          "read": "number"
+        }
+      }
+    },
+    {
+      "name": "Jungmann Zyla",
+      "prefix": "Andor sCMOS Camera",
+      "identify": {
+        "tag": "{prefix}-CameraID",
+        "value": "VSC-01223"
+      },
+      "parameters": {
+        "em_on": {
+          "fixed": false
+        },
+        "pixelsize_um": {
+          "fixed": 0.13
+        },
+        "conversion": {
+          "fixed": 0.45
+        },
+        "emgain": {
+          "fixed": 1.0
+        },
+        "offset": {
+          "fixed": 100.0
+        },
+        "roi": {
+          "tag": "ROI",
+          "read": "numbers"
+        },
+        "exposure_ms": {
+          "tag": "{prefix}-Exposure",
+          "read": "number"
+        },
+        "frame_interval_ms": {
+          "tag": "{prefix}-Exposure",
+          "read": "number"
+        }
+      }
+    },
+    {
+      "name": "M5 Fusion BT",
+      "prefix": "HamamatsuHam_DCAM",
+      "identify": {
+        "tag": "{prefix}-CameraID",
+        "value": "S/N: 500975"
+      },
+      "parameters": {
+        "em_on": {
+          "fixed": false
+        },
+        "pixelsize_um": {
+          "fixed": [
+            0.102,
+            0.103
+          ]
+        },
+        "conversion": {
+          "fixed": 0.24
+        },
+        "emgain": {
+          "fixed": 1.0
+        },
+        "offset": {
+          "fixed": 100.0
+        },
+        "roi": {
+          "tag": "ROI",
+          "read": "numbers"
+        },
+        "exposure_ms": {
+          "tag": "{prefix}-Exposure",
+          "read": "number"
+        },
+        "frame_interval_ms": {
+          "tag": "{prefix}-Exposure",
+          "read": "number"
+        }
+      }
+    }
+  ]
+}

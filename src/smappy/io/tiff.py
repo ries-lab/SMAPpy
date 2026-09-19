@@ -15,7 +15,6 @@ be finite -- the same interface works for online analysis later.
 from __future__ import annotations
 
 import re
-import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterator, List, Optional, Tuple
@@ -23,6 +22,7 @@ from typing import Dict, Iterator, List, Optional, Tuple
 import numpy as np
 import tifffile
 
+from ..camera_db import Resolution
 from ..metadata import CameraMetadata
 
 
@@ -167,97 +167,144 @@ def _series_files(first: Path) -> List[Path]:
 
 
 # --------------------------------------------------------------------- metadata
-def metadata_from_stack(source: ImageSource,
-                        presets=None) -> CameraMetadata:
-    """Extract what the image file knows about the camera.
+def camera_tags(source: ImageSource) -> Dict[str, str]:
+    """Every metadata key this acquisition carries.
 
-    ``presets`` is optional: a :class:`~smappy.io.cameras_mat.CameraPresets`,
-    or the path of a SMAP ``*_cameras.mat`` to load one from.  It supplies the
-    e-/ADU conversion, which Micro-Manager does not record, and the per-camera
-    rules that say which metadata key carries the EM mode, the EM gain and the
-    offset -- those differ between an Evolve and an iXon.  It is a convenience
-    for a lab that already has such a file; the same values can simply be
-    stated in the camera config or passed to the fitter directly.
-
-    The offset is taken from the image metadata.  Some cameras (e.g. the iXon)
-    do not report it at all; in that case the value stored in the settings file
-    for the matching readout mode is used and a warning is issued.  Values that
-    remain unknown stay ``None`` and must be supplied by the user.
+    The summary under the plane's own tags: Micro-Manager writes the device
+    properties once, at the start, and repeats a handful of them per image.
+    The camera database looks things up by tag and does not care which of the
+    two a tag came from -- but it does care that both are looked in, since the
+    serial number that identifies the camera is only in the summary.
     """
-    if presets is not None and not hasattr(presets, "interpret"):
-        from .cameras_mat import CameraPresets   # scipy, so only when asked for
-        presets = CameraPresets.load(presets)
+    tags: Dict[str, str] = {}
+    for source_tags in (source.summary or {}, source.mm_metadata or {}):
+        for key, value in source_tags.items():
+            # scalars and the odd already-parsed tuple (an NDTiff ROI); a
+            # nested structure is not something a tag can be compared against
+            if isinstance(value, (str, int, float, bool, tuple, list)):
+                tags[str(key)] = value
+    return tags
 
-    mm = source.mm_metadata
-    device = str(mm.get("Core-Camera") or mm.get("Camera") or "").strip()
+
+def _generic_values(tags: Dict[str, str]) -> Dict[str, object]:
+    """What any Micro-Manager file says, without knowing the camera.
+
+    The fallback for a camera that is not in the database, and the source of
+    the values a camera entry does not describe.  It has to guess which key
+    means what -- ``Gain`` is the EM gain on one camera and the pre-amp gain
+    on another -- which is exactly what the database exists to stop doing, so
+    the guesses lose to it wherever it has an answer.
+    """
+    device = str(tags.get("Core-Camera") or tags.get("Camera") or "").strip()
 
     def dev(key, default=None):
-        return mm.get(f"{device}-{key}", default) if device else default
+        return tags.get(f"{device}-{key}", default) if device else default
 
-    info = presets.interpret(mm) if presets is not None else {}
+    port = dev("Port") or dev("Output_Amplifier")
+    em_on = bool(port is not None
+                 and str(port).strip() not in ("Normal", "Conventional"))
+    pixelsize = _to_float(tags.get("PixelSizeUm"))
+    return {
+        "em_on": em_on,
+        "emgain": (_to_float(dev("MultiplierGain")) or _to_float(dev("Gain"))
+                   if em_on else 1.0),
+        "offset": _to_float(dev("Offset")),
+        # MM reports 0.0 for a pixel size nobody calibrated
+        "pixelsize_um": pixelsize or None,
+        "roi": _parse_roi(tags.get("ROI")),
+        "exposure_ms": (_to_float(tags.get("Exposure-ms"))
+                        or _to_float(dev("Exposure"))),
+        "camera_name": device or None,
+    }
 
-    # EM: use the camera's own rule when we have one, else a generic guess
-    if "em_on" in info:
-        em_on = bool(info["em_on"])
+
+def resolve_camera(source: ImageSource, camera: str = "", presets=None,
+                   overrides=None) -> Resolution:
+    """Everything known about the camera behind this stack, and from where.
+
+    Three layers, each winning over the one before it:
+
+    1. what the camera database says this camera's parameters are -- the
+       conversion for the readout mode it recognises, the pixel size, the
+       baseline an iXon never reports;
+    2. what the file itself says, because a value the acquisition recorded
+       beats a value someone stored months ago;
+    3. what the user set, which beats both and is the end of the argument.
+
+    `camera` names a database entry to use instead of identifying one, which
+    is what a file whose camera carries no identifying tag needs.
+    """
+    from ..camera_db import Source, database
+
+    tags = camera_tags(source)
+    known = database()
+    if presets is not None:
+        known = known.joined_with(_as_database(presets))
+    resolution = known.resolve(tags, camera=camera)
+
+    generic = _generic_values(tags)
+    if resolution.camera is None:
+        resolution = resolution.overlaid_with(
+            generic, Source("metadata", "read without a camera entry"))
     else:
-        port = dev("Port") or dev("Output_Amplifier")
-        em_on = bool(port is not None
-                     and str(port).strip() not in ("Normal", "Conventional"))
-    emgain = _to_float(info.get("emgain")) or _to_float(dev("MultiplierGain")) \
-        or _to_float(dev("Gain")) or 1.0
+        # only over what the database supplied from its own store: a camera
+        # entry that names a tag has already read the file, and better.  The
+        # device name is not a parameter and always comes from the file.
+        resolution = resolution.overlaid_with(
+            {k: v for k, v in generic.items() if k != "camera_name"},
+            Source("metadata", "from the file"), only_over=("fixed", "missing"))
+        resolution = resolution.overlaid_with(
+            {"camera_name": generic.get("camera_name")},
+            Source("metadata", "the Micro-Manager device"))
+    if overrides:
+        values = overrides if isinstance(overrides, dict) else overrides.to_dict()
+        resolution = resolution.overlaid_with(
+            {k: v for k, v in values.items() if v is not None},
+            Source("user", "your setting"))
+    return resolution
 
-    offset = _to_float(info.get("offset"))
-    if offset is None:
-        offset = _to_float(dev("Offset"))
-    if offset is None and info.get("state_offset") is not None:
-        offset = _to_float(info["state_offset"])
-        warnings.warn(
-            f"camera '{device or '?'}' does not report an offset in the image "
-            f"metadata; using {offset} ADU from the settings file "
-            f"({info.get('camera_preset')}). Set it explicitly to be sure.",
-            stacklevel=2)
 
-    pixelsize = _to_float(mm.get("PixelSizeUm"))
-    if not pixelsize:  # MM reports 0.0 when the pixel size is not calibrated
-        pixelsize = None
+def _as_database(presets):
+    """A camera database from whatever was passed: one, or a SMAP ``.mat``."""
+    from ..camera_db import CameraDatabase
+    if isinstance(presets, CameraDatabase):
+        return presets
+    path = Path(presets)
+    if path.suffix.lower() == ".mat":
+        from .cameras_mat import to_database
+        return to_database(path)
+    return CameraDatabase.load(path)
 
-    return CameraMetadata(
-        conversion=_to_float(info.get("conversion")),
-        offset=offset,
-        pixelsize_um=pixelsize,
-        em_on=em_on,
-        emgain=emgain if em_on else 1.0,
-        roi=_parse_roi(mm.get("ROI")),
-        exposure_ms=(_to_float(info.get("exposure_ms"))
-                     or _to_float(mm.get("Exposure-ms"))
-                     or _to_float(dev("Exposure"))),
-        camera_name=device or None,
-    )
+
+def metadata_from_stack(source: ImageSource, presets=None) -> CameraMetadata:
+    """What the file and the camera database know about this acquisition.
+
+    ``presets`` adds a camera database beyond the shipped one -- another JSON
+    file, or a SMAP ``*_cameras.mat``, which is converted on the spot.
+    """
+    return resolve_camera(source, presets=presets).camera_metadata()
 
 
 def camera_metadata(source: ImageSource, presets=None, overrides=None,
-                    require: bool = True) -> CameraMetadata:
-    """Camera metadata for a stack: file metadata, then user overrides.
+                    require: bool = True, camera: str = "") -> CameraMetadata:
+    """Camera metadata for a stack: the database, the file, then the user.
 
     ``overrides`` may be a :class:`~smappy.metadata.CameraMetadata`, a dict, or
-    a path to a YAML file, and is the ordinary way to state the conversion, the
-    offset and the pixel size.  Anything set there wins over the image metadata
-    and over ``presets``, so a ``*_cameras.mat`` is never needed to get a
-    complete camera -- it only saves typing where one exists.
+    a path to a YAML file, and is the last word on every value it sets -- so a
+    camera that is in no database and a file that says nothing can still be
+    fitted by stating the three numbers.  ``presets`` adds a camera database
+    beyond the shipped one (another JSON file, or a SMAP ``*_cameras.mat``),
+    and ``camera`` names an entry to use instead of identifying one.
+
     With ``require=True`` the result is checked for completeness, so a missing
     pixel size fails here rather than silently producing wrong nm coordinates.
     """
-    meta = metadata_from_stack(source, presets)
-
-    if overrides is not None:
-        if isinstance(overrides, CameraMetadata):
-            user = overrides
-        elif isinstance(overrides, dict):
-            user = CameraMetadata.from_dict(overrides)
-        else:
-            user = CameraMetadata.from_yaml(overrides)
-        meta = meta.merged_with(user)
-
+    if overrides is not None and not isinstance(overrides, (dict, CameraMetadata)):
+        overrides = CameraMetadata.from_yaml(overrides)
+    if isinstance(overrides, CameraMetadata):
+        overrides = {k: v for k, v in overrides.to_dict().items() if v is not None}
+    meta = resolve_camera(source, camera=camera, presets=presets,
+                          overrides=overrides).camera_metadata()
     if require:
         meta.require()
     return meta

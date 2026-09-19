@@ -21,7 +21,7 @@ from typing import Sequence, Dict, Iterator, Optional
 
 import numpy as np
 
-from .metadata import CameraMetadata
+from .metadata import CameraMetadata, pixel_sizes
 from .psf import FitResult, PSFModel
 from .roi import ROIStack
 
@@ -160,9 +160,19 @@ _PIXEL_COLUMNS = {
 }
 
 
-def to_nm(locs: Localizations, pixelsize_nm: float,
+#: which axis a pixel column measures along.  A column that is neither -- a
+#: precision, a width -- is scaled by the mean, which is exact for the square
+#: pixels almost every microscope has and the only sensible answer otherwise.
+_AXIS = {"x_pix": 0, "x_err_pix": 0, "peak_x_pix": 0, "sigma_x_pix": 0,
+         "y_pix": 1, "y_err_pix": 1, "peak_y_pix": 1, "sigma_y_pix": 1}
+
+
+def to_nm(locs: Localizations, pixelsize_nm,
           keep_pixels: bool = False) -> Localizations:
     """Return a copy with pixel columns converted to nm.
+
+    ``pixelsize_nm`` is one number, or x and y for a camera whose pixels are
+    not square -- one number means the same in both directions.
 
     ``keep_pixels`` keeps the pixel columns alongside the nm ones.  ``z_nm`` is
     already in nm and is left untouched.
@@ -171,6 +181,8 @@ def to_nm(locs: Localizations, pixelsize_nm: float,
         return locs
     if locs.metadata.get("units") == "nm":
         return locs
+    x_nm, y_nm = pixel_sizes(pixelsize_nm)
+    mean_nm = 0.5 * (x_nm + y_nm)
 
     columns = {}
     for name, values in locs.columns.items():
@@ -178,13 +190,19 @@ def to_nm(locs: Localizations, pixelsize_nm: float,
         if target is None:
             columns[name] = values
             continue
-        columns[target] = np.asarray(values, dtype=np.float32) * np.float32(pixelsize_nm)
+        axis = _AXIS.get(name)
+        scale = mean_nm if axis is None else (x_nm, y_nm)[axis]
+        columns[target] = np.asarray(values, dtype=np.float32) * np.float32(scale)
         if keep_pixels:
             columns[name] = values
 
     metadata = dict(locs.metadata)
     metadata["units"] = "pixel+nm" if keep_pixels else "nm"
-    metadata["pixelsize_nm"] = float(pixelsize_nm)
+    # one number for everything that wants a scale, both when they differ:
+    # a tool that asks "how big is a pixel" wants an answer, not a pair
+    metadata["pixelsize_nm"] = float(mean_nm)
+    if x_nm != y_nm:
+        metadata["pixelsize_nm_xy"] = [float(x_nm), float(y_nm)]
     return Localizations(columns, metadata)
 
 

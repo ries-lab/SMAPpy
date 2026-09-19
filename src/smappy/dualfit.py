@@ -460,7 +460,7 @@ class DualChannelEngine:
 
         if self.settings.output_unit != "pixel":
             self.camera.require("pixelsize_um")
-            locs = to_nm(locs, float(self.camera.pixelsize_um) * 1000.0,
+            locs = to_nm(locs, self.camera.pixelsize_nm_xy,
                          keep_pixels=self.settings.output_unit == "pixel+nm")
         return locs
 

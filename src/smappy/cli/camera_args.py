@@ -1,10 +1,12 @@
 """The camera options shared by the command-line entry points.
 
-The camera is stated in a config file or on the command line; a SMAP
-``*_cameras.mat`` is an optional extra for labs that keep one.  The layers
-override in this order, each winning over the ones before it:
+Most acquisitions need none of these: the camera database recognises the
+camera from the file's own tags and supplies what the metadata does not carry.
+They are for the rest -- a camera nobody has entered, or one whose file has no
+tag to recognise it by.  The layers override in this order, each winning over
+the ones before it:
 
-    image metadata  <  --cameras preset  <  --camera config  <  options
+    camera database  <  image metadata  <  --camera config  <  options
 """
 from __future__ import annotations
 
@@ -27,9 +29,12 @@ def add_camera_arguments(ap: argparse.ArgumentParser) -> None:
     g.add_argument("--emgain", type=float, default=None)
     g.add_argument("--em", dest="em_on", action=argparse.BooleanOptionalAction,
                    default=None, help="EM amplification was used")
-    g.add_argument("--cameras", metavar="CAMERAS.mat", default=None,
-                   help="optional SMAP camera settings file, for the "
-                        "conversion and the per-camera metadata rules")
+    g.add_argument("--cameras", metavar="CAMERAS", default=None,
+                   help="a camera database to use besides the shipped one: a "
+                        "JSON file, or a SMAP *_cameras.mat")
+    g.add_argument("--camera-name", metavar="NAME", default=None,
+                   help="use this camera from the database instead of "
+                        "identifying one from the file's tags")
 
 
 def camera_from_args(source, a, require: bool = True) -> CameraMetadata:
@@ -40,4 +45,5 @@ def camera_from_args(source, a, require: bool = True) -> CameraMetadata:
     overrides = overrides.merged_with(CameraMetadata(
         conversion=a.conversion, offset=a.offset, pixelsize_um=a.pixelsize,
         emgain=a.emgain, em_on=a.em_on))
-    return camera_metadata(source, a.cameras, overrides, require=require)
+    return camera_metadata(source, a.cameras, overrides, require=require,
+                           camera=getattr(a, "camera_name", None) or "")

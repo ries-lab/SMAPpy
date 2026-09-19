@@ -1038,6 +1038,42 @@ site rather than fifteen.  *Re-evaluate when out of date* is the switch for
 the rest: off, a stale step that is not being looked at is left as it is and
 shown labelled, for scrolling a large project without it computing behind you.
 
+## The camera database
+
+Micro-Manager records a great deal and not the two numbers a fit needs most.
+The e-/ADU conversion is never in the metadata and depends on the readout
+mode, which is; an iXon reports no baseline at all; an EMCCD's conversion
+changes with the pre-amp gain, the readout rate and the output amplifier.  So
+the numbers come from a database, chosen by what the metadata does say --
+which is what SMAP keeps in `settings/*_cameras.mat` and what
+`smappy/data/cameras.json` holds here, ported from the Ries lab's file.
+
+A camera is identified by one tag (a serial number, a camera ID) and carries,
+per parameter, where its value comes from: `fixed`, `metadata` (this tag, read
+this way) or `state` (it depends on the readout mode, which is recognised by a
+set of tags that must all match).  Tags may be written `{prefix}-Gain`, so a
+lab that renames its Micro-Manager device edits one field.
+
+Two rules decide the rest:
+
+* **The file wins.**  The database says what a parameter is when the file does
+  not; a value the acquisition recorded beats a value stored months ago, and
+  the user's own setting beats both.
+* **Nothing is guessed.**  A camera that cannot be identified resolves to
+  nothing rather than to a plausible default -- a wrong conversion is
+  invisible in the fit -- and the camera is then chosen by hand.
+
+Every value is attributable: `Resolution.sources` says, per parameter, whether
+it came from a tag (which one, and what it read), from the readout mode (which
+one), from the database, or from the user.  That is what the parameter view
+shows, and the reason it exists: a conversion that is wrong by a factor of two
+looks exactly like a conversion that is right until something says where it
+came from.
+
+A pixel size is one number or two.  Almost every microscope has square pixels;
+where x and y differ the database keeps both, `to_nm` scales each axis by its
+own, and a width or a precision -- which is neither x nor y -- by the mean.
+
 ## Open questions
 
 * Fitted x sits ~0.24 px from the peak-finder position, and the sign flips with
