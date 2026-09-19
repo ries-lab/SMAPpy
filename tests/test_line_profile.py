@@ -1,0 +1,244 @@
+"""Line profiles: the projection, and the models fitted to it unbinned."""
+import numpy as np
+import pytest
+
+from smappy.locs import Localizations
+from smappy.plugins import Context, Selection
+from smappy.regions import Region
+from smappy.plugins.line_profile import (LineProfile, LineProfileSettings,
+                                         auto_bin, fit_models, fit_profile,
+                                         line_ends, profiles, project)
+
+WIDTH = 200.0
+LENGTH = 1000.0
+ROI = Region.line((0.0, 5000.0), (LENGTH, 5000.0), WIDTH)
+
+
+def simulate(n, across, precision=10.0, seed=0, sigma=0.0):
+    """Localizations in the ROI: ``across`` nm off the line, blurred.
+
+    The structure is at `across` (a number, or one per localization); each
+    localization is then displaced by its own precision, which is what the
+    fit is asked to take out again.
+    """
+    rng = np.random.default_rng(seed)
+    precision = np.full(n, precision, float) if np.isscalar(precision) else precision
+    along = rng.uniform(0, LENGTH, n)
+    offset = np.asarray(across, float) + rng.normal(0, sigma, n)
+    x = along + rng.normal(0, precision)
+    y = 5000.0 + offset + rng.normal(0, precision)
+    return Localizations({
+        "x_nm": x.astype(np.float32), "y_nm": y.astype(np.float32),
+        "frame": np.arange(n, dtype=np.int64),
+        "photons": np.full(n, 800.0, np.float32),
+        "loc_precision_nm": precision.astype(np.float32),
+    }, {"units": "nm"})
+
+
+def context(locs, roi=ROI):
+    """What a session with this ROI drawn would hand a plugin."""
+    ctx = Context(locs=locs,
+                  selection=Selection(roi.mask(locs["x_nm"], locs["y_nm"]),
+                                      roi=roi))
+
+    class OneRoi:
+        def __init__(self, region):
+            self.roi = region
+
+    ctx.session = OneRoi(roi)
+    return ctx
+
+
+# ------------------------------------------------------------ the geometry
+
+def test_the_line_is_recovered_from_the_corners_of_its_roi():
+    p0, p1, width = line_ends(ROI)
+    assert np.allclose(p0, (0.0, 5000.0)) and np.allclose(p1, (LENGTH, 5000.0))
+    assert width == WIDTH
+
+
+def test_a_position_becomes_a_distance_along_and_a_distance_across():
+    along, across = project([0.0, 100.0, 0.0], [0.0, 0.0, 30.0],
+                            (0.0, 0.0), (100.0, 0.0))
+    assert np.allclose(along, [0.0, 100.0, 0.0])
+    assert np.allclose(across, [0.0, 0.0, 30.0])
+    # a diagonal line: the projection is the rotation, not the coordinates
+    along, across = project([10.0], [10.0], (0.0, 0.0), (10.0, 10.0))
+    assert np.allclose(along, np.hypot(10, 10)) and np.allclose(across, 0.0)
+
+
+def test_a_roi_that_is_not_a_line_is_refused_by_name():
+    with pytest.raises(ValueError, match="rect"):
+        line_ends(Region.rect(0, 0, 10, 10))
+    with pytest.raises(ValueError, match="a line ROI"):
+        LineProfile().run(context(simulate(100, 0.0), Region.rect(0, 0, 1e4, 1e4)),
+                          LineProfileSettings())
+
+
+def test_the_profiles_are_of_the_same_localizations_and_of_the_roi_window():
+    locs = simulate(500, 0.0, seed=2)
+    found = profiles(locs, ROI)
+    assert found["across"].window == (-WIDTH / 2, WIDTH / 2)
+    assert found["along"].window == (0.0, LENGTH)
+    assert len(found["across"].values) == len(found["along"].values)
+    assert np.all(np.abs(found["across"].values) <= WIDTH / 2)
+
+
+def test_a_given_length_replaces_the_roi_and_drops_what_is_outside_it():
+    """Two ROIs of different lengths compare directly when both are cut."""
+    locs = simulate(2000, 0.0, seed=3)
+    found = profiles(locs, ROI, length=400.0)
+    assert found["along"].window == (300.0, 700.0)
+    assert len(found["along"].values) < 2000
+    assert np.all(found["along"].values >= 300.0)
+
+
+# -------------------------------------------------------------- the fitting
+
+def test_a_gaussian_profile_comes_back_with_the_width_it_was_made_with():
+    locs = simulate(4000, 0.0, sigma=12.0, seed=4)
+    profile = profiles(locs, ROI)["across"]
+    fit = fit_profile(profile.values, profile.precision, model="gauss",
+                      window=profile.window)
+    assert fit.values()["sigma"] == pytest.approx(12.0, abs=1.5)
+    assert abs(fit.values()["centre"]) < 2.0
+
+
+def test_the_localization_precision_is_what_separates_structure_from_blur():
+    """The point of the unbinned fit: what is fitted is the structure.
+
+    Without the precisions the same data gives the width of the *picture*,
+    sqrt(s^2 + sigma^2), which is a different and larger number.
+    """
+    locs = simulate(4000, 0.0, precision=15.0, sigma=10.0, seed=5)
+    profile = profiles(locs, ROI)["across"]
+    with_it = fit_profile(profile.values, profile.precision, model="gauss",
+                          window=profile.window)
+    without = fit_profile(profile.values, None, model="gauss",
+                          window=profile.window)
+    assert with_it.values()["sigma"] == pytest.approx(10.0, abs=1.5)
+    assert without.values()["sigma"] == pytest.approx(np.hypot(10, 15), abs=1.5)
+
+
+def test_two_structures_give_back_the_distance_between_them():
+    n = 4000
+    rng = np.random.default_rng(6)
+    across = np.where(rng.random(n) < 0.5, -25.0, 25.0)
+    locs = simulate(n, across, precision=8.0, sigma=6.0, seed=7)
+    profile = profiles(locs, ROI)["across"]
+    fit = fit_profile(profile.values, profile.precision, model="two_gauss",
+                      window=profile.window)
+    assert fit.values()["distance"] == pytest.approx(50.0, abs=3.0)
+    assert fit.values()["sigma"] == pytest.approx(6.0, abs=2.0)
+
+
+def test_an_edge_is_found_where_the_localizations_stop():
+    n = 4000
+    rng = np.random.default_rng(8)
+    across = rng.uniform(-WIDTH / 2, 20.0, n)      # labelled up to +20 nm
+    locs = simulate(n, across, precision=8.0, seed=9)
+    profile = profiles(locs, ROI)["across"]
+    fit = fit_profile(profile.values, profile.precision, model="step",
+                      window=profile.window)
+    assert fit.values()["edge"] == pytest.approx(20.0, abs=6.0)
+    assert fit.extra["side"] < 0                   # the density falls with t
+
+
+def test_the_model_with_the_better_aic_is_the_one_the_data_came_from():
+    """The comparison is the point: one structure or two is a number."""
+    n = 3000
+    rng = np.random.default_rng(10)
+    two = np.where(rng.random(n) < 0.5, -30.0, 30.0)
+    profile = profiles(simulate(n, two, precision=8.0, sigma=5.0, seed=11),
+                       ROI)["across"]
+    best = fit_models(profile.values, profile.precision,
+                      models=("gauss", "two_gauss", "step"),
+                      window=profile.window)[0]
+    assert best.model == "two_gauss"
+
+    one = profiles(simulate(n, 0.0, precision=8.0, sigma=20.0, seed=12),
+                   ROI)["across"]
+    best = fit_models(one.values, one.precision,
+                      models=("gauss", "two_gauss", "step"),
+                      window=one.window)[0]
+    assert best.model == "gauss"
+
+
+def test_the_fit_does_not_depend_on_the_bin_width_and_the_binned_one_does():
+    """Unbinned is unbinned: the bins are the picture, not the estimator."""
+    locs = simulate(600, 0.0, precision=10.0, sigma=15.0, seed=13)
+    profile = profiles(locs, ROI)["across"]
+    fits = [fit_profile(profile.values, profile.precision, model="gauss",
+                        window=profile.window, bin_size=size)
+            for size in (2.0, 25.0)]
+    assert fits[0].values()["sigma"] == fits[1].values()["sigma"]
+
+    binned = [fit_profile(profile.values, profile.precision, model="gauss",
+                          window=profile.window, method="binned", bin_size=size)
+              for size in (2.0, 25.0)]
+    assert binned[0].values()["sigma"] != binned[1].values()["sigma"]
+    # and it should still be the right answer, to within the bins
+    assert binned[0].values()["sigma"] == pytest.approx(15.0, abs=3.0)
+
+
+def test_a_uniform_background_is_fitted_rather_than_widening_the_peak():
+    n = 3000
+    rng = np.random.default_rng(14)
+    structure = rng.normal(0, 10.0, n)
+    flat = rng.uniform(-WIDTH / 2, WIDTH / 2, n // 3)
+    across = np.concatenate([structure, flat])
+    locs = simulate(len(across), across, precision=6.0, seed=15)
+    profile = profiles(locs, ROI)["across"]
+    with_background = fit_profile(profile.values, profile.precision,
+                                  model="gauss", window=profile.window)
+    without = fit_profile(profile.values, profile.precision, model="gauss",
+                          window=profile.window, background=False)
+    assert with_background.background == pytest.approx(0.25, abs=0.08)
+    assert with_background.values()["sigma"] == pytest.approx(10.0, abs=2.0)
+    assert without.values()["sigma"] > with_background.values()["sigma"] + 2
+
+
+def test_too_few_localizations_is_said_rather_than_fitted():
+    with pytest.raises(ValueError, match="too few"):
+        fit_profile(np.zeros(3), None, model="gauss", window=(-50, 50))
+
+
+def test_the_bin_width_for_the_picture_stays_between_two_and_two_hundred_bins():
+    for n in (10, 1000, 100000):
+        values = np.random.default_rng(16).normal(0, 20, n)
+        width = auto_bin(values, (-100, 100))
+        assert 1.0 <= width <= 40.0
+
+
+# --------------------------------------------------------------- the plugin
+
+def test_the_plugin_reports_every_model_and_draws_what_it_fitted():
+    locs = simulate(1500, 0.0, precision=8.0, sigma=14.0, seed=17)
+    result = LineProfile().run(context(locs), LineProfileSettings(model="all"))
+    assert set(result.data["fits"]) == {"gauss", "two_gauss", "step"}
+    assert "best by AIC: Gaussian" in result.text
+    assert result.data["values"]["gauss"]["sigma"] == pytest.approx(14.0, abs=2.0)
+
+    figure = _figure()
+    result.plot(figure.subplots())
+    result.plots["scatter"].draw(figure)
+
+
+def test_the_plugin_refuses_a_profile_the_table_has_no_column_for():
+    locs = simulate(200, 0.0, seed=18)
+    with pytest.raises(ValueError, match="no z profile"):
+        LineProfile().run(context(locs), LineProfileSettings(axis="z"))
+
+
+def test_a_profile_along_the_line_is_the_other_coordinate_of_the_same_run():
+    locs = simulate(1500, 0.0, seed=19)
+    result = LineProfile().run(context(locs),
+                               LineProfileSettings(axis="along", model="step"))
+    assert "position along the line" in result.text
+
+
+def _figure():
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    return plt.figure()

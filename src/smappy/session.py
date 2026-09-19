@@ -738,6 +738,17 @@ class Session:
                           grouped=grouped)
         if result.locs is not None:
             self.set_locs(result.locs)
+        # A plugin that writes a column the user is meant to *filter* on says
+        # so here, as `{field: (lo, hi)}`.  It cannot set the bound itself: a
+        # filter belongs to the table it was built from, and the table the
+        # column is in is the one that has just been set here.
+        bounds = (result.data or {}).get("bounds") or {}
+        for field, (lo, hi) in bounds.items():
+            for layer in self.layers:
+                if not layer.is_image:
+                    layer.set_bound(field, lo, hi)
+        if bounds:
+            self.changed("locs")
         # last: a plugin that opened a file has just cleared the session, this
         # one included, and what it worked out belongs to the file it opened
         self.remember(plugin, result)

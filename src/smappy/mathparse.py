@@ -300,6 +300,12 @@ def as_column(values: Any, n: int, expression: str = "") -> np.ndarray:
 def recipes(locs: Localizations) -> List[Dict[str, str]]:
     """The derived fields of this table, in the order they were defined.
 
+    A recipe is how a field survives being grouped.  Usually that is an
+    expression to evaluate again on the blinks, but a field that was
+    *measured* per localization and only needs a rule -- a flag written by
+    `plugins.remove_locs`, say -- is a recipe with a rule and no expression:
+    it cannot be recomputed and must not be averaged like a measurement.
+
     Read tolerantly: the recipes come out of a file that another version wrote,
     so an entry that is not one is dropped rather than raising, and one that
     does not say what to do on the grouped table gets the default.
@@ -309,8 +315,10 @@ def recipes(locs: Localizations) -> List[Dict[str, str]]:
     for recipe in found:
         if not isinstance(recipe, dict):
             continue
-        if not recipe.get("field") or not recipe.get("expression"):
+        if not recipe.get("field"):
             continue
+        if not recipe.get("expression") and recipe.get("grouped") not in COMBINE_RULES:
+            continue          # nothing to recompute and no rule: not a recipe
         entry = dict(recipe)
         if entry.get("grouped") not in GROUPED_CHOICES:
             entry["grouped"] = RECOMPUTE
@@ -362,9 +370,11 @@ def apply_recipes(locs: Localizations, only: Optional[Sequence[str]] = None,
     """
     done = []
     for recipe in recipes(locs):
-        field, expression = recipe["field"], recipe["expression"]
+        field, expression = recipe["field"], recipe.get("expression", "")
         if only is not None and field not in only:
             continue
+        if not expression:
+            continue          # a rule, not an expression: nothing to run here
         if recipe.get("where") == "selection":
             # computed for part of the table only, so the expression alone
             # does not say what the field is; the values that are there stand
