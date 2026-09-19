@@ -178,8 +178,48 @@ class ControlWindow(QMainWindow):
                           "bead z-stacks; opens its own window")
         button.clicked.connect(self.open_calibration)
         row.addWidget(button)
+        camera = QPushButton("Camera parameters...")
+        camera.setToolTip("what the fit thinks the camera is, and where every "
+                          "value came from: this file's tags, the readout mode "
+                          "the database recognised, or what you set here")
+        camera.clicked.connect(self.open_camera_parameters)
+        row.addWidget(camera)
         row.addStretch(1)
         return box
+
+    def open_camera_parameters(self) -> None:
+        """Show the camera behind the fit that is set up in this tab.
+
+        Hidden until asked for: the camera is normally recognised and its
+        numbers are its own.  This is for when a conversion looks wrong, or
+        nothing was recognised at all -- and a wrong conversion is invisible
+        in the result, so the only way to see it is to look at where it came
+        from.
+        """
+        from .camera_view import open_for
+        panel = self._fitting_panel()
+        if panel is None:
+            QMessageBox.information(
+                self, "Camera parameters",
+                "open a fitter in the Localize tab first: the camera is read "
+                "from the acquisition it is set to fit.")
+            return
+        try:
+            settings = panel.form.value()
+        except ValueError as error:
+            QMessageBox.information(self, "Camera parameters",
+                                    f"the fitter's settings do not read: {error}")
+            return
+        self._camera_window = open_for(panel.plugin, settings, self,
+                                       getattr(self, "_camera_window", None))
+
+    def _fitting_panel(self):
+        """The first open panel that knows how to resolve a camera."""
+        for tab in self.plugin_tabs:
+            for panel in tab.panels():
+                if hasattr(panel.plugin, "resolution"):
+                    return panel
+        return None
 
     def build_tabs(self) -> None:
         """(Re)build the tab strip from the workspace."""

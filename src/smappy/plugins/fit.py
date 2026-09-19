@@ -55,18 +55,29 @@ class SourceSettings:
 @dataclass
 class CameraSettings:
     """ADU -> photons and pixel -> nm.  Empty fields come from the file."""
+    # the camera is normally recognised from the file's own tags; this is for
+    # the file whose camera carries no tag to recognise it by
+    camera: str = param("", label="camera", choices=lambda: _camera_choices(),
+                        help="auto: identified from the file's metadata")
     preset: str = param("", label="preset", choices=lambda: _preset_choices(),
                         help="a camera YAML; fills the fields below")
     conversion: Optional[float] = param(None, unit="e-/ADU", min=0)
     offset: Optional[float] = param(None, unit="ADU")
     pixelsize_um: Optional[float] = param(None, label="pixel size", unit="um", min=0)
+    pixelsize_y_um: Optional[float] = param(None, label="pixel size y", unit="um",
+                                            min=0, advanced=True,
+                                            help="auto: square pixels, the same "
+                                                 "as in x")
     em_on: Optional[bool] = param(None, label="EM gain on")
     emgain: Optional[float] = param(None, label="EM gain", min=0)
 
     def overrides(self) -> Dict[str, Any]:
         """What the user set, to win over the file's metadata."""
-        return {k: v for k, v in asdict(self).items()
-                if k != "preset" and v is not None}
+        out = {k: v for k, v in asdict(self).items()
+               if k not in ("preset", "camera", "pixelsize_y_um") and v is not None}
+        if self.pixelsize_y_um and self.pixelsize_um:
+            out["pixelsize_um"] = [self.pixelsize_um, self.pixelsize_y_um]
+        return out
 
     def resolve(self, source) -> CameraMetadata:
         """The complete camera: the file's metadata under the user's values."""
@@ -76,7 +87,7 @@ class CameraSettings:
             overrides = {**{k: v for k, v in preset.items() if v is not None}, **overrides}
         if source is not None:
             from ..io.tiff import camera_metadata
-            return camera_metadata(source, overrides=overrides)
+            return camera_metadata(source, overrides=overrides, camera=self.camera)
         cam = CameraMetadata.from_dict(overrides)
         cam.require()
         return cam
@@ -176,6 +187,16 @@ FIT_PARAMS = {
 }
 
 
+def _camera_choices() -> List:
+    """The cameras in the database, for a file that identifies none."""
+    from ..camera_db import database
+    try:
+        names = database().names()
+    except Exception:
+        names = []
+    return [("", "auto")] + [(name, name) for name in names]
+
+
 def _preset_choices() -> List:
     """Camera YAMLs: ``~/.smappy/cameras`` and the checkout's ``examples``."""
     dirs = [Path.home() / ".smappy" / "cameras",
@@ -209,42 +230,61 @@ class _FitPlugin(Plugin):
 
     CAMERA_FIELDS = ("conversion", "offset", "pixelsize_um", "em_on", "emgain")
 
-    def _camera(self, settings) -> Optional[CameraMetadata]:
-        """The camera as it stands: the file's metadata under the user's values.
+    def resolution(self, settings):
+        """Everything known about this acquisition's camera, and from where.
 
-        Cached on the source path, because this opens the acquisition and the
-        GUI asks after every keystroke that changes a field.
+        The `Resolution` the camera database produced, with the file's own
+        metadata and the user's settings on top of it -- which is what both
+        the hints below and the parameter view read, so that what the view
+        shows is what the fit will use and not a second opinion.
+
+        Cached on the source path and the camera settings, because this opens
+        the acquisition and the GUI asks after every keystroke.
         """
         path = settings.source.path
         if not path:
             return None
-        key = (path, settings.camera.preset, tuple(
-            getattr(settings.camera, name) for name in self.CAMERA_FIELDS))
+        key = (path, settings.camera.preset, settings.camera.camera, tuple(
+            getattr(settings.camera, name) for name in self.CAMERA_FIELDS),
+            settings.camera.pixelsize_y_um)
         if getattr(self, "_camera_key", None) == key:
             return self._camera_value
         try:
-            from ..io.tiff import camera_metadata
+            from ..io.tiff import resolve_camera
             source = _open(settings.source, watch=False)
             overrides = settings.camera.overrides()
             if settings.camera.preset:
                 preset = asdict(CameraMetadata.from_yaml(settings.camera.preset))
                 overrides = {**{k: v for k, v in preset.items() if v is not None},
                              **overrides}
-            # require=False: a camera that is still missing a field has to
-            # hint at the fields it does know, not refuse the lot
-            camera = camera_metadata(source, overrides=overrides, require=False)
+            resolved = resolve_camera(source, camera=settings.camera.camera,
+                                      overrides=overrides)
         except Exception:
             return None
-        self._camera_key, self._camera_value = key, camera
-        return camera
+        self._camera_key, self._camera_value = key, resolved
+        return resolved
+
+    def _camera(self, settings) -> Optional[CameraMetadata]:
+        """The camera as it stands: the file's metadata under the user's values.
+
+        Never `require`d: a camera that is still missing a field has to hint
+        at the fields it does know, not refuse the lot.
+        """
+        resolved = self.resolution(settings)
+        return None if resolved is None else resolved.camera_metadata()
 
     def hints(self, settings) -> Optional[Dict[str, Any]]:
         """What the camera fields left on *auto* will actually be."""
         camera = self._camera(settings)
         if camera is None:
             return None
-        return {f"camera.{name}": getattr(camera, name)
-                for name in self.CAMERA_FIELDS}
+        hints = {f"camera.{name}": getattr(camera, name)
+                 for name in self.CAMERA_FIELDS}
+        sizes = camera.pixelsize_um_xy
+        if sizes is not None:
+            hints["camera.pixelsize_um"] = sizes[0]
+            hints["camera.pixelsize_y_um"] = sizes[1]
+        return hints
 
     def react(self, changed: str, settings) -> Optional[Dict[str, Any]]:
         if changed == "source.path" and settings.source.path:

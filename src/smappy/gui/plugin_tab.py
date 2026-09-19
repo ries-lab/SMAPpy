@@ -109,6 +109,19 @@ class PluginTab(QWidget):
         layout.addWidget(scroll)
         self.rebuild()
 
+    def panels(self):
+        """The panels that have actually been built, in order.
+
+        A tab lists plugins it has never imported, so a slot that nobody has
+        opened has no panel and is not one.
+        """
+        built = []
+        for instance in self.tab.instances:
+            slot = self.slots.get(instance.id)
+            if slot is not None and slot.panel is not None:
+                built.append(slot.panel)
+        return built
+
     # ------------------------------------------------------------- building
     def rebuild(self) -> None:
         opened = self.open_instance()

@@ -147,6 +147,18 @@ reasoning is here so that it does not have to be re-derived.
   what changed* in the pipeline window runs only the steps that are out of
   date -- editing one evaluator's parameter costs that evaluator over the
   sites, not the whole pipeline over all of them.
+* **The camera is recognised, not typed in.**  On opening an acquisition the
+  camera database (`camera_db.py`, `data/cameras.json`) matches one tag of the
+  file -- a serial number, a camera ID -- against its cameras, and reads the
+  readout mode out of the metadata to get the two numbers Micro-Manager never
+  records: the e-/ADU conversion and, for an iXon, the baseline.  What the
+  file itself says wins over the database, and what is set in the Localize
+  tab wins over both.  A camera that is not recognised is *chosen* rather than
+  guessed at, under *camera* in that tab's camera section.  *Camera
+  parameters...* opens a window listing every value the fit will use and where
+  each came from -- this tag of this file, that readout mode, the database,
+  your own setting -- which is the only way to see a conversion that is wrong,
+  since a wrong one fits perfectly well.  Hidden until asked for.
 * **A result's figures share one window.**  *Plot* opens a window per plugin,
   reused across runs; a plugin with several figures gets them as tabs of it,
   and a tab is torn off into its own window by double-clicking it (Ctrl+D),
@@ -205,6 +217,8 @@ reasoning is here so that it does not have to be re-derived.
     smappy/gui/plugin_panel.py   a plugin as a section: form, Run, result
     smappy/gui/figures.py        a result's figures: one window, a tab each
     smappy/gui/roi_site.py       the site window: a tab per evaluator
+    smappy/camera_db.py          the camera database: identify, state, resolve
+    smappy/gui/camera_view.py    every camera value, and where it came from
     smappy/plugins/drift_result.py  what a drift plugin keeps in the file
     smappy/gui/app.py            windows, menus, tabs; `smappy-gui`
 
