@@ -2,33 +2,6 @@
   "version": 1,
   "cameras": [
     {
-      "name": "Default",
-      "comment": "Default camera",
-      "parameters": {
-        "em_on": {
-          "fixed": true
-        },
-        "pixelsize_um": {
-          "fixed": 0.1
-        },
-        "conversion": {
-          "fixed": 45.0
-        },
-        "emgain": {
-          "fixed": 300.0
-        },
-        "offset": {
-          "fixed": 100.0
-        },
-        "exposure_ms": {
-          "fixed": 1.0
-        },
-        "frame_interval_ms": {
-          "fixed": 1.0
-        }
-      }
-    },
-    {
       "name": "M1 Andor",
       "prefix": "Andor",
       "identify": {

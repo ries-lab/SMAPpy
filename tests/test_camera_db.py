@@ -304,3 +304,41 @@ def test_a_smap_settings_file_becomes_a_database(tmp_path):
     assert resolution.values["offset"] == 421.0
     assert resolution.values["em_on"] is True
     assert resolution.values["emgain"] == 300.0
+
+
+def test_smaps_fallback_camera_is_not_converted(tmp_path):
+    """SMAP falls back to a camera called Default for anything it does not
+    recognise.  Its numbers stand for no camera in particular, so using them
+    is exactly the guess this database refuses to make."""
+    pytest.importorskip("scipy")
+    import scipy.io
+
+    from smappy.io.cameras_mat import to_database
+
+    def cell(rows):
+        out = np.empty((len(rows), len(rows[0])), dtype=object)
+        for i, row in enumerate(rows):
+            for j, value in enumerate(row):
+                out[i, j] = value
+        return out
+
+    par = cell([["conversion", "fix", "45", "select", "", "", ""],
+                ["offset", "fix", "100", "select", "", "", ""]])
+    scipy.io.savemat(str(tmp_path / "cams.mat"), {
+        "camtab": cell([["Default", "select", ""], ["Real", "Cam-Serial", "1"]]),
+        "cameras": np.array([
+            {"par": par, "state": np.array([], dtype=object),
+             "ID": {"name": "Default", "tag": "select", "value": ""}},
+            {"par": par, "state": np.array([], dtype=object),
+             "ID": {"name": "Real", "tag": "Cam-Serial", "value": "1"}},
+        ], dtype=object),
+    })
+
+    db = to_database(tmp_path / "cams.mat")
+    assert db.names() == ["Real"]
+
+
+def test_the_shipped_database_carries_no_camera_without_an_identifying_tag():
+    """Every shipped camera is one a file can be recognised as."""
+    for camera in database(reload=True).cameras:
+        assert camera.identify is not None and camera.identify.tag, camera.name

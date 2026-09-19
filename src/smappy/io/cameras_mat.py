@@ -43,6 +43,12 @@ NAMES = {
 DROPPED = ("numberOfFrames", "Width", "Height", "roimode", "correctionfile",
            "imagemetadata")
 
+#: SMAP's fallback entry, which it uses for any camera it does not recognise.
+#: It carries whatever numbers someone once left in it, and using them for an
+#: unknown camera is the guess this database exists not to make -- so it is
+#: not converted, and an unrecognised camera is chosen by name instead.
+FALLBACK = "Default"
+
 
 def _text(value) -> str:
     """A MATLAB cell entry as a plain string ('' for empty)."""
@@ -148,7 +154,10 @@ def to_database(path) -> CameraDatabase:
 
     cameras = []
     for row, raw in zip(table, raw_cameras):
-        cameras.append(_camera(row, raw))
+        camera = _camera(row, raw)
+        if camera.name == FALLBACK and camera.identify is None:
+            continue
+        cameras.append(camera)
     return CameraDatabase(cameras, [path])
 
 
@@ -242,6 +251,8 @@ def main(argv=None) -> int:
     database = to_database(args.mat)
     path = database.save(args.json or user_file())
     print(f"{len(database)} cameras written to {path}")
+    print(f"  (SMAP's '{FALLBACK}' camera is not converted: its numbers stand "
+          f"for no camera in particular)")
     for camera in database.cameras:
         states = f", {len(camera.states)} readout modes" if camera.states else ""
         print(f"  {camera.name}{states}")

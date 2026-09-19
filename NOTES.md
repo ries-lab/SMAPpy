@@ -1061,7 +1061,9 @@ Two rules decide the rest:
   the user's own setting beats both.
 * **Nothing is guessed.**  A camera that cannot be identified resolves to
   nothing rather than to a plausible default -- a wrong conversion is
-  invisible in the fit -- and the camera is then chosen by hand.
+  invisible in the fit -- and the camera is then chosen by hand.  SMAP's own
+  `Default` entry, which it falls back to for an unrecognised camera, is
+  therefore not converted: its numbers stand for no camera in particular.
 
 Every value is attributable: `Resolution.sources` says, per parameter, whether
 it came from a tag (which one, and what it read), from the readout mode (which

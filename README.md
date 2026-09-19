@@ -93,7 +93,7 @@ tags (a serial number, a camera ID) and takes the numbers Micro-Manager does
 not record -- the e-/ADU conversion, and the baseline an iXon never reports --
 from its **camera database**, which also knows that those two depend on the
 readout mode and reads the mode out of the metadata.  `src/smappy/data/cameras.json`
-ships the Ries lab's cameras; a lab's own go in `cameras.json` next to the
+ships the Ries lab's cameras, each one a file can be recognised as; a lab's own go in `cameras.json` next to the
 config file, or in a SMAP `*_cameras.mat` converted with
 `python -m smappy.io.cameras_mat lab_cameras.mat cameras.json`.
 `--camera-name` picks an entry for a file whose camera carries no tag to
