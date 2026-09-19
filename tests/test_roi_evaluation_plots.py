@@ -79,7 +79,7 @@ def test_one_roi_hands_back_what_its_evaluators_drew():
     project, rois = a_project()
     record, results = project.evaluate_one(rois[0].id, steps=steps(Drawing))
     assert record["steps"]["Drawing"]["values"] == {"n": 10}
-    assert [name for name, _ in results["Drawing"].figures()] == ["", "positions"]
+    assert [p.name for p in results["Drawing"].figures()] == ["", "positions"]
 
 
 def test_looking_at_a_site_records_nothing():

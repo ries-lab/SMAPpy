@@ -6,7 +6,7 @@ is applied to the session on the GUI thread.
 from __future__ import annotations
 
 import traceback
-from typing import Dict, Optional, Type
+from typing import Optional, Type
 
 from PySide6.QtCore import QObject, QThread, Signal
 from PySide6.QtGui import QTextCursor
@@ -50,10 +50,10 @@ class PluginPanel(QWidget):
         self.plugin = plugin_cls()
         self.session = session
         self.result: Optional[Result] = None
-        # the figure each named plot was last drawn in, so that running a
-        # plugin again redraws where the user already put the window instead
-        # of stacking another copy of it on the screen
-        self._figures: Dict[str, object] = {}
+        # the window this plugin's figures live in, made on the first Plot
+        # and kept: running again redraws where the user already put it,
+        # instead of stacking another copy of it on the screen
+        self._window = None
         self._thread: Optional[QThread] = None
         self._progress_lines = 0
         self._job = "run"
@@ -295,8 +295,17 @@ class PluginPanel(QWidget):
             button.setEnabled(True)
 
     def plot(self) -> None:
-        """Show every figure the result has, one window each, reusing them."""
+        """Show the result's figures: one window, a tab each beyond the first.
+
+        Only the tab being looked at is drawn, here and on every later run,
+        which is what keeps a plugin with six figures as quick to plot as one
+        with a single figure.
+        """
         if self.result is None:
             return
-        from .figures import draw_figures
-        draw_figures(self._figures, self.result.figures(), self.plugin.name)
+        from .figures import ResultWindow
+        if self._window is None:
+            self._window = ResultWindow(self.plugin.name, self)
+        self._window.show()
+        self._window.show_plots(self.result.figures())
+        self._window.raise_()

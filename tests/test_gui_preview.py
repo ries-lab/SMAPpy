@@ -122,11 +122,12 @@ def test_a_preview_draws_without_touching_the_session(app, tmp_path):
     plt.close("all")
 
 
-def test_plotting_twice_reuses_the_window(app):
-    """A plugin run again redraws where the user put the window.
+def test_the_figures_share_one_window_and_draw_when_looked_at(app):
+    """Several figures are tabs of one window, and only one of them is drawn.
 
-    Each press used to make a new figure, so previewing a few times buried the
-    screen in windows of the same plot.
+    Each press used to make a new pyplot window, so previewing a few times
+    buried the screen in windows of the same plot; and every figure was drawn
+    whether or not anyone was going to look at it.
     """
     from smappy.gui.plugin_panel import PluginPanel
     from smappy.plugins import Plugin, Result
@@ -137,27 +138,58 @@ def test_plotting_twice_reuses_the_window(app):
         Settings = None
 
         def run(self, ctx, settings):
-            return Result(plot=lambda ax: drawn.append(ax.plot([0, 1], [0, 1])),
-                          plots={"second": lambda ax: ax.plot([1, 0])})
+            return Result(plot=lambda ax: drawn.append("first"),
+                          plots={"second": lambda ax: drawn.append("second")})
 
     panel = PluginPanel(Plotter, Session())
     panel._on_done(panel.plugin.run(None, None))
 
     before = set(plt.get_fignums())
     panel.plot()
-    opened = set(plt.get_fignums()) - before
-    assert len(opened) == 2                      # the main plot and "second"
+    window = panel._window
+    assert window.tabs.count() == 2
+    assert [window.tabs.tabText(i) for i in range(2)] == ["figure", "second"]
+    assert drawn == ["first"]                    # the one on screen, no more
+    assert not set(plt.get_fignums()) - before   # and pyplot holds none of it
 
-    panel.plot()
-    assert set(plt.get_fignums()) - before == opened     # the same two windows
-    assert len(drawn) == 2                               # and both were redrawn
-    # redrawing clears first: a reused window shows this run, not both
-    main = panel._figures[""]
-    assert len(main.axes) == 1
+    panel.plot()                                 # the same window, redrawn
+    assert panel._window is window
+    assert drawn == ["first", "first"]
 
-    for number in opened:                        # closed by hand: opened again
-        plt.close(number)
+    window.tabs.setCurrentIndex(1)               # looked at: drawn now
+    assert drawn == ["first", "first", "second"]
+    window.tabs.setCurrentIndex(0)               # already drawn: not again
+    assert len(drawn) == 3
+
+
+def test_a_tab_can_be_taken_out_into_its_own_window(app):
+    """Tabs tidy the screen; tearing one off is how two are compared."""
+    from smappy.gui.plugin_panel import PluginPanel
+    from smappy.plugins import Plugin, Result
+
+    drawn = []
+
+    class Plotter(Plugin):
+        Settings = None
+
+        def run(self, ctx, settings):
+            return Result(plot=lambda ax: drawn.append("first"),
+                          plots={"second": lambda ax: drawn.append("second")})
+
+    panel = PluginPanel(Plotter, Session())
+    panel._on_done(panel.plugin.run(None, None))
     panel.plot()
-    assert len(set(plt.get_fignums()) - before) == 2
-    for number in set(plt.get_fignums()) - before:
-        plt.close(number)
+    window = panel._window
+
+    window.detach(1)
+    assert window.tabs.count() == 1
+    assert "second" in window.detached
+    assert drawn[-1] == "second"                 # on screen, so drawn at once
+
+    drawn.clear()
+    panel.plot()                                 # both are on screen now
+    assert sorted(drawn) == ["first", "second"]
+
+    window.detached["second"].close()            # closed: the tab comes back
+    assert window.tabs.count() == 2
+    assert [window.tabs.tabText(i) for i in range(2)] == ["figure", "second"]

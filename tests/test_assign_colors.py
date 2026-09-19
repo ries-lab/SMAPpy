@@ -340,7 +340,7 @@ def test_the_result_carries_both_figures():
     plugin = plugins.get("Analysis/Dual-Color/AssignColors")()
     result = plugin(locs, Selection.all(len(locs["photons_ch0"])),
                     AssignColorSettings(mode="probabilistic"))
-    names = [name for name, _ in result.figures()]
+    names = [plot.name for plot in result.figures()]
     assert names == ["", "intensities"]
 
 
@@ -366,8 +366,8 @@ def test_the_figure_draws(tmp_path):
     for mode in ("minima", "probabilistic"):
         result = plugin(locs, Selection.all(len(locs)),
                         AssignColorSettings(mode=mode))
-        for name, draw in result.figures():
-            fig, ax = plt.subplots()
-            draw(ax)
-            fig.savefig(tmp_path / f"{mode}{name}.png")
+        for plot in result.figures():
+            fig = plt.figure()
+            plot.draw_into(fig)
+            fig.savefig(tmp_path / f"{mode}{plot.name}.png")
             plt.close(fig)

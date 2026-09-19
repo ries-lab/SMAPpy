@@ -139,6 +139,16 @@ reasoning is here so that it does not have to be re-derived.
   is what its three numbers cannot say: two hundred in a ring and two hundred
   in a smear count the same.  Nothing is recorded by that: *Run on every ROI*
   is what keeps the numbers.
+* **A result's figures share one window.**  *Plot* opens a window per plugin,
+  reused across runs; a plugin with several figures gets them as tabs of it,
+  and a tab is torn off into its own window by double-clicking it (Ctrl+D),
+  which is how two of them are compared.  Nothing is drawn until it is on
+  screen: a run marks every tab stale -- greyed, so the last run's figure is
+  not read as this one's -- and redraws only the tab being looked at and any
+  torn off.  A plugin says what it draws with `Result.plot` / `Result.plots`;
+  a figure of several panels is a `Plot(draw, panels=n, size=(w, h))`, handed
+  the figure instead of one axis.  The window is Qt's rather than pyplot's, so
+  a figure lives as long as the window it is in.
 * **A tool's figure outlives the run that made it.**  A drift correction
   subtracts a curve and the corrected table no longer says what the curve
   was, so a plugin says what of its result is worth keeping (`Plugin.keep`,
@@ -182,7 +192,7 @@ reasoning is here so that it does not have to be re-derived.
     smappy/gui/render_view.py    pyqtgraph view that re-renders on pan/zoom
     smappy/gui/render_tab.py     filter ranges, colour, contrast, gamma
     smappy/gui/plugin_panel.py   a plugin as a section: form, Run, result
-    smappy/gui/figures.py        result figures, redrawn in the window they own
+    smappy/gui/figures.py        a result's figures: one window, a tab each
     smappy/plugins/drift_result.py  what a drift plugin keeps in the file
     smappy/gui/app.py            windows, menus, tabs; `smappy-gui`
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 import dataclasses
 import inspect
 import typing
-from dataclasses import MISSING, dataclass, field, fields
+from dataclasses import MISSING, dataclass, field, fields, replace
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Type
 
@@ -299,6 +299,42 @@ class Context:
 
 
 @dataclass
+class Plot:
+    """One figure a result offers, and how much room it wants.
+
+    A plugin that draws one thing passes a plain ``plot(ax)`` and never meets
+    this class.  One that draws several panels declares how many and is handed
+    the figure instead of an axis, because the alternative -- taking
+    ``ax.figure``, deleting the axis it was given and repopulating what is
+    left -- only works while the figure belongs to nobody else.  It does not
+    when the figure is a page of small multiples, where each plot gets a
+    *subfigure*: same `subplots` call, a piece of a page rather than a window.
+
+    So the two rules are: say how many panels you draw, and never set the
+    figure's size or its layout engine -- `size` is the hint for that, in
+    inches, and the window it lands in decides what to do with it.
+    """
+    draw: Callable                     # draw(ax), or draw(figure) when panels > 1
+    name: str = ""                     # "" is the main figure
+    panels: int = 1                    # how many axes `draw` makes
+    size: Optional[Tuple[float, float]] = None   # width, height in inches
+
+    def draw_into(self, figure) -> None:
+        """Draw into a cleared figure, or into a subfigure of a page."""
+        if self.panels <= 1:
+            self.draw(figure.subplots())
+        else:
+            self.draw(figure)
+
+
+def _as_plot(plot, name: str = "") -> Plot:
+    """A `Plot`, or the plain callable that means a one-axis plot."""
+    if isinstance(plot, Plot):
+        return plot if plot.name == name or not name else replace(plot, name=name)
+    return Plot(draw=plot, name=name)
+
+
+@dataclass
 class Result:
     """What a plugin hands back.  Every part is optional."""
     locs: Optional[Localizations] = None    # replaces the session's table
@@ -307,18 +343,19 @@ class Result:
     # adds them on the thread that owns the session.
     files: Sequence = ()
     text: str = ""                          # shown, and logged
-    plot: Optional[Callable] = None         # plot(ax) draws into a matplotlib axis
+    # plot(ax) draws into a matplotlib axis; a `Plot` says more than that
+    plot: Optional[Any] = None
     # further figures, by name: one plugin may have more than one thing to
-    # show, and two views of the same decision belong in two windows rather
+    # show, and two views of the same decision belong in two tabs rather
     # than in one crowded axis
-    plots: Dict[str, Callable] = field(default_factory=dict)
+    plots: Dict[str, Any] = field(default_factory=dict)
     data: Dict[str, Any] = field(default_factory=dict)  # anything else
     settings: Any = None                    # what was actually used
 
-    def figures(self) -> List[Tuple[str, Callable]]:
-        """Everything there is to draw, as (name, plot), the main one first."""
-        found = [("", self.plot)] if self.plot is not None else []
-        return found + [(name, draw) for name, draw in self.plots.items()
+    def figures(self) -> List[Plot]:
+        """Everything there is to draw, as `Plot`s, the main one first."""
+        found = [_as_plot(self.plot)] if self.plot is not None else []
+        return found + [_as_plot(draw, name) for name, draw in self.plots.items()
                         if draw is not None]
 
 
