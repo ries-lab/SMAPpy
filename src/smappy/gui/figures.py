@@ -26,7 +26,15 @@ from PySide6.QtWidgets import (QMainWindow, QTabWidget, QVBoxLayout, QWidget)
 
 from ..plugins import Plot
 
-GREY = "#8a8a8a"
+# the summary page's key.  A tab character cannot be in a plot's name as
+# anyone would write one, so nothing a plugin calls its figure collides here
+SUMMARY = "\tall"
+SUMMARY_LABEL = "All"
+
+
+def _label(name: str) -> str:
+    """What a tab says: the plot's name, or what to call the two unnamed."""
+    return SUMMARY_LABEL if name == SUMMARY else (name or "figure")
 
 
 def _canvas_classes():
@@ -75,6 +83,34 @@ class FigurePane(QWidget):
         self.stale = False
 
 
+def summary_plot(plots: Sequence[Plot]) -> Plot:
+    """Every figure on one page, each in a subfigure of it.
+
+    A page is worth having for the glance and for what gets exported, and it
+    is worth nothing if it costs the figures being drawn twice, so it is a
+    tab like any other and is drawn when it is looked at.
+
+    Each plot is handed a `SubFigure`, which takes `subplots` exactly as a
+    figure does -- which is why a plot declares its panels instead of
+    helping itself to `ax.figure`: a plot that seizes the figure would take
+    the whole page with it.
+    """
+    plots = list(plots)
+
+    def draw(figure) -> None:
+        columns = 1 if len(plots) == 1 else 2
+        rows = -(-len(plots) // columns)
+        cells = figure.subfigures(rows, columns, squeeze=False).ravel()
+        for plot, cell in zip(plots, cells):
+            if plot.name:
+                cell.suptitle(plot.name, fontsize=9)
+            plot.draw_into(cell)
+        for cell in cells[len(plots):]:
+            cell.set_visible(False)
+
+    return Plot(draw=draw, name=SUMMARY, panels=len(plots) + 1)
+
+
 class ResultWindow(QMainWindow):
     """Every figure of one result: one pane, or a tab each.
 
@@ -96,6 +132,7 @@ class ResultWindow(QMainWindow):
         self.panes: Dict[str, FigurePane] = {}
         self.detached: Dict[str, QMainWindow] = {}
         self._names: List[str] = []
+        self._sized = False
         detach = QAction("Open the current tab in its own window", self)
         detach.setShortcut("Ctrl+D")
         detach.triggered.connect(lambda: self.detach(self.tabs.currentIndex()))
@@ -111,6 +148,8 @@ class ResultWindow(QMainWindow):
         that has gone takes its pane with it.
         """
         plots = list(plots)
+        if len(plots) > 1:            # a page of all of them, drawn on demand
+            plots.append(summary_plot(plots))
         self.setWindowTitle(f"{self._title}: {subtitle}" if subtitle else self._title)
         names = [plot.name for plot in plots]
         if names != self._names:
@@ -123,11 +162,24 @@ class ResultWindow(QMainWindow):
                 window.setWindowTitle(self._tab_title(name, subtitle))
         self._draw_current()
         self._mark_tabs()
-        if plots and plots[0].size:
-            width, height = plots[0].size
-            dpi = self.panes[names[0]].figure.get_dpi()
-            self.resize(max(self.width(), int(width * dpi)),
-                        max(self.height(), int(height * dpi)))
+        self._take_size(plots)
+
+    def _take_size(self, plots: Sequence[Plot]) -> None:
+        """A plot's size hint sets the window, once.
+
+        Only the first time: after that the window is where the user put it
+        and at the size they gave it, and a three-panel figure is not a
+        reason to undo that on every run.
+        """
+        if self._sized:
+            return
+        sizes = [plot.size for plot in plots if plot.size]
+        if not sizes:
+            return
+        self._sized = True
+        dpi = next(iter(self.panes.values())).figure.get_dpi()
+        self.resize(int(max(w for w, _ in sizes) * dpi),
+                    int(max(h for _, h in sizes) * dpi))
 
     def _rebuild(self, names: Sequence[str]) -> None:
         """The set of figures changed: keep the panes that survive it."""
@@ -143,7 +195,7 @@ class ResultWindow(QMainWindow):
             if name not in self.panes:
                 self.panes[name] = FigurePane(self)
             if name not in self.detached:
-                self.tabs.addTab(self.panes[name], name or "figure")
+                self.tabs.addTab(self.panes[name], _label(name))
         self._names = list(names)
         self.tabs.tabBar().setVisible(self.tabs.count() > 1)
 
@@ -210,7 +262,7 @@ class ResultWindow(QMainWindow):
             pane.setParent(self)
             index = min(self._names.index(name) if name in self._names else 0,
                         self.tabs.count())
-            self.tabs.insertTab(index, pane, name or "figure")
+            self.tabs.insertTab(index, pane, _label(name))
             self.tabs.tabBar().setVisible(self.tabs.count() > 1)
             self._mark_tabs()
         event.accept()
@@ -220,7 +272,7 @@ class ResultWindow(QMainWindow):
         if subtitle:
             parts.append(subtitle)
         if name:
-            parts.append(name)
+            parts.append(_label(name))
         return ": ".join(parts)
 
     def closeEvent(self, event) -> None:           # noqa: N802 (Qt's name)

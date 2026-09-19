@@ -145,7 +145,10 @@ reasoning is here so that it does not have to be re-derived.
   which is how two of them are compared.  Nothing is drawn until it is on
   screen: a run marks every tab stale -- greyed, so the last run's figure is
   not read as this one's -- and redraws only the tab being looked at and any
-  torn off.  A plugin says what it draws with `Result.plot` / `Result.plots`;
+  torn off.  Beyond one figure there is also an *All* tab: every figure on one
+  page as small multiples, each in a subfigure of it -- drawn when it is
+  opened, like any other tab, so it costs nothing until it is wanted.  A
+  plugin says what it draws with `Result.plot` / `Result.plots`;
   a figure of several panels is a `Plot(draw, panels=n, size=(w, h))`, handed
   the figure instead of one axis.  The window is Qt's rather than pyplot's, so
   a figure lives as long as the window it is in.
