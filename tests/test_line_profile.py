@@ -378,3 +378,113 @@ def test_the_round_shapes_are_normalized_over_the_window():
         for blur in (2.0, 20.0):
             density = arc_density(grid, 0.0, 60.0, blur, window, kind=kind)
             assert integrate(density, grid) == pytest.approx(1.0, abs=1e-3)
+
+
+# ------------------------------------------------------------- bootstrap
+
+def test_the_bootstrap_interval_covers_the_truth_about_as_often_as_it_claims():
+    """The only test a confidence interval really has: count how often it is
+    right.  Twelve samples of forty localizations, a nominal 95% -- the
+    percentile bootstrap undercovers a width a little at this size, so this
+    asks for three quarters rather than for nineteen in twenty."""
+    from smappy.plugins.line_profile import bootstrap
+    window, covered = (-100.0, 100.0), 0
+    for seed in range(12):
+        rng = np.random.default_rng(100 + seed)
+        precision = np.full(40, 8.0)
+        values = rng.normal(0.0, 12.0, 40) + rng.normal(0, precision)
+        fit = fit_profile(values, precision, model="gauss", window=window)
+        bootstrap(fit, values, precision, rounds=60, seed=seed)
+        low, high = fit.intervals["sigma"]
+        covered += low <= 12.0 <= high
+    assert covered >= 9
+
+
+def test_the_bootstrap_is_wider_than_the_curvature_on_a_small_sample():
+    """Forty localizations: the fit's own error bar is the optimistic one."""
+    from smappy.plugins.line_profile import bootstrap
+    rng = np.random.default_rng(28)
+    n, window = 40, (-100.0, 100.0)
+    precision = np.full(n, 8.0)
+    values = rng.normal(0.0, 12.0, n) + rng.normal(0, precision)
+    fit = fit_profile(values, precision, model="gauss", window=window)
+    bootstrap(fit, values, precision, rounds=200, seed=1)
+
+    low, high = fit.intervals["sigma"]
+    curvature = fit.uncertainties()["sigma"]
+    assert high - low > 2 * curvature        # wider than +- one sigma either way
+    assert fit.replicates.shape == (200, 3)  # centre, sigma, background
+
+
+def test_the_bootstrap_and_the_curvature_agree_when_there_is_enough_data():
+    """The asymptotic error bar is asymptotically right; this is the check."""
+    from smappy.plugins.line_profile import bootstrap
+    rng = np.random.default_rng(29)
+    n, window = 4000, (-100.0, 100.0)
+    precision = np.full(n, 8.0)
+    values = rng.normal(0.0, 15.0, n) + rng.normal(0, precision)
+    fit = fit_profile(values, precision, model="gauss", window=window)
+    bootstrap(fit, values, precision, rounds=150, seed=2)
+    low, high = fit.intervals["sigma"]
+    assert (high - low) / (2 * 1.96 * fit.uncertainties()["sigma"]) == \
+        pytest.approx(1.0, abs=0.35)
+
+
+def test_the_bootstrap_shows_a_width_that_the_data_cannot_resolve():
+    """A structure narrower than the precision: the interval runs to zero,
+    which is the answer, and a symmetric error bar cannot say it."""
+    from smappy.plugins.line_profile import bootstrap
+    rng = np.random.default_rng(30)
+    n, window = 60, (-100.0, 100.0)
+    precision = np.full(n, 12.0)
+    values = rng.normal(0.0, 1.0, n) + rng.normal(0, precision)   # a point
+    fit = fit_profile(values, precision, model="gauss", window=window)
+    bootstrap(fit, values, precision, rounds=200, seed=3)
+    low, high = fit.intervals["sigma"]
+    assert low == pytest.approx(0.0, abs=0.5) and high < 12.0
+
+
+def test_the_same_seed_gives_the_same_interval():
+    from smappy.plugins.line_profile import bootstrap
+    rng = np.random.default_rng(31)
+    n, window = 200, (-100.0, 100.0)
+    precision = np.full(n, 8.0)
+    values = rng.normal(0.0, 14.0, n) + rng.normal(0, precision)
+    made = [bootstrap(fit_profile(values, precision, model="gauss",
+                                  window=window),
+                      values, precision, rounds=60, seed=4).intervals["sigma"]
+            for _ in range(2)]
+    assert made[0] == made[1]
+
+
+def test_a_step_keeps_the_direction_it_was_fitted_with_through_the_resamples():
+    """Otherwise half the resamples answer about the other edge."""
+    from smappy.plugins.line_profile import bootstrap
+    rng = np.random.default_rng(32)
+    window = (-100.0, 100.0)
+    values = rng.uniform(-90.0, 10.0, 300)
+    precision = np.full(len(values), 8.0)
+    fit = fit_profile(values, precision, model="step", window=window)
+    assert fit.extra["side"] < 0
+    bootstrap(fit, values, precision, rounds=100, seed=5)
+    low, high = fit.intervals["edge"]
+    assert low <= fit.values()["edge"] <= high and high - low < 20.0
+
+
+def test_the_plugin_reports_the_intervals_and_offers_their_figure():
+    locs = simulate(300, 0.0, precision=8.0, sigma=12.0, seed=33)
+    result = LineProfile().run(context(locs),
+                               LineProfileSettings(bootstrap=80, confidence=90.0))
+    assert "90% confidence intervals, 80 resamples:" in result.text
+    low, high = result.data["intervals"]["gauss"]["sigma"]
+    fitted = result.data["values"]["gauss"]["sigma"]
+    assert low <= fitted <= high
+    assert low == pytest.approx(12.0, abs=3.0) and high == pytest.approx(12.0, abs=3.0)
+    result.plots["bootstrap"].draw(_figure())
+
+
+def test_a_run_without_the_bootstrap_has_no_intervals_and_no_extra_figure():
+    locs = simulate(300, 0.0, precision=8.0, sigma=12.0, seed=34)
+    result = LineProfile().run(context(locs), LineProfileSettings())
+    assert result.data["intervals"] == {}
+    assert "bootstrap" not in result.plots
