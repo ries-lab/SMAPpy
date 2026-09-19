@@ -5,10 +5,11 @@ from typing import Optional
 
 from ..drift import DriftSettings, correct_drift, estimate_cost
 from . import Context, ParamInfo, Plugin, Result, register
+from .drift_result import KeepsDrift
 
 
 @register("Analysis/Drift/COMET")
-class CometDrift(Plugin):
+class CometDrift(KeepsDrift, Plugin):
     description = ("Estimate drift from the selected localizations with COMET "
                    "and subtract it from all of them.")
     Settings = DriftSettings

@@ -969,6 +969,22 @@ falls roughly quadratically -- 2000 per window is 10x faster (33 s) and moves
 the drift by 2.5 nm rms, 1000 per window is 15x faster and moves it by 6 nm.
 Worth it for a first look at a large dataset, not for the final result.
 
+## What a tool leaves behind
+
+A figure is part of a result, and a result outlives its session.  A drift
+correction subtracts a curve and the corrected table no longer says what the
+curve was, so `Plugin.keep` names what of a result is worth saving and
+`Plugin.restore` reads it back: the session collects it in `Session.results`,
+keyed by plugin path, and writes it into the localization file, which is what
+re-enables *Plot* a week later.  Most plugins keep nothing and are unaffected.
+
+It goes into a dataset of its own (`results/saved`) rather than into the
+metadata attribute, for the same reason the GUI state does: an HDF5 attribute
+is bounded by the object header, about 64 kB in practice, and a per-frame
+drift curve passes that on any real acquisition.  What is kept is the estimate
+and not the run -- the curve, the settings, the counts -- because the
+localizations it was made from are in the same file.
+
 ## Evaluating the ROI being looked at
 
 Walking down the ROI list re-runs the pipeline on the site being looked at

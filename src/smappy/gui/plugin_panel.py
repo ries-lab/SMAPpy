@@ -109,6 +109,37 @@ class PluginPanel(QWidget):
         self.progressed.connect(self._on_progress)
         self.streamed.connect(self._on_stream)
         self._active()
+        session.on_change(self._on_session)
+        self._take_saved()
+
+    def _on_session(self, what: str) -> None:
+        if what in ("locs", "results"):
+            self._take_saved()
+
+    def _take_saved(self) -> None:
+        """Offer the figure of a run that is over: this file carries its result.
+
+        A drift correction subtracts a curve and the corrected table no longer
+        says what the curve was, so the file keeps it (`Plugin.keep`) and the
+        panel picks it up here -- on opening the file and after a run, which
+        is why the file's own result is never allowed over one made in this
+        session.
+        """
+        if self._thread is not None and self._thread.isRunning():
+            return
+        saved = self.session.results.get(self.plugin.path)
+        if not saved or (self.result is not None and self._job != "preview"):
+            return
+        result = self.session.restore_result(self.plugin)
+        if result is None or not result.figures():
+            return
+        self.result = result
+        self.plot_button.setEnabled(True)
+        when = saved.get("time", "")
+        self.plot_button.setToolTip(
+            "show the figure of the run kept with this file"
+            + (f" ({when})" if when else ""))
+        self.status.setText("ran before" + (f", {when}" if when else ""))
 
     def _react(self, path: str) -> None:
         """Let the plugin answer an edit, e.g. fill the camera from the file."""
@@ -250,6 +281,8 @@ class PluginPanel(QWidget):
         for button in self._buttons():
             button.setEnabled(True)
         self.plot_button.setEnabled(bool(result.figures()))
+        self.plot_button.setToolTip(
+            "show the plugin's result figure (the drift curves, say)")
         if self._job == "preview" and result.figures():
             self.plot()
 

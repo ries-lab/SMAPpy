@@ -255,6 +255,10 @@ class Session:
         self.projection = Projection()
         self.files: List[FileInfo] = []
         self.history: List[Dict] = []
+        # what the tools that ran on this file left behind, by plugin path:
+        # enough to draw their figures again, saved with the file and read
+        # back when it is opened.  See `Plugin.keep`.
+        self.results: Dict[str, Dict] = {}
         self._undo: Optional[Localizations] = None
         self._live = False                 # the table is being appended to
         self._listeners: List[Callable[[str], None]] = []
@@ -265,7 +269,8 @@ class Session:
     # ----------------------------------------------------------- observers
     def on_change(self, callback: Callable[[str], None]) -> None:
         """``callback(what)``: "locs" (new table), "layer" (a filter or display
-        setting changed), "layers" (added/removed/visibility) or "history"."""
+        setting changed), "layers" (added/removed/visibility), "history" or
+        "results" (a tool kept something worth drawing again)."""
         self._listeners.append(callback)
 
     def changed(self, what: str) -> None:
@@ -282,7 +287,13 @@ class Session:
         """
         locs, info, grouped = read_and_group(path, self.group_settings, append=append,
                                              progress=progress, **reader_args)
-        return self.add_file(locs, info, append=append, grouped=grouped)
+        added = self.add_file(locs, info, append=append, grouped=grouped)
+        if not append:
+            # after `add_file`, which clears them with the rest of the session
+            from .io.hdf5 import load_results
+            self.results = load_results(path)
+            self.changed("results")
+        return added
 
     def add_file(self, locs: Localizations, info: FileInfo, append: bool = False,
                  grouped: Optional[Localizations] = None) -> FileInfo:
@@ -306,6 +317,7 @@ class Session:
                 grouped = Localizations(gc, dict(grouped.metadata))
             self.set_locs(locs, undoable=False, grouped=grouped)
             self.history.clear()
+            self.results = {}
             saved = self.locs.metadata.get("roi")
             self.set_roi(Region.from_dict(saved) if saved else None)
             self._rois = None            # this file's own ROIs, read on first use
@@ -373,7 +385,7 @@ class Session:
         gets written is whatever `gui_state_provider` returns, so the session
         stays ignorant of tabs and windows; the GUI sets it.
         """
-        from .io.hdf5 import save_gui_state, save_localizations
+        from .io.hdf5 import save_gui_state, save_localizations, save_results
         path = Path(path or self.path)
         metadata = dict(self.locs.metadata)
         metadata["history"] = self.history
@@ -385,6 +397,10 @@ class Session:
         if rois and (rois["rois"] or rois["runs"] or rois.get("tile_nm")):
             metadata["roi_project"] = rois
         save_localizations(path, self.locs, metadata)
+        # after the table: both write into the same file, and the results are
+        # a convenience where the localizations are the point
+        if self.results:
+            save_results(path, self.results)
         if gui_state is None:
             from . import config
             gui_state = bool(config.get("save_gui_state_in_files", True))
@@ -673,6 +689,40 @@ class Session:
                           grouped=grouped)
         if result.locs is not None:
             self.set_locs(result.locs)
+        # last: a plugin that opened a file has just cleared the session, this
+        # one included, and what it worked out belongs to the file it opened
+        self.remember(plugin, result)
+
+    def remember(self, plugin: Plugin, result: Result) -> None:
+        """Keep what this tool worked out, so its figure can be drawn again.
+
+        What is kept is the plugin's own business -- most keep nothing -- and
+        it goes into the localization file, so that a drift curve is still
+        there to look at when the corrected file is opened again.  A plugin
+        that raises here has run successfully and is not going to be told
+        otherwise over a figure, so the failure is logged and dropped.
+        """
+        try:
+            saved = plugin.keep(result)
+        except Exception as error:
+            self.log(plugin.path, f"its result was not kept: {error}")
+            return
+        if not saved:
+            return
+        self.results[plugin.path] = {
+            "time": datetime.now().isoformat(timespec="seconds"),
+            "text": result.text, "data": saved}
+        self.changed("results")
+
+    def restore_result(self, plugin: Plugin) -> Optional[Result]:
+        """The result this tool left in the file, drawable again, or None."""
+        saved = self.results.get(plugin.path)
+        if not saved:
+            return None
+        try:
+            return plugin.restore(saved.get("data") or {})
+        except Exception:
+            return None
 
     def log(self, what: str, text: str = "", **extra) -> None:
         self.history.append({"time": datetime.now().isoformat(timespec="seconds"),

@@ -154,6 +154,51 @@ def load_gui_state(path) -> Optional[Dict[str, object]]:
         return None
 
 
+# -------------------------------------------------------------- tool results
+#
+# What a tool worked out, kept so that it can be looked at again.  A drift
+# correction subtracts a curve and the corrected table no longer says what the
+# curve was; reopening the file a week later and pressing *Plot* should still
+# draw it.  Only what a plugin's `keep` hands over is written -- a curve, a
+# histogram, the few numbers behind a figure -- never the table itself.
+#
+# In a dataset of its own for the same reason as the GUI state: a per-frame
+# drift curve is far past what an HDF5 attribute holds.
+
+RESULTS_GROUP = "results"
+RESULTS = "results/saved"
+
+
+def save_results(path, results: Optional[Dict[str, object]]) -> None:
+    """Write (or clear) the saved tool results of an existing file."""
+    import h5py
+    with h5py.File(path, "a") as f:
+        if RESULTS in f:
+            del f[RESULTS]
+        if not results:
+            return
+        f.require_group(RESULTS_GROUP)
+        f.create_dataset(RESULTS, data=json.dumps(results, default=_json_default),
+                         dtype=h5py.string_dtype("utf-8"))
+
+
+def load_results(path) -> Dict[str, object]:
+    """What the tools that ran on this file left behind; {} if none.
+
+    Never raises: a file from another program, a half-written one, or one
+    written by a newer version must still open.
+    """
+    import h5py
+    try:
+        with h5py.File(path, "r") as f:
+            if RESULTS not in f:
+                return {}
+            saved = json.loads(f[RESULTS][()])
+    except (OSError, KeyError, ValueError, TypeError):
+        return {}
+    return saved if isinstance(saved, dict) else {}
+
+
 def load_localizations(path) -> Localizations:
     """Read a table written by :class:`LocalizationWriter`."""
     with h5py.File(path, "r") as f:

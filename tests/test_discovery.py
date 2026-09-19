@@ -229,8 +229,10 @@ def test_scanning_imports_nothing():
     assert out.returncode == 0, out.stderr
     after_scan, after_get = (eval(part) for part in out.stdout.strip().split("|"))
     assert after_scan == ["smappy.plugins.discovery"]
-    # one plugin opened, one module imported: not fit.py with its C extensions
-    assert after_get == ["smappy.plugins.discovery", "smappy.plugins.drift_comet"]
+    # one plugin opened, only that plugin and the helper it shares with the
+    # other drift plugin imported: not fit.py with its C extensions
+    assert after_get == ["smappy.plugins.discovery", "smappy.plugins.drift_comet",
+                         "smappy.plugins.drift_result"]
 
 
 def test_refs_and_tree_do_not_import_but_available_does():

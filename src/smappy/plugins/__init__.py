@@ -419,6 +419,28 @@ class Plugin:
         """
         return None
 
+    def keep(self, result: Result) -> Optional[Dict[str, Any]]:
+        """What of this result is worth saving with the localization file.
+
+        A tool's figure outlives the run that made it: a drift correction
+        subtracts a curve and the corrected table no longer says what the
+        curve was, so reopening the file next week and pressing *Plot* should
+        still draw it.  Return plain, JSON-able data -- the curve, the few
+        numbers behind the figure -- and never the table, which is in the file
+        already.  None (the default) keeps nothing, and the plot is then
+        offered only for as long as the session that made it lasts.
+        """
+        return None
+
+    def restore(self, saved: Dict[str, Any]) -> Optional[Result]:
+        """A result carrying the figure again, from what `keep` wrote.
+
+        Read tolerantly: a file may have been written by another version, and
+        a curve that cannot be read back is a plot that is not offered, never
+        a file that fails to open.
+        """
+        return None
+
     def hints(self, settings) -> Optional[Dict[str, Any]]:
         """What the settings' *automatic* fields currently resolve to.
 

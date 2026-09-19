@@ -33,6 +33,7 @@ import os
 import time
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, replace
+from dataclasses import fields as dataclass_fields
 from pathlib import Path
 from typing import Callable, Optional, Tuple
 
@@ -198,6 +199,42 @@ class Drift:
             "settings": asdict(self.settings) if self.settings else None,
         }
         return Localizations(columns, metadata)
+
+    def to_dict(self) -> dict:
+        """The curve as plain data, to be kept with the file.
+
+        The estimate, not the run: the settings and the counts are what makes
+        the curve readable a week later, and the localizations it was made
+        from are in the file already.
+        """
+        return {"drift_nm": self.drift.tolist(),
+                "settings": asdict(self.settings) if self.settings else None,
+                "n_used": None if self.n_used is None else int(self.n_used),
+                "flagged_windows": (None if self.flagged_windows is None
+                                    else [int(w) for w in self.flagged_windows])}
+
+    @classmethod
+    def from_dict(cls, saved: dict) -> "Drift":
+        """Read back what `to_dict` wrote.
+
+        The settings come back as a `DriftSettings` when they still fit one:
+        a curve saved by a newer version may carry a field this one has never
+        heard of, and that is a reason to drop the settings, not the curve.
+        """
+        values = saved.get("settings")
+        settings = None
+        if isinstance(values, dict):
+            known = {f.name for f in dataclass_fields(DriftSettings)}
+            try:
+                settings = DriftSettings(**{k: v for k, v in values.items()
+                                            if k in known})
+            except TypeError:
+                settings = None
+        flagged = saved.get("flagged_windows")
+        return cls(np.asarray(saved.get("drift_nm", []), dtype=np.float64),
+                   settings=settings, n_used=saved.get("n_used"),
+                   flagged_windows=None if flagged is None
+                   else np.asarray(flagged, dtype=np.int64))
 
     def plot(self, ax=None):
         """Drift vs frame, the standard sanity check."""

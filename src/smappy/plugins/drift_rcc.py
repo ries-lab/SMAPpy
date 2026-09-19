@@ -3,10 +3,11 @@ from __future__ import annotations
 
 from ..rcc import RCCSettings, estimate_drift_rcc
 from . import Context, ParamInfo, Plugin, Result, register
+from .drift_result import KeepsDrift
 
 
 @register("Analysis/Drift/RCC")
-class RCCDrift(Plugin):
+class RCCDrift(KeepsDrift, Plugin):
     description = ("Estimate drift by cross-correlating rendered time windows "
                    "(RCC) and subtract it from all localizations.")
     Settings = RCCSettings

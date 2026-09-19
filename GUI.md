@@ -139,6 +139,14 @@ reasoning is here so that it does not have to be re-derived.
   is what its three numbers cannot say: two hundred in a ring and two hundred
   in a smear count the same.  Nothing is recorded by that: *Run on every ROI*
   is what keeps the numbers.
+* **A tool's figure outlives the run that made it.**  A drift correction
+  subtracts a curve and the corrected table no longer says what the curve
+  was, so a plugin says what of its result is worth keeping (`Plugin.keep`,
+  and `restore` to read it back) and the session writes it into the
+  localization file beside the data.  Opening that file again enables *Plot*
+  in the plugin's section and draws the curve, with the date of the run in
+  the tooltip.  Both drift plugins do it; a plugin that keeps nothing offers
+  its figure for as long as the session lasts, as before.
 * **Bead calibration is a Qt window in this process** (`calibrate/qt_gui.py`),
   opened from the Localize tab or the Tools menu.  Only the widgets are new:
   the work is `calibrate.core` and `calibrate.dual` as before, and the five
@@ -175,6 +183,7 @@ reasoning is here so that it does not have to be re-derived.
     smappy/gui/render_tab.py     filter ranges, colour, contrast, gamma
     smappy/gui/plugin_panel.py   a plugin as a section: form, Run, result
     smappy/gui/figures.py        result figures, redrawn in the window they own
+    smappy/plugins/drift_result.py  what a drift plugin keeps in the file
     smappy/gui/app.py            windows, menus, tabs; `smappy-gui`
 
 ## Plugin contract
