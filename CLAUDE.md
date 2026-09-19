@@ -103,10 +103,18 @@ written this way; it is also what makes the tests readable.
 ### The result
 
 `Result(locs=..., text=..., plot=..., plots={...}, data={...}, settings=...)`,
-every part optional.  `plot(ax)` is handed **one** axis; for a grid, take its
-figure, `figure.delaxes(ax)`, add subplots and `set_layout_engine("constrained")`
-(`statistics.py` and `ROIManager/Analyze/Histograms` both do this).  Return the
-settings that were actually used -- that is what the history records.
+every part optional.  `plot(ax)` is handed **one** axis; for a grid, pass
+`Plot(draw, panels=n, size=(w, h))` instead, and `draw` is handed the figure
+and lays out its own panels (`statistics.py`, `ROIManager/Analyze/Histograms`
+and the fit preview all do this).  Never set the figure's size or its layout
+engine: on the window's *All* page a plot is handed a `SubFigure`, which has
+neither, and `size` is the hint the window reads instead.  Return the settings
+that were actually used -- that is what the history records.
+
+The figures of one result share a window, a tab each beyond the first, and a
+tab is drawn when it is looked at and not before -- so a plugin with six
+figures costs what one costs, and a plot must be a closure over its data
+rather than something already drawn.
 
 ## The table
 
@@ -136,9 +144,11 @@ over assuming one spelling, and raise a message naming the columns the table
 numbers: simulate data with known parameters and assert they come back.
 `tests/test_statistics.py` is the pattern.
 
-One coupling to remember: **`tests/test_discovery.py` enumerates the `Analysis/`
-plugins exhaustively**, so a new plugin there fails that test until it is listed.
-`tests/test_file_plugins.py::test_the_file_tab_ships_with_the_four_it_needs`
+One coupling to remember: **`tests/test_discovery.py` and
+`tests/test_workspace.py` enumerate the `Analysis/` plugins exhaustively**, so
+a new plugin there fails four tests until it is listed in both (the workspace
+ones name the seeded Analysis tab, including the order its titles come back
+in).  `tests/test_file_plugins.py::test_the_file_tab_ships_with_the_four_it_needs`
 asserts the File tab's exact contents, so a new File plugin needs a line there
 too (it is a Qt test and skips without PySide6).
 

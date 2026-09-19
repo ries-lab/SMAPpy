@@ -170,5 +170,11 @@ def test_the_plugin_is_in_the_tree_and_draws_one_panel_per_distribution():
 
     result = LocalizationStatistics()(simulate(n=20_000))
     figure = Figure()
-    result.plot(figure.add_subplot(111))
-    assert len(figure.axes) == 4
+    result.plot.draw_into(figure)
+    assert result.plot.panels == 4 and len(figure.axes) == 4
+
+    # the panels compose onto a page of small multiples, which is what
+    # declaring them is for: a subfigure can be drawn in, not resized
+    page = Figure()
+    result.plot.draw_into(page.subfigures(1, 1, squeeze=False).ravel()[0])
+    assert len(page.axes) == 4

@@ -46,7 +46,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 from ..locs import Localizations
-from . import Context, Plugin, Result, param, register
+from . import Context, Plot, Plugin, Result, param, register
 
 # the precision columns, in the order they are looked for
 PRECISION_FIELDS = ("loc_precision_nm", "loc_precision_pix")
@@ -411,11 +411,16 @@ def draw(ax, dist: Distribution) -> None:
 
 
 def draw_all(figure, found: Sequence[Distribution]) -> None:
-    """Every panel, one under the other, in one figure."""
-    figure.set_size_inches(5.5, max(2.1 * len(found), 2.1))
-    for n, dist in enumerate(found, 1):
-        draw(figure.add_subplot(len(found), 1, n), dist)
-    figure.set_layout_engine("constrained")
+    """Every panel, one under the other, in one figure.
+
+    Neither the size nor the layout engine is set here: the figure may be a
+    `SubFigure` of a page of small multiples, which has neither, and the size
+    is a hint the window reads (`Plot.size`) rather than something a plugin
+    imposes on the window it landed in.
+    """
+    for axis, dist in zip(figure.subplots(len(found), 1, squeeze=False).ravel(),
+                          found):
+        draw(axis, dist)
 
 
 # ---------------------------------------------------------------- the plugin
@@ -521,19 +526,16 @@ class LocalizationStatistics(Plugin):
                 "stats": {d.key: d.stats for d in found},
                 "n": len(locs), "note": why}
 
-        def plot(ax) -> None:
-            """One panel per distribution in the one window the caller opened.
+        def plot(figure) -> None:
+            """One panel per distribution, in whatever it is given to draw in.
 
-            `Result.plot` is handed a single axis, which is right for a plugin
-            with one thing to draw; there are up to four here, so the axis is
-            given back and its figure filled instead -- as
-            `ROIManager/Analyze/Histograms` does.
+            A single axis is right for a plugin with one thing to draw and
+            there are up to four here, so this declares its panels and is
+            handed the figure -- which on the window's *All* page is one
+            subfigure of it, and works the same.
             """
-            if len(found) == 1:
-                draw(ax, found[0])
-                return
-            figure = ax.get_figure()
-            figure.delaxes(ax)
             draw_all(figure, found)
 
-        return Result(text="\n".join(lines), plot=plot, data=data, settings=settings)
+        return Result(text="\n".join(lines), data=data, settings=settings,
+                      plot=Plot(draw=plot, panels=len(found),
+                                size=(5.5, max(2.1 * len(found), 2.1))))
