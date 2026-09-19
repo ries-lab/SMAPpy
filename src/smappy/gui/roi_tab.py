@@ -141,6 +141,8 @@ class ROIHeader(QWidget):
             # it stays with it, never into the tab's own stack
             self.manager = ROIManagerWindow(self.session, self.window())
             self.manager.changed.connect(self.refresh)
+            # one pipeline window per session, wherever it is opened from
+            self.manager.evaluation_requested.connect(self.open_evaluation)
         self.manager.show()
         self.manager.raise_()
 

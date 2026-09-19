@@ -969,6 +969,17 @@ falls roughly quadratically -- 2000 per window is 10x faster (33 s) and moves
 the drift by 2.5 nm rms, 1000 per window is 15x faster and moves it by 6 nm.
 Worth it for a first look at a large dataset, not for the final result.
 
+## Evaluating the ROI being looked at
+
+Walking down the ROI list re-runs the pipeline on the site being looked at
+(`ROIProject.evaluate_one`) and draws what the evaluators draw, but records
+nothing: a run is a pipeline over every site, and a hundred one-site runs from
+clicking down a list would be provenance about nothing.  The figures are the
+point there, and a figure cannot be saved anyway -- `plot(ax)` is a closure
+over the data it drew.  Each plot keeps one window, which the next ROI
+redraws; that is what makes two sites comparable rather than a screen full of
+windows after five clicks.
+
 ## Open questions
 
 * Fitted x sits ~0.24 px from the peak-finder position, and the sign flips with

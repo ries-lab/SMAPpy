@@ -320,7 +320,7 @@ class ROIProject:
             record = {"inputs": inputs, "signature": digest(inputs),
                       "file_id": roi.file_id, "steps": {}}
             for step in steps:
-                record["steps"][step.label] = self._one_step(step, roi, locs, geometry)
+                record["steps"][step.label] = self._one_step(step, roi, locs, geometry)[0]
             run["records"][roi_id] = record
             if progress:
                 progress(n + 1, len(ids))
@@ -328,14 +328,48 @@ class ROIProject:
         return run
 
     def _one_step(self, step, roi, locs, geometry):
-        """One evaluator on one ROI.  Its failure is recorded, not raised."""
+        """One evaluator on one ROI, as (what is recorded, what it returned).
+
+        The record is data and outlives the session; the result is the live
+        object, with the figures the evaluator drew, and is kept by nobody
+        unless the caller wants it.  A failure is recorded, not raised.
+        """
         from ..plugins import Context
         try:
             context = Context(locs=locs, site=geometry, rois=self)
             result = step.plugin.run(context, step.settings)
-            return {"values": json.loads(json_text(result.data or {}))}
+            return {"values": json.loads(json_text(result.data or {}))}, result
         except Exception as error:
-            return {"error": f"{type(error).__name__}: {error}"}
+            return {"error": f"{type(error).__name__}: {error}"}, None
+
+    def evaluate_one(self, roi_id, instances=None, steps=None):
+        """The pipeline on a single ROI, figures and all.
+
+        What `evaluate` does per site, for the one site being looked at, and
+        handing back each step's whole `Result` rather than only the numbers
+        it recorded -- which is what lets the ROI manager draw what the
+        evaluators drew while the list is walked through.
+
+        Nothing is stored: a run is a pipeline over every site, and a hundred
+        one-site runs from clicking down a list would be provenance about
+        nothing.  `evaluate` is what records.
+        """
+        from . import pipeline as pipeline_module
+        roi = self.rois[roi_id]
+        if steps is None:
+            if instances is None:
+                instances = self.pipeline or pipeline_module.default_instances()
+            steps = pipeline_module.resolve(instances)
+        locs = self.extract(roi)
+        geometry = json.loads(json_text(self.geometry(roi)))
+        record = {"inputs": json.loads(json_text(self.inputs(roi))),
+                  "file_id": roi.file_id, "steps": {}}
+        record["signature"] = digest(record["inputs"])
+        results = {}
+        for step in steps:
+            record["steps"][step.label], results[step.label] = \
+                self._one_step(step, roi, locs, geometry)
+        return record, results
 
     def latest(self, roi_id):
         """The newest record for this ROI, and whether its inputs have changed."""

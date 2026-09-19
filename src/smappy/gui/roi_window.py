@@ -15,10 +15,11 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QRectF, Qt, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
-from PySide6.QtWidgets import (QAbstractItemView, QDoubleSpinBox, QHBoxLayout,
-                               QHeaderView, QLabel, QListWidget, QListWidgetItem,
-                               QMainWindow, QPushButton, QSplitter, QTableWidget,
-                               QTableWidgetItem, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QDoubleSpinBox,
+                               QHBoxLayout, QHeaderView, QLabel, QListWidget,
+                               QListWidgetItem, QMainWindow, QPushButton,
+                               QSplitter, QTableWidget, QTableWidgetItem,
+                               QVBoxLayout, QWidget)
 
 from ..render import FieldOfView
 from ..session import Session
@@ -197,6 +198,7 @@ class ImagePane(QWidget):
 
 class ROIManagerWindow(QMainWindow):
     changed = Signal()          # ROIs added, removed or toggled
+    evaluation_requested = Signal()   # the pipeline window, opened by the ROI tab
 
     def __init__(self, session: Session, parent=None):
         super().__init__(parent)
@@ -212,6 +214,10 @@ class ROIManagerWindow(QMainWindow):
         self._hover: Optional[np.ndarray] = None
         self.zoom_center: Optional[np.ndarray] = None
         self._loading = False
+        # the window each evaluator's plot was last drawn in, so that walking
+        # down the list redraws them in place instead of burying the screen
+        self._figures: dict = {}
+        self._evaluating = False
 
         self.file_pane = ImagePane("file")
         self.zoom_pane = ImagePane("zoom", zoomable=True, pannable=True)
@@ -285,6 +291,22 @@ class ROIManagerWindow(QMainWindow):
         self.remove_button.setToolTip("remove the selected ROI")
         self.remove_button.clicked.connect(self._remove)
         llayout.addWidget(self.remove_button)
+        # the pipeline is set up in the control window's ROI tab, but it is
+        # here that its results are looked at, one site after another; the
+        # same window, opened from where the eye already is
+        self.evaluation_button = QPushButton("Evaluation pipeline...")
+        self.evaluation_button.setToolTip("choose the evaluators to run on the ROIs, "
+                                          "order them and set them up")
+        self.evaluation_button.clicked.connect(self.evaluation_requested.emit)
+        llayout.addWidget(self.evaluation_button)
+        self.evaluate_live = QCheckBox("plot the evaluation")
+        self.evaluate_live.setToolTip(
+            "run the pipeline on the selected ROI and draw what its evaluators "
+            "draw, each in a window of its own that the next ROI redraws -- so "
+            "that stepping down the list compares like with like.  Nothing is "
+            "recorded: Run on every ROI is what keeps the numbers.")
+        self.evaluate_live.toggled.connect(self._on_evaluate_live)
+        llayout.addWidget(self.evaluate_live)
         toggle = QShortcut(QKeySequence(Qt.Key_Space), self)
         toggle.setContext(Qt.WindowShortcut)
         toggle.activated.connect(self._toggle)
@@ -396,6 +418,7 @@ class ROIManagerWindow(QMainWindow):
         self._fill_table()
         self.tiles_button.setChecked(bool(self.project.tile_nm))
         self.tile_size.setValue(self.project.tile_nm or DEFAULT_TILE_NM)
+        self.evaluate_live.setChecked(bool(project.navigation.get("plot_evaluation")))
         self._loading = False
         self.redraw()
 
@@ -827,6 +850,62 @@ class ROIManagerWindow(QMainWindow):
         if not from_table:
             self._fill_table()
         self.redraw()
+        if self.evaluate_live.isChecked():
+            self.evaluate_active()
+
+    # ---------------------------------------------------- the evaluation
+    def _on_evaluate_live(self, on: bool) -> None:
+        if self._loading:            # restored with the rest of the window
+            return
+        self.project.navigation["plot_evaluation"] = bool(on)
+        if on:
+            self.evaluate_active()
+        else:
+            self.status.showMessage("the evaluation plots are left as they are")
+
+    def evaluate_active(self) -> None:
+        """Run the pipeline on the ROI being looked at and draw what it draws.
+
+        On this thread and on one site: an evaluator sees a few hundred
+        localizations, and a figure that arrives after the next ROI has been
+        selected would be worse than a moment's wait.  A step that fails costs
+        its own figure and says so in the status bar; the rest are still drawn,
+        because the one that failed is often why the site is being looked at.
+
+        Nothing is recorded -- `Run on every ROI` is what keeps the numbers.
+        """
+        from .figures import draw_figures
+        from ..roi_manager import pipeline as pipeline_module
+        project = self.project
+        roi = self._selected()
+        if roi is None or self._evaluating:
+            return
+        steps = pipeline_module.resolve(project.pipeline)
+        if not steps:
+            self.status.showMessage("no evaluator is enabled in the pipeline")
+            return
+        self._evaluating = True
+        try:
+            record, results = project.evaluate_one(roi.id, steps=steps)
+        except Exception as error:
+            self.status.showMessage(f"the evaluation failed: {error}")
+            return
+        finally:
+            self._evaluating = False
+        number = project.numbers().get(roi.id, "")
+        drawn = 0
+        for label, result in results.items():
+            if result is None:
+                continue
+            figures = result.figures()
+            drawn += len(figures)
+            draw_figures(self._figures, figures, f"{label}: ROI {number}",
+                         prefix=f"{label}\t")
+        failed = pipeline_module.errors(record)
+        message = f"ROI {number}: {drawn} figure(s) from {len(steps)} step(s)"
+        if failed:
+            message += "; failed: " + ", ".join(f"{k} ({v})" for k, v in failed.items())
+        self.status.showMessage(message)
 
     # --------------------------------------------------------------- edits
     def _add(self) -> None:

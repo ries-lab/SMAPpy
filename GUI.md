@@ -130,7 +130,15 @@ reasoning is here so that it does not have to be re-derived.
   stored, so it never goes stale.  *Polygon* and *Direction* draw an ROI's own outline and its arrow
   in the ROI image.  The ROI tab keeps what applies to every ROI -- geometry, the
   finder, the evaluation.  There is no review step: an ROI counts from the
-  moment it is made, and *use* is what excludes one.
+  moment it is made, and *use* is what excludes one.  Below the ROI list,
+  *Evaluation pipeline...* opens the same window the ROI tab does (there is
+  one per session), and *plot the evaluation* runs that pipeline on the ROI
+  being looked at and draws what its evaluators draw -- each plot in a window
+  of its own that the next ROI redraws, so that stepping down the list
+  compares like with like.  *Statistics* draws the site's localizations, which
+  is what its three numbers cannot say: two hundred in a ring and two hundred
+  in a smear count the same.  Nothing is recorded by that: *Run on every ROI*
+  is what keeps the numbers.
 * **Bead calibration is a Qt window in this process** (`calibrate/qt_gui.py`),
   opened from the Localize tab or the Tools menu.  Only the widgets are new:
   the work is `calibrate.core` and `calibrate.dual` as before, and the five
@@ -166,6 +174,7 @@ reasoning is here so that it does not have to be re-derived.
     smappy/gui/render_view.py    pyqtgraph view that re-renders on pan/zoom
     smappy/gui/render_tab.py     filter ranges, colour, contrast, gamma
     smappy/gui/plugin_panel.py   a plugin as a section: form, Run, result
+    smappy/gui/figures.py        result figures, redrawn in the window they own
     smappy/gui/app.py            windows, menus, tabs; `smappy-gui`
 
 ## Plugin contract

@@ -164,7 +164,25 @@ class Statistics(Plugin):
 
     def run(self, ctx: Context, settings: StatisticsSettings) -> Result:
         values = site_statistics(ctx.locs, settings)
+
+        def plot(ax) -> None:
+            """The site itself, as the numbers' sanity check.
+
+            The ROI manager redraws this in the same window for every site, so
+            what it is for is the comparison: two hundred localizations in a
+            ring and two hundred in a smear give the same three numbers.
+            """
+            x = np.asarray(ctx.locs["x_nm"], dtype=float)
+            y = np.asarray(ctx.locs["y_nm"], dtype=float)
+            ax.scatter(x, y, s=6, c="#2f7fd0", alpha=0.6, linewidths=0)
+            ax.set_aspect("equal")
+            ax.set_xlabel("x (nm)")
+            ax.set_ylabel("y (nm)")
+            ax.set_title(f"{values['n_localizations']} localizations, "
+                         f"{values['mean_precision_nm']:.1f} nm precision")
+
         return Result(text=f"{values['n_localizations']} localizations",
+                      plot=plot if len(ctx.locs) else None,
                       data=values, settings=settings)
 
 

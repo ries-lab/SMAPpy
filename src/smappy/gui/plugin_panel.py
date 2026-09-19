@@ -262,30 +262,8 @@ class PluginPanel(QWidget):
             button.setEnabled(True)
 
     def plot(self) -> None:
-        """Show every figure the result has, one window each.
-
-        The window for a given plot is reused: a plugin run a second time
-        redraws in the window that is already on the screen, where the user
-        put it and at the size they gave it, rather than opening another one
-        on top.  A window they closed is opened again; a `plot(ax)` that
-        repopulates the whole figure (a three-panel preview, say) gets a
-        cleared one, so nothing from the last run is left in it.
-        """
+        """Show every figure the result has, one window each, reusing them."""
         if self.result is None:
             return
-        import matplotlib
-        matplotlib.use("QtAgg")
-        import matplotlib.pyplot as plt
-        for name, draw in self.result.figures():
-            fig = self._figures.get(name)
-            if fig is not None and plt.fignum_exists(fig.number):
-                fig.clear()
-                ax = fig.subplots()
-            else:
-                fig, ax = plt.subplots()
-                self._figures[name] = fig
-            draw(ax)
-            fig.canvas.manager.set_window_title(
-                f"{self.plugin.name}: {name}" if name else self.plugin.name)
-            fig.canvas.draw_idle()
-            fig.show()
+        from .figures import draw_figures
+        draw_figures(self._figures, self.result.figures(), self.plugin.name)
