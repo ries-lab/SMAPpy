@@ -381,6 +381,11 @@ def test_a_fast_render_happens_inside_the_gesture():
     cx, cy = box.x0 + box.width / 2, box.y0 + box.height / 2
 
     rendered = []
+    # both halves of the throttle, stated: a render that is cheap, and no
+    # render just done.  Leaving the cost to whatever the render on the way
+    # up happened to take made this pass on a fast machine and fail on a
+    # loaded one, which is the machine, not the behaviour.
+    viewer._render_seconds = 0.0         # as if a render were free
     viewer._rendered_at = 0.0            # not throttled by the render just done
     real = viewer._render_now
     viewer._render_now = lambda: (rendered.append(1), real())[1]

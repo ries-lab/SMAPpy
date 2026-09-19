@@ -100,6 +100,37 @@ def test_prefetch_preserves_order_and_content():
     assert all(np.array_equal(a, b) for (_, a), (_, b) in zip(out, source))
 
 
+def test_an_abandoned_prefetch_lets_its_reader_go():
+    """A consumer may walk away -- a stopped fit, a live run that timed out.
+
+    The reader used to sit on a full queue for the life of the process,
+    holding its blocks; and a daemon thread parked mid-`put` is what turns an
+    unrelated re-entrant event loop into a segfault somewhere else entirely.
+    """
+    import threading
+    import time
+
+    from smappy.pipeline import prefetch
+
+    def endless():
+        i = 0
+        while True:
+            yield (i, np.zeros((2, 2), np.float32))
+            i += 1
+
+    before = set(threading.enumerate())
+    stream = prefetch(endless(), depth=1)
+    assert next(stream)[0] == 0
+    time.sleep(0.05)                     # the reader fills the queue and waits
+    assert set(threading.enumerate()) - before
+
+    stream.close()                       # nobody is reading any more
+    deadline = time.time() + 3.0
+    while time.time() < deadline and set(threading.enumerate()) - before:
+        time.sleep(0.02)
+    assert not set(threading.enumerate()) - before
+
+
 def test_prefetch_reraises_reader_errors():
     from smappy.pipeline import prefetch
 

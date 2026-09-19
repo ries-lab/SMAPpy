@@ -933,8 +933,7 @@ class Viewer:
         on = bool(self.switches.get_status()[0])
         if on and not self.state.has_grouped:      # the one slow path
             self._update_title("grouping...")
-            self.figure.canvas.draw_idle()
-            self.figure.canvas.flush_events()
+            self._paint_now()
         self.state.show_grouped(on, self.group_settings)
         self._apply_default_bounds()
         field = self.state.settings.color_field
@@ -945,6 +944,22 @@ class Viewer:
             return
         self._restore_bounds()
         self._render_now()
+
+    def _paint_now(self) -> None:
+        """Get the title on the screen before the slow part starts.
+
+        Not `flush_events`: that runs the whole event loop from inside a
+        widget's own callback, so anything queued -- a worker's signal, a
+        timer, a window being torn down -- is delivered in the middle of
+        this, and Qt is not re-entrant enough to survive all of it.  A
+        repaint paints, and does nothing else; on a backend with no window
+        there is nothing to repaint and the draw is the whole of it.
+        """
+        canvas = self.figure.canvas
+        canvas.draw()
+        repaint = getattr(canvas, "repaint", None)
+        if callable(repaint):
+            repaint()
 
     def _update_hints(self) -> None:
         """Print the active table's data range beside each row.

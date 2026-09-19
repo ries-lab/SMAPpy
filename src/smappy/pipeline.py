@@ -145,15 +145,32 @@ def prefetch(source: Iterable, depth: int = 2) -> Iterator:
 
     items: "queue.Queue" = queue.Queue(maxsize=depth)
     sentinel = object()
+    # A consumer may walk away: a fit that is stopped, a live run that times
+    # out, a `for ... break`.  Without this the reader sits on a full queue
+    # for the life of the process, holding its blocks -- and a daemon thread
+    # parked mid-`put` is what turns an unrelated re-entrant event loop into
+    # a crash later on.
+    stop = threading.Event()
+
+    def offer(item) -> bool:
+        """Hand one item over; False once nobody is listening any more."""
+        while not stop.is_set():
+            try:
+                items.put(item, timeout=0.05)
+                return True
+            except queue.Full:
+                continue
+        return False
 
     def reader():
         try:
             for item in source:
-                items.put(item)
+                if not offer(item):
+                    return
         except BaseException as error:  # re-raised in the consumer
-            items.put(error)
+            offer(error)
         finally:
-            items.put(sentinel)
+            offer(sentinel)
 
     thread = threading.Thread(target=reader, daemon=True)
     thread.start()
@@ -166,6 +183,12 @@ def prefetch(source: Iterable, depth: int = 2) -> Iterator:
                 raise item
             yield item
     finally:
+        stop.set()
+        while True:                     # unblock a reader waiting on a full queue
+            try:
+                items.get_nowait()
+            except queue.Empty:
+                break
         thread.join(timeout=1.0)
 
 

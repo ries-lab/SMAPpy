@@ -332,6 +332,11 @@ def test_a_name_that_already_says_the_date_or_the_microscope_does_not_repeat_it(
 
 def test_save_dialog_normalizes_before_overwrite_check(tmp_path, monkeypatch):
     from types import SimpleNamespace
+    # the Tk interface is the legacy one and Tk is not always installed --
+    # macOS ships a version that draws blank windows, which is why the Qt one
+    # is the default.  A machine without it skips this rather than failing a
+    # suite over an interface it cannot run.
+    pytest.importorskip("tkinter")
     from tkinter import filedialog, messagebox
     from smappy.calibrate.gui import CalibrationWindow
     stack = tmp_path/'bead_dataset'/'Pos0'
