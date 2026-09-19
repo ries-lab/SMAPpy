@@ -123,12 +123,12 @@ def test_one_site_reuses_what_is_current_and_says_what_it_ran():
     """A list is scrolled through without recomputing what has not changed."""
     project, ids = a_project()
     project.evaluate()
-    record, results = project.evaluate_one(ids[0], reuse=True)
+    record, results, _ = project.evaluate_one(ids[0], reuse=True)
     assert results["Statistics"] is None           # kept, so nothing to draw
     assert record["steps"]["Statistics"]["values"]["n_localizations"] == 4
 
     project.pipeline[0].values = {"precision_column": "photons"}
-    record, results = project.evaluate_one(ids[0], reuse=True)
+    record, results, _ = project.evaluate_one(ids[0], reuse=True)
     assert results["Statistics"] is not None       # stale, so it ran
     assert record["steps"]["Statistics"]["values"]["mean_precision_nm"] == 200.0
 
@@ -137,7 +137,7 @@ def test_a_figure_can_be_asked_for_even_when_the_numbers_are_current():
     """A plot is a closure; nothing stored brings it back, so it re-runs."""
     project, ids = a_project()
     project.evaluate()
-    _, results = project.evaluate_one(ids[0], reuse=True, force=["Statistics"])
+    _, results, _ = project.evaluate_one(ids[0], reuse=True, force=["Statistics"])
     assert results["Statistics"].figures()
 
 

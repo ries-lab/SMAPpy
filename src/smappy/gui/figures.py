@@ -18,9 +18,9 @@ warning attached.  Here a figure lives as long as the window it is in.
 """
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (QMainWindow, QTabWidget, QVBoxLayout, QWidget)
 
@@ -111,33 +111,62 @@ def summary_plot(plots: Sequence[Plot]) -> Plot:
     return Plot(draw=draw, name=SUMMARY, panels=len(plots) + 1)
 
 
-class ResultWindow(QMainWindow):
-    """Every figure of one result: one pane, or a tab each.
+class DetachedFigure(QMainWindow):
+    """A pane taken out of the tabs, and the way back in.
 
-    Reused for the life of whatever owns it -- a plugin section, an ROI
-    manager -- so that running again redraws where the window already is,
-    at the size it was given, rather than opening another one on top of it.
+    A window rather than an instance with its `closeEvent` replaced: patching
+    a virtual onto one PySide object works until the interpreter takes the
+    C++ side apart in an order nobody chose, and a segfault at exit is a
+    poor trade for six saved lines.
     """
 
-    def __init__(self, title: str, parent=None):
+    closed = Signal(str)
+
+    def __init__(self, name: str, title: str, parent=None):
         super().__init__(parent)
         self.setWindowFlag(Qt.Window, True)
         self.setWindowTitle(title)
+        self._name = name
+
+    def closeEvent(self, event) -> None:           # noqa: N802 (Qt's name)
+        self.closed.emit(self._name)
+        super().closeEvent(event)
+
+
+class FigureTabs(QWidget):
+    """The figures of one result: a pane, or a tab each beyond the first.
+
+    A widget rather than a window, because it is both -- `ResultWindow` puts
+    one in a window of its own, and the ROI site window puts one behind each
+    evaluator's tab, where the outer tabs are who drew it and the inner ones
+    what they drew.
+    """
+
+    def __init__(self, title: str = "", parent=None):
+        super().__init__(parent)
         self._title = title
+        self._subtitle = ""
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
         self.tabs.currentChanged.connect(self._on_tab)
         self.tabs.tabBarDoubleClicked.connect(self.detach)
-        self.setCentralWidget(self.tabs)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.tabs)
         self.panes: Dict[str, FigurePane] = {}
         self.detached: Dict[str, QMainWindow] = {}
         self._names: List[str] = []
-        self._sized = False
+        self.size_hint_inches: Optional[Tuple[float, float]] = None
         detach = QAction("Open the current tab in its own window", self)
         detach.setShortcut("Ctrl+D")
         detach.triggered.connect(lambda: self.detach(self.tabs.currentIndex()))
         self.addAction(detach)
-        self.resize(640, 480)
+
+    @property
+    def current(self) -> str:
+        """The name of the plot being looked at."""
+        pane = self.tabs.currentWidget()
+        return next((n for n, p in self.panes.items() if p is pane), "")
 
     # ------------------------------------------------------------- showing
     def show_plots(self, plots: Sequence[Plot], subtitle: str = "") -> None:
@@ -150,7 +179,7 @@ class ResultWindow(QMainWindow):
         plots = list(plots)
         if len(plots) > 1:            # a page of all of them, drawn on demand
             plots.append(summary_plot(plots))
-        self.setWindowTitle(f"{self._title}: {subtitle}" if subtitle else self._title)
+        self._subtitle = subtitle
         names = [plot.name for plot in plots]
         if names != self._names:
             self._rebuild(names)
@@ -162,24 +191,10 @@ class ResultWindow(QMainWindow):
                 window.setWindowTitle(self._tab_title(name, subtitle))
         self._draw_current()
         self._mark_tabs()
-        self._take_size(plots)
-
-    def _take_size(self, plots: Sequence[Plot]) -> None:
-        """A plot's size hint sets the window, once.
-
-        Only the first time: after that the window is where the user put it
-        and at the size they gave it, and a three-panel figure is not a
-        reason to undo that on every run.
-        """
-        if self._sized:
-            return
         sizes = [plot.size for plot in plots if plot.size]
-        if not sizes:
-            return
-        self._sized = True
-        dpi = next(iter(self.panes.values())).figure.get_dpi()
-        self.resize(int(max(w for w, _ in sizes) * dpi),
-                    int(max(h for _, h in sizes) * dpi))
+        if sizes:
+            self.size_hint_inches = (max(w for w, _ in sizes),
+                                     max(h for _, h in sizes))
 
     def _rebuild(self, names: Sequence[str]) -> None:
         """The set of figures changed: keep the panes that survive it."""
@@ -203,6 +218,10 @@ class ResultWindow(QMainWindow):
         pane = self.tabs.currentWidget()
         if isinstance(pane, FigurePane) and self.isVisible():
             pane.draw()
+
+    def dpi(self) -> float:
+        pane = next(iter(self.panes.values()), None)
+        return pane.figure.get_dpi() if pane is not None else 100.0
 
     def _on_tab(self, index: int) -> None:
         pane = self.tabs.widget(index)
@@ -242,72 +261,96 @@ class ResultWindow(QMainWindow):
         name = next((n for n, p in self.panes.items() if p is pane), None)
         if name is None or name in self.detached:
             return
-        window = QMainWindow(self)
-        window.setWindowFlag(Qt.Window, True)
-        window.setWindowTitle(self._tab_title(name))
+        window = DetachedFigure(name, self._tab_title(name), self)
+        window.closed.connect(self._reattach)
         self.tabs.removeTab(index)
         window.setCentralWidget(pane)
         window.resize(self.size())
-        window.closeEvent = lambda event, n=name: self._reattach(n, event)
         self.detached[name] = window
         pane.draw()
         window.show()
         self.tabs.tabBar().setVisible(self.tabs.count() > 1)
 
-    def _reattach(self, name: str, event) -> None:
+    def _reattach(self, name: str) -> None:
+        """A torn-off window closed: its figure goes back into the tabs."""
         window = self.detached.pop(name, None)
         pane = self.panes.get(name)
-        if window is not None and pane is not None:
-            window.takeCentralWidget()
-            pane.setParent(self)
-            index = min(self._names.index(name) if name in self._names else 0,
-                        self.tabs.count())
-            self.tabs.insertTab(index, pane, _label(name))
-            self.tabs.tabBar().setVisible(self.tabs.count() > 1)
-            self._mark_tabs()
-        event.accept()
+        if window is None or pane is None:
+            return
+        window.takeCentralWidget()
+        pane.setParent(self)
+        index = min(self._names.index(name) if name in self._names else 0,
+                    self.tabs.count())
+        self.tabs.insertTab(index, pane, _label(name))
+        self.tabs.tabBar().setVisible(self.tabs.count() > 1)
+        self._mark_tabs()
 
     def _tab_title(self, name: str, subtitle: str = "") -> str:
-        parts = [self._title]
-        if subtitle:
-            parts.append(subtitle)
+        parts = [p for p in (self._title, subtitle or self._subtitle) if p]
         if name:
             parts.append(_label(name))
         return ": ".join(parts)
 
-    def closeEvent(self, event) -> None:           # noqa: N802 (Qt's name)
+    def close_detached(self) -> None:
+        """Whatever was torn off goes with the window it came from."""
         for window in list(self.detached.values()):
             window.close()
+
+
+class ResultWindow(QMainWindow):
+    """One result's figures in a window of their own.
+
+    Reused for the life of whatever owns it -- a plugin's section -- so that
+    running again redraws where the window already is, at the size it was
+    given, rather than opening another one on top of it.
+    """
+
+    def __init__(self, title: str, parent=None):
+        super().__init__(parent)
+        self.setWindowFlag(Qt.Window, True)
+        self.setWindowTitle(title)
+        self._title = title
+        self._sized = False
+        self.figures = FigureTabs(title, self)
+        self.setCentralWidget(self.figures)
+        self.resize(640, 480)
+
+    # the window is a thin skin over the tabs; the tests and the panel reach
+    # through it rather than through a second set of forwarding methods
+    @property
+    def tabs(self):
+        return self.figures.tabs
+
+    @property
+    def panes(self):
+        return self.figures.panes
+
+    @property
+    def detached(self):
+        return self.figures.detached
+
+    def detach(self, index: int) -> None:
+        self.figures.detach(index)
+
+    def show_plots(self, plots: Sequence[Plot], subtitle: str = "") -> None:
+        self.setWindowTitle(f"{self._title}: {subtitle}" if subtitle else self._title)
+        self.figures.show_plots(plots, subtitle)
+        self._take_size()
+
+    def _take_size(self) -> None:
+        """A plot's size hint sets the window, once.
+
+        Only the first time: after that the window is where the user put it
+        and at the size they gave it, and a three-panel figure is not a
+        reason to undo that on every run.
+        """
+        hint = self.figures.size_hint_inches
+        if self._sized or hint is None:
+            return
+        self._sized = True
+        dpi = self.figures.dpi()
+        self.resize(int(hint[0] * dpi), int(hint[1] * dpi))
+
+    def closeEvent(self, event) -> None:           # noqa: N802 (Qt's name)
+        self.figures.close_detached()
         super().closeEvent(event)
-
-
-# ------------------------------------------------- one window per figure
-#
-# What the ROI manager still uses while its own window is built: a figure per
-# plot, in a pyplot-managed window, reused by key.  It goes when the site
-# window lands.
-
-def draw_figure(cache: Dict[str, object], key: str, title: str, plot: Plot):
-    """Draw `plot` into the pyplot figure `key` owns, and show it."""
-    import matplotlib
-    matplotlib.use("QtAgg")
-    import matplotlib.pyplot as plt
-    figure = cache.get(key)
-    if figure is not None and plt.fignum_exists(figure.number):
-        figure.clear()
-    else:
-        figure = plt.figure()
-        cache[key] = figure
-    plot.draw_into(figure)
-    figure.canvas.manager.set_window_title(title)
-    figure.canvas.draw_idle()
-    figure.show()
-    return figure
-
-
-def draw_figures(cache: Dict[str, object], plots: Sequence[Plot], title: str,
-                 prefix: str = "") -> None:
-    """Every figure of one result, one window each, named `title: plot`."""
-    for plot in plots:
-        draw_figure(cache, f"{prefix}{plot.name}",
-                    f"{title}: {plot.name}" if plot.name else title, plot)

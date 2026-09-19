@@ -399,20 +399,26 @@ class ROIProject:
         run = {"id": uuid4().hex, "time": datetime.now(timezone.utc).isoformat(),
                "pipeline": [step.as_record() for step in steps], "records": {}}
         for n, roi_id in enumerate(ids):
-            record, _ = self._evaluate_record(roi_id, steps, reuse=reuse)
+            record, _, _ = self._evaluate_record(roi_id, steps, reuse=reuse)
             run["records"][roi_id] = record
             if progress:
                 progress(n + 1, len(ids))
         self.runs.append(run)
         return run
 
-    def _evaluate_record(self, roi_id, steps, reuse=False, force=()):
+    def _evaluate_record(self, roi_id, steps, reuse=False, force=(), run="stale"):
         """One ROI: a complete record, and the results of what actually ran.
 
         `force` names steps to run even when their stored result is current,
         which is how a figure is got back: the numbers are in the record but
         a plot is a closure over the data it drew, and nothing in a file can
         bring that back.
+
+        `run="forced"` runs nothing else -- a stored result that is out of
+        date is carried forward as it is, still signed with what made it, so
+        it goes on reading as out of date.  That is the ROI manager with
+        re-evaluation turned off: scrolling a list stays free, and what is
+        shown is what was measured, labelled for what it is.
         """
         roi = self.rois[roi_id]
         inputs = json.loads(json_text(self.inputs(roi)))
@@ -422,19 +428,25 @@ class ROIProject:
         record = {"inputs": inputs, "signature": digest(inputs),
                   "file_id": roi.file_id, "steps": {}}
         results = {}
+        updated = []
         for step in steps:
             entry, state = known.get(step.label, (None, "missing"))
-            if entry is not None and state == "current" and step.label not in force:
+            keep = entry is not None and (state == "current" or run == "forced")
+            if keep and step.label not in force:
                 record["steps"][step.label] = dict(entry)
                 results[step.label] = None          # kept, so not drawn
                 continue
             if locs is None:                        # only if something runs
                 locs = self.extract(roi)
+            if state != "current":
+                # a step re-run only for its figure tells nobody anything
+                # new, and storing it again would grow the file per click
+                updated.append(step.label)
             entry, result = self._one_step(step, roi, locs, geometry)
             entry["signature"] = self.step_signature(step, inputs)
             record["steps"][step.label] = entry
             results[step.label] = result
-        return record, results
+        return record, results, updated
 
     def _one_step(self, step, roi, locs, geometry):
         """One evaluator on one ROI, as (what is recorded, what it returned).
@@ -452,12 +464,13 @@ class ROIProject:
             return {"error": f"{type(error).__name__}: {error}"}, None
 
     def evaluate_one(self, roi_id, instances=None, steps=None, reuse=False,
-                     force=(), store=False):
+                     force=(), store=False, run="stale"):
         """The pipeline on a single ROI, figures and all.
 
         What `evaluate` does per site, for the one site being looked at, and
         handing back each step's whole `Result` rather than only the numbers
-        it recorded -- which is what lets the ROI manager draw what the
+        it recorded, and the labels of the steps whose stored result it
+        replaced -- which is what lets the ROI manager draw what the
         evaluators drew while the list is walked through.
 
         `reuse` takes the stored numbers for the steps that are still current
@@ -466,17 +479,19 @@ class ROIProject:
         for the figure of the tab being looked at.  With `store` the record
         joins the runs as a one-site run, which is what makes a re-evaluation
         on selection worth anything: without it the same stale step would be
-        re-run on every visit and the site table would never catch up.
+        re-run on every visit and the site table would never catch up.  A
+        step re-run only for its figure has nothing new to say and is not
+        stored again.
         """
         steps = self.resolved(steps, instances)
-        record, results = self._evaluate_record(roi_id, steps, reuse=reuse,
-                                                force=force)
-        if store and any(result is not None for result in results.values()):
+        record, results, updated = self._evaluate_record(roi_id, steps, reuse=reuse,
+                                                         force=force, run=run)
+        if store and updated:
             self.runs.append({"id": uuid4().hex, "scope": "site",
                               "time": datetime.now(timezone.utc).isoformat(),
                               "pipeline": [step.as_record() for step in steps],
                               "records": {roi_id: record}})
-        return record, results
+        return record, results, updated
 
     def latest(self, roi_id, steps=None):
         """The newest result for this ROI, step by step, and what it is worth.

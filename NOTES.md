@@ -1012,14 +1012,31 @@ it.
 
 ## Evaluating the ROI being looked at
 
-Walking down the ROI list re-runs the pipeline on the site being looked at
-(`ROIProject.evaluate_one`) and draws what the evaluators draw, but records
-nothing: a run is a pipeline over every site, and a hundred one-site runs from
-clicking down a list would be provenance about nothing.  The figures are the
-point there, and a figure cannot be saved anyway -- `plot(ax)` is a closure
-over the data it drew.  Each plot keeps one window, which the next ROI
-redraws; that is what makes two sites comparable rather than a screen full of
-windows after five clicks.
+Selecting an ROI shows what is already known and measures only what it has to.
+The numbers come from the stored records -- that is what makes a long list
+scrollable -- and a step is run again only when its signature no longer
+matches, which is `evaluate_one(reuse=True)`.
+
+The figures are the exception, and cannot not be: a plot is a closure over the
+data it drew, so nothing stored brings one back and the evaluator whose tab is
+open is always run for the site (`force`).  That is one step of one site, a
+few hundred localizations; everything else is stored numbers.  What ran is
+kept as a one-site run, so the next visit is free -- except that a step run
+only for its figure has told nobody anything new, and storing it again would
+grow the file per click, so only steps whose result actually changed are
+written.
+
+(This reverses the first version of this, which recorded nothing on the
+grounds that a run is a pipeline over every site.  Recording nothing meant the
+same stale step was re-measured on every visit and the site table never caught
+up with what was on screen.  A one-site run says `scope: "site"`, which is
+honest about what it was.)
+
+Outer tabs are the evaluators, inner ones their figures, and both are lazy, so
+a pipeline of five evaluators with three figures each costs one figure per
+site rather than fifteen.  *Re-evaluate when out of date* is the switch for
+the rest: off, a stale step that is not being looked at is left as it is and
+shown labelled, for scrolling a large project without it computing behind you.
 
 ## Open questions
 

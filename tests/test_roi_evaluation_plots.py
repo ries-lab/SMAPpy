@@ -37,6 +37,18 @@ class Drawing(Plugin):
                       data={"n": len(x)}, settings=settings)
 
 
+class Other(Plugin):
+    """A second evaluator with a figure, to watch what the first one costs."""
+    name = "Other"
+    path = "ROIManager/Evaluate/Other"
+    scope = "site"
+    Settings = DrawingSettings
+
+    def run(self, ctx, settings):
+        n = len(ctx.locs)
+        return Result(text=f"{n}", plot=lambda ax: ax.bar([0], [n]), data={"n": n})
+
+
 class Failing(Plugin):
     name = "Failing"
     path = "ROIManager/Evaluate/Failing"
@@ -77,7 +89,7 @@ def a_project():
 
 def test_one_roi_hands_back_what_its_evaluators_drew():
     project, rois = a_project()
-    record, results = project.evaluate_one(rois[0].id, steps=steps(Drawing))
+    record, results, _ = project.evaluate_one(rois[0].id, steps=steps(Drawing))
     assert record["steps"]["Drawing"]["values"] == {"n": 10}
     assert [p.name for p in results["Drawing"].figures()] == ["", "positions"]
 
@@ -93,8 +105,8 @@ def test_looking_at_a_site_records_nothing():
 
 def test_a_step_that_fails_costs_its_own_figure_and_no_more():
     project, rois = a_project()
-    record, results = project.evaluate_one(rois[0].id,
-                                           steps=steps(Failing, Drawing))
+    record, results, _ = project.evaluate_one(
+        rois[0].id, steps=steps(Failing, Drawing))
     assert results["Failing"] is None
     assert results["Drawing"].figures()
     assert pipeline_module.errors(record) == {"Failing": "ValueError: not this site"}
@@ -103,9 +115,9 @@ def test_a_step_that_fails_costs_its_own_figure_and_no_more():
 def test_the_shipped_evaluator_draws_the_site_it_counted():
     """Three numbers cannot tell a ring from a smear; the picture can."""
     project, rois = a_project()
-    _, results = project.evaluate_one(rois[0].id,
-                                      steps=pipeline_module.resolve(
-                                          pipeline_module.default_instances()))
+    _, results, _ = project.evaluate_one(
+        rois[0].id,
+        steps=pipeline_module.resolve(pipeline_module.default_instances()))
     assert results["Statistics"].plot is not None
 
     from matplotlib.figure import Figure
@@ -117,7 +129,7 @@ def test_the_shipped_evaluator_draws_the_site_it_counted():
 def test_the_pipeline_on_the_project_is_what_runs_by_default():
     project, rois = a_project()
     project.pipeline = pipeline_module.default_instances()
-    record, results = project.evaluate_one(rois[0].id)
+    record, results, _ = project.evaluate_one(rois[0].id)
     assert "Statistics" in results
     assert record["steps"]["Statistics"]["values"]["n_localizations"] == 10
 
@@ -144,36 +156,109 @@ def a_window(app):
     return window, project
 
 
-def test_the_next_roi_redraws_the_figures_it_already_has(app, monkeypatch):
-    window, project = a_window(app)
-    drawn = []
+def two_steps():
+    return steps(Drawing, Failing)
 
-    def fake(cache, key, title, draw):
-        drawn.append((key, title))
-        cache[key] = cache.get(key) or object()
-        return cache[key]
 
-    monkeypatch.setattr("smappy.gui.figures.draw_figure", fake)
+def test_the_next_roi_redraws_in_the_window_that_is_already_open(app, monkeypatch):
     monkeypatch.setattr(pipeline_module, "resolve", lambda instances: steps(Drawing))
+    window, project = a_window(app)
     window.evaluate_live.setChecked(True)
     ids = list(project.rois)
     window.select(ids[0])
-    first = dict(window._figures)
+    site = window._site
+    panes = dict(site.figures["Drawing"].panes)
+    assert site.isVisible()
+    assert [site.tabs.tabText(i) for i in range(site.tabs.count())] == ["Drawing"]
+    assert "ROI 1" in site.windowTitle()
+
     window.select(ids[1])
-
-    # two plots, two windows, and the second ROI drew into the same two
-    assert len(window._figures) == 2
-    assert window._figures == first
-    assert [title for _, title in drawn] == [
-        "Drawing: ROI 1", "Drawing: ROI 1: positions",
-        "Drawing: ROI 2", "Drawing: ROI 2: positions"]
+    assert site.figures["Drawing"].panes == panes     # the same panes, redrawn
+    assert "ROI 2" in site.windowTitle()
 
 
-def test_nothing_is_drawn_until_it_is_asked_for(app, monkeypatch):
+def test_every_stale_step_is_measured_but_only_the_open_one_is_drawn(app, monkeypatch):
+    """The numbers are what the site table needs; the figures are what is looked
+    at, and five evaluators with three figures each is why that is not the same
+    thing."""
+    monkeypatch.setattr(pipeline_module, "resolve",
+                        lambda instances: steps(Drawing, Other))
     window, project = a_window(app)
-    monkeypatch.setattr(pipeline_module, "resolve", lambda instances: steps(Drawing))
+    window.evaluate_live.setChecked(True)
     window.select(list(project.rois)[0])
-    assert window._figures == {}
+    site = window._site
+    assert [site.tabs.tabText(i) for i in range(site.tabs.count())] == [
+        "Drawing", "Other"]
+    assert site.current == "Drawing"
+    assert "Drawing, Other evaluated" in window.status.currentMessage()
+
+    assert site.figures["Drawing"].panes[""].figure.axes      # looked at: drawn
+    assert not site.figures["Other"].panes[""].figure.axes    # measured, not drawn
+
+    site.tabs.setCurrentIndex(1)                              # now it is
+    assert site.figures["Other"].panes[""].figure.axes
+
+
+def test_an_evaluator_that_fails_says_so_on_its_tab(app, monkeypatch):
+    monkeypatch.setattr(pipeline_module, "resolve", lambda instances: two_steps())
+    window, project = a_window(app)
+    window.evaluate_live.setChecked(True)
+    window.select(list(project.rois)[0])
+    site = window._site
+    assert "not this site" in site.messages["Failing"].text()
+    assert site.pages["Failing"].currentWidget() is site.messages["Failing"]
+
+
+def test_only_the_figure_being_looked_at_is_drawn(app, monkeypatch):
+    monkeypatch.setattr(pipeline_module, "resolve", lambda instances: steps(Drawing))
+    window, project = a_window(app)
+    window.evaluate_live.setChecked(True)
+    window.select(list(project.rois)[0])
+    figures = window._site.figures["Drawing"]
+    assert [figures.tabs.tabText(i) for i in range(figures.tabs.count())] == [
+        "figure", "positions", "All"]
+    assert not figures.panes["positions"].figure.axes     # not looked at yet
+    figures.tabs.setCurrentIndex(1)
+    assert figures.panes["positions"].figure.axes
+
+
+def test_nothing_runs_until_the_plots_are_asked_for(app, monkeypatch):
+    monkeypatch.setattr(pipeline_module, "resolve", lambda instances: steps(Drawing))
+    window, project = a_window(app)
+    window.select(list(project.rois)[0])
+    assert window._site is None
+
+
+def test_what_is_current_is_not_measured_again(app, monkeypatch):
+    """Scrolling back to a site already measured costs nothing."""
+    monkeypatch.setattr(pipeline_module, "resolve", lambda instances: steps(Drawing))
+    window, project = a_window(app)
+    window.evaluate_live.setChecked(True)
+    ids = list(project.rois)
+    window.select(ids[0])
+    window.select(ids[1])
+    runs = len(project.runs)
+    window.select(ids[0])                             # back again: stored
+    assert len(project.runs) == runs                  # nothing new to store
+    assert "drawn from the result already stored" in window.status.currentMessage()
+
+
+def test_with_re_evaluation_off_a_stale_step_is_left_alone(app, monkeypatch):
+    monkeypatch.setattr(pipeline_module, "resolve", lambda instances: two_steps())
+    window, project = a_window(app)
+    window.evaluate_live.setChecked(True)
+    ids = list(project.rois)
+    window.select(ids[0])
+    window._site.tabs.setCurrentIndex(1)              # both steps measured
+    window._site.tabs.setCurrentIndex(0)
+    assert not project.stale_steps(ids[0], two_steps())
+
+    window.re_evaluate.setChecked(False)
+    project.move_roi(ids[0], [500, 500])              # everything is stale now
+    window.select(ids[0])
+    stale = [step.label for step in project.stale_steps(ids[0], two_steps())]
+    assert stale == ["Failing"]                       # only the open tab ran
+    assert project.navigation["re_evaluate"] is False
 
 
 def test_an_empty_pipeline_says_so_rather_than_drawing(app):
@@ -201,3 +286,18 @@ def test_the_manager_opens_the_pipeline_window(app):
     header.open_manager()
     header.manager.evaluation_button.click()
     assert header.evaluation is not None and header.evaluation.isVisible()
+
+
+def test_closing_the_site_window_stops_the_measuring(app, monkeypatch):
+    """Nobody is looking, so nothing should be computed for it."""
+    monkeypatch.setattr(pipeline_module, "resolve", lambda instances: steps(Drawing))
+    window, project = a_window(app)
+    window.evaluate_live.setChecked(True)
+    ids = list(project.rois)
+    window.select(ids[0])
+
+    window._site.close()
+    assert not window.evaluate_live.isChecked()
+    runs = len(project.runs)
+    window.select(ids[1])
+    assert len(project.runs) == runs

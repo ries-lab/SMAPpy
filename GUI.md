@@ -132,13 +132,17 @@ reasoning is here so that it does not have to be re-derived.
   finder, the evaluation.  There is no review step: an ROI counts from the
   moment it is made, and *use* is what excludes one.  Below the ROI list,
   *Evaluation pipeline...* opens the same window the ROI tab does (there is
-  one per session), and *plot the evaluation* runs that pipeline on the ROI
-  being looked at and draws what its evaluators draw -- each plot in a window
-  of its own that the next ROI redraws, so that stepping down the list
-  compares like with like.  *Statistics* draws the site's localizations, which
-  is what its three numbers cannot say: two hundred in a ring and two hundred
-  in a smear count the same.  Nothing is recorded by that: *Run on every ROI*
-  is what keeps the numbers.  An ROI whose numbers were measured with data or
+  one per session), and *plot the evaluation* opens the site window: what the
+  evaluators drew for the selected ROI, a tab per evaluator and their figures
+  as tabs inside it, redrawn in place by the next ROI so that stepping down
+  the list compares like with like.  Only the evaluator whose tab is open is
+  run for its figures, and only the figure whose tab is open is drawn.  The
+  numbers come from the stored records, so scrolling costs nothing; a step
+  whose result is out of date is measured again and kept, unless
+  *re-evaluate when out of date* is off, in which case it is shown as it was
+  stored and labelled.  *Statistics* draws the site's localizations, which is
+  what its three numbers cannot say: two hundred in a ring and two hundred in
+  a smear count the same.  An ROI whose numbers were measured with data or
   parameters that have since changed is listed in amber, and *Re-evaluate
   what changed* in the pipeline window runs only the steps that are out of
   date -- editing one evaluator's parameter costs that evaluator over the
@@ -200,6 +204,7 @@ reasoning is here so that it does not have to be re-derived.
     smappy/gui/render_tab.py     filter ranges, colour, contrast, gamma
     smappy/gui/plugin_panel.py   a plugin as a section: form, Run, result
     smappy/gui/figures.py        a result's figures: one window, a tab each
+    smappy/gui/roi_site.py       the site window: a tab per evaluator
     smappy/plugins/drift_result.py  what a drift plugin keeps in the file
     smappy/gui/app.py            windows, menus, tabs; `smappy-gui`
 

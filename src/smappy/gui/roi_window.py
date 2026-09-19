@@ -215,9 +215,10 @@ class ROIManagerWindow(QMainWindow):
         self._hover: Optional[np.ndarray] = None
         self.zoom_center: Optional[np.ndarray] = None
         self._loading = False
-        # the window each evaluator's plot was last drawn in, so that walking
-        # down the list redraws them in place instead of burying the screen
-        self._figures: dict = {}
+        # the window the evaluators' figures are drawn in, kept so that
+        # walking down the list redraws them in place instead of burying the
+        # screen; made on first use
+        self._site = None
         self._evaluating = False
 
         self.file_pane = ImagePane("file")
@@ -302,12 +303,22 @@ class ROIManagerWindow(QMainWindow):
         llayout.addWidget(self.evaluation_button)
         self.evaluate_live = QCheckBox("plot the evaluation")
         self.evaluate_live.setToolTip(
-            "run the pipeline on the selected ROI and draw what its evaluators "
-            "draw, each in a window of its own that the next ROI redraws -- so "
-            "that stepping down the list compares like with like.  Nothing is "
-            "recorded: Run on every ROI is what keeps the numbers.")
+            "open the site window: what the evaluators draw for the selected "
+            "ROI, a tab per evaluator, redrawn in place by the next ROI -- so "
+            "that stepping down the list compares like with like.  Only the "
+            "tab being looked at is drawn, and only that evaluator runs.")
         self.evaluate_live.toggled.connect(self._on_evaluate_live)
         llayout.addWidget(self.evaluate_live)
+        self.re_evaluate = QCheckBox("re-evaluate when out of date")
+        self.re_evaluate.setChecked(True)
+        self.re_evaluate.setToolTip(
+            "a selected ROI whose stored numbers were measured with data or "
+            "parameters that have since changed is measured again, and the "
+            "result kept.  Turn it off to scroll a large project without it "
+            "computing behind you: the numbers are then shown as they were "
+            "stored, marked for what they are.")
+        self.re_evaluate.toggled.connect(self._on_re_evaluate)
+        llayout.addWidget(self.re_evaluate)
         toggle = QShortcut(QKeySequence(Qt.Key_Space), self)
         toggle.setContext(Qt.WindowShortcut)
         toggle.activated.connect(self._toggle)
@@ -420,6 +431,7 @@ class ROIManagerWindow(QMainWindow):
         self.tiles_button.setChecked(bool(self.project.tile_nm))
         self.tile_size.setValue(self.project.tile_nm or DEFAULT_TILE_NM)
         self.evaluate_live.setChecked(bool(project.navigation.get("plot_evaluation")))
+        self.re_evaluate.setChecked(bool(project.navigation.get("re_evaluate", True)))
         self._loading = False
         self.redraw()
 
@@ -872,53 +884,89 @@ class ROIManagerWindow(QMainWindow):
             return
         self.project.navigation["plot_evaluation"] = bool(on)
         if on:
+            self.site_window().show()
             self.evaluate_active()
-        else:
-            self.status.showMessage("the evaluation plots are left as they are")
+        elif self._site is not None:
+            self._site.hide()
 
-    def evaluate_active(self) -> None:
-        """Run the pipeline on the ROI being looked at and draw what it draws.
+    def _on_re_evaluate(self, on: bool) -> None:
+        if self._loading:
+            return
+        self.project.navigation["re_evaluate"] = bool(on)
+        if on and self.evaluate_live.isChecked():
+            self.evaluate_active()
 
-        On this thread and on one site: an evaluator sees a few hundred
-        localizations, and a figure that arrives after the next ROI has been
-        selected would be worse than a moment's wait.  A step that fails costs
-        its own figure and says so in the status bar; the rest are still drawn,
-        because the one that failed is often why the site is being looked at.
+    def site_window(self):
+        """The window the selected ROI's figures are drawn in, made once."""
+        from .roi_site import SiteWindow
+        if self._site is None:
+            self._site = SiteWindow(self)
+            # switching evaluator asks for that one: until it is looked at,
+            # it has not been run and there is nothing to draw
+            self._site.shown.connect(lambda label: self.evaluate_active(label))
+            # closed by hand: measuring for a window nobody is looking at is
+            # the cost this whole arrangement exists to avoid
+            self._site.closed.connect(lambda: self.evaluate_live.setChecked(False))
+        return self._site
 
-        Nothing is recorded -- `Run on every ROI` is what keeps the numbers.
+    def evaluate_active(self, label: Optional[str] = None) -> None:
+        """Measure the ROI being looked at, and draw what its evaluator draws.
+
+        On this thread and on one step of one site: an evaluator sees a few
+        hundred localizations, and a figure that arrives after the next ROI
+        has been selected would be worse than a moment's wait.
+
+        What runs is decided here and nowhere else.  The evaluator whose tab
+        is open runs, because a plot is a closure over the data it drew and
+        nothing stored brings it back; the others are run only when their
+        stored result is out of date and *re-evaluate* is on, and what runs
+        is kept, so the same work is not done again on the next visit.
         """
-        from .figures import draw_figures
         from ..roi_manager import pipeline as pipeline_module
         project = self.project
         roi = self._selected()
-        if roi is None or self._evaluating:
+        if roi is None or self._evaluating or not self.evaluate_live.isChecked():
             return
         steps = pipeline_module.resolve(project.pipeline)
         if not steps:
             self.status.showMessage("no evaluator is enabled in the pipeline")
             return
+        window = self.site_window()
+        window.set_steps([step.label for step in steps])
+        label = label or window.current
+        number = project.numbers().get(roi.id, "")
+        window.title_for(f"ROI {number}")
         self._evaluating = True
         try:
-            record, results = project.evaluate_one(roi.id, steps=steps)
+            record, results, updated = project.evaluate_one(
+                roi.id, steps=steps, reuse=True, force=[label] if label else [],
+                store=True, run="stale" if self.re_evaluate.isChecked() else "forced")
         except Exception as error:
             self.status.showMessage(f"the evaluation failed: {error}")
             return
         finally:
             self._evaluating = False
-        number = project.numbers().get(roi.id, "")
-        drawn = 0
-        for label, result in results.items():
-            if result is None:
-                continue
-            figures = result.figures()
-            drawn += len(figures)
-            draw_figures(self._figures, figures, f"{label}: ROI {number}",
-                         prefix=f"{label}\t")
         failed = pipeline_module.errors(record)
-        message = f"ROI {number}: {drawn} figure(s) from {len(steps)} step(s)"
-        if failed:
-            message += "; failed: " + ", ".join(f"{k} ({v})" for k, v in failed.items())
-        self.status.showMessage(message)
+        for step in steps:
+            result = results.get(step.label)
+            if step.label in failed:
+                window.show_message(step.label, failed[step.label], failed=True)
+            elif result is not None and result.figures():
+                window.show_plots(step.label, result.figures(), f"ROI {number}")
+            elif result is not None:
+                window.show_message(step.label, "this evaluator draws nothing; "
+                                                "its numbers are in the ROI tab")
+        # the table first: it writes the ROI counts into the status bar, and
+        # what just happened to this site is the more useful of the two
+        self._fill_table()
+        drew = [label for label, result in results.items() if result is not None]
+        if updated:
+            self.status.showMessage(f"ROI {number}: {', '.join(updated)} evaluated")
+        elif drew:
+            self.status.showMessage(f"ROI {number}: {', '.join(drew)} drawn from "
+                                    "the result already stored")
+        else:
+            self.status.showMessage(f"ROI {number}: nothing to draw")
 
     # --------------------------------------------------------------- edits
     def _add(self) -> None:
