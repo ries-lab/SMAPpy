@@ -113,6 +113,7 @@ class ControlWindow(QMainWindow):
         self._queue: List[tuple] = []
         self._task: Optional[LoadTask] = None
         self._loading_name = ""
+        self._loading = False
         self._loading_stage = ""
         self._elapsed = QElapsedTimer()
         self._elapsed.start()
@@ -126,8 +127,15 @@ class ControlWindow(QMainWindow):
         save = self._action(menu, "Save", QKeySequence.Save, self.save)
         save_as = self._action(menu, "Save as...", QKeySequence.SaveAs, self.save_as)
         menu.addSeparator()
-        self.undo_action = self._action(menu, "Undo", QKeySequence.Undo, session.undo)
-        self._load_locked = [open_, add, image, save, save_as, self.undo_action]
+        self.undo_action = self._action(menu, "Undo", QKeySequence.Undo,
+                                        lambda: self.session.undo())
+        self.undo_menu = menu.addMenu("Undo steps")
+        self.redo_action = self._action(menu, "Redo", None, lambda: self.session.redo())
+        self.redo_action.setShortcuts(_keys(QKeySequence.Redo, "Ctrl+Shift+Z"))
+        self.redo_menu = menu.addMenu("Redo steps")
+        self._load_locked = [open_, add, image, save, save_as, self.undo_action,
+                             self.redo_action, self.undo_menu.menuAction(),
+                             self.redo_menu.menuAction()]
         menu.addSeparator()
         self._action(menu, "Restore GUI state from file...", None,
                      self.restore_state_from_file)
@@ -358,6 +366,36 @@ class ControlWindow(QMainWindow):
         menu.addAction(action)
         return action
 
+    def _refresh_undo(self) -> None:
+        """The menu says what it would undo, and lists the steps behind it.
+
+        Word's arrangement: one entry for the last step, and a submenu where
+        picking the n-th undoes n steps at once.  A plain menu cannot
+        highlight the run above the cursor the way Word's dropdown does, so
+        the labels carry the count instead.
+        """
+        loading = self._loading
+        for action, menu, steps, verb, go in (
+                (self.undo_action, self.undo_menu, self.session.undo_entries(),
+                 "Undo", self.session.undo),
+                (self.redo_action, self.redo_menu, self.session.redo_entries(),
+                 "Redo", self.session.redo)):
+            ready = bool(steps) and not loading
+            action.setText(f"{verb} {steps[0].label}" if steps else verb)
+            action.setToolTip(steps[0].text if steps else "")
+            action.setEnabled(ready)
+            menu.clear()
+            menu.setToolTipsVisible(True)     # the plugin's own line, on hover
+            menu.setEnabled(ready)
+            for n, edit in enumerate(steps, start=1):
+                entry = menu.addAction(edit.label if n == 1
+                                       else f"{edit.label}  ({n})")
+                entry.setToolTip(edit.text)
+                # the count is bound here, as a default argument: a lambda
+                # closing over the loop variable would undo the whole list
+                # whichever entry was picked
+                entry.triggered.connect(lambda checked=False, count=n, run=go: run(count))
+
     def open_calibration(self, dual: bool = False) -> None:
         """The calibration window: bead stacks in, a spline calibration out.
 
@@ -420,7 +458,7 @@ class ControlWindow(QMainWindow):
     def _on_session(self, what: str) -> None:
         if what in ("layer", "layers", "locs", "roi") and not self.render_window.isVisible():
             self.render_window.show()      # closed by accident: a change wants it back
-        self.undo_action.setEnabled(self.session.can_undo)
+        self._refresh_undo()
         names = self.session.file_names()
         name = (names[0] if len(names) == 1 else f"{len(names)} files") if names else "no file"
         n = len(self.session.locs)
@@ -499,13 +537,14 @@ class ControlWindow(QMainWindow):
 
     def _set_loading(self, on: bool) -> None:
         """While a file is being read, nothing may change the table under it."""
+        self._loading = on
         for action in self._load_locked:
             action.setEnabled(False if on else True)
         if on:
             self._ticker.start(500)
         else:
             self._ticker.stop()
-            self.undo_action.setEnabled(self.session.can_undo)
+            self._refresh_undo()
 
     def _loading_progress(self, text: str) -> None:
         self._loading_stage = text

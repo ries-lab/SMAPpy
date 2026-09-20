@@ -27,8 +27,12 @@ reasoning is here so that it does not have to be re-derived.
   layer / ROI it came from; the GUI builds it from the Render tab, a script
   builds it from a `LocFilter` or by hand.
 * **Results go back through a `Result`**: new localizations (or none), text,
-  a plot callback and the settings used.  The session replaces the table with
-  one level of undo and appends to a history, like SMAP's `addhistory`.
+  a plot callback and the settings used.  The session replaces the table,
+  pushes what it replaced onto the undo stack under the plugin's name, and
+  appends to a history, like SMAP's `addhistory`.  The stack holds whole
+  tables and is bounded by memory rather than by a step count, which is
+  affordable because the columns a plugin did not touch are shared between
+  the two tables -- see `smappy/undo.py`.
 * **Layers.**  A `Layer` is a filter plus render and display settings over the
   same table; visible layers are rendered separately and added, as in SMAP.  A
   `Selection` names the layer it was built from.  Each layer keeps its own
@@ -200,6 +204,7 @@ reasoning is here so that it does not have to be re-derived.
     smappy/plugins/fit.py        the parts, and the Gaussian 2D / Spline 3D / 3D 2C fitters
     smappy/dualfit.py            split frames: combining peaks, paired ROIs, the 2C engine
     smappy/session.py            Session: table, files, layers, ROI, undo, history (no Qt)
+    smappy/undo.py               the undo/redo stack and what it is allowed to cost
     smappy/io/formats.py         readers: smappy, SMAP, MINFLUX, csv
     smappy/images.py             pixel images as layers
     smappy/regions.py            ROIs and their masks

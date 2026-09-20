@@ -23,9 +23,9 @@ slider back shows them again.  The column is saved with the file, so the
 decision survives a reload -- which the deletion, being undoable only within
 the session, does not.
 
-Hiding is also the safer half of the pair: a removal is one undo step and a
-save away from being permanent, so a run that would leave nothing behind is
-refused rather than performed.
+Hiding is also the safer half of the pair: a removal lasts only as long as the
+undo history behind it, and is one save away from being permanent, so a run
+that would leave nothing behind is refused rather than performed.
 """
 from __future__ import annotations
 
@@ -72,8 +72,8 @@ def current_roi(ctx: Context) -> Optional[Region]:
 def drop(locs: Localizations, keep: np.ndarray) -> Localizations:
     """The table with only ``keep``.
 
-    A new table rather than columns edited in place: `Session.set_locs`
-    remembers the one it replaced, and that is the whole of the undo.
+    A new table rather than columns edited in place: `Session.set_locs` puts
+    the one it replaced on the undo stack, and that is the whole of the undo.
     """
     return locs[np.asarray(keep, dtype=bool)]
 

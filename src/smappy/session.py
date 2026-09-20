@@ -21,6 +21,7 @@ from .io.formats import FileInfo, load as load_any
 from .regions import Region
 from .view3d import Projection, Slab
 from .render import DisplaySettings, RenderSettings, SigmaSettings, positions
+from .undo import Edit, configured as undo_stack
 from .viewer import ViewState
 
 # The bounds a layer opens with: what is thrown away is on screen, not hidden.
@@ -280,7 +281,8 @@ class Session:
         # enough to draw their figures again, saved with the file and read
         # back when it is opened.  See `Plugin.keep`.
         self.results: Dict[str, Dict] = {}
-        self._undo: Optional[Localizations] = None
+        # every table this session replaced, newest last; see `smappy.undo`
+        self.undo_stack = undo_stack()
         self._live = False                 # the table is being appended to
         self._listeners: List[Callable[[str], None]] = []
         # set by the GUI: what to write into the file's `gui` group.  A session
@@ -357,7 +359,8 @@ class Session:
             # them again (`group.attach`)
             for column in GROUP_COLUMNS:
                 merged.columns.pop(column, None)
-            self.set_locs(merged, undoable=True, keep_layers=True)
+            self.set_locs(merged, undoable=True, keep_layers=True,
+                          label=f"add {info.name}", text=str(info.path))
         self.locs.metadata["files"] = [f.to_dict() for f in self.files]
         self.log("load", str(info.path), append=append)
         return info
@@ -381,7 +384,8 @@ class Session:
         for layer in self.layers:               # a layer's file choice follows the numbering
             if not layer.is_image and layer.files is not None:
                 layer.files = [n - 1 if n > number else n for n in layer.files if n != number]
-        self.set_locs(locs, undoable=True, keep_layers=True)
+        self.set_locs(locs, undoable=True, keep_layers=True,
+                      label=f"remove {removed.name}")
         self.log("remove file", removed.name, changed=True)
 
     # -------------------------------------------------------------- images
@@ -452,12 +456,20 @@ class Session:
 
     def set_locs(self, locs: Localizations, undoable: bool = True,
                  keep_layers: bool = False,
-                 grouped: Optional[Localizations] = None) -> None:
+                 grouped: Optional[Localizations] = None,
+                 label: str = "", text: str = "") -> None:
+        """Replace the table.  ``label`` is what the undo menu will call this.
+
+        A step is pushed only when ``undoable``; everything else -- a new file,
+        the finished form of a live run -- starts the history again, because
+        there is nothing left to go back to.
+        """
         if self._live:                     # the finished form of the live table
-            self.layers = [Layer(locs)]    # (undo already points before the run)
+            self.layers = [Layer(locs)]    # (the step before the run is already pushed)
             self._live = False
         elif undoable or keep_layers:      # the same data, corrected: keep the layers
-            self._undo = self.locs if undoable else None
+            if undoable:
+                self._push_undo(label or "change", text)
             first = None                   # one index for the table, shared by all
             for layer in self.layers:
                 if layer.is_image:
@@ -465,7 +477,7 @@ class Session:
                 layer.rebind(locs, share=first)
                 first = first or layer
         else:                              # a new file: start over with one layer
-            self._undo = None
+            self.undo_stack.clear()
             self.layers = [l for l in self.layers if l.is_image]
             self.layers.insert(0, Layer(locs, grouped=grouped))
         self.locs = locs
@@ -559,7 +571,8 @@ class Session:
         ``extent`` (x0, x1, y0, y1) frames the view before any data arrives.
         The old table is kept for undo.
         """
-        self._undo = self.locs if len(self.locs) else None
+        if len(self.locs):
+            self._push_undo("live acquisition")
         self._live = True
         self.locs = Localizations({}, {})
         self.layers = [Layer(self.locs, live=True, extent=extent)]
@@ -578,22 +591,90 @@ class Session:
             self.changed("append")
         return n
 
+    # ------------------------------------------------------------- undo
+    def _push_undo(self, label: str, text: str = "") -> None:
+        """Remember the table as it is now, under the name of what replaces it."""
+        self.undo_stack.push(Edit(label=label, locs=self.locs, text=text))
+
+    def _here(self, label: str, text: str = "") -> Edit:
+        """The current state as a step, for the other side of the stack."""
+        return Edit(label=label, locs=self.locs, text=text)
+
+    def _restore(self, edit: Edit) -> None:
+        """Put a remembered table back, rebinding every layer onto it.
+
+        The layers keep their bounds and their display, and a grouped layer is
+        linked again on the way (`Layer.rebind`): coming back from a drift
+        correction has to show what it showed before, filters and all.
+        """
+        self.locs = edit.locs
+        first = None
+        for layer in self.layers:
+            if layer.is_image:
+                continue
+            layer.rebind(self.locs, share=first)
+            first = first or layer
+        self.files = [FileInfo(**{k: v for k, v in f.items() if k != "n"})
+                      for f in self.locs.metadata.get("files", [])] or self.files
+
     @property
     def can_undo(self) -> bool:
-        return self._undo is not None
+        return self.undo_stack.can_undo
 
-    def undo(self) -> None:
-        if self._undo is not None:
-            self.locs, self._undo = self._undo, None
-            first = None
-            for layer in self.layers:
-                if layer.is_image:
-                    continue
-                layer.rebind(self.locs, share=first)
-                first = first or layer
-            self.files = [FileInfo(**{k: v for k, v in f.items() if k != "n"})
-                          for f in self.locs.metadata.get("files", [])] or self.files
-            self.log("undo", changed=True)
+    @property
+    def can_redo(self) -> bool:
+        return self.undo_stack.can_redo
+
+    def undo_entries(self) -> List[Edit]:
+        """The steps that can be undone, most recent first."""
+        return self.undo_stack.entries()
+
+    def redo_entries(self) -> List[Edit]:
+        return self.undo_stack.redo_entries()
+
+    def undo_labels(self) -> List[str]:
+        return self.undo_stack.labels()
+
+    def redo_labels(self) -> List[str]:
+        return self.undo_stack.redo_labels()
+
+    def undo(self, steps: int = 1) -> None:
+        """Go back ``steps`` table changes, the most recent first.
+
+        More than one at a time because the menu lists them: picking the third
+        entry means the last three, as it does in every other program.  The log
+        keeps its entries and gains one saying what was undone -- it is the
+        provenance of the localizations, not a second copy of this stack.
+        """
+        self._travel(steps, "undo")
+
+    def redo(self, steps: int = 1) -> None:
+        """Take back an undo, one step or several."""
+        self._travel(steps, "redo")
+
+    def _travel(self, steps: int, direction: str) -> None:
+        """Walk the stack, restoring each step on the way.
+
+        One method for both directions: they differ in which side of the stack
+        is read and which is handed the state being left behind, and nothing
+        else.  The log gets a single entry naming every step that was passed,
+        rather than one per step, because it is one thing the user did.
+        """
+        back = direction == "undo"
+        done = []
+        for _ in range(max(1, int(steps))):
+            entries = self.undo_entries() if back else self.redo_entries()
+            if not entries:
+                break
+            here = self._here(entries[0].label, entries[0].text)
+            edit = (self.undo_stack.undo(redo_of=here) if back
+                    else self.undo_stack.redo(undo_of=here))
+            if edit is None:
+                break
+            self._restore(edit)
+            done.append(entries[0].label)
+        if done:
+            self.log(direction, ", ".join(done), changed=True)
             self.changed("locs")
 
     # -------------------------------------------------------- ROI manager
@@ -737,7 +818,10 @@ class Session:
             self.add_file(locs, info, append=result.data.get("append", False) or n > 0,
                           grouped=grouped)
         if result.locs is not None:
-            self.set_locs(result.locs)
+            # the menu says what it is about to undo, so the step is named
+            # after the plugin rather than after the fact that a table changed
+            self.set_locs(result.locs, label=plugin.path.rsplit("/", 1)[-1],
+                          text=result.text or "")
         # A plugin that writes a column the user is meant to *filter* on says
         # so here, as `{field: (lo, hi)}`.  It cannot set the bound itself: a
         # filter belongs to the table it was built from, and the table the

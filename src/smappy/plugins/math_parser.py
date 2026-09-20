@@ -119,9 +119,10 @@ def write_column(locs: Localizations, field: str, values: np.ndarray,
     """A copy of the table with ``field`` set -- everywhere, or under ``mask``.
 
     A copy rather than a column added in place, because this is what the undo
-    keeps: `Session.set_locs` remembers the table it replaced, and a table
-    edited in place would have nothing to go back to.  The arrays themselves
-    are shared, so the copy costs a dictionary.
+    keeps: `Session.set_locs` puts the table it replaced on the undo stack,
+    and a table edited in place would have nothing to go back to.  The arrays
+    themselves are shared, so the copy costs a dictionary -- and so a step of
+    the history costs one column rather than a whole table (`smappy.undo`).
 
     Where a mask leaves a localization out, the field keeps whatever it had
     before, or NaN if the field is new: those rows have no value rather than a

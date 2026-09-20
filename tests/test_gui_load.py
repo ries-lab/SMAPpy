@@ -83,7 +83,11 @@ def test_open_returns_at_once_and_reports_its_stages(app, tmp_path):
     app.exec()
 
     assert len(session.locs) == 20_000
-    assert all(a.isEnabled() for a in control._load_locked if a.text() != "Undo")
+    # everything is usable again except the undo and redo entries: a file just
+    # opened has no history behind it
+    history = {"Undo", "Redo", "Undo steps", "Redo steps"}
+    assert all(a.isEnabled() for a in control._load_locked if a.text() not in history)
+    assert not control.undo_action.isEnabled() and not control.redo_action.isEnabled()
     said = " ".join(stages)
     assert "Grouper: connect" in said and "Grouper: combine" in said
     # and the status bar is back to what it says the rest of the time
