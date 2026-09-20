@@ -1210,6 +1210,158 @@ A pixel size is one number or two.  Almost every microscope has square pixels;
 where x and y differ the database keeps both, `to_nm` scales each axis by its
 own, and a width or a precision -- which is neither x nor y -- by the mean.
 
+## Two colours in 2D
+
+The 2D two-colour workflow (`Localize/Gaussian 2D 2C`) is the 3D one with the
+PSF model taken out, and it departs from SMAP in what replaces it.
+
+**A global fit, where SMAP reads intensities.**  SMAP's
+`fit_wavelet_dualcolorratiometric` fits the whole frame single-channel, finds
+the transformation, then goes back to the movie and *measures* the partner
+intensity at the transformed position (`Get2CIntImagesWF` ->
+`Intensity2Channel`).  SMAP has no global Gaussian fitter -- only
+`MLE_global_spline`.  We do, because `global_fit` in `csrc/global.hpp` was
+written as a template over the model and instantiating it for `GaussFree` is a
+binding, not an algorithm.  So this is one pass instead of two, a proper linked
+MLE instead of a readout, and the photon ratio falls out of the fit rather than
+being assembled afterwards.
+
+This works only because of a coincidence worth stating: `GaussFree` and
+`CSpline` both have five parameters, with `(x, y, photons, background)` first
+and one model-specific parameter fifth -- z for the spline, sigma for the
+Gaussian.  The link array is therefore the same shape for both, and
+`dualfit.build_link` leaves that fifth slot at offset 0, factor 1 in either
+case: correct for z because the channels are checked to share a z grid, and
+correct for sigma because sigma is free per channel and the link is never
+consulted.  `combine_peaks`, `cut_paired_rois` and `build_link` are shared
+verbatim; `paired_to_localizations` is the single place the two part.
+
+**Sigma free per channel.**  The two halves of a ratiometric splitter see
+different wavelengths and rarely share a focus.  Linking the width would push
+the misfit into the photon numbers -- the very quantity whose ratio carries the
+colour -- so the default is free, and linking it is an advanced option for
+checking, not for production.
+
+**Registration by voting on pairs, not by cross-correlating images.**  See
+`docs/channel_registration.md`.  The short version: `RegisterLocs2` renders both
+channels and cross-correlates, which needs the split position to render around;
+voting on within-frame pair vectors is the same cross-correlation computed on
+the points, and needs nothing.  The offset comes first and the split follows.
+That matters because an initial shift, a magnification guess and a wrongly
+assumed image centre are between them the usual cause of a registration that
+fails without saying so.
+
+Two stages of pair-and-refit, as in SMAP, and measurably: the tight second round
+is worth a factor of three to seven in accuracy over the coarse one alone, and a
+third intermediate round is worth exactly nothing (identical transformations,
+identical residuals).  The table is in the doc.
+
+**What cannot be measured, and is said so.**  For a mirrored layout the seam
+between the halves and the optical mirror line are not separable from pair data
+-- a seam at `c` with residual shift `t` and one at `c + t/2` with no shift
+predict the same pairs.  The mirror line is used and reported as an estimate.
+For an unmirrored layout with a large misalignment there is a band that pairs
+with nothing, and the split is then bracketed rather than known; the bracket is
+recorded as `split_interval_px` and a wide one warns.  Neither is a bug to be
+fixed by a cleverer estimator; both are answers the data does not contain.
+
+**Keeping the edges of the field.**  A tight refit round is where a
+localization registration quietly goes wrong: the first round is worst at the
+edges, those pairs get screened out, the transformation is refitted on the
+middle, and the tight round never reaches the edges again.  Nothing in the
+residual says so -- it is only ever measured on what survived.  Two things
+stop it, and both were found by measuring rather than by reading the code.
+
+* The tight tolerance is derived from the coarse round's residual over *every*
+  pair it matched, not over the ones it kept.  With a field distortion a
+  projective map cannot absorb, edge recovery goes from 0% to 99.9%; on a
+  clean field it changes nothing, to the pair.
+* `robust_projective` iterated until its inlier set *repeated exactly*.  With
+  a bead calibration's tens of pairs that converges; with thousands it never
+  does, because a few pairs always sit within noise of the threshold and flip
+  each iteration -- so it raised instead, and every field it could not fit
+  perfectly failed outright rather than degrading.  It now settles for a set
+  that has stopped changing meaningfully.
+
+This was not hypothetical: on the NPC benchmark dataset it was costing three
+quarters of the field.  Before the fixes the pairs covered 27% of the
+reference channel and sat in a band; after them they span it entirely.
+
+**The transform fit is inverse-variance weighted; the bead one is not.**
+`fit_dual_transform` took the soft-L1 loss as its only defence, which is right
+for beads -- they are all bright -- and wrong for localizations, which span
+orders of magnitude in precision.  It matters most exactly where the
+two-colour workflow lives: the dim channel's threshold has to come down to
+find partners at all, and what that buys is imprecise pairs.  Measured against
+ground truth, lowering the threshold unweighted makes the registration seven
+times worse (0.0017 -> 0.0125 px) and more pairs do not compensate, because
+they win by count; weighted, the same pairs cost nothing (0.0016) and help
+slightly.  The weight is `1/(s_ref^2 + s_sec^2)`, since it is the *difference*
+whose variance matters.  RANSAC stays unweighted -- a precise outlier is still
+an outlier.
+
+**The adaptive tight tolerance is guarded, not capped.**  It protects the
+edges of a distorted field, where the projective fit misses by more than any
+fixed tolerance allows, and on a dense dataset it misfires: at twenty pixels
+over a hundred thousand localizations the coarse round's pairs are
+contaminated by chance partners, so a percentile of its residual measures the
+junk rather than the periphery.  On the NPC dataset it read 18 px of misfit
+that did not exist and doubled the final residual.
+
+The two cases look identical in the residual and are obvious in the *inlier
+fraction*: a distorted field keeps nearly all its coarse pairs, a contaminated
+one about a third.  So the adaptation runs only above `MIN_CLEAN_FRACTION`,
+and is then allowed all the way up to the coarse tolerance.  A cap tight
+enough to contain the contaminated case would also be too tight to reach the
+periphery, which is the whole point -- the guard has to be on the diagnosis,
+not on the size of the remedy.
+
+**A looser coarse tolerance does not cost anything.**  Worth recording because
+the opposite is intuitive, and because it is what the real-data residuals
+appear to say.  Measured against ground truth instead, the true error after
+the tight round is flat from 6 px to 30 px at every density tried -- 0.0011 px
+either way at fifteen pairs per frame, coverage 100% throughout -- because the
+tight round removes the chance matches the loose one admitted.  Only at 150
+pairs per frame *and* 30 px does it show (0.0045 against 0.0006).  The coarse
+tolerance is therefore set by the rotation it has to cover and by nothing
+else.
+
+**Residuals are not comparable across runs that kept different pairs.**
+Widen the tolerance, the edges come back, and the reported spread grows -- an
+improvement reported as a regression.  On a clean field, widening the tight
+round from 1.5 px to 20 px leaves the true accuracy at 0.0014 px while the
+reported residual inflates fivefold.  So the residual is recorded separately
+for the middle of the paired region and its edge: flat is noise, rising is the
+wrong model, and the two have opposite remedies.
+
+**Which frames to calibrate on.**  Not the first ones.  The opening frames of
+a movie are not single molecules -- everything is on, often saturated -- and
+fitting them gives a mat of spurious positions; on the NPC dataset, including
+frame 0 does not degrade the registration but *fails* it outright.  The rest
+are taken as evenly spaced blocks across the whole movie, which on the same
+data more than doubled the vote contrast (19 -> 47) for half the
+localizations.  Blocks and not a stride, because reading is sequential.
+
+**Order three, and no option for two.**  Radial distortion is
+`r' = r(1 + k1 r^2 + ...)`, i.e. `u' = u + k1(u^3 + u v^2)`: the leading term
+is cubic.  A quadratic spans no cubic monomial, so it cannot describe it at
+all -- measured, order two is indistinguishable from projective while order
+three is thirty times better.  The polynomial is refused when the pairs cannot
+support twenty coefficients, because outside its pairs a cubic is not a
+transformation but an extrapolation, ~85x worse than the projective map it
+would have replaced.  Both directions are fitted, since a cubic has no
+closed-form inverse; the backward cubic is only a seed, refined by Newton
+against the forward map, because a 0.5 px round-trip error would be handed to
+the fitter as a link offset as if it were real.
+
+**A file name that must not change.**  The registration plugin lives in
+`plugins/registration.py` and not `plugins/register.py`, because every plugin
+module does `from . import register` for the decorator and a sibling module of
+that name silently replaces it on the package.  The failure surfaces as
+"module object is not callable" in whichever *other* plugin happens to be
+imported next, which is nowhere near the cause.  There is a comment saying so
+at the top of the file.
+
 ## Open questions
 
 * Fitted x sits ~0.24 px from the peak-finder position, and the sign flips with

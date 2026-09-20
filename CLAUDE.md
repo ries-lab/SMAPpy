@@ -9,6 +9,21 @@ plugin, and the traps that cost time.  It is a summary written at one moment
 and the code moves, so treat it as a starting point, not as authority -- and
 see "Keeping this file true" at the end.
 
+## Before you edit anything
+
+Pull first:
+
+    git fetch origin && git rebase origin/main      # or: git pull --rebase
+
+Work lands on `origin/main` from cloud sessions and other machines, so the
+local `main` is routinely well behind it -- 28 commits, on one occasion.
+Editing first means rebasing finished work through conflicts in files upstream
+has already changed, and it is always the same files: `NOTES.md`, and the
+plugin-list assertions in `tests/test_workspace.py` and `tests/test_discovery.py`,
+which every added plugin extends.  If you have already started, `git stash push
+-u` first so new untracked files come along, and rebuild afterwards if `csrc/`
+moved.
+
 ## Getting the checkout to run
 
 A fresh container has **no numpy**.  Before anything else:

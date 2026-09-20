@@ -207,6 +207,15 @@ mode selector or `--layout 'up-down mirrored' --main-channel lower`.  See
 [bead calibration](docs/bead_calibration.md) and [dual-colour
 calibration](docs/dual_color_calibration.md).
 
+A two-colour experiment in 2D needs no PSF model, only the registration between
+the halves, and in a ratiometric experiment that can be measured from the data
+itself -- every molecule is imaged twice in the same frame.  *Localize →
+Gaussian 2D 2C* will do it on the leading frames of the movie it is about to
+fit, or take a transformation saved by *Analysis → Register → Calibrate
+transform* (or a dual-colour bead calibration, which carries one).  No initial
+shift, magnification or split position is needed; see [channel
+registration](docs/channel_registration.md).
+
 ## ROI manager
 
 Tools → ROI manager (Ctrl+R).  Four quadrants: the file, a zoom and the ROI,
