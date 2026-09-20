@@ -167,6 +167,29 @@ _AXIS = {"x_pix": 0, "x_err_pix": 0, "peak_x_pix": 0, "sigma_x_pix": 0,
          "y_pix": 1, "y_err_pix": 1, "peak_y_pix": 1, "sigma_y_pix": 1}
 
 
+def _base_column(name: str):
+    """``sigma_pix_ch1`` -> ``sigma_pix``; anything else unchanged.
+
+    A per-channel column is the same quantity as the one it is a channel of,
+    so it converts the same way and measures along the same axis.  The paired
+    two-channel fits write both spellings into one table, and a table where
+    ``sigma_pix`` had become ``sigma_nm`` while ``sigma_pix_ch1`` was still in
+    pixels would be a trap.
+    """
+    head, sep, tail = name.rpartition("_ch")
+    return head if sep and tail.isdigit() else name
+
+
+def _nm_name(name: str):
+    """What a column is called in nm, or None if it is not a length in pixels."""
+    if name in _PIXEL_COLUMNS:
+        return _PIXEL_COLUMNS[name]
+    base = _base_column(name)
+    if base is not name and base in _PIXEL_COLUMNS:
+        return _PIXEL_COLUMNS[base] + name[len(base):]
+    return None
+
+
 def to_nm(locs: Localizations, pixelsize_nm,
           keep_pixels: bool = False) -> Localizations:
     """Return a copy with pixel columns converted to nm.
@@ -186,11 +209,11 @@ def to_nm(locs: Localizations, pixelsize_nm,
 
     columns = {}
     for name, values in locs.columns.items():
-        target = _PIXEL_COLUMNS.get(name)
+        target = _nm_name(name)
         if target is None:
             columns[name] = values
             continue
-        axis = _AXIS.get(name)
+        axis = _AXIS.get(_base_column(name))
         scale = mean_nm if axis is None else (x_nm, y_nm)[axis]
         columns[target] = np.asarray(values, dtype=np.float32) * np.float32(scale)
         if keep_pixels:

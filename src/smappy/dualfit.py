@@ -33,7 +33,7 @@ from typing import List, Optional, Tuple
 import numpy as np
 from scipy.spatial import cKDTree
 
-from .calibrate.dual import DualColorCalibration, map_points
+from .calibrate.dual import DualColorCalibration
 from .detect import Candidates
 
 # (x, y, photons, background, z): the fitter's parameter order everywhere
@@ -117,19 +117,24 @@ def which_channel(x: np.ndarray, y: np.ndarray, geometry: dict) -> np.ndarray:
     return low if reference_is_first(geometry) else ~low
 
 
-def _linearise(transform: np.ndarray, x: np.ndarray, y: np.ndarray,
+def _linearise(mapping, x: np.ndarray, y: np.ndarray,
                step: float = 1.0) -> Tuple[np.ndarray, np.ndarray]:
-    """The local dx2/dx1 and dy2/dy1 of a projective map, by a finite difference.
+    """The local dx2/dx1 and dy2/dy1 of a map, by a finite difference.
 
     The link the fitter takes is diagonal -- a factor per coordinate, no cross
     term -- so this is the part of the transformation it can represent.  For a
     splitter the map is nearly a translation with a scale near one, and what is
     left over (the rotation) is small enough to sit inside the fit's residual,
     exactly as in GlobLoc.
+
+    ``mapping`` is any callable from positions to positions, which is the whole
+    reason this is a finite difference and not an analytic derivative: a
+    projective map and a polynomial one are equally easy to differentiate this
+    way, and the fitter never learns which it was given.
     """
-    here = map_points(transform, np.c_[x, y])
-    along_x = map_points(transform, np.c_[x + step, y])
-    along_y = map_points(transform, np.c_[x, y + step])
+    here = mapping(np.c_[x, y])
+    along_x = mapping(np.c_[x + step, y])
+    along_y = mapping(np.c_[x, y + step])
     return ((along_x[:, 0] - here[:, 0]) / step,
             (along_y[:, 1] - here[:, 1]) / step)
 
@@ -149,7 +154,7 @@ def secondary_to_reference(x: np.ndarray, y: np.ndarray,
     if not len(x):
         return np.empty((0, 2))
     ox, oy = origin
-    return map_points(calibration.transformation, np.c_[x + ox, y + oy]) - (ox, oy)
+    return calibration.to_reference(np.c_[x + ox, y + oy]) - (ox, oy)
 
 
 # ------------------------------------------------------------------ combining
@@ -180,7 +185,6 @@ def combine_peaks(candidates: Candidates, calibration: DualColorCalibration,
        sub-pixel offset the fitter is given.
     """
     geometry = calibration.geometry
-    forward = np.linalg.inv(calibration.transformation)   # main -> secondary
     height, width = image_shape
     half = (roisize - 1) // 2
     ox, oy = origin
@@ -224,7 +228,7 @@ def combine_peaks(candidates: Candidates, calibration: DualColorCalibration,
     value = np.concatenate(values).astype(np.float32)
 
     # the rounded reference pixel, mapped forward: where the partner ROI goes
-    exact = map_points(forward, np.c_[x_ref + ox, y_ref + oy]) - (ox, oy)
+    exact = calibration.to_secondary(np.c_[x_ref + ox, y_ref + oy]) - (ox, oy)
     x_sec, y_sec = np.rint(exact[:, 0]), np.rint(exact[:, 1])
     residual = np.zeros((len(frame), 2, 2))
     residual[:, 1, 0] = exact[:, 0] - x_sec
@@ -289,7 +293,7 @@ def build_link(reference: Candidates, secondary: Candidates, residual: np.ndarra
     link[:, 0, :, 1] = residual[:, :, 1]               # y offsets
 
     ox, oy = origin
-    fx, fy = _linearise(np.linalg.inv(calibration.transformation),
+    fx, fy = _linearise(calibration.to_secondary,
                         reference.x + ox, reference.y + oy)
     link[:, 1, 1, 0] = fx
     link[:, 1, 1, 1] = fy
@@ -339,10 +343,16 @@ def cut_paired_rois(photons: np.ndarray, reference: Candidates, secondary: Candi
 def paired_to_localizations(result, pairs: PairedROIs, model, cam) -> "Localizations":
     """Raw global-fit output as a localization table, in camera pixels.
 
-    `locs.fit_to_localizations` for the paired case: x, y and z belong to the
+    `locs.fit_to_localizations` for the paired case: x and y belong to the
     emitter, while the photons and background may be one number or one per
     channel, and ``ratio`` -- the fraction of the photons in the last channel
     -- is the colour a ratiometric splitter measures.
+
+    The model's fifth parameter follows the model: z for a spline, and for a
+    Gaussian the width, which is per channel because the two halves of a
+    splitter see different wavelengths.  Nothing above this line knows the
+    difference -- pairing, cutting and the link are the same either way -- and
+    this is the one place the two workflows part.
     """
     from .locs import Localizations
 
@@ -354,12 +364,10 @@ def paired_to_localizations(result, pairs: PairedROIs, model, cam) -> "Localizat
         "frame": pairs.candidates.frame.astype(np.int64),
         "x_pix": pairs.to_image_x(p["x_roi"]) + roi_x,
         "y_pix": pairs.to_image_y(p["y_roi"]) + roi_y,
-        "z_nm": p["z_nm"],
         "photons": p["photons"] * excess,
         "background": p["background"] * excess,
         "ratio": p["ratio"],
         "x_err_pix": p["x_err_pix"], "y_err_pix": p["y_err_pix"],
-        "z_err_nm": p["z_err_nm"],
         "photons_err": p["photons_err"] * excess,
         "background_err": p["background_err"] * excess,
         "logl": result.logl,
@@ -368,13 +376,20 @@ def paired_to_localizations(result, pairs: PairedROIs, model, cam) -> "Localizat
         "peak_y_pix": pairs.candidates.y + roi_y,
         "iterations": result.iterations.astype(np.int32),
     }
+    if model.is_3d:
+        cols["z_nm"], cols["z_err_nm"] = p["z_nm"], p["z_err_nm"]
+    else:
+        cols["sigma_pix"], cols["sigma_err_pix"] = p["sigma_pix"], p["sigma_err_pix"]
     for channel in range(model.n_channels):
         # the per-channel errors travel with the counts: a colour assignment
         # downstream weighs the split by how well each half was measured
         for name in (f"photons_ch{channel}", f"background_ch{channel}",
-                     f"photons_err_ch{channel}", f"background_err_ch{channel}"):
+                     f"photons_err_ch{channel}", f"background_err_ch{channel}",
+                     f"sigma_pix_ch{channel}", f"sigma_err_pix_ch{channel}"):
             if name in p:
-                cols[name] = p[name] * excess
+                # a width is already in pixels; only the counts carry the gain
+                scale = 1.0 if name.startswith("sigma") else excess
+                cols[name] = p[name] * scale
     cols["loc_precision_pix"] = np.sqrt((cols["x_err_pix"] ** 2
                                          + cols["y_err_pix"] ** 2) / 2)
     return Localizations({k: np.asarray(v) for k, v in cols.items()}, {})
@@ -390,7 +405,7 @@ class DualChannelEngine:
 
     camera: "CameraMetadata"
     finder: "PeakFinder"
-    model: "GlobalSplinePSF"
+    model: "PSFModel"          # GlobalSplinePSF or GlobalGaussianPSF
     calibration: DualColorCalibration
     settings: "FitSettings" = None
     photon_ratio: Optional[float] = None

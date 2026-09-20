@@ -213,5 +213,5 @@ def test_the_shapes_it_refuses():
         _fit3d.fit_cspline_global(rois, coeff[:1], link, shared, 20.0)
     with pytest.raises(ValueError, match="link must have shape"):
         _fit3d.fit_cspline_global(rois, coeff, link[:, :1], shared, 20.0)
-    with pytest.raises(ValueError, match="five flags"):
+    with pytest.raises(ValueError, match="5 flags"):
         _fit3d.fit_cspline_global(rois, coeff, link, shared[:4], 20.0)

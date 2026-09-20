@@ -116,43 +116,56 @@ py::tuple fit_cspline(const Array& rois, const Array& coeff, float z_start,
     return as_tuple(run(model, rois, iterations, n_threads));
 }
 
-// Global (multi-channel) cubic-spline fit.  One emitter, one ROI per channel,
-// with the parameters the caller marks shared fitted once for all channels.
+// Global (multi-channel) fits.  One emitter, one ROI per channel, with the
+// parameters the caller marks shared fitted once for all channels.
 //
-// rois   (n, C, sz, sz)      the same emitter in every channel
-// coeff  (C, 64, nz, ny, nx) that channel's spline
-// link   (n, 2, C, 5)        per fit: the offset, then the factor, of each of
-//                            (x, y, photons, background, z) in each channel
-// shared (5,)                which of the five are fitted once for all
+// rois   (n, C, sz, sz)  the same emitter in every channel
+// link   (n, 2, C, P)    per fit: the offset, then the factor, of each of the
+//                        model's P parameters in each channel
+// shared (P,)            which of them are fitted once for all
 //
-// Returns theta and crlb with NV = sum over the five of (1 if shared else C)
-// columns, laid out in parameter order with a free parameter's C values
-// contiguous.
-py::tuple fit_cspline_global(const Array& rois, const Array& coeff, const Array& link,
-                             const py::array_t<int, py::array::c_style |
-                                                py::array::forcecast>& shared,
-                             float z_start, int iterations, int n_threads) {
-    constexpr int P = smappy::CSpline::NV;
+// Returns theta and crlb with NV = sum over the P parameters of (1 if shared
+// else C) columns, laid out in parameter order with a free parameter's C
+// values contiguous.
+using IntArray = py::array_t<int, py::array::c_style | py::array::forcecast>;
+
+struct GlobalDims {
+    py::ssize_t n;
+    int channels, sz;
+};
+
+// Check the paired ROI stack.  Cheap and idempotent, so a caller that needs
+// the channel count before it can build its models may ask twice.
+GlobalDims check_global_rois(const Array& rois) {
     if (rois.ndim() != 4 || rois.shape(2) != rois.shape(3))
         throw std::invalid_argument("rois must have shape (n, channels, sz, sz), square");
-    const py::ssize_t n = rois.shape(0);
     const int channels = static_cast<int>(rois.shape(1));
-    const int sz = static_cast<int>(rois.shape(2));
     if (channels < 1 || channels > smappy::MAX_CHANNELS)
         throw std::invalid_argument("between one and four channels");
-    if (coeff.ndim() != 5 || coeff.shape(0) != channels || coeff.shape(1) != 64)
-        throw std::invalid_argument(
-            "spline coefficients must have shape (channels, 64, nz, ny, nx)");
+    return {rois.shape(0), channels, static_cast<int>(rois.shape(2))};
+}
+
+// The body every global fit shares: validate the link, plan the layout of the
+// global vector and drive the per-ROI loop.  `models` holds one PSF per
+// channel and is copied per thread, as in `run` -- the spline keeps scratch.
+template <class Model>
+Output run_global(const std::vector<Model>& models, const Array& rois,
+                  const Array& link, const IntArray& shared, int iterations,
+                  int n_threads) {
+    constexpr int P = Model::NV;
+    const GlobalDims dims = check_global_rois(rois);
+    const py::ssize_t n = dims.n;
+    const int channels = dims.channels, sz = dims.sz;
+
+    if (static_cast<int>(models.size()) != channels)
+        throw std::invalid_argument("one PSF model per channel");
     if (link.ndim() != 4 || link.shape(0) != n || link.shape(1) != 2 ||
         link.shape(2) != channels || link.shape(3) != P)
-        throw std::invalid_argument("link must have shape (n, 2, channels, 5)");
+        throw std::invalid_argument("link must have shape (n, 2, channels, " +
+                                    std::to_string(P) + ")");
     if (shared.ndim() != 1 || shared.shape(0) != P)
-        throw std::invalid_argument("shared must have five flags");
-
-    const int nz = static_cast<int>(coeff.shape(2));
-    const int ny = static_cast<int>(coeff.shape(3));
-    const int nx = static_cast<int>(coeff.shape(4));
-    const py::ssize_t plane = py::ssize_t(64) * nz * ny * nx;
+        throw std::invalid_argument("shared must have " + std::to_string(P) +
+                                    " flags");
 
     smappy::Link plan{};
     plan.shared = shared.data();
@@ -170,15 +183,10 @@ py::tuple fit_cspline_global(const Array& rois, const Array& coeff, const Array&
     float* logl = out.logl.mutable_data();
     int* iters = out.iterations.mutable_data();
 
-    std::vector<smappy::CSpline> models;
-    models.reserve(channels);
-    for (int c = 0; c < channels; ++c)
-        models.emplace_back(coeff.data() + c * plane, nx, ny, nz, z_start);
-
     {
         py::gil_scoped_release release;
         smappy::parallel_ranges(n, n_threads, [&](long long begin, long long end, int) {
-            std::vector<smappy::CSpline> local(models);   // the spline keeps scratch
+            std::vector<Model> local(models);   // the spline keeps scratch
             std::vector<const float*> planes(channels);
             smappy::Link mine = plan;
             for (long long i = begin; i < end; ++i) {
@@ -191,7 +199,50 @@ py::tuple fit_cspline_global(const Array& rois, const Array& coeff, const Array&
             }
         });
     }
-    return as_tuple(std::move(out));
+    return out;
+}
+
+// A cubic-spline PSF per channel; `coeff` is (C, 64, nz, ny, nx), one plane
+// per channel, and every channel's spline must be on the same z grid -- which
+// is why z needs no offset in the link.
+py::tuple fit_cspline_global(const Array& rois, const Array& coeff, const Array& link,
+                             const IntArray& shared, float z_start, int iterations,
+                             int n_threads) {
+    const int channels = check_global_rois(rois).channels;
+    if (coeff.ndim() != 5 || coeff.shape(0) != channels || coeff.shape(1) != 64)
+        throw std::invalid_argument(
+            "spline coefficients must have shape (channels, 64, nz, ny, nx)");
+
+    const int nz = static_cast<int>(coeff.shape(2));
+    const int ny = static_cast<int>(coeff.shape(3));
+    const int nx = static_cast<int>(coeff.shape(4));
+    const py::ssize_t plane = py::ssize_t(64) * nz * ny * nx;
+
+    std::vector<smappy::CSpline> models;
+    models.reserve(channels);
+    for (int c = 0; c < channels; ++c)
+        models.emplace_back(coeff.data() + c * plane, nx, ny, nz, z_start);
+    return as_tuple(run_global(models, rois, link, shared, iterations, n_threads));
+}
+
+// The same, with a free-width Gaussian in place of the spline: the 2D
+// two-colour fit.  `GaussFree`'s fifth parameter is sigma rather than z, so
+// the link keeps its shape and `smappy.dualfit` builds it unchanged -- x and y
+// carry the registration, the photon number carries the splitter's ratio, and
+// sigma needs no link, being free per channel in a ratiometric experiment
+// where the two halves see different wavelengths.  `sigma` is each channel's
+// starting width, which for the same reason is per channel too.
+py::tuple fit_gauss_global(const Array& rois, const Array& sigma, const Array& link,
+                           const IntArray& shared, int iterations, int n_threads) {
+    const int channels = check_global_rois(rois).channels;
+    if (sigma.ndim() != 1 || sigma.shape(0) != channels)
+        throw std::invalid_argument("sigma must have one starting width per channel");
+
+    std::vector<smappy::GaussFree> models;
+    models.reserve(channels);
+    for (int c = 0; c < channels; ++c)
+        models.emplace_back(sigma.data()[c]);
+    return as_tuple(run_global(models, rois, link, shared, iterations, n_threads));
 }
 
 // Difference-of-Gaussians / Gaussian filtering of a block of images.
@@ -321,4 +372,11 @@ PYBIND11_MODULE(_fit3d, m) {
           py::arg("iterations") = 50, py::arg("n_threads") = 0,
           "Fit one emitter across several channels with a spline PSF each, "
           "sharing the parameters marked in `shared`.");
+
+    m.def("fit_gauss_global", &fit_gauss_global, py::arg("rois"), py::arg("sigma"),
+          py::arg("link"), py::arg("shared"), py::arg("iterations") = 50,
+          py::arg("n_threads") = 0,
+          "Fit one emitter across several channels with a free-width Gaussian "
+          "each -- (x, y, photons, background, sigma) -- sharing the parameters "
+          "marked in `shared`.");
 }
