@@ -177,6 +177,36 @@ accident, and it survives a save.  Usually the recipe is an expression
 needs the rule -- the `use` flag `remove_locs.py` writes -- is a recipe with
 a rule and no expression.
 
+## What the picture's axes are
+
+The render grid is normally the table's positions, and usually a plugin can
+forget this -- but it does not have to be.  `RenderSettings.axes`
+(`render.RenderAxes`) says which column each axis is and what to divide it by,
+so the same renderer draws photons against frame, or one fit parameter against
+another, with the same layers, LUTs, filters, ROIs and 3D box; the hidden
+"axes" section of the Render tab is where a user turns it on.  A coordinate is
+the column over that axis's scale, which keeps the grid square in *render
+units* -- that is why nothing downstream knows about it.
+
+What that means for a plugin:
+
+* `ctx.locs` and `render.positions` are unchanged: they are the table and its
+  position columns, in nanometres, whatever the picture is showing.  Only the
+  render path goes through `axes.coordinates`.
+* `ctx.selection` is still a mask over the same rows, and an ROI drawn on a
+  versatile picture is in that picture's coordinates, so the mask means what
+  the user drew.
+* `session.axes()` is the current set and `axes.is_default` is the ordinary
+  picture.  A plugin that draws in nanometres, measures a distance or places a
+  site should say so -- or check -- rather than assume: the extent the user is
+  looking at may be in photons.
+* A width per axis: `settings.sigma` and `settings.sigma_y`, in each axis's own
+  units, zero meaning plain binning.  The localization precision only blurs an
+  axis that is a position (`render.render_sigmas` has the rule).
+
+`NOTES.md` under "Any column against any other" records why it is shaped this
+way and what was left out of SMAP's `VersatileRenderer`.
+
 ## Tests
 
 `tests/test_*.py`, pytest, no classes.  Name a test as the sentence it proves --
