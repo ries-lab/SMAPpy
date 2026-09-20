@@ -12,6 +12,7 @@ STATS = "Analysis/Measure/Localization Statistics"
 HISTORY = "Analysis/Process/History"
 MATH = "Analysis/Process/Math Parser"
 REMOVE = "Analysis/Process/Remove Localizations"
+REGISTER = "Analysis/Register/Calibrate transform"
 
 
 # ---------------------------------------------------------------- the model
@@ -47,7 +48,7 @@ def test_the_default_workspace_is_seeded_from_what_is_installed():
     assert [t.name for t in ws.tabs] == ["File", "Localize", "Render", "Analysis", "ROI"]
     analysis = next(t for t in ws.tabs if t.name == "Analysis")
     assert sorted(i.plugin for i in analysis.instances) == [
-        COMET, RCC, COLORS, PROFILE, STATS, HISTORY, MATH, REMOVE]
+        COMET, RCC, COLORS, PROFILE, STATS, HISTORY, MATH, REMOVE, REGISTER]
     assert next(t for t in ws.tabs if t.name == "Render").kind == "render"
     # a tab the *user* adds starts empty; only the shipped ones are seeded
     assert Tab(name="Mine").instances == []
@@ -77,7 +78,7 @@ def test_a_round_trip_keeps_order_labels_and_values(tmp_path):
     assert [i.title() for i in tab.instances] == [
         "COMET (coarse)", "RCC", "AssignColors", "Line Profile",
         "Localization Statistics", "History", "Math Parser",
-        "Remove Localizations", "COMET (coarse)"]
+        "Remove Localizations", "Calibrate transform", "COMET (coarse)"]
     assert tab.instances[0].values == {"segmentation_var": 12}
     assert back.layout["active_tab"] == "Analysis"
 
@@ -123,7 +124,7 @@ def test_pruning_reports_what_it_dropped():
     gone = ws.prune(list(plugins.refs()))
     assert gone == ["Gone/Away"]
     assert [i.plugin for i in tab.instances] == [
-        COMET, RCC, COLORS, PROFILE, STATS, HISTORY, MATH, REMOVE]
+        COMET, RCC, COLORS, PROFILE, STATS, HISTORY, MATH, REMOVE, REGISTER]
 
 
 # ------------------------------------------------------------------ the GUI
@@ -161,7 +162,7 @@ def test_the_window_opens_the_shipped_tabs(window):
         ["File", "Localize", "Render", "Analysis", "ROI"]
     localize = tab_named(window, "Localize")
     assert [s.title for s in localize.sections] == \
-        ["Gaussian 2D", "Spline 3D", "Spline 3D 2C"]
+        ["Gaussian 2D", "Gaussian 2D 2C", "Spline 3D", "Spline 3D 2C"]
 
 
 def test_opening_a_section_is_what_imports_the_plugin(window):

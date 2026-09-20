@@ -228,11 +228,20 @@ def local_maxima(images: np.ndarray, threshold: float = -np.inf,
 
 
 def find_candidates(filtered: np.ndarray, cutoff,
-                    n_threads: int = 0) -> Candidates:
+                    n_threads: int = 0, split=None) -> Candidates:
     """All local maxima of ``filtered`` above the cutoff.
 
     The cutoff is evaluated per frame, from that frame's maxima, which is what
     makes :class:`DynamicCutoff` adaptive.
+
+    ``split`` is ``(axis, position)`` in frame coordinates -- axis 0 for rows,
+    1 for columns -- and makes it adaptive per *half* as well.  On a split
+    frame the two halves are two detection channels that happen to share a
+    sensor, and a dynamic cutoff pooled over both is set by whichever is
+    brighter: the dim channel is then held to a threshold its own molecules
+    never reach, and the fainter partner of every pair is simply not found.
+    That is the difference between a two-colour dataset and a one-colour one
+    with extra steps, so the two-channel engine always passes this.
     """
     filtered = np.asarray(filtered, dtype=np.float32)
     if filtered.ndim == 2:
@@ -252,10 +261,21 @@ def find_candidates(filtered: np.ndarray, cutoff,
     keep = np.zeros(frames.size, dtype=bool)
     n_frames = filtered.shape[0]
     bounds = np.searchsorted(frames, np.arange(n_frames + 1))
+    side = None
+    if split is not None:
+        axis, position = split
+        side = (rows if axis == 0 else cols) >= position
     for start, stop in zip(bounds[:-1], bounds[1:]):
-        if stop > start:
-            block = values[start:stop]
+        if stop <= start:
+            continue
+        block = values[start:stop]
+        if side is None:
             keep[start:stop] = block > cutoff(block)
+            continue
+        here = side[start:stop]
+        for half in (here, ~here):
+            if half.any():
+                keep[start:stop][half] = block[half] > cutoff(block[half])
 
     return Candidates(frame=frames[keep].astype(np.int64),
                       x=cols[keep].astype(np.int32),
@@ -270,15 +290,20 @@ class PeakFinder:
     filter: ImageFilter
     cutoff: object
     n_threads: int = 0  # 0 = one per core
+    # (axis, position) in frame coordinates: threshold each half of a split
+    # frame on its own, so a dim channel is not judged against a bright one
+    split: Optional[tuple] = None
 
     def __call__(self, photons: np.ndarray, first_frame: int = 0,
                  n_threads: Optional[int] = None):
         """Returns ``(candidates, filtered)``; frame indices are absolute."""
         threads = self.n_threads if n_threads is None else n_threads
         filtered = self.filter(photons, n_threads=threads)
-        candidates = find_candidates(filtered, self.cutoff, n_threads=threads)
+        candidates = find_candidates(filtered, self.cutoff, n_threads=threads,
+                                     split=self.split)
         candidates.frame = candidates.frame + first_frame
         return candidates, filtered
 
     def __str__(self) -> str:
-        return f"PeakFinder({self.filter}, {self.cutoff})"
+        halves = "" if self.split is None else ", each half on its own"
+        return f"PeakFinder({self.filter}, {self.cutoff}{halves})"

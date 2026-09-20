@@ -25,6 +25,7 @@ import numpy as np
 from ..detect import AbsoluteCutoff, DoGFilter, DynamicCutoff, GaussFilter, PeakFinder
 from ..locs import Localizations
 from ..metadata import CameraMetadata
+from ..calibrate.transform import RegisterSettings
 from ..pipeline import FitSettings, fit_stack, provenance
 from ..psf import GaussianPSF, SplinePSF
 from . import Context, ParamInfo, Plot, Plugin, Result, param, register
@@ -228,6 +229,23 @@ class _FitPlugin(Plugin):
         from ..pipeline import LocalizationEngine
         return LocalizationEngine(camera, finder, model, settings.fit)
 
+    def finder(self, settings, camera: Optional[CameraMetadata] = None):
+        """What finds the candidates.  A two-channel fitter overrides this to
+        threshold each half of the split frame separately."""
+        return settings.detection.finder(settings.fit.n_threads)
+
+    @staticmethod
+    def _split_for_detection(geometry, camera) -> Optional[tuple]:
+        """``(axis, position)`` in frame coordinates, for a split frame.
+
+        The geometry records the seam on the chip; detection works on the
+        frame the camera actually delivered, so the ROI corner comes off.
+        """
+        from ..dualfit import split_axis
+        axis = split_axis(geometry)              # 0 = rows (y), 1 = columns (x)
+        offset = camera.roi_offset[1 - axis] if camera is not None else 0
+        return (axis, float(geometry["split_position"]) - offset)
+
     CAMERA_FIELDS = ("conversion", "offset", "pixelsize_um", "em_on", "emgain")
 
     def resolution(self, settings):
@@ -344,7 +362,7 @@ class _FitPlugin(Plugin):
             raise ValueError(f"could not read the camera from {src.path}")
         camera.require("conversion", "offset")
         fit = settings.fit
-        finder = settings.detection.finder(fit.n_threads)
+        finder = self.finder(settings, camera)
 
         raw = source.frame(index)
         photons = to_photons(raw, camera)/camera.excess_noise
@@ -456,7 +474,7 @@ class _FitPlugin(Plugin):
         source = _open(src, watch=src.live)
         camera = settings.camera.resolve(source)
         fit = settings.fit
-        finder = settings.detection.finder(fit.n_threads)
+        finder = self.finder(settings, camera)
         model = self.model(settings, camera)
         out = settings.output.resolve(src.path)
 
@@ -654,8 +672,418 @@ class DualSplineFit(_FitPlugin):
                                         calibration, (ox, oy))
         return mapped[:, 0], mapped[:, 1]
 
+    def finder(self, settings, camera=None):
+        from dataclasses import replace as _replace
+        base = super().finder(settings, camera)
+        try:
+            geometry = settings.model.load().geometry
+        except Exception:
+            return base                          # no calibration yet: preview only
+        return _replace(base, split=self._split_for_detection(geometry, camera))
+
     def engine(self, settings, camera, finder, model):
         from ..dualfit import DualChannelEngine
         return DualChannelEngine(camera, finder, model, settings.model.load(),
                                  settings.fit, settings.model.photon_ratio)
 
+
+
+# ----------------------------------------------------- two channels, no model
+TRANSFORM_FILTER = ("Channel transformation (*_2ct.h5 *.h5 *.hdf5);;"
+                    "All files (*)")
+
+
+def _replace_split(finder, split, camera):
+    """The peak finder, thresholding each half of the frame on its own."""
+    from dataclasses import replace as _replace
+    if split is None:
+        return finder
+    axis, chip = split
+    offset = camera.roi_offset[1 - axis] if camera is not None else 0
+    return _replace(finder, split=(axis, chip - offset))
+
+
+def _dim_channel_count(parts, split) -> int:
+    """How many localizations the *dimmer* half has, over the blocks so far.
+
+    The dim channel is what limits the pairs -- a pair needs both -- so it is
+    the thing to count, and counting the total instead would call a dataset
+    finished on the strength of the bright half alone.
+    """
+    if split is None:
+        return sum(len(p) for p in parts)
+    axis, chip = split
+    column = "x_pix" if axis == 1 else "y_pix"
+    low = high = 0
+    for part in parts:
+        if column not in part:
+            return sum(len(p) for p in parts)
+        values = np.asarray(part[column], float)
+        low += int((values < chip).sum())
+        high += int((values >= chip).sum())
+    return min(low, high)
+
+
+def calibration_blocks(start: int, stop: int, frames: int, blocks: int,
+                       skip: int = 0):
+    """Which frames to measure the channel transformation on.
+
+    Not the first `frames` of the movie.  A registration measured on the
+    opening seconds describes the opening seconds: it sees whichever molecules
+    happened to be blinking then, and in a sample that is not uniformly
+    labelled that is a *part of the field*, which is exactly the thing a
+    transformation must not be fitted on only part of.  Later frames also
+    differ -- the bright population has bleached, the density has dropped, and
+    any slow relative movement of the two channels has happened by then.
+
+    So the same number of frames is taken as evenly spaced blocks across the
+    whole movie.  Blocks rather than every n-th frame because reading is
+    sequential and a stride would cost far more than it buys; the spread is
+    what matters, not the interleaving.
+
+    ``skip`` drops the opening frames, which are not single molecules at all:
+    every fluorophore is still on, the frames are often saturated, and what a
+    fit makes of them is a dense mat of spurious positions.  Measured on a
+    real dataset, including the first hundred frames does not merely add noise
+    -- the registration fails outright, because the vote is swamped and the
+    projective fit that follows is handed collinear rubbish.  It is skipped
+    rather than merely down-weighted because nothing there is usable.
+    """
+    start, stop = int(start), int(stop)
+    if skip > 0 and stop - start > skip:
+        start += int(skip)
+    span = max(stop - start, 0)
+    frames = max(int(frames), 1)
+    if span <= frames:
+        return [(start, stop)] if span else [(start, start + 1)]
+    blocks = max(min(int(blocks), frames), 1)
+    per = max(frames // blocks, 1)
+    blocks = min(blocks, max(span // per, 1))
+    # first block at the start, last one ending at the end, the rest between
+    if blocks == 1:
+        return [(start, start + per)]
+    step = (span - per) / (blocks - 1)
+    out = []
+    for i in range(blocks):
+        a = start + int(round(i * step))
+        out.append((a, min(a + per, stop)))
+    return out
+
+
+@dataclass
+class ChannelTransformSettings:
+    """Where the second channel is.
+
+    Either a transformation measured earlier -- by *Register/Calibrate
+    transform*, or a dual-colour bead calibration, which carries one -- or one
+    measured from this very movie: fit its first frames with a plain Gaussian
+    over the whole frame, register the pairs, and go on to the real fit with
+    the result.  The second is the usual case, because a ratiometric
+    experiment images every molecule twice and so carries its own
+    registration; a saved file is for when the splitter is known to be stable,
+    or when the data are too sparse to register on.
+    """
+    path: str = param("", label="transformation", kind="open_file",
+                      file_filter=TRANSFORM_FILTER,
+                      help="from Register/Calibrate transform, or a dual-colour "
+                           "bead calibration")
+    calibrate: bool = param(False, label="calibrate from this movie",
+                            help="ignore the file: fit the first frames with a "
+                                 "plain Gaussian and register them")
+    # A cap, not a target: what is wanted is enough *pairs*, and how many
+    # frames that takes depends entirely on the sample and the dye.
+    calibrate_frames: int = param(5000, label="at most", unit="frames", min=50)
+    calibrate_locs: int = param(10000, label="localizations wanted", min=500,
+                                help="in the dimmer of the two channels, which "
+                                     "is what limits the pairs; blocks are read "
+                                     "until this is reached or the frame cap is")
+    calibrate_blocks: int = param(10, label="spread over", unit="blocks", min=1,
+                                  help="the frames are taken as this many "
+                                       "evenly spaced blocks across the whole "
+                                       "movie, not as one run at the start")
+    registration: RegisterSettings = field(default_factory=RegisterSettings)
+    calibrate_skip: int = param(500, label="skip the first", unit="frames", min=0,
+                                help="the opening frames of a movie are not "
+                                     "single molecules: everything is on at "
+                                     "once and often saturated, and fitting "
+                                     "that gives a registration nothing to "
+                                     "pair")
+    save_calibration: bool = param(True, label="save it", advanced=True,
+                                   help="write the measured transformation "
+                                        "beside the output, as *_2ct.h5")
+
+    def provisional_split(self, settings):
+        """Roughly where the frame divides, before anything has measured it.
+
+        The calibration pass has a chicken-and-egg problem: thresholding each
+        half separately is what lets a dim channel be detected at all, and the
+        seam is not known until the registration that needs those detections
+        has run.  A rough answer settles it.  The threshold only needs the two
+        populations kept apart, so a seam a few pixels off costs nothing but a
+        thin band judged against the wrong half -- whereas pooling the two
+        costs the dim channel outright.
+
+        The chip is split down the middle of its longer axis, which is what a
+        split-frame camera ROI looks like, unless the registration settings
+        already say otherwise.  Returns ``(axis, chip position)``, axis 0 for
+        rows and 1 for columns, or None when there is nothing to go on.
+        """
+        given = getattr(self, "registration", None)
+        layout = getattr(given, "layout", "auto") if given else "auto"
+        position = getattr(given, "split_position", None) if given else None
+        roi = None
+        try:
+            camera = settings.camera.resolve(
+                _open(replace(settings.source, live=False), watch=False))
+            roi = camera.roi
+        except Exception:
+            return None
+        if roi is None:
+            return None
+        x0, y0, width, height = roi
+        if layout != "auto":
+            axis = 1 if "right-left" in layout else 0
+        else:
+            axis = 1 if width > height else 0
+        if position is not None:
+            return (axis, float(position))
+        origin, extent = ((x0, width) if axis == 1 else (y0, height))
+        return (axis, origin + extent / 2.0)
+
+    def load(self):
+        from ..calibrate.transform import load_transform
+        if not self.path:
+            raise ValueError("a two-channel fit needs a transformation: choose a "
+                             "file, or tick 'calibrate from this movie'")
+        return load_transform(self.path)
+
+
+@dataclass
+class DualGaussianModelSettings:
+    """A free-width Gaussian per channel, and which parameters they share."""
+    sigma: float = param(1.2, label="start sigma", unit="pix", min=0.1)
+    link_xy: bool = param(True, label="link x, y",
+                          help="one position for both channels, through the "
+                               "registration; unlink only to check the transform")
+    link_photons: bool = param(False, label="link photons",
+                               help="off for two colours -- the photon ratio is "
+                                    "what tells the dyes apart")
+    link_background: bool = param(False, label="link background", advanced=True)
+    link_sigma: bool = param(False, label="link width", advanced=True,
+                             help="off: each half finds its own width, which it "
+                                  "should -- they see different wavelengths and "
+                                  "rarely share a focus")
+    photon_ratio: Optional[float] = param(None, label="photon ratio", min=0,
+                                          advanced=True,
+                                          help="secondary / main; auto: 1")
+
+    def shared(self) -> tuple:
+        return (self.link_xy, self.link_xy, self.link_photons,
+                self.link_background, self.link_sigma)
+
+    def model(self, channels: int = 2):
+        from ..psf import GlobalGaussianPSF
+        return GlobalGaussianPSF(sigma=self.sigma, shared=self.shared(),
+                                 channels=channels)
+
+
+@dataclass
+class DualGaussianFitSettings:
+    source: SourceSettings = field(default_factory=SourceSettings)
+    camera: CameraSettings = field(default_factory=CameraSettings)
+    detection: DetectionSettings = field(default_factory=DetectionSettings)
+    model: DualGaussianModelSettings = field(default_factory=DualGaussianModelSettings)
+    transform: ChannelTransformSettings = field(default_factory=ChannelTransformSettings)
+    fit: FitSettings = field(default_factory=lambda: FitSettings(output_unit="nm"))
+    output: OutputSettings = field(default_factory=OutputSettings)
+
+
+@register("Localize/Gaussian 2D 2C")
+class DualGaussianFit(_FitPlugin):
+    """The 2D two-channel workflow: one emitter, both halves, no PSF model.
+
+    `DualSplineFit` without the calibration.  Candidates are found over the
+    whole frame and combined, each gets a ROI in both halves, and the pair is
+    fitted at once with x and y shared through the registration -- so the two
+    photon numbers that come back are one molecule's, split by colour.
+
+    What it needs instead of a PSF model is the registration, and in a
+    ratiometric experiment that can be had from the data: every molecule is
+    already imaged twice in the same frame.  Ticking *calibrate from this
+    movie* fits the first frames with a plain Gaussian, hands them to
+    `smappy.calibrate.transform`, and uses what comes back -- SMAP's
+    ``fit_dualcolor`` sequence (fit, ``RegisterLocs2``, refit) as one run.
+    """
+
+    description = ("Detect and fit both halves of a split frame as one emitter "
+                   "with a Gaussian PSF, sharing x and y: adds the photon ratio "
+                   "that tells the two colours apart.  No PSF calibration; the "
+                   "registration can be measured from the movie itself.")
+    Settings = DualGaussianFitSettings
+    params = GaussianFit.params
+
+    def model(self, settings, camera):
+        return settings.model.model()
+
+    # a transformation measured from this movie, kept so that `engine` and
+    # `back_projected` need no file: writing one only to read it back would
+    # make saving it a precondition of fitting rather than a convenience
+    _measured = None
+
+    def transform(self, settings):
+        """The registration this fit will use: measured here, or off disk."""
+        if self._measured is not None:
+            return self._measured
+        return settings.transform.load()
+
+    def back_projected(self, settings, camera, candidates):
+        from ..dualfit import secondary_to_reference, which_channel
+        transform = self.transform(settings)
+        ox, oy = camera.roi_offset
+        secondary = ~which_channel(candidates.x + ox, candidates.y + oy,
+                                   transform.geometry)
+        mapped = secondary_to_reference(candidates.x[secondary],
+                                        candidates.y[secondary],
+                                        transform, (ox, oy))
+        return mapped[:, 0], mapped[:, 1]
+
+    def finder(self, settings, camera=None):
+        """Each half thresholded on its own.
+
+        The two halves are two detection channels; a dynamic cutoff pooled
+        over both is set by whichever is brighter, and the dim one then loses
+        the fainter partner of every pair -- which is most of the pairs a
+        registration would have had, and most of the colour the fit is for.
+        """
+        from dataclasses import replace as _replace
+        base = super().finder(settings, camera)
+        try:
+            geometry = self.transform(settings).geometry
+        except Exception:
+            return base                          # no transformation yet
+        return _replace(base, split=self._split_for_detection(geometry, camera))
+
+    def engine(self, settings, camera, finder, model):
+        from ..dualfit import DualChannelEngine
+        return DualChannelEngine(camera, finder, model, self.transform(settings),
+                                 settings.fit, settings.model.photon_ratio)
+
+    def preflight(self, ctx: Context, settings):
+        if settings.transform.calibrate or settings.transform.path:
+            return None
+        return ("No transformation chosen.  Tick 'calibrate from this movie' to "
+                "measure one from the first frames, or choose a file.  Start "
+                "anyway?")
+
+    def run(self, ctx: Context, settings) -> Result:
+        self._measured = None
+        if settings.transform.calibrate:
+            self._measured = self._calibrate(ctx, settings)
+        try:
+            return super().run(ctx, settings)
+        finally:
+            self._measured = None
+
+    # ------------------------------------------------------------ calibrate
+    def _calibrate(self, ctx: Context, settings):
+        """Fit the first frames plainly, register the pairs, save the result.
+
+        Deliberately the *same* detection and camera settings as the real fit:
+        the registration has to describe the peaks the fit will go on to pair,
+        and a threshold set here and not there would register on a different
+        population than it serves.
+        """
+        from ..calibrate.transform import register_channels
+
+        from ..locs import concat
+
+        src = settings.source
+        provisional = settings.transform.provisional_split(settings)
+        source = _open(replace(src, live=False), watch=False)
+        camera = settings.camera.resolve(source)
+        last = min(src.stop, source.n_frames) if src.stop else source.n_frames
+        blocks = calibration_blocks(src.start, last,
+                                    settings.transform.calibrate_frames,
+                                    settings.transform.calibrate_blocks,
+                                    settings.transform.calibrate_skip)
+        ctx.report("calibrating the channel transformation")
+
+        # a context of its own: the calibration pass must not push its blocks
+        # into the live view the real fit is about to draw into
+        quiet = Context(progress=lambda _: None)
+        want = int(settings.transform.calibrate_locs)
+
+        def fit_range(start, stop):
+            plain = GaussianFitSettings(
+                source=replace(src, start=start, stop=stop, live=False),
+                camera=settings.camera, detection=settings.detection,
+                model=GaussianModelSettings(sigma=settings.model.sigma),
+                # pixels as well as nm: a transformation is a statement about
+                # the camera, and is fitted in chip pixels
+                fit=replace(settings.fit, output_unit="pixel+nm"),
+                output=OutputSettings(save=False))
+            # the provisional split only decides which half a localization is
+            # in, for the threshold and for the count; the seam the fit will
+            # actually use is measured by the registration afterwards
+            plain_fit = GaussianFit()
+            plain_fit.finder = lambda s, c, sp=provisional: _replace_split(
+                s.detection.finder(s.fit.n_threads), sp, c)
+            return plain_fit.run(quiet, plain).locs
+
+        # One small block first, only to find out how dense this sample is.
+        # Stopping early once the count is reached would be the obvious thing
+        # and is wrong: on a bright dataset the very first block satisfies it,
+        # and the frames then all come from one place -- which is exactly the
+        # spreading this went to the trouble of arranging.  So the probe sets
+        # how *many* frames are needed, and they are spread regardless.
+        probe_start, probe_stop = blocks[0][0], min(blocks[0][0] + 100, last)
+        probe = fit_range(probe_start, probe_stop)
+        rate = (_dim_channel_count([probe], provisional)
+                / max(probe_stop - probe_start, 1)) if probe is not None else 0
+        if rate > 0:
+            needed = int(min(max(want / rate, 100),
+                             settings.transform.calibrate_frames))
+            blocks = calibration_blocks(src.start, last, needed,
+                                        settings.transform.calibrate_blocks,
+                                        settings.transform.calibrate_skip)
+        ctx.report(f"{rate:.0f} localizations per frame in the dimmer channel: "
+                   f"taking {sum(b - a for a, b in blocks):,} frames in "
+                   f"{len(blocks)} block(s) between {blocks[0][0]:,} and "
+                   f"{blocks[-1][1]:,}")
+
+        parts, used, dim = [], 0, 0
+        for start, stop in blocks:
+            part = fit_range(start, stop)
+            used += stop - start
+            if part is not None and len(part):
+                parts.append(part)
+        dim = _dim_channel_count(parts, provisional) if parts else 0
+        if not parts:
+            raise ValueError("the calibration pass found no localizations; check "
+                             "the detection cutoff")
+        locs = concat(parts) if len(parts) > 1 else parts[0]
+        enough = "" if dim >= want else f" -- wanted {want:,}, the movie ran out"
+        ctx.report(f"registering {len(locs):,} localizations from {used:,} frames "
+                   f"({dim:,} in the dimmer channel{enough})")
+        result = register_channels(
+            np.asarray(locs["x_pix"], float), np.asarray(locs["y_pix"], float),
+            np.asarray(locs["frame"]), source.shape[-2:],
+            camera.roi, settings=settings.transform.registration,
+            progress=ctx.report,
+            precision=(np.asarray(locs["loc_precision_pix"], float)
+                       if "loc_precision_pix" in locs else None))
+
+        if settings.transform.save_calibration:
+            out = settings.output.resolve(src.path)
+            if out is None:
+                # saving the localizations is off, but the transformation was
+                # still asked for: it belongs beside the movie it describes,
+                # not in whatever directory the process happens to be in
+                out = default_output_path(src.path)
+            path = out.with_name(out.name.rsplit(".", 1)[0] + "_2ct.h5")
+            result.save(path, overwrite=True)
+            ctx.report(f"transformation saved to {path}")
+        p = result.transform.parameters
+        ctx.report(f"registered on {p['n_inliers']:,} pairs, residual "
+                   f"dx {p['residual_dx_px']:.3f} px, dy {p['residual_dy_px']:.3f} px")
+        return result.transform
