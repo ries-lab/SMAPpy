@@ -33,7 +33,7 @@ __all__ = [
     # results
     "LocalizationWriter", "save_localizations", "load_localizations",
     "LocFilter", "group", "GroupSettings",
-    "FieldOfView", "RenderSettings", "DisplaySettings", "render_locs",
+    "FieldOfView", "RenderSettings", "RenderAxes", "DisplaySettings", "render_locs",
     "save_image", "show",
     "correct_drift", "DriftSettings",
     "LiveFit", "LiveSettings", "live_view", "QueueSource", "queue_source",
@@ -63,7 +63,7 @@ _EXPORTS = {
     "load_localizations": "io.hdf5",
     "LocFilter": "filter",
     "group": "group", "GroupSettings": "group",
-    "FieldOfView": "render", "RenderSettings": "render",
+    "FieldOfView": "render", "RenderSettings": "render", "RenderAxes": "render",
     "DisplaySettings": "render", "render_locs": "render",
     "save_image": "render",
     "show": "viewer",

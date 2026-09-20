@@ -13,13 +13,14 @@ their results are saved with `File -> Save` and come back with the file.
 from __future__ import annotations
 
 import json
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from typing import Dict, List, Optional
 
 import numpy as np
 
 from ..group import GroupSettings
 from ..locs import Localizations
+from ..render import RenderAxes
 from ..viewer import ViewState
 from .core import ROI, ROIProject, digest, json_text, point, polygon_vertices
 
@@ -74,8 +75,11 @@ class SessionROIs(ROIProject):
         self.filters = ranges
         self.grouped = layer.grouped
         self.group_settings = layer.group_settings
-        self.render = layer.state.settings          # so the manager's images
-        self.display = layer.state.display          # look like the main view
+        # so the manager's images look like the main view -- except for the
+        # axes, which stay the positions: a site is a place, and a versatile
+        # render is a picture of two columns rather than of anywhere
+        self.render = replace(layer.state.settings, axes=RenderAxes())
+        self.display = layer.state.display
         for source in self.sources.values():         # the states follow the layer
             if source.state is not None:
                 self._apply(source)

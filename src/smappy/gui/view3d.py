@@ -17,9 +17,9 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDoubleSpinBo
                                QInputDialog, QLabel, QMainWindow, QMenu, QPushButton,
                                QScrollArea, QToolBar, QToolButton, QVBoxLayout, QWidget)
 
-from ..render import FieldOfView
+from ..render import FieldOfView, axis_unit
 from ..session import Session
-from .render_view import nice_step
+from .render_view import bar_label, nice_step
 from .widgets import CONTROL_WIDTH
 from ..view3d import (PRESETS, PREVIEW_SCALE, PreviewBudget, Projection, Slab, render_3d,
                       upscale)
@@ -243,31 +243,56 @@ class View3D(QWidget):
         the edges the box is drawn with -- projected exactly as the data is,
         so an axis pointing at the viewer is short and one across the screen
         is full length.  The scale bar reads the same as the 2D view's.
+
+        On custom render axes it is the tripod that carries the scale, and the
+        bar goes: a rotated view mixes the axes, so a bar across the screen is
+        not a length in any one of them, while an arm *is* its own axis.  Each
+        arm is then a round number of its own units and says which.
         """
         fov = self._fov
         on = self.show_guides and fov is not None
-        self.scalebar.setVisible(bool(on))
+        axes = self.session.axes()
+        versatile = not axes.is_default and len(self.session.locs)
+        self.scalebar.setVisible(bool(on) and not versatile)
         for arm, label in self.axes:
             arm.setVisible(bool(on))
             label.setVisible(bool(on))
         if not on:
             return
         span = fov.x1 - fov.x0
-        size = nice_step(0.2 * span)
-        self.scalebar.size = size
-        self.scalebar.text.setText(f"{size / 1000:g} µm" if size >= 1000 else f"{size:g} nm")
-        self.scalebar.updateBar()
+        if not versatile:
+            size = nice_step(0.2 * span)
+            self.scalebar.size = size
+            self.scalebar.text.setText(f"{size / 1000:g} µm" if size >= 1000 else f"{size:g} nm")
+            self.scalebar.updateBar()
 
         slab = self.session.slab
         length = AXIS_FRACTION * span
         ox = fov.x0 + AXIS_CORNER * span
         oy = fov.y1 - AXIS_CORNER * (fov.y1 - fov.y0)     # y grows downwards here
         m = self.projection.matrix
+        names = self._axis_names(axes) if versatile else None
+        scales = (axes.x_scale, axes.y_scale, axes.z_scale)
         for i, (arm, label) in enumerate(self.axes):
             unit = slab.axis_unit(i) if slab is not None else np.eye(3)[i]
-            d = (m @ unit)[:2] * length
+            arm_length = length
+            if versatile and names[i] is not None:
+                native = nice_step(length * scales[i])
+                arm_length = native / scales[i]
+                label.setText(f"{names[i]} {bar_label(native, axis_unit(names[i]))}",
+                              color=AXIS_COLORS[i])
+            d = (m @ unit)[:2] * arm_length
             arm.setData([ox, ox + d[0]], [oy, oy + d[1]])
             label.setPos(ox + d[0] * 1.25, oy + d[1] * 1.25)
+
+    def _axis_names(self, axes) -> List[Optional[str]]:
+        """The three columns the box's axes are, for labelling the tripod."""
+        locs = self.session.locs
+        try:
+            x_name, y_name = axes.names(locs)
+        except KeyError:
+            return [None, None, None]
+        return [x_name, y_name, axes.depth_name(locs)]
 
     def _face_at(self, pos: QPointF) -> Optional[tuple]:
         """Which face handle is under a widget position, if any."""

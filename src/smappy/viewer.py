@@ -124,6 +124,8 @@ class LocSet:
         # for the query margin: how far the widest blob reaches beyond the view
         self.median_precision = 0.0
         self._precision_n = 0
+        self._bounds_key = None
+        self._bounds = (0.0, 0.0, 1.0, 1.0)
         self._update_precision()
 
     def _update_precision(self, force: bool = True) -> None:
@@ -163,6 +165,26 @@ class LocSet:
         self.index.append(x, y)
         self._update_precision(force=False)
         return n
+
+    def axis_bounds(self, axes) -> Tuple[float, float, float, float]:
+        """``(x0, y0, x1, y1)`` of the table on non-default render axes.
+
+        The spatial index stays in the table's own coordinates -- that is what
+        an ROI and a neighbour query mean -- so a picture of photons against
+        frame has nowhere to read its extent from but the columns.  Cached
+        against the axes and the length, because the overview asks for it on
+        every redraw.
+        """
+        key = (axes, len(self.locs))
+        if self._bounds_key != key:
+            if not len(self.locs):
+                self._bounds = (0.0, 0.0, 1.0, 1.0)
+            else:
+                x, y = axes.coordinates(self.locs)
+                self._bounds = (float(np.nanmin(x)), float(np.nanmin(y)),
+                                float(np.nanmax(x)), float(np.nanmax(y)))
+            self._bounds_key = key
+        return self._bounds
 
     def __len__(self) -> int:
         return len(self.locs)
@@ -272,9 +294,27 @@ class ViewState:
             self.group(settings, share)
         self.use_grouped = bool(on)
 
+    @property
+    def cull_index(self):
+        """The index to narrow a view with, or None when it cannot be used.
+
+        On non-default render axes the index answers questions about the
+        table's positions, which is not where the picture is looking, so the
+        whole filtered table is rendered instead.  A versatile render is one
+        picture of everything rather than a pan over a field, so the pass it
+        costs is what SMAP pays too.
+        """
+        return None if not self.settings.axes.is_default else self.index
+
+    def bounds(self) -> Tuple[float, float, float, float]:
+        """``(x0, y0, x1, y1)`` of the whole table, in render coordinates."""
+        if self.settings.axes.is_default:
+            return self.index.bounds
+        return self.current.axis_bounds(self.settings.axes)
+
     def full_view(self, margin_fraction: float = 0.01) -> Tuple[tuple, tuple]:
         """The coordinate ranges covering every localization."""
-        x0, y0, x1, y1 = self.index.bounds
+        x0, y0, x1, y1 = self.bounds()
         mx, my = (x1 - x0) * margin_fraction, (y1 - y0) * margin_fraction
         return (x0 - mx, x1 + mx), (y0 - my, y1 + my)
 
@@ -290,6 +330,8 @@ class ViewState:
 
     def select(self, fov: FieldOfView) -> np.ndarray:
         """The localizations that can contribute to this view, after filtering."""
+        if self.cull_index is None:
+            return self.filter.indices
         margin = self.settings.roi_sigma * self.max_sigma(fov.pixelsize)
         candidates = self.index.query(fov.x0, fov.x1, fov.y0, fov.y1, margin)
         if candidates.size == self.index.n_localizations:

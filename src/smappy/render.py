@@ -26,6 +26,11 @@ composites at display time from a single render:
              ``"hue"`` wherever the pixel is below saturation and gamma is 1;
              above it, per-channel clipping pulls dense regions towards white.
 
+What the two axes *are* is `RenderAxes`: normally the table's positions, but
+any column against any other, each divided by a scale of its own.  The division
+is the whole mechanism -- the grid stays square in those units, so nothing
+downstream has to know -- and it is what SMAP's ``VersatileRenderer`` does.
+
 Coordinates are in whatever unit the localizations are in (nm, normally).  A
 pixel of the rendered image covers ``[x0 + j*p, x0 + (j+1)*p)``, so a position
 maps to pixel ``floor((x - x0) / p)``.  SMAP instead rounds and shifts the range
@@ -286,16 +291,27 @@ class SigmaSettings:
 ROI_SIGMA = 2.7
 
 
-def render(x, y, fov: FieldOfView, sigma=None, weights=None, colors=None,
-           roi_sigma: float = ROI_SIGMA, n_threads: int = 0,
+def _sigma_array(value, n: int, what: str) -> np.ndarray:
+    a = np.ascontiguousarray(value, dtype=np.float32).reshape(-1)
+    if a.size not in (1, n):
+        raise ValueError(f"{what} must be a scalar or one value per localization")
+    return a
+
+
+def render(x, y, fov: FieldOfView, sigma=None, sigma_y=None, weights=None,
+           colors=None, roi_sigma: float = ROI_SIGMA, n_threads: int = 0,
            use_extension: bool = True) -> RenderedImage:
     """Accumulate localizations into ``fov``.
 
-    ``sigma`` selects the mode and is in data units: ``None`` renders a
-    histogram, a scalar renders every localization with the same Gaussian, and
-    an array renders each with its own -- normally a localization precision put
-    through :class:`SigmaSettings`.  There is one kernel behind all three; see
-    ``csrc/render.hpp``.
+    ``sigma`` selects the mode and is in the units of the grid: ``None``
+    renders a histogram, a scalar renders every localization with the same
+    Gaussian, and an array renders each with its own -- normally a
+    localization precision put through :class:`SigmaSettings`.  There is one
+    kernel behind all three; see ``csrc/render.hpp``.
+
+    ``sigma_y`` gives the vertical direction a width of its own, for a grid
+    whose two axes are not the same quantity; ``None`` is the same width in
+    both.  Either may be zero, which bins along that axis instead of blurring.
 
     ``weights`` is the intensity per localization (one value broadcasts), and
     ``colors`` an ``(n, 3)`` array for field colouring.
@@ -305,13 +321,22 @@ def render(x, y, fov: FieldOfView, sigma=None, weights=None, colors=None,
     if x.shape != y.shape or x.ndim != 1:
         raise ValueError("x and y must be matching 1-D arrays")
 
-    gaussian = sigma is not None
-    sigma_x = sigma_y = np.zeros(1, np.float32)
+    gaussian = sigma is not None or sigma_y is not None
+    sigma_x = sigma_y_ = np.zeros(1, np.float32)
     if gaussian:
-        sigma = np.ascontiguousarray(sigma, dtype=np.float32).reshape(-1)
-        if sigma.size not in (1, x.size):
-            raise ValueError("sigma must be a scalar or one value per localization")
-        sigma_x = sigma_y = sigma
+        sigma_x = _sigma_array(0.0 if sigma is None else sigma, x.size, "sigma")
+        sigma_y_ = sigma_x if sigma_y is None else \
+            _sigma_array(sigma_y, x.size, "sigma_y")
+        if sigma_x.size != sigma_y_.size:
+            # the kernel reads both through one stride, so a per-localization
+            # width on one axis and a constant on the other have to meet
+            n = max(sigma_x.size, sigma_y_.size)
+            sigma_x = np.ascontiguousarray(np.broadcast_to(sigma_x, (n,)), np.float32)
+            sigma_y_ = np.ascontiguousarray(np.broadcast_to(sigma_y_, (n,)), np.float32)
+        if sigma_x.size == 1 and sigma_y_.size == 1 and sigma_x[0] <= 0 and sigma_y_[0] <= 0:
+            # no width either way is a histogram, and the histogram is both
+            # the cheaper way to say so and the one that skips the kernel
+            gaussian = False
 
     w = np.ones(1, np.float32) if weights is None else \
         np.ascontiguousarray(weights, dtype=np.float32).reshape(-1)
@@ -322,14 +347,15 @@ def render(x, y, fov: FieldOfView, sigma=None, weights=None, colors=None,
 
     if use_extension and _render is not None:
         weight, color, n = _render.render(
-            x, y, sigma_x, sigma_y, w, c, fov.x0, fov.y0, fov.pixelsize,
+            x, y, sigma_x, sigma_y_, w, c, fov.x0, fov.y0, fov.pixelsize,
             fov.nx, fov.ny, gaussian, roi_sigma, 512, n_threads)
         return RenderedImage(fov, weight, color, int(n))
 
-    return _render_numpy(x, y, fov, sigma_x if gaussian else None, w, c, roi_sigma)
+    return _render_numpy(x, y, fov, sigma_x if gaussian else None,
+                         sigma_y_ if gaussian else None, w, c, roi_sigma)
 
 
-def _render_numpy(x, y, fov, sigma, weights, colors, roi_sigma) -> RenderedImage:
+def _render_numpy(x, y, fov, sigma, sigma_y, weights, colors, roi_sigma) -> RenderedImage:
     """Reference implementation of :func:`render`; the extension must match it."""
     from scipy.special import erf
 
@@ -349,7 +375,14 @@ def _render_numpy(x, y, fov, sigma, weights, colors, roi_sigma) -> RenderedImage
     n_locs = 0
 
     def kernel(center, position, s):
-        """Pixel-integrated Gaussian over the ROI, and its sum."""
+        """Pixel-integrated Gaussian over the ROI, and its sum.
+
+        A sigma below a hundredth of a pixel is one pixel -- the integral has
+        collapsed onto it -- which is how the extension reads it too, and is
+        what an axis with no width at all (plain binning) comes down to.
+        """
+        if s <= 0.01:
+            return np.array([center]), np.ones(1), 1.0
         d = int(roi_sigma * s + 1.0)
         edges = (np.arange(-d, d + 2) - (position - center)) / (np.sqrt(2) * s)
         k = 0.5 * np.diff(erf(edges))
@@ -357,11 +390,12 @@ def _render_numpy(x, y, fov, sigma, weights, colors, roi_sigma) -> RenderedImage
 
     for i in range(x.size):
         s = (sigma[0] if sigma.size == 1 else sigma[i]) / fov.pixelsize
+        sy_i = (sigma_y[0] if sigma_y.size == 1 else sigma_y[i]) / fov.pixelsize
         cx, cy = int(np.floor(px[i])), int(np.floor(py[i]))
         if 0 <= cx < fov.nx and 0 <= cy < fov.ny:
             n_locs += 1
         cols, kx, sx = kernel(cx, px[i], s)
-        rows, ky, sy = kernel(cy, py[i], s)
+        rows, ky, sy = kernel(cy, py[i], sy_i)
         tile = np.outer(ky, kx) * (weights[0] if weights.size == 1 else weights[i]) \
             / (sx * sy)
         keep_r = (rows >= 0) & (rows < fov.ny)
@@ -383,6 +417,10 @@ def _render_numpy(x, y, fov, sigma, weights, colors, roi_sigma) -> RenderedImage
 # unit systems work; the field of view just has to be in the same one.
 POSITION_FIELDS = (("x_nm", "y_nm"), ("x_pix", "y_pix"))
 PRECISION_FIELDS = ("loc_precision_nm", "loc_precision_pix")
+LATERAL_FIELDS = tuple(n for pair in POSITION_FIELDS for n in pair)
+# z is always in nm (`locs.to_nm` leaves it alone) and has a precision of its own
+AXIAL_FIELD = "z_nm"
+AXIAL_PRECISION_FIELD = "loc_precision_z_nm"
 
 
 def _pick(locs: Localizations, names, what: str):
@@ -400,17 +438,154 @@ def positions(locs: Localizations, select=None):
     return (x, y) if select is None else (x[select], y[select])
 
 
+def axis_unit(name: str) -> str:
+    """What one unit of an axis is called, for a scale bar.
+
+    A position column is a length and says so; anything else is counted in
+    itself -- "2000 photons", "500 frame" -- which is the honest label when the
+    axis is not a distance at all.
+    """
+    if name.endswith("_nm"):
+        return "nm"
+    if name.endswith("_pix"):
+        return "pixels"
+    return name
+
+
+def precision_for(locs: Localizations, name: str) -> Optional[str]:
+    """The localization precision belonging to a position column, if there is one.
+
+    Returns None for a column that is not a position at all -- a photon count
+    has no precision to be blurred with -- which is what makes the per-axis
+    sigma rule in `render_sigmas` fall through to an explicit width.
+
+    A z axis takes the axial precision where the fit produced one and the
+    lateral precision otherwise, which understates the blur along z -- it is
+    what every rotated view in the program already does, and a side view that
+    suddenly sharpened or softened against the 3D one would be worse.
+    """
+    if name == AXIAL_FIELD:
+        if AXIAL_PRECISION_FIELD in locs:
+            return AXIAL_PRECISION_FIELD
+        return next((n for n in PRECISION_FIELDS if n in locs), None)
+    if name in LATERAL_FIELDS:
+        return next((n for n in PRECISION_FIELDS if n in locs), None)
+    return None
+
+
+def is_position(name: str) -> bool:
+    return name in LATERAL_FIELDS or name == AXIAL_FIELD
+
+
+@dataclass(frozen=True)
+class RenderAxes:
+    """Which columns the render grid's axes are, and the scale of each.
+
+    The default -- the table's own position columns, unscaled -- is the
+    superresolution image everybody means.  Any other pair turns the same
+    renderer into SMAP's versatile renderer: photons against frame, z against
+    x, one fit parameter against another, drawn with the same layers, LUTs,
+    contrast, ROIs and 3D box as a picture of a cell.
+
+    A coordinate is the column divided by that axis's ``scale``, so the grid
+    stays *square in render units* and the anisotropy lives in the two scales.
+    Everything downstream -- the field of view, the zoom, the ROI shapes, the
+    projection, the GPU kernels -- is then untouched and never has to learn
+    about aspect ratios.  It is how SMAP does it too (``sr_pixrec = 1`` with
+    each field divided by a pixel size of its own).
+
+    ``None`` means "whatever the table carries", so the default costs nothing
+    and a pixel-unit table keeps working.
+    """
+
+    x: Optional[str] = None
+    y: Optional[str] = None
+    z: Optional[str] = None
+    x_scale: float = 1.0        # native units of the column per render unit
+    y_scale: float = 1.0
+    z_scale: float = 1.0
+
+    @property
+    def is_default(self) -> bool:
+        """The table's own positions at their own scale: nothing to do."""
+        return (self.x is None and self.y is None and self.z is None
+                and self.x_scale == 1.0 and self.y_scale == 1.0
+                and self.z_scale == 1.0)
+
+    def names(self, locs: Localizations) -> Tuple[str, str]:
+        """The two columns, resolving the defaults against the table."""
+        if self.x is not None and self.y is not None:
+            return (self.x, self.y)
+        x_name, y_name = _pick(locs, POSITION_FIELDS, "position")
+        return (self.x or x_name, self.y or y_name)
+
+    def depth_name(self, locs: Localizations) -> Optional[str]:
+        """The third axis, or None when the table has nothing to put there."""
+        name = self.z if self.z is not None else AXIAL_FIELD
+        return name if name in locs else None
+
+    def coordinates(self, locs: Localizations, select=None):
+        """The x and y of the render grid, in render units."""
+        x_name, y_name = self.names(locs)
+        return (self._values(locs, x_name, self.x_scale, select),
+                self._values(locs, y_name, self.y_scale, select))
+
+    def depth(self, locs: Localizations, select=None) -> Optional[np.ndarray]:
+        name = self.depth_name(locs)
+        return None if name is None else self._values(locs, name, self.z_scale, select)
+
+    def normalised(self, locs: Localizations) -> "RenderAxes":
+        """The same axes, with a spelled-out default folded back into one.
+
+        Picking ``x_nm`` and ``y_nm`` by hand is the ordinary picture, and it
+        should stay the ordinary picture -- index culling, one scale bar --
+        rather than the versatile path that happens to look the same.
+        """
+        if self.is_default:
+            return self
+        x_name, y_name = _pick(locs, POSITION_FIELDS, "position")
+        if ((self.x, self.y) == (x_name, y_name)
+                and self.z in (None, AXIAL_FIELD)
+                and self.x_scale == self.y_scale == self.z_scale == 1.0):
+            return RenderAxes()
+        return self
+
+    def scale_of(self, locs: Localizations, axis: str) -> float:
+        return {"x": self.x_scale, "y": self.y_scale, "z": self.z_scale}[axis]
+
+    @staticmethod
+    def _values(locs: Localizations, name: str, scale: float, select):
+        if name not in locs:
+            raise KeyError(f"no column {name!r} in the table; it has "
+                           f"{', '.join(sorted(locs.keys()))}")
+        values = locs[name]
+        if select is not None:
+            values = values[select]
+        if scale == 1.0 and name in LATERAL_FIELDS:
+            return values                       # the usual case: not even a copy
+        return np.asarray(values, dtype=np.float32) / np.float32(scale)
+
+
 @dataclass
 class RenderSettings:
-    """What to accumulate: the kernel, and what colours the localizations."""
+    """What to accumulate: the kernel, and what colours the localizations.
+
+    The two sigmas are per axis because the axes need not be the same
+    quantity: on a picture of photons against frame there is no localization
+    precision to blur with, and a width in nanometres says nothing about one
+    in photons.  `render_sigmas` has the rule; zero is plain binning along
+    that axis.
+    """
 
     mode: str = "precision"     # "hist", "gauss" (one sigma), "precision"
-    sigma: float = 10.0         # data units, for mode="gauss"
+    sigma: float = 10.0         # native units of the x axis, for mode="gauss"
+    sigma_y: Optional[float] = None      # None: `sigma`, where that means anything
     sigma_settings: "SigmaSettings" = field(default_factory=lambda: SigmaSettings())
     roi_sigma: float = ROI_SIGMA
     color_field: Optional[str] = None    # None: an intensity image, recoloured later
     color_range: Optional[Tuple[float, float]] = None
     weight_field: Optional[str] = None   # None: one count per localization
+    axes: RenderAxes = field(default_factory=RenderAxes)
 
 
 @dataclass
@@ -438,6 +613,68 @@ class DisplaySettings:
                       self.gamma, self.color_mode, white)
 
 
+def explicit_sigmas(locs: Localizations, settings: "RenderSettings") -> Tuple[float, float]:
+    """The two widths the settings state, in render units.
+
+    ``sigma_y`` unset means the same width as x where the two axes are the
+    same quantity, and zero -- plain binning -- where they are not: a width in
+    nanometres says nothing about one in photons.
+    """
+    axes = settings.axes
+    x_name, y_name = axes.names(locs)
+    sigma_y = settings.sigma_y
+    if sigma_y is None:
+        sigma_y = settings.sigma if axis_unit(x_name) == axis_unit(y_name) else 0.0
+    return (settings.sigma / axes.x_scale, sigma_y / axes.y_scale)
+
+
+def render_sigmas(locs: Localizations, settings: "RenderSettings", fov: FieldOfView,
+                  select=None):
+    """The rendering width along each axis, in render units.
+
+    ``(None, None)`` for a histogram.  The rule is per axis because the axes
+    need not be positions:
+
+    * mode ``"gauss"`` is the explicit pair everywhere -- that is what a
+      constant Gaussian means;
+    * mode ``"precision"`` uses the localization precision on an axis that
+      *is* a position (``loc_precision_z_nm`` for a z axis, when the fit
+      produced one), and the explicit width on any other axis, because there
+      is no precision for a photon count or a frame number;
+    * ``sigma_y`` unset means the same width as x where the two axes are the
+      same quantity, and zero -- plain binning -- where they are not.
+    """
+    if settings.mode == "hist":
+        return None, None
+    if settings.mode not in ("gauss", "precision"):
+        raise ValueError(f"unknown mode {settings.mode!r}; "
+                         "use 'hist', 'gauss' or 'precision'")
+    axes = settings.axes
+    x_name, y_name = axes.names(locs)
+    explicit_x, explicit_y = explicit_sigmas(locs, settings)
+
+    out, fields = [], []
+    for name, scale, explicit in ((x_name, axes.x_scale, explicit_x),
+                                  (y_name, axes.y_scale, explicit_y)):
+        field_name = precision_for(locs, name) if settings.mode == "precision" else None
+        if field_name is None:
+            if settings.mode == "precision" and is_position(name):
+                raise KeyError("no localization precision column in the table; "
+                               f"looked for {PRECISION_FIELDS}")
+            out.append(np.float32(explicit))          # already in render units
+        else:
+            values = locs[field_name]
+            values = values if select is None else values[select]
+            values = np.asarray(values, dtype=np.float32) / np.float32(scale)
+            out.append(settings.sigma_settings.apply(values, fov.pixelsize))
+        fields.append((field_name, scale))
+    # the usual picture has the same precision on both axes: hand it over once
+    # rather than putting the same millions of values through twice
+    if fields[0] == fields[1] and fields[0][0] is not None:
+        return out[0], None
+    return out[0], out[1]
+
+
 def render_locs(locs: Localizations, fov: FieldOfView,
                 settings: Optional[RenderSettings] = None,
                 display: Optional[DisplaySettings] = None, select=None,
@@ -452,19 +689,8 @@ def render_locs(locs: Localizations, fov: FieldOfView,
     display = display or DisplaySettings()
     select = getattr(select, "indices", select)  # a LocFilter, or a mask/indices
 
-    x, y = positions(locs, select)
-
-    if settings.mode == "hist":
-        sigma = None
-    elif settings.mode == "gauss":
-        sigma = settings.sigma
-    elif settings.mode == "precision":
-        name = _pick(locs, PRECISION_FIELDS, "localization precision")
-        precision = locs[name] if select is None else locs[name][select]
-        sigma = settings.sigma_settings.apply(precision, fov.pixelsize)
-    else:
-        raise ValueError(f"unknown mode {settings.mode!r}; "
-                         "use 'hist', 'gauss' or 'precision'")
+    x, y = settings.axes.coordinates(locs, select)
+    sigma, sigma_y = render_sigmas(locs, settings, fov, select)
 
     weights = None
     if settings.weight_field is not None:
@@ -479,8 +705,8 @@ def render_locs(locs: Localizations, fov: FieldOfView,
                                           float(np.nanmax(values)))
         colors = luts.colors(values, display.lut, lo, hi, display.invert)
 
-    return render(x, y, fov, sigma=sigma, weights=weights, colors=colors,
-                  roi_sigma=settings.roi_sigma, n_threads=n_threads,
+    return render(x, y, fov, sigma=sigma, sigma_y=sigma_y, weights=weights,
+                  colors=colors, roi_sigma=settings.roi_sigma, n_threads=n_threads,
                   use_extension=use_extension)
 
 
@@ -510,7 +736,8 @@ def save_image(locs, path, pixelsize: float = 10.0,
         locs = load_localizations(locs)
 
     if fov is None:
-        x, y = positions(locs, getattr(select, "indices", select))
+        x, y = (settings or RenderSettings()).axes.coordinates(
+            locs, getattr(select, "indices", select))
         fov = FieldOfView.around(x, y, pixelsize=pixelsize, margin=margin)
     rendered = render_locs(locs, fov, settings, display, select=select)
     rgb = (display or DisplaySettings()).apply(rendered)

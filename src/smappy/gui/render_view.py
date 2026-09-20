@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (QFileDialog, QGraphicsPathItem, QInputDialog, QLa
 
 from .. import lut as luts
 from ..regions import Region
-from ..render import FieldOfView
+from ..render import FieldOfView, axis_unit
 from ..session import Session
 
 TILE = 1.5          # render this many view widths, so a pan needs no render
@@ -95,6 +95,7 @@ class RenderView(QWidget):
         self.scalebar = pg.ScaleBar(size=1000, suffix="nm")
         self.scalebar.setParentItem(self.view)
         self.scalebar.anchor((1, 1), (1, 1), offset=(-20, -20))
+        self.axis_bars = AxisBars(self.view)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.graphics)
@@ -176,6 +177,21 @@ class RenderView(QWidget):
         self.view.setRange(QRectF(x0, y0, x1 - x0, y1 - y0), padding=0)
         self.schedule()
 
+    def frame_on(self, xrange, yrange) -> None:
+        """Show this box, whatever else the data reaches beyond it.
+
+        `reset` frames everything, which is right for a picture of a cell and
+        wrong for one of a photon count: a handful of localizations ten times
+        brighter than the rest would leave the structure in a corner.  What
+        chose these axes chooses the box too.
+        """
+        (x0, x1), (y0, y1) = xrange, yrange
+        # a little beyond the box: a hollow structure -- a ring in x against z
+        # -- has its brightest arcs just outside its own 99 %, and cutting
+        # them off is the one thing the fit must not do
+        self.view.setRange(QRectF(x0, y0, x1 - x0, y1 - y0), padding=0.05)
+        self.schedule()
+
     def _has_content(self) -> bool:
         if any(l.is_image for l in self.session.layers) or len(self.session.locs):
             return True
@@ -234,7 +250,7 @@ class RenderView(QWidget):
             self.fov = None
             return
         view = self.current_fov()
-        self._update_scalebar(view)
+        self._update_guides(view)
         if self._covered(view):
             return
         if self._busy:                   # one at a time; the newest view wins
@@ -282,7 +298,25 @@ class RenderView(QWidget):
         rgb, _ = self.composite(fov)
         return np.ascontiguousarray(rgb)
 
-    def _update_scalebar(self, fov: FieldOfView) -> None:
+    def _update_guides(self, fov: FieldOfView) -> None:
+        """Which way up the picture hangs, and what its bars say.
+
+        A picture of a place hangs the way the camera saw it, y downwards,
+        which is the image convention the rest of the program uses.  A plot of
+        one column against another is a plot: y goes up, as it does in SMAP's
+        versatile renderer, because a photon count that grows downwards reads
+        as a lie.  The bars follow: one in nanometres, or one per axis in
+        whatever that axis counts.
+        """
+        axes = self.session.axes()
+        versatile = not axes.is_default and len(self.session.locs)
+        if self.view.yInverted() == bool(versatile):
+            self.view.invertY(not versatile)
+        self.scalebar.setVisible(not versatile)
+        self.axis_bars.setVisible(versatile)
+        if versatile:
+            self.axis_bars.update(fov, axes, self.session.locs)
+            return
         self.scalebar.size = nice_step(0.2 * (fov.x1 - fov.x0))
         size = self.scalebar.size
         self.scalebar.text.setText(f"{size / 1000:g} µm" if size >= 1000 else f"{size:g} nm")
@@ -550,6 +584,87 @@ class RenderToolBar(QToolBar):
                                               "TIFF (*.tif *.tiff)")
         if path:
             self.view.save_tiff(path, pixelsize, what)
+
+
+class AxisBars:
+    """A scale bar per axis, each in that axis's own quantity.
+
+    One nanometre bar says everything about the ordinary picture, and nothing
+    about a picture of photons against frame: there the horizontal bar has to
+    say how many frames it spans and the vertical one how many photons, and
+    neither of them is a distance.
+
+    They are drawn in data coordinates -- a scale bar *should* grow with the
+    zoom -- and re-anchored to the corner of the view on every render, which
+    is where the render already knows what the view is.
+    """
+
+    MARGIN = 0.06           # of the view, from the bottom right corner
+    FRACTION = 0.2          # of the view, at most: the label rounds down
+
+    def __init__(self, view):
+        self.view = view
+        self.items = []
+        for _ in range(2):
+            line = pg.PlotDataItem(pen=pg.mkPen((255, 255, 255), width=3))
+            text = pg.TextItem("", color=(255, 255, 255))
+            line.setZValue(100)
+            text.setZValue(100)
+            view.addItem(line)
+            view.addItem(text)
+            self.items.append((line, text))
+        self.items[0][1].setAnchor(pg.Point(0.5, 1.0))     # above its bar
+        self.items[1][1].setAnchor(pg.Point(1.0, 0.5))     # left of its bar
+        self.setVisible(False)
+
+    def setVisible(self, on: bool) -> None:
+        for line, text in self.items:
+            line.setVisible(bool(on))
+            text.setVisible(bool(on))
+
+    def update(self, fov: FieldOfView, axes, locs) -> None:
+        try:
+            names = axes.names(locs)
+        except KeyError:
+            self.setVisible(False)
+            return
+        w, h = fov.x1 - fov.x0, fov.y1 - fov.y0
+        # the corner the two bars meet in, bottom right.  These axes are drawn
+        # the way up a plot is, y increasing upwards, so the bottom is y0
+        cx, cy = fov.x1 - self.MARGIN * w, fov.y0 + self.MARGIN * h
+        for i, (span, scale) in enumerate(((w, axes.x_scale), (h, axes.y_scale))):
+            line, text = self.items[i]
+            # round in the quantity that is written on the label, not in
+            # render units: "2000 photons" rather than "1873.4 photons"
+            native = nice_below(self.FRACTION * abs(span) * scale)
+            length = native / scale if scale else 0.0
+            if i == 0:
+                line.setData([cx - length, cx], [cy, cy])
+                text.setPos(cx - length / 2, cy)
+            else:
+                line.setData([cx, cx], [cy, cy + length])
+                text.setPos(cx, cy + length / 2)
+            text.setText(bar_label(native, axis_unit(names[i])))
+
+
+def bar_label(value: float, unit: str) -> str:
+    """"500 nm", "2 µm", "2000 photons"."""
+    if unit == "nm" and value >= 1000:
+        return f"{value / 1000:g} µm"
+    return f"{value:g} {unit}"
+
+
+def nice_below(span: float) -> float:
+    """A round 1 / 2 / 5 x 10^k at or below ``span``.
+
+    `nice_step` rounds up, which is what a bar of "at least this much" wants;
+    a bar that must not eat a third of the picture wants the other direction.
+    """
+    if not span or not np.isfinite(span):
+        return 1.0
+    decade = 10.0 ** np.floor(np.log10(abs(span)))
+    return float(max((m * decade for m in (1, 2, 5) if m * decade <= abs(span)),
+                     default=decade))
 
 
 def nice_step(span: float) -> float:

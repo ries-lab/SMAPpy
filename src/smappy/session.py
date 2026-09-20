@@ -20,7 +20,7 @@ from .plugins import Context, Plugin, Result, Selection
 from .io.formats import FileInfo, load as load_any
 from .regions import Region
 from .view3d import Projection, Slab
-from .render import DisplaySettings, RenderSettings, SigmaSettings, positions
+from .render import DisplaySettings, RenderAxes, RenderSettings, SigmaSettings
 from .undo import Edit, configured as undo_stack
 from .viewer import ViewState
 
@@ -118,10 +118,10 @@ class Layer:
         return self.state.image(fov, white_background)
 
     def bounds(self):
-        """(x0, y0, x1, y1) this layer covers."""
+        """(x0, y0, x1, y1) this layer covers, in render coordinates."""
         if self.is_image:
             return self.image.bounds
-        return self.state.index.bounds
+        return self.state.bounds()
 
     def apply_defaults(self) -> None:
         locs = self.locs
@@ -710,15 +710,25 @@ class Session:
 
     # ---------------------------------------------------------------- 3D
     def z_range(self) -> Tuple[float, float]:
-        """The z the first locs layer's filter keeps, else the data's."""
+        """The depth the first locs layer's filter keeps, else the data's.
+
+        In render units, like the slab it goes into: the third axis is ``z_nm``
+        unless the render axes say otherwise, and a filter bound is in the
+        column's own units and has to be scaled with it.
+        """
         layer = self._locs_layer()
-        if layer is None or "z_nm" not in self.locs or not len(self.locs):
+        if layer is None or not len(self.locs):
             return (-1.0, 1.0)
-        lo, hi = layer.state.sets["ungrouped"].filter.ranges.get("z_nm", (None, None))
-        z = np.asarray(self.locs["z_nm"])
+        axes = self.axes()
+        name = axes.depth_name(self.locs)
+        if name is None:
+            return (-1.0, 1.0)
+        lo, hi = layer.state.sets["ungrouped"].filter.ranges.get(name, (None, None))
+        z = np.asarray(axes.depth(self.locs))
         finite = z[np.isfinite(z)]
         dlo, dhi = (float(finite.min()), float(finite.max())) if finite.size else (-1.0, 1.0)
-        return (dlo if lo is None else lo, dhi if hi is None else hi)
+        return (dlo if lo is None else lo / axes.z_scale,
+                dhi if hi is None else hi / axes.z_scale)
 
     def slab_from_roi(self) -> Slab:
         """The slab from the ROI (or the whole field), z from the filter."""
@@ -749,6 +759,27 @@ class Session:
         self.slab_follows_roi = follow_roi
         self.changed("slab")
 
+    def axes(self, layer: int = 0) -> RenderAxes:
+        """Which columns the picture's axes are.
+
+        One set for the whole session in practice -- the layers are composited
+        into one grid, so two layers on different axes would mean nothing --
+        but it is kept on each layer's `RenderSettings`, as
+        `DisplaySettings.white_background` is, so that a render outside a
+        session needs nothing else.
+        """
+        if not self.layers or self.layers[layer].is_image:
+            layer = self.first_locs_layer()
+        state = self.layers[layer].state if self.layers else None
+        return state.settings.axes if state is not None else RenderAxes()
+
+    def set_axes(self, axes: RenderAxes) -> None:
+        """Put every localization layer on these axes, and say so."""
+        for layer in self.layers:
+            if not layer.is_image:
+                layer.state.settings = dataclasses.replace(layer.state.settings, axes=axes)
+        self.changed("layer")
+
     def set_projection(self, projection: Projection) -> None:
         self.projection = projection
         self.changed("projection")
@@ -762,15 +793,19 @@ class Session:
         if self.layers[layer].is_image:
             layer = self.first_locs_layer()
         sel = self.layers[layer].selection(layer)
+        axes = self.axes(layer)
         if self.roi is not None and len(self.locs):
-            x, y = positions(self.locs)
+            # an ROI is drawn on the picture, so it is in render coordinates:
+            # a rectangle on a photons-against-frame view selects those
+            # localizations, and the usual picture is unchanged
+            x, y = axes.coordinates(self.locs)
             sel.mask = sel.mask & self.roi.mask(x, y)     # never in place: the
             # filter's cached mask is what `Selection` was handed
             sel.roi = self.roi
             sel.name += f", {self.roi}"
         if self.select_in_slab and self.slab is not None and len(self.locs):
-            x, y = positions(self.locs)
-            z = self.locs["z_nm"] if "z_nm" in self.locs else None
+            x, y = axes.coordinates(self.locs)
+            z = axes.depth(self.locs)
             sel.mask = sel.mask & self.slab.mask(x, y, z)
             sel.roi = self.slab
             sel.name += f", {self.slab}"

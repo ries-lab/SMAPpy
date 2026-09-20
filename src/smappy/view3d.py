@@ -17,8 +17,9 @@ import numpy as np
 
 from .locs import Localizations
 from .regions import Region
-from .render import (DisplaySettings, FieldOfView, RenderSettings, RenderedImage,
-                     normalize, positions, render_locs)
+from .render import (DisplaySettings, FieldOfView, RenderAxes, RenderSettings,
+                     RenderedImage, explicit_sigmas, is_position, normalize,
+                     render_locs)
 
 PREVIEW_POINTS = 2_000_000       # at most this many while the mouse drags
 PREVIEW_SCALE = 2                # and at this many times coarser pixels
@@ -298,6 +299,55 @@ class Projection:
 
 
 # --------------------------------------------------------------- engine A
+def _common_scale(axes: RenderAxes, locs: Localizations) -> Optional[float]:
+    """The one scale a rotated view can use, or None if the axes disagree.
+
+    A projection mixes the axes, so it has room for one width only.  That
+    still holds when every axis is a position at the same scale -- the picture
+    is then the usual one, stretched -- and not when one of them is a photon
+    count.
+    """
+    names = list(axes.names(locs))
+    depth = axes.depth_name(locs)
+    scales = [axes.x_scale, axes.y_scale]
+    if depth is not None:
+        names.append(depth)
+        scales.append(axes.z_scale)
+    if all(is_position(n) for n in names) and len(set(scales)) == 1:
+        return scales[0]
+    return None
+
+
+def projected_settings(locs: Localizations, settings: RenderSettings
+                       ) -> Tuple[RenderSettings, float]:
+    """``settings`` as they apply to a rotated view, and the precision scale.
+
+    The coordinates a 3D engine is handed are already in render units, so the
+    settings that go with them are on the *default* axes.  What the mapping
+    leaves behind is the width:
+
+    * the usual axes change nothing at all;
+    * positions at one common scale keep the localization precision, with the
+      scale folded into `SigmaSettings` (sigma = precision x factor, so a
+      factor divided by the scale is the precision divided by it) and returned
+      for the median the GPU caps with;
+    * anything else -- photons against frame -- cannot keep a width per axis
+      once they are mixed, so the two explicit widths are averaged into one.
+    """
+    axes = settings.axes
+    if axes.is_default:
+        return settings, 1.0
+    scale = _common_scale(axes, locs)
+    if scale is not None and settings.mode == "precision":
+        ss = settings.sigma_settings
+        return replace(settings, axes=RenderAxes(),
+                       sigma_settings=replace(ss, factor=ss.factor / scale,
+                                              min_sigma=ss.min_sigma / scale)), scale
+    sigma = 0.5 * sum(explicit_sigmas(locs, settings))
+    return replace(settings, axes=RenderAxes(), sigma=sigma,
+                   mode="gauss" if sigma > 0 else "hist"), 1.0
+
+
 def slab_candidates(locs: Localizations, select: np.ndarray, slab: Optional[Slab],
                     index=None) -> np.ndarray:
     """The rows worth looking at: the filter's, narrowed to the slab's footprint.
@@ -433,7 +483,8 @@ class PreviewBudget:
 
 
 def depth_sample(locs: Localizations, select: np.ndarray, projection: Projection,
-                 slab: Optional[Slab], index=None, limit: int = HIST_POINTS) -> np.ndarray:
+                 slab: Optional[Slab], index=None, limit: int = HIST_POINTS,
+                 axes: Optional[RenderAxes] = None) -> np.ndarray:
     """Depths of up to ``limit`` of the slab's localizations.
 
     Only the depth *histogram* wants this, and that histogram is a shape --
@@ -445,8 +496,9 @@ def depth_sample(locs: Localizations, select: np.ndarray, projection: Projection
     too.  Sampling the candidate *rows* before touching a coordinate keeps it
     at ``limit`` however large the table.
     """
-    x, y = positions(locs)
-    z = locs["z_nm"] if "z_nm" in locs else None
+    axes = axes or RenderAxes()
+    x, y = axes.coordinates(locs)
+    z = axes.depth(locs)
     idx = selection_rows(locs, select, slab, index)
     if index is None and slab is not None and idx.size:
         # With an index the candidates are already the slab's own neighbourhood,
@@ -497,8 +549,8 @@ def project_layer(locs: Localizations, select: np.ndarray, projection: Projectio
     """
     if preview and budget is None:
         budget = PREVIEW_POINTS
-    x, y = positions(locs)
-    z = locs["z_nm"] if "z_nm" in locs else None
+    x, y = settings.axes.coordinates(locs)
+    z = settings.axes.depth(locs)
     # thinned before the mask and the gather, not after: the budget is there to
     # bound the work, and the rows are already the slab's neighbourhood
     idx = thinned(selection_rows(locs, select, slab, index), budget)
@@ -549,9 +601,12 @@ def render_layer_3d(locs: Localizations, select: np.ndarray, projection: Project
         settings = replace(settings, color_range=column_range(locs, settings.color_field))
     # depth is defined by the slab's corners (or the table's box), so that the
     # colour scale, the slices and the attenuation do not move with the filter
-    front, drange = _depth_front_and_range(projection, slab, locs)
+    front, drange = _depth_front_and_range(projection, slab, locs, settings.axes)
     table, _ = project_layer(locs, select, projection, slab, settings, preview, front,
                              index, budget)
+    # the projected table is in render units on plain x/y: the mapping has
+    # already been applied, and only the width still has to follow it
+    settings, _ = projected_settings(locs, settings)
     weight = "_weight" if "_weight" in table else settings.weight_field
     if settings.color_field == "depth":
         settings = replace(settings, color_range=settings.color_range or drange)
@@ -610,13 +665,16 @@ def composite_depth(whole: RenderedImage, slices: int, render_slice, display: Di
 
 
 # ------------------------------------------------------------ engine: GPU
-def _depth_front_and_range(projection: Projection, slab: Optional[Slab], locs: Localizations):
+def _depth_front_and_range(projection: Projection, slab: Optional[Slab],
+                           locs: Localizations, axes: Optional[RenderAxes] = None):
     """The depth range of the slab's corners (or the table's bounding box)."""
     if slab is not None:
         c = slab.corners()
     else:
-        x, y = positions(locs)
-        z = locs["z_nm"] if "z_nm" in locs else np.zeros(1)
+        axes = axes or RenderAxes()
+        x, y = axes.coordinates(locs)
+        z = axes.depth(locs)
+        z = np.zeros(1) if z is None else z
         lo = [np.nanmin(x), np.nanmin(y), np.nanmin(z)]
         hi = [np.nanmax(x), np.nanmax(y), np.nanmax(z)]
         c = np.array([[a, b, d] for a in (lo[0], hi[0]) for b in (lo[1], hi[1])
@@ -660,8 +718,10 @@ def sphere_draw(engine, locs: Localizations, select: np.ndarray, projection: Pro
                 slab: Optional[Slab], fov: FieldOfView, settings: RenderSettings,
                 display: DisplaySettings, index=None):
     """One layer's contribution to `GPUEngine.render_spheres`."""
-    x, y = positions(locs)
-    z = locs["z_nm"] if "z_nm" in locs else None
+    axes = settings.axes
+    x, y = axes.coordinates(locs)
+    z = axes.depth(locs)
+    settings, _ = projected_settings(locs, settings)
     prec_name = next((n for n in ("loc_precision_nm", "loc_precision_pix") if n in locs), None)
     color_field = "depth" if projection.color_by_depth else settings.color_field
     key = _table_key(locs, prec_name, settings.weight_field, color_field)
@@ -671,7 +731,7 @@ def sphere_draw(engine, locs: Localizations, select: np.ndarray, projection: Pro
                  locs[settings.weight_field] if settings.weight_field else None, cvalues)
     idx = selection_rows(locs, select, slab, index)
     sel = engine.selection((key, id(select), _slab_key(slab)), idx)
-    front, drange = _depth_front_and_range(projection, slab, locs)
+    front, drange = _depth_front_and_range(projection, slab, locs, axes)
     if color_field == "depth":
         color_mode, color_range = 2, (settings.color_range or drange)
     elif cvalues is not None:
@@ -708,8 +768,11 @@ def render_layer_gpu(engine, locs: Localizations, select: np.ndarray, projection
                      preview: bool = False, index=None, budget: Optional[int] = None):
     """Engine A on the GPU for one layer: the same planes as `render_layer_3d`,
     or, with ``projection.engine == "points"``, an RGB sprite image."""
-    x, y = positions(locs)
-    z = locs["z_nm"] if "z_nm" in locs else None
+    axes = settings.axes
+    x, y = axes.coordinates(locs)
+    z = axes.depth(locs)
+    settings, precision_scale = projected_settings(locs, settings)
+    median_precision = median_precision / precision_scale
     prec_name = next((n for n in ("loc_precision_nm", "loc_precision_pix") if n in locs), None)
     color_field = "depth" if projection.color_by_depth else settings.color_field
     key = _table_key(locs, prec_name, settings.weight_field, color_field)
@@ -718,7 +781,7 @@ def render_layer_gpu(engine, locs: Localizations, select: np.ndarray, projection
     engine.table(key, x, y, z, locs[prec_name] if prec_name else None,
                  locs[settings.weight_field] if settings.weight_field else None, cvalues)
     sel_key = (key, id(select), _slab_key(slab), budget)
-    front, drange = _depth_front_and_range(projection, slab, locs)
+    front, drange = _depth_front_and_range(projection, slab, locs, axes)
     if color_field == "depth":
         color_mode, color_range = 2, (settings.color_range or drange)
     elif cvalues is not None:
@@ -800,7 +863,7 @@ def render_3d(layers, projection: Projection, slab: Optional[Slab], fov: FieldOf
                 st = layer.state
                 draw, shade_params = sphere_draw(engine, st.locs, st.filter.mask, projection, slab,
                                                  fov, st.settings, st.display,
-                                                 index=getattr(st, "index", None))     # opaque: no budget
+                                                 index=getattr(st, "cull_index", None))  # opaque: no budget
                 draws.append(draw)
         if draws:
             rgb = engine.render_spheres(draws, fov, shade_params)
@@ -808,7 +871,8 @@ def render_3d(layers, projection: Projection, slab: Optional[Slab], fov: FieldOf
         if not layer.visible or layer.is_image:
             continue
         state = layer.state
-        index = getattr(state, "index", None)
+        # None on custom axes: the index is in the table's own coordinates
+        index = getattr(state, "cull_index", None)
         # memoised, so this is the count the engines are about to work on
         drawn += min(selection_rows(state.locs, state.filter.mask, slab, index).size,
                      limit if limit is not None else np.iinfo(np.int64).max)
@@ -824,7 +888,8 @@ def render_3d(layers, projection: Projection, slab: Optional[Slab], fov: FieldOf
                                        state.settings, state.display, preview,
                                        n_threads=state.n_threads, index=index, budget=limit)
         rgb += image
-        depths.append(depth_sample(state.locs, state.filter.mask, projection, slab, index))
+        depths.append(depth_sample(state.locs, state.filter.mask, projection, slab, index,
+                                   axes=state.settings.axes))
     rgb = np.clip(rgb, 0, 1)
     if any(l.visible and not l.is_image and l.get_display().white_background
            for l in layers):

@@ -21,9 +21,10 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog
 
 from .. import lut as luts
 from ..filter import quantile_range  # noqa: F401  (kept for callers)
-from ..render import FieldOfView
+from ..render import FieldOfView, RenderAxes, axis_unit, is_position
 from ..session import Layer, Session
 from ..viewer import FIELD_LUT, INTENSITY_LUT
+from .render_view import nice_below
 from .widgets import CollapsibleSection, detach_to_window
 
 # the fields with a quick button, best-named alternative first
@@ -505,6 +506,8 @@ class Overview(QWidget):
                                      or any(l.is_image for l in self.session.layers)):
             self.image.clear()
             return
+        # the same way up as the main view: a plot of two columns is a plot
+        self.box.invertY(self.session.axes().is_default)
         (x0, x1), (y0, y1) = self.session.full_view()
         fov = FieldOfView.fit((x0, x1), (y0, y1), 300, 200)
         rgb, _ = self.view.composite(fov)
@@ -525,6 +528,280 @@ class Overview(QWidget):
         self.view.window().show()          # closed by accident: bring it back
         self.view.center_on(pos.x(), pos.y())
         event.accept()
+
+
+#: how many render units the 1-99 % of an axis is fitted onto.  An arbitrary
+#: number -- only the ratio of the two scales is a picture -- but a round one
+#: keeps the pixel sizes and sigmas people type in a familiar range.
+FIT_SPAN = 1000.0
+
+
+def numeric_fields(locs) -> List[str]:
+    """The 1-D numeric columns of a table, in the order it carries them."""
+    return [n for n in locs if np.asarray(locs[n]).dtype.kind in "iuf"
+            and np.asarray(locs[n]).ndim == 1]
+
+
+class AxesSection(QWidget):
+    """Which columns the picture's axes are: SMAP's versatile renderer.
+
+    Hidden under "axes" because for every ordinary picture the answer is x and
+    y, and opening it is what turns the same renderer -- the same layers,
+    LUTs, contrast, filters, ROIs and 3D box -- into a picture of photons
+    against frame, or of a fit parameter against another.
+
+    The axes belong to the picture rather than to one layer, since the layers
+    are composited onto one grid, so everything here is set on all of them at
+    once, as the white background is.
+    """
+
+    changed = Signal()          # the widths moved with the axes; re-read them
+
+    def __init__(self, session: Session, view=None, parent=None):
+        super().__init__(parent)
+        self.session = session
+        self.view = view
+        self._filling = False
+        self._kept = None       # the widths from before the mapping
+        form = QFormLayout(self)
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setVerticalSpacing(2)
+        self.fields: Dict[str, QComboBox] = {}
+        self.scales: Dict[str, _Bound] = {}
+        for axis, label in (("x", "x"), ("y", "y"), ("z", "z (3D)")):
+            combo = QComboBox()
+            combo.setToolTip(f"the column the {axis} axis of the render grid is")
+            scale = _Bound()
+            scale.setToolTip("units of that column per render unit: the two "
+                             "scales are what makes the pixels non-square, and "
+                             "the grid itself stays square so that the zoom, "
+                             "the ROIs and the 3D box are unchanged")
+            row = QHBoxLayout()
+            row.setContentsMargins(0, 0, 0, 0)
+            row.addWidget(combo, 1)
+            row.addWidget(QLabel("/"))
+            row.addWidget(scale)
+            holder = QWidget()
+            holder.setLayout(row)
+            form.addRow(label, holder)
+            self.fields[axis] = combo
+            self.scales[axis] = scale
+            combo.currentIndexChanged.connect(lambda _, a=axis: self._on_field(a))
+            scale.editingFinished.connect(self._apply)
+        self.same = QCheckBox("same scale on both axes")
+        self.same.setToolTip("one scale for x and y, so distances stay true.  "
+                             "Ticked by itself when the two axes are the same "
+                             "quantity -- x against z is a picture, and "
+                             "stretching it would be a lie")
+        form.addRow("", self.same)
+        buttons = QHBoxLayout()
+        buttons.setContentsMargins(0, 0, 0, 0)
+        self.fit = QPushButton("fit")
+        self.fit.setToolTip("scale each axis so its 1-99 % fills the picture, "
+                            "and frame the view on it")
+        self.reset = QPushButton("reset")
+        self.reset.setToolTip("back to x and y: the ordinary picture")
+        buttons.addWidget(self.fit)
+        buttons.addWidget(self.reset)
+        buttons.addStretch(1)
+        form.addRow("", buttons)
+        self.note = QLabel("")
+        self.note.setWordWrap(True)
+        self.note.hide()
+        form.addRow("", self.note)
+        self.same.toggled.connect(self._apply)
+        self.fit.clicked.connect(self._fit)
+        self.reset.clicked.connect(self._reset)
+
+    # ------------------------------------------------------------- binding
+    def bind(self) -> None:
+        """Show the session's axes, without firing anything."""
+        locs = self.session.locs
+        axes = self.session.axes()
+        names = numeric_fields(locs)
+        self._filling = True
+        for axis, combo in self.fields.items():
+            current = getattr(axes, axis)
+            combo.clear()
+            combo.addItem("auto", None)
+            combo.addItems(names)
+            combo.setCurrentIndex(max(0, combo.findText(current)) if current else 0)
+            self.scales[axis].set(getattr(axes, f"{axis}_scale"))
+        self.same.setChecked(axes.x_scale == axes.y_scale)
+        self._filling = False
+        self._describe(axes)
+
+    def _chosen(self) -> RenderAxes:
+        def field(axis: str) -> Optional[str]:
+            combo = self.fields[axis]
+            return combo.currentText() if combo.currentIndex() > 0 else None
+
+        def scale(axis: str) -> float:
+            value = self.scales[axis].value()
+            return float(value) if value else 1.0
+
+        return RenderAxes(x=field("x"), y=field("y"), z=field("z"),
+                          x_scale=scale("x"), y_scale=scale("y"), z_scale=scale("z"))
+
+    def _describe(self, axes: RenderAxes) -> None:
+        """Say what is no longer in nanometres, where it would mislead."""
+        if axes.is_default:
+            self.note.hide()
+            return
+        locs = self.session.locs
+        try:
+            x_name, y_name = axes.names(locs)
+        except KeyError:
+            self.note.hide()
+            return
+        self.note.setText(f"{x_name} across, {y_name} up.  Sites and anything "
+                          "that measures nanometres read the columns, not the "
+                          "picture; the scale bars are in the axes' own units.")
+        self.note.show()
+
+    # -------------------------------------------------------------- editing
+    def _on_field(self, axis: str) -> None:
+        """A new field: scale it onto the screen rather than leaving it at 1.
+
+        A frame number is in the thousands and a photon count in the hundreds
+        of thousands; at scale 1 the first picture would be a single bright
+        pixel or an empty field, and the user would have to guess two numbers
+        before seeing anything.
+        """
+        if self._filling:
+            return
+        locs = self.session.locs
+        axes = self._chosen()
+        if len(locs):
+            try:                       # the same quantity on both axes: one scale
+                x_name, y_name = axes.names(locs)
+            except KeyError:
+                x_name = y_name = None
+            if x_name is not None:
+                self._filling = True
+                self.same.setChecked(axis_unit(x_name) == axis_unit(y_name))
+                self._filling = False
+        self._fit()
+
+    def _apply(self, *_) -> None:
+        if self._filling:
+            return
+        axes = self._chosen()
+        if self.same.isChecked():
+            axes = dataclasses.replace(axes, y_scale=axes.x_scale)
+        self._set(axes)
+
+    def _reset(self) -> None:
+        self._set(RenderAxes())
+        self.bind()
+
+    def _set(self, axes: RenderAxes, frame=None) -> None:
+        """Put the session on these axes, and show the result.
+
+        ``frame`` is the box to look at, in render units; without one the view
+        goes back to showing everything, which is what a reset means.
+        """
+        locs = self.session.locs
+        if len(locs):
+            axes = axes.normalised(locs)
+        self.session.set_axes(axes)
+        self._sigmas(axes)
+        self.changed.emit()
+        self._describe(axes)
+        if self.view is None:
+            return
+        if frame is None:
+            self.view.reset()
+        else:
+            self.view.frame_on(*frame)
+
+    def _sigmas(self, axes: RenderAxes) -> None:
+        """Zero the width of an axis that is not a position, and put it back.
+
+        A leftover 10 nm is not a width in photons, and the honest default on
+        an axis with no precision behind it is to bin rather than to blur --
+        but the number that was typed for the ordinary picture should still be
+        there on the way back to it, rather than a silent histogram.
+        """
+        locs = self.session.locs
+        if not len(locs):
+            return
+        try:
+            x_name, y_name = axes.names(locs)
+        except KeyError:
+            return
+        zero = (not is_position(x_name), not is_position(y_name))
+        if any(zero) and self._kept is None:
+            first = self.session.layers[self.session.first_locs_layer()].state.settings
+            self._kept = (first.sigma, first.sigma_y)
+        for layer in self.session.layers:
+            if layer.is_image:
+                continue
+            settings = layer.state.settings
+            changes = {}
+            for i, name in enumerate(("sigma", "sigma_y")):
+                if zero[i]:
+                    changes[name] = 0.0
+                elif self._kept is not None and getattr(settings, name) == 0.0:
+                    changes[name] = self._kept[i]      # theirs, from before
+            if changes:
+                layer.state.settings = dataclasses.replace(settings, **changes)
+        if not any(zero):
+            self._kept = None
+
+    def _fit(self, *_) -> None:
+        """Scale both axes so their 1-99 % fills the picture."""
+        locs = self.session.locs
+        if not len(locs):
+            return
+        axes = self._chosen()
+        try:
+            names = dict(zip(("x", "y"), axes.names(locs)))
+        except KeyError:
+            return
+        names["z"] = axes.depth_name(locs)
+        ranges = {a: _quantile_range(locs, names[a]) for a in ("x", "y", "z")}
+        spans = {a: (r[1] - r[0]) if r else None for a, r in ranges.items()}
+        lateral = [spans[a] for a in ("x", "y") if spans[a]]
+        if not lateral:
+            return
+        # A position axis is left at one unit per nanometre.  It could be
+        # scaled like any other, and then an ROI drawn on the picture would be
+        # in tenths of a nanometre and a site somewhere else entirely: a
+        # picture of x against z is still a picture of a place, and the rest
+        # of the program is entitled to read it as one.
+        keep = {a: bool(names[a]) and is_position(names[a]) for a in ("x", "y", "z")}
+        # what one render unit is worth, taken from an axis that keeps its own
+        # scale so the two spans still land on one screen together
+        target = next((spans[a] for a in ("x", "y") if keep[a] and spans[a]), FIT_SPAN)
+        scales = {a: 1.0 if keep[a] else nice_below((spans[a] or target) / target)
+                  for a in ("x", "y", "z")}
+        if self.same.isChecked():
+            scales["y"] = scales["x"]
+        self._filling = True
+        for axis, value in scales.items():
+            self.scales[axis].set(value)
+        self._filling = False
+        frame = tuple(tuple(v / scales[a] for v in ranges[a]) for a in ("x", "y"))
+        self._set(dataclasses.replace(axes, x_scale=scales["x"], y_scale=scales["y"],
+                                      z_scale=scales["z"]), frame=frame)
+
+
+def _quantile_range(locs, name: Optional[str]):
+    """The 1-99 % of a column, which is what the picture should be filled by.
+
+    The extremes are not: one localization with a photon count a thousand
+    times the rest would leave the structure in a corner, and it is the same
+    reason the display saturates a quantile rather than the maximum.
+    """
+    if name is None or name not in locs:
+        return None
+    values = np.asarray(locs[name], np.float64)
+    values = values[np.isfinite(values)]
+    if values.size < 2:
+        return None
+    lo, hi = (float(v) for v in np.quantile(values, (0.01, 0.99)))
+    return (lo, hi) if hi > lo else None
 
 
 class RenderTab(QWidget):
@@ -629,8 +906,14 @@ class RenderTab(QWidget):
         more_form = QFormLayout(more)
         more_form.setContentsMargins(0, 0, 0, 0)
         more_form.setVerticalSpacing(2)
-        self.sigma = QDoubleSpinBox(minimum=0.1, maximum=1000, singleStep=1, decimals=1)
-        self.sigma.setToolTip("rendering sigma for mode 'gauss', in data units")
+        self.sigma = QDoubleSpinBox(minimum=0.0, maximum=1000, singleStep=1, decimals=1)
+        self.sigma.setToolTip("rendering sigma along x for mode 'gauss', in the "
+                              "units of that axis; 0 bins instead of blurring")
+        self.sigma_y = _Bound()
+        self.sigma_y.setToolTip("rendering sigma along y, in the units of that "
+                                "axis.  Empty is the same as x where the two "
+                                "axes are the same quantity, and 0 -- plain "
+                                "binning -- where they are not")
         self.gamma = QDoubleSpinBox(minimum=0.1, maximum=3, singleStep=0.1, decimals=2)
         self.factor = QDoubleSpinBox(minimum=0.05, maximum=5, singleStep=0.1, decimals=2)
         self.factor.setToolTip("rendering sigma = factor x localization precision "
@@ -641,12 +924,18 @@ class RenderTab(QWidget):
                               "red stays red, hot runs white through red and yellow "
                               "to black, and grey is black on white.  A property of "
                               "the picture, so it is set on every layer at once.")
-        more_form.addRow("sigma (gauss)", self.sigma)
+        more_form.addRow("sigma x (gauss)", self.sigma)
+        more_form.addRow("sigma y (gauss)", self.sigma_y)
         more_form.addRow("precision factor", self.factor)
         more_form.addRow("gamma", self.gamma)
         more_form.addRow("", self.white)
         form.addRow(CollapsibleSection("more", more, expanded=False))
         layout.addWidget(CollapsibleSection("display", display, expanded=True))
+        # last and closed: the ordinary picture is x against y, and this is
+        # what turns the renderer into SMAP's versatile one
+        self.axes = AxesSection(session, view)
+        self.axes.changed.connect(lambda: self._bind_layer(self.strip.current))
+        layout.addWidget(CollapsibleSection("axes", self.axes, expanded=False))
         layout.addStretch(1)
 
         self.strip.selected.connect(self._bind_layer)
@@ -654,6 +943,7 @@ class RenderTab(QWidget):
         self.filter.changed.connect(lambda: session.changed("layer"))
         self.mode.currentTextChanged.connect(self._on_render_settings)
         self.sigma.valueChanged.connect(self._on_render_settings)
+        self.sigma_y.editingFinished.connect(self._on_render_settings)
         self.factor.valueChanged.connect(self._on_render_settings)
         self.color.currentIndexChanged.connect(self._on_color)
         self.color_field.currentIndexChanged.connect(self._on_color)
@@ -666,6 +956,7 @@ class RenderTab(QWidget):
         self._appended = 0
         session.on_change(self._on_session)
         self._bind_layer(0)
+        self.axes.bind()
 
     @property
     def layer(self) -> Layer:
@@ -674,6 +965,7 @@ class RenderTab(QWidget):
     def _on_session(self, what: str) -> None:
         if what == "locs":
             self._bind_layer(self.strip.current)
+            self.axes.bind()
         elif what == "layers":
             self.strip.rebuild()
         elif what == "regrouped":
@@ -715,7 +1007,7 @@ class RenderTab(QWidget):
         """Point every control at one layer, without firing their signals."""
         layer = self.session.layers[index]
         self.filter.layer_index = index
-        widgets = (self.mode, self.sigma, self.factor, self.color, self.color_field,
+        widgets = (self.mode, self.sigma, self.sigma_y, self.factor, self.color, self.color_field,
                    self.lut, self.invert, self.white, self.contrast, self.gamma,
                    self.grouped,
                    self.image_pixelsize, self.image_x0, self.image_y0, self.image_frame)
@@ -755,6 +1047,7 @@ class RenderTab(QWidget):
         self.color_hi.set(hi)
         self.mode.setCurrentText(settings.mode)
         self.sigma.setValue(settings.sigma)
+        self.sigma_y.set(settings.sigma_y)
         self.factor.setValue(settings.sigma_settings.factor)
         self.lut.setCurrentText(display.lut if isinstance(display.lut, str) else "hot")
         self.invert.setChecked(display.invert)
@@ -768,8 +1061,13 @@ class RenderTab(QWidget):
     def _on_render_settings(self) -> None:
         state = self.layer.state
         sigmas = dataclasses.replace(state.settings.sigma_settings, factor=self.factor.value())
+        try:
+            sigma_y = self.sigma_y.value()
+        except ValueError:                       # half-typed; the old one stands
+            sigma_y = state.settings.sigma_y
         state.settings = dataclasses.replace(state.settings, mode=self.mode.currentText(),
-                                             sigma=self.sigma.value(), sigma_settings=sigmas)
+                                             sigma=self.sigma.value(), sigma_y=sigma_y,
+                                             sigma_settings=sigmas)
         self.session.changed("layer")
 
     def _on_color(self) -> None:

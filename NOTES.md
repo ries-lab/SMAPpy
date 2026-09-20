@@ -98,6 +98,62 @@ needs.  SMAP splits the same way (`renderSMAP` / `drawerSMAP`).
   `mingaussnm`, `mingausspix`, the cap at 10x the median) is kept, in
   `SigmaSettings`, because it is what makes precision-weighted images readable.
 
+### Any column against any other
+
+SMAP's `VersatileRenderer` is a plugin that copies the table, writes
+`x = field1/pixelsize1` and `y = field2/pixelsize2`, renders with
+`sr_pixrec = 1` and labels the axes -- photons against frame, a fit parameter
+against another, with the layers' own LUTs.  Here it is not a plugin but the
+renderer itself: `RenderAxes` on `RenderSettings` says which columns the two
+(or three) axes are and what to divide each by, and the default -- the table's
+own positions, unscaled -- is the picture everybody means and costs nothing.
+
+* **The division is the whole mechanism.**  Coordinates are the column over
+  that axis's scale, so the grid stays *square in render units* and the
+  anisotropy lives in the two scales.  The field of view, the zoom, the ROI
+  shapes, the projection and the GPU kernels are then unchanged and never have
+  to learn about aspect ratios.  It is SMAP's trick, kept.
+* **One set of axes for the picture, not one per layer**, since the layers are
+  composited onto one grid.  They live on each layer's `RenderSettings` all
+  the same -- as `white_background` does -- so a render outside a session
+  needs nothing else, and the GUI writes all the layers at once.
+* **A width per axis.**  The kernel always took `sigma_x` and `sigma_y`; only
+  the Python wrapper tied them together.  The localization precision blurs an
+  axis that *is* a position and nothing else -- a photon count has no
+  precision -- so each axis falls through to an explicit width, zero by
+  default, which bins along that axis.  Mode `gauss` is the explicit pair
+  everywhere.  An unset `sigma_y` follows x where the two axes are the same
+  quantity and is zero where they are not: 10 nm says nothing about photons.
+* **A position axis keeps its scale of 1.**  It could be fitted like any
+  other, and then an ROI drawn on a picture of x against z would be in tenths
+  of a nanometre and a site somewhere else entirely.  A picture of x against z
+  is still a picture of a place and the rest of the program may read it as one.
+* **The index is not used** while the axes are custom: it answers questions
+  about the table's positions, which is not where the picture is looking, so
+  the whole filtered table is rendered.  A versatile render is one picture of
+  everything rather than a pan over a field, which is the pass SMAP pays too.
+* **A scale bar per axis, in that axis's own quantity** ("20000 frame", "2000
+  photons"), because one bar in nanometres would be a lie about both.  In the
+  3D view it is the tripod that carries them: a rotated view mixes the axes,
+  so a bar across the screen is not a length in any of them while an arm is
+  its own axis, and each arm is a round number of its own units.
+* **A plot hangs the other way up.**  y increases upwards once the axes are
+  custom, as it does in SMAP (`axis xy`); a photon count growing downwards
+  reads as a lie.  A picture of a place keeps the image convention.
+* **Choosing the fields fits them.**  A frame number is in the tens of
+  thousands and at scale 1 the first render would be one bright pixel, so
+  picking a column scales it -- a round 1/2/5 -- and frames the view on its
+  1-99 %, padded, because a ring's brightest arcs sit just outside its own
+  99 %.  SMAP does the same from its field callback, with 0.1/99.9 %.
+* Not taken from the SMAP plugin: the `plot line` overlay (mean, median, std
+  of y binned along x).  It belongs to a measurement rather than to a
+  renderer, and there is no line to draw on a 3D box.
+* A rotated view has room for one width only, so `projected_settings` folds
+  the mapping into the projection: positions at one common scale keep the
+  precision with the scale folded into `SigmaSettings`, and mixed axes fall
+  back to the mean of the two explicit widths.  The ROI manager's site images
+  ignore the axes entirely -- a site is a place.
+
 **Filtering** (`LocFilter`) caches one boolean array per field and recomputes
 only the field that changed, which is what SMAP does and the reason interactive
 filtering is possible at all; the displayed set is an AND over a handful of
