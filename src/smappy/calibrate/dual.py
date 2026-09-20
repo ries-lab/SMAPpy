@@ -110,24 +110,40 @@ def robust_projective(source, target, threshold, minimum):
             best, best_error = good, error
     if best.sum() < minimum:
         raise ValueError(f'only {best.sum()} projective inliers; require {minimum}')
+    # Re-fit on the inliers until the inlier set stops moving.  Exact set
+    # equality is the right test for the tens of pairs a bead calibration has
+    # and the wrong one for the thousands a localization registration has: a
+    # handful of pairs always sit within noise of the threshold and flip every
+    # iteration, so the set never repeats however still the transformation is.
+    # Settle instead for a set that is no longer changing meaningfully, and if
+    # even that is not reached, hand back the last fit -- by then it has
+    # stopped moving, and the caller's own dx/dy screen is what decides
+    # whether the result is usable.
+    settled = max(1, int(0.002*len(source)))
     for _ in range(10):
         h = fit_projective(source[best], target[best])
         residual = np.linalg.norm(map_points(h, source)-target, axis=1)
         good = residual <= threshold
         if good.sum() < minimum:
             raise ValueError('too few pairs after projective refinement')
-        if np.array_equal(good, best):
-            return h, best, residual
+        churn = int(np.count_nonzero(good != best))
         best = good
-    raise ValueError('projective inlier refinement did not converge')
+        if churn <= settled:
+            return h, best, residual
+    return h, best, residual
 
 
-def refine_projective(source, target, initial, loss_scale):
+def refine_projective(source, target, initial, loss_scale, weights=None):
     """Minimize soft-L1 x/y reprojection errors in main-channel pixels.
 
     Optimize in centered/scaled coordinates for numerical stability, including
-    chip ROIs far from the origin. Weights express geometric robustness only,
-    not photon precision or PSF shape quality.
+    chip ROIs far from the origin.
+
+    ``weights`` are per-pair and multiply the residual, so passing the inverse
+    localization precision makes this an inverse-variance fit.  For beads they
+    are left out and the soft-L1 loss expresses geometric robustness alone;
+    for a registration built from localizations they are the difference
+    between a fit and a fit that believes its dimmest pairs.
     """
     def normalization(points):
         center = np.mean(points, axis=0)
@@ -146,8 +162,10 @@ def refine_projective(source, target, initial, loss_scale):
     h /= h[2, 2]
     def unpack(parameters):
         return np.r_[parameters, 1.].reshape(3, 3)
+    w = None if weights is None else np.sqrt(np.asarray(weights, float))[:, None]
     def residual(parameters):
-        return ((map_points(unpack(parameters), src)-dst)/nt[0, 0]).ravel()
+        error = (map_points(unpack(parameters), src)-dst)/nt[0, 0]
+        return (error if w is None else error*w).ravel()
     fitted = optimize.least_squares(residual, h.ravel()[:8], loss='soft_l1',
                  f_scale=loss_scale, x_scale='jac', max_nfev=500,
                  ftol=1e-10, xtol=1e-10, gtol=1e-10)
@@ -171,7 +189,7 @@ class ProjectiveFit:
     weights_xy: np.ndarray
 
 
-def fit_dual_transform(source, target, settings):
+def fit_dual_transform(source, target, settings, precision=None):
     """Two rounds: robust initialization, componentwise dx/dy screen and refit.
 
     The round-two training mask is determined by round-one residuals and stays
@@ -179,6 +197,9 @@ def fit_dual_transform(source, target, settings):
     """
     settings.validate()
     source, target = np.asarray(source, float), np.asarray(target, float)
+    precision = None if precision is None else np.asarray(precision, float)
+    # RANSAC stays unweighted: it is looking for the inlier set, and a precise
+    # outlier is still an outlier
     initial, coarse, _ = robust_projective(source, target,
                     settings.reprojection_threshold_px, settings.min_pairs)
     # Half the axis limit, as documented, but never below MIN_LOSS_SCALE_PX:
@@ -186,14 +207,17 @@ def fit_dual_transform(source, target, settings):
     # regime and the refinement stops converging, which would hide the real
     # cause -- an axis limit no pair can meet -- behind an optimizer failure.
     scale = max(settings.transform_axis_limit_px/2, MIN_LOSS_SCALE_PX)
-    initial = refine_projective(source[coarse], target[coarse], initial, scale)
+    initial = refine_projective(source[coarse], target[coarse], initial, scale,
+                                None if precision is None else precision[coarse])
     delta1 = map_points(initial, source)-target
     good = coarse & np.all(np.abs(delta1) <= settings.transform_axis_limit_px, axis=1)
     if good.sum() < settings.min_pairs:
         raise ValueError(f'only {good.sum()} pairs pass the dx/dy limit '
                          f'({settings.transform_axis_limit_px:g} px); require {settings.min_pairs}. '
                          'Inspect pairing/coverage or increase the transformation dx/dy limit.')
-    h = refine_projective(source[good], target[good], fit_projective(source[good], target[good]), scale)
+    h = refine_projective(source[good], target[good],
+                          fit_projective(source[good], target[good]), scale,
+                          None if precision is None else precision[good])
     delta = map_points(h, source)-target
     weights = np.zeros_like(delta)
     weights[good] = 1/np.sqrt(1+(delta[good]/scale)**2)
@@ -210,8 +234,162 @@ def point_coverage_area(points):
         return 0.
 
 
+def check_geometry(geometry, shape, roi=None):
+    """Check a later split frame against the geometry a transformation was found in.
+
+    Shared by every kind of channel registration: the question -- is this the
+    camera the transformation was measured on? -- does not depend on whether a
+    PSF model came with it.
+    """
+    shape = tuple(shape[-2:])
+    if geometry['coordinate_system'] == 'roi-local':
+        if shape != tuple(geometry['image_shape']):
+            raise ValueError('ROI-local calibration requires the original bead image dimensions')
+        if roi is not None:
+            known = [s['roi'] for s in geometry.get('sources', []) if s['roi'] is not None]
+            if known and any(tuple(r) != tuple(roi) for r in known):
+                raise ValueError('ROI differs from the ROI-local bead calibration')
+        warnings.warn('ROI-local calibration: identical shape cannot verify identical camera location.', stacklevel=3)
+    elif roi is None:
+        warnings.warn('Camera ROI is required to apply the full-chip transformation.', stacklevel=3)
+        raise ValueError('supply the target camera ROI before applying this transformation')
+    elif len(roi) != 4 or tuple(roi[2:]) != (shape[1], shape[0]):
+        raise ValueError('target ROI dimensions disagree with image dimensions')
+
+
+def polynomial_terms(points, order, centre, scale):
+    """Monomials of (x, y) up to `order`, in normalised coordinates.
+
+    Normalised because the raw ones are chip pixels in the hundreds, and a
+    cube of that is 10^8 against a constant term of 1 -- a design matrix no
+    least-squares solve should be handed.
+    """
+    u, v = ((np.asarray(points, float) - centre)/scale).T
+    return np.stack([u**i * v**(k-i) for k in range(order+1) for i in range(k+1)],
+                    axis=1)
+
+
+def n_polynomial_terms(order):
+    return (order+1)*(order+2)//2
+
+
 @dataclass
-class DualColorCalibration:
+class Polynomial:
+    """A bivariate polynomial map between the channels, fitted both ways.
+
+    A projective map cannot represent radial distortion.  That distortion is
+    by definition ``r' = r(1 + k1 r^2 + ...)``, which in components is
+
+        u' = u(1 + k1(u^2 + v^2)) = u + k1(u^3 + u v^2)
+
+    -- the leading term is *cubic*.  A quadratic polynomial spans no cubic
+    monomial at all and so cannot describe it to any degree, which is why the
+    order here is three and there is no option for two: measured on a
+    distorted field, order two is indistinguishable from projective and order
+    three is thirty times better.
+
+    Both directions are fitted and stored, because a polynomial has no
+    closed-form inverse.  They are therefore not exact inverses of each other;
+    over the region they were fitted on the disagreement is far below the
+    registration accuracy, and outside it neither is to be trusted anyway.
+    """
+    order: int
+    forward_centre: np.ndarray       # secondary -> reference
+    forward_scale: float
+    forward_coef: np.ndarray         # (terms, 2)
+    inverse_centre: np.ndarray       # reference -> secondary
+    inverse_scale: float
+    inverse_coef: np.ndarray
+
+    def forward(self, points):
+        return polynomial_terms(points, self.order, self.forward_centre,
+                                self.forward_scale) @ self.forward_coef
+
+    def _seed(self, points):
+        return polynomial_terms(points, self.order, self.inverse_centre,
+                                self.inverse_scale) @ self.inverse_coef
+
+    def inverse(self, points, refine=2):
+        """The reverse map, seeded by the fitted coefficients and then solved.
+
+        Fitting a cubic to the inverse of a cubic is not exact -- on a field
+        distorted by five per cent it is half a pixel out -- and half a pixel
+        is not affordable here: this map places the partner ROI, and whatever
+        it gets wrong goes into the fitter's link as if it were real.  So the
+        fitted inverse is only a starting point, and a couple of Newton steps
+        against the forward map take it to machine precision.
+
+        The steps need the forward map to be locally invertible, which it is
+        wherever it means anything.  Where it is not -- far outside the pairs,
+        where a cubic folds over -- the step is dropped and the fitted seed
+        stands, since nothing out there is trustworthy either way.
+        """
+        points = np.asarray(points, float)
+        q = self._seed(points)
+        step = 1e-3
+        for _ in range(max(int(refine), 0)):
+            f0 = self.forward(q)
+            jx = (self.forward(q + [step, 0]) - f0)/step
+            jy = (self.forward(q + [0, step]) - f0)/step
+            det = jx[:, 0]*jy[:, 1] - jy[:, 0]*jx[:, 1]
+            ok = np.abs(det) > 1e-12
+            if not ok.any():
+                break
+            r = f0 - points
+            dq = np.zeros_like(q)
+            dq[ok, 0] = ( jy[ok, 1]*r[ok, 0] - jy[ok, 0]*r[ok, 1])/det[ok]
+            dq[ok, 1] = (-jx[ok, 1]*r[ok, 0] + jx[ok, 0]*r[ok, 1])/det[ok]
+            q = q - dq
+        return q
+
+
+class _Mapping:
+    """Both directions between the channels, whatever describes them.
+
+    `dualfit` asks only these two questions, so that adding a model here costs
+    nothing there: `combine_peaks` used to invert a 3x3 itself, which quietly
+    made the projective map the only one possible.
+    """
+
+    def to_reference(self, secondary_xy):
+        if getattr(self, 'polynomial', None) is not None:
+            return self.polynomial.forward(secondary_xy)
+        return map_points(self.transformation, secondary_xy)
+
+    def to_secondary(self, reference_xy):
+        if getattr(self, 'polynomial', None) is not None:
+            return self.polynomial.inverse(reference_xy)
+        return map_points(np.linalg.inv(self.transformation), reference_xy)
+
+    def transform(self, secondary_xy):
+        return self.to_reference(secondary_xy)
+
+
+@dataclass
+class ChannelTransform(_Mapping):
+    """Where the second channel is, and nothing else.
+
+    A projective map from secondary to reference chip coordinates, with the
+    split-frame geometry it applies to.  `DualColorCalibration` is this plus a
+    PSF model per channel; a 2D two-colour fit needs only this much, which is
+    why it can be measured from localizations (`smappy.calibrate.transform`)
+    instead of from beads.
+    """
+    transformation: np.ndarray       # always present: the projective fit, and
+    geometry: dict                   # the starting point of any better one
+    parameters: dict
+    polynomial: Optional[Polynomial] = None
+
+    @property
+    def model(self) -> str:
+        return 'polynomial' if self.polynomial is not None else 'projective'
+
+    def validate_image(self, shape, roi=None):
+        check_geometry(self.geometry, shape, roi)
+
+
+@dataclass
+class DualColorCalibration(_Mapping):
     main: SplineCalibration
     secondary: SplineCalibration
     transformation: np.ndarray
@@ -229,25 +407,13 @@ class DualColorCalibration:
     def z_index_to_nm(self, index):
         return self.main.z_index_to_nm(index)
 
-    def transform(self, secondary_xy):
-        return map_points(self.transformation, secondary_xy)
+    def as_transform(self):
+        """Just the registration, for a fit that brings its own PSF model."""
+        return ChannelTransform(self.transformation, self.geometry, self.parameters)
 
     def validate_image(self, shape, roi=None):
         """Check a later split frame before applying this calibration."""
-        shape = tuple(shape[-2:])
-        if self.geometry['coordinate_system'] == 'roi-local':
-            if shape != tuple(self.geometry['image_shape']):
-                raise ValueError('ROI-local calibration requires the original bead image dimensions')
-            if roi is not None:
-                known = [s['roi'] for s in self.geometry['sources'] if s['roi'] is not None]
-                if known and any(tuple(r) != tuple(roi) for r in known):
-                    raise ValueError('ROI differs from the ROI-local bead calibration')
-            warnings.warn('ROI-local calibration: identical shape cannot verify identical camera location.', stacklevel=2)
-        elif roi is None:
-            warnings.warn('Camera ROI is required to apply the full-chip transformation.', stacklevel=2)
-            raise ValueError('supply the target camera ROI before applying this transformation')
-        elif len(roi) != 4 or tuple(roi[2:]) != (shape[1], shape[0]):
-            raise ValueError('target ROI dimensions disagree with image dimensions')
+        check_geometry(self.geometry, shape, roi)
 
 
 @dataclass
