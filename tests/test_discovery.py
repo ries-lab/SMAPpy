@@ -240,6 +240,7 @@ def test_refs_and_tree_do_not_import_but_available_does():
         "Analysis/Drift/COMET", "Analysis/Drift/RCC",
         "Analysis/Dual-Color/AssignColors",
         "Analysis/Measure/Line Profile",
+        "Analysis/Measure/Localization Precision",
         "Analysis/Measure/Localization Statistics",
         "Analysis/Process/History", "Analysis/Process/Math Parser",
         "Analysis/Process/Remove Localizations",

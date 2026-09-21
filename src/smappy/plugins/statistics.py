@@ -144,12 +144,20 @@ def photon_decay(photons, start: float = 0.0) -> Dict[str, float]:
             "median": float(np.median(values)) if len(values) else float("nan")}
 
 
-def precision_model(precision) -> Dict[str, float]:
+def precision_model(precision, low: Optional[float] = None,
+                    high: Optional[float] = None) -> Dict[str, float]:
     """``sigma_c`` of ``p(sigma) = 2a/sigma^3 exp(-a/sigma^2)``, and its landmarks.
 
     The substitution ``y = 1/sigma^2`` turns the model into an exponential in
     ``y`` with mean ``1/a`` -- ``y`` *is* ``N/S^2`` -- so the photon estimator
     above fits it, the trimming cut included.
+
+    ``low`` and ``high`` are where the sample was cut, when that is known from
+    outside -- a filter on the precision column, say.  The likelihood is
+    truncated there, so the fit describes the whole distribution rather than
+    the part that survived; left out, the cut is taken from the data itself
+    (the trimmed percentiles), which is the same thing whenever the filter is
+    what removed the tails.
     """
     values = np.asarray(precision, dtype=float)
     values = values[np.isfinite(values) & (values > 0)]
@@ -160,7 +168,11 @@ def precision_model(precision) -> Dict[str, float]:
         out.update(sigma_c=float("nan"), max=float("nan"), rising=float("nan"),
                    low=float("nan"), high=float("nan"))
         return out
-    low, high = np.percentile(values, (TRIM_PERCENT, 100 - TRIM_PERCENT))
+    trimmed = np.percentile(values, (TRIM_PERCENT, 100 - TRIM_PERCENT))
+    low = float(trimmed[0]) if low is None else float(low)
+    high = float(trimmed[1]) if high is None else float(high)
+    if not high > low > 0:
+        low, high = float(trimmed[0]), float(trimmed[1])
     y = 1.0 / values ** 2
     mean_y = exponential_mean(y, lo=1.0 / high ** 2, hi=1.0 / low ** 2)
     a = 1.0 / mean_y if mean_y > 0 else float("nan")
