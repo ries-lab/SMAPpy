@@ -15,8 +15,13 @@ twice the variance of one localization and nothing else -- no knowledge of the
 PSF, no assumption about photons.  This is NeNA (Endesfelder et al., *Histochem
 Cell Biol* 2014).
 
-**FRC** measures the picture rather than the localizations, and is a separate
-step (it belongs here, as a third method, and is not implemented yet).
+**FRC** measures the picture rather than the localizations: it splits the
+acquisition in two, renders both halves and asks up to which spatial frequency
+they still agree.  That folds in the labeling density, the drift and the noise
+of a thin dataset as well as the precision, so it answers "what can be seen"
+rather than "how well was this molecule placed" -- and it is drawn against the
+blur the measured precision implies, which says which of the two is in the
+way.  `smappy.frc` has the recipe and how to read it.
 
 ## The number NeNA reports is not the precision of a typical localization
 
@@ -170,6 +175,8 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
+from ..frc import (FRC, THRESHOLD as THRESHOLD_LINE, blur_envelope,
+                   envelope_resolution, frc_resolution)
 from ..locs import Localizations
 from . import Context, Plot, Plugin, Result, param, register
 from .statistics import (MIN_FOR_FIT, PRECISION_FIELDS, PRECISION_Z_FIELDS,
@@ -635,6 +642,7 @@ class Measurement:
     gap_line: Dict[str, float] = field(default_factory=dict)
     displacements: Dict[int, Displacements] = field(default_factory=dict)
     crlb: Dict[str, Dict[str, float]] = field(default_factory=dict)
+    frc: Optional[FRC] = None
     photons: Dict[str, float] = field(default_factory=dict)
     notes: List[str] = field(default_factory=list)
 
@@ -661,7 +669,9 @@ def median_precision(locs: Localizations, names: Sequence[str] = PRECISION_FIELD
 
 def measure(locs: Localizations, name: str = "", reach: float = 0.0,
             reach_z: float = 0.0, max_gap: int = 5, pairwise: bool = True,
-            crlb: bool = True, bounds: Optional[Dict[str, Tuple]] = None,
+            crlb: bool = True, frc: bool = False, frc_pixel: float = 0.0,
+            frc_blocks: int = 20, frc_repeats: int = 5,
+            bounds: Optional[Dict[str, Tuple]] = None,
             max_frame_pairs: int = 20000, max_pairs: int = 2_000_000,
             seed: int = 0, report=None) -> Measurement:
     """Both measurements over one table: the displacements and the CRLB.
@@ -676,6 +686,10 @@ def measure(locs: Localizations, name: str = "", reach: float = 0.0,
 
     if crlb:
         out.crlb = crlb_statistics(locs, bounds)
+    if frc:
+        out.frc = _frc_of(locs, frc_pixel, frc_blocks, frc_repeats, seed, report)
+        if out.frc is not None and out.frc.message:
+            out.notes.append(f"FRC: {out.frc.message}")
     if not pairwise:
         return out
 
@@ -776,6 +790,20 @@ def sigma_at_photons(fit: Optional[Fit], photons: float) -> float:
     return float(np.sqrt(fit.amplitude / photons))
 
 
+def _frc_of(locs: Localizations, pixel: float, blocks: int, repeats: int,
+            seed: int, report) -> Optional[FRC]:
+    """The FRC of this table, or None when it has nothing to render."""
+    x_name = first_present(locs, ("x_nm", "x_pix"))
+    y_name = first_present(locs, ("y_nm", "y_pix"))
+    if x_name is None or y_name is None or "frame" not in locs:
+        return None
+    return frc_resolution(np.asarray(locs[x_name], dtype=float),
+                          np.asarray(locs[y_name], dtype=float),
+                          np.asarray(locs["frame"]), pixelsize=pixel,
+                          n_blocks=blocks, repeats=repeats, seed=seed,
+                          report=report)
+
+
 def crlb_statistics(locs: Localizations, bounds: Optional[Dict[str, Tuple]] = None
                     ) -> Dict[str, Dict[str, float]]:
     """The fitted precision distribution, lateral and axial, with its cut.
@@ -873,6 +901,19 @@ def summary(found: Sequence[Measurement]) -> str:
                          f"{scaled.kappa_error:.2f} x the bound these pairs "
                          f"claimed ({scaled.crlb:.2f} nm): the fit and the "
                          "photon calibration together")
+        curve = measurement.frc
+        if curve is not None and curve.ok:
+            lines.append(f"  FRC       {curve.resolution:.1f} +/- "
+                         f"{curve.error:.1f} nm at 1/7, over "
+                         f"{curve.repeats} split(s) of {curve.n_blocks} blocks, "
+                         f"{curve.pixelsize:.1f} nm pixels")
+            sigma = (measurement.radial.sigma
+                     if measurement.radial is not None and measurement.radial.ok
+                     else float("nan"))
+            if np.isfinite(sigma):
+                lines.append(f"            the blur of {sigma:.2f} nm alone "
+                             f"crosses 1/7 at {envelope_resolution(sigma):.1f} nm "
+                             "-- read the curves, not the ratio")
         line = measurement.gap_line
         if line and np.isfinite(line.get("sigma0", np.nan)) and line.get("n", 0) > 1:
             lines.append(f"  gap -> 0  sigma = {line['sigma0']:.2f} nm, "
@@ -887,6 +928,19 @@ def summary(found: Sequence[Measurement]) -> str:
 # -------------------------------------------------------------------- drawing
 
 COLORS = ("#1f77b4", "#d62728")          # one per source, in the order given
+
+
+def panel_axes(target, n: int):
+    """``n`` axes, from a figure or from the single axis of a one-panel plot.
+
+    A `Plot` is handed the figure when it declares more than one panel and an
+    axis when it declares one, and how many panels these draw depends on the
+    data -- a table with no z has one axis fewer.  Asking what we were given is
+    shorter than making every caller count first.
+    """
+    if hasattr(target, "subplots"):
+        return list(target.subplots(n, 1, squeeze=False).ravel())
+    return [target]
 
 
 def averaged_density(x, fit: Fit, d_max: float, variance: np.ndarray,
@@ -965,8 +1019,7 @@ def draw_axes(figure, found: Sequence[Measurement], bins: int = 80) -> None:
                 names.append(axis)
     if not names:
         names = ["x"]
-    for ax, axis in zip(figure.subplots(len(names), 1, squeeze=False).ravel(),
-                        names):
+    for ax, axis in zip(panel_axes(figure, len(names)), names):
         titles = []
         for index, measurement in enumerate(found):
             fit, pairs = measurement.axes.get(axis), measurement.first_gap
@@ -1043,7 +1096,7 @@ def draw_crlb(figure, found: Sequence[Measurement], bins: int = 80) -> None:
             if any(key in measurement.crlb for measurement in found)]
     if not keys:
         keys = ["lateral"]
-    for ax, key in zip(figure.subplots(len(keys), 1, squeeze=False).ravel(), keys):
+    for ax, key in zip(panel_axes(figure, len(keys)), keys):
         titles = []
         for index, measurement in enumerate(found):
             stats = measurement.crlb.get(key)
@@ -1076,6 +1129,42 @@ def draw_crlb(figure, found: Sequence[Measurement], bins: int = 80) -> None:
                      fontsize=7.5, color="0.25")
 
 
+def draw_frc(ax, found: Sequence[Measurement]) -> None:
+    """The FRC curves, the threshold, and the blur the precision implies."""
+    titles = []
+    for index, measurement in enumerate(found):
+        curve = measurement.frc
+        if curve is None or not len(curve.curve):
+            continue
+        color = COLORS[index % len(COLORS)]
+        ax.plot(curve.q, curve.curve, color=color, linewidth=0.7, alpha=0.45)
+        ax.plot(curve.q, curve.smoothed, color=color, linewidth=1.5,
+                label=measurement.name)
+        if curve.ok:
+            ax.axvline(1.0 / curve.resolution, color=color, linewidth=0.9,
+                       linestyle=":")
+            titles.append(f"{measurement.name}: {curve.resolution:.1f} +/- "
+                          f"{curve.error:.1f} nm")
+        fit = measurement.radial
+        if fit is not None and fit.ok:
+            # not a fit to the data: what the measured precision alone leaves
+            # correlated at each frequency, which the curve is read against
+            ax.plot(curve.q, blur_envelope(curve.q, fit.sigma), color=color,
+                    linewidth=1.0, linestyle="--",
+                    label=f"{measurement.name}: blur of {fit.sigma:.1f} nm")
+    ax.axhline(THRESHOLD_LINE, color="0.35", linewidth=0.9)
+    ax.text(0.99, THRESHOLD_LINE, " 1/7", transform=ax.get_yaxis_transform(),
+            ha="right", va="bottom", fontsize=7, color="0.35")
+    ax.axhline(0.0, color="0.75", linewidth=0.6)
+    ax.set_xlabel("spatial frequency (1/nm)")
+    ax.set_ylabel("FRC")
+    ax.set_ylim(-0.2, 1.05)
+    ax.set_xlim(left=0)
+    ax.legend(fontsize=6.5, frameon=False)
+    ax.set_title("   ".join(titles) if titles else "no FRC", fontsize=7.5,
+                 color="0.25")
+
+
 # ----------------------------------------------------------------- the plugin
 
 @dataclass
@@ -1091,6 +1180,9 @@ class PrecisionSettings:
                                 "localized in more than one frame")
     crlb: bool = param(True, label="CRLB histogram",
                        help="what the fitter expected, from the photons")
+    frc: bool = param(True, label="FRC resolution",
+                      help="what the picture resolves: the localization error, "
+                           "the labeling density and the drift together")
     max_gap: int = param(5, label="frame gaps to", min=1, max=50,
                          help="the fit is repeated at every gap up to this: "
                               "flat means nothing moved between frames")
@@ -1100,6 +1192,17 @@ class PrecisionSettings:
                               advanced=True,
                               help=f"3D data only.  0: {REACH_Z:g} x the median "
                                    "axial precision")
+    frc_blocks: int = param(20, label="FRC blocks", min=2, advanced=True,
+                            help="the acquisition is cut into this many "
+                                 "stretches of frames before the two halves "
+                                 "are dealt, so that a blink stays whole")
+    frc_repeats: int = param(5, label="FRC splits", min=1, max=50, advanced=True,
+                             help="the curves of this many random deals are "
+                                  "averaged, and their spread is the error bar")
+    frc_pixel_nm: float = param(0.0, label="FRC pixel", unit="nm", min=0.0,
+                                advanced=True,
+                                help="0: measured roughly first, then at a "
+                                     "fifth of that resolution")
     bins: int = param(80, label="bins", min=10, advanced=True,
                       help="drawing only: every fit is on the displacements")
     max_frame_pairs: int = param(20000, label="frames per gap", min=100,
@@ -1121,7 +1224,7 @@ class LocalizationPrecision(Plugin):
     version = "1"
 
     def run(self, ctx: Context, settings: PrecisionSettings) -> Result:
-        if not settings.pairwise and not settings.crlb:
+        if not (settings.pairwise or settings.crlb or settings.frc):
             raise ValueError("nothing to measure: tick a method")
         sources: List[Tuple[str, Localizations, bool]] = []
         everything = len(ctx.selection) == len(ctx.locs)
@@ -1142,6 +1245,8 @@ class LocalizationPrecision(Plugin):
                 locs, name=name, reach=settings.reach_nm,
                 reach_z=settings.reach_z_nm, max_gap=settings.max_gap,
                 pairwise=settings.pairwise, crlb=settings.crlb,
+                frc=settings.frc, frc_pixel=settings.frc_pixel_nm,
+                frc_blocks=settings.frc_blocks, frc_repeats=settings.frc_repeats,
                 bounds=bounds if filtered else {},
                 max_frame_pairs=settings.max_frame_pairs,
                 max_pairs=settings.max_pairs, seed=settings.seed,
@@ -1156,6 +1261,10 @@ class LocalizationPrecision(Plugin):
             if settings.max_gap > 1:
                 plots["frame gap"] = Plot(draw=lambda ax: draw_gaps(ax, found),
                                           size=(5.5, 3.4))
+        if settings.frc and any(m.frc is not None and len(m.frc.curve)
+                                for m in found):
+            plots["FRC"] = Plot(draw=lambda ax: draw_frc(ax, found),
+                                size=(5.5, 3.4))
         if settings.crlb and any(m.crlb for m in found):
             plots["CRLB"] = Plot(
                 draw=lambda figure: draw_crlb(figure, found, settings.bins),
@@ -1174,6 +1283,8 @@ class LocalizationPrecision(Plugin):
                                    else float("nan")) for m in found},
                 "kappa": {m.name: (m.scaled.kappa if m.scaled and m.scaled.ok
                                    else float("nan")) for m in found},
+                "resolution": {m.name: (m.frc.resolution if m.frc and m.frc.ok
+                                        else float("nan")) for m in found},
                 "amplitude": {m.name: (m.photon_law.amplitude
                                        if m.photon_law and m.photon_law.ok
                                        else float("nan")) for m in found}}
@@ -1206,6 +1317,10 @@ class LocalizationPrecision(Plugin):
                 entry.update(kappa=measurement.scaled.kappa,
                              kappa_error=measurement.scaled.kappa_error,
                              crlb_of_pairs=measurement.scaled.crlb)
+            if measurement.frc is not None and measurement.frc.ok:
+                entry.update(frc_resolution=measurement.frc.resolution,
+                             frc_error=measurement.frc.error,
+                             frc_pixelsize=measurement.frc.pixelsize)
             entry["crlb"] = {
                 key: {name: value for name, value in stats.items()
                       if isinstance(value, (int, float, str, bool))}
