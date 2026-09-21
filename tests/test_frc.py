@@ -2,9 +2,9 @@
 import numpy as np
 import pytest
 
-from smappy.frc import (blur_envelope, envelope_resolution, frc_curve,
-                        frc_resolution, resolution_from_curve, taper,
-                        time_blocks)
+from smappy.frc import (blur_envelope, envelope_resolution, fpc_resolution,
+                        frc_curve, frc_resolution, resolution_from_curve,
+                        taper, time_blocks)
 
 
 def picture(sigma=8.0, n_emitters=20000, repeats=20, extent=10000.0,
@@ -161,3 +161,51 @@ def test_the_blur_envelope_crosses_the_threshold_where_it_should():
     sigma = 10.0
     q = 1.0 / envelope_resolution(sigma)
     assert blur_envelope(q, sigma) == pytest.approx(1 / 7)
+
+
+# ------------------------------------------------ the planes, for 3D anisotropy
+
+def volume_picture(sigma=8.0, sigma_z=None, n_emitters=20000, repeats=20,
+                   extent=4000.0, depth=600.0, n_frames=2000, seed=1):
+    """`picture` with a third dimension, and its own error along it."""
+    rng = np.random.default_rng(seed)
+    truth = np.column_stack([rng.uniform(0, extent, n_emitters),
+                             rng.uniform(0, extent, n_emitters),
+                             rng.uniform(0, depth, n_emitters)])
+    which = np.repeat(np.arange(n_emitters), repeats)
+    frame = rng.integers(0, n_frames, len(which))
+    spread = np.array([sigma, sigma, sigma_z if sigma_z else sigma])
+    xyz = truth[which] + rng.normal(0, 1, (len(which), 3)) * spread
+    return xyz[:, 0], xyz[:, 1], xyz[:, 2], frame
+
+
+def test_the_planes_find_the_same_resolution_along_every_axis_when_it_is_isotropic():
+    out = fpc_resolution(*volume_picture(sigma=8.0), repeats=2)
+    assert out.ok
+    resolutions = [out.axes[name].resolution for name in "xyz"]
+    assert max(resolutions) < 1.25 * min(resolutions)
+    assert out.anisotropy == pytest.approx(1.0, abs=0.25)
+
+
+def test_the_planes_measure_the_axial_resolution_separately_from_the_lateral():
+    # the axial error is three times the lateral, and that is what comes back:
+    # a shell would have averaged the two into a number describing neither
+    out = fpc_resolution(*volume_picture(sigma=8.0, sigma_z=24.0), repeats=2)
+    assert out.anisotropy == pytest.approx(3.0, rel=0.25)
+    assert out.axes["x"].resolution == pytest.approx(out.axes["y"].resolution,
+                                                     rel=0.1)
+    assert out.axes["z"].resolution > 2 * out.axes["x"].resolution
+
+
+def test_the_axial_sampling_follows_the_axial_resolution_and_not_the_lateral():
+    # left to 2.5 x the lateral voxel, a sharply resolved z would be measured
+    # at its own sampling; the coarse pass is there to stop that
+    out = fpc_resolution(*volume_picture(sigma=8.0), repeats=1)
+    assert out.axes["z"].resolution > 3 * out.voxel[2]
+    assert not out.axes["z"].message
+
+
+def test_a_volume_with_no_depth_says_so_rather_than_dividing_by_zero():
+    x, y, z, frame = volume_picture()
+    out = fpc_resolution(x, y, np.zeros_like(z), frame, repeats=1)
+    assert not out.ok and "extent" in out.message

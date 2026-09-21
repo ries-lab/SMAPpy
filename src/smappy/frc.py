@@ -105,14 +105,48 @@ nothing from the camera calibration.)
 * The reference clips the brightest pixels (a quantile at 0.9999) before the
   transform.  That is a rendering habit -- it keeps a fiducial bead from
   dominating a picture -- and it changes the spectrum, so it is not done here.
-* 3D data is projected along z.  A slab deeper than the resolution blurs its
-  own picture, so cut a slab before asking, and read the answer as the
-  resolution of that projection.
+* The ring correlation projects 3D data along z, so a slab deeper than the
+  resolution blurs its own picture; cut a slab first, or use the planes below.
+
+## The third dimension: planes, not shells
+
+For 3D the reference paper does *not* use an isotropic Fourier shell.  It uses
+the **Fourier Plane Correlation**: the correlation over the plane of Fourier
+space perpendicular to one axis, which gives the resolution along that axis and
+no other.  The reason is the one that matters in 3D localization microscopy --
+the axial resolution is two to six times the lateral, and a shell averages them
+into a number that describes no direction at all.  On simulated data the ratio
+this returns is the ratio of the precisions it was given (1.0, 3.1 and 6.2 for
+sigma_z / sigma_xy of 1, 3.1 and 6.25), which is the check that the planes
+measure what they claim.
+
+`fpc_resolution` does it, and it is a different cost: a volume rather than an
+image, so the field of view has to fit in one transform.  The voxel is
+anisotropic on purpose -- no axis is compared with another here, so lateral and
+axial sampling each follow what they measure -- and both the lateral and the
+axial voxel are found by measuring once on a coarse grid and coming back at a
+fifth of what that saw.  Where a whole field of view will not fit, the run says
+so and asks for a ROI; a few micrometres across is what this is for.
+
+One number will look wrong at first: the per-axis lateral resolution is worse
+than the ring correlation's, often by a factor of two.  Both are right.  The
+ring correlation works on the projection, where every localization in the slab
+lands in one pixel and the counting noise is small; the planes work on the
+volume, where the same localizations are spread over fifty layers and each
+lateral frequency is measured with a fiftieth of them.  The projection is the
+resolution of the picture that is drawn; the planes are the resolution of the
+volume that is measured, and they are the ones to quote for anything read in
+three dimensions.
+
+Others have gone the isotropic-shell way for 3D SMLM -- particle-fusion work
+reports FSC resolutions on fused 3D volumes, where the averaged particle *is*
+isotropic and a shell is the right question.  For one recorded volume with an
+astigmatic or a bifocal PSF it is not.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 import numpy as np
 
@@ -127,6 +161,13 @@ DEFAULT_BLOCKS = 20
 DEFAULT_PIXELS = 1024
 MAX_PIXELS = 4096
 MIN_LOCS = 1000                    # below this the curve is noise
+# the 3D grid, which is what does not fit: a complex64 transform of this many
+# voxels is 200 MB, and the plane sums need three arrays beside it
+MAX_VOXELS = 24_000_000
+# the grid the axial voxel is guessed on, per axis
+ROUGH_VOXELS = 128
+# below this many voxels per resolution element the answer is the sampling
+MIN_VOXELS_PER_RESOLUTION = 3.0
 
 
 @dataclass
@@ -416,4 +457,202 @@ def frc_resolution(x, y, frame, pixelsize: float = 0.0,
     if len(singles) >= 3:
         # what splitting the same data again would have given
         out.error = float(np.std(singles, ddof=1))
+    return out
+
+
+# ------------------------------------------------- the third dimension: planes
+
+@dataclass
+class FPC:
+    """The resolution along each axis separately, from planes instead of rings."""
+    axes: Dict[str, FRC] = field(default_factory=dict)
+    voxel: Tuple[float, float, float] = (0.0, 0.0, 0.0)
+    shape: Tuple[int, int, int] = (0, 0, 0)
+    repeats: int = 1
+    n_locs: Tuple[int, int] = (0, 0)
+    message: str = ""
+
+    @property
+    def ok(self) -> bool:
+        return any(curve.ok for curve in self.axes.values())
+
+    @property
+    def anisotropy(self) -> float:
+        """How much worse the axial resolution is than the lateral."""
+        lateral = [self.axes[name].resolution for name in ("x", "y")
+                   if name in self.axes and self.axes[name].ok]
+        axial = self.axes.get("z")
+        if not lateral or axial is None or not axial.ok:
+            return float("nan")
+        return float(axial.resolution / np.mean(lateral))
+
+
+def _taper_volume(volume: np.ndarray, alpha: float = TAPER) -> np.ndarray:
+    """The Tukey window on each axis, applied in place along each in turn.
+
+    The outer product would be a fourth array the size of the volume, and the
+    volume is the thing that does not fit.
+    """
+    from scipy.signal.windows import tukey
+
+    for axis, length in enumerate(volume.shape):
+        shape = [1, 1, 1]
+        shape[axis] = length
+        volume *= tukey(length, alpha).astype(volume.dtype).reshape(shape)
+    return volume
+
+
+def plane_curves(first: np.ndarray, second: np.ndarray) -> Dict[str, np.ndarray]:
+    """The correlation of two volumes over planes perpendicular to each axis.
+
+    This is the Fourier Plane Correlation of Nieuwenhuizen et al., which is
+    what that paper uses for 3D rather than an isotropic shell -- and rightly:
+    a shell averages the lateral and the axial directions together, and in
+    3D localization microscopy those differ by a factor of two to four, so the
+    one number a shell returns describes no direction at all.  A plane
+    perpendicular to z holds every lateral frequency at one axial frequency,
+    so its correlation is the axial resolution and nothing else.
+
+    The two halves of each axis are folded together: a real image has a
+    Hermitian transform, so they carry the same information twice.
+    """
+    from scipy.fft import fftn, fftshift
+
+    a = fftshift(fftn(_taper_volume(first), workers=-1))
+    b = fftshift(fftn(_taper_volume(second), workers=-1))
+    numerator = np.real(a * np.conj(b))
+    power_a, power_b = np.abs(a) ** 2, np.abs(b) ** 2
+    del a, b
+
+    out: Dict[str, np.ndarray] = {}
+    for axis, name in enumerate("xyz"):
+        others = tuple(k for k in range(3) if k != axis)
+        denominator = np.sqrt(power_a.sum(axis=others) * power_b.sum(axis=others))
+        curve = np.divide(numerator.sum(axis=others), denominator,
+                          out=np.zeros(first.shape[axis]), where=denominator > 0)
+        centre = first.shape[axis] // 2
+        up, down = curve[centre:], curve[:centre + 1][::-1]
+        length = min(len(up), len(down))
+        out[name] = np.clip(0.5 * (up[:length] + down[:length]), -1.0, 1.0)
+    return out
+
+
+def _volume(x, y, z, low, voxel, shape) -> np.ndarray:
+    """Count localizations per voxel, as `render_histogram` does per pixel."""
+    index = np.column_stack([((x - low[0]) / voxel[0]).astype(np.int64),
+                             ((y - low[1]) / voxel[1]).astype(np.int64),
+                             ((z - low[2]) / voxel[2]).astype(np.int64)])
+    inside = np.all((index >= 0) & (index < np.asarray(shape)), axis=1)
+    flat = np.ravel_multi_index(index[inside].T, shape)
+    return np.bincount(flat, minlength=int(np.prod(shape))
+                       ).reshape(shape).astype(np.float32)
+
+
+def fpc_resolution(x, y, z, frame, pixelsize: float = 0.0, z_pixelsize: float = 0.0,
+                   n_blocks: int = DEFAULT_BLOCKS, repeats: int = 3, seed: int = 0,
+                   max_voxels: int = MAX_VOXELS, threshold: float = THRESHOLD,
+                   report=None) -> FPC:
+    """The resolution along x, y and z, each from its own plane correlation.
+
+    The voxel is anisotropic on purpose: no axis is ever compared with another
+    here, so the lateral and axial sampling can each follow what they are
+    measuring, and a field of view that is fifty micrometres wide and half a
+    micrometre deep still fits in a volume that can be transformed.  The
+    lateral voxel is found the way the 2D run finds its pixel (a coarse pass,
+    then a fifth of what it saw); the axial one starts at two and a half times
+    that, which is the usual ratio of an astigmatic PSF, and both grow together
+    if the volume would otherwise be too large to transform.
+    """
+    from scipy.fft import next_fast_len
+
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    z = np.asarray(z, dtype=float)
+    out = FPC()
+    if len(x) < MIN_LOCS:
+        out.message = f"{len(x)} localizations: too few for a plane correlation"
+        return out
+    low = np.array([x.min(), y.min(), z.min()])
+    span = np.array([x.max(), y.max(), z.max()]) - low
+    if not np.all(span > 0):
+        out.message = "the localizations have no extent in one of the axes"
+        return out
+
+    if pixelsize <= 0:
+        rough = frc_resolution(x, y, frame, n_blocks=n_blocks, repeats=1, seed=seed,
+                               threshold=threshold)
+        pixelsize = rough.resolution / 5 if rough.ok else float(span[:2].max() / 512)
+    if z_pixelsize <= 0:
+        # the axial voxel cannot be guessed from the lateral one: 2.5 times it
+        # is right for an astigmatic PSF and three times too coarse for an
+        # interferometric one, and too coarse reads the resolution as the
+        # sampling.  So measure once on a small grid and come back at a fifth
+        # of what that saw, the way the lateral pixel is found.
+        # the rough grid is coarse laterally and fine axially, which is the
+        # cheap way round: the axial curve sums over the lateral frequencies,
+        # so it hardly cares how finely they are sampled, while sampling z
+        # coarsely would report the sampling rather than the resolution
+        rough = fpc_resolution(x, y, z, frame,
+                               pixelsize=float(span[:2].max()) / ROUGH_VOXELS,
+                               z_pixelsize=float(span[2]) / ROUGH_VOXELS,
+                               n_blocks=n_blocks, repeats=1, seed=seed,
+                               max_voxels=max_voxels, threshold=threshold)
+        axial = rough.axes.get("z")
+        z_pixelsize = (axial.resolution / 5 if axial is not None and axial.ok
+                       else 2.5 * pixelsize)
+        if report:
+            report(f"FPC: about {axial.resolution:.0f} nm along z on a coarse "
+                   f"grid, measuring again at {z_pixelsize:.1f} nm"
+                   if axial is not None and axial.ok else
+                   "FPC: no axial resolution on the coarse grid")
+    voxel = np.array([pixelsize, pixelsize, z_pixelsize], dtype=float)
+
+    counts = np.maximum(np.ceil(span / voxel), 8)
+    asked = voxel.copy()
+    if counts.prod() > max_voxels:
+        voxel = voxel * (counts.prod() / max_voxels) ** (1 / 3)
+        counts = np.maximum(np.ceil(span / voxel), 8)
+        if np.any(voxel > 1.5 * asked):      # a little coarser costs nothing
+            out.message = (f"the field of view needs voxels of {voxel[0]:.1f} x "
+                           f"{voxel[2]:.1f} nm to fit in one transform, well "
+                           f"coarser than the {asked[0]:.1f} x {asked[2]:.1f} nm "
+                           "the resolution asks for -- measure a ROI instead")
+    shape = tuple(int(next_fast_len(int(n))) for n in counts)
+    voxel = tuple(float(span[k] / shape[k]) for k in range(3))
+    out.voxel, out.shape = voxel, shape
+    if report:
+        report(f"FPC: {shape[0]} x {shape[1]} x {shape[2]} voxels of "
+               f"{voxel[0]:.1f} x {voxel[1]:.1f} x {voxel[2]:.1f} nm, "
+               f"{repeats} split(s)")
+
+    gathered: Dict[str, list] = {"x": [], "y": [], "z": []}
+    for repeat in range(max(int(repeats), 1)):
+        side = time_blocks(frame, n_blocks, "random" if repeats > 1 else "alternating",
+                           seed + repeat)
+        if not side.any() or side.all():
+            continue
+        first = _volume(x[~side], y[~side], z[~side], low, voxel, shape)
+        second = _volume(x[side], y[side], z[side], low, voxel, shape)
+        for name, curve in plane_curves(first, second).items():
+            gathered[name].append(curve)
+        out.n_locs = (int((~side).sum()), int(side.sum()))
+    if not gathered["x"]:
+        out.message = "every localization landed in one half: too few frames"
+        return out
+
+    for axis, name in enumerate("xyz"):
+        curve = np.mean(gathered[name], axis=0)
+        # every plane perpendicular to this axis holds the same voxel count
+        per_plane = np.full(len(curve), float(np.prod(shape) / shape[axis]))
+        found = resolution_from_curve(curve, per_plane, shape[axis], voxel[axis],
+                                      threshold)
+        found.repeats = len(gathered[name])
+        found.n_locs = out.n_locs
+        if found.ok and found.resolution < MIN_VOXELS_PER_RESOLUTION * voxel[axis]:
+            found.message = (f"the resolution is within "
+                             f"{MIN_VOXELS_PER_RESOLUTION:g} voxels of the "
+                             f"{voxel[axis]:.1f} nm sampling along {name}: set a "
+                             "finer one before believing it")
+        out.axes[name] = found
+    out.repeats = len(gathered["x"])
     return out

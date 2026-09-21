@@ -175,8 +175,8 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
-from ..frc import (FRC, THRESHOLD as THRESHOLD_LINE, blur_envelope,
-                   envelope_resolution, frc_resolution)
+from ..frc import (FPC, FRC, THRESHOLD as THRESHOLD_LINE, blur_envelope,
+                   envelope_resolution, fpc_resolution, frc_resolution)
 from ..locs import Localizations
 from . import Context, Plot, Plugin, Result, param, register
 from .statistics import (MIN_FOR_FIT, PRECISION_FIELDS, PRECISION_Z_FIELDS,
@@ -643,6 +643,7 @@ class Measurement:
     displacements: Dict[int, Displacements] = field(default_factory=dict)
     crlb: Dict[str, Dict[str, float]] = field(default_factory=dict)
     frc: Optional[FRC] = None
+    fpc: Optional[FPC] = None                  # the resolution along each axis
     photons: Dict[str, float] = field(default_factory=dict)
     notes: List[str] = field(default_factory=list)
 
@@ -670,7 +671,7 @@ def median_precision(locs: Localizations, names: Sequence[str] = PRECISION_FIELD
 def measure(locs: Localizations, name: str = "", reach: float = 0.0,
             reach_z: float = 0.0, max_gap: int = 5, pairwise: bool = True,
             crlb: bool = True, frc: bool = False, frc_pixel: float = 0.0,
-            frc_blocks: int = 20, frc_repeats: int = 5,
+            frc_blocks: int = 20, frc_repeats: int = 5, frc_axes: bool = False,
             bounds: Optional[Dict[str, Tuple]] = None,
             max_frame_pairs: int = 20000, max_pairs: int = 2_000_000,
             seed: int = 0, report=None) -> Measurement:
@@ -690,6 +691,15 @@ def measure(locs: Localizations, name: str = "", reach: float = 0.0,
         out.frc = _frc_of(locs, frc_pixel, frc_blocks, frc_repeats, seed, report)
         if out.frc is not None and out.frc.message:
             out.notes.append(f"FRC: {out.frc.message}")
+    if frc_axes:
+        # three splits at least: the spread over them is the error bar, and a
+        # 3D transform is dear enough that more than a few is not worth it
+        out.fpc = _fpc_of(locs, frc_pixel, frc_blocks, max(frc_repeats // 2, 3),
+                          seed, report)
+        if out.fpc is None:
+            out.notes.append("no z: the per-axis resolution needs 3D data")
+        elif out.fpc.message:
+            out.notes.append(f"FPC: {out.fpc.message}")
     if not pairwise:
         return out
 
@@ -799,6 +809,23 @@ def _frc_of(locs: Localizations, pixel: float, blocks: int, repeats: int,
         return None
     return frc_resolution(np.asarray(locs[x_name], dtype=float),
                           np.asarray(locs[y_name], dtype=float),
+                          np.asarray(locs["frame"]), pixelsize=pixel,
+                          n_blocks=blocks, repeats=repeats, seed=seed,
+                          report=report)
+
+
+def _fpc_of(locs: Localizations, pixel: float, blocks: int, repeats: int,
+            seed: int, report) -> Optional[FPC]:
+    """The per-axis resolution of this table, or None when it is not 3D."""
+    x_name = first_present(locs, ("x_nm", "x_pix"))
+    y_name = first_present(locs, ("y_nm", "y_pix"))
+    if x_name is None or y_name is None or "frame" not in locs or "z_nm" not in locs:
+        return None
+    z = np.asarray(locs["z_nm"], dtype=float)
+    if not np.any(np.isfinite(z) & (z != 0)):
+        return None
+    return fpc_resolution(np.asarray(locs[x_name], dtype=float),
+                          np.asarray(locs[y_name], dtype=float), z,
                           np.asarray(locs["frame"]), pixelsize=pixel,
                           n_blocks=blocks, repeats=repeats, seed=seed,
                           report=report)
@@ -914,6 +941,22 @@ def summary(found: Sequence[Measurement]) -> str:
                 lines.append(f"            the blur of {sigma:.2f} nm alone "
                              f"crosses 1/7 at {envelope_resolution(sigma):.1f} nm "
                              "-- read the curves, not the ratio")
+        planes = measurement.fpc
+        if planes is not None and planes.ok:
+            per_axis = "  ".join(
+                f"{name} {curve.resolution:.1f}"
+                + (f" +/- {curve.error:.1f}" if np.isfinite(curve.error) else "")
+                for name, curve in planes.axes.items() if curve.ok)
+            lines.append(f"  per axis  {per_axis} nm, from planes rather than "
+                         f"rings, {planes.shape[0]}x{planes.shape[1]}x"
+                         f"{planes.shape[2]} voxels of "
+                         f"{planes.voxel[0]:.1f}/{planes.voxel[2]:.1f} nm")
+            if np.isfinite(planes.anisotropy):
+                lines.append(f"            axial / lateral = "
+                             f"{planes.anisotropy:.2f}")
+            for name, curve in planes.axes.items():
+                if curve.message:
+                    lines.append(f"            {name}: {curve.message}")
         line = measurement.gap_line
         if line and np.isfinite(line.get("sigma0", np.nan)) and line.get("n", 0) > 1:
             lines.append(f"  gap -> 0  sigma = {line['sigma0']:.2f} nm, "
@@ -1165,6 +1208,51 @@ def draw_frc(ax, found: Sequence[Measurement]) -> None:
                  color="0.25")
 
 
+AXIS_COLORS = {"x": "#1f77b4", "y": "#2ca02c", "z": "#d62728"}
+
+
+def draw_planes(ax, found: Sequence[Measurement]) -> None:
+    """The plane correlations: one curve per axis, per source.
+
+    With one source the axes get the colours, because that is what the panel is
+    about; with two, the colours go back to the sources and the axes take the
+    line styles, since comparing the same axis across sources is then the
+    question.
+    """
+    styles = {"x": "-", "y": "--", "z": "-."}
+    titles = []
+    for index, measurement in enumerate(found):
+        planes = measurement.fpc
+        if planes is None or not planes.axes:
+            continue
+        color = COLORS[index % len(COLORS)]
+        for name, curve in planes.axes.items():
+            color = AXIS_COLORS[name] if len(found) == 1 else color
+            if not len(curve.smoothed):
+                continue
+            ax.plot(curve.q, curve.smoothed, color=color, linewidth=1.3,
+                    linestyle=styles.get(name, "-"),
+                    label=name if len(found) == 1 else f"{measurement.name} {name}")
+            if curve.ok:
+                ax.axvline(1.0 / curve.resolution, color=color, linewidth=0.7,
+                           linestyle=":")
+        if planes.ok:
+            titles.append(f"{measurement.name}: " + ", ".join(
+                f"{name} {curve.resolution:.0f} nm"
+                for name, curve in planes.axes.items() if curve.ok))
+    ax.axhline(THRESHOLD_LINE, color="0.35", linewidth=0.9)
+    ax.text(0.99, THRESHOLD_LINE, " 1/7", transform=ax.get_yaxis_transform(),
+            ha="right", va="bottom", fontsize=7, color="0.35")
+    ax.axhline(0.0, color="0.75", linewidth=0.6)
+    ax.set_xlabel("spatial frequency along the axis (1/nm)")
+    ax.set_ylabel("FPC")
+    ax.set_ylim(-0.2, 1.05)
+    ax.set_xlim(left=0)
+    ax.legend(fontsize=6.5, frameon=False)
+    ax.set_title("   ".join(titles) if titles else "no per-axis resolution",
+                 fontsize=7.5, color="0.25")
+
+
 # ----------------------------------------------------------------- the plugin
 
 @dataclass
@@ -1192,6 +1280,11 @@ class PrecisionSettings:
                               advanced=True,
                               help=f"3D data only.  0: {REACH_Z:g} x the median "
                                    "axial precision")
+    frc_axes: bool = param(False, label="FRC per axis (3D)",
+                           help="the resolution along x, y and z separately, "
+                                "from planes of the 3D transform rather than "
+                                "rings of a 2D one.  3D data, and a ROI rather "
+                                "than a whole field of view")
     frc_blocks: int = param(20, label="FRC blocks", min=2, advanced=True,
                             help="the acquisition is cut into this many "
                                  "stretches of frames before the two halves "
@@ -1224,7 +1317,8 @@ class LocalizationPrecision(Plugin):
     version = "1"
 
     def run(self, ctx: Context, settings: PrecisionSettings) -> Result:
-        if not (settings.pairwise or settings.crlb or settings.frc):
+        if not (settings.pairwise or settings.crlb or settings.frc
+                or settings.frc_axes):
             raise ValueError("nothing to measure: tick a method")
         sources: List[Tuple[str, Localizations, bool]] = []
         everything = len(ctx.selection) == len(ctx.locs)
@@ -1247,6 +1341,7 @@ class LocalizationPrecision(Plugin):
                 pairwise=settings.pairwise, crlb=settings.crlb,
                 frc=settings.frc, frc_pixel=settings.frc_pixel_nm,
                 frc_blocks=settings.frc_blocks, frc_repeats=settings.frc_repeats,
+                frc_axes=settings.frc_axes,
                 bounds=bounds if filtered else {},
                 max_frame_pairs=settings.max_frame_pairs,
                 max_pairs=settings.max_pairs, seed=settings.seed,
@@ -1265,6 +1360,10 @@ class LocalizationPrecision(Plugin):
                                 for m in found):
             plots["FRC"] = Plot(draw=lambda ax: draw_frc(ax, found),
                                 size=(5.5, 3.4))
+        if settings.frc_axes and any(m.fpc is not None and m.fpc.axes
+                                     for m in found):
+            plots["per axis FRC"] = Plot(draw=lambda ax: draw_planes(ax, found),
+                                         size=(5.5, 3.4))
         if settings.crlb and any(m.crlb for m in found):
             plots["CRLB"] = Plot(
                 draw=lambda figure: draw_crlb(figure, found, settings.bins),
@@ -1285,6 +1384,9 @@ class LocalizationPrecision(Plugin):
                                    else float("nan")) for m in found},
                 "resolution": {m.name: (m.frc.resolution if m.frc and m.frc.ok
                                         else float("nan")) for m in found},
+                "per_axis": {m.name: ({name: curve.resolution
+                                      for name, curve in m.fpc.axes.items()}
+                                      if m.fpc else {}) for m in found},
                 "amplitude": {m.name: (m.photon_law.amplitude
                                        if m.photon_law and m.photon_law.ok
                                        else float("nan")) for m in found}}
@@ -1317,6 +1419,10 @@ class LocalizationPrecision(Plugin):
                 entry.update(kappa=measurement.scaled.kappa,
                              kappa_error=measurement.scaled.kappa_error,
                              crlb_of_pairs=measurement.scaled.crlb)
+            if measurement.fpc is not None and measurement.fpc.ok:
+                entry["frc_per_axis"] = {
+                    name: curve.resolution
+                    for name, curve in measurement.fpc.axes.items() if curve.ok}
             if measurement.frc is not None and measurement.frc.ok:
                 entry.update(frc_resolution=measurement.frc.resolution,
                              frc_error=measurement.frc.error,
