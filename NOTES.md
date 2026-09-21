@@ -1362,6 +1362,42 @@ that name silently replaces it on the package.  The failure surfaces as
 imported next, which is nowhere near the cause.  There is a comment saying so
 at the top of the file.
 
+### Finishing the fit
+
+A two-colour fit is not finished when the last frame is: the localizations
+want the drift taken out and the colours put on, and only then is the file
+worth opening.  Both are already plugins, so the fit runs them -- `finish`
+in `plugins/fit.py`, an `after the fit` section on both 2C fitters, colour
+assignment on and drift off by default.
+
+**At the end, not per block.**  Neither step can see one block.  A drift curve
+is measured *across* the acquisition, and the modes of the colour histogram are
+a property of the sample that the first two hundred localizations do not yet
+show; running either per package would also cost the fit its throughput, which
+is the thing the block pipeline exists for.  So they run once, over the
+finished table, and the raw fit is what streams.
+
+**The file is rewritten, not corrected.**  The writer is append-only and
+streams while the frames come in, which is what makes a crash cost one block;
+the finishing steps add columns, which an append-only writer cannot do to what
+it has already written.  So the streamed file is the raw fit, and it is
+replaced by the finished table once the steps have run -- the saved file is the
+one somebody should open, and the raw fit is what survives a crash.  Both runs
+go into the file's `history` in the same shape `Session.log` uses, so a file
+says which drift estimator corrected it and with which numbers.
+
+**A failed step is a note.**  These run when the frames are already fitted.  A
+colour histogram with one mode, or a drift estimate on too few localizations,
+must cost its own step and not the twenty minutes that produced the table -- so
+each step is caught, said in the result's text, and the table goes on to be
+saved regardless.
+
+**Drift off by default.**  Colour assignment is seconds and is what the fit was
+for.  A drift estimate is minutes on a dataset whose size the form cannot see,
+and COMET's own preflight -- the question it asks before a long run -- is not
+asked here, because the fit has already been agreed to.  Choosing RCC or COMET
+in the section is the agreement.
+
 ## Open questions
 
 * Fitted x sits ~0.24 px from the peak-finder position, and the sign flips with
