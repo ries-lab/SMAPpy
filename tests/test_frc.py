@@ -209,3 +209,65 @@ def test_a_volume_with_no_depth_says_so_rather_than_dividing_by_zero():
     x, y, z, frame = volume_picture()
     out = fpc_resolution(x, y, np.zeros_like(z), frame, repeats=1)
     assert not out.ok and "extent" in out.message
+
+
+def test_the_per_axis_resolution_does_not_depend_on_how_finely_it_was_sampled():
+    """The regression that matters: a plane must sum over a band, not a grid.
+
+    Summing a plane over the whole grid includes every transverse frequency,
+    most of which hold only noise once the sampling is fine -- and the answer
+    then follows the voxel instead of the data.  Untreated, this same dataset
+    read 89 nm axially on a coarse lateral voxel and 417 nm on a fine one.
+    """
+    x, y, z, frame = volume_picture(sigma=8.0, sigma_z=24.0)
+    fine = fpc_resolution(x, y, z, frame, pixelsize=4.0, z_pixelsize=10.0,
+                          repeats=1)
+    coarse = fpc_resolution(x, y, z, frame, pixelsize=10.0, z_pixelsize=25.0,
+                            repeats=1)
+    for name in "xyz":
+        assert (fine.axes[name].resolution
+                == pytest.approx(coarse.axes[name].resolution, rel=0.15))
+
+
+def test_the_band_a_plane_sums_over_barely_changes_the_answer():
+    # the band is set from the resolution already measured along the other
+    # axes; widening it by half again must not move the number much, or the
+    # choice of band would be doing the measuring
+    x, y, z, frame = volume_picture(sigma=8.0, sigma_z=24.0)
+    from smappy.frc import band_masks, plane_sums, _volume, _fold
+    from smappy.frc import resolution_from_curve
+
+    shape, voxel = (256, 256, 48), (6.0, 6.0, 15.0)
+    low = np.array([x.min(), y.min(), z.min()])
+    side = frame % 2 == 0
+    halves = [_volume(x[m], y[m], z[m], low, voxel, shape) for m in (~side, side)]
+    found = {}
+    for width in (1.0, 1.5):
+        masks = band_masks(shape, voxel, 30.0 * width, 90.0 * width)
+        sums = plane_sums(halves[0], halves[1], -1, masks)
+        num, pa, pb = sums["z"]
+        curve = _fold(np.divide(num, np.sqrt(pa * pb), out=np.zeros(len(num)),
+                                where=pa * pb > 0))
+        counts = np.full(len(curve), float(masks["z"].sum()))
+        found[width] = resolution_from_curve(curve, counts, shape[2],
+                                             voxel[2]).resolution
+    assert found[1.5] == pytest.approx(found[1.0], rel=0.1)
+
+
+def test_tiles_give_the_same_answer_as_one_transform():
+    x, y, frame = picture(sigma=8.0, extent=6000.0)
+    whole = frc_resolution(x, y, frame, pixelsize=6.0, tile_pixels=4096, repeats=1)
+    tiled = frc_resolution(x, y, frame, pixelsize=6.0, tile_pixels=256, repeats=1)
+    assert tiled.tiles > 4 and whole.tiles == 1
+    assert tiled.resolution == pytest.approx(whole.resolution, rel=0.03)
+
+
+def test_empty_tiles_are_skipped_rather_than_transformed():
+    # localizations in one corner of a wide field: the rest is empty space and
+    # must not cost a transform each
+    x, y, frame = picture(sigma=8.0, extent=2000.0)
+    wide = frc_resolution(np.append(x, 20000.0), np.append(y, 20000.0),
+                          np.append(frame, 0), pixelsize=6.0, tile_pixels=256,
+                          repeats=1)
+    assert wide.tiles <= 9                      # not the 170 the grid holds
+    assert wide.ok

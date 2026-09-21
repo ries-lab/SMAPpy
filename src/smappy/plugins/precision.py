@@ -948,9 +948,11 @@ def summary(found: Sequence[Measurement]) -> str:
                 + (f" +/- {curve.error:.1f}" if np.isfinite(curve.error) else "")
                 for name, curve in planes.axes.items() if curve.ok)
             lines.append(f"  per axis  {per_axis} nm, from planes rather than "
-                         f"rings, {planes.shape[0]}x{planes.shape[1]}x"
-                         f"{planes.shape[2]} voxels of "
-                         f"{planes.voxel[0]:.1f}/{planes.voxel[2]:.1f} nm")
+                         f"rings, {planes.tiles} tiles of {planes.shape[0]}x"
+                         f"{planes.shape[1]}x{planes.shape[2]} voxels of "
+                         f"{planes.voxel[0]:.1f}/{planes.voxel[2]:.1f} nm, "
+                         f"summed over {planes.band[0]:.0f}/{planes.band[1]:.0f} nm "
+                         "of frequency")
             if np.isfinite(planes.anisotropy):
                 lines.append(f"            axial / lateral = "
                              f"{planes.anisotropy:.2f}")

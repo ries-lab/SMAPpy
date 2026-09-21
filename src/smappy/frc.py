@@ -116,17 +116,39 @@ space perpendicular to one axis, which gives the resolution along that axis and
 no other.  The reason is the one that matters in 3D localization microscopy --
 the axial resolution is two to six times the lateral, and a shell averages them
 into a number that describes no direction at all.  On simulated data the ratio
-this returns is the ratio of the precisions it was given (1.0, 3.1 and 6.2 for
-sigma_z / sigma_xy of 1, 3.1 and 6.25), which is the check that the planes
-measure what they claim.
+this returns is the ratio of the precisions it was given -- 1.01, 3.01 and 6.19
+for sigma_z / sigma_xy of 1, 3 and 6.25 -- and the lateral resolution comes out
+the same 31 nm in all three, which it should, since sigma_xy never moved.  That
+is the check that the planes measure what they claim and nothing else.
 
-`fpc_resolution` does it, and it is a different cost: a volume rather than an
-image, so the field of view has to fit in one transform.  The voxel is
-anisotropic on purpose -- no axis is compared with another here, so lateral and
-axial sampling each follow what they measure -- and both the lateral and the
-axial voxel are found by measuring once on a coarse grid and coming back at a
-fifth of what that saw.  Where a whole field of view will not fit, the run says
-so and asks for a ROI; a few micrometres across is what this is for.
+`fpc_resolution` does it.  The voxel is anisotropic on purpose -- no axis is
+compared with another here, so lateral and axial sampling each follow what they
+measure -- and both the lateral and the axial voxel are found by measuring once
+on a coarse grid and coming back at a fifth of what that saw.
+
+One thing the plain plane correlation does not survive, and this is a
+departure: **a plane must sum over a band, not over the whole grid.**  The
+plane perpendicular to z holds every lateral frequency, including all the ones
+past what the picture resolves, where there is no correlation and plenty of
+power -- and how many of those there are is decided by how finely the lateral
+axes happen to be sampled.  Measured on one dataset, the axial resolution came
+out 89 nm on a 20 nm lateral voxel and 417 nm on a 4 nm one.  Restricting each
+plane to the frequencies its other two axes are known to resolve (`band_masks`)
+removes it: the same data then reads 79, 79, 79, 80 and 81 nm over that same
+five-fold range of voxel, and widening the band by half again moves it 2.5%.
+
+## Tiles, and the threads that go with them
+
+Both the rings and the planes are computed in tiles -- square in 2D, and
+lateral-only in 3D so that each tile keeps the full depth and with it the axial
+frequency sampling.  The three sums behind the curve are added over the tiles,
+which is exactly the same answer as one transform of the whole field (to a
+tenth of a nanometre on simulated data) and is what frees the pixel from the
+size of the field: forty micrometres at five nanometres is an eight-thousand
+pixel transform that will not fit, and coarsening the pixel until it does reads
+the resolution several percent too large.  Tiles that hold almost nothing are
+skipped, which in a real acquisition is most of the field, and being
+independent they run one per thread.
 
 One number will look wrong at first: the per-axis lateral resolution is worse
 than the ring correlation's, often by a factor of two.  Both are right.  The
@@ -150,8 +172,6 @@ from typing import Dict, Optional, Tuple
 
 import numpy as np
 
-from .render import FieldOfView, render_histogram
-
 THRESHOLD = 1 / 7                  # the paper's, and what every implementation uses
 TAPER = 0.25                       # Tukey window: the outer eighth of each side
 DEFAULT_BLOCKS = 20
@@ -168,6 +188,13 @@ MAX_VOXELS = 24_000_000
 ROUGH_VOXELS = 128
 # below this many voxels per resolution element the answer is the sampling
 MIN_VOXELS_PER_RESOLUTION = 3.0
+# one tile of the transform, per axis.  Small enough that any field of view
+# fits at any pixel size, large enough that the lowest frequency a tile can
+# measure -- one cycle across it -- is far below any resolution worth having.
+TILE_PIXELS = 512
+# a 3D tile is the full depth of the data, so its lateral side is smaller
+TILE_VOXELS = 256
+MIN_TILE_LOCS = 200                # below this a tile is empty space
 
 
 @dataclass
@@ -183,6 +210,7 @@ class FRC:
     n_blocks: int = 0
     n_locs: Tuple[int, int] = (0, 0)          # in the two halves
     repeats: int = 1
+    tiles: int = 1                            # how many of them carried data
     per_repeat: Tuple[float, ...] = ()        # the resolution of each split
     analytic_error: float = float("nan")      # from the ring statistics alone
     message: str = ""
@@ -217,12 +245,16 @@ def time_blocks(frame, n_blocks: int = DEFAULT_BLOCKS,
     return side[index]
 
 
-def taper(image: np.ndarray, alpha: float = TAPER) -> np.ndarray:
-    """A Tukey window on both axes: the edge of the field is not a structure."""
+def _window(length: int, alpha: float = TAPER) -> np.ndarray:
     from scipy.signal.windows import tukey
 
+    return tukey(length, alpha)
+
+
+def taper(image: np.ndarray, alpha: float = TAPER) -> np.ndarray:
+    """A Tukey window on both axes: the edge of the field is not a structure."""
     ny, nx = image.shape
-    return image * np.outer(tukey(ny, alpha), tukey(nx, alpha))
+    return image * np.outer(_window(ny, alpha), _window(nx, alpha))
 
 
 def _ring_index(size: int) -> Tuple[np.ndarray, np.ndarray]:
@@ -371,22 +403,94 @@ def envelope_resolution(sigma: float, threshold: float = THRESHOLD) -> float:
     return float(2 * np.pi * sigma / np.sqrt(-np.log(threshold)))
 
 
+
+
+# ------------------------------------------------------------------- the tiles
+
+def _counted(flat: np.ndarray, size: int) -> np.ndarray:
+    """A histogram over ``size`` bins, by sorting rather than by counting.
+
+    ``np.bincount`` allocates and zeroes an int64 array of one entry per bin,
+    which for a 24-million-voxel volume is 200 MB written for the sake of a few
+    hundred thousand localizations -- and it measured 1.4 s where this measures
+    0.04.  Sorting the indices instead touches only what is occupied.
+    """
+    out = np.zeros(size, dtype=np.float32)
+    if len(flat):
+        where, counts = np.unique(flat, return_counts=True)
+        out[where] = counts
+    return out
+
+
+def _tile_buckets(x, y, low, tile_nm: float, n_tiles: Tuple[int, int]
+                  ) -> Tuple[np.ndarray, np.ndarray]:
+    """Sort the localizations by tile, once, for every split that follows.
+
+    Which tile a localization is in does not depend on how the acquisition is
+    split, so the sort is paid for once and each tile is then a slice.
+    """
+    columns = np.clip(((x - low[0]) / tile_nm).astype(np.int64), 0, n_tiles[0] - 1)
+    rows = np.clip(((y - low[1]) / tile_nm).astype(np.int64), 0, n_tiles[1] - 1)
+    key = columns * n_tiles[1] + rows
+    order = np.argsort(key, kind="stable")
+    starts = np.searchsorted(key[order], np.arange(n_tiles[0] * n_tiles[1] + 1))
+    return order, starts
+
+
+def _workers(requested: int) -> Tuple[int, int]:
+    """Threads over tiles, and threads inside each transform.
+
+    One or the other: a transform threaded four ways inside a pool of four
+    threads oversubscribes the machine and both run slower.  Tiles are the
+    better grain -- they are independent, and the histogram and the ring sums
+    parallelize with them, where inside a transform only the transform does.
+    """
+    import os
+
+    if requested and requested > 0:
+        count = int(requested)
+    else:
+        count = os.cpu_count() or 1
+    return (1, -1) if count <= 1 else (count, 1)
+
+
+def _over_tiles(work, indices, threads: int):
+    """``work`` over every tile, on as many threads as were asked for."""
+    if threads <= 1:
+        return [work(index) for index in indices]
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(threads) as pool:
+        return list(pool.map(work, indices))
+
+
 def frc_resolution(x, y, frame, pixelsize: float = 0.0,
                    n_blocks: int = DEFAULT_BLOCKS, assignment: str = "alternating",
-                   repeats: int = 5, seed: int = 0, max_pixels: int = MAX_PIXELS,
-                   threshold: float = THRESHOLD, report=None) -> FRC:
+                   repeats: int = 5, seed: int = 0, tile_pixels: int = TILE_PIXELS,
+                   workers: int = 0, threshold: float = THRESHOLD,
+                   report=None) -> FRC:
     """The FRC resolution of these localizations, in nanometres.
 
     Takes arrays and gives numbers: no session, no plugin, no window.  The
-    canvas is square (a ring is only a ring on a square grid) and covers
-    everything handed in, which is what makes a ROI the field of view -- cut
-    the table first and the answer is about what is left.
+    field of view is whatever was handed in, which is what makes a ROI the
+    field of view -- cut the table first and the answer is about what is left.
 
     With ``repeats`` above one the blocks are dealt at random that many times
     and the curves averaged.  One split is one draw, and two draws of the same
     data do not give the same number; the spread across the draws is the error
     bar that means something, and it is usually larger than what the ring
     statistics alone suggest.
+
+    The picture is transformed in **square tiles** of ``tile_pixels`` and the
+    ring sums are added over them.  It is the same answer -- on simulated data
+    it agrees with one transform of the whole field to the tenth of a
+    nanometre -- and it is what makes the pixel independent of the field of
+    view: forty micrometres at five nanometres is an eight-thousand-pixel
+    transform, which does not fit, and coarsening the pixel until it does
+    reads the resolution several percent too large.  Tiles also skip the empty
+    parts of a field, which in a real acquisition is most of it, and being
+    independent they run on as many threads as the machine has (``workers``;
+    0 means all of them).
     """
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
@@ -395,69 +499,107 @@ def frc_resolution(x, y, frame, pixelsize: float = 0.0,
         out.message = f"{len(x)} localizations: too few for an FRC"
         return out
 
-    span = max(float(np.max(x) - np.min(x)), float(np.max(y) - np.min(y)))
-    if span <= 0:
+    low = np.array([x.min(), y.min()])
+    span = np.array([x.max() - low[0], y.max() - low[1]])
+    if not np.all(span > 0):
         out.message = "the localizations have no extent"
         return out
     if pixelsize <= 0:
         # a pixel coarser than about a fifth of the resolution reads it too
         # large, and the resolution is what the run is for -- so find it
-        # roughly on a cheap canvas first and then pick the pixel from it.
+        # roughly on one coarse tile first and then pick the pixel from it.
         # One extra transform pair, against a percent or two of bias.
-        rough = frc_resolution(x, y, frame, pixelsize=span / DEFAULT_PIXELS,
-                               n_blocks=n_blocks, assignment=assignment,
-                               repeats=1, seed=seed, max_pixels=max_pixels,
-                               threshold=threshold)
+        rough = frc_resolution(x, y, frame,
+                               pixelsize=float(span.max()) / DEFAULT_PIXELS,
+                               n_blocks=n_blocks, assignment=assignment, repeats=1,
+                               seed=seed, tile_pixels=DEFAULT_PIXELS,
+                               workers=workers, threshold=threshold)
         pixelsize = (rough.resolution / 5 if rough.ok
-                     else span / DEFAULT_PIXELS)
+                     else float(span.max()) / DEFAULT_PIXELS)
         if report:
             report(f"FRC: about {rough.resolution:.0f} nm on a coarse grid, "
                    f"measuring again at {pixelsize:.1f} nm")
-    from scipy.fft import next_fast_len
+    from scipy.fft import fft2, fftshift, next_fast_len
 
     # a transform of 3346 pixels costs ten times one of 3360, because 3346 is
-    # 2 x 7 x 239 and the algorithm wants small factors.  Rounding the canvas
-    # up to the next good length and letting the pixel size follow costs a
-    # fraction of a nanometre per pixel and buys that factor back.
-    size = int(min(max(int(np.ceil(span / pixelsize)), 16), max_pixels))
-    size = int(min(next_fast_len(size), max_pixels))
-    pixelsize = span / size                # the canvas decides, so it stays square
-    fov = FieldOfView(float(np.min(x)), float(np.min(y)), pixelsize, size, size)
+    # 2 x 7 x 239 and the algorithm wants small factors
+    wanted = int(np.ceil(span.max() / pixelsize))
+    size = int(next_fast_len(min(max(wanted, 16), int(tile_pixels))))
+    tile_nm = size * pixelsize
+    n_tiles = tuple(max(int(np.ceil(span[k] / tile_nm)), 1) for k in range(2))
 
     repeats = max(int(repeats), 1)
     if repeats > 1:
         assignment = "random"      # an alternating split has only one draw in it
+    threads, fft_workers = _workers(workers)
     if report:
-        report(f"FRC: {size} x {size} pixels of {pixelsize:.1f} nm, "
-               f"{n_blocks} blocks, {repeats} split(s)")
+        report(f"FRC: {n_tiles[0]}x{n_tiles[1]} tiles of {size} x {size} pixels "
+               f"of {pixelsize:.1f} nm, {n_blocks} blocks, {repeats} split(s)")
 
-    rings = _ring_index(size)
-    curves, counts, singles, halves = [], rings[1], [], (0, 0)
+    flat_rings, counts = _ring_index(size)
+    flat_rings = flat_rings.ravel()
+    window = np.outer(_window(size), _window(size)).astype(np.float32)
+    order, starts = _tile_buckets(x, y, low, tile_nm, n_tiles)
+
+    def ring_sum(values) -> np.ndarray:
+        return np.bincount(flat_rings, weights=np.asarray(values).ravel(),
+                           minlength=len(counts) + 1)[:len(counts)]
+
+    def tile_sums(index: int, side: np.ndarray):
+        """The three ring sums of one tile, or None when it holds too little."""
+        rows = order[starts[index]:starts[index + 1]]
+        if len(rows) < MIN_TILE_LOCS:
+            return None
+        origin = low + np.array([index // n_tiles[1], index % n_tiles[1]]) * tile_nm
+        halves = []
+        for half in (rows[~side[rows]], rows[side[rows]]):
+            column = ((x[half] - origin[0]) / pixelsize).astype(np.int64)
+            row = ((y[half] - origin[1]) / pixelsize).astype(np.int64)
+            inside = (column >= 0) & (column < size) & (row >= 0) & (row < size)
+            image = _counted(column[inside] * size + row[inside], size * size)
+            halves.append(image.reshape(size, size) * window)
+        a = fftshift(fft2(halves[0], workers=fft_workers))
+        b = fftshift(fft2(halves[1], workers=fft_workers))
+        return (ring_sum(np.real(a * np.conj(b))), ring_sum(np.abs(a) ** 2),
+                ring_sum(np.abs(b) ** 2))
+
+    curves, singles, halves, used = [], [], (0, 0), 0
     for repeat in range(repeats):
         side = time_blocks(frame, n_blocks, assignment, seed + repeat)
         if not side.any() or side.all():
             continue
-        first = render_histogram(x[~side], y[~side], fov).weight.astype(np.float64)
-        second = render_histogram(x[side], y[side], fov).weight.astype(np.float64)
-        curve, counts = frc_curve(first, second, rings)
+        got = [found for found in
+               _over_tiles(lambda index: tile_sums(index, side),
+                           range(n_tiles[0] * n_tiles[1]), threads)
+               if found is not None]
+        if not got:
+            continue
+        used = max(used, len(got))
+        totals = [sum(part[k] for part in got) for k in range(3)]
+        denominator = np.sqrt(totals[1] * totals[2])
+        curve = np.clip(np.divide(totals[0], denominator, out=np.zeros(len(counts)),
+                                  where=denominator > 0), -1.0, 1.0)
         curves.append(curve)
         halves = (int((~side).sum()), int(side.sum()))
         if repeats > 1:
-            one = resolution_from_curve(curve, counts, size, pixelsize, threshold)
+            one = resolution_from_curve(curve, counts * len(got), size, pixelsize,
+                                        threshold)
             if one.ok:
                 singles.append(one.resolution)
     if not curves:
-        out.message = "every localization landed in one half: too few frames"
+        out.message = ("no tile held enough localizations, or every one landed "
+                       "in one half of the split")
         return out
 
-    out = resolution_from_curve(np.mean(curves, axis=0), counts, size, pixelsize,
-                                threshold)
+    out = resolution_from_curve(np.mean(curves, axis=0), counts * max(used, 1),
+                                size, pixelsize, threshold)
     out.n_blocks, out.n_locs = int(n_blocks), halves
-    out.repeats, out.per_repeat = len(curves), tuple(singles)
+    out.repeats, out.per_repeat, out.tiles = len(curves), tuple(singles), used
     if len(singles) >= 3:
         # what splitting the same data again would have given
         out.error = float(np.std(singles, ddof=1))
     return out
+
 
 
 # ------------------------------------------------- the third dimension: planes
@@ -469,6 +611,8 @@ class FPC:
     voxel: Tuple[float, float, float] = (0.0, 0.0, 0.0)
     shape: Tuple[int, int, int] = (0, 0, 0)
     repeats: int = 1
+    tiles: int = 1
+    band: Tuple[float, float] = (0.0, 0.0)    # lateral, axial: what each plane summed
     n_locs: Tuple[int, int] = (0, 0)
     message: str = ""
 
@@ -516,24 +660,80 @@ def plane_curves(first: np.ndarray, second: np.ndarray) -> Dict[str, np.ndarray]
     The two halves of each axis are folded together: a real image has a
     Hermitian transform, so they carry the same information twice.
     """
+    return {name: _fold(np.divide(num, np.sqrt(pa * pb), out=np.zeros(len(num)),
+                                  where=pa * pb > 0))
+            for name, (num, pa, pb) in plane_sums(first, second).items()}
+
+
+def _fold(curve: np.ndarray) -> np.ndarray:
+    """One half of a symmetric curve about its centre, averaged with the other."""
+    centre = len(curve) // 2
+    up, down = curve[centre:], curve[:centre + 1][::-1]
+    length = min(len(up), len(down))
+    return np.clip(0.5 * (up[:length] + down[:length]), -1.0, 1.0)
+
+
+def band_masks(shape, voxel, lateral_nm: float, axial_nm: float
+               ) -> Dict[str, np.ndarray]:
+    """For each axis, which transverse frequencies its planes should sum over.
+
+    A plane perpendicular to z holds *every* lateral frequency, including the
+    ones far beyond what the picture resolves, where there is nothing but
+    noise.  They carry no correlation and plenty of power, so they dilute the
+    plane's correlation -- and how many of them there are depends on how finely
+    the lateral axes happen to be sampled.  Left alone, the axial resolution of
+    one dataset reads 89 nm on a 20 nm lateral voxel and 417 nm on a 4 nm one:
+    a factor of nearly five, decided by a sampling choice.
+
+    So each plane sums only over the transverse frequencies the picture has
+    signal at -- inside the ellipse set by the resolution already measured
+    along those two axes.  That is stable: the same data gives the same axial
+    number to two percent across a five-fold range of lateral voxel, and
+    widening the band by 1.7 moves it by 2.5%.  It is a departure from the
+    plain plane correlation of the paper, and the reason is above.
+    """
+    q_lateral, q_axial = 1.0 / max(lateral_nm, 1e-9), 1.0 / max(axial_nm, 1e-9)
+    frequencies = [(np.arange(shape[k]) - shape[k] // 2) / (shape[k] * voxel[k])
+                   for k in range(3)]
+    limits = (q_lateral, q_lateral, q_axial)
+    out: Dict[str, np.ndarray] = {}
+    for axis, name in enumerate("xyz"):
+        first, second = [k for k in range(3) if k != axis]
+        ellipse = ((frequencies[first][:, None] / limits[first]) ** 2
+                   + (frequencies[second][None, :] / limits[second]) ** 2)
+        out[name] = (ellipse <= 1.0).astype(np.float32)
+    return out
+
+
+def plane_sums(first: np.ndarray, second: np.ndarray, fft_workers: int = -1,
+               masks: Optional[Dict[str, np.ndarray]] = None
+               ) -> Dict[str, Tuple[np.ndarray, np.ndarray, np.ndarray]]:
+    """The un-normalized plane sums, which is what tiles can be added over.
+
+    A ratio cannot be averaged over tiles; the three sums behind it can, and
+    dividing at the end weights each tile by the signal it actually carried.
+    ``masks`` restricts each plane to the transverse frequencies worth summing
+    (`band_masks`); without it every frequency of the grid is included, which
+    makes the answer depend on the grid.
+    """
     from scipy.fft import fftn, fftshift
 
-    a = fftshift(fftn(_taper_volume(first), workers=-1))
-    b = fftshift(fftn(_taper_volume(second), workers=-1))
+    a = fftshift(fftn(_taper_volume(first), workers=fft_workers))
+    b = fftshift(fftn(_taper_volume(second), workers=fft_workers))
     numerator = np.real(a * np.conj(b))
     power_a, power_b = np.abs(a) ** 2, np.abs(b) ** 2
     del a, b
 
-    out: Dict[str, np.ndarray] = {}
+    out: Dict[str, Tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
     for axis, name in enumerate("xyz"):
         others = tuple(k for k in range(3) if k != axis)
-        denominator = np.sqrt(power_a.sum(axis=others) * power_b.sum(axis=others))
-        curve = np.divide(numerator.sum(axis=others), denominator,
-                          out=np.zeros(first.shape[axis]), where=denominator > 0)
-        centre = first.shape[axis] // 2
-        up, down = curve[centre:], curve[:centre + 1][::-1]
-        length = min(len(up), len(down))
-        out[name] = np.clip(0.5 * (up[:length] + down[:length]), -1.0, 1.0)
+        if masks is None:
+            out[name] = (numerator.sum(axis=others), power_a.sum(axis=others),
+                         power_b.sum(axis=others))
+        else:
+            mask = masks[name]
+            out[name] = tuple(np.tensordot(values, mask, axes=(others, (0, 1)))
+                              for values in (numerator, power_a, power_b))
     return out
 
 
@@ -544,24 +744,30 @@ def _volume(x, y, z, low, voxel, shape) -> np.ndarray:
                              ((z - low[2]) / voxel[2]).astype(np.int64)])
     inside = np.all((index >= 0) & (index < np.asarray(shape)), axis=1)
     flat = np.ravel_multi_index(index[inside].T, shape)
-    return np.bincount(flat, minlength=int(np.prod(shape))
-                       ).reshape(shape).astype(np.float32)
+    return _counted(flat, int(np.prod(shape))).reshape(shape)
 
 
 def fpc_resolution(x, y, z, frame, pixelsize: float = 0.0, z_pixelsize: float = 0.0,
                    n_blocks: int = DEFAULT_BLOCKS, repeats: int = 3, seed: int = 0,
+                   tile_pixels: int = TILE_VOXELS, workers: int = 0,
                    max_voxels: int = MAX_VOXELS, threshold: float = THRESHOLD,
                    report=None) -> FPC:
     """The resolution along x, y and z, each from its own plane correlation.
 
     The voxel is anisotropic on purpose: no axis is ever compared with another
     here, so the lateral and axial sampling can each follow what they are
-    measuring, and a field of view that is fifty micrometres wide and half a
-    micrometre deep still fits in a volume that can be transformed.  The
-    lateral voxel is found the way the 2D run finds its pixel (a coarse pass,
-    then a fifth of what it saw); the axial one starts at two and a half times
-    that, which is the usual ratio of an astigmatic PSF, and both grow together
-    if the volume would otherwise be too large to transform.
+    measuring.  The lateral voxel is found the way the 2D run finds its pixel
+    (a coarse pass, then a fifth of what it saw); the axial one the same way,
+    on a grid that is coarse laterally and fine axially, since the axial curve
+    sums over the lateral frequencies and hardly cares how finely they are
+    sampled.
+
+    Tiles are **lateral only**: each one is the full depth of the data, so the
+    axial curve keeps the frequency sampling the whole depth affords -- z is
+    the short axis and the one that can least afford to lose it -- while the
+    lateral extent, which is what does not fit, is cut up.  A tile that holds
+    almost nothing is skipped, and the rest run on as many threads as the
+    machine has.
     """
     from scipy.fft import next_fast_len
 
@@ -578,81 +784,117 @@ def fpc_resolution(x, y, z, frame, pixelsize: float = 0.0, z_pixelsize: float = 
         out.message = "the localizations have no extent in one of the axes"
         return out
 
-    if pixelsize <= 0:
+    lateral_resolution = float("nan")
+    if pixelsize <= 0 or not np.isfinite(lateral_resolution):
         rough = frc_resolution(x, y, frame, n_blocks=n_blocks, repeats=1, seed=seed,
-                               threshold=threshold)
-        pixelsize = rough.resolution / 5 if rough.ok else float(span[:2].max() / 512)
+                               workers=workers, threshold=threshold)
+        lateral_resolution = rough.resolution if rough.ok else float("nan")
+        if pixelsize <= 0:
+            pixelsize = (rough.resolution / 5 if rough.ok
+                         else float(span[:2].max() / 512))
+    axial_resolution = float("nan")
     if z_pixelsize <= 0:
         # the axial voxel cannot be guessed from the lateral one: 2.5 times it
         # is right for an astigmatic PSF and three times too coarse for an
-        # interferometric one, and too coarse reads the resolution as the
-        # sampling.  So measure once on a small grid and come back at a fifth
-        # of what that saw, the way the lateral pixel is found.
-        # the rough grid is coarse laterally and fine axially, which is the
-        # cheap way round: the axial curve sums over the lateral frequencies,
-        # so it hardly cares how finely they are sampled, while sampling z
-        # coarsely would report the sampling rather than the resolution
+        # interferometric one, and too coarse reads the sampling as the
+        # resolution.  So measure once on a grid that is coarse laterally and
+        # fine axially -- the cheap way round -- and come back at a fifth of it.
         rough = fpc_resolution(x, y, z, frame,
                                pixelsize=float(span[:2].max()) / ROUGH_VOXELS,
                                z_pixelsize=float(span[2]) / ROUGH_VOXELS,
                                n_blocks=n_blocks, repeats=1, seed=seed,
-                               max_voxels=max_voxels, threshold=threshold)
+                               workers=workers, max_voxels=max_voxels,
+                               threshold=threshold)
         axial = rough.axes.get("z")
-        z_pixelsize = (axial.resolution / 5 if axial is not None and axial.ok
+        axial_resolution = (axial.resolution if axial is not None and axial.ok
+                            else float("nan"))
+        z_pixelsize = (axial_resolution / 5 if np.isfinite(axial_resolution)
                        else 2.5 * pixelsize)
         if report:
             report(f"FPC: about {axial.resolution:.0f} nm along z on a coarse "
                    f"grid, measuring again at {z_pixelsize:.1f} nm"
                    if axial is not None and axial.ok else
                    "FPC: no axial resolution on the coarse grid")
-    voxel = np.array([pixelsize, pixelsize, z_pixelsize], dtype=float)
 
-    counts = np.maximum(np.ceil(span / voxel), 8)
-    asked = voxel.copy()
-    if counts.prod() > max_voxels:
-        voxel = voxel * (counts.prod() / max_voxels) ** (1 / 3)
-        counts = np.maximum(np.ceil(span / voxel), 8)
-        if np.any(voxel > 1.5 * asked):      # a little coarser costs nothing
-            out.message = (f"the field of view needs voxels of {voxel[0]:.1f} x "
-                           f"{voxel[2]:.1f} nm to fit in one transform, well "
-                           f"coarser than the {asked[0]:.1f} x {asked[2]:.1f} nm "
-                           "the resolution asks for -- measure a ROI instead")
-    shape = tuple(int(next_fast_len(int(n))) for n in counts)
-    voxel = tuple(float(span[k] / shape[k]) for k in range(3))
+    # the depth is whole in every tile; the lateral tile is whatever is left of
+    # the voxel budget once it has been paid for
+    depth = int(next_fast_len(max(int(np.ceil(span[2] / z_pixelsize)), 8)))
+    lateral = min(int(tile_pixels), int(np.sqrt(max(max_voxels // depth, 64))))
+    lateral = int(next_fast_len(max(lateral, 16)))
+    z_pixelsize = float(span[2] / depth)
+    voxel = (pixelsize, pixelsize, z_pixelsize)
+    shape = (lateral, lateral, depth)
+    tile_nm = lateral * pixelsize
+    n_tiles = tuple(max(int(np.ceil(span[k] / tile_nm)), 1) for k in range(2))
     out.voxel, out.shape = voxel, shape
+    threads, fft_workers = _workers(workers)
     if report:
-        report(f"FPC: {shape[0]} x {shape[1]} x {shape[2]} voxels of "
-               f"{voxel[0]:.1f} x {voxel[1]:.1f} x {voxel[2]:.1f} nm, "
+        report(f"FPC: {n_tiles[0]}x{n_tiles[1]} tiles of {lateral} x {lateral} x "
+               f"{depth} voxels of {pixelsize:.1f} x {z_pixelsize:.1f} nm, "
                f"{repeats} split(s)")
 
+    order, starts = _tile_buckets(x, y, low[:2], tile_nm, n_tiles)
+    # the band each plane sums over, from what has already been measured along
+    # the other two axes -- see `band_masks` for why a plane cannot take the
+    # whole grid
+    lateral_band = (lateral_resolution if np.isfinite(lateral_resolution)
+                    else 5 * pixelsize)
+    axial_band = (axial_resolution if np.isfinite(axial_resolution)
+                  else 5 * z_pixelsize)
+    masks = band_masks(shape, voxel, lateral_band, axial_band)
+    out.band = (float(lateral_band), float(axial_band))
+
+    def tile_sums(index: int, side: np.ndarray):
+        rows = order[starts[index]:starts[index + 1]]
+        if len(rows) < MIN_TILE_LOCS:
+            return None
+        corner = np.array([low[0] + (index // n_tiles[1]) * tile_nm,
+                           low[1] + (index % n_tiles[1]) * tile_nm, low[2]])
+        halves = [_volume(x[half], y[half], z[half], corner, voxel, shape)
+                  for half in (rows[~side[rows]], rows[side[rows]])]
+        return plane_sums(halves[0], halves[1], fft_workers, masks)
+
     gathered: Dict[str, list] = {"x": [], "y": [], "z": []}
+    used = 0
     for repeat in range(max(int(repeats), 1)):
-        side = time_blocks(frame, n_blocks, "random" if repeats > 1 else "alternating",
-                           seed + repeat)
+        side = time_blocks(frame, n_blocks,
+                           "random" if repeats > 1 else "alternating", seed + repeat)
         if not side.any() or side.all():
             continue
-        first = _volume(x[~side], y[~side], z[~side], low, voxel, shape)
-        second = _volume(x[side], y[side], z[side], low, voxel, shape)
-        for name, curve in plane_curves(first, second).items():
-            gathered[name].append(curve)
+        got = [found for found in
+               _over_tiles(lambda index: tile_sums(index, side),
+                           range(n_tiles[0] * n_tiles[1]), threads)
+               if found is not None]
+        if not got:
+            continue
+        used = max(used, len(got))
+        for name in "xyz":
+            totals = [sum(part[name][k] for part in got) for k in range(3)]
+            denominator = np.sqrt(totals[1] * totals[2])
+            gathered[name].append(_fold(np.divide(
+                totals[0], denominator, out=np.zeros(len(totals[0])),
+                where=denominator > 0)))
         out.n_locs = (int((~side).sum()), int(side.sum()))
     if not gathered["x"]:
-        out.message = "every localization landed in one half: too few frames"
+        out.message = ("no tile held enough localizations, or every one landed "
+                       "in one half of the split")
         return out
 
     for axis, name in enumerate("xyz"):
-        curve = np.mean(gathered[name], axis=0)
-        # every plane perpendicular to this axis holds the same voxel count
-        per_plane = np.full(len(curve), float(np.prod(shape) / shape[axis]))
+        curves = gathered[name]
+        curve = np.mean(curves, axis=0)
+        # how many voxels each plane actually summed over: the band, in each
+        # of the tiles that contributed
+        per_plane = np.full(len(curve),
+                            float(masks[name].sum() * max(used, 1)))
         found = resolution_from_curve(curve, per_plane, shape[axis], voxel[axis],
                                       threshold)
-        found.repeats = len(gathered[name])
-        found.n_locs = out.n_locs
+        found.repeats, found.tiles, found.n_locs = len(curves), used, out.n_locs
         if found.ok and found.resolution < MIN_VOXELS_PER_RESOLUTION * voxel[axis]:
             found.message = (f"the resolution is within "
                              f"{MIN_VOXELS_PER_RESOLUTION:g} voxels of the "
                              f"{voxel[axis]:.1f} nm sampling along {name}: set a "
                              "finer one before believing it")
         out.axes[name] = found
-    out.repeats = len(gathered["x"])
+    out.repeats, out.tiles = len(gathered["x"]), used
     return out
