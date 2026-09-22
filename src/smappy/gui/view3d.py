@@ -122,6 +122,9 @@ class View3D(QWidget):
         self.show_guides = True
         self._fov: Optional[FieldOfView] = None
         self._face: Optional[tuple] = None       # (axis, sign) while a face drags
+        # what the render grid's axes were last time: a change of quantity is
+        # a change of units, and the zoom and the pivot mean nothing across it
+        self._render_axes = session.axes()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.graphics)
@@ -148,6 +151,13 @@ class View3D(QWidget):
     # ------------------------------------------------------------ session
     def _on_session(self, what: str) -> None:
         if what in ("locs", "layer", "layers", "append", "slab", "roi"):
+            axes = self.session.axes()
+            if axes != self._render_axes:
+                # a picture of another quantity: the session has already built
+                # the slab again, and the view has to be framed on it afresh
+                self._render_axes = axes
+                self.fit()
+                return
             if what == "locs":
                 self.fit()
             elif what == "slab" and self.session.slab is not None:

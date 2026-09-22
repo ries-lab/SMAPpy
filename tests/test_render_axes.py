@@ -244,3 +244,59 @@ def test_the_3d_view_draws_the_versatile_axes():
     rgb, hist = render_3d(session.layers, Projection(azimuth=30, elevation=20), slab, fov)
     assert rgb.shape == (fov.ny, fov.nx, 3) and rgb.max() > 0
     assert hist[:, 1].sum() > 0
+
+
+def test_the_slab_is_rebuilt_when_the_picture_changes_quantity():
+    """The slab is a box in render units, so it belongs to the axes it was
+    built on.  Left alone across a change it is a ROI-sized box of nanometres
+    over a picture of photons against frame, and the 3D window is empty."""
+    from smappy.regions import Region
+    from smappy.session import Session
+    from smappy.view3d import Projection, render_3d
+
+    session = Session(table(20_000))
+    session.set_roi(Region.rect(4000, 4000, 5000, 5000))
+    session.slab_from_roi()
+    assert tuple(np.round(session.slab.size[:2])) == (1000.0, 1000.0)
+
+    session.set_axes(RenderAxes(x="frame", y="photons", x_scale=10.0, y_scale=1000.0))
+    projection = Projection()
+    projection.fit(session.slab, 200, 200)
+    rgb, _ = render_3d(session.layers, projection, session.slab, projection.fov(200, 200))
+    assert (rgb > 0).any(), "the 3D view came up empty on the new axes"
+
+    session.set_axes(RenderAxes())          # and back to the ordinary picture
+    assert tuple(np.round(session.slab.size[:2])) != (1000.0, 1000.0)
+    projection = Projection()
+    projection.fit(session.slab, 200, 200)
+    rgb, _ = render_3d(session.layers, projection, session.slab, projection.fov(200, 200))
+    assert (rgb > 0).any()
+
+
+def test_setting_the_axes_to_what_they_already_are_leaves_the_slab_alone():
+    """A slab the user set by hand is not thrown away by a no-op."""
+    from smappy.session import Session
+    from smappy.view3d import Slab
+
+    session = Session(table())
+    session.set_slab(Slab.from_bounds(100, 200, 300, 400, -50, 50))
+    session.set_axes(RenderAxes())
+    assert tuple(session.slab.size) == (100.0, 100.0, 100.0)
+
+
+def test_a_second_layer_knows_its_extent_on_custom_axes():
+    """A layer over the same table reuses the first's spatial index and used
+    to skip the bounds cache with it, so asking a two-layer session for its
+    extent on any picture but the ordinary one raised -- which is what left
+    the 3D window empty on dual-colour data."""
+    from smappy.session import Session
+
+    locs = table(5000)
+    locs.columns["channel"] = (np.arange(len(locs)) % 2).astype(np.int64)
+    session = Session(locs)
+    session.add_layer(like=0)
+    session.layers[0].set_bound("channel", -0.5, 0.5)
+    session.layers[1].set_bound("channel", 0.5, 1.5)
+    session.set_axes(RenderAxes(x="frame", y="photons", x_scale=10.0, y_scale=1000.0))
+    (x0, x1), (y0, y1) = session.full_view()
+    assert x1 > x0 and y1 > y0

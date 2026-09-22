@@ -109,6 +109,12 @@ class LocSet:
             if name in locs:
                 self._precision_field = name
                 break
+        # the extent on custom render axes, cached; set before the shared
+        # branch returns, because a shared set answers `axis_bounds` too -- it
+        # is the second layer, and without this it raised on any picture that
+        # was not the ordinary one, which is a 3D window that stays empty
+        self._bounds_key = None
+        self._bounds = (0.0, 0.0, 1.0, 1.0)
         if share is not None and share.locs is locs:
             self.index = share.index
             self.median_precision = share.median_precision
@@ -124,8 +130,6 @@ class LocSet:
         # for the query margin: how far the widest blob reaches beyond the view
         self.median_precision = 0.0
         self._precision_n = 0
-        self._bounds_key = None
-        self._bounds = (0.0, 0.0, 1.0, 1.0)
         self._update_precision()
 
     def _update_precision(self, force: bool = True) -> None:

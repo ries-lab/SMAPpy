@@ -753,10 +753,10 @@ class Session:
         return (dlo if lo is None else lo / axes.z_scale,
                 dhi if hi is None else hi / axes.z_scale)
 
-    def slab_from_roi(self) -> Slab:
+    def slab_from_roi(self, use_roi: bool = True) -> Slab:
         """The slab from the ROI (or the whole field), z from the filter."""
         z0, z1 = self.z_range()
-        if self.roi is not None:
+        if use_roi and self.roi is not None:
             self.slab = Slab.from_region(self.roi, (z0, z1))
         else:
             (x0, x1), (y0, y1) = self.full_view(0.0)
@@ -797,10 +797,24 @@ class Session:
         return state.settings.axes if state is not None else RenderAxes()
 
     def set_axes(self, axes: RenderAxes) -> None:
-        """Put every localization layer on these axes, and say so."""
+        """Put every localization layer on these axes, and say so.
+
+        The slab is a box in *render* units, so it belongs to the axes it was
+        built on: kept across a change it is a box in the wrong quantity, and
+        a 3D window showing a ROI-sized box of nanometres against a picture of
+        photons against frame is empty -- and stays empty on the way back,
+        which is what made it look as though nothing could be selected.  So a
+        real change rebuilds it, from the ROI when there is one.
+        """
+        before = self.axes()
         for layer in self.layers:
             if not layer.is_image:
                 layer.state.settings = dataclasses.replace(layer.state.settings, axes=axes)
+        if axes != before and len(self.locs):
+            # not from the ROI: that was drawn on the old picture and is in its
+            # coordinates too, so the whole field on the new axes is the only
+            # box that means anything until the user draws another one
+            self.slab_from_roi(use_roi=False)
         self.changed("layer")
 
     def set_projection(self, projection: Projection) -> None:
