@@ -85,16 +85,16 @@ def test_luts_are_well_formed():
     for name in luts.names():
         table = luts.get(name)
         assert table.shape == (256, 3) and table.min() >= 0 and table.max() <= 1
-    # inverting is the complementary colour at the same brightness, not a
+    # "complement" is the opposite colour at the same brightness, not a
     # reversal: a layer and its inverse add to grey, and grey is its own
     # inverse (black on white is the `gray_inverted` ramp, which is why it
     # is a LUT of its own)
     for name in ("hot", "jet", "turbo", "gray"):
-        table, flipped = luts.get(name), luts.get(name, invert=True)
+        table, flipped = luts.get(name), luts.get(name, invert="complement")
         total = table + flipped
         assert np.allclose(total[:, 0], total[:, 1]) and np.allclose(total[:, 1], total[:, 2])
         assert np.allclose(table.max(1) + table.min(1), flipped.max(1) + flipped.min(1))
-    assert np.allclose(luts.get("gray", invert=True), luts.get("gray"))
+    assert np.allclose(luts.get("gray", invert="complement"), luts.get("gray"))
     assert np.allclose(luts.complement(np.array([[1.0, 0.0, 0.0]])), [[0.0, 1.0, 1.0]])
 
     # on white paper the hue stays and the brightness turns over: a `red` ramp
@@ -240,3 +240,39 @@ def test_the_two_composites_differ_only_where_a_pixel_saturates():
     assert np.allclose(hue[0, 1], [0.5, 0.5, 0.5])   # hue: grey at full brightness
     for rgb in (hue, total):                          # the single colours agree
         assert np.allclose(rgb[0, 0], red) and np.allclose(rgb[0, 2], cyan)
+
+
+def test_the_default_inversion_is_smaps_lutinvert():
+    """The pictures are compared against SMAP's, and "invert" there is
+    `lutinvert`: ``sum(c) - c``, which counts a second channel twice.  On a
+    ramp of one hue it is the complement; on `hot` it saturates at white where
+    the complement runs on to blue, which is the difference one sees."""
+    assert luts.DEFAULT_INVERSION == "sum"
+    assert np.allclose(luts.get("hot", invert=True), luts.get("hot", invert="sum"))
+
+    one_hue = np.array([[0.4, 0.0, 0.0]], np.float32)
+    assert np.allclose(luts.invert_sum(one_hue), luts.complement(one_hue))
+    assert np.allclose(luts.invert_sum(one_hue), [[0.0, 0.4, 0.4]])
+
+    # yellow: sum counts both channels, the complement only the range
+    yellow = np.array([[1.0, 1.0, 0.0]], np.float32)
+    assert np.allclose(luts.invert_sum(yellow), [[1.0, 1.0, 1.0]])
+    assert np.allclose(luts.complement(yellow), [[0.0, 0.0, 1.0]])
+
+    # every inversion stays inside the cube, on every shipped ramp
+    for name in luts.names():
+        for how in luts.INVERSIONS:
+            table = luts.get(name, invert=how)
+            assert table.min() >= 0 and table.max() <= 1, (name, how)
+
+    with pytest.raises(KeyError):
+        luts.get("hot", invert="reversed")
+
+
+def test_an_old_display_setting_still_means_an_inversion():
+    """A workspace written before there was a choice carries a plain True."""
+    from smappy.render import DisplaySettings
+
+    assert DisplaySettings().invert is False
+    assert luts.inversion_name(True) == luts.DEFAULT_INVERSION
+    assert luts.inversion_name("complement") == "complement"

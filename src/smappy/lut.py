@@ -147,17 +147,46 @@ def complement(table: np.ndarray) -> np.ndarray:
     Entry by entry, ``(max + min) - c``, which is the colour half a turn away
     on the hue circle at the same HSL lightness -- so the two ramps are equally
     bright everywhere and, added, make a grey of exactly that brightness.  That
-    is what an inverted LUT is for: two channels drawn one over the other, each
-    keeping its own intensity, and where they coincide the picture goes grey
+    is what an inverted LUT is for when it is two channels one over the other:
+    each keeps its own intensity, and where they coincide the picture goes grey
     instead of one colour winning.
 
-    Reversing the ramp instead, which is what this used to do, turns a bright
-    localization dark; that is a different thing and lives in its own LUT --
-    `gray_inverted` for black on white.  A grey ramp is its own complement.
+    It is *not* what SMAP does (`invert_sum`), and on `hot` the two part
+    company past the red: this sends the yellow end to blue, SMAP's sends it
+    to white.  Both are here and `INVERSIONS` names them.
+
+    Reversing the ramp instead turns a bright localization dark; that is a
+    different thing and lives in its own LUT -- `gray_inverted` for black on
+    white.  A grey ramp is its own complement.
     """
     table = np.asarray(table, dtype=np.float32)
     level = table.max(axis=1, keepdims=True) + table.min(axis=1, keepdims=True)
     return np.clip(level - table, 0.0, 1.0)
+
+
+def invert_sum(table: np.ndarray) -> np.ndarray:
+    """SMAP's inversion: ``sum(c) - c`` per entry, clipped.
+
+    `lutinvert.m`, verbatim.  On a ramp of one hue it agrees with `complement`
+    -- for ``(r, 0, 0)`` both give ``(0, r, r)`` -- and it parts company as
+    soon as a second channel comes up, because the sum counts it twice: `hot`
+    inverted this way runs black through teal and cyan to white and saturates
+    there, where the complement runs on to blue.
+
+    The clipping is ours; MATLAB leaves the entries above one and the display
+    clips them, which is the same picture.  Added, a ramp and this inversion
+    do not make grey -- they make white wherever both are bright, which is why
+    `complement` is kept as the other choice.
+    """
+    table = np.asarray(table, dtype=np.float32)
+    return np.clip(table.sum(axis=1, keepdims=True) - table, 0.0, 1.0)
+
+
+# Which inversion ``invert=True`` means.  SMAP's, because the pictures are
+# compared against SMAP's and "invert" there is `lutinvert`; `complement` is
+# the one to pick for two channels that should go grey where they overlap.
+INVERSIONS = {"sum": invert_sum, "complement": complement}
+DEFAULT_INVERSION = "sum"
 
 
 def on_white(rgb: np.ndarray) -> np.ndarray:
@@ -183,8 +212,13 @@ def on_white(rgb: np.ndarray) -> np.ndarray:
     return np.clip(rgb + (1.0 - level), 0.0, 1.0)
 
 
-def get(lut: LUT, invert: bool = False) -> np.ndarray:
-    """Resolve a LUT name (or pass an array through), complemented if asked."""
+def get(lut: LUT, invert=False) -> np.ndarray:
+    """Resolve a LUT name (or pass an array through), inverted if asked.
+
+    ``invert`` is a name from `INVERSIONS` -- which inversion, they are not the
+    same picture -- or a plain ``True`` for `DEFAULT_INVERSION`, which is what
+    a settings file written before there was a choice carries.
+    """
     if isinstance(lut, str):
         try:
             table = _TABLES[lut]
@@ -194,7 +228,17 @@ def get(lut: LUT, invert: bool = False) -> np.ndarray:
         table = np.asarray(lut, dtype=np.float32)
         if table.ndim != 2 or table.shape[1] != 3:
             raise ValueError("a LUT must have shape (n, 3)")
-    return complement(table) if invert else table
+    return INVERSIONS[inversion_name(invert)](table) if invert else table
+
+
+def inversion_name(invert) -> str:
+    """The inversion ``invert`` asks for; `DEFAULT_INVERSION` for ``True``."""
+    if invert is True or not isinstance(invert, str):
+        return DEFAULT_INVERSION
+    if invert not in INVERSIONS:
+        raise KeyError(f"unknown inversion {invert!r}; "
+                       f"have {', '.join(sorted(INVERSIONS))}")
+    return invert
 
 
 def register(name: str, table: np.ndarray) -> None:

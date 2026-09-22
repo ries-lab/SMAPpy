@@ -898,15 +898,28 @@ class RenderTab(QWidget):
         self.lut = QComboBox()
         self.lut.addItems(luts.names())
         self.invert = QCheckBox("invert")
-        self.invert.setToolTip("the complementary colour at the same brightness: "
-                               "red becomes cyan, and a layer over its inverse "
-                               "goes grey where the two coincide.  A grey ramp is "
-                               "its own complement -- for black on white pick the "
-                               "gray_inverted LUT.")
+        self.invert.setToolTip("the opposite colour at the same brightness: red "
+                               "becomes cyan.  For black on white pick the "
+                               "gray_inverted LUT -- inverting is about hue, not "
+                               "about which end is bright.")
+        # The two inversions are not the same picture past a ramp of one hue,
+        # and which one is wanted depends on what the picture is for, so it is
+        # a choice rather than a decision made here.
+        self.invert_mode = QComboBox()
+        self.invert_mode.addItem("SMAP", "sum")
+        self.invert_mode.addItem("grey", "complement")
+        self.invert_mode.setToolTip(
+            "SMAP: sum(c) - c, as SMAP's lutinvert -- inverted hot runs black "
+            "through cyan to white.\n"
+            "grey: the hue exactly half a turn away at the same lightness, so "
+            "a layer over its inverse goes grey where the two coincide; "
+            "inverted hot runs on to blue instead of saturating at white.")
+        self.invert_mode.setMaximumWidth(90)
         lut_row = QHBoxLayout()
         lut_row.setContentsMargins(0, 0, 0, 0)
         lut_row.addWidget(self.lut, 1)
         lut_row.addWidget(self.invert)
+        lut_row.addWidget(self.invert_mode)
         self.contrast = QDoubleSpinBox(minimum=0, maximum=6, singleStep=0.1, decimals=2)
         self.grouped = QCheckBox("grouped")
         self.grouped.setToolTip("one entry per blink instead of one per frame; "
@@ -964,6 +977,7 @@ class RenderTab(QWidget):
         self.color_field.currentIndexChanged.connect(self._on_color)
         self.lut.currentTextChanged.connect(self._on_display)
         self.invert.toggled.connect(self._on_display)
+        self.invert_mode.currentIndexChanged.connect(self._on_display)
         self.white.toggled.connect(self._on_white)
         self.contrast.valueChanged.connect(self._on_display)
         self.gamma.valueChanged.connect(self._on_display)
@@ -1023,7 +1037,8 @@ class RenderTab(QWidget):
         layer = self.session.layers[index]
         self.filter.layer_index = index
         widgets = (self.mode, self.sigma, self.sigma_y, self.factor, self.color, self.color_field,
-                   self.lut, self.invert, self.white, self.contrast, self.gamma,
+                   self.lut, self.invert, self.invert_mode, self.white,
+                   self.contrast, self.gamma,
                    self.grouped,
                    self.image_pixelsize, self.image_x0, self.image_y0, self.image_frame)
         for w in widgets:
@@ -1043,7 +1058,7 @@ class RenderTab(QWidget):
             self.image_frame.setEnabled(img.n_frames > 1)
             display = layer.get_display()
             self.lut.setCurrentText(display.lut if isinstance(display.lut, str) else "gray")
-            self.invert.setChecked(display.invert)
+            self._show_invert(display.invert)
             self.white.setChecked(display.white_background)
             self.contrast.setValue(display.contrast)
             self.gamma.setValue(display.gamma)
@@ -1065,7 +1080,7 @@ class RenderTab(QWidget):
         self.sigma_y.set(settings.sigma_y)
         self.factor.setValue(settings.sigma_settings.factor)
         self.lut.setCurrentText(display.lut if isinstance(display.lut, str) else "hot")
-        self.invert.setChecked(display.invert)
+        self._show_invert(display.invert)
         self.white.setChecked(display.white_background)
         self.contrast.setValue(display.contrast)
         self.gamma.setValue(display.gamma)
@@ -1142,10 +1157,21 @@ class RenderTab(QWidget):
                                                   white_background=on))
         self.session.changed("layer")
 
+    def _show_invert(self, invert) -> None:
+        """The tick and which inversion, from the one field that carries both."""
+        from .. import lut as luts_module
+        self.invert.setChecked(bool(invert))
+        self.invert_mode.setCurrentIndex(
+            max(0, self.invert_mode.findData(luts_module.inversion_name(invert))))
+        self.invert_mode.setEnabled(bool(invert))
+
     def _on_display(self) -> None:
         layer = self.layer
+        on = self.invert.isChecked()
+        self.invert_mode.setEnabled(on)
         layer.set_display(dataclasses.replace(layer.get_display(), lut=self.lut.currentText(),
-                                              invert=self.invert.isChecked(),
+                                              invert=self.invert_mode.currentData() if on
+                                              else False,
                                               contrast=self.contrast.value(),
                                               gamma=self.gamma.value()))
         self.session.changed("layer")

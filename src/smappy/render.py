@@ -41,7 +41,7 @@ of twice.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Union
 
 import numpy as np
 
@@ -214,7 +214,7 @@ def normalize(image: np.ndarray, imax: Optional[float] = None,
     return np.clip(image / imax, 0.0, 1.0), imax
 
 
-def to_rgb(rendered: RenderedImage, lut: luts.LUT = "hot", invert: bool = False,
+def to_rgb(rendered: RenderedImage, lut: luts.LUT = "hot", invert=False,
            imax: Optional[float] = None, contrast: float = DEFAULT_CONTRAST,
            gamma: float = 1.0, color_mode: str = "hue",
            white_background: bool = False) -> np.ndarray:
@@ -595,7 +595,10 @@ class DisplaySettings:
     then the colour is baked into the accumulation."""
 
     lut: luts.LUT = "hot"
-    invert: bool = False
+    # False, or which inversion (`lut.INVERSIONS`): they are not the same
+    # picture past a ramp of one hue.  A plain True is what a file written
+    # before there was a choice carries, and means `lut.DEFAULT_INVERSION`.
+    invert: Union[bool, str] = False
     contrast: float = DEFAULT_CONTRAST   # saturate 10^-contrast of the pixels
     imax: Optional[float] = None         # an absolute scale, overriding contrast
     gamma: float = 1.0

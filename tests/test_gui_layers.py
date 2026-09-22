@@ -211,3 +211,37 @@ def _layer_table(n=2000):
                           "frame": (np.arange(n) % 50).astype(np.int64),
                           "photons": rng.exponential(500, n),
                           "loc_precision_nm": rng.uniform(5, 40, n)}, {})
+
+
+def test_the_invert_tick_and_the_inversion_are_one_setting():
+    """Which inversion is a choice, not a decision made in the render tab, and
+    both live in the one `invert` field so nothing downstream grows a second
+    one to carry through the GPU cache key and the saved workspace."""
+    import dataclasses
+
+    from PySide6.QtWidgets import QApplication
+
+    from smappy import lut as luts
+    from smappy.gui.render_tab import RenderTab
+    from smappy.session import Session
+
+    QApplication.instance() or QApplication([])
+    session = Session()
+    tab = RenderTab(session)
+    session.set_locs(_layer_table())
+    layer = session.layers[0]
+
+    assert layer.get_display().invert is False and not tab.invert_mode.isEnabled()
+    tab.invert.setChecked(True)
+    assert layer.get_display().invert == luts.DEFAULT_INVERSION
+    assert tab.invert_mode.isEnabled()
+    tab.invert_mode.setCurrentIndex(tab.invert_mode.findData("complement"))
+    assert layer.get_display().invert == "complement"
+    tab.invert.setChecked(False)
+    assert layer.get_display().invert is False
+
+    # a workspace written before there was a choice carries a plain True
+    layer.set_display(dataclasses.replace(layer.get_display(), invert=True))
+    tab._bind_layer(0)
+    assert tab.invert.isChecked()
+    assert tab.invert_mode.currentData() == luts.DEFAULT_INVERSION
