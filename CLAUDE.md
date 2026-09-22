@@ -36,10 +36,15 @@ Running the tests:
 
 * Plain `pytest` collects `externaltools/Comet`, which imports numba and errors
   out.  Always name `tests`.
-* The Qt tests need a display: about 30 of them fail on a headless machine with
-  `ImportError: libEGL.so.1` (`test_workspace`, `test_calibrate_qt`,
-  `test_roi_pipeline`, parts of `test_context` and `test_roi_session`).  That is
-  the environment, not your change -- confirm with `git stash` before chasing one.
+* The Qt tests need Qt's own libraries, not a display: on a bare container they
+  fail with `ImportError: libEGL.so.1`.  Install them once --
+
+      apt-get update && apt-get install -y libegl1 libgl1 libxkbcommon0
+      QT_QPA_PLATFORM=offscreen python -m pytest tests -q
+
+  -- and the whole suite runs.  Without them about 30 fail (`test_workspace`,
+  `test_calibrate_qt`, `test_roi_pipeline`, parts of `test_context` and
+  `test_roi_session`), which is the environment and not your change.
 * `SMAPPY_TEST_CAL=/path/to/_3dcal.mat` enables the tests that want real
   calibration data; without it they skip.
 
@@ -58,7 +63,7 @@ shape, so read the one closest to what you are writing:
 | parts, presets, a C++ backend | `fit.py` (nested settings dataclasses) |
 | adds a derived column, no output | `math_parser.py` (an expression, kept with the table as a recipe) |
 | removes or flags localizations | `remove_locs.py` (a region, a new table or a filtered flag) |
-| fits a model to what is in a ROI | `line_profile.py` (unbinned likelihood, models compared by AIC) |
+| fits a model to what is in a ROI | `line_profile.py` (unbinned likelihood, models compared by AIC; one fit per layer, and `live`) |
 | reads the session and reports | `history.py` (the log, with an optional export) |
 
 A plugin is a settings dataclass plus a `run`:
@@ -95,7 +100,19 @@ class Thing(Plugin):
   the GUI grows a button when it is overridden and nothing when it is not.
 * Override `preflight` to put a question before a run whose cost you can know
   in a fraction of a second -- `drift_comet.py` does, rather than letting
-  someone find out over the next twenty minutes.
+  someone find out over the next twenty minutes.  Returning a
+  `PreflightQuestion` instead of a string offers named alternatives beside the
+  plain yes, each carrying the settings it would run with: COMET offers an RCC
+  prepass, because "no" is not a useful answer to "this will take an
+  afternoon".
+* Set `live = True` on a plugin whose work is tens of milliseconds and which
+  overrides `preview`: the GUI grows a *live* tick and re-previews while the
+  ROI is dragged, silently (no log line, no window, no focus).  It turns a
+  measurement one asks for into one that can be aimed.
+* **A plugin that measures usually wants one answer per layer**, not one over
+  the selection: a line is drawn over two channels and the measurement is how
+  they differ.  `session.selection(i)` is layer `i`'s, and `line_profile.py`'s
+  `_groups` is the shape to copy.
 
 **Put the algorithm in module-level functions that take arrays** and let `run`
 be the thin wrapper.  A script, a test and a notebook should be able to get the
