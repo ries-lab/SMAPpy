@@ -317,3 +317,46 @@ class CountNeighbours(Plugin):
         config.set_plugin_roots([])
         config.load(reload=True)
         plugins.discover(force=True)
+
+
+# ------------------------------------------------------------ the menu
+
+def test_the_plugins_menu_is_the_whole_tree_and_opens_a_window(window, monkeypatch):
+    """A tab is a curated list and pinning is a decision; the menu is the
+    other way in -- anything, once, in a window of its own."""
+    window._fill_plugins_menu()
+
+    def leaves(menu, prefix=""):
+        found = {}
+        for action in menu.actions():
+            if action.menu():
+                found.update(leaves(action.menu(), f"{prefix}{action.text()}/"))
+            elif not action.isSeparator():
+                found[f"{prefix}{action.text()}"] = action
+        return found
+
+    found = leaves(window.plugins_menu)
+    # every scanned plugin, under its own group; the tree, not the pinned list.
+    # The leaf is the plugin's *name*, as the chooser shows it, not the last
+    # part of its path
+    for path, ref in plugins.refs().items():
+        assert f"{ref.group}/{ref.name}" in found, path
+    assert "Find a plugin..." in found
+
+    stats = f"{plugins.refs()[STATS].group}/{plugins.refs()[STATS].name}"
+    found[stats].trigger()
+    opened = window._plugin_windows[STATS]
+    assert opened.isVisible() and opened.panel.plugin.path == STATS
+    # again is the same window, so what was typed into it is still there
+    found[stats].trigger()
+    assert window._plugin_windows[STATS] is opened
+
+
+def test_a_plugin_that_cannot_be_opened_says_so_rather_than_raising(window, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    said = []
+    monkeypatch.setattr(QMessageBox, "warning",
+                        lambda *a, **k: said.append(a[-1]), raising=False)
+    assert window.open_plugin_window("No/Such/Plugin") is None
+    assert said and "No/Such/Plugin" in said[0]

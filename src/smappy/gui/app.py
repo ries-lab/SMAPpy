@@ -151,6 +151,12 @@ class ControlWindow(QMainWindow):
         self.view3d_window = None
         self.calibration_window = None
         self._action(view, "3D view", "Ctrl+3", self.show_3d)
+        self.plugins_menu = self.menuBar().addMenu("Plugins")
+        self._plugin_windows: dict = {}
+        # filled when it is opened, from the scan rather than from imports, so
+        # the menu costs nothing at start and a plugin dropped into the folder
+        # is in it without a restart
+        self.plugins_menu.aboutToShow.connect(self._fill_plugins_menu)
         tools = self.menuBar().addMenu("Tools")
         self._action(tools, "ROI manager", "Ctrl+R", self._open_manager)
         self._action(tools, "ROI evaluation...", None, self._open_evaluation)
@@ -357,6 +363,63 @@ class ControlWindow(QMainWindow):
     def _open_evaluation(self) -> None:
         if self.roi_tab is not None:
             self.roi_tab.open_evaluation()
+
+    # ------------------------------------------------------------ plugins
+    def _fill_plugins_menu(self) -> None:
+        """The whole plugin tree as nested menus; picking one opens a window.
+
+        Built from `PluginRef`s, as the chooser is, so opening the menu
+        imports no plugin.  Rebuilt on every show rather than cached: the scan
+        is cheap and a stale menu is worse than a rebuilt one.
+        """
+        from .. import plugins as registry
+
+        menu = self.plugins_menu
+        menu.clear()
+        self._action(menu, "Find a plugin...", "Ctrl+Shift+P", self.choose_plugin_window)
+        menu.addSeparator()
+        groups = {"": menu}
+
+        def group_for(path: str):
+            if path in groups:
+                return groups[path]
+            head, _, leaf = path.rpartition("/")
+            groups[path] = group_for(head).addMenu(leaf)
+            return groups[path]
+
+        for path, ref in sorted(registry.refs().items()):
+            action = group_for(ref.group).addAction(ref.name)
+            action.setToolTip(ref.description or path)
+            action.triggered.connect(lambda _=False, p=path: self.open_plugin_window(p))
+        if len(groups) == 1:
+            menu.addAction("no plugins found").setEnabled(False)
+
+    def choose_plugin_window(self) -> None:
+        from .chooser import choose_plugin
+        path = choose_plugin(self, title="Open a plugin")
+        if path:
+            self.open_plugin_window(path)
+
+    def open_plugin_window(self, path: str):
+        """One plugin in a window of its own, without pinning it to a tab.
+
+        Kept, so that reopening finds the settings that were typed into it.
+        """
+        from .. import plugins as registry
+        from .plugin_panel import PluginWindow
+
+        window = self._plugin_windows.get(path)
+        if window is None:
+            try:
+                window = PluginWindow(registry.get(path), self.session, self)
+            except Exception as e:
+                QMessageBox.warning(self, "plugin", f"{path} could not be opened:\n{e}")
+                return None
+            window_shortcuts(window)
+            self._plugin_windows[path] = window
+        window.show()
+        window.raise_()
+        return window
 
     def _action(self, menu, text, shortcut, slot) -> QAction:
         action = QAction(text, self)

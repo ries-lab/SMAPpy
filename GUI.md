@@ -66,7 +66,10 @@ reasoning is here so that it does not have to be re-derived.
   ROI, and it is saved with the file.  A search box
   filters them; once there are many plugins a tree chooser is added for the
   long tail.  Each plugin tab shows the favourites (the star on a section,
-  kept in QSettings) or, with *all* ticked, the whole tree.
+  kept in QSettings) or, with *all* ticked, the whole tree.  The **Plugins**
+  menu is the whole tree as nested submenus and opens any of them in a window
+  of its own -- pinning is a decision, and this is the way in for a plugin
+  used once; *Find a plugin...* (Ctrl+Shift+P) is the same chooser.
 * **Defaults**: grouped on, precision <= 25 nm, log-likelihood >= -2,
   z within +-500 nm, PSF size <= 180 nm for a 2D table, rendering sigma =
   0.5 x precision.  Bounds apply to the grouped and ungrouped table alike.

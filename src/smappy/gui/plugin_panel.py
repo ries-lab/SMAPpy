@@ -8,10 +8,11 @@ from __future__ import annotations
 import traceback
 from typing import Optional, Type
 
-from PySide6.QtCore import QObject, QThread, Signal
+from PySide6.QtCore import QObject, Qt, QThread, Signal
 from PySide6.QtGui import QTextCursor
-from PySide6.QtWidgets import (QHBoxLayout, QLabel, QMessageBox, QPlainTextEdit,
-                               QPushButton, QSpinBox, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QHBoxLayout, QLabel, QMainWindow, QMessageBox,
+                               QPlainTextEdit, QPushButton, QScrollArea, QSpinBox,
+                               QVBoxLayout, QWidget)
 
 from ..plugins import Plugin, Result
 from ..session import Session
@@ -399,3 +400,28 @@ class PluginPanel(QWidget):
         self._window.show()
         self._window.show_plots(self.result.figures())
         self._window.raise_()
+
+
+class PluginWindow(QMainWindow):
+    """One plugin in a window of its own, pinned to nothing.
+
+    A tab is a curated list and pinning is a decision; this is the other way
+    in -- pick anything from the Plugins menu and use it once, in a window
+    that can sit beside the picture rather than in the column of sections.
+    The panel is the same `PluginPanel` a tab builds, so a run from here goes
+    through the session exactly as one from a tab does.
+
+    Hidden rather than destroyed on close, and kept by the window that opened
+    it, so reopening finds the settings that were typed into it.
+    """
+
+    def __init__(self, plugin_cls: Type[Plugin], session: Session, parent=None):
+        super().__init__(parent)
+        self.setWindowFlag(Qt.Window, True)
+        self.setWindowTitle(plugin_cls.name or plugin_cls.path)
+        self.panel = PluginPanel(plugin_cls, session)
+        area = QScrollArea()
+        area.setWidgetResizable(True)
+        area.setWidget(self.panel)
+        self.setCentralWidget(area)
+        self.resize(max(self.panel.sizeHint().width() + 40, 380), 520)
