@@ -201,7 +201,13 @@ def test_z_is_weighted_by_its_own_error_when_the_table_has_one():
         1 / np.sqrt(np.sum(1 / z_err.astype(np.float64) ** 2)), rel=1e-5)
 
 
-def test_a_z_window_keeps_stacked_emitters_apart():
+def test_linking_is_lateral_and_does_not_look_at_z():
+    """Two emitters above each other link into one blink, on purpose.
+
+    The z window that would have kept them apart is gone: emitters this close
+    in xy overlap in the raw frames and were never fitted apart anyway, so the
+    window mostly split real blinks whose fitted z scatters between frames.
+    """
     from smappy.group import GroupSettings, group
     from smappy.locs import Localizations
     n = 40
@@ -210,9 +216,9 @@ def test_a_z_window_keeps_stacked_emitters_apart():
                           "frame": np.arange(n, dtype=np.int64),
                           "loc_precision_nm": np.full(n, 10, np.float32)}, {})
     flat, _ = group(locs, GroupSettings(dx=50, dt=1))
-    stacked, _ = group(locs, GroupSettings(dx=50, dt=1, dz=100))
-    assert len(flat) == 1 and len(stacked) == 2
-    assert sorted(np.round(stacked["z_nm"]).tolist()) == [0.0, 400.0]
+    assert len(flat) == 1
+    with pytest.raises(TypeError):
+        GroupSettings(dx=50, dt=1, dz=100)
 
 
 # --------------------------------------------------------------- the sort ---

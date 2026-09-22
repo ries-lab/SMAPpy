@@ -106,7 +106,7 @@ def chunk_edges(frame: np.ndarray, n_chunks: int, lo: int = 0,
     return edges
 
 
-def _link_chunks(ids, x, y, frame, z, dx, dt, dz, edges, workers):
+def _link_chunks(ids, x, y, frame, dx, dt, edges, workers):
     """Every chunk linked at once, then the ids made unique across them.
 
     `ids` is indexed like the sorted table, so everything after this -- the
@@ -114,8 +114,7 @@ def _link_chunks(ids, x, y, frame, z, dx, dt, dz, edges, workers):
     """
     def one(k):
         a, b = edges[k], edges[k + 1]
-        zb = None if z is None else z[a:b]
-        return _group.connect(x[a:b], y[a:b], frame[a:b], dx, dt, zb, dz)
+        return _group.connect(x[a:b], y[a:b], frame[a:b], dx, dt)
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
         results = list(pool.map(one, range(len(edges) - 1)))
@@ -167,18 +166,16 @@ class _Merges:
         return dense[root[ids]], int(used.sum())
 
 
-def _running_state(xs, ys, zs):
+def _running_state(xs, ys):
     """The walk's own recursive mean: ``xh = (xh + x_new) / 2``, in order."""
-    xh, yh, zh = float(xs[0]), float(ys[0]), (float(zs[0]) if zs is not None else 0.0)
+    xh, yh = float(xs[0]), float(ys[0])
     for i in range(1, len(xs)):
         xh = (float(xs[i]) + xh) / 2
         yh = (float(ys[i]) + yh) / 2
-        if zs is not None:
-            zh = (float(zs[i]) + zh) / 2
-    return xh, yh, zh
+    return xh, yh
 
 
-def _stitch(x, y, frame, z, dx, dt, dz, ids, a, b, c, merges) -> Tuple[int, int]:
+def _stitch(x, y, frame, dx, dt, ids, a, b, c, merges) -> Tuple[int, int]:
     """Repair one seam: chunk [a, b) against chunk [b, c).
 
     Returns (traces rejoined, tails that reached the seam).  Both sides are
@@ -202,11 +199,8 @@ def _stitch(x, y, frame, z, dx, dt, dz, ids, a, b, c, merges) -> Tuple[int, int]
     member = np.isin(ids[a:b], tail_ids)
     m_ids, m_x, m_y = ids[a:b][member], x[a:b][member], y[a:b][member]
     m_f = frame[a:b][member]
-    m_z = z[a:b][member] if z is not None else None
     order = np.argsort(m_ids, kind="stable")             # frame order kept inside
     m_ids, m_x, m_y, m_f = m_ids[order], m_x[order], m_y[order], m_f[order]
-    if m_z is not None:
-        m_z = m_z[order]
     starts = np.concatenate(([0], np.flatnonzero(m_ids[1:] != m_ids[:-1]) + 1,
                              [len(m_ids)]))
 
@@ -214,8 +208,8 @@ def _stitch(x, y, frame, z, dx, dt, dz, ids, a, b, c, merges) -> Tuple[int, int]
     for s, e in zip(starts[:-1], starts[1:]):
         if int(m_f[e - 1]) < first - reach:               # died before the seam
             continue
-        xh, yh, zh = _running_state(m_x[s:e], m_y[s:e], None if m_z is None else m_z[s:e])
-        tails.append((int(m_f[s]), float(m_x[s]), int(m_f[e - 1]), xh, yh, zh, int(m_ids[s])))
+        xh, yh = _running_state(m_x[s:e], m_y[s:e])
+        tails.append((int(m_f[s]), float(m_x[s]), int(m_f[e - 1]), xh, yh, int(m_ids[s])))
     if not tails:
         return 0, 0
     tails.sort()                    # by where the trace was SEEDED
@@ -223,7 +217,6 @@ def _stitch(x, y, frame, z, dx, dt, dz, ids, a, b, c, merges) -> Tuple[int, int]
     # --- the heads: the first frames of chunk k+1, and which of them seed ----
     head_to = b + int(np.searchsorted(frame[b:c], first + reach, side="right"))
     hx, hy, hf = x[b:head_to], y[b:head_to], frame[b:head_to]
-    hz = z[b:head_to] if z is not None else None
     h_ids = ids[b:head_to]
     # a head may be joined only at its seed: taking it mid-trace would drag a
     # group that the sequential walk had already given to someone else
@@ -233,7 +226,7 @@ def _stitch(x, y, frame, z, dx, dt, dz, ids, a, b, c, merges) -> Tuple[int, int]
     taken = np.zeros(len(h_ids), bool)
 
     joined = 0
-    for _sf, _sx, fh, xh, yh, zh, gid in tails:
+    for _sf, _sx, fh, xh, yh, gid in tails:
         dark = 0
         while dark <= dt:
             nxt = fh + 1
@@ -250,8 +243,6 @@ def _stitch(x, y, frame, z, dx, dt, dz, ids, a, b, c, merges) -> Tuple[int, int]
                         continue
                     if not (yh - dx < hy[j] < yh + dx):
                         continue
-                    if hz is not None and not (zh - dz < hz[j] < zh + dz):
-                        continue
                     merges.union(gid, int(h_ids[j]))
                     taken[j] = True
                     joined += 1
@@ -265,8 +256,7 @@ def _stitch(x, y, frame, z, dx, dt, dz, ids, a, b, c, merges) -> Tuple[int, int]
 
 
 def connect_chunked(x, y, frame, dx: float = 50.0, dt: int = 1,
-                    blocks: Optional[np.ndarray] = None, z=None,
-                    dz: Optional[float] = None, n_chunks: int = 8,
+                    blocks: Optional[np.ndarray] = None, n_chunks: int = 8,
                     workers: Optional[int] = None, progress=None,
                     stats: Optional[dict] = None) -> np.ndarray:
     """`smappy.group.connect`, with the linking spread over threads.
@@ -285,8 +275,6 @@ def connect_chunked(x, y, frame, dx: float = 50.0, dt: int = 1,
     x = np.asarray(x, np.float64)
     y = np.asarray(y, np.float64)
     frame = np.asarray(np.rint(np.asarray(frame, np.float64)), np.int64)
-    z = None if (z is None or dz is None) else np.asarray(z, np.float64)
-    dz = 0.0 if dz is None else float(dz)
 
     keys: Tuple[np.ndarray, ...] = ()
     if blocks is not None:
@@ -297,7 +285,6 @@ def connect_chunked(x, y, frame, dx: float = 50.0, dt: int = 1,
     order = sorted_order(x, frame, keys, workers)
 
     xs, ys, fs = x[order], y[order], frame[order]
-    zs = None if z is None else z[order]
 
     if keys:
         stacked = np.stack([np.asarray(k)[order] for k in keys], axis=1)
@@ -316,10 +303,10 @@ def connect_chunked(x, y, frame, dx: float = 50.0, dt: int = 1,
             label = "connect" if n_blocks == 1 else f"connect (block {bi + 1}/{n_blocks})"
             progress(label, lo / max(x.size, 1))
         edges = chunk_edges(fs, n_chunks, int(lo), int(hi))
-        n_local = _link_chunks(ids, xs, ys, fs, zs, dx, dt, dz, edges, workers)
+        n_local = _link_chunks(ids, xs, ys, fs, dx, dt, edges, workers)
         merges = _Merges(n_local)
         for k in range(len(edges) - 2):
-            joined, seen = _stitch(xs, ys, fs, zs, dx, dt, dz, ids,
+            joined, seen = _stitch(xs, ys, fs, dx, dt, ids,
                                    edges[k], edges[k + 1], edges[k + 2], merges)
             if stats is not None:
                 stats["rejoined"] += joined

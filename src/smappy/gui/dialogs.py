@@ -80,9 +80,9 @@ class ParametersDialog(QDialog):
         self.setWindowTitle("parameters")
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("<b>grouping</b>: localizations of one blink are merged"))
-        note = QLabel("A z window is rarely right: emitters within the link box in "
-                      "consecutive frames overlap in the raw data, so they were fitted as "
-                      "one anyway, and a window would split blinks whose z scatters.")
+        note = QLabel("Linking is lateral: emitters within the link box in consecutive "
+                      "frames overlap in the raw data and were fitted as one anyway, so "
+                      "a z window only split blinks whose z scatters.")
         note.setWordWrap(True)
         note.setStyleSheet("color: gray")
         layout.addWidget(note)
@@ -90,11 +90,6 @@ class ParametersDialog(QDialog):
                                  help="half-width of the box a localization may move per frame"),
                  "dt": ParamInfo(label="gap", unit="frames", min=0,
                                  help="frames a blink may be dark and still continue"),
-                 "dz": ParamInfo(label="z window", unit="nm", min=0,
-                                 help="link only within this in z; auto (recommended): z is "
-                                      "not looked at.  Emitters that close in xy overlap in "
-                                      "the raw frames and are not fitted apart, so a window "
-                                      "mostly splits real blinks whose z scatters."),
                  "block_fields": ParamInfo(hidden=True),
                  "link_chunks": ParamInfo(hidden=True)}
         self.form = SettingsForm(GroupSettings, param_specs(GroupSettings, infos))

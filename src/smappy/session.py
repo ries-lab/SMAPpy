@@ -38,7 +38,7 @@ GROUPED_BY_DEFAULT = True
 # that box in consecutive frames have overlapping PSFs and could not have been
 # fitted apart anyway, so a z window would only split real blinks; it stays an
 # option in the parameters dialog, with that caveat.
-DEFAULT_GROUP_SETTINGS = GroupSettings(dx=50.0, dt=1, dz=None)
+DEFAULT_GROUP_SETTINGS = GroupSettings(dx=50.0, dt=1)
 
 
 class Layer:
@@ -534,8 +534,7 @@ class Session:
                 if layer.files is not None:
                     layer.set_files(layer.files)
             first = first or layer
-        self.log("regroup", f"dx = {settings.dx:g}, dt = {settings.dt}"
-                 + (f", dz = {settings.dz:g}" if settings.dz else ""),
+        self.log("regroup", f"dx = {settings.dx:g}, dt = {settings.dt}",
                  settings=asdict(settings), changed=True)
         self.changed("regrouped")
 
