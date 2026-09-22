@@ -151,3 +151,45 @@ def place_beside(window: QWidget, other: QWidget, gap: int = 0) -> None:
             x = left if left >= room.left() else max(room.left(), room.right() - width)
         y = min(max(y, room.top()), max(room.top(), room.bottom() - window.height()))
     window.move(x, y)
+
+
+# What a field that can be typed into looks like.  Qt's native styles draw a
+# line edit almost flush with the window on several platforms -- on macOS in
+# particular a spin box and a label are hard to tell apart at a glance -- and
+# the panels here are dense enough that "which of these can I change?" was a
+# real question.  So every editable widget gets the base colour and a border,
+# and a read-only one deliberately does not: the difference is the point.
+#
+# The colours are palette roles rather than literals, so this is a white field
+# on a light desktop and a dark one on a dark desktop, and it follows a theme
+# change without being told.
+EDITABLE_STYLE = """
+QLineEdit, QPlainTextEdit, QTextEdit, QSpinBox, QDoubleSpinBox,
+QComboBox:editable, QAbstractSpinBox {
+    background-color: palette(base);
+    border: 1px solid palette(mid);
+    border-radius: 3px;
+    selection-background-color: palette(highlight);
+}
+QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus, QAbstractSpinBox:focus {
+    border: 1px solid palette(highlight);
+}
+QLineEdit:disabled, QPlainTextEdit:disabled, QTextEdit:disabled,
+QAbstractSpinBox:disabled {
+    background-color: palette(window);
+    color: palette(mid);
+    border: 1px solid palette(window);
+}
+QLineEdit[readOnly="true"], QPlainTextEdit[readOnly="true"],
+QTextEdit[readOnly="true"] {
+    background-color: palette(window);
+    border: 1px solid palette(window);
+}
+"""
+
+
+def apply_style(app) -> None:
+    """Mark the editable fields, keeping whatever style is already set."""
+    existing = app.styleSheet() or ""
+    if EDITABLE_STYLE not in existing:
+        app.setStyleSheet(existing + EDITABLE_STYLE)

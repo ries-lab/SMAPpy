@@ -4,9 +4,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
-from PySide6.QtWidgets import (QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
-                               QFormLayout, QLabel, QTableWidget, QTableWidgetItem,
-                               QVBoxLayout)
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox,
+                               QDoubleSpinBox, QFormLayout, QLabel, QTableWidget,
+                               QTableWidgetItem, QVBoxLayout)
 
 from ..io.formats import CSV_NAMES, csv_columns, guess_csv_mapping
 
@@ -131,3 +131,52 @@ class PixelSizeDialog(QDialog):
 
     def values(self) -> Tuple[float, float, float]:
         return self.pixelsize.value(), self.x0.value(), self.y0.value()
+
+
+class CopyLayerDialog(QDialog):
+    """Which layer to copy from, and which of its settings to take.
+
+    Everything is the wrong default: what makes two layers two -- the filter,
+    or which file each one shows -- is usually exactly what must not be
+    carried over, and "make this one look like that one" is the thing people
+    actually want.  So the display is ticked and the rest is not.
+    """
+
+    PARTS = (("display", "display and rendering",
+              "colour, LUT, contrast, mode and the rendering width"),
+             ("bounds", "filter bounds",
+              "replaces this layer's bounds with the other layer's"),
+             ("files", "which files are shown", ""),
+             ("grouping", "grouped or not, and the linking parameters", ""))
+
+    def __init__(self, session, target: int, parent=None):
+        super().__init__(parent)
+        self.session = session
+        self.target = target
+        self.setWindowTitle(f"copy settings to {session.layers[target].name}")
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("Take these settings from:"))
+        self.source = QComboBox()
+        for i, layer in enumerate(session.layers):
+            if i != target and not layer.is_image:
+                self.source.addItem(f"{i + 1}: {layer.name}", i)
+        layout.addWidget(self.source)
+        self.parts = {}
+        for name, label, help_text in self.PARTS:
+            box = QCheckBox(label, checked=(name == "display"))
+            if help_text:
+                box.setToolTip(help_text)
+            layout.addWidget(box)
+            self.parts[name] = box
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self._apply)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+        self.setEnabled(self.source.count() > 0)
+
+    def _apply(self) -> None:
+        source = self.source.currentData()
+        if source is not None:
+            self.session.copy_layer(source, self.target,
+                                    **{n: b.isChecked() for n, b in self.parts.items()})
+        self.accept()

@@ -140,3 +140,74 @@ def test_white_background_turns_the_picture_over_once(app):
 
     tab.white.setChecked(False)
     assert not any(l.get_display().white_background for l in session.layers)
+
+
+def test_the_editable_fields_are_marked_and_the_read_only_ones_are_not():
+    """"Which of these can I change?" should be answerable at a glance: an
+    editable field gets the base colour and a border, a read-only one keeps
+    the window's."""
+    from PySide6.QtWidgets import QApplication
+
+    from smappy.gui.widgets import EDITABLE_STYLE, apply_style
+
+    app = QApplication.instance() or QApplication([])
+    before = app.styleSheet() or ""
+    try:
+        apply_style(app)
+        assert EDITABLE_STYLE in app.styleSheet()
+        apply_style(app)                     # twice does not stack it
+        assert app.styleSheet().count(EDITABLE_STYLE) == 1
+        assert 'QPlainTextEdit[readOnly="true"]' in EDITABLE_STYLE
+        assert "palette(base)" in EDITABLE_STYLE       # not a hard-coded white
+    finally:
+        app.setStyleSheet(before)
+
+
+def test_copying_settings_from_another_layer_takes_only_what_is_asked_for():
+    """What makes two layers two -- the filter, which file each shows -- must
+    not ride along with "make this one look like that one"."""
+    import dataclasses
+
+    from smappy.session import Session
+
+    session = Session(_layer_table())
+    session.add_layer(like=0)
+    first, second = session.layers
+    first.set_display(dataclasses.replace(first.get_display(), lut="hot"))
+    first.state.settings = dataclasses.replace(first.state.settings, sigma=7.0)
+    second.set_bound("photons", 700, None)
+
+    session.copy_layer(0, 1)
+    assert second.get_display().lut == "hot"
+    assert second.state.settings.sigma == 7.0
+    assert second.state.sets["ungrouped"].filter.ranges["photons"] == (700, None)
+
+    # and the bounds when they are asked for: the other layer's, not both
+    session.copy_layer(0, 1, display=False, bounds=True)
+    assert "photons" not in second.state.sets["ungrouped"].filter.ranges
+    assert (second.state.sets["ungrouped"].filter.ranges
+            == first.state.sets["ungrouped"].filter.ranges)
+
+
+def test_copying_a_layer_onto_itself_or_out_of_range_does_nothing():
+    from smappy.session import Session
+
+    session = Session(_layer_table())
+    session.add_layer(like=0)
+    before = dict(session.layers[1].state.sets["ungrouped"].filter.ranges)
+    session.copy_layer(1, 1, bounds=True)
+    session.copy_layer(5, 1, bounds=True)
+    assert dict(session.layers[1].state.sets["ungrouped"].filter.ranges) == before
+
+
+def _layer_table(n=2000):
+    import numpy as np
+
+    from smappy.locs import Localizations
+
+    rng = np.random.default_rng(0)
+    return Localizations({"x_nm": rng.uniform(0, 1000, n),
+                          "y_nm": rng.uniform(0, 1000, n),
+                          "frame": (np.arange(n) % 50).astype(np.int64),
+                          "photons": rng.exponential(500, n),
+                          "loc_precision_nm": rng.uniform(5, 40, n)}, {})

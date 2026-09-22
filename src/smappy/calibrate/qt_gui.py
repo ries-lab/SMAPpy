@@ -789,6 +789,8 @@ def show_calibration_qt(paths=(), settings=None):
     standalone = app is None
     if standalone:
         app = QApplication([])
+    from ..gui.widgets import apply_style
+    apply_style(app)                 # the same editable fields as the main GUI
     window = CalibrationWindow(paths, settings)
     window.show()
     if standalone:

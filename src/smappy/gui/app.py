@@ -24,7 +24,7 @@ from .preferences import PreferencesDialog
 from .render_tab import RenderTab
 from .roi_tab import ROIHeader
 from .render_view import RenderToolBar, RenderView
-from .widgets import CONTROL_WIDTH, place_beside
+from .widgets import CONTROL_WIDTH, apply_style, place_beside
 
 
 class LoadTask(QThread):
@@ -649,6 +649,7 @@ class RenderWindow(QMainWindow):
 def main(argv: Optional[List[str]] = None) -> int:
     argv = sys.argv if argv is None else argv
     app = QApplication.instance() or QApplication(argv)
+    apply_style(app)
     session = Session()
     render = RenderWindow(session)
     control = ControlWindow(session, render)

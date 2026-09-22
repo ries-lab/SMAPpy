@@ -299,3 +299,44 @@ def test_a_preflight_that_fails_does_not_block_the_run():
     from smappy.gui.plugin_panel import PluginPanel
     panel = PluginPanel(Broken, Session(table()))
     assert panel._preflight(None)[0] is True
+
+
+def test_a_long_report_opens_in_its_own_window():
+    """The panel's output box is four lines tall.  A plugin that hands back a
+    log -- the history, a calibration report -- gets a window instead, and a
+    short summary is still read where it is."""
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication([])
+
+    class Talkative(Plugin):
+        path = "Test/Talkative"
+        name = "Talkative"
+        Settings = None
+        lines = 40
+
+        def run(self, ctx, settings):
+            return Result(text="\n".join(f"line {i}" for i in range(self.lines)))
+
+    from smappy.gui.plugin_panel import PluginPanel
+    panel = PluginPanel(Talkative, Session(table()))
+    panel.run()
+    while panel._thread is not None and panel._thread.isRunning():
+        app.processEvents()
+    app.processEvents()
+    assert panel._text_window is not None
+    assert panel._text_window.view.toPlainText().endswith("line 39")
+    assert panel.text_button.isEnabled()
+
+    # a summary of a line or two is not worth a window
+    Talkative.lines = 2
+    panel._text_window = None
+    panel.run()
+    while panel._thread is not None and panel._thread.isRunning():
+        app.processEvents()
+    app.processEvents()
+    assert panel._text_window is None
+    assert panel.text_button.isEnabled()      # but the button still offers it
+    panel.show_text()
+    assert panel._text_window is not None

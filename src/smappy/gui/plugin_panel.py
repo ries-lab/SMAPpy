@@ -17,6 +17,11 @@ from ..plugins import Plugin, Result
 from ..session import Session
 from .params import SettingsForm
 
+# Longer than this and the result goes to a window of its own rather than into
+# the panel's four-line output box.  A plugin that reports a summary line or
+# three is read where it is; a log or a table is not.
+LONG_TEXT_LINES = 6
+
 
 class _Worker(QObject):
     done = Signal(object)
@@ -54,6 +59,7 @@ class PluginPanel(QWidget):
         # and kept: running again redraws where the user already put it,
         # instead of stacking another copy of it on the screen
         self._window = None
+        self._text_window = None
         self._thread: Optional[QThread] = None
         self._progress_lines = 0
         self._job = "run"
@@ -95,8 +101,14 @@ class PluginPanel(QWidget):
         self.plot_button = QPushButton("Plot")
         self.plot_button.setToolTip("show the plugin's result figure (the drift curves, say)")
         self.plot_button.setEnabled(False)
+        # the output box below is four lines tall; anything longer than a
+        # summary is unreadable in it, so it gets a window of its own
+        self.text_button = QPushButton("Text")
+        self.text_button.setToolTip("show what the run reported, in its own window")
+        self.text_button.setEnabled(False)
         self.status = QLabel("")
         buttons.addWidget(self.plot_button)
+        buttons.addWidget(self.text_button)
         buttons.addWidget(self.status, 1)
         layout.addLayout(buttons)
         self.output = QPlainTextEdit(readOnly=True, maximumBlockCount=500)
@@ -105,6 +117,7 @@ class PluginPanel(QWidget):
 
         self.run_button.clicked.connect(self.run)
         self.plot_button.clicked.connect(self.plot)
+        self.text_button.clicked.connect(self.show_text)
         self.form.field_changed.connect(self._react)
         self.progressed.connect(self._on_progress)
         self.streamed.connect(self._on_stream)
@@ -339,6 +352,10 @@ class PluginPanel(QWidget):
         self.output.appendPlainText(result.text)
         self._progress_lines = 0
         self.status.setText("done")
+        self.text_button.setEnabled(bool(result.text))
+        if len(result.text.splitlines()) > LONG_TEXT_LINES:
+            self.show_text()          # a log, a table: not something to scroll
+                                      # through a four-line slot
         # a run may have added to a list the form offers -- the expressions
         # the math parser has been given, say
         self.form.refresh()
@@ -357,6 +374,15 @@ class PluginPanel(QWidget):
         self.status.setText("failed")
         for button in self._buttons():
             button.setEnabled(True)
+
+    def show_text(self) -> None:
+        """What the run reported, in a window that can hold it."""
+        if self.result is None or not self.result.text:
+            return
+        from .figures import TextWindow
+        if self._text_window is None:
+            self._text_window = TextWindow(self.plugin.name, self)
+        self._text_window.show_text(self.result.text)
 
     def plot(self) -> None:
         """Show the result's figures: one window, a tab each beyond the first.

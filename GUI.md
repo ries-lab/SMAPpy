@@ -60,7 +60,8 @@ reasoning is here so that it does not have to be re-derived.
   a chosen pixel size, colour or float intensity, with the pixel size in the
   resolution tags) and *ROI*: left-click draws one (click, click; polygon:
   click per vertex, double-click closes; Escape cancels), right-click picks
-  the kind, the line width, or clears.  The ROI is a `Region` (`regions.py`)
+  the kind or clears; the line width is a spin box beside it, which resizes
+  the line already drawn.  The ROI is a `Region` (`regions.py`)
   in the session; a plugin's `Selection` is the layer's filter *inside* the
   ROI, and it is saved with the file.  A search box
   filters them; once there are many plugins a tree chooser is added for the

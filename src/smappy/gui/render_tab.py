@@ -364,6 +364,11 @@ class LayerStrip(QWidget):
         self.add.setMenu(menu)
         self.remove = QToolButton(text="-")
         self.remove.clicked.connect(self._remove)
+        # two layers drift apart over a session and one of them is right;
+        # setting the other one up again by hand is a dozen controls
+        self.copy = QToolButton(text="\u2913")           # downwards arrow to bar
+        self.copy.setToolTip("copy settings from another layer")
+        self.copy.clicked.connect(self._copy)
         self.visible.toggled.connect(self._on_visible)
         self.rebuild()
 
@@ -371,7 +376,8 @@ class LayerStrip(QWidget):
         while self.layout_.count():
             item = self.layout_.takeAt(0)
             if item.widget() and item.widget() not in (self.visible, self.name,
-                                                       self.add, self.remove):
+                                                       self.add, self.remove,
+                                                       self.copy):
                 item.widget().deleteLater()
         self.buttons = []
         for i, layer in enumerate(self.session.layers):
@@ -386,10 +392,12 @@ class LayerStrip(QWidget):
             self.layout_.addWidget(b)
         self.layout_.addWidget(self.add)
         self.layout_.addWidget(self.remove)
+        self.layout_.addWidget(self.copy)
         self.layout_.addWidget(self.visible)
         self.layout_.addWidget(self.name)
         self.layout_.addStretch(1)
         self.remove.setEnabled(len(self.buttons) > 1)
+        self.copy.setEnabled(sum(not l.is_image for l in self.session.layers) > 1)
         self.select(min(self.current, len(self.buttons) - 1))
 
     def select(self, i: int) -> None:
@@ -416,6 +424,13 @@ class LayerStrip(QWidget):
 
     def _remove(self) -> None:
         self.session.remove_layer(self.current)
+
+    def _copy(self) -> None:
+        """Ask which layer to take settings from, and which of them."""
+        if self.session.layers[self.current].is_image:
+            return
+        from .dialogs import CopyLayerDialog
+        CopyLayerDialog(self.session, self.current, self).exec()
 
     def _on_visible(self, on: bool) -> None:
         self.session.layers[self.current].visible = on

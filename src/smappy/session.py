@@ -581,6 +581,41 @@ class Session:
         self.changed("layers")
         return layer
 
+    def copy_layer(self, source: int, target: int, display: bool = True,
+                   bounds: bool = False, files: bool = False,
+                   grouping: bool = False) -> None:
+        """Make one layer like another, in the parts that are asked for.
+
+        `add_layer` copies everything, because a new layer starts as the old
+        one with one thing changed.  This is the other half of that: two
+        layers that have drifted apart over a session, and one of them is
+        right.  What to copy is a choice rather than everything, since the
+        thing that makes two layers two -- the filter, or which file each
+        shows -- is usually exactly what must *not* be carried over.
+        """
+        layers = self.layers
+        if not (0 <= source < len(layers) and 0 <= target < len(layers)) \
+                or source == target:
+            return
+        src, dst = layers[source], layers[target]
+        if src.is_image or dst.is_image:
+            raise ValueError("an image layer has no localization settings to copy")
+        if display:
+            dst.state.settings = dataclasses.replace(src.state.settings)
+            dst.set_display(dataclasses.replace(src.get_display()))
+        if bounds:
+            for field in list(dst.state.sets["ungrouped"].filter.ranges):
+                dst.remove_bound(field)
+            for field, (lo, hi) in src.state.sets["ungrouped"].filter.ranges.items():
+                dst.set_bound(field, lo, hi)
+        if files:
+            dst.set_files(src.files)
+        if grouping:
+            dst.group_settings = src.group_settings
+            if dst.grouped != src.grouped:
+                dst.show_grouped(src.grouped, src)
+        self.changed("layer")
+
     def remove_layer(self, index: int) -> None:
         if len(self.layers) > 1:
             del self.layers[index]

@@ -16,8 +16,9 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QAction, QActionGroup, QImage
-from PySide6.QtWidgets import (QFileDialog, QGraphicsPathItem, QInputDialog, QLabel,
-                               QMenu, QToolBar, QToolButton, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QDoubleSpinBox, QFileDialog, QGraphicsPathItem,
+                               QInputDialog, QLabel, QMenu, QToolBar, QToolButton,
+                               QVBoxLayout, QWidget)
 
 from .. import lut as luts
 from ..regions import Region
@@ -520,13 +521,29 @@ class RenderToolBar(QToolBar):
             action.triggered.connect(lambda _=False, k=kind, n=name: self._set_kind(k, n))
             kinds.addAction(action)
         self.roi_menu.addSeparator()
-        self.roi_menu.addAction("line width...", self._line_width)
         self.roi_menu.addAction("clear ROI", view.clear_roi)
         self.roi_button.clicked.connect(lambda: view.start_drawing(self.kind))
         self.roi_button.setContextMenuPolicy(Qt.CustomContextMenu)
         self.roi_button.customContextMenuRequested.connect(
             lambda pos: self.roi_menu.exec(self.roi_button.mapToGlobal(pos)))
         self.addWidget(self.roi_button)
+
+        # The width of a line ROI is the one number a line is drawn *for* --
+        # a profile is taken across it -- and it lived behind a right-click on
+        # the button and a modal dialog, which is where nobody found it.  On
+        # the toolbar, and it resizes the line that is already drawn.
+        self.width_label = QLabel(" width ")
+        self.addWidget(self.width_label)
+        self.line_width = QDoubleSpinBox(minimum=0.1, maximum=1e6, decimals=1)
+        self.line_width.setKeyboardTracking(False)
+        self.line_width.setValue(view.line_width)
+        self.line_width.setMaximumWidth(110)
+        self.line_width.setToolTip("how wide a line ROI is: the band a profile "
+                                   "is taken over, and the slab's second axis "
+                                   "in the 3D window")
+        self.line_width.valueChanged.connect(self._on_width)
+        self.addWidget(self.line_width)
+        self._width_unit()
 
         self.addAction(QAction("Reset view", self, triggered=view.reset))
         self.counts = QLabel("")
@@ -539,6 +556,13 @@ class RenderToolBar(QToolBar):
         """Localizations per layer, and inside the ROI when there is one."""
         if what not in ("locs", "layer", "layers", "append", "roi", "roi-edited"):
             return
+        roi = self.view.session.roi
+        if roi is not None and roi.kind == "line":
+            blocked = self.line_width.blockSignals(True)
+            self.line_width.setValue(float(roi.width))    # dragged on screen
+            self.line_width.blockSignals(blocked)
+        if what in ("locs", "layer"):
+            self._width_unit()
         session = self.view.session
         parts = []
         for i, layer in enumerate(session.layers):
@@ -555,14 +579,25 @@ class RenderToolBar(QToolBar):
         self.kind = kind
         self.roi_button.setText(f"ROI: {name}")
 
-    def _line_width(self) -> None:
-        width, ok = QInputDialog.getDouble(self, "Line ROI", "width (data units):",
-                                           self.view.line_width, 0.1, 1e6, 1)
-        if ok:
-            self.view.line_width = width
-            if self.view.session.roi is not None and self.view.session.roi.kind == "line":
-                p = self.view.session.roi.points
-                self.view.session.set_roi(Region.line((p[0] + p[3]) / 2, (p[1] + p[2]) / 2, width))
+    def _on_width(self, width: float) -> None:
+        """The width the next line gets, and the one on screen now."""
+        self.view.line_width = width
+        roi = self.view.session.roi
+        if roi is not None and roi.kind == "line" and abs(roi.width - width) > 1e-9:
+            p = roi.points
+            self.view.session.set_roi(
+                Region.line((p[0] + p[3]) / 2, (p[1] + p[2]) / 2, width))
+
+    def _width_unit(self) -> None:
+        """The suffix: the picture's own x unit, which need not be nanometres."""
+        axes = self.view.session.axes()
+        locs = self.view.session.locs
+        try:
+            name = axes.names(locs)[0] if len(locs) else "x_nm"
+        except KeyError:
+            name = "x_nm"
+        unit = axis_unit(name)
+        self.line_width.setSuffix(f" {unit}" if unit in ("nm", "pixels") else "")
 
     def _default(self, suffix: str) -> str:
         path = self.view.session.path

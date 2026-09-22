@@ -21,8 +21,9 @@ from __future__ import annotations
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QAction
-from PySide6.QtWidgets import (QMainWindow, QTabWidget, QVBoxLayout, QWidget)
+from PySide6.QtGui import QAction, QFontDatabase, QTextCursor
+from PySide6.QtWidgets import (QMainWindow, QPlainTextEdit, QTabWidget,
+                               QVBoxLayout, QWidget)
 
 from ..plugins import Plot
 
@@ -354,3 +355,30 @@ class ResultWindow(QMainWindow):
     def closeEvent(self, event) -> None:           # noqa: N802 (Qt's name)
         self.figures.close_detached()
         super().closeEvent(event)
+
+
+class TextWindow(QMainWindow):
+    """A result's text in a window of its own, with a monospaced font.
+
+    The panel's output box is four lines tall, which is right for a progress
+    line and a summary and useless for what `Analysis/Process/History` or a
+    calibration report hands back -- a table of tens of lines, scrolled
+    through a slot.  Reused like `ResultWindow`, so running again replaces
+    the text where the window already is.
+    """
+
+    def __init__(self, title: str, parent=None):
+        super().__init__(parent)
+        self.setWindowFlag(Qt.Window, True)
+        self.setWindowTitle(title)
+        self.view = QPlainTextEdit(readOnly=True)
+        self.view.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        self.view.setFont(QFontDatabase.systemFont(QFontDatabase.FixedFont))
+        self.setCentralWidget(self.view)
+        self.resize(760, 520)
+
+    def show_text(self, text: str) -> None:
+        self.view.setPlainText(text)
+        self.view.moveCursor(QTextCursor.MoveOperation.Start)
+        self.show()
+        self.raise_()

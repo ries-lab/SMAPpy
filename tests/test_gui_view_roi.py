@@ -53,3 +53,23 @@ def test_the_roi_header_never_widens_the_control_window(app):
     header.file_count.setText("1. " + "a_long_experiment_name" * 4
                               + "_sml.hdf5 - 128 ROIs")
     assert header.sizeHint().width() <= CONTROL_WIDTH
+
+
+def test_the_line_width_is_on_the_toolbar_and_moves_the_line(app):
+    """It is the number a line ROI exists for, and it lived behind a
+    right-click and a modal dialog."""
+    from smappy.gui.render_view import RenderToolBar, RenderView
+
+    session = Session(table())
+    view = RenderView(session)
+    bar = RenderToolBar(view)
+    assert bar.line_width.value() == view.line_width
+
+    session.set_roi(Region.line((0, 0), (500, 500), 100.0))
+    bar.line_width.setValue(250.0)
+    assert session.roi.width == 250.0
+    assert view.line_width == 250.0
+
+    # and a line dragged wider on screen moves the spin box back
+    session.set_roi(Region.line((0, 0), (500, 500), 77.0))
+    assert bar.line_width.value() == 77.0
