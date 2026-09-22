@@ -196,8 +196,16 @@ class PluginPanel(QWidget):
         except ValueError as e:
             self.status.setText(f"bad value: {e}")
             return
-        if job == "run" and not self._preflight(settings):
-            return
+        if job == "run":
+            go, chosen = self._preflight(settings)
+            if not go:
+                return
+            if chosen is not settings:
+                # a preflight choice may hand back other settings than the
+                # form's; showing them is what keeps the run from being a
+                # surprise afterwards
+                settings = chosen
+                self.form.set(settings)
         # built here, on the GUI thread: the context reads the table and the
         # selection now, so the worker cannot race a live fit rebinding them
         context = self.session.context(progress=self.progressed.emit,
@@ -220,8 +228,12 @@ class PluginPanel(QWidget):
             sig.connect(self._thread.quit)
         self._thread.start()
 
-    def _preflight(self, settings) -> bool:
+    def _preflight(self, settings):
         """Ask the plugin whether this run wants agreeing to first.
+
+        Returns ``(go, settings)``: a plugin may offer a cheaper way of doing
+        the same thing (`PreflightQuestion`), and taking it runs with the
+        settings that choice carries rather than the ones in the form.
 
         On the GUI thread and before the worker exists, so the dialog is an
         ordinary modal one.  What the plugin reports here is written straight
@@ -229,6 +241,8 @@ class PluginPanel(QWidget):
         of what was agreed to, and the progress lines that follow overwrite
         each other on the line below it.
         """
+        from ..plugins import PreflightQuestion
+
         try:
             context = self.session.context(progress=self.output.appendPlainText)
             question = self.plugin.preflight(context, settings)
@@ -239,18 +253,65 @@ class PluginPanel(QWidget):
             # says so rather than vanishing, so that a broken preflight is
             # visible as one.
             self.output.appendPlainText(f"(no estimate: {type(e).__name__}: {e})")
-            return True
+            return True, settings
         if not question:
-            return True
-        answer = QMessageBox.question(
-            self, f"{self.plugin.name}: before running", question,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No)
-        if answer == QMessageBox.StandardButton.Yes:
-            return True
+            return True, settings
+        title = f"{self.plugin.name}: before running"
+        if not isinstance(question, PreflightQuestion):
+            answer = QMessageBox.question(
+                self, title, str(question),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No)
+            if answer == QMessageBox.StandardButton.Yes:
+                return True, settings
+            return self._not_run()
+        chosen = self.ask_choice(title, question)
+        if chosen is None:
+            return self._not_run()
+        if chosen.settings is not None:
+            self.output.appendPlainText(f"chose: {chosen.label}")
+            return True, chosen.settings
+        return True, settings
+
+    def _not_run(self):
         self.output.appendPlainText("not run")
         self.status.setText("cancelled")
-        return False
+        return False, None
+
+    def ask_choice(self, title: str, question):
+        """Put a question with alternatives; the choice, or None to cancel.
+
+        Its own method because it is the one part of the preflight that opens
+        a modal dialog: a test drives the decision by replacing this, as it
+        replaces `QMessageBox.question` for the plain yes-or-no.
+        """
+        from ..plugins import PreflightChoice
+
+        box = QMessageBox(self)
+        box.setWindowTitle(title)
+        box.setText(question.text)
+        # each alternative is a button of its own rather than a second dialog:
+        # the choice is between ways of doing the same thing, and they should
+        # be readable side by side
+        buttons = []
+        for choice in question.choices:
+            button = box.addButton(choice.label, QMessageBox.ButtonRole.AcceptRole)
+            if choice.help:
+                button.setToolTip(choice.help)
+            buttons.append((button, choice))
+        plain = PreflightChoice(label=question.run_label)
+        run = box.addButton(question.run_label, QMessageBox.ButtonRole.AcceptRole)
+        cancel = box.addButton(QMessageBox.StandardButton.Cancel)
+        box.setDefaultButton(buttons[0][0] if buttons else cancel)
+        detail = "\n\n".join(f"{c.label}\n{c.help}" for c in question.choices if c.help)
+        if detail:
+            box.setDetailedText(detail)
+        box.exec()
+        clicked = box.clickedButton()
+        for button, choice in buttons:
+            if clicked is button:
+                return choice
+        return plain if clicked is run else None
 
     def _on_progress(self, text: str) -> None:
         """Progress replaces the last line while it is a progress line, so a

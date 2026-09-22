@@ -125,6 +125,47 @@ def test_two_stage_matches_the_single_pass():
         assert np.abs(error).mean() < 5.0
 
 
+def test_an_rcc_prepass_recovers_the_same_drift_over_a_small_radius():
+    """RCC takes out the bulk, COMET refines what is left, and the two add.
+
+    The point of it is the search radius: COMET sees a few tens of nanometres
+    where a single pass has to look over the whole drift, and the pair count
+    -- which is the wait -- goes with the radius.
+    """
+    locs, truth, _ = simulate()
+    drift = estimate_drift(locs, DriftSettings(
+        segmentation_var=2, backend="cpu", spline=False, group=False,
+        rcc_prepass=True, rcc_prepass_windows=8, rcc_prepass_max_drift_nm=400.0,
+        max_drift_nm=50.0, initial_sigma_nm=None, target_sigma_nm=10.0))
+    error = (drift.drift - drift.drift.mean(0)) - (truth - truth.mean(0))
+    assert np.abs(error).mean() < 8.0
+
+
+def test_the_slow_run_dialogue_offers_rcc_first():
+    """"No" is not the only useful answer to "this will take an afternoon"."""
+    from smappy.plugins import Context, PreflightQuestion
+    from smappy.plugins.drift_comet import CometDrift
+
+    rng = np.random.default_rng(0)
+    n = 300_000
+    locs = Localizations({"x_nm": rng.uniform(0, 20_000, n),
+                          "y_nm": rng.uniform(0, 20_000, n),
+                          "frame": np.sort(rng.integers(0, 20_000, n)).astype(np.int64),
+                          "loc_precision_nm": np.full(n, 12.0)}, {})
+    plugin = CometDrift()
+    asked = DriftSettings(max_drift_nm=1500.0)
+    question = plugin.preflight(Context(locs=locs), asked)
+    assert isinstance(question, PreflightQuestion) and len(question.choices) == 1
+    cheap = question.choices[0].settings
+    assert cheap.rcc_prepass and cheap.max_drift_nm == plugin.prepass_max_drift_nm
+    assert cheap.rcc_prepass_max_drift_nm == asked.max_drift_nm
+    # and it really is cheaper, which is the whole reason for offering it
+    assert estimate_cost(locs, cheap).seconds < estimate_cost(locs, asked).seconds
+    # a run that already has the prepass on is asked the plain question
+    again = plugin.preflight(Context(locs=locs), cheap)
+    assert again is None or isinstance(again, str)
+
+
 def test_spline_drift_needs_no_time_windows():
     locs, truth, _ = simulate()
     drift = estimate_drift(locs, DriftSettings(

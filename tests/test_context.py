@@ -225,7 +225,58 @@ def test_a_declined_preflight_question_does_not_run_the_plugin(monkeypatch):
     assert "this will take 3 hours" in panel.output.toPlainText()
 
     answer["button"] = QMessageBox.StandardButton.Yes
-    assert panel._preflight(None) is True         # and 'yes' lets the run start
+    assert panel._preflight(None)[0] is True      # and 'yes' lets the run start
+
+
+def test_a_preflight_choice_runs_with_the_settings_it_carries(monkeypatch):
+    """A question with alternatives: taking one runs what that one says, and
+    the form shows it afterwards -- a run must not do something the panel
+    does not admit to."""
+    pytest.importorskip("PySide6")
+    from dataclasses import dataclass
+    from PySide6.QtWidgets import QApplication
+
+    from smappy.plugins import PreflightChoice, PreflightQuestion, param
+
+    app = QApplication.instance() or QApplication([])
+    used = {}
+
+    @dataclass
+    class Cost:
+        radius: float = param(500.0, label="radius", min=1)
+
+    class Expensive(Plugin):
+        path = "Test/Choosy"
+        name = "Choosy"
+        Settings = Cost
+
+        def preflight(self, ctx, settings):
+            return PreflightQuestion(
+                text="this will take 3 hours",
+                choices=[PreflightChoice(label="do it cheaply",
+                                         settings=Cost(radius=50.0))])
+
+        def run(self, ctx, settings):
+            used["radius"] = settings.radius
+            return Result(locs=ctx.locs[:10])
+
+    from smappy.gui.plugin_panel import PluginPanel
+    panel = PluginPanel(Expensive, Session(table()))
+    monkeypatch.setattr(PluginPanel, "ask_choice",
+                        lambda self, title, q: q.choices[0])
+    panel.run()
+    while panel._thread is not None and panel._thread.isRunning():
+        app.processEvents()
+    app.processEvents()
+    assert used["radius"] == 50.0
+    assert panel.form.value().radius == 50.0
+
+    # and cancelling runs nothing at all
+    used.clear()
+    monkeypatch.setattr(PluginPanel, "ask_choice", lambda self, title, q: None)
+    panel.run()
+    app.processEvents()
+    assert not used and panel.status.text() == "cancelled"
 
 
 def test_a_preflight_that_fails_does_not_block_the_run():
@@ -247,4 +298,4 @@ def test_a_preflight_that_fails_does_not_block_the_run():
 
     from smappy.gui.plugin_panel import PluginPanel
     panel = PluginPanel(Broken, Session(table()))
-    assert panel._preflight(None) is True
+    assert panel._preflight(None)[0] is True

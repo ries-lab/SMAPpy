@@ -338,6 +338,35 @@ def _as_plot(plot, name: str = "") -> Plot:
 
 
 @dataclass
+class PreflightChoice:
+    """One way out of a preflight question, and what taking it runs.
+
+    ``settings`` is what the run uses when this is chosen -- normally the ones
+    the form holds with a few fields replaced, which is how a question can
+    offer a cheaper way of doing the same thing rather than only a yes and a
+    no.  None runs what was asked for.
+    """
+    label: str
+    settings: Any = None
+    help: str = ""
+
+
+@dataclass
+class PreflightQuestion:
+    """A preflight question with more than two answers.
+
+    `Plugin.preflight` may return a plain string, which is the yes-or-no it
+    always was.  This is for the case where the honest answer to "this will
+    take an afternoon" is neither yes nor no but "not like that": the choices
+    are offered beside the plain yes, each carrying the settings it would run
+    with, and cancelling is always there.
+    """
+    text: str
+    choices: Sequence[PreflightChoice] = ()
+    run_label: str = "Run anyway"
+
+
+@dataclass
 class Result:
     """What a plugin hands back.  Every part is optional."""
     locs: Optional[Localizations] = None    # replaces the session's table
@@ -460,14 +489,16 @@ class Plugin:
         except (TypeError, ValueError):
             return True
 
-    def preflight(self, ctx: Context, settings) -> Optional[str]:
+    def preflight(self, ctx: Context, settings):
         """Anything to put to the user before `run` starts, or None to start.
 
-        Returning a string makes the GUI ask it, and run only on a yes.  This
-        is called on the thread that owns the session, *before* the worker
-        exists, so it has to be quick -- it is where a run whose cost can be
-        known in a fraction of a second says so, rather than finding out over
-        the following twenty minutes.  `ctx.report` from here reaches the log.
+        Returning a string makes the GUI ask it, and run only on a yes; a
+        `PreflightQuestion` offers named alternatives beside that yes, each
+        with the settings it would run with.  This is called on the thread
+        that owns the session, *before* the worker exists, so it has to be
+        quick -- it is where a run whose cost can be known in a fraction of a
+        second says so, rather than finding out over the following twenty
+        minutes.  `ctx.report` from here reaches the log.
         """
         return None
 

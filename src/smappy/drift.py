@@ -109,6 +109,21 @@ class DriftSettings:
     # keeps it from producing the runaway window the single pass has here.
     two_stage: bool = False
     two_stage_radius_nm: float = 30.0
+    # A coarse RCC pass first, and then COMET only has to find what RCC left
+    # behind.  This is the lever when the estimate would take an afternoon:
+    # COMET's cost is the pair count, which grows steeply with the search
+    # radius, while RCC correlates rendered images and does not care how far it
+    # looks.  So RCC takes out the hundreds of nanometres over
+    # `rcc_prepass_max_drift_nm` and COMET refines the tens that are left over
+    # a `max_drift_nm` of a few tens -- the same trade as `two_stage`, with a
+    # first pass that is seconds instead of the expensive half.
+    rcc_prepass: bool = False
+    rcc_prepass_windows: int = 10    # time windows RCC correlates
+    # How far the prepass looks.  None is RCC's own default, which is the right
+    # thing when the setting is turned on by hand; the preflight's offer puts
+    # the max drift that was asked for here, since that is what the user
+    # believes the stage did, and leaves `max_drift_nm` for the refinement.
+    rcc_prepass_max_drift_nm: Optional[float] = None
     # Fit the drift as a cubic B-spline in time instead of one free vector per
     # time window.  Drift is smooth -- slow creep, occasionally a small jump --
     # so a curve with a coefficient every `spline_knot_frames` frames has far
@@ -509,6 +524,8 @@ def estimate_drift(locs: Localizations, settings: Optional[DriftSettings] = None
     if settings.spline:
         return _estimate_spline(locs, settings, select, pixelsize_nm, display,
                                 progress)
+    if settings.rcc_prepass:
+        return _rcc_prepass(locs, settings, select, pixelsize_nm, display, progress)
     if settings.two_stage:
         return _two_stage(locs, settings, select, pixelsize_nm, display, progress)
 
@@ -702,6 +719,33 @@ def _two_stage(locs: Localizations, settings: DriftSettings, select,
                 initial_sigma_nm=radius / 3.0, target_sigma_nm=radius / 5.0),
         select, pixelsize_nm, display, progress)
     # the two are drift of the same sample measured in sequence, so they add
+    return Drift(coarse.drift + fine.drift, settings, n_used=fine.n_used,
+                 flagged_windows=fine.flagged_windows)
+
+
+def _rcc_prepass(locs: Localizations, settings: DriftSettings, select,
+                 pixelsize_nm: Optional[float], display: bool,
+                 progress: Optional[Progress] = None) -> "Drift":
+    """RCC for the bulk of the drift, then COMET for what is left of it.
+
+    The two are drift of the same sample measured one after the other, so they
+    add -- as in `_two_stage`, whose shape this follows.
+    """
+    from .rcc import RCCSettings, estimate_drift_rcc
+
+    rcc = RCCSettings(n_timepoints=settings.rcc_prepass_windows,
+                      use_z=settings.use_z, group=settings.group,
+                      group_dx_nm=settings.group_dx_nm, group_dt=settings.group_dt)
+    if settings.rcc_prepass_max_drift_nm:
+        rcc = replace(rcc, max_drift_nm=float(settings.rcc_prepass_max_drift_nm))
+    _log(display, f"pass 1 of 2: RCC over {rcc.n_timepoints} time windows, "
+                  f"within {rcc.max_drift_nm:g} nm", progress)
+    coarse = estimate_drift_rcc(locs, rcc, select, pixelsize_nm, display)
+    _log(display, f"pass 2 of 2: COMET within {settings.max_drift_nm:g} nm of "
+                  "what RCC left", progress)
+    fine = estimate_drift(coarse.apply(locs, pixelsize_nm),
+                          replace(settings, rcc_prepass=False),
+                          select, pixelsize_nm, display, progress)
     return Drift(coarse.drift + fine.drift, settings, n_used=fine.n_used,
                  flagged_windows=fine.flagged_windows)
 
