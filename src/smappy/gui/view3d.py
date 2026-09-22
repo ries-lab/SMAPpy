@@ -12,15 +12,15 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QAction, QImage
-from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDoubleSpinBox,
-                               QFileDialog, QFormLayout, QGridLayout, QHBoxLayout,
-                               QInputDialog, QLabel, QMainWindow, QMenu, QPushButton,
-                               QScrollArea, QToolBar, QToolButton, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog,
+                               QFormLayout, QGridLayout, QHBoxLayout, QInputDialog,
+                               QLabel, QMainWindow, QMenu, QPushButton, QScrollArea,
+                               QToolBar, QToolButton, QVBoxLayout, QWidget)
 
 from ..render import FieldOfView, axis_unit
 from ..session import Session
 from .render_view import bar_label, nice_step
-from .widgets import CONTROL_WIDTH
+from .widgets import CONTROL_WIDTH, place_beside
 from ..view3d import (PRESETS, PREVIEW_SCALE, PreviewBudget, Projection, Slab, render_3d,
                       upscale)
 
@@ -840,14 +840,7 @@ class View3DWindow(QMainWindow):
     def _place_controls(self) -> None:
         """Beside the image, and on the screen: a panel off the right edge is
         a panel nobody finds."""
-        frame = self.frameGeometry()
-        x, y = frame.x() + frame.width() + 8, frame.y()
-        screen = self.screen() or QApplication.primaryScreen()
-        if screen is not None:
-            room = screen.availableGeometry()
-            if x + self.controls.width() > room.right():
-                x = max(room.left(), room.right() - self.controls.width())
-        self.controls.move(x, y)
+        place_beside(self.controls, self, gap=8)
 
     def moveEvent(self, event) -> None:
         super().moveEvent(event)

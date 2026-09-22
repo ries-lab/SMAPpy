@@ -254,10 +254,18 @@ class Projection:
         """A mouse drag (degrees).  With ``fix_roll`` (turntable) a horizontal
         drag turns about the data's z axis and a vertical one tilts that axis
         forward or back, and the horizon stays level.  Otherwise a trackball:
-        the drag turns about the screen's own axes, continuous, no pole."""
+        the drag turns about the screen's own axes, continuous, no pole.
+
+        Both branches turn the *view* the same way, so the picture follows the
+        mouse in either: dragging right carries the face towards the viewer to
+        the right.  The turntable subtracts because ``azimuth`` turns the data
+        under a fixed camera, where the trackball's ``_ry`` turns the camera --
+        the two conventions have opposite signs, and using the same one for
+        both is what made a horizontal drag go the wrong way.
+        """
         if self.fix_roll:
             self.roll = 0.0
-            self.azimuth = (self.azimuth + about_vertical) % 360
+            self.azimuth = (self.azimuth - about_vertical) % 360
             self.elevation = (self.elevation + about_horizontal) % 360
             return
         self.set_matrix(_ry(about_vertical) @ _rx(about_horizontal) @ self.matrix)

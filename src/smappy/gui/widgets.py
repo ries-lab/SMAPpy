@@ -127,3 +127,27 @@ class FloatingWindow(QWidget):
         self.content.setParent(None)
         self.closed.emit()
         super().closeEvent(event)
+
+
+def place_beside(window: QWidget, other: QWidget, gap: int = 0) -> None:
+    """Put ``window`` against ``other``'s right edge, on the same screen.
+
+    Touching rather than overlapping: a second window dropped on top of the
+    one it belongs to hides what it was opened to compare against.  Right
+    first, then left, and if neither side has room the window is pushed back
+    onto the screen rather than off it -- a window with its title bar past
+    the edge cannot be moved back by hand on some desktops.
+    """
+    from PySide6.QtWidgets import QApplication
+
+    anchor = other.frameGeometry()
+    width = window.frameGeometry().width() or window.width()
+    x, y = anchor.right() + 1 + gap, anchor.top()
+    screen = other.screen() or window.screen() or QApplication.primaryScreen()
+    if screen is not None:
+        room = screen.availableGeometry()
+        if x + width > room.right():
+            left = anchor.left() - gap - width          # the other side
+            x = left if left >= room.left() else max(room.left(), room.right() - width)
+        y = min(max(y, room.top()), max(room.top(), room.bottom() - window.height()))
+    window.move(x, y)

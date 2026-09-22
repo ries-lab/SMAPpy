@@ -33,10 +33,18 @@ the grouped table's ``n_in_group``.  A constant off-rate makes it geometric,
 ``P(t) = (1 - q) q^(t-1)``, a straight line on a log axis, and the mean
 on-time is ``tau = -1 / ln(q)`` frames.
 
-Every fit is maximum likelihood on the localizations, not least squares on the
-bins, so the bin width is a drawing choice and changes no number.  The
-functions are module level and take arrays: a script can have the same numbers
-without a session, a plugin or a window.
+The photon and on-time fits are maximum likelihood on the localizations, so
+the bin width is a drawing choice and changes no number.  The precision is the
+exception and is fitted to its histogram by least squares: the likelihood
+weighs a localization by ``1/sigma^2``, so the handful of rows a fitter
+returns with a precision of a fraction of a nanometre -- failed fits, not good
+localizations -- carry the answer, and a few per cent of them pull ``sigma_c``
+down by an order of magnitude.  Binned they are a few counts in bins the model
+puts near zero and they move nothing.  ``precision fit`` puts the likelihood
+back for anyone who wants it.
+
+The functions are module level and take arrays: a script can have the same
+numbers without a session, a plugin or a window.
 """
 from __future__ import annotations
 
@@ -144,26 +152,103 @@ def photon_decay(photons, start: float = 0.0) -> Dict[str, float]:
             "median": float(np.median(values)) if len(values) else float("nan")}
 
 
+def precision_cdf(sigma, a: float) -> np.ndarray:
+    """``P(sigma\' <= sigma)`` of the model, in closed form.
+
+    ``y = 1/sigma^2`` is exponential with mean ``1/a``, so a small sigma is a
+    large y and ``P(sigma\' <= s) = P(y >= 1/s^2) = exp(-a/s^2)``.  Exact per
+    bin, which is what the histogram fit needs near zero where the density
+    swings over a bin\'s width.
+    """
+    s = np.asarray(sigma, dtype=float)
+    out = np.zeros_like(s)
+    good = s > 0
+    out[good] = np.exp(-a / s[good] ** 2)
+    return out
+
+
+def _histogram_residual(counts: np.ndarray, edges: np.ndarray, a: float) -> float:
+    """Least squares of the model against the counts, amplitude profiled out."""
+    p = np.diff(precision_cdf(edges, a))
+    denom = float(p @ p)
+    if denom <= 0:
+        return float("inf")
+    amplitude = float(counts @ p) / denom
+    residual = counts - amplitude * p
+    return float(residual @ residual)
+
+
+def precision_from_histogram(counts, edges) -> Tuple[float, float]:
+    """``(a, amplitude)`` fitting ``p(sigma)`` to a histogram by least squares.
+
+    One free shape parameter, so the amplitude comes out of a linear solve for
+    each ``a`` and the search is one-dimensional: a log grid over ``sigma_c``
+    wide enough to hold any histogram, then a golden section on the bracket it
+    picks.  There is no derivative and no optimizer to import.
+
+    Least squares on the counts rather than a likelihood on the localizations,
+    because that is what makes it robust.  A row whose fit collapsed carries a
+    precision of a fraction of a nanometre; the unbinned estimator weighs a row
+    by ``1/sigma^2``, so a few per cent of them outweigh the whole sample and
+    the answer comes back several times too small.  Binned, those rows are a
+    few counts in bins the model puts near zero, and a bounded residual against
+    a peak of thousands moves the fit by nothing.
+    """
+    counts = np.asarray(counts, dtype=float)
+    edges = np.asarray(edges, dtype=float)
+    if counts.sum() <= 0 or len(edges) != len(counts) + 1 or edges[-1] <= 0:
+        return float("nan"), float("nan")
+    # sigma_c is within a factor of a few of the histogram\'s peak; the grid is
+    # far wider than that so no shape of histogram falls off the end of it
+    top = float(edges[-1])
+    grid = np.geomspace(top * 1e-4, top * 10, 240)
+    losses = [_histogram_residual(counts, edges, sc ** 2) for sc in grid]
+    i = int(np.argmin(losses))
+    lo = grid[max(i - 1, 0)]
+    hi = grid[min(i + 1, len(grid) - 1)]
+    phi = (np.sqrt(5) - 1) / 2
+    for _ in range(60):                    # golden section in log sigma_c
+        c, d = hi - phi * (hi - lo), lo + phi * (hi - lo)
+        if _histogram_residual(counts, edges, c ** 2) < \
+                _histogram_residual(counts, edges, d ** 2):
+            hi = d
+        else:
+            lo = c
+    sigma_c = float(np.sqrt(lo * hi))
+    a = sigma_c ** 2
+    p = np.diff(precision_cdf(edges, a))
+    denom = float(p @ p)
+    amplitude = float(counts @ p) / denom if denom > 0 else float("nan")
+    return a, amplitude
+
+
 def precision_model(precision, low: Optional[float] = None,
-                    high: Optional[float] = None) -> Dict[str, float]:
+                    high: Optional[float] = None, bins: int = 100,
+                    method: str = "histogram") -> Dict[str, float]:
     """``sigma_c`` of ``p(sigma) = 2a/sigma^3 exp(-a/sigma^2)``, and its landmarks.
 
-    The substitution ``y = 1/sigma^2`` turns the model into an exponential in
-    ``y`` with mean ``1/a`` -- ``y`` *is* ``N/S^2`` -- so the photon estimator
-    above fits it, the trimming cut included.
+    Two estimators, and the default is the binned one:
 
-    ``low`` and ``high`` are where the sample was cut, when that is known from
-    outside -- a filter on the precision column, say.  The likelihood is
-    truncated there, so the fit describes the whole distribution rather than
-    the part that survived; left out, the cut is taken from the data itself
-    (the trimmed percentiles), which is the same thing whenever the filter is
-    what removed the tails.
+    ``"histogram"`` fits the model to the precision histogram by least squares
+    (`precision_from_histogram`).  It is what a person would do by eye, and it
+    survives the rows a fitter produces with a precision of a fraction of a
+    nanometre -- rows that are not good localizations but failed fits.
+
+    ``"mle"`` is the unbinned maximum likelihood: ``y = 1/sigma^2`` turns the
+    model into an exponential in ``y`` with mean ``1/a`` -- ``y`` *is*
+    ``N/S^2`` -- so the photon estimator above fits it, truncated at ``low``
+    and ``high`` where the sample was cut (a filter on the precision column,
+    say), or at the trimmed percentiles when those are not given.  It is the
+    efficient estimator on clean data and it is the one that goes wrong on
+    real data: weighing each row by ``1/sigma^2`` is exactly what hands the
+    answer to the smallest few.
     """
     values = np.asarray(precision, dtype=float)
     values = values[np.isfinite(values) & (values > 0)]
     out: Dict[str, float] = {
         "n": len(values),
-        "median": float(np.median(values)) if len(values) else float("nan")}
+        "median": float(np.median(values)) if len(values) else float("nan"),
+        "method": method}
     if len(values) < MIN_FOR_FIT:
         out.update(sigma_c=float("nan"), max=float("nan"), rising=float("nan"),
                    low=float("nan"), high=float("nan"))
@@ -173,13 +258,29 @@ def precision_model(precision, low: Optional[float] = None,
     high = float(trimmed[1]) if high is None else float(high)
     if not high > low > 0:
         low, high = float(trimmed[0]), float(trimmed[1])
-    y = 1.0 / values ** 2
-    mean_y = exponential_mean(y, lo=1.0 / high ** 2, hi=1.0 / low ** 2)
-    a = 1.0 / mean_y if mean_y > 0 else float("nan")
+    if method == "histogram":
+        counts, edges = _binned(values, bins, 0.0, precision_range(values))
+        a, amplitude = precision_from_histogram(counts, edges)
+        out["amplitude"] = amplitude
+    else:
+        y = 1.0 / values ** 2
+        mean_y = exponential_mean(y, lo=1.0 / high ** 2, hi=1.0 / low ** 2)
+        a = 1.0 / mean_y if mean_y > 0 else float("nan")
     sigma_c = float(np.sqrt(a))
     out.update(sigma_c=sigma_c, a=float(a), low=float(low), high=float(high),
                max=sigma_c * MODE_OVER_SIGMA_C, rising=sigma_c * RISE_OVER_SIGMA_C)
     return out
+
+
+def precision_range(values) -> float:
+    """Where the precision histogram stops: the 99.5th percentile.
+
+    The same cut for the picture and for the fit, so the curve drawn is the
+    curve fitted and a bin nobody can see cannot move it.
+    """
+    values = np.asarray(values, dtype=float)
+    values = values[np.isfinite(values) & (values > 0)]
+    return float(np.percentile(values, 99.5)) if len(values) else 1.0
 
 
 def precision_density(sigma, a: float) -> np.ndarray:
@@ -313,13 +414,12 @@ def photon_distribution(photons, bins: int = 100, start: float = 0.0
 
 def precision_distribution(precision, bins: int = 100, key: str = "precision",
                            label: str = "localization precision",
-                           unit: str = "nm") -> Distribution:
+                           unit: str = "nm", method: str = "histogram") -> Distribution:
     """The precision histogram with the model the exponential photons imply."""
     values = np.asarray(precision, dtype=float)
     values = values[np.isfinite(values) & (values > 0)]
-    stats = precision_model(values)
-    high = np.percentile(values, 99.5) if len(values) else 1.0
-    counts, edges = _binned(values, bins, 0.0, high)
+    stats = precision_model(values, bins=bins, method=method)
+    counts, edges = _binned(values, bins, 0.0, precision_range(values))
     landmarks = histogram_landmarks(counts, edges)
     stats["histogram_max"] = landmarks["max"]
     stats["histogram_rising"] = landmarks["rising"]
@@ -328,7 +428,12 @@ def precision_distribution(precision, bins: int = 100, key: str = "precision",
     if np.isfinite(a) and a > 0:
         x = np.linspace(edges[0] + 1e-6, edges[-1], 400)
         width = edges[1] - edges[0]
-        curve = (x, stats["n"] * width * precision_density(x, a))
+        # the binned fit carries its own amplitude: the counts it describes are
+        # the ones in the picture, which is fewer than n when a tail was cut
+        scale = stats.get("amplitude", stats["n"])
+        if not np.isfinite(scale):
+            scale = stats["n"]
+        curve = (x, scale * width * precision_density(x, a))
     return Distribution(
         key=key, label=label, unit=unit, counts=counts, edges=edges, stats=stats,
         curve=curve,
@@ -362,7 +467,8 @@ def ontime_distribution(frames, exposure_ms: float = 0.0) -> Distribution:
 
 def statistics(locs: Localizations, bins: int = 100, photon_start: float = 0.0,
                on_time: Optional[Sequence[float]] = None,
-               exposure_ms: float = 0.0) -> List[Distribution]:
+               exposure_ms: float = 0.0,
+               precision_fit: str = "histogram") -> List[Distribution]:
     """Every distribution the table can supply, in reading order.
 
     ``on_time`` is given separately because it lives in the *grouped* table:
@@ -377,11 +483,13 @@ def statistics(locs: Localizations, bins: int = 100, photon_start: float = 0.0,
         found.append(precision_distribution(
             locs[lateral], bins, key="precision",
             label="localization precision",
-            unit="nm" if lateral.endswith("_nm") else "pixel"))
+            unit="nm" if lateral.endswith("_nm") else "pixel",
+            method=precision_fit))
     axial = next((n for n in PRECISION_Z_FIELDS if n in locs), None)
     if axial:
         found.append(precision_distribution(
-            locs[axial], bins, key="precision_z", label="z precision", unit="nm"))
+            locs[axial], bins, key="precision_z", label="z precision", unit="nm",
+            method=precision_fit))
     if on_time is None and "n_in_group" in locs:
         on_time = locs["n_in_group"]
     if on_time is not None and len(on_time):
@@ -444,7 +552,17 @@ class StatisticsSettings:
                                  ("all", "all, unfiltered")),
                         help="the localizations on screen, or the whole table")
     bins: int = param(100, label="bins", min=5,
-                      help="drawing only: every fit is on the localizations")
+                      help="the photon and on-time fits are on the "
+                           "localizations and ignore this; the precision fit "
+                           "is on these bins")
+    precision_fit: str = param("histogram", label="precision fit",
+                               choices=(("histogram", "least squares on the histogram"),
+                                        ("mle", "maximum likelihood (outlier-sensitive)")),
+                               advanced=True,
+                               help="the likelihood weighs a localization by "
+                                    "1/sigma^2, so a few failed fits with a "
+                                    "precision near zero carry the answer; "
+                                    "the binned fit does not see them")
     photon_start: float = param(0.0, label="photons from", unit="photons", min=0.0,
                                 help="where the exponential fit starts; "
                                      "0: at the maximum of the histogram, below "
@@ -524,7 +642,8 @@ class LocalizationStatistics(Plugin):
                                            settings.source != "all")
         found = statistics(locs, bins=settings.bins,
                            photon_start=settings.photon_start, on_time=on_time,
-                           exposure_ms=settings.exposure_ms)
+                           exposure_ms=settings.exposure_ms,
+                           precision_fit=settings.precision_fit)
         if not found:
             raise ValueError("the table has no photons, precision or on-time: "
                              f"it has {', '.join(sorted(locs.keys()))}")

@@ -24,7 +24,7 @@ from .preferences import PreferencesDialog
 from .render_tab import RenderTab
 from .roi_tab import ROIHeader
 from .render_view import RenderToolBar, RenderView
-from .widgets import CONTROL_WIDTH
+from .widgets import CONTROL_WIDTH, place_beside
 
 
 class LoadTask(QThread):
@@ -450,7 +450,8 @@ class ControlWindow(QMainWindow):
             self.view3d_window = View3DWindow(self.session)
             window_shortcuts(self.view3d_window)
             QApplication.instance().aboutToQuit.connect(self.view3d_window.view.shutdown)
-            self.view3d_window.move(self.render_window.x(), self.render_window.y() + 60)
+            # beside the 2D picture, not over it: the two are looked at together
+            place_beside(self.view3d_window, self.render_window)
         self.view3d_window.show()
         self.view3d_window.raise_()
 

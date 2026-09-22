@@ -96,6 +96,35 @@ def test_the_precision_fit_ignores_a_handful_of_absurdly_good_rows():
     assert precision_model(spoilt)["sigma_c"] == pytest.approx(SIGMA_C, rel=0.05)
 
 
+def test_the_binned_precision_fit_survives_what_the_likelihood_does_not():
+    """Five per cent of collapsed rows is past any trimming: the likelihood
+    comes back an order of magnitude too small, the histogram fit does not."""
+    rng = np.random.default_rng(3)
+    sigma = PSF_SCALE / np.sqrt(rng.exponential(N0, 100_000))
+    spoilt = np.concatenate([sigma, rng.uniform(0.01, 1.0, 5_000)])
+    assert precision_model(spoilt)["sigma_c"] == pytest.approx(SIGMA_C, rel=0.05)
+    assert precision_model(spoilt, method="mle")["sigma_c"] < 0.5 * SIGMA_C
+
+
+def test_the_binned_precision_fit_agrees_with_the_likelihood_on_clean_data():
+    """Robustness that cost accuracy would be no bargain."""
+    sigma = PSF_SCALE / np.sqrt(np.random.default_rng(4).exponential(N0, 100_000))
+    binned = precision_model(sigma)["sigma_c"]
+    assert binned == pytest.approx(SIGMA_C, rel=0.02)
+    assert binned == pytest.approx(precision_model(sigma, method="mle")["sigma_c"],
+                                   rel=0.02)
+
+
+def test_the_precision_curve_is_drawn_at_the_height_it_was_fitted_at():
+    """The fitted amplitude, not the row count: the histogram stops at the
+    99.5th percentile and the curve must sit on the bars that are shown."""
+    sigma = PSF_SCALE / np.sqrt(np.random.default_rng(5).exponential(N0, 50_000))
+    dist = precision_distribution(sigma)
+    peak_bin = dist.counts.max()
+    assert dist.curve is not None
+    assert dist.curve[1].max() == pytest.approx(peak_bin, rel=0.1)
+
+
 def test_the_on_time_fit_finds_the_lifetime():
     locs = simulate()
     stats = ontime_decay(locs["n_in_group"])

@@ -197,15 +197,38 @@ class Layer:
     def grouped(self) -> bool:
         return self.state.use_grouped
 
+    def _grouped_carries_the_filter(self, grouped) -> bool:
+        """Does the grouped set already have this layer's bounds and files?
+
+        `set_bound` writes to every set, so the two filters agreeing is the
+        invariant; this asks whether it still holds.  It is asked rather than
+        remembered because a grouped set arrives from three directions -- built
+        here, inherited from another layer over the same table, or carried
+        through a `rebind` -- and only the first of them is a relink.
+        """
+        wanted = {field: bound
+                  for field, bound in self.state.sets["ungrouped"].filter.ranges.items()
+                  if field in grouped.locs}
+        if dict(grouped.filter.ranges) != wanted:
+            return False
+        return self.files is None or "files" in grouped.filter
+
     def show_grouped(self, on: bool, share: Optional["Layer"] = None) -> None:
         """Draw one entry per blink instead of one per frame.  Links on first
         use -- unless ``share``, a layer over the same table, has it already."""
-        fresh = on and ("grouped" not in self.state.sets or self.state.grouped_stale)
         other = share.state if share is not None and not share.is_image else None
         self.state.show_grouped(on, self.group_settings, share=other)
-        if fresh:                    # the new table gets the bounds already set
+        grouped = self.state.sets.get("grouped")
+        if on and grouped is not None and not self._grouped_carries_the_filter(grouped):
+            # A grouped set this layer has not filtered yet.  Inheriting one
+            # from another layer brings that layer's *table* but a filter of
+            # its own, and that is how the second layer came out of a drift
+            # correction unfiltered: nothing was linked here, so the old test
+            # (had it just been relinked?) said there was nothing to do.
             for field, (lo, hi) in self.state.sets["ungrouped"].filter.ranges.items():
                 self.set_bound(field, lo, hi)
+            if self.files is not None:
+                self.set_files(self.files)
 
     def selection(self, index: int = 0) -> Selection:
         """The *ungrouped* localizations this layer's filter keeps.

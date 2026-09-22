@@ -169,13 +169,24 @@ def test_fixed_roll_is_a_turntable():
     proj = Projection(fix_roll=True)
     for _ in range(10):
         proj.rotate_view(7.0, 3.0)
-    assert proj.roll == 0.0 and abs(proj.azimuth - 70) < 1e-9 and abs(proj.elevation - 30) < 1e-9
+    assert proj.roll == 0.0 and abs(proj.azimuth - 290) < 1e-9 and abs(proj.elevation - 30) < 1e-9
     # the data's z axis stays vertical on screen: no x' component
     zx, zy, _ = proj.apply([0.0], [0.0], [1.0])
     assert abs(zx[0]) < 1e-9
     free = Projection(fix_roll=False)
     free.rotate_view(30.0, 0.0)
     assert free.roll != 0.0 or free.azimuth != 0.0
+
+
+def test_a_drag_to_the_right_carries_the_picture_right_in_both_modes():
+    """The face towards the viewer must follow the mouse, turntable or trackball."""
+    for fix_roll in (True, False):
+        proj = Projection(azimuth=0.0, elevation=90.0, fix_roll=fix_roll)
+        # the point the camera is looking at, one unit in front of the pivot
+        front = proj.matrix.T @ np.array([0.0, 0.0, 1.0])
+        proj.rotate_view(10.0, 0.0)                  # drag right
+        xv, _, _ = proj.apply(*[[v] for v in front])
+        assert xv[0] > 0.05, f"fix_roll={fix_roll}: the front face went left"
 
 
 def test_the_index_picks_the_same_rows_as_a_walk_over_the_table():
