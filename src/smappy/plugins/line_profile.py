@@ -83,8 +83,28 @@ squares on the histogram rather than SMAP's plain least squares.  Even then
 the likelihood that is reported is the unbinned one at the fitted parameters,
 so the two methods -- and every model -- are compared on the same scale.
 
+One fit per layer
+-----------------
+
+A line is nearly always drawn over *two* channels, and what is wanted is how
+they differ -- where each one sits, how far apart they are.  So the unit of
+work is a layer: every visible localization layer is fitted separately and
+drawn in its own colour, as SMAP's `lineprofile` does.  ``source="selection"``
+falls back to one fit over whatever is selected, for a single-channel picture
+or a script.
+
+The default profile is the one **along** the line, which is what a line is
+usually drawn for; ``axis="across"`` is the one that measures the width of
+something the line crosses.
+
+The plugin declares `Plugin.live`, so the GUI offers a *live* tick that
+refits while the ROI is dragged: the fit is tens of milliseconds and a
+measurement one can aim with is a different tool from one that is asked for
+and read afterwards.
+
 Everything here is a module-level function over arrays: `project` and
-`fit_profile` need no session, no ROI and no window.
+`fit_profile` need no session, no ROI and no window.  `fit_layers` is the one
+that takes a context, and only because the loop over layers needs one.
 """
 from __future__ import annotations
 
@@ -1156,32 +1176,108 @@ def profiles(locs: Localizations, region: Region,
     return found
 
 
+@dataclass
+class LayerProfile:
+    """One layer\'s localizations in the ROI: its profiles and its fits.
+
+    A line is nearly always drawn over *two* channels -- the distance between
+    them is the measurement -- so the unit of work here is a layer, not the
+    picture.  SMAP\'s `lineprofile` loops over the visible layers for the same
+    reason; this keeps the fits beside the profiles so one figure can draw
+    them together.
+    """
+    name: str
+    colour: str
+    found: Dict[str, Profile]           # by axis
+    fits: List[Fit] = field(default_factory=list)
+    bin_size: float = 1.0
+    note: str = ""
+    axis: str = "along"                 # which of `found` was fitted
+
+    @property
+    def profile(self) -> Profile:
+        return self.found[self.axis]
+
+
+# When a layer\'s own colour cannot be read off its LUT -- a ramp that ends
+# white, like `hot` -- a curve still has to be told from the next one.
+FALLBACK_COLOURS = ("#d62728", "#1f77b4", "#2ca02c", "#9467bd", "#8c564b",
+                    "#e377c2", "#7f7f7f", "#bcbd22")
+
+
+def layer_colour(display, index: int = 0, taken: Sequence[str] = ()) -> str:
+    """A line colour for a layer, from the LUT it is drawn with.
+
+    Three quarters of the way up the ramp rather than at the top: `hot` ends
+    white and so does `gray`, and a white curve on a white figure is no curve.
+    A colour too pale, too dark or too grey to read falls back to the palette,
+    and so does one another layer already has -- telling two curves apart
+    matters more than matching the picture, and two layers on one LUT (which
+    is what copying a layer gives) would otherwise come out the same.
+    """
+    from .. import lut as luts
+
+    try:
+        table = luts.get(getattr(display, "lut", "hot"),
+                         getattr(display, "invert", False))
+        rgb = np.asarray(table[int(0.75 * (len(table) - 1))], float)
+    except Exception:
+        rgb = None
+    if rgb is not None:
+        level = float(rgb.max() + rgb.min()) / 2
+        chroma = float(rgb.max() - rgb.min())
+        colour = "#%02x%02x%02x" % tuple(int(round(255 * c)) for c in rgb)
+        if 0.12 < level < 0.88 and chroma > 0.15 and colour not in taken:
+            return colour
+    free = [c for c in FALLBACK_COLOURS if c not in taken]
+    return free[index % len(free)] if free else FALLBACK_COLOURS[
+        index % len(FALLBACK_COLOURS)]
+
+
 # ---------------------------------------------------------------- drawing
 
-def draw_profile(ax, profile: Profile, fits: Sequence[Fit], bin_size: float) -> None:
-    """The histogram, with every fitted model over it.
+def draw_profile(ax, layers: Sequence["LayerProfile"]) -> None:
+    """The histogram, with what was fitted to it over it.
 
     The histogram is the picture and the fits are of the localizations, so the
     curve is not a fit *to these bars*: it is the density scaled by how many
     localizations and how wide a bin, which is why it can sit above an empty
     bin without anything being wrong.
+
+    One layer is drawn as it always was -- grey bars, a curve per model, the
+    best one red -- because there the question is which model.  Several layers
+    are drawn one colour each, with only the model that won, because there the
+    question is how the layers differ and five curves per layer answers
+    nothing.
     """
-    counts, edges = histogram(profile.values, profile.window, bin_size)
-    ax.bar(edges[:-1], counts, width=np.diff(edges), align="edge",
-           color="0.75", edgecolor="0.45", linewidth=0.4)
-    grid = np.linspace(profile.window[0], profile.window[1], 400)
-    # one per model, best-fitting first, so the red curve is the one the
-    # comparison chose and the rest are there to be seen losing
-    colours = ("#d62728", "#1f77b4", "#2ca02c", "#9467bd", "#8c564b")
-    for fit, colour in zip(fits, colours):
-        ax.plot(grid, len(profile.values) * bin_size * fit.curve(grid),
-                color=colour, linewidth=1.5, label=fit.label)
-    if len(fits) > 1:
+    alone = len(layers) == 1
+    model_colours = ("#d62728", "#1f77b4", "#2ca02c", "#9467bd", "#8c564b")
+    for layer in layers:
+        profile = layer.profile
+        counts, edges = histogram(profile.values, profile.window, layer.bin_size)
+        ax.bar(edges[:-1], counts, width=np.diff(edges), align="edge",
+               color="0.75" if alone else layer.colour,
+               edgecolor="0.45" if alone else "none",
+               alpha=1.0 if alone else 0.45, linewidth=0.4,
+               label=None if alone else layer.name)
+        grid = np.linspace(profile.window[0], profile.window[1], 400)
+        scale = len(profile.values) * layer.bin_size
+        shown = layer.fits if alone else layer.fits[:1]
+        for fit, colour in zip(shown, model_colours):
+            ax.plot(grid, scale * fit.curve(grid),
+                    color=colour if alone else layer.colour, linewidth=1.5,
+                    label=fit.label if alone else None)
+    if not alone or len(layers[0].fits) > 1:
         ax.legend(fontsize=6.5, frameon=False)
-    ax.set_xlabel(f"{profile.label} ({profile.unit})")
+    first = layers[0].profile
+    ax.set_xlabel(f"{first.label} ({first.unit})")
     ax.set_ylabel("localizations")
-    if fits:
-        ax.set_title(fits[0].summary, fontsize=7.5, color="0.25")
+    if alone and layers[0].fits:
+        ax.set_title(layers[0].fits[0].summary, fontsize=7.5, color="0.25")
+    elif not alone:
+        ax.set_title("  |  ".join(f"{l.name}: {l.fits[0].summary}"
+                                  for l in layers if l.fits),
+                     fontsize=7.0, color="0.25")
 
 
 def draw_bootstrap(figure, fit: Fit) -> None:
@@ -1211,36 +1307,57 @@ def draw_bootstrap(figure, fit: Fit) -> None:
                          fontsize=7.5, color="0.25")
 
 
-def draw_scatter(figure, found: Dict[str, Profile]) -> None:
+def draw_scatter(figure, layers: Sequence["LayerProfile"]) -> None:
     """Where the localizations are, in the line's coordinates.
 
     The profile is a projection and a projection hides things -- a filament
     that leaves the ROI half way along, two structures that cross -- so the
-    scatter is next to it rather than behind a menu.
+    scatter is next to it rather than behind a menu.  One colour per layer,
+    the same as the curves, so a feature in one channel can be found in the
+    other.
     """
-    keys = ["across"] + (["z"] if "z" in found else [])
+    found = layers[0].found
+    keys = ["across"] + (["z"] if any("z" in l.found for l in layers) else [])
     axes = figure.subplots(len(keys), 1, squeeze=False).ravel()
-    along = found["along"]
     for ax, key in zip(axes, keys):
-        other = found[key]
-        ax.plot(along.values, other.values, ".", markersize=2, color="#1f77b4")
+        for layer in layers:
+            if key not in layer.found:
+                continue
+            along, other = layer.found["along"], layer.found[key]
+            ax.plot(along.values, other.values, ".", markersize=2,
+                    color=layer.colour if len(layers) > 1 else "#1f77b4",
+                    label=layer.name if len(layers) > 1 else None)
+        along = found["along"]
+        other = next(l.found[key] for l in layers if key in l.found)
         ax.set_xlabel(f"{along.label} ({along.unit})")
         ax.set_ylabel(f"{other.label} ({other.unit})")
         ax.set_xlim(*along.window)
         if key == "across":
             ax.set_ylim(*other.window)
             ax.set_aspect("equal", adjustable="box")
+        if len(layers) > 1:
+            ax.legend(fontsize=6.5, frameon=False, markerscale=4)
 
 
 # --------------------------------------------------------------- the plugin
 
 @dataclass
 class LineProfileSettings:
-    axis: str = param("across", label="profile",
-                      choices=(("across", "across the line"),
-                               ("along", "along the line"),
+    axis: str = param("along", label="profile",
+                      choices=(("along", "along the line"),
+                               ("across", "across the line"),
                                ("z", "z")),
-                      help="which coordinate is histogrammed and fitted")
+                      help="which coordinate is histogrammed and fitted.  "
+                           "Along is what a line is usually drawn for -- the "
+                           "structure laid out under it; across measures the "
+                           "width of something the line crosses")
+    source: str = param("layers", label="localizations",
+                        choices=(("layers", "each visible layer, in its colour"),
+                                 ("selection", "the selection, as one")),
+                        help="a line is nearly always drawn over two channels "
+                             "and the measurement is how they differ, so a "
+                             "profile per layer is the usual thing; SMAP's "
+                             "lineprofile does the same")
     model: str = param("gauss", label="model",
                        choices=(("gauss", "Gaussian"),
                                 ("two_gauss", "two Gaussians (a distance)"),
@@ -1294,26 +1411,109 @@ class LineProfile(Plugin):
 
     def run(self, ctx: Context, settings: LineProfileSettings) -> Result:
         region = _line_roi(ctx)
-        ctx.selection.require(MIN_FOR_FIT, ctx.report, "a profile fit")
-        locs = ctx.selection.apply(ctx.locs)
-        found = profiles(locs, region, length=settings.length_nm,
-                         z_window=_z_window(ctx))
+        layers = fit_layers(ctx, settings, region)
+
+        lines = []
+        for layer in layers:
+            profile = layer.profile
+            head = f"{len(profile.values)} localizations in the {region}, {profile.label}"
+            lines.append(head if len(layers) == 1 else f"{layer.name}: {head}")
+            if layer.note:
+                lines.append(f"    {layer.note}")
+            for fit in layer.fits:
+                lines.append(f"{fit.summary}")
+                lines.append(f"    log L {fit.log_likelihood:.1f}, "
+                             f"AIC {fit.aic:.1f}, BIC {fit.bic:.1f}")
+                lines.extend(fit.interval_lines())
+            if len(layer.fits) > 1:
+                lines.append(f"best by AIC: {layer.fits[0].label} "
+                             f"(by {layer.fits[1].aic - layer.fits[0].aic:.1f})")
+
+        def profile_plot(ax) -> None:
+            draw_profile(ax, layers)
+
+        def scatter_plot(figure) -> None:
+            draw_scatter(figure, layers)
+
+        panels = 2 if any("z" in l.found for l in layers) else 1
+        plots = {"scatter": Plot(draw=scatter_plot, panels=panels,
+                                 size=(5.0, 2.6 * panels))}
+        best = layers[0].fits[0]
+        if best.intervals:
+            spread = len(best.names) + (1 if settings.background else 0)
+            plots["bootstrap"] = Plot(
+                draw=lambda figure: draw_bootstrap(figure, best),
+                panels=spread, size=(5.0, 1.8 * spread))
+
+        def per_layer(what):
+            found = {l.name: what(l) for l in layers}
+            return found[layers[0].name] if len(layers) == 1 else found
+
+        return Result(
+            text="\n".join(lines), settings=settings,
+            data={"layers": layers,
+                  "fits": per_layer(lambda l: {f.model: f for f in l.fits}),
+                  "values": per_layer(lambda l: {f.model: f.values() for f in l.fits}),
+                  "errors": per_layer(lambda l: {f.model: f.uncertainties()
+                                                 for f in l.fits}),
+                  "intervals": per_layer(lambda l: {f.model: f.intervals
+                                                    for f in l.fits if f.intervals}),
+                  "profiles": per_layer(lambda l: l.found),
+                  "bin": layers[0].bin_size,
+                  "n": sum(len(l.profile.values) for l in layers)},
+            plot=profile_plot, plots=plots)
+
+    # cheap enough to redo while the line is dragged; see `Plugin.live`
+    live = True
+
+    def preview(self, ctx: Context, settings: LineProfileSettings) -> Result:
+        """The same measurement, not applied to anything.
+
+        `run` changes no localizations either, so this is `run` -- what the
+        preview is for here is the *live* tick, which wants a result without a
+        line in the history for every position the line was dragged through.
+        """
+        return self.run(ctx, settings)
+
+
+def fit_layers(ctx: Context, settings: LineProfileSettings,
+               region: Region) -> List[LayerProfile]:
+    """One `LayerProfile` per layer asked for, fitted.
+
+    Module level and taking a context so that the loop over layers, which is
+    the only thing the session is needed for, is in one place and the fitting
+    below it needs no session at all.
+    """
+    z_window = _z_window(ctx)
+    groups = _groups(ctx, settings)
+    layers: List[LayerProfile] = []
+    for name, colour, locs in groups:
+        found = profiles(locs, region, length=settings.length_nm, z_window=z_window)
         if settings.axis not in found:
             raise ValueError(f"no {settings.axis} profile: the table has "
                              f"{', '.join(sorted(locs.keys()))}")
         profile = found[settings.axis]
         if len(profile.values) < MIN_FOR_FIT:
-            raise ValueError(f"{len(profile.values)} localizations in the ROI: "
-                             f"too few for a profile fit (at least {MIN_FOR_FIT})")
+            if len(groups) == 1:
+                raise ValueError(f"{len(profile.values)} localizations in the ROI: "
+                                 f"too few for a profile fit (at least {MIN_FOR_FIT})")
+            ctx.report(f"{name}: {len(profile.values)} localizations in the ROI, "
+                       f"too few to fit -- skipped")
+            continue
+        note = ""
         if len(profile.values) < THIN:
-            ctx.report(f"only {len(profile.values)} localizations: the fitted "
-                       "values stand, their error bars are optimistic")
+            note = (f"only {len(profile.values)} localizations: the fitted "
+                    "values stand, their error bars are optimistic")
+            ctx.report(f"{name}: {note}" if len(groups) > 1 else note)
+        if profile.note and settings.use_precision:
+            note = f"{note}; {profile.note}" if note else profile.note
 
         precision = profile.precision if settings.use_precision else None
         bin_size = settings.bin_nm or auto_bin(profile.values, profile.window)
         models = (tuple(MODELS) if settings.model == "all" else (settings.model,))
         ctx.report(f"fitting {len(profile.values)} localizations "
-                   f"({'unbinned' if settings.method == 'mle' else 'binned'})")
+                   f"({'unbinned' if settings.method == 'mle' else 'binned'})"
+                   + (f" -- {name}" if len(groups) > 1 else ""))
         fits = fit_models(profile.values, precision, models=models,
                           window=profile.window, method=settings.method,
                           background=settings.background, bin_size=bin_size)
@@ -1328,44 +1528,34 @@ class LineProfile(Plugin):
         elif len(profile.values) < THIN:
             ctx.report("switch the bootstrap on for intervals that do not "
                        "assume a large sample")
+        layers.append(LayerProfile(name=name, colour=colour, found=found, fits=fits,
+                                   bin_size=bin_size, note=note, axis=settings.axis))
+    if not layers:
+        raise ValueError("no layer has enough localizations in the ROI for a "
+                         f"profile fit (at least {MIN_FOR_FIT} each)")
+    return layers
 
-        lines = [f"{len(profile.values)} localizations in the {region}, "
-                 f"{profile.label}"]
-        if profile.note and settings.use_precision:
-            lines.append(profile.note)
-        for fit in fits:
-            lines.append(f"{fit.summary}")
-            lines.append(f"    log L {fit.log_likelihood:.1f}, "
-                         f"AIC {fit.aic:.1f}, BIC {fit.bic:.1f}")
-            lines.extend(fit.interval_lines())
-        if len(fits) > 1:
-            lines.append(f"best by AIC: {fits[0].label} "
-                         f"(by {fits[1].aic - fits[0].aic:.1f})")
 
-        def profile_plot(ax) -> None:
-            draw_profile(ax, profile, fits, bin_size)
-
-        def scatter_plot(figure) -> None:
-            draw_scatter(figure, found)
-
-        panels = 2 if "z" in found else 1
-        plots = {"scatter": Plot(draw=scatter_plot, panels=panels,
-                                 size=(5.0, 2.6 * panels))}
-        if fits[0].intervals:
-            spread = len(fits[0].names) + (1 if settings.background else 0)
-            plots["bootstrap"] = Plot(
-                draw=lambda figure: draw_bootstrap(figure, fits[0]),
-                panels=spread, size=(5.0, 1.8 * spread))
-
-        return Result(
-            text="\n".join(lines), settings=settings,
-            data={"fits": {f.model: f for f in fits},
-                  "values": {f.model: f.values() for f in fits},
-                  "errors": {f.model: f.uncertainties() for f in fits},
-                  "intervals": {f.model: f.intervals for f in fits
-                                if f.intervals},
-                  "profiles": found, "bin": bin_size, "n": len(profile.values)},
-            plot=profile_plot, plots=plots)
+def _groups(ctx: Context, settings: LineProfileSettings):
+    """``(name, colour, locs)`` per layer to fit, or one for the selection."""
+    session = ctx.session
+    if settings.source == "layers" and session is not None:
+        found = []
+        for i, layer in enumerate(getattr(session, "layers", [])):
+            if layer.is_image or not layer.visible:
+                continue
+            locs = session.selection(i).apply(ctx.locs)
+            taken = [colour for _, colour, _ in found]
+            found.append((layer.name,
+                          layer_colour(layer.get_display(), len(found), taken),
+                          locs))
+        if found:
+            return found
+        if getattr(session, "layers", None):
+            ctx.report("no visible localization layer: the selection is used instead")
+    ctx.selection.require(MIN_FOR_FIT, ctx.report, "a profile fit")
+    return [(ctx.selection.name or "selection", FALLBACK_COLOURS[0],
+             ctx.selection.apply(ctx.locs))]
 
 
 def _line_roi(ctx: Context) -> Region:

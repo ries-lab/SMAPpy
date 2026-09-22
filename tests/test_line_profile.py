@@ -214,7 +214,8 @@ def test_the_bin_width_for_the_picture_stays_between_two_and_two_hundred_bins():
 
 def test_the_plugin_reports_every_model_and_draws_what_it_fitted():
     locs = simulate(1500, 0.0, precision=8.0, sigma=14.0, seed=17)
-    result = LineProfile().run(context(locs), LineProfileSettings(model="all"))
+    result = LineProfile().run(context(locs),
+                               LineProfileSettings(axis="across", model="all"))
     assert set(result.data["fits"]) == {"gauss", "two_gauss", "step",
                                        "disk", "ring"}
     assert "best by AIC: Gaussian" in result.text
@@ -231,11 +232,14 @@ def test_the_plugin_refuses_a_profile_the_table_has_no_column_for():
         LineProfile().run(context(locs), LineProfileSettings(axis="z"))
 
 
-def test_a_profile_along_the_line_is_the_other_coordinate_of_the_same_run():
+def test_a_profile_along_the_line_is_what_a_line_is_drawn_for_and_the_default():
     locs = simulate(1500, 0.0, seed=19)
-    result = LineProfile().run(context(locs),
-                               LineProfileSettings(axis="along", model="step"))
+    result = LineProfile().run(context(locs), LineProfileSettings(model="step"))
+    assert LineProfileSettings().axis == "along"
     assert "position along the line" in result.text
+    across = LineProfile().run(context(locs),
+                               LineProfileSettings(axis="across", model="step"))
+    assert "position across the line" in across.text
 
 
 def _figure():
@@ -474,7 +478,8 @@ def test_a_step_keeps_the_direction_it_was_fitted_with_through_the_resamples():
 def test_the_plugin_reports_the_intervals_and_offers_their_figure():
     locs = simulate(300, 0.0, precision=8.0, sigma=12.0, seed=33)
     result = LineProfile().run(context(locs),
-                               LineProfileSettings(bootstrap=80, confidence=90.0))
+                               LineProfileSettings(axis="across", bootstrap=80,
+                                                   confidence=90.0))
     assert "90% confidence intervals, 80 resamples:" in result.text
     low, high = result.data["intervals"]["gauss"]["sigma"]
     fitted = result.data["values"]["gauss"]["sigma"]
@@ -488,3 +493,80 @@ def test_a_run_without_the_bootstrap_has_no_intervals_and_no_extra_figure():
     result = LineProfile().run(context(locs), LineProfileSettings())
     assert result.data["intervals"] == {}
     assert "bootstrap" not in result.plots
+
+
+# ------------------------------------------------------- one fit per layer
+
+def _two_channel_session():
+    """Two channels over the same line, 60 nm apart, one layer each."""
+    from smappy.session import Session
+
+    one = simulate(800, -30.0, precision=8.0, sigma=6.0, seed=51)
+    two = simulate(800, +30.0, precision=8.0, sigma=6.0, seed=52)
+    columns = {name: np.concatenate([np.asarray(one[name]), np.asarray(two[name])])
+               for name in one.keys()}
+    columns["channel"] = np.concatenate([np.zeros(len(one), np.int64),
+                                         np.ones(len(two), np.int64)])
+    session = Session(Localizations(columns, {"units": "nm"}))
+    session.add_layer(like=0)
+    for i, layer in enumerate(session.layers):
+        layer.set_bound("channel", i - 0.5, i + 0.5)
+        layer.name = f"channel {i + 1}"
+    session.set_roi(ROI)
+    return session
+
+
+def test_a_profile_is_fitted_per_layer_and_drawn_in_each_layer_s_colour():
+    """A line is drawn over two channels and the measurement is how they
+    differ, so one fit for both would answer the wrong question."""
+    session = _two_channel_session()
+    result = LineProfile().run(session.context(),
+                               LineProfileSettings(axis="across"))
+    layers = result.data["layers"]
+    assert [l.name for l in layers] == ["channel 1", "channel 2"]
+    assert layers[0].colour != layers[1].colour
+    centres = [l.fits[0].values()["centre"] for l in layers]
+    assert centres[0] == pytest.approx(-30.0, abs=4.0)
+    assert centres[1] == pytest.approx(+30.0, abs=4.0)
+    assert "channel 1:" in result.text and "channel 2:" in result.text
+    assert set(result.data["fits"]) == {"channel 1", "channel 2"}
+
+    figure = _figure()
+    result.plot(figure.subplots())
+    result.plots["scatter"].draw(_figure())
+
+
+def test_a_hidden_layer_is_not_fitted():
+    session = _two_channel_session()
+    session.layers[1].visible = False
+    result = LineProfile().run(session.context(), LineProfileSettings(axis="across"))
+    assert [l.name for l in result.data["layers"]] == ["channel 1"]
+
+
+def test_the_selection_can_still_be_measured_as_one():
+    session = _two_channel_session()
+    result = LineProfile().run(session.context(),
+                               LineProfileSettings(axis="across", source="selection",
+                                                   model="two_gauss"))
+    assert len(result.data["layers"]) == 1
+    # one layer's filter, so this is channel 1 alone rather than both
+    assert result.data["fits"].keys() == {"two_gauss"}
+
+
+def test_a_layer_colour_is_read_off_its_lut_and_falls_back_when_it_cannot_be():
+    from dataclasses import dataclass as _dataclass
+
+    from smappy.plugins.line_profile import FALLBACK_COLOURS, layer_colour
+
+    @_dataclass
+    class Display:
+        lut: str = "hot"
+        invert: bool = False
+
+    assert layer_colour(Display(lut="red")) == "#bf0000"
+    # a grey ramp has no colour to take, and a nonsense one no LUT
+    assert layer_colour(Display(lut="gray"), 1) == FALLBACK_COLOURS[1]
+    assert layer_colour(Display(lut="nonsense"), 2) == FALLBACK_COLOURS[2]
+    # and a colour another layer already has is not used twice
+    mine = layer_colour(Display(lut="red"))
+    assert layer_colour(Display(lut="red"), 1, taken=[mine]) != mine

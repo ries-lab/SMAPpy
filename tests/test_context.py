@@ -340,3 +340,76 @@ def test_a_long_report_opens_in_its_own_window():
     assert panel.text_button.isEnabled()      # but the button still offers it
     panel.show_text()
     assert panel._text_window is not None
+
+
+def test_a_live_plugin_refits_while_the_roi_moves_and_says_nothing_about_it():
+    """Ten times a second: no line in the log, no window taking the focus.
+    The figure redrawing where it already is is the whole output."""
+    pytest.importorskip("PySide6")
+    import time
+
+    from PySide6.QtWidgets import QApplication
+
+    from smappy.regions import Region
+
+    app = QApplication.instance() or QApplication([])
+    runs = []
+
+    class Aimed(Plugin):
+        path = "Test/Aimed"
+        name = "Aimed"
+        Settings = None
+        live = True
+
+        def run(self, ctx, settings):
+            return self.preview(ctx, settings)
+
+        def preview(self, ctx, settings):
+            ctx.report("measuring")
+            runs.append(getattr(ctx.session, "roi", None))
+            return Result(text="one\ntwo\nthree\nfour\nfive\nsix\nseven\neight",
+                          plot=lambda ax: ax.plot([0, 1], [0, 1]))
+
+    from smappy.gui.plugin_panel import PluginPanel
+    session = Session(table())
+    panel = PluginPanel(Aimed, session)
+    assert panel.live is not None                 # the plugin asked for it
+
+    panel.live.setChecked(True)
+    session.set_roi(Region.line((0, 0), (500, 500), 100.0))
+    deadline = time.time() + 20
+    while not runs and time.time() < deadline:
+        app.processEvents()
+        time.sleep(0.01)
+    while panel._thread is not None and panel._thread.isRunning():
+        app.processEvents()
+    app.processEvents()
+
+    assert runs, "the live tick never refitted"
+    assert panel.status.text() == "live"
+    assert panel.output.toPlainText().strip() == ""    # not a word about it
+    assert panel._text_window is None                  # even though it is long
+    assert panel._window is not None                   # but the figure is there
+    assert panel.text_button.isEnabled()               # and the text is offered
+
+    panel.live.setChecked(False)
+    while panel._thread is not None and panel._thread.isRunning():
+        app.processEvents()
+
+
+def test_a_plugin_that_is_not_live_gets_no_tick():
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication
+
+    QApplication.instance() or QApplication([])
+
+    class Slow(Plugin):
+        path = "Test/Slow"
+        name = "Slow"
+        Settings = None
+
+        def run(self, ctx, settings):
+            return Result(text="done")
+
+    from smappy.gui.plugin_panel import PluginPanel
+    assert PluginPanel(Slow, Session(table())).live is None

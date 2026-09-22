@@ -8,11 +8,11 @@ from __future__ import annotations
 import traceback
 from typing import Optional, Type
 
-from PySide6.QtCore import QObject, Qt, QThread, Signal
+from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QTextCursor
-from PySide6.QtWidgets import (QHBoxLayout, QLabel, QMainWindow, QMessageBox,
-                               QPlainTextEdit, QPushButton, QScrollArea, QSpinBox,
-                               QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QCheckBox, QHBoxLayout, QLabel, QMainWindow,
+                               QMessageBox, QPlainTextEdit, QPushButton,
+                               QScrollArea, QSpinBox, QVBoxLayout, QWidget)
 
 from ..plugins import Plugin, Result
 from ..session import Session
@@ -107,9 +107,20 @@ class PluginPanel(QWidget):
         self.text_button = QPushButton("Text")
         self.text_button.setToolTip("show what the run reported, in its own window")
         self.text_button.setEnabled(False)
+        # a measurement one aims with rather than one asked for afterwards:
+        # the plugin says it is cheap enough (`Plugin.live`) and the tick
+        # re-previews while the ROI is dragged
+        self.live: Optional[QCheckBox] = None
+        if plugin_cls.live and plugin_cls.has_preview():
+            self.live = QCheckBox("live")
+            self.live.setToolTip("redraw while the ROI is moved, without "
+                                 "touching the session")
+            self.live.toggled.connect(self._on_live)
         self.status = QLabel("")
         buttons.addWidget(self.plot_button)
         buttons.addWidget(self.text_button)
+        if self.live is not None:
+            buttons.addWidget(self.live)
         buttons.addWidget(self.status, 1)
         layout.addLayout(buttons)
         self.output = QPlainTextEdit(readOnly=True, maximumBlockCount=500)
@@ -119,6 +130,9 @@ class PluginPanel(QWidget):
         self.run_button.clicked.connect(self.run)
         self.plot_button.clicked.connect(self.plot)
         self.text_button.clicked.connect(self.show_text)
+        self._live_running = False
+        self._live_timer = QTimer(self, singleShot=True, interval=120)
+        self._live_timer.timeout.connect(self._live_step)
         self.form.field_changed.connect(self._react)
         self.progressed.connect(self._on_progress)
         self.streamed.connect(self._on_stream)
@@ -129,6 +143,30 @@ class PluginPanel(QWidget):
     def _on_session(self, what: str) -> None:
         if what in ("locs", "results"):
             self._take_saved()
+        elif what in ("roi", "roi-edited") and self.live is not None \
+                and self.live.isChecked():
+            # not straight away: a drag is tens of events a second and a
+            # refit is tens of milliseconds, so the timer coalesces them and
+            # the last position always wins
+            self._live_timer.start()
+
+    def _on_live(self, on: bool) -> None:
+        if on:
+            self._live_timer.start()
+
+    def _live_step(self) -> None:
+        """One live refit, skipped while another is still running.
+
+        Skipped rather than queued: the point is to follow the ROI, and the
+        next drag event will ask again in a few tens of milliseconds.
+        """
+        if self.live is None or not self.live.isChecked():
+            return
+        if self._thread is not None and self._thread.isRunning():
+            self._live_timer.start()          # try again once it is free
+            return
+        self._live_running = True
+        self.preview()
 
     def _take_saved(self) -> None:
         """Offer the figure of a run that is over: this file carries its result.
@@ -329,7 +367,14 @@ class PluginPanel(QWidget):
 
     def _on_progress(self, text: str) -> None:
         """Progress replaces the last line while it is a progress line, so a
-        long fit does not scroll its own summary away."""
+        long fit does not scroll its own summary away.
+
+        A live step reports nothing: it happens ten times a second and would
+        fill the box with the same line while saying less than the figure it
+        is redrawing.
+        """
+        if self._live_running:
+            return
         cursor = self.output.textCursor()
         if self._progress_lines:
             cursor.movePosition(QTextCursor.MoveOperation.End)
@@ -345,16 +390,21 @@ class PluginPanel(QWidget):
         return [b for b in (self.run_button, self.preview_button) if b is not None]
 
     def _on_done(self, result: Result) -> None:
+        live, self._live_running = self._live_running, False
         self.result = result
         # a preview is looked at, never applied: it exists so that the session
         # is not changed before the settings are right
         if self._job != "preview":
             self.session.apply(self.plugin, result)
-        self.output.appendPlainText(result.text)
+        # A live step happens ten times a second while the ROI is dragged, so
+        # it writes no line, opens no window and takes no focus: the figure
+        # redrawing where it already is *is* the output.
+        if not live:
+            self.output.appendPlainText(result.text)
         self._progress_lines = 0
-        self.status.setText("done")
+        self.status.setText("live" if live else "done")
         self.text_button.setEnabled(bool(result.text))
-        if len(result.text.splitlines()) > LONG_TEXT_LINES:
+        if not live and len(result.text.splitlines()) > LONG_TEXT_LINES:
             self.show_text()          # a log, a table: not something to scroll
                                       # through a four-line slot
         # a run may have added to a list the form offers -- the expressions
@@ -366,15 +416,22 @@ class PluginPanel(QWidget):
         self.plot_button.setToolTip(
             "show the plugin's result figure (the drift curves, say)")
         if self._job == "preview" and result.figures():
-            self.plot()
+            self.plot(raise_window=not live)
 
     def _on_failed(self, text: str) -> None:
-        self.output.appendPlainText(text.strip().splitlines()[-1])
+        live, self._live_running = self._live_running, False
         self._progress_lines = 0
         print(text)
-        self.status.setText("failed")
         for button in self._buttons():
             button.setEnabled(True)
+        if live:
+            # the ROI is being dragged and has passed over a position with too
+            # few localizations in it, which is not a failure to report: the
+            # next position will ask again
+            self.status.setText("live: " + text.strip().splitlines()[-1][:60])
+            return
+        self.output.appendPlainText(text.strip().splitlines()[-1])
+        self.status.setText("failed")
 
     def show_text(self) -> None:
         """What the run reported, in a window that can hold it."""
@@ -385,12 +442,13 @@ class PluginPanel(QWidget):
             self._text_window = TextWindow(self.plugin.name, self)
         self._text_window.show_text(self.result.text)
 
-    def plot(self) -> None:
+    def plot(self, raise_window: bool = True) -> None:
         """Show the result's figures: one window, a tab each beyond the first.
 
         Only the tab being looked at is drawn, here and on every later run,
         which is what keeps a plugin with six figures as quick to plot as one
-        with a single figure.
+        with a single figure.  ``raise_window`` is off for a live step: taking
+        the focus ten times a second would make the ROI impossible to drag.
         """
         if self.result is None:
             return
@@ -399,7 +457,8 @@ class PluginPanel(QWidget):
             self._window = ResultWindow(self.plugin.name, self)
         self._window.show()
         self._window.show_plots(self.result.figures())
-        self._window.raise_()
+        if raise_window:
+            self._window.raise_()
 
 
 class PluginWindow(QMainWindow):
