@@ -1,0 +1,20 @@
+# Images in: a 2D Gaussian fit, then statistics of what was fitted.  The batch
+# hands each image to the first step (source.path) and says where the fit
+# writes its own file (output.path); do not set those two here.
+schema: smappy-chain-v1
+description: Gaussian fit, localization statistics
+steps:
+  - plugin: Localize/Gaussian 2D
+    label: fit
+    version: "1"
+    values:
+      camera.conversion: 0.5           # null (or leaving it out) reads it from the file
+      camera.offset: 100.0
+      camera.pixelsize_um: 0.107
+      detection.cutoff_mode: dynamic
+      detection.cutoff: 1.7
+  - plugin: Analysis/Measure/Localization Statistics
+    label: stats
+    version: "1"
+    values:
+      source: all

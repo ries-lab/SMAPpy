@@ -295,3 +295,14 @@ def test_a_real_fit_then_an_analysis_over_two_stacks(tmp_path):
     assert 30 <= len(processed) <= 36
     assert [e["what"] for e in processed.metadata["history"]][-1] == \
         "Analysis/Chains/Unsaved chain"
+
+
+def test_the_documented_examples_are_valid():
+    from pathlib import Path
+    examples = Path(__file__).resolve().parents[1] / "docs" / "examples"
+    for path in sorted(examples.glob("*.chain.yaml")):
+        _, problems = batch.validate_chain(chain.read(path))
+        assert problems == [], (path.name, [str(p) for p in problems])
+    job = batch.read_job(examples / "cells.batch.yaml")
+    # everything but the example's own data folder, which is not on this machine
+    assert [p for p in batch.validate(job) if "inputs" not in p.where] == []

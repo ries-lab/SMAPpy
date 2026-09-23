@@ -1,0 +1,30 @@
+# Localization files in: filter, correct the drift, describe what is left.
+# Check with:  smappy-batch validate docs/examples/filter_drift_statistics.chain.yaml
+schema: smappy-chain-v1
+description: filter, RCC drift, localization statistics
+grouping: layer
+steps:
+  - plugin: Chain/Layers
+    label: filter
+    version: "1"
+    values:
+      layers:
+        - grouped: true
+          start: defaults              # the bounds a freshly opened file gets, then:
+          bounds:
+            - {field: loc_precision_nm, hi: 20}
+            - {field: photons, lo: 0.01, quantile: true}   # drop the dimmest 1 %
+      remove: false
+  - plugin: Analysis/Drift/RCC
+    label: drift
+    version: "1"
+    values:
+      n_timepoints: 10
+      pixelsize_nm: 20.0
+  - plugin: Analysis/Measure/Localization Statistics
+    label: stats
+    version: "1"
+    grouping: ungrouped                # on-time and precision per frame
+    values:
+      source: selection
+      bins: 60

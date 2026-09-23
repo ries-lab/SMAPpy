@@ -68,6 +68,9 @@ steps:
   mismatch is a warning on validation, and part of what makes a re-run
   "the same" (see "Skipping what is done").
 * A step that is not `enabled` is kept in the file and skipped.
+* A step's grouping is `<key>.use_grouping` among the chain's settings (the
+  field a step's settings gain; a plugin may not have a field of that name),
+  and the chain's own is `grouping`.
 
 ### A chain is one plugin
 
@@ -88,8 +91,10 @@ until the chain's single result comes back.  So:
 * **one undo step**, named after the chain;
 * **one log entry**, `what: <chain path>`, whose `steps` list holds every
   step's plugin, version, values, the line it reported, whether it changed the
-  table, and how long it took.  A measurement step is in it, because in a chain
-  the measurement is the point;
+  table, and how long it took.  A chain is logged whether or not it changed
+  the table (`logged = True`): a measurement step is in it, because in a chain
+  the measurement is the point.  *Analysis/Process/History* shows the entry
+  as its steps, each with its settings;
 * the figures of all steps, as tabs of one window, `"<label>: <figure>"`;
 * what each step keeps (`Plugin.keep`) goes in the file under the chain's
   path, one entry per step, so two RCC steps in one chain do not overwrite one
@@ -97,6 +102,10 @@ until the chain's single result comes back.  So:
 
 A step fails -> the chain stops, and the file is not saved (in a batch, the
 file is marked failed and the batch goes on).
+
+Run in the GUI, a chain that starts with a fit does not stream: the table
+appears when the chain is done, not block by block as a fit in the Localize
+tab does, because the chain's steps run on the scratch copy.
 
 A plugin's `preflight` is asked for each step before it runs.  In the GUI the
 chain asks all of them once, up front, and runs without asking again; in a
@@ -213,6 +222,18 @@ rerun: skip_identical           # skip_identical | always
   (what an agent writes), both at once.  The runner resolves them to one list
   at the start and writes that list into the report, so the report is the
   record of which files a run saw, whatever the rules would match tomorrow.
+  A file named twice -- by a folder rule, and again to give it overrides --
+  keeps its place and gains the overrides.  The output folder is never
+  searched, so a second run does not take its own results for input.
+* A folder rule's default patterns are `*.tif`, `*.tiff` for images and
+  `*.h5`, `*.hdf5`, `*_sml.mat`, `*.csv` for localizations, in every
+  subfolder.  An acquisition written as a multi-file OME series
+  (`..._MMStack_Pos0.ome.tif`, `..._1.ome.tif`, ...) is opened from its first
+  file; exclude the rest (`exclude: ["*_[0-9].ome.tif"]`) or name the first
+  files one by one.
+* Overrides, the job's and each file's, use the chain's settings names,
+  `<step key>.<field>` (a part may be given as a mapping, `drift: {n_timepoints: 8}`).
+  A file's own override wins over the job's.
 * The **input kind** follows from the first step: a plugin that makes its own
   table (`Localize/*`, the simulator) means images, and each file becomes that
   step's `source.path`; anything else means localization files, each opened
@@ -290,19 +311,57 @@ the batch and never the GUI -- and reads its progress lines.
 
 ## For agents
 
-The loop:
+This section is for an agent asked to "analyse these files with ...".  You
+have the code base; you do not need the GUI.
 
-1. `smappy-batch plugins Analysis` -- what exists, by path.
-2. `smappy-batch describe <path>` -- its fields as flat dotted names, with
-   type, default, unit, bounds, choices and help; whether it makes its own
-   table (image input) and whether it requires a grouping.
-3. Write the chain and the job.  Start from `docs/examples/`.
-4. `smappy-batch validate job.batch.yaml` until it is clean.
-5. `smappy-batch run job.batch.yaml --limit 1`, then read
-   `<output>/<stem>/results.json` and look at the figures.
-6. Run the rest.
+**The loop.**
 
-If a step needs a plugin that does not exist, write it first -- `CLAUDE.md`,
-"Writing a plugin" -- and give it a `version`.  A plugin that measures should
-return its numbers as scalars in `Result.data`: that is what reaches
-`summary.csv`.
+1. `smappy-batch plugins Analysis` (or no prefix for everything) -- what
+   exists, by path; saved chains are marked `(chain)`.
+2. `smappy-batch describe <path>` -- the plugin's fields as the flat dotted
+   names a chain uses, with type, default, unit, range, choices and help;
+   whether it only works grouped or ungrouped; whether it makes its own
+   table (a fit or a loader, which can only be a first step).
+3. Write the chain and the job, starting from `docs/examples/`:
+   `filter_drift_statistics.chain.yaml` (localizations in),
+   `fit_and_measure.chain.yaml` (images in) and `cells.batch.yaml`.
+4. `smappy-batch validate job.batch.yaml` until it prints no errors.  It
+   refuses unknown fields and says which ones exist, so a failed validation
+   is the quickest way to learn a plugin's names.
+5. `smappy-batch describe chain.chain.yaml` -- the values every field will
+   run with, under the names overrides use.
+6. `smappy-batch run job.batch.yaml --limit 1`, then read
+   `<output>/<name>/results.json` (status, each step's text and numbers, the
+   traceback if it failed) and look at `<output>/<name>/figures/`.
+7. Run the rest; `summary.csv` has a row per file.  Re-running skips what is
+   done with the same settings, so fixing one step and running again only
+   redoes what changed.  `--force` redoes everything.
+
+**Things that are easy to get wrong.**
+
+* Values are flat: `camera.offset: 100`, not `camera: {offset: 100}` inside a
+  step's `values` (the nested form is read, but write the flat one).
+* Leave `source.path` and `output.path` of a fit out of the chain: the batch
+  sets them per file.
+* A step key is its label made into an identifier: `label: NPC radius` ->
+  `npc_radius`; without a label it is the plugin's name (`Localization
+  Statistics` -> `localization_statistics`).  Overrides use the key.
+* Without a `Chain/Layers` step every file gets the default filter
+  (precision below 25 nm, `logl_rel` above -2, and so on) and is grouped.
+  Say what you want explicitly; `start: empty` gives no bounds but yours.
+* Grouping: a plugin that reads `ctx.table()` gets the table the rules in
+  "Grouping" decide; one that reads `ctx.locs` always gets the ungrouped
+  table, whatever the chain says (the shipped drift corrections and colour
+  assignment are of this kind).  A step that read the grouped table and hands
+  back a new one stops the chain with a message.
+* A step that asks before running (COMET estimating hours) skips the file
+  by default; the job's `preflight: proceed` runs it anyway.
+
+**If a step needs a plugin that does not exist**, write it first --
+`CLAUDE.md`, "Writing a plugin" -- give it a `version`, and put it in a
+plugin folder (`config.plugin_roots`, set in Preferences).  A plugin that
+measures should return its numbers as scalars in `Result.data` (nested
+dictionaries are fine): that is what reaches `summary.csv`, as
+`<step key>.<name>`.  Arrays up to a thousand values reach `results.json`;
+larger ones and tables are left out.  If it should work on one row per
+blink, read the table with `ctx.table()` rather than `ctx.locs`.

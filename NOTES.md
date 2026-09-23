@@ -1398,6 +1398,27 @@ and COMET's own preflight -- the question it asks before a long run -- is not
 asked here, because the fit has already been agreed to.  Choosing RCC or COMET
 in the section is the agreement.
 
+## Chains and batch runs
+
+`docs/batch.md` has the whole design; the decisions someone would otherwise
+undo:
+
+* **A chain runs on a scratch copy of the session** (`Session.scratch`), and
+  only its one result reaches the real session: one undo step, one log entry
+  holding every step.  Applying each step to the real session would give a
+  chain of five steps five undo steps and a half-finished table on failure.
+* **A chain is logged even when it only measured** (`ChainPlugin.logged =
+  True`), unlike a plain measurement: in a chain, and above all in a batch,
+  the numbers a measurement step produced are the point of the run.
+* **Validation is strict and reading is not.**  `settings_from` drops unknown
+  names so that an old workspace or file still opens; `batch.validate`
+  refuses them, because in a file someone wrote this morning an unknown name
+  is a typo and would otherwise become a silent default.
+* **`ctx.locs` stays ungrouped.**  The grouping a chain decides reaches a
+  plugin only through `ctx.table()`, so no existing plugin changed behaviour.
+* **Linear, and one file per input.**  Pooling across files, several files per
+  input and parallel files are recorded under "Not yet" in `docs/batch.md`.
+
 ## Open questions
 
 * Fitted x sits ~0.24 px from the peak-finder position, and the sign flips with

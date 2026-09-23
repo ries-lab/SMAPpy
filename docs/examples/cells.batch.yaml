@@ -1,0 +1,25 @@
+# A chain over every cell of one day's imaging.  Paths are relative to this
+# file unless absolute.  Check with:  smappy-batch validate cells.batch.yaml
+# and try it with:                    smappy-batch run cells.batch.yaml --limit 1
+schema: smappy-batch-v1
+name: cells 2026-09-20
+chain: filter_drift_statistics.chain.yaml
+overrides:
+  drift.n_timepoints: 8                # <step key>.<field>, as `describe` lists them
+inputs:
+  - folder: /data/2026-09-20           # every file matching, in every subfolder
+    pattern: ["*_locs.hdf5"]
+    exclude: ["*bead*"]
+  - file: /data/2026-09-20/cell7/cell7_locs.hdf5
+    overrides:                         # this file only
+      filter.layers:
+        - {grouped: true, start: defaults, bounds: [{field: loc_precision_nm, hi: 15}]}
+output:
+  folder: /data/2026-09-20/smappy_batch
+  suffix: _proc
+  locs: true
+  figures: png
+  fitted: beside_image
+  delete_fitted: false
+preflight: skip
+rerun: skip_identical
