@@ -322,6 +322,11 @@ class Session:
         "results" (a tool kept something worth drawing again)."""
         self._listeners.append(callback)
 
+    def off_change(self, callback: Callable[[str], None]) -> None:
+        """Stop telling ``callback``: a panel that is being replaced."""
+        if callback in self._listeners:
+            self._listeners.remove(callback)
+
     def changed(self, what: str) -> None:
         for cb in self._listeners:
             cb(what)

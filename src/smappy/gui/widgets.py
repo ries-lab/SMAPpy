@@ -70,6 +70,10 @@ class CollapsibleSection(QWidget):
     def title(self) -> str:
         return self.button.text().replace(" (window)", "")
 
+    def set_title(self, title: str) -> None:
+        detached = self.button.text().endswith(" (window)")
+        self.button.setText(title + (" (window)" if detached else ""))
+
     def set_expanded(self, on: bool) -> None:
         self.button.setChecked(on)
         self.button.setArrowType(Qt.DownArrow if on else Qt.RightArrow)

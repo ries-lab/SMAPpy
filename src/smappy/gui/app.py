@@ -164,6 +164,9 @@ class ControlWindow(QMainWindow):
         self._action(tools, "Bead calibration...", None, self.open_calibration)
         self._action(tools, "Dual-colour calibration...", None,
                      lambda: self.open_calibration(dual=True))
+        tools.addSeparator()
+        self.batch_window = None
+        self._action(tools, "Batch...", None, self.open_batch)
         self._action(view, "Reset view", "Ctrl+0", render.view.reset)
         self._action(view, "Show render window", None, render.show)
         QApplication.instance().aboutToQuit.connect(self.stop_loading)
@@ -172,6 +175,21 @@ class ControlWindow(QMainWindow):
         session.on_change(self._on_session)
         self._on_session("locs")
         self.restore_layout()
+
+    def open_batch(self) -> None:
+        """The batch window: a chain over many files, run as a subprocess.
+
+        Kept once made, so a job being assembled survives closing the window;
+        a result it produced can be opened in this session.
+        """
+        if self.batch_window is None:
+            from .batch_window import BatchWindow
+            self.batch_window = BatchWindow(
+                open_result=lambda path: self.load_paths([path], reset_view=True),
+                parent=self)
+        self.batch_window.refresh_chains()
+        self.batch_window.show()
+        self.batch_window.raise_()
 
     # --------------------------------------------------------------- tabs
     def header_for(self, name: str) -> Optional[QWidget]:

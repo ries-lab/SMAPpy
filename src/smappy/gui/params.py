@@ -215,6 +215,231 @@ class _Field(QWidget):
         return text
 
 
+class LayersField(QWidget):
+    """The `Chain/Layers` step's layers: per layer a grouping, where its bounds
+    start from, and rows of field, lo, hi, quantile, required.
+
+    A table of rows rather than a field per column, because which columns a
+    table has is not known until a file is open -- and in a batch it is a
+    different file each time.  With a session, the field box offers its
+    columns and **from current layers** copies what the Render tab shows;
+    without one, a field is typed.
+    """
+
+    changed = Signal()
+    COLUMNS = ("field", "lo", "hi", "quantile", "required")
+    GROUPING = ((None, "as it is"), (True, "grouped"), (False, "ungrouped"))
+
+    def __init__(self, spec: ParamSpec):
+        super().__init__()
+        from PySide6.QtWidgets import (QAbstractItemView, QHeaderView, QPushButton,
+                                       QTableWidget)
+        from ..plugins.chain_layers import STARTS, default_layers
+        self.spec = spec
+        self.session = None                 # set by the panel that owns the form
+        self._default = default_layers
+        self._layers: List[Dict[str, Any]] = []
+        self._current = 0
+        self._loading = False
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        top = QHBoxLayout()
+        self.which = QComboBox()
+        self.which.currentIndexChanged.connect(self._switch)
+        add_layer = QPushButton("+ layer")
+        add_layer.clicked.connect(self._add_layer)
+        remove_layer = QPushButton("- layer")
+        remove_layer.clicked.connect(self._remove_layer)
+        self.take = QPushButton("from current layers")
+        self.take.setToolTip("the bounds and grouping the Render tab shows now")
+        self.take.clicked.connect(self.take_from_session)
+        for w in (self.which, add_layer, remove_layer, self.take):
+            top.addWidget(w)
+        top.addStretch(1)
+        layout.addLayout(top)
+        options = QHBoxLayout()
+        self.grouped = QComboBox()
+        for value, label in self.GROUPING:
+            self.grouped.addItem(label, value)
+        self.start = QComboBox()
+        for value, label in STARTS:
+            self.start.addItem(value, value)
+            self.start.setItemData(self.start.count() - 1, label, Qt.ToolTipRole)
+        for w in (self.grouped, self.start):
+            w.currentIndexChanged.connect(self._edited)
+        options.addWidget(QLabel("grouping"))
+        options.addWidget(self.grouped)
+        options.addWidget(QLabel("start from"))
+        options.addWidget(self.start)
+        options.addStretch(1)
+        layout.addLayout(options)
+        self.table = QTableWidget(0, len(self.COLUMNS))
+        self.table.setHorizontalHeaderLabels(self.COLUMNS)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.table.verticalHeader().setVisible(False)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setMinimumHeight(110)
+        self.table.itemChanged.connect(self._edited)
+        layout.addWidget(self.table)
+        rows = QHBoxLayout()
+        self.add_field = QComboBox(editable=True)
+        self.add_field.setPlaceholderText("field")
+        self.add_field.lineEdit().setPlaceholderText("add a bound on...")
+        self.add_field.activated.connect(lambda _i: self._add_row(self.add_field.currentText()))
+        self.add_field.lineEdit().returnPressed.connect(
+            lambda: self._add_row(self.add_field.currentText()))
+        remove_row = QPushButton("- row")
+        remove_row.clicked.connect(self._remove_rows)
+        rows.addWidget(self.add_field, 1)
+        rows.addWidget(remove_row)
+        layout.addLayout(rows)
+        if spec.info.help:
+            self.setToolTip(spec.info.help)
+        self.set(spec.default)
+
+    # the interface a form expects of a field
+    def refresh(self) -> None:
+        self.add_field.clear()
+        if self.session is not None and len(self.session.locs):
+            self.add_field.addItems(sorted(self.session.locs.keys()))
+        self.add_field.setCurrentText("")
+        self.take.setEnabled(self.session is not None)
+
+    def set_hint(self, value) -> None:
+        pass
+
+    def set(self, value) -> None:
+        import copy
+        self._layers = copy.deepcopy(list(value)) if value else self._default()
+        self._current = 0
+        self._reload()
+
+    def value(self):
+        import copy
+        self._commit()
+        return copy.deepcopy(self._layers)
+
+    # what the widgets hold, to and from the layer on show
+    def _reload(self) -> None:
+        self._loading = True
+        try:
+            self.which.clear()
+            self.which.addItems([f"layer {n + 1}" for n in range(len(self._layers))])
+            self.which.setCurrentIndex(self._current)
+            layer = self._layers[self._current]
+            grouped = layer.get("grouped")
+            self.grouped.setCurrentIndex([v for v, _ in self.GROUPING].index(
+                None if grouped is None else bool(grouped)))
+            index = self.start.findData(layer.get("start", "defaults"))
+            self.start.setCurrentIndex(max(index, 0))
+            self.table.setRowCount(0)
+            for row in layer.get("bounds") or []:
+                self._put_row(row)
+        finally:
+            self._loading = False
+
+    def _put_row(self, row: Dict[str, Any]) -> None:
+        from PySide6.QtWidgets import QTableWidgetItem
+        n = self.table.rowCount()
+        self.table.insertRow(n)
+        for c, name in enumerate(self.COLUMNS):
+            item = QTableWidgetItem()
+            if name in ("quantile", "required"):
+                item.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+                item.setCheckState(Qt.Checked if row.get(name) else Qt.Unchecked)
+            else:
+                value = row.get(name)
+                item.setText("" if value is None else f"{value:g}"
+                             if isinstance(value, float) else str(value))
+            self.table.setItem(n, c, item)
+
+    def _commit(self) -> None:
+        if not self._layers:
+            return
+        rows = []
+        for r in range(self.table.rowCount()):
+            cells = {name: self.table.item(r, c) for c, name in enumerate(self.COLUMNS)}
+            name = cells["field"].text().strip() if cells["field"] else ""
+            if not name:
+                continue
+            row: Dict[str, Any] = {"field": name}
+            for bound in ("lo", "hi"):
+                text = cells[bound].text().strip() if cells[bound] else ""
+                if text:
+                    row[bound] = float(text)
+            for flag in ("quantile", "required"):
+                if cells[flag] is not None and cells[flag].checkState() == Qt.Checked:
+                    row[flag] = True
+            rows.append(row)
+        layer = self._layers[self._current]
+        layer["bounds"] = rows
+        layer["start"] = self.start.currentData()
+        grouped = self.grouped.currentData()
+        if grouped is None:
+            layer.pop("grouped", None)
+        else:
+            layer["grouped"] = bool(grouped)
+
+    def _edited(self, *args) -> None:
+        if self._loading:
+            return
+        try:
+            self._commit()
+        except ValueError:
+            return                          # a half-typed number: wait for the rest
+        self.changed.emit()
+
+    def _switch(self, index: int) -> None:
+        if self._loading or index < 0:
+            return
+        self._commit()
+        self._current = index
+        self._reload()
+
+    def _add_layer(self) -> None:
+        self._commit()
+        self._layers.append({"start": "defaults", "bounds": []})
+        self._current = len(self._layers) - 1
+        self._reload()
+        self.changed.emit()
+
+    def _remove_layer(self) -> None:
+        if len(self._layers) <= 1:
+            return
+        self._layers.pop(self._current)
+        self._current = max(0, self._current - 1)
+        self._reload()
+        self.changed.emit()
+
+    def _add_row(self, name: str) -> None:
+        name = (name or "").strip()
+        if not name:
+            return
+        self._put_row({"field": name})
+        self.add_field.setCurrentText("")
+        self._edited()
+
+    def _remove_rows(self) -> None:
+        for r in sorted({i.row() for i in self.table.selectedIndexes()}, reverse=True):
+            self.table.removeRow(r)
+        self._edited()
+
+    def take_from_session(self) -> None:
+        """The session's layers, as they are: every bound, and the grouping."""
+        if self.session is None:
+            return
+        layers = []
+        for config in self.session.layer_configs():
+            rows = [{"field": f, **({"lo": lo} if lo is not None else {}),
+                     **({"hi": hi} if hi is not None else {})}
+                    for f, (lo, hi) in config["bounds"].items()]
+            layers.append({"grouped": config["grouped"], "start": "empty",
+                           "bounds": rows})
+        if layers:
+            self.set(layers)
+            self.changed.emit()
+
+
 class SettingsForm(QWidget):
     """The fields of a settings dataclass; ``value()`` builds the instance.
 
@@ -255,7 +480,7 @@ class SettingsForm(QWidget):
                                                     expanded=not (spec.info.advanced
                                                                   or spec.info.collapsed)))
                 continue
-            w = _Field(spec)
+            w = LayersField(spec) if spec.info.kind == "layers" else _Field(spec)
             w.changed.connect(self.changed)
             w.changed.connect(lambda n=name: self.field_changed.emit(n))
             self.fields[name] = w
@@ -284,6 +509,14 @@ class SettingsForm(QWidget):
         """Re-read every field whose choices are computed.  See `_Field.refresh`."""
         for f in self.fields.values():
             f.refresh()
+
+    def leaves(self):
+        """Every field widget, parts' included, depth first."""
+        for f in self.fields.values():
+            if isinstance(f, SettingsForm):
+                yield from f.leaves()
+            else:
+                yield f
 
     def values(self) -> Dict[str, Any]:
         """Every field by dotted name, for saving.

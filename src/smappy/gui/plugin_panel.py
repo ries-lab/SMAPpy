@@ -74,6 +74,12 @@ class PluginPanel(QWidget):
             layout.addWidget(about)
         self.form = SettingsForm(plugin_cls.Settings, plugin_cls.specs())
         layout.addWidget(self.form)
+        # a field that reads the session -- the layers editor offers its
+        # columns and copies its layers -- is told which one
+        for leaf in self.form.leaves():
+            if hasattr(leaf, "take_from_session"):
+                leaf.session = session
+                leaf.refresh()
 
         buttons = QHBoxLayout()
         self.run_button = QPushButton("Run")
@@ -139,6 +145,11 @@ class PluginPanel(QWidget):
         self._active()
         session.on_change(self._on_session)
         self._take_saved()
+
+    def release(self) -> None:
+        """Stop listening to the session, for a panel about to be replaced
+        (a chain rebuilt after its steps were edited)."""
+        self.session.off_change(self._on_session)
 
     def _on_session(self, what: str) -> None:
         if what in ("locs", "results"):

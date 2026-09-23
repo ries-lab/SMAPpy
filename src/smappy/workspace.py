@@ -15,6 +15,7 @@ without a GUI, and window geometry is carried as opaque text the GUI encodes.
 """
 from __future__ import annotations
 
+import copy
 import uuid
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
@@ -50,6 +51,10 @@ class Instance:
     label: str = ""                                 # "" : use the plugin's name
     values: Dict[str, Any] = field(default_factory=dict)   # by dotted name
     enabled: bool = True                            # the pipeline's checkbox
+    # A chain being built or edited, as its file would say it (`chain.ChainSpec`).
+    # None for a plugin, and for a chain that is used as saved: then `plugin`
+    # is its path and the file is the chain.
+    chain: Optional[Dict[str, Any]] = None
 
     def __post_init__(self) -> None:
         if not self.id:
@@ -60,7 +65,8 @@ class Instance:
 
     def copy(self) -> "Instance":
         """A duplicate with its own identity, so the values can diverge."""
-        return replace(self, id=uuid.uuid4().hex[:12], values=dict(self.values))
+        return replace(self, id=uuid.uuid4().hex[:12], values=dict(self.values),
+                       chain=copy.deepcopy(self.chain))
 
 
 @dataclass
@@ -123,9 +129,12 @@ class Workspace:
 
     # ----------------------------------------------------------- as data
     def to_dict(self) -> Dict[str, Any]:
-        return {"version": self.version,
-                "tabs": [asdict(t) for t in self.tabs],
-                "layout": dict(self.layout)}
+        tabs = [asdict(t) for t in self.tabs]
+        for tab in tabs:                  # a plugin has no chain: say nothing
+            for instance in tab["instances"]:
+                if instance.get("chain") is None:
+                    instance.pop("chain", None)
+        return {"version": self.version, "tabs": tabs, "layout": dict(self.layout)}
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any], path: Optional[Path] = None) -> "Workspace":
@@ -143,11 +152,13 @@ class Workspace:
                 if not isinstance(item, dict) or not item.get("plugin"):
                     continue
                 values = item.get("values")
+                chain = item.get("chain")
                 instances.append(Instance(
                     plugin=str(item["plugin"]), id=str(item.get("id") or ""),
                     label=str(item.get("label") or ""),
                     values=values if isinstance(values, dict) else {},
-                    enabled=bool(item.get("enabled", True))))
+                    enabled=bool(item.get("enabled", True)),
+                    chain=chain if isinstance(chain, dict) else None))
             tabs.append(Tab(name=str(raw["name"]), kind=str(raw.get("kind") or "plugins"),
                             header=str(raw.get("header") or ""), instances=instances))
         layout = data.get("layout")
@@ -172,7 +183,9 @@ class Workspace:
         for tab in self.tabs:
             keep = []
             for instance in tab.instances:
-                (keep if instance.plugin in known else gone).append(instance)
+                # a chain being built carries itself, installed or not
+                (keep if instance.plugin in known or instance.chain
+                 else gone).append(instance)
             tab.instances = keep
         return [i.plugin for i in gone]
 

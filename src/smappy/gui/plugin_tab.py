@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (QHBoxLayout, QLabel, QLineEdit, QInputDialog, QMe
 from .. import plugins
 from ..session import Session
 from ..workspace import Instance, Tab
+from .chain_panel import ChainPanel, is_chain, spec_of
 from .chooser import choose_plugin
 from .plugin_panel import PluginPanel
 from .widgets import CollapsibleSection, detach_to_window
@@ -37,6 +38,8 @@ class _Slot(QWidget):
     startup.
     """
 
+    edited = None                  # set by the tab: a chain's steps changed
+
     def __init__(self, instance: Instance, session: Session, parent=None):
         super().__init__(parent)
         self.instance = instance
@@ -49,8 +52,18 @@ class _Slot(QWidget):
         if self.panel is not None:
             return self.panel
         try:
-            cls = plugins.get(self.instance.plugin)
-            self.panel = PluginPanel(cls, self.session)
+            inline = spec_of(self.instance)
+            if inline is not None:          # a chain being built: it carries itself
+                from ..chain import chain_class
+                cls = chain_class(inline, path=self.instance.plugin)
+            else:
+                cls = plugins.get(self.instance.plugin)
+            if is_chain(cls):
+                self.panel = ChainPanel(self.instance, self.session, cls)
+                if self.edited is not None:
+                    self.panel.changed.connect(self.edited)
+            else:
+                self.panel = PluginPanel(cls, self.session)
         except Exception:
             trouble = QLabel(f"{self.instance.plugin} could not be loaded:\n"
                              + traceback.format_exc().strip().splitlines()[-1])
@@ -95,8 +108,13 @@ class PluginTab(QWidget):
         add = QToolButton(text="+", autoRaise=True)
         add.setToolTip("add a plugin to this tab")
         add.clicked.connect(self.add_plugin)
+        new_chain = QToolButton(text="+ chain", autoRaise=True)
+        new_chain.setToolTip("a new chain of plugins that runs as one; "
+                             "add its steps with 'edit steps'")
+        new_chain.clicked.connect(self.add_chain)
         top.addWidget(self.search, 1)
         top.addWidget(add)
+        top.addWidget(new_chain)
         layout.addLayout(top)
         if header is not None:
             layout.addWidget(header)
@@ -139,10 +157,13 @@ class PluginTab(QWidget):
             slot = self.slots.get(instance.id)
             if slot is None:
                 slot = self.slots[instance.id] = _Slot(instance, self.session)
+                slot.edited = self._chain_edited
             slot.setParent(None)
-            title = instance.title(ref.name if ref else "")
+            inline = spec_of(instance) if instance.chain else None
+            title = instance.title(inline.name if inline is not None
+                                   else ref.name if ref else "")
             section = CollapsibleSection(title, slot, detachable=True)
-            if ref is None:
+            if ref is None and inline is None:
                 section.button.setToolTip(f"{instance.plugin} is not installed")
             section.toggled.connect(lambda on, s=section, i=instance:
                                     self._toggled(s, i, on))
@@ -205,6 +226,29 @@ class PluginTab(QWidget):
         self.tab.instances.append(instance)
         self.rebuild()
         self.open_section(instance.id)
+        self.changed.emit()
+
+    def add_chain(self) -> None:
+        """An empty chain, opened with its step list showing."""
+        from ..chain import DEFAULT_GROUP, ChainSpec
+        instance = Instance(plugin=f"{DEFAULT_GROUP}/Unsaved chain",
+                            chain=ChainSpec().to_dict())
+        self.tab.instances.append(instance)
+        self.rebuild()
+        self.open_section(instance.id)
+        panel = self.slots[instance.id].panel
+        if isinstance(panel, ChainPanel):
+            panel.edit.setChecked(True)
+        self.changed.emit()
+
+    def _chain_edited(self) -> None:
+        """A chain's steps or its file changed: its title may have, and the
+        workspace has something new to save."""
+        for section, instance in zip(self.sections, self.tab.instances):
+            known = plugins.refs().get(instance.plugin)
+            inline = spec_of(instance) if instance.chain else None
+            section.set_title(instance.title(inline.name if inline is not None
+                                             else known.name if known else ""))
         self.changed.emit()
 
     def _menu(self, instance: Instance, section: CollapsibleSection, point) -> None:

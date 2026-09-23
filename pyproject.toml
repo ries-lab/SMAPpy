@@ -85,6 +85,7 @@ smappy-drift = "smappy.cli.drift:main"
 smappy-gui = "smappy.cli.gui:main"
 smappy-calibrate = "smappy.cli.calibrate:main"
 smappy-batch = "smappy.cli.batch:main"
+smappy-batch-gui = "smappy.gui.batch_window:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
