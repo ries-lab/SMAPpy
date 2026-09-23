@@ -261,7 +261,8 @@ class PluginPanel(QWidget):
         # built here, on the GUI thread: the context reads the table and the
         # selection now, so the worker cannot race a live fit rebinding them
         context = self.session.context(progress=self.progressed.emit,
-                                       stream=self.streamed.emit)
+                                       stream=self.streamed.emit,
+                                       grouping=self.plugin.grouping)
         self._job = job
         for button in self._buttons():
             button.setEnabled(False)
@@ -296,7 +297,8 @@ class PluginPanel(QWidget):
         from ..plugins import PreflightQuestion
 
         try:
-            context = self.session.context(progress=self.output.appendPlainText)
+            context = self.session.context(progress=self.output.appendPlainText,
+                                           grouping=self.plugin.grouping)
             question = self.plugin.preflight(context, settings)
         except Exception as e:
             # An estimate is a courtesy.  One that cannot be made -- a table in

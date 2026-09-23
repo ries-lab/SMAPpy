@@ -863,24 +863,60 @@ class Session:
         """
         if self.layers[layer].is_image:
             layer = self.first_locs_layer()
-        sel = self.layers[layer].selection(layer)
+        return self._clip(self.layers[layer].selection(layer), self.locs, layer)
+
+    def _clip(self, sel: Selection, locs: Localizations, layer: int) -> Selection:
+        """Narrow a layer's selection to the ROI and, if asked, the slab."""
         axes = self.axes(layer)
-        if self.roi is not None and len(self.locs):
+        if self.roi is not None and len(locs):
             # an ROI is drawn on the picture, so it is in render coordinates:
             # a rectangle on a photons-against-frame view selects those
             # localizations, and the usual picture is unchanged
-            x, y = axes.coordinates(self.locs)
+            x, y = axes.coordinates(locs)
             sel.mask = sel.mask & self.roi.mask(x, y)     # never in place: the
             # filter's cached mask is what `Selection` was handed
             sel.roi = self.roi
             sel.name += f", {self.roi}"
-        if self.select_in_slab and self.slab is not None and len(self.locs):
-            x, y = axes.coordinates(self.locs)
-            z = axes.depth(self.locs)
+        if self.select_in_slab and self.slab is not None and len(locs):
+            x, y = axes.coordinates(locs)
+            z = axes.depth(locs)
             sel.mask = sel.mask & self.slab.mask(x, y, z)
             sel.roi = self.slab
             sel.name += f", {self.slab}"
         return sel
+
+    def table(self, layer: int = 0, grouping: Optional[str] = None
+              ) -> Tuple[Localizations, Selection]:
+        """A layer's table and selection, grouped or not: ``(locs, selection)``.
+
+        ``grouping`` is "grouped", "ungrouped", or None for whatever the layer
+        itself shows.  This is where the choice a chain or a plugin makes
+        (`Context.table`) meets the session: the ungrouped answer is
+        `self.locs` with `selection`, and the grouped one is the layer's
+        linked table with its own filter, cut to the same ROI and slab.
+
+        Asking for the grouped table of a layer that has none links it.  The
+        rule elsewhere is to say what is missing rather than spend minutes
+        behind the user's back, but here somebody has asked for exactly this
+        table -- a chain step set to grouped -- and linking is the answer.
+        What the layer *shows* is left as it was.
+        """
+        if self.layers[layer].is_image:
+            layer = self.first_locs_layer()
+        lay = self.layers[layer]
+        grouped = lay.grouped if grouping is None else grouping == "grouped"
+        if not grouped:
+            return self.locs, self.selection(layer)
+        if "grouped" not in lay.state.sets or lay.state.grouped_stale:
+            showing = lay.state.use_grouped
+            partner = next((l for l in self.layers if l is not lay and not l.is_image
+                            and "grouped" in l.state.sets
+                            and not l.state.grouped_stale), None)
+            lay.show_grouped(True, partner)
+            lay.state.use_grouped = showing
+        locset = lay.state.sets["grouped"]
+        sel = Selection(locset.filter.mask, layer=layer, name=f"{lay.name}, grouped")
+        return locset.locs, self._clip(sel, locset.locs, layer)
 
     def context(self, layer: int = 0,
                 progress: Optional[Callable[[str], None]] = None,
@@ -903,7 +939,8 @@ class Session:
         The plugin runs on whatever thread calls this; only `apply` touches
         the session, so a GUI can run the plugin in a worker and apply here.
         """
-        result = plugin.run(self.context(layer, progress, stream), settings)
+        result = plugin.run(self.context(layer, progress, stream,
+                                         grouping=plugin.grouping), settings)
         self.apply(plugin, result)
         return result
 
@@ -914,20 +951,36 @@ class Session:
         # and would only record that somebody looked.  `Plugin.logged`
         # overrides the rule either way; see it for when that is right.
         changed = result.locs is not None or bool(result.files)
-        if plugin.logged if plugin.logged is not None else changed:
-            self.log(plugin.path, result.text,
-                     settings=asdict(settings) if is_dataclass(settings) else settings,
-                     changed=changed)
         for n, (locs, info, grouped) in enumerate(result.files or ()):
             # the first replaces unless the plugin asked to append; the rest
             # always join, or opening three files would keep only the last
             self.add_file(locs, info, append=result.data.get("append", False) or n > 0,
                           grouped=grouped)
-        if result.locs is not None:
+        if result.locs is not None and not self.files and not len(self.locs) \
+                and not self._live:
+            # A table made from nothing -- a fit run where no file is open,
+            # which is every fit in a batch -- is a file being opened, not a
+            # correction: it gets its layers and its file entry, and its own
+            # log, rather than an undo step back to an empty session.
+            from .io.formats import FileInfo
+            where = (result.data or {}).get("path")
+            name = Path(where).name if where else plugin.path.rsplit("/", 1)[-1]
+            self.add_file(result.locs, FileInfo(name=name, path=str(where or ""),
+                                                format=plugin.path, n=len(result.locs)))
+            if not where:
+                self.path = None         # nowhere to save back to until asked
+        elif result.locs is not None:
             # the menu says what it is about to undo, so the step is named
             # after the plugin rather than after the fact that a table changed
             self.set_locs(result.locs, label=plugin.path.rsplit("/", 1)[-1],
                           text=result.text or "")
+        # After the files: opening one starts the log again from the file's
+        # own, and an entry written before it would be the one thing lost --
+        # which is how a loader's settings never reached the history.
+        if plugin.logged if plugin.logged is not None else changed:
+            self.log(plugin.path, result.text,
+                     settings=asdict(settings) if is_dataclass(settings) else settings,
+                     changed=changed, **(result.log or {}))
         # A plugin that writes a column the user is meant to *filter* on says
         # so here, as `{field: (lo, hi)}`.  It cannot set the bound itself: a
         # filter belongs to the table it was built from, and the table the

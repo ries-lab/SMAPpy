@@ -25,6 +25,7 @@ from PySide6.QtGui import QAction, QFontDatabase, QTextCursor
 from PySide6.QtWidgets import (QMainWindow, QPlainTextEdit, QTabWidget,
                                QVBoxLayout, QWidget)
 
+from ..figures import summary_plot as _summary_page
 from ..plugins import Plot
 
 # the summary page's key.  A tab character cannot be in a plot's name as
@@ -85,31 +86,12 @@ class FigurePane(QWidget):
 
 
 def summary_plot(plots: Sequence[Plot]) -> Plot:
-    """Every figure on one page, each in a subfigure of it.
+    """Every figure on one page, as the window's *All* tab.
 
-    A page is worth having for the glance and for what gets exported, and it
-    is worth nothing if it costs the figures being drawn twice, so it is a
-    tab like any other and is drawn when it is looked at.
-
-    Each plot is handed a `SubFigure`, which takes `subplots` exactly as a
-    figure does -- which is why a plot declares its panels instead of
-    helping itself to `ax.figure`: a plot that seizes the figure would take
-    the whole page with it.
+    The page itself is Qt-free (`smappy.figures.summary_plot`), so a batch
+    run saves the same page the window shows.
     """
-    plots = list(plots)
-
-    def draw(figure) -> None:
-        columns = 1 if len(plots) == 1 else 2
-        rows = -(-len(plots) // columns)
-        cells = figure.subfigures(rows, columns, squeeze=False).ravel()
-        for plot, cell in zip(plots, cells):
-            if plot.name:
-                cell.suptitle(plot.name, fontsize=9)
-            plot.draw_into(cell)
-        for cell in cells[len(plots):]:
-            cell.set_visible(False)
-
-    return Plot(draw=draw, name=SUMMARY, panels=len(plots) + 1)
+    return _summary_page(plots, name=SUMMARY)
 
 
 class DetachedFigure(QMainWindow):

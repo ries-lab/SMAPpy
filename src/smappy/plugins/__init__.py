@@ -154,6 +154,10 @@ def settings_from(settings_cls: Optional[type], values: Optional[Dict[str, Any]]
     Saved values outlive the plugin that wrote them, so a name the plugin no
     longer has is dropped and a name it has gained keeps its default: a renamed
     field must cost that field, not the whole pipeline.
+
+    A part may also come as a nested dictionary, ``{"fit": {"roisize": 13}}``:
+    that is how the session's log has always written settings (`asdict`), and
+    reading it back is what makes a logged run one that can be repeated.
     """
     if settings_cls is None or not dataclasses.is_dataclass(settings_cls):
         return None
@@ -169,6 +173,9 @@ def settings_from(settings_cls: Optional[type], values: Optional[Dict[str, Any]]
     specs = param_specs(settings_cls)
     for name, spec in specs.items():
         if spec.children is not None:
+            if isinstance(flat.get(name), dict):
+                # the nested spelling; a dotted key given as well wins
+                nested[name] = {**flat[name], **nested.get(name, {})}
             child = settings_from(spec.type, nested.get(name))
             if child is not None:
                 kwargs[name] = child
@@ -248,9 +255,13 @@ class Context:
                  progress: Optional[Callable[[str], None]] = None,
                  stream: Optional[Callable[[str, Any], None]] = None,
                  site=None, site_table: Optional[Sequence[Dict[str, Any]]] = None,
-                 rois=None):
+                 rois=None, grouping: Optional[str] = None):
         self.session = session
         self.layer = layer
+        # "grouped", "ungrouped", or None for each layer's own: what a chain
+        # (or the plugin's own requirement) has decided `table` should hand
+        # out.  See `table`.
+        self.grouping = grouping
         self.site = site                    # the ROI, for a scope="site" plugin
         self.site_table = site_table        # the rows evaluation produced
         self._rois = rois                   # a project without a session
@@ -275,6 +286,30 @@ class Context:
             return self._rois
         return None if self.session is None else self.session.rois
 
+    def table(self, layer: Optional[int] = None
+              ) -> Tuple[Localizations, "Selection"]:
+        """The table to work on and what is selected in it: ``(locs, selection)``.
+
+        Grouped or not, as decided -- lowest priority first -- by the layer's
+        own grouping, the chain's, the chain step's, and the plugin's
+        requirement (`Plugin.grouping`); `grouping` here is the outcome of all
+        but the first, None leaving it to the layer.  This is SMAP's
+        ``getloc(..., 'grouping', ...)``.  `locs` and `selection` stay the
+        ungrouped table, so a plugin that never asks behaves as it always did.
+
+        Without a session there is no grouped table to hand out, and linking
+        one here with settings nobody chose would be a guess; that is refused
+        with a message rather than answered with the ungrouped table.
+        """
+        index = self.layer if layer is None else layer
+        if self.session is None:
+            if self.grouping == "grouped":
+                raise ValueError("a grouped table needs a session: link the "
+                                 "localizations first (group.group), or run "
+                                 "this ungrouped")
+            return self.locs, self.selection
+        return self.session.table(index, self.grouping)
+
     def report(self, text: str) -> None:
         """Say what is happening.  A no-op when nobody is listening."""
         if self._progress:
@@ -298,7 +333,7 @@ class Context:
                        selection=self.selection if selection is None else selection,
                        layer=self.layer, progress=self._progress,
                        stream=self._stream, site=site, site_table=self.site_table,
-                       rois=self._rois)
+                       rois=self._rois, grouping=self.grouping)
 
 
 @dataclass
@@ -383,6 +418,9 @@ class Result:
     plots: Dict[str, Any] = field(default_factory=dict)
     data: Dict[str, Any] = field(default_factory=dict)  # anything else
     settings: Any = None                    # what was actually used
+    # more for the log entry, beside the path, the text and the settings: a
+    # chain puts its steps here, so the history shows what each one did
+    log: Dict[str, Any] = field(default_factory=dict)
 
     def figures(self) -> List[Plot]:
         """Everything there is to draw, as `Plot`s, the main one first."""
@@ -424,6 +462,16 @@ class Plugin:
     # True says log it anyway, for a run that changes something the log cannot
     # see -- writing a file, exporting a picture.  False says never.
     logged: Optional[bool] = None
+    # Bumped when a change moves the numbers.  A chain records the version of
+    # every step it ran, and a batch re-runs a file whose steps' versions have
+    # changed and skips one whose have not: a fix that leaves this alone is a
+    # fix the old results are taken to agree with.
+    version: str = "1"
+    # "grouped" or "ungrouped" for a plugin that can only work on one of the
+    # two tables; None for one that takes whichever the layer, the chain or
+    # the user says (see `Context.table`).  A requirement, not a preference:
+    # it wins over every other choice, and the GUI greys the choice out.
+    grouping: Optional[str] = None
 
     def __init_subclass__(cls, **kwargs):
         """Catch a plugin written against the old signature with a real error.
