@@ -311,6 +311,9 @@ class Session:
         # set by the GUI: what to write into the file's `gui` group.  A session
         # in a script has none, and saves only data.
         self.gui_state_provider: Optional[Callable[[], Dict]] = None
+        # False in a chain's scratch copy: the chain keeps one record and one
+        # undo step for all its steps, so the copy keeps neither (`scratch`)
+        self.recording = True
 
     # ----------------------------------------------------------- observers
     def on_change(self, callback: Callable[[str], None]) -> None:
@@ -616,6 +619,93 @@ class Session:
                 dst.show_grouped(src.grouped, src)
         self.changed("layer")
 
+    def layer_configs(self) -> List[Dict]:
+        """What each localization layer keeps and shows: bounds, grouping,
+        files.  The form a chain hands its layers back in, and `Chain/Layers`
+        reads the current bounds from."""
+        out = []
+        for layer in self.layers:
+            if layer.is_image:
+                continue
+            ranges = layer.state.sets["ungrouped"].filter.ranges
+            out.append({"grouped": bool(layer.grouped),
+                        "bounds": {f: [lo, hi] for f, (lo, hi) in ranges.items()},
+                        "files": None if layer.files is None else list(layer.files)})
+        return out
+
+    def set_layer_configs(self, configs: Sequence[Dict]) -> None:
+        """Make the localization layers say what ``configs`` say.
+
+        A layer that is named and missing is made as a copy of the first (a
+        new layer without a template shows no file until one is ticked, which
+        is not what a chain that asked for a second layer means).  Layers
+        beyond the list are left as they are: the user may have more than the
+        chain knows about.  Each layer's bounds are replaced, not merged --
+        the config is the whole filter.
+        """
+        indices = [i for i, l in enumerate(self.layers) if not l.is_image]
+        for n, config in enumerate(configs):
+            if n >= len(indices):
+                self.add_layer(like=indices[0] if indices else None)
+                indices = [i for i, l in enumerate(self.layers) if not l.is_image]
+            index = indices[n]
+            layer = self.layers[index]
+            if "bounds" in config:
+                for name in list(layer.state.sets["ungrouped"].filter.ranges):
+                    layer.remove_bound(name)
+                for name, (lo, hi) in (config.get("bounds") or {}).items():
+                    if name in self.locs:
+                        layer.set_bound(name, lo, hi)
+            if "files" in config:
+                layer.set_files(config["files"])
+            if "grouped" in config and bool(config["grouped"]) != layer.grouped:
+                self.show_grouped(index, bool(config["grouped"]))
+        self.changed("layer")
+
+    def scratch(self) -> "Session":
+        """A headless copy to run a chain on: same table, layers, filters,
+        grouping, ROI and slab; no undo, no log, no listeners.
+
+        The arrays are shared, not copied -- a plugin hands back a new table
+        and never edits the one it was given -- and so is every grouped table
+        that is still current, so a copy costs neither memory nor a relink.
+        What the chain does to the copy reaches this session only as the
+        chain's result.
+        """
+        copy = Session()
+        copy.recording = False
+        copy.locs = self.locs
+        copy.path = self.path
+        copy.files = list(self.files)
+        copy.history = list(self.history)
+        copy.roi, copy.slab = self.roi, self.slab
+        copy.select_in_slab = self.select_in_slab
+        copy.projection = self.projection
+        copy.layers = []
+        first = None
+        for layer in self.layers:
+            if layer.is_image:
+                copy.layers.append(layer)
+                continue
+            sets = layer.state.sets
+            grouped = (sets["grouped"].locs if "grouped" in sets
+                       and not layer.state.grouped_stale else None)
+            made = Layer(self.locs, name=layer.name, defaults=False,
+                         settings=dataclasses.replace(layer.state.settings),
+                         display=dataclasses.replace(layer.get_display()),
+                         group_settings=layer.group_settings,
+                         grouped=grouped if first is None else None, share=first)
+            for name, (lo, hi) in sets["ungrouped"].filter.ranges.items():
+                made.set_bound(name, lo, hi)
+            made.set_files(layer.files)
+            if made.grouped != layer.grouped:
+                made.show_grouped(layer.grouped, first)
+            copy.layers.append(made)
+            first = first or made
+        if not any(not l.is_image for l in copy.layers):
+            copy.layers.insert(0, Layer(copy.locs))
+        return copy
+
     def remove_layer(self, index: int) -> None:
         if len(self.layers) > 1:
             del self.layers[index]
@@ -651,6 +741,8 @@ class Session:
     # ------------------------------------------------------------- undo
     def _push_undo(self, label: str, text: str = "") -> None:
         """Remember the table as it is now, under the name of what replaces it."""
+        if not self.recording:
+            return
         self.undo_stack.push(Edit(label=label, locs=self.locs, text=text))
 
     def _here(self, label: str, text: str = "") -> Edit:
@@ -992,6 +1084,10 @@ class Session:
                     layer.set_bound(field, lo, hi)
         if bounds:
             self.changed("locs")
+        # the layers a chain step set up -- bounds and grouping per layer, the
+        # Render tab's work done by a plugin (`Chain/Layers`)
+        if (result.data or {}).get("layers"):
+            self.set_layer_configs(result.data["layers"])
         # last: a plugin that opened a file has just cleared the session, this
         # one included, and what it worked out belongs to the file it opened
         self.remember(plugin, result)
@@ -1033,6 +1129,8 @@ class Session:
             return None
 
     def log(self, what: str, text: str = "", **extra) -> None:
+        if not self.recording:
+            return
         self.history.append({"time": datetime.now().isoformat(timespec="seconds"),
                              "what": what, "text": text, **extra})
         self.changed("history")

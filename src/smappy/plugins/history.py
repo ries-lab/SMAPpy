@@ -69,7 +69,22 @@ def as_text(found: Sequence[Dict], settings: bool = True) -> str:
         if entry.get("text"):
             for line in str(entry["text"]).splitlines():
                 lines.append(f"      {line}")
-        if settings:
+        steps = entry.get("steps")
+        if isinstance(steps, list):
+            # a chain: its steps are the record, each with its own settings,
+            # rather than the chain's settings as one very long line
+            for step in steps:
+                if not isinstance(step, dict):
+                    continue
+                mark = "*" if step.get("changed") else " "
+                first = str(step.get("text") or "").splitlines()[:1]
+                lines.append(f"    {mark} {step.get('label', '')} ({step.get('plugin', '')})"
+                             + (f": {first[0]}" if first else ""))
+                if settings:
+                    written = _settings_text(step.get("values"))
+                    if written:
+                        lines.append(f"          [{written}]")
+        elif settings:
             written = _settings_text(entry.get("settings"))
             if written:
                 lines.append(f"      [{written}]")

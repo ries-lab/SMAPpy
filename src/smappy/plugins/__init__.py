@@ -38,6 +38,9 @@ class ParamInfo:
     # written rather than dialled -- an expression, a list of names
     kind: Optional[str] = None
     file_filter: str = ""       # a Qt-style name filter for those, "TIFF (*.tif)"
+    # for a part: shown folded until it is opened.  A chain's steps are, so a
+    # chain of eight plugins reads as eight lines rather than eight forms
+    collapsed: bool = False
 
 
 def param(default: Any = MISSING, *, default_factory: Any = MISSING, **info):
@@ -262,6 +265,9 @@ class Context:
         # (or the plugin's own requirement) has decided `table` should hand
         # out.  See `table`.
         self.grouping = grouping
+        # whether `table` has handed out a grouped table: a chain refuses a
+        # new table from a step that worked on one row per blink
+        self.served_grouped = False
         self.site = site                    # the ROI, for a scope="site" plugin
         self.site_table = site_table        # the rows evaluation produced
         self._rois = rois                   # a project without a session
@@ -308,7 +314,10 @@ class Context:
                                  "localizations first (group.group), or run "
                                  "this ungrouped")
             return self.locs, self.selection
-        return self.session.table(index, self.grouping)
+        locs, selection = self.session.table(index, self.grouping)
+        if locs is not self.session.locs:
+            self.served_grouped = True
+        return locs, selection
 
     def report(self, text: str) -> None:
         """Say what is happening.  A no-op when nobody is listening."""
@@ -677,12 +686,27 @@ def roots() -> List[Tuple[str, Path]]:
     return found
 
 
+def chains_dir() -> Path:
+    """Where **Save chain** writes, and a folder of chains discovery reads.
+
+    The one folder read without the user naming it (`config.plugin_roots` is
+    deliberately explicit): a chain holds no code, so reading one runs nothing
+    the user did not write.
+    """
+    from .. import config
+    return config.config_dir() / "chains"
+
+
+def chain_roots() -> List[Tuple[str, Path]]:
+    return [("chains", chains_dir())]
+
+
 def discover(force: bool = False) -> Dict[str, PluginRef]:
     """Scan the roots.  Cheap, and idempotent unless ``force``."""
     global _SCANNED, _REFS, _PROBLEMS
     if _SCANNED and not force:
         return _REFS
-    _REFS, _PROBLEMS = scan(roots())
+    _REFS, _PROBLEMS = scan(roots(), chain_roots())
     _SCANNED = True
     return _REFS
 

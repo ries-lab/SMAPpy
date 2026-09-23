@@ -252,7 +252,8 @@ class SettingsForm(QWidget):
                 part.changed.connect(self.changed)
                 self.fields[name] = part
                 layout.addWidget(CollapsibleSection(spec.info.label or name, part,
-                                                    expanded=not spec.info.advanced))
+                                                    expanded=not (spec.info.advanced
+                                                                  or spec.info.collapsed)))
                 continue
             w = _Field(spec)
             w.changed.connect(self.changed)

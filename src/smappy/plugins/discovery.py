@@ -58,6 +58,7 @@ class PluginRef:
     attr: Optional[str] = None      # the class; None: declared, resolve on import
     scope: str = "locs"             # "locs": run once.  "site": run per ROI
     favorite: bool = True
+    kind: str = "plugin"            # "plugin": a class in a .py.  "chain": a .chain.yaml
 
     @property
     def group(self) -> str:
@@ -70,6 +71,9 @@ class PluginRef:
 
     def load(self) -> type:
         """Import the module and return the plugin class.  Cached by the loader."""
+        if self.kind == "chain":
+            from ..chain import load_class
+            return load_class(self.origin, self.path)
         module = load_module(self.origin)
         if self.attr is not None:
             cls = getattr(module, self.attr, None)
@@ -309,27 +313,72 @@ def _refs_in_file(origin: Path, path_prefix: str, root: str
                                    "@register path, or split the file")]
 
 
-def scan(roots: Sequence[Tuple[str, Path]]
+CHAIN_SUFFIXES = (".chain.yaml", ".chain.yml")
+# where a chain in the chains folder lands when its file does not say
+CHAIN_GROUP = "Analysis/Chains"
+
+
+def _chain_ref(origin: Path, path_prefix: str, root: str
+               ) -> Tuple[List[PluginRef], List[Diagnostic]]:
+    """A chain file as a ref: its ``path:`` key, else where it sits.
+
+    Read with `yaml.safe_load` -- a few lines of data, nothing executed -- and
+    only for the path and the description: whether its steps' plugins exist
+    is found out when it is opened, with their names, not while the tree is
+    being built.
+    """
+    try:
+        import yaml
+        raw = yaml.safe_load(origin.read_text(encoding="utf-8")) or {}
+    except Exception as exc:
+        return [], [Diagnostic(origin, f"cannot be read: {exc}")]
+    if not isinstance(raw, dict) or not isinstance(raw.get("steps", []), list):
+        return [], [Diagnostic(origin, "is not a chain: no list of `steps`")]
+    name = origin.name
+    for suffix in CHAIN_SUFFIXES:
+        if name.endswith(suffix):
+            name = name[:-len(suffix)]
+    path = str(raw.get("path") or f"{path_prefix or CHAIN_GROUP}/{title(name)}")
+    steps = [s.get("label") or str(s.get("plugin", "")).rsplit("/", 1)[-1]
+             for s in raw.get("steps") or [] if isinstance(s, dict)]
+    return [PluginRef(path=path, name=path.rsplit("/", 1)[-1],
+                      description=str(raw.get("description") or " -> ".join(steps)),
+                      origin=origin, root=root, kind="chain")], []
+
+
+def scan(roots: Sequence[Tuple[str, Path]],
+         chain_roots: Sequence[Tuple[str, Path]] = ()
          ) -> Tuple[Dict[str, PluginRef], List[Diagnostic]]:
     """Every plugin under ``roots``, without importing any of them.
 
     ``roots`` are ``(label, directory)`` in priority order: a later root
     shadowing an earlier path wins, so a user can override a shipped plugin by
-    putting their own at the same place.
+    putting their own at the same place.  Chains (``*.chain.yaml``) are found
+    in every root, and in ``chain_roots``, which hold chains only and are
+    skipped quietly when they do not exist yet.
     """
     refs: Dict[str, PluginRef] = {}
     problems: List[Diagnostic] = []
-    for label, directory in roots:
+    walk = [(label, directory, False) for label, directory in roots]
+    walk += [(label, directory, True) for label, directory in chain_roots]
+    for label, directory, chains_only in walk:
         directory = Path(directory).expanduser()
         if not directory.is_dir():
-            problems.append(Diagnostic(directory, "plugin folder does not exist"))
+            if not chains_only:
+                problems.append(Diagnostic(directory, "plugin folder does not exist"))
             continue
-        for origin in sorted(directory.rglob("*.py")):
+        files = [] if chains_only else sorted(directory.rglob("*.py"))
+        files += sorted(o for suffix in CHAIN_SUFFIXES
+                        for o in directory.rglob(f"*{suffix}"))
+        for origin in files:
             relative = origin.relative_to(directory)
             if any(_skip(part) for part in relative.parts[:-1]) or _skip(origin.name):
                 continue
             prefix = "/".join(relative.parts[:-1])
-            found, trouble = _refs_in_file(origin, prefix, label)
+            if origin.name.endswith(CHAIN_SUFFIXES):
+                found, trouble = _chain_ref(origin, prefix, label)
+            else:
+                found, trouble = _refs_in_file(origin, prefix, label)
             problems.extend(trouble)
             for ref in found:
                 previous = refs.get(ref.path)
