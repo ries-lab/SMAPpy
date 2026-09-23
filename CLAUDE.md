@@ -29,6 +29,7 @@ moved.
 A fresh container has **no numpy**.  Before anything else:
 
     pip install -e .                    # builds the C++ extensions too
+    pip install pytest                  # not a dependency, and not in the container
 
 Running the tests:
 
@@ -65,6 +66,10 @@ shape, so read the one closest to what you are writing:
 | removes or flags localizations | `remove_locs.py` (a region, a new table or a filtered flag) |
 | fits a model to what is in a ROI | `line_profile.py` (unbinned likelihood, models compared by AIC; one fit per layer, and `live`) |
 | reads the session and reports | `history.py` (the log, with an optional export) |
+| sets up layers and filters from settings | `chain_layers.py` (bounds as rows per layer, `Result.data["layers"]`) |
+
+A chain of plugins that runs as one, and running one over many files
+(`smappy-batch`, the batch window): `docs/batch.md`.
 
 A plugin is a settings dataclass plus a `run`:
 
@@ -87,6 +92,8 @@ class Thing(Plugin):
 * `param(...)` is a dataclass field carrying the GUI presentation -- label,
   unit, bounds, `choices`, `advanced=True` to hide it under "more".  The GUI
   builds its widgets from these; nothing in a plugin imports Qt.
+* `version` -- bump it when a change moves the numbers: a chain records it,
+  and a batch re-runs files whose steps' versions changed.
 * `@register("Tab/Group/Name")` places it in the tree.  Without it the *folder*
   decides the path (`<root>/Analysis/Drift/comet.py` -> `Analysis/Drift/COMET`),
   which is how a user drops a plugin in and it appears.
@@ -122,6 +129,10 @@ written this way; it is also what makes the tests readable.
 ### The context
 
 * `ctx.locs` -- the whole table, **always the ungrouped one**.
+* `ctx.table(layer)` -- `(locs, selection)`, grouped or not as the layer, a
+  chain and `Plugin.grouping` decide.  Read this, not `ctx.locs`, in a plugin
+  that should honour a chain's grouping; `Session.table` links the grouped
+  table on request.
 * `ctx.selection` -- what the user is looking at: the layer's filter *and* the
   ROI *and* the slab, as a boolean mask.  `.apply(locs)` cuts the table,
   `.require(n, ctx.report, "what")` refuses an empty one and warns about a thin
@@ -161,7 +172,8 @@ looked.  What a measurement worked out goes with its *result* instead --
 measurement is the only record there is.  `Plugin.logged` overrides the rule
 (`True` for a run that changes something the log cannot see, such as writing
 a file; `False` for never), and `Analysis/Process/History` shows the log and
-exports it.
+exports it.  A chain logs once, its steps under `steps`, whether or not it
+changed the table.
 
 That is why a plugin returns the settings it actually used, and why one that
 changes the table hands back a new one rather than editing `ctx.locs`: the
