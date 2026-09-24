@@ -114,3 +114,15 @@ def test_the_voice_makes_a_clip_per_step(tmp_path):
     for step in steps:
         assert (tmp_path / step["audio"]).stat().st_size > 1000
         assert 0.3 < step["audio_seconds"] < 5
+
+
+def test_the_index_lists_what_was_built_and_what_is_planned(tmp_path):
+    built = tmp_path / "layout"
+    built.mkdir()
+    player.write(built, [_step("one"), _step("two", chapter="Two")], "The tour", "what it is")
+    page = player.write_index(tmp_path, ["Fitting"]).read_text()
+    assert page.startswith("<!doctype html>")
+    assert 'href="layout/"' in page and "The tour" in page and "what it is" in page
+    assert "Fitting" in page
+    assert "--ground:" in page                      # the player's tokens came along
+    assert (built / "index.html").read_text().startswith("<!doctype html>")

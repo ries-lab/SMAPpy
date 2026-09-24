@@ -7,6 +7,11 @@ PSF calibration -- the SMAP workflow, ported.  Reads SMAP `_3Dcal.mat`
 calibration files, Micro-Manager TIFF stacks and NDTiff datasets
 (pycro-manager).
 
+**New to smappy?**  The [tutorials](https://ries-lab.github.io/SMAPpy/) are
+guided tours of a few minutes each, with subtitles and a voice, on simulated
+data you can follow along with.  They are generated from the program itself
+(`python -m smappy.tutorial`), so they show the GUI as it is.
+
 ## Install
 
     pip install smappy-smlm

@@ -77,21 +77,66 @@ def vtt(steps: List[dict]) -> str:
     return "\n".join(lines)
 
 
+# What a page needs to stand on its own on a static host (GitHub Pages): a
+# host that wraps pages in its own skeleton gets them without this.
+STANDALONE = ('<!doctype html>\n<html lang="en">\n<meta charset="utf-8">\n'
+              '<meta name="viewport" content="width=device-width, initial-scale=1">\n')
+
+
 def write(out: Path, steps: List[dict], title: str, description: str = "",
           size=(1600, 900)) -> Path:
-    """The page, ``index.html``, beside the screenshots in ``out``."""
+    """The page, ``index.html``, beside the screenshots in ``out``, and
+    ``tutorial.json`` saying what it is, for the index (`write_index`)."""
     out = Path(out)
     steps = timing(steps)
     data = json.dumps({"title": title, "description": description,
                        "size": list(size), "steps": steps}, ensure_ascii=False)
-    page = (_PAGE.replace("__TITLE__", html.escape(title))
+    page = STANDALONE + (_PAGE.replace("__TITLE__", html.escape(title))
                  .replace("__VOICE_LEAD__", str(VOICE_LEAD))
                  .replace("__DESCRIPTION__", html.escape(description))
                  .replace("__DATA__", data.replace("</", "<\\/")))
     (out / "index.html").write_text(page, encoding="utf-8")
     (out / "subtitles.vtt").write_text(vtt(steps), encoding="utf-8")
     (out / "steps.json").write_text(json.dumps(steps, indent=1, ensure_ascii=False))
+    (out / "tutorial.json").write_text(json.dumps({
+        "title": title, "description": description,
+        "seconds": round(sum(s["duration"] for s in steps)),
+        "steps": len(steps), "voice": any(s.get("audio") for s in steps),
+        "chapters": [s["chapter"] for s in steps if s.get("chapter")],
+    }, indent=1, ensure_ascii=False))
     return out / "index.html"
+
+
+def write_index(root: Path, planned=()) -> Path:
+    """The landing page: every tutorial built under ``root``, and what is to come.
+
+    Found by their ``tutorial.json``, so the page lists what was actually
+    built, in the order `topics.TOPICS` gives, rather than a list kept by hand.
+    """
+    from .topics import TOPICS
+    root = Path(root)
+    built = {p.parent.name: json.loads(p.read_text())
+             for p in root.glob("*/tutorial.json")}
+    order = [t for t in TOPICS if t in built] + sorted(set(built) - set(TOPICS))
+    cards = []
+    for name in order:
+        t = built[name]
+        minutes = max(1, round(t["seconds"] / 60))
+        chapters = " &middot; ".join(html.escape(c) for c in t["chapters"])
+        cards.append(
+            f'<li class="tut"><a href="{html.escape(name)}/">'
+            f'<span class="meta">{minutes} min'
+            f'{" &middot; with voice" if t.get("voice") else ""}</span>'
+            f'<span class="name">{html.escape(t["title"])}</span>'
+            f'<span class="about">{html.escape(t["description"])}</span>'
+            f'<span class="chapters">{chapters}</span></a></li>')
+    later = "".join(f"<li>{html.escape(p)}</li>" for p in planned)
+    page = STANDALONE + (_INDEX.replace("__TOKENS__", _tokens())
+                              .replace("__CARDS__", "\n".join(cards))
+                              .replace("__PLANNED__", later)
+                              .replace("__HAS_PLANNED__", "" if planned else "hidden"))
+    (root / "index.html").write_text(page, encoding="utf-8")
+    return root / "index.html"
 
 
 def record(out: Path, size=(1600, 900), browser: Optional[str] = None) -> Path:
@@ -130,6 +175,59 @@ def record(out: Path, size=(1600, 900), browser: Optional[str] = None) -> Path:
                     "-movflags", "+faststart", str(target)], check=True)
     shutil.rmtree(raw, ignore_errors=True)
     return target
+
+
+_INDEX = r"""<title>smappy tutorials</title>
+<meta name="description" content="Short guided tours of smappy, generated from the program itself.">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+__TOKENS__
+.wrap { max-width: 860px; margin: 0 auto; padding-inline: 16px; padding-block: 40px 48px;
+        display: grid; gap: 28px; }
+.kicker { font-family: var(--mono); font-size: 12px; letter-spacing: .08em;
+          text-transform: uppercase; color: var(--muted); margin: 0; }
+h1 { font-size: 32px; line-height: 1.15; margin: 4px 0 8px; font-weight: 600; text-wrap: balance; }
+.lede { margin: 0; color: var(--muted); max-width: 62ch; font-size: 16px; }
+ul { margin: 0; padding: 0; list-style: none; }
+.tuts { display: grid; gap: 12px; }
+.tut a { display: grid; gap: 4px; padding: 18px 20px; border-radius: 10px; text-decoration: none;
+         color: var(--ink); background: var(--surface); border: 1px solid var(--line); }
+.tut a:hover { border-color: var(--accent); }
+.tut a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tut .meta { font-family: var(--mono); font-size: 12px; color: var(--accent-ink);
+             letter-spacing: .04em; }
+.tut .name { font-size: 20px; font-weight: 600; }
+.tut .about { color: var(--muted); }
+.tut .chapters { font-size: 13px; color: var(--muted); }
+h2 { font-size: 15px; margin: 0 0 8px; font-weight: 600; }
+.later li { color: var(--muted); padding: 6px 0; border-top: 1px solid var(--line); }
+footer { font-size: 13px; color: var(--muted); }
+footer a { color: var(--accent-ink); }
+</style>
+<div class="wrap">
+  <header>
+    <p class="kicker">smappy</p>
+    <h1>Tutorials</h1>
+    <p class="lede">Short guided tours of smappy, a few minutes each, with subtitles and
+    a voice you can switch off. They run on simulated data, so you can follow along in
+    the program: File &rarr; Simulate.</p>
+  </header>
+  <ul class="tuts">
+__CARDS__
+  </ul>
+  <section __HAS_PLANNED__>
+    <h2>Coming later</h2>
+    <ul class="later">__PLANNED__</ul>
+  </section>
+  <footer>Made from the program itself, and rebuilt when it changes.
+  <a href="https://github.com/ries-lab/SMAPpy">smappy on GitHub</a></footer>
+</div>
+"""
+
+
+def _tokens() -> str:
+    """The player's colour and type tokens, both themes, for the index too."""
+    return _PAGE[_PAGE.index(":root {"):_PAGE.index(".wrap {")]
 
 
 # The page.  Tokens first, both themes; the stage is a fixed 1600 x 900
@@ -175,6 +273,8 @@ header h1 { font-size: 22px; font-weight: 600; margin: 0; text-wrap: balance; }
 header .kicker { font-family: var(--mono); font-size: 12px; letter-spacing: .08em;
                  text-transform: uppercase; color: var(--muted); }
 header p { margin: 0; color: var(--muted); flex-basis: 100%; }
+header a.kicker { text-decoration: none; }
+header a.kicker:hover { color: var(--accent-ink); }
 
 .viewport { position: relative; width: 100%; aspect-ratio: 16 / 9; max-width: 100%;
             background: var(--stage); border-radius: 10px; overflow: hidden;
@@ -272,7 +372,7 @@ body.recording .card .panel-box { max-height: 690px; }
 
 <div class="wrap">
   <header>
-    <span class="kicker">smappy tutorial</span>
+    <a class="kicker" href="../">smappy tutorials</a>
     <h1 id="title">__TITLE__</h1>
     <p>__DESCRIPTION__</p>
   </header>

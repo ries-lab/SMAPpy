@@ -1,0 +1,83 @@
+# The tutorials, rebuilt from the program and published on GitHub Pages.
+#
+# A tutorial is a storyboard that drives the real GUI (src/smappy/tutorial), so
+# it is built here rather than kept as files: every push to main that touches
+# the package re-runs it, and the pages always show the GUI as it is.  Each
+# subtitle is read aloud by Piper, offline, with a voice model fetched from
+# Piper's own release on GitHub and cached between runs.
+#
+# Needs Pages switched on once: Settings -> Pages -> Build and deployment ->
+# Source: "GitHub Actions".  The site is then https://ries-lab.github.io/SMAPpy/
+name: tutorials
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/smappy/**"
+      - ".github/workflows/tutorials.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# one deployment at a time, and a newer push wins over one still running
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+env:
+  VOICE: en-us-lessac-medium
+  VOICE_URL: https://github.com/rhasspy/piper/releases/download/v0.0.2/voice-en-us-lessac-medium.tar.gz
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Qt's own libraries -- the GUI runs on the offscreen platform, so no
+      # display is needed, but Qt still loads EGL -- and ffmpeg for the clips
+      - name: System libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libxkbcommon0 ffmpeg
+
+      - name: Install smappy and Piper
+        run: python -m pip install -e . piper-tts colorama
+
+      - name: Voice model (cached)
+        id: voice
+        uses: actions/cache@v4
+        with:
+          path: voices
+          key: piper-${{ env.VOICE }}
+
+      - name: Fetch the voice
+        if: steps.voice.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p voices
+          curl -sSL "$VOICE_URL" | tar xz -C voices
+
+      - name: Build the tutorials
+        run: python -m smappy.tutorial -o site --voice "voices/$VOICE.onnx"
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

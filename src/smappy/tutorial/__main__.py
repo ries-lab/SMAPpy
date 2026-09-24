@@ -1,4 +1,4 @@
-"""python -m smappy.tutorial TOPIC [-o DIR] [--voice VOICE.onnx] [--video]"""
+"""python -m smappy.tutorial [TOPIC ...] [-o DIR] [--voice VOICE.onnx] [--video]"""
 from __future__ import annotations
 
 import argparse
@@ -33,10 +33,13 @@ def build(topic: str, out: Path, video: bool = False,
 
 
 def main(argv=None) -> int:
-    from .topics import TOPICS
+    from .topics import PLANNED, TOPICS
     parser = argparse.ArgumentParser(prog="python -m smappy.tutorial",
-                                     description="Build a tutorial from its storyboard.")
-    parser.add_argument("topic", choices=TOPICS)
+                                     description="Build tutorials from their storyboards, "
+                                                 "and the index page that lists them.")
+    # not `choices`: with nargs="*" argparse rejects the empty list itself
+    parser.add_argument("topic", nargs="*",
+                        help=f"which to build, of {', '.join(TOPICS)}; all if none is named")
     parser.add_argument("-o", "--out", default="build/tutorials", type=Path)
     parser.add_argument("--voice", metavar="VOICE.onnx",
                         help="read every subtitle aloud with this Piper voice "
@@ -44,8 +47,22 @@ def main(argv=None) -> int:
     parser.add_argument("--video", action="store_true",
                         help="also record tutorial.mp4 (needs playwright and ffmpeg)")
     args = parser.parse_args(argv)
-    page = build(args.topic, args.out, args.video, args.voice)
-    print(page)
+    unknown = [t for t in args.topic if t not in TOPICS]
+    if unknown:
+        parser.error(f"no tutorial {', '.join(unknown)}; there are {', '.join(TOPICS)}")
+    # one process per topic: a Director owns the process's only QApplication
+    import subprocess
+    topics = args.topic or list(TOPICS)
+    if len(topics) == 1:
+        print(build(topics[0], args.out, args.video, args.voice))
+    else:
+        for topic in topics:
+            command = [sys.executable, "-m", "smappy.tutorial", topic, "-o", str(args.out)]
+            command += ["--voice", args.voice] if args.voice else []
+            command += ["--video"] if args.video else []
+            subprocess.run(command, check=True)
+    from .player import write_index
+    print(write_index(args.out, PLANNED))
     return 0
 
 
