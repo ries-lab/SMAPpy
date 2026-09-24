@@ -1,0 +1,81 @@
+import json
+import subprocess
+import sys
+
+import pytest
+
+from smappy.tutorial import player
+
+
+def _step(say, **extra):
+    step = {"say": say, "image": "001.webp", "spot": [], "point": None, "click": False,
+            "zoom": None, "card": None, "chapter": None, "duration": 0.0}
+    step.update(extra)
+    return step
+
+
+def test_a_subtitle_stays_up_long_enough_to_read_and_a_card_longer():
+    short = _step("Click Run.")
+    long = _step(" ".join(["word"] * 28))
+    pointed = _step(" ".join(["word"] * 28), point=(10, 10))
+    card = _step("Filters.", image=None,
+                 card={"title": "Filters", "body": " ".join(["word"] * 70), "figure": ""})
+    player.timing([short, long, pointed, card])
+    assert short["duration"] == player.MIN_SECONDS
+    assert long["duration"] == pytest.approx(1.2 + 28 / player.WORDS_PER_SECOND, abs=0.01)
+    assert pointed["duration"] == pytest.approx(long["duration"] + player.MOVE_SECONDS, abs=0.01)
+    assert card["duration"] > 70 / player.CARD_WORDS_PER_SECOND
+
+
+def test_the_subtitle_track_follows_the_steps_end_to_end():
+    steps = player.timing([_step("one two three"), _step("four five six seven")])
+    track = player.vtt(steps)
+    total = sum(s["duration"] for s in steps)
+    assert track.startswith("WEBVTT")
+    assert "00:00:00.000 --> " in track
+    m, s = divmod(total, 60)
+    assert f"--> 00:{int(m):02d}:{s:06.3f}" in track
+    assert "four five six seven" in track
+
+
+def test_the_page_carries_its_steps_and_cannot_be_closed_early_by_them(tmp_path):
+    steps = [_step("a </script> in a subtitle")]
+    page = player.write(tmp_path, steps, "Title", "what it is").read_text()
+    start = page.index('<script id="data" type="application/json">')
+    embedded = page[start:].split(">", 1)[1].split("</script>", 1)[0]
+    assert json.loads(embedded)["steps"][0]["say"] == "a </script> in a subtitle"
+    assert json.loads((tmp_path / "steps.json").read_text())[0]["duration"] > 0
+
+
+def test_the_layout_tutorial_builds_from_the_real_gui(tmp_path):
+    """The whole storyboard, run as a user would, on the offscreen platform.
+
+    A subprocess because a tutorial needs a QApplication of its own -- the
+    screen size and the scale are fixed when Qt starts, and the rest of the
+    suite has usually started one already.  A storyboard that stops running
+    is a GUI that no longer does what its tutorial says.
+    """
+    pytest.importorskip("PySide6")
+    pytest.importorskip("pyqtgraph")
+    done = subprocess.run([sys.executable, "-m", "smappy.tutorial", "layout",
+                           "-o", str(tmp_path)], capture_output=True, text=True,
+                          timeout=600)
+    if done.returncode and "libEGL" in done.stderr:
+        pytest.skip("Qt's libraries are not installed")
+    assert done.returncode == 0, done.stderr[-3000:]
+    out = tmp_path / "layout"
+    steps = json.loads((out / "steps.json").read_text())
+    assert len(steps) > 20
+    assert steps[0]["card"] and steps[-1]["card"]
+    width, height = 1600, 900
+    for step in steps:
+        if step["image"]:
+            assert (out / step["image"]).stat().st_size > 10_000
+        for x, y, w, h in step["spot"] + ([step["zoom"]] if step["zoom"] else []):
+            assert w > 0 and h > 0
+            assert -10 <= x and x + w <= width + 10, step["say"]
+            assert -10 <= y and y + h <= height + 10, step["say"]
+        if step["point"]:
+            assert 0 <= step["point"][0] <= width and 0 <= step["point"][1] <= height
+    # the numbers in the subtitles come from the run, not from the storyboard
+    assert any("blinks" in s["say"] and any(c.isdigit() for c in s["say"]) for s in steps)

@@ -76,6 +76,10 @@ cuda = ["numba>=0.57"]
 gui = []
 # The GPU engine of the 3D viewer: wgpu-py (Metal / Vulkan / DX12, headless).
 gpu = ["wgpu>=0.19"]
+# `python -m smappy.tutorial TOPIC --video`: the tutorial page played by
+# headless Chromium and encoded by ffmpeg (which is not a pip package).  The
+# page itself needs nothing beyond the GUI.
+tutorial = ["playwright>=1.40"]
 
 [project.scripts]
 smappy-fit = "smappy.cli.fit:main"
