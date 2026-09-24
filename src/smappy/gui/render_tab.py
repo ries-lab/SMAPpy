@@ -299,7 +299,7 @@ class FilterWidget(QWidget):
         f = self.layer.filter
         text = f"{len(f)} / {len(self.layer.locs)}"
         if self.session is not None and self.session.roi is not None:
-            text += f", {len(self.session.selection(self.layer_index))} in ROI"
+            text += f", {len(self.session.shown_selection(self.layer_index))} in ROI"
         self.count.setText(text)
         bounded = set(f.ranges)
         for n, b in self.quick.items():

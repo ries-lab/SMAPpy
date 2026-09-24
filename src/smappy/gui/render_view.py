@@ -571,7 +571,7 @@ class RenderToolBar(QToolBar):
                 continue
             n = len(layer.filter)
             if session.roi is not None:
-                n = f"{len(session.selection(i))} in {session.roi}"
+                n = f"{len(session.shown_selection(i))} in {session.roi}"
             parts.append(f"{layer.name}: {n}")
         self.counts.setText("   ".join(parts))
 

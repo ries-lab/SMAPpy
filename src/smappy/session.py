@@ -973,6 +973,22 @@ class Session:
             layer = self.first_locs_layer()
         return self._clip(self.layers[layer].selection(layer), self.locs, layer)
 
+    def shown_selection(self, layer: int = 0) -> Selection:
+        """What the layer *draws* inside the ROI: its own table, grouped or not.
+
+        For counting what is on screen.  `selection` is over the ungrouped
+        table, since that is what plugins get, so on a grouped layer it counted
+        frames where the count beside it counted blinks -- "29088" without an
+        ROI and "68549 in ROI" with one drawn round nearly everything.  This
+        never links: it counts whatever the layer is showing, stale or not,
+        which is what the number next to the picture has to agree with.
+        """
+        if self.layers[layer].is_image:
+            layer = self.first_locs_layer()
+        lay = self.layers[layer]
+        sel = Selection(lay.filter.mask, layer=layer, name=lay.name)
+        return self._clip(sel, lay.locs, layer)
+
     def _clip(self, sel: Selection, locs: Localizations, layer: int) -> Selection:
         """Narrow a layer's selection to the ROI and, if asked, the slab."""
         axes = self.axes(layer)

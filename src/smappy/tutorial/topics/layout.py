@@ -387,9 +387,10 @@ def make(d) -> None:
     toolbar._set_kind("rect", "rectangle")
     session.set_roi(Region.rect(2300, 2300, 7700, 7700))
     d.settle()
-    d.shot("Then drag over the picture. What is inside is what the plugins "
-           "measure.",
-           spot=[d.data_rect(2300, 2300, 7700, 7700, pad=6)],
+    inside = len(session.shown_selection(0))
+    d.shot("Then drag over the picture. The toolbar counts what is inside, "
+           f"{_count(inside)}; plugins now measure only the ROI.",
+           spot=[d.data_rect(2300, 2300, 7700, 7700, pad=6), toolbar.counts],
            point=d.at_data(7700, 7700))
 
     d.chapter("Plugins")

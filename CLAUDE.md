@@ -272,6 +272,12 @@ in).  `tests/test_file_plugins.py::test_the_file_tab_ships_with_the_four_it_need
 asserts the File tab's exact contents, so a new File plugin needs a line there
 too (it is a Qt test and skips without PySide6).
 
+`tests/test_tutorial.py` runs every tutorial storyboard against the real GUI
+(`python -m smappy.tutorial`, see `src/smappy/tutorial/__init__.py`), so a GUI
+change that breaks a tutorial fails there: fix the storyboard in
+`src/smappy/tutorial/topics/`, which usually means a widget that was renamed
+or moved.
+
 Plugins reach the shipped workspace by themselves: the Analysis tab seeds from
 `Analysis/` and `favorite` defaults to True, so there is no registry to edit.
 
