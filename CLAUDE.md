@@ -134,7 +134,8 @@ written this way; it is also what makes the tests readable.
   that should honour a chain's grouping; `Session.table` links the grouped
   table on request.
 * `ctx.selection` -- what the user is looking at: the layer's filter *and* the
-  ROI *and* the slab, as a boolean mask.  `.apply(locs)` cuts the table,
+  ROI *and*, while the 3D window is open with "plugins use the slab" ticked,
+  the slab (`session.selects_slab`), as a boolean mask.  `.apply(locs)` cuts the table,
   `.require(n, ctx.report, "what")` refuses an empty one and warns about a thin
   one.  A plugin that offers "all localizations" means `ctx.locs` unfiltered.
 * `ctx.session` -- may be `None`; a script can say `Context(locs=locs)`, so
@@ -160,6 +161,11 @@ and the fit preview all do this).  Never set the figure's size or its layout
 engine: on the window's *All* page a plot is handed a `SubFigure`, which has
 neither, and `size` is the hint the window reads instead.  Return the settings
 that were actually used -- that is what the history records.
+
+`text` goes into the plugin panel's output box, however long it is; the Text
+button opens it in a window on request.  Set `text_window = True` on the
+plugin only when the text *is* the result and is long -- `history.py` is the
+one that does -- and the window then opens by itself.
 
 A run that **changes** the localizations is logged: `Session.apply` appends
 the plugin's path, the result's `text` and its settings to `session.history`,
