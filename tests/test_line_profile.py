@@ -301,6 +301,21 @@ def test_em_finds_two_components_that_overlap_and_a_gradient_start_would_miss():
     assert fit.values()["distance"] == pytest.approx(found["distance"], abs=2.0)
 
 
+def test_two_peaks_far_apart_and_of_very_different_height_are_both_found():
+    """The small peak is below half the tall one, so the profile's top is the
+    tall peak alone; a start read only from the top put both components on it
+    and reported a distance of about one peak width."""
+    rng = np.random.default_rng(31)
+    window = (-300.0, 300.0)
+    values = np.concatenate([rng.normal(-150.0, 15.0, 1000),
+                             rng.normal(150.0, 15.0, 60),
+                             rng.uniform(*window, 60)])
+    fit = fit_profile(values, None, model="two_gauss", window=window)
+    assert fit.values()["distance"] == pytest.approx(300.0, abs=10.0)
+    assert fit.values()["sigma"] == pytest.approx(15.0, abs=3.0)
+    assert fit.values()["fraction"] == pytest.approx(1000 / 1060, abs=0.03)
+
+
 def test_em_puts_the_unspecific_localizations_in_the_background_component():
     from smappy.plugins.line_profile import em_two_gaussians
     rng = np.random.default_rng(24)

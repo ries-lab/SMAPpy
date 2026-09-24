@@ -1,6 +1,7 @@
 """Projection, slab and engine A: the tilted image is the 2D image of the tilted table."""
 from dataclasses import replace
 import numpy as np
+import pytest
 
 from smappy.locs import Localizations
 from smappy.regions import Region
@@ -121,6 +122,23 @@ def test_render_3d_gives_depth_histogram_and_selection_in_slab():
     assert rgb.shape == (160, 200, 3) and hist[:, 1].sum() > 0 and abs(hist[:, 0]).max() <= 100
     s.select_in_slab = True
     assert np.abs(locs["z_nm"][s.selection(0).mask]).max() <= 100
+
+
+def test_plugins_see_the_slab_only_while_the_3d_window_shows_it():
+    """Ticked, the slab cuts every plugin's selection -- but a closed window
+    is a restriction nobody can see, so closing it lifts the cut."""
+    from smappy.session import Session
+    locs = _table()
+    s = Session(locs)
+    s.set_slab(Slab.from_bounds(0, 1000, 0, 800, -100, 100))
+    everything = int(s.selection(0).mask.sum())
+    s.select_in_slab = True
+    assert s.selects_slab and s.selection(0).mask.sum() < everything
+    s.slab_shown = False                 # what the window does when it closes
+    assert not s.selects_slab and s.selection(0).mask.sum() == everything
+    assert s.scratch().selects_slab is False      # and a chain's copy agrees
+    s.slab_shown = True
+    assert s.selection(0).mask.sum() < everything
 
 
 def test_view_rotation_is_continuous_and_angles_round_trip():
@@ -302,3 +320,32 @@ def test_a_preview_is_bounded_by_the_budget_and_a_final_frame_is_not():
     rgb, hist = render_3d(s.layers, proj, slab, proj.fov(200, 160), True, budget=budget)
     assert rgb.shape == (160, 200, 3) and hist[:, 1].sum() > 0
     assert budget.rate is not None                            # and it timed itself
+
+
+def test_after_a_pan_a_rotation_turns_about_the_middle_of_the_screen():
+    """In a large field the slab's centre is off screen once one has panned
+    away from it; turning about it swings the data out of the picture."""
+    proj = Projection(pivot=[0.0, 0.0, 0.0], zoom=5.0, elevation=30.0)
+    proj.offset = np.array([4000.0, -2500.0])            # panned
+    target = proj.screen_centre()
+    xv, yv, d = proj.apply(*target)
+    assert np.allclose([xv, yv, d], [4000.0, -2500.0, 0.0])
+
+    proj.pivot_at_centre()
+    assert np.allclose(proj.offset, 0) and np.allclose(proj.pivot, target)
+    for _ in range(5):
+        proj.rotate_view(17.0, 11.0)
+        xv, yv, _ = proj.apply(*target)
+        assert np.allclose([xv, yv], proj.offset)       # still in the middle
+
+
+def test_moving_along_the_sight_brings_the_middle_of_the_screen_nearer():
+    proj = Projection(pivot=[0.0, 0.0, 0.0], elevation=40.0, azimuth=25.0,
+                      focal=5000.0)
+    ahead = np.array(proj.pivot) - proj.view_axis(2) * 500.0     # behind the pivot
+    before = proj.apply(*(ahead + proj.view_axis(0) * 100.0))
+    proj.move_along_sight(1000.0)
+    after = proj.apply(*(ahead + proj.view_axis(0) * 100.0))
+    assert after[2] > before[2]                         # nearer the eye
+    assert abs(after[0]) > abs(before[0])               # so it looks bigger
+    assert proj.apply(*proj.screen_centre())[:2] == pytest.approx((0.0, 0.0), abs=1e-6)

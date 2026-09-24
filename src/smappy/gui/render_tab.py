@@ -71,13 +71,23 @@ class FilterWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(2)
 
+        # The quick buttons have a row to themselves and the drop-down and the
+        # count share the next.  All on one line, a table with all eight quick
+        # fields made the panel ~440 px wide in a 380 px window, and the scroll
+        # area (no horizontal bar) cut off the histogram's right end -- with
+        # the handle of the upper bound on it.
         row = QHBoxLayout()
         self.quick: Dict[str, QToolButton] = {}
         self.quick_row = row
+        row.addStretch(1)
+        layout.addLayout(row)
+        field_row = QHBoxLayout()
         self.field = QComboBox()
         self.field.setMinimumWidth(110)
-        row.addWidget(self.field)
-        layout.addLayout(row)
+        field_row.addWidget(self.field)
+        self.count = QLabel("")
+        field_row.addWidget(self.count, 1, Qt.AlignRight)
+        layout.addLayout(field_row)
 
         # for the file column: names to tick, not a histogram
         self.files = QListWidget()
@@ -110,8 +120,7 @@ class FilterWidget(QWidget):
         self.clear = QPushButton("clear")
         self.clear.setToolTip("no bounds on this field")
         numbers.addWidget(self.clear)
-        self.count = QLabel("")
-        numbers.addWidget(self.count, 1, Qt.AlignRight)
+        numbers.addStretch(1)
         layout.addLayout(numbers)
 
         self.field.currentTextChanged.connect(self._show_field)

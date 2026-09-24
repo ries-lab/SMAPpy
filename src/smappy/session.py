@@ -297,6 +297,11 @@ class Session:
         self.slab: Optional[Slab] = None          # the 3D view's volume
         self.slab_follows_roi = True              # the 2D ROI sets its footprint
         self.select_in_slab = False               # plugins see only the slab
+        # ... and only while the 3D window shows it: a restriction nobody can
+        # see is one nobody remembers, and a plugin run an hour after the
+        # window was closed would quietly measure a box.  The window clears
+        # this when it closes; a script, with no window, keeps it True.
+        self.slab_shown = True
         self.projection = Projection()
         self.files: List[FileInfo] = []
         self.history: List[Dict] = []
@@ -685,6 +690,7 @@ class Session:
         copy.history = list(self.history)
         copy.roi, copy.slab = self.roi, self.slab
         copy.select_in_slab = self.select_in_slab
+        copy.slab_shown = self.slab_shown
         copy.projection = self.projection
         copy.layers = []
         first = None
@@ -948,6 +954,11 @@ class Session:
             self.slab_from_roi(use_roi=False)
         self.changed("layer")
 
+    @property
+    def selects_slab(self) -> bool:
+        """Whether a plugin's selection is cut to the slab right now."""
+        return self.select_in_slab and self.slab_shown and self.slab is not None
+
     def set_projection(self, projection: Projection) -> None:
         self.projection = projection
         self.changed("projection")
@@ -974,7 +985,7 @@ class Session:
             # filter's cached mask is what `Selection` was handed
             sel.roi = self.roi
             sel.name += f", {self.roi}"
-        if self.select_in_slab and self.slab is not None and len(locs):
+        if self.selects_slab and len(locs):
             x, y = axes.coordinates(locs)
             z = axes.depth(locs)
             sel.mask = sel.mask & self.slab.mask(x, y, z)

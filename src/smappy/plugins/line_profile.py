@@ -63,7 +63,10 @@ profile as the eye reads it, and the one place a bin width enters a number
 here), the width has the localization precision taken out of it in
 quadrature, and the two-Gaussian start comes from **expectation-maximization**
 (`em_two_gaussians`), which moves two overlapping components apart where a
-gradient step cannot.  On a pair 25 nm apart with 8 nm structures and 8 nm
+gradient step cannot -- started three ways and the likeliest kept, so two
+peaks far apart and of very different height are found as well as two that
+overlap (a small peak far from a tall one used to be left to the
+background, both components sitting on the tall one).  On a pair 25 nm apart with 8 nm structures and 8 nm
 precision, EM lands on the maximum the likelihood then confirms in one
 iteration; started instead from a distance of 2 nm, the same fit settles at
 4.5 nm and stays there.
@@ -492,27 +495,94 @@ def em_two_gaussians(t, precision=None, window=None, background: bool = True,
       keeps unspecific localizations from pulling a component out to the edge
       of the window.
 
+    EM finds the mixture nearest where it was started, like any local
+    method, so it is started three ways and the likeliest answer kept:
+
+    * at the two ends of the profile's top -- two peaks that overlap;
+    * on the profile's two highest separate maxima -- two peaks far apart.
+      The first start alone fails here whenever one peak is well below half
+      the height of the other: the top is then the tall peak only, both
+      components sit on it, and the small one is left to the background;
+    * at the 15th and 85th percentiles -- as far apart as the data goes,
+      which EM can only pull together, for a second peak too faint to be a
+      maximum of the smoothed profile.
+
     This is a start, not the answer: it ignores the truncation at the window,
     where the likelihood that follows does not.  Returns the parameters by
     name, ready for `Model.start`.
     """
     t = np.asarray(t, float)
     window = window or (float(t.min()), float(t.max()))
-    flat = 1.0 / max(window[1] - window[0], 1e-9)
     sigma = (np.asarray(precision, float) if precision is not None
              else np.zeros_like(t))
 
-    # start the two components at the two ends of the profile's top, which is
-    # where two overlapping peaks are, and the width at what is left of it
     low, high = half_max_span(t, window)
     centre = peak_position(t, window)
-    mu = np.array([min(low, centre), max(high, centre)], float)
-    if mu[1] - mu[0] < 1e-6:
-        mu = centre + np.array([-1.0, 1.0]) * _spread(t)
-    s = _structure_sigma(0.5 * max(high - low, _spread(t)), precision)
+    top = np.array([min(low, centre), max(high, centre)], float)
+    if top[1] - top[0] < 1e-6:
+        top = centre + np.array([-1.0, 1.0]) * _spread(t)
+    # the width at what is left of the top; for the separated starts, the top
+    # is one peak and its half-width is one peak's width
+    wide = _structure_sigma(0.5 * max(high - low, _spread(t)), precision)
+    narrow = _structure_sigma(max(high - low, 1e-3) / FWHM_PER_SIGMA, precision)
+    starts = [(top, wide)]
+    maxima = _two_maxima(*smoothed_profile(t, window))
+    if maxima is not None:
+        starts.append((np.asarray(maxima, float), narrow))
+    starts.append((np.percentile(t, [15.0, 85.0]), narrow))
+
+    best = None
+    for mu, s in starts:
+        found = _em(t, sigma, window, mu, s, background, rounds, tolerance)
+        if best is None or found[-1] > best[-1]:
+            best = found
+    mu, s, weights, share, _ = best
+
+    order = np.argsort(mu)
+    mu, weights = mu[order], weights[order]
+    total_weight = float(weights.sum()) or 1.0
+    return {"centre": float(mu.mean()), "distance": float(mu[1] - mu[0]),
+            "sigma": s, "fraction": float(weights[0] / total_weight),
+            "background": float(np.clip(share, 0.0, 0.95))}
+
+
+def _two_maxima(centres, counts) -> Optional[Tuple[float, float]]:
+    """The two highest maxima of a smoothed profile with a dip between them.
+
+    A dip, so the shoulder of one peak is not taken for a second one: the
+    profile has to fall below four fifths of the lower maximum on the way.
+    None if there is only one.
+    """
+    counts = np.asarray(counts, float)
+    if counts.size < 3:
+        return None
+    padded = np.r_[-np.inf, counts, -np.inf]
+    peaks = [i for i in range(counts.size)
+             if counts[i] > 0 and counts[i] >= padded[i] and counts[i] > padded[i + 2]]
+    peaks.sort(key=lambda i: counts[i], reverse=True)
+    if len(peaks) < 2:
+        return None
+    first = peaks[0]
+    for other in peaks[1:]:
+        a, b = sorted((first, other))
+        if counts[a:b + 1].min() < 0.8 * counts[other]:
+            return float(centres[a]), float(centres[b])
+    return None
+
+
+def _em(t, sigma, window, mu, s, background: bool, rounds: int,
+        tolerance: float):
+    """EM for two Gaussians of one structural width, from ``mu`` and ``s``.
+
+    Returns ``(mu, s, weights, background share, log-likelihood)``; the
+    likelihood is the mixture's own, so starts can be compared on it.
+    """
+    flat = 1.0 / max(window[1] - window[0], 1e-9)
+    mu = np.asarray(mu, float).copy()
+    s = float(s)
     weights = np.array([0.5, 0.5]) * (0.95 if background else 1.0)
     share = 0.05 if background else 0.0
-
+    floor = (0.05 * _spread(t)) ** 2
     for _ in range(rounds):
         w2 = s ** 2 + sigma ** 2
         gauss = (np.exp(-0.5 * (t[None, :] - mu[:, None]) ** 2 / w2[None, :])
@@ -534,20 +604,18 @@ def em_two_gaussians(t, precision=None, window=None, background: bool = True,
         residual = (t[None, :] - new_mu[:, None]) ** 2 - sigma[None, :] ** 2
         assigned = r.sum()
         variance = float((r * residual).sum() / assigned) if assigned > 0 else s ** 2
-        new_s = float(np.sqrt(max(variance, (0.05 * _spread(t)) ** 2)))
+        new_s = float(np.sqrt(max(variance, floor)))
 
         moved = (np.max(np.abs(new_mu - mu)) + abs(new_s - s)
                  + np.max(np.abs(new_weights - weights)))
         mu, s, weights, share = new_mu, new_s, new_weights, new_share
         if moved < tolerance:
             break
-
-    order = np.argsort(mu)
-    mu, weights = mu[order], weights[order]
-    total_weight = float(weights.sum()) or 1.0
-    return {"centre": float(mu.mean()), "distance": float(mu[1] - mu[0]),
-            "sigma": s, "fraction": float(weights[0] / total_weight),
-            "background": float(np.clip(share, 0.0, 0.95))}
+    w2 = s ** 2 + sigma ** 2
+    density = ((weights[:, None] * np.exp(-0.5 * (t[None, :] - mu[:, None]) ** 2
+                                          / w2[None, :])
+                / np.sqrt(2 * np.pi * w2)[None, :]).sum(axis=0) + share * flat)
+    return mu, s, weights, share, float(np.sum(np.log(np.maximum(density, TINY))))
 
 
 # -------------------------------------------------------------- the models
@@ -1407,7 +1475,7 @@ class LineProfile(Plugin):
     """Profiles across a line ROI, fitted without binning them."""
 
     Settings = LineProfileSettings
-    version = "1"
+    version = "2"        # 2: the two-Gaussian start tries peaks far apart
 
     def run(self, ctx: Context, settings: LineProfileSettings) -> Result:
         region = _line_roi(ctx)

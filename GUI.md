@@ -312,7 +312,11 @@ projected as the data is, so an axis pointing at the viewer is short.
 Layers, filters and display stay in the Render tab and drive both windows.
 Mouse: left-drag rotates, shift + left-drag or middle-drag pans, wheel
 zooms, ctrl + wheel moves the slab along the depth axis, shift + wheel
-changes its thickness.
+changes its thickness, alt + wheel (or page up / down) moves the eye and the
+centre of rotation along the line of sight.  A drag turns about the middle
+of the screen, at the depth the view was framed at, so after a pan to
+another part of a large field the turn stays where one is looking; *rotate
+about the screen centre* off turns about the slab's centre instead.
 
 The slab has three handles that edit the same box:
 1. the 2D window: a rectangle ROI is the footprint; a line ROI is a rotated
@@ -332,7 +336,8 @@ face handles, the mouse as above, the side panel with ranges, angle, dials,
 presets, fit, depth attenuation, slice opacity (front-to-back compositing
 on the linear planes, exact sum at 0), perspective (a tick and a distance in
 µm, ten box lengths by default), colour by depth, a depth histogram, and *plugins use the slab* (the slab as the `Selection`'s
-ROI).  Save: PNG as shown, or a TIFF of the slab at a pixel size, colour or
+ROI, only while the 3D window is open: closing it lifts the cut, reopening
+puts it back, since a restriction nobody can see is one nobody remembers).  Save: PNG as shown, or a TIFF of the slab at a pixel size, colour or
 float intensity, with projection and slab in the ImageJ metadata.
 
 Phase 3 is in (`gpu.py`, extra ``[gpu]``): the GPU engine on wgpu-py

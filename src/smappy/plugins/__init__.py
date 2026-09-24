@@ -481,6 +481,13 @@ class Plugin:
     # the user says (see `Context.table`).  A requirement, not a preference:
     # it wins over every other choice, and the GUI greys the choice out.
     grouping: Optional[str] = None
+    # Whether the result's text opens in a window of its own.  A run reports
+    # in the panel's output box, where the rest of the GUI's status is, and a
+    # window that pops up with a summary in it is one more thing to close.
+    # True only for a plugin whose text *is* the result -- the history, a log
+    # nobody reads four lines at a time.  The Text button offers the window
+    # either way.
+    text_window: bool = False
 
     def __init_subclass__(cls, **kwargs):
         """Catch a plugin written against the old signature with a real error.

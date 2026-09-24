@@ -119,3 +119,22 @@ def test_the_title_counts_what_is_shown_not_the_table(app, tmp_path, monkeypatch
     layer.set_bound("photons", 800.0, None)
     session.changed("layer")
     assert f"{len(layer.filter):,} of" in control.render_window.windowTitle()
+
+
+def test_the_filter_fits_the_control_window_with_every_quick_button(app):
+    """Eight quick buttons and the drop-down on one row made the filter ~440
+    px wide in a 380 px window; the Render tab scrolls only vertically, so the
+    histogram's right end -- and the handle of the upper bound -- was cut off."""
+    from smappy.gui.render_tab import QUICK_FIELDS, FilterWidget
+    from smappy.gui.widgets import CONTROL_WIDTH
+    rng = np.random.default_rng(3)
+    n = 1000
+    columns = {"x_nm": rng.uniform(0, 1e4, n), "y_nm": rng.uniform(0, 1e4, n)}
+    for _, names in QUICK_FIELDS:
+        columns[names[0]] = rng.uniform(0, 10, n)
+    session = Session(Localizations(columns, {}))
+    widget = FilterWidget(session)
+    widget.bind(session.layers[0])
+    assert len(widget.quick) == len(QUICK_FIELDS)
+    scrollbar_and_margins = 40
+    assert widget.minimumSizeHint().width() <= CONTROL_WIDTH - scrollbar_and_margins

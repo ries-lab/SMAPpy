@@ -18,10 +18,6 @@ from ..plugins import Plugin, Result
 from ..session import Session
 from .params import SettingsForm
 
-# Longer than this and the result goes to a window of its own rather than into
-# the panel's four-line output box.  A plugin that reports a summary line or
-# three is read where it is; a log or a table is not.
-LONG_TEXT_LINES = 6
 
 
 class _Worker(QObject):
@@ -35,10 +31,19 @@ class _Worker(QObject):
         self.kwargs = kwargs
 
     def run(self) -> None:
+        from ..diagnostics import running
         plugin, context, settings = self.args
         try:
+            n = len(context.selection)
+        except Exception:                   # a File plugin has no table yet
+            n = None
+        try:
             work = getattr(plugin, self.job)
-            self.done.emit(work(context, settings, **self.kwargs))
+            # into the diagnostic log: what ran, with what, and the traceback
+            # if it failed -- the first thing a bug report is asked for
+            with running(plugin, self.job, settings, n):
+                result = work(context, settings, **self.kwargs)
+            self.done.emit(result)
         except Exception:
             self.failed.emit(traceback.format_exc())
 
@@ -417,9 +422,9 @@ class PluginPanel(QWidget):
         self._progress_lines = 0
         self.status.setText("live" if live else "done")
         self.text_button.setEnabled(bool(result.text))
-        if not live and len(result.text.splitlines()) > LONG_TEXT_LINES:
-            self.show_text()          # a log, a table: not something to scroll
-                                      # through a four-line slot
+        if not live and self.plugin.text_window and result.text:
+            self.show_text()          # a log: not something to scroll through
+                                      # a four-line slot (`Plugin.text_window`)
         # a run may have added to a list the form offers -- the expressions
         # the math parser has been given, say
         self.form.refresh()

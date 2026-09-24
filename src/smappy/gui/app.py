@@ -167,6 +167,9 @@ class ControlWindow(QMainWindow):
         tools.addSeparator()
         self.batch_window = None
         self._action(tools, "Batch...", None, self.open_batch)
+        help_ = self.menuBar().addMenu("Help")
+        self._action(help_, "Save a bug report...", None, self.save_bug_report)
+        self._action(help_, "Show the log folder", None, self.show_log_folder)
         self._action(view, "Reset view", "Ctrl+0", render.view.reset)
         self._action(view, "Show render window", None, render.show)
         QApplication.instance().aboutToQuit.connect(self.stop_loading)
@@ -281,6 +284,35 @@ class ControlWindow(QMainWindow):
 
     def _tab_widgets(self) -> List[QWidget]:
         return [self.tabs.widget(i) for i in range(self.tabs.count())]
+
+    def save_bug_report(self) -> None:
+        """The log, the crash stacks and what is open, zipped for an issue."""
+        from datetime import datetime
+        from PySide6.QtWidgets import QInputDialog, QMessageBox
+        from .. import diagnostics
+        note, ok = QInputDialog.getMultiLineText(
+            self, "Bug report", "What happened, and what did you expect?  (optional)")
+        if not ok:
+            return
+        default = str(Path.home() / f"smappy-bug-{datetime.now():%Y%m%d-%H%M}.zip")
+        path, _ = QFileDialog.getSaveFileName(self, "Save bug report", default,
+                                              "Zip (*.zip)")
+        if not path:
+            return
+        written = diagnostics.bug_report(path, self.session, note)
+        QMessageBox.information(
+            self, "Bug report",
+            f"Written to\n{written}\n\nIt has the log, the environment and a "
+            "description of the open table (its columns, files and history), "
+            "not the localizations.  File names and folders are in it.")
+
+    def show_log_folder(self) -> None:
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        from .. import diagnostics
+        folder = diagnostics.log_dir()
+        folder.mkdir(parents=True, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
 
     def open_preferences(self) -> None:
         before = [(t.name, t.kind) for t in self.workspace.tabs]
@@ -727,10 +759,36 @@ class RenderWindow(QMainWindow):
         window_shortcuts(self)
 
 
+def _start_log() -> None:
+    """The diagnostic log (`smappy.diagnostics`), and Qt's own warnings in it.
+
+    Never the reason the GUI does not start: a read-only home directory costs
+    the log, not the program.
+    """
+    from .. import diagnostics
+    try:
+        diagnostics.start("smappy-gui")
+    except OSError as e:
+        print(f"no diagnostic log: {e}")
+        return
+    from PySide6.QtCore import QtMsgType, qInstallMessageHandler
+    levels = {QtMsgType.QtDebugMsg: 10, QtMsgType.QtInfoMsg: 20,
+              QtMsgType.QtWarningMsg: 30, QtMsgType.QtCriticalMsg: 40,
+              QtMsgType.QtFatalMsg: 50}
+
+    def qt_message(kind, context, text):
+        diagnostics.logger.log(levels.get(kind, 30), "(qt) %s", text)
+        if sys.__stderr__ is not None and kind != QtMsgType.QtDebugMsg:
+            sys.__stderr__.write(text + "\n")      # where Qt would have put it
+
+    qInstallMessageHandler(qt_message)
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     argv = sys.argv if argv is None else argv
     app = QApplication.instance() or QApplication(argv)
     apply_style(app)
+    _start_log()
     session = Session()
     render = RenderWindow(session)
     control = ControlWindow(session, render)

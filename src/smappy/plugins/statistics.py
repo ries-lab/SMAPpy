@@ -608,14 +608,14 @@ def grouped_on_time(session, layer: int = 0, selected: bool = True
     from ..render import positions
     mask = np.asarray(locset.filter.mask, dtype=bool)
     roi = getattr(session, "roi", None)
-    slab = getattr(session, "slab", None)
-    if roi is not None or (getattr(session, "select_in_slab", False) and slab):
+    in_slab = bool(getattr(session, "selects_slab", False))
+    if roi is not None or in_slab:
         x, y = positions(locs)
         if roi is not None:
             mask = mask & roi.mask(x, y)
-        if getattr(session, "select_in_slab", False) and slab is not None:
+        if in_slab:
             z = locs["z_nm"] if "z_nm" in locs else None
-            mask = mask & slab.mask(x, y, z)
+            mask = mask & session.slab.mask(x, y, z)
     return np.asarray(locs["n_in_group"])[mask], ""
 
 

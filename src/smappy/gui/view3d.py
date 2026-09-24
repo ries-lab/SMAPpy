@@ -348,9 +348,14 @@ class View3D(QWidget):
         step = 5.0
         turns = {Qt.Key_Left: (-step, 0.0), Qt.Key_Right: (step, 0.0),
                  Qt.Key_Up: (0.0, -step), Qt.Key_Down: (0.0, step)}
-        if event.key() in turns:
+        if event.key() in (Qt.Key_PageUp, Qt.Key_PageDown):
+            self.move_along_sight(1.0 if event.key() == Qt.Key_PageUp else -1.0)
+            event.accept()
+        elif event.key() in turns:
             az, el = turns[event.key()]
             proj = self.projection
+            if proj.rotate_at_centre:
+                proj.pivot_at_centre()
             proj.roll = 0.0
             proj.azimuth = (proj.azimuth + az) % 360
             proj.elevation = (proj.elevation + el) % 360
@@ -368,6 +373,8 @@ class View3D(QWidget):
         self._face = self._face_at(event.position()) if event.button() == Qt.LeftButton else None
         self._mode = ("face" if self._face else "pan" if event.button() == Qt.MiddleButton
                       or event.modifiers() & Qt.ShiftModifier else "rotate")
+        if self._mode == "rotate" and self.projection.rotate_at_centre:
+            self.projection.pivot_at_centre()
 
     def _move(self, event) -> None:
         if not self._dragging or self._last is None:
@@ -419,10 +426,32 @@ class View3D(QWidget):
                                           index=getattr(st, "index", None))[1].weight
         return weight
 
+    def move_along_sight(self, steps: float) -> None:
+        """Fly in (positive) or out: a tenth of the eye's distance a step in
+        perspective, where that is the scale of what changes, and a tenth of
+        the slab's depth through the screen otherwise."""
+        proj, slab = self.projection, self.session.slab
+        if proj.focal:
+            step = 0.1 * proj.focal
+        elif slab is not None:
+            step = 0.1 * float(np.abs(slab.size @ np.abs(proj.view_axis(2))))
+        else:
+            step = 100.0 * proj.zoom
+        proj.move_along_sight(step * steps)
+        self.changed.emit()
+        self._draw_box()
+        self.schedule(preview=True)
+        self._timer.start()
+
     def _wheel(self, event) -> None:
-        steps = event.angleDelta().y() / 120.0
+        # Qt hands an alt-wheel to the horizontal delta on some platforms
+        delta = event.angleDelta()
+        steps = (delta.y() or delta.x()) / 120.0
         mods = event.modifiers()
         slab = self.session.slab
+        if mods & Qt.AltModifier:                               # the eye, along the sight
+            self.move_along_sight(steps)
+            return
         if mods & Qt.ControlModifier and slab is not None:      # move along the depth axis
             slab.center -= self.projection.view_axis(2) * slab.size.min() * 0.1 * steps
             self.session.changed("slab")
@@ -502,6 +531,15 @@ class SlabPanel(QWidget):
         self.fix_roll.setChecked(view.projection.fix_roll)
         self.fix_roll.toggled.connect(self._on_fix_roll)
         layout.addWidget(self.fix_roll)
+        self.at_centre = QCheckBox("rotate about the screen centre")
+        self.at_centre.setToolTip(
+            "on: a drag turns about what is in the middle of the screen, so after a pan "
+            "to another part of the data the turn stays where one is looking.  "
+            "off: about the slab's centre.  alt-wheel or page up / down moves the eye "
+            "and the centre along the line of sight.")
+        self.at_centre.setChecked(view.projection.rotate_at_centre)
+        self.at_centre.toggled.connect(self._on_at_centre)
+        layout.addWidget(self.at_centre)
         presets = QHBoxLayout()
         for name in PRESETS:
             b = QPushButton(name)
@@ -607,8 +645,11 @@ class SlabPanel(QWidget):
         self.guides.setChecked(True)
         self.guides.toggled.connect(self._on_guides)
         form.addRow("", self.guides)
-        self.in_slab = QCheckBox("plugins use the slab")
-        self.in_slab.setToolTip("a plugin's selection is restricted to the slab")
+        self.in_slab = QCheckBox("plugins use the slab (while open)")
+        self.in_slab.setToolTip("while this window is open, every plugin's selection is "
+                                "cut to the slab as well as to the layer's filter and the "
+                                "ROI.  Closing the window lifts it; opening it again puts "
+                                "it back.")
         self.in_slab.setChecked(session.select_in_slab)
         self.in_slab.toggled.connect(self._on_in_slab)
         form.addRow("", self.in_slab)
@@ -674,6 +715,12 @@ class SlabPanel(QWidget):
             proj.roll = 0.0
         self.view3d._draw_box()
         self.view3d.schedule()
+
+    def _on_at_centre(self, on: bool) -> None:
+        proj = self.view3d.projection
+        proj.rotate_at_centre = on
+        if not on and self.session.slab is not None:      # back to the slab's centre
+            proj.move_pivot(self.session.slab.center)
 
     def _preset(self, name: str) -> None:
         slab = self.session.slab
@@ -787,8 +834,9 @@ class View3DWindow(QMainWindow):
         self.controls_action = QAction("controls", self, checkable=True, checked=True,
                                        triggered=self._show_controls)
         bar.addAction(self.controls_action)
-        self.hint = QLabel("  drag: rotate about the slab centre   shift-drag: pan   "
-                           "wheel: zoom   ctrl-wheel: slab depth   shift-wheel: thickness")
+        self.hint = QLabel("  drag: rotate   shift-drag: pan   wheel: zoom   "
+                           "alt-wheel: move along the sight   ctrl-wheel: slab depth   "
+                           "shift-wheel: thickness")
         bar.addWidget(self.hint)
         self.addToolBar(bar)
         # the controls are their own window rather than a dock: the image is
@@ -835,8 +883,17 @@ class View3DWindow(QMainWindow):
                                    "slab": str(self.view.session.slab.to_dict()
                                                if self.view.session.slab else None)})
 
+    def _slab_shown(self, shown: bool) -> None:
+        """The slab restricts plugins only while it can be seen (`Session.slab_shown`)."""
+        session = self.view.session
+        if session.slab_shown != shown:
+            session.slab_shown = shown
+            if session.select_in_slab:
+                session.changed("slab")
+
     def showEvent(self, event) -> None:
         super().showEvent(event)
+        self._slab_shown(True)
         self.controls.setVisible(self.controls_action.isChecked())
         if not self._placed:
             self._placed = True
@@ -859,4 +916,5 @@ class View3DWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         self.controls.hide()          # hidden, not closed: the tick stays as it is
+        self._slab_shown(False)
         super().closeEvent(event)

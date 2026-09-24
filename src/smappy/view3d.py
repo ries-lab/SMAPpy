@@ -197,6 +197,7 @@ class Projection:
     slices: int = 32                # depth slices for the opacity compositing
     color_by_depth: bool = False    # override the layers' colour field
     fix_roll: bool = True           # turntable: turn about data z, tilt z forward / back
+    rotate_at_centre: bool = True   # a drag turns about the screen's centre, not the slab's
     engine: str = "cpu"             # "cpu", "gpu" (same image), "points" or "spheres" (GPU)
     point_size: float = 0.0         # points mode: radius in nm; 0 = the median precision
     point_alpha: float = 0.05       # points mode: sprite opacity
@@ -276,6 +277,39 @@ class Projection:
         shift = self.matrix @ (self.pivot - pivot)
         self.offset = self.offset + shift[:2]
         self.pivot = pivot
+
+    def screen_centre(self) -> np.ndarray:
+        """The data point in the middle of the screen, at the pivot's depth.
+
+        The pivot's depth because that is a distance the view was framed at:
+        the slab's centre plane to begin with, wherever panning has taken the
+        screen since.  Exact with perspective too, which scales nothing in
+        that plane.
+        """
+        return self.pivot + self.matrix.T @ np.array([self.offset[0], self.offset[1], 0.0])
+
+    def pivot_at_centre(self) -> None:
+        """Turn about what is in the middle of the screen from now on.
+
+        After a pan to another part of a large field the slab's centre is
+        somewhere off screen, and a rotation about it swings what one is
+        looking at out of the picture.  About the screen's centre it turns in
+        place.  Orthographic, the image does not move (`move_pivot`); in
+        perspective the eye comes along to face the screen's centre, which is
+        where it belongs, and what lies off the pivot's plane shifts a little.
+        """
+        self.move_pivot(self.screen_centre())
+
+    def move_along_sight(self, distance: float) -> None:
+        """Move the eye and the centre of rotation ``distance`` nm into the
+        picture (negative: back out).
+
+        The picture changes only in perspective, where what is ahead grows as
+        it comes nearer; orthographic, it is the depth of the centre of
+        rotation that moves, which is what decides whether a turn swings the
+        front of the data or the back.
+        """
+        self.pivot = self.pivot - self.view_axis(2) * float(distance)
 
     def preset(self, name: str, slab_angle: float = 0.0) -> None:
         """Top / front / side of the *slab*: its long axis is the screen's x

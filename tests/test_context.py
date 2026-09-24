@@ -301,10 +301,10 @@ def test_a_preflight_that_fails_does_not_block_the_run():
     assert panel._preflight(None)[0] is True
 
 
-def test_a_long_report_opens_in_its_own_window():
-    """The panel's output box is four lines tall.  A plugin that hands back a
-    log -- the history, a calibration report -- gets a window instead, and a
-    short summary is still read where it is."""
+def test_a_report_stays_in_the_panel_unless_the_plugin_is_a_log():
+    """A run reports in the panel's output box, however long its text: a
+    window popping up with a summary is one more thing to close.  Only a
+    plugin whose text is the result -- the history -- opens one."""
     pytest.importorskip("PySide6")
     from PySide6.QtWidgets import QApplication
 
@@ -314,32 +314,35 @@ def test_a_long_report_opens_in_its_own_window():
         path = "Test/Talkative"
         name = "Talkative"
         Settings = None
-        lines = 40
 
         def run(self, ctx, settings):
-            return Result(text="\n".join(f"line {i}" for i in range(self.lines)))
+            return Result(text="\n".join(f"line {i}" for i in range(40)))
 
     from smappy.gui.plugin_panel import PluginPanel
-    panel = PluginPanel(Talkative, Session(table()))
-    panel.run()
-    while panel._thread is not None and panel._thread.isRunning():
+
+    def run(panel):
+        panel.run()
+        while panel._thread is not None and panel._thread.isRunning():
+            app.processEvents()
         app.processEvents()
-    app.processEvents()
+
+    panel = PluginPanel(Talkative, Session(table()))
+    run(panel)
+    assert panel._text_window is None
+    assert panel.output.toPlainText().endswith("line 39")
+    assert panel.text_button.isEnabled()      # but the button offers it
+    panel.show_text()
+    assert panel._text_window.view.toPlainText().endswith("line 39")
+
+    class Log(Talkative):
+        path = "Test/Log"
+        name = "Log"
+        text_window = True
+
+    panel = PluginPanel(Log, Session(table()))
+    run(panel)
     assert panel._text_window is not None
     assert panel._text_window.view.toPlainText().endswith("line 39")
-    assert panel.text_button.isEnabled()
-
-    # a summary of a line or two is not worth a window
-    Talkative.lines = 2
-    panel._text_window = None
-    panel.run()
-    while panel._thread is not None and panel._thread.isRunning():
-        app.processEvents()
-    app.processEvents()
-    assert panel._text_window is None
-    assert panel.text_button.isEnabled()      # but the button still offers it
-    panel.show_text()
-    assert panel._text_window is not None
 
 
 def test_a_live_plugin_refits_while_the_roi_moves_and_says_nothing_about_it():

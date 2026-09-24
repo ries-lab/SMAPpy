@@ -157,6 +157,7 @@ class History(Plugin):
     """What has been done to these localizations, with the settings used."""
 
     Settings = HistorySettings
+    text_window = True        # the log is the result, and it is long
 
     def run(self, ctx: Context, settings: HistorySettings) -> Result:
         found = entries(ctx.session, settings.changes_only)
