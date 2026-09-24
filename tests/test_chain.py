@@ -83,7 +83,8 @@ def test_a_chain_is_a_plugin_whose_settings_are_its_steps():
     settings.flag.expression = "photons > 20"
     saved = cls.current_spec(settings)
     assert saved.steps[0].values["expression"] == "photons > 20"
-    assert saved.steps[1].version == "1"
+    from smappy.plugins.statistics import LocalizationStatistics
+    assert saved.steps[1].version == LocalizationStatistics.version   # recorded as it runs
 
 
 def test_a_chain_naming_a_missing_plugin_says_which():

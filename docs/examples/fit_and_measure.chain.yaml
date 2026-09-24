@@ -15,6 +15,6 @@ steps:
       detection.cutoff: 1.7
   - plugin: Analysis/Measure/Localization Statistics
     label: stats
-    version: "1"
+    version: "2"
     values:
       source: all

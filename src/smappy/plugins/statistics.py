@@ -29,7 +29,7 @@ when the photons are exponential and part company when they are not, which is
 the point of printing them side by side.
 
 **On-time.**  How many frames a fluorophore stays on before it blinks off, from
-the grouped table's ``n_in_group``.  A constant off-rate makes it geometric,
+``n_in_group``, one value per blink.  A constant off-rate makes it geometric,
 ``P(t) = (1 - q) q^(t-1)``, a straight line on a log axis, and the mean
 on-time is ``tau = -1 / ln(q)`` frames.
 
@@ -42,6 +42,16 @@ localizations -- carry the answer, and a few per cent of them pull ``sigma_c``
 down by an order of magnitude.  Binned they are a few counts in bins the model
 puts near zero and they move nothing.  ``precision fit`` puts the likelihood
 back for anyone who wants it.
+
+**Which table.**  The one the layer shows: a grouped layer is described blink
+by blink (the photons added, the precision of the combined position), an
+ungrouped one frame by frame -- the same table the count beside the picture
+counts.  The on-time is the exception, because it is a property of the blink:
+once a table has been linked, every ungrouped row carries its blink's
+``n_in_group``, and taking that column as it stands counted a three-frame blink
+three times and a one-frame blink once, which weighs the histogram towards the
+long ones.  It is reduced to one value per ``group_id`` first, so both views
+report the same on-time.
 
 The functions are module level and take arrays: a script can have the same
 numbers without a session, a plugin or a window.
@@ -573,6 +583,20 @@ class StatisticsSettings:
                                help="0: the on-time is reported in frames only")
 
 
+def blink_on_times(locs: Localizations) -> np.ndarray:
+    """``n_in_group`` once per blink, whichever table it comes from.
+
+    The grouped table has a row per blink already; the ungrouped one repeats
+    the value on every frame of it, and ``group_id`` says which rows are one
+    blink.  A table without ``group_id`` is taken to be one row per blink.
+    """
+    on_time = np.asarray(locs["n_in_group"])
+    if "group_id" not in locs:
+        return on_time
+    _, first = np.unique(np.asarray(locs["group_id"]), return_index=True)
+    return on_time[first]
+
+
 def grouped_on_time(session, layer: int = 0, selected: bool = True
                     ) -> Tuple[Optional[np.ndarray], str]:
     """``n_in_group`` from the session's grouped table, and why not if not.
@@ -624,20 +648,28 @@ class LocalizationStatistics(Plugin):
     """Photons, localization precision and on-time, each with its law fitted."""
 
     Settings = StatisticsSettings
-    version = "1"
+    # 2: the table the layer shows rather than always the ungrouped one, and
+    # the on-time counted once per blink rather than once per frame
+    version = "2"
 
     def run(self, ctx: Context, settings: StatisticsSettings) -> Result:
+        table, selection = ctx.table()
+        grouped = table is not ctx.locs
         if settings.source == "all":
-            locs = ctx.locs
+            locs = table
             where = "all localizations"
         else:
-            ctx.selection.require(MIN_FOR_FIT, ctx.report, "a distribution")
-            locs = ctx.selection.apply(ctx.locs)
-            where = str(ctx.selection)
+            selection.require(MIN_FOR_FIT, ctx.report, "a distribution")
+            locs = selection.apply(table)
+            where = str(selection)
+        if grouped:
+            where += " (grouped)"
         if not len(locs):
             raise ValueError("no localizations to describe")
         on_time, why = None, ""
-        if "n_in_group" not in locs:
+        if "n_in_group" in locs:
+            on_time = blink_on_times(locs)
+        else:
             on_time, why = grouped_on_time(ctx.session, ctx.layer,
                                            settings.source != "all")
         found = statistics(locs, bins=settings.bins,

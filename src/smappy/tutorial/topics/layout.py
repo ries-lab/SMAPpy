@@ -189,9 +189,18 @@ def make(d) -> None:
            spot=[d.window_rect(render)])
 
     d.chapter("Getting data in")
+    menu = _menu(d, "File")
+    d.shot("Open a file from the File menu, or with Ctrl+O: smappy, SMAP, "
+           "ThunderSTORM and MINFLUX files.",
+           spot=[_menu_item(d, menu, "Open...")], point=_menu_item(d, menu, "Open..."),
+           zoom=d.around(menu, 700))
+    d.shot("Add file... puts a second file into the same table, for instance "
+           "the next field of view.",
+           spot=[_menu_item(d, menu, "Add file")], zoom=d.around(menu, 700))
+    menu.close()
     file_tab = _show_tab(d, "File")
-    d.shot("Data comes in through the File tab: smappy, SMAP, ThunderSTORM "
-           "and MINFLUX files.",
+    d.shot("The File tab has the same, and more: saving, exporting an image, "
+           "and simulating data.",
            spot=[_tab_button(d, "File")], point=_tab_button(d, "File"), click=True)
     section, panel = _open(d, file_tab, "Blinking Structure")
     d.shot("To practise, Simulate makes a dataset with a known structure: "
@@ -228,6 +237,12 @@ def make(d) -> None:
     d.shot("Reset view, or Ctrl+0, shows everything again.",
            spot=[reset], point=reset, click=True, zoom=d.around(reset, 800))
     render.view.reset()
+    d.settle()
+    menu = _menu(d, "View")
+    d.shot("The View menu has Reset view too, next to the 3D view.",
+           spot=[_menu_item(d, menu, "Reset view"), _menu_item(d, menu, "3D view")],
+           zoom=d.around(menu, 700))
+    menu.close()
     d.settle()
 
     d.chapter("Filters")
@@ -419,7 +434,7 @@ def make(d) -> None:
     window.hide()
     menu = _menu(d, "Plugins")
     d.shot("The Plugins menu has every plugin, to open once in a window of "
-           "its own.",
+           "its own. Find a plugin..., Ctrl+Shift+P, searches them by name.",
            spot=[d.rect(menu)], zoom=d.around(menu, 700))
     menu.close()
 
@@ -429,8 +444,8 @@ def make(d) -> None:
            "Grey here: filters and layers never change it.",
            spot=[_menu_item(d, menu, "Undo"), _menu_item(d, menu, "Undo steps")],
            zoom=d.around(menu, 700))
-    d.shot("Save keeps the localizations, their history and your ROIs in one "
-           "file.",
+    d.shot("Save, or Ctrl+S, keeps the localizations, their history and your "
+           "ROIs in one file.",
            spot=[_menu_item(d, menu, "Save"), _menu_item(d, menu, "Save as")],
            zoom=d.around(menu, 700))
     menu.close()

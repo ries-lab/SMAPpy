@@ -207,3 +207,50 @@ def test_the_plugin_is_in_the_tree_and_draws_one_panel_per_distribution():
     page = Figure()
     result.plot.draw_into(page.subfigures(1, 1, squeeze=False).ravel()[0])
     assert len(page.axes) == 4
+
+
+def _blinks(n_emitters=300, on=3):
+    """Each emitter on for exactly ``on`` frames, a few nm apart, with the
+    photons of a frame drawn around 700: grouped, a blink has three times that."""
+    rng = np.random.default_rng(1)
+    xy = rng.uniform(0, 10_000, (n_emitters, 2))
+    start = rng.integers(0, 1000, n_emitters) * 10
+    rows = np.repeat(np.arange(n_emitters), on)
+    n = len(rows)
+    photons = rng.normal(700, 30, n).astype(np.float32)
+    return Localizations({
+        "x_nm": (xy[rows, 0] + rng.normal(0, 3, n)).astype(np.float32),
+        "y_nm": (xy[rows, 1] + rng.normal(0, 3, n)).astype(np.float32),
+        "frame": (start[rows] + np.tile(np.arange(on), n_emitters)).astype(np.int64),
+        "photons": photons,
+        "loc_precision_nm": (150 / np.sqrt(photons)).astype(np.float32),
+    }, {"units": "nm"})
+
+
+def test_a_grouped_layer_is_described_blink_by_blink_and_an_ungrouped_one_frame_by_frame():
+    from smappy.session import Session
+    session = Session(_blinks())
+    session.show_grouped(0, True)
+    grouped = LocalizationStatistics().run(session.context(0), StatisticsSettings())
+    assert grouped.data["n"] == 300
+    assert grouped.data["stats"]["photons"]["median"] == pytest.approx(2100, rel=0.05)
+    assert "(grouped)" in grouped.text
+
+    session.show_grouped(0, False)
+    frames = LocalizationStatistics().run(session.context(0), StatisticsSettings())
+    assert frames.data["n"] == 900
+    assert frames.data["stats"]["photons"]["median"] == pytest.approx(700, rel=0.05)
+
+
+def test_the_on_time_counts_each_blink_once_whichever_table_is_shown():
+    """Grouping writes a blink's n_in_group onto each of its frames; taken as it
+    stands, a three-frame blink counted three times."""
+    from smappy.session import Session
+    session = Session(_blinks())
+    session.show_grouped(0, True)
+    for on in (True, False):
+        session.show_grouped(0, on)
+        result = LocalizationStatistics().run(session.context(0), StatisticsSettings())
+        on_time = result.data["distributions"]["on_time"]
+        assert on_time.stats["n"] == 300
+        assert on_time.stats["mean"] == pytest.approx(3.0)
