@@ -30,6 +30,8 @@ WORDS_PER_SECOND = 2.8
 MIN_SECONDS = 3.5
 CARD_WORDS_PER_SECOND = 3.5  # a card's body, read once its title has been seen
 MOVE_SECONDS = 0.9          # the pointer's travel and the zoom; the click follows
+VOICE_LEAD = 0.4            # the picture changes, then the voice starts
+VOICE_TAIL = 0.7            # and a breath before the next step
 
 
 def _words(text: str) -> int:
@@ -37,8 +39,20 @@ def _words(text: str) -> int:
 
 
 def timing(steps: List[dict]) -> List[dict]:
-    """Fill in each step's duration, in seconds."""
+    """Fill in each step's duration, in seconds.
+
+    A step with a spoken clip (`voice.narrate`) lasts as long as the clip, with
+    a beat either side; the pointer travels while it is spoken.  Without one,
+    the reading speed decides.  A card is never shorter than its body takes
+    to read, voice or not.
+    """
     for step in steps:
+        if step.get("audio_seconds"):
+            seconds = VOICE_LEAD + step["audio_seconds"] + VOICE_TAIL
+            if step.get("card"):
+                seconds = max(seconds, 2.5 + _words(step["card"]["body"]) / CARD_WORDS_PER_SECOND)
+            step["duration"] = round(max(MIN_SECONDS, seconds), 2)
+            continue
         seconds = 1.2 + _words(step["say"]) / WORDS_PER_SECOND
         if step.get("card"):
             # the subtitle says what the card says, so they are read side by
@@ -71,6 +85,7 @@ def write(out: Path, steps: List[dict], title: str, description: str = "",
     data = json.dumps({"title": title, "description": description,
                        "size": list(size), "steps": steps}, ensure_ascii=False)
     page = (_PAGE.replace("__TITLE__", html.escape(title))
+                 .replace("__VOICE_LEAD__", str(VOICE_LEAD))
                  .replace("__DESCRIPTION__", html.escape(description))
                  .replace("__DATA__", data.replace("</", "<\\/")))
     (out / "index.html").write_text(page, encoding="utf-8")
@@ -286,11 +301,12 @@ body.recording .card .panel-box { max-height: 690px; }
       <button id="prev" type="button" aria-label="previous step">&#9664;</button>
       <button id="play" type="button">Play</button>
       <button id="next" type="button" aria-label="next step">&#9654;</button>
+      <button id="sound" type="button" aria-pressed="true" hidden>Voice on</button>
       <div class="track" id="track" role="slider" tabindex="0" aria-label="progress"></div>
       <span class="counter" id="counter"></span>
     </div>
     <ul class="chapters" id="chapters"></ul>
-    <p class="hint"><kbd>space</kbd> play or pause &nbsp; <kbd>&larr;</kbd> <kbd>&rarr;</kbd> step &nbsp; click a chapter to jump to it</p>
+    <p class="hint"><kbd>space</kbd> play or pause &nbsp; <kbd>&larr;</kbd> <kbd>&rarr;</kbd> step &nbsp; <span id="soundHint" hidden><kbd>m</kbd> voice on or off &nbsp;</span> click a chapter to jump to it</p>
   </div>
 </div>
 <script id="data" type="application/json">__DATA__</script>
@@ -303,6 +319,10 @@ body.recording .card .panel-box { max-height: 690px; }
   var stage = $("stage"), world = $("world"), shade = $("shade"), pointer = $("pointer");
   var imgs = [$("imgA"), $("imgB")], front = 0, shown = null;
   var index = 0, playing = false, timer = null, started = 0, elapsed = 0, recording = false;
+  // The voice: one clip per step, fetched when the step is reached.  A browser
+  // plays sound only after a click, which Play is, so it starts with Play.
+  var voice = new Audio(), voiceStep = -1, leadTimer = null, LEAD = __VOICE_LEAD__;
+  var sound = steps.some(function (s) { return s.audio; });
 
   // chapters: a step without one belongs to the last one named
   var chapters = [];
@@ -381,12 +401,32 @@ body.recording .card .panel-box { max-height: 690px; }
     steps.forEach(function (t, k) { t._seg.style.width = k < i ? "100%" : "0"; });
   }
 
+  function speak(i, fresh) {
+    clearTimeout(leadTimer);
+    var s = steps[i];
+    if (!sound || !s.audio) { voice.pause(); return; }
+    if (fresh || voiceStep !== i) {
+      voice.pause(); voice.src = s.audio; voiceStep = i;
+      leadTimer = setTimeout(function () {
+        if (playing && index === i) voice.play().catch(function () {});
+      }, LEAD * 1000);
+    } else if (!voice.ended) {
+      voice.play().catch(function () {});          // resumed where it was paused
+    }
+    var next = steps[i + 1];                        // the next clip, ready in time
+    if (next && next.audio) { var pre = new Audio(); pre.preload = "auto"; pre.src = next.audio; }
+  }
+  function speaking() { return sound && voiceStep === index && !voice.paused && !voice.ended; }
+
   function tick() {
     var s = steps[index];
     var t = elapsed + (playing ? (performance.now() - started) / 1000 : 0);
     s._seg.style.width = Math.min(100, 100 * t / s.duration) + "%";
-    if (playing && t >= s.duration) {
-      if (index + 1 < steps.length) { index++; elapsed = 0; started = performance.now(); show(index); }
+    // a clip that runs long (a slow start, a slow machine) is not cut off
+    if (playing && t >= s.duration && !speaking()) {
+      if (index + 1 < steps.length) {
+        index++; elapsed = 0; started = performance.now(); show(index); speak(index, true);
+      }
       else { pause(); s._seg.style.width = "100%"; if (recording) window.tutorial.done = true; return; }
     }
     if (playing) timer = requestAnimationFrame(tick);
@@ -394,16 +434,27 @@ body.recording .card .panel-box { max-height: 690px; }
   function play() {
     if (index === steps.length - 1 && elapsed >= steps[index].duration) go(0);
     playing = true; started = performance.now(); $("play").textContent = "Pause";
+    speak(index, elapsed === 0);
     cancelAnimationFrame(timer); timer = requestAnimationFrame(tick);
   }
   function pause() {
     if (playing) elapsed += (performance.now() - started) / 1000;
     playing = false; $("play").textContent = "Play"; cancelAnimationFrame(timer);
+    clearTimeout(leadTimer); voice.pause();
   }
   function go(i) {
     index = Math.max(0, Math.min(steps.length - 1, i)); elapsed = 0; started = performance.now();
-    show(index); tick();
+    show(index); if (playing) speak(index, true); else { voice.pause(); voiceStep = -1; }
+    tick();
   }
+  function toggleSound() {
+    sound = !sound;
+    $("sound").textContent = sound ? "Voice on" : "Voice off";
+    $("sound").setAttribute("aria-pressed", sound ? "true" : "false");
+    if (sound && playing) speak(index, true); else { clearTimeout(leadTimer); voice.pause(); }
+  }
+  if (sound) { $("sound").hidden = false; $("soundHint").hidden = false; }
+  $("sound").addEventListener("click", toggleSound);
 
   $("play").addEventListener("click", function () { playing ? pause() : play(); });
   $("prev").addEventListener("click", function () { go(index - 1); });
@@ -419,6 +470,7 @@ body.recording .card .panel-box { max-height: 690px; }
     if (e.key === " ") { e.preventDefault(); playing ? pause() : play(); }
     else if (e.key === "ArrowRight") { e.preventDefault(); go(index + 1); }
     else if (e.key === "ArrowLeft") { e.preventDefault(); go(index - 1); }
+    else if ((e.key === "m" || e.key === "M") && !$("sound").hidden) toggleSound();
   });
 
   window.tutorial = {

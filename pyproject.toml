@@ -79,7 +79,9 @@ gpu = ["wgpu>=0.19"]
 # `python -m smappy.tutorial TOPIC --video`: the tutorial page played by
 # headless Chromium and encoded by ffmpeg (which is not a pip package).  The
 # page itself needs nothing beyond the GUI.
-tutorial = ["playwright>=1.40"]
+# --voice: Piper, an offline neural voice; the voice model is a download of
+# its own (see smappy.tutorial.voice).
+tutorial = ["playwright>=1.40", "piper-tts>=1.2"]
 
 [project.scripts]
 smappy-fit = "smappy.cli.fit:main"

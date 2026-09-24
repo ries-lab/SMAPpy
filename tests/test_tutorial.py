@@ -79,3 +79,38 @@ def test_the_layout_tutorial_builds_from_the_real_gui(tmp_path):
             assert 0 <= step["point"][0] <= width and 0 <= step["point"][1] <= height
     # the numbers in the subtitles come from the run, not from the storyboard
     assert any("blinks" in s["say"] and any(c.isdigit() for c in s["say"]) for s in steps)
+
+
+def test_the_voice_reads_shortcuts_numbers_and_names_as_they_are_said():
+    from smappy.tutorial.voice import spoken
+    assert spoken("Open with Ctrl+O, or Ctrl+Shift+P.") == \
+        "Open with control O, or control shift P."
+    assert spoken("Reset view, or Ctrl+0.") == "Reset view, or control zero."
+    assert spoken("Add file... puts") == "Add file puts"
+    assert spoken("25 888 of 29 088 kept") == "25888 of 29088 kept"
+    assert spoken("click ROI, 4 nm, z and PSF") == "click R O I, 4 nanometres, zed and P S F"
+    # names inside other words are left alone
+    assert spoken("ROIManager and smappy-batch") == "ROIManager and smappy-batch"
+
+
+def test_a_spoken_step_lasts_as_long_as_its_clip():
+    spoken_step = _step("one two", audio="001.mp3", audio_seconds=6.0)
+    card = _step("Filters.", image=None, audio="002.mp3", audio_seconds=1.0,
+                 card={"title": "Filters", "body": " ".join(["word"] * 70), "figure": ""})
+    player.timing([spoken_step, card])
+    assert spoken_step["duration"] == pytest.approx(
+        player.VOICE_LEAD + 6.0 + player.VOICE_TAIL)
+    assert card["duration"] > 70 / player.CARD_WORDS_PER_SECOND   # still read
+
+
+def test_the_voice_makes_a_clip_per_step(tmp_path):
+    import os
+    pytest.importorskip("piper")
+    model = os.environ.get("SMAPPY_PIPER_VOICE")
+    if not model:
+        pytest.skip("set SMAPPY_PIPER_VOICE to a Piper voice to test it")
+    from smappy.tutorial.voice import narrate
+    steps = narrate(tmp_path, [_step("Click Run."), _step("The picture is drawn.")], model)
+    for step in steps:
+        assert (tmp_path / step["audio"]).stat().st_size > 1000
+        assert 0.3 < step["audio_seconds"] < 5
