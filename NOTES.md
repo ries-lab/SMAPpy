@@ -40,6 +40,12 @@ Zernike and astigmatic-Gaussian z models, multiple z start values.
   via `to_nm()` / `FitSettings.output_unit`, because the pixel size is a separate
   calibration that may be corrected later.  `z_nm` is the exception: it comes
   from the calibration's `dz` and has no pixel equivalent.
+* **The background starts at the ROI's border, and the Hessian is the expected
+  information.**  SMAP starts from the ROI's minimum and uses the observed
+  information `d / mu^2`; together they left a spline fit at a few background
+  photons per pixel stuck at no background -- see "A fit that starts at no
+  background".  The maximum is the same, and at ordinary backgrounds so are the
+  fits.
 * **No mirroring in the fitter.**  A calibration built from mirrored bead images
   (`parameters.emmirror` in the `_3Dcal.mat`) is handled by flipping the ROI in x
   and flipping the fitted x back; the fitter itself is orientation-free.
@@ -355,6 +361,51 @@ one: z from a crowded acquisition is pulled towards focus by the overlapping
 fits, and they are the ones with a poor `logl_rel` (median -1.6 against -0.5
 for isolated spots; keeping the best 70 % by `logl_rel` gave 0.996 on the
 unfiltered frames).  Filtering on it is the remedy, as it is in SMAP.
+
+### A fit that starts at no background
+
+On an sCMOS a background of a few photons per pixel is realistic -- a dim
+sample, TIRF, a short exposure -- and Spline 3D failed there.  At 5 photons/px
+and 2000 photons, 38 % of the pipeline's fits ended with a background of 0.01,
+the clamp's floor, their photons inflated and z frozen at the start value: the
+slope of fitted z against true was 0.53, the good fits' `logl_rel` median
+-1.37 instead of -0.5, and a `logl_rel` cut kept half of the isolated spots.
+Below 2 photons/px the fits went to NaN.  The Gaussian fitter never showed it:
+a Gaussian's tails never reach zero.
+
+Two things combined, measured on isolated synthetic spots (Poisson plus 1.5 e-
+read noise, 200-5000 photons, 0.5-20 photons/px background):
+
+* **The start.**  The background started at the ROI's minimum pixel, which at a
+  few photons is 0, so the floor.  Starting at the mean of the border pixels
+  fixed 1000-photon spots, but bright ones still stalled (4-40 % at 5000
+  photons below 2 photons/px).  Starting *higher* than the data says -- two or
+  three times the border -- was worse, up to 75 % stalled: a bright spot's excess
+  over a guessed background is explained by lowering the background.
+* **The Hessian.**  With the observed information, a pixel's curvature is
+  `d / mu^2`, and once the background nears the floor `mu` is tiny where the
+  spot is not, the curvature explodes and the Newton step for the background
+  shrinks to about `mu`.  From 0.01 it could at most double per iteration, and
+  LM's damping and step halving took the rest.  The expected information,
+  `1 / mu`, steps by about `d - mu` and climbs straight back.  It has the same
+  maximum -- the gradient is unchanged -- and is guarded at `mu >= 1e-3`
+  because a spline's tail can dip below zero.
+
+With both, no fit stalls from 0.5 to 20 photons/px except 3 % at 5000 photons
+and 0.5 photons/px, and those may be honest estimates of almost nothing.
+Through the pipeline at 5 photons/px: none at the floor, slope 0.997 for
+isolated spots, `logl_rel` median -0.55; at 1 photon/px 0.992.  At 20
+photons/px the fits agree with the old ones to 1 nm in z and 5e-6 in photons,
+at the same speed, and at low background they are three times faster, since
+they converge in 9 iterations instead of running out at 50.
+
+The two-colour global fit takes the same Hessian and the same start per
+channel, for consistency rather than because it failed: at 3 photons/px per
+half it gave a slope of 1.004 before and 1.000 after.  Its empty-channel
+pairs had come back NaN only because the model went non-positive; the guard
+ended that, so a channel with no light now marks the pair NaN explicitly.
+`test_a_spline_fit_at_a_few_background_photons_does_not_stall_at_no_background`
+failed on the old fitter with 43 % stalled.
 
 ## Performance
 

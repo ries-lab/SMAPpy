@@ -27,6 +27,7 @@
 
 #include <cmath>
 #include <cstring>
+#include <limits>
 
 #include "linalg.hpp"
 #include "lm.hpp"
@@ -130,7 +131,8 @@ inline void accumulate_global(const Model* models, const float* const* data, int
             for (int l = 0; l < nv; ++l)
                 for (int m = l; m < nv; ++m) {
                     for (int c = 0; c < C; ++c)
-                        hessian[l * nv + m] += d[c] / (mu[c] * mu[c]) *
+                        // the expected information, as in lm.hpp's accumulate
+                        hessian[l * nv + m] += 1.0f / std::max(mu[c], MIN_MODEL) *
                             dudt_global[c * nv + l] * dudt_global[c * nv + m];
                     hessian[m * nv + l] = hessian[l * nv + m];
                 }
@@ -207,6 +209,24 @@ inline void global_fit(const Model* models, const float* const* data, int sz,
                        float* logl, int* used_iterations) {
     constexpr int P = Model::NV;
     const int nv = link.nv, C = link.n_channels;
+
+    // A channel with no light in it -- an empty or negative ROI at the edge
+    // of a split frame, or an offset set too high -- makes the pair
+    // unmeasurable, since the two channels are one measurement: say so with
+    // NaN, which `locs.valid` drops.  This used to happen by accident, the
+    // model going non-positive and d / mu^2 dividing by it; the guarded
+    // expected information no longer does, so it is asked for here.
+    for (int c = 0; c < C; ++c) {
+        float sum = 0.0f;
+        for (int i = 0; i < sz * sz; ++i) sum += data[c][i];
+        if (!(sum > 0.0f)) {
+            const float nan = std::numeric_limits<float>::quiet_NaN();
+            for (int i = 0; i < nv; ++i) global[i] = crlb[i] = nan;
+            *logl = nan;
+            *used_iterations = 0;
+            return;
+        }
+    }
 
     float theta[P * MAX_CHANNELS];
     float old_global[MAX_GLOBAL_NV], maxjump[MAX_GLOBAL_NV];

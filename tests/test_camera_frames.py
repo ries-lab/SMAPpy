@@ -154,6 +154,26 @@ def test_a_neighbour_inside_the_roi_pulls_z_towards_focus(bead_calibration):
     assert slope < 0.9
 
 
+def test_a_spline_fit_at_a_few_background_photons_does_not_stall_at_no_background(
+        bead_calibration):
+    """sCMOS frames with 1-5 background photons per pixel: the fit used to
+    start the background at the ROI's minimum pixel, 0 here, and a third to
+    two thirds of the fits ended there, their z frozen at the start and the
+    slope of fitted z against true 0.2-0.6.  A start from the ROI's border
+    and the expected information in the Hessian bring them all back."""
+    rng = np.random.default_rng(0)
+    z = rng.uniform(-400, 400, 600)
+    for photons, background in ((1000, 1.0), (1000, 5.0), (5000, 2.0)):
+        rois = rng.poisson(_spots(z, photons=photons, background=background))
+        rois = (rois + rng.normal(0, 1.5, rois.shape)).astype(np.float32)
+        from smappy.psf import SplinePSF
+        fit = SplinePSF(bead_calibration).fit(rois, iterations=50)
+        assert np.isfinite(fit.theta).all()
+        assert np.mean(fit.theta[:, 3] < 0.05) < 0.02, (photons, background)
+        slope = np.polyfit(z, bead_calibration.z_index_to_nm(fit.theta[:, 4]), 1)[0]
+        assert slope == pytest.approx(1.0, abs=0.05), (photons, background)
+
+
 def test_no_two_spots_in_a_frame_are_closer_than_the_minimum_separation():
     """The frames are meant to fit cleanly, and the structure's emitters
     cluster: without this a quarter of the blinks had a neighbour within a

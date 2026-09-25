@@ -63,13 +63,27 @@ inline void center_of_mass(const float* data, int sz, float* x, float* y) {
     *y = sy / sum;
 }
 
-inline void max_min(const float* data, int sz, float* maxn, float* minbg) {
-    *maxn = 0.0f;
-    *minbg = 1e10f;
-    for (int i = 0; i < sz * sz; ++i) {
-        *maxn = std::max(*maxn, data[i]);
-        *minbg = std::min(*minbg, data[i]);
-    }
+inline float max_value(const float* data, int sz) {
+    float maxn = 0.0f;
+    for (int i = 0; i < sz * sz; ++i) maxn = std::max(maxn, data[i]);
+    return maxn;
+}
+
+// The background a fit starts from: the mean of the ROI's outermost pixels.
+// SMAP starts from the ROI's minimum, which on an sCMOS at a few photons per
+// pixel is 0 -- the 0.01 floor -- and a spline fit started there often never
+// left it: with 5 photons/px, a third to two thirds of the fits ended with no
+// background, their photons inflated and z frozen at its start (NOTES.md,
+// "A fit that starts at no background").  The border is mostly background
+// even for a wide defocused spot, and a mean of 4 (sz - 1) pixels is not
+// pulled to zero by shot noise the way a minimum is.  Starting higher still
+// (twice or three times the border) was measured, and was worse.
+inline float border_background(const float* data, int sz) {
+    float sum = 0.0f;
+    for (int i = 0; i < sz - 1; ++i)
+        sum += data[i] + data[i * sz + sz - 1]
+             + data[(sz - 1) * sz + sz - 1 - i] + data[(sz - 1 - i) * sz];
+    return std::max(sum / (4 * (sz - 1)), 0.01f);
 }
 
 // Gaussian with one free width.  theta = (x, y, N, bg, sigma)
@@ -80,10 +94,9 @@ struct GaussFree {
     explicit GaussFree(float sigma = 1.0f) : sigma_start(sigma) {}
 
     void init(const float* data, int sz, float* theta, float* maxjump) const {
-        float maxn, minbg;
         center_of_mass(data, sz, &theta[0], &theta[1]);
-        max_min(data, sz, &maxn, &minbg);
-        theta[3] = std::max(minbg, 0.01f);
+        const float maxn = max_value(data, sz);
+        theta[3] = border_background(data, sz);
         theta[2] = std::max(0.0f, (maxn - theta[3]) * 2 * PI_F * sigma_start * sigma_start);
         theta[4] = sigma_start;
 
@@ -125,10 +138,9 @@ struct GaussXY {
     explicit GaussXY(float sigma = 1.0f) : sigma_start(sigma) {}
 
     void init(const float* data, int sz, float* theta, float* maxjump) const {
-        float maxn, minbg;
         center_of_mass(data, sz, &theta[0], &theta[1]);
-        max_min(data, sz, &maxn, &minbg);
-        theta[3] = std::max(minbg, 0.01f);
+        const float maxn = max_value(data, sz);
+        theta[3] = border_background(data, sz);
         theta[2] = std::max(0.0f, (maxn - theta[3]) * 2 * PI_F * sigma_start * sigma_start);
         theta[4] = sigma_start;
         theta[5] = sigma_start;
@@ -206,10 +218,9 @@ struct CSpline {
         : coeff(c), nx(nx_), ny(ny_), nz(nz_), z_start(z0) {}
 
     void init(const float* data, int sz, float* theta, float* maxjump) const {
-        float maxn, minbg;
         center_of_mass(data, sz, &theta[0], &theta[1]);
-        max_min(data, sz, &maxn, &minbg);
-        theta[3] = std::max(minbg, 0.01f);
+        const float maxn = max_value(data, sz);
+        theta[3] = border_background(data, sz);
         const float centre = coeff[(((nz / 2) * ny) + ny / 2) * nx + nx / 2];
         theta[2] = (maxn - theta[3]) / centre * 4.0f;
         theta[4] = z_start;

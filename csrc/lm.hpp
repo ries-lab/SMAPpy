@@ -6,8 +6,11 @@
 // kernels of the original (five PSF models x two noise models) collapse into
 // this one loop: the PSF model is a template parameter and only the Poisson
 // noise model remains, EM excess noise being handled outside the fitter.
+// One departure: the Hessian is the expected information rather than the
+// observed one, which is what lets a fit at low background converge.
 #pragma once
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 
@@ -20,9 +23,10 @@ constexpr float INIT_LAMBDA = 0.1f;
 constexpr float SCALE_UP = 10.0f;
 constexpr float SCALE_DOWN = 0.1f;
 constexpr float ACCEPTANCE = 1.5f;
+constexpr float MIN_MODEL = 1e-3f;  // photons; see accumulate
 
 // Accumulate the Poisson log-likelihood error, its gradient and the
-// (Gauss-Newton) Hessian over all pixels of the ROI.
+// Hessian (the expected information, see below) over all pixels of the ROI.
 template <class Model>
 inline void accumulate(const Model& model, const float* data, int sz,
                        const float* theta, float* err, float* jacobian,
@@ -50,7 +54,14 @@ inline void accumulate(const Model& model, const float* data, int sz,
             const float t1 = 1.0f - d / mu;
             for (int l = 0; l < NV; ++l) jacobian[l] += t1 * dudt[l];
 
-            const float t2 = d / (mu * mu);
+            // The expected (Fisher) information, not SMAP's observed d / mu^2.
+            // Both have the same maximum, but where the model nears zero --
+            // a background driven to its floor -- d / mu^2 explodes and the
+            // step shrinks to about mu, so the background could at most
+            // double per iteration and a fit that touched the floor stayed
+            // there.  1 / mu steps by about d - mu instead.  The guard keeps
+            // a spline's slightly negative tail from dividing by zero.
+            const float t2 = 1.0f / std::max(mu, MIN_MODEL);
             for (int l = 0; l < NV; ++l)
                 for (int m = l; m < NV; ++m) {
                     hessian[l * NV + m] += t2 * dudt[l] * dudt[m];

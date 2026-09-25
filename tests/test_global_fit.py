@@ -91,22 +91,26 @@ def test_the_parameter_count_follows_which_parameters_are_shared():
 
 def test_unlinking_everything_gives_each_channel_its_own_single_channel_fit():
     """With no parameter shared the two channels never meet, so each half of
-    the answer has to be what fitting that channel alone gives."""
+    the answer has to be what fitting that channel alone gives -- to the
+    convergence tolerance, since the pair stops on their joint error and may
+    take one iteration more or fewer than a channel alone (0.003 CRLB at
+    most, measured; 1e-5 relative held until the Hessian changed)."""
     rng = np.random.default_rng(2)
     cal_a, cal_b, sz = calibration(0.6), calibration(-0.4), 13
     a = np.stack([render(cal_a, 6.2, 6.9, 24.0, 3000., 20., sz, rng) for _ in range(20)])
     b = np.stack([render(cal_b, 6.7, 6.1, 24.0, 2000., 30., sz, rng) for _ in range(20)])
 
-    separate = [_fit3d.fit_cspline(r, c.coeff, 20.0, 50, 1)[0]
-                for r, c in ((a, cal_a), (b, cal_b))]
+    fits = [_fit3d.fit_cspline(r, c.coeff, 20.0, 50, 1) for r, c in ((a, cal_a), (b, cal_b))]
+    separate = [f[0] for f in fits]
+    precision = [np.sqrt(f[1]) for f in fits]
     theta, _, _, _ = _fit3d.fit_cspline_global(
         np.stack([a, b], axis=1), coeff_stack(cal_a, cal_b),
         link_array(len(a), 2), np.zeros(5, np.int32), 20.0, 50, 1)
 
     for p in (X, Y, N, BG, Z):                     # free: two slots per parameter
         for channel in (0, 1):
-            np.testing.assert_allclose(theta[:, 2 * p + channel],
-                                       separate[channel][:, p], rtol=1e-5, atol=1e-5)
+            difference = np.abs(theta[:, 2 * p + channel] - separate[channel][:, p])
+            assert (difference < 0.01 * precision[channel][:, p]).all(), (p, channel)
 
 
 # -------------------------------------------------------------- two channels
@@ -184,11 +188,13 @@ def test_a_photon_factor_links_a_ratiometric_split():
 
 
 def test_a_bad_channel_poisons_the_pair_rather_than_the_process():
-    """Empty or negative ROIs happen at the edge of a split frame.  GlobLoc
-    does not guard the model against going negative and neither does this
-    port, so such a pair comes back non-finite -- which is right, since the
-    two channels are one measurement -- and `locs.valid` drops it.  What the
-    fitter must not do is crash or return the wrong shape."""
+    """Empty or negative ROIs happen at the edge of a split frame.  Such a
+    pair comes back non-finite -- which is right, since the two channels are
+    one measurement -- and `locs.valid` drops it.  In GlobLoc, and here
+    until the Hessian became the guarded expected information, that was an
+    accident of the model going non-positive; now the fitter checks for a
+    channel with no light.  What it must not do is crash or return the wrong
+    shape."""
     cal, sz = calibration(), 13
     rng = np.random.default_rng(6)
     good = render(cal, 6.5, 6.5, 20.0, 2000., 10., sz, rng)
