@@ -1,26 +1,19 @@
-"""Fitting, 2D and 3D: what each part of a fitter does, and how to check it.
+"""Fitting in 2D: what each part of a fitter does, and how to check it.
 
 The quickstart fits once with the defaults; this one opens the fitter up.
 The camera and where its numbers come from, detection and what a wrong
 cutoff looks like, the PSF model, and -- after the fit -- the two columns
-that say whether a localization is a good one.  Then 3D: an astigmatic
-acquisition fitted with Spline 3D, against a bead calibration.
-
-Everything is simulated here, the calibration included: `simulate.bead_stacks`
-draws beads through focus with the same astigmatic PSF `camera_frames` gives
-the acquisition, and `calibrate.core` builds the calibration from them, as
-the Bead calibration window would.  Making the calibration is not shown --
-that window is a tutorial of its own -- but it is real: the 3D fit gets the
-simulated z back (`tests/test_camera_frames.py`).
+that say whether a localization is a good one.  3D, with its bead
+calibration, is `fitting_3d`: the same fitter form, with a measured PSF.
 """
 from __future__ import annotations
 
 from .common import (field, open_section, place_beside, section, section_of,
                      show_tab, type_into)
 
-TITLE = "Fitting: 2D and 3D"
-DESCRIPTION = ("The camera, finding the spots, the PSF model and checking the "
-               "fit; then 3D with a bead calibration.")
+TITLE = "Fitting in 2D"
+DESCRIPTION = ("The camera, finding the spots, the PSF model, and checking the "
+               "fit.")
 
 CONVERSION, OFFSET, PIXELSIZE_UM = 0.5, 100.0, 0.1
 
@@ -49,51 +42,17 @@ _PIPELINE = """
 </svg>
 """
 
-_ASTIGMATISM = """
-<svg viewBox="0 0 560 150" role="img" aria-label="a spot wide in y below focus, round at focus, wide in x above">
-  <g font-size="13" fill="currentColor">
-    <rect x="20" y="20" width="100" height="90" rx="8" fill="#000"/>
-    <ellipse cx="70" cy="65" rx="11" ry="27" fill="#fff" opacity=".85"/>
-    <text x="70" y="132" text-anchor="middle">below focus</text>
-    <rect x="230" y="20" width="100" height="90" rx="8" fill="#000"/>
-    <circle cx="280" cy="65" r="15" fill="#fff" opacity=".9"/>
-    <text x="280" y="132" text-anchor="middle">in focus</text>
-    <rect x="440" y="20" width="100" height="90" rx="8" fill="#000"/>
-    <ellipse cx="490" cy="65" rx="27" ry="11" fill="#fff" opacity=".85"/>
-    <text x="490" y="132" text-anchor="middle">above focus</text>
-    <path d="M135 65 h80" class="arrow" marker-end="url(#h4)"/>
-    <path d="M345 65 h80" class="arrow" marker-end="url(#h4)"/>
-    <text x="175" y="55" text-anchor="middle" opacity=".7">z</text>
-    <text x="385" y="55" text-anchor="middle" opacity=".7">z</text>
-  </g>
-  <defs><marker id="h4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
-    <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/></marker></defs>
-</svg>
-"""
 
 
 def _data(d):
-    """The two acquisitions and the calibration, written where the form shows them."""
-    import numpy as np
+    """The acquisition, written where the form shows it."""
     import tifffile
-    from ...calibrate.core import CalibrationSettings, build_calibration, collect_beads
-    from ...calibrate.input import BeadStack
-    from ...simulate import ASTIGMATISM, bead_stacks, camera_frames
-    folder = d.data_dir()
-    camera = dict(conversion=CONVERSION, offset=OFFSET, pixelsize_nm=PIXELSIZE_UM * 1000)
-    flat = folder / "demo_acquisition.tif"
-    frames, _ = camera_frames(2000, seed=0, **camera)
+    from ...simulate import camera_frames
+    flat = d.data_dir() / "demo_acquisition.tif"
+    frames, _ = camera_frames(2000, seed=0, conversion=CONVERSION, offset=OFFSET,
+                              pixelsize_nm=PIXELSIZE_UM * 1000)
     tifffile.imwrite(flat, frames)
-    astigmatic = folder / "demo_3d_acquisition.tif"
-    frames, _ = camera_frames(2000, seed=1, astigmatism=ASTIGMATISM, **camera)
-    tifffile.imwrite(astigmatic, frames)
-    stacks, z = bead_stacks(3, seed=0, astigmatism=ASTIGMATISM, **camera)
-    beads = collect_beads([BeadStack(s.astype(np.float32), z, source=f"beads {i + 1}")
-                           for i, s in enumerate(stacks)], CalibrationSettings())
-    calibration = folder / "demo_beads_3dcal.h5"
-    calibration.unlink(missing_ok=True)
-    build_calibration(beads).save(calibration)
-    return flat, astigmatic, calibration
+    return flat
 
 
 def _camera(panel) -> None:
@@ -114,15 +73,14 @@ def _preview(d, panel, frame: int = 10):
 
 def make(d) -> None:
     session, control, render = d.session, d.control, d.render
-    flat, astigmatic, calibration = _data(d)
+    flat = _data(d)
 
     d.chapter("The pipeline")
     d.card(TITLE,
-           "<p>What each part of a fitter does, what to check, and how to fit "
-           "in 3D with a bead calibration.</p>"
-           "<p>The acquisitions and the calibration are simulated.</p>",
-           say="This tutorial goes through fitting step by step: first in 2D, "
-               "then in 3D.")
+           "<p>What each part of a fitter does, and what to check.</p>"
+           "<p>The acquisition is simulated.</p>",
+           say="This tutorial goes through fitting step by step, in 2D. 3D has "
+               "a tutorial of its own.")
     d.card("What a fitter does",
            "<p>It converts the camera's counts to photons, finds candidate "
            "spots, fits a model of the PSF to each, and writes a table of "
@@ -224,51 +182,12 @@ def make(d) -> None:
            "Analysis tab. Filtering and grouping are in the rendering tutorial.",
            spot=drift, point=drift[0], zoom=d.around(drift[0], 760))
 
-    d.chapter("3D")
-    d.card("Astigmatism",
-           "<p>A cylindrical lens in the detection path makes each spot "
-           "elliptical: wide in one direction above the focus, in the other "
-           "below it.</p>"
-           "<p>How the shape changes with z is measured once, on beads, and "
-           "the fit reads z from it.</p>",
-           figure=_ASTIGMATISM,
-           say="In 3D, a cylindrical lens makes the spots elliptical, and their "
-               "shape tells how high each molecule sits.")
-    localize = show_tab(d, "Localize")
-    beads = next(b for b in control.findChildren(type(panel.run_button))
-                 if b.text().startswith("Bead calibration"))
-    d.shot("The calibration comes from beads stepped through focus. Bead "
-           "calibration makes it; that has a tutorial of its own.",
-           spot=[beads], point=beads, zoom=d.around(beads, 760))
-    sec3, panel3 = open_section(d, localize, "Spline 3D")
-    type_into(panel3, "source.path", str(astigmatic))
-    type_into(panel3, "model.calibration", str(calibration))
-    _camera(panel3)
-    d.settle()
-    d.shot("Spline 3D takes the acquisition and the calibration file. The "
-           "camera and the detection are as in 2D.",
-           spot=[field(panel3, "model.calibration")],
-           point=field(panel3, "model.calibration"),
-           zoom=d.around(field(panel3, "model.calibration"), 760))
-    d.shot("Run.", spot=[panel3.run_button], point=panel3.run_button, click=True,
-           zoom=d.around(panel3.run_button, 760))
-    panel3.run_button.click()
-    d.settle()
-    assert "z_nm" in session.locs, "the 3D fit wrote no z"
-    render_tab = show_tab(d, "Render")
-    render_tab.color.setCurrentIndex(1)
-    render_tab.color_field.setCurrentText("z_nm")
-    d.settle()
-    d.shot("Colour by z, and the ring rises and falls as it was simulated.",
-           spot=[d.rect(render.view.graphics, pad=-2),
-                 d.union(render_tab.color, render_tab.color_field)])
-
     d.chapter("Next")
     d.card("What to remember",
            "<ul><li><b>Camera:</b> check its numbers once.</li>"
            "<li><b>Detection:</b> set the cutoff with Preview.</li>"
-           "<li><b>Model:</b> Gaussian for 2D; Spline 3D with a bead "
-           "calibration for 3D.</li>"
+           "<li><b>Model:</b> Gaussian 2D; for 3D, Spline 3D with a bead "
+           "calibration.</li>"
            "<li><b>After the fit:</b> the default filters drop the bad "
            "localizations; correct the drift before measuring.</li></ul>",
-           say="That is fitting. Next: rendering the result, in 2D and in 3D.")
+           say="That is fitting in 2D. Next: fitting in 3D, with a measured PSF.")

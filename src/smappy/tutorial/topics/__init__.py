@@ -16,9 +16,8 @@ a subtitle cannot drift away from the picture it is under.
 # from it, so a tutorial is added in one place.
 SERIES = (
     ("Getting started", ("quickstart", "layout"), ()),
-    ("Fitting", ("fitting",),
-     ("3D: bead calibration and spline fitting",
-      "Two colours: dual-channel calibration and fitting")),
+    ("Fitting", ("fitting", "fitting_3d"),
+     ("Two colours: dual-channel calibration and fitting",)),
     ("Rendering", ("rendering",), ()),
     ("Plugins", ("plugins", "measuring", "drift_correction"), ()),
     ("ROI manager", (), ("The ROI manager: finding and measuring many regions",)),

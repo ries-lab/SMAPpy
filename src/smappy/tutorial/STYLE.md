@@ -56,9 +56,14 @@ it was about.  Say who asked and when, so a later reader can weigh it.
 
 * (none yet)
 
-### fitting -- Fitting: 2D and 3D
+### fitting -- Fitting in 2D
 
 * (none yet)
+
+### fitting_3d -- 3D fitting: bead calibration and spline fitting
+
+* Open with why: a realistic PSF model, measured on bead stacks, not an
+  ideal formula.  Briefly.
 
 ### rendering -- Rendering in 2D and 3D
 

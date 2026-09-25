@@ -173,7 +173,7 @@ class CalibrationWindow(QMainWindow):
     def __init__(self, paths=(), settings=None, parent=None):
         super().__init__(parent)
         self.setWindowFlag(Qt.Window, True)
-        self.setWindowTitle("smappy - bead calibration")
+        self.setWindowTitle("SMAPpy - bead calibration")
         self.paths: List[str] = [str(p) for p in paths]
         self.result = None
         self.diagnostics = None
