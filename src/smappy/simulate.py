@@ -104,12 +104,24 @@ def simulate(n_frames: int, seed: int, drift: bool, density: float = 1.0,
     return Localizations(columns, metadata)
 
 
+# Two spots on in one frame closer than this are dropped from the camera
+# frames.  A neighbour inside the fit's ROI (13 px, so 600 nm either way, plus
+# the neighbour's own spot, up to 2.3 px wide far from focus) adds light the
+# single-emitter model has to explain, and in 3D it explains it as a rounder
+# spot -- z nearer focus.  With the structure's clustered emitters a quarter
+# of the blinks had such a neighbour, and fitted z against true came out with
+# a slope of 0.93 (0.95 in two colours) although the calibration and the
+# fitter give 1.00 on the rest: see NOTES.md, "Crowding compresses z".
+MIN_SEPARATION_NM = 1000.0
+
+
 def camera_frames(n_frames: int = 2000, seed: int = 0, pixelsize_nm: float = 100.0,
                   size_px: int = 100, photons: float = 2000.0,
                   background: float = 20.0, sigma_nm: float = 130.0,
                   conversion: float = 0.5, offset: float = 100.0,
                   read_noise: float = 1.5, on_per_frame: float = 7.0,
-                  astigmatism: Optional[Tuple[float, float]] = None):
+                  astigmatism: Optional[Tuple[float, float]] = None,
+                  min_separation_nm: float = MIN_SEPARATION_NM):
     """Raw camera frames of the same structure, blinking: ``(frames, truth)``.
 
     For fitting what `simulate` only pretends to have fitted -- the tutorial
@@ -129,10 +141,15 @@ def camera_frames(n_frames: int = 2000, seed: int = 0, pixelsize_nm: float = 100
     in a frame on average, whatever the number of frames -- the density a
     fitter sees -- and the default of seven on 100 x 100 pixels is sparse,
     because the point is a picture that fits cleanly, not a test of the fitter
-    under crowding.
+    under crowding.  Sparse on average is not enough, because the structure's
+    emitters cluster: a blink with another emitter on in its frame closer than
+    ``min_separation_nm`` is dropped, both of the pair (see
+    `MIN_SEPARATION_NM`, and the count in the metadata), so somewhat fewer
+    than ``on_per_frame`` shine; 0 keeps them, for a test of crowding.
     """
     rng = np.random.default_rng(seed)
-    emitters, emitter, frame, emitted = _blinks(rng, n_frames, photons, on_per_frame)
+    emitters, emitter, frame, emitted, dropped = _blinks(
+        rng, n_frames, photons, on_per_frame, min_separation_nm)
     n = len(frame)
     # pixel k spans k - 1/2 .. k + 1/2, so x_nm = x_pix * pixelsize, which is
     # the fitter's convention: at k + 1/2 every position came out half a pixel off
@@ -156,13 +173,17 @@ def camera_frames(n_frames: int = 2000, seed: int = 0, pixelsize_nm: float = 100
     }, {"units": "nm", "simulation": "SMAPpy camera frames", "seed": seed,
         "pixelsize_nm": pixelsize_nm, "conversion": conversion, "offset": offset,
         "background": background, "sigma_nm": sigma_nm,
-        "astigmatism": list(astigmatism) if astigmatism else None})
+        "astigmatism": list(astigmatism) if astigmatism else None,
+        "min_separation_nm": min_separation_nm, "n_unresolvable_dropped": dropped})
     return frames, truth
 
 
-def _blinks(rng, n_frames: int, photons: float, on_per_frame: float):
+def _blinks(rng, n_frames: int, photons: float, on_per_frame: float,
+            min_separation_nm: float = 0.0):
     """The structure, and which emitter is on in which frame with how many
-    photons: ``(emitters, emitter, frame, photons)``, sorted by frame."""
+    photons: ``(emitters, emitter, frame, photons, n_dropped)``, sorted by
+    frame, without the blinks that had another emitter on in their frame
+    closer than ``min_separation_nm`` (both of the pair, as in `simulate`)."""
     emitters = structure(rng)
     mean_on = 1 / 0.35                      # frames per blink, geometric(0.35)
     blinks_per_emitter = on_per_frame * n_frames / (len(emitters) * mean_on)
@@ -176,7 +197,12 @@ def _blinks(rng, n_frames: int, photons: float, on_per_frame: float):
     rows = rows[np.argsort(rows[:, 1], kind="stable")]
     emitter, frame = rows[:, 0], rows[:, 1]
     emitted = rng.gamma(4.0, photons / 4.0, len(frame))
-    return emitters, emitter, frame, emitted
+    drop = np.zeros(len(frame), bool)
+    if min_separation_nm > 0 and len(frame):
+        drop = unresolvable(emitters[emitter, 0], emitters[emitter, 1], frame,
+                            min_separation_nm)
+    keep = ~drop
+    return emitters, emitter[keep], frame[keep], emitted[keep], int(drop.sum())
 
 
 def _draw(image, frame, xy_px, photons, sx, sy) -> None:
@@ -232,7 +258,8 @@ def dual_camera_frames(n_frames: int = 2000, seed: int = 0, pixelsize_nm: float 
                        ratios=(0.25, 0.75), conversion: float = 0.5,
                        offset: float = 100.0, read_noise: float = 1.5,
                        on_per_frame: float = 7.0,
-                       astigmatism: Optional[Tuple[float, float]] = None):
+                       astigmatism: Optional[Tuple[float, float]] = None,
+                       min_separation_nm: float = MIN_SEPARATION_NM):
     """Frames of a split camera imaging two dyes: ``(frames, truth)``.
 
     The two-colour counterpart of `camera_frames`, with the same structure:
@@ -246,10 +273,12 @@ def dual_camera_frames(n_frames: int = 2000, seed: int = 0, pixelsize_nm: float 
     halves see different wavelengths, so ``sigma_nm`` is a width per half.
     ``frames`` is uint16 ADU, (n, 2 * size_px, size_px); ``truth`` has the
     main-half positions, ``dye`` (1 for the ring, 2 for the rest) and
-    ``ratio``, and its metadata the transformation.
+    ``ratio``, and its metadata the transformation.  Overlapping blinks are
+    dropped by ``min_separation_nm`` in the main half, as in `camera_frames`.
     """
     rng = np.random.default_rng(seed)
-    emitters, emitter, frame, emitted = _blinks(rng, n_frames, photons, on_per_frame)
+    emitters, emitter, frame, emitted, dropped = _blinks(
+        rng, n_frames, photons, on_per_frame, min_separation_nm)
     n = len(frame)
     dye = np.where(emitter < 1200, 1, 2)             # `structure`: the ring first
     ratio = np.asarray(ratios, dtype=np.float64)[dye - 1]
@@ -277,7 +306,8 @@ def dual_camera_frames(n_frames: int = 2000, seed: int = 0, pixelsize_nm: float 
         "background": background, "sigma_nm": list(sigma_nm), "ratios": list(ratios),
         "transformation": dual_transformation(size_px).tolist(),
         "layout": "up-down", "main_channel": "upper", "split_position": size_px,
-        "astigmatism": list(astigmatism) if astigmatism else None})
+        "astigmatism": list(astigmatism) if astigmatism else None,
+        "min_separation_nm": min_separation_nm, "n_unresolvable_dropped": dropped})
     return frames, truth
 
 

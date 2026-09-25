@@ -316,6 +316,46 @@ layout:
 * the summed-error rule is checked against the shot-noise identity: for
   `e_i = sqrt(N_i)` the grouped error is `sqrt(sum(N_i))` to float precision
 
+### Crowding compresses z
+
+Simulated beads -> calibration -> Spline 3D on simulated astigmatic frames gave
+fitted z against true on a slope of 0.93 (0.95 through Spline 3D 2C), with no
+offset.  It looked like a scale error in the calibration.  It was not, and
+measuring one thing at a time is what showed it:
+
+| what was fitted | slope |
+| --- | --- |
+| the calibration's own beads (`fit_bead_diagnostics`) | 1.002 |
+| noise-free isolated spots of the same PSF, z smoothing 0 / 20 / 60 nm | 0.988 / 1.001 / 1.005 |
+| the same, Poisson noise, gamma photons around 2000, one start at z = 0 | 0.99 |
+| the frames' own ROIs cut at the true positions, all spots | 0.907 |
+| the same, only spots with no emitter on within 1 um in that frame | 0.994 |
+| the whole pipeline, all matched localizations | 0.933 |
+| the whole pipeline, those with no neighbour within 600 nm / 1 um | 0.974 / 0.996 |
+| Spline 3D 2C, all / no neighbour within 1 um | 0.951 / 0.999 |
+
+So the calibration, its z smoothing, the registration and the fitter are
+right, and the compression was entirely the spots with a neighbour.  A second
+emitter inside the 13 px ROI is light the one-emitter model has to account
+for, and an astigmatic model accounts for extra light around a spot as a
+rounder spot -- z nearer focus.  A neighbour 2-4 px away gave a slope of 0.5,
+6-10 px still 0.89.  `camera_frames` promised frames that fit cleanly and was
+sparse on average, seven spots on 100 x 100 pixels, but the structure's
+emitters cluster, and a quarter of the blinks had another emitter on within a
+micrometre.
+
+The simulators now drop both blinks of such a pair, as `simulate` has always
+done for the localizations it pretends to have fitted (`MIN_SEPARATION_NM`,
+1 um: the ROI's half-width plus a defocused neighbour's spot), and count them
+in the metadata.  Both paths give 1.002, and the test and the tutorials hold
+the slope to 0.02 instead of 0.08-0.1.
+
+For real data the lesson is that this is a density effect, not a calibration
+one: z from a crowded acquisition is pulled towards focus by the overlapping
+fits, and they are the ones with a poor `logl_rel` (median -1.6 against -0.5
+for isolated spots; keeping the best 70 % by `logl_rel` gave 0.996 on the
+unfiltered frames).  Filtering on it is the remedy, as it is in SMAP.
+
 ## Performance
 
 M1 Pro, 46,005 frames of 200x200, spline fit, ROI 13: **35.9 s** (1283 frames/s,

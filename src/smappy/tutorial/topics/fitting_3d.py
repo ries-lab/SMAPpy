@@ -250,7 +250,7 @@ def make(d) -> None:
     # the words say z comes out right: fitted against simulated, molecule by
     # molecule, the slope is one (a mirrored calibration gave minus one)
     slope = _z_slope(locs, truth)
-    assert abs(slope - 1) < 0.1, f"fitted z against true z has slope {slope:.2f}"
+    assert abs(slope - 1) < 0.02, f"fitted z against true z has slope {slope:.3f}"
 
     render_tab = show_tab(d, "Render")
     render_tab.color.setCurrentIndex(1)

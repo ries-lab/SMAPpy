@@ -172,7 +172,7 @@ def make(d) -> None:
     locs = session.locs
     assert "z_nm" in locs and "photons_ch1" in locs, sorted(locs.keys())
     slope = _z_slope(locs, truth)
-    assert abs(slope - 1) < 0.1, f"fitted z against true z has slope {slope:.2f}"
+    assert abs(slope - 1) < 0.02, f"fitted z against true z has slope {slope:.3f}"
     d.shot("Each localization has a z, its photons in each half, and a colour.",
            spot=[panel.output], zoom=d.around(panel.output, 760))
 

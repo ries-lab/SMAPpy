@@ -59,7 +59,9 @@ def test_a_calibration_from_the_beads_fits_the_astigmatic_frames_in_z(tmp_path):
     A bead stack records where the *objective* was, so a bead drawn at +z
     rather than -z made a calibration that turned every z upside down (fitted
     against true, the slope was -0.96).  Both simulations use one PSF, so the
-    fit must give z back with the right sign and no offset.
+    fit must give z back with the right sign, no offset and no change of
+    scale: before the frames dropped overlapping blinks the slope was 0.93,
+    from the quarter of the spots with a neighbour in their ROI.
     """
     tifffile = pytest.importorskip("tifffile")
     from scipy.spatial import cKDTree
@@ -96,8 +98,77 @@ def test_a_calibration_from_the_beads_fits_the_astigmatic_frames_in_z(tmp_path):
         fitted += list(locs["z_nm"][m][near])
         true += list(truth["z_nm"][t][i[near]])
     slope, intercept = np.polyfit(true, fitted, 1)
-    assert slope == pytest.approx(1.0, abs=0.08)
-    assert abs(intercept) < 15
+    assert slope == pytest.approx(1.0, abs=0.02)
+    assert abs(intercept) < 10
+
+
+@pytest.fixture(scope="module")
+def bead_calibration():
+    from smappy.calibrate.core import CalibrationSettings, build_calibration, collect_beads
+    from smappy.calibrate.input import BeadStack
+    from smappy.simulate import bead_stacks
+    stacks, z = bead_stacks(2, seed=0)
+    beads = collect_beads([BeadStack(s.astype(np.float32), z, source=f"b{i}")
+                           for i, s in enumerate(stacks)], CalibrationSettings())
+    return build_calibration(beads).calibration
+
+
+def _spots(z_nm, neighbour_px=None, photons=5000.0, background=20.0, size=13):
+    """Noise-free ROIs of one astigmatic spot at the centre and ``z_nm``, with
+    an equally bright one ``neighbour_px`` to the right at the same z."""
+    from scipy.special import erf
+    from smappy.simulate import ASTIGMATISM, astigmatic_sigmas
+    sx, sy = (w / 100.0 * np.sqrt(2.0) for w in astigmatic_sigmas(z_nm, 130.0, *ASTIGMATISM))
+    pix, c = np.arange(size), (size - 1) / 2
+    def spot(cx, k):
+        px = 0.5 * (erf((pix + 0.5 - cx) / sx[k]) - erf((pix - 0.5 - cx) / sx[k]))
+        py = 0.5 * (erf((pix + 0.5 - c) / sy[k]) - erf((pix - 0.5 - c) / sy[k]))
+        return photons * np.outer(py, px)
+    return np.array([background + spot(c, k) + (spot(c + neighbour_px, k) if neighbour_px else 0)
+                     for k in range(len(z_nm))], np.float32)
+
+
+def _fitted_z(calibration, rois):
+    from smappy.psf import SplinePSF
+    return calibration.z_index_to_nm(SplinePSF(calibration).fit(rois, iterations=100).theta[:, 4])
+
+
+def test_the_bead_calibration_gives_isolated_spots_back_at_the_scale_they_were_drawn(
+        bead_calibration):
+    """The calibration and the fitter alone, without the acquisition: spots of
+    the beads' own PSF at known z come back on a slope of one.  This is what
+    said the 4-7 % compression of the fitted frames was not the calibration's
+    (nor its z smoothing's: 0.99 unsmoothed, 1.00 at the default 20 nm)."""
+    z = np.linspace(-500, 500, 41)
+    slope, intercept = np.polyfit(z, _fitted_z(bead_calibration, _spots(z)), 1)
+    assert slope == pytest.approx(1.0, abs=0.01)
+    assert abs(intercept) < 8
+
+
+def test_a_neighbour_inside_the_roi_pulls_z_towards_focus(bead_calibration):
+    """Why `camera_frames` drops blinks with a neighbour: a second spot four
+    pixels away is light the one-emitter model explains as a rounder spot,
+    and the whole z range shrinks towards focus."""
+    z = np.linspace(-300, 300, 25)
+    slope, _ = np.polyfit(z, _fitted_z(bead_calibration, _spots(z, neighbour_px=4)), 1)
+    assert slope < 0.9
+
+
+def test_no_two_spots_in_a_frame_are_closer_than_the_minimum_separation():
+    """The frames are meant to fit cleanly, and the structure's emitters
+    cluster: without this a quarter of the blinks had a neighbour within a
+    micrometre, which compressed fitted z by 7 %."""
+    from scipy.spatial import cKDTree
+    from smappy.simulate import MIN_SEPARATION_NM, dual_camera_frames
+    for simulate in (camera_frames, dual_camera_frames):
+        _, truth = simulate(200, seed=4)
+        assert truth.metadata["n_unresolvable_dropped"] > 0
+        for f in np.unique(truth["frame"]):
+            t = truth["frame"] == f
+            xy = np.column_stack([truth["x_nm"][t], truth["y_nm"][t]])
+            assert not cKDTree(xy).query_pairs(MIN_SEPARATION_NM), (simulate.__name__, f)
+    _, crowded = camera_frames(200, seed=4, min_separation_nm=0)
+    assert crowded.metadata["n_unresolvable_dropped"] == 0
 
 
 def test_the_split_camera_frames_give_back_their_transformation_and_their_dyes(tmp_path):
