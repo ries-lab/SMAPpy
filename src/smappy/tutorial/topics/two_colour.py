@@ -161,62 +161,26 @@ def make(d) -> None:
            "photons for each half. The width is free per half, as the colours "
            "differ.",
            spot=[model], zoom=d.around(model, 760))
-    finish = section_of(panel, "finish")
-    d.shot("After the fit, the colours are assigned by themselves. Drift "
-           "correction can run here too.",
-           spot=[finish], zoom=d.around(finish, 760))
+    # the colours are the last step, shown as a plugin of their own; the
+    # fitter's "assign colours" is said there, not used here
+    type_into(panel, "finish.assign_colors", False)
+    d.settle()
     d.shot("Run.", spot=[panel.run_button], point=panel.run_button, click=True,
            zoom=d.around(panel.run_button, 760))
     panel.run_button.click()
     d.settle()
-    locs = session.locs
-    assert "channel" in locs, f"no colours; the table has {sorted(locs.keys())}"
-    # the words say the transformation is measured and the colours are the dyes
+    # the words say the transformation is measured from the movie
     from pathlib import Path
     output = Path(field(panel, "output.path").value())
     saved = output.with_name(output.stem + "_2ct.h5")
     assert saved.exists(), f"no transformation at {saved}"
     error = _check_transformation(saved)
     assert error < 0.2, f"the transformation is {error:.2f} px off"
-    agreement = _agreement(locs, truth)
-    assert agreement > 0.95, f"only {agreement:.0%} of the colours are the dye"
-    d.shot("The output box says how well the halves were matched, and how many "
-           "localizations got a colour.",
+    d.shot("The output box says how well the halves were matched. Each "
+           "localization now has its photons in each half.",
            spot=[panel.output], zoom=d.around(panel.output, 760))
 
-    d.chapter("The colours")
-    analysis = show_tab(d, "Analysis")
-    _, colours = open_section(d, analysis, "Assign colours")
-    colours.run_button.click()
-    d.settle()
-    agreement = _agreement(session.locs, truth)          # it rewrote the table
-    assert agreement > 0.95, f"after Assign colours, {agreement:.0%} are the dye"
-    colours.plot()
-    d.settle()
-    window = colours._window
-    place_beside(d, window, 0.75)
-    d.shot("Assign colours shows how the photons split: one peak per dye. The "
-           "colours are cut between the peaks.",
-           spot=[d.window_rect(window)])
-    window.hide()
-    mode = field(colours, "mode")
-    d.shot("Run it again to change the rule: probabilistic assigns only what is "
-           "clearly one dye, and leaves the rest without a colour. Run it with "
-           "every localization shown, or it sees only one dye.",
-           spot=[mode], point=mode, zoom=d.around(mode, 760))
-
-    tab = show_tab(d, "Render")
-    _colour_layer(d, tab, 1, "red")
-    tab.strip.add.menu().actions()[0].trigger()          # + -> localizations
-    d.settle()
-    _colour_layer(d, tab, 2, "green")
-    render.view.reset()
-    d.settle()
-    d.shot("Each localization now has a channel. A layer per channel, in red "
-           "and in green: the ring is one dye, the lines the other.",
-           spot=[d.rect(render.view.graphics, pad=-2), tab.strip,
-                 tab.filter.field],
-           point=tab.filter.field)
+    colours_and_layers(d, panel, truth)
 
     d.chapter("Next")
     d.card("What to remember",
@@ -224,8 +188,63 @@ def make(d) -> None:
            "is its colour.</li>"
            "<li><b>Transformation:</b> calibrate from the movie, or use a bead "
            "calibration.</li>"
-           "<li><b>Gaussian 2D 2C</b> fits both halves together and assigns "
-           "the colours.</li>"
-           "<li>A layer per channel shows them.</li></ul>",
+           "<li><b>Gaussian 2D 2C</b> fits both halves together.</li>"
+           "<li><b>Assign colours</b> gives each localization a channel, by "
+           "hand or right after the fit; a layer per channel shows them.</li></ul>",
            say="That is two colours in 2D. Next: two colours in 3D, with a "
                "dual-colour bead calibration.")
+
+
+def colours_and_layers(d, fitter, truth) -> None:
+    """The last steps of a two-colour fit, the same in 2D and 3D: Assign
+    colours, that the fitter can do it by itself, and a layer per channel."""
+    session, render = d.session, d.render
+    d.chapter("Assign colours")
+    analysis = show_tab(d, "Analysis")
+    _, colours = open_section(d, analysis, "Assign colours")
+    d.shot("The last step: Assign colours, in the Analysis tab, sorts the "
+           "localizations by how their photons split.",
+           spot=[colours.form], point=colours.run_button, click=True,
+           zoom=d.around(colours.form, 760))
+    colours.run_button.click()
+    d.settle()
+    locs = session.locs
+    assert "channel" in locs, f"no colours; the table has {sorted(locs.keys())}"
+    # the words say the colours are the dyes
+    agreement = _agreement(locs, truth)
+    assert agreement > 0.95, f"only {agreement:.0%} of the colours are the dye"
+    colours.plot()
+    d.settle()
+    window = colours._window
+    place_beside(d, window, 0.75)
+    d.shot("One peak per dye. Each localization gets the channel of its peak; "
+           "the few between the peaks get none.",
+           spot=[d.window_rect(window)])
+    window.hide()
+    mode = field(colours, "mode")
+    d.shot("Probabilistic is stricter: it gives a channel only to what is "
+           "clearly one dye. Run it with all localizations shown, or it sees "
+           "only one dye.",
+           spot=[mode], point=mode, zoom=d.around(mode, 760))
+    show_tab(d, "Localize")
+    automatic = field(fitter, "finish.assign_colors")
+    d.shot("It can also run automatically: tick assign colours under after the "
+           "fit, and the table comes out with its channels.",
+           spot=[automatic], point=automatic, zoom=d.around(automatic, 760))
+
+    d.chapter("Two layers")
+    tab = show_tab(d, "Render")
+    _colour_layer(d, tab, 1, "red")
+    d.settle()
+    d.shot("To draw the colours, filter layer 1 on channel: from 1 to 1, in red.",
+           spot=[tab.filter.field, d.union(tab.filter.lo, tab.filter.hi), tab.lut],
+           point=tab.filter.field, zoom=d.around(tab.filter, 760))
+    tab.strip.add.menu().actions()[0].trigger()          # + -> localizations
+    d.settle()
+    _colour_layer(d, tab, 2, "green")
+    render.view.reset()
+    d.settle()
+    d.shot("Add a layer for channel 2, in green. Here the ring is one dye and "
+           "the lines the other.",
+           spot=[d.rect(render.view.graphics, pad=-2), tab.strip],
+           point=tab.strip.add)
