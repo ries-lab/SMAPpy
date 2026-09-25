@@ -131,22 +131,9 @@ def camera_frames(n_frames: int = 2000, seed: int = 0, pixelsize_nm: float = 100
     because the point is a picture that fits cleanly, not a test of the fitter
     under crowding.
     """
-    from scipy.special import erf
     rng = np.random.default_rng(seed)
-    emitters = structure(rng)
-    mean_on = 1 / 0.35                      # frames per blink, geometric(0.35)
-    blinks_per_emitter = on_per_frame * n_frames / (len(emitters) * mean_on)
-    rows = []
-    for i in range(len(emitters)):
-        for _ in range(rng.poisson(blinks_per_emitter)):
-            start = rng.integers(0, n_frames)
-            for f in range(start, min(start + rng.geometric(0.35), n_frames)):
-                rows.append((i, f))
-    rows = np.array(rows, dtype=np.int64).reshape(-1, 2)
-    rows = rows[np.argsort(rows[:, 1], kind="stable")]
-    emitter, frame = rows[:, 0], rows[:, 1]
+    emitters, emitter, frame, emitted = _blinks(rng, n_frames, photons, on_per_frame)
     n = len(frame)
-    emitted = rng.gamma(4.0, photons / 4.0, n)
     # pixel k spans k - 1/2 .. k + 1/2, so x_nm = x_pix * pixelsize, which is
     # the fitter's convention: at k + 1/2 every position came out half a pixel off
     xy_px = emitters[emitter, :2] / pixelsize_nm
@@ -159,22 +146,8 @@ def camera_frames(n_frames: int = 2000, seed: int = 0, pixelsize_nm: float = 100
     sy = sy_nm / pixelsize_nm * np.sqrt(2.0)
 
     image = np.full((n_frames, size_px, size_px), background, dtype=np.float64)
-    half = int(np.ceil(4 * max(sx_nm.max(), sy_nm.max()) / pixelsize_nm))
-    offsets = np.arange(-half, half + 1)
-    for k in range(n):
-        cx, cy = xy_px[k]
-        ix, iy = int(np.rint(cx)) + offsets, int(np.rint(cy)) + offsets
-        keep_x = (ix >= 0) & (ix < size_px)
-        keep_y = (iy >= 0) & (iy < size_px)
-        if not keep_x.any() or not keep_y.any():
-            continue
-        ix, iy = ix[keep_x], iy[keep_y]
-        px = 0.5 * (erf((ix + 0.5 - cx) / sx[k]) - erf((ix - 0.5 - cx) / sx[k]))
-        py = 0.5 * (erf((iy + 0.5 - cy) / sy[k]) - erf((iy - 0.5 - cy) / sy[k]))
-        image[frame[k], iy[0]:iy[-1] + 1, ix[0]:ix[-1] + 1] += emitted[k] * np.outer(py, px)
-    electrons = rng.poisson(image)
-    adu = electrons / conversion + offset + rng.normal(0, read_noise, image.shape)
-    frames = np.clip(np.round(adu), 0, 65535).astype(np.uint16)
+    _draw(image, frame, xy_px, emitted, sx, sy)
+    frames = _camera(image, rng, conversion, offset, read_noise)
     truth = Localizations({
         "frame": frame, "x_nm": emitters[emitter, 0].astype(np.float32),
         "y_nm": emitters[emitter, 1].astype(np.float32),
@@ -183,6 +156,127 @@ def camera_frames(n_frames: int = 2000, seed: int = 0, pixelsize_nm: float = 100
     }, {"units": "nm", "simulation": "SMAPpy camera frames", "seed": seed,
         "pixelsize_nm": pixelsize_nm, "conversion": conversion, "offset": offset,
         "background": background, "sigma_nm": sigma_nm,
+        "astigmatism": list(astigmatism) if astigmatism else None})
+    return frames, truth
+
+
+def _blinks(rng, n_frames: int, photons: float, on_per_frame: float):
+    """The structure, and which emitter is on in which frame with how many
+    photons: ``(emitters, emitter, frame, photons)``, sorted by frame."""
+    emitters = structure(rng)
+    mean_on = 1 / 0.35                      # frames per blink, geometric(0.35)
+    blinks_per_emitter = on_per_frame * n_frames / (len(emitters) * mean_on)
+    rows = []
+    for i in range(len(emitters)):
+        for _ in range(rng.poisson(blinks_per_emitter)):
+            start = rng.integers(0, n_frames)
+            for f in range(start, min(start + rng.geometric(0.35), n_frames)):
+                rows.append((i, f))
+    rows = np.array(rows, dtype=np.int64).reshape(-1, 2)
+    rows = rows[np.argsort(rows[:, 1], kind="stable")]
+    emitter, frame = rows[:, 0], rows[:, 1]
+    emitted = rng.gamma(4.0, photons / 4.0, len(frame))
+    return emitters, emitter, frame, emitted
+
+
+def _draw(image, frame, xy_px, photons, sx, sy) -> None:
+    """Add a pixel-integrated Gaussian per spot into ``image`` (n, y, x), in
+    place; ``sx``, ``sy`` are the widths in pixels times sqrt(2), erf's scale."""
+    from scipy.special import erf
+    height, width = image.shape[1:]
+    half = int(np.ceil(4 * max(sx.max(), sy.max()) / np.sqrt(2.0)))
+    offsets = np.arange(-half, half + 1)
+    for k in range(len(frame)):
+        cx, cy = xy_px[k]
+        ix, iy = int(np.rint(cx)) + offsets, int(np.rint(cy)) + offsets
+        keep_x = (ix >= 0) & (ix < width)
+        keep_y = (iy >= 0) & (iy < height)
+        if not keep_x.any() or not keep_y.any():
+            continue
+        ix, iy = ix[keep_x], iy[keep_y]
+        px = 0.5 * (erf((ix + 0.5 - cx) / sx[k]) - erf((ix - 0.5 - cx) / sx[k]))
+        py = 0.5 * (erf((iy + 0.5 - cy) / sy[k]) - erf((iy - 0.5 - cy) / sy[k]))
+        image[frame[k], iy[0]:iy[-1] + 1, ix[0]:ix[-1] + 1] += photons[k] * np.outer(py, px)
+
+
+def _camera(image, rng, conversion: float, offset: float, read_noise: float):
+    """Photons to ADU: Poisson, the gain and offset, Gaussian read noise."""
+    electrons = rng.poisson(image)
+    adu = electrons / conversion + offset + rng.normal(0, read_noise, image.shape)
+    return np.clip(np.round(adu), 0, 65535).astype(np.uint16)
+
+
+# Where the second half of a split camera sees what the first sees: a little
+# shifted, turned and magnified, as a dichroic and two light paths leave it.
+# Small, but pixels off at the corners -- the reason a transformation is fitted
+# rather than a shift assumed.
+DUAL_SHIFT_PX, DUAL_ANGLE_DEG, DUAL_SCALE = (1.6, -0.9), 0.4, 1.004
+
+
+def dual_transformation(size_px: int = 100) -> np.ndarray:
+    """The 3x3 map from the secondary (lower) half to the main (upper) half,
+    in chip pixels -- the direction `calibrate.dual` and `ChannelTransform`
+    use.  Its inverse is where a molecule in the main half appears below."""
+    centre = np.array([(size_px - 1) / 2, (size_px - 1) / 2])
+    a = np.deg2rad(DUAL_ANGLE_DEG)
+    rotation = DUAL_SCALE * np.array([[np.cos(a), -np.sin(a)], [np.sin(a), np.cos(a)]])
+    forward = np.eye(3)                              # main -> secondary
+    forward[:2, :2] = rotation
+    forward[:2, 2] = centre - rotation @ centre + np.array(DUAL_SHIFT_PX) + [0, size_px]
+    return np.linalg.inv(forward)
+
+
+def dual_camera_frames(n_frames: int = 2000, seed: int = 0, pixelsize_nm: float = 100.0,
+                       size_px: int = 100, photons: float = 3000.0,
+                       background: float = 20.0, sigma_nm=(130.0, 145.0),
+                       ratios=(0.25, 0.75), conversion: float = 0.5,
+                       offset: float = 100.0, read_noise: float = 1.5,
+                       on_per_frame: float = 7.0,
+                       astigmatism: Optional[Tuple[float, float]] = None):
+    """Frames of a split camera imaging two dyes: ``(frames, truth)``.
+
+    The two-colour counterpart of `camera_frames`, with the same structure:
+    the ring is one dye, the lines and the scattered points the other.  A
+    dichroic sends each molecule's light to both halves of the chip -- the
+    upper half the main channel, the lower the secondary, placed by
+    `dual_transformation` -- in a proportion that is the dye's: ``ratios`` is
+    the fraction in the secondary half, one per dye.  So every molecule is a
+    pair of spots, and which dye it is shows only in how its photons split,
+    which is what the two-colour fit and the colour assignment measure.  The
+    halves see different wavelengths, so ``sigma_nm`` is a width per half.
+    ``frames`` is uint16 ADU, (n, 2 * size_px, size_px); ``truth`` has the
+    main-half positions, ``dye`` (1 for the ring, 2 for the rest) and
+    ``ratio``, and its metadata the transformation.
+    """
+    rng = np.random.default_rng(seed)
+    emitters, emitter, frame, emitted = _blinks(rng, n_frames, photons, on_per_frame)
+    n = len(frame)
+    dye = np.where(emitter < 1200, 1, 2)             # `structure`: the ring first
+    ratio = np.asarray(ratios, dtype=np.float64)[dye - 1]
+    main_px = emitters[emitter, :2] / pixelsize_nm
+    forward = np.linalg.inv(dual_transformation(size_px))
+    secondary_px = (np.c_[main_px, np.ones(n)] @ forward.T)[:, :2]
+    z_nm = emitters[emitter, 2]
+    image = np.full((n_frames, 2 * size_px, size_px), background, dtype=np.float64)
+    for half, (xy, share) in enumerate(((main_px, 1 - ratio), (secondary_px, ratio))):
+        if astigmatism is None:
+            sx_nm = sy_nm = np.full(n, sigma_nm[half])
+        else:
+            sx_nm, sy_nm = astigmatic_sigmas(z_nm, sigma_nm[half], *astigmatism)
+        _draw(image, frame, xy, emitted * share,
+              sx_nm / pixelsize_nm * np.sqrt(2.0), sy_nm / pixelsize_nm * np.sqrt(2.0))
+    frames = _camera(image, rng, conversion, offset, read_noise)
+    truth = Localizations({
+        "frame": frame, "x_nm": emitters[emitter, 0].astype(np.float32),
+        "y_nm": emitters[emitter, 1].astype(np.float32),
+        "z_nm": z_nm.astype(np.float32),
+        "photons": emitted.astype(np.float32), "emitter": emitter.astype(np.int32),
+        "dye": dye.astype(np.int32), "ratio": ratio.astype(np.float32),
+    }, {"units": "nm", "simulation": "SMAPpy dual camera frames", "seed": seed,
+        "pixelsize_nm": pixelsize_nm, "conversion": conversion, "offset": offset,
+        "background": background, "sigma_nm": list(sigma_nm), "ratios": list(ratios),
+        "transformation": dual_transformation(size_px).tolist(),
+        "layout": "up-down", "main_channel": "upper", "split_position": size_px,
         "astigmatism": list(astigmatism) if astigmatism else None})
     return frames, truth
 

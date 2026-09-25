@@ -65,6 +65,10 @@ it was about.  Say who asked and when, so a later reader can weigh it.
 * Open with why: a realistic PSF model, measured on bead stacks, not an
   ideal formula.  Briefly.
 
+### two_colour -- Two colours in 2D: split camera, fit and colours
+
+* (none yet)
+
 ### rendering -- Rendering in 2D and 3D
 
 * (none yet)

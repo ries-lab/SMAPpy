@@ -47,7 +47,7 @@ def test_the_page_carries_its_steps_and_cannot_be_closed_early_by_them(tmp_path)
     assert json.loads((tmp_path / "steps.json").read_text())[0]["duration"] > 0
 
 
-@pytest.mark.parametrize("topic", ["quickstart", "layout", "fitting", "fitting_3d", "rendering", "plugins", "measuring",
+@pytest.mark.parametrize("topic", ["quickstart", "layout", "fitting", "fitting_3d", "two_colour", "rendering", "plugins", "measuring",
                                    "drift_correction"])
 def test_every_tutorial_builds_from_the_real_gui(tmp_path, topic):
     """The whole storyboard, run as a user would, on the offscreen platform.

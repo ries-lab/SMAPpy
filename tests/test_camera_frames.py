@@ -98,3 +98,43 @@ def test_a_calibration_from_the_beads_fits_the_astigmatic_frames_in_z(tmp_path):
     slope, intercept = np.polyfit(true, fitted, 1)
     assert slope == pytest.approx(1.0, abs=0.08)
     assert abs(intercept) < 15
+
+
+def test_the_split_camera_frames_give_back_their_transformation_and_their_dyes(tmp_path):
+    """`dual_camera_frames` through the two-colour fit, as its tutorial runs it:
+    the transformation measured from the movie is the simulated one, and the
+    colours assigned from the photon split are the dyes."""
+    tifffile = pytest.importorskip("tifffile")
+    from scipy.spatial import cKDTree
+    from smappy.calibrate.transform import load_transform
+    from smappy.plugins import Context
+    from smappy.plugins.fit import (CameraSettings, ChannelTransformSettings,
+                                    DualGaussianFit, DualGaussianFitSettings,
+                                    OutputSettings, SourceSettings)
+    from smappy.simulate import dual_camera_frames, dual_transformation
+    frames, truth = dual_camera_frames(600, seed=2)
+    assert frames.shape[1:] == (200, 100)
+    tifffile.imwrite(tmp_path / "two.tif", frames)
+    result = DualGaussianFit().run(Context(), DualGaussianFitSettings(
+        source=SourceSettings(path=str(tmp_path / "two.tif")),
+        camera=CameraSettings(conversion=0.5, offset=100.0, pixelsize_um=0.1),
+        transform=ChannelTransformSettings(calibrate=True, calibrate_skip=0),
+        output=OutputSettings(path=str(tmp_path / "two.hdf5"))))
+    probe = np.array([[5.0, 105.0], [95.0, 195.0], [50.0, 150.0]])
+    true = (np.c_[probe, np.ones(3)] @ dual_transformation().T)[:, :2]
+    measured = load_transform(tmp_path / "two_2ct.h5").transform(probe)
+    np.testing.assert_allclose(measured, true, atol=0.2)
+    locs = result.locs
+    got, want = [], []
+    for f in np.unique(locs["frame"]):
+        m, t = locs["frame"] == f, truth["frame"] == f
+        if not t.any():
+            continue
+        d, i = cKDTree(np.column_stack([truth["x_nm"][t], truth["y_nm"][t]])).query(
+            np.column_stack([locs["x_nm"][m], locs["y_nm"][m]]))
+        near = (d < 60) & (locs["channel"][m] > 0)
+        got += list(locs["channel"][m][near])
+        want += list(truth["dye"][t][i[near]])
+    # colour 1 is the lower (ch0 - ch1) / (ch0 + ch1): the dye with more in
+    # the secondary half, which is the lines (dye 2)
+    assert np.mean(np.asarray(got) == 3 - np.asarray(want)) > 0.95
