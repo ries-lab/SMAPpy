@@ -59,3 +59,7 @@ it was about.  Say who asked and when, so a later reader can weigh it.
 ### fitting -- Fitting: 2D and 3D
 
 * (none yet)
+
+### rendering -- Rendering in 2D and 3D
+
+* (none yet)

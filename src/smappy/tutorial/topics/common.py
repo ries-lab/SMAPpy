@@ -112,3 +112,14 @@ def section_of(panel, name: str):
     while widget is not None and not isinstance(widget, CollapsibleSection):
         widget = widget.parentWidget()
     return widget if widget is not None else field(panel, name)
+
+
+def expand(widget) -> None:
+    """Open every collapsed section around a widget, as a person clicks the
+    title of "more" before reaching what is inside it."""
+    from ...gui.widgets import CollapsibleSection
+    parent = widget.parentWidget()
+    while parent is not None:
+        if isinstance(parent, CollapsibleSection) and not parent.button.isChecked():
+            parent.set_expanded(True)
+        parent = parent.parentWidget()
