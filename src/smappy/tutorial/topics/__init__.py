@@ -11,13 +11,20 @@ and the pointer and the spotlight are there so that the text need not say
 where things are.  Numbers come from the GUI as it runs, never typed in, so
 a subtitle cannot drift away from the picture it is under.
 """
-TOPICS = ("quickstart", "layout", "fitting", "rendering")
-
-# What the index says is coming, in the order it is planned to be made.
-PLANNED = (
-    "Drift correction, grouping and filtering",
-    "Analysis plugins: statistics, line profiles, resolution",
-    "The ROI manager: finding and measuring many regions",
-    "Two colours: registration and assignment",
-    "Chains and batch runs over many files",
+# The series as the index shows it: sections, each with the tutorials that
+# exist (module names, in order) and those planned (titles).  TOPICS follows
+# from it, so a tutorial is added in one place.
+SERIES = (
+    ("Getting started", ("quickstart", "layout"), ()),
+    ("Fitting", ("fitting",),
+     ("3D: bead calibration and spline fitting",
+      "Two colours: dual-channel calibration and fitting")),
+    ("Rendering", ("rendering",), ()),
+    ("Plugins", (),
+     ("Plugins: running, previewing, plotting",
+      "Measuring: statistics, precision and line profiles",
+      "Drift correction: RCC and COMET")),
+    ("ROI manager", (), ("The ROI manager: finding and measuring many regions",)),
+    ("Many files", (), ("Chains and batch runs over many files",)),
 )
+TOPICS = tuple(t for _, built, _ in SERIES for t in built)

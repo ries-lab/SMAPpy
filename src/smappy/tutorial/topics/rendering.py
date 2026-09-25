@@ -11,11 +11,12 @@ which is the same picture the GPU engine draws, only slower to turn.
 """
 from __future__ import annotations
 
-from .common import expand, menu, menu_item, open_section, show_tab, toolbar
+from .common import (expand, menu, menu_item, open_section, show_tab, tab_button,
+                     toolbar)
 
 TITLE = "Rendering in 2D and 3D"
-DESCRIPTION = ("Render modes, contrast and colours, saving a picture, other "
-               "axes, and the 3D view.")
+DESCRIPTION = ("What is drawn (filters and grouping), render modes, contrast "
+               "and colours, saving, other axes, and the 3D view.")
 
 _RENDER = """
 <svg viewBox="0 0 560 160" role="img" aria-label="points with an uncertainty, drawn as blurs or counted per pixel">
@@ -58,8 +59,8 @@ def make(d) -> None:
 
     d.chapter("From table to picture")
     d.card(TITLE,
-           "<p>How SMAPpy draws localizations, what to change for a figure, "
-           "how to save it, and the 3D view.</p>",
+           "<p>What is drawn, how SMAPpy draws it, what to change for a "
+           "figure, how to save it, and the 3D view.</p>",
            say="This tutorial is about the picture: how it is drawn, how to "
                "change it, and the 3D view.")
     d.card("A picture of positions",
@@ -71,10 +72,60 @@ def make(d) -> None:
            say="A localization is a position with an uncertainty. Rendering "
                "draws each one as a blur, or counts them per pixel.")
 
-    d.chapter("Render modes")
+    d.chapter("What is drawn")
+    filt = tab.filter
+    bold = [b for b in filt.quick.values() if "bold" in b.styleSheet()]
+    assert bold, "a new table has no default filter"
+    d.shot("Each layer draws only what passes its filter. A quick button in "
+           "bold has a bound: a new table starts with a few, on precision and "
+           "fit quality.",
+           spot=bold, zoom=d.around(filt, 700))
+    ll = filt.quick.get("logl_rel")
+    if ll is not None:
+        ll.click()
+        d.settle()
+        d.shot("The histogram shows the column, and the shaded range is what is "
+               "kept. Here fit quality: fits worse than the bound are left out.",
+               spot=[ll, d.rect(filt.plot)], point=ll, click=True,
+               zoom=d.around(filt, 700))
+    d.shot("Any column can be filtered: the list below the buttons has them "
+           "all, and each layer keeps its own bounds.",
+           spot=[filt.field], point=filt.field, zoom=d.around(filt, 700))
     ring = (6400, 8200), (3600, 5400)
     render.view.frame_on(*ring)
     d.settle()
+    assert tab.grouped.isChecked(), "a new table is not grouped"
+    d.shot("Grouped, each blink is one localization: its positions averaged "
+           "and its photons added, so it is more precise.",
+           spot=[tab.grouped, d.rect(render.view.graphics, pad=-2)],
+           point=tab.grouped)
+    tab.grouped.click()
+    d.settle()
+    d.shot("Ungrouped, every frame of every blink is drawn: more localizations, "
+           "each one less precise.",
+           spot=[tab.grouped, d.rect(render.view.graphics, pad=-2)],
+           point=tab.grouped, click=True)
+    tab.grouped.click()
+    d.settle()
+    from ...gui.dialogs import ParametersDialog
+    dialog = ParametersDialog(session, control)
+    dialog.show()
+    d.settle()
+    x, y, w, h = d.rect(tab.overview.parameters_button)
+    d.place(dialog, x + w + 20, y - 40)
+    d.shot("Parameters, beside the overview, sets how far a molecule may move "
+           "between frames, and how many dark frames a blink may have.",
+           spot=[tab.overview.parameters_button, d.window_rect(dialog)],
+           point=tab.overview.parameters_button, click=True,
+           zoom=d.around(dialog, 800))
+    dialog.reject()
+    d.settle()
+    d.shot("The filter and the grouping also decide what the analysis plugins "
+           "measure: what is drawn is what is measured.",
+           spot=[tab_button(d, "Analysis"), d.rect(render.view.graphics, pad=-2)],
+           point=tab_button(d, "Analysis"))
+
+    d.chapter("Render modes")
     d.shot("Render precision draws each localization as wide as it is "
            "uncertain: well-localized ones are sharp, poor ones are soft.",
            spot=[tab.mode, d.rect(render.view.graphics, pad=-2)], point=tab.mode)

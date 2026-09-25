@@ -129,10 +129,12 @@ def test_the_index_lists_what_was_built_and_what_is_planned(tmp_path):
     built = tmp_path / "layout"
     built.mkdir()
     player.write(built, [_step("one"), _step("two", chapter="Two")], "The tour", "what it is")
-    page = player.write_index(tmp_path, ["Fitting"]).read_text()
+    page = player.write_index(tmp_path, [("Getting started", ("layout",), ()),
+                                         ("Fitting", (), ("Fitting",))]).read_text()
     assert page.startswith("<!doctype html>")
     assert 'href="layout/"' in page and "The tour" in page and "what it is" in page
-    assert "Fitting" in page
+    assert "Fitting" in page and "coming" in page
+    assert page.index("Getting started") < page.index("The tour") < page.index("coming")
     assert "--ground:" in page                      # the player's tokens came along
     assert (built / "index.html").read_text().startswith("<!doctype html>")
 

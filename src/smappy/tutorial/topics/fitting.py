@@ -15,7 +15,8 @@ simulated z back (`tests/test_camera_frames.py`).
 """
 from __future__ import annotations
 
-from .common import field, open_section, place_beside, section_of, show_tab, type_into
+from .common import (field, open_section, place_beside, section, section_of,
+                     show_tab, type_into)
 
 TITLE = "Fitting: 2D and 3D"
 DESCRIPTION = ("The camera, finding the spots, the PSF model and checking the "
@@ -216,6 +217,13 @@ def make(d) -> None:
                spot=[psf, d.rect(filt.plot)], point=psf, click=True,
                zoom=d.around(filt, 700))
 
+    d.chapter("After fitting")
+    analysis = show_tab(d, "Analysis")
+    drift = [section(analysis, name).button for name in ("COMET", "RCC")]
+    d.shot("Before measuring, correct the drift, with RCC or COMET in the "
+           "Analysis tab. Filtering and grouping are in the rendering tutorial.",
+           spot=drift, point=drift[0], zoom=d.around(drift[0], 760))
+
     d.chapter("3D")
     d.card("Astigmatism",
            "<p>A cylindrical lens in the detection path makes each spot "
@@ -262,5 +270,5 @@ def make(d) -> None:
            "<li><b>Model:</b> Gaussian for 2D; Spline 3D with a bead "
            "calibration for 3D.</li>"
            "<li><b>After the fit:</b> the default filters drop the bad "
-           "localizations.</li></ul>",
+           "localizations; correct the drift before measuring.</li></ul>",
            say="That is fitting. Next: rendering the result, in 2D and in 3D.")

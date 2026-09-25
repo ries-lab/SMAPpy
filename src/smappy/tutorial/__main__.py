@@ -33,7 +33,7 @@ def build(topic: str, out: Path, video: bool = False,
 
 
 def main(argv=None) -> int:
-    from .topics import PLANNED, TOPICS
+    from .topics import SERIES, TOPICS
     parser = argparse.ArgumentParser(prog="python -m smappy.tutorial",
                                      description="Build tutorials from their storyboards, "
                                                  "and the index page that lists them.")
@@ -62,7 +62,7 @@ def main(argv=None) -> int:
             command += ["--video"] if args.video else []
             subprocess.run(command, check=True)
     from .player import write_index
-    print(write_index(args.out, PLANNED))
+    print(write_index(args.out, SERIES))
     return 0
 
 

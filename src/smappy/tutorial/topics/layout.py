@@ -188,22 +188,14 @@ def make(d) -> None:
                "a range. It changes what is drawn and analysed, never the data.")
     filt = render_tab.filter
     quick = list(filt.quick.values())
-    d.shot("The quick buttons choose what to filter on; the list below them "
-           "has every other column.",
-           spot=[d.union(*quick)], zoom=d.around(filt, 700))
     prec = filt.quick.get("xy_err_nm")
     if prec is not None:
         prec.click()
-    d.shot("The shaded part of the histogram is the range kept. Drag its "
-           "edges, or type min and max.",
-           spot=[d.rect(filt.plot), d.union(filt.lo, filt.hi)],
+    d.shot("A quick button chooses what to filter on. The shaded part of the "
+           "histogram is the range kept: drag its edges, or type min and max.",
+           spot=[d.union(*quick), d.rect(filt.plot), d.union(filt.lo, filt.hi)],
            zoom=d.around(filt, 700))
     default = filt.hi.text()
-    if default not in ("", "-"):
-        d.shot("SMAPpy starts with a sensible filter on the precision. "
-               "Tighten it by typing a smaller maximum.",
-               spot=[d.union(filt.lo, filt.hi)], point=filt.hi, click=True,
-               zoom=d.around(filt, 700))
     filt.hi.setText("4")
     filt.hi.editingFinished.emit()
     d.settle()
@@ -211,16 +203,13 @@ def make(d) -> None:
     # here instead: what a subtitle says must still be what the GUI does
     kept, total = (int(n) for n in filt.count.text().split("/"))
     assert 0 < kept < total, filt.count.text()
-    d.shot("Here you see how many localizations pass the filter. Only those "
-           "are drawn.",
+    d.shot("With a tighter maximum, fewer localizations pass: the count is "
+           "above the histogram. The rendering tutorial has more on filters.",
            spot=[d.rect(filt.count), d.union(filt.lo, filt.hi)],
            zoom=d.around(filt, 700))
     filt.hi.setText(default if default not in ("", "-") else "")
     filt.hi.editingFinished.emit()
-    d.shot("Type the old value back, or Clear the bound. Nothing was deleted: "
-           "a filter only chooses.",
-           spot=[d.union(filt.lo, filt.hi), filt.clear], point=filt.clear,
-           zoom=d.around(filt, 700))
+    d.settle()
 
     d.chapter("Display")
     display = render_tab.mode.parentWidget()
@@ -303,20 +292,10 @@ def make(d) -> None:
         d.settle()
     assert len(session.table(0)[0]) < len(session.locs), "grouping merged nothing"
     d.shot("SMAPpy groups a new table straight away, so what you see are "
-           "blinks, not single frames.",
+           "blinks, not single frames. More on grouping in the rendering "
+           "tutorial.",
            spot=[render_tab.grouped], point=render_tab.grouped,
            zoom=d.around(render_tab.grouped, 700))
-    render_tab.grouped.click()
-    d.settle()
-    d.shot("Untick grouped to see every localization of every frame.",
-           spot=[render_tab.grouped, d.rect(render.view.graphics, pad=-2)],
-           point=render_tab.grouped, click=True)
-    render_tab.grouped.click()
-    d.settle()
-    d.shot("Parameters... sets how close, and how many dark frames apart, "
-           "localizations are linked.",
-           spot=[overview.parameters_button], point=overview.parameters_button,
-           zoom=d.around(overview, 700))
 
     d.chapter("The selection")
     d.card("What a plugin works on",

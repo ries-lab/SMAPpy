@@ -181,34 +181,42 @@ def _script_page(markdown: str, title: str) -> str:
                          + "\n".join(body) + "\n</div>\n")
 
 
-def write_index(root: Path, planned=()) -> Path:
-    """The landing page: every tutorial built under ``root``, and what is to come.
+def write_index(root: Path, series=()) -> Path:
+    """The landing page: the series by section, what is built and what is to come.
 
-    Found by their ``tutorial.json``, so the page lists what was actually
-    built, in the order `topics.TOPICS` gives, rather than a list kept by hand.
+    ``series`` is `topics.SERIES` -- ``(section, built, planned)`` -- and a
+    tutorial counts as built when its ``tutorial.json`` is under ``root``, so
+    the page lists what a build actually produced.  One built but in no
+    section is listed at the end rather than lost.
     """
-    from .topics import TOPICS
     root = Path(root)
     built = {p.parent.name: json.loads(p.read_text())
              for p in root.glob("*/tutorial.json")}
-    order = [t for t in TOPICS if t in built] + sorted(set(built) - set(TOPICS))
-    cards = []
-    for name in order:
+
+    def card(name: str) -> str:
         t = built[name]
         minutes = max(1, round(t["seconds"] / 60))
         chapters = " &middot; ".join(html.escape(c) for c in t["chapters"])
-        cards.append(
-            f'<li class="tut"><a href="{html.escape(name)}/">'
-            f'<span class="meta">{minutes} min'
-            f'{" &middot; with voice" if t.get("voice") else ""}</span>'
-            f'<span class="name">{html.escape(t["title"])}</span>'
-            f'<span class="about">{html.escape(t["description"])}</span>'
-            f'<span class="chapters">{chapters}</span></a></li>')
-    later = "".join(f"<li>{html.escape(p)}</li>" for p in planned)
+        return (f'<li class="tut"><a href="{html.escape(name)}/">'
+                f'<span class="meta">{minutes} min'
+                f'{" &middot; with voice" if t.get("voice") else ""}</span>'
+                f'<span class="name">{html.escape(t["title"])}</span>'
+                f'<span class="about">{html.escape(t["description"])}</span>'
+                f'<span class="chapters">{chapters}</span></a></li>')
+
+    sections, placed = [], set()
+    for title, names, planned in list(series) + [("More", tuple(sorted(built)), ())]:
+        names = [n for n in names if n in built and n not in placed]
+        placed.update(names)
+        if not names and not planned:
+            continue
+        later = "".join(f'<li class="later">{html.escape(p)}<span>coming</span></li>'
+                        for p in planned)
+        sections.append(f'<section><h2>{html.escape(title)}</h2>'
+                        f'<ul class="tuts">{"".join(card(n) for n in names)}{later}</ul>'
+                        f'</section>')
     page = STANDALONE + (_INDEX.replace("__TOKENS__", _tokens())
-                              .replace("__CARDS__", "\n".join(cards))
-                              .replace("__PLANNED__", later)
-                              .replace("__HAS_PLANNED__", "" if planned else "hidden"))
+                              .replace("__SECTIONS__", "\n".join(sections)))
     (root / "index.html").write_text(page, encoding="utf-8")
     return root / "index.html"
 
@@ -273,8 +281,12 @@ ul { margin: 0; padding: 0; list-style: none; }
 .tut .name { font-size: 20px; font-weight: 600; }
 .tut .about { color: var(--muted); }
 .tut .chapters { font-size: 13px; color: var(--muted); }
-h2 { font-size: 15px; margin: 0 0 8px; font-weight: 600; }
-.later li { color: var(--muted); padding: 6px 0; border-top: 1px solid var(--line); }
+section { display: grid; gap: 10px; }
+h2 { font-size: 13px; margin: 0; font-weight: 600; font-family: var(--mono);
+     letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+li.later { display: flex; justify-content: space-between; gap: 12px; color: var(--muted);
+           padding: 10px 20px; border: 1px dashed var(--line); border-radius: 10px; }
+li.later span { font-family: var(--mono); font-size: 12px; }
 footer { font-size: 13px; color: var(--muted); }
 footer a { color: var(--accent-ink); }
 </style>
@@ -286,13 +298,7 @@ footer a { color: var(--accent-ink); }
     a voice you can switch off. They run on simulated data, so you can follow along in
     the program: File &rarr; Simulate.</p>
   </header>
-  <ul class="tuts">
-__CARDS__
-  </ul>
-  <section __HAS_PLANNED__>
-    <h2>Coming later</h2>
-    <ul class="later">__PLANNED__</ul>
-  </section>
+__SECTIONS__
   <footer>Made from the program itself, and rebuilt when it changes.
   <a href="https://github.com/ries-lab/SMAPpy">SMAPpy on GitHub</a></footer>
 </div>
