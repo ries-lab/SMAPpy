@@ -67,6 +67,11 @@ it was about.  Say who asked and when, so a later reader can weigh it.
 
 ### two_colour -- Two colours in 2D: split camera, fit and colours
 
+* Assign colours is the last step, a plugin of its own; say that the fitter
+  can run it automatically.  Then the two layers, filtered on channel.
+
+### two_colour_3d -- Two colours in 3D: dual-colour calibration and Spline 3D 2C
+
 * (none yet)
 
 ### rendering -- Rendering in 2D and 3D

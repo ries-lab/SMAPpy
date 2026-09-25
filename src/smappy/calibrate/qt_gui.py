@@ -380,6 +380,10 @@ class CalibrationWindow(QMainWindow):
     def update_mode(self) -> None:
         for index in (1, 3):                       # transformation pages: dual only
             self.tabs.setTabEnabled(index, self.is_dual)
+        # the button says where the calibration goes, which the mode decides
+        # (`app.use_calibration`)
+        self.use_button.setText("Use in the Spline 3D 2C fitter" if self.is_dual
+                                else "Use in the Spline 3D fitter")
 
     # --------------------------------------------------------------- files
     def _refresh_files(self) -> None:

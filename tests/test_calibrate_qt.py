@@ -74,6 +74,10 @@ def test_a_dual_calibration_is_offered_to_the_two_channel_fitter(app, tmp_path):
     window.saved_path = str(tmp_path / "cal.h5")
     window._use_in_fitter()
     assert seen == [(str(tmp_path / "cal.h5"), True)]
+    # and the button says so
+    assert window.use_button.text() == "Use in the Spline 3D 2C fitter"
+    window.mode_box.setCurrentText("Single channel")
+    assert window.use_button.text() == "Use in the Spline 3D fitter"
 
 
 def test_mode_switch_keeps_the_shared_settings(app):

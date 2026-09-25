@@ -337,3 +337,45 @@ def bead_stacks(n_stacks: int = 3, seed: int = 0, z_range_nm=(-800.0, 800.0),
         adu = rng.poisson(image) / conversion + offset
         stacks.append(np.clip(np.round(adu), 0, 65535).astype(np.uint16))
     return stacks, z
+
+
+def dual_bead_stacks(n_stacks: int = 3, seed: int = 0, z_range_nm=(-800.0, 800.0),
+                     dz_nm: float = 20.0, pixelsize_nm: float = 100.0,
+                     size_px: int = 100, sigma_nm=(130.0, 145.0),
+                     astigmatism=ASTIGMATISM, photons: float = 20000.0,
+                     secondary_share: float = 0.5, background: float = 100.0,
+                     conversion: float = 0.5, offset: float = 100.0):
+    """Bead z-stacks on the split camera of `dual_camera_frames`: ``(stacks, z)``.
+
+    What a dual-colour bead calibration is measured from: broadband beads,
+    seen in both halves, each half's image placed by the same
+    `dual_transformation` the acquisition has -- so a calibration from these
+    maps the halves as the fit needs them mapped -- with each half's width
+    and the same astigmatism.  ``secondary_share`` is the fraction of a
+    bead's light in the lower half.  Nine beads per half on a 30 px grid, a
+    little off the pixel grid, as in `bead_stacks`; z is the objective
+    position, so the beads are drawn at -z (see there).  Each stack is uint16
+    ADU, (z, 2 * size_px, size_px).
+    """
+    rng = np.random.default_rng(seed)
+    z = np.arange(z_range_nm[0], z_range_nm[1] + dz_nm / 2, dz_nm)
+    forward = np.linalg.inv(dual_transformation(size_px))
+    widths = []
+    for sigma in sigma_nm:
+        sx_nm, sy_nm = astigmatic_sigmas(-z, sigma, *astigmatism)
+        widths.append((sx_nm / pixelsize_nm * np.sqrt(2.0), sy_nm / pixelsize_nm * np.sqrt(2.0)))
+    stacks = []
+    for _ in range(n_stacks):
+        image = np.full((len(z), 2 * size_px, size_px), background, dtype=np.float64)
+        centres = np.array([(gx + rng.uniform(-0.5, 0.5), gy + rng.uniform(-0.5, 0.5))
+                            for gy in (20, 50, 80) for gx in (20, 50, 80)])
+        partners = (np.c_[centres, np.ones(len(centres))] @ forward.T)[:, :2]
+        planes = np.arange(len(z))
+        for half, (xy, share) in enumerate(((centres, 1 - secondary_share),
+                                            (partners, secondary_share))):
+            sx, sy = widths[half]
+            for cx, cy in xy:
+                _draw(image, planes, np.tile([cx, cy], (len(z), 1)),
+                      np.full(len(z), photons * share), sx, sy)
+        stacks.append(_camera(image, rng, conversion, offset, 0.0))
+    return stacks, z
