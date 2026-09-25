@@ -22,7 +22,7 @@ import numpy as np
 
 from .common import field, menu, menu_item, open_section, section_of, show_tab, type_into
 from .fitting_3d import _wait, _z_slope
-from .two_colour import colours_and_layers
+from .two_colour import after_the_fit, colours_and_layers
 
 TITLE = "Two colours in 3D: dual-colour calibration and Spline 3D 2C"
 DESCRIPTION = ("A dual-colour bead calibration for the transformation and a PSF "
@@ -155,7 +155,6 @@ def make(d) -> None:
     for name, value in (("conversion", CONVERSION), ("offset", OFFSET),
                         ("pixelsize_um", PIXELSIZE_UM)):
         type_into(panel, f"camera.{name}", value)
-    type_into(panel, "finish.assign_colors", False)       # shown as its own step
     d.settle()
     d.shot("Spline 3D 2C has the calibration. It knows the split from it, so "
            "only the acquisition and the camera are left.",
@@ -165,6 +164,7 @@ def make(d) -> None:
     d.shot("A molecule is at one place in both halves, so x, y and z are shared. "
            "Its photons are not: how they split is its colour.",
            spot=[model], zoom=d.around(model, 760))
+    after_the_fit(d, panel)
     d.shot("Run.", spot=[panel.run_button], point=panel.run_button, click=True,
            zoom=d.around(panel.run_button, 760))
     panel.run_button.click()
@@ -173,7 +173,7 @@ def make(d) -> None:
     assert "z_nm" in locs and "photons_ch1" in locs, sorted(locs.keys())
     slope = _z_slope(locs, truth)
     assert abs(slope - 1) < 0.1, f"fitted z against true z has slope {slope:.2f}"
-    d.shot("Each localization has a z, and its photons in each half.",
+    d.shot("Each localization has a z, its photons in each half, and a colour.",
            spot=[panel.output], zoom=d.around(panel.output, 760))
 
     colours_and_layers(d, panel, truth)
@@ -183,7 +183,7 @@ def make(d) -> None:
            "<ul><li><b>Dual-colour calibration:</b> the beads give the map "
            "between the halves and a PSF for each; say how the chip is split.</li>"
            "<li><b>Spline 3D 2C:</b> x, y and z shared, the photons free.</li>"
-           "<li><b>Assign colours</b> last, by hand or right after the fit; a "
-           "layer per channel.</li></ul>",
+           "<li><b>Assign colours</b> runs at the end of the fit; a layer per "
+           "channel shows the colours.</li></ul>",
            say="That is two colours in 3D: calibrate on beads, fit with Spline 3D "
                "2C, and assign the colours.")

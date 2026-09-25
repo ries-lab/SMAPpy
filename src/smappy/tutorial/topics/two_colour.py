@@ -161,10 +161,7 @@ def make(d) -> None:
            "photons for each half. The width is free per half, as the colours "
            "differ.",
            spot=[model], zoom=d.around(model, 760))
-    # the colours are the last step, shown as a plugin of their own; the
-    # fitter's "assign colours" is said there, not used here
-    type_into(panel, "finish.assign_colors", False)
-    d.settle()
+    after_the_fit(d, panel)
     d.shot("Run.", spot=[panel.run_button], point=panel.run_button, click=True,
            zoom=d.around(panel.run_button, 760))
     panel.run_button.click()
@@ -176,8 +173,8 @@ def make(d) -> None:
     assert saved.exists(), f"no transformation at {saved}"
     error = _check_transformation(saved)
     assert error < 0.2, f"the transformation is {error:.2f} px off"
-    d.shot("The output box says how well the halves were matched. Each "
-           "localization now has its photons in each half.",
+    d.shot("The output box says how well the halves were matched, and how many "
+           "localizations got a colour.",
            spot=[panel.output], zoom=d.around(panel.output, 760))
 
     colours_and_layers(d, panel, truth)
@@ -189,10 +186,20 @@ def make(d) -> None:
            "<li><b>Transformation:</b> calibrate from the movie, or use a bead "
            "calibration.</li>"
            "<li><b>Gaussian 2D 2C</b> fits both halves together.</li>"
-           "<li><b>Assign colours</b> gives each localization a channel, by "
-           "hand or right after the fit; a layer per channel shows them.</li></ul>",
+           "<li><b>Assign colours</b> runs at the end of the fit and gives each "
+           "localization a channel; run it again to change the rule.</li>"
+           "<li>A layer per channel shows the colours.</li></ul>",
            say="That is two colours in 2D. Next: two colours in 3D, with a "
                "dual-colour bead calibration.")
+
+
+def after_the_fit(d, fitter) -> None:
+    """The fit's last step, on by default: Assign colours over the result."""
+    automatic = field(fitter, "finish.assign_colors")
+    d.shot("After the fit, assign colours is on: the fit ends by running the "
+           "Assign colours plugin, so the table comes out with its colours.",
+           spot=[section_of(fitter, "finish")], point=automatic,
+           zoom=d.around(automatic, 760))
 
 
 def colours_and_layers(d, fitter, truth) -> None:
@@ -200,25 +207,27 @@ def colours_and_layers(d, fitter, truth) -> None:
     colours, that the fitter can do it by itself, and a layer per channel."""
     session, render = d.session, d.render
     d.chapter("Assign colours")
-    analysis = show_tab(d, "Analysis")
-    _, colours = open_section(d, analysis, "Assign colours")
-    d.shot("The last step: Assign colours, in the Analysis tab, sorts the "
-           "localizations by how their photons split.",
-           spot=[colours.form], point=colours.run_button, click=True,
-           zoom=d.around(colours.form, 760))
-    colours.run_button.click()
-    d.settle()
     locs = session.locs
     assert "channel" in locs, f"no colours; the table has {sorted(locs.keys())}"
     # the words say the colours are the dyes
     agreement = _agreement(locs, truth)
     assert agreement > 0.95, f"only {agreement:.0%} of the colours are the dye"
+    analysis = show_tab(d, "Analysis")
+    _, colours = open_section(d, analysis, "Assign colours")
+    d.shot("The plugin the fit ran is here, in the Analysis tab. Run it to see "
+           "how it decided, or to decide again.",
+           spot=[colours.form], point=colours.run_button, click=True,
+           zoom=d.around(colours.form, 760))
+    colours.run_button.click()
+    d.settle()
+    agreement = _agreement(session.locs, truth)          # it rewrote the table
+    assert agreement > 0.95, f"after Assign colours, {agreement:.0%} are the dye"
     colours.plot()
     d.settle()
     window = colours._window
     place_beside(d, window, 0.75)
-    d.shot("One peak per dye. Each localization gets the channel of its peak; "
-           "the few between the peaks get none.",
+    d.shot("How the photons split: one peak per dye. Each localization gets the "
+           "channel of its peak; the few between the peaks get none.",
            spot=[d.window_rect(window)])
     window.hide()
     mode = field(colours, "mode")
@@ -226,11 +235,6 @@ def colours_and_layers(d, fitter, truth) -> None:
            "clearly one dye. Run it with all localizations shown, or it sees "
            "only one dye.",
            spot=[mode], point=mode, zoom=d.around(mode, 760))
-    show_tab(d, "Localize")
-    automatic = field(fitter, "finish.assign_colors")
-    d.shot("It can also run automatically: tick assign colours under after the "
-           "fit, and the table comes out with its channels.",
-           spot=[automatic], point=automatic, zoom=d.around(automatic, 760))
 
     d.chapter("Two layers")
     tab = show_tab(d, "Render")

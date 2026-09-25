@@ -67,8 +67,9 @@ it was about.  Say who asked and when, so a later reader can weigh it.
 
 ### two_colour -- Two colours in 2D: split camera, fit and colours
 
-* Assign colours is the last step, a plugin of its own; say that the fitter
-  can run it automatically.  Then the two layers, filtered on channel.
+* The fit assigns the colours by itself, by running the Assign colours
+  plugin at its end (on by default): say so at the fit, then open that
+  plugin to show how it decided.  Then the two layers, filtered on channel.
 
 ### two_colour_3d -- Two colours in 3D: dual-colour calibration and Spline 3D 2C
 
