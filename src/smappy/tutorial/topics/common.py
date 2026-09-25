@@ -103,3 +103,12 @@ def menu_item(d, menu, text: str):
     r = menu.actionGeometry(action)
     g = menu.geometry()
     return (g.x() + r.x(), g.y() + r.y(), r.width(), r.height())
+
+
+def section_of(panel, name: str):
+    """A part of a plugin's form (``detection``), as the section that holds it."""
+    from ...gui.widgets import CollapsibleSection
+    widget = field(panel, name)
+    while widget is not None and not isinstance(widget, CollapsibleSection):
+        widget = widget.parentWidget()
+    return widget if widget is not None else field(panel, name)

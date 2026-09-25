@@ -14,7 +14,8 @@ showing -- a file SMAPpy cannot recognise the camera of -- and it is typed in.
 """
 from __future__ import annotations
 
-from .common import field, open_section, place_beside, show_tab, tab_button, type_into
+from .common import (field, open_section, place_beside, section_of, show_tab,
+                     tab_button, type_into)
 
 TITLE = "SMAPpy in three minutes"
 DESCRIPTION = ("From raw camera frames to a super-resolution picture: fitting, "
@@ -167,15 +168,6 @@ def make(d) -> None:
            "<p>Next: the tour of SMAPpy, with filters, layers and grouping.</p>",
            say="That is all it takes. Next, the tour of SMAPpy: filters, layers "
                "and grouping.")
-
-
-def section_of(panel, name: str):
-    """A part of a plugin's form (``detection``), as the section that holds it."""
-    from ...gui.widgets import CollapsibleSection
-    widget = field(panel, name)
-    while widget is not None and not isinstance(widget, CollapsibleSection):
-        widget = widget.parentWidget()
-    return widget if widget is not None else field(panel, name)
 
 
 def _wait_for_first_block(d, timeout: float = 30.0) -> None:

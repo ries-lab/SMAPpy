@@ -55,3 +55,7 @@ it was about.  Say who asked and when, so a later reader can weigh it.
 ### layout -- Finding your way around
 
 * (none yet)
+
+### fitting -- Fitting: 2D and 3D
+
+* (none yet)

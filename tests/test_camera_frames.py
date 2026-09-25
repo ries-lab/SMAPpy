@@ -51,3 +51,50 @@ def test_a_fit_of_the_frames_finds_the_molecules_where_they_are(tmp_path):
     # each error against that spot's own precision: robustly about one sigma
     spread = 1.4826 * np.median(np.abs(dx / sigma))
     assert spread == pytest.approx(1.0, abs=0.3)
+
+
+def test_a_calibration_from_the_beads_fits_the_astigmatic_frames_in_z(tmp_path):
+    """The whole 3D path on simulated data: beads -> calibration -> Spline 3D.
+
+    A bead stack records where the *objective* was, so a bead drawn at +z
+    rather than -z made a calibration that turned every z upside down (fitted
+    against true, the slope was -0.96).  Both simulations use one PSF, so the
+    fit must give z back with the right sign and no offset.
+    """
+    tifffile = pytest.importorskip("tifffile")
+    from scipy.spatial import cKDTree
+    from smappy.calibrate.core import CalibrationSettings, build_calibration, collect_beads
+    from smappy.calibrate.input import BeadStack
+    from smappy.plugins import Context
+    from smappy.plugins.fit import (CameraSettings, OutputSettings, SourceSettings,
+                                    SplineFit, SplineFitSettings, SplineModelSettings)
+    from smappy.session import Session
+    from smappy.simulate import ASTIGMATISM, bead_stacks
+    stacks, z = bead_stacks(2, seed=0)
+    beads = collect_beads([BeadStack(s.astype(np.float32), z, source=f"b{i}")
+                           for i, s in enumerate(stacks)], CalibrationSettings())
+    calibration = tmp_path / "beads_3dcal.h5"
+    build_calibration(beads).save(calibration)
+    frames, truth = camera_frames(400, seed=3, astigmatism=ASTIGMATISM)
+    tifffile.imwrite(tmp_path / "frames.tif", frames)
+    SplineFit().run(Context(), SplineFitSettings(
+        source=SourceSettings(path=str(tmp_path / "frames.tif")),
+        camera=CameraSettings(conversion=0.5, offset=100.0, pixelsize_um=0.1),
+        model=SplineModelSettings(calibration=str(calibration)),
+        output=OutputSettings(path=str(tmp_path / "out.hdf5"))))
+    session = Session()
+    session.load(tmp_path / "out.hdf5")
+    locs = session.locs
+    fitted, true = [], []
+    for f in np.unique(locs["frame"]):
+        m, t = locs["frame"] == f, truth["frame"] == f
+        if not t.any():
+            continue
+        d, i = cKDTree(np.column_stack([truth["x_nm"][t], truth["y_nm"][t]])).query(
+            np.column_stack([locs["x_nm"][m], locs["y_nm"][m]]))
+        near = d < 60
+        fitted += list(locs["z_nm"][m][near])
+        true += list(truth["z_nm"][t][i[near]])
+    slope, intercept = np.polyfit(true, fitted, 1)
+    assert slope == pytest.approx(1.0, abs=0.08)
+    assert abs(intercept) < 15

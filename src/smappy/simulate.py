@@ -16,6 +16,8 @@ without a microscope.
 """
 from __future__ import annotations
 
+from typing import Optional, Tuple
+
 import numpy as np
 
 from .locs import Localizations
@@ -106,7 +108,8 @@ def camera_frames(n_frames: int = 2000, seed: int = 0, pixelsize_nm: float = 100
                   size_px: int = 100, photons: float = 2000.0,
                   background: float = 20.0, sigma_nm: float = 130.0,
                   conversion: float = 0.5, offset: float = 100.0,
-                  read_noise: float = 1.5, on_per_frame: float = 7.0):
+                  read_noise: float = 1.5, on_per_frame: float = 7.0,
+                  astigmatism: Optional[Tuple[float, float]] = None):
     """Raw camera frames of the same structure, blinking: ``(frames, truth)``.
 
     For fitting what `simulate` only pretends to have fitted -- the tutorial
@@ -118,7 +121,11 @@ def camera_frames(n_frames: int = 2000, seed: int = 0, pixelsize_nm: float = 100
     The PSF is a Gaussian integrated over each pixel (the fitter's own model,
     so the fit is expected to find it); photons are Poisson over a flat
     background, then converted at ``conversion`` e-/ADU on an ``offset``, with
-    Gaussian read noise in ADU.  ``on_per_frame`` is how many molecules shine
+    Gaussian read noise in ADU.  With ``astigmatism`` -- ``(focal offset,
+    depth)`` in nm, see `astigmatic_sigmas` -- the spot's widths in x and y
+    follow the structure's z, as behind a cylindrical lens, and a spline fit
+    with a calibration of the same PSF (`bead_stacks`) finds z; without it
+    the frames are 2D and z is ignored.  ``on_per_frame`` is how many molecules shine
     in a frame on average, whatever the number of frames -- the density a
     fitter sees -- and the default of seven on 100 x 100 pixels is sparse,
     because the point is a picture that fits cleanly, not a test of the fitter
@@ -126,7 +133,7 @@ def camera_frames(n_frames: int = 2000, seed: int = 0, pixelsize_nm: float = 100
     """
     from scipy.special import erf
     rng = np.random.default_rng(seed)
-    emitters = structure(rng)[:, :2]
+    emitters = structure(rng)
     mean_on = 1 / 0.35                      # frames per blink, geometric(0.35)
     blinks_per_emitter = on_per_frame * n_frames / (len(emitters) * mean_on)
     rows = []
@@ -142,11 +149,17 @@ def camera_frames(n_frames: int = 2000, seed: int = 0, pixelsize_nm: float = 100
     emitted = rng.gamma(4.0, photons / 4.0, n)
     # pixel k spans k - 1/2 .. k + 1/2, so x_nm = x_pix * pixelsize, which is
     # the fitter's convention: at k + 1/2 every position came out half a pixel off
-    xy_px = emitters[emitter] / pixelsize_nm
-    s = sigma_nm / pixelsize_nm * np.sqrt(2.0)
+    xy_px = emitters[emitter, :2] / pixelsize_nm
+    z_nm = emitters[emitter, 2]
+    if astigmatism is None:
+        sx_nm = sy_nm = np.full(n, sigma_nm)
+    else:
+        sx_nm, sy_nm = astigmatic_sigmas(z_nm, sigma_nm, *astigmatism)
+    sx = sx_nm / pixelsize_nm * np.sqrt(2.0)       # erf's scale: sigma * sqrt(2)
+    sy = sy_nm / pixelsize_nm * np.sqrt(2.0)
 
     image = np.full((n_frames, size_px, size_px), background, dtype=np.float64)
-    half = int(np.ceil(4 * sigma_nm / pixelsize_nm))
+    half = int(np.ceil(4 * max(sx_nm.max(), sy_nm.max()) / pixelsize_nm))
     offsets = np.arange(-half, half + 1)
     for k in range(n):
         cx, cy = xy_px[k]
@@ -156,8 +169,8 @@ def camera_frames(n_frames: int = 2000, seed: int = 0, pixelsize_nm: float = 100
         if not keep_x.any() or not keep_y.any():
             continue
         ix, iy = ix[keep_x], iy[keep_y]
-        px = 0.5 * (erf((ix + 0.5 - cx) / s) - erf((ix - 0.5 - cx) / s))
-        py = 0.5 * (erf((iy + 0.5 - cy) / s) - erf((iy - 0.5 - cy) / s))
+        px = 0.5 * (erf((ix + 0.5 - cx) / sx[k]) - erf((ix - 0.5 - cx) / sx[k]))
+        py = 0.5 * (erf((iy + 0.5 - cy) / sy[k]) - erf((iy - 0.5 - cy) / sy[k]))
         image[frame[k], iy[0]:iy[-1] + 1, ix[0]:ix[-1] + 1] += emitted[k] * np.outer(py, px)
     electrons = rng.poisson(image)
     adu = electrons / conversion + offset + rng.normal(0, read_noise, image.shape)
@@ -165,8 +178,68 @@ def camera_frames(n_frames: int = 2000, seed: int = 0, pixelsize_nm: float = 100
     truth = Localizations({
         "frame": frame, "x_nm": emitters[emitter, 0].astype(np.float32),
         "y_nm": emitters[emitter, 1].astype(np.float32),
+        "z_nm": z_nm.astype(np.float32),
         "photons": emitted.astype(np.float32), "emitter": emitter.astype(np.int32),
     }, {"units": "nm", "simulation": "SMAPpy camera frames", "seed": seed,
         "pixelsize_nm": pixelsize_nm, "conversion": conversion, "offset": offset,
-        "background": background, "sigma_nm": sigma_nm})
+        "background": background, "sigma_nm": sigma_nm,
+        "astigmatism": list(astigmatism) if astigmatism else None})
     return frames, truth
+
+
+# A cylindrical lens of moderate strength: the two foci 2 x 300 nm apart and a
+# depth of 400 nm, which keeps the spot fittable over about +-600 nm -- the
+# structure's z range with room to spare.
+ASTIGMATISM = (300.0, 400.0)
+
+
+def astigmatic_sigmas(z_nm, sigma_nm: float, focal_offset_nm: float, depth_nm: float):
+    """The spot's widths in x and y at ``z_nm``, behind a cylindrical lens.
+
+    The textbook model (Huang et al., Science 2008): each axis is a Gaussian
+    beam focused at +-``focal_offset_nm``, ``sigma(z) = sigma_0 sqrt(1 + ((z -
+    c) / d)^2)``, so a spot is wide in x above focus, wide in y below, and
+    round in between.
+    """
+    z = np.asarray(z_nm, dtype=np.float64)
+    sx = sigma_nm * np.sqrt(1 + ((z - focal_offset_nm) / depth_nm) ** 2)
+    sy = sigma_nm * np.sqrt(1 + ((z + focal_offset_nm) / depth_nm) ** 2)
+    return sx, sy
+
+
+def bead_stacks(n_stacks: int = 3, seed: int = 0, z_range_nm=(-800.0, 800.0),
+                dz_nm: float = 20.0, pixelsize_nm: float = 100.0, size_px: int = 96,
+                sigma_nm: float = 130.0, astigmatism=ASTIGMATISM,
+                photons: float = 20000.0, background: float = 100.0,
+                conversion: float = 0.5, offset: float = 100.0):
+    """z-stacks of fluorescent beads for a calibration: a list of (z, y, x) ADU.
+
+    What a bead calibration is measured from -- a few fields of view of beads
+    on a coverslip, the objective stepped through focus -- with the same PSF
+    `camera_frames` uses, so a calibration built from these fits those.  Nine
+    beads per stack on a grid 30 pixels apart, each a little off the pixel
+    grid, so the calibration has to register them as a real one does.
+    """
+    from scipy.special import erf
+    rng = np.random.default_rng(seed)
+    z = np.arange(z_range_nm[0], z_range_nm[1] + dz_nm / 2, dz_nm)
+    # z is where the *objective* is, as a calibration records it: raised by
+    # dz, it leaves a bead on the coverslip dz below the focus.  Drawn at +z
+    # instead, the calibration came out mirrored and every fitted z with it.
+    sx_nm, sy_nm = astigmatic_sigmas(-z, sigma_nm, *astigmatism)
+    sx = sx_nm / pixelsize_nm * np.sqrt(2.0)
+    sy = sy_nm / pixelsize_nm * np.sqrt(2.0)
+    pix = np.arange(size_px)
+    stacks = []
+    for _ in range(n_stacks):
+        image = np.full((len(z), size_px, size_px), background, dtype=np.float64)
+        for gy in (18, 48, 78):
+            for gx in (18, 48, 78):
+                cx, cy = gx + rng.uniform(-0.5, 0.5), gy + rng.uniform(-0.5, 0.5)
+                for k in range(len(z)):
+                    px = 0.5 * (erf((pix + 0.5 - cx) / sx[k]) - erf((pix - 0.5 - cx) / sx[k]))
+                    py = 0.5 * (erf((pix + 0.5 - cy) / sy[k]) - erf((pix - 0.5 - cy) / sy[k]))
+                    image[k] += photons * np.outer(py, px)
+        adu = rng.poisson(image) / conversion + offset
+        stacks.append(np.clip(np.round(adu), 0, 65535).astype(np.uint16))
+    return stacks, z

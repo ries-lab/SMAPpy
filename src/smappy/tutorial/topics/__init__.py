@@ -11,11 +11,10 @@ and the pointer and the spotlight are there so that the text need not say
 where things are.  Numbers come from the GUI as it runs, never typed in, so
 a subtitle cannot drift away from the picture it is under.
 """
-TOPICS = ("quickstart", "layout")
+TOPICS = ("quickstart", "layout", "fitting")
 
 # What the index says is coming, in the order it is planned to be made.
 PLANNED = (
-    "Fitting: from camera frames to localizations, 2D and 3D",
     "Rendering in 2D and 3D",
     "Drift correction, grouping and filtering",
     "Analysis plugins: statistics, line profiles, resolution",
