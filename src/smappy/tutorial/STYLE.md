@@ -67,3 +67,11 @@ it was about.  Say who asked and when, so a later reader can weigh it.
 ### plugins -- Plugins: running, previewing, plotting
 
 * (none yet)
+
+### measuring -- Measuring: statistics, precision and line profiles
+
+* (none yet)
+
+### drift_correction -- Drift correction: RCC and COMET
+
+* (none yet)

@@ -20,9 +20,7 @@ SERIES = (
      ("3D: bead calibration and spline fitting",
       "Two colours: dual-channel calibration and fitting")),
     ("Rendering", ("rendering",), ()),
-    ("Plugins", ("plugins",),
-     ("Measuring: statistics, precision and line profiles",
-      "Drift correction: RCC and COMET")),
+    ("Plugins", ("plugins", "measuring", "drift_correction"), ()),
     ("ROI manager", (), ("The ROI manager: finding and measuring many regions",)),
     ("Many files", (), ("Chains and batch runs over many files",)),
 )

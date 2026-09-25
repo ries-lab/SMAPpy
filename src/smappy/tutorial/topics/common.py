@@ -123,3 +123,24 @@ def expand(widget) -> None:
         if isinstance(parent, CollapsibleSection) and not parent.button.isChecked():
             parent.set_expanded(True)
         parent = parent.parentWidget()
+
+
+def figure_panels(d, window, pad: float = 0.03):
+    """The panels of the figure a result window shows, as desktop rectangles,
+    top to bottom -- read from the figure's own layout, since a figure's
+    panels are not an equal division of it (titles and axes take room)."""
+    from ...gui.figures import FigurePane
+    panes = [p for p in window.findChildren(FigurePane) if p.isVisible()]
+    if not panes:
+        raise LookupError("the window shows no figure")
+    pane = panes[0]
+    x, y, w, h = d.rect(pane.canvas, pad=0)
+    rects = []
+    for ax in pane.figure.axes:
+        if not ax.get_visible() or not ax.has_data():
+            continue
+        box = ax.get_position()
+        x0, x1 = max(0.0, box.x0 - pad), min(1.0, box.x1 + pad / 2)
+        y0, y1 = max(0.0, box.y0 - 2 * pad), min(1.0, box.y1 + 1.5 * pad)
+        rects.append((x + x0 * w, y + (1 - y1) * h, (x1 - x0) * w, (y1 - y0) * h))
+    return sorted(rects, key=lambda r: r[1])

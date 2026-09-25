@@ -243,8 +243,7 @@ def make(d) -> None:
            "what it is.</li>"
            "<li><b>Save:</b> a PNG as shown, or a TIFF at a chosen pixel size.</li>"
            "<li><b>3D view:</b> the same layers, turned, with a slab.</li></ul>",
-           say="That is rendering. Next: drift correction, grouping and "
-               "filtering.")
+           say="That is rendering. Next: plugins, which measure what is drawn.")
 
 
 def _turn(view, horizontal: float, vertical: float) -> None:
