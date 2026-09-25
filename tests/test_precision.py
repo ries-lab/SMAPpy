@@ -63,8 +63,8 @@ def blinking(sigma=8.0, sigma_z=None, n_emitters=600, blinks=6, on_time=3,
                "y_nm": xyz[:, 1].astype(np.float32),
                "z_nm": xyz[:, 2].astype(np.float32),
                "photons": photons.astype(np.float32),
-               "loc_precision_nm": claimed_nm.astype(np.float32),
-               "loc_precision_z_nm": (claimed_nm
+               "xy_err_nm": claimed_nm.astype(np.float32),
+               "z_err_nm": (claimed_nm
                                       * ((sigma_z / sigma) if sigma_z else 1.0)
                                       ).astype(np.float32),
                "emitter": emitter.astype(np.int32)}
@@ -124,7 +124,7 @@ def split_blinks(n_emitters=900, blinks=6, n_frames=400, extent=5000.0,
         {"frame": frame.astype(np.int64),
          "x_nm": xy[:, 0].astype(np.float32), "y_nm": xy[:, 1].astype(np.float32),
          "photons": (photons * gain).astype(np.float32),
-         "loc_precision_nm": sigma.astype(np.float32),
+         "xy_err_nm": sigma.astype(np.float32),
          "emitter": emitter.astype(np.int32)}, {"units": "nm"})
 
 
@@ -154,7 +154,7 @@ def test_kappa_is_the_one_number_a_wrong_calibration_moves():
     honest = measure(split_blinks(), max_gap=1, reach=48.0)
     claimed = split_blinks()
     columns = dict(claimed.columns)
-    columns["loc_precision_nm"] = claimed["loc_precision_nm"] * 2
+    columns["xy_err_nm"] = claimed["xy_err_nm"] * 2
     # the radius is held, because left to itself it follows the median
     # precision -- the one place the claimed column reaches the plain sigma
     optimistic = measure(Localizations(columns, claimed.metadata), max_gap=1,
@@ -211,10 +211,10 @@ def test_the_truncated_crlb_fit_recovers_what_a_filter_cut_away():
     rng = np.random.default_rng(11)
     photons = rng.exponential(2000.0, 200000)
     sigma = 400.0 / np.sqrt(photons)                 # sigma_c = 400/sqrt(2000)
-    whole = crlb_statistics(Localizations({"loc_precision_nm": sigma}, {}))
+    whole = crlb_statistics(Localizations({"xy_err_nm": sigma}, {}))
     kept = sigma[sigma <= 12.0]
-    cut = crlb_statistics(Localizations({"loc_precision_nm": kept}, {}),
-                          bounds={"loc_precision_nm": (None, 12.0)})
+    cut = crlb_statistics(Localizations({"xy_err_nm": kept}, {}),
+                          bounds={"xy_err_nm": (None, 12.0)})
     expected = 400.0 / np.sqrt(2000.0)
     assert whole["lateral"]["sigma_c"] == pytest.approx(expected, rel=0.03)
     assert cut["lateral"]["sigma_c"] == pytest.approx(expected, rel=0.05)

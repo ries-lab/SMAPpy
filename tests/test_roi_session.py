@@ -18,7 +18,7 @@ def _table(n=4000, seed=0):
     return Localizations({"x_nm": xy[:, 0].astype(np.float32), "y_nm": xy[:, 1].astype(np.float32),
                           "frame": np.arange(m, dtype=np.int64),
                           "photons": rng.gamma(4, 400, m).astype(np.float32),
-                          "loc_precision_nm": rng.uniform(5, 15, m).astype(np.float32)}, {})
+                          "xy_err_nm": rng.uniform(5, 15, m).astype(np.float32)}, {})
 
 
 def test_rois_follow_the_layer_and_survive_a_save(tmp_path):
@@ -33,11 +33,11 @@ def test_rois_follow_the_layer_and_survive_a_save(tmp_path):
     # the ROI sees what the layer shows: tighten the filter, fewer localizations
     roi = project.add_roi(file_id, [2000, 2000])
     wide = len(project.extract(roi))
-    s.layers[0].set_bound("loc_precision_nm", None, 8.0)
+    s.layers[0].set_bound("xy_err_nm", None, 8.0)
     project.sync()
     assert 0 < len(project.extract(roi)) < wide
 
-    s.layers[0].set_bound("loc_precision_nm", None, 25.0)   # back to the default
+    s.layers[0].set_bound("xy_err_nm", None, 25.0)   # back to the default
     project.sync()
     found = project.find(file_id, parameters={"min_count": 5})
     assert found                                   # the blobs are found

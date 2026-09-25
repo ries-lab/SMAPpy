@@ -24,7 +24,7 @@ def table(n=200):
                           "y_nm": rng.uniform(0, 1000, n),
                           "frame": np.arange(n) % 50,
                           "photons": np.full(n, 300.0),
-                          "loc_precision_nm": np.full(n, 10.0)})
+                          "xy_err_nm": np.full(n, 10.0)})
 
 
 def a_drift(frames=50):

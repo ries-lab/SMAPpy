@@ -19,7 +19,7 @@ def _table(n=20000, seed=0):
         "x_nm": rng.uniform(0, 10000, n).astype(np.float32),
         "y_nm": rng.uniform(0, 8000, n).astype(np.float32),
         "z_nm": rng.uniform(-400, 400, n).astype(np.float32),
-        "loc_precision_nm": (rng.gamma(4, 3, n) + 5).astype(np.float32),
+        "xy_err_nm": (rng.gamma(4, 3, n) + 5).astype(np.float32),
         "logl_rel": rng.normal(-1, 0.5, n).astype(np.float32),
         "frame": np.arange(n, dtype=np.int64),
     }, {"units": "nm"})
@@ -34,7 +34,7 @@ def test_the_index_does_not_change_the_image(mode):
     """
     locs = _table()
     state = ViewState(locs, RenderSettings(mode=mode))
-    state.filter.set("loc_precision_nm", None, 15.0)
+    state.filter.set("xy_err_nm", None, 15.0)
     for fov in (FieldOfView.from_range((0, 10000), (0, 8000), 20.0),
                 FieldOfView.from_range((2000, 3000), (2000, 3000), 2.0),
                 FieldOfView.from_range((-5000, -4000), (0, 1000), 2.0)):
@@ -50,7 +50,7 @@ def test_a_filter_change_is_visible_without_rebuilding_the_index():
     index = state.index
     fov = FieldOfView.from_range((0, 10000), (0, 8000), 20.0)
     before = state.render(fov).n_locs
-    state.filter.set("loc_precision_nm", None, 12.0)
+    state.filter.set("xy_err_nm", None, 12.0)
     assert state.render(fov).n_locs < before
     assert state.index is index          # positions did not change, so it stands
 
@@ -77,7 +77,7 @@ def test_viewer_zoom_pan_and_reset():
 
 def test_typed_bounds_filter_and_an_empty_box_means_no_bound():
     viewer = Viewer(ViewState(_table()))
-    field = "loc_precision_nm"
+    field = "xy_err_nm"
 
     viewer._on_bound(field, 1, "12")               # tighter than the default
     assert viewer.state.filter.ranges[field] == (None, 12.0)
@@ -96,10 +96,10 @@ def test_typed_bounds_filter_and_an_empty_box_means_no_bound():
 
 def test_junk_in_a_box_changes_nothing_and_is_put_back():
     viewer = Viewer(ViewState(_table()))
-    viewer._on_bound("loc_precision_nm", 1, "12")
-    viewer._on_bound("loc_precision_nm", 1, "not a number")
-    assert viewer.state.filter.ranges["loc_precision_nm"] == (None, 12.0)
-    assert viewer.bounds["loc_precision_nm"][1].text == "12"
+    viewer._on_bound("xy_err_nm", 1, "12")
+    viewer._on_bound("xy_err_nm", 1, "not a number")
+    assert viewer.state.filter.ranges["xy_err_nm"] == (None, 12.0)
+    assert viewer.bounds["xy_err_nm"][1].text == "12"
 
 
 def test_contrast_and_gamma_redisplay_without_rendering():
@@ -133,7 +133,7 @@ def _groupable_table(n=3000, seed=5):
     return Localizations({
         "x_nm": np.array(x, np.float32), "y_nm": np.array(y, np.float32),
         "frame": np.array(frame, np.int64),
-        "loc_precision_nm": (rng.gamma(4, 3, n) + 5).astype(np.float32),
+        "xy_err_nm": (rng.gamma(4, 3, n) + 5).astype(np.float32),
         "photons": rng.gamma(3, 500, n).astype(np.float32),
         "logl_rel": rng.normal(-1, 0.5, n).astype(np.float32),
     }, {"units": "nm"})
@@ -141,18 +141,18 @@ def _groupable_table(n=3000, seed=5):
 
 def test_grouped_and_ungrouped_keep_separate_filters():
     state = ViewState(_groupable_table())
-    state.filter.set("loc_precision_nm", None, 20.0)
+    state.filter.set("xy_err_nm", None, 20.0)
 
     state.show_grouped(True)
     assert state.has_grouped
     assert len(state.locs) < len(state.sets["ungrouped"].locs)
     assert state.filter.ranges == {}                 # its own, untouched filter
-    state.filter.set("loc_precision_nm", None, 8.0)
+    state.filter.set("xy_err_nm", None, 8.0)
 
     state.show_grouped(False)
-    assert state.filter.ranges == {"loc_precision_nm": (None, 20.0)}
+    assert state.filter.ranges == {"xy_err_nm": (None, 20.0)}
     state.show_grouped(True)
-    assert state.filter.ranges == {"loc_precision_nm": (None, 8.0)}
+    assert state.filter.ranges == {"xy_err_nm": (None, 8.0)}
 
 
 def test_switching_does_not_regroup():
@@ -175,7 +175,7 @@ def test_each_set_has_its_own_index_and_renders():
 
 def test_the_viewer_switch_restores_the_boxes_silently():
     viewer = Viewer(ViewState(_groupable_table()))
-    field = "loc_precision_nm"
+    field = "xy_err_nm"
     viewer._on_bound(field, 1, "20")
     hint = viewer._hints[field].get_text()
 
@@ -434,10 +434,10 @@ def test_a_window_opens_with_the_default_bounds_shown_in_its_boxes():
 
     viewer = Viewer(ViewState(_table()))
     ranges = viewer.state.filter.ranges
-    assert ranges["loc_precision_nm"] == (None, 25.0)
+    assert ranges["xy_err_nm"] == (None, 25.0)
     assert ranges["logl_rel"] == (-1.5, None)
     assert ranges["z_nm"] == (-500.0, 500.0)
-    assert viewer.bounds["loc_precision_nm"][1].text == "25"
+    assert viewer.bounds["xy_err_nm"][1].text == "25"
     assert viewer.bounds["logl_rel"][0].text == "-1.5"
     assert viewer.bounds["z_nm"][0].text == "-500"
     assert len(viewer.state.filter) < len(viewer.state.locs)
@@ -448,9 +448,9 @@ def test_a_bound_already_set_is_not_overridden_by_a_default():
     from smappy.viewer import Viewer
 
     locs = _table()
-    state = ViewState(locs, filter=LocFilter(locs, loc_precision_nm=(None, 8.0)))
+    state = ViewState(locs, filter=LocFilter(locs, xy_err_nm=(None, 8.0)))
     viewer = Viewer(state)
-    assert viewer.state.filter.ranges["loc_precision_nm"] == (None, 8.0)
+    assert viewer.state.filter.ranges["xy_err_nm"] == (None, 8.0)
     assert viewer.state.filter.ranges["z_nm"] == (-500.0, 500.0)   # the rest apply
 
 
@@ -458,11 +458,11 @@ def test_a_cleared_default_stays_cleared():
     from smappy.viewer import Viewer
 
     viewer = Viewer(ViewState(_groupable_table()))
-    viewer._on_bound("loc_precision_nm", 1, "")
-    assert "loc_precision_nm" not in viewer.state.filter
+    viewer._on_bound("xy_err_nm", 1, "")
+    assert "xy_err_nm" not in viewer.state.filter
     viewer.grouped.set_active(0)          # -> grouped, which gets its own defaults
     viewer.grouped.set_active(0)          # -> back
-    assert "loc_precision_nm" not in viewer.state.filter
+    assert "xy_err_nm" not in viewer.state.filter
 
 
 def test_a_pixel_table_gets_only_the_bounds_whose_unit_is_fixed():
@@ -470,11 +470,11 @@ def test_a_pixel_table_gets_only_the_bounds_whose_unit_is_fixed():
     from smappy.viewer import Viewer
 
     locs = _table()
-    locs.columns["loc_precision_pix"] = locs.columns.pop("loc_precision_nm")
+    locs.columns["xy_err_pix"] = locs.columns.pop("xy_err_nm")
     locs.columns["x_pix"] = locs.columns.pop("x_nm")
     locs.columns["y_pix"] = locs.columns.pop("y_nm")
     viewer = Viewer(ViewState(locs))
-    assert "loc_precision_pix" not in viewer.state.filter
+    assert "xy_err_pix" not in viewer.state.filter
     assert viewer.state.filter.ranges["logl_rel"] == (-1.5, None)
 
 

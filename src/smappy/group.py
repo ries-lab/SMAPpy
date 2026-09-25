@@ -35,6 +35,12 @@ Two departures, both because the blanket rule is wrong for the column:
   is the one weight it computes, and flags it as a shortcut; under astigmatism
   ``x_err`` and ``y_err`` diverge with z (that divergence is what encodes z), so
   the pooled weight is the right one only when they happen to be equal.
+* the lateral precision ``xy_err_nm`` is not combined at all where the table
+  has ``x_err_nm`` and ``y_err_nm``: it is derived from the combined pair, the
+  RMS of the two, as it is everywhere else (`columns.add_xy_err`), so the
+  grouped table cannot disagree with itself.  Combining it by the precision
+  rule would give a slightly different number -- the rule is not linear in
+  the square.
 * ``logl_rel`` is a likelihood *per pixel* and stays comparable under max, but
   the raw ``logl`` of a group is the sum over its members' fits; taking the max
   of it is meaningless across groups of different size, so it is dropped rather
@@ -75,6 +81,7 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
+from .columns import xy_err
 from .locs import Localizations
 from .mathparse import (COMBINE_RULES, RECOMPUTE, apply_recipes,
                         derived_names, recipes)
@@ -102,7 +109,7 @@ COMBINE_MODES: Dict[str, str] = {
     "sigma_x_pix": "mean", "sigma_y_pix": "mean",
     "photons": "sum", "background": "sum",
     "photons_err": "quad", "background_err": "quad",
-    "loc_precision_nm": "precision", "loc_precision_pix": "precision",
+    "xy_err_nm": "precision", "xy_err_pix": "precision",
     "x_err_nm": "precision", "y_err_nm": "precision", "z_err_nm": "precision",
     "x_err_pix": "precision", "y_err_pix": "precision",
     "logl_rel": "max",
@@ -123,7 +130,7 @@ GROUP_COLUMNS = ("group_id", "n_in_group")
 
 # The precision columns the general weight is taken from, best first (SMAP's
 # order).  It is a lateral precision, so it is the right weight for x and y.
-WEIGHT_FIELDS = ("loc_precision_nm", "loc_precision_pix", "x_err_nm", "x_err_pix")
+WEIGHT_FIELDS = ("xy_err_nm", "xy_err_pix", "x_err_nm", "x_err_pix")
 
 # Columns that carry their own uncertainty and are weighted by it rather than by
 # the pooled lateral precision.  SMAP weights everything with `locprecnm`
@@ -410,6 +417,11 @@ def combine(locs: Localizations, group_index: np.ndarray,
     else:
         skip = set(DROP_ON_GROUPING) | set(GROUP_COLUMNS) | derived_names(locs)
         names = [n for n in locs.keys() if n not in skip]
+    # derived from the combined x and y errors below, not combined itself
+    lateral = [n for n in ("xy_err_nm", "xy_err_pix") if n in names
+               and n.replace("xy_", "x_") in names
+               and n.replace("xy_", "y_") in names]
+    names = [n for n in names if n not in lateral]
 
     # Group order, built once and read by every column.  `connect` numbers
     # groups densely, so `starts` has one entry per group plus the end.
@@ -499,6 +511,9 @@ def combine(locs: Localizations, group_index: np.ndarray,
         if name in columns:
             columns[name] = columns[name].astype(np.int64 if name == "frame"
                                                  else np.int32)
+    for name in lateral:
+        columns[name] = xy_err(columns[name.replace("xy_", "x_")],
+                               columns[name.replace("xy_", "y_")])
     columns["n_in_group"] = n_in_group.astype(np.int32)
     # the same ids as the ungrouped table's `group_id`, so a row can be found
     # from a localization and the other way round

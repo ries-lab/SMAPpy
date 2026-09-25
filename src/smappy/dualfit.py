@@ -34,6 +34,7 @@ import numpy as np
 from scipy.spatial import cKDTree
 
 from .calibrate.dual import DualColorCalibration
+from .columns import add_xy_err
 from .detect import Candidates
 
 # (x, y, photons, background, z): the fitter's parameter order everywhere
@@ -390,8 +391,7 @@ def paired_to_localizations(result, pairs: PairedROIs, model, cam) -> "Localizat
                 # a width is already in pixels; only the counts carry the gain
                 scale = 1.0 if name.startswith("sigma") else excess
                 cols[name] = p[name] * scale
-    cols["loc_precision_pix"] = np.sqrt((cols["x_err_pix"] ** 2
-                                         + cols["y_err_pix"] ** 2) / 2)
+    add_xy_err(cols)
     return Localizations({k: np.asarray(v) for k, v in cols.items()}, {})
 
 

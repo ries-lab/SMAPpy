@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from . import chain as chains
+from .columns import current
 from .chain import (ChainAborted, ChainError, ChainSkipped, ChainSpec,
                     chain_class, is_source)
 from .plugins import ParamSpec, settings_from, settings_values
@@ -193,7 +194,7 @@ def read_job(path) -> Job:
     else:
         import yaml
         raw = yaml.safe_load(text)
-    return Job.from_dict(raw, origin=path.resolve())
+    return Job.from_dict(current(raw), origin=path.resolve())
 
 
 def write_job(job: Job, path) -> Path:

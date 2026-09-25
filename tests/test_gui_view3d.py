@@ -22,7 +22,7 @@ def table(n=4000, seed=0):
         "y_nm": rng.uniform(0, 5000, n).astype(np.float32),
         "z_nm": rng.normal(0, 200, n).astype(np.float32),
         "frame": rng.integers(0, 100, n).astype(np.int64),
-        "loc_precision_nm": rng.uniform(8, 15, n).astype(np.float32),
+        "xy_err_nm": rng.uniform(8, 15, n).astype(np.float32),
     }, {})
 
 

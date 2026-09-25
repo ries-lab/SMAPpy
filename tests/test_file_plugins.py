@@ -14,7 +14,7 @@ def table(n=50):
     rng = np.random.default_rng(0)
     return Localizations({"x_nm": rng.uniform(0, 1000, n), "y_nm": rng.uniform(0, 1000, n),
                           "frame": np.arange(n), "photons": np.full(n, 300.0),
-                          "loc_precision_nm": np.full(n, 10.0)})
+                          "xy_err_nm": np.full(n, 10.0)})
 
 
 @pytest.fixture

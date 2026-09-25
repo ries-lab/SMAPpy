@@ -92,7 +92,7 @@ def simulate(n_frames: int, seed: int, drift: bool, density: float = 1.0,
         "x_nm": xyz[:, 0].astype(np.float32), "y_nm": xyz[:, 1].astype(np.float32),
         "z_nm": xyz[:, 2].astype(np.float32),
         "photons": photons, "background": rng.gamma(20, 1.0, n).astype(np.float32),
-        "loc_precision_nm": prec, "loc_precision_z_nm": prec_z,
+        "xy_err_nm": prec, "z_err_nm": prec_z,
         "sigma_nm": rng.normal(120, 8, n).astype(np.float32),
         "logl_rel": rng.normal(-0.5, 0.3, n).astype(np.float32),
         "emitter": emitter.astype(np.int32),                   # ground truth identity

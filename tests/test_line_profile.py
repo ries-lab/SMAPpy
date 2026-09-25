@@ -31,7 +31,7 @@ def simulate(n, across, precision=10.0, seed=0, sigma=0.0):
         "x_nm": x.astype(np.float32), "y_nm": y.astype(np.float32),
         "frame": np.arange(n, dtype=np.int64),
         "photons": np.full(n, 800.0, np.float32),
-        "loc_precision_nm": precision.astype(np.float32),
+        "xy_err_nm": precision.astype(np.float32),
     }, {"units": "nm"})
 
 

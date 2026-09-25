@@ -191,7 +191,7 @@ def make(d) -> None:
     d.shot("The quick buttons choose what to filter on; the list below them "
            "has every other column.",
            spot=[d.union(*quick)], zoom=d.around(filt, 700))
-    prec = filt.quick.get("loc_precision_nm")
+    prec = filt.quick.get("xy_err_nm")
     if prec is not None:
         prec.click()
     d.shot("The shaded part of the histogram is the range kept. Drag its "

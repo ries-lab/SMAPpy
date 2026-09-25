@@ -24,6 +24,7 @@ from typing import Any, Dict, List, Optional, Sequence
 import yaml
 
 from . import config
+from .columns import current
 
 VERSION = 1
 WORKSPACE_NAME = "workspace.yaml"
@@ -205,4 +206,4 @@ def load(path=None) -> Workspace:
         return Workspace.default()
     if not isinstance(data, dict) or not data.get("tabs"):
         return Workspace.default()
-    return Workspace.from_dict(data, path=path)
+    return Workspace.from_dict(current(data), path=path)

@@ -1316,7 +1316,7 @@ class LocalizationPrecision(Plugin):
     """The precision the data shows, beside the precision the fitter expected."""
 
     Settings = PrecisionSettings
-    version = "1"
+    version = "2"        # 2: finds a SMAPpy 3D fit's z precision, z_err_nm
 
     def run(self, ctx: Context, settings: PrecisionSettings) -> Result:
         if not (settings.pairwise or settings.crlb or settings.frc

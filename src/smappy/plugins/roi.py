@@ -137,7 +137,7 @@ def current_file(project) -> Optional[str]:
 @dataclass
 class StatisticsSettings:
     precision_column: str = param(
-        "loc_precision_nm", label="precision column",
+        "xy_err_nm", label="precision column",
         help="the column averaged as the site's localization precision")
 
 

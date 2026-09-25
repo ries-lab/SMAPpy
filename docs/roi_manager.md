@@ -92,7 +92,7 @@ line and a direction is a magenta arrow.
 
 **Evaluate all** runs on every included ROI across all files. The
 statistics evaluator returns localization count, arithmetic mean lateral
-localization precision (`loc_precision_nm`), and arithmetic mean photons.
+localization precision (`xy_err_nm`), and arithmetic mean photons.
 Nonfinite measurement values are omitted from each mean; their finite sample
 counts are saved separately. Empty selections return count zero and NaN means.
 Missing required measurement columns produce a per-ROI error without stopping
@@ -136,7 +136,7 @@ from smappy.roi_manager import ROIProject, Histograms
 project = ROIProject()
 source = project.add_file("localizations.h5")
 project.set_geometry(300, "circle")
-project.set_filters({"loc_precision_nm": (None, 25), "photons": (500, None)})
+project.set_filters({"xy_err_nm": (None, 25), "photons": (500, None)})
 
 candidates = project.find(source.id, parameters={"min_count": 15})
 

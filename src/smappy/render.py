@@ -416,11 +416,11 @@ def _render_numpy(x, y, fov, sigma, sigma_y, weights, colors, roi_sigma) -> Rend
 # The columns a table can carry positions and precisions in, best first.  Both
 # unit systems work; the field of view just has to be in the same one.
 POSITION_FIELDS = (("x_nm", "y_nm"), ("x_pix", "y_pix"))
-PRECISION_FIELDS = ("loc_precision_nm", "loc_precision_pix")
+PRECISION_FIELDS = ("xy_err_nm", "xy_err_pix")
 LATERAL_FIELDS = tuple(n for pair in POSITION_FIELDS for n in pair)
 # z is always in nm (`locs.to_nm` leaves it alone) and has a precision of its own
 AXIAL_FIELD = "z_nm"
-AXIAL_PRECISION_FIELD = "loc_precision_z_nm"
+AXIAL_PRECISION_FIELD = "z_err_nm"
 
 
 def _pick(locs: Localizations, names, what: str):
@@ -641,7 +641,7 @@ def render_sigmas(locs: Localizations, settings: "RenderSettings", fov: FieldOfV
     * mode ``"gauss"`` is the explicit pair everywhere -- that is what a
       constant Gaussian means;
     * mode ``"precision"`` uses the localization precision on an axis that
-      *is* a position (``loc_precision_z_nm`` for a z axis, when the fit
+      *is* a position (``z_err_nm`` for a z axis, when the fit
       produced one), and the explicit width on any other axis, because there
       is no precision for a photon count or a frame number;
     * ``sigma_y`` unset means the same width as x where the two axes are the

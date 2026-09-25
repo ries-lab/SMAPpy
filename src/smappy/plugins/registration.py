@@ -161,8 +161,8 @@ class CalibrateChannelTransform(Plugin):
             raise ValueError("registration pairs within a frame, and the table "
                              "has no frame column")
         # the fit's own error bars, so a dim pair counts for what it knows
-        precision = (np.asarray(locs["loc_precision_pix"], float)
-                     if "loc_precision_pix" in locs else None)
+        precision = (np.asarray(locs["xy_err_pix"], float)
+                     if "xy_err_pix" in locs else None)
         return register_channels(x, y, np.asarray(locs["frame"]), shape, roi,
                                  settings=settings.registration,
                                  progress=ctx.report, precision=precision), locs

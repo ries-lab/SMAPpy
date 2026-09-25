@@ -21,7 +21,7 @@ def chain_spec(**extra):
     return ChainSpec(steps=[
         Step(plugin="Chain/Layers", label="filter",
              values={"layers": [{"grouped": False, "start": "empty",
-                                 "bounds": [{"field": "loc_precision_nm", "hi": 20}]}],
+                                 "bounds": [{"field": "xy_err_nm", "hi": 20}]}],
                      "remove": True}),
         Step(plugin="Analysis/Process/Math Parser", label="flag",
              values={"field": "bright", "expression": "photons > 500"}),
@@ -35,7 +35,7 @@ def folder(tmp_path):
     data = tmp_path / "data"
     for n, (a, b) in enumerate([(5, 40), (5, 25), (10, 60)]):
         locs = blinks(seed=n)
-        locs.columns["loc_precision_nm"] = np.repeat(np.linspace(a, b, 40), 4)
+        locs.columns["xy_err_nm"] = np.repeat(np.linspace(a, b, 40), 4)
         (data / f"cell{n}").mkdir(parents=True)
         save_localizations(data / f"cell{n}" / "locs.h5", locs)
     return data

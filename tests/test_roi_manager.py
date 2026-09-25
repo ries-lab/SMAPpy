@@ -15,7 +15,7 @@ def table(x, y=None):
     x = np.asarray(x, dtype=np.float64)
     n = len(x)
     return Localizations({'x_nm': x, 'y_nm': np.zeros(n) if y is None else np.asarray(y, dtype=float),
-                          'loc_precision_nm': np.arange(n, dtype=float) + 10,
+                          'xy_err_nm': np.arange(n, dtype=float) + 10,
                           'photons': np.arange(n, dtype=float) * 100 + 100,
                           'frame': np.arange(n, dtype=np.int64)}, {'units': 'nm'})
 
@@ -177,7 +177,7 @@ def pores():
         xy.extend(center + offsets)
     xy = np.asarray(xy)
     locs = table(xy[:, 0], xy[:, 1])
-    locs.columns['loc_precision_nm'][:] = 12
+    locs.columns['xy_err_nm'][:] = 12
     locs.columns['photons'][:] = 1000
     return locs, centers
 

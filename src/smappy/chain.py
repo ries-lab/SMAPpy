@@ -39,6 +39,7 @@ from dataclasses import dataclass, field, fields, make_dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from .columns import current
 from .plugins import (Context, ParamInfo, Plugin, PreflightQuestion, Result,
                       _hint_from_text, param, settings_from, settings_values)
 
@@ -206,7 +207,9 @@ def read(path) -> ChainSpec:
     else:
         import yaml
         raw = yaml.safe_load(text)
-    return ChainSpec.from_dict(raw, origin=path)
+    # a chain saved before a column was renamed names the old one, in a
+    # layer's bounds or a step's settings
+    return ChainSpec.from_dict(current(raw), origin=path)
 
 
 def write(spec: ChainSpec, path) -> Path:

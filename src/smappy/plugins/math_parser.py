@@ -39,6 +39,7 @@ from typing import Dict, List, Optional
 
 import numpy as np
 
+from ..columns import current
 from ..locs import Localizations
 from ..mathparse import (FUNCTIONS, GROUPED_CHOICES, RECOMPUTE,
                          ExpressionError, evaluate, names_in, remember)
@@ -69,7 +70,7 @@ def history() -> List[Dict[str, str]]:
     import yaml
     path = history_file()
     try:
-        entries = yaml.safe_load(path.read_text()) or []
+        entries = current(yaml.safe_load(path.read_text()) or [])
     except (OSError, yaml.YAMLError):
         return []
     if not isinstance(entries, list):
@@ -174,7 +175,7 @@ def describe(field: str, values: np.ndarray) -> str:
 class MathSettings:
     field: str = param("within", label="new field",
                        help="the column the result is written to")
-    expression: str = param("(loc_precision_nm < 25) & (sigma_nm > 100)",
+    expression: str = param("(xy_err_nm < 25) & (sigma_nm > 100)",
                             label="=", kind="text",
                             help="an expression in the column names; `&` and "
                                  "`|` combine comparisons, each in brackets")

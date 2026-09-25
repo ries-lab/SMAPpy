@@ -30,7 +30,7 @@ def table(n=5000, seed=0):
         "y_nm": rng.uniform(0, 10_000, n).astype(np.float32),
         "frame": rng.integers(0, 2000, n).astype(np.int64),
         "photons": rng.uniform(100, 900, n).astype(np.float32),
-        "loc_precision_nm": rng.uniform(5, 60, n).astype(np.float32),
+        "xy_err_nm": rng.uniform(5, 60, n).astype(np.float32),
     }, {"units": "nm"})
 
 
@@ -84,8 +84,8 @@ def test_the_filter_list_marks_every_bounded_field(app):
         return widget.field.findData(name)
 
     # the default precision bound is marked; an untouched field is not
-    assert widget.field.itemText(item("loc_precision_nm")).startswith("●")
-    assert widget.field.itemData(item("loc_precision_nm"), 0x0006).bold()   # FontRole
+    assert widget.field.itemText(item("xy_err_nm")).startswith("●")
+    assert widget.field.itemData(item("xy_err_nm"), 0x0006).bold()   # FontRole
     assert widget.field.itemText(item("photons")) == "photons"
 
     # a bound set on a field that is not on show is marked too
@@ -95,10 +95,10 @@ def test_the_filter_list_marks_every_bounded_field(app):
     assert widget.field.itemText(item("photons")).startswith("●")
 
     # reading the current field gives the column, never the marked label
-    widget._select("loc_precision_nm")
-    assert widget.current_field() == "loc_precision_nm"
+    widget._select("xy_err_nm")
+    assert widget.current_field() == "xy_err_nm"
     widget._apply(None, None)                        # clearing removes the mark
-    assert widget.field.itemText(item("loc_precision_nm")) == "loc_precision_nm"
+    assert widget.field.itemText(item("xy_err_nm")) == "xy_err_nm"
 
 
 def test_the_title_counts_what_is_shown_not_the_table(app, tmp_path, monkeypatch):

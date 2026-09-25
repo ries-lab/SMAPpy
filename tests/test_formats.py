@@ -29,7 +29,7 @@ def test_smap_sml_v73(tmp_path):
         info["cam_pixelsize_um"] = np.array([[0.1]])
     locs, meta = load(path)
     assert reader_for(path).name == "SMAP"
-    assert set(locs) == {"x_nm", "y_nm", "frame", "photons", "loc_precision_nm", "logl_rel"}
+    assert set(locs) == {"x_nm", "y_nm", "frame", "photons", "xy_err_nm", "logl_rel"}
     assert locs["frame"][0] == 0 and locs["frame"].dtype == np.int64   # 1-based -> 0-based
     assert meta.pixelsize_nm == 100.0 and meta.n == n
 
@@ -50,7 +50,7 @@ def test_minflux_npy_and_zip(tmp_path):
     locs, info = load(tmp_path / "m.npy")
     assert len(locs) == n - 1 and "z_nm" not in locs and info.format == "MINFLUX"
     assert locs["x_nm"].max() < 1000 and np.all(np.diff(locs["time_s"]) >= 0)
-    assert np.allclose(locs["loc_precision_nm"], 150 / np.sqrt(400))
+    assert np.allclose(locs["xy_err_nm"], 150 / np.sqrt(400))
     with zipfile.ZipFile(tmp_path / "m.zip", "w") as z:
         z.write(tmp_path / "m.npy", "export.npy")
     assert len(load(tmp_path / "m.zip")[0]) == n - 1

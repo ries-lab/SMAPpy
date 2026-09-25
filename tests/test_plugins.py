@@ -27,7 +27,7 @@ def test_plugin_runs_as_a_function_and_through_a_session():
     assert "drift over 50 frames" in result.text
 
     session = Session(locs)
-    session.layers[0].filter.set("loc_precision_nm", None, 30.0)
+    session.layers[0].filter.set("xy_err_nm", None, 30.0)
     before = session.locs
     session.run(plugin, SETTINGS)
     assert session.locs is not before and session.can_undo

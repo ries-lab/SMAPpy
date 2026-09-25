@@ -31,7 +31,7 @@ def table(n=4000, seed=0):
         "z_nm": rng.uniform(-300, 300, n).astype(np.float32),
         "frame": rng.integers(0, 20_000, n).astype(np.int64),
         "photons": rng.uniform(200, 4000, n).astype(np.float32),
-        "loc_precision_nm": rng.uniform(5, 25, n).astype(np.float32),
+        "xy_err_nm": rng.uniform(5, 25, n).astype(np.float32),
     }, {"units": "nm"})
 
 

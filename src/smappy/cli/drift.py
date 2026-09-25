@@ -30,7 +30,7 @@ def main() -> None:
                    metavar=("FIELD", "MIN", "MAX"),
                    help="estimate only from localizations in this range; "
                         "'-' is unbounded.  Repeatable, e.g. "
-                        "--filter loc_precision_nm - 20 --filter logl_rel -2 -")
+                        "--filter xy_err_nm - 20 --filter logl_rel -2 -")
 
     windows = p.add_mutually_exclusive_group()
     windows.add_argument("--frames-per-window", type=int, default=500,

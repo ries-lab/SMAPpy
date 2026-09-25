@@ -42,7 +42,7 @@ Two refinements matter more than the estimator when there are few
 localizations:
 
 * **Each localization brings its own precision** (`use_precision`).  A
-  localization is not a point but a Gaussian of width ``loc_precision_nm``, so
+  localization is not a point but a Gaussian of width ``xy_err_nm``, so
   the density is the structure convolved with *that* localization's error:
   width ``sqrt(s^2 + sigma_i^2)``.  The fitted ``s`` is then the width of the
   structure rather than of the picture of it, and for a step or a pair of
@@ -122,8 +122,8 @@ from ..regions import Region
 from ..render import positions
 from . import Context, Plot, Plugin, Result, param, register
 
-PRECISION_FIELDS = ("loc_precision_nm", "loc_precision_pix")
-PRECISION_Z_FIELDS = ("loc_precision_z_nm",)
+PRECISION_FIELDS = ("xy_err_nm", "xy_err_pix")
+PRECISION_Z_FIELDS = ("z_err_nm",)
 MIN_FOR_FIT = 8             # below this the maximum is not where the data is
 THIN = 30                   # below this the error bars are worth a warning
 TINY = 1e-300
@@ -1475,7 +1475,7 @@ class LineProfile(Plugin):
     """Profiles across a line ROI, fitted without binning them."""
 
     Settings = LineProfileSettings
-    version = "2"        # 2: the two-Gaussian start tries peaks far apart
+    version = "3"        # 2: the two-Gaussian start tries peaks far apart; 3: z_err_nm
 
     def run(self, ctx: Context, settings: LineProfileSettings) -> Result:
         region = _line_roi(ctx)

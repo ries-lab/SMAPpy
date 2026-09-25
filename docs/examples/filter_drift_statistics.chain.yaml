@@ -12,7 +12,7 @@ steps:
         - grouped: true
           start: defaults              # the bounds a freshly opened file gets, then:
           bounds:
-            - {field: loc_precision_nm, hi: 20}
+            - {field: xy_err_nm, hi: 20}
             - {field: photons, lo: 0.01, quantile: true}   # drop the dimmest 1 %
       remove: false
   - plugin: Analysis/Drift/RCC
@@ -23,7 +23,7 @@ steps:
       pixelsize_nm: 20.0
   - plugin: Analysis/Measure/Localization Statistics
     label: stats
-    version: "2"
+    version: "3"
     grouping: ungrouped                # photons and precision per frame
     values:
       source: selection

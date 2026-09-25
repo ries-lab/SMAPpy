@@ -134,7 +134,7 @@ changing meaningfully.
 
 The fit is inverse-variance weighted: a pair's weight is
 `1 / (sigma_ref^2 + sigma_sec^2)`, taken from the fit's own
-`loc_precision_pix`.  (The bead path stays unweighted — there the soft-L1 loss
+`xy_err_pix`.  (The bead path stays unweighted — there the soft-L1 loss
 expresses geometric robustness alone, which is right for beads, all of which
 are bright.)
 

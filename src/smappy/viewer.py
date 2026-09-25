@@ -52,7 +52,7 @@ from .spatial import GrowingIndex, SpatialIndex
 # The fields worth a filter control, best alternative first.  Everything else
 # stays available through `LocFilter` without cluttering the window.
 FILTER_FIELDS: Sequence[Tuple[str, ...]] = (
-    ("loc_precision_nm", "loc_precision_pix"),
+    ("xy_err_nm", "xy_err_pix"),
     ("z_nm",),
     ("sigma_nm", "sigma_pix"),
     ("logl_rel",),
@@ -67,7 +67,7 @@ FILTER_FIELDS: Sequence[Tuple[str, ...]] = (
 COLOR_FIELDS: Sequence[Tuple[str, Tuple[str, ...]]] = (
     ("z", ("z_nm",)),
     ("frame", ("frame",)),
-    ("precision", ("loc_precision_nm", "loc_precision_pix")),
+    ("precision", ("xy_err_nm", "xy_err_pix")),
     ("photons", ("photons",)),
     ("colour", ("channel",)),
 )
@@ -78,7 +78,7 @@ COLOR_FIELDS: Sequence[Tuple[str, Tuple[str, ...]]] = (
 # precision cut means nothing in pixels -- and a bound already set (a file
 # opened with one, a table switched back to) is never overridden.
 DEFAULT_BOUNDS: Dict[str, Tuple[Optional[float], Optional[float]]] = {
-    "loc_precision_nm": (None, 25.0),   # nm; a looser cut is rarely wanted
+    "xy_err_nm": (None, 25.0),   # nm; a looser cut is rarely wanted
     "logl_rel": (-1.5, None),           # drops the fits that did not converge
     "z_nm": (-500.0, 500.0),            # the depth a spline calibration covers
 }
@@ -105,7 +105,7 @@ class LocSet:
         self.locs = locs
         self.filter = filter if filter is not None else LocFilter(locs)
         self._precision_field: Optional[str] = None
-        for name in ("loc_precision_nm", "loc_precision_pix"):
+        for name in ("xy_err_nm", "xy_err_pix"):
             if name in locs:
                 self._precision_field = name
                 break

@@ -106,7 +106,7 @@ def test_the_viewer_takes_in_new_data_without_changing_a_setting(tmp_path):
     try:
         assert viewer.update() > 0                  # the first block frames it
         view = viewer.axes.get_xlim(), viewer.axes.get_ylim()
-        viewer.state.filter.set("loc_precision_nm", None, 40.0)
+        viewer.state.filter.set("xy_err_nm", None, 40.0)
         viewer.state.display.gamma = 0.5
         before = len(state.locs)
 
@@ -115,7 +115,7 @@ def test_the_viewer_takes_in_new_data_without_changing_a_setting(tmp_path):
 
         assert len(state.locs) == before + 500
         assert (viewer.axes.get_xlim(), viewer.axes.get_ylim()) == view
-        assert state.filter.ranges["loc_precision_nm"] == (None, 40.0)
+        assert state.filter.ranges["xy_err_nm"] == (None, 40.0)
         assert state.display.gamma == 0.5
         assert "fitting" in viewer.status or "ended" in viewer.status
     finally:
@@ -213,7 +213,7 @@ def test_live_view_wires_the_whole_thing_up(tmp_path):
         assert viewer.fit.error is None
         assert len(viewer.state.locs) > 0
         assert (viewer.axes.get_xlim(), viewer.axes.get_ylim()) == framed
-        assert "loc_precision_nm" in viewer.bounds   # the rows are up from the start
+        assert "xy_err_nm" in viewer.bounds   # the rows are up from the start
     finally:
         viewer.close()
         viewer.fit.stop()

@@ -98,18 +98,18 @@ def test_a_chain_runs_its_steps_in_order_as_one_undo_step_and_one_log_entry():
     cls = chain_class(spec(
         {"plugin": "Chain/Layers", "label": "filter",
          "values": {"layers": [{"grouped": False, "start": "empty",
-                                "bounds": [{"field": "loc_precision_nm", "hi": 20}]}],
+                                "bounds": [{"field": "xy_err_nm", "hi": 20}]}],
                     "remove": True}},
         {"plugin": "Analysis/Process/Math Parser", "label": "flag",
          "values": {"field": "bright", "expression": "photons > 500"}},
         {"plugin": "Test/Chain/Count"}))
     result = session.run(cls(), cls.Settings())
-    kept = int(np.sum(blinks()["loc_precision_nm"] <= 20))
+    kept = int(np.sum(blinks()["xy_err_nm"] <= 20))
     assert len(session.locs) == kept and "bright" in session.locs
     assert result.data["results"]["count"].data["rows"] == kept
     # the layer is as the step set it up, which is what Render then shows
     assert not session.layers[0].grouped
-    assert session.layers[0].filter.ranges == {"loc_precision_nm": (None, 20.0)}
+    assert session.layers[0].filter.ranges == {"xy_err_nm": (None, 20.0)}
     # one step back undoes the whole chain
     assert session.undo_stack.can_undo and len(session.undo_stack) == 1
     session.undo()
@@ -170,16 +170,16 @@ def test_the_layers_step_resolves_quantiles_and_skips_what_the_file_lacks():
     from smappy.plugins.chain_layers import resolve_layer
     locs = blinks()
     bounds, notes = resolve_layer(locs, {"start": "empty", "bounds": [
-        {"field": "loc_precision_nm", "lo": 0.25, "hi": 0.75, "quantile": True},
+        {"field": "xy_err_nm", "lo": 0.25, "hi": 0.75, "quantile": True},
         {"field": "z_nm", "lo": -300, "hi": 300}]})
-    lo, hi = bounds["loc_precision_nm"]
-    assert lo == pytest.approx(np.quantile(locs["loc_precision_nm"], 0.25))
-    assert hi == pytest.approx(np.quantile(locs["loc_precision_nm"], 0.75))
+    lo, hi = bounds["xy_err_nm"]
+    assert lo == pytest.approx(np.quantile(locs["xy_err_nm"], 0.25))
+    assert hi == pytest.approx(np.quantile(locs["xy_err_nm"], 0.75))
     assert "z_nm" not in bounds and "z_nm" in notes[0]
     with pytest.raises(ValueError, match="needs 'z_nm'.*it has"):
         resolve_layer(locs, {"bounds": [{"field": "z_nm", "hi": 1, "required": True}]})
     # "defaults" starts from what a freshly opened file gets
-    assert resolve_layer(locs, {"start": "defaults"})[0] == {"loc_precision_nm": (None, 25.0)}
+    assert resolve_layer(locs, {"start": "defaults"})[0] == {"xy_err_nm": (None, 25.0)}
 
 
 def test_a_second_layer_named_by_the_step_is_made():

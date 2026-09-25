@@ -67,8 +67,8 @@ from ..locs import Localizations
 from . import Context, Plot, Plugin, Result, param, register
 
 # the precision columns, in the order they are looked for
-PRECISION_FIELDS = ("loc_precision_nm", "loc_precision_pix")
-PRECISION_Z_FIELDS = ("loc_precision_z_nm",)
+PRECISION_FIELDS = ("xy_err_nm", "xy_err_pix")
+PRECISION_Z_FIELDS = ("z_err_nm",)
 # the tails dropped before a precision is fitted.  A row with a precision of
 # 0.1 nm is not a good localization, it is a bad fit, and the estimator below
 # weighs it by 1/sigma^2 -- a hundred such rows in a million would carry the
@@ -650,7 +650,7 @@ class LocalizationStatistics(Plugin):
     Settings = StatisticsSettings
     # 2: the table the layer shows rather than always the ungrouped one, and
     # the on-time counted once per blink rather than once per frame
-    version = "2"
+    version = "3"        # 3: finds a SMAPpy 3D fit's z precision, z_err_nm
 
     def run(self, ctx: Context, settings: StatisticsSettings) -> Result:
         table, selection = ctx.table()

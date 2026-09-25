@@ -10,8 +10,8 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox,
 
 from ..io.formats import CSV_NAMES, csv_columns, guess_csv_mapping
 
-TARGETS = ["-", "x_nm", "y_nm", "z_nm", "frame", "photons", "loc_precision_nm",
-           "loc_precision_z_nm", "sigma_nm", "sigma_y_nm", "background", "logl_rel",
+TARGETS = ["-", "x_nm", "y_nm", "z_nm", "frame", "photons", "xy_err_nm",
+           "z_err_nm", "sigma_nm", "sigma_y_nm", "background", "logl_rel",
            "channel", "id"]
 
 

@@ -22,7 +22,7 @@ def block(n=500, seed=0, z=True):
         "y_nm": rng.uniform(0, 10_000, n).astype(np.float32),
         "frame": rng.integers(0, 100, n).astype(np.int64),
         "photons": rng.uniform(100, 5000, n).astype(np.float32),
-        "loc_precision_nm": rng.uniform(5, 25, n).astype(np.float32),
+        "xy_err_nm": rng.uniform(5, 25, n).astype(np.float32),
     }
     if z:
         columns["z_nm"] = rng.normal(0, 200, n).astype(np.float32)

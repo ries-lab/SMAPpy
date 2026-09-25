@@ -66,7 +66,7 @@ def table(centers, per=10, seed=0):
     n = per * len(centers)
     return Localizations({"x_nm": x, "y_nm": y, "frame": np.arange(n),
                           "photons": np.full(n, 200.0),
-                          "loc_precision_nm": np.full(n, 11.0)})
+                          "xy_err_nm": np.full(n, 11.0)})
 
 
 def steps(*plugins):

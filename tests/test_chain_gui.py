@@ -82,7 +82,7 @@ def test_the_layers_editor_reads_back_what_it_was_given_and_the_session(app):
     given = [{"grouped": True, "start": "empty",
               "bounds": [{"field": "photons", "lo": 0.01, "quantile": True}]},
              {"grouped": False, "start": "defaults",
-              "bounds": [{"field": "loc_precision_nm", "hi": 20.0, "required": True}]}]
+              "bounds": [{"field": "xy_err_nm", "hi": 20.0, "required": True}]}]
     field.set(given)
     assert field.value() == given
     session = Session(blinks())

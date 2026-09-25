@@ -12,7 +12,7 @@ def table(n=200) -> Localizations:
     rng = np.random.default_rng(0)
     return Localizations({
         "x_nm": rng.uniform(0, 1000, n), "y_nm": rng.uniform(0, 500, n),
-        "loc_precision_nm": rng.uniform(5, 25, n),
+        "xy_err_nm": rng.uniform(5, 25, n),
         "z_nm": rng.uniform(-300, 300, n),
         "frame": np.arange(n),
     }, {"units": "nm"})
@@ -49,7 +49,7 @@ def test_a_filter_narrows_what_is_drawn(tmp_path):
     from smappy.filter import LocFilter
 
     locs = table()
-    keep = LocFilter(locs, loc_precision_nm=(None, 10))
+    keep = LocFilter(locs, xy_err_nm=(None, 10))
     path = save_image(locs, tmp_path / "filtered.png", pixelsize=10.0, select=keep)
     with Image.open(path) as image:
         assert np.asarray(image).any()      # something was drawn

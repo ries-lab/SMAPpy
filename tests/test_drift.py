@@ -31,7 +31,7 @@ def simulate(n_points=200, n_frames=50, per_frame=30, seed=1):
                           "x_nm": xyz[:, 0].astype(np.float32),
                           "y_nm": xyz[:, 1].astype(np.float32),
                           "z_nm": xyz[:, 2].astype(np.float32),
-                          "loc_precision_nm": rng.random(frame.size).astype(np.float32) * 40},
+                          "xy_err_nm": rng.random(frame.size).astype(np.float32) * 40},
                          {"units": "nm"})
     return locs, drift, true_xyz
 
@@ -54,7 +54,7 @@ def test_recovers_known_drift():
 def test_corrects_localizations_the_filter_hides():
     locs, _, true_xyz = simulate()
     # estimate from the good half only, correct all of it
-    keep = LocFilter(locs, loc_precision_nm=(None, 20))
+    keep = LocFilter(locs, xy_err_nm=(None, 20))
     corrected, drift = correct_drift(locs, SETTINGS, select=keep)
 
     assert drift.n_used == len(keep.indices) < len(locs)
@@ -151,7 +151,7 @@ def test_the_slow_run_dialogue_offers_rcc_first():
     locs = Localizations({"x_nm": rng.uniform(0, 20_000, n),
                           "y_nm": rng.uniform(0, 20_000, n),
                           "frame": np.sort(rng.integers(0, 20_000, n)).astype(np.int64),
-                          "loc_precision_nm": np.full(n, 12.0)}, {})
+                          "xy_err_nm": np.full(n, 12.0)}, {})
     plugin = CometDrift()
     asked = DriftSettings(max_drift_nm=1500.0)
     question = plugin.preflight(Context(locs=locs), asked)
@@ -289,7 +289,7 @@ rng = np.random.default_rng(0)
 n = 2000
 locs = Localizations({"x_nm": rng.uniform(0, 3000, n), "y_nm": rng.uniform(0, 3000, n),
                       "frame": rng.integers(0, 60, n).astype(np.int64),
-                      "loc_precision_nm": np.full(n, 5.0)}, {"units": "nm"})
+                      "xy_err_nm": np.full(n, 5.0)}, {"units": "nm"})
 drift = estimate_drift(locs, DriftSettings(segmentation_var=10, use_z=False))
 assert len(drift.frames) > 0
 assert "matplotlib" not in sys.modules

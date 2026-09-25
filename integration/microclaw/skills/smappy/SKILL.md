@@ -183,7 +183,7 @@ locs = load_localizations(path)         # symmetric read
 ```
 
 Columns depend on `FitSettings.output_unit`: `"pixel"` gives `x_pix`, `y_pix`,
-…; `"nm"` gives `x_nm`, `y_nm`, `z_nm`, `loc_precision_nm`, `logl_rel`,
+…; `"nm"` gives `x_nm`, `y_nm`, `z_nm`, `xy_err_nm`, `logl_rel`,
 `photons`, `background`, `frame`; `"pixel+nm"` gives both. **Use `"nm"`** for
 anything a user will look at. The column set must not change between blocks —
 the writer refuses a block whose columns differ.
@@ -206,7 +206,7 @@ GUI):
 ```python
 from smappy.filter import LocFilter
 
-keep = LocFilter(locs, loc_precision_nm=(None, 20), logl_rel=(-1.5, None))
+keep = LocFilter(locs, xy_err_nm=(None, 20), logl_rel=(-1.5, None))
 smappy.save_image(locs, "image.png", pixelsize=10.0, select=keep)
 ```
 
@@ -229,7 +229,7 @@ Filter, then drift-correct, then group — in that order.
 ```python
 from smappy.drift import DriftSettings, correct_drift, save_drift_corrected
 
-keep = LocFilter(locs, loc_precision_nm=(None, 15), logl_rel=(-2, None),
+keep = LocFilter(locs, xy_err_nm=(None, 15), logl_rel=(-2, None),
                  z_nm=(-300, 300))
 corrected, drift = correct_drift(locs, DriftSettings(segmentation_var=500),
                                  select=keep)

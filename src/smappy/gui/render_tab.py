@@ -29,7 +29,7 @@ from .widgets import CollapsibleSection, detach_to_window
 
 # the fields with a quick button, best-named alternative first
 QUICK_FIELDS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
-    ("prec", ("loc_precision_nm", "loc_precision_pix")),
+    ("prec", ("xy_err_nm", "xy_err_pix")),
     ("LL", ("logl_rel",)),
     ("frame", ("frame",)),
     ("z", ("z_nm",)),

@@ -26,7 +26,7 @@ from .viewer import ViewState
 
 # The bounds a layer opens with: what is thrown away is on screen, not hidden.
 DEFAULT_BOUNDS: Dict[str, Tuple[Optional[float], Optional[float]]] = {
-    "loc_precision_nm": (None, 25.0),
+    "xy_err_nm": (None, 25.0),
     "logl_rel": (-2.0, None),
     "z_nm": (-500.0, 500.0),
 }

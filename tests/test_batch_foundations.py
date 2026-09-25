@@ -24,7 +24,7 @@ def blinks(n_emitters=40, on=4, seed=1):
     precision = np.repeat(np.linspace(5, 40, n_emitters), on)
     return Localizations({"x_nm": x, "y_nm": y, "frame": frame,
                           "photons": np.full(len(x), 1000.0),
-                          "loc_precision_nm": precision})
+                          "xy_err_nm": precision})
 
 
 @dataclass
@@ -64,14 +64,14 @@ def test_the_grouped_table_is_handed_out_with_its_own_filter():
     locs = blinks()
     session = Session(locs)
     session.layers[0].show_grouped(False)
-    session.layers[0].set_bound("loc_precision_nm", None, 20.0)
+    session.layers[0].set_bound("xy_err_nm", None, 20.0)
 
     ungrouped, sel = session.context().table()
-    assert ungrouped is session.locs and len(sel) == np.sum(locs["loc_precision_nm"] <= 20)
+    assert ungrouped is session.locs and len(sel) == np.sum(locs["xy_err_nm"] <= 20)
 
     grouped, gsel = session.context(grouping="grouped").table()
     assert len(grouped) == 40
-    assert len(gsel) == np.sum(grouped["loc_precision_nm"] <= 20)
+    assert len(gsel) == np.sum(grouped["xy_err_nm"] <= 20)
     # what the layer shows is not changed by a plugin asking
     assert not session.layers[0].grouped
 

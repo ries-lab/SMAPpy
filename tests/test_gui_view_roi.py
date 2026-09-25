@@ -22,7 +22,7 @@ def table(n=2000):
         "y_nm": rng.uniform(0, 10_000, n).astype(np.float32),
         "frame": rng.integers(0, 100, n).astype(np.int64),
         "photons": rng.uniform(100, 900, n).astype(np.float32),
-        "loc_precision_nm": rng.uniform(5, 25, n).astype(np.float32),
+        "xy_err_nm": rng.uniform(5, 25, n).astype(np.float32),
     }, {"units": "nm"})
 
 
@@ -89,7 +89,7 @@ def blinks(n_emitters=300, on=3):
         "y_nm": (xy[rows, 1] + rng.normal(0, 3, n)).astype(np.float32),
         "frame": frame.astype(np.int64),
         "photons": rng.uniform(500, 900, n).astype(np.float32),
-        "loc_precision_nm": rng.uniform(5, 10, n).astype(np.float32),
+        "xy_err_nm": rng.uniform(5, 10, n).astype(np.float32),
     }, {"units": "nm"})
 
 

@@ -45,7 +45,7 @@ def test_a_fit_of_the_frames_finds_the_molecules_where_they_are(tmp_path):
             near = d < 50
             dx += list(found[near, 0] - true[i[near], 0])
             dy += list(found[near, 1] - true[i[near], 1])
-            sigma += list(locs["loc_precision_nm"][locs["frame"] == f][near])
+            sigma += list(locs["xy_err_nm"][locs["frame"] == f][near])
     dx, dy, sigma = np.array(dx), np.array(dy), np.array(sigma)
     assert abs(np.median(dx)) < 1.0 and abs(np.median(dy)) < 1.0    # no offset
     # each error against that spot's own precision: robustly about one sigma

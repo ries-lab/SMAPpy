@@ -6,7 +6,7 @@ localizations a filter cannot express -- writes it as an expression in the
 column names:
 
     on_time_ms = n_in_group * 20
-    within     = (loc_precision_nm < 25) & (sigma_nm > 100)
+    within     = (xy_err_nm < 25) & (sigma_nm > 100)
 
 This is SMAP's ``Process/Modify/MathParser``, with two departures.  MATLAB
 needs ``.*`` and ``./`` to stay elementwise and numpy does not, so the dots are

@@ -26,7 +26,7 @@ def table(n=3000, seed=0):
         # against photons the picture is a straight diagonal, wherever the
         # scales put it
         "photons": (100.0 * frame).astype(np.float32),
-        "loc_precision_nm": np.full(n, 12.0, np.float32),
+        "xy_err_nm": np.full(n, 12.0, np.float32),
     }, {"units": "nm"})
 
 

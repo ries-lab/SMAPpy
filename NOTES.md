@@ -506,7 +506,7 @@ construction: on a 1300x600 window the render is 1248x558 pixels of 46.5 nm,
 covering 58.0 x 26.0 um.  Empty area beside square data stays black, as part of
 the image, rather than grey figure background.
 
-Filter bounds now have defaults -- `loc_precision_nm` below 25 nm, `logl_rel`
+Filter bounds now have defaults -- `xy_err_nm` below 25 nm, `logl_rel`
 above -1.5, `z_nm` within +-500 -- because those are right almost every time
 and an unfiltered first view is not what anyone wants to look at.  Every one of
 them throws localizations away, so each is written into its box: the earlier
@@ -812,7 +812,7 @@ disagreed by 8.2 nm rms and the ungrouped z drift range came out 113 nm against
 the grouped 75 nm -- which looked like grouping damaging the axial estimate, and
 was not.  `z_err_nm` has a median of 41 nm and a 95th percentile of 108 nm: the
 out-of-focus tail carries the axial estimate away.  With
-`logl_rel > -2`, `loc_precision_nm < 15`, `|z_nm| < 300` (323 k of 844 k
+`logl_rel > -2`, `xy_err_nm < 15`, `|z_nm| < 300` (323 k of 844 k
 localizations) the ranges agree (69 vs 75 nm) and the two curves lie on top of
 each other: **median |difference| 0.9 nm in x, 0.6 in y, 1.4 in z**.
 
@@ -1418,6 +1418,40 @@ undo:
   plugin only through `ctx.table()`, so no existing plugin changed behaviour.
 * **Linear, and one file per input.**  Pooling across files, several files per
   input and parallel files are recorded under "Not yet" in `docs/batch.md`.
+
+## One name for a precision
+
+Every precision is `<quantity>_err_<unit>`, the unit last and nothing after
+it when there is none: `x_err_nm`, `z_err_nm`, `x_err_pix`, `photons_err`.
+The fitter had always written those; the two exceptions were the lateral
+precision, `loc_precision_nm` (`_pix`), and the axial one,
+`loc_precision_z_nm`.  They are now `xy_err_nm` (`xy_err_pix`) and `z_err_nm`.
+
+The second was a bug and not only a spelling.  SMAPpy's Spline 3D fit writes
+`z_err_nm`, while the renderer, Statistics, the precision plugin and the line
+profile looked for `loc_precision_z_nm`, which only files from other programs
+carried: after a SMAPpy 3D fit there was no z precision in Statistics and a
+side view was blurred along z by the lateral precision.  Those three plugins'
+versions are bumped for it.
+
+`xy_err` is the RMS of the two errors, `sqrt((x_err^2 + y_err^2) / 2)`, and
+wherever the pair exists it is *derived* from them rather than carried
+alongside (`columns.add_xy_err`): after the fit, after a conversion to nm with
+pixels that are not square, and after grouping, which combines `x_err` and
+`y_err` each by the precision rule and then derives `xy_err` from the pair.
+Grouping it by the rule directly gives a slightly different number, and the
+grouped table would disagree with itself.  A table with only a lateral
+precision (SMAP's `locprecnm`, ThunderSTORM's `uncertainty`, MINFLUX's
+estimate) keeps the one it has.
+
+Old names are renamed where things are read in, in one place: `columns.RENAMED`
+and `columns.current`, applied to an HDF5 table's columns and metadata (a
+derived column's expression, the ROI project's filters), the GUI state and tool
+results stored with it, workspaces, chain and batch files, ROI projects and
+pipelines, and the Math Parser's remembered expressions.  It renames whole
+words, so an old name inside an expression is renamed too.  Only the new names
+are written.  An ROI project fingerprints its source's column names; one saved
+before the rename is checked against the file as it is on disk.
 
 ## Open questions
 

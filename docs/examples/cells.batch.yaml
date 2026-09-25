@@ -13,7 +13,7 @@ inputs:
   - file: /data/2026-09-20/cell7/cell7_locs.hdf5
     overrides:                         # this file only
       filter.layers:
-        - {grouped: true, start: defaults, bounds: [{field: loc_precision_nm, hi: 15}]}
+        - {grouped: true, start: defaults, bounds: [{field: xy_err_nm, hi: 15}]}
 output:
   folder: /data/2026-09-20/smappy_batch
   suffix: _proc

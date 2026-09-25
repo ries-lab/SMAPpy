@@ -20,7 +20,7 @@ def _table(n=20000, seed=0, first_frame=0):
         "x_nm": rng.uniform(0, 10000, n).astype(np.float32),
         "y_nm": rng.uniform(0, 8000, n).astype(np.float32),
         "z_nm": rng.uniform(-400, 400, n).astype(np.float32),
-        "loc_precision_nm": (rng.gamma(4, 3, n) + 5).astype(np.float32),
+        "xy_err_nm": (rng.gamma(4, 3, n) + 5).astype(np.float32),
         "logl_rel": rng.normal(-1, 0.5, n).astype(np.float32),
         "frame": np.arange(first_frame, first_frame + n, dtype=np.int64),
     }, {"units": "nm"})
@@ -105,7 +105,7 @@ def test_appending_extends_the_filter_without_rederiving_it():
     part = whole[:2000]
     grown = Localizations()
     grown.extend(part)
-    filt = LocFilter(grown, loc_precision_nm=(None, 15.0), z_nm=(-100.0, 100.0))
+    filt = LocFilter(grown, xy_err_nm=(None, 15.0), z_nm=(-100.0, 100.0))
     ranges = filt.ranges
 
     for block in _blocks(whole[2000:], [1000, 3000]):
@@ -136,14 +136,14 @@ def test_an_appended_view_renders_what_the_whole_table_would(mode):
                       extent=(0.0, 0.0, 10000.0, 8000.0))
     for block in _blocks(whole, [4000, 1, 5999, 10000]):
         state.append(block)
-    state.filter.set("loc_precision_nm", None, 15.0)
+    state.filter.set("xy_err_nm", None, 15.0)
 
     assert len(state.locs) == len(whole)
     for fov in (FieldOfView.from_range((0, 10000), (0, 8000), 20.0),
                 FieldOfView.from_range((2000, 3000), (2000, 3000), 2.0)):
         reference = render_locs(whole, fov, state.settings,
                                 select=LocFilter(
-                                    whole, loc_precision_nm=(None, 15.0)).indices)
+                                    whole, xy_err_nm=(None, 15.0)).indices)
         assert np.allclose(state.render(fov).weight, reference.weight, atol=1e-6)
 
 
@@ -166,7 +166,7 @@ def test_appending_does_not_move_the_full_view_or_the_filter():
 def test_the_grouped_table_goes_stale_rather_than_lagging_silently():
     state = ViewState(_table(2000), live=True)
     state.show_grouped(True)
-    state.filter.set("loc_precision_nm", None, 12.0)   # the grouped filter
+    state.filter.set("xy_err_nm", None, 12.0)   # the grouped filter
     grouped_before = state.locs
     assert not state.grouped_stale
 
@@ -177,7 +177,7 @@ def test_the_grouped_table_goes_stale_rather_than_lagging_silently():
     rebuilt = state.group()
     assert not state.grouped_stale
     assert rebuilt.locs is not grouped_before
-    assert rebuilt.filter.ranges["loc_precision_nm"] == (None, 12.0)
+    assert rebuilt.filter.ranges["xy_err_nm"] == (None, 12.0)
 
 
 def test_appending_to_a_table_not_opened_for_it_is_refused():

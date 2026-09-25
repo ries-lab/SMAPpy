@@ -19,7 +19,7 @@ def _table(n=20000, seed=0):
     return Localizations({"x_nm": rng.uniform(0, 1000, n).astype(np.float32),
                           "y_nm": rng.uniform(0, 800, n).astype(np.float32),
                           "z_nm": rng.uniform(-300, 300, n).astype(np.float32),
-                          "loc_precision_nm": rng.uniform(5, 20, n).astype(np.float32),
+                          "xy_err_nm": rng.uniform(5, 20, n).astype(np.float32),
                           "photons": rng.uniform(100, 1000, n).astype(np.float32)}, {})
 
 
@@ -138,7 +138,7 @@ def test_the_default_occlusion_radius_is_visible_at_the_zoom_the_box_is_seen_at(
     locs = Localizations({"x_nm": rng.uniform(0, 4000, n).astype(np.float32),
                           "y_nm": rng.uniform(0, 4000, n).astype(np.float32),
                           "z_nm": rng.normal(0, 300, n).astype(np.float32),
-                          "loc_precision_nm": rng.uniform(8, 12, n).astype(np.float32)}, {})
+                          "xy_err_nm": rng.uniform(8, 12, n).astype(np.float32)}, {})
     s = Session(locs)
     s.layers[0].state.display = DisplaySettings(lut="gray")
     slab = Slab.from_bounds(0, 4000, 0, 4000, -900, 900)

@@ -18,7 +18,7 @@ def table(n=20):
         "y_nm": np.zeros(n, np.float32),
         "frame": np.arange(n, dtype=np.int64),
         "photons": np.full(n, 500.0, np.float32),
-        "loc_precision_nm": np.full(n, 10.0, np.float32),
+        "xy_err_nm": np.full(n, 10.0, np.float32),
     }, {"units": "nm"})
 
 

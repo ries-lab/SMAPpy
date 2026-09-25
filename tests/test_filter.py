@@ -16,7 +16,7 @@ def _table(n=1000, seed=0):
         "x_nm": rng.uniform(0, 10000, n).astype(np.float32),
         "y_nm": rng.uniform(0, 10000, n).astype(np.float32),
         "z_nm": z,
-        "loc_precision_nm": rng.gamma(4, 3, n).astype(np.float32),
+        "xy_err_nm": rng.gamma(4, 3, n).astype(np.float32),
         "logl_rel": rng.normal(-1, 0.5, n).astype(np.float32),
         "frame": np.arange(n, dtype=np.int64),
     }, {"units": "nm"})
@@ -24,8 +24,8 @@ def _table(n=1000, seed=0):
 
 def test_ranges_intersect():
     locs = _table()
-    f = LocFilter(locs, loc_precision_nm=(None, 15.0), logl_rel=(-2.0, None))
-    expected = (locs["loc_precision_nm"] <= 15.0) & (locs["logl_rel"] >= -2.0)
+    f = LocFilter(locs, xy_err_nm=(None, 15.0), logl_rel=(-2.0, None))
+    expected = (locs["xy_err_nm"] <= 15.0) & (locs["logl_rel"] >= -2.0)
     assert np.array_equal(f.mask, expected)
     assert len(f) == int(expected.sum()) and 0 < len(f) < len(locs)
     assert np.array_equal(f.indices, np.flatnonzero(expected))
@@ -44,15 +44,15 @@ def test_nan_is_excluded_by_any_range():
 
 def test_changing_one_filter_recomputes_only_that_one():
     locs = _table()
-    f = LocFilter(locs, loc_precision_nm=(0.0, 15.0), logl_rel=(-2.0, 0.0))
+    f = LocFilter(locs, xy_err_nm=(0.0, 15.0), logl_rel=(-2.0, 0.0))
     kept = f.mask.copy()
     other = f._masks["logl_rel"]           # the array a GUI must not have to redo
 
-    f.set("loc_precision_nm", 0.0, 10.0)
+    f.set("xy_err_nm", 0.0, 10.0)
     assert f._masks["logl_rel"] is other   # untouched, not merely equal
     assert f.mask.sum() < kept.sum()       # and the result did change
 
-    f.remove("loc_precision_nm")
+    f.remove("xy_err_nm")
     assert np.array_equal(f.mask, other)
     assert f.clear().mask.all()
 
@@ -60,8 +60,8 @@ def test_changing_one_filter_recomputes_only_that_one():
 def test_arbitrary_masks_join_the_intersection():
     locs = _table()
     inside = locs["x_nm"] < 5000
-    f = LocFilter(locs, loc_precision_nm=(None, 15.0)).set_mask("view", inside)
-    assert np.array_equal(f.mask, inside & (locs["loc_precision_nm"] <= 15.0))
+    f = LocFilter(locs, xy_err_nm=(None, 15.0)).set_mask("view", inside)
+    assert np.array_equal(f.mask, inside & (locs["xy_err_nm"] <= 15.0))
     assert f.counts()["view"] == int(inside.sum())
     with pytest.raises(ValueError):
         f.set_mask("bad", np.ones(3, bool))
@@ -78,7 +78,7 @@ def test_quantile_range_ignores_tails_and_nan():
 def test_filter_and_render_agree_with_rendering_the_filtered_table():
     locs = _table()
     fov = FieldOfView.from_range((0, 10000), (0, 10000), 50.0)
-    f = LocFilter(locs, loc_precision_nm=(None, 12.0))
+    f = LocFilter(locs, xy_err_nm=(None, 12.0))
     settings = RenderSettings(mode="precision")
 
     through_filter = render_locs(locs, fov, settings, select=f)

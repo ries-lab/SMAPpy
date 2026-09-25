@@ -18,6 +18,7 @@ from uuid import uuid4
 import h5py
 import numpy as np
 
+from ..columns import current
 from ..group import GroupSettings
 from ..io.hdf5 import load_localizations
 from ..locs import Localizations, to_nm
@@ -609,7 +610,7 @@ class ROIProject:
         with h5py.File(path, 'r') as f:
             if f.attrs.get('format') != 'smappy-roi-project' or f.attrs.get('format_version') != 1:
                 raise ValueError("Unsupported ROI project format")
-            doc = json.loads(f['project'][()])
+            doc = current(json.loads(f['project'][()]))
         project = cls()
         project.set_geometry(doc['size_nm'], doc['shape'])
         project.set_tiles(doc.get('tile_nm', 0.0))
@@ -620,7 +621,10 @@ class ROIProject:
             source_path = (source_paths or {}).get(saved['id'], path.parent / saved['path'])
             source = project.add_source(load_localizations(source_path), path=source_path,
                                         name=saved['name'], source_id=saved['id'])
-            if source.fingerprint != saved['fingerprint']:
+            # a project saved before a column rename fingerprinted the old names
+            if (source.fingerprint != saved['fingerprint']
+                    and Source(load_localizations(source_path, renamed=False)
+                               ).fingerprint != saved['fingerprint']):
                 raise ValueError(f"Source contents changed: {source_path}. Restore the original source.")
         for saved in doc['rois']:
             roi = ROI(**saved)

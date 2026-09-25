@@ -14,7 +14,7 @@ def table(n=200, seed=0, photons=100.0):
                           "y_nm": rng.uniform(0, 1000, n),
                           "frame": np.arange(n, dtype=np.int64),
                           "photons": np.full(n, photons),
-                          "loc_precision_nm": np.full(n, 10.0)})
+                          "xy_err_nm": np.full(n, 10.0)})
 
 
 def step(session, name, change):

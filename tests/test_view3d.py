@@ -14,7 +14,7 @@ def _table(n=5000, seed=0):
     return Localizations({"x_nm": rng.uniform(0, 1000, n).astype(np.float32),
                           "y_nm": rng.uniform(0, 800, n).astype(np.float32),
                           "z_nm": rng.uniform(-300, 300, n).astype(np.float32),
-                          "loc_precision_nm": rng.uniform(5, 20, n).astype(np.float32)}, {})
+                          "xy_err_nm": rng.uniform(5, 20, n).astype(np.float32)}, {})
 
 
 def test_top_view_is_the_2d_image():
@@ -24,7 +24,7 @@ def test_top_view_is_the_2d_image():
     settings, display = RenderSettings(), DisplaySettings()
     rgb, planes = render_layer_3d(locs, np.ones(len(locs), bool), proj, None, fov, settings, display)
     shifted = Localizations({"x_nm": locs["x_nm"] - 500, "y_nm": locs["y_nm"] - 400,
-                             "loc_precision_nm": locs["loc_precision_nm"]}, {})
+                             "xy_err_nm": locs["xy_err_nm"]}, {})
     ref = render_locs(shifted, fov, settings, display)
     assert np.allclose(planes.weight, ref.weight, atol=1e-5)
 
@@ -85,7 +85,7 @@ def test_opacity_zero_is_the_plain_sum_and_one_hides_the_back():
     y = np.tile(rng.uniform(0, 500, n // 2), 2).astype(np.float32)
     z = np.r_[np.zeros(n // 2), np.full(n // 2, 300.0)].astype(np.float32)
     locs = Localizations({"x_nm": x, "y_nm": y, "z_nm": z,
-                          "loc_precision_nm": np.full(n, 10, np.float32)}, {})
+                          "xy_err_nm": np.full(n, 10, np.float32)}, {})
     sel = np.ones(n, bool)
     settings, display = RenderSettings(), DisplaySettings()
     proj = Projection(pivot=[250, 250, 150], zoom=5.0)

@@ -21,6 +21,7 @@ from typing import Sequence, Dict, Iterator, Optional
 
 import numpy as np
 
+from .columns import add_xy_err
 from .metadata import CameraMetadata, pixel_sizes
 from .psf import FitResult, PSFModel
 from .roi import ROIStack
@@ -139,8 +140,7 @@ def fit_to_localizations(result: FitResult, rois: ROIStack, model: PSFModel,
         if name in p:
             cols[name] = p[name]
 
-    cols["loc_precision_pix"] = np.sqrt((cols["x_err_pix"] ** 2
-                                         + cols["y_err_pix"] ** 2) / 2)
+    add_xy_err(cols)
 
     for key, value in cols.items():
         if key not in ("frame", "iterations"):
@@ -154,7 +154,7 @@ _PIXEL_COLUMNS = {
     "x_pix": "x_nm", "y_pix": "y_nm",
     "x_err_pix": "x_err_nm", "y_err_pix": "y_err_nm",
     "peak_x_pix": "peak_x_nm", "peak_y_pix": "peak_y_nm",
-    "loc_precision_pix": "loc_precision_nm",
+    "xy_err_pix": "xy_err_nm",
     "sigma_pix": "sigma_nm", "sigma_x_pix": "sigma_x_nm",
     "sigma_y_pix": "sigma_y_nm",
 }
@@ -218,6 +218,9 @@ def to_nm(locs: Localizations, pixelsize_nm,
         columns[target] = np.asarray(values, dtype=np.float32) * np.float32(scale)
         if keep_pixels:
             columns[name] = values
+    # scaled by the mean above; derived again so that it stays the RMS of the
+    # two errors when the pixels are not square
+    add_xy_err(columns)
 
     metadata = dict(locs.metadata)
     metadata["units"] = "pixel+nm" if keep_pixels else "nm"

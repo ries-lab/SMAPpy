@@ -31,7 +31,7 @@ def table(seed, n=4000):
         "y_nm": rng.uniform(0, 10_000, n).astype(np.float32),
         "frame": rng.integers(0, 200, n).astype(np.int64),
         "photons": rng.uniform(100, 900, n).astype(np.float32),
-        "loc_precision_nm": rng.uniform(5, 25, n).astype(np.float32),
+        "xy_err_nm": rng.uniform(5, 25, n).astype(np.float32),
     }, {"units": "nm"})
 
 
@@ -210,7 +210,7 @@ def _layer_table(n=2000):
                           "y_nm": rng.uniform(0, 1000, n),
                           "frame": (np.arange(n) % 50).astype(np.int64),
                           "photons": rng.exponential(500, n),
-                          "loc_precision_nm": rng.uniform(5, 40, n)}, {})
+                          "xy_err_nm": rng.uniform(5, 40, n)}, {})
 
 
 def test_the_invert_tick_and_the_inversion_are_one_setting():

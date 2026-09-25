@@ -216,7 +216,7 @@ def test_nm_coordinates_use_each_axis_pixel_size():
     from smappy.locs import Localizations, to_nm
     locs = Localizations({"x_pix": np.array([1.0, 2.0]),
                           "y_pix": np.array([1.0, 2.0]),
-                          "loc_precision_pix": np.array([1.0, 1.0])})
+                          "xy_err_pix": np.array([1.0, 1.0])})
     square = to_nm(locs, 100.0)
     assert square["x_nm"].tolist() == [100.0, 200.0]
     assert square["y_nm"].tolist() == [100.0, 200.0]
@@ -228,7 +228,7 @@ def test_nm_coordinates_use_each_axis_pixel_size():
     assert rectangular["y_nm"].tolist() == [103.0, 206.0]
     # a width is neither x nor y; the mean is exact for square pixels and the
     # only sensible answer for these
-    assert rectangular["loc_precision_nm"].tolist() == [102.5, 102.5]
+    assert rectangular["xy_err_nm"].tolist() == [102.5, 102.5]
     assert rectangular.metadata["pixelsize_nm_xy"] == [102.0, 103.0]
 
 

@@ -1,7 +1,7 @@
 """Localization file formats: one registry, one ``load`` for all of them.
 
 Every reader turns a file into smappy's column set -- ``x_nm``, ``y_nm``,
-``z_nm``, ``frame``, ``photons``, ``loc_precision_nm``, ``sigma_nm``,
+``z_nm``, ``frame``, ``photons``, ``xy_err_nm``, ``sigma_nm``,
 ``logl_rel``, ... -- keeping any extra column under its own name, and
 returns it with a :class:`FileInfo`.  Positions are in nm; the pixel size,
 where the format records one, is in the info.
@@ -20,6 +20,7 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
+from ..columns import current_name
 from ..locs import Localizations
 
 
@@ -164,8 +165,8 @@ register_writer(Writer("smappy HDF5", (".hdf5", ".h5"), _save_smappy))
 # --------------------------------------------------------------- SMAP sml
 SML_COLUMNS = {
     "xnm": "x_nm", "ynm": "y_nm", "znm": "z_nm", "frame": "frame",
-    "phot": "photons", "bg": "background", "locprecnm": "loc_precision_nm",
-    "locprecznm": "loc_precision_z_nm", "PSFxnm": "sigma_nm", "PSFynm": "sigma_y_nm",
+    "phot": "photons", "bg": "background", "locprecnm": "xy_err_nm",
+    "locprecznm": "z_err_nm", "PSFxnm": "sigma_nm", "PSFynm": "sigma_y_nm",
     "LLrel": "logl_rel", "logLikelihood": "logl", "channel": "channel",
     "xnmerr": "x_err_nm", "ynmerr": "y_err_nm", "zerr": "z_err_nm",
     "photerr": "photons_err", "iterations": "iterations",
@@ -329,7 +330,7 @@ def _load_minflux(path: Path, valid_only: bool = True) -> Tuple[Localizations, F
     photons = (np.asarray(last["eco"], np.float32) if "eco" in last.dtype.names
                else np.full(n, np.nan, np.float32))
     columns["photons"] = photons
-    columns["loc_precision_nm"] = (MINFLUX_PSF_NM / np.sqrt(np.maximum(photons, 1))).astype(np.float32)
+    columns["xy_err_nm"] = (MINFLUX_PSF_NM / np.sqrt(np.maximum(photons, 1))).astype(np.float32)
     columns["sigma_nm"] = np.full(n, MINFLUX_PSF_NM, np.float32)
     for name in ("efo", "cfr", "dcr", "efc", "ecc", "fbg"):
         if name in last.dtype.names:
@@ -353,9 +354,9 @@ CSV_NAMES = {
     "x": "x_nm", "y": "y_nm", "z": "z_nm", "xnm": "x_nm", "ynm": "y_nm", "znm": "z_nm",
     "x_nm": "x_nm", "y_nm": "y_nm", "z_nm": "z_nm", "frame": "frame", "t": "frame",
     "intensity": "photons", "photons": "photons", "phot": "photons", "n": "photons",
-    "uncertainty": "loc_precision_nm", "uncertainty_xy": "loc_precision_nm",
-    "locprecnm": "loc_precision_nm", "loc_precision_nm": "loc_precision_nm",
-    "uncertainty_z": "loc_precision_z_nm", "locprecznm": "loc_precision_z_nm",
+    "uncertainty": "xy_err_nm", "uncertainty_xy": "xy_err_nm",
+    "locprecnm": "xy_err_nm", "xy_err_nm": "xy_err_nm",
+    "uncertainty_z": "z_err_nm", "locprecznm": "z_err_nm", "z_err_nm": "z_err_nm",
     "sigma": "sigma_nm", "sigma1": "sigma_nm", "sigma2": "sigma_y_nm", "psfxnm": "sigma_nm",
     "sigma_nm": "sigma_nm", "offset": "background", "bkgstd": "background_std",
     "bg": "background", "background": "background", "channel": "channel",
@@ -399,7 +400,7 @@ def guess_csv_mapping(headers: Sequence[str]) -> Dict[str, str]:
     mapping = {}
     for h in headers:
         name, unit = _clean(h)
-        target = CSV_NAMES.get(name)
+        target = CSV_NAMES.get(current_name(name))
         if target and target not in mapping.values():
             mapping[h] = target
     return mapping
@@ -418,7 +419,9 @@ def _load_csv(path: Path, mapping: Optional[Dict[str, str]] = None,
     data = np.atleast_2d(data)
     if data.shape[1] != len(headers):
         data = data.reshape(-1, len(headers))
-    mapping = dict(mapping or guess_csv_mapping(headers))
+    # the headers are the file's own; a target saved before a rename is not
+    mapping = {h: current_name(c) for h, c in
+               dict(mapping or guess_csv_mapping(headers)).items()}
     missing = [c for c in CSV_REQUIRED if c not in mapping.values()]
     if missing:
         raise ValueError(f"{path.name}: no column for {', '.join(missing)}; "
@@ -438,7 +441,7 @@ def _load_csv(path: Path, mapping: Optional[Dict[str, str]] = None,
     if units == "px":
         if not pixelsize_nm:
             raise ValueError("positions in pixels need pixelsize_nm")
-        for name in ("x_nm", "y_nm", "loc_precision_nm", "sigma_nm", "sigma_y_nm"):
+        for name in ("x_nm", "y_nm", "xy_err_nm", "sigma_nm", "sigma_y_nm"):
             if name in columns:
                 columns[name] = columns[name] * np.float32(pixelsize_nm)
     if "frame" not in columns:

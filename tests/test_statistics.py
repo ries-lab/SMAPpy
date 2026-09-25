@@ -30,8 +30,8 @@ def simulate(n=200_000, threshold=150.0, seed=0):
         {"frame": np.arange(len(photons), dtype=np.int64),
          "x_nm": rng.uniform(0, 1e4, len(photons)),
          "y_nm": rng.uniform(0, 1e4, len(photons)),
-         "photons": photons, "loc_precision_nm": sigma,
-         "loc_precision_z_nm": 2.5 * sigma, "n_in_group": on_time},
+         "photons": photons, "xy_err_nm": sigma,
+         "z_err_nm": 2.5 * sigma, "n_in_group": on_time},
         {"units": "nm"})
 
 
@@ -75,14 +75,14 @@ def test_the_photon_fit_finds_the_decay_constant_above_the_threshold():
 
 def test_the_precision_fit_finds_sigma_c_and_both_landmarks():
     locs = simulate()
-    stats = precision_model(locs["loc_precision_nm"])
+    stats = precision_model(locs["xy_err_nm"])
     assert stats["sigma_c"] == pytest.approx(SIGMA_C, rel=0.02)
     assert stats["max"] == pytest.approx(SIGMA_C * np.sqrt(2 / 3), rel=0.02)
     assert stats["rising"] == pytest.approx(SIGMA_C / np.sqrt(HALF_MAX_U), rel=0.02)
     assert stats["rising"] < stats["max"] < stats["median"]
 
     # the histogram is read independently of the fit, and agrees with it
-    dist = precision_distribution(locs["loc_precision_nm"])
+    dist = precision_distribution(locs["xy_err_nm"])
     assert dist.stats["histogram_max"] == pytest.approx(stats["max"], rel=0.05)
     assert dist.stats["histogram_rising"] == pytest.approx(stats["rising"], rel=0.05)
 
@@ -223,7 +223,7 @@ def _blinks(n_emitters=300, on=3):
         "y_nm": (xy[rows, 1] + rng.normal(0, 3, n)).astype(np.float32),
         "frame": (start[rows] + np.tile(np.arange(on), n_emitters)).astype(np.int64),
         "photons": photons,
-        "loc_precision_nm": (150 / np.sqrt(photons)).astype(np.float32),
+        "xy_err_nm": (150 / np.sqrt(photons)).astype(np.float32),
     }, {"units": "nm"})
 
 

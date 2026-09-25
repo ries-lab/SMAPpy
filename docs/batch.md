@@ -46,7 +46,7 @@ steps:
       layers:
         - grouped: true
           bounds:
-            - {field: loc_precision_nm, hi: 20}
+            - {field: xy_err_nm, hi: 20}
             - {field: photons, lo: 0.01, quantile: true}
   - plugin: Analysis/Drift/RCC
     label: drift

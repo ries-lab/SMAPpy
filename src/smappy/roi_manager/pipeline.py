@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional, Sequence
 
 import yaml
 
+from ..columns import current
 from ..plugins import settings_from, settings_values
 from ..workspace import Instance
 
@@ -164,4 +165,4 @@ def save(instances: Sequence[Instance], path) -> Path:
 
 
 def load(path) -> List[Instance]:
-    return from_dict(yaml.safe_load(Path(path).read_text()) or {})
+    return from_dict(current(yaml.safe_load(Path(path).read_text()) or {}))

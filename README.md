@@ -151,7 +151,7 @@ across consecutive frames, and writing a picture without opening a window:
     from smappy.render import FieldOfView, RenderSettings, DisplaySettings, render_locs
     from smappy.group import group, GroupSettings
 
-    keep = LocFilter(locs, loc_precision_nm=(None, 20), logl_rel=(-2, 0))
+    keep = LocFilter(locs, xy_err_nm=(None, 20), logl_rel=(-2, 0))
     fov = FieldOfView.around(locs["x_nm"], locs["y_nm"], pixelsize=10.0)
     image = render_locs(locs, fov, RenderSettings(mode="precision"), select=keep)
     rgb = DisplaySettings(lut="hot", gamma=0.7).apply(image)
@@ -175,7 +175,7 @@ install drift-corrects with nothing else added.  **Cite COMET** if you publish
 work that used it.
 
     smappy-drift OUT.h5 \
-        --filter loc_precision_nm - 15 --filter logl_rel -2 - \
+        --filter xy_err_nm - 15 --filter logl_rel -2 - \
         --filter z_nm -300 300
 
 The default is **the best estimator measured so far**: the drift is fitted as a

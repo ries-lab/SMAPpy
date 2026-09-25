@@ -1236,8 +1236,8 @@ class DualGaussianFit(_FitPlugin):
             np.asarray(locs["frame"]), source.shape[-2:],
             camera.roi, settings=settings.transform.registration,
             progress=ctx.report,
-            precision=(np.asarray(locs["loc_precision_pix"], float)
-                       if "loc_precision_pix" in locs else None))
+            precision=(np.asarray(locs["xy_err_pix"], float)
+                       if "xy_err_pix" in locs else None))
 
         if settings.transform.save_calibration:
             out = settings.output.resolve(src.path)

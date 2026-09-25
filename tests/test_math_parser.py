@@ -26,7 +26,7 @@ def table(n=12):
         "y_nm": np.zeros(n, np.float32),
         "frame": np.arange(n, dtype=np.int64) % (n // 3),
         "photons": np.linspace(100, 1200, n).astype(np.float32),
-        "loc_precision_nm": np.full(n, 10.0, np.float32),
+        "xy_err_nm": np.full(n, 10.0, np.float32),
     }, {"units": "nm"})
 
 
@@ -55,7 +55,7 @@ def test_the_rounding_and_modulus_functions_are_there():
 def test_a_flag_is_a_column_of_zeros_and_ones():
     """Everything downstream treats a column as numbers; a bool is not one."""
     locs = table()
-    flag = evaluate(locs, "(photons > 500) & (loc_precision_nm < 25)")
+    flag = evaluate(locs, "(photons > 500) & (xy_err_nm < 25)")
     assert flag.dtype == np.float32
     assert np.array_equal(flag, (np.asarray(locs["photons"]) > 500).astype(np.float32))
 
@@ -67,8 +67,8 @@ def test_one_number_becomes_a_column():
 
 
 def test_names_in_are_the_columns_and_not_the_functions():
-    assert names_in("(loc_precision_nm < 25) & (sigma_nm > 100)") == \
-        {"loc_precision_nm", "sigma_nm"}
+    assert names_in("(xy_err_nm < 25) & (sigma_nm > 100)") == \
+        {"xy_err_nm", "sigma_nm"}
     assert names_in("round(x_nm) + pi") == {"x_nm"}
 
 

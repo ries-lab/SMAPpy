@@ -602,7 +602,7 @@ def project_layer(locs: Localizations, select: np.ndarray, projection: Projectio
     xv, yv, depth = projection.apply(x[idx], y[idx], None if z is None else z[idx])
     columns = {"x_nm": xv.astype(np.float32), "y_nm": yv.astype(np.float32),
                "depth": depth.astype(np.float32)}
-    for name in ("loc_precision_nm", "loc_precision_pix", settings.color_field,
+    for name in ("xy_err_nm", "xy_err_pix", settings.color_field,
                  settings.weight_field):
         if name and name in locs and name not in columns:
             columns[name] = np.asarray(locs[name])[idx]
@@ -764,7 +764,7 @@ def sphere_draw(engine, locs: Localizations, select: np.ndarray, projection: Pro
     x, y = axes.coordinates(locs)
     z = axes.depth(locs)
     settings, _ = projected_settings(locs, settings)
-    prec_name = next((n for n in ("loc_precision_nm", "loc_precision_pix") if n in locs), None)
+    prec_name = next((n for n in ("xy_err_nm", "xy_err_pix") if n in locs), None)
     color_field = "depth" if projection.color_by_depth else settings.color_field
     key = _table_key(locs, prec_name, settings.weight_field, color_field)
     cvalues = (locs[color_field] if color_field and color_field != "depth" and color_field in locs
@@ -815,7 +815,7 @@ def render_layer_gpu(engine, locs: Localizations, select: np.ndarray, projection
     z = axes.depth(locs)
     settings, precision_scale = projected_settings(locs, settings)
     median_precision = median_precision / precision_scale
-    prec_name = next((n for n in ("loc_precision_nm", "loc_precision_pix") if n in locs), None)
+    prec_name = next((n for n in ("xy_err_nm", "xy_err_pix") if n in locs), None)
     color_field = "depth" if projection.color_by_depth else settings.color_field
     key = _table_key(locs, prec_name, settings.weight_field, color_field)
     cvalues = (locs[color_field] if color_field and color_field != "depth" and color_field in locs

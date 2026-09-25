@@ -22,7 +22,7 @@ def table(centers, per=10, seed=0):
     n = per * len(centers)
     return Localizations({"x_nm": np.concatenate(x), "y_nm": np.concatenate(y),
                           "frame": np.arange(n), "photons": np.full(n, 200.0),
-                          "loc_precision_nm": np.full(n, 11.0)})
+                          "xy_err_nm": np.full(n, 11.0)})
 
 
 # ------------------------------------------------------------- the plugins
@@ -74,10 +74,10 @@ def test_histograms_picks_the_numeric_columns_itself():
 
 def test_a_pipeline_step_is_the_same_instance_type_a_tab_pins():
     instance = Instance(plugin="ROIManager/Evaluate/Statistics",
-                        values={"precision_column": "loc_precision_nm"})
+                        values={"precision_column": "xy_err_nm"})
     step, = pipeline_module.resolve([instance])
     assert step.label == "Statistics" and step.version == "1"
-    assert step.settings.precision_column == "loc_precision_nm"
+    assert step.settings.precision_column == "xy_err_nm"
     assert step.as_record()["plugin"] == "ROIManager/Evaluate/Statistics"
 
 
@@ -224,7 +224,7 @@ def test_find_evaluate_and_analyse_through_the_session(app):
     y = np.concatenate([rng.normal(c, 30, 100) for c in (0, 0, 3000, 3000)])
     session = Session(Localizations({
         "x_nm": x, "y_nm": y, "frame": np.arange(n),
-        "photons": np.full(n, 300.0), "loc_precision_nm": np.full(n, 9.0)}))
+        "photons": np.full(n, 300.0), "xy_err_nm": np.full(n, 9.0)}))
     session.show_grouped(0, False)
     project = session.rois
     project.set_geometry(400)

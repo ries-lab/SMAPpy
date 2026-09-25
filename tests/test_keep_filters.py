@@ -20,7 +20,7 @@ def table(n=4000, seed=0):
         "y_nm": rng.uniform(0, 10_000, n).astype(np.float32),
         "frame": rng.integers(0, 200, n).astype(np.int64),
         "phot": rng.uniform(100, 5000, n).astype(np.float32),
-        "loc_precision_nm": rng.uniform(5, 40, n).astype(np.float32),
+        "xy_err_nm": rng.uniform(5, 40, n).astype(np.float32),
         "logl_rel": rng.uniform(-3, 0, n).astype(np.float32),
     }, {})
 
@@ -52,7 +52,7 @@ def test_a_correction_keeps_the_bounds_on_both_tables():
     for which in ("ungrouped", "grouped"):
         ranges = layer.state.sets[which].filter.ranges
         assert ranges.get("phot") == (500, None), which
-        assert ranges.get("loc_precision_nm") == (None, 25.0), which
+        assert ranges.get("xy_err_nm") == (None, 25.0), which
     assert layer.filter.mask.sum() == before   # and the same rows are kept
 
 

@@ -78,7 +78,7 @@ def _table(n=12):
     return Localizations({
         "x_nm": np.repeat([100.0, 500.0, 900.0], 4).astype(np.float32),
         "y_nm": np.zeros(n, np.float32),
-        "loc_precision_nm": rng.uniform(5, 20, n).astype(np.float32),
+        "xy_err_nm": rng.uniform(5, 20, n).astype(np.float32),
         "photons": rng.uniform(1000, 5000, n).astype(np.float32),
         "photons_err": rng.uniform(50, 200, n).astype(np.float32),
         "logl_rel": rng.normal(-1, 0.3, n).astype(np.float32),
@@ -93,15 +93,15 @@ def test_combine_follows_the_rules_per_column():
     assert len(grouped) == 3
     assert np.array_equal(grouped["n_in_group"], [4, 4, 4])
 
-    w = 1.0 / np.asarray(locs["loc_precision_nm"], np.float64) ** 2
+    w = 1.0 / np.asarray(locs["xy_err_nm"], np.float64) ** 2
     for g in range(3):
         s = slice(4 * g, 4 * g + 4)
         assert grouped["x_nm"][g] == pytest.approx(
             np.average(locs["x_nm"][s], weights=w[s]), rel=1e-5)
         assert grouped["photons"][g] == pytest.approx(
             np.sum(locs["photons"][s]), rel=1e-5)
-        assert grouped["loc_precision_nm"][g] == pytest.approx(
-            1 / np.sqrt(np.sum(1 / locs["loc_precision_nm"][s] ** 2)), rel=1e-5)
+        assert grouped["xy_err_nm"][g] == pytest.approx(
+            1 / np.sqrt(np.sum(1 / locs["xy_err_nm"][s] ** 2)), rel=1e-5)
         # the error of a *sum* adds in quadrature, not by the precision rule
         assert grouped["photons_err"][g] == pytest.approx(
             np.sqrt(np.sum(locs["photons_err"][s] ** 2)), rel=1e-5)
@@ -116,8 +116,8 @@ def test_grouping_improves_precision_and_conserves_photons():
     assert np.asarray(grouped["photons"]).sum() == pytest.approx(
         np.asarray(locs["photons"], np.float64).sum(), rel=1e-5)
     for g in range(3):
-        best = locs["loc_precision_nm"][4 * g:4 * g + 4].min()
-        assert grouped["loc_precision_nm"][g] < best
+        best = locs["xy_err_nm"][4 * g:4 * g + 4].min()
+        assert grouped["xy_err_nm"][g] < best
 
 
 def test_the_meaningless_columns_are_dropped_not_guessed():
@@ -148,7 +148,7 @@ def test_summed_errors_stay_consistent_with_shot_noise():
     locs = Localizations({
         "x_nm": np.zeros(4, np.float32), "y_nm": np.zeros(4, np.float32),
         "photons": photons, "photons_err": np.sqrt(photons).astype(np.float32),
-        "loc_precision_nm": np.full(4, 10.0, np.float32),
+        "xy_err_nm": np.full(4, 10.0, np.float32),
         "frame": np.arange(4, dtype=np.int64),
     }, {"units": "nm"})
     grouped = combine(locs, np.ones(4, np.int64))
@@ -167,7 +167,7 @@ def test_each_coordinate_is_weighted_by_its_own_error():
         "y_nm": np.array([40.0, 0.0, -100.0], np.float32),
         "x_err_nm": np.array([50.0, 5.0, 50.0], np.float32),
         "y_err_nm": np.array([5.0, 50.0, 5.0], np.float32),
-        "loc_precision_nm": np.array([35.4, 35.4, 35.4], np.float32),
+        "xy_err_nm": np.array([35.4, 35.4, 35.4], np.float32),
         "frame": np.arange(3, dtype=np.int64),
     }, {"units": "nm"})
     grouped = combine(locs, np.ones(3, np.int64))
@@ -187,14 +187,14 @@ def test_z_is_weighted_by_its_own_error_when_the_table_has_one():
     locs = Localizations({
         "x_nm": np.zeros(3, np.float32), "y_nm": np.zeros(3, np.float32),
         "z_nm": z, "z_err_nm": z_err,
-        "loc_precision_nm": np.array([5.0, 50.0, 5.0], np.float32),
+        "xy_err_nm": np.array([5.0, 50.0, 5.0], np.float32),
         "frame": np.arange(3, dtype=np.int64),
     }, {"units": "nm"})
     grouped = combine(locs, np.ones(3, np.int64))
 
     by_z_err = np.average(z.astype(np.float64), weights=1 / z_err.astype(np.float64) ** 2)
     by_lateral = np.average(z.astype(np.float64),
-                            weights=1 / locs["loc_precision_nm"].astype(np.float64) ** 2)
+                            weights=1 / locs["xy_err_nm"].astype(np.float64) ** 2)
     assert grouped["z_nm"][0] == pytest.approx(by_z_err, abs=1e-3)
     assert abs(by_z_err - by_lateral) > 1.0        # the two really do differ here
     assert grouped["z_err_nm"][0] == pytest.approx(
@@ -214,7 +214,7 @@ def test_linking_is_lateral_and_does_not_look_at_z():
     locs = Localizations({"x_nm": np.full(n, 100.0, np.float32), "y_nm": np.full(n, 100.0, np.float32),
                           "z_nm": np.where(np.arange(n) % 2 == 0, 0.0, 400.0).astype(np.float32),
                           "frame": np.arange(n, dtype=np.int64),
-                          "loc_precision_nm": np.full(n, 10, np.float32)}, {})
+                          "xy_err_nm": np.full(n, 10, np.float32)}, {})
     flat, _ = group(locs, GroupSettings(dx=50, dt=1))
     assert len(flat) == 1
     with pytest.raises(TypeError):
@@ -380,7 +380,7 @@ def test_grouping_uses_the_chunked_linker_and_can_be_told_not_to():
     x, y, f = _blinking(n_emitters=4000, frames=600, seed=3)
     locs = Localizations({"x_nm": x.astype(np.float32), "y_nm": y.astype(np.float32),
                           "frame": f, "photons": np.ones(len(x), np.float32),
-                          "loc_precision_nm": np.full(len(x), 10.0, np.float32)},
+                          "xy_err_nm": np.full(len(x), 10.0, np.float32)},
                          {"units": "nm"})
     assert GroupSettings().link_chunks == 8
     chunked, _ = group(locs, GroupSettings())
@@ -397,7 +397,7 @@ def test_combine_reduces_each_column_by_its_own_rule():
         "x_nm": x.astype(np.float32), "y_nm": y.astype(np.float32), "frame": f,
         "photons": rng.uniform(100, 900, n).astype(np.float32),
         "photons_err": rng.uniform(5, 40, n).astype(np.float32),
-        "loc_precision_nm": rng.uniform(5, 25, n).astype(np.float32),
+        "xy_err_nm": rng.uniform(5, 25, n).astype(np.float32),
         "x_err_nm": rng.uniform(5, 25, n).astype(np.float32),
         "y_err_nm": rng.uniform(5, 25, n).astype(np.float32),
         "logl_rel": rng.uniform(-2, 0, n).astype(np.float32),
@@ -454,7 +454,7 @@ def test_the_compiled_combiner_agrees_with_numpy_in_every_mode(monkeypatch):
         "photons": rng.uniform(100, 900, n).astype(np.float32),        # sum
         "background": rng.uniform(1, 50, n).astype(np.float32),        # sum
         "photons_err": rng.uniform(5, 40, n).astype(np.float32),       # quad
-        "loc_precision_nm": rng.uniform(5, 25, n).astype(np.float32),  # precision
+        "xy_err_nm": rng.uniform(5, 25, n).astype(np.float32),  # precision
         "x_err_nm": rng.uniform(5, 25, n).astype(np.float32),
         "y_err_nm": rng.uniform(5, 25, n).astype(np.float32),
         "z_err_nm": rng.uniform(20, 90, n).astype(np.float32),
