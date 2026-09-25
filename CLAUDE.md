@@ -206,14 +206,18 @@ rather than something already drawn.
 | `x_nm`, `y_nm`, `z_nm` | position (a pixel-unit table has `x_pix`, ...) |
 | `frame` | camera frame, int64 |
 | `photons`, `background` | per localization |
-| `loc_precision_nm` | lateral precision; `loc_precision_pix` in a pixel table |
-| `loc_precision_z_nm` | axial precision, when the fit produced one |
+| `xy_err_nm` | lateral precision, the RMS of `x_err_nm` and `y_err_nm`; `xy_err_pix` in a pixel table |
+| `z_err_nm` | axial precision, when the fit produced one |
 | `n_in_group` | **on-time in frames**; grouping writes it onto both tables |
 | `group_id` | which group a localization was linked into, 1-based; on the grouped table, its own row |
 | `sigma_nm`, `sigma_y_nm`, `logl_rel` | PSF width and fit quality |
 | `filenumber`, `channel` | which file, which channel |
 
-Prefer `next((n for n in ("loc_precision_nm", "loc_precision_pix") if n in locs), None)`
+Every precision is `<quantity>_err_<unit>` -- `x_err_nm`, `z_err_nm`,
+`photons_err` (no unit, nothing after `_err`).  Names saved before a rename
+are read through `columns.RENAMED`, and only there.
+
+Prefer `next((n for n in ("xy_err_nm", "xy_err_pix") if n in locs), None)`
 over assuming one spelling, and raise a message naming the columns the table
 *does* have when something is missing.
 
@@ -310,7 +314,7 @@ transliterated.  The correspondence:
 
 Column names differ; `src/smappy/io/formats.py` (`SML_COLUMNS`) is the
 authoritative map -- `xnm`->`x_nm`, `phot`->`photons`, `locprecnm`->
-`loc_precision_nm`, `PSFxnm`->`sigma_nm`, `LLrel`->`logl_rel`.  SMAP's
+`xy_err_nm`, `locprecznm`->`z_err_nm`, `PSFxnm`->`sigma_nm`, `LLrel`->`logl_rel`.  SMAP's
 `numberInGroup` is `n_in_group` and no loader writes it: it comes from linking
 here.
 
