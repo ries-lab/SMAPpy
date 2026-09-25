@@ -1,5 +1,9 @@
 """The storyboards, one module per tutorial, each with a `TITLE` and a `make`.
 
+**Read `../STYLE.md` before writing or editing one**: it is the reviewers'
+directions for how a tutorial speaks and how fast it goes, and it wins over
+anything below.
+
 `make(director)` does to the GUI what the tutorial shows and asks for a shot
 at every step.  Say what the user sees and why it matters, in a sentence or
 two a biologist reads at a glance: a subtitle longer than that is not read,

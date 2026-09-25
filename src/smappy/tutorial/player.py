@@ -30,8 +30,11 @@ WORDS_PER_SECOND = 2.8
 MIN_SECONDS = 3.5
 CARD_WORDS_PER_SECOND = 3.5  # a card's body, read once its title has been seen
 MOVE_SECONDS = 0.9          # the pointer's travel and the zoom; the click follows
-VOICE_LEAD = 0.4            # the picture changes, then the voice starts
-VOICE_TAIL = 0.7            # and a breath before the next step
+VOICE_LEAD = 0.25           # the picture changes, then the voice starts
+VOICE_TAIL = 0.35           # and a breath before the next step
+VOICE_MIN_SECONDS = 2.0     # a spoken "Click Run." needs no reading time
+CARD_HOLD = 1.5             # a card outlasts its voice by this much: the body
+                            # is there to be paused on, not waited through
 
 
 def _words(text: str) -> int:
@@ -42,16 +45,18 @@ def timing(steps: List[dict]) -> List[dict]:
     """Fill in each step's duration, in seconds.
 
     A step with a spoken clip (`voice.narrate`) lasts as long as the clip, with
-    a beat either side; the pointer travels while it is spoken.  Without one,
-    the reading speed decides.  A card is never shorter than its body takes
-    to read, voice or not.
+    a short beat either side; the pointer travels while it is spoken.  A
+    spoken card holds a moment longer, not for as long as its body takes to
+    read: waiting that out was the slow part of the first review (STYLE.md),
+    and whoever wants the body pauses.  Without a voice, the reading speed
+    decides, and a card is never shorter than its body takes to read.
     """
     for step in steps:
         if step.get("audio_seconds"):
             seconds = VOICE_LEAD + step["audio_seconds"] + VOICE_TAIL
             if step.get("card"):
-                seconds = max(seconds, 2.5 + _words(step["card"]["body"]) / CARD_WORDS_PER_SECOND)
-            step["duration"] = round(max(MIN_SECONDS, seconds), 2)
+                seconds += CARD_HOLD
+            step["duration"] = round(max(VOICE_MIN_SECONDS, seconds), 2)
             continue
         seconds = 1.2 + _words(step["say"]) / WORDS_PER_SECOND
         if step.get("card"):
@@ -98,6 +103,9 @@ def write(out: Path, steps: List[dict], title: str, description: str = "",
     (out / "index.html").write_text(page, encoding="utf-8")
     (out / "subtitles.vtt").write_text(vtt(steps), encoding="utf-8")
     (out / "steps.json").write_text(json.dumps(steps, indent=1, ensure_ascii=False))
+    text = script(steps, title)
+    (out / "script.md").write_text(text, encoding="utf-8")
+    (out / "script.html").write_text(_script_page(text, title), encoding="utf-8")
     (out / "tutorial.json").write_text(json.dumps({
         "title": title, "description": description,
         "seconds": round(sum(s["duration"] for s in steps)),
@@ -105,6 +113,72 @@ def write(out: Path, steps: List[dict], title: str, description: str = "",
         "chapters": [s["chapter"] for s in steps if s.get("chapter")],
     }, indent=1, ensure_ascii=False))
     return out / "index.html"
+
+
+def _plain(text: str) -> str:
+    """A card's HTML body as the words in it, list items on lines of their own."""
+    text = re.sub(r"<li>", "\n- ", text)
+    text = re.sub(r"</p>\s*<p>", "\n\n", text)
+    text = html.unescape(re.sub(r"<[^>]+>", "", text))
+    return re.sub(r"[ \t]+", " ", text).strip()
+
+
+def script(steps: List[dict], title: str) -> str:
+    """Every step's words, numbered as the page numbers them, in Markdown.
+
+    For reviewing: a suggestion names the step ("20: don't read the number")
+    and goes into STYLE.md if it is about more than that one line.
+    """
+    lines = [f"# {title}", "",
+             "The words of this tutorial, step by step. The text lives in "
+             "`src/smappy/tutorial/topics/`; the directions it follows are in "
+             "`src/smappy/tutorial/STYLE.md`.", ""]
+    for i, step in enumerate(steps, 1):
+        if step.get("chapter"):
+            lines += [f"## {step['chapter']}", ""]
+        card = step.get("card")
+        if card:
+            lines += [f"**{i}.** *card:* **{card['title']}**", "",
+                      "> " + _plain(card["body"]).replace("\n", "\n> "), ""]
+            lines += [f"    spoken: {step['say']}", ""]
+        else:
+            lines += [f"**{i}.** {step['say']}", ""]
+    return "\n".join(lines)
+
+
+def _script_page(markdown: str, title: str) -> str:
+    """The script as a plain page, so it reads in a browser on Pages too."""
+    body = []
+    for block in markdown.split("\n\n"):
+        block = html.escape(block.strip())
+        if not block:
+            continue
+        block = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", block)
+        block = re.sub(r"(?<!\*)\*(?!\*)(.+?)\*", r"<i>\1</i>", block)
+        block = re.sub(r"`(.+?)`", r"<code>\1</code>", block)
+        if block.startswith("## "):
+            body.append(f"<h2>{block[3:]}</h2>")
+        elif block.startswith("# "):
+            body.append(f"<h1>{block[2:]}</h1>")
+        elif block.startswith("&gt; "):
+            body.append("<blockquote>" + block.replace("&gt; ", "").replace("\n", "<br>")
+                        + "</blockquote>")
+        elif block.startswith("spoken: "):
+            body.append(f'<p class="spoken">{block}</p>')
+        else:
+            body.append(f"<p>{block}</p>")
+    return STANDALONE + (f"<title>{html.escape(title)}: script</title>\n<style>\n"
+                         + _tokens() +
+                         ".wrap { max-width: 720px; margin: 0 auto; padding-inline: 16px; "
+                         "padding-block: 32px; }\n"
+                         "h2 { margin-top: 28px; font-size: 17px; }\n"
+                         "blockquote { margin: 0 0 6px; padding-left: 12px; "
+                         "border-left: 3px solid var(--accent); color: var(--muted); }\n"
+                         ".spoken { color: var(--muted); font-size: 14px; }\n"
+                         "code { font-family: var(--mono); font-size: 13px; }\n"
+                         "a { color: var(--accent-ink); }\n</style>\n"
+                         '<div class="wrap"><p><a href="./">&larr; back to the tutorial</a></p>\n'
+                         + "\n".join(body) + "\n</div>\n")
 
 
 def write_index(root: Path, planned=()) -> Path:
@@ -349,6 +423,7 @@ header a.kicker:hover { color: var(--accent-ink); }
 .chapters button[aria-current="true"] { color: var(--ink); border-color: var(--accent);
                                         background: var(--surface); }
 .hint { font-size: 13px; color: var(--muted); margin: 0; }
+.hint a { color: var(--accent-ink); }
 kbd { font-family: var(--mono); font-size: 12px; border: 1px solid var(--line);
       border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; background: var(--surface); }
 
@@ -406,7 +481,7 @@ body.recording .card .panel-box { max-height: 690px; }
       <span class="counter" id="counter"></span>
     </div>
     <ul class="chapters" id="chapters"></ul>
-    <p class="hint"><kbd>space</kbd> play or pause &nbsp; <kbd>&larr;</kbd> <kbd>&rarr;</kbd> step &nbsp; <span id="soundHint" hidden><kbd>m</kbd> voice on or off &nbsp;</span> click a chapter to jump to it</p>
+    <p class="hint"><kbd>space</kbd> play or pause &nbsp; <kbd>&larr;</kbd> <kbd>&rarr;</kbd> step &nbsp; <a href="script.html">the script</a> &nbsp; <span id="soundHint" hidden><kbd>m</kbd> voice on or off &nbsp;</span> click a chapter to jump to it</p>
   </div>
 </div>
 <script id="data" type="application/json">__DATA__</script>

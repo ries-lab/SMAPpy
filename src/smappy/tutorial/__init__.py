@@ -16,6 +16,11 @@ longer does what its tutorial says, which is worth knowing too.  The pointer
 and the spotlight are drawn by the page rather than baked into the pictures,
 so they move between steps and the pictures stay plain screenshots.
 
+How a tutorial should sound is in ``STYLE.md`` beside this file: the review
+comments, kept as directions for the next edit.  Each build writes
+``script.md`` (and ``script.html``) with every step's words, numbered, which
+is what a reviewer comments on.
+
     python -m smappy.tutorial layout -o build/tutorials          # HTML
     python -m smappy.tutorial layout -o build/tutorials --video  # and MP4
 """

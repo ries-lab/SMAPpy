@@ -77,8 +77,11 @@ def test_the_layout_tutorial_builds_from_the_real_gui(tmp_path):
             assert -10 <= y and y + h <= height + 10, step["say"]
         if step["point"]:
             assert 0 <= step["point"][0] <= width and 0 <= step["point"][1] <= height
-    # the numbers in the subtitles come from the run, not from the storyboard
-    assert any("blinks" in s["say"] and any(c.isdigit() for c in s["say"]) for s in steps)
+    # STYLE.md: point at numbers, never read them -- no count in any subtitle
+    import re
+    for step in steps:
+        assert not re.search(r"\d[\d\u2009 ,]{3,}", step["say"]), step["say"]
+    assert "**1.**" in (out / "script.md").read_text()
 
 
 def test_the_voice_reads_shortcuts_numbers_and_names_as_they_are_said():
@@ -100,7 +103,9 @@ def test_a_spoken_step_lasts_as_long_as_its_clip():
     player.timing([spoken_step, card])
     assert spoken_step["duration"] == pytest.approx(
         player.VOICE_LEAD + 6.0 + player.VOICE_TAIL)
-    assert card["duration"] > 70 / player.CARD_WORDS_PER_SECOND   # still read
+    # a spoken card holds a moment, not for as long as its body takes to read
+    assert card["duration"] == pytest.approx(
+        player.VOICE_LEAD + 1.0 + player.VOICE_TAIL + player.CARD_HOLD)
 
 
 def test_the_voice_makes_a_clip_per_step(tmp_path):
@@ -126,3 +131,13 @@ def test_the_index_lists_what_was_built_and_what_is_planned(tmp_path):
     assert "Fitting" in page
     assert "--ground:" in page                      # the player's tokens came along
     assert (built / "index.html").read_text().startswith("<!doctype html>")
+
+
+def test_the_script_numbers_the_steps_as_the_page_does():
+    steps = [_step("Welcome.", image=None, chapter="Start",
+                   card={"title": "Hello", "body": "<p>One</p><ul><li>a</li><li>b</li></ul>",
+                         "figure": ""}),
+             _step("Click Run.")]
+    text = player.script(steps, "The tour")
+    assert "## Start" in text and "**1.** *card:* **Hello**" in text
+    assert "> One" in text and "> - a" in text and "**2.** Click Run." in text

@@ -143,10 +143,6 @@ def _toolbar(d):
     return d.render.findChild(RenderToolBar)
 
 
-def _count(n: int) -> str:
-    return f"{n:,}".replace(",", " ")          # a thin space: 57 363
-
-
 def _menu(d, title: str):
     """Open one of the control window's menus where it would drop down."""
     from PySide6.QtCore import QPoint
@@ -190,8 +186,8 @@ def make(d) -> None:
 
     d.chapter("Getting data in")
     menu = _menu(d, "File")
-    d.shot("Open a file from the File menu, or with Ctrl+O: smappy, SMAP, "
-           "ThunderSTORM and MINFLUX files.",
+    d.shot("Open a file from the File menu, or with Ctrl+O. smappy reads "
+           "localizations from the common fitting programs.",
            spot=[_menu_item(d, menu, "Open...")], point=_menu_item(d, menu, "Open..."),
            zoom=d.around(menu, 700))
     d.shot("Add file... puts a second file into the same table, for instance "
@@ -214,8 +210,8 @@ def make(d) -> None:
            spot=[d.window_rect(render)], point=d.at_data(5000, 5000))
 
     d.chapter("The tabs")
-    d.shot("The tabs follow the workflow: File, Localize to fit raw frames, "
-           "Render for the picture, Analysis, and ROI.",
+    d.shot("The tabs follow the workflow, from loading and fitting to the "
+           "picture and its analysis.",
            spot=[d.rect(control.tabs.tabBar())],
            zoom=d.around(control.tabs.tabBar(), 640))
 
@@ -257,8 +253,8 @@ def make(d) -> None:
                "a range. It changes what is drawn and analysed, never the data.")
     filt = render_tab.filter
     quick = list(filt.quick.values())
-    d.shot("Pick a field with the quick buttons: precision, fit quality, frame, "
-           "z, photons, PSF size.",
+    d.shot("The quick buttons choose what to filter on; the list below them "
+           "has every other column.",
            spot=[d.union(*quick)], zoom=d.around(filt, 700))
     prec = filt.quick.get("loc_precision_nm")
     if prec is not None:
@@ -269,16 +265,19 @@ def make(d) -> None:
            zoom=d.around(filt, 700))
     default = filt.hi.text()
     if default not in ("", "-"):
-        d.shot(f"smappy starts with a sensible filter: precision up to {default} nm. "
-               "Tighten it to 4 nm.",
+        d.shot("smappy starts with a sensible filter on the precision. "
+               "Tighten it by typing a smaller maximum.",
                spot=[d.union(filt.lo, filt.hi)], point=filt.hi, click=True,
                zoom=d.around(filt, 700))
     filt.hi.setText("4")
     filt.hi.editingFinished.emit()
     d.settle()
+    # the words no longer read the numbers out (STYLE.md), so they are checked
+    # here instead: what a subtitle says must still be what the GUI does
     kept, total = (int(n) for n in filt.count.text().split("/"))
-    d.shot(f"Now {_count(kept)} of {_count(total)} localizations are kept, "
-           "and only those are drawn.",
+    assert 0 < kept < total, filt.count.text()
+    d.shot("Here you see how many localizations pass the filter. Only those "
+           "are drawn.",
            spot=[d.rect(filt.count), d.union(filt.lo, filt.hi)],
            zoom=d.around(filt, 700))
     filt.hi.setText(default if default not in ("", "-") else "")
@@ -325,7 +324,7 @@ def make(d) -> None:
     filt.hi.editingFinished.emit()
     render_tab.lut.setCurrentText("red")
     d.settle()
-    d.shot(f"Layer 1 now keeps frames up to {_count(half)}, drawn in red.",
+    d.shot("Layer 1 now keeps the first half of the frames, drawn in red.",
            spot=[d.rect(filt), render_tab.lut], zoom=d.around(filt, 760))
     strip.add.menu().actions()[0].trigger()             # + -> localizations
     d.settle()
@@ -367,10 +366,9 @@ def make(d) -> None:
     if not render_tab.grouped.isChecked():
         render_tab.grouped.click()
         d.settle()
-    n_all = len(session.locs)
-    n_grouped = len(session.table(0)[0])
-    d.shot(f"smappy groups a new table straight away: {_count(n_all)} "
-           f"localizations, {_count(n_grouped)} blinks.",
+    assert len(session.table(0)[0]) < len(session.locs), "grouping merged nothing"
+    d.shot("smappy groups a new table straight away, so what you see are "
+           "blinks, not single frames.",
            spot=[render_tab.grouped], point=render_tab.grouped,
            zoom=d.around(render_tab.grouped, 700))
     render_tab.grouped.click()
@@ -402,9 +400,9 @@ def make(d) -> None:
     toolbar._set_kind("rect", "rectangle")
     session.set_roi(Region.rect(2300, 2300, 7700, 7700))
     d.settle()
-    inside = len(session.shown_selection(0))
-    d.shot("Then drag over the picture. The toolbar counts what is inside, "
-           f"{_count(inside)}; plugins now measure only the ROI.",
+    assert 0 < len(session.shown_selection(0)) < len(session.table(0)[0])
+    d.shot("Then drag over the picture. The toolbar shows how many "
+           "localizations are inside, and plugins now measure only those.",
            spot=[d.data_rect(2300, 2300, 7700, 7700, pad=6), toolbar.counts],
            point=d.at_data(7700, 7700))
 

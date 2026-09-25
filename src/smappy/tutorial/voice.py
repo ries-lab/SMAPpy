@@ -30,9 +30,9 @@ import wave
 from pathlib import Path
 from typing import List, Optional
 
-# A little slower than the voice's own pace: the lab listens in its second
-# language, and a tutorial is paused less often than it should be.
-LENGTH_SCALE = 1.1
+# The voice's own pace.  1.1 (slower, for a lab listening in its second
+# language) was the first try, and the review found the whole thing slow.
+LENGTH_SCALE = 1.0
 BITRATE = "32k"
 
 # How the screen's words are read.  Whole words, case as written; add to it
