@@ -95,7 +95,7 @@ def test_the_voice_reads_shortcuts_numbers_and_names_as_they_are_said():
     assert spoken("Add file... puts") == "Add file puts"
     assert spoken("25 888 of 29 088 kept") == "25888 of 29088 kept"
     assert spoken("click ROI, 4 nm, z and PSF") == "click R O I, 4 nanometres, zed and P S F"
-    assert spoken("SMAPpy opens two windows") == "smap pie opens two windows"
+    assert spoken("SMAPpy opens two windows") == "smappy opens two windows"
     # names inside other words are left alone
     assert spoken("ROIManager and smappy-batch") == "ROIManager and smappy-batch"
 

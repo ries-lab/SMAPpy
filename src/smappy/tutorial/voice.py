@@ -38,7 +38,7 @@ BITRATE = "32k"
 # How the screen's words are read.  Whole words, case as written; add to it
 # when the voice stumbles on a name.
 SAY_AS = {
-    "SMAPpy": "smap pie",
+    "SMAPpy": "smappy",          # like "snappy" (espeak: s m 'a p i)
     "SMAP": "smap",
     "ThunderSTORM": "thunder storm",
     "MINFLUX": "min flux",
