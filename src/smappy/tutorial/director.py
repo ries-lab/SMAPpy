@@ -163,9 +163,21 @@ class Director:
             if time.monotonic() > end:
                 raise TimeoutError("the GUI did not settle")
 
-    def _idle(self) -> bool:
+    def settle_picture(self, timeout: float = 30.0) -> None:
+        """Wait for the picture only, not for a plugin still running: a shot of
+        a fit half done, with its localizations drawn so far."""
+        end = time.monotonic() + timeout
+        quiet = 0
+        while quiet < 2 and time.monotonic() < end:
+            self.pump(0.04)
+            quiet = quiet + 1 if self._picture_idle() else 0
+
+    def _picture_idle(self) -> bool:
         view = self.render.view
-        if view._timer.isActive() or view._busy or view._pending:
+        return not (view._timer.isActive() or view._busy or view._pending)
+
+    def _idle(self) -> bool:
+        if not self._picture_idle():
             return False
         for tab in self.control.plugin_tabs:
             for panel in tab.panels():
@@ -176,13 +188,22 @@ class Director:
 
     # ------------------------------------------------------------- geometry
     def rect(self, widget, pad: float = 3) -> Rect:
-        """Where a widget is on the desktop, a little larger than itself."""
-        from PySide6.QtCore import QPoint
+        """Where a widget is on the desktop, a little larger than itself.
+
+        Only the part of it that is on screen: a field in a scrolled form can
+        be wider than the column showing it, and a spotlight on the rest lit
+        up the render window beside it.
+        """
+        from PySide6.QtCore import QPoint, QRect
         top = widget.window()
-        corner = widget.mapTo(top, QPoint(0, 0)) if widget is not top else QPoint(0, 0)
+        seen = widget.visibleRegion().boundingRect() if widget.isVisible() else QRect()
+        if seen.isEmpty():
+            seen = QRect(0, 0, widget.width(), widget.height())
+        corner = (widget.mapTo(top, seen.topLeft()) if widget is not top
+                  else seen.topLeft())
         g = top.geometry()
         return (g.x() + corner.x() - pad, g.y() + corner.y() - pad,
-                widget.width() + 2 * pad, widget.height() + 2 * pad)
+                seen.width() + 2 * pad, seen.height() + 2 * pad)
 
     def union(self, *items, pad: float = 3) -> Rect:
         rects = [self._as_rect(i, pad) for i in items]
@@ -238,9 +259,12 @@ class Director:
         self._chapter = name
 
     def shot(self, say: str, spot: Sequence = (), point=None, click: bool = False,
-             zoom=None, pad: float = 3) -> Step:
-        """Wait for the GUI, keep a picture of it and the step that goes with it."""
-        self.settle()
+             zoom=None, pad: float = 3, wait: bool = True) -> Step:
+        """Wait for the GUI, keep a picture of it and the step that goes with it.
+
+        ``wait=False`` waits for the picture but not for a running plugin.
+        """
+        self.settle() if wait else self.settle_picture()
         n = len(self.steps) + 1
         name = f"{n:03d}.webp"
         self.composite().save(str(self.out / name), "webp", 92)
@@ -300,10 +324,20 @@ class Director:
                 font = QFont()
                 font.setPixelSize(13)
                 p.setFont(font)
-                p.drawText(bar, Qt.AlignCenter, window.windowTitle() or "smappy")
+                p.drawText(bar, Qt.AlignCenter, window.windowTitle() or "SMAPpy")
             p.drawPixmap(g.x(), g.y(), window.grab())
         p.end()
         return image
+
+    def data_dir(self) -> Path:
+        """Where a storyboard puts the files it makes -- an acquisition to fit.
+
+        Short and plain, because it is on screen: a file field shows the path,
+        and a temporary directory's name is noise to whoever watches.
+        """
+        path = Path(tempfile.gettempdir()) / "SMAPpy demo"
+        path.mkdir(parents=True, exist_ok=True)
+        return path
 
     # ----------------------------------------------------------- the result
     def manifest(self) -> List[dict]:

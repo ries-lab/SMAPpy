@@ -292,7 +292,7 @@ to nothing.  `run` validates first.
 
 ## The batch window
 
-`smappy-batch-gui`, or *Tools -> Batch…* in smappy: the same window class
+`smappy-batch-gui`, or *Tools -> Batch…* in SMAPpy: the same window class
 either way.  A table of inputs (add files, add folder with a pattern, drag and
 drop, remove, an include tick, a status column), the chain panel (the same
 widget as in the plugin tabs, so a chain is edited the same way everywhere),

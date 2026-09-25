@@ -47,7 +47,8 @@ def test_the_page_carries_its_steps_and_cannot_be_closed_early_by_them(tmp_path)
     assert json.loads((tmp_path / "steps.json").read_text())[0]["duration"] > 0
 
 
-def test_the_layout_tutorial_builds_from_the_real_gui(tmp_path):
+@pytest.mark.parametrize("topic", ["quickstart", "layout"])
+def test_every_tutorial_builds_from_the_real_gui(tmp_path, topic):
     """The whole storyboard, run as a user would, on the offscreen platform.
 
     A subprocess because a tutorial needs a QApplication of its own -- the
@@ -57,15 +58,17 @@ def test_the_layout_tutorial_builds_from_the_real_gui(tmp_path):
     """
     pytest.importorskip("PySide6")
     pytest.importorskip("pyqtgraph")
-    done = subprocess.run([sys.executable, "-m", "smappy.tutorial", "layout",
+    from smappy.tutorial.topics import TOPICS
+    assert topic in TOPICS                  # a new tutorial gets a line above
+    done = subprocess.run([sys.executable, "-m", "smappy.tutorial", topic,
                            "-o", str(tmp_path)], capture_output=True, text=True,
                           timeout=600)
     if done.returncode and "libEGL" in done.stderr:
         pytest.skip("Qt's libraries are not installed")
     assert done.returncode == 0, done.stderr[-3000:]
-    out = tmp_path / "layout"
+    out = tmp_path / topic
     steps = json.loads((out / "steps.json").read_text())
-    assert len(steps) > 20
+    assert len(steps) > 10
     assert steps[0]["card"] and steps[-1]["card"]
     width, height = 1600, 900
     for step in steps:
@@ -92,6 +95,7 @@ def test_the_voice_reads_shortcuts_numbers_and_names_as_they_are_said():
     assert spoken("Add file... puts") == "Add file puts"
     assert spoken("25 888 of 29 088 kept") == "25888 of 29088 kept"
     assert spoken("click ROI, 4 nm, z and PSF") == "click R O I, 4 nanometres, zed and P S F"
+    assert spoken("SMAPpy opens two windows") == "smap pie opens two windows"
     # names inside other words are left alone
     assert spoken("ROIManager and smappy-batch") == "ROIManager and smappy-batch"
 

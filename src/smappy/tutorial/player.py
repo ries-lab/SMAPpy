@@ -251,8 +251,8 @@ def record(out: Path, size=(1600, 900), browser: Optional[str] = None) -> Path:
     return target
 
 
-_INDEX = r"""<title>smappy tutorials</title>
-<meta name="description" content="Short guided tours of smappy, generated from the program itself.">
+_INDEX = r"""<title>SMAPpy tutorials</title>
+<meta name="description" content="Short guided tours of SMAPpy, generated from the program itself.">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 <style>
 __TOKENS__
@@ -280,9 +280,9 @@ footer a { color: var(--accent-ink); }
 </style>
 <div class="wrap">
   <header>
-    <p class="kicker">smappy</p>
+    <p class="kicker">SMAPpy</p>
     <h1>Tutorials</h1>
-    <p class="lede">Short guided tours of smappy, a few minutes each, with subtitles and
+    <p class="lede">Short guided tours of SMAPpy, a few minutes each, with subtitles and
     a voice you can switch off. They run on simulated data, so you can follow along in
     the program: File &rarr; Simulate.</p>
   </header>
@@ -294,7 +294,7 @@ __CARDS__
     <ul class="later">__PLANNED__</ul>
   </section>
   <footer>Made from the program itself, and rebuilt when it changes.
-  <a href="https://github.com/ries-lab/SMAPpy">smappy on GitHub</a></footer>
+  <a href="https://github.com/ries-lab/SMAPpy">SMAPpy on GitHub</a></footer>
 </div>
 """
 
@@ -447,7 +447,7 @@ body.recording .card .panel-box { max-height: 690px; }
 
 <div class="wrap">
   <header>
-    <a class="kicker" href="../">smappy tutorials</a>
+    <a class="kicker" href="../">SMAPpy tutorials</a>
     <h1 id="title">__TITLE__</h1>
     <p>__DESCRIPTION__</p>
   </header>

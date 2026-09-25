@@ -21,6 +21,9 @@ it was about.  Say who asked and when, so a later reader can weigh it.
   in a subtitle (`tests/test_tutorial.py` checks).  (Jonas Ries, 2026-09-25)
 * One idea per step, one or two short sentences.  The pointer and the
   spotlight say *where*; the words say *what* and *why*.
+* **SMAPpy** is the program's name wherever it is read or heard; `smappy`
+  only where it is typed (`import smappy`, `smappy-gui`).  (Jonas Ries,
+  2026-09-25)
 * Plain words a biologist uses at the bench.  Name a GUI element by the text
   on it ("Run", "grouped"), so it can be found.
 * Keyboard shortcuts may be said once, where the thing is first shown.
@@ -43,6 +46,10 @@ it was about.  Say who asked and when, so a later reader can weigh it.
   and a number or a name in a subtitle comes from it, not from memory.
 
 ## Per tutorial
+
+### quickstart -- SMAPpy in three minutes
+
+* (none yet)
 
 ### layout -- Finding your way around
 

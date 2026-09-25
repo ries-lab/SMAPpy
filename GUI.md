@@ -1,4 +1,4 @@
-# smappy GUI and plugin architecture
+# SMAPpy GUI and plugin architecture
 
 The first step of porting SMAP from MATLAB.  Decisions taken 2026-09-04; the
 reasoning is here so that it does not have to be re-derived.
@@ -112,11 +112,11 @@ reasoning is here so that it does not have to be re-derived.
   not link across files.  A layer picks files in its filter: the *file*
   quick button shows a tickable list of names instead of a histogram, and
   the mask composes with the bounds and the ROI, so plugins get it too.
-* **Formats are a registry** (`io/formats.py`): smappy HDF5, SMAP
+* **Formats are a registry** (`io/formats.py`): SMAPpy HDF5, SMAP
   `_sml.mat` (v7.3 and older), MINFLUX exports (npy, zip, json; last
   iteration, valid only, m -> nm, ``frame`` is the rank in time), and csv
   (ThunderSTORM and SMAP headers recognised; otherwise a mapping dialog,
-  also for positions in pixels).  A reader returns smappy's columns and a
+  also for positions in pixels).  A reader returns SMAPpy's columns and a
   `FileInfo`; SMAP frames become 0-based.
 * **Image layers** (`images.py`): a layer is ``"locs"`` or ``"image"``; an
   image holds pixels with a pixel size and origin in nm (from the TIFF

@@ -793,7 +793,7 @@ class _ControlsWindow(QWidget):
 
     def __init__(self, panel: SlabPanel, parent=None):
         super().__init__(parent, Qt.Window)
-        self.setWindowTitle("smappy 3D - slab and view")
+        self.setWindowTitle("SMAPpy 3D - slab and view")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         scroll = QScrollArea(widgetResizable=True)
@@ -812,7 +812,7 @@ class _ControlsWindow(QWidget):
 class View3DWindow(QMainWindow):
     def __init__(self, session: Session, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("smappy 3D")
+        self.setWindowTitle("SMAPpy 3D")
         self._fitted = False
         self._placed = False
         self.view = View3D(session)

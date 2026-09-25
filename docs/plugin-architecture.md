@@ -3,7 +3,7 @@
 Where plugins come from, how they reach the GUI, and what a plugin has to
 declare.  Decisions taken 2026-09-12; this extends `GUI.md`, which fixed the
 toolkit and the "a plugin is a settings dataclass plus a `run`" contract.  The
-goal is that smappy ships with many plugins and that a user adds one by copying
+goal is that SMAPpy ships with many plugins and that a user adds one by copying
 a file into a folder.
 
 ## What is wrong with what we have
@@ -163,7 +163,7 @@ empty.  A "special" tab is an ordinary tab with a header widget above the list
 calibration buttons -- so File and Analysis are nothing but ordinary tabs, and a
 special one costs a header, not a class.
 
-Because a fresh install would otherwise be a blank window, smappy ships a
+Because a fresh install would otherwise be a blank window, SMAPpy ships a
 default workspace.  It is *seeded* rather than listed: each shipped tab names a
 path prefix used once, at first run, to pin the installed plugins that ask for
 it (`Plugin.favorite`).  So the defaults adapt to what is installed, and after
@@ -187,7 +187,7 @@ of any files that could not be read, which is where the scanner's diagnostics
 surface.
 
 A section's panel is built the first time it is opened, not when the tab is.
-Together with the scanner that means starting smappy imports no plugin at all,
+Together with the scanner that means starting SMAPpy imports no plugin at all,
 and a tab of thirty costs thirty parsed files.  A pin whose plugin is no longer
 installed becomes a section with a message in it rather than an exception during
 startup, and a workspace naming plugins that have gone is pruned with a line
@@ -295,7 +295,7 @@ Seeded with:
 
 A named loader *means* it: `load` takes an explicit reader, because dispatching
 by extension underneath would have `File/Load/SMAP` on a `.hdf5` quietly read it
-as smappy.
+as SMAPpy.
 
 The menu and the plugins share one *reading* implementation,
 `session.read_and_group`, which the window's `LoadTask`, `Session.load` and

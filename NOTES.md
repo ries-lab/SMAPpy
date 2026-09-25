@@ -639,7 +639,7 @@ and it is deliberately thin -- an array in, a per-frame drift table out.
   not -- otherwise changing a filter afterwards would mean re-running it.
 * **COMET's file I/O is not wrapped.** It can load ThunderSTORM CSV and write
   molecule sets; we hand it a `(N, 4)` array and read the drift back, so the
-  corrected file stays an ordinary smappy HDF5 that the viewer opens unchanged.
+  corrected file stays an ordinary SMAPpy HDF5 that the viewer opens unchanged.
   The drift curve rides along in a `/drift` group, which readers ignore.
 * **The drift table is indexed by frame.** COMET interpolates onto
   `arange(0, max_frame + 1)`, so applying it is one fancy-index per coordinate.

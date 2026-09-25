@@ -100,3 +100,73 @@ def simulate(n_frames: int, seed: int, drift: bool, density: float = 1.0,
                 "min_separation_nm": min_separation, "n_unresolvable_dropped": int(lost.sum()),
                 "drift_truth": drift_nm.round(3).tolist() if drift else None}
     return Localizations(columns, metadata)
+
+
+def camera_frames(n_frames: int = 2000, seed: int = 0, pixelsize_nm: float = 100.0,
+                  size_px: int = 100, photons: float = 2000.0,
+                  background: float = 20.0, sigma_nm: float = 130.0,
+                  conversion: float = 0.5, offset: float = 100.0,
+                  read_noise: float = 1.5, on_per_frame: float = 7.0):
+    """Raw camera frames of the same structure, blinking: ``(frames, truth)``.
+
+    For fitting what `simulate` only pretends to have fitted -- the tutorial
+    that goes from camera frames to a picture, and anyone who wants to try the
+    Localize tab without a microscope.  ``frames`` is uint16 ADU, (n, y, x);
+    ``truth`` is a `Localizations` of every emitter that was on in a frame, at
+    its true position, with the photons it emitted there.
+
+    The PSF is a Gaussian integrated over each pixel (the fitter's own model,
+    so the fit is expected to find it); photons are Poisson over a flat
+    background, then converted at ``conversion`` e-/ADU on an ``offset``, with
+    Gaussian read noise in ADU.  ``on_per_frame`` is how many molecules shine
+    in a frame on average, whatever the number of frames -- the density a
+    fitter sees -- and the default of seven on 100 x 100 pixels is sparse,
+    because the point is a picture that fits cleanly, not a test of the fitter
+    under crowding.
+    """
+    from scipy.special import erf
+    rng = np.random.default_rng(seed)
+    emitters = structure(rng)[:, :2]
+    mean_on = 1 / 0.35                      # frames per blink, geometric(0.35)
+    blinks_per_emitter = on_per_frame * n_frames / (len(emitters) * mean_on)
+    rows = []
+    for i in range(len(emitters)):
+        for _ in range(rng.poisson(blinks_per_emitter)):
+            start = rng.integers(0, n_frames)
+            for f in range(start, min(start + rng.geometric(0.35), n_frames)):
+                rows.append((i, f))
+    rows = np.array(rows, dtype=np.int64).reshape(-1, 2)
+    rows = rows[np.argsort(rows[:, 1], kind="stable")]
+    emitter, frame = rows[:, 0], rows[:, 1]
+    n = len(frame)
+    emitted = rng.gamma(4.0, photons / 4.0, n)
+    # pixel k spans k - 1/2 .. k + 1/2, so x_nm = x_pix * pixelsize, which is
+    # the fitter's convention: at k + 1/2 every position came out half a pixel off
+    xy_px = emitters[emitter] / pixelsize_nm
+    s = sigma_nm / pixelsize_nm * np.sqrt(2.0)
+
+    image = np.full((n_frames, size_px, size_px), background, dtype=np.float64)
+    half = int(np.ceil(4 * sigma_nm / pixelsize_nm))
+    offsets = np.arange(-half, half + 1)
+    for k in range(n):
+        cx, cy = xy_px[k]
+        ix, iy = int(np.rint(cx)) + offsets, int(np.rint(cy)) + offsets
+        keep_x = (ix >= 0) & (ix < size_px)
+        keep_y = (iy >= 0) & (iy < size_px)
+        if not keep_x.any() or not keep_y.any():
+            continue
+        ix, iy = ix[keep_x], iy[keep_y]
+        px = 0.5 * (erf((ix + 0.5 - cx) / s) - erf((ix - 0.5 - cx) / s))
+        py = 0.5 * (erf((iy + 0.5 - cy) / s) - erf((iy - 0.5 - cy) / s))
+        image[frame[k], iy[0]:iy[-1] + 1, ix[0]:ix[-1] + 1] += emitted[k] * np.outer(py, px)
+    electrons = rng.poisson(image)
+    adu = electrons / conversion + offset + rng.normal(0, read_noise, image.shape)
+    frames = np.clip(np.round(adu), 0, 65535).astype(np.uint16)
+    truth = Localizations({
+        "frame": frame, "x_nm": emitters[emitter, 0].astype(np.float32),
+        "y_nm": emitters[emitter, 1].astype(np.float32),
+        "photons": emitted.astype(np.float32), "emitter": emitter.astype(np.int32),
+    }, {"units": "nm", "simulation": "SMAPpy camera frames", "seed": seed,
+        "pixelsize_nm": pixelsize_nm, "conversion": conversion, "offset": offset,
+        "background": background, "sigma_nm": sigma_nm})
+    return frames, truth

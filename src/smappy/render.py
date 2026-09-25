@@ -692,6 +692,12 @@ def render_locs(locs: Localizations, fov: FieldOfView,
     display = display or DisplaySettings()
     select = getattr(select, "indices", select)  # a LocFilter, or a mask/indices
 
+    # A live fit's table exists before its first block does, with no columns
+    # yet, and the view asks for a picture of it the moment the fit starts:
+    # that is an empty picture, not a missing position column.
+    if not len(locs):
+        return RenderedImage(fov, np.zeros((fov.ny, fov.nx)))
+
     x, y = settings.axes.coordinates(locs, select)
     sigma, sigma_y = render_sigmas(locs, settings, fov, select)
 

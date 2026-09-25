@@ -89,7 +89,7 @@ class ControlWindow(QMainWindow):
         super().__init__()
         self.session = session
         self.render_window = render
-        self.setWindowTitle("smappy")
+        self.setWindowTitle("SMAPpy")
         self.workspace = workspace_module.load()
         missing = self.workspace.prune(list(plugins.refs()))
         if missing:
@@ -578,7 +578,7 @@ class ControlWindow(QMainWindow):
         n = len(self.session.locs)
         shown = self._shown_text()
         self.statusBar().showMessage(f"{name}: {n} localizations" + (f", {shown}" if shown else ""))
-        self.render_window.setWindowTitle(f"smappy - {name}" + (f" - {shown}" if shown else ""))
+        self.render_window.setWindowTitle(f"SMAPpy - {name}" + (f" - {shown}" if shown else ""))
 
     def _shown_text(self) -> str:
         """What the render window actually draws: kept by each visible layer.

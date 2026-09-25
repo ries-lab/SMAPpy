@@ -10,7 +10,7 @@ fitting tutorial's job.
 """
 from __future__ import annotations
 
-TITLE = "Finding your way around smappy"
+TITLE = "Finding your way around SMAPpy"
 DESCRIPTION = ("The two windows, the tabs, filters, layers, grouping, what a "
                "plugin works on, and undo.")
 
@@ -94,73 +94,8 @@ _SELECTION = """
 """
 
 
-# ---------------------------------------------------------------- helpers
-
-def _tab(d, name: str):
-    tabs = d.control.tabs
-    for i in range(tabs.count()):
-        if tabs.tabText(i) == name:
-            return i, tabs.widget(i)
-    raise LookupError(f"no {name!r} tab; there are "
-                      + ", ".join(tabs.tabText(i) for i in range(tabs.count())))
-
-
-def _show_tab(d, name: str):
-    i, widget = _tab(d, name)
-    d.control.tabs.setCurrentIndex(i)
-    return widget
-
-
-def _tab_button(d, name: str):
-    """The tab's own button in the tab bar, as a rectangle."""
-    i, _ = _tab(d, name)
-    bar = d.control.tabs.tabBar()
-    r = bar.tabRect(i)
-    x, y, _, _ = d.rect(bar, pad=0)
-    return (x + r.x(), y + r.y(), r.width(), r.height())
-
-
-def _section(tab, title: str):
-    for section in tab.sections:
-        if section.title.lower().startswith(title.lower()):
-            return section
-    raise LookupError(f"no section {title!r}; there are "
-                      + ", ".join(s.title for s in tab.sections))
-
-
-def _open(d, tab, title: str):
-    """Expand a plugin's section and return it and its panel."""
-    section = _section(tab, title)
-    if not section.button.isChecked():
-        section.button.click()
-    d.settle()
-    panel = next(p for p in tab.panels() if p.plugin.name.lower().startswith(title.lower()))
-    return section, panel
-
-
-def _toolbar(d):
-    from ...gui.render_view import RenderToolBar
-    return d.render.findChild(RenderToolBar)
-
-
-def _menu(d, title: str):
-    """Open one of the control window's menus where it would drop down."""
-    from PySide6.QtCore import QPoint
-    bar = d.control.menuBar()
-    action = next(a for a in bar.actions() if a.text().replace("&", "") == title)
-    geometry = bar.actionGeometry(action)
-    menu = action.menu()
-    menu.popup(bar.mapToGlobal(QPoint(geometry.x(), geometry.bottom() + 1)))
-    d.settle()
-    return menu
-
-
-def _menu_item(d, menu, text: str):
-    """An item of an open menu, as a rectangle on the desktop."""
-    action = next(a for a in menu.actions() if a.text().replace("&", "").startswith(text))
-    r = menu.actionGeometry(action)
-    g = menu.geometry()
-    return (g.x() + r.x(), g.y() + r.y(), r.width(), r.height())
+from .common import menu as _menu, menu_item as _menu_item, open_section as _open
+from .common import show_tab as _show_tab, tab_button as _tab_button, toolbar as _toolbar
 
 
 # ---------------------------------------------------------------- the story
@@ -171,14 +106,14 @@ def make(d) -> None:
 
     d.chapter("Two windows")
     d.card(TITLE,
-           "<p>The two windows, the tabs, and the four ideas the rest of smappy "
+           "<p>The two windows, the tabs, and the four ideas the rest of SMAPpy "
            "is built on: <b>filters</b>, <b>layers</b>, <b>grouping</b> and "
            "<b>the selection</b>.</p>"
            "<p>Everything here uses simulated data, so you can follow along: "
            "<i>File &rarr; Simulate</i>.</p>",
-           say="Welcome. This tutorial is a tour of smappy: where things are, "
+           say="Welcome. This tutorial is a tour of SMAPpy: where things are, "
                "and four ideas that everything else is built on.")
-    d.shot("smappy opens two windows. On the left, the control window, with "
+    d.shot("SMAPpy opens two windows. On the left, the control window, with "
            "every setting and tool.",
            spot=[d.window_rect(control)])
     d.shot("On the right, the render window: the super-resolution image itself.",
@@ -186,7 +121,7 @@ def make(d) -> None:
 
     d.chapter("Getting data in")
     menu = _menu(d, "File")
-    d.shot("Open a file from the File menu, or with Ctrl+O. smappy reads "
+    d.shot("Open a file from the File menu, or with Ctrl+O. SMAPpy reads "
            "localizations from the common fitting programs.",
            spot=[_menu_item(d, menu, "Open...")], point=_menu_item(d, menu, "Open..."),
            zoom=d.around(menu, 700))
@@ -265,7 +200,7 @@ def make(d) -> None:
            zoom=d.around(filt, 700))
     default = filt.hi.text()
     if default not in ("", "-"):
-        d.shot("smappy starts with a sensible filter on the precision. "
+        d.shot("SMAPpy starts with a sensible filter on the precision. "
                "Tighten it by typing a smaller maximum.",
                spot=[d.union(filt.lo, filt.hi)], point=filt.hi, click=True,
                zoom=d.around(filt, 700))
@@ -367,7 +302,7 @@ def make(d) -> None:
         render_tab.grouped.click()
         d.settle()
     assert len(session.table(0)[0]) < len(session.locs), "grouping merged nothing"
-    d.shot("smappy groups a new table straight away, so what you see are "
+    d.shot("SMAPpy groups a new table straight away, so what you see are "
            "blinks, not single frames.",
            spot=[render_tab.grouped], point=render_tab.grouped,
            zoom=d.around(render_tab.grouped, 700))

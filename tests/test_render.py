@@ -276,3 +276,14 @@ def test_an_old_display_setting_still_means_an_inversion():
     assert DisplaySettings().invert is False
     assert luts.inversion_name(True) == luts.DEFAULT_INVERSION
     assert luts.inversion_name("complement") == "complement"
+
+
+def test_a_table_with_no_columns_yet_renders_as_an_empty_picture():
+    """A live fit's table, before its first block: the view asks for a picture
+    of it as soon as the fit starts, and used to get a KeyError."""
+    from smappy.locs import Localizations
+    from smappy.render import render_locs
+    fov = FieldOfView.fit((0, 1000), (0, 500), 40, 20)
+    image = render_locs(Localizations({}, {}), fov)
+    assert image.weight.shape == (fov.ny, fov.nx) and not image.weight.any()
+    assert image.n_locs == 0

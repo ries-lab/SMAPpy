@@ -44,7 +44,7 @@ class BatchWindow(QMainWindow):
                  open_result: Optional[Callable[[str], None]] = None, parent=None):
         super().__init__(parent)
         self.setWindowFlag(Qt.Window, True)
-        self.setWindowTitle("smappy batch")
+        self.setWindowTitle("SMAPpy batch")
         self.setAcceptDrops(True)
         # the chain panel needs a session to exist; this one is never run on
         self.session = Session()
@@ -360,7 +360,7 @@ class BatchWindow(QMainWindow):
                            (self.preflight, job.preflight), (self.rerun, job.rerun)):
             box.setCurrentIndex(max(box.findData(value), 0))
         self.delete_fitted.setChecked(out.delete_fitted)
-        self.setWindowTitle(f"smappy batch -- {self.job_path.name}")
+        self.setWindowTitle(f"SMAPpy batch -- {self.job_path.name}")
 
     def open_job(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Open job", "",
@@ -381,7 +381,7 @@ class BatchWindow(QMainWindow):
                 target = target.with_name(target.name.split(".")[0] + ".batch.yaml")
         self.job_path = target
         batch.write_job(self.job(), target)
-        self.setWindowTitle(f"smappy batch -- {target.name}")
+        self.setWindowTitle(f"SMAPpy batch -- {target.name}")
         return target
 
     def validate(self) -> bool:

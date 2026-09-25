@@ -1,4 +1,4 @@
-# smappy
+# SMAPpy
 
 Single-molecule localization microscopy in Python, with a Qt GUI: camera
 conversion, peak finding, maximum-likelihood fitting with a Gaussian or
@@ -7,7 +7,7 @@ PSF calibration -- the SMAP workflow, ported.  Reads SMAP `_3Dcal.mat`
 calibration files, Micro-Manager TIFF stacks and NDTiff datasets
 (pycro-manager).
 
-**New to smappy?**  The [tutorials](https://ries-lab.github.io/SMAPpy/) are
+**New to SMAPpy?**  The [tutorials](https://ries-lab.github.io/SMAPpy/) are
 guided tours of a few minutes each, with subtitles and a voice, on simulated
 data you can follow along with.  They are generated from the program itself
 (`python -m smappy.tutorial`), so they show the GUI as it is.
@@ -93,7 +93,7 @@ plugin's declaration -- nothing in the plugin or session layer imports Qt.  See
 | `smappy-calibrate /path/to/bead_acquisitions` | bead PSF calibration |
 | `smappy-view FILE.h5` | the older matplotlib viewer |
 
-The camera usually needs no flags: smappy recognises it from the file's own
+The camera usually needs no flags: SMAPpy recognises it from the file's own
 tags (a serial number, a camera ID) and takes the numbers Micro-Manager does
 not record -- the e-/ADU conversion, and the baseline an iXon never reports --
 from its **camera database**, which also knows that those two depend on the
@@ -169,8 +169,8 @@ combined by SMAP's per-column rules, plus `n_in_group`.
 Drift is estimated with [COMET](https://github.com/gpufit/Comet), which
 maximises the overlap of localizations between time windows -- no fiducials, no
 reference structure.  COMET is somebody else's published method, MIT licensed;
-the parts smappy calls are vendored in `src/smappy/_comet`, including its cost
-function, which is compiled with smappy rather than with numba, so a plain
+the parts SMAPpy calls are vendored in `src/smappy/_comet`, including its cost
+function, which is compiled with SMAPpy rather than with numba, so a plain
 install drift-corrects with nothing else added.  **Cite COMET** if you publish
 work that used it.
 
