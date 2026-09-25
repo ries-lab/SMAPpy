@@ -136,3 +136,42 @@ def test_the_batch_window_follows_the_runners_lines(app, tmp_path):
     assert window.table.item(1, 4).text() == "done"
     assert window.progress.value() == 3
     assert window.report_path.name == "batch_report.json"
+
+
+def test_a_second_run_counts_its_files_afresh(app, tmp_path, monkeypatch):
+    from smappy.gui.batch_window import BatchWindow
+    from smappy.batch import Input
+    window = BatchWindow()
+    (tmp_path / "d").mkdir()
+    window.add_input(Input(folder=str(tmp_path / "d")))
+    lines = [f"SMAPPY_START\t1/1\t{tmp_path / 'd' / 'a.h5'}",
+             f"SMAPPY_DONE\t1/1\t{tmp_path / 'out' / 'a'}"]
+    for line in lines:
+        window.handle_line(line)
+    assert window.table.item(0, 4).text() == "1 done"
+    # the second run, all of it but the subprocess
+    import smappy.gui.batch_window as module
+
+    class Process:
+        MergedChannels = None
+
+        def __init__(self, *a):
+            self.readyReadStandardOutput = self.finished = self
+
+        def connect(self, *a):
+            pass
+
+        def setProcessChannelMode(self, *a):
+            pass
+
+        def start(self, *a):
+            pass
+
+    monkeypatch.setattr(module, "QProcess", Process)
+    monkeypatch.setattr(window, "validate", lambda: True)
+    monkeypatch.setattr(window, "save_job", lambda ask=True: tmp_path / "j.batch.yaml")
+    window.run()
+    for line in (lines[0], f"SMAPPY_SKIP\t1/1\t{tmp_path / 'd' / 'a.h5'}\tdone before"):
+        window.handle_line(line)
+    assert window.table.item(0, 4).text() == "1 skipped"
+

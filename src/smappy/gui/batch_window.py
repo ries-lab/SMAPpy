@@ -402,7 +402,9 @@ class BatchWindow(QMainWindow):
         if path is None:
             return
         for r in range(self.table.rowCount()):
+            # a folder's counts too: a second run counts afresh, not on top
             self.table.item(r, 4).setText("")
+            self.table.item(r, 4).setData(Qt.UserRole, None)
         self.progress.setRange(0, 0)
         self.process = QProcess(self)
         self.process.setProcessChannelMode(QProcess.MergedChannels)

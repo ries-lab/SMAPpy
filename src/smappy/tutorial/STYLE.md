@@ -90,3 +90,7 @@ it was about.  Say who asked and when, so a later reader can weigh it.
 ### drift_correction -- Drift correction: RCC and COMET
 
 * (none yet)
+
+### batch -- Chains and batch runs over many files
+
+* (none yet)

@@ -48,7 +48,7 @@ def test_the_page_carries_its_steps_and_cannot_be_closed_early_by_them(tmp_path)
 
 
 @pytest.mark.parametrize("topic", ["quickstart", "layout", "fitting", "fitting_3d", "two_colour", "two_colour_3d", "rendering", "plugins", "measuring",
-                                   "drift_correction"])
+                                   "drift_correction", "batch"])
 def test_every_tutorial_builds_from_the_real_gui(tmp_path, topic):
     """The whole storyboard, run as a user would, on the offscreen platform.
 

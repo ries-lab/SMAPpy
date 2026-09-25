@@ -6,6 +6,8 @@ renamed tab or plugin shows up when a tutorial is rebuilt.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
+
 
 def tab(d, name: str):
     tabs = d.control.tabs
@@ -144,3 +146,29 @@ def figure_panels(d, window, pad: float = 0.03):
         y0, y1 = max(0.0, box.y0 - 2 * pad), min(1.0, box.y1 + 1.5 * pad)
         rects.append((x + x0 * w, y + (1 - y1) * h, (x1 - x0) * w, (y1 - y0) * h))
     return sorted(rects, key=lambda r: r[1])
+
+
+@contextmanager
+def answering(save: str = "", folder: str = ""):
+    """Answer the dialogs a click opens, as a person would, for as long as the
+    ``with`` lasts: a save dialog with ``save``, a folder chooser with
+    ``folder``, and any question with its offered default.
+
+    A modal dialog would stop the storyboard where a person stops to type,
+    and the offscreen platform has no one to type; answering it lets the
+    click run the window's own code, where the path goes on to matter.
+    """
+    from PySide6.QtWidgets import QFileDialog, QInputDialog
+    answers = {
+        (QFileDialog, "getSaveFileName"): lambda *a, **k: (save, ""),
+        (QFileDialog, "getExistingDirectory"): lambda *a, **k: folder,
+        (QInputDialog, "getText"): lambda *a, **k: (k.get("text", ""), True),
+    }
+    kept = {key: getattr(*key) for key in answers}
+    try:
+        for (cls, name), answer in answers.items():
+            setattr(cls, name, staticmethod(answer))
+        yield
+    finally:
+        for (cls, name), original in kept.items():
+            setattr(cls, name, original)

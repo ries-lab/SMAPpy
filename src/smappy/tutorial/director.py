@@ -181,9 +181,12 @@ class Director:
             return False
         for tab in self.control.plugin_tabs:
             for panel in tab.panels():
-                thread = getattr(panel, "_thread", None)
-                if thread is not None and thread.isRunning():
-                    return False
+                # a chain's panel runs through the plugin panel inside it
+                inner = getattr(panel, "panel", None)
+                for runner in (panel, inner):
+                    thread = getattr(runner, "_thread", None)
+                    if thread is not None and thread.isRunning():
+                        return False
         return True
 
     # ------------------------------------------------------------- geometry
