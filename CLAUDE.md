@@ -1,6 +1,6 @@
 # Working in this repository
 
-smappy is a Python SMLM package: TIFF -> photons -> peak finding -> MLE fit ->
+SMAPpy (`smappy` in code) is a Python SMLM package: TIFF -> photons -> peak finding -> MLE fit ->
 localization table -> analysis, with a Qt GUI over the same functions.  Read
 `NOTES.md` for the decisions behind the fitting pipeline and
 `docs/plugin-architecture.md` for why the plugin system is shaped as it is.
@@ -276,7 +276,9 @@ too (it is a Qt test and skips without PySide6).
 (`python -m smappy.tutorial`, see `src/smappy/tutorial/__init__.py`), so a GUI
 change that breaks a tutorial fails there: fix the storyboard in
 `src/smappy/tutorial/topics/`, which usually means a widget that was renamed
-or moved.
+or moved.  Before writing or editing a storyboard, read
+`src/smappy/tutorial/STYLE.md`: the reviewers' directions for how tutorials
+speak.
 
 Plugins reach the shipped workspace by themselves: the Analysis tab seeds from
 `Analysis/` and `favorite` defaults to True, so there is no registry to edit.
