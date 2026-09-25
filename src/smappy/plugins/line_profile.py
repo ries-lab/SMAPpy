@@ -1519,7 +1519,10 @@ class LineProfile(Plugin):
 
         return Result(
             text="\n".join(lines), settings=settings,
-            data={"layers": layers,
+            # "layer_profiles", not "layers": `Session.apply` reads
+            # data["layers"] as layer set-ups to apply (`Chain/Layers`), and
+            # every Run of this plugin crashed there on a list of profiles
+            data={"layer_profiles": layers,
                   "fits": per_layer(lambda l: {f.model: f for f in l.fits}),
                   "values": per_layer(lambda l: {f.model: f.values() for f in l.fits}),
                   "errors": per_layer(lambda l: {f.model: f.uncertainties()

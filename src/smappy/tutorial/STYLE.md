@@ -63,3 +63,7 @@ it was about.  Say who asked and when, so a later reader can weigh it.
 ### rendering -- Rendering in 2D and 3D
 
 * (none yet)
+
+### plugins -- Plugins: running, previewing, plotting
+
+* (none yet)

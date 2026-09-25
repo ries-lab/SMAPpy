@@ -211,12 +211,22 @@ class Director:
         person scrolls to a button before clicking it.  A long form -- a
         fitter's -- otherwise leaves Run below the fold and the spotlight on
         whatever is at the bottom edge instead."""
+        from PySide6.QtCore import QPoint
         from PySide6.QtWidgets import QScrollArea
         parent = widget.parentWidget()
         while parent is not None:
             if isinstance(parent, QScrollArea) and parent.widget() is not None \
                     and parent.widget().isAncestorOf(widget):
-                parent.ensureWidgetVisible(widget, 10, 10)
+                # up and down only: `ensureWidgetVisible` also scrolls sideways
+                # to a form wider than its column, and every label went off
+                # the left edge
+                bar = parent.verticalScrollBar()
+                top = widget.mapTo(parent.widget(), QPoint(0, 0)).y()
+                seen = parent.viewport().height()
+                if top < bar.value() + 10:
+                    bar.setValue(max(0, top - 10))
+                elif top + min(widget.height(), seen - 20) > bar.value() + seen - 10:
+                    bar.setValue(top + min(widget.height(), seen - 20) - seen + 10)
             parent = parent.parentWidget()
 
     def union(self, *items, pad: float = 3) -> Rect:

@@ -537,7 +537,7 @@ def test_a_profile_is_fitted_per_layer_and_drawn_in_each_layer_s_colour():
     session = _two_channel_session()
     result = LineProfile().run(session.context(),
                                LineProfileSettings(axis="across"))
-    layers = result.data["layers"]
+    layers = result.data["layer_profiles"]
     assert [l.name for l in layers] == ["channel 1", "channel 2"]
     assert layers[0].colour != layers[1].colour
     centres = [l.fits[0].values()["centre"] for l in layers]
@@ -555,7 +555,7 @@ def test_a_hidden_layer_is_not_fitted():
     session = _two_channel_session()
     session.layers[1].visible = False
     result = LineProfile().run(session.context(), LineProfileSettings(axis="across"))
-    assert [l.name for l in result.data["layers"]] == ["channel 1"]
+    assert [l.name for l in result.data["layer_profiles"]] == ["channel 1"]
 
 
 def test_the_selection_can_still_be_measured_as_one():
@@ -563,7 +563,7 @@ def test_the_selection_can_still_be_measured_as_one():
     result = LineProfile().run(session.context(),
                                LineProfileSettings(axis="across", source="selection",
                                                    model="two_gauss"))
-    assert len(result.data["layers"]) == 1
+    assert len(result.data["layer_profiles"]) == 1
     # one layer's filter, so this is channel 1 alone rather than both
     assert result.data["fits"].keys() == {"two_gauss"}
 
@@ -585,3 +585,14 @@ def test_a_layer_colour_is_read_off_its_lut_and_falls_back_when_it_cannot_be():
     # and a colour another layer already has is not used twice
     mine = layer_colour(Display(lut="red"))
     assert layer_colour(Display(lut="red"), 1, taken=[mine]) != mine
+
+
+def test_a_run_is_applied_to_the_session_without_touching_its_layers():
+    """Run hands its result to `Session.apply`, which takes data["layers"] as
+    layer set-ups (Chain/Layers); the per-layer profiles were under that key
+    once, and every Run from the GUI failed there."""
+    session = _two_channel_session()
+    before = [l.name for l in session.layers]
+    result = session.run(LineProfile(), LineProfileSettings(axis="across"))
+    assert "layers" not in result.data and len(result.data["layer_profiles"]) == 2
+    assert [l.name for l in session.layers] == before
