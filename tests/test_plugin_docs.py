@@ -355,8 +355,8 @@ def test_a_plugins_title_bar_has_a_question_mark_that_opens_its_page(app):
                                                 QUrl(names[0]))
     assert not image.isNull() and image.width() > 10
     # a link to another plugin's page is followed in the same window
-    window._on_link(QUrl("plugin:Analysis/Dual-Color/AssignColors"))
-    assert window.current == "Analysis/Dual-Color/AssignColors"
+    window._on_link(QUrl("plugin:File/Load/MINFLUX"))
+    assert window.current == "File/Load/MINFLUX"
     assert "No written page" in window.browser.toPlainText()
 
 
