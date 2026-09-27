@@ -1652,8 +1652,8 @@ labelling.  What differs, on purpose:
   brightest pixel.
 * SMAP matches nearest-first; here the assignment of least total distance.
 
-And three things in SMAP that are bugs, with fixes written as a patch for
-`jries/SMAP`: the `Dye` model assigns the sort permutation instead of the
+And three things in SMAP that look like bugs, noted here and not fixed
+there: the `Dye` model assigns the sort permutation instead of the
 ranks when spreading the blinks, which scrambles each fluorophore's order;
 SimulateCameraImages draws `phot` that `simulatelocs` had already
 Poisson-sampled and applies shot noise again, doubling its variance; and its
