@@ -264,6 +264,8 @@ def save_spline_calibration(path, cal, diagnostics=None, overwrite=False):
                            dz=cal.dz, z0=cal.z0, em_mirror=bool(cal.em_mirror))
             if cal.x0 is not None:
                 f.attrs['x0'] = cal.x0
+            if cal.em_on is not None:
+                f.attrs['em_on'] = bool(cal.em_on)
             f.create_dataset('coeff', data=cal.coeff, compression='gzip')
             if cal.psf is not None:
                 f.create_dataset('psf', data=cal.psf, compression='gzip')
@@ -301,6 +303,7 @@ def _load_native_calibration(path):
             dz=float(f.attrs['dz']), z0=float(f.attrs['z0']),
             x0=f.attrs.get('x0'), psf=f['psf'][...] if 'psf' in f else None,
             em_mirror=bool(f.attrs.get('em_mirror', False)), source=Path(path),
+            em_on=bool(f.attrs['em_on']) if 'em_on' in f.attrs else None,
             parameters=json.loads(f['parameters_json'][()]))
     _validate_native_calibration(cal)
     return cal

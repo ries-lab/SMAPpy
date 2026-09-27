@@ -122,7 +122,8 @@ the shape of the spot is what depends on it, and the fit changes z until the
 model's shape matches the spot's.
 
 The fit starts at the centre of mass of the ROI, at the background of its
-border pixels, and at **z = 0**, the focal plane of the calibration.  From
+border pixels, and at the *start z* -- the focal plane of the calibration
+unless set otherwise.  From
 there Levenberg-Marquardt walks to the best z; with an astigmatic PSF the
 shape changes monotonically over the range, so there is one best z to find.
 
@@ -220,7 +221,7 @@ imaging into water, real distances are shorter, by a factor of roughly 0.7 to
 **The start and the limits.**  x and y start at the ROI's centre of mass,
 the background at the mean of the ROI's border pixels, the photons at the
 brightest pixel above background divided by the model's central value, times
-4, and z at 0 nm (the plane $k_0$).  A z step is capped at a third of the
+4, and z at *start z* (0 nm by default, the plane $k_0$).  A z step is capped at a third of the
 calibration's depth (at least two planes) at first, and the cap is halved whenever the step reverses.
 z is held inside the calibration: a fit that tries to leave it stops at an
 end.  During the fit $N \geq 1$ and $b \geq 0.01$; x and y are not held.
@@ -231,9 +232,10 @@ that; each ROI is then flipped in x before it is fitted and the fitted x
 flipped back, so the table is in the orientation of the data.  Calibrations
 from the Bead calibration tool are never mirrored.
 
-**EM gain.**  If a SMAP calibration records whether the beads were taken with
-EM gain and the data's camera says otherwise, the fit warns (a Python warning,
-in the console): the EM register of many EMCCDs reads out mirrored, so a model
+**EM gain.**  A calibration records whether the beads were taken with EM
+gain -- the Bead calibration tool reads it from the bead files' metadata, a
+SMAP calibration carries it -- and if the data's camera says otherwise, the
+fit warns, in the plugin's output: the EM register of many EMCCDs reads out mirrored, so a model
 from beads on the other port is mirrored against the data, and every fit is
 then subtly wrong.  The fit is not stopped.  The EM gain's excess noise is
 handled as in the Gaussian fitter.
@@ -241,16 +243,19 @@ handled as in the Gaussian fitter.
 ## Parameters
 
 ### model.calibration
-Made once per microscope configuration.  The file dialog lists `.mat` files;
-a calibration from the Bead calibration tool (`.h5`) is filled in when it is
-saved, or can be typed.
+Made once per microscope configuration, with the objective, filters and
+camera settings of the data.
 
 ### fit.roisize
-Must be smaller than the calibration's lateral size (the Bead calibration's
-*ROI size*, 27 by default) by a few pixels; beyond it the model is extended
-by repeating its edge, with no check.  Large enough for the widest,
+At least 2 pixels smaller than the calibration laterally (the Bead
+calibration's *ROI size*, 27 by default), or the fit refuses to start:
+beyond the grid the model would only repeat its edge.  Large enough for the widest,
 most defocused spot; the default 13 holds the spots of the figures above, over
 $\pm$600 nm.
+
+### model.z_start_nm
+Worth moving only when most of the data is far from focus on one side, where
+a start at the focal plane has the farthest to go.
 
 ### fit.iterations
 Defocused spots can take more steps than in 2D; 50 is usually plenty, and
@@ -300,10 +305,10 @@ fits at low background from sticking at no background, which in the spline
 fitter froze z at its start), no clamp of x and y, border candidates dropped.
 Beyond those:
 
-* **One z start, at the calibration's focal plane.**  SMAP starts at the
-  centre of the spline grid plus an offset set in the GUI, and accepts
-  several starts, keeping the fit with the best likelihood.  Neither is
-  offered here.
+* **One z start**, at the focal plane unless *start z* says otherwise.  SMAP
+  starts at the centre of the spline grid plus an offset set in the GUI, and
+  accepts several starts, keeping the fit with the best likelihood; several
+  starts are not offered here.
 * **No refractive-index correction.**  SMAP's fitter has an optional factor
   (0.8 by default when switched on); here z stays in objective nanometres.
 * **One calibration for the whole field.**  A `_3dcal.mat` with a spatially

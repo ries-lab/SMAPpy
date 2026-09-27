@@ -153,21 +153,35 @@ class GaussianModelSettings:
 
 @dataclass
 class SplineModelSettings:
-    """An experimental PSF from a SMAP ``_3dcal.mat``: adds z."""
+    """An experimental PSF from a bead calibration (.h5, or SMAP's ``_3dcal.mat``): adds z."""
     calibration: str = param("", label="calibration", kind="open_file",
-                             file_filter="SMAP calibration (*_3dcal.mat *.mat)",
+                             file_filter="Bead calibrations (*.h5 *.hdf5 *_3dcal.mat *.mat)",
                              help="the bead calibration of this microscope: an "
                                   ".h5 from Tools > Bead calibration, or a "
                                   "SMAP _3dcal.mat")
+    z_start_nm: float = param(0.0, label="start z", unit="nm", advanced=True,
+                              help="where each fit starts in z, relative to "
+                                   "the calibration's focal plane")
 
-    def model(self, camera: Optional[CameraMetadata] = None) -> SplinePSF:
+    def model(self, camera: Optional[CameraMetadata] = None,
+              roisize: Optional[int] = None) -> SplinePSF:
         from ..io.calibration import load_spline_calibration, warn_on_em_mismatch
         if not self.calibration:
-            raise ValueError("a spline fit needs a _3dcal.mat calibration file")
+            raise ValueError("a spline fit needs a bead calibration file")
         calibration = load_spline_calibration(self.calibration)
         if camera is not None:
             warn_on_em_mismatch(calibration, camera.em_on)
-        return SplinePSF(calibration)
+        if roisize is not None:
+            # the ROI sits in the middle of the calibration grid, and a fit that
+            # starts up to a pixel off centre reaches one further: any larger
+            # and the model silently repeats its edge
+            lateral = min(calibration.shape[1:])
+            if roisize > lateral - 2:
+                raise ValueError(
+                    f"the ROI ({roisize} px) must be at least 2 px smaller than "
+                    f"the calibration ({lateral} px across): make the ROI "
+                    f"smaller, or the calibration's ROI size larger")
+        return SplinePSF(calibration, z_start_nm=float(self.z_start_nm))
 
 
 @dataclass
@@ -388,6 +402,24 @@ class _FitPlugin(Plugin):
     def model(self, settings, camera: CameraMetadata):
         raise NotImplementedError
 
+    def _model_telling(self, ctx: Context, settings, camera: CameraMetadata):
+        """`model`, with what it warned about said where the user reads it.
+
+        Loading a calibration can warn -- the beads were taken with EM gain
+        and the data without, say, so the model may be mirrored against the
+        data -- and a Python warning goes to a console a GUI user never sees.
+        It goes to the run's report as well, which the panel shows.
+        """
+        import warnings
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            model = self.model(settings, camera)
+        for warning in caught:
+            ctx.report(f"warning: {warning.message}")
+            warnings.warn_explicit(warning.message, warning.category,
+                                   warning.filename, warning.lineno)
+        return model
+
     def engine(self, settings, camera: CameraMetadata, finder, model):
         """What consumes the frames.  One ROI per candidate by default; the
         two-channel fitter overrides this with one pair per candidate."""
@@ -553,7 +585,7 @@ class _FitPlugin(Plugin):
 
         locs, trouble = None, ""
         try:
-            model = self.model(settings, camera)
+            model = self._model_telling(ctx, settings, camera)
             engine = self.engine(settings, camera, finder, model)
             if camera.pixelsize_um is None:
                 # pixels, then: a preview is about detection and shape, and
@@ -651,7 +683,7 @@ class _FitPlugin(Plugin):
         camera = settings.camera.resolve(source)
         fit = settings.fit
         finder = self.finder(settings, camera)
-        model = self.model(settings, camera)
+        model = self._model_telling(ctx, settings, camera)
         out = settings.output.resolve(src.path)
 
         if src.live:
@@ -835,12 +867,13 @@ class GaussianFit(_FitPlugin):
 
 @register("Localize/Spline 3D")
 class SplineFit(_FitPlugin):
-    description = "Detect and fit with an experimental spline PSF from a _3dcal.mat: adds z."
+    description = ("Detect and fit with an experimental spline PSF from a bead "
+                   "calibration: adds z.")
     Settings = SplineFitSettings
     params = GaussianFit.params
 
     def model(self, settings, camera):
-        return settings.model.model(camera)
+        return settings.model.model(camera, roisize=settings.fit.roisize)
 
 
 @register("Localize/Spline 3D 2C")

@@ -74,6 +74,10 @@ class BeadCollection:
     settings: CalibrationSettings
     original_volumes: np.ndarray | None = None
     channel_offsets: np.ndarray | None = None
+    # EM gain on the camera the beads were taken with, from the files' own
+    # metadata; None when they do not say, or disagree.  Kept with the
+    # calibration so the fitter can warn about data taken the other way.
+    em_on: bool | None = None
 
 
 @dataclass
@@ -142,11 +146,13 @@ def collect_beads(inputs, settings=None, progress=None):
     inputs = list(inputs)
     if not inputs:
         raise ValueError('select at least one acquisition')
+    em_states = []
     if isinstance(inputs[0], BeadStack):
         batches = ([s] for s in inputs)
     else:
         paths = discover_acquisitions(inputs)
         batches = (read_bead_stacks(p, settings.dz_nm) for p in paths)
+        em_states = [_em_on(p) for p in paths]
     volumes, records, projections, sources = [], [], [], []
     dz = None
     channels = set()
@@ -229,7 +235,20 @@ def collect_beads(inputs, settings=None, progress=None):
         rec['start_plane'] = (vol.shape[0] - nz) // 2
     volumes = np.stack([v[r['start_plane']:r['start_plane']+nz]
                         for v, r in zip(volumes, records)]).astype(np.float32)
-    return BeadCollection(volumes, records, projections, sources, dz, settings)
+    known = {state for state in em_states if state is not None}
+    em_on = known.pop() if len(known) == 1 and None not in em_states else None
+    return BeadCollection(volumes, records, projections, sources, dz, settings,
+                          em_on=em_on)
+
+
+def _em_on(path):
+    """Whether a bead acquisition was taken with EM gain, as the fitter would
+    read it (the file's metadata and the camera database); None if unknown."""
+    try:
+        from ..io.tiff import camera_metadata, open_stack
+        return camera_metadata(open_stack(path), require=False).em_on
+    except Exception:
+        return None
 
 
 def estimate_shift(reference, moving, limits=None, z_window=None, lateral_window=None,
@@ -565,6 +584,7 @@ def build_calibration(beads, excluded=(), progress=None):
     else:
         models, raws = [], []
         cal, raw = _single_model(raw, beads.dz_nm, s)
+        cal.em_on = getattr(beads, "em_on", None)
         psf = cal.psf
     reasons = []
     for i in range(n):
