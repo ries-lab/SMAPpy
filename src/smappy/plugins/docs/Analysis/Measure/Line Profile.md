@@ -1,5 +1,5 @@
 ---
-version: "3"
+version: "4"
 covers: [smappy.plugins.line_profile.project, smappy.plugins.line_profile.profiles, smappy.plugins.line_profile.fit_profile, smappy.plugins.line_profile.fit_models, smappy.plugins.line_profile.em_two_gaussians, smappy.plugins.line_profile.bootstrap, smappy.plugins.line_profile.gauss_density, smappy.plugins.line_profile.step_density, smappy.plugins.line_profile.arc_density, smappy.plugins.line_profile.smoothed_profile, smappy.plugins.line_profile.fit_layers, smappy.plugins.line_profile.draw_profile]
 ---
 
@@ -215,8 +215,10 @@ half-maximum width from a coarse, smoothed histogram, and for the two
 Gaussians a preliminary fit by *expectation-maximization* that pulls two
 components apart wherever two describe the data better.  That preliminary
 fit is started three ways -- on the two ends of the tallest peak, on the two
-highest separate peaks, and as far apart as the data goes -- and the best
-one is kept.
+highest separate peaks, and as far apart as the data goes -- each once with
+the width read off the profile and once much narrower, and the best one is
+kept.  The narrow start matters for a close pair: its profile looks like one
+broad peak, and a start as wide as that peak can only shrink onto it.
 
 **7. One structure or two?**  Two Gaussians always fit at least as well as
 one, because they can become one.  The question is whether they fit
@@ -378,7 +380,8 @@ $1.4826\,\mathrm{median}\,|t - \mathrm{median}\,t|$.  At most 200 rounds, until 
 parameters move by less than $10^{-6}$.  The three starts are the
 half-maximum ends of the tallest peak; the two highest maxima of the
 smoothed profile that have a dip below four fifths of the lower one between
-them; and the 15th and 85th percentiles.  The start with the highest mixture
+them; and the 15th and 85th percentiles.  Each is run at the width read off
+the profile and at a third of it, and the run with the highest mixture
 likelihood is kept.  EM ignores the truncation at the window, which is why
 it is a start and not the answer.
 

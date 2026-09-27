@@ -63,7 +63,7 @@ profile as the eye reads it, and the one place a bin width enters a number
 here), the width has the localization precision taken out of it in
 quadrature, and the two-Gaussian start comes from **expectation-maximization**
 (`em_two_gaussians`), which moves two overlapping components apart where a
-gradient step cannot -- started three ways and the likeliest kept, so two
+gradient step cannot -- started three ways, each wide and narrow, and the likeliest kept, so two
 peaks far apart and of very different height are found as well as two that
 overlap (a small peak far from a tall one used to be left to the
 background, both components sitting on the tall one).  On a pair 25 nm apart with 8 nm structures and 8 nm
@@ -496,7 +496,8 @@ def em_two_gaussians(t, precision=None, window=None, background: bool = True,
       of the window.
 
     EM finds the mixture nearest where it was started, like any local
-    method, so it is started three ways and the likeliest answer kept:
+    method, so it is started three ways, each at two widths -- the one read
+    off the profile and a third of it -- and the likeliest answer kept:
 
     * at the two ends of the profile's top -- two peaks that overlap;
     * on the profile's two highest separate maxima -- two peaks far apart.
@@ -530,6 +531,14 @@ def em_two_gaussians(t, precision=None, window=None, background: bool = True,
     if maxima is not None:
         starts.append((np.asarray(maxima, float), narrow))
     starts.append((np.percentile(t, [15.0, 85.0]), narrow))
+    # and each again at a third of its width.  A width read off the profile is
+    # the width of *both* peaks together when they overlap, and EM started that
+    # wide can only shrink onto one broad peak: a pair 25 nm apart with 6 nm
+    # structures and 8 nm precision came back as a distance of 0.2 from all
+    # three starts, where a narrow start finds 25.4 and a likelihood higher by
+    # 5.6.  A narrow start on a single structure merges back, so it costs a
+    # pair nothing.
+    starts += [(mu, s / 3.0) for mu, s in starts]
 
     best = None
     for mu, s in starts:
@@ -1475,7 +1484,9 @@ class LineProfile(Plugin):
     """Profiles across a line ROI, fitted without binning them."""
 
     Settings = LineProfileSettings
-    version = "3"        # 2: the two-Gaussian start tries peaks far apart; 3: z_err_nm
+    # 2: the two-Gaussian start tries peaks far apart; 3: z_err_nm; 4: the
+    # EM starts are tried narrow as well, so a close pair is not merged
+    version = "4"
 
     def run(self, ctx: Context, settings: LineProfileSettings) -> Result:
         region = _line_roi(ctx)

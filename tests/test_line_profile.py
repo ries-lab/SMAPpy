@@ -301,6 +301,29 @@ def test_em_finds_two_components_that_overlap_and_a_gradient_start_would_miss():
     assert fit.values()["distance"] == pytest.approx(found["distance"], abs=2.0)
 
 
+def test_a_close_pair_is_found_when_the_profile_looks_like_one_broad_peak():
+    """Every start used to read its width off the profile, which for two
+    overlapping peaks is the width of both together; EM started that wide
+    shrank onto one peak.  200 localizations, 6 nm structures 25 nm apart at
+    about 8 nm precision: of 60 draws, these three came back as one peak
+    (distance under 10 nm) although a narrow start finds the pair.  (Three
+    others, 30, 38 and 41, look like one peak to EM started at the truth
+    too: those are the data, not the fit.)"""
+    for seed in (51, 54, 59):
+        rng = np.random.default_rng(seed)
+        n = 200
+        precision = rng.lognormal(np.log(8.0), 0.35, n)
+        values = (np.where(rng.random(n) < 0.5, -12.5, 12.5)
+                  + rng.normal(0.0, np.hypot(6.0, precision)))
+        stray = rng.random(n) < 0.1
+        values[stray] = rng.uniform(-100.0, 100.0, stray.sum())
+        keep = np.abs(values) <= 100.0
+        fits = {f.model: f for f in fit_models(values[keep], precision[keep],
+                                               models=("gauss", "two_gauss"),
+                                               window=(-100.0, 100.0))}
+        assert fits["two_gauss"].values()["distance"] == pytest.approx(25.0, abs=8.0), seed
+
+
 def test_two_peaks_far_apart_and_of_very_different_height_are_both_found():
     """The small peak is below half the tall one, so the profile's top is the
     tall peak alone; a start read only from the top put both components on it
