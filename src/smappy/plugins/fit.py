@@ -34,7 +34,9 @@ from ..rcc import RCCSettings
 from . import Context, ParamInfo, Plot, Plugin, Result, param, register
 from .assign_colors import AssignColorSettings
 
-TIFF_FILTER = "Image stacks (*.tif *.tiff *.ome.tif);;All files (*)"
+# a simulation's recipe opens as an acquisition too (`smappy.simulate.source`)
+TIFF_FILTER = ("Image stacks (*.tif *.tiff *.ome.tif *.sim.yaml);;"
+               "Simulations (*.sim.yaml);;All files (*)")
 
 
 # ---------------------------------------------------------------------- parts
@@ -43,8 +45,9 @@ class SourceSettings:
     """Where the frames come from."""
     path: str = param("", label="file", kind="open_file", file_filter=TIFF_FILTER,
                       help="any file of the acquisition: a Micro-Manager TIFF "
-                           "series, an NDTiff directory, or one image out of a "
-                           "folder written one file per frame")
+                           "series, an NDTiff directory, one image out of a "
+                           "folder written one file per frame, or a "
+                           "simulation (*.sim.yaml, File > Simulate)")
     start: int = param(0, label="first frame", min=0, advanced=True)
     stop: Optional[int] = param(None, label="last frame", min=1, advanced=True,
                                 help="auto: to the end")
@@ -178,6 +181,8 @@ def default_output_path(source_path) -> Path:
         folder = src if src.is_dir() else src.parent
         return folder.parent / f"{folder.name}_locs.hdf5"
     name = src.name.rsplit(".", 1)[0]
+    if src.name.lower().endswith((".sim.yaml", ".sim.yml")):
+        name = src.name.rsplit(".", 2)[0]            # run.sim.yaml -> run
     return src.parent / f"{name}_locs.hdf5"
 
 

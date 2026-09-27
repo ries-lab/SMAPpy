@@ -52,7 +52,7 @@ def _data(d):
     for old in folder.glob("*"):
         old.unlink()
     for i in range(4):
-        save(simulate(8000, seed=10 + i, drift=True), folder / f"cell_{i + 1}.h5")
+        save(simulate(n_frames=8000, seed=10 + i, drift=True), folder / f"cell_{i + 1}.h5")
     return folder
 
 

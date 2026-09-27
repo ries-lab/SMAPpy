@@ -6,16 +6,15 @@
 The simulation itself is `smappy.simulate`, which is also the
 ``File/Simulate/Blinking Structure`` plugin; this only drives it and saves.
 
-Emitters sit on a 3D structure (a tilted ring, two crossing lines, a few
-scattered points) spread over ~10 um, far apart compared with a PSF.  Each
-one blinks a few times; a blink lasts one to a few frames and every frame
-gives one localization with noise from its photon count (precision ~
-150 / sqrt(N) nm laterally, three times that in z).  Two emitters that are
-active in the same frame closer than ``--min-separation`` (a PSF width)
-could not have been fitted apart, so both are dropped -- the labelling is
-dense, the activation sparse, as in a real experiment.  The drifted copy adds a
-smooth random walk plus a slow linear creep of ~100 nm; the true drift per
-frame is stored in the file's metadata as ``drift_truth`` (x, y, z in nm).
+The structure (``--structure``: a built-in such as ``demo`` or ``npc``, or a
+structure YAML) is labelled, each fluorophore blinks -- ``--blinks`` times on
+average, ``--on-time`` frames each -- and every frame it is on in gives a
+localization with the Mortensen precision of its photons.  Two emitters on in
+one frame closer than ``--min-separation`` could not have been fitted apart
+and are both dropped.  The drifted copy adds a smooth random walk plus a slow
+linear creep of ~100 nm; the true drift per frame is stored in the file's
+metadata as ``drift_truth`` (x, y, z in nm).  Every other setting is
+`smappy.simulate.SimulationSettings`.
 """
 import argparse
 import sys
@@ -26,7 +25,8 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from smappy.io.hdf5 import save_localizations  # noqa: E402
-from smappy.simulate import simulate            # noqa: E402
+from smappy.simulate import (BlinkingSettings, LocalizationOutputSettings,  # noqa: E402
+                             StructureSettings, simulate)
 
 
 def main() -> None:
@@ -34,15 +34,24 @@ def main() -> None:
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--out", default=".", help="directory (default: here)")
     p.add_argument("--frames", type=int, default=20000)
-    p.add_argument("--density", type=float, default=1.0,
-                   help="scale the number of blinks per emitter")
+    p.add_argument("--structure", default="demo",
+                   help="a built-in structure or a structure YAML")
+    p.add_argument("--blinks", type=float, default=3.0,
+                   help="mean blinks per fluorophore in the measurement")
+    p.add_argument("--on-time", type=float, default=1.5, help="mean on-time, frames")
     p.add_argument("--min-separation", type=float, default=250.0,
                    help="two emitters closer than this in one frame are both dropped (nm)")
     p.add_argument("--seed", type=int, default=0)
     args = p.parse_args()
     out = Path(args.out)
     for drift, name in ((False, "sim_blinks.hdf5"), (True, "sim_blinks_drift.hdf5")):
-        locs = simulate(args.frames, args.seed, drift, args.density, args.min_separation)
+        structure = (StructureSettings(file=args.structure)
+                     if args.structure.endswith((".yaml", ".yml"))
+                     else StructureSettings(preset=args.structure))
+        locs = simulate(
+            n_frames=args.frames, seed=args.seed, drift=drift, structure=structure,
+            blinking=BlinkingSettings(blinks=args.blinks, on_time=args.on_time),
+            localizations=LocalizationOutputSettings(min_separation_nm=args.min_separation))
         save_localizations(out / name, locs)
         per_frame = len(locs) / args.frames
         print(f"{name}: {len(locs)} localizations, {locs.metadata['n_emitters']} emitters, "

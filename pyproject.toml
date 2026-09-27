@@ -102,7 +102,8 @@ where = ["src"]
 "smappy._comet" = ["LICENSE.txt"]
 # the camera database: a file that is read at run time, so it has to be in the
 # wheel and not only in the checkout
-"smappy" = ["data/*.json"]
+# and the simulator's built-in structures, likewise
+"smappy" = ["data/*.json", "data/structures/*.yaml"]
 
 [tool.cibuildwheel]
 # numpy is deliberately not a build dependency: the extensions include only

@@ -350,11 +350,14 @@ sparse on average, seven spots on 100 x 100 pixels, but the structure's
 emitters cluster, and a quarter of the blinks had another emitter on within a
 micrometre.
 
-The simulators now drop both blinks of such a pair, as `simulate` has always
-done for the localizations it pretends to have fitted (`MIN_SEPARATION_NM`,
-1 um: the ROI's half-width plus a defocused neighbour's spot), and count them
-in the metadata.  Both paths give 1.002, and the test and the tutorials hold
-the slope to 0.02 instead of 0.08-0.1.
+The simulators first dropped both blinks of such a pair, as `simulate` does
+for the localizations it pretends to have fitted.  Both paths gave 1.002.
+Since the simulation model was unified (below) the camera frames keep every
+spot -- crowding is what a fitter is tested *on*, not something a simulator
+should hide -- and the truth says instead how far each spot's nearest
+neighbour in its frame was (`neighbour_nm`).  The tests compare only spots
+with none within `ISOLATED_NM` (1 um: the ROI's half-width plus a defocused
+neighbour's spot) and hold the slope to 0.02 there.
 
 For real data the lesson is that this is a density effect, not a calibration
 one: z from a crowded acquisition is pulled towards focus by the overlapping
@@ -1543,6 +1546,59 @@ pipelines, and the Math Parser's remembered expressions.  It renames whole
 words, so an old name inside an expression is renamed too.  Only the new names
 are written.  An ROI project fingerprints its source's column names; one saved
 before the rename is checked against the file as it is on disk.
+
+## The simulation model
+
+`smappy.simulate` is one model with two outputs, localizations and camera
+frames, so a dataset looked at as localizations can be fitted from its frames
+by changing nothing but the output.  The stages and what each assumes:
+
+* **Structure**: label positions from a YAML (`simulate/structure.py` has the
+  syntax): explicit points or a CSV, the same in every copy, or lines,
+  circles, polygons and grey-value images sampled at a density, Poisson in
+  number and drawn afresh per copy; copies placed at random (with a minimum
+  distance) or on a grid, turned in-plane or in 3D.  The built-ins are YAML
+  files in `data/structures`, the demo among them, so each is an example.
+* **Labelling**: a label is labelled with a probability and then carries
+  exactly one fluorophore (or a set number, or a Poisson number), each off
+  its label by a Gaussian linkage error.
+* **Blinking**: exponential on- and off-times in continuous time, and a
+  bleaching probability after each blink -- one model for STORM and PAINT,
+  since PAINT's docking strands are lost too.  The off-time is set from the
+  mean number of blinks *in the measurement*, which is what one knows about
+  a dye, by inverting `E = sum_k (1-p)^(k-1) P(K >= k)` with `K` the
+  Poisson number of activations; asking for more than `1/p` is refused.  By
+  default the activation is ramped against the bleaching: the blinks of the
+  fixed-rate model, their times mapped monotonically so they fall evenly
+  over the measurement (the density is flat to within 5 %).  The fixed rate,
+  with most blinks early, is the option.
+* **Photons**: a total per blink from a gamma distribution with a given mean
+  and standard deviation (0: exact), emitted at a constant rate while on, so
+  a frame gets its share by the time on in it and the first and last frames
+  of a blink are dim.  Background likewise, per localization or per frame,
+  flat over the frame.
+* **Localizations**: Poisson photons, a detection limit, the Mortensen
+  precision from the photons, the background, the PSF and the pixel (times
+  sqrt 2 for an EMCCD), and noise drawn from it, so `xy_err_nm` is honest.
+  Emitters on in one frame within the separation are removed, or merged at
+  their photon-weighted mean.
+* **Camera frames**: pixel-integrated Gaussians (the fitter's own model),
+  astigmatic optionally, shot noise, gain, offset and Gaussian read noise;
+  nothing removed.  Saved as the recipe (`*.sim.yaml`), which `open_stack`
+  opens as an acquisition that draws its frames as they are read, seeded per
+  frame, and which tells the fitter its camera.
+
+What changed from the first simulators, which each had their own blinking:
+blinks were uniform in time with geometric lengths in whole frames, the
+photons of every frame independent, the precision `150 / sqrt(N)` whatever
+the background, and a fluorophore could overlap itself in time (two
+localizations in one frame, then both dropped as "too close").  The number of
+blinks now follows from the kinetics rather than being drawn, and the demo's
+structure is the same ring and lines as before, written as a YAML.
+
+Left out for now: EMCCD noise in the frames, a non-flat background, a
+spline PSF for the frames (which would stop the frames being drawn with the
+fitter's own model), and using a loaded table as the structure.
 
 ## Open questions
 

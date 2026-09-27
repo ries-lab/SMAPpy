@@ -1,0 +1,46 @@
+# Nuclear pore complexes labelled at Nup96: 32 copies per pore, 8 spokes x 2
+# per spoke x 2 rings, the rings 50 nm apart in z at a radius of 53.7 nm
+# (Thevathasan et al., Nat. Methods 2019).  The two copies of a spoke are
+# about 11 nm apart along the ring.  Pores sit in the flat bottom envelope,
+# randomly turned; set the labelling efficiency with the simulation (~0.6).
+name: nuclear pore complexes (Nup96)
+elements:
+  - points:
+      - [53.4, 5.6, 25]
+      - [53.4, -5.6, 25]
+      - [33.8, 41.7, 25]
+      - [41.7, 33.8, 25]
+      - [-5.6, 53.4, 25]
+      - [5.6, 53.4, 25]
+      - [-41.7, 33.8, 25]
+      - [-33.8, 41.7, 25]
+      - [-53.4, -5.6, 25]
+      - [-53.4, 5.6, 25]
+      - [-33.8, -41.7, 25]
+      - [-41.7, -33.8, 25]
+      - [5.6, -53.4, 25]
+      - [-5.6, -53.4, 25]
+      - [41.7, -33.8, 25]
+      - [33.8, -41.7, 25]
+      - [53.4, 5.6, -25]
+      - [53.4, -5.6, -25]
+      - [33.8, 41.7, -25]
+      - [41.7, 33.8, -25]
+      - [-5.6, 53.4, -25]
+      - [5.6, 53.4, -25]
+      - [-41.7, 33.8, -25]
+      - [-33.8, 41.7, -25]
+      - [-53.4, -5.6, -25]
+      - [-53.4, 5.6, -25]
+      - [-33.8, -41.7, -25]
+      - [-41.7, -33.8, -25]
+      - [5.6, -53.4, -25]
+      - [-5.6, -53.4, -25]
+      - [41.7, -33.8, -25]
+      - [33.8, -41.7, -25]
+copies:
+  density: 2                         # pores per um^2
+  field: [500, 500, 9500, 9500]
+  placement: random
+  rotation: random
+  min_distance: 200

@@ -23,6 +23,7 @@ from typing import Any, Dict, Optional
 
 from ..io.formats import (FileInfo, name_filter, reader_for, reader_named,
                           save_filter, writer_for)
+from ..simulate.settings import SimulationSettings
 from . import Context, Plugin, Result, param, register
 
 LOCS_FILTER = "Localizations (*.hdf5 *.h5 *.mat *.csv *.npy *.zip *.json)"
@@ -197,36 +198,58 @@ class ExportImage(Plugin):
 
 # ----------------------------------------------------------------- simulate
 
-@dataclass
-class SimulateSettings:
-    n_frames: int = param(20000, label="frames", min=1)
-    density: float = param(1.0, label="density", min=0.01,
-                           help="scales the number of blinks per emitter")
-    drift: bool = param(False, label="add drift",
-                        help="a smooth random walk plus a slow creep of ~100 nm; "
-                             "the truth is kept in the metadata as drift_truth")
-    min_separation_nm: float = param(
-        250.0, label="minimum separation", unit="nm", min=0,
-        help="two emitters active in one frame closer than this could not have "
-             "been fitted apart, so both are dropped")
-    seed: int = param(0, label="seed", min=0)
-
-
 @register("File/Simulate/Blinking Structure")
 class SimulateBlinks(Plugin):
-    """A ring, two lines and some scattered points, blinking: a dataset to try."""
+    """A labelled structure, blinking: localizations to try, or camera frames
+    to fit (`smappy.simulate`)."""
 
-    Settings = SimulateSettings
+    Settings = SimulationSettings
+    version = "2"
 
-    def run(self, ctx: Context, settings: SimulateSettings) -> Result:
-        from ..simulate import simulate
+    def run(self, ctx: Context, settings: SimulationSettings) -> Result:
+        from ..simulate import camera_truth, ground_truth, localizations
         ctx.report(f"simulating {settings.n_frames} frames...")
-        locs = simulate(settings.n_frames, settings.seed, settings.drift,
-                        settings.density, settings.min_separation_nm)
+        truth = ground_truth(settings)
+        if settings.output == "camera":
+            return self._camera(ctx, settings, truth, camera_truth)
+        locs = localizations(truth)
         name = "simulation (drift)" if settings.drift else "simulation"
         info = FileInfo(name=name, path=name, format="simulated", n=len(locs))
-        text = (f"{len(locs)} localizations, {locs.metadata['n_emitters']} emitters, "
-                f"{settings.n_frames} frames, "
-                f"{locs.metadata['n_unresolvable_dropped']} overlapping dropped")
+        md = locs.metadata
+        close = ("removed" if settings.localizations.close == "remove" else "averaged")
+        text = (f"{len(locs)} localizations of {md['n_emitters']} emitters "
+                f"({md['n_labels']} labels), {md['n_blinks']} blinks over "
+                f"{settings.n_frames} frames, off time {md['off_time_frames']:.0f} "
+                f"frames; {md['n_close']} too close together, {close}")
         return Result(files=[(locs, info, None)], text=text,
                       data={"append": False}, settings=settings)
+
+    def _camera(self, ctx, settings, truth, camera_truth) -> Result:
+        from ..simulate.source import write_recipe
+        cam = settings.camera
+        if not cam.path:
+            raise ValueError("camera frames: choose where to write the simulation "
+                             "file (camera frames > simulation file)")
+        path = write_recipe(settings, cam.path)
+        text = (f"{len(truth.emission)} spots of {len(truth.fluorophores)} emitters "
+                f"over {settings.n_frames} frames of {cam.size_px} x {cam.size_px} "
+                f"pixels: {path} -- open it in a fitter as its file")
+        data = {"path": str(path)}
+        if cam.tiff:
+            import tifffile
+            from ..simulate import render
+            tif = path.with_name(path.name[:-len(".sim.yaml")] + ".tif")
+            ctx.report(f"writing {tif}...")
+            with tifffile.TiffWriter(tif, bigtiff=True) as writer:
+                for a in range(0, settings.n_frames, 500):
+                    writer.write(render(truth, a, a + 500), contiguous=True)
+            data["tiff"] = str(tif)
+            text += f"; the frames in {tif.name}"
+        files = []
+        if cam.load_truth:
+            locs = camera_truth(truth)
+            name = f"{path.name} (truth)"
+            files = [(locs, FileInfo(name=name, path=str(path), format="simulated",
+                                     n=len(locs)), None)]
+            data["append"] = False
+        return Result(files=files, text=text, data=data, settings=settings)

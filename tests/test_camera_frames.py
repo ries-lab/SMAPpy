@@ -2,12 +2,22 @@
 import numpy as np
 import pytest
 
-from smappy.simulate import camera_frames
+from smappy.simulate import ISOLATED_NM, LabellingSettings, camera_frames
+
+# the demo's 3800 fluorophores blink three times each over however many frames
+# there are: a short test stack keeps a few percent of them to stay sparse
+SPARSE = LabellingSettings(efficiency=0.1)
+
+
+def _found(truth, photons=500.0):
+    """What a fit of the frames should find and place cleanly: bright enough,
+    and no other spot on within a micrometre in its frame."""
+    return (truth["photons"] > photons) & (truth["neighbour_nm"] > ISOLATED_NM)
 
 
 def test_the_frames_are_the_camera_it_was_told_of():
     frames, truth = camera_frames(50, seed=1, background=20.0, conversion=0.5,
-                                  offset=100.0)
+                                  offset=100.0, labelling=LabellingSettings(efficiency=0.03))
     assert frames.dtype == np.uint16 and frames.shape == (50, 100, 100)
     # a pixel no molecule reaches is the background, converted: 20 / 0.5 + 100
     assert np.median(frames) == pytest.approx(140, abs=3)
@@ -22,7 +32,8 @@ def test_a_fit_of_the_frames_finds_the_molecules_where_they_are(tmp_path):
     from smappy.plugins import Context
     from smappy.plugins.fit import (CameraSettings, GaussianFit, GaussianFitSettings,
                                     OutputSettings, SourceSettings)
-    frames, truth = camera_frames(300, seed=2, conversion=0.5, offset=100.0)
+    frames, truth = camera_frames(300, seed=2, conversion=0.5, offset=100.0,
+                                  labelling=SPARSE)
     path = tmp_path / "frames.tif"
     tifffile.imwrite(path, frames)
     settings = GaussianFitSettings(
@@ -35,11 +46,13 @@ def test_a_fit_of_the_frames_finds_the_molecules_where_they_are(tmp_path):
         session = Session()
         session.load(tmp_path / "out.hdf5")
         locs = session.locs
-    assert len(locs) > 0.8 * len(truth)
+    clean = _found(truth)
+    assert len(locs) > clean.sum()
     dx, dy, sigma = [], [], []
     for f in np.unique(locs["frame"]):
         found = np.column_stack([locs["x_nm"], locs["y_nm"]])[locs["frame"] == f]
-        true = np.column_stack([truth["x_nm"], truth["y_nm"]])[truth["frame"] == f]
+        t = (truth["frame"] == f) & clean
+        true = np.column_stack([truth["x_nm"], truth["y_nm"]])[t]
         if len(found) and len(true):
             d, i = cKDTree(true).query(found)
             near = d < 50
@@ -47,6 +60,7 @@ def test_a_fit_of_the_frames_finds_the_molecules_where_they_are(tmp_path):
             dy += list(found[near, 1] - true[i[near], 1])
             sigma += list(locs["xy_err_nm"][locs["frame"] == f][near])
     dx, dy, sigma = np.array(dx), np.array(dy), np.array(sigma)
+    assert len(dx) > 0.9 * clean.sum()              # the clean ones are all found
     assert abs(np.median(dx)) < 1.0 and abs(np.median(dy)) < 1.0    # no offset
     # each error against that spot's own precision: robustly about one sigma
     spread = 1.4826 * np.median(np.abs(dx / sigma))
@@ -60,8 +74,9 @@ def test_a_calibration_from_the_beads_fits_the_astigmatic_frames_in_z(tmp_path):
     rather than -z made a calibration that turned every z upside down (fitted
     against true, the slope was -0.96).  Both simulations use one PSF, so the
     fit must give z back with the right sign, no offset and no change of
-    scale: before the frames dropped overlapping blinks the slope was 0.93,
-    from the quarter of the spots with a neighbour in their ROI.
+    scale -- on the isolated spots: over all of them the slope was 0.93, from
+    the quarter with a neighbour in their ROI (NOTES.md, "Crowding
+    compresses z").
     """
     tifffile = pytest.importorskip("tifffile")
     from scipy.spatial import cKDTree
@@ -77,7 +92,7 @@ def test_a_calibration_from_the_beads_fits_the_astigmatic_frames_in_z(tmp_path):
                            for i, s in enumerate(stacks)], CalibrationSettings())
     calibration = tmp_path / "beads_3dcal.h5"
     build_calibration(beads).save(calibration)
-    frames, truth = camera_frames(400, seed=3, astigmatism=ASTIGMATISM)
+    frames, truth = camera_frames(400, seed=3, astigmatism=ASTIGMATISM, labelling=SPARSE)
     tifffile.imwrite(tmp_path / "frames.tif", frames)
     SplineFit().run(Context(), SplineFitSettings(
         source=SourceSettings(path=str(tmp_path / "frames.tif")),
@@ -88,8 +103,9 @@ def test_a_calibration_from_the_beads_fits_the_astigmatic_frames_in_z(tmp_path):
     session.load(tmp_path / "out.hdf5")
     locs = session.locs
     fitted, true = [], []
+    clean = _found(truth)
     for f in np.unique(locs["frame"]):
-        m, t = locs["frame"] == f, truth["frame"] == f
+        m, t = locs["frame"] == f, (truth["frame"] == f) & clean
         if not t.any():
             continue
         d, i = cKDTree(np.column_stack([truth["x_nm"][t], truth["y_nm"][t]])).query(
@@ -174,21 +190,23 @@ def test_a_spline_fit_at_a_few_background_photons_does_not_stall_at_no_backgroun
         assert slope == pytest.approx(1.0, abs=0.05), (photons, background)
 
 
-def test_no_two_spots_in_a_frame_are_closer_than_the_minimum_separation():
-    """The frames are meant to fit cleanly, and the structure's emitters
-    cluster: without this a quarter of the blinks had a neighbour within a
-    micrometre, which compressed fitted z by 7 %."""
+def test_the_frames_keep_close_spots_and_the_truth_says_how_close():
+    """Crowding is the fitter's problem, so the frames draw every spot; the
+    truth's ``neighbour_nm`` is the distance to the nearest other spot on in
+    that frame, which is how a test takes the isolated ones."""
     from scipy.spatial import cKDTree
-    from smappy.simulate import MIN_SEPARATION_NM, dual_camera_frames
+    from smappy.simulate import dual_camera_frames
     for simulate in (camera_frames, dual_camera_frames):
-        _, truth = simulate(200, seed=4)
-        assert truth.metadata["n_unresolvable_dropped"] > 0
-        for f in np.unique(truth["frame"]):
+        _, truth = simulate(200, seed=4, labelling=SPARSE)
+        assert (truth["neighbour_nm"] < ISOLATED_NM).any()        # kept, not dropped
+        for f in np.unique(truth["frame"])[:50]:
             t = truth["frame"] == f
+            if t.sum() < 2:
+                assert np.isinf(truth["neighbour_nm"][t]).all()
+                continue
             xy = np.column_stack([truth["x_nm"][t], truth["y_nm"][t]])
-            assert not cKDTree(xy).query_pairs(MIN_SEPARATION_NM), (simulate.__name__, f)
-    _, crowded = camera_frames(200, seed=4, min_separation_nm=0)
-    assert crowded.metadata["n_unresolvable_dropped"] == 0
+            d, _ = cKDTree(xy).query(xy, k=2)
+            np.testing.assert_allclose(truth["neighbour_nm"][t], d[:, 1], atol=0.01)
 
 
 def test_the_split_camera_frames_give_back_their_transformation_and_their_dyes(tmp_path):
@@ -203,7 +221,7 @@ def test_the_split_camera_frames_give_back_their_transformation_and_their_dyes(t
                                     DualGaussianFit, DualGaussianFitSettings,
                                     OutputSettings, SourceSettings)
     from smappy.simulate import dual_camera_frames, dual_transformation
-    frames, truth = dual_camera_frames(600, seed=2)
+    frames, truth = dual_camera_frames(600, seed=2, labelling=SPARSE)
     assert frames.shape[1:] == (200, 100)
     tifffile.imwrite(tmp_path / "two.tif", frames)
     result = DualGaussianFit().run(Context(), DualGaussianFitSettings(
@@ -217,8 +235,9 @@ def test_the_split_camera_frames_give_back_their_transformation_and_their_dyes(t
     np.testing.assert_allclose(measured, true, atol=0.2)
     locs = result.locs
     got, want = [], []
+    clean = _found(truth, photons=1000.0)
     for f in np.unique(locs["frame"]):
-        m, t = locs["frame"] == f, truth["frame"] == f
+        m, t = locs["frame"] == f, (truth["frame"] == f) & clean
         if not t.any():
             continue
         d, i = cKDTree(np.column_stack([truth["x_nm"][t], truth["y_nm"][t]])).query(

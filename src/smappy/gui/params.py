@@ -444,7 +444,9 @@ class SettingsForm(QWidget):
     """The fields of a settings dataclass; ``value()`` builds the instance.
 
     Fields marked advanced sit under a collapsed "more" section; a part (a
-    dataclass-typed field) is a section of its own, open unless advanced.
+    dataclass-typed field) is a section of its own, open unless advanced or
+    collapsed.  Rows and parts come in the order they are declared, so a
+    plugin whose plain settings say what it does can put them first.
     ``field_changed`` carries the dotted name of what was edited.
     """
 
@@ -460,10 +462,13 @@ class SettingsForm(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(2)
-        main, more = QFormLayout(), QFormLayout()
-        for form in (main, more):
+        def form_layout():
+            form = QFormLayout()
             form.setContentsMargins(0, 0, 0, 0)
             form.setVerticalSpacing(2)
+            return form
+        more = form_layout()
+        main = None                          # the rows since the last part
         # `specs if None`, not `specs or`: {} is a plugin that declares no
         # settings at all -- a loader with sensible defaults, say -- and it
         # must give an empty form rather than fall back to introspection
@@ -476,6 +481,7 @@ class SettingsForm(QWidget):
                 part.field_changed.connect(lambda sub, n=name: self.field_changed.emit(f"{n}.{sub}"))
                 part.changed.connect(self.changed)
                 self.fields[name] = part
+                main = None
                 layout.addWidget(CollapsibleSection(spec.info.label or name, part,
                                                     expanded=not (spec.info.advanced
                                                                   or spec.info.collapsed)))
@@ -488,9 +494,13 @@ class SettingsForm(QWidget):
             if spec.info.help:
                 label.setToolTip(spec.info.help)
             self.labels[name] = label
-            (more if spec.info.advanced else main).addRow(label, w)
-        if main.rowCount():
-            layout.addLayout(main)
+            if spec.info.advanced:
+                more.addRow(label, w)
+                continue
+            if main is None:
+                main = form_layout()
+                layout.addLayout(main)
+            main.addRow(label, w)
         if more.rowCount():
             box = QWidget()
             box.setLayout(more)

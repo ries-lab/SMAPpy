@@ -1,0 +1,12 @@
+# Straight filaments 3 um long, randomly placed and turned: a geometry
+# sampled afresh for every copy, at a density along its length.
+name: random filaments
+elements:
+  - line: [[-1500, 0, 0], [1500, 0, 0]]
+    density: 0.1
+    width: 8
+copies:
+  n: 40
+  field: [1000, 1000, 9000, 9000]
+  placement: random
+  rotation: random

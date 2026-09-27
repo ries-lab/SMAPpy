@@ -104,7 +104,10 @@ def open_stack(path) -> ImageSource:
     """
     from .ndtiff import is_ndtiff, open_ndtiff   # NDTiff imports this module
     from .singles import is_single_image_set, open_singles
+    from ..simulate.source import is_simulation, open_simulation
 
+    if is_simulation(path):          # a recipe: frames made as they are read
+        return open_simulation(path)
     if is_ndtiff(path):
         return open_ndtiff(path)
     if is_single_image_set(path):
@@ -256,6 +259,10 @@ def resolve_camera(source: ImageSource, camera: str = "", presets=None,
         resolution = resolution.overlaid_with(
             {"camera_name": generic.get("camera_name")},
             Source("metadata", "the Micro-Manager device"))
+    simulated = getattr(source, "camera", None)
+    if simulated:
+        # a simulation knows its camera exactly, which beats any guess
+        resolution = resolution.overlaid_with(simulated, Source("metadata", "the simulation"))
     if overrides:
         values = overrides if isinstance(overrides, dict) else overrides.to_dict()
         resolution = resolution.overlaid_with(
