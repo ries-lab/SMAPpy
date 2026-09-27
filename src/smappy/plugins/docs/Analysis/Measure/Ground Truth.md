@@ -1,5 +1,5 @@
 ---
-version: "2"
+version: "3"
 covers: [smappy.plugins.ground_truth.truth_for, smappy.plugins.ground_truth.match, smappy.plugins.ground_truth._near_any, smappy.plugins.ground_truth.compare, smappy.plugins.ground_truth.Comparison, smappy.plugins.ground_truth.GroundTruth.run, smappy.plugins.ground_truth.draw_all, smappy.plugins.ground_truth._draw_recall, smappy.plugins.ground_truth._draw_error, smappy.plugins.ground_truth._draw_pull, smappy.plugins.ground_truth._draw_z, smappy.simulate.camera.camera_truth, smappy.simulate.camera.neighbour_distance]
 ---
 
@@ -253,7 +253,9 @@ per frame (`camera_truth`): `x_nm`, `y_nm`, `z_nm` including the simulated
 drift, `photons` emitted in that frame (the expected number, before shot
 noise), and `neighbour_nm`, the distance to the nearest other spot in the
 same frame.  With *drift corrected*, the simulated drift of each spot's
-frame is subtracted from its position.
+frame is subtracted from its position, the table is matched against that,
+the mean offset of the pairs in each axis is taken out of the truth as well,
+and the table is matched again.
 
 **Which spots count.**  True spot $j$ counts when
 
@@ -361,12 +363,13 @@ light falls into a fit's 13-pixel box.
 ### drift_corrected
 The truth includes the simulated drift, and a table that has been drift
 corrected no longer does; tick it after a drift correction.  A drift
-correction measures drift only up to a constant: RCC makes the drift average
-zero over the acquisition, while the simulated drift starts at zero, so
-the drift's mean shows as a bias.  A bias of that size inflates the RMS
-error and, being many precisions for a bright spot, the error / reported
-precision too, so read the accuracy of a drift-corrected table with that in
-mind.
+correction measures drift only up to a constant -- RCC and COMET make it
+average zero over the acquisition, while the simulated drift starts at zero
+-- so a corrected table sits a constant offset from the truth that nothing
+in it can tell.  That offset is measured from the pairs, taken out, and
+reported; the bias of a drift-corrected table is therefore zero by
+construction and says nothing, while the error / reported precision above 1
+that remains is the drift correction's own error.
 
 ## Output
 
@@ -386,7 +389,7 @@ on the isolated spots, biases well below a nanometre, an error / reported
 precision near 1 (the measured-error points on the precision line) and a z
 slope near 1.  A bias of tens of nanometres usually means the table and the
 truth disagree about something other than the fit: a drift correction
-(see *drift corrected*), or a pixel convention.  An error / reported
+without *drift corrected*, or a pixel convention.  An error / reported
 precision well above 1 on isolated spots means the fitter's precision
 cannot be trusted; if it is near 1 there and above 1 on all spots, the
 excess is crowding.

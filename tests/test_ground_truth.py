@@ -146,3 +146,21 @@ def test_a_z_radius_refuses_pairs_that_agree_only_laterally():
     both = compare(fitted, truth, 100, z_radius=300)
     assert (lateral.tp, lateral.fp, lateral.fn) == (2, 0, 0)
     assert (both.tp, both.fp, both.fn) == (1, 1, 1)
+
+
+def test_a_drift_corrected_table_is_scored_without_the_mean_drift_as_a_bias():
+    """A drift estimate is fixed up to a constant (RCC and COMET make it
+    average zero); taking out the whole true drift left its mean as a bias,
+    40 nm here, and the error over the precision at six."""
+    from smappy.plugins import Context
+    from smappy.plugins.ground_truth import GroundTruth, GroundTruthSettings
+    from smappy.rcc import RCCSettings, estimate_drift_rcc
+    from smappy.simulate import simulate
+    locs = simulate(n_frames=6000, seed=1, drift=True)
+    corrected = estimate_drift_rcc(locs, RCCSettings(n_timepoints=10)).apply(locs)
+    c = GroundTruth().run(Context(locs=corrected), GroundTruthSettings(
+        drift_corrected=True)).data["comparison"]
+    for axis in ("x", "y"):
+        assert abs(c["axes"][axis]["bias_nm"]) < 1.0, axis
+        # what is left above one is RCC's own error on the drift, which is real
+        assert c["axes"][axis]["pull"] < 2.0, axis

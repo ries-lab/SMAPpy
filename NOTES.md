@@ -1643,7 +1643,9 @@ and error over reported precision 0.94-1.03; with an EM gain of 100 the
 lateral error grows from 7.5 to 10.7 nm, the sqrt(2) of the excess noise, and
 the fit's reported precision grows with it.  Ground Truth can also require a
 z match (SMAP asks 300 nm), and leaves localizations dimmer than its photon
-threshold (100 by default) out of the score whether they matched or not.
+threshold (100 by default) out of the score when they matched nothing: a dim
+localization that found a counted spot is a true positive, and one that found
+nothing is too imprecise to be called false.
 
 ### Against SMAP's simulator
 

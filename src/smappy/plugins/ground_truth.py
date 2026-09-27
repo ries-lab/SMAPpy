@@ -354,7 +354,9 @@ class GroundTruth(Plugin):
     """A fit of a simulation against where the molecules really were."""
 
     Settings = GroundTruthSettings
-    version = "2"        # 2: dim spots not counted by default; a z radius
+    # 2: dim spots not counted by default; a z radius.  3: a drift-corrected
+    # table is compared with the truth less the drift's mean
+    version = "3"
 
     def run(self, ctx: Context, settings: GroundTruthSettings) -> Result:
         from ..simulate import ISOLATED_NM
@@ -362,8 +364,10 @@ class GroundTruth(Plugin):
         truth = truth_for(ctx.locs, settings.truth)
         if settings.drift_corrected:
             drift = truth.metadata.get("drift_truth")
+            if not drift:
+                ctx.report("the simulation had no drift: nothing to take out")
             if drift:
-                shift = np.asarray(drift)[truth["frame"]]
+                shift = np.asarray(drift, float)[truth["frame"]]
                 truth = Localizations({**truth.columns,
                                        "x_nm": truth["x_nm"] - shift[:, 0],
                                        "y_nm": truth["y_nm"] - shift[:, 1],
@@ -387,13 +391,36 @@ class GroundTruth(Plugin):
         # only the isolated counted, what lies within half the isolation
         # distance of a crowded spot is the crowding's, not a false fit
         reach = max(settings.radius_nm, ISOLATED_NM / 2) if settings.isolated else None
+        if settings.z_radius_nm and not ("z_nm" in fitted and "z_nm" in truth):
+            ctx.report("no z in the table or the truth: matched in x and y only")
         c = compare(fitted, truth, settings.radius_nm, counted, reach,
                     settings.z_radius_nm, settings.min_photons)
+        offset = None
+        if settings.drift_corrected and truth.metadata.get("drift_truth"):
+            # A drift estimate knows the drift only up to a constant -- RCC and
+            # COMET fix it to average zero -- so a corrected table sits at the
+            # truth plus an offset nothing in it can tell.  Taking out the
+            # whole true drift left that offset as a bias (40 nm on a simulated
+            # drift) and the error over the precision at six.  It is measured
+            # from the pairs, taken out, and reported instead.
+            offset = {axis: c.axes[axis]["bias_nm"] for axis in c.axes}
+            moved = dict(truth.columns)
+            for axis, value in offset.items():
+                if np.isfinite(value):
+                    moved[f"{axis}_nm"] = np.asarray(truth[f"{axis}_nm"]) + value
+            truth = Localizations(moved, truth.metadata)
+            c = compare(fitted, truth, settings.radius_nm, counted, reach,
+                        settings.z_radius_nm, settings.min_photons)
         lines = [f"{c.n_fitted} localizations against {c.n_counted} true spots "
                  f"(of {len(truth)} drawn), matched within {settings.radius_nm:g} nm",
                  f"found {c.tp} (recall {c.recall:.3f}), false {c.fp} "
                  f"({1 - c.correct:.3f} of those scored), missed {c.fn}; "
                  f"Jaccard {c.jaccard:.3f}"]
+        if offset:
+            lines.append("drift corrected: the table's constant offset from the "
+                         "truth, taken out -- " + ", ".join(
+                             f"{axis} {value:+.1f} nm" for axis, value in offset.items()
+                             if np.isfinite(value)))
         if c.set_aside:
             lines.append(f"{c.set_aside} localizations of spots that are not counted, set aside")
         for axis, s in c.axes.items():
