@@ -105,11 +105,18 @@ def _wait(d, window, timeout: float = 300.0) -> None:
 
 
 def _z_slope(locs, truth) -> float:
-    """Fitted z against simulated z, molecule by molecule: 1 is right."""
+    """Fitted z against simulated z, molecule by molecule: 1 is right.
+
+    Over the isolated spots: the frames keep every spot, and one with a
+    neighbour in its ROI is pulled towards focus (NOTES.md, "Crowding
+    compresses z") -- a property of the data, not of the calibration.
+    """
     from scipy.spatial import cKDTree
+    from ...simulate import ISOLATED_NM
+    clean = (truth["neighbour_nm"] > ISOLATED_NM) & (truth["photons"] > 500)
     fitted, true = [], []
     for f in np.unique(locs["frame"]):
-        m, t = locs["frame"] == f, truth["frame"] == f
+        m, t = locs["frame"] == f, (truth["frame"] == f) & clean
         if not t.any():
             continue
         dist, i = cKDTree(np.column_stack([truth["x_nm"][t], truth["y_nm"][t]])).query(

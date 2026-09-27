@@ -1,7 +1,7 @@
 # The tour's structure: a ring, two crossing lines and some scattered points
 # over 10 x 10 um, in 3D.  The ring is dye 1 and the rest dye 2, which is what
 # the two-colour simulation separates.
-name: ring, two lines and scattered points
+name: ring and cross, with scattered points
 elements:
   - circle: 2500                     # slightly tilted: z within +-300 nm
     centre: [5000, 5000, 0]

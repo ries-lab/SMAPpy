@@ -70,6 +70,21 @@ def presets() -> List[str]:
     return sorted(p.name[:-len(".yaml")] for p in PRESETS_DIR.glob("*.yaml"))
 
 
+def preset_choices() -> List[tuple]:
+    """``(preset, its name)`` for a menu: the YAML's own ``name``, which says
+    what the structure is where the file name only labels it."""
+    import yaml
+    out = []
+    for preset in presets():
+        try:
+            with open(PRESETS_DIR / f"{preset}.yaml", encoding="utf-8") as fh:
+                name = (yaml.safe_load(fh) or {}).get("name") or preset
+        except (OSError, yaml.YAMLError):
+            name = preset
+        out.append((preset, f"{name} ({preset})" if name != preset else preset))
+    return out
+
+
 def load_structure(source: Union[str, Path, Dict[str, Any]]) -> "Structure":
     """A structure from a preset name, a YAML path or an already parsed dict."""
     if isinstance(source, dict):

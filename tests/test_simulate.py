@@ -89,12 +89,21 @@ def test_an_image_scales_the_density_by_its_grey_value(tmp_path):
 
 
 def test_every_preset_loads_and_the_pores_have_32_labels_each():
-    assert {"demo", "npc", "filaments"} <= set(presets())
+    assert {"demo", "npc", "filaments", "pie"} <= set(presets())
     for name in presets():
         assert len(load_structure(name).sample(np.random.default_rng(0))) > 100
     pores = load_structure("npc").sample(np.random.default_rng(0))
     assert set(np.bincount(pores.copy)) == {32}
     assert len(set(pores.copy)) == pytest.approx(2 * 81, rel=0.2)    # 2 per um^2
+
+
+def test_the_pie_doubles_its_density_from_segment_to_segment():
+    labels = load_structure("pie").sample(np.random.default_rng(0))
+    xy = labels.xyz[:, :2] - 5000
+    segment = (np.arctan2(xy[:, 1], xy[:, 0]) % (2 * np.pi)) // (np.pi / 4)
+    per_um2 = np.bincount(segment.astype(int), minlength=8) / (np.pi * 4.0 ** 2 / 8)
+    np.testing.assert_allclose(per_um2[2:], 25 * 2.0 ** np.arange(2, 8), rtol=0.1)
+    assert np.all(np.diff(per_um2) > 0)
 
 
 def test_a_malformed_structure_says_what_is_wrong():

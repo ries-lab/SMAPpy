@@ -1558,7 +1558,10 @@ by changing nothing but the output.  The stages and what each assumes:
   circles, polygons and grey-value images sampled at a density, Poisson in
   number and drawn afresh per copy; copies placed at random (with a minimum
   distance) or on a grid, turned in-plane or in 3D.  The built-ins are YAML
-  files in `data/structures`, the demo among them, so each is an example.
+  files in `data/structures`, so each is also an example: `demo` (the ring
+  and cross the tutorials use), `npc` (Nup96), `filaments`, and `pie`, a
+  density resolution target of eight segments from 25 to 3200 labels per
+  um^2.  A new one is a file dropped there.
 * **Labelling**: a label is labelled with a probability and then carries
   exactly one fluorophore (or a set number, or a Poisson number), each off
   its label by a Gaussian linkage error.

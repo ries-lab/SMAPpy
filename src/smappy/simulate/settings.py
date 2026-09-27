@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from ..plugins import param
-from .structure import presets
+from .structure import preset_choices
 
 STRUCTURE_FILTER = "Structures (*.yaml *.yml);;All files (*)"
 SIMULATION_FILTER = "Simulations (*.sim.yaml);;All files (*)"
@@ -21,7 +21,7 @@ SIMULATION_FILTER = "Simulations (*.sim.yaml);;All files (*)"
 @dataclass
 class StructureSettings:
     """What is labelled (`smappy.simulate.structure`)."""
-    preset: str = param("demo", label="structure", choices=lambda: presets(),
+    preset: str = param("demo", label="structure", choices=lambda: preset_choices(),
                         help="a built-in structure; its YAML in smappy/data/structures "
                              "is an example of the syntax")
     file: str = param("", label="structure file", kind="open_file",
