@@ -97,7 +97,8 @@ class Thing(Plugin):
   (`collapsed=True` starts it folded); rows and parts are laid out in the
   order they are declared.
 * `version` -- bump it when a change moves the numbers: a chain records it,
-  and a batch re-runs files whose steps' versions changed.
+  a batch re-runs files whose steps' versions changed, and the plugin's page
+  must be re-read and brought along (see "The plugin's page" below).
 * `@register("Tab/Group/Name")` places it in the tree.  Without it the *folder*
   decides the path (`<root>/Analysis/Drift/comet.py` -> `Analysis/Drift/COMET`),
   which is how a user drops a plugin in and it appears.
@@ -324,8 +325,88 @@ or moved.  Before writing or editing a storyboard, read
 `src/smappy/tutorial/STYLE.md`: the reviewers' directions for how tutorials
 speak.
 
+`tests/test_plugin_docs.py` checks every shipped plugin's page: that it
+exists or the plugin is in `UNDOCUMENTED` (the plugins written before pages
+were -- a list that only shrinks, and a new plugin never joins it), that its
+`version` is the plugin's, that every setting is explained, and that it
+renders with its maths and figures.
+
 Plugins reach the shipped workspace by themselves: the Analysis tab seeds from
 `Analysis/` and `favorite` defaults to True, so there is no registry to edit.
+
+## The plugin's page
+
+Every plugin has a page, `src/smappy/plugins/docs/<Tab>/<Group>/<Name>.md`
+(or `<file>.md` beside a dropped-in `<file>.py`), which the **?** in its title
+bar, F1 in its panel and Help > Plugin documentation open, and which
+`python -m smappy.docs -o DIR` writes as a static site.  The page is for the
+people who use the plugin -- biologists and biophysicists -- so they can
+understand the algorithm without reading the code.  The format is in
+`src/smappy/docs/__init__.py`; `Analysis/Drift/RCC.md` is the example to copy.
+
+**Writing it is part of the work, and it is yours.**  A session that adds a
+plugin writes its page in the same change.  A session that changes what a
+plugin computes -- the algorithm, a normalisation, a default that moves the
+numbers, anything that bumps `version` -- re-reads the page against the new
+code, rewrites what is no longer true, redraws what needs it, and sets the
+page's `version` to the plugin's.  The test fails until it does, and bumping
+the page's version without reading it defeats the only check there is.  A
+refactor that changes nothing a user could see needs neither.
+
+What is generated and must not be written by hand: the title, the menu path,
+the version line, the summary (`Plugin.description`) and the settings table
+(labels, defaults, units, bounds, choices and the `help` text).  The page
+holds everything else.
+
+**How a page is written:**
+
+* **Sections, in this order**: *What it does* (the problem, what the plugin
+  does about it, when to use it and when not, what it needs), *How it works*
+  (the steps, one bold lead-in each, with figures), *In detail* (the maths,
+  the constants, the edge cases), *Parameters* (notes only), *Output* (what
+  each number and figure means, what a good and a bad result look like),
+  *Differences from SMAP*, *References*.  Leave out a section that has
+  nothing to say.
+* **Two registers.**  The first two sections are for a biologist: plain
+  words, one idea per sentence, an equation only where it says something a
+  sentence cannot, every symbol explained where it first appears.  *In
+  detail* may be as mathematical as the method is, for the reader who wants
+  to know exactly what is computed.
+* **Describe the code, not the paper.**  Every claim must be true of the
+  code as it is: read the functions before writing about them, take the
+  constants from them (5 iterations, the 1.4826, the 20th and 80th
+  percentiles), and name them in `covers`.  Where the code departs from the
+  textbook method, say what it does and why -- the reason is usually in the
+  module docstring or NOTES.md.  Check a claim about the GUI (a button, a
+  default, what is saved) in the GUI code.  If you are not sure, find out or
+  leave it out.
+* **Settings by their GUI label**, in italics (*time windows*), in the
+  prose.  Column names in backticks (`xy_err_nm`).
+* **Parameter notes add to the tooltip, never repeat it.**  The tooltip
+  (`param(help=...)`) is a short phrase and is shown in the table anyway; a
+  `### field` note says how to choose the value, what goes wrong at either
+  extreme, or a typical range.  A setting with neither fails the test, and a
+  tooltip is the better place for anything short, because the GUI shows it
+  on hover.
+* **Figures show the method working**, drawn by the plugin's own
+  module-level functions on data from `smappy.simulate`, with the known
+  truth drawn beside the answer where there is one.  Put the shared
+  simulation in one ```` ```figure-setup ```` block; keep a page's figures to
+  a few seconds in all.  Simulated tables keep spots down to 10 photons, so
+  filter them (at 200 photons, say) before anything about precision.  The
+  caption says what to see, not what is plotted.  No screenshots and no
+  images checked in: they go stale.
+* **Maths is matplotlib's mathtext**, not LaTeX: `\leq`, `\geq` (not `\le`,
+  `\ge`), `\mathrm{}`, `\frac`, `\sqrt`, `\sum`, `\left( \right)`; no
+  `\texttt`, `align` or matrices.  The render test catches what it cannot
+  draw.
+* **Differences from SMAP** from the MATLAB itself (`../SMAP`, `jries/SMAP`),
+  concretely: what SMAP does, what this does, and why.
+* **References** that were checked (PubMed or the journal), with a DOI link;
+  write a `(` or `)` in a URL as `%28` / `%29`.  Say in a few words what each
+  one is cited for when it is not obvious.
+* Spelling as the plugin's module.  Look at the rendered page (the Help
+  window, or the exported HTML) before calling it done.
 
 ## Porting a plugin from SMAP
 
@@ -374,7 +455,7 @@ you are in; see `group.py` (why one column at a time, with timings) or
 or American spelling, whichever the file already uses.
 
 Keep changes minimal and finish them: a new plugin means the module, its tests,
-and any exhaustive test that now needs a line.
+its page, and any exhaustive test that now needs a line.
 
 ## Keeping this file true
 
