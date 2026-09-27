@@ -230,11 +230,17 @@ class MathParser(Plugin):
             raise ExpressionError(
                 f"no column {', '.join(missing)}; the table has: "
                 f"{', '.join(sorted(locs.keys()))}{hint}")
-        values = evaluate(locs, settings.expression)
         mask = None
         if settings.where == "selection":
             ctx.selection.require(1, ctx.report, "this")
-            mask = ctx.selection.mask
+            mask = np.asarray(ctx.selection.mask, bool)
+            # evaluated on the selected rows only, so that a reduction --
+            # median(z_nm) -- is the selection's, as in SMAP, and not the
+            # whole table's; the rows outside get NaN (see `write_column`)
+            values = np.full(len(locs), np.nan)
+            values[mask] = np.asarray(evaluate(locs[mask], settings.expression), float)
+        else:
+            values = evaluate(locs, settings.expression)
         return field, values, mask
 
     def preview(self, ctx: Context, settings: MathSettings) -> Result:

@@ -525,14 +525,27 @@ def combine(locs: Localizations, group_index: np.ndarray,
         rule = recipe["grouped"]
         if rule not in COMBINE_RULES or recipe["field"] not in locs:
             continue                       # recomputed, or left off, below
-        values = locs[recipe["field"]]
+        values = np.asarray(locs[recipe["field"]], np.float64)
+        # A field computed for a selection is NaN on the rows outside it.
+        # The reduction is over the rows that have a value -- a blink with
+        # one outside used to come out NaN under mean and sum, and *true*
+        # under any and all, NaN being nonzero -- and a blink with none
+        # has no value either.
+        finite = np.isfinite(values)
+        counted = accumulate(finite.astype(np.float64), ACCUMULATE["sum"])
         if rule == "mean":
-            reduced = accumulate(values, ACCUMULATE["sum"]) / n_in_group
+            reduced = accumulate(np.where(finite, values, 0.0), ACCUMULATE["sum"]) \
+                / np.maximum(counted, 1)
         elif rule in ("any", "all"):
-            extreme = accumulate(values, ACCUMULATE["max" if rule == "any" else "min"])
-            reduced = (extreme != 0).astype(np.float32)
+            filler = -np.inf if rule == "any" else np.inf
+            extreme = accumulate(np.where(finite, values, filler),
+                                 ACCUMULATE["max" if rule == "any" else "min"])
+            reduced = (extreme != 0).astype(np.float64)
+        elif rule == "sum":
+            reduced = accumulate(np.where(finite, values, 0.0), ACCUMULATE["sum"])
         else:
             reduced = accumulate(values, ACCUMULATE[rule])
+        reduced = np.where(counted > 0, reduced, np.nan)
         columns[recipe["field"]] = np.asarray(reduced, np.float32)
 
     metadata = dict(locs.metadata)

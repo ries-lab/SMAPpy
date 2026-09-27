@@ -340,3 +340,46 @@ def test_an_expression_that_reads_its_own_field_is_applied_once():
     assert np.median(np.asarray(session.locs["photons"], float) / before) == pytest.approx(2.0)
     assert "photons" in session.layers[0].state.sets["grouped"].locs
     assert "applied once" in result.text
+
+
+def _selection_table():
+    """Two blinks of three localizations each; the selection is the first
+    two localizations of each blink."""
+    locs = Localizations({"frame": np.array([0, 1, 2, 0, 1, 2]),
+                          "x_nm": np.array([0., 1, 2, 500, 501, 502]),
+                          "y_nm": np.zeros(6), "photons": np.array([10., 20, 30, 1, 2, 300])},
+                         {"units": "nm"})
+    mask = np.array([True, True, False, True, True, False])
+    return locs, mask
+
+
+def test_a_field_computed_for_a_selection_is_reduced_over_the_rows_that_have_it():
+    """A blink with a localization outside the selection came out NaN under
+    mean and sum, and true under any and all (NaN is nonzero)."""
+    from smappy.group import GroupSettings, group
+    from smappy.mathparse import remember
+    from smappy.plugins import Context, Selection
+    from smappy.plugins.math_parser import MathParser, MathSettings
+    locs, mask = _selection_table()
+    for rule, expected in (("mean", [30.0, 3.0]), ("sum", [60.0, 6.0]),
+                           ("any", [1.0, 0.0]), ("all", [1.0, 0.0])):
+        expression = "photons * 2" if rule in ("mean", "sum") else "photons > 5"
+        result = MathParser().run(Context(locs=locs, selection=Selection(mask)),
+                                  MathSettings(field="f", expression=expression,
+                                               where="selection", grouped=rule))
+        grouped, _ = group(result.locs, GroupSettings(dx=50.0, dt=1))
+        order = np.argsort(np.asarray(grouped["x_nm"]))
+        assert np.asarray(grouped["f"])[order] == pytest.approx(expected), rule
+
+
+def test_a_reduction_for_a_selection_is_the_selections():
+    """median(photons) was the whole table's median, copied to the selection."""
+    from smappy.plugins import Context, Selection
+    from smappy.plugins.math_parser import MathParser, MathSettings
+    locs, mask = _selection_table()
+    result = MathParser().run(Context(locs=locs, selection=Selection(mask)),
+                              MathSettings(field="m", expression="median(photons)",
+                                           where="selection"))
+    m = np.asarray(result.locs["m"])
+    assert m[mask] == pytest.approx(np.median(np.asarray(locs["photons"])[mask]))
+    assert np.isnan(m[~mask]).all()

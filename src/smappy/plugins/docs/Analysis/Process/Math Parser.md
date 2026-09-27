@@ -122,9 +122,10 @@ The functions are numpy's (`sqrt` is `numpy.sqrt`, `rem` is
 `numpy.remainder`; `float` and `int` convert the type), called with
 their arguments in order: `clip(photons, 0, 5000)`, `percentile(z_nm, 90)`,
 `where(z_nm > 0, 1, -1)`.  The reductions ignore NaN, as `numpy.nanmedian`
-does; `count` is the number of values, NaN included.  A reduction is taken
-over the whole table even when *apply to* is *the selection*, and over the
-grouped table when it is recomputed there.
+does; `count` is the number of values, NaN included.  With *apply to* set to *the
+selection*, the expression is evaluated on the selected localizations only,
+so a reduction is the selection's own; recomputed on the grouped table, it is
+the grouped table's.
 
 **What is refused, and why.**  Each of these is a mistake that numpy would
 answer with either a crash far from the cause or, worse, a plausible wrong
@@ -200,7 +201,8 @@ numbers, not an error.
 
 ### where
 A field written only for the selection has NaN elsewhere, and is only
-reduced, never recomputed, on the grouped table.
+reduced, never recomputed, on the grouped table: over the localizations of
+each blink that have a value, and NaN for a blink that has none.
 
 ### grouped
 *recompute* for an expression in `n_in_group` or in anything that is a
