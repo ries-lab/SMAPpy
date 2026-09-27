@@ -186,6 +186,8 @@ def cpu_wrapper_chunked_fast(mu, locs_coords, locs_time, idx_i, idx_j, sigma, si
 # relative error is below 7e-5 on [0, 1).  Pairs beyond CUTOFF_SIGMAS sigma are
 # skipped outright, which also bounds the table.  Measured against the exact
 # kernel: 1.3x faster, gradient accurate to 4e-4 relative at the finest sigma.
+# (That was the numba kernel.  The C++ one below calls std::exp and keeps only
+# the cutoff, so its result is exact; the table is kept for the signature.)
 CUTOFF_SIGMAS = 6.0
 _EXPTAB = np.exp(-np.arange(float(int(CUTOFF_SIGMAS ** 2 / 4.0) + 2)))
 

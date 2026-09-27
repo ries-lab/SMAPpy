@@ -21,6 +21,12 @@ class SegmentationResult:
     out_dict: Optional[Dict] = None
 
 
+def _SUBSET_RNG(segment: int) -> np.random.Generator:
+    """smappy: the subset of a window depends on the window, not on how many
+    random numbers were drawn before it."""
+    return np.random.default_rng([20260927, int(segment)])
+
+
 def _group_by_frame(loc_frames: np.ndarray):
     """Returns a dict {frame_number: indices_in_loc_frames} efficiently."""
     sort_idx = np.argsort(loc_frames)
@@ -97,7 +103,10 @@ def segment_by_num_locs_per_window(loc_frames: np.ndarray, min_n_locs_per_window
     for i in range(n_segments):
         segment_indices = np.where(loc_segments == i)[0]
         if max_locs_per_segment and len(segment_indices) > max_locs_per_segment:
-            selected = np.random.choice(segment_indices, max_locs_per_segment, replace=False)
+            # smappy: a seeded generator, so the same table and settings give the
+            # same drift twice; upstream draws from numpy's global state
+            selected = _SUBSET_RNG(i).choice(segment_indices, max_locs_per_segment,
+                                             replace=False)
         else:
             selected = segment_indices
         loc_valid[selected] = True
@@ -155,7 +164,8 @@ def segment_by_frame_windows(loc_frames: np.ndarray, n_frames_per_window: int,
         locs_per_segment.append(len(indices))
         if max_locs_per_segment and len(indices) > max_locs_per_segment:
             mask = np.ones(len(indices), dtype=bool)
-            mask[np.random.choice(len(indices), len(indices) - max_locs_per_segment, replace=False)] = False
+            mask[_SUBSET_RNG(i).choice(len(indices), len(indices) - max_locs_per_segment,
+                                       replace=False)] = False   # smappy: seeded
             loc_valid[indices[~mask]] = False
 
     out_dict = None

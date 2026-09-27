@@ -422,3 +422,15 @@ def test_progress_is_optional_everywhere():
     locs, _, _ = simulate()
     drift = estimate_drift(locs, DriftSettings(max_drift_nm=100, group=False))
     assert len(drift) == 50
+
+
+def test_a_subset_per_window_is_the_same_on_every_run():
+    """The subset was drawn from numpy's global state, so two runs differed."""
+    locs, _, _ = simulate()
+    settings = DriftSettings(segmentation_var=5, backend="cpu", spline=False,
+                             group=False, max_locs_per_segment=100,
+                             max_drift_nm=100, initial_sigma_nm=120,
+                             target_sigma_nm=10)
+    first = estimate_drift(locs, settings).drift
+    np.random.seed(123)                      # whatever else has drawn numbers
+    np.testing.assert_array_equal(first, estimate_drift(locs, settings).drift)

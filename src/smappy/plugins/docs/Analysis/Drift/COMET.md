@@ -301,7 +301,7 @@ drift* that was asked for here and uses 50 nm for COMET.
 ### max_locs_per_segment
 Fewer per window is roughly quadratically faster and less precise; on real
 data 2000 per window was ten times faster and moved the drift by 2.5 nm rms.
-The subset is random, so two runs differ slightly.
+The subset is drawn with a fixed seed per window, so a run repeats exactly.
 
 ### boxcar_width
 A running mean over windows also flattens real, fast drift.

@@ -76,8 +76,10 @@ class DriftSettings:
     # cost evaluations from 423 to 154.  Raise it towards 1e-13 to reproduce
     # upstream COMET exactly.
     optimizer_ftol: float = 1e-7
-    # Compute the Gaussian from a table plus a polynomial and skip pairs beyond
-    # 6 sigma: 1.3x faster, gradient accurate to 4e-4 relative.  See NOTES.
+    # Skip pairs beyond 6 sigma, where each contributes less than e^-9 of a
+    # coincident pair: 1.3x faster.  The Gaussian itself is exact -- the table
+    # and polynomial this once used went with the numba kernel -- so the name
+    # is historical.  The spline fit always uses the cutoff.  See NOTES.
     approximate_kernel: bool = True
     # A looser tolerance for the coarse sigma steps.  None (the default) means
     # the same as `optimizer_ftol`: measured, loosening the coarse steps is a
@@ -465,7 +467,14 @@ def _report_evaluation(progress: Optional[Progress], state: dict,
 
 
 def _sigma_levels(settings: DriftSettings) -> int:
-    """How many times the refinement loop runs the optimizer."""
+    """How many times the refinement loop runs the optimizer.
+
+    Exactly, for the spline fit: from the initial width down to the target in
+    steps of 1.5.  For the time-window fit it is a lower bound -- COMET's own
+    loop keeps narrowing past the target until a step changes the drift more
+    than the one before, which cannot be known before the run -- and the
+    estimate says "about" for that reason as well.
+    """
     sigma = (settings.initial_sigma_nm if settings.initial_sigma_nm is not None
              else settings.max_drift_nm / 3.0)
     target = settings.target_sigma_nm

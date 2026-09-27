@@ -869,6 +869,10 @@ approximate -- L-BFGS-B decides when it is done -- which is why it says "about".
   Taylor-expanded on the fraction; pairs beyond 6 sigma are skipped, and the
   four divisions per pair become one hoisted reciprocal.  A 4 sigma cutoff was
   measured too: no faster, and two orders of magnitude less accurate.
+  *Since the kernel moved to C++ (`csrc/drift.hpp`) only the cutoff is left*:
+  it calls `std::exp`, so the Gaussian is exact and "approximate" means only
+  that pairs beyond 6 sigma are skipped -- which is where the saving was, once
+  sigma has tightened.  The table and the Taylor series were numba's problem.
 
 ### The noise floor, and how to measure it
 
