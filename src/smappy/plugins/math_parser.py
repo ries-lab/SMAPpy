@@ -42,7 +42,7 @@ import numpy as np
 from ..columns import current
 from ..locs import Localizations
 from ..mathparse import (FUNCTIONS, GROUPED_CHOICES, RECOMPUTE,
-                         ExpressionError, evaluate, names_in, remember)
+                         ExpressionError, evaluate, names_in, recipes, remember)
 from . import Context, Plugin, Result, param, register
 
 MAX_HISTORY = 20
@@ -266,8 +266,23 @@ class MathParser(Plugin):
             note = ("; on the grouped table it is the mean of the "
                     "localizations, since the expression cannot be "
                     "recomputed for a selection")
-        remember(locs, field, settings.expression, grouped=rule,
-                 where="selection" if mask is not None else None)
+        if field in names_in(settings.expression):
+            # ``photons = photons * 2`` is a change made once, not a recipe:
+            # re-evaluated -- and every grouping re-evaluates recipes on the
+            # ungrouped table -- it compounds (the photons came back x4 after
+            # one grouping) and the grouped table, which has no photons of
+            # its own to read, lost the column.  So no expression is kept.  A
+            # measured column goes on being reduced by its own rule (photons
+            # add up per blink); a derived one keeps only its reduction.
+            previous = next((r for r in recipes(ctx.locs) if r["field"] == field),
+                            None)
+            if previous is not None:
+                kept = previous.get("grouped", "mean")
+                remember(locs, field, "", grouped="mean" if kept == RECOMPUTE else kept)
+            note += "; applied once, since it reads the field it writes"
+        else:
+            remember(locs, field, settings.expression, grouped=rule,
+                     where="selection" if mask is not None else None)
         remember_expression(field, settings.expression, rule)
 
         shown = values if mask is None else np.asarray(values)[mask]

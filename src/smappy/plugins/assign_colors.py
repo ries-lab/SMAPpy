@@ -530,7 +530,9 @@ class AssignColorSettings:
                                "Greys", "Greys_r"),
                       help="the colour map of the intensity plot's 2D histogram")
     bins: int = param(200, label="histogram bins", min=10, max=2000,
-                      advanced=True)
+                      advanced=True,
+                      help="how many bins the histogram of r has over its "
+                           "whole range, -1 to 1")
     smoothing: float = param(2.0, label="smoothing", unit="bins", min=0.0,
                              advanced=True,
                              help="the histogram is smoothed by this much "
@@ -545,7 +547,9 @@ class AssignColorSettings:
     channel1: Optional[str] = param(None, label="channel 1 column", advanced=True,
                                     help="auto: photons_ch0, or the first pair "
                                          "of per-channel columns in the table")
-    channel2: Optional[str] = param(None, label="channel 2 column", advanced=True)
+    channel2: Optional[str] = param(None, label="channel 2 column", advanced=True,
+                                    help="the column r counts negative; name "
+                                         "both columns or neither")
 
 
 @register("Analysis/Dual-Color/AssignColors")

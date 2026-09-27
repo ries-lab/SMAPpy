@@ -1305,7 +1305,9 @@ class PrecisionSettings:
                                  help="a longer movie is sampled evenly across "
                                       "its whole length")
     max_pairs: int = param(2_000_000, label="pairs per gap", min=1000,
-                           advanced=True)
+                           advanced=True,
+                           help="more pairs than this at one gap are thinned "
+                                "to a random sample of this many")
     seed: int = param(0, label="seed", advanced=True,
                       help="which pairs are kept when there are more than the "
                            "limit")

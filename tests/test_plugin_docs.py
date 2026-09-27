@@ -16,12 +16,7 @@ from smappy.docs import markup
 # that is written takes its plugin off.  Until then the Help window shows the
 # summary and the settings table, generated.
 UNDOCUMENTED = {
-    "Analysis/Dual-Color/AssignColors",
-    "Analysis/Measure/Ground Truth",
-    "Analysis/Measure/Localization Precision",
     "Analysis/Process/History",
-    "Analysis/Process/Math Parser",
-    "Analysis/Process/Remove Localizations",
     "Analysis/Register/Calibrate transform",
     "Chain/Layers",
     "File/Export/Image",

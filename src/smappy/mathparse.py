@@ -375,6 +375,10 @@ def apply_recipes(locs: Localizations, only: Optional[Sequence[str]] = None,
             continue
         if not expression:
             continue          # a rule, not an expression: nothing to run here
+        if field in names_in(expression):
+            # reads what it writes: re-running it compounds (MathParser no
+            # longer stores such a recipe; a file saved before may carry one)
+            continue
         if recipe.get("where") == "selection":
             # computed for part of the table only, so the expression alone
             # does not say what the field is; the values that are there stand

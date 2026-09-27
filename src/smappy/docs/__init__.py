@@ -334,7 +334,8 @@ def header(plugin_cls) -> str:
            f'<p class="crumbs">{crumbs} &middot; {" &middot; ".join(facts)}</p>']
     summary = plugin_cls.description or (plugin_cls.__doc__ or "").strip().split("\n")[0]
     if summary:
-        out.append(f'<p class="summary">{html.escape(summary)}</p>')
+        # formatted, not escaped: a description may name a `column`
+        out.append(f'<p class="summary">{Converter().inline(summary)}</p>')
     return "\n".join(out)
 
 

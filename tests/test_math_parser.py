@@ -317,3 +317,26 @@ def test_what_a_plugin_did_is_logged_with_its_settings_and_survives_a_save(
     fields = [e["settings"]["field"] for e in again.history
               if e["what"] == "Analysis/Process/Math Parser"]
     assert fields == ["double", "half"]
+
+
+def test_an_expression_that_reads_its_own_field_is_applied_once():
+    """`photons = photons * 2` was kept as a recipe, and every grouping
+    re-evaluates the ungrouped table's recipes: after one it was x4, and the
+    grouped table, with no photons to read, lost the column."""
+    from smappy.plugins import Context, get
+    from smappy.plugins.math_parser import MathSettings
+    from smappy.session import Session
+    from smappy.simulate import simulate
+    session = Session()
+    locs = simulate(n_frames=2000, seed=1)
+    before = np.asarray(locs["photons"], float).copy()
+    session.set_locs(locs, undoable=False)
+    session.show_grouped(0, True)
+    plugin = get("Analysis/Process/Math Parser")()
+    result = plugin.run(Context(locs=session.locs, selection=session.selection(0),
+                                session=session),
+                        MathSettings(field="photons", expression="photons * 2"))
+    session.apply(plugin, result)
+    assert np.median(np.asarray(session.locs["photons"], float) / before) == pytest.approx(2.0)
+    assert "photons" in session.layers[0].state.sets["grouped"].locs
+    assert "applied once" in result.text
