@@ -1,5 +1,5 @@
 ---
-version: "1"
+version: "2"
 covers: [smappy.drift.estimate_drift, smappy.drift._estimate_spline, smappy.drift._spline_basis, smappy.drift._two_stage, smappy.drift._rcc_prepass, smappy.drift._grouped, smappy.drift.estimate_cost, smappy.drift._sigma_levels, smappy.drift.Drift.apply, smappy._comet.core.drift_optimizer.comet_run_kd, smappy._comet.core.drift_optimizer.optimize_3d_chunked_better_moving_avg_kd, smappy._comet.core.cpu_wrapper.cpu_wrapper_chunked_approx, smappy._comet.core.segmenter.segmentation_wrapper, smappy._comet.core.interpolation.interpolate_drift, smappy._comet.core.qc_utils.flag_flawed_segments_by_lift]
 ---
 
@@ -147,8 +147,7 @@ of neighbour pairs, which grows with the square of the number of
 localizations and steeply with *max drift*.  If the answer is more than five
 minutes, or more than half the computer's memory, it asks first, and offers
 an alternative: RCC over a few time windows to take out the bulk of the
-drift in seconds, then COMET within 50 nm of what is left (but see *RCC
-first* under *Parameters*).
+drift in seconds, then COMET within 50 nm of what is left.
 
 ## In detail
 
@@ -224,9 +223,8 @@ subtracts it, and then runs it again ungrouped with *max drift* set to
 drifts add.  *RCC first* runs [RCC](plugin:Analysis/Drift/RCC) over *RCC
 windows* windows (grouping as set here), subtracts it, and runs COMET on
 what is left; again the two add.  In both, the second pass searches a small
-radius, which is what makes it fast.  At present both are carried out only
-with *fit spline* off: with the spline on they are skipped and a single
-spline fit runs with the settings as they are.
+radius, which is what makes it fast.  The fit in each pass is the one
+asked for, the spline or the time windows.
 
 **The cost estimate.**  The pairs within $R$ are counted with a KD-tree on a
 fixed random sample of at most 60 000 of the selected localizations and
@@ -284,7 +282,7 @@ gave a less noisy drift curve, because the repeated localizations of one
 molecule are not independent measurements.
 
 ### two_stage
-Takes effect only with *fit spline* off.  It suits a large dataset where a
+It suits a large dataset where a
 single ungrouped pass is slow: the grouped pass gets within a few
 nanometres, and the ungrouped pass refines that over a small radius.
 
@@ -292,7 +290,7 @@ nanometres, and the ungrouped pass refines that over a small radius.
 Well above what the first pass leaves, which is a few nanometres.
 
 ### rcc_prepass
-Takes effect only with *fit spline* off.  It is the lever when the
+It is the lever when the
 estimate would otherwise take hours: RCC's cost does not depend on how far it
 looks, COMET's does.
 

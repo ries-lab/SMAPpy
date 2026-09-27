@@ -16,6 +16,9 @@ class CometDrift(KeepsDrift, Plugin):
     description = ("Estimate drift from the selected localizations with COMET "
                    "and subtract it from all of them.")
     Settings = DriftSettings
+    # 2: "RCC first" and "two stage" run under the spline fit (the default)
+    # rather than being skipped by it
+    version = "2"
     main = ("segmentation_var", "max_drift_nm", "target_sigma_nm",
             "spline", "spline_knot_frames", "group", "use_z")
     params = {

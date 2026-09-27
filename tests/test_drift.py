@@ -141,6 +141,37 @@ def test_an_rcc_prepass_recovers_the_same_drift_over_a_small_radius():
     assert np.abs(error).mean() < 8.0
 
 
+def test_an_rcc_prepass_runs_before_the_spline_fit_too():
+    """The spline is the default, and the prepass used to be skipped under it.
+
+    The spline branch returned before the prepass was looked at, so "RCC
+    first" -- which the slow-run dialogue offers -- ran one spline fit over
+    the prepass's small radius and could not see drift beyond it.
+    """
+    locs, truth, _ = simulate()
+    told = []
+    drift = estimate_drift(locs, DriftSettings(
+        backend="cpu", spline=True, spline_knot_frames=5, group=False,
+        rcc_prepass=True, rcc_prepass_windows=8, rcc_prepass_max_drift_nm=400.0,
+        max_drift_nm=30.0, initial_sigma_nm=None, target_sigma_nm=10.0),
+        progress=told.append)
+    assert any("RCC" in line for line in told)
+    error = (drift.drift - drift.drift.mean(0)) - (truth - truth.mean(0))
+    assert np.abs(error).mean() < 8.0
+
+
+def test_two_stage_runs_both_passes_with_the_spline_fit():
+    locs, truth, _ = simulate()
+    told = []
+    drift = estimate_drift(locs, DriftSettings(
+        backend="cpu", spline=True, spline_knot_frames=5, two_stage=True,
+        group_dx_nm=30.0, two_stage_radius_nm=60.0, max_drift_nm=100,
+        initial_sigma_nm=120, target_sigma_nm=10), progress=told.append)
+    assert any("pass 2 of 2" in line for line in told)
+    error = (drift.drift - drift.drift.mean(0)) - (truth - truth.mean(0))
+    assert np.abs(error).mean() < 5.0
+
+
 def test_the_slow_run_dialogue_offers_rcc_first():
     """"No" is not the only useful answer to "this will take an afternoon"."""
     from smappy.plugins import Context, PreflightQuestion

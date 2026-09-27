@@ -1125,6 +1125,17 @@ noisiest.  Worth understanding rather than explaining away.
 
 ### Two passes: grouped, then a small radius
 
+*Both passes, and the RCC prepass, used to run only with the time-window fit.*
+`estimate_drift` took the spline branch before looking at `two_stage` or
+`rcc_prepass`, so with the spline on -- the default since it was added -- both
+were skipped without a word.  The slow-run dialogue's "RCC first, then COMET
+within 50 nm" then ran one spline fit over 50 nm and no RCC: on 10 000 simulated
+frames with drift, 29 / 42 / 10 nm rms error in x / y / z where the default
+gives 10 / 6 / 6.  The passes are now checked first and each runs the fit that
+was asked for; the same offer gives 8.7 / 5.5 / 5.5 nm.  Every test of the
+passes had set `spline=False`, which is why none saw it.  COMET's version went
+to 2.  (Found writing its documentation page, 2026-09-27.)
+
 `DriftSettings.two_stage` (`--two-stage`) runs the grouped estimate first, takes
 that drift out, and then runs an ungrouped estimate over a **30 nm** search
 radius.  The pair count is what costs time, and once the coarse pass has removed

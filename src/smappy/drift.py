@@ -521,13 +521,18 @@ def estimate_drift(locs: Localizations, settings: Optional[DriftSettings] = None
     if settings.quality_control and settings.spline:
         raise ValueError("quality control flags time windows, and the spline "
                          "fit has none; pass spline=False to use it")
-    if settings.spline:
-        return _estimate_spline(locs, settings, select, pixelsize_nm, display,
-                                progress)
+    # The passes first: each runs this function again with its own flag off,
+    # so whichever fit is asked for -- spline or time windows -- does the
+    # passes' work.  With the spline checked first, the default, "RCC first"
+    # and "two stage" were skipped without a word, and the slow-run dialogue's
+    # "RCC first, then COMET within 50 nm" ran one fit over 50 nm and no RCC.
     if settings.rcc_prepass:
         return _rcc_prepass(locs, settings, select, pixelsize_nm, display, progress)
     if settings.two_stage:
         return _two_stage(locs, settings, select, pixelsize_nm, display, progress)
+    if settings.spline:
+        return _estimate_spline(locs, settings, select, pixelsize_nm, display,
+                                progress)
 
     # Opt in to the two changes made to the vendored COMET (see NOTES.md); its
     # own defaults are untouched for anyone importing it directly.
