@@ -18,9 +18,11 @@ and why it is parsed rather than ``eval``ed.  What is here is the rest:
   (`mathparse`), and the recipe says either *recompute* -- evaluate the
   expression again on the grouped table, which is what an expression in
   ``n_in_group`` means -- or a rule to reduce the localizations' values with,
-  which is what a per-localization measurement means.  Either way nothing is
-  relinked: the grouped table is derived from the ungrouped one when it is
-  next built.
+  which is what a per-localization measurement means.  Either way the field
+  needs no relinking of its own: the rule goes with the column, and the
+  grouped table is derived from the ungrouped one whenever it is built --
+  which, for a layer shown grouped, is after every run that changes the
+  table, this one included.
 * **the history**, SMAP's most-used feature here.  The last twenty
   ``field = expression`` pairs are kept in the settings directory and offered
   in a dropdown, because the expression someone wants today is nearly always
@@ -41,7 +43,7 @@ import numpy as np
 
 from ..columns import current
 from ..locs import Localizations
-from ..mathparse import (FUNCTIONS, GROUPED_CHOICES, RECOMPUTE,
+from ..mathparse import (CONSTANTS, FUNCTIONS, GROUPED_CHOICES, RECOMPUTE,
                          ExpressionError, evaluate, names_in, recipes, remember)
 from . import Context, Plugin, Result, param, register
 
@@ -154,6 +156,10 @@ def check_field(field: str, locs: Localizations) -> str:
     if name in FUNCTIONS:
         raise ValueError(f"{name!r} is the name of a function an expression "
                          "can call; choose another")
+    if name in CONSTANTS:
+        raise ValueError(f"{name!r} is a constant in an expression, and a "
+                         "column of that name would change what it means; "
+                         "choose another")
     if name in ("group_id", "n_in_group"):
         raise ValueError(f"{name!r} is written by the grouping itself and "
                          "would be overwritten again")
@@ -193,10 +199,11 @@ class MathSettings:
                                   ("all", "all localizations (flag)"),
                                   ("none", "leave it off")],
                          help="what the field means once the localizations "
-                              "are grouped; nothing is relinked either way")
+                              "are grouped: the expression again, or a rule "
+                              "to combine their values")
     recall: str = param("", label="history", choices=_recall_choices,
                         help="an expression used before; choosing one fills "
-                             "the two fields above")
+                             "the field, the expression and the grouped rule")
 
 
 @register("Analysis/Process/Math Parser")

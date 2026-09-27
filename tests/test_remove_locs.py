@@ -193,3 +193,13 @@ def test_the_drawn_roi_is_read_in_the_pictures_coordinates():
     box = Region.rect(50.0, 1000.0, 150.0, 9000.0)
     assert region_mask(locs, box, axes).tolist() == [False, True]
     assert region_mask(locs, box).tolist() == [False, False]      # positions
+
+
+def test_a_flag_is_not_written_over_a_measured_column():
+    from smappy.plugins.remove_locs import check_field, hide
+    locs = Localizations({"x_nm": np.arange(4.0), "y_nm": np.zeros(4),
+                          "photons": np.full(4, 100.0), "frame": np.arange(4)}, {})
+    with pytest.raises(ValueError, match="column of the table"):
+        check_field("photons", locs)
+    flagged = hide(locs, np.array([True, False, True, True]))
+    assert check_field("use", flagged) == "use"       # an earlier run's flag

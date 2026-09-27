@@ -117,7 +117,9 @@ recipes work.
 **The flag's name.**  *flag* must be a word of letters, digits and
 underscores that does not start with a digit, so that it can be used in a
 filter and in an expression.  `group_id` and `n_in_group` are refused,
-because grouping writes them itself and would overwrite the flag.
+because grouping writes them itself and would overwrite the flag.  So is a
+column the table already has, unless it is a flag itself: hiding writes 0 and
+1 over it, and a flag named `photons` would have replaced the photons.
 
 ## Parameters
 

@@ -114,8 +114,14 @@ def hide(locs: Localizations, keep: np.ndarray, field: str = "use") -> Localizat
     return out
 
 
-def check_field(field: str) -> str:
-    """The flag's name, refused now rather than half-written later."""
+def check_field(field: str, locs: Optional[Localizations] = None) -> str:
+    """The flag's name, refused now rather than half-written later.
+
+    A column the table already has is taken only if it is a flag -- an
+    earlier run's, or one with a combining rule and no expression -- since
+    hiding writes 0 and 1 over it: named ``photons``, it would have replaced
+    the photons.
+    """
     name = (field or "").strip()
     if not name.isidentifier():
         raise ValueError(f"{name!r} is not usable as a column name: a word of "
@@ -124,6 +130,13 @@ def check_field(field: str) -> str:
     if name in ("group_id", "n_in_group"):
         raise ValueError(f"{name!r} is written by the grouping itself and "
                          "would be overwritten again")
+    if locs is not None and name in locs:
+        from ..mathparse import recipes
+        flag = any(r["field"] == name and not r.get("expression")
+                   for r in recipes(locs))
+        if not flag:
+            raise ValueError(f"{name!r} is a column of the table; hiding would "
+                             "write 0 and 1 over it.  Choose another flag name")
     return name
 
 
@@ -198,7 +211,7 @@ class RemoveLocalizations(Plugin):
         keep, where = self._keep(ctx, settings)
         going = int((~keep).sum())
         if settings.action == "hide":
-            field = check_field(settings.field)
+            field = check_field(settings.field, ctx.locs)
             locs = hide(ctx.locs, keep, field)
             hidden = int((np.asarray(locs[field]) < 0.5).sum())
             text = (f"hid {going} of {len(ctx.locs)} localizations "

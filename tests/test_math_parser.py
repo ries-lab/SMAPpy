@@ -383,3 +383,9 @@ def test_a_reduction_for_a_selection_is_the_selections():
     m = np.asarray(result.locs["m"])
     assert m[mask] == pytest.approx(np.median(np.asarray(locs["photons"])[mask]))
     assert np.isnan(m[~mask]).all()
+
+
+def test_a_field_may_not_shadow_a_constant():
+    for name in ("e", "pi", "nan"):
+        with pytest.raises(ValueError, match="constant"):
+            check_field(name, Localizations({"x_nm": np.zeros(2)}, {}))
