@@ -59,7 +59,7 @@ shape, so read the one closest to what you are writing:
 | measures the selection and draws it | `statistics.py` (settings, selection, several figures in one window) |
 | rewrites the table and hands it back | `assign_colors.py` (`Result.locs`, a preview) |
 | a long computation with progress | `drift_comet.py`, `drift_rcc.py` |
-| loads, saves, exports, simulates | `file.py` (a plugin per format, no input table) |
+| loads, saves, exports, simulates | `file.py` (a plugin per format, no input table; the simulator's model is `smappy.simulate`) |
 | finds, measures or summarises ROIs | `roi.py` (segment, `scope = "site"`, analyse) |
 | parts, presets, a C++ backend | `fit.py` (nested settings dataclasses) |
 | adds a derived column, no output | `math_parser.py` (an expression, kept with the table as a recipe) |
@@ -91,7 +91,10 @@ class Thing(Plugin):
 
 * `param(...)` is a dataclass field carrying the GUI presentation -- label,
   unit, bounds, `choices`, `advanced=True` to hide it under "more".  The GUI
-  builds its widgets from these; nothing in a plugin imports Qt.
+  builds its widgets from these; nothing in a plugin imports Qt.  A field
+  that is itself a dataclass is a part, a section of its own
+  (`collapsed=True` starts it folded); rows and parts are laid out in the
+  order they are declared.
 * `version` -- bump it when a change moves the numbers: a chain records it,
   and a batch re-runs files whose steps' versions changed.
 * `@register("Tab/Group/Name")` places it in the tree.  Without it the *folder*
@@ -260,6 +263,32 @@ What that means for a plugin:
 
 `NOTES.md` under "Any column against any other" records why it is shaped this
 way and what was left out of SMAP's `VersatileRenderer`.
+
+## Simulated data
+
+`smappy.simulate` is one model with two outputs, and the `File/Simulate/
+Blinking Structure` plugin is its form: structure -> labelling -> blinking ->
+localizations or camera frames.  NOTES.md, "The simulation model", has the
+assumptions.  What a session needs:
+
+* Structures are YAML (the syntax is in `simulate/structure.py`); the
+  built-ins are the files in `src/smappy/data/structures` -- `demo` (the ring
+  and cross the tutorials measure), `npc`, `filaments`, `pie` -- and a new
+  one is a file dropped there.
+* `simulate(n_frames=..., seed=..., drift=...)` gives a localization table;
+  `camera_frames(...)` gives `(frames, truth)`.  Both take the settings
+  dataclasses of `simulate/settings.py` for everything else.
+* A camera simulation saved as `*.sim.yaml` (`simulate.source.write_recipe`)
+  is an acquisition: a fitter's `source.path` may name it, `open_stack` opens
+  it, the frames are drawn as they are read, and the camera comes from it.
+* The truth columns: `emitter` (which fluorophore), `dye`, `copy` (which
+  copy of the structure); camera truth adds `neighbour_nm`, the nearest other
+  spot in the same frame.
+* The camera frames keep every spot, and every fluorophore blinks within the
+  stack whatever its length, so a short test stack is dense: pass
+  `labelling=LabellingSettings(efficiency=0.1)`, and compare a fit only
+  against truth with `neighbour_nm > ISOLATED_NM` -- crowded spots pull z
+  towards focus.  `tests/test_camera_frames.py` is the pattern.
 
 ## Tests
 
