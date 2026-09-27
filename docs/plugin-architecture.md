@@ -291,7 +291,9 @@ Seeded with:
                               present but unpinned, since Auto covers them
     File/Save/smappy HDF5     with the GUI state, or without
     File/Export/Image         the rendered view as a picture
-    File/Simulate/Blinking Structure   `smappy.simulate`, into the session
+    File/Simulate/Blinking Structure   `smappy.simulate`: localizations into
+                              the session, or camera frames as a `*.sim.yaml`
+                              recipe that a fitter opens as its file
 
 A named loader *means* it: `load` takes an explicit reader, because dispatching
 by extension underneath would have `File/Load/SMAP` on a `.hdf5` quietly read it

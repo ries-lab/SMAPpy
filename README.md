@@ -262,13 +262,35 @@ specification; records describing images that were never written are dropped
 rather than read as noise, which is also what makes a growing dataset safe to
 follow.
 
+## Simulated data
+
+The *Blinking Structure* plugin in the File tab makes data
+whose truth is known.  A **structure** -- a built-in (a ring and cross,
+nuclear pores, filaments, a density-pie resolution target) or a YAML file of
+label positions, or lines, circles, areas and images filled at a density,
+copied many times -- is **labelled** with an efficiency, **blinks** with an
+on-time, a number of blinks and a bleaching probability, and comes out as
+either:
+
+* **localizations**, with the precision their photons and background allow;
+* **camera frames**, saved as a recipe (`*.sim.yaml`) that any fitter opens
+  as its file, camera included, drawing the frames as it reads them.
+
+Analysis → Measure → *Ground Truth* then scores a fit against where the
+molecules really were: found, false and missed, the Jaccard index, and
+whether the reported precision is the real error.  The *simulation* tutorial
+goes through all of it; `smappy.simulate` is the same from Python
+(`simulate(...)`, `camera_frames(...)`), and NOTES.md, "The simulation
+model", lists the assumptions.
+
 ## Scripts
 
 `scripts/*.py` run from a checkout without installing anything.  The `check_*`
 ones exercise one stage against real data -- the stack metadata, the detection,
 the fit, a single-channel or dual-colour calibration; `fit_dataset.py`,
 `view_locs.py`, `drift_correct.py` and `live_fit.py` are the scripted forms of
-the commands above, and `simulate_blinks.py` makes test data.
+the commands above, and `simulate_blinks.py` makes test data
+(`--structure npc`, `--blinks`, ...).
 
 ## Tests
 
