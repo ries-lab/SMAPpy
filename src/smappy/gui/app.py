@@ -168,6 +168,8 @@ class ControlWindow(QMainWindow):
         self.batch_window = None
         self._action(tools, "Batch...", None, self.open_batch)
         help_ = self.menuBar().addMenu("Help")
+        self._action(help_, "Plugin documentation", None, self.show_plugin_docs)
+        help_.addSeparator()
         self._action(help_, "Save a bug report...", None, self.save_bug_report)
         self._action(help_, "Show the log folder", None, self.show_log_folder)
         self._action(view, "Reset view", "Ctrl+0", render.view.reset)
@@ -178,6 +180,10 @@ class ControlWindow(QMainWindow):
         session.on_change(self._on_session)
         self._on_session("locs")
         self.restore_layout()
+
+    def show_plugin_docs(self) -> None:
+        from .help_window import show_help
+        show_help(None, self)
 
     def open_batch(self) -> None:
         """The batch window: a chain over many files, run as a subprocess.

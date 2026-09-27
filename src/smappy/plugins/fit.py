@@ -48,7 +48,8 @@ class SourceSettings:
                            "series, an NDTiff directory, one image out of a "
                            "folder written one file per frame, or a "
                            "simulation (*.sim.yaml, File > Simulate)")
-    start: int = param(0, label="first frame", min=0, advanced=True)
+    start: int = param(0, label="first frame", min=0, advanced=True,
+                       help="frames before this one are skipped")
     stop: Optional[int] = param(None, label="last frame", min=1, advanced=True,
                                 help="auto: to the end")
     live: bool = param(False, label="live",
@@ -57,7 +58,9 @@ class SourceSettings:
     live_timeout: float = param(30.0, label="stop after", unit="s idle", min=1,
                                 advanced=True, help="live: give up after this long "
                                 "without a new frame")
-    chunk: int = param(200, label="frames per block", min=1, advanced=True)
+    chunk: int = param(200, label="frames per block", min=1, advanced=True,
+                       help="frames read and detected at once; only memory "
+                            "and speed depend on it")
 
 
 @dataclass
@@ -69,15 +72,25 @@ class CameraSettings:
                         help="auto: identified from the file's metadata")
     preset: str = param("", label="preset", choices=lambda: _preset_choices(),
                         help="a camera YAML; fills the fields below")
-    conversion: Optional[float] = param(None, unit="e-/ADU", min=0)
-    offset: Optional[float] = param(None, unit="ADU")
-    pixelsize_um: Optional[float] = param(None, label="pixel size", unit="um", min=0)
+    conversion: Optional[float] = param(None, unit="e-/ADU", min=0,
+                                        help="photoelectrons per count; auto: "
+                                             "from the file or the camera "
+                                             "database")
+    offset: Optional[float] = param(None, unit="ADU",
+                                    help="the count of a pixel that saw no light")
+    pixelsize_um: Optional[float] = param(None, label="pixel size", unit="um", min=0,
+                                          help="the pixel's size in the sample, "
+                                               "after the magnification")
     pixelsize_y_um: Optional[float] = param(None, label="pixel size y", unit="um",
                                             min=0, advanced=True,
                                             help="auto: square pixels, the same "
                                                  "as in x")
-    em_on: Optional[bool] = param(None, label="EM gain on")
-    emgain: Optional[float] = param(None, label="EM gain", min=0)
+    em_on: Optional[bool] = param(None, label="EM gain on",
+                                  help="an EMCCD with its electron multiplication "
+                                       "on: the counts are divided by the gain, "
+                                       "and the noise is doubled")
+    emgain: Optional[float] = param(None, label="EM gain", min=0,
+                                    help="the EM gain the camera was set to")
 
     def overrides(self) -> Dict[str, Any]:
         """What the user set, to win over the file's metadata."""
@@ -105,12 +118,19 @@ class CameraSettings:
 class DetectionSettings:
     """Finding candidates in the filtered image."""
     filter: str = param("dog", choices=(("dog", "difference of Gaussians"),
-                                        ("gauss", "Gaussian")))
-    sigma: float = param(1.2, label="filter sigma", unit="pix", min=0.1)
+                                        ("gauss", "Gaussian")),
+                        help="what the frame is smoothed with before maxima are "
+                             "looked for; the difference of Gaussians also "
+                             "removes a smooth background")
+    sigma: float = param(1.2, label="filter sigma", unit="pix", min=0.1,
+                         help="the width of the smoothing: about the PSF's")
     cutoff_mode: str = param("dynamic", label="cutoff",
                              choices=(("dynamic", "dynamic (x noise)"),
-                                      ("absolute", "absolute (photons)")))
-    cutoff: float = param(1.7, label="cutoff value", min=0)
+                                      ("absolute", "absolute (photons)")),
+                             help="dynamic: set per frame from the noise of the "
+                                  "filtered image; absolute: a fixed value")
+    cutoff: float = param(1.7, label="cutoff value", min=0,
+                          help="lower finds dimmer molecules, and more noise")
 
     def finder(self, n_threads: int = 0) -> PeakFinder:
         image_filter = (DoGFilter(self.sigma) if self.filter == "dog"
@@ -123,7 +143,8 @@ class DetectionSettings:
 @dataclass
 class GaussianModelSettings:
     """A free-width Gaussian: x, y, photons, background and sigma."""
-    sigma: float = param(1.2, label="start sigma", unit="pix", min=0.1)
+    sigma: float = param(1.2, label="start sigma", unit="pix", min=0.1,
+                         help="the PSF width the fit starts from; it is fitted")
     elliptical: bool = param(False, help="fit sigma_x and sigma_y separately")
 
     def model(self) -> GaussianPSF:
@@ -148,7 +169,8 @@ class SplineModelSettings:
 
 @dataclass
 class OutputSettings:
-    save: bool = param(True, label="save HDF5")
+    save: bool = param(True, label="save HDF5",
+                       help="write the table to a file as it is fitted")
     path: str = param("", label="file", kind="save_file",
                       file_filter="HDF5 (*.hdf5 *.h5)",
                       help="filled from the source: <acquisition>_locs.hdf5 "
@@ -313,13 +335,18 @@ def finish_localizations(locs: Localizations, settings: FinishSettings,
 
 
 FIT_PARAMS = {
-    "roisize": ParamInfo(label="ROI size", unit="pix", min=5),
-    "iterations": ParamInfo(min=1, advanced=True),
-    "max_block_rois": ParamInfo(label="ROIs per fit", min=100, advanced=True),
+    "roisize": ParamInfo(label="ROI size", unit="pix", min=5,
+                         help="the square cut around each candidate and fitted"),
+    "iterations": ParamInfo(min=1, advanced=True,
+                            help="the most steps a fit may take"),
+    "max_block_rois": ParamInfo(label="ROIs per fit", min=100, advanced=True,
+                                help="how many are collected before they are "
+                                     "fitted together; speed and memory only"),
     "n_threads": ParamInfo(label="threads", min=0, help="0: one per core", advanced=True),
     "max_fit_distance": ParamInfo(label="max fit distance", unit="pix", advanced=True,
                                   help="reject fits that ran off; auto: keep all"),
-    "output_unit": ParamInfo(label="units", choices=("nm", "pixel", "pixel+nm")),
+    "output_unit": ParamInfo(label="units", choices=("nm", "pixel", "pixel+nm"),
+                             help="the unit of the positions in the table"),
 }
 
 

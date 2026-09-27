@@ -104,6 +104,9 @@ where = ["src"]
 # wheel and not only in the checkout
 # and the simulator's built-in structures, likewise
 "smappy" = ["data/*.json", "data/structures/*.yaml"]
+# the plugins' pages, read by the Help window (`smappy.docs`), one folder per
+# level of the menu tree
+"smappy.plugins" = ["docs/*.md", "docs/*/*.md", "docs/*/*/*.md", "docs/*/*/*/*.md"]
 
 [tool.cibuildwheel]
 # numpy is deliberately not a build dependency: the extensions include only

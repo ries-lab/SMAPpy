@@ -9,10 +9,11 @@ import traceback
 from typing import Optional, Type
 
 from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QTextCursor
+from PySide6.QtGui import QKeySequence, QShortcut, QTextCursor
 from PySide6.QtWidgets import (QCheckBox, QHBoxLayout, QLabel, QMainWindow,
                                QMessageBox, QPlainTextEdit, QPushButton,
-                               QScrollArea, QSpinBox, QVBoxLayout, QWidget)
+                               QScrollArea, QSpinBox, QToolButton, QVBoxLayout,
+                               QWidget)
 
 from ..plugins import Plugin, Result
 from ..session import Session
@@ -137,6 +138,10 @@ class PluginPanel(QWidget):
         self.output = QPlainTextEdit(readOnly=True, maximumBlockCount=500)
         self.output.setFixedHeight(90)
         layout.addWidget(self.output)
+        # F1 anywhere in the panel opens the plugin's page, wherever the panel
+        # sits -- a tab, a detached section or a window of its own
+        shortcut = QShortcut(QKeySequence.HelpContents, self, self.show_help)
+        shortcut.setContext(Qt.WidgetWithChildrenShortcut)
 
         self.run_button.clicked.connect(self.run)
         self.plot_button.clicked.connect(self.plot)
@@ -479,6 +484,11 @@ class PluginPanel(QWidget):
             self._window.raise_()
 
 
+    def show_help(self) -> None:
+        from .help_window import show_help
+        show_help(self.plugin.path, self.window())
+
+
 class PluginWindow(QMainWindow):
     """One plugin in a window of its own, pinned to nothing.
 
@@ -500,5 +510,20 @@ class PluginWindow(QMainWindow):
         area = QScrollArea()
         area.setWidgetResizable(True)
         area.setWidget(self.panel)
-        self.setCentralWidget(area)
+        # the same ? as a section's title bar, in the one place a window has
+        self.help_button = QToolButton(text="?", autoRaise=True)
+        self.help_button.setToolTip("what this plugin does, how it works, "
+                                    "and every setting (F1)")
+        self.help_button.clicked.connect(self.panel.show_help)
+        top = QHBoxLayout()
+        top.setContentsMargins(0, 0, 0, 0)
+        top.addStretch(1)
+        top.addWidget(self.help_button)
+        central = QWidget()
+        column = QVBoxLayout(central)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(0)
+        column.addLayout(top)
+        column.addWidget(area)
+        self.setCentralWidget(central)
         self.resize(max(self.panel.sizeHint().width() + 40, 380), 520)

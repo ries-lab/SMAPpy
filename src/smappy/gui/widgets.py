@@ -18,15 +18,20 @@ class CollapsibleSection(QWidget):
 
     With ``detachable`` a small button on the right asks for the content to
     be moved to its own window (`detach_requested`); `detach` / `reattach`
-    do the moving, so several sections can be open at once.
+    do the moving, so several sections can be open at once.  With
+    ``helpable`` a **?** beside it asks for the page documenting what is in
+    the section (`help_requested`); it stays when the content is detached,
+    since that is when the section's title bar is all there is to click.
     """
 
     toggled = Signal(bool)
     detach_requested = Signal()
+    help_requested = Signal()
     starred = Signal(bool)
 
     def __init__(self, title: str, content: QWidget, expanded: bool = False,
-                 detachable: bool = False, star: Optional[bool] = None, parent=None):
+                 detachable: bool = False, star: Optional[bool] = None,
+                 helpable: bool = False, parent=None):
         super().__init__(parent)
         self.content = content
         self.button = QToolButton(text=title, checkable=True, checked=expanded)
@@ -43,6 +48,13 @@ class CollapsibleSection(QWidget):
             self.star_button.toggled.connect(self._on_star)
             self._on_star(star)
             header.addWidget(self.star_button)
+        self.help_button = None
+        if helpable:
+            self.help_button = QToolButton(text="?", autoRaise=True)
+            self.help_button.setToolTip("what this plugin does, how it works, "
+                                        "and every setting (F1)")
+            self.help_button.clicked.connect(self.help_requested)
+            header.addWidget(self.help_button)
         self.detach_button = None
         if detachable:
             self.detach_button = QToolButton(text="↗", autoRaise=True)

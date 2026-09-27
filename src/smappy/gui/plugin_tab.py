@@ -26,6 +26,7 @@ from ..workspace import Instance, Tab
 from .chain_panel import ChainPanel, is_chain, spec_of
 from .chooser import choose_plugin
 from .plugin_panel import PluginPanel
+from .help_window import show_help
 from .widgets import CollapsibleSection, detach_to_window
 
 
@@ -162,7 +163,10 @@ class PluginTab(QWidget):
             inline = spec_of(instance) if instance.chain else None
             title = instance.title(inline.name if inline is not None
                                    else ref.name if ref else "")
-            section = CollapsibleSection(title, slot, detachable=True)
+            section = CollapsibleSection(title, slot, detachable=True,
+                                         helpable=ref is not None)
+            section.help_requested.connect(
+                lambda p=instance.plugin: show_help(p, self.window()))
             if ref is None and inline is None:
                 section.button.setToolTip(f"{instance.plugin} is not installed")
             section.toggled.connect(lambda on, s=section, i=instance:
