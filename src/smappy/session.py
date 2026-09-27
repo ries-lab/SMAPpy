@@ -15,7 +15,7 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 from .filter import LocFilter
 from .group import GROUP_COLUMNS, GroupSettings
 from .images import ImageData, load_image
-from .locs import Localizations, concat
+from .locs import KEPT_BOUNDS, Localizations, concat
 from .plugins import Context, Plugin, Result, Selection
 from .io.formats import FileInfo, load as load_any
 from .regions import Region
@@ -129,6 +129,9 @@ class Layer:
         if "z_nm" not in locs:
             bounds.update(DEFAULT_BOUNDS_2D)
         for field, (lo, hi) in bounds.items():
+            if field in locs:
+                self.set_bound(field, lo, hi)
+        for field, (lo, hi) in (locs.metadata.get(KEPT_BOUNDS) or {}).items():
             if field in locs:
                 self.set_bound(field, lo, hi)
 

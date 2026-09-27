@@ -48,9 +48,11 @@ def show(ax, table, title):
 ```
 
 **1. Which localizations are in the region.**  With *region* set to *the
-drawn ROI*, a localization is inside when its position (`x_nm`, `y_nm`, or
-the pixel columns of a pixel table) lies within the shape drawn in the render
-window: a rectangle, a polygon, or a line with a width (a line is a rectangle
+drawn ROI*, a localization is inside when it lies within the shape drawn in
+the render window, in the picture's own coordinates -- its position (`x_nm`,
+`y_nm`, or the pixel columns of a pixel table) on the ordinary picture, and
+whatever the axes show when the picture is of other columns (photons against
+frame, say): a rectangle, a polygon, or a line with a width (a line is a rectangle
 of that width around the segment).  The ROI is taken on its own: the layer's
 filter does not narrow it, so every localization of the table in the drawn
 shape counts, whichever file or layer it belongs to.
@@ -148,9 +150,8 @@ filter.
 
 The run is recorded in the file's history, with its settings, and can be
 undone.  The flag column and its grouping rule are saved with the file, so
-the decision survives a reload.  The filter on it is not part of the file:
-a reopened file shows every localization until the filter is set to `use`
-$\geq$ 0.5 again.
+the decision survives a reload.  So does the filter on it: the bound is kept
+with the table, and a reopened file hides the same localizations again.
 
 ## Differences from SMAP
 

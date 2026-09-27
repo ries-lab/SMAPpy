@@ -160,3 +160,36 @@ def test_what_was_removed_is_in_the_log_with_its_settings():
     entry = session.history[-1]
     assert entry["what"] == "Analysis/Process/Remove Localizations"
     assert entry["settings"]["which"] == "outside"
+
+
+def test_a_hidden_region_stays_hidden_when_the_file_is_reopened(tmp_path):
+    """The flag and its recipe were saved, the bound that hides them was not:
+    a reopened file showed everything again."""
+    from smappy.session import Session
+    from smappy.plugins.remove_locs import hide
+    rng = np.random.default_rng(0)
+    locs = Localizations({"x_nm": rng.uniform(0, 1000, 400), "y_nm": rng.uniform(0, 1000, 400),
+                          "frame": np.arange(400)}, {"units": "nm"})
+    hidden = hide(locs, np.asarray(locs["x_nm"]) > 300)
+    session = Session(hidden)
+    path = tmp_path / "hidden.hdf5"
+    session.save(path, gui_state=False)
+    reopened = Session()
+    reopened.load(path)
+    shown = reopened.selection(0).mask
+    assert shown.sum() == (np.asarray(locs["x_nm"]) > 300).sum()
+
+
+def test_the_drawn_roi_is_read_in_the_pictures_coordinates():
+    """On a picture of photons against frame, an ROI means photons and
+    frames, as the session's own selection reads it."""
+    from smappy.plugins.remove_locs import region_mask
+    from smappy.regions import Region
+    from smappy.render import RenderAxes
+    locs = Localizations({"x_nm": np.array([10.0, 20.0]), "y_nm": np.array([10.0, 20.0]),
+                          "frame": np.array([0, 100]), "photons": np.array([500.0, 5000.0])},
+                         {"units": "nm"})
+    axes = RenderAxes(x="frame", y="photons")
+    box = Region.rect(50.0, 1000.0, 150.0, 9000.0)
+    assert region_mask(locs, box, axes).tolist() == [False, True]
+    assert region_mask(locs, box).tolist() == [False, False]      # positions

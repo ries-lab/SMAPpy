@@ -34,7 +34,7 @@ from typing import Optional, Tuple
 
 import numpy as np
 
-from ..locs import Localizations
+from ..locs import KEPT_BOUNDS, Localizations
 from ..mathparse import remember
 from ..regions import Region
 from ..render import positions
@@ -49,9 +49,18 @@ FILTER_BOUND: Tuple[Optional[float], Optional[float]] = (0.5, None)
 
 # ----------------------------------------------------------------- the work
 
-def region_mask(locs: Localizations, region: Region) -> np.ndarray:
-    """Which localizations lie inside ``region``."""
-    x, y = positions(locs)
+def region_mask(locs: Localizations, region: Region, axes=None) -> np.ndarray:
+    """Which localizations lie inside ``region``.
+
+    ``axes`` is the picture the region was drawn on (`render.RenderAxes`): an
+    ROI is in that picture's coordinates, so on a view of photons against
+    frame it means photons and frames -- as `Session._clip` reads it.  None,
+    or the ordinary picture, is the table's positions.
+    """
+    if axes is not None and not getattr(axes, "is_default", True):
+        x, y = axes.coordinates(locs)
+    else:
+        x, y = positions(locs)
     return np.asarray(region.mask(x, y), dtype=bool)
 
 
@@ -96,6 +105,12 @@ def hide(locs: Localizations, keep: np.ndarray, field: str = "use") -> Localizat
     # localizations are: hiding a region and then grouping should not bring
     # half of it back as blinks that straddle the edge.
     remember(out, field, "", grouped="all")
+    # and the bound that hides them travels with the table, so a reopened file
+    # hides them again: a filter belongs to the session, the flag to the file,
+    # and the docstring's "survives a reload" was true of the flag only
+    kept = dict(out.metadata.get(KEPT_BOUNDS) or {})
+    kept[field] = list(FILTER_BOUND)
+    out.metadata[KEPT_BOUNDS] = kept
     return out
 
 
@@ -158,7 +173,8 @@ class RemoveLocalizations(Plugin):
             if roi is None:
                 raise ValueError("no ROI: draw one in the render window, or "
                                  "set the region to the selection")
-            inside = region_mask(locs, roi)
+            axes = ctx.session.axes() if ctx.session is not None else None
+            inside = region_mask(locs, roi, axes)
             where = f"the {roi}"
         keep = ~inside if settings.which == "inside" else inside
         going = int((~keep).sum())

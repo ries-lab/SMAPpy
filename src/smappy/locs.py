@@ -150,6 +150,13 @@ def fit_to_localizations(result: FitResult, rois: ROIStack, model: PSFModel,
 
 
 # columns in pixels, and the nm name they get; z is already in nm
+# Filter bounds that belong to the table rather than to the session:
+# ``metadata[KEPT_BOUNDS] = {field: [lo, hi]}``, opened on every layer when
+# the table is loaded.  Remove Localizations' hide flag is the one that needs
+# it -- the rows it hides are still in the file, and without its bound a
+# reopened file showed them all again.
+KEPT_BOUNDS = "kept_bounds"
+
 _PIXEL_COLUMNS = {
     "x_pix": "x_nm", "y_pix": "y_nm",
     "x_err_pix": "x_err_nm", "y_err_pix": "y_err_nm",
