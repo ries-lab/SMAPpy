@@ -818,7 +818,9 @@ class DualModelSettings:
     link_photons: bool = param(False, label="link photons",
                                help="off for two colours -- the photon ratio is "
                                     "what tells the dyes apart; on for biplane")
-    link_background: bool = param(False, label="link background", advanced=True)
+    link_background: bool = param(False, label="link background", advanced=True,
+                                  help="one background for both halves; off: "
+                                       "each half fits its own")
     photon_ratio: Optional[float] = param(None, label="photon ratio", min=0,
                                           advanced=True,
                                           help="secondary / main; auto: from the "
@@ -1027,7 +1029,10 @@ class ChannelTransformSettings:
                                  "plain Gaussian and register them")
     # A cap, not a target: what is wanted is enough *pairs*, and how many
     # frames that takes depends entirely on the sample and the dye.
-    calibrate_frames: int = param(5000, label="at most", unit="frames", min=50)
+    calibrate_frames: int = param(5000, label="at most", unit="frames", min=50,
+                                  help="the most frames the calibration pass "
+                                       "fits, however few localizations they "
+                                       "give")
     calibrate_locs: int = param(10000, label="localizations wanted", min=500,
                                 help="in the dimmer of the two channels, which "
                                      "is what limits the pairs; blocks are read "
@@ -1096,14 +1101,18 @@ class ChannelTransformSettings:
 @dataclass
 class DualGaussianModelSettings:
     """A free-width Gaussian per channel, and which parameters they share."""
-    sigma: float = param(1.2, label="start sigma", unit="pix", min=0.1)
+    sigma: float = param(1.2, label="start sigma", unit="pix", min=0.1,
+                         help="the PSF width both halves' fits start from; "
+                              "each is fitted")
     link_xy: bool = param(True, label="link x, y",
                           help="one position for both channels, through the "
                                "registration; unlink only to check the transform")
     link_photons: bool = param(False, label="link photons",
                                help="off for two colours -- the photon ratio is "
                                     "what tells the dyes apart")
-    link_background: bool = param(False, label="link background", advanced=True)
+    link_background: bool = param(False, label="link background", advanced=True,
+                                  help="one background for both halves; off: "
+                                       "each half fits its own")
     link_sigma: bool = param(False, label="link width", advanced=True,
                              help="off: each half finds its own width, which it "
                                   "should -- they see different wavelengths and "
@@ -1135,6 +1144,36 @@ class DualGaussianFitSettings:
                                    label="after the fit")
 
 
+# `RegisterSettings` is a plain dataclass; its tooltips, under the 2C fit's
+# "transform.registration" part.  Help only: labels and widgets stay as they were.
+REGISTRATION_PARAMS = {f"transform.registration.{name}": ParamInfo(help=text)
+                       for name, text in {
+    "layout": "how the chip is split: auto (detected from the pairs), "
+              "right-left, up-down, or either mirrored",
+    "main_channel": "the reference half: auto, left, right, upper or lower",
+    "model": "projective (8 coefficients), or polynomial (third order, 20) "
+             "for a distorted field the pairs cover",
+    "split_position": "the seam between the halves, in chip pixels; auto: "
+                      "measured from the pairs",
+    "vote_bin_px": "the bin, in pixels, of the histogram of pair vectors "
+                   "the channel offset is voted in",
+    "vote_smooth_px": "the width of the difference-of-Gaussians filter the "
+                      "vote is scored with, in pixels",
+    "coarse_tolerance_px": "first round: how far apart, in pixels, the "
+                           "partners may be after the voted offset",
+    "fine_tolerance_px": "second round: how far apart the partners may be "
+                         "through the first round's map; 0 skips it",
+    "adapt_fine_tolerance": "widen the second round's tolerance to the first "
+                            "round's misfit, when its pairs are clean",
+    "min_pairs": "fewer pairs than this and the registration refuses",
+    "max_pairs": "at most this many pairs, drawn at random, go into each fit",
+    "reprojection_threshold_px": "the robust (RANSAC) fit's inlier radius, "
+                                 "at least; it widens with the tolerance",
+    "transform_axis_limit_px": "the largest |dx| or |dy| a pair may keep "
+                               "after the first fit, at least",
+}.items()}
+
+
 @register("Localize/Gaussian 2D 2C")
 class DualGaussianFit(_FitPlugin):
     """The 2D two-channel workflow: one emitter, both halves, no PSF model.
@@ -1157,7 +1196,7 @@ class DualGaussianFit(_FitPlugin):
                    "that tells the two colours apart.  No PSF calibration; the "
                    "registration can be measured from the movie itself.")
     Settings = DualGaussianFitSettings
-    params = {**GaussianFit.params, **finish_params()}
+    params = {**GaussianFit.params, **finish_params(), **REGISTRATION_PARAMS}
 
     def model(self, settings, camera):
         return settings.model.model()
