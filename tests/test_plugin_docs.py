@@ -3,6 +3,7 @@ explains every setting, and renders -- maths, figures and all.
 
 The figures are the plugins' own code run on simulated data, so rendering a
 page is also a check that the page's claims still run."""
+import re
 import textwrap
 
 import pytest
@@ -107,8 +108,8 @@ def test_a_written_page_renders_with_its_maths_and_figures(path):
     assert rendered.errors == []
     figures = [name for name in rendered.images if name.startswith("figure")]
     assert figures, "a written page shows what the plugin does"
-    for png in rendered.images.values():
-        assert png[:8] == b"\x89PNG\r\n\x1a\n"
+    for name, data in rendered.images.items():
+        assert data.startswith(b"<svg" if name.endswith(".svg") else b"\x89PNG\r\n\x1a\n")
 
 
 def test_a_plugin_without_a_page_still_gets_its_settings():
@@ -264,12 +265,64 @@ def test_a_dollar_can_be_written():
     assert markup.inline("costs \\$5") == "costs $5"
 
 
-def test_a_formula_becomes_an_image_the_size_of_the_text_around_it():
-    png, width, height = docs.math_image("\\frac{S}{\\sqrt{N}}", False)
-    assert png[:4] == b"\x89PNG"
-    assert 5 < width < 60 and 10 < height < 40
-    big, _, tall = docs.math_image("\\frac{S}{\\sqrt{N}}", True)
-    assert tall > height                        # displayed maths is larger
+def test_a_formula_is_typeset_as_svg_the_size_of_the_text_around_it():
+    image = docs.math_image("\\frac{S}{\\sqrt{N}}", False, renderer="ziamath")
+    assert image.renderer == "ziamath" and image.ext == "svg"
+    assert image.data.startswith(b"<svg") and b"<symbol" not in image.data
+    assert 5 < image.width < 80 and 15 < image.height < 60
+    assert 0 < image.depth < image.height / 2       # the fraction reaches below
+    shown = docs.math_image("\\frac{S}{\\sqrt{N}}", True, renderer="ziamath")
+    assert shown.height > image.height              # displayed: a full-size fraction
+
+
+def test_the_fallback_is_mathtext_for_a_formula_ziamath_refuses(monkeypatch):
+    def refuse(*args):
+        raise ValueError("no")
+    monkeypatch.setattr(docs, "_ziamath", refuse)
+    monkeypatch.setattr(docs, "_MATH_CACHE", {})
+    monkeypatch.setattr(docs, "_disk_cache", lambda: None)
+    image = docs.math_image("x^2 + 1", False)
+    assert image.renderer == "mathtext" and image.data[:4] == b"\x89PNG"
+
+
+def test_the_fallback_can_be_asked_for(monkeypatch):
+    monkeypatch.setenv("SMAPPY_DOCS_MATH", "mathtext")
+    assert docs.math_renderer() == "mathtext"
+    assert docs.math_image("x_i", False).renderer == "mathtext"
+
+
+@pytest.mark.parametrize("renderer", ["ziamath", "mathtext"])
+def test_a_centred_formula_has_its_baseline_on_the_line(renderer):
+    """Qt can only centre an inline image; padded, the centre lands where Qt
+    puts it (``middle`` above the baseline) with the baseline on the text's."""
+    image = docs.math_image("\\sigma_{\\max}^2", False, renderer=renderer)
+    for middle in (1.0, 6.0):
+        padded = image.centred(middle)
+        above, below = padded.height - padded.depth, padded.depth
+        assert abs((above - below) / 2 - middle) < 0.6
+        if renderer == "ziamath":                   # the SVG says the same
+            height = float(re.search(rb'<svg[^>]*height="([^"]+)"', padded.data).group(1))
+            assert abs(height - padded.height) < 0.01
+
+
+def page_formulas(path):
+    found = []
+    record = lambda tex, display: found.append((tex, display)) or ""
+    inner = markup.Converter(math=record)
+    body = docs.figure_setup(docs.page_for(plugins.get(path)).body)[0]
+    markup.Converter(math=record, figure=lambda code, caption: inner.inline(caption)
+                     ).convert(body)
+    return found
+
+
+@pytest.mark.parametrize("path", documented())
+def test_every_formula_on_a_page_is_set_by_both_renderers(path):
+    """So falling back never costs a page its maths."""
+    formulas = page_formulas(path)
+    assert formulas
+    for tex, display in formulas:
+        assert docs._ziamath(tex, display, "black", 10.0).width > 0, tex
+        assert docs._mathtext(tex, display, "black", 10.0).width > 0, tex
 
 
 # ------------------------------------------------------------------- the GUI
@@ -298,8 +351,12 @@ def test_a_plugins_title_bar_has_a_question_mark_that_opens_its_page(app):
     # its images reached the document, so the maths is drawn and not missing
     from PySide6.QtCore import QUrl
     from PySide6.QtGui import QTextDocument
-    assert not window.browser.document().resource(
-        QTextDocument.ImageResource, QUrl("math1.png")).isNull()
+    names = [n for n in docs.render(plugins.get("Analysis/Drift/RCC")).images
+             if n.startswith("math")]
+    assert names and names[0].endswith(".svg")
+    image = window.browser.document().resource(QTextDocument.ImageResource,
+                                                QUrl(names[0]))
+    assert not image.isNull() and image.width() > 10
     # a link to another plugin's page is followed in the same window
     window._on_link(QUrl("plugin:Analysis/Drift/COMET"))
     assert window.current == "Analysis/Drift/COMET"

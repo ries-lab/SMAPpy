@@ -50,6 +50,10 @@ dependencies = [
     "PySide6-Essentials>=6.6",
     "pyqtgraph>=0.13",
     "matplotlib>=3.4",  # the render LUTs, and the plugins' result plots
+    # the plugins' pages set their maths with it: TeX's layout from an
+    # OpenType maths font, pure Python (~3.5 MB with the font).  Optional in
+    # practice -- without it `smappy.docs` falls back on matplotlib's mathtext
+    "ziamath>=0.13",
 ]
 
 [project.urls]

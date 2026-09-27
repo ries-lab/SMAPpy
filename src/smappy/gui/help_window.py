@@ -15,9 +15,10 @@ from __future__ import annotations
 from typing import Optional
 from urllib.parse import unquote
 
-from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QDesktopServices, QGuiApplication, QImage, QKeySequence, \
-    QPalette, QShortcut, QTextDocument
+from PySide6.QtCore import QByteArray, QRectF, Qt, QUrl
+from PySide6.QtGui import QDesktopServices, QFontMetricsF, QGuiApplication, QImage, \
+    QKeySequence, QPainter, QPalette, QShortcut, QTextDocument
+from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (QMainWindow, QSplitter, QTextBrowser,
                                QTreeWidget, QTreeWidgetItem)
 
@@ -41,6 +42,32 @@ def show_help(path: Optional[str] = None, parent=None) -> "HelpWindow":
     _WINDOW.raise_()
     _WINDOW.activateWindow()
     return _WINDOW
+
+
+def _middle(document: QTextDocument) -> float:
+    """Where Qt centres an inline image with ``vertical-align: middle``.
+
+    A quarter of the x-height above the baseline: Qt gives the image an
+    ascent of ``(height + x/2) / 2`` and a descent of ``(height - x/2) / 2``
+    (`QTextDocumentLayout::resizeInlineObject`).  The formulas are padded to
+    that, which is what puts their baseline on the text's.
+    """
+    return QFontMetricsF(document.defaultFont()).xHeight() / 4
+
+
+def _image(name: str, data: bytes) -> QImage:
+    """PNG as it is; SVG drawn at `docs.SCALE`, sharp on a dense screen."""
+    if not name.endswith(".svg"):
+        return QImage.fromData(data, "PNG")
+    renderer = QSvgRenderer(QByteArray(data))
+    size = renderer.defaultSize()
+    image = QImage(round(size.width() * docs.SCALE), round(size.height() * docs.SCALE),
+                   QImage.Format_ARGB32_Premultiplied)
+    image.fill(Qt.transparent)
+    painter = QPainter(image)
+    renderer.render(painter, QRectF(0, 0, image.width(), image.height()))
+    painter.end()
+    return image
 
 
 class HelpWindow(QMainWindow):
@@ -135,15 +162,16 @@ class HelpWindow(QMainWindow):
             size = self.browser.font().pointSizeF()
             rendered = docs.render(plugin_cls, color=color,
                                    size_pt=size if size > 0 else 10.0,
-                                   origin=ref.origin if ref else None)
+                                   origin=ref.origin if ref else None,
+                                   middle_px=_middle(document))
         finally:
             QGuiApplication.restoreOverrideCursor()
         self.current = path
         document.clear()
         # the names repeat from page to page (math1.png, ...), so the resources
         # are replaced on every page rather than accumulated
-        for name, png in rendered.images.items():
-            image = QImage.fromData(png, "PNG")
+        for name, data in rendered.images.items():
+            image = _image(name, data)
             image.setDevicePixelRatio(docs.SCALE)
             document.addResource(QTextDocument.ImageResource, QUrl(name), image)
         self.browser.setHtml(rendered.html)

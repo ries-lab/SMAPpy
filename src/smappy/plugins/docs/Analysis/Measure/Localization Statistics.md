@@ -59,7 +59,7 @@ maximum (or at *photons from*, if that is set).  The fit is maximum
 likelihood on the localizations above the start, which for an exponential is
 simply
 
-$$\hat N_0 = \overline{N} - N_{\mathrm{start}} ,$$
+$$\hat{N}_0 = \overline{N} - N_{\mathrm{start}} ,$$
 
 the mean of what is left above the start, minus the start.  It does not
 depend on the bins of the histogram.

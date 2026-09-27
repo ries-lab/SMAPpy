@@ -51,6 +51,10 @@ the simulation they draw from -- and only when one of them is not cached.
 exist (a test checks), and their modules' source is part of a figure's cache
 key, so a figure is redrawn when the code under it changes.
 
+Maths is ``$...$`` and ``$$...$$``, set by ziamath with matplotlib's mathtext
+as the fallback (see "the maths" below); a page is written in what both
+accept.
+
 `render` gives HTML plus the images it refers to, as bytes, and knows nothing
 about Qt: the Help window hands the images to its document, and
 ``python -m smappy.docs`` writes them next to the HTML.
@@ -336,44 +340,184 @@ def header(plugin_cls) -> str:
 # ---------------------------------------------------------------- the images
 @dataclass
 class Rendered:
-    """A page as HTML, and the images it names, as PNG bytes by name."""
+    """A page as HTML, and the images it names, as bytes by name.
+
+    A name's extension says what the bytes are: ``.png``, or ``.svg`` for a
+    formula drawn by ziamath.
+    """
     html: str
     images: Dict[str, bytes] = field(default_factory=dict)
     errors: List[str] = field(default_factory=list)
 
 
-_MATH_CACHE: Dict[Tuple[str, bool, str, float], Tuple[bytes, float, float]] = {}
 _FIGURE_CACHE: Dict[str, bytes] = {}
 # rendered at this many device pixels per logical one, and shown at 1/SCALE,
 # so the images stay sharp on a high-density screen
 SCALE = 2.0
 
 
-def math_image(tex: str, display: bool, color: str = "black",
-               size_pt: float = 10.0) -> Tuple[bytes, float, float]:
-    """``(png, width, height)`` of one formula, the size in logical pixels.
+# -------------------------------------------------------------------- the maths
+#
+# Two renderers.  ziamath lays a formula out as TeX does, from the maths
+# tables of an OpenType maths font (STIX Two Math): full-size fractions on a
+# line of their own, brackets that grow with what they hold, TeX's spacing --
+# which is what makes a formula look typeset rather than drawn.  It is pure
+# Python and writes SVG.  matplotlib's mathtext, in Computer Modern, is the
+# fallback: already installed and fast, but it sets every fraction small and
+# does not size brackets.  A formula ziamath refuses falls back on its own, and
+# ``SMAPPY_DOCS_MATH=mathtext`` falls back for everything (the test renders
+# every page's maths with both, so the fallback never meets a formula it
+# cannot draw).
+#
+# About 80 ms a displayed formula with ziamath, against a few with mathtext,
+# so formulas are cached in memory and on disk like the figures.
 
-    matplotlib's mathtext, not LaTeX: it is already installed, it needs no TeX,
-    and it covers the maths a page needs -- fractions, roots, sums, Greek,
-    sub- and superscripts.  What it lacks (``align``, matrices) a page does
-    without.
-    """
-    key = (tex, display, color, size_pt)
+@dataclass
+class MathImage:
+    """One formula: the image, and where its baseline is, in logical pixels."""
+    data: bytes
+    ext: str                    # "svg" or "png"
+    width: float
+    height: float
+    depth: float                # how far it reaches below the baseline
+    renderer: str = ""
+
+    def centred(self, middle: float) -> "MathImage":
+        """Padded so that its centre sits ``middle`` above the baseline.
+
+        A viewer that can only centre an inline image on the line (Qt's
+        ``vertical-align: middle``) then puts the formula's baseline on the
+        text's, where a subscript or a fraction would otherwise drag it down.
+        """
+        above = self.height - self.depth
+        extra = (above - self.depth) - 2 * middle
+        top, bottom = (0.0, extra) if extra > 0 else (-extra, 0.0)
+        if top == bottom == 0:
+            return self
+        if self.ext == "svg":
+            data = _pad_svg(self.data, top, bottom)
+        else:
+            data = _pad_png(self.data, top * SCALE, bottom * SCALE)
+        return MathImage(data, self.ext, self.width, self.height + top + bottom,
+                         self.depth + bottom, self.renderer)
+
+
+_MATH_CACHE: Dict[str, MathImage] = {}
+
+
+def math_renderer() -> str:
+    """The renderer asked for: ``ziamath`` unless ``SMAPPY_DOCS_MATH`` says
+    ``mathtext``, or ziamath is not installed."""
+    import os
+    wanted = os.environ.get("SMAPPY_DOCS_MATH", "ziamath").strip().lower()
+    if wanted == "ziamath":
+        from importlib.util import find_spec
+        if find_spec("ziamath") is None:
+            return "mathtext"
+    return "mathtext" if wanted == "mathtext" else "ziamath"
+
+
+def math_image(tex: str, display: bool, color: str = "black",
+               size_pt: float = 10.0, renderer: Optional[str] = None) -> MathImage:
+    """One formula, the size of the text around it (``size_pt``)."""
+    renderer = renderer or math_renderer()
+    key = hashlib.sha1(repr((_math_version(renderer), tex, display, color,
+                             size_pt)).encode()).hexdigest()
     if key in _MATH_CACHE:
         return _MATH_CACHE[key]
+    cached = _disk_cache() / "math" / f"{key}.json" if _disk_cache() else None
+    if cached is not None and cached.is_file():
+        try:
+            import base64
+            import json
+            saved = json.loads(cached.read_text())
+            saved["data"] = base64.b64decode(saved["data"])
+            _MATH_CACHE[key] = MathImage(**saved)
+            return _MATH_CACHE[key]
+        except (OSError, ValueError, TypeError, KeyError):
+            pass
+    if renderer == "ziamath":
+        try:
+            image = _ziamath(tex, display, color, size_pt)
+        except Exception:
+            # what latex2mathml does not know, mathtext may; if neither
+            # does, mathtext's error is the one reported
+            return math_image(tex, display, color, size_pt, "mathtext")
+    else:
+        image = _mathtext(tex, display, color, size_pt)
+    _MATH_CACHE[key] = image
+    if cached is not None:
+        try:
+            import base64
+            import json
+            cached.parent.mkdir(parents=True, exist_ok=True)
+            cached.write_text(json.dumps({**dataclasses.asdict(image),
+                                          "data": base64.b64encode(image.data).decode()}))
+        except OSError:
+            pass
+    return image
+
+
+def _math_version(renderer: str) -> str:
+    try:
+        from importlib.metadata import version
+        return f"{renderer} {version(renderer if renderer == 'ziamath' else 'matplotlib')}"
+    except Exception:
+        return renderer
+
+
+def _ziamath(tex: str, display: bool, color: str, size_pt: float) -> MathImage:
+    import ziamath
+
+    # SVG 1.1: the SVG 2 output shares glyphs through <symbol>, which Qt's SVG
+    # renderer does not draw -- the formula comes out as its fraction bars
+    ziamath.config.svg2 = False
+    # px at 96 dpi; displayed maths a touch larger, as a book sets it.
+    # STIX has a smaller x-height than the sans-serif text around it, so it
+    # is set 15% larger to look the same size
+    size = size_pt * 96 / 72 * 1.15 * (1.1 if display else 1.0)
+    svg = ziamath.Latex(tex, size=size, inline=not display, color=color).svg()
+    x, y, width, height = (float(v) for v in
+                           re.search(r'viewBox="([^"]+)"', svg).group(1).split())
+    # the baseline is y = 0 of the view box, so what lies below it is its depth
+    return MathImage(svg.encode(), "svg", width, height, max(y + height, 0.0), "ziamath")
+
+
+def _mathtext(tex: str, display: bool, color: str, size_pt: float) -> MathImage:
     from matplotlib.font_manager import FontProperties
     from matplotlib.mathtext import MathTextParser, math_to_image
 
-    size = size_pt * (1.25 if display else 1.0)
-    prop = FontProperties(size=size, math_fontfamily="dejavusans")
+    size = size_pt * (1.1 if display else 1.0)
+    prop = FontProperties(size=size, math_fontfamily="cm")
     text = f"${tex}$"
     # logical px at 96 dpi: the size a sentence around it is drawn at
     parsed = MathTextParser("path").parse(text, dpi=96, prop=prop)
     buffer = io.BytesIO()
     math_to_image(text, buffer, prop=prop, dpi=96 * SCALE, format="png", color=color)
-    result = (buffer.getvalue(), float(parsed.width), float(parsed.height + parsed.depth))
-    _MATH_CACHE[key] = result
-    return result
+    return MathImage(buffer.getvalue(), "png", float(parsed.width),
+                     float(parsed.height + parsed.depth), float(parsed.depth), "mathtext")
+
+
+def _pad_svg(svg: bytes, top: float, bottom: float) -> bytes:
+    text = svg.decode()
+    x, y, width, height = (float(v) for v in
+                           re.search(r'viewBox="([^"]+)"', text).group(1).split())
+    new_height = height + top + bottom
+    text = re.sub(r'viewBox="[^"]+"',
+                  f'viewBox="{x:g} {y - top:g} {width:g} {new_height:g}"', text, count=1)
+    text = re.sub(r'(<svg[^>]*?)height="[^"]+"', rf'\g<1>height="{new_height:g}"',
+                  text, count=1)
+    return text.encode()
+
+
+def _pad_png(png: bytes, top: float, bottom: float) -> bytes:
+    from PIL import Image
+    image = Image.open(io.BytesIO(png))
+    padded = Image.new(image.mode, (image.width, image.height + round(top) + round(bottom)))
+    padded.paste(image, (0, round(top)))
+    buffer = io.BytesIO()
+    padded.save(buffer, format="PNG")
+    return buffer.getvalue()
 
 
 def _figure_key(code: str, covers: List[str]) -> str:
@@ -451,11 +595,16 @@ def _png_size(png: bytes) -> Tuple[int, int]:
 
 # ------------------------------------------------------------------ rendering
 def render(plugin_cls, color: str = "black", size_pt: float = 10.0,
-           figures: bool = True, link=None, origin: Optional[Path] = None) -> Rendered:
+           figures: bool = True, link=None, origin: Optional[Path] = None,
+           middle_px: Optional[float] = None) -> Rendered:
     """The whole page for ``plugin_cls``: generated and written parts together.
 
     ``color`` is the text colour the maths is drawn in, so a dark palette gets
-    light formulas.  ``link`` rewrites a link target (the exporter turns
+    light formulas.  An inline formula is put on the baseline with
+    ``vertical-align`` by its depth, which a browser honours; a viewer that
+    can only centre an image (Qt) passes ``middle_px`` -- how far above the
+    baseline it centres one -- and gets formulas padded to suit
+    (`MathImage.centred`).  ``link`` rewrites a link target (the exporter turns
     ``plugin:`` links into files).  A figure that fails is shown as its error
     rather than failing the page; `Rendered.errors` collects them.
     """
@@ -463,21 +612,25 @@ def render(plugin_cls, color: str = "black", size_pt: float = 10.0,
     out = Rendered("")
     counter = [0]
 
-    def name(kind: str) -> str:
+    def name(kind: str, ext: str = "png") -> str:
         counter[0] += 1
-        return f"{kind}{counter[0]}.png"
+        return f"{kind}{counter[0]}.{ext}"
 
     def math(tex: str, display: bool) -> str:
         try:
-            png, width, height = math_image(tex, display, color, size_pt)
+            image = math_image(tex, display, color, size_pt)
         except Exception as error:
             out.errors.append(f"maths {tex!r}: {error}")
             return f"<code>{html.escape(tex)}</code>"
-        file = name("math")
-        out.images[file] = png
-        align = "" if display else ' style="vertical-align: middle"'
-        img = (f'<img src="{file}" width="{width:.0f}" height="{height:.0f}"'
-               f"{align}>")
+        if not display and middle_px is not None:
+            image = image.centred(middle_px)
+        file = name("math", image.ext)
+        out.images[file] = image.data
+        align = ("" if display else ' style="vertical-align: middle"'
+                 if middle_px is not None else
+                 f' style="vertical-align: {-image.depth:.1f}px"')
+        img = (f'<img src="{file}" width="{image.width:.0f}" '
+               f'height="{image.height:.0f}"{align}>')
         return f'<p class="math" align="center">{img}</p>' if display else img
 
     def figure(code: str, caption: str) -> str:

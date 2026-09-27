@@ -1,8 +1,8 @@
 """Write every plugin's page as a static site: ``python -m smappy.docs -o DIR``.
 
 The same pages the Help window shows, from the same `render`, with the maths
-and figures written out as PNGs beside them -- so the site needs no MathJax,
-no network and no build tool, and says what the program says.
+(SVG) and figures (PNG) written out beside them -- so the site needs no
+MathJax, no network and no build tool, and says what the program says.
 
     python -m smappy.docs -o build/docs                   # every plugin
     python -m smappy.docs -o build/docs "Analysis/Drift/RCC"
@@ -27,7 +27,6 @@ a { color: #0b62c4; }
 table { border-collapse: collapse; }
 pre { background: #f6f8fa; padding: 8px; overflow-x: auto; }
 img { max-width: 100%; height: auto; }
-img[style] { vertical-align: middle; }
 nav { font-size: small; margin-bottom: 1.5em; }
 ul.index li { margin: 2px 0; }
 """
