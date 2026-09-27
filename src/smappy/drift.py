@@ -154,7 +154,8 @@ class Drift:
 
     def __init__(self, drift_nm: np.ndarray, settings: Optional[DriftSettings] = None,
                  n_used: Optional[int] = None,
-                 flagged_windows: Optional[np.ndarray] = None):
+                 flagged_windows: Optional[np.ndarray] = None,
+                 method: str = "comet"):
         drift = np.asarray(drift_nm, dtype=np.float64)
         if drift.ndim != 2 or drift.shape[1] != 3:
             raise ValueError(f"drift must be (n_frames, 3), got {drift.shape}")
@@ -164,6 +165,9 @@ class Drift:
         # time windows quality control discarded; the curve is interpolated
         # across them, so they are a caveat on the result, not a hole in it
         self.flagged_windows = flagged_windows
+        # which estimator made it -- "comet", "rcc", or "rcc+comet" for the
+        # prepass -- so a table's metadata and a saved curve say so
+        self.method = method
 
     def __len__(self) -> int:
         return self.drift.shape[0]
@@ -205,7 +209,7 @@ class Drift:
 
         metadata = dict(locs.metadata)
         metadata["drift_correction"] = {
-            "method": "comet",
+            "method": self.method,
             "columns": corrected,
             "n_frames": len(self),
             "n_localizations_used": self.n_used,
@@ -222,7 +226,7 @@ class Drift:
         the curve readable a week later, and the localizations it was made
         from are in the file already.
         """
-        return {"drift_nm": self.drift.tolist(),
+        return {"drift_nm": self.drift.tolist(), "method": self.method,
                 "settings": asdict(self.settings) if self.settings else None,
                 "n_used": None if self.n_used is None else int(self.n_used),
                 "flagged_windows": (None if self.flagged_windows is None
@@ -249,7 +253,8 @@ class Drift:
         return cls(np.asarray(saved.get("drift_nm", []), dtype=np.float64),
                    settings=settings, n_used=saved.get("n_used"),
                    flagged_windows=None if flagged is None
-                   else np.asarray(flagged, dtype=np.int64))
+                   else np.asarray(flagged, dtype=np.int64),
+                   method=str(saved.get("method") or "comet"))
 
     def plot(self, ax=None):
         """Drift vs frame, the standard sanity check."""
@@ -752,7 +757,7 @@ def _rcc_prepass(locs: Localizations, settings: DriftSettings, select,
                           replace(settings, rcc_prepass=False),
                           select, pixelsize_nm, display, progress)
     return Drift(coarse.drift + fine.drift, settings, n_used=fine.n_used,
-                 flagged_windows=fine.flagged_windows)
+                 flagged_windows=fine.flagged_windows, method="rcc+comet")
 
 
 def correct_drift(locs: Localizations, settings: Optional[DriftSettings] = None,
@@ -792,8 +797,12 @@ def save_drift_corrected(path, locs: Localizations, drift: Drift) -> Path:
         group.create_dataset("frame", data=drift.frames.astype(np.int64))
         # the estimator is somebody else's published method: say so in the file,
         # so a result can be traced -- and cited -- back to it
-        group.attrs["method"] = _comet.UPSTREAM
-        group.attrs["method_version"] = _comet.__version__
+        if "comet" in drift.method:
+            group.attrs["method"] = _comet.UPSTREAM
+            group.attrs["method_version"] = _comet.__version__
+        if "rcc" in drift.method:
+            group.attrs["prepass" if "comet" in drift.method else "method"] = \
+                "RCC (Wang et al. 2014)"
     return path
 
 
@@ -805,7 +814,11 @@ def load_drift(path) -> Drift:
         group = f["drift"]
         drift = np.column_stack([group[name][()]
                                  for name in ("x_nm", "y_nm", "z_nm")])
-    return Drift(drift)
+        method = str(group.attrs.get("method", ""))
+        prepass = "prepass" in group.attrs
+    name = ("rcc+comet" if prepass else "rcc" if method.startswith("RCC")
+            else "comet")
+    return Drift(drift, method=name)
 
 
 # ---------------------------------------------------------------------- helpers

@@ -33,3 +33,22 @@ def test_every_pair_is_used():
     true = np.array([0.0, 3.0, -6.0, 2.0]); true -= true.mean()
     shifts = true[:, None] - true[None, :]
     assert np.allclose(_solve(shifts, 4), true, atol=1e-6)
+
+
+def test_a_table_corrected_by_rcc_says_it_was_rcc(tmp_path):
+    """The drift curve records its estimator, through the table's metadata,
+    the saved result and a saved file -- it used to say COMET whatever made it."""
+    from smappy.drift import Drift, load_drift, save_drift_corrected
+    from smappy.locs import Localizations
+    locs, _, _ = simulate()
+    assert estimate_drift_rcc(locs, RCCSettings(n_timepoints=5)).method == "rcc"
+    drift = Drift(np.zeros((10, 3)), method="rcc")
+    table = Localizations({"frame": np.arange(10), "x_nm": np.zeros(10),
+                           "y_nm": np.zeros(10)}, {})
+    assert drift.apply(table).metadata["drift_correction"]["method"] == "rcc"
+    assert Drift.from_dict(drift.to_dict()).method == "rcc"
+    path = save_drift_corrected(tmp_path / "t.hdf5", drift.apply(table), drift)
+    assert load_drift(path).method == "rcc"
+    prepass = Drift(np.zeros((10, 3)), method="rcc+comet")
+    path = save_drift_corrected(tmp_path / "p.hdf5", prepass.apply(table), prepass)
+    assert load_drift(path).method == "rcc+comet"

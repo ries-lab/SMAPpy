@@ -136,7 +136,7 @@ def estimate_drift_rcc(locs: Localizations, settings: Optional[RCCSettings] = No
 
     per_window = np.column_stack([dx, dy, dz])
     drift = _to_frames(centres[occupied], per_window, n_frames)
-    return Drift(drift, None, n_used=len(x))
+    return Drift(drift, None, n_used=len(x), method="rcc")
 
 
 # ------------------------------------------------------------------- correlating
