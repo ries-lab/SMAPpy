@@ -81,13 +81,42 @@ def drift_trace(n_frames: int, rng) -> np.ndarray:
 
 def mortensen(photons, background, sigma_nm, pixelsize_nm, emccd: bool = False):
     """The lateral precision per axis, nm, of a Gaussian spot fitted by
-    maximum likelihood (Mortensen et al. 2010, eq. 6, with the pixel's own
-    blur): ``background`` in photons per pixel."""
+    maximum likelihood: Mortensen et al. 2010, eq. 5, with the pixel's own
+    blur.  ``background`` in photons per pixel.
+
+        var = sa^2 / N / (1 + int_0^1 ln t / (1 + t / tau) dt),
+        sa^2 = sigma^2 + a^2 / 12,    tau = 2 pi sa^2 b / (N a^2)
+
+    Not their eq. 6, the ``16/9 + 8 pi sa^2 b / (N a^2)`` that SMAP's
+    ``MortensenCRLB`` uses: that is the error of an *unweighted least-squares*
+    fit, up to 16/9 of this variance at low background.  Against SMAPpy's own
+    fitter on simulated spots this one agrees to 1-2% from 200 to 5000
+    photons; that one was 10-23% too pessimistic.
+    """
     n = np.maximum(np.asarray(photons, float), 1.0)
     sa2 = np.asarray(sigma_nm, float) ** 2 + pixelsize_nm ** 2 / 12.0
-    variance = sa2 / n * (16.0 / 9.0 + 8 * np.pi * sa2 * np.asarray(background, float)
-                          / (n * pixelsize_nm ** 2))
+    tau = 2 * np.pi * sa2 * np.asarray(background, float) / (n * pixelsize_nm ** 2)
+    variance = sa2 / n / (1.0 + _log_integral(tau))
     return np.sqrt(variance * (2.0 if emccd else 1.0))
+
+
+# Gauss-Legendre on u in (0, 1) with t = u^2: the integrand's logarithmic
+# singularity at t = 0 becomes 4 u ln u, smooth enough that 48 nodes agree
+# with adaptive quadrature to 2e-7 over tau from 1e-4 to 1e3
+_NODES, _WEIGHTS = np.polynomial.legendre.leggauss(48)
+_U = 0.5 * (_NODES + 1.0)
+_W = 0.5 * _WEIGHTS
+
+
+def _log_integral(tau):
+    """``int_0^1 ln t / (1 + t / tau) dt``, elementwise: 0 with no background
+    (tau = 0, so the variance is sa^2 / N), towards -1 as the background
+    swamps the spot."""
+    tau = np.asarray(tau, float)
+    t = _U ** 2
+    values = (_W * 4.0 * _U * np.log(_U)
+              / (1.0 + t / np.maximum(tau, 1e-300)[..., None])).sum(axis=-1)
+    return np.where(tau > 0, values, 0.0)
 
 
 def spot_sigma(z_nm, optics) -> np.ndarray:

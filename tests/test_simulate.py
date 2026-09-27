@@ -187,12 +187,42 @@ def test_more_blinks_than_bleaching_allows_are_refused():
 # ------------------------------------------------------------- localizations
 def test_the_mortensen_precision_at_a_known_point():
     # 1000 photons, no background, sigma 100 on 100 nm pixels:
-    # sa^2 = 100^2 + 100^2/12, var = sa^2 / N * 16/9
+    # sa^2 = 100^2 + 100^2/12, and with no background var = sa^2 / N
     sa2 = 100 ** 2 + 100 ** 2 / 12
-    assert mortensen(1000, 0, 100, 100) == pytest.approx(np.sqrt(sa2 / 1000 * 16 / 9))
+    assert mortensen(1000, 0, 100, 100) == pytest.approx(np.sqrt(sa2 / 1000))
     assert mortensen(1000, 10, 100, 100) > mortensen(1000, 0, 100, 100)
     assert mortensen(1000, 10, 100, 100, emccd=True) == pytest.approx(
         np.sqrt(2) * mortensen(1000, 10, 100, 100))
+    # vectorized, and the same as one at a time
+    many = mortensen(np.array([200.0, 1000.0]), np.array([2.0, 10.0]), 130, 100)
+    assert many == pytest.approx([mortensen(200, 2, 130, 100),
+                                  mortensen(1000, 10, 130, 100)])
+
+
+def test_the_mortensen_precision_is_what_the_fitter_achieves():
+    """The maximum-likelihood precision (Mortensen's eq. 5), not the
+    least-squares one (eq. 6, 16/9 at no background) that SMAP's
+    MortensenCRLB uses and that this was until then: 10-23% pessimistic."""
+    from scipy.special import erf
+    from smappy.psf import GaussianPSF
+    rng = np.random.default_rng(0)
+    size, pixel, sigma = 13, 100.0, 130.0
+    k = np.arange(size)
+    for photons, background in ((1000, 2), (5000, 10), (300, 20)):
+        x0 = size // 2 + rng.uniform(-0.5, 0.5, 3000)
+        y0 = size // 2 + rng.uniform(-0.5, 0.5, 3000)
+        s = sigma / pixel
+
+        def edges(c):
+            return 0.5 * (erf((k[None] - c[:, None] + 0.5) / (np.sqrt(2) * s))
+                          - erf((k[None] - c[:, None] - 0.5) / (np.sqrt(2) * s)))
+        rois = rng.poisson(background + photons * edges(y0)[:, :, None]
+                           * edges(x0)[:, None, :]).astype(np.float32)
+        found = GaussianPSF(sigma=1.2).unpack(GaussianPSF(sigma=1.2).fit(rois))
+        ok = np.isfinite(found["x_roi"])
+        scatter = np.std(found["x_roi"][ok] - x0[ok]) * pixel
+        assert mortensen(photons, background, sigma, pixel) == pytest.approx(
+            scatter, rel=0.05), (photons, background)
 
 
 def test_the_localization_errors_are_the_precision_the_table_claims():

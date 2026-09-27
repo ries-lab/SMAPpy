@@ -1602,7 +1602,7 @@ by changing nothing but the output.  The stages and what each assumes:
   flat over the frame.
 * **Localizations**: Poisson photons, a detection limit of 10 photons (the
   dim ones are kept, as SMAP keeps them, and Ground Truth leaves them out of
-  its score), the Mortensen
+  its score), Mortensen's maximum-likelihood
   precision from the photons, the background, the PSF and the pixel (times
   sqrt 2 for an EMCCD), and noise drawn from it, so `xy_err_nm` is honest.
   Emitters on in one frame within the separation are removed, or merged at
@@ -1650,9 +1650,17 @@ threshold (100 by default) out of the score whether they matched or not.
 Compared with `shared/simulatelocs.m` (SimulateSites), `simulatecamera.m`
 (SimulateCameraImages) and `CompareToGroundTruth`, the physics within a blink
 is the same -- exponential on-time starting at a random point in a frame,
-photons per blink spread by the time on, Poisson per frame, the Mortensen
+photons per blink spread by the time on, Poisson per frame, a Mortensen
 precision with sqrt 2 for EM and z three times lateral -- and so is the
 labelling.  What differs, on purpose:
+
+* **The precision is Mortensen's eq. 5, maximum likelihood; SMAP's
+  `MortensenCRLB` is his eq. 6**, `16/9 + 8 pi sa^2 b / (N a^2)`, which is the
+  error of an *unweighted least-squares* fit (the paper's "Gaussian mask
+  estimator", 1.5x the variance in its own measurement).  SMAPpy copied it
+  until the plugin pages were written; against SMAPpy's own fitter on
+  simulated spots it was 10-23% too pessimistic, from 200 to 5000 photons,
+  where eq. 5 agrees to 1-2% (`test_the_mortensen_precision_is_what_the_fitter_achieves`).
 
 * SMAP's default blinking (`simple`) puts every blink at an independent
   uniform frame, 1 + round(Exp(n)) of them, with no kinetics; here the

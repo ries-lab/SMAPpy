@@ -204,7 +204,9 @@ class SimulateBlinks(Plugin):
     to fit (`smappy.simulate`)."""
 
     Settings = SimulationSettings
-    version = "3"        # 3: localizations down to 10 photons; free linkage, poses
+    # 3: localizations down to 10 photons; free linkage, poses.  4: the
+    # precision is Mortensen's maximum-likelihood one, not least squares'
+    version = "4"
 
     def run(self, ctx: Context, settings: SimulationSettings) -> Result:
         from ..simulate import camera_truth, ground_truth, localizations
