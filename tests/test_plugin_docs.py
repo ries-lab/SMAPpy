@@ -16,10 +16,8 @@ from smappy.docs import markup
 # that is written takes its plugin off.  Until then the Help window shows the
 # summary and the settings table, generated.
 UNDOCUMENTED = {
-    "Analysis/Drift/COMET",
     "Analysis/Dual-Color/AssignColors",
     "Analysis/Measure/Ground Truth",
-    "Analysis/Measure/Line Profile",
     "Analysis/Measure/Localization Precision",
     "Analysis/Process/History",
     "Analysis/Process/Math Parser",
@@ -357,8 +355,8 @@ def test_a_plugins_title_bar_has_a_question_mark_that_opens_its_page(app):
                                                 QUrl(names[0]))
     assert not image.isNull() and image.width() > 10
     # a link to another plugin's page is followed in the same window
-    window._on_link(QUrl("plugin:Analysis/Drift/COMET"))
-    assert window.current == "Analysis/Drift/COMET"
+    window._on_link(QUrl("plugin:Analysis/Dual-Color/AssignColors"))
+    assert window.current == "Analysis/Dual-Color/AssignColors"
     assert "No written page" in window.browser.toPlainText()
 
 

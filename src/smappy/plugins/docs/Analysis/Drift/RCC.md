@@ -20,7 +20,7 @@ Use it on **fixed** samples.  It assumes the structure itself does not change,
 only where it is, so anything that moves by itself (live cells, diffusing
 molecules) is taken for drift.  It needs enough localizations per window for
 each image to show structure: a few thousand in the selection at the very
-least (the plugin refuses fewer than 5000), and many more for a precise
+least (below 5000 the plugin warns), and many more for a precise
 curve.
 
 It is the classic method, and fast -- seconds, where

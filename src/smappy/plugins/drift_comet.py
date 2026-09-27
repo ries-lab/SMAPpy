@@ -21,36 +21,86 @@ class CometDrift(KeepsDrift, Plugin):
     params = {
         "segmentation_mode": ParamInfo(label="window unit",
                                        choices=((2, "frames"), (1, "localizations"),
-                                                (0, "windows"))),
-        "segmentation_var": ParamInfo(label="window size", min=1),
-        "max_drift_nm": ParamInfo(label="max drift", unit="nm", min=1),
-        "target_sigma_nm": ParamInfo(label="target sigma", unit="nm", min=0.1),
-        "initial_sigma_nm": ParamInfo(label="initial sigma", unit="nm"),
-        "boxcar_width": ParamInfo(label="smoothing", unit="windows", min=1),
-        "interpolation": ParamInfo(choices=("cubic", "catmull-rom")),
-        "max_locs_per_segment": ParamInfo(label="max locs / window", min=1),
-        "optimizer_ftol": ParamInfo(label="ftol"),
-        "optimizer_ftol_coarse": ParamInfo(label="ftol coarse"),
-        "approximate_kernel": ParamInfo(label="approximate kernel"),
-        "quality_control": ParamInfo(label="quality control"),
-        "min_lift": ParamInfo(label="min lift"),
-        "group": ParamInfo(label="group blinks"),
-        "group_dx_nm": ParamInfo(label="group radius", unit="nm", min=0),
-        "group_dt": ParamInfo(label="group gap", unit="frames", min=0),
-        "two_stage": ParamInfo(label="two stage"),
-        "two_stage_radius_nm": ParamInfo(label="fine radius", unit="nm", min=0),
+                                                (0, "windows")),
+                                       help="what window size counts; time-window "
+                                            "fit only"),
+        "segmentation_var": ParamInfo(label="window size", min=1,
+                                      help="frames or localizations per time "
+                                           "window, or the number of windows; "
+                                           "time-window fit only"),
+        "max_drift_nm": ParamInfo(label="max drift", unit="nm", min=1,
+                                  help="the largest drift expected; also the "
+                                       "radius within which localizations are "
+                                       "paired"),
+        "target_sigma_nm": ParamInfo(label="target sigma", unit="nm", min=0.1,
+                                     help="the finest width of the overlap "
+                                          "Gaussian, where refinement stops"),
+        "initial_sigma_nm": ParamInfo(label="initial sigma", unit="nm",
+                                      help="the width the refinement starts "
+                                           "from; auto: a third of max drift"),
+        "boxcar_width": ParamInfo(label="smoothing", unit="windows", min=1,
+                                  help="running mean over this many windows "
+                                       "between refinement steps; 1 is none; "
+                                       "time-window fit only"),
+        "interpolation": ParamInfo(choices=("cubic", "catmull-rom"),
+                                   help="the curve from the window estimates to "
+                                        "every frame; time-window fit only"),
+        "max_locs_per_segment": ParamInfo(label="max locs / window", min=1,
+                                          help="a random subset of at most this "
+                                               "many per window; auto: all; "
+                                               "time-window fit only"),
+        "optimizer_ftol": ParamInfo(label="ftol",
+                                    help="relative change of the cost at which "
+                                         "the optimizer stops"),
+        "optimizer_ftol_coarse": ParamInfo(label="ftol coarse",
+                                           help="ftol for the steps above the "
+                                                "target sigma; auto: ftol; "
+                                                "time-window fit only"),
+        "approximate_kernel": ParamInfo(label="approximate kernel",
+                                        help="skip pairs more than 6 sigma apart; "
+                                             "the spline fit always does"),
+        "quality_control": ParamInfo(label="quality control",
+                                     help="discard time windows whose fit does "
+                                          "not beat no correction; needs fit "
+                                          "spline off"),
+        "min_lift": ParamInfo(label="min lift",
+                              help="how much a window's fit must improve its "
+                                   "overlap over no correction to be kept"),
+        "group": ParamInfo(label="group blinks",
+                           help="link the localizations of one blink into one "
+                                "before estimating"),
+        "group_dx_nm": ParamInfo(label="group radius", unit="nm", min=0,
+                                 help="how close localizations in consecutive "
+                                      "frames must be to be linked"),
+        "group_dt": ParamInfo(label="group gap", unit="frames", min=0,
+                              help="how many dark frames a blink may skip"),
+        "two_stage": ParamInfo(label="two stage",
+                               help="a grouped pass, then an ungrouped one "
+                                    "within fine radius"),
+        "two_stage_radius_nm": ParamInfo(label="fine radius", unit="nm", min=0,
+                                         help="the max drift of the second, "
+                                              "ungrouped pass"),
         "rcc_prepass": ParamInfo(label="RCC first",
                                  help="correlate rendered time windows to take "
                                       "out the bulk of the drift, then run "
                                       "COMET over a small max drift"),
-        "rcc_prepass_windows": ParamInfo(label="RCC windows", min=2),
+        "rcc_prepass_windows": ParamInfo(label="RCC windows", min=2,
+                                         help="the time windows RCC correlates"),
         "rcc_prepass_max_drift_nm": ParamInfo(label="RCC max drift", unit="nm",
                                               help="auto: RCC's own default"),
-        "spline": ParamInfo(label="fit spline"),
-        "spline_knot_frames": ParamInfo(label="knot spacing", unit="frames", min=10),
-        "spline_penalty": ParamInfo(label="spline penalty", min=0),
+        "spline": ParamInfo(label="fit spline",
+                            help="fit the drift as a smooth curve in time rather "
+                                 "than one value per time window"),
+        "spline_knot_frames": ParamInfo(label="knot spacing", unit="frames", min=10,
+                                        help="frames between the spline's "
+                                             "coefficients"),
+        "spline_penalty": ParamInfo(label="spline penalty", min=0,
+                                    help="extra penalty on the curve's bending; "
+                                         "0 is none"),
         "use_z": ParamInfo(label="correct z", help="auto: if the table has z"),
-        "backend": ParamInfo(choices=("cuda", "torch", "cpu")),
+        "backend": ParamInfo(choices=("cuda", "torch", "cpu"),
+                             help="where the cost is computed; auto: the "
+                                  "fastest available; time-window fit only"),
     }
 
     # Longer than this and the run is worth agreeing to first.  Five minutes
