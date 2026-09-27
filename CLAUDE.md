@@ -396,10 +396,12 @@ holds everything else.
   filter them (at 200 photons, say) before anything about precision.  The
   caption says what to see, not what is plotted.  No screenshots and no
   images checked in: they go stale.
-* **Maths is matplotlib's mathtext**, not LaTeX: `\leq`, `\geq` (not `\le`,
-  `\ge`), `\mathrm{}`, `\frac`, `\sqrt`, `\sum`, `\left( \right)`; no
-  `\texttt`, `align` or matrices.  The render test catches what it cannot
-  draw.
+* **Maths is LaTeX, in what both renderers take**: ziamath sets it, and
+  matplotlib's mathtext is the fallback, so write the subset mathtext knows
+  too -- `\leq`, `\geq` (not `\le`, `\ge`), `\mathrm{}`, `\frac`, `\sqrt`,
+  `\sum`, `\left( \right)`, braces around what a `\hat` covers
+  (`\hat{N}_0`); no `\texttt`, `align` or matrices.  The test sets every
+  formula with both.
 * **Differences from SMAP** from the MATLAB itself (`../SMAP`, `jries/SMAP`),
   concretely: what SMAP does, what this does, and why.
 * **References** that were checked (PubMed or the journal), with a DOI link;
