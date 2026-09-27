@@ -164,6 +164,26 @@ def test_the_plugin_writes_a_channel_column_and_the_preview_does_not():
     assert cls.has_preview() and not cls.preview_wants_frame()
 
 
+def test_a_layer_filtered_to_one_colour_still_shows_both_to_the_histogram():
+    """The usual set-up after a first run -- a layer per colour, filtered on
+    `channel` -- used to hand a second run one dye, one mode, and a table
+    recoloured from half its histogram."""
+    locs, truth = simulate(n=6000, seed=3)
+    columns = dict(locs.columns)
+    columns["channel"] = truth.astype(np.int32)
+    session = Session(Localizations(columns, dict(locs.metadata)))
+    lay = session.layers[0].state.sets["ungrouped"].filter
+    lay.set("channel", 1, 1)
+    lay.set("photons", 1500, None)                 # other bounds still count
+    ctx = session.context()
+    assert set(np.unique(ctx.selection.apply(session.locs)["channel"])) == {1}
+    plugin = plugins.get("Analysis/Dual-Color/AssignColors")()
+    result = plugin.run(ctx, AssignColorSettings(mode="minima"))
+    channel = result.locs["channel"]
+    assert (channel == truth).mean() > 0.95
+    assert "2 colours" in result.text
+
+
 def test_the_summary_measures_a_species_wider_than_shot_noise():
     """`spread` is meant to be set by looking at what the preview prints."""
     rng = np.random.default_rng(1)

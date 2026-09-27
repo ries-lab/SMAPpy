@@ -233,14 +233,16 @@ class Layer:
             if self.files is not None:
                 self.set_files(self.files)
 
-    def selection(self, index: int = 0) -> Selection:
+    def selection(self, index: int = 0, without: Tuple[str, ...] = ()) -> Selection:
         """The *ungrouped* localizations this layer's filter keeps.
 
         Plugins work on the full table, so a grouped layer hands back the
-        ungrouped filter, which is what it would apply to it.
+        ungrouped filter, which is what it would apply to it.  ``without``
+        names filters to leave out (`LocFilter.mask_without`).
         """
         f = self.state.sets["ungrouped"].filter
-        return Selection(f.mask, layer=index, name=self.name)
+        mask = f.mask_without(*without) if without else f.mask
+        return Selection(mask, layer=index, name=self.name)
 
 
 # How many log entries a file carries.  One entry is a plugin path, a line of
@@ -967,14 +969,16 @@ class Session:
         self.changed("projection")
 
     # ------------------------------------------------------------- plugins
-    def selection(self, layer: int = 0) -> Selection:
+    def selection(self, layer: int = 0, without: Tuple[str, ...] = ()) -> Selection:
         """What a plugin looks at: the layer's filter, inside the ROI if any.
 
         An image layer has no localizations; the first locs layer stands in.
+        ``without`` names filters of the layer to leave out.
         """
         if self.layers[layer].is_image:
             layer = self.first_locs_layer()
-        return self._clip(self.layers[layer].selection(layer), self.locs, layer)
+        return self._clip(self.layers[layer].selection(layer, without),
+                          self.locs, layer)
 
     def shown_selection(self, layer: int = 0) -> Selection:
         """What the layer *draws* inside the ROI: its own table, grouped or not.

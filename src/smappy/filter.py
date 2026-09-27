@@ -120,6 +120,17 @@ class LocFilter:
                 self._combined = np.logical_and.reduce(list(self._masks.values()))
         return self._combined
 
+    def mask_without(self, *names: str) -> np.ndarray:
+        """The mask with the filters on ``names`` left out.
+
+        For a plugin that must see what a filter hides: a layer set to one
+        colour still has to hand both colours to the colour assignment.
+        """
+        kept = [m for name, m in self._masks.items() if name not in names]
+        if not kept:
+            return np.ones(self._n, dtype=bool)
+        return np.logical_and.reduce(kept)
+
     @property
     def indices(self) -> np.ndarray:
         """The positions of the kept localizations; what the renderer indexes with."""

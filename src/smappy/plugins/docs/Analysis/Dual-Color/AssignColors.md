@@ -1,5 +1,5 @@
 ---
-version: "1"
+version: "2"
 covers: [smappy.plugins.assign_colors.ratios, smappy.plugins.assign_colors.find_modes, smappy.plugins.assign_colors.unclaimed_modes, smappy.plugins.assign_colors.assign_by_minima, smappy.plugins.assign_colors.log_likelihoods, smappy.plugins.assign_colors.variances, smappy.plugins.assign_colors.deviations, smappy.plugins.assign_colors.posteriors, smappy.plugins.assign_colors.assign_by_probability, smappy.plugins.assign_colors.region_polygons, smappy.plugins.assign_colors._mode_width, smappy.plugins.assign_colors.AssignColors]
 ---
 
@@ -46,10 +46,10 @@ and `photons_ch1`, as the two-colour fitters write them, or another pair (see
 *channel 1 column*).  The fit's errors on them, `photons_err_ch0` and
 `photons_err_ch1`, are used when they are there.  The peaks are looked for in
 the **current selection** -- the layer's filter and the ROI -- and the colours
-are then given to every localization of the table.  So the selection must
-show both dyes: if the layer is already filtered on `channel`, the histogram
-sees one dye and the run fails or splits it in two.  It warns below 50
-selected localizations.
+are then given to every localization of the table.  A filter on `channel`
+itself is left out of that selection: after a first run the layers are
+usually set to one colour each, and the histogram still has to see both
+dyes.  It warns below 50 selected localizations.
 
 ## How it works
 
@@ -361,7 +361,7 @@ grid point has no fitted error, so $N_{\mathrm{eff}}$ there is its total times
 the table's median $N_{\mathrm{eff}}/N$ (shown in the figure's title, kept
 between 0.001 and 1).  Along 260 totals, 2001 values of $r$ are decided and
 each colour's first and last are its region's two edges.  The view is limited
-to the 0.1th and 99.1th percentile of each half's photons, the histogram of
+to the 0.1th and 99.9th percentile of each half's photons, the histogram of
 $r$ to the 0.1th and 99.9th percentile of $r$.
 
 ## Parameters
@@ -496,9 +496,6 @@ the ratio, refined by a parabola.  Here:
   two-colour fit always gives both photon numbers.
 * **The histogram is not photon-weighted.**  It counts localizations, so the
   share of each colour is a share of localizations.
-* **The selection is used as it is.**  SMAP reads the localizations with the
-  layer's filter on `channel` removed; here that filter applies, so the
-  histogram should be made with all localizations shown.
 * SMAP measures the partner's intensity after a single-channel fit; here both
   photon numbers come from one global fit of the pair (see NOTES.md, "Two
   colours in 2D").

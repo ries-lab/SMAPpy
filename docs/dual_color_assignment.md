@@ -1,6 +1,6 @@
 # Assigning colours from channel intensities
 
-How `Analysis/Dual-Color/Assign Colors` turns two photon counts into a species
+How `Analysis/Dual-Color/AssignColors` turns two photon counts into a species
 label.  The first half is the histogram-and-minimum rule everybody uses; the
 second half is the probabilistic rule, which is what the *allowed crosstalk*
 parameter needs to mean something.  Decisions taken 2026-09-14.
@@ -196,10 +196,13 @@ that the sigma-tolerance is measured in.
 With the modes rho_k as the hypotheses and pi_k as the prior fraction of each
 species -- estimated from the counts between the minima, which is the one
 number the histogram gives away for free -- the posterior for a localization is
-an ordinary Gaussian mixture responsibility:
+the mixture responsibility of the exact binomial above (`log_likelihoods`):
 
-    L_k = exp( -(r - rho_k)^2 / (2 s_k^2) ) / s_k
-    P(k | r, N) = pi_k L_k / sum_j pi_j L_j.
+    L_k = p_k^I1 (1 - p_k)^I2,   p_k = (1 + rho_k) / 2,
+    P(k | r, N) = pi_k L_k / sum_j pi_j L_j,
+
+with I1, I2 the effective counts, N_eff (1 +- r) / 2, and the beta-binomial in
+their place when `extra spread` is set.
 
 Assign to the best k only if it is good enough:
 
@@ -220,7 +223,7 @@ the achieved crosstalk is the mean of 1 - P(k*|.) over the assigned
 localizations, which is normally several times smaller than c because most
 localizations are nowhere near the boundary.  Both numbers are reported, and
 both are model-based -- they are as good as the claim that the modes are
-Gaussian in r with the width the photon statistics give, which is why the
+as wide as the photon statistics make them (plus `extra spread`), which is why the
 preview shows the fit against the histogram.
 
 ### How close is too close
@@ -368,7 +371,7 @@ of its middle, a kept tail, a cut at a minimum -- and cannot drift out of step
 with it.  Everything no polygon covers is grey, which is to say fits no colour.
 Evaluating the rule away from the measured points needs a stand-in for the
 fitted errors a grid point has not got: the table's median N_eff/N, printed in
-the title.  The axes stop at the 0.1 and 99.1 percentiles of each channel,
+the title.  The axes stop at the 0.1 and 99.9 percentiles of each channel,
 since the rule can be drawn over decades that were never measured.
 
 ## Where this comes from, and where it differs
@@ -402,7 +405,7 @@ two channels make visible.
   expected ratio.  Without the second, a localization that is no colour at all
   is assigned to the nearer one (see above), which matters more for a
   histogram-derived rho than for one measured on a single-label sample.
-* `spread` exists because the Gaussian-in-r model is the part most likely to be
+* `spread` exists because the shot-noise-only model is the part most likely to be
   wrong: real modes are broader than photon statistics.  The summary prints the
   strongest mode's measured width next to the shot-noise width, so the model
   can be checked against the histogram it claims to describe -- and when the
@@ -412,8 +415,9 @@ two channels make visible.
 ## Which parameter belongs to which method
 
 Nothing is shared between the two: `dr` is the minima method's whole
-mechanism and the probabilistic one never reads it, while `crosstalk`,
-`consistency` and `extra spread` are the probabilistic model and the minima
+mechanism and the probabilistic one never reads it, while `allowed crosstalk`,
+`sigma` (the consistency test, `tolerance` in code), `keep the tails`,
+`extra spread` and `use abundances` are the probabilistic model and the minima
 method never reads them.  The GUI greys out whichever set is not in play,
 because a number that does nothing should not look like a number that does.
 Greying is presentation only -- the value stays, and a script sees every field.
@@ -441,6 +445,9 @@ Greying is presentation only -- the value stays, and a script sees every field.
   a localization in a mode from one in the valley.
 
 The modes are estimated from the current selection -- the filter, the ROI --
-and applied to the whole table, as drift correction is.  A colour is a property
+and applied to the whole table, as drift correction is.  A filter on `channel`
+itself is left out (SMAP's `removeFilter channel`): after a first run the
+layers are usually one colour each, and a second run from one of them would
+otherwise see a single dye.  A colour is a property
 of the molecule, and there is no sense in which a localization outside the
 current ROI has a different one.

@@ -53,7 +53,7 @@ MIN_SEPARATION = 3.0
 MAX_COLORS = 6
 # where the intensity plot's axes stop: the data, not the rule, which can draw
 # regions over decades nobody measured
-VIEW_PERCENTILES = (0.1, 99.1)
+VIEW_PERCENTILES = (0.1, 99.9)
 HWHM_PER_SIGMA = np.sqrt(2 * np.log(2))     # 1.1774: a Gaussian's HWHM
 # a palette for the modes, in r order.  Red first because the channel the
 # splitter sends the long wavelengths to is conventionally channel 1.
@@ -88,7 +88,8 @@ def channel_columns(locs: Localizations, first: Optional[str] = None,
         if all(name in locs for name in pair):
             return pair
     raise ValueError("no per-channel photon columns in the table: fit with "
-                     "'Localize/Spline 3D 2C', or name the columns yourself")
+                     "a two-colour fitter ('Localize/Gaussian 2D 2C' or "
+                     "'Localize/Spline 3D 2C'), or name the columns yourself")
 
 
 @dataclass
@@ -438,7 +439,9 @@ def assign_by_probability(r: np.ndarray, n_eff: np.ndarray, modes: Modes,
       localizations among the assigned ones.
     * *Inconsistent* -- the winner must also lie within ``tolerance`` sigma of
       the observed split, so that a localization no species could have produced
-      is refused rather than handed to the nearest one.  0 turns it off, and
+      is refused rather than handed to the nearest one.  0 turns it off --
+      the default here, so a script asks for the test; the plugin's *sigma*
+      starts at 3 -- and
       ``keep_tails`` applies it only *between* the outermost species: past the
       first or the last mode there is no competing hypothesis, so being far out
       says the ratio is unusual rather than that the molecule is something
@@ -552,6 +555,25 @@ class AssignColorSettings:
                                          "both columns or neither")
 
 
+def histogram_selection(ctx: Context):
+    """What the histogram is read from: the selection, but never cut by colour.
+
+    Once colours are assigned, the usual set-up is a layer per colour with a
+    filter on `channel` -- and a second run from such a layer would see one
+    dye, find one mode and recolour the table from half its histogram.  So
+    the layer's `channel` filter is left out and everything else (the other
+    bounds, the ROI, the slab) kept, as SMAP's ``'removeFilter','channel'``.
+    """
+    session = ctx.session
+    layer = getattr(ctx.selection, "layer", 0)
+    if session is None or not 0 <= layer < len(session.layers):
+        return ctx.selection
+    lay = session.layers[layer]
+    if lay.is_image or "channel" not in lay.state.sets["ungrouped"].filter:
+        return ctx.selection
+    return session.selection(layer, without=("channel",))
+
+
 @register("Analysis/Dual-Color/AssignColors")
 class AssignColors(Plugin):
     name = "Assign colours"
@@ -567,6 +589,7 @@ class AssignColors(Plugin):
                     "the two channels' intensities.  Nothing is saved and the "
                     "session is not touched.")
     Settings = AssignColorSettings
+    version = "2"
     main = ("mode", "colors", "exclusion", "tolerance", "keep_tails",
             "crosstalk", "spread", "use_errors")
     # which fields each method actually reads; the GUI greys out the rest, so
@@ -591,7 +614,8 @@ class AssignColors(Plugin):
     # ------------------------------------------------------------------ work
     def _work(self, ctx: Context, settings: AssignColorSettings,
               apply: bool) -> Result:
-        ctx.selection.require(50, ctx.report, "a colour histogram")
+        selection = histogram_selection(ctx)
+        selection.require(50, ctx.report, "a colour histogram")
         values = ratios(ctx.locs, settings.channel1, settings.channel2,
                         use_errors=settings.use_errors,
                         min_photons=settings.min_photons)
@@ -600,7 +624,7 @@ class AssignColors(Plugin):
 
         # the modes are read from what the user is looking at and applied to
         # the whole table: a molecule's colour does not depend on the ROI
-        seen = ctx.selection.mask & values.valid
+        seen = selection.mask & values.valid
         if not seen.any():
             raise ValueError("no selected localization has two-channel photons")
         expected = _expected_ratios(settings)
