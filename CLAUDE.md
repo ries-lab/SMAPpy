@@ -67,6 +67,7 @@ shape, so read the one closest to what you are writing:
 | fits a model to what is in a ROI | `line_profile.py` (unbinned likelihood, models compared by AIC; one fit per layer, and `live`) |
 | reads the session and reports | `history.py` (the log, with an optional export) |
 | sets up layers and filters from settings | `chain_layers.py` (bounds as rows per layer, `Result.data["layers"]`) |
+| scores a fit against a simulation | `ground_truth.py` (the truth redrawn from the recipe, matched per frame) |
 
 A chain of plugins that runs as one, and running one over many files
 (`smappy-batch`, the batch window): `docs/batch.md`.
@@ -284,6 +285,11 @@ assumptions.  What a session needs:
 * The truth columns: `emitter` (which fluorophore), `dye`, `copy` (which
   copy of the structure); camera truth adds `neighbour_nm`, the nearest other
   spot in the same frame.
+* `Analysis/Measure/Ground Truth` scores a table against its simulation --
+  found, false, missed, Jaccard, bias, and error over reported precision --
+  finding the recipe by the table's `source` (a fitter writes it) or its
+  `simulation_settings`; `plugins/ground_truth.py` has `match` and `compare`
+  as functions for a test.  The `simulation` tutorial walks the whole path.
 * The camera frames keep every spot, and every fluorophore blinks within the
   stack whatever its length, so a short test stack is dense: pass
   `labelling=LabellingSettings(efficiency=0.1)`, and compare a fit only

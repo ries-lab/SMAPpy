@@ -267,6 +267,10 @@ def test_a_simulation_file_opens_as_an_acquisition_with_its_camera(tmp_path):
     assert (camera.conversion, camera.offset) == (0.5, 100.0)
     assert np.allclose(camera.pixelsize_um, 0.1)
     assert len(source.truth()) == len(ground_truth(settings).emission)
+    # and the camera window can tell it was the simulation that said so
+    from smappy.io.tiff import SIMULATED, resolve_camera
+    origin = resolve_camera(source).sources["conversion"]
+    assert (origin.kind, origin.detail) == SIMULATED
 
 
 def test_the_plugin_writes_a_simulation_a_fitter_can_open(tmp_path):

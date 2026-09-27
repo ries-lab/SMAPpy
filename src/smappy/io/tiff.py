@@ -221,6 +221,11 @@ def _generic_values(tags: Dict[str, str]) -> Dict[str, object]:
     }
 
 
+# where a simulation's camera came from: the camera window names it rather
+# than calling a camera it knows exactly "not recognised"
+SIMULATED = ("metadata", "the simulation")
+
+
 def resolve_camera(source: ImageSource, camera: str = "", presets=None,
                    overrides=None) -> Resolution:
     """Everything known about the camera behind this stack, and from where.
@@ -262,7 +267,7 @@ def resolve_camera(source: ImageSource, camera: str = "", presets=None,
     simulated = getattr(source, "camera", None)
     if simulated:
         # a simulation knows its camera exactly, which beats any guess
-        resolution = resolution.overlaid_with(simulated, Source("metadata", "the simulation"))
+        resolution = resolution.overlaid_with(simulated, SIMULATED)
     if overrides:
         values = overrides if isinstance(overrides, dict) else overrides.to_dict()
         resolution = resolution.overlaid_with(

@@ -7,6 +7,7 @@ from smappy.workspace import Instance, Tab, Workspace, load
 COMET = "Analysis/Drift/COMET"
 RCC = "Analysis/Drift/RCC"
 COLORS = "Analysis/Dual-Color/AssignColors"
+TRUTH = "Analysis/Measure/Ground Truth"
 PROFILE = "Analysis/Measure/Line Profile"
 PRECISION = "Analysis/Measure/Localization Precision"
 STATS = "Analysis/Measure/Localization Statistics"
@@ -49,7 +50,7 @@ def test_the_default_workspace_is_seeded_from_what_is_installed():
     assert [t.name for t in ws.tabs] == ["File", "Localize", "Render", "Analysis", "ROI"]
     analysis = next(t for t in ws.tabs if t.name == "Analysis")
     assert sorted(i.plugin for i in analysis.instances) == [
-        COMET, RCC, COLORS, PROFILE, PRECISION, STATS, HISTORY, MATH, REMOVE,
+        COMET, RCC, COLORS, TRUTH, PROFILE, PRECISION, STATS, HISTORY, MATH, REMOVE,
         REGISTER]
     assert next(t for t in ws.tabs if t.name == "Render").kind == "render"
     # a tab the *user* adds starts empty; only the shipped ones are seeded
@@ -78,7 +79,7 @@ def test_a_round_trip_keeps_order_labels_and_values(tmp_path):
     back = load(path)
     tab = next(t for t in back.tabs if t.name == "Analysis")
     assert [i.title() for i in tab.instances] == [
-        "COMET (coarse)", "RCC", "AssignColors", "Line Profile",
+        "COMET (coarse)", "RCC", "AssignColors", "Ground Truth", "Line Profile",
         "Localization Precision", "Localization Statistics", "History",
         "Math Parser", "Remove Localizations", "Calibrate transform",
         "COMET (coarse)"]
@@ -127,7 +128,7 @@ def test_pruning_reports_what_it_dropped():
     gone = ws.prune(list(plugins.refs()))
     assert gone == ["Gone/Away"]
     assert [i.plugin for i in tab.instances] == [
-        COMET, RCC, COLORS, PROFILE, PRECISION, STATS, HISTORY, MATH, REMOVE,
+        COMET, RCC, COLORS, TRUTH, PROFILE, PRECISION, STATS, HISTORY, MATH, REMOVE,
         REGISTER]
 
 

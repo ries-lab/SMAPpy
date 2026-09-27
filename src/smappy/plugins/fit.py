@@ -689,6 +689,9 @@ class _FitPlugin(Plugin):
                 + (f", saved to {out}" if out else ""))
 
         finished = self.finish(ctx, settings, collected.compact())
+        # the table in hand says what it was fitted from, as its file does: a
+        # comparison with a simulation's truth finds the recipe by it
+        finished.locs.metadata.setdefault("source", str(src.path))
         if finished.history:
             # the file says what was done to it, in the shape the session's
             # log uses, so reopening it shows these runs and their settings

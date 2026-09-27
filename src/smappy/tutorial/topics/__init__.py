@@ -21,5 +21,6 @@ SERIES = (
     ("Plugins", ("plugins", "measuring", "drift_correction"), ()),
     ("ROI manager", (), ("The ROI manager: finding and measuring many regions",)),
     ("Many files", ("batch",), ()),
+    ("Simulation", ("simulation",), ()),
 )
 TOPICS = tuple(t for _, built, _ in SERIES for t in built)

@@ -94,3 +94,7 @@ it was about.  Say who asked and when, so a later reader can weigh it.
 ### batch -- Chains and batch runs over many files
 
 * (none yet)
+
+### simulation -- Simulating data: structures, blinking and camera frames
+
+* (none yet)

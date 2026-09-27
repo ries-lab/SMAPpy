@@ -88,7 +88,15 @@ class CameraParameters(QWidget):
             return None
 
     def _fill(self, resolved) -> None:
-        if resolved.camera is None:
+        from ..io.tiff import SIMULATED
+        origin = (resolved.sources or {}).get("camera_name")
+        if resolved.camera is None and origin is not None \
+                and (origin.kind, origin.detail) == SIMULATED:
+            # a simulation says exactly what its camera is: not a failure
+            self.summary.setText(
+                "<b>a simulation</b><br>its camera is not in the database and "
+                "need not be: the simulation says what it is.")
+        elif resolved.camera is None:
             self.summary.setText(
                 "<b>camera not recognised</b><br>Nothing in this file matches a "
                 "camera in the database, so only what the file itself says is "
