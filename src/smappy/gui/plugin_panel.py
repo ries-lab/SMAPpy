@@ -134,6 +134,17 @@ class PluginPanel(QWidget):
         if self.live is not None:
             buttons.addWidget(self.live)
         buttons.addWidget(self.status, 1)
+        # Five controls at the style's minimum button width (80 px in Fusion)
+        # are wider than the control column, and a fitter has all five: the
+        # section then scrolled sideways and took its title bar -- the ? and
+        # the detach arrow -- out of view.  Each may shrink to its text.
+        for button in (self.run_button, self.preview_button, self.plot_button,
+                       self.text_button):
+            if button is not None:
+                button.setMinimumWidth(
+                    button.fontMetrics().horizontalAdvance(button.text()) + 20)
+        if self.preview_frame is not None:
+            self.preview_frame.setMinimumWidth(72)
         layout.addLayout(buttons)
         self.output = QPlainTextEdit(readOnly=True, maximumBlockCount=500)
         self.output.setFixedHeight(90)

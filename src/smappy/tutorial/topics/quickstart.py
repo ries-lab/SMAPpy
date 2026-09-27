@@ -1,7 +1,8 @@
 """SMAPpy in three minutes: raw camera frames to a super-resolution picture.
 
 The first of the series and the one on the landing page, so it shows the
-whole path once and explains nothing twice: the Localize tab fits a
+whole path once and explains nothing twice -- except where to find the rest,
+the **?** that opens a plugin's page: the Localize tab fits a
 simulated acquisition (`simulate.camera_frames`, the tour's ring and lines as
 a camera would have seen them), the picture builds up while it fits, and the
 result is saved beside the acquisition.  Where to go from there -- filters,
@@ -94,6 +95,7 @@ def make(d) -> None:
            "spline fitters use a bead calibration, for 3D.",
            spot=[d.union(*fitters)], zoom=d.around(localize.sections[0], 700))
     sec, panel = open_section(d, localize, "Gaussian 2D")
+    _documentation(d, sec)
     type_into(panel, "source.path", str(acquisition))
     # small blocks, so the picture is caught half built (at a thousand frames
     # a second, the default 200 is most of the fit before the first draw)
@@ -164,10 +166,31 @@ def make(d) -> None:
            "<ul><li><b>Localize</b> fits the frames: choose the file, check the "
            "camera, preview, run.</li>"
            "<li><b>Render</b> shows the result.</li>"
-           "<li><b>Analysis</b> measures it.</li></ul>"
+           "<li><b>Analysis</b> measures it.</li>"
+           "<li>The <b>?</b> beside a plugin explains it.</li></ul>"
            "<p>Next: the tour of SMAPpy, with filters, layers and grouping.</p>",
            say="That is all it takes. Next, the tour of SMAPpy: filters, layers "
                "and grouping.")
+
+
+def _documentation(d, sec) -> None:
+    """The ? on a plugin: its page, once, where the first plugin is opened.
+
+    Here rather than in the tour because it is the question every first
+    plugin raises -- what do these settings mean -- and it is answered in the
+    program, so the answer belongs at the moment it is asked.
+    """
+    from ...gui import help_window
+    d.shot("The question mark beside a plugin opens its page. F1 does the same.",
+           spot=[sec.help_button], point=sec.help_button, click=True,
+           zoom=d.around(sec.help_button, 700))
+    sec.help_button.click()
+    window = help_window._WINDOW
+    place_beside(d, window)
+    d.shot("What the plugin does, how it works, and what each setting means. "
+           "Help, Plugin documentation, lists every page.",
+           spot=[d.window_rect(window)])
+    window.hide()
 
 
 def _wait_for_first_block(d, timeout: float = 30.0) -> None:
