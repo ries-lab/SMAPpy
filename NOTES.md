@@ -1665,6 +1665,19 @@ structure.
 
 ## Open questions
 
+* **Pages for what is not a plugin.**  Every plugin has a page behind its ?
+  (`smappy.docs`), but the controls a user meets first do not: the Render
+  tab (layers, the renderer and its LUTs, the filter, grouping, the axes
+  section), the ROI tab and ROI manager, the 3D view, bead and dual-colour
+  calibration, the batch window.  They want the same kind of page, in the
+  same register (CLAUDE.md, "The plugin's page"), in the same Help window.
+  What does not carry over is the generated settings table: `render_tab.py`
+  builds its widgets by hand rather than from `param` specs, so either the
+  page lists its controls in writing (and a test checks the names against the
+  widgets), or those panels move to `SettingsForm` first.  The page lookup
+  already works for any path (`docs.page_file`); `docs.render` wants a plugin
+  class, and would need a variant for a page with no class behind it.
+  (Jonas Ries, 2026-09-27)
 * Fitted x sits ~0.24 px from the peak-finder position, and the sign flips with
   the mirror (-0.22 unmirrored, +0.26 mirrored) while y stays at -0.09.  A
   round trip (render the model, fit it back) is exact, so this is a property of
