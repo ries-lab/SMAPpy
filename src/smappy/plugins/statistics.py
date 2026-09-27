@@ -240,7 +240,8 @@ def precision_model(precision, low: Optional[float] = None,
     Two estimators, and the default is the binned one:
 
     ``"histogram"`` fits the model to the precision histogram by least squares
-    (`precision_from_histogram`).  It is what a person would do by eye, and it
+    (`precision_from_histogram`), over ``low`` to ``high`` when they are given:
+    a filter's cut, fitted as a truncated histogram.  It is what a person would do by eye, and it
     survives the rows a fitter produces with a precision of a fraction of a
     nanometre -- rows that are not good localizations but failed fits.
 
@@ -263,13 +264,21 @@ def precision_model(precision, low: Optional[float] = None,
         out.update(sigma_c=float("nan"), max=float("nan"), rising=float("nan"),
                    low=float("nan"), high=float("nan"))
         return out
+    cut = (low, high)
     trimmed = np.percentile(values, (TRIM_PERCENT, 100 - TRIM_PERCENT))
     low = float(trimmed[0]) if low is None else float(low)
     high = float(trimmed[1]) if high is None else float(high)
     if not high > low > 0:
         low, high = float(trimmed[0]), float(trimmed[1])
     if method == "histogram":
-        counts, edges = _binned(values, bins, 0.0, precision_range(values))
+        # a cut that was given is where the histogram starts or stops, so the
+        # model is fitted to the part that survived and not to empty bins
+        # below a filter -- which read as a distribution shifted up
+        start = float(cut[0]) if cut[0] is not None and cut[0] > 0 else 0.0
+        stop = precision_range(values)
+        if cut[1] is not None and start < cut[1] < stop:
+            stop = float(cut[1])
+        counts, edges = _binned(values, bins, start, stop)
         a, amplitude = precision_from_histogram(counts, edges)
         out["amplitude"] = amplitude
     else:

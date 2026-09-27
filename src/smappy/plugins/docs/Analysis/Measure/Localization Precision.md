@@ -1,5 +1,5 @@
 ---
-version: "2"
+version: "3"
 covers: [smappy.plugins.precision.measure, smappy.plugins.precision.displacement_pairs, smappy.plugins.precision.fit_radial, smappy.plugins.precision.fit_axis, smappy.plugins.precision.radial_density, smappy.plugins.precision.axis_density, smappy.plugins.precision.drift_free_sigma, smappy.plugins.precision.sigma_at_photons, smappy.plugins.precision.crlb_statistics, smappy.plugins.precision.summary, smappy.plugins.precision.draw_radial, smappy.plugins.precision.draw_gaps, smappy.plugins.precision.draw_crlb, smappy.plugins.precision.draw_frc, smappy.frc.frc_resolution, smappy.frc.blur_envelope, smappy.frc.envelope_resolution]
 ---
 
@@ -58,7 +58,7 @@ sim = simulate(n_frames=3000, seed=1)
 # fitter's detection threshold.  Its xy_err_nm is honest: every position was
 # displaced by a random error of exactly that size.
 locs = sim[np.asarray(sim["photons"]) > 200]
-found = measure(locs, name="simulated", max_gap=1, frc=True, frc_pixel=5.0,
+found = measure(locs, name="simulated", max_gap=1, frc=True,
                 frc_repeats=3)
 x, y = np.asarray(locs["x_nm"]), np.asarray(locs["y_nm"])
 z, frame = np.asarray(locs["z_nm"]), np.asarray(locs["frame"])
@@ -252,14 +252,22 @@ $$\sigma(g)^2 = \sigma_0^2 + \frac{w^2}{2}\, g .$$
 
 The line is fitted to $\sigma(g)^2$ by weighted least squares, each gap
 weighted by its fitted error; $\sigma_0$ is its intercept and $w$ is printed
-as the motion "per root frame".  Any positive slope is converted into a $w$,
-so compare the points with their error bars before believing a small one.
+as the motion "per root frame".  The slope counts as motion only when it is
+more than twice its own standard error (from the same weighted fit) above
+zero; otherwise the text says there is no motion beyond the scatter of the
+gaps and $w$ is 0.  Five points that scatter by their errors always have some
+slope, and on still simulated data it came out as half a nanometre per root
+frame before this test.
 
 **The CRLB histogram fit** is Localization Statistics' least-squares fit of
 $p(\sigma) = (2a/\sigma^3)\, e^{-a/\sigma^2}$, $a = \sigma_c^2$, to the
 histogram from zero to its 99.5th percentile.  If $\sigma_c$ lands outside 0.3
 to 3 times the median, the photons are not exponential and the text says to
-read the median instead.
+read the median instead.  When the selection is measured and the layer's
+filter cuts the precision column, the histogram is fitted between the cuts
+only: a lower cut would otherwise leave empty bins the model reads as a
+distribution moved up (11.3 nm for a true 8.9 nm, with a cut at 7 nm), and
+the fit of the part that survived recovers the whole.
 
 **FRC.**  With the half-images $F_1$ and $F_2$, the correlation over a ring of
 spatial frequency $q$ is
@@ -272,7 +280,10 @@ crossing is read.  The picture is transformed in tiles of 512 pixels whose
 sums are added, so the pixel can be small whatever the size of the field;
 tiles with fewer than 200 localizations are skipped.  With the *FRC pixel* at
 0 the resolution is first measured on a coarse grid (the field over 1024
-pixels) and then again with a pixel a fifth of what that found.  The blur
+pixels) and then again with a pixel a fifth of what that found.  A coarse
+pixel cannot see a resolution finer than about two of it, so when the coarse
+curve never falls through 1/7 the coarse pass is repeated at a quarter of the
+pixel, down to 1 nm.  The blur
 envelope is $e^{-4\pi^2\sigma^2 q^2}$, and the text reports where it alone
 crosses 1/7, at $2\pi\sigma/\sqrt{\ln 7} = 4.50\,\sigma$.  That is not a limit
 on the FRC: a structure localized many times per molecule resolves better
@@ -286,7 +297,10 @@ the projection, so the lateral numbers come out worse than the ring FRC,
 often by a factor of two; they are the ones to quote for a 3D measurement.
 
 **A ROI or a slab** costs only the pairs that straddle its edge, which for a
-search radius of tens of nanometres is nothing.  The pairs within one frame
+search radius of tens of nanometres is nothing -- except in z, where a slab
+(a filter on `z_nm`, or the 3D view's slab while plugins use it) thinner than
+four axial precisions loses the partners that fell outside and $\sigma_z$
+reads low; the text warns.  The pairs within one frame
 gap are searched with one KD-tree per frame.
 
 ## Parameters
@@ -296,8 +310,7 @@ gap are searched with one KD-tree per frame.
 good is this sample".  A filter on precision or photons does not bias the
 pairwise fit, it selects: both partners of a pair must survive it, and the
 first and last frames of a blink are the dim ones, so a hard cut removes
-true pairs preferentially.  The fitted fraction of same-molecule pairs shows
-it; $\kappa$ survives a cut better than the plain $\sigma$.
+true pairs preferentially.  The fitted signal fraction shows it; $\kappa$ survives a cut better than the plain $\sigma$.
 
 ### pairwise
 It is the only one of the three methods that sees drift, vibration and a
@@ -339,9 +352,9 @@ At least 3 are needed for the spread to be the error bar; with fewer, the
 error comes from the ring statistics of the curve alone.
 
 ### frc_pixel_nm
-If the text says the curve never falls through 1/7 on a large field of view,
-the coarse first pass could not reach the frequencies that matter: set the
-pixel by hand (a fifth of the expected resolution), or draw a ROI.
+Leave it at 0 unless two measurements must be compared at the same pixel.  A
+pixel coarser than about a fifth of the resolution reads the resolution too
+large; one much finer only costs time.
 
 ### max_frame_pairs
 Only a speed limit: the default covers most acquisitions whole.
@@ -352,10 +365,11 @@ The **text** has one block per set of localizations, a line per number:
 
 * *CRLB*: $\sigma_c$ and the median of the precision column, lateral and
   axial.
-* *pairwise*: $\sigma$ at gap 1, the number of pairs and the percentage the
-  fit calls the same molecule; then $\sigma_x$, $\sigma_y$, $\sigma_z$ and
+* *pairwise*: $\sigma$ at gap 1, the number of pairs and the percentage in
+  its peak (the signal fraction $f$, see below); then $\sigma_x$, $\sigma_y$, $\sigma_z$ and
   the mean shift over one frame.
-* *law*: $\sqrt{A}$, and what it gives for the median paired localization and
+* *law*: $\sqrt{A}$ and the percentage of pairs that are one molecule by
+  this fit, and what it gives for the median paired localization and
   for the median localization of the table.
 * *kappa*, and the bound the pairs claimed -- the root mean square of their
   precisions, which is larger than the median because dim localizations weigh
@@ -363,8 +377,12 @@ The **text** has one block per set of localizations, a line per number:
 * *FRC*: the resolution and its error, and where the blur of the pairwise
   $\sigma$ alone crosses 1/7; *per axis*: the resolutions and the
   axial-to-lateral ratio.
-* *gap -> 0*: $\sigma_0$ and the motion per frame.
-* Notes: the search radius used, too few pairs, a cut-off axial search.
+* *gap -> 0*: $\sigma_0$ and the motion per root frame, or that there is no
+  motion beyond the scatter of the gaps.
+* Notes: the search radius used, too few pairs, a cut-off axial search or a
+  thin slab.
+
+A table in pixels (`x_pix`, `xy_err_pix`) is measured and reported in pixels.
 
 Besides the text:
 
@@ -382,14 +400,14 @@ well before the dashed blur envelope means the picture is limited by
 labelling density, drift or too few localizations, and better precision would
 not help; if the two fall together, the precision is what limits it.
 
-The percentage of same-molecule pairs is a property of the single-$\sigma$
+The percentage in the *pairwise* line is a property of the single-$\sigma$
 model, not a count.  When the precisions vary, as they always do, the one
 Rayleigh describes the core of the distribution and hands part of the broad
 tail of dim pairs to the background: in the simulation above all but a few
-tenths of a percent of the pairs are one molecule, and the fit calls about
-85% of them so.
-The photon-law and CRLB fits, which give every pair its own width, find a
-fraction close to one.
+tenths of a percent of the pairs are one molecule, and about 85% are in the
+single $\sigma$'s peak.  The photon law, which gives every pair its own
+width, finds a fraction close to one, and that is the one the *law* line
+reports.
 
 ## Differences from SMAP
 

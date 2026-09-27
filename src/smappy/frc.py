@@ -509,13 +509,25 @@ def frc_resolution(x, y, frame, pixelsize: float = 0.0,
         # large, and the resolution is what the run is for -- so find it
         # roughly on one coarse tile first and then pick the pixel from it.
         # One extra transform pair, against a percent or two of bias.
-        rough = frc_resolution(x, y, frame,
-                               pixelsize=float(span.max()) / DEFAULT_PIXELS,
-                               n_blocks=n_blocks, assignment=assignment, repeats=1,
-                               seed=seed, tile_pixels=DEFAULT_PIXELS,
-                               workers=workers, threshold=threshold)
-        pixelsize = (rough.resolution / 5 if rough.ok
-                     else float(span.max()) / DEFAULT_PIXELS)
+        #
+        # A coarse pixel cannot see a resolution finer than about two of it,
+        # and on a large field it is coarse indeed: 8.6 um over 1024 pixels
+        # is 8.4 nm, and a 15 nm resolution never crossed 1/7 there -- nor,
+        # the fallback being that same pixel, at all.  So a coarse pass whose
+        # curve stays above the threshold is tried again at a quarter of the
+        # pixel (tiled, so it costs the localizations rather than the field),
+        # down to a nanometre.
+        coarse = float(span.max()) / DEFAULT_PIXELS
+        while True:
+            rough = frc_resolution(x, y, frame, pixelsize=coarse,
+                                   n_blocks=n_blocks, assignment=assignment,
+                                   repeats=1, seed=seed,
+                                   tile_pixels=DEFAULT_PIXELS,
+                                   workers=workers, threshold=threshold)
+            if rough.ok or coarse <= 1.0 or "never falls" not in rough.message:
+                break
+            coarse = max(coarse / 4, 1.0)
+        pixelsize = rough.resolution / 5 if rough.ok else coarse
         if report:
             report(f"FRC: about {rough.resolution:.0f} nm on a coarse grid, "
                    f"measuring again at {pixelsize:.1f} nm")
@@ -784,14 +796,16 @@ def fpc_resolution(x, y, z, frame, pixelsize: float = 0.0, z_pixelsize: float = 
         out.message = "the localizations have no extent in one of the axes"
         return out
 
-    lateral_resolution = float("nan")
-    if pixelsize <= 0 or not np.isfinite(lateral_resolution):
-        rough = frc_resolution(x, y, frame, n_blocks=n_blocks, repeats=1, seed=seed,
-                               workers=workers, threshold=threshold)
-        lateral_resolution = rough.resolution if rough.ok else float("nan")
-        if pixelsize <= 0:
-            pixelsize = (rough.resolution / 5 if rough.ok
-                         else float(span[:2].max() / 512))
+    # the lateral resolution is wanted whether or not the pixel is given: it
+    # sets the band of frequencies the planes are summed over.  At a given
+    # pixel it is one FRC at that pixel; otherwise the FRC finds its own.
+    rough = frc_resolution(x, y, frame, pixelsize=max(pixelsize, 0.0),
+                           n_blocks=n_blocks, repeats=1, seed=seed,
+                           workers=workers, threshold=threshold)
+    lateral_resolution = rough.resolution if rough.ok else float("nan")
+    if pixelsize <= 0:
+        pixelsize = (rough.resolution / 5 if rough.ok
+                     else float(span[:2].max() / 512))
     axial_resolution = float("nan")
     if z_pixelsize <= 0:
         # the axial voxel cannot be guessed from the lateral one: 2.5 times it

@@ -271,3 +271,18 @@ def test_empty_tiles_are_skipped_rather_than_transformed():
                           repeats=1)
     assert wide.tiles <= 9                      # not the 170 the grid holds
     assert wide.ok
+
+
+def test_the_automatic_pixel_reaches_a_resolution_finer_than_the_coarse_grid():
+    """On a large field the coarse pass is 1024 pixels across -- 8.4 nm on the
+    simulated demo -- and a 15 nm resolution never crossed 1/7 there, nor, the
+    fallback being the same pixel, at all."""
+    from smappy.simulate import simulate
+    locs = simulate(n_frames=10000, seed=1)
+    locs = locs[locs["photons"] > 200]
+    x, y = locs["x_nm"], locs["y_nm"]
+    assert (x.max() - x.min()) / 1024 > 8.0
+    found = frc_resolution(x, y, locs["frame"], pixelsize=0)
+    assert found.ok, found.message
+    given = frc_resolution(x, y, locs["frame"], pixelsize=3.0)
+    assert found.resolution == pytest.approx(given.resolution, rel=0.08)

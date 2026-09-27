@@ -7,7 +7,7 @@ from smappy.plugins import Context, Selection
 from smappy.plugins.precision import (LocalizationPrecision, crlb_statistics,
                                       displacement_pairs, drift_free_sigma,
                                       fit_axis, fit_radial, measure,
-                                      sigma_at_photons)
+                                      sigma_at_photons, summary)
 
 
 def blinking(sigma=8.0, sigma_z=None, n_emitters=600, blinks=6, on_time=3,
@@ -197,6 +197,20 @@ def test_a_still_sample_has_the_same_precision_at_every_gap():
     assert found.gap_line["step"] < 1.5
 
 
+def test_a_slope_within_its_own_error_is_not_called_motion():
+    """Five sigmas that scatter by their errors always have some slope; on
+    still data it read as half a nanometre per root frame."""
+    still = drift_free_sigma([1, 2, 3, 4, 5], [7.02, 6.97, 7.05, 7.0, 7.06],
+                             [0.05] * 5)
+    assert not still["moving"] and still["step"] == 0.0
+    assert still["slope"] > 0                     # there *is* a slope
+    moving = drift_free_sigma([1, 2, 3, 4, 5],
+                              list(np.sqrt(25 + 4.5 * np.arange(1, 6))),
+                              [0.05] * 5)
+    assert moving["moving"]
+    assert moving["step"] == pytest.approx(3.0, abs=0.01)
+
+
 def test_the_displacements_carry_the_drift_of_the_gap_in_their_mean():
     locs = blinking(sigma=5.0, on_time=4, seed=7)
     shifted = dict(locs.columns)
@@ -220,6 +234,36 @@ def test_the_truncated_crlb_fit_recovers_what_a_filter_cut_away():
     assert cut["lateral"]["sigma_c"] == pytest.approx(expected, rel=0.05)
     # without the bound the cut sample would report the cut, not the sample
     assert np.median(kept) < np.median(sigma)
+
+
+def test_a_cut_below_the_crlb_peak_does_not_move_sigma_c():
+    """A lower bound left empty bins the histogram fit read as a distribution
+    moved up: 11.3 for a true 8.9."""
+    rng = np.random.default_rng(3)
+    sigma = 400.0 / np.sqrt(rng.exponential(2000.0, 200000))
+    kept = sigma[sigma >= 7.0]
+    cut = crlb_statistics(Localizations({"xy_err_nm": kept}, {}),
+                          bounds={"xy_err_nm": (7.0, None)})
+    assert cut["lateral"]["sigma_c"] == pytest.approx(400 / np.sqrt(2000), rel=0.03)
+
+
+def test_a_thin_slab_is_warned_about_and_a_thick_one_is_not():
+    locs = blinking(sigma=5.0, sigma_z=15.0, on_time=4, seed=2)
+    assert any("cut to 40 nm" in note
+               for note in measure(locs, max_gap=1, slab_nm=40.0).notes)
+    assert not any("cut to" in note
+                   for note in measure(locs, max_gap=1, slab_nm=600.0).notes)
+
+
+def test_a_pixel_table_is_reported_in_pixels():
+    locs = blinking(sigma=5.0, on_time=4, seed=4)
+    columns = {"frame": locs["frame"], "x_pix": locs["x_nm"] / 100,
+               "y_pix": locs["y_nm"] / 100, "xy_err_pix": locs["xy_err_nm"] / 100,
+               "photons": locs["photons"]}
+    found = measure(Localizations(columns, {}), max_gap=1)
+    assert found.radial.sigma == pytest.approx(0.05, rel=0.1)
+    text = summary([found])
+    assert "0.05 +/-" in text and "pixels at gap 1" in text and " nm" not in text
 
 
 def test_the_gap_line_falls_back_to_the_one_gap_it_has():

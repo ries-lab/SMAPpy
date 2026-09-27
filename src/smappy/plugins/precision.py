@@ -30,17 +30,22 @@ switched on or off.  A blink that lasts about one frame is split across two,
 and the two halves share one molecule's photons: if the switch happens a
 fraction *u* into the exposure, the pair carries ``S^2 (1/u + 1/(1-u))`` of
 variance, which is smallest when the split is even and unbounded when it is
-not.  Averaged over the split, the plain NeNA sigma is therefore *worse* than
-the precision of an average localization -- systematically, and by an amount
-that depends on how the on-time compares with the frame time and on where the
-detection threshold cut the dim half off.  Much of the folklore that "NeNA is
-1.3 to 2 times the CRLB" is this effect rather than a defect of the fit.
+not.  When blinks last about a frame, the plain NeNA sigma is therefore
+*worse* than the precision of an average localization.  When they last many
+frames it goes the other way: most pairs are then two frames from the bright
+middle of a blink, and the pairs are brighter than the table (on the simulated
+demo, 2389 photons against a median of 1811, and a NeNA sigma below the median
+CRLB).  Either way the plain sigma describes the localizations that were
+paired, not a typical one, by an amount that depends on how the on-time
+compares with the frame time and on where the detection threshold cut the dim
+halves off.
 
 So the plugin fits the displacements **three** times, and only the first of
 the three is the number NeNA defines:
 
-* once for a single sigma -- the NeNA number, comparable with what SMAP,
-  Picasso and the paper report, and beholden to nothing but the coordinates;
+* once for a single sigma -- the NeNA number, comparable with what Picasso
+  and the paper report (SMAP has no NeNA), and beholden to nothing but the
+  coordinates;
 
 * once against ``1/N_i + 1/N_j``, the pair's own **photon counts**::
 
@@ -159,14 +164,17 @@ Three things to know about the filtered case:
   (``Analysis/Measure/Localization Statistics`` fits from there for the same
   reason).
 * The CRLB histogram *is* biased by a cut -- it is cut off -- but the estimator
-  knows: its likelihood is truncated, so given the bounds it recovers the
-  underlying ``sigma_c`` from the surviving part.  The bounds are read from the
-  layer's filter when there is a session, and from the data otherwise.
+  knows: given the bounds, the histogram is fitted between them only, so it
+  recovers the underlying ``sigma_c`` from the surviving part rather than
+  reading the empty bins below a cut as a distribution moved up.  The bounds
+  are read from the layer's filter when there is a session; without them the
+  whole histogram is fitted.
 
 A ROI or a z slab costs only the pairs that straddle its boundary, which for a
 search radius of tens of nanometres in a field of micrometres is nothing --
 except for a slab thinner than a few times the axial precision, which truncates
-``dz`` itself, and which the run warns about.
+``dz`` itself, and which the run warns about -- a z filter or the 3D slab, when
+the selection is measured (`slab_thickness`).
 """
 from __future__ import annotations
 
@@ -193,6 +201,9 @@ REACH_Z = 6.0
 # a slab (or z range) narrower than this many axial precisions starts to
 # truncate the axial displacement rather than the sample
 THIN_SLAB = 4.0
+# a slope of sigma^2 against the gap is called motion from this many of its
+# own standard errors above zero
+MOTION_SIGMAS = 2.0
 # starting fractions tried when a fit is set going
 START_FRACTIONS = (0.5, 0.15, 0.85)
 
@@ -594,6 +605,13 @@ def drift_free_sigma(gaps: Sequence[int], sigmas: Sequence[float],
     line through ``sigma^2`` extrapolates to the gap the fit cannot see -- zero,
     two localizations of one molecule in the same frame.  With one gap there is
     no line and the answer is that gap's sigma.
+
+    A slope is a motion only when it stands out of its own error: the sigmas
+    at neighbouring gaps scatter by their fit errors, and a line through five
+    of them always has *some* slope -- on still simulated data it read as
+    half a nanometre per root frame.  ``slope_error`` is the fit's, and
+    ``step`` is 0 unless the slope is ``MOTION_SIGMAS`` of it above zero
+    (``moving`` says which).
     """
     gap = np.asarray(gaps, dtype=float)
     sigma = np.asarray(sigmas, dtype=float)
@@ -601,7 +619,8 @@ def drift_free_sigma(gaps: Sequence[int], sigmas: Sequence[float],
     good = np.isfinite(gap) & np.isfinite(sigma) & (sigma > 0)
     gap, sigma, error = gap[good], sigma[good], error[good]
     out = {"sigma0": float("nan"), "slope": float("nan"),
-           "step": float("nan"), "n": int(len(gap))}
+           "slope_error": float("nan"), "step": float("nan"),
+           "moving": False, "n": int(len(gap))}
     if not len(gap):
         return out
     if len(gap) == 1:
@@ -610,19 +629,29 @@ def drift_free_sigma(gaps: Sequence[int], sigmas: Sequence[float],
     y = sigma ** 2
     # d(sigma^2) = 2 sigma d(sigma): the weights follow from the fitted errors
     spread = np.where(np.isfinite(error) & (error > 0), 2 * sigma * error, np.nan)
-    weight = 1.0 / spread ** 2 if np.all(np.isfinite(spread)) else np.ones_like(y)
+    known = bool(np.all(np.isfinite(spread)))
+    weight = 1.0 / spread ** 2 if known else np.ones_like(y)
     design = np.column_stack([np.ones_like(gap), gap])
     scaled = design * weight[:, None]
     try:
-        solution = np.linalg.solve(design.T @ scaled, scaled.T @ y)
+        normal = design.T @ scaled
+        solution = np.linalg.solve(normal, scaled.T @ y)
+        covariance = np.linalg.inv(normal)
     except np.linalg.LinAlgError:
         return out
     intercept, slope = float(solution[0]), float(solution[1])
+    if not known:
+        # no errors to weigh by: the scatter about the line is the error
+        residual = y - design @ solution
+        dof = max(len(y) - 2, 1)
+        covariance = covariance * float(residual @ residual) / dof
     out["slope"] = slope
+    out["slope_error"] = float(np.sqrt(max(covariance[1, 1], 0.0)))
     out["sigma0"] = float(np.sqrt(intercept)) if intercept > 0 else float("nan")
     # a random walk of step w per frame adds w^2 g to the *displacement*
     # variance, which is 2 sigma^2 -- so the line's slope is w^2 / 2
-    out["step"] = float(np.sqrt(2 * slope)) if slope > 0 else 0.0
+    out["moving"] = bool(slope > MOTION_SIGMAS * out["slope_error"])
+    out["step"] = float(np.sqrt(2 * slope)) if out["moving"] else 0.0
     return out
 
 
@@ -646,6 +675,7 @@ class Measurement:
     fpc: Optional[FPC] = None                  # the resolution along each axis
     photons: Dict[str, float] = field(default_factory=dict)
     notes: List[str] = field(default_factory=list)
+    unit: str = "nm"                           # "pixels" for a pixel table
 
     @property
     def first_gap(self) -> Optional[Displacements]:
@@ -674,14 +704,19 @@ def measure(locs: Localizations, name: str = "", reach: float = 0.0,
             frc_blocks: int = 20, frc_repeats: int = 5, frc_axes: bool = False,
             bounds: Optional[Dict[str, Tuple]] = None,
             max_frame_pairs: int = 20000, max_pairs: int = 2_000_000,
-            seed: int = 0, report=None) -> Measurement:
+            seed: int = 0, slab_nm: Optional[float] = None,
+            report=None) -> Measurement:
     """Both measurements over one table: the displacements and the CRLB.
 
     Takes a table and returns numbers -- a script, a test or a notebook gets
-    the same answer as the plugin without a session or a window.
+    the same answer as the plugin without a session or a window.  ``slab_nm``
+    is the thickness in z the table was cut to (a z filter, the 3D slab), for
+    the warning that a thin one truncates sigma_z.
     """
     bounds = bounds or {}
     out = Measurement(name=name, n_locs=len(locs))
+    if "x_nm" not in locs and "x_pix" in locs:
+        out.unit = "pixels"
     lateral = median_precision(locs)
     axial = median_precision(locs, PRECISION_Z_FIELDS)
 
@@ -717,9 +752,10 @@ def measure(locs: Localizations, name: str = "", reach: float = 0.0,
     precision_name = first_present(locs, PRECISION_FIELDS)
     precision_z_name = first_present(locs, PRECISION_Z_FIELDS)
 
+    unit = out.unit
     if reach <= 0:
         reach = REACH * lateral if np.isfinite(lateral) and lateral > 0 else 100.0
-        out.notes.append(f"search radius {reach:.0f} nm "
+        out.notes.append(f"search radius {reach:.3g} {unit} "
                          f"({REACH:g} x the median precision)")
     if z is not None and reach_z <= 0:
         reach_z = (REACH_Z * axial if np.isfinite(axial) and axial > 0
@@ -727,7 +763,7 @@ def measure(locs: Localizations, name: str = "", reach: float = 0.0,
 
     gaps = tuple(range(1, max(1, max_gap) + 1))
     if report:
-        report(f"pairs within {reach:.0f} nm, frame gaps 1-{gaps[-1]}")
+        report(f"pairs within {reach:.3g} {unit}, frame gaps 1-{gaps[-1]}")
     out.displacements = displacement_pairs(
         np.asarray(locs[x_name], dtype=float),
         np.asarray(locs[y_name], dtype=float),
@@ -781,6 +817,11 @@ def measure(locs: Localizations, name: str = "", reach: float = 0.0,
                 f"the axial search reaches {reach_z:.0f} nm, less than "
                 f"{THIN_SLAB:g} x the axial precision: sigma_z is cut off and "
                 "reads low")
+        if slab_nm is not None and slab_nm < THIN_SLAB * z_fit.sigma:
+            out.notes.append(
+                f"the localizations are cut to {slab_nm:.0f} nm in z, less "
+                f"than {THIN_SLAB:g} x the axial precision: a partner that "
+                "fell outside is lost, and sigma_z reads low")
     return out
 
 
@@ -866,6 +907,24 @@ def crlb_statistics(locs: Localizations, bounds: Optional[Dict[str, Tuple]] = No
     return out
 
 
+def slab_thickness(session, bounds: Dict[str, Tuple]) -> Optional[float]:
+    """How thick in z the selection is cut: a z filter, or the 3D slab.
+
+    None when nothing cuts it.  The slab counts only on the ordinary picture,
+    where its depth is z.
+    """
+    widths = []
+    low, high = bounds.get("z_nm", (None, None))
+    if low is not None and high is not None and high > low:
+        widths.append(float(high - low))
+    try:
+        if session.selects_slab and session.axes().is_default:
+            widths.append(float(session.slab.size[2]))
+    except AttributeError:
+        pass
+    return min(widths) if widths else None
+
+
 def filter_bounds(session, layer: int = 0) -> Dict[str, Tuple]:
     """The layer filter's ranges, so a truncated fit can be told about them.
 
@@ -886,12 +945,13 @@ def summary(found: Sequence[Measurement]) -> str:
     """The numbers, side by side, in the order someone reads them."""
     lines: List[str] = []
     for measurement in found:
+        u = measurement.unit                   # "pixels" for a pixel table
         lines.append(f"{measurement.name}: {measurement.n_locs} localizations")
         crlb = measurement.crlb.get("lateral")
         if crlb and np.isfinite(crlb.get("sigma_c", np.nan)):
             cut = ", filter bounds used" if crlb.get("cut") else ""
-            lines.append(f"  CRLB      sigma_c = {crlb['sigma_c']:.2f} nm "
-                         f"(median {crlb['median']:.2f} nm{cut})")
+            lines.append(f"  CRLB      sigma_c = {crlb['sigma_c']:.2f} {u} "
+                         f"(median {crlb['median']:.2f} {u}{cut})")
             if crlb.get("suspect"):
                 lines.append("            sigma_c is far from the median: the "
                              "photons are not exponential here, so read the "
@@ -902,44 +962,49 @@ def summary(found: Sequence[Measurement]) -> str:
                          f"(median {axial['median']:.2f} nm)")
         fit = measurement.radial
         if fit is not None and fit.ok:
+            # the fraction is the single sigma's: dim pairs broader than it
+            # go to the background, so it undercounts when the precision
+            # varies -- the photon law's fraction is the better count
             lines.append(f"  pairwise  sigma = {fit.sigma:.2f} +/- "
-                         f"{fit.sigma_error:.2f} nm at gap 1, {fit.n} pairs, "
-                         f"{100 * fit.fraction:.0f}% same molecule")
+                         f"{fit.sigma_error:.2f} {u} at gap 1, {fit.n} pairs, "
+                         f"{100 * fit.fraction:.0f}% in its peak")
         for axis, axis_fit in measurement.axes.items():
+            au = "nm" if axis == "z" else u
             if axis_fit.ok:
                 lines.append(f"  sigma_{axis}   = {axis_fit.sigma:.2f} +/- "
-                             f"{axis_fit.sigma_error:.2f} nm "
-                             f"(mean shift over the gap {axis_fit.offset:+.2f} nm)")
+                             f"{axis_fit.sigma_error:.2f} {au} "
+                             f"(mean shift over the gap {axis_fit.offset:+.2f} {au})")
         law, photons = measurement.photon_law, measurement.photons
         if law is not None and law.ok and photons:
             lines.append(f"  law       sigma = sqrt(A/N), A^0.5 = "
-                         f"{np.sqrt(law.amplitude):.0f} nm sqrt(photons), "
-                         "from the same pairs and no calibration")
+                         f"{np.sqrt(law.amplitude):.3g} {u} sqrt(photons), "
+                         "from the same pairs and no calibration; "
+                         f"{100 * law.fraction:.0f}% of them one molecule")
             for what, key in (("a paired localization", "paired"),
                               ("the median localization", "all")):
                 count = photons.get(key, float("nan"))
                 value = sigma_at_photons(law, count)
                 if np.isfinite(value):
-                    lines.append(f"            -> {value:.2f} nm for {what} "
+                    lines.append(f"            -> {value:.2f} {u} for {what} "
                                  f"({count:.0f} photons)")
         scaled = measurement.scaled
         if scaled is not None and scaled.ok:
             lines.append(f"  kappa     = {scaled.kappa:.2f} +/- "
                          f"{scaled.kappa_error:.2f} x the bound these pairs "
-                         f"claimed ({scaled.crlb:.2f} nm): the fit and the "
+                         f"claimed ({scaled.crlb:.2f} {u}): the fit and the "
                          "photon calibration together")
         curve = measurement.frc
         if curve is not None and curve.ok:
             lines.append(f"  FRC       {curve.resolution:.1f} +/- "
-                         f"{curve.error:.1f} nm at 1/7, over "
+                         f"{curve.error:.1f} {u} at 1/7, over "
                          f"{curve.repeats} split(s) of {curve.n_blocks} blocks, "
-                         f"{curve.pixelsize:.1f} nm pixels")
+                         f"{curve.pixelsize:.3g} {u} pixels")
             sigma = (measurement.radial.sigma
                      if measurement.radial is not None and measurement.radial.ok
                      else float("nan"))
             if np.isfinite(sigma):
-                lines.append(f"            the blur of {sigma:.2f} nm alone "
-                             f"crosses 1/7 at {envelope_resolution(sigma):.1f} nm "
+                lines.append(f"            the blur of {sigma:.2f} {u} alone "
+                             f"crosses 1/7 at {envelope_resolution(sigma):.1f} {u} "
                              "-- read the curves, not the ratio")
         planes = measurement.fpc
         if planes is not None and planes.ok:
@@ -961,8 +1026,10 @@ def summary(found: Sequence[Measurement]) -> str:
                     lines.append(f"            {name}: {curve.message}")
         line = measurement.gap_line
         if line and np.isfinite(line.get("sigma0", np.nan)) and line.get("n", 0) > 1:
-            lines.append(f"  gap -> 0  sigma = {line['sigma0']:.2f} nm, "
-                         f"motion {line['step']:.2f} nm per root frame")
+            motion = (f"motion {line['step']:.2f} {u} per root frame"
+                      if line.get("moving") else
+                      "no motion beyond the scatter of the gaps")
+            lines.append(f"  gap -> 0  sigma = {line['sigma0']:.2f} {u}, {motion}")
         for note in measurement.notes:
             lines.append(f"  {note}")
         if fit is not None and fit.message:
@@ -973,6 +1040,11 @@ def summary(found: Sequence[Measurement]) -> str:
 # -------------------------------------------------------------------- drawing
 
 COLORS = ("#1f77b4", "#d62728")          # one per source, in the order given
+
+
+def _unit(found: Sequence[Measurement]) -> str:
+    """The lateral unit of what is drawn: nanometres, or a pixel table's."""
+    return found[0].unit if found else "nm"
 
 
 def panel_axes(target, n: int):
@@ -1038,7 +1110,7 @@ def draw_radial(ax, found: Sequence[Measurement], bins: int = 80) -> None:
                                                     pairs.inverse_photons),
                         color=color, linewidth=1.1, linestyle="-.",
                         label=f"{measurement.name}: sqrt(A/N)")
-    ax.set_xlabel("lateral displacement (nm)")
+    ax.set_xlabel(f"lateral displacement ({_unit(found)})")
     ax.set_ylabel("pairs")
     ax.legend(fontsize=7, frameon=False)
     ax.set_title(_radial_title(found), fontsize=7.5, color="0.25")
@@ -1085,7 +1157,7 @@ def draw_axes(figure, found: Sequence[Measurement], bins: int = 80) -> None:
                         color=color, linewidth=1.6)
                 titles.append(f"{measurement.name}: sigma_{axis} = "
                               f"{fit.sigma:.2f} +/- {fit.sigma_error:.2f} nm")
-        ax.set_xlabel(f"{axis} displacement (nm)")
+        ax.set_xlabel(f"{axis} displacement ({'nm' if axis == 'z' else _unit(found)})")
         ax.set_ylabel("pairs")
         ax.set_title("   ".join(titles) if titles else f"no fit for {axis}",
                      fontsize=7.5, color="0.25")
@@ -1118,7 +1190,7 @@ def draw_gaps(ax, found: Sequence[Measurement]) -> None:
                     color=color, linewidth=0.8, alpha=0.7)
             ax.plot([0], [line["sigma0"]], marker="*", markersize=9, color=color)
     ax.set_xlabel("frame gap")
-    ax.set_ylabel("sigma (nm)")
+    ax.set_ylabel(f"sigma ({_unit(found)})")
     ax.set_xlim(left=0)
     ax.legend(fontsize=6.5, frameon=False)
     ax.set_title(_gap_title(found), fontsize=7.5, color="0.25")
@@ -1129,9 +1201,11 @@ def _gap_title(found: Sequence[Measurement]) -> str:
     for measurement in found:
         line = measurement.gap_line
         if line and np.isfinite(line.get("sigma0", np.nan)) and line.get("n", 0) > 1:
+            u = measurement.unit
             parts.append(f"{measurement.name}: sigma(gap -> 0) = "
-                         f"{line['sigma0']:.2f} nm, "
-                         f"{line['step']:.2f} nm per root frame")
+                         f"{line['sigma0']:.2f} {u}, "
+                         + (f"{line['step']:.2f} {u} per root frame"
+                            if line.get("moving") else "no motion"))
     return "   ".join(parts) if parts else "one gap: no motion to see"
 
 
@@ -1167,7 +1241,7 @@ def draw_crlb(figure, found: Sequence[Measurement], bins: int = 80) -> None:
             if fit is not None and fit.ok:
                 ax.axvline(fit.sigma, color=color, linestyle="--", linewidth=1.0,
                            label=f"{measurement.name}: pairwise")
-        ax.set_xlabel(f"{key} precision (nm)")
+        ax.set_xlabel(f"{key} precision ({'nm' if key == 'axial' else _unit(found)})")
         ax.set_ylabel("localizations")
         ax.legend(fontsize=6.5, frameon=False)
         ax.set_title("   ".join(titles) if titles else f"no {key} precision",
@@ -1201,7 +1275,7 @@ def draw_frc(ax, found: Sequence[Measurement]) -> None:
     ax.text(0.99, THRESHOLD_LINE, " 1/7", transform=ax.get_yaxis_transform(),
             ha="right", va="bottom", fontsize=7, color="0.35")
     ax.axhline(0.0, color="0.75", linewidth=0.6)
-    ax.set_xlabel("spatial frequency (1/nm)")
+    ax.set_xlabel(f"spatial frequency (1/{_unit(found).rstrip('s')})")
     ax.set_ylabel("FRC")
     ax.set_ylim(-0.2, 1.05)
     ax.set_xlim(left=0)
@@ -1318,7 +1392,10 @@ class LocalizationPrecision(Plugin):
     """The precision the data shows, beside the precision the fitter expected."""
 
     Settings = PrecisionSettings
-    version = "2"        # 2: finds a SMAPpy 3D fit's z precision, z_err_nm
+    version = "3"        # 2: finds a SMAPpy 3D fit's z precision, z_err_nm
+    #                      3: a filter cut honoured by the CRLB fit; the FRC's
+    #                         automatic pixel on a large field; motion only
+    #                         when the slope is significant
 
     def run(self, ctx: Context, settings: PrecisionSettings) -> Result:
         if not (settings.pairwise or settings.crlb or settings.frc
@@ -1334,6 +1411,7 @@ class LocalizationPrecision(Plugin):
             sources.append(("all localizations", ctx.locs, False))
 
         bounds = filter_bounds(ctx.session, ctx.layer)
+        slab = slab_thickness(ctx.session, bounds)
         found: List[Measurement] = []
         for name, locs, filtered in sources:
             if not len(locs):
@@ -1349,7 +1427,7 @@ class LocalizationPrecision(Plugin):
                 bounds=bounds if filtered else {},
                 max_frame_pairs=settings.max_frame_pairs,
                 max_pairs=settings.max_pairs, seed=settings.seed,
-                report=ctx.report))
+                slab_nm=slab if filtered else None, report=ctx.report))
 
         plots: Dict[str, object] = {}
         if settings.pairwise and any(m.displacements for m in found):
