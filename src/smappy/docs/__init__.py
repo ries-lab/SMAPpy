@@ -282,6 +282,7 @@ def parameter_table(specs, notes: Dict[str, str], converter: Converter) -> str:
                 doc = (spec.type.__doc__ or "").strip().split("\n\n")[0]
                 doc = " ".join(doc.split()) if not doc.startswith(
                     spec.type.__name__ + "(") else ""
+                doc = doc.replace("``", "`")        # a docstring's literal
                 note = notes.get(dotted, "")
                 text = converter.inline(doc)
                 if note:

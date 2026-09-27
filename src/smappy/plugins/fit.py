@@ -155,7 +155,10 @@ class GaussianModelSettings:
 class SplineModelSettings:
     """An experimental PSF from a SMAP ``_3dcal.mat``: adds z."""
     calibration: str = param("", label="calibration", kind="open_file",
-                             file_filter="SMAP calibration (*_3dcal.mat *.mat)")
+                             file_filter="SMAP calibration (*_3dcal.mat *.mat)",
+                             help="the bead calibration of this microscope: an "
+                                  ".h5 from Tools > Bead calibration, or a "
+                                  "SMAP _3dcal.mat")
 
     def model(self, camera: Optional[CameraMetadata] = None) -> SplinePSF:
         from ..io.calibration import load_spline_calibration, warn_on_em_mismatch

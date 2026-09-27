@@ -35,7 +35,6 @@ UNDOCUMENTED = {
     "File/Save/smappy HDF5",
     "File/Simulate/Blinking Structure",
     "Localize/Gaussian 2D 2C",
-    "Localize/Spline 3D",
     "Localize/Spline 3D 2C",
     "ROIManager/Analyze/Histograms",
     "ROIManager/Evaluate/Statistics",
