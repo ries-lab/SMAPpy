@@ -26,6 +26,8 @@ geometry, and optionally *copies* of the whole:
       field: [0, 0, 10000, 10000]           # x0, y0, x1, y1 in nm
       placement: random                     # random | grid
       rotation: random                      # none | random | random_3d
+      tilt: 15                              # and tilted by up to this, degrees
+      jitter: 20                            # each copy moved by up to +-this, nm
       min_distance: 300                     # between copies, random placement
 
 Every element takes ``dye`` (default 1) and ``width``.  Explicit positions
@@ -60,6 +62,11 @@ class Labels:
     xyz: np.ndarray          # (n, 3) nm
     dye: np.ndarray          # (n,) int, 1-based
     copy: np.ndarray         # (n,) int, which copy of the structure, 0-based
+    # per copy, by its number: where it was put (x_nm, y_nm, z_nm, the
+    # jitter included) and how it was turned, R = Rz(alpha) Ry(beta) Rz(gamma)
+    # in degrees -- gamma the turn in the plane, beta the tilt, alpha its
+    # direction
+    poses: Optional[Dict[str, list]] = None
 
     def __len__(self) -> int:
         return len(self.xyz)
@@ -127,10 +134,14 @@ class Structure:
 
     def sample(self, rng) -> Labels:
         xyz, dye, copy = [], [], []
+        poses = {k: [] for k in ("x_nm", "y_nm", "z_nm", "alpha_deg", "beta_deg",
+                                 "gamma_deg")}
         n_copies = 0
         for elements, copies in self.parts:
             placements = _placements(copies, rng)
-            for position, rotation in placements:
+            for position, rotation, angles in placements:
+                for key, value in zip(poses, (*position, *angles)):
+                    poses[key].append(round(float(value), 3))
                 one = [e.sample(rng) for e in elements]
                 pts = np.vstack([p for p, _ in one]) if one else np.zeros((0, 3))
                 if rotation is not None:
@@ -140,9 +151,10 @@ class Structure:
                 copy.append(np.full(len(pts), n_copies))
                 n_copies += 1
         if not xyz:
-            return Labels(np.zeros((0, 3)), np.zeros(0, np.int32), np.zeros(0, np.int32))
+            return Labels(np.zeros((0, 3)), np.zeros(0, np.int32), np.zeros(0, np.int32),
+                          poses)
         return Labels(np.vstack(xyz), np.concatenate(dye).astype(np.int32),
-                      np.concatenate(copy).astype(np.int32))
+                      np.concatenate(copy).astype(np.int32), poses)
 
 
 class _Element:
@@ -263,9 +275,12 @@ def _sample_image(image, pixelsize, origin, density, z, rng):
 
 
 def _placements(copies: Optional[Dict[str, Any]], rng):
-    """``[(position, rotation or None)]`` for every copy of a part."""
+    """``[(position, rotation or None, (alpha, beta, gamma))]`` for every
+    copy of a part: SMAP's turn in the plane, then a tilt of up to ``tilt``
+    degrees in a random direction, and a uniform jitter of up to ``jitter``
+    nm per axis (a number, or ``[xy, z]``)."""
     if not copies:
-        return [(np.zeros(3), None)]
+        return [(np.zeros(3), None, (0.0, 0.0, 0.0))]
     field = np.asarray(copies.get("field", [0, 0, 10000, 10000]), float)
     x0, y0, x1, y1 = field
     area_um2 = (x1 - x0) * (y1 - y0) / 1e6
@@ -287,20 +302,42 @@ def _placements(copies: Optional[Dict[str, Any]], rng):
     else:
         raise ValueError(f"placement {placement!r}: random or grid")
     rotation = copies.get("rotation", "none")
+    tilt = np.deg2rad(float(copies.get("tilt", 0.0)))
+    jitter = copies.get("jitter", 0.0)
+    jitter = (np.array([jitter[0], jitter[0], jitter[1]], float)
+              if isinstance(jitter, (list, tuple)) else np.full(3, float(jitter)))
     out = []
     for p in xy:
+        alpha = beta = gamma = 0.0
         if rotation in ("none", None, False):
-            r = None
+            pass
         elif rotation in ("random", True):
-            a = rng.uniform(0, 2 * np.pi)
-            r = np.array([[np.cos(a), -np.sin(a), 0], [np.sin(a), np.cos(a), 0], [0, 0, 1]])
+            gamma = rng.uniform(0, 2 * np.pi)
         elif rotation == "random_3d":
             from scipy.spatial.transform import Rotation
-            r = Rotation.random(random_state=rng).as_matrix()
+            alpha, beta, gamma = Rotation.random(random_state=rng).as_euler("ZYZ")
         else:
             raise ValueError(f"rotation {rotation!r}: none, random or random_3d")
-        out.append((np.array([p[0], p[1], float(copies.get("z", 0.0))]), r))
+        if tilt > 0 and rotation != "random_3d":
+            alpha, beta = rng.uniform(0, 2 * np.pi), rng.uniform(0, tilt)
+        r = None
+        if alpha or beta or gamma:
+            r = _rz(alpha) @ _ry(beta) @ _rz(gamma)
+        position = np.array([p[0], p[1], float(copies.get("z", 0.0))])
+        if jitter.any():
+            position = position + rng.uniform(-jitter, jitter)
+        out.append((position, r, tuple(np.rad2deg([alpha, beta, gamma]))))
     return out
+
+
+def _rz(a):
+    c, s = np.cos(a), np.sin(a)
+    return np.array([[c, -s, 0], [s, c, 0], [0, 0, 1.0]])
+
+
+def _ry(b):
+    c, s = np.cos(b), np.sin(b)
+    return np.array([[c, 0, s], [0, 1.0, 0], [-s, 0, c]])
 
 
 def _random_positions(n, field, min_distance, rng):

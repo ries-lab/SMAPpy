@@ -273,8 +273,13 @@ on-time, a number of blinks and a bleaching probability, and comes out as
 either:
 
 * **localizations**, with the precision their photons and background allow;
-* **camera frames**, saved as a recipe (`*.sim.yaml`) that any fitter opens
+* **camera frames** -- a Gaussian, astigmatic or measured (spline) PSF, on an
+  sCMOS or an EMCCD -- saved as a recipe (`*.sim.yaml`) that any fitter opens
   as its file, camera included, drawing the frames as it reads them.
+
+Linkage errors fixed per fluorophore and free per blink, SMAP's "Dye"
+blinking, and tilted and jittered copies whose poses are kept with the truth
+are there for simulating sites to fit models to.
 
 Analysis → Measure → *Ground Truth* then scores a fit against where the
 molecules really were: found, false and missed, the Jaccard index, and

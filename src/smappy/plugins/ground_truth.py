@@ -73,10 +73,16 @@ def truth_for(locs: Localizations, path: str = "") -> Localizations:
 
 
 # ---------------------------------------------------------------- matching
-def match(fit_xy, fit_frame, true_xy, true_frame, radius: float
+def match(fit_xy, fit_frame, true_xy, true_frame, radius: float,
+          fit_z=None, true_z=None, z_radius: Optional[float] = None
           ) -> Tuple[np.ndarray, np.ndarray]:
     """Indices ``(fitted, true)`` of the pairs: one to one within each frame,
-    the assignment of least total distance, no pair further than ``radius``."""
+    the assignment of least total lateral distance, no pair further than
+    ``radius`` -- nor, with ``z_radius``, further apart in z than that, which
+    SMAP's comparison asks too (300 nm there)."""
+    use_z = z_radius is not None and fit_z is not None and true_z is not None
+    if use_z:
+        fit_z, true_z = np.asarray(fit_z, float), np.asarray(true_z, float)
     from scipy.optimize import linear_sum_assignment
     from scipy.spatial import cKDTree
     fit_frame, true_frame = np.asarray(fit_frame), np.asarray(true_frame)
@@ -89,7 +95,8 @@ def match(fit_xy, fit_frame, true_xy, true_frame, radius: float
     for k in range(len(frames)):
         fi, ti = fo[fa[k]:fb[k]], to[ta[k]:tb[k]]
         if len(fi) == 1 and len(ti) == 1:
-            if np.hypot(*(fit_xy[fi[0]] - true_xy[ti[0]])) <= radius:
+            if (np.hypot(*(fit_xy[fi[0]] - true_xy[ti[0]])) <= radius
+                    and (not use_z or abs(fit_z[fi[0]] - true_z[ti[0]]) <= z_radius)):
                 out_f.append(fi)
                 out_t.append(ti)
             continue
@@ -97,6 +104,8 @@ def match(fit_xy, fit_frame, true_xy, true_frame, radius: float
         # frames being a handful of spots far apart
         near = cKDTree(true_xy[ti]).sparse_distance_matrix(
             cKDTree(fit_xy[fi]), radius, output_type="ndarray")
+        if use_z and len(near):
+            near = near[np.abs(true_z[ti][near["i"]] - fit_z[fi][near["j"]]) <= z_radius]
         if not len(near):
             continue
         cost = np.full((len(ti), len(fi)), big)
@@ -164,18 +173,24 @@ class Comparison:
 
 def compare(fitted: Localizations, truth: Localizations, radius: float = 100.0,
             counted: Optional[np.ndarray] = None,
-            reach: Optional[float] = None) -> Comparison:
+            reach: Optional[float] = None,
+            z_radius: Optional[float] = None,
+            min_photons: float = 0.0) -> Comparison:
     """Score ``fitted`` against ``truth``; ``counted`` (boolean over the
     truth) says which true spots count, all of them by default.  A
     localization left unmatched within ``reach`` (default ``radius``) of a
-    spot that does not count is set aside rather than called false."""
+    spot that does not count is set aside rather than called false, and so
+    is one with fewer than ``min_photons``: a dim localization is too
+    imprecise to be scored either way."""
     if "x_nm" not in fitted or "y_nm" not in fitted:
         raise ValueError("the comparison is in nanometres, and the table has "
                          f"{', '.join(sorted(fitted.keys()))}")
     counted = np.ones(len(truth), bool) if counted is None else np.asarray(counted, bool)
     fxy = np.column_stack([fitted["x_nm"], fitted["y_nm"]]).astype(float)
     txy = np.column_stack([truth["x_nm"], truth["y_nm"]]).astype(float)
-    fi, ti = match(fxy, fitted["frame"], txy, truth["frame"], radius)
+    zs = ((fitted["z_nm"], truth["z_nm"]) if "z_nm" in fitted and "z_nm" in truth
+          else (None, None))
+    fi, ti = match(fxy, fitted["frame"], txy, truth["frame"], radius, *zs, z_radius)
     scored = counted[ti]
     fi_s, ti_s = fi[scored], ti[scored]
     tp = len(fi_s)
@@ -185,6 +200,8 @@ def compare(fitted: Localizations, truth: Localizations, radius: float = 100.0,
     beside = _near_any(fxy[left], np.asarray(fitted["frame"])[left],
                        txy[~counted], np.asarray(truth["frame"])[~counted],
                        radius if reach is None else reach)
+    if min_photons > 0 and "photons" in fitted:
+        beside |= np.asarray(fitted["photons"], float)[left] < min_photons
     set_aside = int((~scored).sum() + beside.sum())
     fp = len(left) - int(beside.sum())
     n_counted = int(counted.sum())
@@ -311,10 +328,18 @@ class GroundTruthSettings:
                              help="a localization and a true spot in one frame closer "
                                   "than this can be the same molecule; paired one to "
                                   "one")
-    min_photons: float = param(0.0, label="count spots from", unit="photons", min=0,
+    z_radius_nm: Optional[float] = param(None, label="and in z within", unit="nm",
+                                         min=0.1, advanced=True,
+                                         help="auto: lateral only; otherwise a pair "
+                                              "must also agree in z this well "
+                                              "(SMAP: 300 nm)")
+    min_photons: float = param(100.0, label="count spots from", unit="photons", min=0,
                                help="true spots with fewer photons in the frame are "
-                                    "not counted: a fluorophore on for a sliver of a "
-                                    "frame is found by no fitter")
+                                    "not counted, and what was fitted to them, or "
+                                    "fitted as dim itself, is set aside: a "
+                                    "fluorophore on for a sliver of a frame is found "
+                                    "by no fitter, and a simulation keeps its dim "
+                                    "localizations")
     isolated: bool = param(False, label="isolated spots only",
                            help="count only true spots with no other within 1 um in "
                                 "their frame, and set aside what was fitted near the "
@@ -329,7 +354,7 @@ class GroundTruth(Plugin):
     """A fit of a simulation against where the molecules really were."""
 
     Settings = GroundTruthSettings
-    version = "1"
+    version = "2"        # 2: dim spots not counted by default; a z radius
 
     def run(self, ctx: Context, settings: GroundTruthSettings) -> Result:
         from ..simulate import ISOLATED_NM
@@ -362,7 +387,8 @@ class GroundTruth(Plugin):
         # only the isolated counted, what lies within half the isolation
         # distance of a crowded spot is the crowding's, not a false fit
         reach = max(settings.radius_nm, ISOLATED_NM / 2) if settings.isolated else None
-        c = compare(fitted, truth, settings.radius_nm, counted, reach)
+        c = compare(fitted, truth, settings.radius_nm, counted, reach,
+                    settings.z_radius_nm, settings.min_photons)
         lines = [f"{c.n_fitted} localizations against {c.n_counted} true spots "
                  f"(of {len(truth)} drawn), matched within {settings.radius_nm:g} nm",
                  f"found {c.tp} (recall {c.recall:.3f}), false {c.fp} "

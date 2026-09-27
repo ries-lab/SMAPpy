@@ -8,7 +8,14 @@ flat background; photons are Poisson, converted at ``conversion`` e-/ADU on an
 ``offset``, with Gaussian read noise in ADU.  Pixel k is centred on k, the
 fitter's convention: at k + 1/2 every position came out half a pixel off.
 
-Nothing is dropped.  Two spots close together in one frame are what a fitter
+With a bead calibration (``optics.calibration``) the spots are drawn with
+that measured spline PSF instead (`io.calibration.evaluate_spline`, the
+fitter's own model evaluation), which is the way out of fitting the model one
+simulated with.  With an EM gain the camera is an EMCCD: the electrons of a
+pixel are a gamma of its Poisson count, the multiplication noise that doubles
+the variance, then divided by the gain as the fitter expects.
+
+Nothing is dropped, however dim.  Two spots close together in one frame are what a fitter
 has to cope with, and the frames are the fitter's test, not the simulator's;
 the truth table says for each spot how far its nearest neighbour in the same
 frame was (``neighbour_nm``), so a test of precision can take the isolated
@@ -61,7 +68,10 @@ def render(truth, start: int = 0, stop: Optional[int] = None,
         frame = em.frame[rows] - a
         if hi > lo:
             px = xyz[rows, :2] / s.optics.pixelsize_nm
-            if dual is None:
+            if dual is None and s.optics.calibration:
+                _draw_spline(image, frame, px, xyz[rows, 2], em.photons[rows],
+                             spline_calibration(s.optics.calibration))
+            elif dual is None:
                 _draw(image, frame, px, em.photons[rows], *_widths(xyz[rows, 2], s.optics))
             else:
                 ratio = _ratios(truth, dual["ratios"])[em.owner[rows]]
@@ -74,7 +84,8 @@ def render(truth, start: int = 0, stop: Optional[int] = None,
         for k in range(b - a):
             rng = np.random.default_rng([s.seed, 3, a + k])
             out[a - start + k] = _camera(image[k], rng, s.camera.conversion,
-                                         s.camera.offset, s.camera.read_noise)
+                                         s.camera.offset, s.camera.read_noise,
+                                         s.camera.em_gain)
     return out
 
 
@@ -126,6 +137,8 @@ def camera_truth(truth, dual: Optional[dict] = None) -> Localizations:
     metadata = _metadata(truth, "smappy camera frames")
     metadata.update({"pixelsize_nm": s.optics.pixelsize_nm,
                      "conversion": s.camera.conversion, "offset": s.camera.offset,
+                     "em_gain": s.camera.em_gain,
+                     "psf": s.optics.calibration or "gaussian",
                      "read_noise": s.camera.read_noise, "sigma_nm": s.optics.sigma_nm,
                      "astigmatism": ([s.optics.focal_offset_nm, s.optics.depth_nm]
                                      if s.optics.astigmatism else None)})
@@ -205,6 +218,51 @@ def camera_frames(n_frames: int = 2000, seed: int = 0, pixelsize_nm: float = 100
     return render(truth), camera_truth(truth)
 
 
+_SPLINES: dict = {}
+
+
+def spline_calibration(path):
+    """A bead calibration, loaded once per path."""
+    key = str(path)
+    if key not in _SPLINES:
+        from ..io.calibration import load_spline_calibration
+        _SPLINES[key] = load_spline_calibration(path)
+    return _SPLINES[key]
+
+
+def _draw_spline(image, frame, xy_px, z_nm, photons, cal) -> None:
+    """Add the spline PSF of each spot into ``image`` (n, y, x), in place.
+
+    Each spot is evaluated in a ROI of the spline's own size around its pixel
+    (`evaluate_spline`, whose x and y are ROI coordinates with pixel k
+    centred on k), and a mirrored calibration -- beads imaged through the EM
+    register -- is drawn mirrored, as the fitter flips the ROIs back."""
+    from ..io.calibration import evaluate_spline
+    if len(frame) == 0:
+        return
+    height, width = image.shape[1:]
+    _, _, ny, nx = cal.coeff.shape
+    size = max(min(nx, ny) - 3, 5)
+    half = size // 2
+    z_index = cal.z_nm_to_index(np.asarray(z_nm, float))
+    mirror = bool(cal.em_mirror)
+    for k in range(len(frame)):
+        cx, cy = xy_px[k]
+        ox, oy = int(np.rint(cx)) - half, int(np.rint(cy)) - half
+        rx, ry = cx - ox, cy - oy
+        if mirror:
+            rx = size - 1 - rx
+        spot = evaluate_spline(cal, rx, ry, float(z_index[k]), size)
+        if mirror:
+            spot = spot[:, ::-1]
+        x0, y0 = max(ox, 0), max(oy, 0)
+        x1, y1 = min(ox + size, width), min(oy + size, height)
+        if x1 <= x0 or y1 <= y0:
+            continue
+        image[frame[k], y0:y1, x0:x1] += photons[k] * np.clip(
+            spot[y0 - oy:y1 - oy, x0 - ox:x1 - ox], 0, None)
+
+
 def _draw(image, frame, xy_px, photons, sx, sy) -> None:
     """Add a pixel-integrated Gaussian per spot into ``image`` (n, y, x), in
     place; ``sx``, ``sy`` are the widths in pixels times sqrt(2), erf's scale."""
@@ -227,9 +285,15 @@ def _draw(image, frame, xy_px, photons, sx, sy) -> None:
         image[frame[k], iy[0]:iy[-1] + 1, ix[0]:ix[-1] + 1] += photons[k] * np.outer(py, px)
 
 
-def _camera(image, rng, conversion: float, offset: float, read_noise: float):
-    """Photons to ADU: Poisson, the gain and offset, Gaussian read noise."""
+def _camera(image, rng, conversion: float, offset: float, read_noise: float,
+            em_gain: float = 0.0):
+    """Photons to ADU: Poisson, the EM multiplication if any, the gain and
+    offset, Gaussian read noise."""
     electrons = rng.poisson(image)
+    if em_gain > 0:
+        # the sum of n exponential multiplications is a gamma of shape n:
+        # mean n * gain, variance twice the Poisson one's -- the excess factor
+        electrons = rng.gamma(electrons, em_gain)
     adu = electrons / conversion + offset + rng.normal(0, read_noise, image.shape)
     return np.clip(np.round(adu), 0, 65535).astype(np.uint16)
 

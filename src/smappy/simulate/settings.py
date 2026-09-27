@@ -44,10 +44,14 @@ class LabellingSettings:
                                      "(rounded), or its mean with Poisson ticked")
     poisson: bool = param(False, label="Poisson number",
                           help="the number of fluorophores per label is Poisson")
-    linkage_nm: float = param(0.0, label="linkage error", unit="nm", min=0,
+    linkage_nm: float = param(0.0, label="linkage error, fixed", unit="nm", min=0,
                               help="each fluorophore is off its label by a Gaussian "
-                                   "of this width per axis, as a linker or an "
-                                   "antibody puts it")
+                                   "of this width per axis, the same for all its "
+                                   "blinks: a rigid linker or antibody")
+    linkage_free_nm: float = param(0.0, label="linkage error, free", unit="nm", min=0,
+                                   help="a Gaussian offset of this width per axis "
+                                        "drawn anew for every blink: a dye that "
+                                        "turns freely on a flexible linker")
 
 
 @dataclass
@@ -58,7 +62,9 @@ class BlinkingSettings:
                                 "at any time within a frame")
     blinks: float = param(3.0, label="blinks", min=0.01,
                           help="mean number of blinks of a fluorophore within the "
-                               "measurement; sets the off time")
+                               "measurement, which sets the off time; with "
+                               "activation 'every blink', the mean number before "
+                               "it bleaches")
     off_time: Optional[float] = param(None, label="off time", unit="frames",
                                       min=0.01, advanced=True,
                                       help="mean of an exponential off-time; auto: "
@@ -66,15 +72,20 @@ class BlinkingSettings:
     bleaching: float = param(0.1, label="bleaching probability", min=0, max=1,
                              help="the probability to bleach after each blink: at "
                                   "most 1/p blinks on average, however long one "
-                                  "measures")
+                                  "measures (not used with 'every blink', where it "
+                                  "is 1 / blinks)")
     activation: str = param("constant", label="activation",
                             choices=(("constant", "constant: ramped against bleaching"),
-                                     ("decay", "decaying: all dark at the start")),
+                                     ("decay", "decaying: all dark at the start"),
+                                     ("all", "every blink until bleached, spread evenly")),
                             advanced=True,
                             help="constant: the blinks are spread evenly over the "
                                  "measurement, as an activation raised while the "
                                  "fluorophores bleach keeps them; decaying: a fixed "
-                                 "rate, so most blinks come early")
+                                 "rate, so most blinks come early; every blink: each "
+                                 "fluorophore shows all its blinks before it bleaches "
+                                 "(1 / blinks per blink), whatever the number of "
+                                 "frames, spread evenly -- SMAP's 'Dye' model")
     photons: float = param(5000.0, label="photons per blink", min=0,
                            help="mean over a whole blink; a frame gets its share "
                                 "by the time the fluorophore was on in it")
@@ -93,14 +104,22 @@ class OpticsSettings:
     focal_offset_nm: float = param(300.0, label="focal offset", unit="nm",
                                    advanced=True)
     depth_nm: float = param(400.0, label="focal depth", unit="nm", min=1, advanced=True)
+    calibration: str = param("", label="PSF calibration", kind="open_file",
+                             file_filter="Calibrations (*_3dcal.mat *_3Dcal.mat *.h5);;"
+                                         "All files (*)",
+                             help="camera frames drawn with a measured spline PSF "
+                                  "(a bead calibration) instead of a Gaussian: a fit "
+                                  "then meets a PSF it did not make itself")
 
 
 @dataclass
 class LocalizationOutputSettings:
     """What a fit would have made of the frames."""
-    min_photons: float = param(100.0, label="detection limit", unit="photons", min=0,
-                               help="a fluorophore on for only a sliver of a frame "
-                                    "is not found")
+    min_photons: float = param(10.0, label="detection limit", unit="photons", min=0,
+                               help="fewer photons than this in a frame and there is "
+                                    "no localization; the dim ones that remain are "
+                                    "kept, as SMAP keeps them, and Ground Truth leaves "
+                                    "them out of its score")
     close: str = param("remove", label="close emitters",
                        choices=(("remove", "remove both"),
                                 ("average", "one localization, averaged")),
@@ -130,6 +149,10 @@ class CameraOutputSettings:
     conversion: float = param(0.5, unit="e-/ADU", min=1e-6)
     offset: float = param(100.0, unit="ADU")
     read_noise: float = param(1.5, label="read noise", unit="ADU", min=0)
+    em_gain: float = param(0.0, label="EM gain", min=0,
+                           help="0: an sCMOS; otherwise an EMCCD with this gain, its "
+                                "multiplication noise included (the excess factor "
+                                "of 2)")
     load_truth: bool = param(False, label="load the truth",
                              help="the true positions of every spot drawn, as a "
                                   "localization table")

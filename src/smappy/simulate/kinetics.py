@@ -36,7 +36,18 @@ that is the default (``constant``): the same fluorophores, the same number of
 blinks each, their start times mapped monotonically so that together they are
 spread evenly over the measurement.  The mapping keeps each fluorophore's own
 order, so its dark times are longer early and shorter late -- what a rising
-activation does.
+activation does.  The third choice, ``all``, is SMAP's "Dye" model: every
+fluorophore shows *all* its blinks, geometric in number with mean ``blinks``
+(a bleaching probability of ``1 / blinks``), whatever the number of frames,
+spread evenly the same way -- the number of blinks is then the dye's alone,
+not the dye's and the measurement's.  (SMAP's version maps the times by the
+inverse of the ranks rather than the ranks, which keeps them uniform but
+scrambles each fluorophore's order; here the order is kept.)
+
+**Linkage error** comes in two kinds, as in SMAP: a fixed offset per
+fluorophore (`label`), shared by its blinks, and a free one drawn for every
+blink (``linkage_free_nm``, `blink_offsets`), for a dye that turns on a
+flexible linker.
 
 **Photons.**  Each blink draws a total from a gamma distribution with the
 given mean and standard deviation (a standard deviation of 0 is exactly the
@@ -70,7 +81,8 @@ class Blinks:
     start: np.ndarray
     end: np.ndarray          # cut at the end of the measurement
     rate: np.ndarray         # photons per frame while on
-    off_time: float          # the off-time that was used
+    off_time: float          # the off-time that was used (the mean, when spread)
+    offset: np.ndarray = None  # (n, 3) nm, the free linkage error of each blink
 
     def __len__(self) -> int:
         return len(self.owner)
@@ -82,6 +94,7 @@ class Emission:
     owner: np.ndarray
     frame: np.ndarray        # int64
     photons: np.ndarray      # expected photons in that frame
+    blink: np.ndarray = None  # which blink the row is (the first, if two share it)
 
     def __len__(self) -> int:
         return len(self.owner)
@@ -149,6 +162,8 @@ def off_time_for(blinks: float, on_time: float, bleaching: float,
 
 def blink(n: int, n_frames: int, settings: BlinkingSettings, rng) -> Blinks:
     """Every blink of ``n`` fluorophores within ``n_frames``."""
+    if settings.activation == "all":
+        return _every_blink(n, n_frames, settings, rng)
     on, p = settings.on_time, settings.bleaching
     off = settings.off_time or off_time_for(settings.blinks, on, p, n_frames)
     # blinks before bleaching, capped at more than the measurement could hold
@@ -174,10 +189,44 @@ def blink(n: int, n_frames: int, settings: BlinkingSettings, rng) -> Blinks:
         keep = start < n_frames
         owner, start, on_for = owner[keep], start[keep], on_for[keep]
     elif settings.activation not in ("constant", "decay"):
-        raise ValueError(f"activation {settings.activation!r}: constant or decay")
+        raise ValueError(f"activation {settings.activation!r}: constant, decay or all")
     end = np.minimum(start + on_for, n_frames)
     rate = draw(settings.photons, settings.photons_std, len(owner), rng) / on
     return Blinks(owner, start, end, rate, off)
+
+
+def _every_blink(n, n_frames, settings: BlinkingSettings, rng) -> Blinks:
+    """All the blinks each fluorophore has before it bleaches, spread evenly
+    over the measurement in each one's order (SMAP's "Dye")."""
+    if settings.blinks < 1:
+        raise ValueError(f"every blink until bleached: at least one blink each, "
+                         f"not {settings.blinks:g}")
+    on = settings.on_time
+    g = rng.geometric(1.0 / settings.blinks, n)
+    owner = np.repeat(np.arange(n), g)
+    first = np.zeros(len(owner), bool)
+    first[np.concatenate([[0], np.cumsum(g)[:-1]])[g > 0]] = True
+    # any time scale will do: only the order survives the spreading
+    step = rng.exponential(1.0, len(owner))
+    total = np.cumsum(step)
+    start = total - np.maximum.accumulate(np.where(first, total - step, 0.0))
+    on_for = rng.exponential(on, len(owner))
+    start = _spread(owner, start, on_for, n_frames, rng)
+    keep = start < n_frames
+    owner, start, on_for = owner[keep], start[keep], on_for[keep]
+    end = np.minimum(start + on_for, n_frames)
+    same = owner[1:] == owner[:-1]
+    dark = (start[1:] - end[:-1])[same]
+    off = float(dark.mean()) if dark.size else float("nan")
+    rate = draw(settings.photons, settings.photons_std, len(owner), rng) / on
+    return Blinks(owner, start, end, rate, off)
+
+
+def blink_offsets(n: int, width_nm: float, rng) -> np.ndarray:
+    """The free linkage error of ``n`` blinks, (n, 3) nm."""
+    if width_nm <= 0:
+        return np.zeros((n, 3))
+    return rng.normal(0, width_nm, (n, 3))
 
 
 def _spread(owner, start, on_for, n_frames, rng) -> np.ndarray:
@@ -217,4 +266,4 @@ def emission(blinks: Blinks, n_frames: int) -> Emission:
     summed = np.bincount(inverse, weights=photons, minlength=len(unique))
     first = np.zeros(len(unique), np.int64)
     first[inverse[::-1]] = np.arange(len(inverse))[::-1]
-    return Emission(owner[first], frame[first], summed)
+    return Emission(owner[first], frame[first], summed, idx[first])

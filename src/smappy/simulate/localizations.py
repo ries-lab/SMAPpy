@@ -28,7 +28,7 @@ from typing import Optional
 import numpy as np
 
 from ..locs import Localizations
-from .kinetics import Blinks, Emission, Fluorophores, blink, emission, label
+from .kinetics import Blinks, Emission, Fluorophores, blink, blink_offsets, emission, label
 from .settings import SimulationSettings
 from .structure import load_structure
 
@@ -42,10 +42,13 @@ class GroundTruth:
     blinks: Blinks
     emission: Emission
     drift_nm: Optional[np.ndarray]   # (n_frames, 3), or None
+    poses: Optional[dict] = None     # where each copy was put and how it was turned
 
     def positions(self) -> np.ndarray:
         """Where each emitting row was, drift included: (len(emission), 3)."""
         xyz = self.fluorophores.xyz[self.emission.owner]
+        if self.blinks.offset is not None and self.emission.blink is not None:
+            xyz = xyz + self.blinks.offset[self.emission.blink]
         if self.drift_nm is not None:
             xyz = xyz + self.drift_nm[self.emission.frame]
         return xyz
@@ -61,10 +64,11 @@ def ground_truth(settings: SimulationSettings) -> GroundTruth:
     labels = structure.sample(rng)
     fluorophores = label(labels, settings.labelling, rng)
     blinks = blink(len(fluorophores), settings.n_frames, settings.blinking, rng)
+    blinks.offset = blink_offsets(len(blinks), settings.labelling.linkage_free_nm, rng)
     emitted = emission(blinks, settings.n_frames)
     drift = drift_trace(settings.n_frames, rng) if settings.drift else None
     return GroundTruth(settings, structure.name, len(labels), fluorophores, blinks,
-                       emitted, drift)
+                       emitted, drift, labels.poses)
 
 
 def drift_trace(n_frames: int, rng) -> np.ndarray:
@@ -225,5 +229,8 @@ def _metadata(truth: GroundTruth, what: str) -> dict:
             "n_blinks": len(truth.blinks), "n_frames": s.n_frames,
             "off_time_frames": round(truth.blinks.off_time, 3),
             "simulation_settings": asdict(s),
+            # a copy's position and turn, by its `copy` number: what a model
+            # fitted to one site should give back
+            "copies": truth.poses,
             "drift_truth": (truth.drift_nm.round(3).tolist()
                             if truth.drift_nm is not None else None)}

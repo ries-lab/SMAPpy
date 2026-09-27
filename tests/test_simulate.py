@@ -213,7 +213,8 @@ def test_close_emitters_are_removed_or_averaged():
     from scipy.spatial import cKDTree
     removed = simulate(base)
     for f in np.unique(removed["frame"])[:40]:
-        m = removed["frame"] == f
+        # bright ones only: a 10-photon localization can be put anywhere
+        m = (removed["frame"] == f) & (removed["photons"] > 500)
         # the true positions were 250 nm apart; the noise moves them a little
         xy = np.column_stack([removed["x_nm"][m], removed["y_nm"][m]])
         assert not cKDTree(xy).query_pairs(200)
@@ -287,3 +288,102 @@ def test_the_plugin_writes_a_simulation_a_fitter_can_open(tmp_path):
     assert tifffile.imread(result.data["tiff"]).shape == (20, 100, 100)
     from smappy.plugins.fit import default_output_path
     assert default_output_path(result.data["path"]).name == "x_locs.hdf5"
+
+
+# ------------------------------------------------- after comparing with SMAP
+def test_a_free_linkage_error_moves_each_blink_and_a_fixed_one_the_fluorophore(tmp_path):
+    """SMAP's two linkage errors: fixed per fluorophore, free per blink."""
+    (tmp_path / "one.yaml").write_text("elements:\n  - points: [[5000, 5000, 0]]\n")
+    for fixed, free in ((12.0, 0.0), (0.0, 12.0)):
+        truth = ground_truth(SimulationSettings(
+            n_frames=20000, seed=11, structure=StructureSettings(file=str(tmp_path / "one.yaml")),
+            labelling=LabellingSettings(fluorophores=300, linkage_nm=fixed,
+                                        linkage_free_nm=free),
+            blinking=BlinkingSettings(activation="all", blinks=20)))
+        b = truth.blinks
+        at = truth.fluorophores.xyz[b.owner, 0] + b.offset[:, 0]
+        # one fluorophore's blinks scatter about their mean by the free error
+        # alone, and the fluorophores about the label by the fixed one
+        n = np.bincount(b.owner)
+        mean = np.bincount(b.owner, weights=at) / n
+        within = np.sum((at - mean[b.owner]) ** 2) / np.sum(n - 1)
+        assert np.sqrt(within) == pytest.approx(free, abs=0.5)
+        assert (truth.fluorophores.xyz[:, 0] - 5000).std() == pytest.approx(fixed, abs=1.2)
+
+
+def test_every_blink_until_bleached_is_the_dyes_number_whatever_the_frames():
+    """SMAP's "Dye": geometric blinks with mean `blinks`, all of them shown,
+    spread evenly, each fluorophore's in order and never on twice at once."""
+    settings = BlinkingSettings(activation="all", blinks=4.0, on_time=1.5)
+    for n_frames in (500, 50000):
+        b = blink(20000, n_frames, settings, np.random.default_rng(12))
+        per = np.bincount(b.owner, minlength=20000)
+        assert per.mean() == pytest.approx(4.0, rel=0.03)
+        assert np.mean(per == 1) == pytest.approx(0.25, abs=0.01)   # geometric, p = 1/4
+        same = b.owner[1:] == b.owner[:-1]
+        assert np.all(b.start[1:][same] >= b.end[:-1][same])
+        counts = np.histogram(b.start, bins=5, range=(0, n_frames))[0]
+        assert counts.max() / counts.min() < 1.05
+
+
+def test_copies_are_tilted_jittered_and_their_poses_recorded():
+    from scipy.spatial.transform import Rotation
+    shape = [[100, 0, 0], [0, 50, 0], [0, 0, 20]]
+    s = load_structure({"elements": [{"points": shape}],
+                        "copies": {"n": 300, "rotation": "random", "tilt": 15,
+                                   "jitter": [20, 5], "placement": "grid",
+                                   "field": [0, 0, 1e5, 1e5]}})
+    labels = s.sample(np.random.default_rng(13))
+    p = {k: np.asarray(v) for k, v in labels.poses.items()}
+    assert p["beta_deg"].max() <= 15 and p["beta_deg"].max() > 13
+    # a grid of 18 x 17 over 100 um, each copy up to 20 nm off its node
+    nodes = (np.arange(18) + 0.5) * 1e5 / 18
+    off = p["x_nm"] - nodes[np.abs(p["x_nm"][:, None] - nodes).argmin(axis=1)]
+    assert np.abs(off).max() <= 20 and np.abs(off).max() > 18
+    assert np.abs(p["z_nm"]).max() <= 5 and np.abs(p["z_nm"]).max() > 4
+    for k in range(0, 300, 37):
+        r = Rotation.from_euler("ZYZ", np.deg2rad([p["alpha_deg"][k], p["beta_deg"][k],
+                                                   p["gamma_deg"][k]])).as_matrix()
+        centre = [p["x_nm"][k], p["y_nm"][k], p["z_nm"][k]]
+        np.testing.assert_allclose(labels.xyz[labels.copy == k] - centre,
+                                   np.array(shape, float) @ r.T, atol=0.05)
+
+
+def test_the_truth_carries_each_copys_pose():
+    locs = simulate(n_frames=300, seed=14, structure=StructureSettings(preset="npc"))
+    poses = locs.metadata["copies"]
+    assert len(poses["x_nm"]) == locs["copy"].max() + 1
+    k = int(np.bincount(locs["copy"]).argmax())
+    mine = locs["copy"] == k
+    assert np.hypot(np.median(locs["x_nm"][mine]) - poses["x_nm"][k],
+                    np.median(locs["y_nm"][mine]) - poses["y_nm"][k]) < 30
+
+
+def test_an_emccd_doubles_the_variance_and_the_gain_divides_out():
+    from smappy.simulate import CameraOutputSettings, render
+    # the conversions keep an ADU step small against a photon, so rounding
+    # to whole ADU adds no variance to speak of
+    for gain, conversion, excess in ((0.0, 0.05, 1.0), (100.0, 5.0, 2.0)):
+        s = SimulationSettings(output="camera", n_frames=20, seed=15, background=20.0,
+                               labelling=LabellingSettings(efficiency=0.0),
+                               camera=CameraOutputSettings(em_gain=gain, conversion=conversion,
+                                                           read_noise=0.0, offset=100.0))
+        frames = render(ground_truth(s)).astype(float)
+        photons = (frames - 100.0) * conversion / (gain or 1.0)
+        assert photons.mean() == pytest.approx(20.0, rel=0.02)
+        assert photons.var() == pytest.approx(excess * 20.0, rel=0.05)
+
+
+def test_the_camera_draws_every_spot_however_dim():
+    """Camera frames keep what the localizations would drop: a sliver of a
+    blink with a few photons is drawn, and the frames hold all the light."""
+    from smappy.simulate import CameraOutputSettings, camera_truth, render
+    s = SimulationSettings(output="camera", n_frames=200, seed=16, background=0.0,
+                           labelling=LabellingSettings(efficiency=0.2),
+                           camera=CameraOutputSettings(read_noise=0.0, offset=0.0,
+                                                       conversion=1.0, size_px=120))
+    truth = ground_truth(s)
+    table = camera_truth(truth)
+    assert np.sum(table["photons"] < 10) > 20
+    frames = render(truth).astype(float)
+    assert frames.sum() == pytest.approx(table["photons"].sum(), rel=0.01)

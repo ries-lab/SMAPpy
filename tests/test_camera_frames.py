@@ -248,3 +248,38 @@ def test_the_split_camera_frames_give_back_their_transformation_and_their_dyes(t
     # colour 1 is the lower (ch0 - ch1) / (ch0 + ch1): the dye with more in
     # the secondary half, which is the lines (dye 2)
     assert np.mean(np.asarray(got) == 3 - np.asarray(want)) > 0.95
+
+
+def test_frames_drawn_with_a_measured_psf_fit_back_with_it(tmp_path, bead_calibration):
+    """A bead calibration draws the spots instead of a Gaussian, the fitter
+    finds them where they were -- on the spline's own convention -- and an
+    EMCCD's excess noise costs sqrt(2) in precision that the fit reports."""
+    from smappy.io.calibration import save_spline_calibration
+    from smappy.plugins import Context
+    from smappy.plugins.fit import (OutputSettings, SourceSettings, SplineFit,
+                                    SplineFitSettings, SplineModelSettings)
+    from smappy.plugins.ground_truth import GroundTruth, GroundTruthSettings
+    from smappy.simulate import CameraOutputSettings, OpticsSettings, SimulationSettings
+    from smappy.simulate.source import write_recipe
+    path = tmp_path / "beads_3dcal.h5"
+    save_spline_calibration(path, bead_calibration)
+    errors = {}
+    for gain, conversion in ((0.0, 0.5), (100.0, 5.0)):
+        recipe = write_recipe(SimulationSettings(
+            output="camera", n_frames=400, seed=3, labelling=SPARSE,
+            optics=OpticsSettings(calibration=str(path)),
+            camera=CameraOutputSettings(em_gain=gain, conversion=conversion)),
+            tmp_path / f"em{int(gain)}.sim.yaml")
+        locs = SplineFit().run(Context(), SplineFitSettings(
+            source=SourceSettings(path=str(recipe)),
+            model=SplineModelSettings(calibration=str(path)),
+            output=OutputSettings(path=str(tmp_path / f"em{int(gain)}.hdf5")))).locs
+        c = GroundTruth().run(Context(locs=locs), GroundTruthSettings(
+            min_photons=500, isolated=True)).data["comparison"]
+        assert c["recall"] > 0.98, gain
+        assert c["z_slope"] == pytest.approx(1.0, abs=0.02), gain
+        for axis in "xyz":
+            assert abs(c["axes"][axis]["bias_nm"]) < (1.0 if axis != "z" else 5.0)
+            assert c["axes"][axis]["pull"] == pytest.approx(1.0, abs=0.1), (gain, axis)
+        errors[gain] = c["axes"]["x"]["rmse_nm"]
+    assert errors[100.0] / errors[0.0] == pytest.approx(np.sqrt(2), abs=0.15)

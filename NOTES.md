@@ -1557,14 +1557,17 @@ by changing nothing but the output.  The stages and what each assumes:
   syntax): explicit points or a CSV, the same in every copy, or lines,
   circles, polygons and grey-value images sampled at a density, Poisson in
   number and drawn afresh per copy; copies placed at random (with a minimum
-  distance) or on a grid, turned in-plane or in 3D.  The built-ins are YAML
+  distance) or on a grid, turned in-plane or in 3D, tilted by up to a
+  given angle and jittered, and each copy's position and turn kept with the
+  truth (`metadata["copies"]`, by the `copy` column).  The built-ins are YAML
   files in `data/structures`, so each is also an example: `demo` (the ring
   and cross the tutorials use), `npc` (Nup96), `filaments`, and `pie`, a
   density resolution target of eight segments from 25 to 3200 labels per
   um^2.  A new one is a file dropped there.
 * **Labelling**: a label is labelled with a probability and then carries
-  exactly one fluorophore (or a set number, or a Poisson number), each off
-  its label by a Gaussian linkage error.
+  exactly one fluorophore (or a set number, or a Poisson number).  Linkage
+  error comes in SMAP's two kinds: fixed, one Gaussian offset per
+  fluorophore shared by its blinks, and free, drawn anew for every blink.
 * **Blinking**: exponential on- and off-times in continuous time, and a
   bleaching probability after each blink -- one model for STORM and PAINT,
   since PAINT's docking strands are lost too.  The off-time is set from the
@@ -1574,20 +1577,26 @@ by changing nothing but the output.  The stages and what each assumes:
   default the activation is ramped against the bleaching: the blinks of the
   fixed-rate model, their times mapped monotonically so they fall evenly
   over the measurement (the density is flat to within 5 %).  The fixed rate,
-  with most blinks early, is the option.
+  with most blinks early, is one option; SMAP's "Dye" model -- every blink a
+  fluorophore has until it bleaches, `blinks` on average whatever the
+  number of frames, spread evenly in each one's order -- is the other.
 * **Photons**: a total per blink from a gamma distribution with a given mean
   and standard deviation (0: exact), emitted at a constant rate while on, so
   a frame gets its share by the time on in it and the first and last frames
   of a blink are dim.  Background likewise, per localization or per frame,
   flat over the frame.
-* **Localizations**: Poisson photons, a detection limit, the Mortensen
+* **Localizations**: Poisson photons, a detection limit of 10 photons (the
+  dim ones are kept, as SMAP keeps them, and Ground Truth leaves them out of
+  its score), the Mortensen
   precision from the photons, the background, the PSF and the pixel (times
   sqrt 2 for an EMCCD), and noise drawn from it, so `xy_err_nm` is honest.
   Emitters on in one frame within the separation are removed, or merged at
   their photon-weighted mean.
 * **Camera frames**: pixel-integrated Gaussians (the fitter's own model),
-  astigmatic optionally, shot noise, gain, offset and Gaussian read noise;
-  nothing removed.  Saved as the recipe (`*.sim.yaml`), which `open_stack`
+  astigmatic optionally, or a measured spline PSF from a bead calibration;
+  shot noise, an EMCCD's multiplication noise when there is EM gain (the
+  electrons a gamma of the Poisson count: twice the variance), gain,
+  offset and Gaussian read noise; every spot drawn, however dim.  Saved as the recipe (`*.sim.yaml`), which `open_stack`
   opens as an acquisition that draws its frames as they are read, seeded per
   frame, and which tells the fitter its camera.
 
@@ -1613,9 +1622,46 @@ isolated spots come back with a recall of 1.00, two false positives in 1300
 and an error over reported precision of 1.00 and 1.02; counting every spot
 above 300 photons gives a Jaccard index of 0.77, the rest crowding.
 
-Left out for now: EMCCD noise in the frames, a non-flat background, a
-spline PSF for the frames (which would stop the frames being drawn with the
-fitter's own model), and using a loaded table as the structure.
+Frames drawn with a spline PSF from simulated beads and fitted with Spline
+3D and the same calibration give z on a slope of 1.001, biases below 0.4 nm
+and error over reported precision 0.94-1.03; with an EM gain of 100 the
+lateral error grows from 7.5 to 10.7 nm, the sqrt(2) of the excess noise, and
+the fit's reported precision grows with it.  Ground Truth can also require a
+z match (SMAP asks 300 nm), and leaves localizations dimmer than its photon
+threshold (100 by default) out of the score whether they matched or not.
+
+### Against SMAP's simulator
+
+Compared with `shared/simulatelocs.m` (SimulateSites), `simulatecamera.m`
+(SimulateCameraImages) and `CompareToGroundTruth`, the physics within a blink
+is the same -- exponential on-time starting at a random point in a frame,
+photons per blink spread by the time on, Poisson per frame, the Mortensen
+precision with sqrt 2 for EM and z three times lateral -- and so is the
+labelling.  What differs, on purpose:
+
+* SMAP's default blinking (`simple`) puts every blink at an independent
+  uniform frame, 1 + round(Exp(n)) of them, with no kinetics; here the
+  number follows from off-time and bleaching, set by the blinks wanted in the
+  measurement, with SMAP's `Dye` as an option.
+* SMAP keeps close emitters in its localizations; here they are removed or
+  averaged, since a fitter could not have separated them (the camera frames
+  keep them, as SMAP's do).
+* SMAP's PSF width in the precision is fixed at 100 nm; here it is a setting.
+* SMAP places sites on a grid, one per ROI; here copies are placed at random
+  or on a grid.  SMAP normalises an image structure by 255, here by its
+  brightest pixel.
+* SMAP matches nearest-first; here the assignment of least total distance.
+
+And three things in SMAP that are bugs, with fixes written as a patch for
+`jries/SMAP`: the `Dye` model assigns the sort permutation instead of the
+ranks when spreading the blinks, which scrambles each fluorophore's order;
+SimulateCameraImages draws `phot` that `simulatelocs` had already
+Poisson-sampled and applies shot noise again, doubling its variance; and its
+random source draws a new position for every frame of a blink.
+
+Left out for now: a non-flat background, the precision from a spline PSF's
+CRLB (SMAP has it) rather than Mortensen's, and using a loaded table as the
+structure.
 
 ## Open questions
 

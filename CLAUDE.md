@@ -284,7 +284,12 @@ assumptions.  What a session needs:
   it, the frames are drawn as they are read, and the camera comes from it.
 * The truth columns: `emitter` (which fluorophore), `dye`, `copy` (which
   copy of the structure); camera truth adds `neighbour_nm`, the nearest other
-  spot in the same frame.
+  spot in the same frame.  `metadata["copies"]` has each copy's position and
+  turn by its `copy` number (`x_nm`, ..., `alpha_deg`, `beta_deg`,
+  `gamma_deg`: R = Rz(alpha) Ry(beta) Rz(gamma)).
+* Simulated localizations go down to 10 photons, as SMAP's do, and Ground
+  Truth sets anything below its `min_photons` (100) aside, so a check of a
+  simulated table's precision should look at the bright ones.
 * `Analysis/Measure/Ground Truth` scores a table against its simulation --
   found, false, missed, Jaccard, bias, and error over reported precision --
   finding the recipe by the table's `source` (a fitter writes it) or its

@@ -39,6 +39,8 @@ def write_recipe(settings: SimulationSettings, path) -> Path:
     values = asdict(settings)
     if values["structure"]["file"]:
         values["structure"]["file"] = str(Path(values["structure"]["file"]).resolve())
+    if values["optics"]["calibration"]:
+        values["optics"]["calibration"] = str(Path(values["optics"]["calibration"]).resolve())
     values["output"] = "camera"
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
@@ -95,7 +97,9 @@ def open_simulation(path) -> SimulatedSource:
     size = settings.camera.size_px
     camera = {"conversion": settings.camera.conversion, "offset": settings.camera.offset,
               "pixelsize_um": settings.optics.pixelsize_nm / 1000.0,
-              "em_on": False, "emgain": 1.0, "camera_name": "simulation"}
+              "em_on": settings.camera.em_gain > 0,
+              "emgain": settings.camera.em_gain if settings.camera.em_gain > 0 else 1.0,
+              "camera_name": "simulation"}
     return SimulatedSource(
         files=[Path(path)], shape=(size, size), dtype=np.dtype(np.uint16),
         n_frames=settings.n_frames, n_frames_declared=settings.n_frames,

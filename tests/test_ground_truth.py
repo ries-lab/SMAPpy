@@ -80,7 +80,11 @@ def test_a_simulated_table_is_scored_against_its_own_truth():
     result = GroundTruth().run(Context(locs=locs), GroundTruthSettings())
     c = result.data["comparison"]
     assert c["correct"] > 0.99
-    assert c["tp"] == pytest.approx(len(locs), rel=0.01)
+    # every localization is found, false or set aside; the dim ones -- kept
+    # down to 10 photons, as SMAP keeps them -- are not scored
+    assert c["tp"] + c["fp"] + c["set_aside"] == len(locs)
+    assert c["tp"] == pytest.approx(np.sum(locs["photons"] >= 100), rel=0.02)
+    assert locs["photons"].min() >= 10 and np.sum(locs["photons"] < 100) > 100
     for axis in "xyz":
         assert c["axes"][axis]["pull"] == pytest.approx(1.0, abs=0.05), axis
     assert c["z_slope"] == pytest.approx(1.0, abs=0.01)
@@ -132,3 +136,13 @@ def test_a_table_that_is_no_simulation_is_refused_with_a_reason():
     table.metadata["source"] = "/data/run.tif"
     with pytest.raises(ValueError, match="not a simulation"):
         truth_for(table)
+
+
+def test_a_z_radius_refuses_pairs_that_agree_only_laterally():
+    truth = _table([0, 1000], [0, 0], [0, 0], z_nm=[0, 0], photons=[1000, 1000])
+    fitted = _table([5, 1005], [0, 0], [0, 0], z_nm=[50, 500], xy_err_nm=[10, 10],
+                    z_err_nm=[30, 30], photons=[1000, 1000])
+    lateral = compare(fitted, truth, 100)
+    both = compare(fitted, truth, 100, z_radius=300)
+    assert (lateral.tp, lateral.fp, lateral.fn) == (2, 0, 0)
+    assert (both.tp, both.fp, both.fn) == (1, 1, 1)
