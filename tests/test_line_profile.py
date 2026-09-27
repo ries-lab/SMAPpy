@@ -619,3 +619,32 @@ def test_a_run_is_applied_to_the_session_without_touching_its_layers():
     result = session.run(LineProfile(), LineProfileSettings(axis="across"))
     assert "layers" not in result.data and len(result.data["layer_profiles"]) == 2
     assert [l.name for l in session.layers] == before
+
+
+def test_the_binned_fit_integrates_over_its_bins():
+    """Sampled at bin centres, a peak two bins wide came back too narrow."""
+    rng = np.random.default_rng(5)
+    values = rng.normal(0.0, 4.0, 20000)
+    fit = fit_profile(values, None, model="gauss", window=(-50.0, 50.0),
+                      method="binned", bin_size=8.0, background=False)
+    assert fit.values()["sigma"] == pytest.approx(4.0, rel=0.03)
+
+
+def test_the_z_window_comes_from_the_filter_in_nm_and_is_open_where_it_is():
+    from smappy.plugins.line_profile import _z_window
+    from smappy.session import Session
+    rng = np.random.default_rng(0)
+    locs = Localizations({"x_nm": rng.uniform(0, 1000, 500),
+                          "y_nm": rng.uniform(0, 1000, 500),
+                          "z_nm": rng.uniform(-300, 300, 500),
+                          "frame": np.arange(500)}, {"units": "nm"})
+    session = Session(locs)
+    ctx = Context(locs=locs, session=session)
+    z_filter = session._locs_layer().state.sets["ungrouped"].filter
+    z_filter.set("z_nm", -100.0, None)
+    assert _z_window(ctx) == (-100.0, None)         # open above: widened data
+    z_filter.set("z_nm", None, None)
+    assert _z_window(ctx) is None
+    profile = profiles(locs, Region.line((0, 500), (1000, 500), 400.0),
+                       z_window=(-100.0, None))["z"]
+    assert profile.window[0] == -100.0 and profile.window[1] > locs["z_nm"].max()

@@ -299,9 +299,9 @@ along and across.  The windows are $0 \leq a \leq L$ and
 $-W/2 \leq c \leq W/2$, $W$ the ROI's width; with a *length* $\ell$ the
 along window becomes $(L-\ell)/2 \leq a \leq (L+\ell)/2$, centred on the
 line, and localizations outside it are dropped from every profile.  The z
-window is the depth range the first layer's z filter keeps (the data's own
-range when there is no filter on z); without a session, the data's range
-widened by 5% on each side.  It matters, because it is part of the
+window is the first layer's filter on `z_nm`, in nanometres; a side the
+filter leaves open -- or both, without a filter or a session -- is the data's
+outermost value widened by 5% of the range.  It matters, because it is part of the
 likelihood.
 
 **The likelihood.**  For the fitted coordinates $t_1, \ldots, t_N$ in a
@@ -413,7 +413,8 @@ resampled.
 
 **Binned.**  With *fit* set to *binned*, the parameters minimise
 $\sum_j (n_j - e_j)^2 / \max(e_j, 1)$ over the histogram bins of width
-*bin*, $e_j$ the counts the model predicts at the bin's centre (for
+*bin*, $e_j$ the counts the model predicts in the bin -- its density
+integrated over the bin, by three-point Gauss-Legendre quadrature (for
 per-localization precisions, the density averaged over the sample's
 precisions).  The log-likelihood that is reported is still the unbinned one
 at those parameters, so the two methods and all models are compared on the
@@ -469,7 +470,8 @@ Also useful to keep a long line's profile to the part around the structure.
   filament that leaves the ROI half way, two structures that cross -- and the
   scatter shows them.
 * **The bootstrap**, when it was run: the resampled values of each parameter
-  of the first layer's best model, with the fit and the interval.
+  of each layer's best model, with the fit and the interval -- one tab per
+  layer.
 
 A good result has a curve that follows the histogram, an error bar well below
 the value, and, for a distance, an AIC clearly in favour of two Gaussians.

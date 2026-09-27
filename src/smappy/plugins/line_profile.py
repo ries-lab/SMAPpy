@@ -73,7 +73,7 @@ iteration; started instead from a distance of 2 nm, the same fit settles at
 
 What is reported is the fit's log-likelihood with AIC and BIC, so "one
 Gaussian or two?" is answered by a number rather than by eye; `model="all"`
-fits all three and prints the comparison.  Parameter errors come from the
+fits all five and prints the comparison.  Parameter errors come from the
 curvature of the likelihood at its maximum (the observed Fisher information),
 which is the usual asymptotic approximation and is optimistic for very small
 samples.  Below ~50 localizations, set `bootstrap` to a few hundred and read
@@ -1048,12 +1048,19 @@ def fit_profile(t, precision=None, model: str = "gauss",
             centres = 0.5 * (edges[:-1] + edges[1:])
             widths = np.diff(edges)
             total = float(counts.sum())
+            # the density integrated over each bin, by three-point
+            # Gauss-Legendre, rather than sampled at its centre: a peak a bin
+            # or two wide is otherwise fitted too tall and too narrow
+            nodes = np.concatenate([centres + f * 0.5 * widths
+                                    for f in (-np.sqrt(0.6), 0.0, np.sqrt(0.6))])
+            quadrature = np.array([5.0, 8.0, 5.0]) / 18.0
 
             def residuals(vector):
                 params, fraction = split(np.asarray(vector, float))
                 density = _density_of(spec, params, window, fraction,
                                       background, shape)
-                expected = total * widths * _curve_of(density, precision)(centres)
+                at = _curve_of(density, precision)(nodes).reshape(3, -1)
+                expected = total * widths * (quadrature @ at)
                 # Poisson weights rather than SMAP's plain least squares: at
                 # ten counts a bin the two differ by more than the bin width
                 return (counts - expected) / np.sqrt(np.maximum(expected, 1.0))
@@ -1205,7 +1212,7 @@ class Profile:
 
 def profiles(locs: Localizations, region: Region,
              length: float = 0.0,
-             z_window: Optional[Tuple[float, float]] = None) -> Dict[str, Profile]:
+             z_window: Optional[Tuple[Optional[float], Optional[float]]] = None) -> Dict[str, Profile]:
     """The line's coordinates for every localization inside it.
 
     ``length`` overrides the ROI's own length with a window of that size
@@ -1241,9 +1248,13 @@ def profiles(locs: Localizations, region: Region,
     if "z_nm" in kept:
         z = np.asarray(kept["z_nm"], float)
         finite = z[np.isfinite(z)]
-        if z_window is None and finite.size:
+        if finite.size:
+            # a side the caller does not bound is the data's edge widened by
+            # 5%, so the window never sits *at* the outermost localization
             pad = 0.05 * (float(finite.max() - finite.min()) + 1e-9)
-            z_window = (float(finite.min()) - pad, float(finite.max()) + pad)
+            low, high = z_window if z_window is not None else (None, None)
+            z_window = (float(finite.min()) - pad if low is None else float(low),
+                        float(finite.max()) + pad if high is None else float(high))
         z_precision_name = column(kept, PRECISION_Z_FIELDS)
         found["z"] = Profile(
             "z", AXES["z"], "nm", z, z_window or (-1.0, 1.0),
@@ -1470,8 +1481,9 @@ class LineProfileSettings:
                               max=99.9, advanced=True,
                               help="the interval the resamples are asked for")
     bin_nm: float = param(0.0, label="bin", unit="nm", min=0.0,
-                          help="0: chosen from the data.  Drawing only, "
-                               "unless the binned fit is chosen")
+                          help="0: chosen from the data.  In pixels for a "
+                               "table in pixels.  Drawing only, unless the "
+                               "binned fit is chosen")
     length_nm: float = param(0.0, label="length", unit="nm", min=0.0,
                              advanced=True,
                              help="0: the ROI's own length.  Otherwise a "
@@ -1481,11 +1493,12 @@ class LineProfileSettings:
 
 @register("Analysis/Measure/Line Profile")
 class LineProfile(Plugin):
-    """Profiles across a line ROI, fitted without binning them."""
+    """Profiles along or across a line ROI, fitted without binning them."""
 
     Settings = LineProfileSettings
     # 2: the two-Gaussian start tries peaks far apart; 3: z_err_nm; 4: the
-    # EM starts are tried narrow as well, so a close pair is not merged
+    # EM starts are tried narrow as well, so a close pair is not merged; the
+    # binned fit integrates over its bins; the z window is the filter's, in nm
     version = "4"
 
     def run(self, ctx: Context, settings: LineProfileSettings) -> Result:
@@ -1517,11 +1530,16 @@ class LineProfile(Plugin):
         panels = 2 if any("z" in l.found for l in layers) else 1
         plots = {"scatter": Plot(draw=scatter_plot, panels=panels,
                                  size=(5.0, 2.6 * panels))}
-        best = layers[0].fits[0]
-        if best.intervals:
+        # every layer's best fit was resampled, so every layer gets its plot;
+        # only the first used to, and the others' intervals were text only
+        for layer in layers:
+            best = layer.fits[0] if layer.fits else None
+            if best is None or not best.intervals:
+                continue
             spread = len(best.names) + (1 if settings.background else 0)
-            plots["bootstrap"] = Plot(
-                draw=lambda figure: draw_bootstrap(figure, best),
+            name = "bootstrap" if len(layers) == 1 else f"bootstrap: {layer.name}"
+            plots[name] = Plot(
+                draw=lambda figure, fit=best: draw_bootstrap(figure, fit),
                 panels=spread, size=(5.0, 1.8 * spread))
 
         def per_layer(what):
@@ -1657,18 +1675,27 @@ def _line_roi(ctx: Context) -> Region:
     return roi
 
 
-def _z_window(ctx: Context) -> Optional[Tuple[float, float]]:
-    """Where z could have been: the layer's own z range, when there is one.
+def _z_window(ctx: Context) -> Optional[Tuple[Optional[float], Optional[float]]]:
+    """Where z could have been: the layer's filter on ``z_nm``, in nm.
 
     Taking it from the data instead would put the window's edges *at* the
     outermost localizations, and the likelihood would read that as a structure
-    that stops exactly there.
+    that stops exactly there -- so a side the filter leaves open is None, and
+    `profiles` widens the data's edge there.  Read off the filter itself rather
+    than `Session.z_range`, which falls back to exactly those edges and is in
+    render units, not the nanometres the profile is in.
     """
     session = ctx.session
-    if session is None or not hasattr(session, "z_range"):
+    if session is None or not hasattr(session, "_locs_layer"):
         return None
     try:
-        low, high = session.z_range()
+        layer = session._locs_layer()
+        ranges = layer.state.sets["ungrouped"].filter.ranges
     except Exception:
         return None
-    return (float(low), float(high)) if high > low else None
+    low, high = ranges.get("z_nm", (None, None))
+    if low is None and high is None:
+        return None
+    if low is not None and high is not None and not high > low:
+        return None
+    return (None if low is None else float(low), None if high is None else float(high))
