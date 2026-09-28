@@ -5,8 +5,9 @@ covers: [smappy.plugins.assign_colors.ratios, smappy.plugins.assign_colors.find_
 
 ## What it does
 
-In a **ratiometric** two-colour experiment the two dyes are not imaged one
-after the other or through different filters.  Both are imaged at once, and a
+In a **ratiometric** two-colour experiment
+([Bossi et al. 2008](https://doi.org/10.1021/nl801471d)) the two dyes are not
+imaged one after the other or through different filters.  Both are imaged at once, and a
 dichroic mirror splits the light of every molecule between two halves of the
 camera.  The dyes emit at slightly different wavelengths, so they split their
 light differently: one might send three quarters of its photons to the first
@@ -364,6 +365,19 @@ each colour's first and last are its region's two edges.  The view is limited
 to the 0.1th and 99.9th percentile of each half's photons, the histogram of
 $r$ to the 0.1th and 99.9th percentile of $r$.
 
+**Compared with the papers.**  Reading a molecule's colour from how its
+photons divide between two detection channels is the method of
+[Bossi et al. 2008](https://doi.org/10.1021/nl801471d).  The two photon
+numbers come here from a global fit with the photons free, and
+[Li et al. 2022](https://doi.org/10.1038/s41467-022-30719-4) assign colours
+from such a fit by a threshold on the photon ratio -- which is what *split at
+the minima* does, with the boundaries found in the histogram rather than set
+by hand.  Li et al. also fit every molecule with the photon ratio fixed at
+each dye's value and keep the most likely fit; that is not done here.  The
+probabilistic method is not taken from these papers: the probability from
+the binomial split, the crosstalk bound and the *sigma* test were worked out
+for this plugin.
+
 ## Parameters
 
 ### mode
@@ -508,6 +522,11 @@ the ratio, refined by a parabola.  Here:
   [doi:10.1021/nl801471d](https://doi.org/10.1021/nl801471d)
   -- colours of single molecules from the split between two detection
   channels.
+* Li Y, Shi W, Liu S, et al. Global fitting for high-accuracy multi-channel
+  single-molecule localization. *Nat Commun* 13, 3133 (2022).
+  [doi:10.1038/s41467-022-30719-4](https://doi.org/10.1038/s41467-022-30719-4)
+  -- the global fit that gives both photon numbers, and colour assignment
+  from it.
 * Testa I, Wurm CA, Medda R, et al. Multicolor fluorescence nanoscopy in
   fixed and living cells by exciting conventional fluorophores with a single
   wavelength. *Biophys J* 99, 2686 (2010).

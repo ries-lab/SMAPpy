@@ -13,8 +13,9 @@ two halves of drift correction want different data:
 
 The estimator is COMET (Cost-function Optimized Maximal Overlap drift
 EsTimation, https://github.com/gpufit/Comet), used as a library -- it maximises
-the spatiotemporal overlap of localizations across time windows, which needs no
-fiducials and no reference structure.  Its result is a per-frame drift table
+the spatiotemporal overlap of localizations, across time windows or, by
+default here, along a smooth spline in time, which needs no fiducials and no
+reference structure.  Its result is a per-frame drift table
 whose row index *is* the frame number, so applying it is one fancy-index per
 coordinate.
 

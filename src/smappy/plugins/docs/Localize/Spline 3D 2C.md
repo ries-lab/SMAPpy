@@ -20,10 +20,12 @@ For two colours it combines two things other pages explain: the split camera of
 [Gaussian 2D 2C](plugin:Localize/Gaussian 2D 2C) -- a dichroic sends each
 molecule's light to both halves of the chip, and the proportion in each half
 tells the dyes apart -- and the measured, z-dependent PSF of
-[Spline 3D](plugin:Localize/Spline 3D), which gives every localization a
-height.
+[Spline 3D](plugin:Localize/Spline 3D)
+([Li et al. 2018](https://doi.org/10.1038/nmeth.4661)), which gives every
+localization a height.
 
-Each molecule is fitted in **both halves at once, as one emitter**: one x,
+Each molecule is fitted in **both halves at once, as one emitter** -- the
+global fit of [Li et al. 2022](https://doi.org/10.1038/s41467-022-30719-4): one x,
 one y and **one z** for both halves, and a photon number for each.  Sharing z
 is the main gain.  The two spots are two independent looks at the same
 height, so z comes out up to $\sqrt{2}$ times more precise than from one half
@@ -353,6 +355,29 @@ link: the local scale of the transformation along the mirrored axis is
 $-1$, and the partner ROI is evaluated about its centre.  The calibration
 stores the secondary PSF in the camera's own orientation, so no image is
 flipped.
+
+**Compared with the paper.**  The fit and the calibration follow
+[Li et al. 2022](https://doi.org/10.1038/s41467-022-30719-4).  Where the code
+departs from the publication:
+
+* **The link.**  In the paper a shared parameter reaches a channel through a
+  scale and a translation, the translation being the sub-pixel remainder of
+  rounding the partner ROI to whole pixels.  Here the scale for x and y is
+  the transformation's local derivative, applied about the ROI's centre, which
+  is what lets a mirrored splitter be a factor of $-1$ rather than a flipped
+  image.
+* **The bead positions.**  The paper fits each channel's beads with that
+  channel's own spline model to find the transformation.  Here each bead is
+  located by an elliptical Gaussian fitted to the average of the 11 middle
+  planes of its stack, before any spline exists.  The stacks are then aligned and
+  averaged with one shift per bead pair for both halves, keeping the halves'
+  fixed relation, as in the paper.
+* **One photon ratio, from the beads.**  With *link photons* on, the paper
+  takes each dye's ratio from single-molecule data, and for colour it fits
+  every molecule at each dye's ratio and keeps the most likely.  Here the
+  ratio is the beads' split, which the PSFs carry, or a typed *photon ratio*;
+  colour comes only from the free photon split and
+  [Assign colours](plugin:Analysis/Dual-Color/AssignColors).
 
 ## Parameters
 

@@ -8,8 +8,10 @@ and the seed determine it exactly and it costs a second to redraw.
 
 **Matching.**  In each frame, localizations and true spots are paired one to
 one by the Hungarian algorithm on their lateral distance, and a pair further
-apart than the radius is no pair, as in the SMLM challenge (Sage et al., Nat.
-Methods 2019).  A localization left over is a false positive, a true spot
+apart than the radius is no pair.  The pairing one to one within a radius and
+the scores are the SMLM challenge's (Sage et al., Nat. Methods 2019); the
+challenge itself paired by a presorted nearest-neighbour search within
+250 nm, which it reports comes close to the Hungarian algorithm.  A localization left over is a false positive, a true spot
 left over a false negative, and the Jaccard index ``TP / (TP + FP + FN)`` is
 the one number for detection.
 

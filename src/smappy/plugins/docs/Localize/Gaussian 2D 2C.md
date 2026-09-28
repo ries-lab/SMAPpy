@@ -11,9 +11,11 @@ of the camera chip, so every molecule appears twice in the same frame: once
 in the *main* (reference) half and once in the *secondary* half, a little
 shifted, turned and magnified.  Both dyes appear in both halves, but in
 different proportions, and that proportion -- the **photon ratio** -- is what
-tells the dyes apart.  This is *ratiometric* multicolour imaging.
+tells the dyes apart.  This is *ratiometric* multicolour imaging
+([Bossi et al. 2008](https://doi.org/10.1021/nl801471d)).
 
-The plugin fits the two spots of a molecule **together, as one emitter**: one
+The plugin fits the two spots of a molecule **together, as one emitter**, the
+global fit of [Li et al. 2022](https://doi.org/10.1038/s41467-022-30719-4): one
 position for both halves, and a photon number for each.  The position is then
 as precise as all the photons allow, and the photon split comes out of the
 same fit.  At the end of the run it assigns the colours from that split
@@ -346,6 +348,29 @@ The first frames are checked against the transformation's geometry: a
 registration made on another camera ROI is refused, and a movie without a
 camera ROI in its metadata is taken to start at the chip's corner, with a
 warning.
+
+**Compared with the paper.**  The global fit is that of
+[Li et al. 2022](https://doi.org/10.1038/s41467-022-30719-4), whose software
+offers a Gaussian PSF beside its spline.  Where the code departs from the publication:
+
+* **The link.**  The paper links a shared parameter through a scale and a
+  translation, the translation being the sub-pixel remainder left when the
+  partner ROI is rounded to whole pixels.  Here the scale for x and y is the
+  transformation's local derivative, and it acts about the ROI's centre (the
+  $(1 - f)\,h$ above), so a mirrored splitter, $f = -1$, needs no flipped
+  image.
+* **No bead calibration is needed.**  The paper builds its transformation from
+  beads and may re-measure it on the single molecules; here the movie alone
+  can give it (*calibrate from this movie*), by voting on the vectors between
+  localizations of the same frame.
+* **Unpaired peaks are fitted**, which is the paper's argument for a global
+  fit (a molecule too dim in one channel to be detected there): the candidate
+  list is every peak of either half, not only the pairs.
+* **Colour from the free photon split only.**  The paper also fits each
+  molecule with the photon ratio fixed at each dye's value and keeps the most
+  likely; that is not offered here.  With *link photons* on, one ratio is
+  used, 1 or the bead calibration's, where the paper takes each dye's from
+  the single-molecule data.
 
 ## Parameters
 

@@ -273,9 +273,11 @@ def build_link(reference: Candidates, secondary: Candidates, residual: np.ndarra
 
     The fitter evaluates each channel at ``factor * global + offset``, in that
     channel's own ROI pixel coordinates.  The factors are the local scale of
-    the transformation for x and y, and the splitter's photon ratio for the
-    photon number, so that a shared photon parameter means the *total* as
-    channel 0 sees it.  Everything else is offset 0, factor 1: the two
+    the transformation for x and y, and for the photon number the splitter's
+    photon ratio over the split the secondary's PSF already carries -- one,
+    for a spline pair and no ratio given -- so that a shared photon number is
+    spread over the channels as the ratio says (`_GlobalPSF.unpack` reports
+    the total).  Everything else is offset 0, factor 1: the two
     calibrations are checked on load to share one z grid, so z needs neither.
 
     The x and y offsets are the sub-pixel residual *plus* ``(1 - factor) *

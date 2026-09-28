@@ -13,7 +13,9 @@ spot it came from and reports two things:
 
 * **Detection** -- how many molecules were found, how many localizations
   are false, how many molecules were missed, and the Jaccard index that sums
-  the three up.
+  the three up.  These are the measures of the SMLM software challenge
+  ([Sage et al. 2015](https://doi.org/10.1038/nmeth.3442);
+  [Sage et al. 2019](https://doi.org/10.1038/s41592-019-0364-4)).
 * **Accuracy** -- for the localizations that were found, how far they are
   from the truth: the systematic offset (bias), the typical error, and
   whether the error each localization *claims* (its precision) is the error
@@ -328,6 +330,25 @@ reported `xy_err_nm`.  The pull panel has 60 bins from $-5$ to $5$, with
 the standard normal density dashed.  The z panel is a 60 by 60 histogram of
 fitted against true z, with the identity dashed and the fitted line drawn
 over the 0.5th to 99.5th percentile of true z.
+
+**Compared with the challenge.**  The SMLM challenge
+([Sage et al. 2019](https://doi.org/10.1038/s41592-019-0364-4)) also pairs
+frame by frame and scores recall, precision, the Jaccard index and the RMS
+error.  Its assessment differs from this one in four places:
+
+* It pairs by a presorted nearest-neighbour search within 250 nm, which it
+  reports gives results close to the Hungarian algorithm.  Here the exact
+  optimal assignment is taken, within 100 nm by default and, if asked, within
+  a z radius as well.
+* It keeps the brightest 75% of the true activations.  Here a spot counts
+  from a fixed number of emitted photons, and the unpaired localizations
+  beside an uncounted spot or dimmer than that number are set aside as well
+  as the ones paired with it.
+* It leaves out the fluorophores within 450 nm of the border of the field;
+  here none is left out for being near the border.
+* It corrects the depth-dependent lateral shift of its experimental PSFs
+  (the "wobble") before comparing; here nothing is corrected, and such a
+  shift shows in the bias and the error.
 
 ## Parameters
 

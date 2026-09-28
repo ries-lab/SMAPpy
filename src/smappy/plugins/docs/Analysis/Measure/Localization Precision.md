@@ -18,12 +18,16 @@ meant to disagree -- the way they disagree is the diagnosis:
 
 * **The CRLB histogram** -- what the fitter believes.  The distribution of the
   precision column, with its typical value $\sigma_c$.
-* **The pairwise displacement** (NeNA) -- what the experiment did.  A
+* **The pairwise displacement** (NeNA,
+  [Endesfelder et al. 2014](https://doi.org/10.1007/s00418-014-1192-3)) --
+  what the experiment did.  A
   fluorophore is usually on for more than one frame, so the same molecule is
   localized again in the next frame, a few nanometres away.  How far apart
   those two localizations are depends only on how precisely each was placed.
   Nothing about photons or PSFs is assumed.
-* **FRC** -- what the picture resolves.  The acquisition is split in two
+* **FRC**, Fourier ring correlation
+  ([Nieuwenhuizen et al. 2013](https://doi.org/10.1038/nmeth.2448)) -- what
+  the picture resolves.  The acquisition is split in two
   halves, both are rendered, and the plugin finds up to which level of detail
   the two images still agree.  This folds in the labelling density, the drift
   and the number of localizations as well as the precision.
@@ -302,6 +306,38 @@ search radius of tens of nanometres is nothing -- except in z, where a slab
 four axial precisions loses the partners that fell outside and $\sigma_z$
 reads low; the text warns.  The pairs within one frame
 gap are searched with one KD-tree per frame.
+
+**Compared with the papers.**  NeNA
+([Endesfelder et al. 2014](https://doi.org/10.1007/s00418-014-1192-3))
+estimates the precision from nearest neighbours.  Here:
+
+* every pair within the search radius is taken, not only the nearest one,
+  so that the background of different molecules has the known shape
+  $2d/d_{\max}^2$ (above);
+* the single-$\sigma$ fit is the NeNA number, and the photon law and the
+  CRLB-scaled fit are added to it, because the pairs are the frames in which
+  a blink began or ended and are not a typical localization (step 3).
+
+FRC follows [Nieuwenhuizen et al. 2013](https://doi.org/10.1038/nmeth.2448):
+two independent halves, the correlation over rings, the fixed threshold of
+1/7, and the Fourier plane correlation for 3D.  It departs in three places:
+
+* The paper corrects the curve for repeated localizations of one emitter by
+  dividing its numerator by the average blur of the localization
+  uncertainties, and estimates from that how often an emitter was localized.
+  Here nothing is divided: the blur envelope is drawn beside the curve,
+  because dividing amplifies the noise at exactly the frequencies that are
+  read, takes the curve off the 0 to 1 scale the threshold belongs to, and
+  uses the precision that is being checked.
+* The halves are dealt in blocks of frames, so a blink stays in one half
+  (all but the few that straddle a block boundary) and cannot correlate with
+  itself; a molecule that blinks again later can still land in both.
+* Each Fourier plane is summed only over the band of frequencies the other
+  two axes resolve: over the whole plane, the axial resolution of one
+  dataset read 89 nm on a 20 nm lateral voxel and 417 nm on a 4 nm one.
+
+How this differs from SMAP's port of the FRC is under *Differences from
+SMAP*.
 
 ## Parameters
 

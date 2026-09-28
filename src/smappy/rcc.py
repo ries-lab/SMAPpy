@@ -27,8 +27,9 @@ Differences from SMAP's implementation, all deliberate:
   options.  Same intent, and it is linear -- ``d_k - d_l`` is linear in the
   unknowns -- so it needs no nonlinear fit at all.
 * Axial drift is **one-dimensional correlations of z histograms, computed in
-  narrow slices of the field of view and summed** -- SMAP's
-  ``finddisplacementZ``.  Correlating one pooled x-z image instead, which is
+  small square tiles of the field of view (200 nm) and summed** -- SMAP's
+  ``finddisplacementZ2``; slices, as ``finddisplacementZ`` has them, did
+  worse (see `RCCSettings`).  Correlating one pooled x-z image instead, which is
   what this module did first, mixes the z profiles of everything at different
   x and y before correlating: the local structure the peak comes from is gone,
   and the axial estimate is worthless (43 nm from the overlap estimator's, and
