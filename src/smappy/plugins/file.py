@@ -94,9 +94,11 @@ class LoadSmappy(_Load):
 
 @register("File/Load/SMAP")
 class LoadSMAP(_Load):
-    """Read a SMAP ``_sml.mat`` file."""
+    """Read a SMAP `_sml.mat` file."""
     format = "SMAP"
     favorite = False
+    # 2: locprecznm, not zerr, is the axial precision when a file has both
+    version = "2"
 
 
 @register("File/Load/MINFLUX")

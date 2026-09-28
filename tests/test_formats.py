@@ -133,3 +133,63 @@ def test_remove_file_renumbers_and_keeps_layer_choices():
     assert len(s.selection(1)) == 4 and s.locs["x_nm"][s.selection(1).mask].min() == 2
     s.undo()
     assert len(s.locs) == 12
+
+
+def test_smap_keeps_its_axial_precision_over_the_fits_crlb(tmp_path):
+    """zerr and locprecznm both map to z_err_nm; read in file order, the
+    later silently replaced the other."""
+    path = tmp_path / "z_sml.mat"
+    n = 10
+    with h5py.File(path, "w") as f:
+        loc = f.create_group("saveloc/loc")
+        loc["xnm"] = np.arange(n, dtype=np.float32)[None]
+        loc["ynm"] = np.ones((1, n), np.float32)
+        loc["frame"] = np.arange(1, n + 1, dtype=np.float64)[None]
+        loc["locprecznm"] = np.full((1, n), 30, np.float32)
+        loc["zerr"] = np.full((1, n), 99, np.float32)       # written after it
+    locs, _ = load(path)
+    assert np.all(locs["z_err_nm"] == 30)
+
+
+def test_a_tab_separated_file_and_a_last_header_ending_in_n(tmp_path):
+    """A .tsv was registered but only , and ; were split; and the header line
+    lost a trailing 'n' when the file had no final newline."""
+    for name, sep in (("t.tsv", "\t"), ("s.csv", ";"), ("c.csv", ",")):
+        path = tmp_path / name
+        path.write_text(sep.join(["frame", "x [nm]", "y [nm]", "sigman"]) + "\n"
+                        + sep.join(["1", "10.5", "20.5", "3"]))
+        locs, _ = load(path, mapping={"frame": "frame", "x [nm]": "x_nm",
+                                      "y [nm]": "y_nm", "sigman": "sigma_nm"})
+        assert locs["x_nm"][0] == pytest.approx(10.5), name
+        assert "sigma_nm" in locs, name
+
+
+def test_a_matlab_string_keeps_its_letters():
+    """strip('\\\\x00') stripped the letters x and 0 from a string's ends."""
+    from smappy.io.formats import _h5_scalar
+    import io
+    buffer = io.BytesIO()
+    with h5py.File(buffer, "w") as f:
+        f["name"] = np.frombuffer(b"x0box\x00\x00", np.uint8).astype(np.uint16)[:, None]
+        assert _h5_scalar(f, "name") == "x0box"
+
+
+def test_a_picasso_file_is_said_to_be_one_not_failed_on(tmp_path):
+    """Its /locs is one compound dataset: it passed as smappy and then broke
+    with an h5py TypeError."""
+    from smappy.io.hdf5 import load_localizations
+    path = tmp_path / "picasso_locs.hdf5"
+    table = np.zeros(5, dtype=[("frame", "u4"), ("x", "f4"), ("y", "f4")])
+    with h5py.File(path, "w") as f:
+        f["locs"] = table
+    with pytest.raises(ValueError, match="Picasso"):
+        load_localizations(path)
+    assert reader_for(path).name != "smappy HDF5" if _has_reader(path) else True
+
+
+def _has_reader(path):
+    try:
+        reader_for(path)
+        return True
+    except ValueError:
+        return False

@@ -1,5 +1,5 @@
 ---
-version: "1"
+version: "2"
 covers: [smappy.io.formats._load_sml, smappy.io.formats._has_saveloc, smappy.session.read_and_group]
 ---
 

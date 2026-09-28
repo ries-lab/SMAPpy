@@ -1,5 +1,5 @@
 ---
-version: "1"
+version: "2"
 covers: [smappy.plugins.registration.chip_pixels, smappy.plugins.registration.default_transform_path, smappy.plugins.registration._draw_vote, smappy.plugins.registration._draw_residuals, smappy.plugins.registration._draw_coverage, smappy.calibrate.transform.register_channels, smappy.calibrate.transform.find_alignment, smappy.calibrate.transform._vote, smappy.calibrate.transform._orient, smappy.calibrate.transform._split_estimate, smappy.calibrate.transform._pair, smappy.calibrate.transform._refit, smappy.calibrate.transform.pair_weights, smappy.calibrate.transform.fit_polynomial, smappy.calibrate.transform._polynomial_round, smappy.calibrate.transform.save_channel_transform, smappy.calibrate.dual.fit_dual_transform, smappy.calibrate.dual.robust_projective, smappy.calibrate.dual.fit_projective, smappy.calibrate.dual.refine_projective]
 ---
 
@@ -216,7 +216,8 @@ The outlier threshold and the dx/dy limit widen with the round's tolerance,
 to at least a half and a quarter of it: 10 and 5 pixels in the first round,
 the set values in a tight second round.
 
-**Weights.**  If the table has `xy_err_pix`, a pair's weight is the inverse
+**Weights.**  If the table has a precision -- `xy_err_pix`, or `xy_err_nm`
+converted with the pixel size it records -- a pair's weight is the inverse
 variance of its separation,
 
 $$w_k = \frac{1}{\sigma_{\mathrm{ref},k}^2 + \sigma_{\mathrm{sec},k}^2} ,$$

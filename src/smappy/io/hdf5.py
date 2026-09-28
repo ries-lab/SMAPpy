@@ -217,6 +217,11 @@ def load_localizations(path, renamed: bool = True) -> Localizations:
     check against a fingerprint taken before the rename wants.
     """
     with h5py.File(path, "r") as f:
+        if not isinstance(f.get("locs"), h5py.Group):
+            what = ("a table in one dataset, as Picasso writes"
+                    if isinstance(f.get("locs"), h5py.Dataset) else "no /locs group")
+            raise ValueError(f"{Path(path).name} is not a smappy localization "
+                             f"file: it has {what}")
         columns = {name: f["locs"][name][()] for name in f["locs"]}
         metadata = {}
         if "metadata" in f.attrs:

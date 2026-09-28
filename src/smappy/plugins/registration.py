@@ -33,7 +33,7 @@ from typing import Optional
 import numpy as np
 
 from ..calibrate.transform import RegisterSettings, register_channels
-from . import Context, ParamInfo, Plugin, Result, param, register
+from . import Context, ParamInfo, Plot, Plugin, Result, param, register
 
 TRANSFORM_FILTER = "Channel transformation (*_2ct.h5 *.h5 *.hdf5)"
 
@@ -103,6 +103,8 @@ class CalibrateChannelTransform(Plugin):
                    "split frame from localizations fitted over the whole "
                    "frame: no initial shift, no magnification and no split "
                    "position needed.")
+    # 2: a table in nm is weighted by its xy_err_nm too (it was unweighted)
+    version = "2"
     Settings = RegisterLocsSettings
     preview_help = ("run the registration and draw it -- the vote, the "
                     "residual scatter and where the pairs are -- without "
@@ -138,6 +140,7 @@ class CalibrateChannelTransform(Plugin):
             help="second pass over clean matches only, which is where the "
                  "accuracy comes from; 0 skips it"),
         "registration.adapt_fine_tolerance": ParamInfo(
+            label="adapt fine matching", advanced=True,
             help="widen the fine matching to what the coarse fit misses its "
                  "own pairs by, when those pairs are clean"),
         "registration.vote_bin_px": ParamInfo(
@@ -179,9 +182,16 @@ class CalibrateChannelTransform(Plugin):
         if "frame" not in locs:
             raise ValueError("registration pairs within a frame, and the table "
                              "has no frame column")
-        # the fit's own error bars, so a dim pair counts for what it knows
-        precision = (np.asarray(locs["xy_err_pix"], float)
-                     if "xy_err_pix" in locs else None)
+        # the fit's own error bars, so a dim pair counts for what it knows --
+        # in pixels, as the positions are; a table in nm has them in nm, and
+        # reading only the pixel column lost the weighting for every fit
+        # saved in the default unit
+        precision = None
+        if "xy_err_pix" in locs:
+            precision = np.asarray(locs["xy_err_pix"], float)
+        elif "xy_err_nm" in locs and locs.metadata.get("pixelsize_nm"):
+            precision = (np.asarray(locs["xy_err_nm"], float)
+                         / float(locs.metadata["pixelsize_nm"]))
         return register_channels(x, y, np.asarray(locs["frame"]), shape, roi,
                                  settings=settings.registration,
                                  progress=ctx.report, precision=precision), locs
@@ -222,11 +232,10 @@ class CalibrateChannelTransform(Plugin):
 
     @staticmethod
     def _plot(result):
-        def plot(ax) -> None:
-            figure = ax.figure
-            ax.remove()
-            figure.set_size_inches(15, 4.6)
-            figure.set_layout_engine("constrained")
+        # three panels in a figure the window lays out: setting the figure's
+        # size and layout engine here broke on the All page, whose SubFigure
+        # has neither
+        def draw(figure) -> None:
             vote_ax, residual_ax, cover_ax = figure.subplots(1, 3)
             _draw_vote(vote_ax, result)
             _draw_residuals(residual_ax, result)
@@ -236,7 +245,7 @@ class CalibrateChannelTransform(Plugin):
                 panel.tick_params(labelsize=8)
                 panel.xaxis.label.set_fontsize(8)
                 panel.yaxis.label.set_fontsize(8)
-        return plot
+        return Plot(draw, panels=3, size=(15, 4.6))
 
 
 def _draw_vote(ax, result) -> None:

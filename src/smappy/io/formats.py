@@ -146,7 +146,8 @@ def _is_smappy(path: Path) -> bool:
     import h5py
     try:
         with h5py.File(path, "r") as f:
-            return "locs" in f
+            # a group of columns; Picasso's /locs is one compound dataset
+            return isinstance(f.get("locs"), h5py.Group)
     except OSError:
         return False
 
@@ -189,8 +190,19 @@ def _h5_scalar(group, name):
         return None
     v = np.array(group[name])
     if v.dtype.kind == "u" and v.dtype.itemsize == 2:      # a char array
-        return bytes(v.ravel().astype("uint8")).decode("latin-1").strip("\\x00")
+        return bytes(v.ravel().astype("uint8")).decode("latin-1").strip("\x00")
     return v.ravel()
+
+
+def _superseded(name: str, names) -> bool:
+    """Whether another field of the same file wins the column ``name`` maps to.
+
+    ``zerr`` is the fit's axial CRLB and ``locprecznm`` the axial precision
+    SMAP derives from it; both map to `z_err_nm`, and read in file order the
+    later one silently replaced the other.  ``locprecznm`` is the one SMAP's
+    analyses read, so it wins.
+    """
+    return name == "zerr" and "locprecznm" in names
 
 
 def _load_sml(path: Path) -> Tuple[Localizations, FileInfo]:
@@ -204,7 +216,7 @@ def _load_sml(path: Path) -> Tuple[Localizations, FileInfo]:
         with f:
             loc = f["saveloc"]["loc"]
             for name in loc:
-                if name in SML_DROP:
+                if name in SML_DROP or _superseded(name, loc):
                     continue
                 columns[SML_COLUMNS.get(name, name)] = np.array(loc[name]).ravel()
             file = f["saveloc"].get("file")
@@ -223,7 +235,7 @@ def _load_sml(path: Path) -> Tuple[Localizations, FileInfo]:
         m = sio.loadmat(path, squeeze_me=True, struct_as_record=False)
         loc = m["saveloc"].loc
         for name in loc._fieldnames:
-            if name in SML_DROP:
+            if name in SML_DROP or _superseded(name, loc._fieldnames):
                 continue
             columns[SML_COLUMNS.get(name, name)] = np.atleast_1d(getattr(loc, name))
         try:
@@ -374,12 +386,21 @@ def _clean(header: str) -> str:
     return h.strip().replace(" ", "_"), unit
 
 
+def csv_delimiter(line: str) -> str:
+    """The separator of a delimited line: tab, semicolon or comma, the most
+    frequent.  One rule for the reader and the mapping dialog, which used to
+    disagree -- and neither split a .tsv."""
+    counts = {d: line.count(d) for d in ("\t", ";", ",")}
+    best = max(counts, key=lambda d: counts[d])
+    return best if counts[best] else ","
+
+
 def csv_columns(path: Path) -> Tuple[List[str], List[str], bool]:
     """(headers, first data row, has_header) -- what a mapping dialog shows."""
     with open(path, "r", encoding="utf-8-sig") as f:
-        first = f.readline().rstrip("\\n")
-        second = f.readline().rstrip("\\n")
-    delimiter = ";" if first.count(";") > first.count(",") else ","
+        first = f.readline().rstrip("\r\n")
+        second = f.readline().rstrip("\r\n")
+    delimiter = csv_delimiter(first)
     cells = [c.strip() for c in first.split(delimiter)]
     has_header = not all(_is_number(c) for c in cells)
     row = [c.strip() for c in (second if has_header else first).split(delimiter)]
@@ -413,7 +434,8 @@ def _load_csv(path: Path, mapping: Optional[Dict[str, str]] = None,
     recognised names (ThunderSTORM, SMAP exports, x/y/z/frame) need none.
     ``units`` "px" scales positions by ``pixelsize_nm``."""
     headers, _, has_header = csv_columns(path)
-    delimiter = ";" if open(path, encoding="utf-8-sig").readline().count(";") > 0 else ","
+    with open(path, encoding="utf-8-sig") as f:
+        delimiter = csv_delimiter(f.readline())
     data = np.genfromtxt(path, delimiter=delimiter, skip_header=1 if has_header else 0,
                          dtype=np.float64, encoding="utf-8-sig", invalid_raise=False)
     data = np.atleast_2d(data)
