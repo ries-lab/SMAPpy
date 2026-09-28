@@ -91,6 +91,10 @@ class CameraSettings:
                                        "and the noise is doubled")
     emgain: Optional[float] = param(None, label="EM gain", min=0,
                                     help="the EM gain the camera was set to")
+    read_noise_e: Optional[float] = param(None, label="read noise", unit="e-",
+                                          min=0, advanced=True,
+                                          help="rms per pixel; auto: 1 without "
+                                               "EM gain (an sCMOS), 0 with it")
 
     def overrides(self) -> Dict[str, Any]:
         """What the user set, to win over the file's metadata."""
@@ -863,6 +867,8 @@ class DualSplineFitSettings:
 class GaussianFit(_FitPlugin):
     description = "Detect and fit with a free-width Gaussian PSF: x, y, photons, sigma."
     Settings = GaussianFitSettings
+    # 2: the camera's read noise in the likelihood (1 e- without EM gain)
+    version = "2"
     params = {f"fit.{k}": v for k, v in FIT_PARAMS.items()}
 
     def model(self, settings, camera):
@@ -874,6 +880,8 @@ class SplineFit(_FitPlugin):
     description = ("Detect and fit with an experimental spline PSF from a bead "
                    "calibration: adds z.")
     Settings = SplineFitSettings
+    # 2: the camera's read noise in the likelihood (1 e- without EM gain)
+    version = "2"
     params = GaussianFit.params
 
     def model(self, settings, camera):
@@ -899,7 +907,9 @@ class DualSplineFit(_FitPlugin):
     # 3: the PSFs normalised together; linked photons are the total
     # 4: a calibration's PSFs clipped at zero, not lifted: the background is
     #    the background (the version is the calibration's as much as the fit's)
-    version = "4"
+    # 5: the camera's read noise in the likelihood; the calibration's photon
+    #    shares from the light before clipping
+    version = "5"
     Settings = DualSplineFitSettings
     params = {**GaussianFit.params, **finish_params()}
 
@@ -1208,7 +1218,8 @@ class DualGaussianFit(_FitPlugin):
                    "that tells the two colours apart.  No PSF calibration; the "
                    "registration can be measured from the movie itself.")
     # 2: linked photons are the total over both halves, not the main half's
-    version = "2"
+    # 3: the camera's read noise in the likelihood (1 e- without EM gain)
+    version = "3"
     Settings = DualGaussianFitSettings
     params = {**GaussianFit.params, **finish_params(), **REGISTRATION_PARAMS}
 

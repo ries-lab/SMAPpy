@@ -1,5 +1,5 @@
 ---
-version: "2"
+version: "3"
 covers: [smappy.dualfit.combine_peaks, smappy.dualfit.build_link, smappy.dualfit.cut_paired_rois, smappy.dualfit.paired_to_localizations, smappy.dualfit.DualChannelEngine, smappy.psf.GlobalGaussianPSF, smappy.detect.find_candidates, smappy.plugins.fit.DualGaussianFit, smappy.plugins.fit.calibration_blocks, smappy.plugins.fit.finish_localizations, smappy.calibrate.transform.register_channels]
 ---
 
@@ -339,7 +339,9 @@ and the halves see $\hat{N}$ and $r\,\hat{N}$ for the *photon ratio* $r$;
 `photons` is their total, $(1 + r)\,\hat{N}$, and `ratio` is 0: there is no
 split left to measure.  (Before version 2 it was the main half's $\hat{N}$
 alone.)  `logl_rel` is the log-likelihood per pixel of
-the two ROIs together.  EM gain is handled as in the single-channel fit.
+the two ROIs together.  EM gain and the camera's read noise are handled as in the
+single-channel fit ([Gaussian 2D](plugin:Localize/Gaussian 2D)), the read
+noise in both ROIs.
 The first frames are checked against the transformation's geometry: a
 registration made on another camera ROI is refused, and a movie without a
 camera ROI in its metadata is taken to start at the chip's corner, with a

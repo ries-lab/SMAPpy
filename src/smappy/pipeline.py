@@ -106,8 +106,11 @@ class LocalizationEngine:
 
         stack = ROIStack(images, candidates, self.settings.roisize, self.mirror)
         t0 = time.perf_counter()
-        result = self.model.fit(stack.images, iterations=self.settings.iterations,
+        variance = self.camera.readout_variance
+        result = self.model.fit(with_readout(stack.images, variance),
+                                iterations=self.settings.iterations,
                                 n_threads=self.settings.n_threads)
+        without_readout(result, self.model, variance)
         self.stats["fit_seconds"] += time.perf_counter() - t0
         self.stats["rois"] += len(stack)
 
@@ -128,6 +131,38 @@ class LocalizationEngine:
         return (f"{s['localizations']} localizations from {s['frames']} frames "
                 f"({s['detect_seconds']:.1f} s detection, "
                 f"{s['fit_seconds']:.1f} s fitting)")
+
+
+def with_readout(images: np.ndarray, variance: float) -> np.ndarray:
+    """The ROIs with the read noise's variance added to every pixel.
+
+    With the background a free parameter, this is the read-noise term of an
+    sCMOS likelihood (Huang et al. 2013): the fit's background takes the
+    constant, so every model value it evaluates -- in the likelihood, its
+    weights and the Cramer-Rao bound -- is the model plus the variance.
+    `without_readout` takes it off the background afterwards.
+    """
+    if not variance:
+        return images
+    return np.asarray(images, np.float32) + np.float32(variance)
+
+
+def without_readout(result, model, variance: float) -> None:
+    """Take the variance `with_readout` added back off the fitted background.
+
+    In place, on every background the fit has: one, or one per channel of a
+    global fit whose background is free.  The error is unchanged -- a
+    constant moves the value and not its spread.
+    """
+    if not variance:
+        return
+    slot = getattr(model, "slot", None)
+    if slot is None:
+        columns = [3]                        # every single-channel model's
+    else:
+        shared = model.shared[3]
+        columns = sorted({slot(3, c) for c in range(1 if shared else model.n_channels)})
+    result.theta[:, columns] -= np.float32(variance)
 
 
 def prefetch(source: Iterable, depth: int = 2) -> Iterator:

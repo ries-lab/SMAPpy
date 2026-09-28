@@ -50,6 +50,8 @@ class CameraMetadata:
     emgain: Optional[float] = None  # EM multiplication gain
     roi: Optional[Sequence[int]] = None  # (x, y, width, height) on the chip
     exposure_ms: Optional[float] = None
+    # rms read noise, e-; None: the default of `readout_variance`
+    read_noise_e: Optional[float] = None
     camera_name: Optional[str] = None
     comment: str = ""
 
@@ -79,6 +81,26 @@ class CameraMetadata:
         photons and background by it afterwards.
         """
         return 2.0 if self.is_em else 1.0
+
+    @property
+    def readout_variance(self) -> float:
+        """The read noise's variance per pixel, in the units the fit sees.
+
+        The fitter's likelihood is Poisson, and a camera adds Gaussian read
+        noise on top.  Its variance, added to both the data and the model,
+        makes the Poisson likelihood a good approximation of the sum (Huang
+        et al. 2013, the uniform part of their sCMOS variance map) -- and
+        floors every pixel's weight, 1 / (model + variance), so that no pixel
+        whose model is nearly zero can dominate a fit.  Unset, it is 1 e- for
+        a camera without EM gain -- a modern sCMOS reads 0.7 to 1.4 e-, pixel
+        by pixel -- and 0 with EM gain, which leaves the read noise a
+        fraction of an electron.  In the fit's units: electrons, divided by
+        the excess-noise factor as the counts are (`excess_noise`).
+        """
+        if self.is_em:
+            return 0.0
+        noise = 1.0 if self.read_noise_e is None else float(self.read_noise_e)
+        return (noise / self.excess_noise) ** 2
 
     @property
     def pixelsize_um_xy(self) -> Optional[Tuple[float, float]]:

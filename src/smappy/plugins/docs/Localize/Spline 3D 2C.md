@@ -1,5 +1,5 @@
 ---
-version: "4"
+version: "5"
 covers: [smappy.psf.GlobalSplinePSF, smappy.dualfit.combine_peaks, smappy.dualfit.build_link, smappy.dualfit.cut_paired_rois, smappy.dualfit.paired_to_localizations, smappy.dualfit.DualChannelEngine, smappy.calibrate.dual.build_dual_calibration, smappy.calibrate.dual.fit_dual_transform, smappy.calibrate.core.positive_pair_models, smappy.calibrate.dual.load_dual_color_calibration, smappy.plugins.fit.DualSplineFit, smappy.plugins.fit.finish_localizations]
 ---
 
@@ -295,7 +295,8 @@ of them.
 
 **The normalisation.**  Each half's PSF is the average of its bead images,
 smoothed and clipped at zero: the tails of an average of a few beads scatter
-about zero, and a PSF has no negative light.  Half $c$'s signal is
+about zero, and a PSF has no negative light.  The light is counted before
+clipping, where that scatter averages out.  Half $c$'s signal is
 
 $$S_c = \left\langle \sum_{\mathrm{ROI}} \mathrm{PSF}_c(z) \right\rangle_{|z| \leq 2\,\Delta z} ,$$
 
@@ -304,9 +305,19 @@ of it ($\Delta z$ the calibration's step).  Both PSFs are divided by
 $S_0 + S_1$, and $s_c = S_c / (S_0 + S_1)$ is stored with each, so
 $s_0 + s_1 = 1$.
 
-Clipping keeps a little of the noise, the part above zero: on a simulated
-calibration from 9 beads the photons read 1.5% high and the ratio 0.005 high,
-and from 27 beads 0.8% and 0.003.  Between its knots the cubic spline can dip
+Clipping keeps a little of the noise, the part above zero -- 0.7% of a
+bright half's signal and 2.7% of a dim one, from 9 beads -- which the fit's
+background mostly takes.  Counted as light, it read the photons 1.5% high and
+the ratio 0.005 high; counted before clipping, the photons come back within
+0.7% and the ratio within 0.003, from 9 beads and from 27.  Why clip at all,
+when the fit keeps its model positive anyway?  Because the likelihood weighs
+each pixel by $1/\mu_i$: a negative dip in the PSF, times a bright
+molecule's photons, brings the model close to zero wherever the background
+is low, and a pixel there with a photon in it outweighs the rest.  Unclipped,
+at a photon of background, z scattered by 55 nm where clipped it scatters by
+10.  The camera's read noise, added to data and model as in
+[Gaussian 2D](plugin:Localize/Gaussian 2D), floors those weights further.
+Between its knots the cubic spline can dip
 slightly below zero next to a clipped tail; the calibration records the
 lowest value as `spline_minimum` (a fraction of the peak, a few per mille),
 and the fit floors its model at $10^{-3}$ photons, so a low background never

@@ -1,5 +1,5 @@
 ---
-version: "1"
+version: "2"
 covers: [smappy.psf.SplinePSF, smappy.io.calibration.load_spline_calibration, smappy.io.calibration.SplineCalibration, smappy.io.calibration.evaluate_spline, smappy.io.calibration.warn_on_em_mismatch, smappy.roi.cut_rois, smappy.calibrate.core.build_calibration]
 ---
 
@@ -238,7 +238,11 @@ SMAP calibration carries it -- and if the data's camera says otherwise, the
 fit warns, in the plugin's output: the EM register of many EMCCDs reads out mirrored, so a model
 from beads on the other port is mirrored against the data, and every fit is
 then subtly wrong.  The fit is not stopped.  The EM gain's excess noise is
-handled as in the Gaussian fitter.
+handled as in the Gaussian fitter.  So is the camera's read noise: its variance is
+added to data and model, one electron without EM gain by default (*read
+noise*), which also keeps a pixel whose spline model nears zero from
+dominating a fit at low background (see
+[Gaussian 2D](plugin:Localize/Gaussian 2D)).
 
 ## Parameters
 

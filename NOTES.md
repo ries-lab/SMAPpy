@@ -7,9 +7,11 @@ here was decided deliberately; if something looks wrong, read this first.
 
 A stripped-down version of SMAP's `fit_fastsimple` workflow: TIFF -> photons ->
 filter -> peak finding -> ROI cutting -> MLE fit -> HDF5.  Single channel,
-Poisson noise only.  Fit models: `gauss_free`, `gauss_xy`, `cspline`.
+Poisson noise, with the camera's read noise as one variance added to data and
+model (see "Read noise" below).  Fit models: `gauss_free`, `gauss_xy`, `cspline`.
 
-Deliberately **not** ported: sCMOS per-pixel variance, the Anscombe transform
+Deliberately **not** ported: sCMOS per-pixel variance (one variance for the
+chip is used instead), the Anscombe transform
 and probability cutoff, background estimation, minimum-distance filtering,
 mean-PSF / MIP-PSF detection filters, ROI masks, Zernike and
 astigmatic-Gaussian z models, multiple z start values.  Two-channel global
@@ -17,6 +19,17 @@ fitting of a split frame came later, and has sections of its own ("Two colours
 in 2D" and the dual-colour calibration in `docs/dual_color_calibration.md`).
 
 ## Departures from SMAP, and why
+
+* **Read noise.**  The likelihood is Poisson; an sCMOS adds Gaussian read noise
+  of about an electron per pixel (0.7 to 1.4, pixel by pixel).  Its variance is
+  added to the data and taken up by the fitted background (Huang et al. 2013,
+  with one variance for the chip rather than a map), then taken back off the
+  background: `CameraMetadata.readout_variance`, `pipeline.with_readout`.
+  Default 1 e- without EM gain, 0 with it.  At half a photon of background the
+  Poisson likelihood alone read the background as 0.74; with the variance,
+  0.53.  It also floors each pixel's weight, 1 / (model + variance), which is
+  what keeps a spline's near-zero tail from dominating a fit of a bright spot
+  at a low background.
 
 * **No module chain.**  SMAP's WorkflowModules exist to serve a GUI (parameter
   synchronisation, per-frame data packets, global-variable accumulators).  Here

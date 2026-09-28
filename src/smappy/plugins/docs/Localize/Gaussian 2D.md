@@ -1,5 +1,5 @@
 ---
-version: "1"
+version: "2"
 covers: [smappy.pipeline.LocalizationEngine, smappy.detect.PeakFinder, smappy.detect.DynamicCutoff, smappy.psf.GaussianPSF, smappy.camera.to_photons]
 ---
 
@@ -222,6 +222,21 @@ them Poisson again with half the counts, and the fitted photons and
 background are multiplied by 2 afterwards.  The precision then correctly
 reflects the extra noise.
 
+**Read noise.**  A camera without EM gain -- an sCMOS -- adds Gaussian read
+noise, about one electron per pixel, to the Poisson counts, and a Poisson
+likelihood cannot take it: a count read as negative is treated as none, and
+at a photon or two of background the background comes out too high.  So the
+read noise's variance $\sigma_r^2$ is added to every pixel of the data and of
+the model before the fit (Huang et al. 2013), which makes the likelihood
+Poisson again to a good approximation and weighs each pixel by
+$1/(\mu_i + \sigma_r^2)$; it is taken off the fitted background afterwards.
+*read noise* sets $\sigma_r$: by default 1 electron without EM gain and 0 with
+it, since the gain leaves the read noise a fraction of an electron.  On
+simulated spots at half a photon of background and one electron of read
+noise, the background comes back at 0.53 rather than 0.74.  The variance is
+one number for the whole chip; an sCMOS's varies from pixel to pixel (0.7 to
+1.4 electrons), which a variance map would capture and this does not.
+
 **Quality of the fit.**  `logl` is the log-likelihood of the fit and
 `logl_rel` the same per pixel of the ROI, so that it can be compared between
 ROI sizes.  A spot that is not one emitter (two overlapping, or a bright
@@ -300,7 +315,10 @@ Deliberate changes:
   removed by *max fit distance* instead.
 * Candidates at the image border are dropped rather than fitted in a ROI
   shifted off centre, which biased them.
-* No Anscombe transform, sCMOS variance map or background estimation before
+* **Read noise** is one variance for the whole chip, added to data and model
+  (1 electron by default without EM gain); SMAP's sCMOS mode reads a
+  per-pixel variance map instead, which is not ported.
+* No Anscombe transform or background estimation before
   detection; the filter pads the image by repeating its edge rather than with
   zeros.
 * EM excess noise is handled outside the fitter, by the factor of 2 above.
@@ -320,6 +338,11 @@ Deliberate changes:
   microscopy. *Nat Methods* 7, 377 (2010).
   [doi:10.1038/nmeth.1447](https://doi.org/10.1038/nmeth.1447) -- the
   precision formula, and the excess noise of EMCCDs.
+* Huang F, Hartwich TMP, Rivera-Molina FE, et al. Video-rate nanoscopy
+  using sCMOS camera-specific single-molecule localization algorithms.
+  *Nat Methods* 10, 653 (2013).
+  [doi:10.1038/nmeth.2488](https://doi.org/10.1038/nmeth.2488) -- the read
+  noise's variance added to data and model.
 * Ober RJ, Ram S, Ward ES. Localization accuracy in single-molecule
   microscopy. *Biophys J* 86, 1185 (2004).
   [doi:10.1016/S0006-3495(04)74193-4](https://doi.org/10.1016/S0006-3495%2804%2974193-4)

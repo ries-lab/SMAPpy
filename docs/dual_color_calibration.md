@@ -191,8 +191,13 @@ noise dip anywhere in the averaged volume, added to every pixel of every
 plane -- 11% of a bright channel's focal signal and 40% of a channel with a
 fifth of the light, from 9 simulated beads -- and a fit's background absorbed
 it, so the fitted background read low by the photons times the offset and sat
-on the fitter's floor at low backgrounds. Clipping keeps only the noise above
-zero (photons about 1% high from 9-27 beads). The cubic spline can still dip
+on the fitter's floor at low backgrounds. Clipping keeps the noise above zero,
+so the light is counted before clipping, where the noise averages out: the
+photons then come back within 0.7% from 9 to 27 simulated beads. Clipping
+still matters although the fit keeps its model positive: the likelihood weighs
+a pixel by 1/model, and an unclipped negative dip, times a bright molecule's
+photons, brings the model near zero at a low background (z scattered by 55 nm
+rather than 10 at one photon per pixel). The cubic spline can still dip
 slightly below zero between knots next to a clipped tail; its lowest value is
 recorded as `spline_minimum` (relative to the peak), and the fitter floors its
 model at 1e-3 photons. Both channels are then divided by **one

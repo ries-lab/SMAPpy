@@ -526,10 +526,13 @@ class DualChannelEngine:
         pairs = _concat_pairs(self._pairs)
         self._pairs, self._buffered = [], 0
 
+        from .pipeline import with_readout, without_readout
         started = time.perf_counter()
-        result = self.model.fit(pairs.images, pairs.link,
+        variance = self.camera.readout_variance
+        result = self.model.fit(with_readout(pairs.images, variance), pairs.link,
                                 iterations=self.settings.iterations,
                                 n_threads=self.settings.n_threads)
+        without_readout(result, self.model, variance)
         self.stats["fit_seconds"] += time.perf_counter() - started
         self.stats["pairs"] += len(pairs)
 

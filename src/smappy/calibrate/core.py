@@ -704,8 +704,10 @@ def positive_pair_models(raw, dz_nm, settings):
     40% of a half with a fifth of the light, from 9 beads.  A fit's
     background took it, so the photons survived; the background did not --
     it read low by the photons times the constant, and at a photon per pixel
-    it sat on the fitter's floor.  Clipping the noise of the tails costs
-    0.7% and 2.7% of phantom signal instead.  The spline can still dip a
+    it sat on the fitter's floor.  Clipping keeps the tails' noise above
+    zero, 0.7% and 2.7% of the signal; the light is therefore counted
+    before clipping, where that noise averages out, and the photons come
+    back within half a per cent.  The spline can still dip a
     little below zero between knots near the clipped tails; the fitter floors
     its model for that (`lm.hpp`, MIN_MODEL), and the dip is recorded here,
     relative to the peak, as ``spline_minimum``.
@@ -713,30 +715,33 @@ def positive_pair_models(raw, dz_nm, settings):
     s = settings
     psfs = ndimage.gaussian_filter(raw, (0, s.smooth_z_nm/dz_nm, s.smooth_xy_px,
                                         s.smooth_xy_px), mode='reflect')
+    centre = (psfs.shape[1]-1)//2
+    around = slice(max(centre-FOCAL_PLANES, 0), centre+FOCAL_PLANES+1)
+    # the light is counted before clipping, where the tails' noise averages
+    # out; the clipped part above zero is noise the fit's background mostly
+    # takes, and counted as light it read the photons 1.5% high (9 beads)
+    light = [float(psf[around].sum(axis=(1, 2)).mean()) for psf in psfs]
     psfs = np.maximum(psfs, 0)
     # One factor for both channels, so that the pair keeps the beads' split,
     # chosen so that their signal together is one photon at focus: fitted
     # with one shared photon number (biplane, the split taken from the
     # beads) that number is the emitter's total.  Fitted with a photon number
     # per channel (two colours), each is multiplied back by its channel's own
-    # share, `photon_normalization`, stored with the PSF.  The signal is read
+    # share, `photon_normalization`, stored with the PSF.  The light is read
     # over the planes around focus, where z = 0 is.
-    centre = (psfs.shape[1]-1)//2
-    around = slice(max(centre-FOCAL_PLANES, 0), centre+FOCAL_PLANES+1)
-    signal = [float(psf[around].sum(axis=(1, 2)).mean()) for psf in psfs]
-    norm = float(sum(signal))
-    if not np.isfinite(norm) or norm <= 0 or min(signal) <= 0:
+    norm = float(sum(light))
+    if not np.isfinite(norm) or norm <= 0 or min(light) <= 0:
         raise ValueError('invalid paired PSF normalization')
     models = [SplineCalibration(spline_coefficients(psf/norm), dz_nm,
               (psf.shape[0]-1)/2, x0=(s.roi_size-1)/2, psf=psf/norm, em_mirror=False,
-              parameters={'method': 'smappy_dual_bead_v3', 'settings': asdict(s),
+              parameters={'method': 'smappy_dual_bead_v4', 'settings': asdict(s),
                           'common_normalization': norm,
-                          'normalization': 'joint: both channels\' signal around '
-                                           'focus sums to 1',
+                          'normalization': 'joint: both channels\' light around '
+                                           'focus, before clipping, sums to 1',
                           'photon_normalization': share/norm,
                           'positivity': 'smoothed PSF clipped at zero',
                           'z_reference': 'joint aligned stack center'})
-              for psf, share in zip(psfs, signal)]
+              for psf, share in zip(psfs, light)]
     for model in models:
         model.parameters['spline_minimum'] = (_spline_minimum(model.coeff)
                                               / float(model.psf.max()))
