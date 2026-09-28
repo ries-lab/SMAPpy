@@ -219,8 +219,7 @@ rather than something already drawn.
 | `filenumber`, `channel` | which file, which channel |
 
 Every precision is `<quantity>_err_<unit>` -- `x_err_nm`, `z_err_nm`,
-`photons_err` (no unit, nothing after `_err`).  Names saved before a rename
-are read through `columns.RENAMED`, and only there.
+`photons_err` (no unit, nothing after `_err`).
 
 Prefer `next((n for n in ("xy_err_nm", "xy_err_pix") if n in locs), None)`
 over assuming one spelling, and raise a message naming the columns the table
