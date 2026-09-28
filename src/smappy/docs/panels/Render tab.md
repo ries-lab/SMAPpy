@@ -323,9 +323,16 @@ ones produced it.
 
 ### +
 Adds a layer: *localizations* or *image...*.  The layer strip also has one
-button per layer (click to edit it, right-click to show or hide it without
-selecting it; bold means drawn, struck through means hidden), a box to tick
-the selected layer visible or not, and its name.
+button per layer: click to edit it, right-click to show or hide it without
+selecting it; bold means drawn, struck through means hidden.
+
+### visible
+Whether the selected layer is drawn.  A hidden layer keeps its settings and
+is still what a plugin reads when it asks for that layer.
+
+### name
+The selected layer's name, shown in its button's tooltip and in the
+layer lists of the dialogs that ask for one.
 
 ### localizations
 A new localization layer on the same table, starting as a copy of the
@@ -461,8 +468,13 @@ it is the ordinary picture.  While a custom pair is shown, a note says what
 is across and up, and the scale bars are in the axes' own units.
 
 ### x
-The horizontal axis, and after the slash its scale: how many units of that
-column one render unit is.  *auto* is the table's x position.
+The horizontal axis, and after *scale* how many units of that column one
+render unit is.  *auto* is the table's x position.
+
+### scale
+Units of the axis's column per render unit.  For positions leave it at 1;
+for photons against frame, *fit* picks scales that make each axis's 1-99 %
+fill the picture.
 
 ### y
 The vertical axis and its scale.  *auto* is y.

@@ -64,20 +64,20 @@ from smappy.calibrate.dual import DualColorSettings, calibrate_dual
 from smappy.calibrate.input import BeadStack
 from smappy.calibrate.validation import fit_bead_diagnostics
 from smappy.simulate import bead_stacks, dual_bead_stacks
-# one simulated field of nine astigmatic beads, 40 nm steps -> a calibration
-stacks, z_objective = bead_stacks(1, seed=0, dz_nm=40.0)
-settings = CalibrationSettings(roi_size=21, smooth_z_nm=40.0)
+# one simulated field of nine astigmatic beads, 60 nm steps -> a calibration
+stacks, z_objective = bead_stacks(1, seed=0, dz_nm=60.0)
+settings = CalibrationSettings(roi_size=21, smooth_z_nm=60.0)
 image = stacks[0].astype(np.float32)
 beads = collect_beads([BeadStack(image, z_objective, source="beads")], settings)
 single = build_calibration(beads)
 cal = single.calibration
-# a split camera, 30 % of each bead's light in the lower half, 50 nm steps
-dstacks, dz_objective = dual_bead_stacks(1, seed=0, dz_nm=50.0, z_range_nm=(-700.0, 700.0),
+# a split camera, 30 % of each bead's light in the lower half, 70 nm steps
+dstacks, dz_objective = dual_bead_stacks(1, seed=0, dz_nm=70.0, z_range_nm=(-700.0, 700.0),
                                          secondary_share=0.3)
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")        # no camera ROI in a simulation: ROI-local
     dual = calibrate_dual([BeadStack(dstacks[0].astype(np.float32), dz_objective)],
-                          DualColorSettings(layout="up-down", main_channel="upper", dz_nm=50.0,
+                          DualColorSettings(layout="up-down", main_channel="upper", dz_nm=70.0,
                                             roi_size=17, smooth_z_nm=40.0))
 ```
 

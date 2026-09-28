@@ -359,8 +359,9 @@ class LayerStrip(QWidget):
         self.layout_ = QHBoxLayout(self)
         self.layout_.setContentsMargins(0, 0, 0, 0)
         self.buttons: List[QToolButton] = []
-        self.visible = QCheckBox()
-        self.visible.setToolTip("visible")
+        self.visible = QCheckBox("visible")
+        self.visible.setToolTip("draw this layer")
+        self.name_label = QLabel("name")
         self.name = QLineEdit()
         self.name.setToolTip("layer name")
         self.name.setMaximumWidth(110)
@@ -372,6 +373,7 @@ class LayerStrip(QWidget):
         menu.addAction("image...", self.add_image_requested)
         self.add.setMenu(menu)
         self.remove = QToolButton(text="-")
+        self.remove.setToolTip("remove this layer")
         self.remove.clicked.connect(self._remove)
         # two layers drift apart over a session and one of them is right;
         # setting the other one up again by hand is a dozen controls
@@ -384,8 +386,8 @@ class LayerStrip(QWidget):
     def rebuild(self) -> None:
         while self.layout_.count():
             item = self.layout_.takeAt(0)
-            if item.widget() and item.widget() not in (self.visible, self.name,
-                                                       self.add, self.remove,
+            if item.widget() and item.widget() not in (self.visible, self.name_label,
+                                                       self.name, self.add, self.remove,
                                                        self.copy):
                 item.widget().deleteLater()
         self.buttons = []
@@ -403,6 +405,7 @@ class LayerStrip(QWidget):
         self.layout_.addWidget(self.remove)
         self.layout_.addWidget(self.copy)
         self.layout_.addWidget(self.visible)
+        self.layout_.addWidget(self.name_label)
         self.layout_.addWidget(self.name)
         self.layout_.addStretch(1)
         self.remove.setEnabled(len(self.buttons) > 1)
@@ -603,7 +606,7 @@ class AxesSection(QWidget):
             row = QHBoxLayout()
             row.setContentsMargins(0, 0, 0, 0)
             row.addWidget(combo, 1)
-            row.addWidget(QLabel("/"))
+            row.addWidget(QLabel("scale"))
             row.addWidget(scale)
             holder = QWidget()
             holder.setLayout(row)
