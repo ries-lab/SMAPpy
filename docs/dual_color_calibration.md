@@ -188,14 +188,28 @@ After Gaussian smoothing, a separate constant offset makes each channel's cubic
 PSF strictly positive. A Bernstein coefficient lower bound over every cubic cell
 accounts for interpolation undershoot between positive knots. The relative floor
 is 1e-6 of the channel peak (absolute minimum 1e-12 before common normalization).
-Offsets and normalization are saved. Both channels then use **one main-channel
-normalization**, preserving their relative amplitudes apart from the explicitly
-recorded positivity offsets. Unmodified unsmoothed averages are retained for
-review. The measured median secondary/main bead brightness ratio is saved too.
-Intensities are in camera ADU; photon counts are not inferred without gain data.
-Each model records its peak-plane integral in the common normalization. A
-separately fitted secondary-channel amplitude therefore follows this common
-scale and should not be interpreted directly as that channel's photon total.
+Offsets and normalization are saved. Both channels are then divided by **one
+common factor**, so they keep the beads' relative amplitudes: the factor makes
+the two channels' signal around the focal plane (the plane sums over the focal
+plane and two planes either side, less the positivity offset, which a fit's
+background absorbs) add up to 1. Each model stores its share of that sum as
+`photon_normalization`, so the two shares add up to 1 too. Unmodified
+unsmoothed averages are retained for review. The measured median
+secondary/main bead brightness ratio is saved too. Intensities are in camera
+ADU; photon counts are not inferred without gain data.
+
+One calibration serves both uses of a split camera:
+
+* **Biplane**, photons linked: one photon number is fitted for both channels,
+  each channel's model is that number times its PSF, and because the PSFs
+  hold one photon together and carry the beads' split, the number is the
+  emitter's total.
+* **Two colours**, photons free: a number is fitted per channel against that
+  channel's PSF and multiplied by its `photon_normalization`, which gives the
+  photons in each channel; the total is their sum.
+
+Calibrations saved before `photon_normalization` was stored had the main
+channel's brightest plane at 1; the fit works their shares out on loading.
 
 ## Storage and validation
 

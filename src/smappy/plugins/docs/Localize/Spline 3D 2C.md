@@ -1,12 +1,22 @@
 ---
-version: "2"
+version: "3"
 covers: [smappy.psf.GlobalSplinePSF, smappy.dualfit.combine_peaks, smappy.dualfit.build_link, smappy.dualfit.cut_paired_rois, smappy.dualfit.paired_to_localizations, smappy.dualfit.DualChannelEngine, smappy.calibrate.dual.build_dual_calibration, smappy.calibrate.dual.fit_dual_transform, smappy.calibrate.core.positive_pair_models, smappy.calibrate.dual.load_dual_color_calibration, smappy.plugins.fit.DualSplineFit, smappy.plugins.fit.finish_localizations]
 ---
 
 ## What it does
 
-This is the fitter for **two colours on one camera in 3D**.  It combines two
-things other pages explain: the split camera of
+This is the fitter for **two halves of one camera in 3D**, and it serves two
+experiments:
+
+* **Two colours.**  A dichroic sends each molecule's light to both halves,
+  in a proportion that depends on the dye.  The photons of each half are
+  fitted separately, and their split tells the dyes apart.
+* **Biplane.**  A beam splitter sends the light to both halves with the two
+  halves focused at different heights.  The split is the same for every
+  molecule and known from the beads, so only **one photon number** is
+  fitted, and both halves together pin z.  Tick *link photons* for this.
+
+For two colours it combines two things other pages explain: the split camera of
 [Gaussian 2D 2C](plugin:Localize/Gaussian 2D 2C) -- a dichroic sends each
 molecule's light to both halves of the chip, and the proportion in each half
 tells the dyes apart -- and the measured, z-dependent PSF of
@@ -111,11 +121,50 @@ takes three things:
   same height in both halves.  Any real difference between the halves -- one
   half focused a little higher, say -- stays in the models rather than being
   aligned away.
-* **Their relative brightness.**  Both PSFs are scaled by one number, the one
-  that makes the main half's brightest plane sum to 1, so the secondary PSF
-  keeps how bright the beads were in its half compared to the main one.  The
-  fit takes that back out (see *Photons* below), so the photons it reports
-  are photons.  The median of the bead brightness ratio is saved too.
+* **Their relative brightness.**  Both PSFs are scaled by **one** factor,
+  chosen so that the two together hold one photon around the focal plane.
+  So the pair keeps the beads' split: with a fifth of the light in the
+  secondary half, the main PSF holds 0.8 of a photon and the secondary 0.2.
+  Each half's share is stored with its PSF.  The median of the beads'
+  brightness ratio is saved too.
+
+**2. Two uses of one calibration.**  How the photons are read depends on
+whether they are linked.
+
+* **Linked (biplane).**  One photon number $N$ is fitted, and each half's
+  model is $N$ times its PSF.  Because the PSFs carry the beads' split and
+  hold one photon together, $N$ is the molecule's total photons, split as
+  the beads split -- nothing has to be typed in.
+* **Free (two colours).**  A photon number is fitted in each half against
+  that half's PSF.  A number fitted against a PSF that holds 0.2 of a photon
+  is five times the photons it stands for, so each half's number is
+  multiplied by its stored share.  `photons_ch0` and `photons_ch1` are then
+  the photons in each half, `photons` their sum, and `ratio` the dye's own
+  fraction in the secondary half -- whatever the beads' split was.
+
+```figure Both uses give photons back as photons.  Left, two colours: molecules of 2000 photons with a quarter in the secondary half, fitted with the photons free -- each half's photons and their sum, against the truth (grey).  Right, biplane: molecules that split as the beads did, fitted with one photon number, which is the total.
+dye = pairs(np.repeat(levels, 60), 0.25)[0]
+free = both.unpack(both.fit(dye, link[:len(dye)]), link[:len(dye)])
+from smappy.psf import GlobalSplinePSF
+biplane = GlobalSplinePSF((cal.main, cal.secondary), (True,) * 5)
+bi_images = pairs(np.repeat(levels, 60), 0.5)[0]
+bi = biplane.unpack(biplane.fit(bi_images, link[:len(bi_images)]), link[:len(bi_images)])
+fig.set_size_inches(7, 2.8)
+axes = fig.subplots(1, 2, sharey=True)
+bins = np.linspace(0, 3200, 65)
+for name, truth, colour in (("photons_ch0", 1500, "#1f77b4"), ("photons_ch1", 500, "#d62728"),
+                            ("photons", 2000, "#2ca02c")):
+    axes[0].hist(free[name], bins, histtype="step", color=colour, label=name)
+    axes[0].axvline(truth, color="0.6", lw=1, zorder=0)
+axes[1].hist(bi["photons"], bins, histtype="step", color="#2ca02c", label="photons")
+axes[1].axvline(2000, color="0.6", lw=1, zorder=0)
+axes[0].set_title("two colours: photons free", fontsize=9)
+axes[1].set_title("biplane: one photon number", fontsize=9)
+for ax in axes:
+    ax.set_xlabel("photons")
+    ax.legend(frameon=False, fontsize=7)
+axes[0].set_ylabel("molecules")
+```
 
 ```figure The calibration.  Left: the PSF model of each half at three heights, as the fit sees them -- the same astigmatism, the secondary half's spot a little wider.  Right: how far the calibration's transformation, measured on nine bead pairs, is from the true one over the secondary half, in pixels.
 fig.set_size_inches(7.5, 3.3)
@@ -143,14 +192,14 @@ ax.tick_params(labelsize=7)
 fig.colorbar(shown, ax=ax, fraction=0.046, label="px").ax.tick_params(labelsize=7)
 ```
 
-**2. The model in each half.**  Each ROI is compared with its own half's
+**3. The model in each half.**  Each ROI is compared with its own half's
 PSF: for half $c$, the calibrated PSF of that half at the molecule's position
 and height, scaled to $N_c$ photons, on a background $b_c$.  x and y reach the
 secondary half through the transformation, exactly as in
 [Gaussian 2D 2C](plugin:Localize/Gaussian 2D 2C).  z needs no mapping at all:
 the two PSFs share one z grid, so the same z is the same plane in both.
 
-**3. What is linked.**  By default x, y and z are linked -- one value each for
+**4. What is linked.**  By default x, y and z are linked -- one value each for
 both halves -- and the photons and the background are free, one per half.
 This is the choice that the two-colour experiment needs: every photon of both
 spots informs the position and the height, and nothing forces the photons to
@@ -179,7 +228,7 @@ axes[1].set_ylabel("x precision (nm, 100 nm pixels)")
 axes[0].legend(frameon=False, fontsize=8)
 ```
 
-**4. z, and the colour.**  z is converted from the calibration's planes as
+**5. z, and the colour.**  z is converted from the calibration's planes as
 in [Spline 3D](plugin:Localize/Spline 3D): relative to the calibration's
 focal plane, in the nanometres the objective moved.  The photons of the two
 halves come out as `photons_ch0` and `photons_ch1`, their sum as `photons`,
@@ -204,7 +253,7 @@ ax.set_ylabel("ratio")
 ax.legend(frameon=False, fontsize=8, loc="center right")
 ```
 
-**5. Finishing.**  As in [Gaussian 2D 2C](plugin:Localize/Gaussian 2D 2C):
+**6. Finishing.**  As in [Gaussian 2D 2C](plugin:Localize/Gaussian 2D 2C):
 once the last frame is fitted, drift correction (off by default; RCC or
 COMET, which corrects z as well when the table has it) and colour assignment
 (on by default) run over the whole table, with the Analysis tab's own
@@ -244,26 +293,39 @@ its light into one half gains less, since the other half adds little; and
 because x, y and z are linked, the photons of both halves count in every one
 of them.
 
-**Photons.**  The secondary PSF carries the beads' relative brightness (see
-*The calibration*), so the number fitted against it, $\hat{N}_1$, is in the
-beads' units: a fifth of the light in the secondary half makes its PSF a
-quarter as bright as the main one, and $\hat{N}_1$ four times too large.
-Each half's photons are therefore multiplied by what its PSF gives one fitted
-photon, $s_c$:
+**The normalisation.**  Each half's PSF is the average of its bead images,
+smoothed, with a constant $p_c$ added to every pixel so that the cubic spline
+is positive everywhere.  That constant is not light: in a fit it is taken up
+by the background, so it is left out of what a PSF holds.  Half $c$'s
+signal is
 
-$$N_c = s_c\, \hat{N}_c , \qquad s_c = \max_z \sum_{\mathrm{ROI}} \mathrm{PSF}_c - p_c\, n_{\mathrm{px}} ,$$
+$$S_c = \left\langle \sum_{\mathrm{ROI}} \mathrm{PSF}_c(z) \right\rangle_{|z| \leq 2\,\Delta z} - p_c\, n_{\mathrm{px}} ,$$
 
-the integral of the brightest plane less the constant $p_c$ the calibration
-added to every one of its $n_{\mathrm{px}}$ pixels to keep the spline
-positive.  That constant is what the fit's background absorbs, and it is not
-small: 15% of the main half's integral, and 40% of a secondary half that has
-a fifth of the light.  So `photons` is in photons and `ratio` is each dye's
-own fraction in the secondary half, whatever the beads' split was: on
-simulated beads with a fifth of their light in the secondary half, a dye
-with a quarter comes back at 0.25 (it was 0.57 before version 2, and the
-total 3.4 times too large).  With the photons linked, the secondary's factor
-is the *photon ratio* over the split its PSF already carries -- one, when no
-ratio is given.
+the plane sum averaged over the focal plane and the two planes either side
+of it ($\Delta z$ the calibration's step), less the constant over the
+$n_{\mathrm{px}}$ pixels of a plane.  Both PSFs are divided by $S_0 + S_1$,
+and $s_c = S_c / (S_0 + S_1)$ is stored with each, so $s_0 + s_1 = 1$.  The
+constant matters: it is about 15% of a bright half's plane sum and 40% of a
+half with a fifth of the light, enough to read that fifth as a third.
+
+**Photons.**  With the link's photon factor $f_c$ ($f_0 = 1$), half $c$'s
+model is $f_c \hat{N}\,\mathrm{PSF}_c$ when the photons are linked, and
+$\hat{N}_c\,\mathrm{PSF}_c$ when they are free.  What is reported is
+
+$$N = \hat{N} \sum_c f_c\, s_c \quad \mathrm{(linked)}, \qquad N_c = s_c\, \hat{N}_c ,\quad N = \sum_c N_c \quad \mathrm{(free)} .$$
+
+With no *photon ratio* given, $f_1 = 1$: the split is the one the PSFs carry,
+the beads', and linked $N = \hat{N}$.  A *photon ratio* $r$ (secondary over
+main photons) sets $f_1 = r\, s_0 / s_1$, which splits the one photon number
+as $r$ says, and $N$ is still the total.  On simulated beads with a fifth of
+their light in the secondary half, a dye with a quarter comes back at a
+`ratio` of 0.25 and its true photons, and a biplane fit of molecules that
+split as the beads did gives their total, both within 1%.  (Before version
+2 the secondary's photons were read in the beads' units -- that dye came
+back at 0.57, with 3.4 times its photons -- and before version 3 a linked
+fit reported the main half's share rather than the total.)  A calibration
+saved before the shares were stored had the main half's brightest plane
+at 1, and its shares are worked out from that on loading.
 
 **Mirrored splitters.**  A splitter that mirrors one half is handled by the
 link: the local scale of the transformation along the mirrored axis is
@@ -296,13 +358,17 @@ which should scatter about 0 at every height if the two PSF models share
 their focus.
 
 ### model.link_photons
-With the photons linked, `ratio` is 0 for every localization and colour
-assignment has nothing to work with.
+On for biplane, off for two colours.  Linked, `photons` is the total and
+`ratio` is 0 for every localization -- there is no split left to measure, and
+colour assignment has nothing to work with -- but z is more precise still,
+since both halves' photons count as one.
 
 ### model.photon_ratio
 Only used with *link photons* on; with the photons free it has no effect.
 Leave it empty: the calibration's PSFs already carry the beads' split, which
-is the dye's too when the photons can be linked at all (biplane, one dye).
+is the molecules' too when the photons can be linked at all (biplane, one
+dye).  Give it only when the molecules split differently from the beads --
+a narrow-band dye behind a splitter whose transmission depends on colour.
 
 ### fit.roisize
 Both ROIs have this size.  As for [Spline 3D](plugin:Localize/Spline 3D) it
@@ -322,8 +388,8 @@ photons of each half beside the totals:
 | --- | --- |
 | `x_nm`, `y_nm`, `z_nm` | the linked position, in the main half's coordinates, and the height |
 | `x_err_nm`, `y_err_nm`, `xy_err_nm`, `z_err_nm` | their precision (CRLB), from both halves |
-| `photons`, `photons_err` | the photons of both halves together |
-| `photons_ch0`, `photons_ch1` | the photons of the main and the secondary half, and `photons_err_ch0`, `photons_err_ch1` |
+| `photons`, `photons_err` | the photons of both halves together: the sum of the two, or, linked, the one fitted number |
+| `photons_ch0`, `photons_ch1` | photons free: the photons of the main and the secondary half, and `photons_err_ch0`, `photons_err_ch1` |
 | `ratio` | $N_1 / (N_0 + N_1)$, the colour |
 | `background_ch0`, `background_ch1` | the background per pixel of each half (`background` is the main half's) |
 | `channel` | the colour Assign colours gave it: 1, 2, or 0 for none |
@@ -358,11 +424,13 @@ differences:
   channel weights, a choice of which channel's x and y are reported (SMAP:
   either, or the mean), several z starts and sCMOS variance maps are not
   offered.  x and y are always the main half's.
-* **The photons are scaled back the same way.**  SMAP multiplies each
-  channel's fitted photons by its spline's normalisation (`normf`) and
-  divides a typed-in photon ratio by the secondary's; here the factor is the
-  PSF's integral less the positivity constant (see *Photons*), and a linked
-  photon ratio left empty is the split the two PSFs carry.
+* **The photons are scaled back the same way.**  SMAP stores a
+  normalisation per channel with the global calibration (`normf`),
+  multiplies each channel's fitted photons by it and divides a typed-in
+  photon ratio by the secondary's.  Here the PSFs are normalised together
+  so that they hold one photon at focus, the share $s_c$ is what is stored,
+  the constant added for positivity is left out of it, and a linked fit
+  with no ratio given takes the beads' split and reports the total.
 * **No image is mirrored.**  SMAP flips the second channel's ROIs for a
   mirrored splitter; here the secondary PSF is kept in the camera's
   orientation and the mirror is a factor of $-1$ in the link.

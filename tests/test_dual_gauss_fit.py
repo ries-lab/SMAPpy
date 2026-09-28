@@ -151,6 +151,25 @@ def test_an_unlinked_fit_keeps_how_far_the_partner_is_from_the_link():
     assert not [name for name in right.keys() if "_pix" in name]
 
 
+def test_linked_photons_are_the_emitters_total():
+    """One photon number for both halves, the split typed in: the number
+    reported is the total over the halves, not the main half's share."""
+    from smappy.detect import AbsoluteCutoff, DoGFilter, PeakFinder
+    from smappy.dualfit import DualChannelEngine
+
+    rng = np.random.default_rng(8)
+    frames, _ = movie(40, rng, transform(), ratio=0.35, photons=6000.)
+    engine = DualChannelEngine(
+        camera(), PeakFinder(DoGFilter(1.2), AbsoluteCutoff(25.0)),
+        GlobalGaussianPSF(sigma=1.2, shared=(True, True, True, False, False)),
+        transform(), FitSettings(roisize=13, output_unit="pixel"),
+        photon_ratio=0.35 / 0.65)
+    engine.push((frames + 100).astype(np.uint16), first_frame=0)
+    locs = engine.flush()
+    assert np.median(locs["photons"]) == pytest.approx(6000, rel=0.05)
+    assert np.all(locs["ratio"] == 0)
+
+
 def test_frames_from_another_camera_roi_are_refused():
     """The geometry check existed and neither fitter called it."""
     from smappy.detect import AbsoluteCutoff, DoGFilter, PeakFinder

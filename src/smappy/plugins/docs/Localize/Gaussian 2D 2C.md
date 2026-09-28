@@ -1,5 +1,5 @@
 ---
-version: "1"
+version: "2"
 covers: [smappy.dualfit.combine_peaks, smappy.dualfit.build_link, smappy.dualfit.cut_paired_rois, smappy.dualfit.paired_to_localizations, smappy.dualfit.DualChannelEngine, smappy.psf.GlobalGaussianPSF, smappy.detect.find_candidates, smappy.plugins.fit.DualGaussianFit, smappy.plugins.fit.calibration_blocks, smappy.plugins.fit.finish_localizations, smappy.calibrate.transform.register_channels]
 ---
 
@@ -334,9 +334,11 @@ the factor $\sqrt{2}$ of the figure.
 **What is written.**  `x_nm`, `y_nm` are the linked position, in the main
 half's coordinates.  With the photons free, `photons` is
 $N_0 + N_1$ and `photons_err` the two errors added in quadrature; `ratio` is
-$N_1 / (N_0 + N_1)$.  With *link photons* on, $N_1 = r\,N_0$ for the
-*photon ratio* $r$, `photons` is the one fitted $N_0$ -- the main half's
-count -- and `ratio` is 0: there is no split left to measure.  `logl_rel` is the log-likelihood per pixel of
+$N_1 / (N_0 + N_1)$.  With *link photons* on, one number $\hat{N}$ is fitted
+and the halves see $\hat{N}$ and $r\,\hat{N}$ for the *photon ratio* $r$;
+`photons` is their total, $(1 + r)\,\hat{N}$, and `ratio` is 0: there is no
+split left to measure.  (Before version 2 it was the main half's $\hat{N}$
+alone.)  `logl_rel` is the log-likelihood per pixel of
 the two ROIs together.  EM gain is handled as in the single-channel fit.
 The first frames are checked against the transformation's geometry: a
 registration made on another camera ROI is refused, and a movie without a
@@ -356,8 +358,9 @@ halves pin one position and the precision is better.
 
 ### model.link_photons
 On, one photon number is fitted and the secondary half is expected to hold
-*photon ratio* times as many: more precise, and no colour.  That suits two
-halves that see the same dye, not two dyes.
+*photon ratio* times as many as the main: more precise, and no colour, and
+`photons` is the total over both halves.  That suits two halves that see the
+same dye, not two dyes.
 
 ### model.photon_ratio
 Only used with *link photons* on; with the photons free it has no effect.

@@ -300,9 +300,11 @@ def test_the_ratio_and_the_photons_are_the_dyes_not_the_beads(dim_secondary):
     assert np.median(values['photons_ch1']) == pytest.approx(500, rel=0.08)
 
 
-def test_linked_photons_count_the_split_once(dim_secondary):
-    """`build_link` multiplied the secondary by the beads' ratio on top of a
-    spline that already carried it."""
+def test_linked_photons_are_the_total_with_the_split_from_the_beads(dim_secondary):
+    """Biplane: one photon number, the split taken from the beads.  The PSFs
+    are normalised together, so that number is the emitter's total -- and
+    `build_link` once multiplied the secondary by the beads' ratio on top of
+    a spline that already carried it."""
     from smappy.dualfit import build_link
     from smappy.psf import GlobalSplinePSF
     cal = dim_secondary
@@ -316,6 +318,36 @@ def test_linked_photons_count_the_split_once(dim_secondary):
     link = build_link(spot, spot, np.zeros((400, 2, 2)), cal, roisize=13)
     link[:, 0] = 0.0                     # the ROIs are cut on the spot
     link[:, 1, :, :2] = 1.0
-    values = model.unpack(model.fit(_molecules(0.2), link))
-    # the shared number is the main half's: 0.8 of the molecule's photons
-    assert np.median(values['photons']) == pytest.approx(0.8*2000, rel=0.05)
+    assert np.allclose(link[:, 1, 1, 2], 1.0)       # the split is in the PSFs
+    values = model.unpack(model.fit(_molecules(0.2), link), link)
+    assert np.median(values['photons']) == pytest.approx(2000, rel=0.05)
+    assert np.all(values['ratio'] == 0)
+
+
+def test_the_two_psfs_are_normalised_together_and_keep_their_shares(dim_secondary):
+    """One factor for both, their signal at focus summing to one, and each
+    channel's share stored with its PSF for a fit with a photon number each."""
+    from smappy.psf import signal_integral
+    cal = dim_secondary
+    shares = [signal_integral(c) for c in (cal.main, cal.secondary)]
+    assert sum(shares) == pytest.approx(1.0, abs=1e-6)
+    assert shares[1] == pytest.approx(0.2, abs=0.02)     # the beads' split
+    for c, share in zip((cal.main, cal.secondary), shares):
+        p = c.parameters
+        npx = c.psf.shape[1]*c.psf.shape[2]
+        centre = (c.psf.shape[0]-1)//2
+        signal = (c.psf[centre].sum()
+                  - p['positivity_offset_before_normalization']/p['common_normalization']*npx)
+        assert signal == pytest.approx(share, rel=0.03)
+
+
+def test_the_shares_survive_a_save(dim_secondary, tmp_path):
+    from smappy.calibrate.dual import (load_dual_color_calibration,
+                                       save_dual_color_calibration)
+    from smappy.psf import signal_integral
+    path = tmp_path / "dual.h5"
+    save_dual_color_calibration(path, dim_secondary)
+    loaded = load_dual_color_calibration(path)
+    for before, after in ((dim_secondary.main, loaded.main),
+                          (dim_secondary.secondary, loaded.secondary)):
+        assert signal_integral(after) == pytest.approx(signal_integral(before))

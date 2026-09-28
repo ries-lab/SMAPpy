@@ -687,6 +687,12 @@ def estimate_pair_shift(reference, moving, limits=None, z_window=None,
     return (shift, float(1-objective(result.x))) if return_quality else shift
 
 
+# the planes either side of focus a paired PSF's signal is read over, for the
+# normalisation: enough that one plane's noise does not set it, few enough
+# that defocus -- light leaving the ROI -- does not
+FOCAL_PLANES = 2
+
+
 def positive_pair_models(raw, dz_nm, settings):
     """Constant channel offsets certify positivity throughout every cubic cell.
 
@@ -710,17 +716,33 @@ def positive_pair_models(raw, dz_nm, settings):
         offset = max(0., epsilon-lower_bound(coeff))
         psf += offset
         offsets.append(offset)
-    norm = float(psfs[0].sum(axis=(1, 2)).max())
-    if not np.isfinite(norm) or norm <= 0:
+    # One factor for both channels, so that the pair keeps the beads' split,
+    # chosen so that their signal together is one photon at focus: fitted
+    # with one shared photon number (biplane, the split taken from the
+    # beads) that number is the emitter's total.  Fitted with a photon number
+    # per channel (two colours), each is multiplied back by its channel's own
+    # share, `photon_normalization`, stored with the PSF.  The signal is the
+    # plane sum less the positivity offset, which a fit's background takes,
+    # and it is read over the planes around focus, where z = 0 is.
+    npx = psfs.shape[2]*psfs.shape[3]
+    centre = (psfs.shape[1]-1)//2
+    around = slice(max(centre-FOCAL_PLANES, 0), centre+FOCAL_PLANES+1)
+    signal = [float((psf[around].sum(axis=(1, 2)) - offset*npx).mean())
+              for psf, offset in zip(psfs, offsets)]
+    norm = float(sum(signal))
+    if not np.isfinite(norm) or norm <= 0 or min(signal) <= 0:
         raise ValueError('invalid paired PSF normalization')
     models = [SplineCalibration(spline_coefficients(psf/norm), dz_nm,
               (psf.shape[0]-1)/2, x0=(s.roi_size-1)/2, psf=psf/norm, em_mirror=False,
-              parameters={'method': 'smappy_dual_bead_v1', 'settings': asdict(s),
+              parameters={'method': 'smappy_dual_bead_v2', 'settings': asdict(s),
                           'positivity_offset_before_normalization': offset,
                           'common_normalization': norm,
+                          'normalization': 'joint: both channels\' signal around '
+                                           'focus sums to 1',
+                          'photon_normalization': share/norm,
                           'positivity': 'Bernstein lower bound; relative floor 1e-6',
                           'z_reference': 'joint aligned stack center'})
-              for psf, offset in zip(psfs, offsets)]
+              for psf, offset, share in zip(psfs, offsets, signal)]
     for model in models:
         bound = lower_bound(model.coeff)
         if not np.isfinite(bound) or bound <= 0:

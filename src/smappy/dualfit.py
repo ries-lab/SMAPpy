@@ -371,7 +371,7 @@ def paired_to_localizations(result, pairs: PairedROIs, model, cam) -> "Localizat
     """
     from .locs import Localizations
 
-    p = model.unpack(result)
+    p = model.unpack(result, pairs.link)
     excess = cam.excess_noise
     roi_x, roi_y = cam.roi_offset
 

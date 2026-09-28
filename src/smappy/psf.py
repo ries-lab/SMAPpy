@@ -139,26 +139,39 @@ class _GlobalPSF(PSFModel):
         """The fifth parameter in its own unit.  Identity unless overridden."""
         return value, error
 
-    def unpack(self, result: FitResult) -> Dict[str, np.ndarray]:
+    def unpack(self, result: FitResult, link: np.ndarray = None
+               ) -> Dict[str, np.ndarray]:
         """Named quantities.  A free parameter gets one column per channel,
         suffixed ``_ch0``, ``_ch1``, ...; a shared one gets a single column.
 
-        ``photons`` is always the total the emitter gave off as channel 0 sees
-        it: shared, that is the fitted value; free, it is the sum over the
-        channels.  ``ratio`` is the fraction in the last channel, which is
-        what a ratiometric splitter measures colour with.
+        ``photons`` is always the emitter's total over the channels.  Free,
+        it is the sum of each channel's photons, each fitted number times what
+        its model gives one photon (`photon_scales`).  Shared, one number N
+        was fitted and channel c saw ``factor_c * N`` of its model -- the
+        link's photon factor, the split either typed in or carried by the
+        PSFs -- so the total is ``N * sum_c factor_c * scale_c``; for a
+        jointly normalised spline pair and no ratio given, that sum is one
+        and N is the total itself.  ``link`` is the fit's; without it the
+        factors are taken to be one.  ``ratio`` is the fraction in the last
+        channel, which is what a ratiometric splitter measures colour with,
+        and 0 when the photons were shared: there is no split left to
+        measure.
         """
         p, crlb = result.theta, np.clip(result.crlb, 0, None)
         out: Dict[str, np.ndarray] = {}
         scales = self.photon_scales()
+        if self.shared[2]:
+            factors = (np.ones((len(p), self.n_channels)) if link is None else
+                       np.asarray(link, float)[:, 1, :, 2])
+            total = factors @ scales
 
         def take(index, channel):
             column = self.slot(index, channel)
             value, sigma = p[:, column], np.sqrt(crlb[:, column])
             if index == 2:
-                # a photon number is in its channel's model units -- a shared
-                # one in channel 0's, which the link carries to the others
-                k = scales[channel if not self.shared[2] else 0]
+                # a photon number is in its channel's model units; a shared
+                # one is spread over every channel by the link
+                k = total if self.shared[2] else scales[channel]
                 value, sigma = value * k, sigma * k
             return value, sigma
 
@@ -213,20 +226,28 @@ class _GlobalPSF(PSFModel):
 
 
 def signal_integral(calibration) -> float:
-    """What a spline gives a fitted photon of, at its brightest plane.
+    """What a spline gives a fitted photon of, at focus.
 
-    The plane's integral less the pedestal: a bead calibration adds a constant
-    to its PSFs so that the spline is certifiably positive
-    (`calibrate.core.positive_pair_models`), and a constant over the ROI is
-    what the fit's background takes, not the photons.  It is small against a
-    bright PSF and not against a dim one -- 15% of the main half's integral
-    and 40% of a secondary half with a fifth of the light, which read the
-    fifth as a third.  Without the record (SMAP's calibrations, one built by
-    hand) the spline is taken to be normalised to one.
+    A dual bead calibration normalises its two PSFs together, so that their
+    signal sums to one and the pair keeps the beads' split; each channel's
+    share is stored with it, ``photon_normalization``
+    (`calibrate.core.positive_pair_models`).  The signal is the plane sum
+    less the constant the calibration adds to keep the spline positive,
+    which a fit's background takes rather than its photons -- 15% of the
+    main half's sum and 40% of a secondary half with a fifth of the light,
+    enough to read that fifth as a third.  A calibration saved before the
+    share was stored had the main half's brightest plane at one, and the
+    share is worked out from it.  Without either record (SMAP's calibrations,
+    one built by hand) the spline is taken to be normalised to one.
     """
     p = getattr(calibration, "parameters", None) or {}
+    if "photon_normalization" in p:              # stored with the PSF
+        value = float(p["photon_normalization"])
+        return value if np.isfinite(value) and value > 0 else 1.0
     if "peak_plane_integral" not in p:
         return 1.0
+    # a calibration saved before the share was stored: the main half's
+    # brightest plane was 1, pedestal included
     integral = float(p["peak_plane_integral"])
     offset = float(p.get("positivity_offset_before_normalization", 0.0))
     norm = float(p.get("common_normalization", 0.0))
@@ -410,12 +431,15 @@ class SplinePSF(PSFModel):
     def unpack(self, result: FitResult) -> Dict[str, np.ndarray]:
         p, crlb = result.theta, np.clip(result.crlb, 0, None)
         cal = self.calibration
+        # one for a single-channel calibration; for one half of a dual one,
+        # its share of the pair's joint normalisation (`signal_integral`)
+        scale = signal_integral(cal)
         return {
             "x_roi": p[:, 0], "y_roi": p[:, 1],
-            "photons": p[:, 2], "background": p[:, 3],
+            "photons": p[:, 2] * scale, "background": p[:, 3],
             "z_nm": cal.z_index_to_nm(p[:, 4]),
             "x_err_pix": np.sqrt(crlb[:, 0]), "y_err_pix": np.sqrt(crlb[:, 1]),
-            "photons_err": np.sqrt(crlb[:, 2]),
+            "photons_err": np.sqrt(crlb[:, 2]) * scale,
             "background_err": np.sqrt(crlb[:, 3]),
             "z_err_nm": np.sqrt(crlb[:, 4]) * cal.dz,
         }

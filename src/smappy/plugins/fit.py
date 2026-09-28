@@ -896,7 +896,8 @@ class DualSplineFit(_FitPlugin):
                    "two colours apart.")
     # 2: photons and ratio in photons, not in the beads' split; linked photons
     #    count that split once
-    version = "2"
+    # 3: the PSFs normalised together; linked photons are the total
+    version = "3"
     Settings = DualSplineFitSettings
     params = {**GaussianFit.params, **finish_params()}
 
@@ -1204,6 +1205,8 @@ class DualGaussianFit(_FitPlugin):
                    "with a Gaussian PSF, sharing x and y: adds the photon ratio "
                    "that tells the two colours apart.  No PSF calibration; the "
                    "registration can be measured from the movie itself.")
+    # 2: linked photons are the total over both halves, not the main half's
+    version = "2"
     Settings = DualGaussianFitSettings
     params = {**GaussianFit.params, **finish_params(), **REGISTRATION_PARAMS}
 
