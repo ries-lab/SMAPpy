@@ -150,10 +150,17 @@ class _GlobalPSF(PSFModel):
         """
         p, crlb = result.theta, np.clip(result.crlb, 0, None)
         out: Dict[str, np.ndarray] = {}
+        scales = self.photon_scales()
 
         def take(index, channel):
             column = self.slot(index, channel)
-            return p[:, column], np.sqrt(crlb[:, column])
+            value, sigma = p[:, column], np.sqrt(crlb[:, column])
+            if index == 2:
+                # a photon number is in its channel's model units -- a shared
+                # one in channel 0's, which the link carries to the others
+                k = scales[channel if not self.shared[2] else 0]
+                value, sigma = value * k, sigma * k
+            return value, sigma
 
         for index, (name, error) in enumerate((("x_roi", "x_err_pix"),
                                                ("y_roi", "y_err_pix"),
@@ -191,10 +198,48 @@ class _GlobalPSF(PSFModel):
             out["background_err"] = out["background_err_ch0"]
         return out
 
+    def photon_scales(self) -> np.ndarray:
+        """What one fitted photon of each channel is, in photons.
+
+        One, unless a channel's model is not normalised to one photon: see
+        `GlobalSplinePSF.photon_scales`.
+        """
+        return np.ones(self.n_channels)
+
     def _linked(self) -> str:
         return ", ".join(n for n, on in zip(("x", "y", "photons", "background",
                                              self.fifth[0].rsplit("_", 1)[0]),
                                             self.shared) if on)
+
+
+def signal_integral(calibration) -> float:
+    """What a spline gives a fitted photon of, at its brightest plane.
+
+    The plane's integral less the pedestal: a bead calibration adds a constant
+    to its PSFs so that the spline is certifiably positive
+    (`calibrate.core.positive_pair_models`), and a constant over the ROI is
+    what the fit's background takes, not the photons.  It is small against a
+    bright PSF and not against a dim one -- 15% of the main half's integral
+    and 40% of a secondary half with a fifth of the light, which read the
+    fifth as a third.  Without the record (SMAP's calibrations, one built by
+    hand) the spline is taken to be normalised to one.
+    """
+    p = getattr(calibration, "parameters", None) or {}
+    if "peak_plane_integral" not in p:
+        return 1.0
+    integral = float(p["peak_plane_integral"])
+    offset = float(p.get("positivity_offset_before_normalization", 0.0))
+    norm = float(p.get("common_normalization", 0.0))
+    psf = getattr(calibration, "psf", None)
+    if offset > 0 and norm > 0 and psf is not None:
+        integral -= offset / norm * psf.shape[1] * psf.shape[2]
+    return integral if np.isfinite(integral) and integral > 0 else 1.0
+
+
+def photon_scales(calibrations) -> np.ndarray:
+    """`signal_integral` of each channel's spline, over the first's."""
+    values = np.array([signal_integral(c) for c in calibrations], float)
+    return values / values[0]
 
 
 @dataclass
@@ -253,6 +298,24 @@ class GlobalSplinePSF(_GlobalPSF):
     def _fifth(self, value, error):
         cal = self.calibration
         return cal.z_index_to_nm(value), error * cal.dz
+
+    def photon_scales(self) -> np.ndarray:
+        """What one fitted photon of each channel is: `signal_integral`.
+
+        A dual bead calibration normalises both halves by the *main* half's
+        integral (`calibrate.core.positive_pair_models`), so that the pair
+        keeps the beads' brightness split: the secondary spline integrates to
+        that split, not to one.  A photon number fitted against it is then in
+        bead units, and read as photons it put ``photons_ch1`` out by the
+        split -- the total 3.4x the truth for a splitter sending a fifth of
+        the light to the second half -- and the ratio against the beads'
+        rather than the dye's.  SMAP divides by the same number
+        (``PhotonRatios / normf``).  Less the positivity pedestal, which the
+        main half has too, so the total comes out in photons and not 17%
+        above them.  A calibration without the record (SMAP's, one built by
+        hand) is taken to be normalised per channel.
+        """
+        return np.array([signal_integral(c) for c in self.calibrations], float)
 
     def __str__(self) -> str:
         nz, ny, nx = self.calibration.shape

@@ -208,12 +208,10 @@ def fit_paired_bead_diagnostics(result, bead_ids=None, plane_stride=5):
     cal = r.calibration
     model = GlobalSplinePSF(tuple(models), shared=LINK_XYZ)
     # The production link, on ROIs that are already aligned: no sub-pixel
-    # offset and no local scale left to correct, only the splitter's photon
-    # ratio, so that channel 1's photons are read in channel 0's units.
+    # offset and no local scale left to correct, and a photon factor of one:
+    # the secondary spline already carries the beads' split (`build_link`).
     link = np.zeros((len(raw), 2, 2, 5), np.float32)
     link[:, 1] = 1.0
-    link[:, 1, 1, 2] = float(result.calibration.parameters.get(
-        'secondary_main_brightness_ratio', 1.0)) or 1.0
 
     best = None
     zmax = cal.shape[0]-1

@@ -237,8 +237,85 @@ def test_the_two_channel_fitter_refits_the_calibration_beads():
     assert good.sum() > .8*beads.sum()
     # a shared z is the point of the global fit: it must land on the plane
     assert np.nanstd(fitted['centered_error_nm'][good]) < 20
-    # channel 1 is twice as bright, and the link divides that ratio out
-    assert abs(np.nanmedian(fitted['ratio'][good])-.5) < .1
+    # channel 1 is twice as bright, and the ratio is the photons' true
+    # fraction: the secondary spline's share of the beads is read back as
+    # photons (`GlobalSplinePSF.photon_scales`), not left in bead units
+    assert abs(np.nanmedian(fitted['ratio'][good])-2/3) < .07
 
     with pytest.raises(TypeError, match='fit_paired_bead_diagnostics'):
         fit_bead_diagnostics(result)
+
+
+@pytest.fixture(scope="module")
+def dim_secondary():
+    """A dual calibration from beads that send a fifth of their light to the
+    secondary half, as `smappy.simulate` draws them."""
+    import warnings
+    from smappy.calibrate.dual import DualColorSettings
+    from smappy.calibrate.input import BeadStack
+    from smappy.simulate import dual_bead_stacks
+    stacks, z = dual_bead_stacks(1, seed=0, dz_nm=50.0, z_range_nm=(-700.0, 700.0),
+                                 secondary_share=0.2)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")            # ROI-local: no camera ROI
+        return calibrate_dual([BeadStack(stacks[0].astype(np.float32), z)],
+                              DualColorSettings(layout="up-down", main_channel="upper",
+                                                dz_nm=50.0, roi_size=17,
+                                                smooth_z_nm=40.0)).calibration
+
+
+def _molecules(share, n=400, photons=2000.0, background=10.0, seed=1):
+    """ROI pairs of one astigmatic molecule each, cut on the spot, drawn from
+    the PSF the beads were drawn with, a fraction ``share`` in the secondary."""
+    from scipy.special import erf
+    from smappy.simulate import ASTIGMATISM, astigmatic_sigmas
+    rng = np.random.default_rng(seed)
+    z = rng.choice([-200.0, 0.0, 200.0], n)
+    x0, y0 = 6 + rng.uniform(-0.5, 0.5, (2, n))
+    k = np.arange(13)[None]
+
+    def psf(sigma_nm):
+        sx, sy = (w / 100.0 * np.sqrt(2.0)
+                  for w in astigmatic_sigmas(z, sigma_nm, *ASTIGMATISM))
+        ex = .5*(erf((k+.5-x0[:, None])/sx[:, None]) - erf((k-.5-x0[:, None])/sx[:, None]))
+        ey = .5*(erf((k+.5-y0[:, None])/sy[:, None]) - erf((k-.5-y0[:, None])/sy[:, None]))
+        return ey[:, :, None]*ex[:, None, :]
+    return np.stack([rng.poisson(background + photons*part*psf(sigma))
+                     for part, sigma in ((1-share, 130.0), (share, 145.0))],
+                    axis=1).astype(np.float32)
+
+
+def test_the_ratio_and_the_photons_are_the_dyes_not_the_beads(dim_secondary):
+    """The secondary spline carries the beads' split, and the fit read its
+    photons in bead units: a dye with a quarter of its light in the secondary
+    came out at 0.57 and the total 3.4x the truth."""
+    from smappy.psf import GlobalSplinePSF
+    cal = dim_secondary
+    model = GlobalSplinePSF((cal.main, cal.secondary))
+    link = np.zeros((400, 2, 2, 5), np.float32)
+    link[:, 1] = 1.0
+    values = model.unpack(model.fit(_molecules(0.25), link))
+    assert np.median(values['ratio']) == pytest.approx(0.25, abs=0.015)
+    assert np.median(values['photons']) == pytest.approx(2000, rel=0.05)
+    assert np.median(values['photons_ch1']) == pytest.approx(500, rel=0.08)
+
+
+def test_linked_photons_count_the_split_once(dim_secondary):
+    """`build_link` multiplied the secondary by the beads' ratio on top of a
+    spline that already carried it."""
+    from smappy.dualfit import build_link
+    from smappy.psf import GlobalSplinePSF
+    cal = dim_secondary
+    model = GlobalSplinePSF((cal.main, cal.secondary), (True,)*5)
+    class spot:                          # where the candidates were: any
+        x = y = np.full(400, 40)
+
+        def __len__(self):
+            return 400
+    spot = spot()
+    link = build_link(spot, spot, np.zeros((400, 2, 2)), cal, roisize=13)
+    link[:, 0] = 0.0                     # the ROIs are cut on the spot
+    link[:, 1, :, :2] = 1.0
+    values = model.unpack(model.fit(_molecules(0.2), link))
+    # the shared number is the main half's: 0.8 of the molecule's photons
+    assert np.median(values['photons']) == pytest.approx(0.8*2000, rel=0.05)

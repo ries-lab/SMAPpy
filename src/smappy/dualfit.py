@@ -302,10 +302,24 @@ def build_link(reference: Candidates, secondary: Candidates, residual: np.ndarra
         half = (int(roisize) - 1) / 2.0
         link[:, 0, 1, 0] += (1.0 - fx) * half
         link[:, 0, 1, 1] += (1.0 - fy) * half
+    # The factor is on the secondary's *model*, and a dual bead calibration's
+    # secondary spline already carries the beads' split
+    # (`GlobalSplinePSF.photon_scales`): multiplying by the ratio again
+    # counted it twice.  So a ratio given is divided by the one the splines
+    # carry, and none given means theirs -- a factor of one.  The beads'
+    # measured ratio is the fallback only for a registration alone (the 2D
+    # fitter's), which has no PSF to carry one; it reads a few per cent high
+    # against the splines' (0.274 for 0.252 at a fifth of the light).
+    scale = 1.0
+    if hasattr(calibration, "secondary"):
+        from .psf import photon_scales
+        scale = float(photon_scales((calibration.main, calibration.secondary))[1])
+        if photon_ratio is None:
+            photon_ratio = scale
     if photon_ratio is None:
         photon_ratio = calibration.parameters.get(
             "secondary_main_brightness_ratio", 1.0)
-    link[:, 1, 1, 2] = photon_ratio
+    link[:, 1, 1, 2] = photon_ratio / scale
     return link
 
 

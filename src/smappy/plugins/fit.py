@@ -823,8 +823,10 @@ class DualModelSettings:
                                        "each half fits its own")
     photon_ratio: Optional[float] = param(None, label="photon ratio", min=0,
                                           advanced=True,
-                                          help="secondary / main; auto: from the "
-                                               "calibration's beads")
+                                          help="secondary / main, used when the "
+                                               "photons are linked; auto: the "
+                                               "split the calibration's two "
+                                               "PSFs carry")
 
     def shared(self) -> tuple:
         return (self.link_xy, self.link_xy, self.link_photons,
@@ -892,6 +894,9 @@ class DualSplineFit(_FitPlugin):
     description = ("Detect and fit both halves of a split frame as one emitter, "
                    "sharing x, y and z: adds the photon ratio that tells the "
                    "two colours apart.")
+    # 2: photons and ratio in photons, not in the beads' split; linked photons
+    #    count that split once
+    version = "2"
     Settings = DualSplineFitSettings
     params = {**GaussianFit.params, **finish_params()}
 
@@ -1119,7 +1124,11 @@ class DualGaussianModelSettings:
                                   "rarely share a focus")
     photon_ratio: Optional[float] = param(None, label="photon ratio", min=0,
                                           advanced=True,
-                                          help="secondary / main; auto: 1")
+                                          help="secondary / main, used when the "
+                                               "photons are linked; auto: the "
+                                               "beads' ratio if the "
+                                               "transformation is a bead "
+                                               "calibration, otherwise 1")
 
     def shared(self) -> tuple:
         return (self.link_xy, self.link_xy, self.link_photons,

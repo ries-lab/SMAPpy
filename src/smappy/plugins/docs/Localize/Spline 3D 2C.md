@@ -1,5 +1,5 @@
 ---
-version: "1"
+version: "2"
 covers: [smappy.psf.GlobalSplinePSF, smappy.dualfit.combine_peaks, smappy.dualfit.build_link, smappy.dualfit.cut_paired_rois, smappy.dualfit.paired_to_localizations, smappy.dualfit.DualChannelEngine, smappy.calibrate.dual.build_dual_calibration, smappy.calibrate.dual.fit_dual_transform, smappy.calibrate.core.positive_pair_models, smappy.calibrate.dual.load_dual_color_calibration, smappy.plugins.fit.DualSplineFit, smappy.plugins.fit.finish_localizations]
 ---
 
@@ -114,7 +114,8 @@ takes three things:
 * **Their relative brightness.**  Both PSFs are scaled by one number, the one
   that makes the main half's brightest plane sum to 1, so the secondary PSF
   keeps how bright the beads were in its half compared to the main one.  The
-  median of that bead brightness ratio is saved too.
+  fit takes that back out (see *Photons* below), so the photons it reports
+  are photons.  The median of the bead brightness ratio is saved too.
 
 ```figure The calibration.  Left: the PSF model of each half at three heights, as the fit sees them -- the same astigmatism, the secondary half's spot a little wider.  Right: how far the calibration's transformation, measured on nine bead pairs, is from the true one over the secondary half, in pixels.
 fig.set_size_inches(7.5, 3.3)
@@ -243,17 +244,26 @@ its light into one half gains less, since the other half adds little; and
 because x, y and z are linked, the photons of both halves count in every one
 of them.
 
-**Photons in the calibration's scale.**  The secondary PSF carries the beads'
-relative brightness (see *The calibration*), so $N_1$ is not quite the number
-of photons in the secondary half: it is counted in the main half's units.  A
-molecule that splits its light between the halves as the beads did gets
-$N_0 = N_1$ and a `ratio` of 0.5, whatever the splitter's transmission.  With
-broadband beads that split evenly -- as in the figures -- `ratio` is the
-fraction of the photons in the secondary half; otherwise a dye's `ratio` is not its
-fraction of photons in the secondary half but its split measured against the
-beads' -- 0.5 for a dye that splits as the beads did.  The modes of the ratio
-histogram move accordingly; Assign colours finds them in the histogram,
-wherever they are.
+**Photons.**  The secondary PSF carries the beads' relative brightness (see
+*The calibration*), so the number fitted against it, $\hat{N}_1$, is in the
+beads' units: a fifth of the light in the secondary half makes its PSF a
+quarter as bright as the main one, and $\hat{N}_1$ four times too large.
+Each half's photons are therefore multiplied by what its PSF gives one fitted
+photon, $s_c$:
+
+$$N_c = s_c\, \hat{N}_c , \qquad s_c = \max_z \sum_{\mathrm{ROI}} \mathrm{PSF}_c - p_c\, n_{\mathrm{px}} ,$$
+
+the integral of the brightest plane less the constant $p_c$ the calibration
+added to every one of its $n_{\mathrm{px}}$ pixels to keep the spline
+positive.  That constant is what the fit's background absorbs, and it is not
+small: 15% of the main half's integral, and 40% of a secondary half that has
+a fifth of the light.  So `photons` is in photons and `ratio` is each dye's
+own fraction in the secondary half, whatever the beads' split was: on
+simulated beads with a fifth of their light in the secondary half, a dye
+with a quarter comes back at 0.25 (it was 0.57 before version 2, and the
+total 3.4 times too large).  With the photons linked, the secondary's factor
+is the *photon ratio* over the split its PSF already carries -- one, when no
+ratio is given.
 
 **Mirrored splitters.**  A splitter that mirrors one half is handled by the
 link: the local scale of the transformation along the mirrored axis is
@@ -291,6 +301,8 @@ assignment has nothing to work with.
 
 ### model.photon_ratio
 Only used with *link photons* on; with the photons free it has no effect.
+Leave it empty: the calibration's PSFs already carry the beads' split, which
+is the dye's too when the photons can be linked at all (biplane, one dye).
 
 ### fit.roisize
 Both ROIs have this size.  As for [Spline 3D](plugin:Localize/Spline 3D) it
@@ -310,7 +322,7 @@ photons of each half beside the totals:
 | --- | --- |
 | `x_nm`, `y_nm`, `z_nm` | the linked position, in the main half's coordinates, and the height |
 | `x_err_nm`, `y_err_nm`, `xy_err_nm`, `z_err_nm` | their precision (CRLB), from both halves |
-| `photons`, `photons_err` | the photons of both halves together, in the calibration's scale |
+| `photons`, `photons_err` | the photons of both halves together |
 | `photons_ch0`, `photons_ch1` | the photons of the main and the secondary half, and `photons_err_ch0`, `photons_err_ch1` |
 | `ratio` | $N_1 / (N_0 + N_1)$, the colour |
 | `background_ch0`, `background_ch1` | the background per pixel of each half (`background` is the main half's) |
@@ -346,11 +358,11 @@ differences:
   channel weights, a choice of which channel's x and y are reported (SMAP:
   either, or the mean), several z starts and sCMOS variance maps are not
   offered.  x and y are always the main half's.
-* **Photons stay in the calibration's scale.**  SMAP multiplies each
-  channel's fitted photons by its spline's normalisation and divides a linked
-  photon ratio by it; here neither is done (see *Photons in the calibration's
-  scale*), and the linked photon ratio defaults to the calibration's measured
-  bead ratio rather than being typed in.
+* **The photons are scaled back the same way.**  SMAP multiplies each
+  channel's fitted photons by its spline's normalisation (`normf`) and
+  divides a typed-in photon ratio by the secondary's; here the factor is the
+  PSF's integral less the positivity constant (see *Photons*), and a linked
+  photon ratio left empty is the split the two PSFs carry.
 * **No image is mirrored.**  SMAP flips the second channel's ROIs for a
   mirrored splitter; here the secondary PSF is kept in the camera's
   orientation and the mirror is a factor of $-1$ in the link.
