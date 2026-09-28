@@ -450,6 +450,3 @@ data with the CRLB; only the two neighbours of this plugin's other parts:
   microscopy. *Nat Methods* 7, 377 (2010).
   [doi:10.1038/nmeth.1447](https://doi.org/10.1038/nmeth.1447) -- the
   precision a fit can reach, and its $1/\sqrt{N}$ scaling.
-* Ries J. SMAP: a modular super-resolution microscopy analysis platform for
-  SMLM data. *Nat Methods* 17, 870 (2020).
-  [doi:10.1038/s41592-020-0938-1](https://doi.org/10.1038/s41592-020-0938-1)

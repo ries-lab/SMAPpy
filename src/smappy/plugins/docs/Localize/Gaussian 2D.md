@@ -347,6 +347,3 @@ Deliberate changes:
   microscopy. *Biophys J* 86, 1185 (2004).
   [doi:10.1016/S0006-3495(04)74193-4](https://doi.org/10.1016/S0006-3495%2804%2974193-4)
   -- the Fisher information limit.
-* Ries J. SMAP: a modular super-resolution microscopy analysis platform for
-  SMLM data. *Nat Methods* 17, 870 (2020).
-  [doi:10.1038/s41592-020-0938-1](https://doi.org/10.1038/s41592-020-0938-1)

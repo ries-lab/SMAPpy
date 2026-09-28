@@ -268,6 +268,3 @@ changes:
   in 3D fluorescence photoactivation localization microscopy. *Opt Express*
   19, 15009 (2011).
   [doi:10.1364/OE.19.015009](https://doi.org/10.1364/OE.19.015009)
-* Ries J. SMAP: a modular super-resolution microscopy analysis platform for
-  SMLM data. *Nat Methods* 17, 870 (2020).
-  [doi:10.1038/s41592-020-0938-1](https://doi.org/10.1038/s41592-020-0938-1)

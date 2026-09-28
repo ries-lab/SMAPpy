@@ -442,6 +442,3 @@ compares two loaded layers, one of which is the ground truth.  Here:
   Logist Q* 2, 83 (1955).
   [doi:10.1002/nav.3800020109](https://doi.org/10.1002/nav.3800020109)
   -- the assignment problem that the pairing solves.
-* Ries J. SMAP: a modular super-resolution microscopy analysis platform for
-  SMLM data. *Nat Methods* 17, 870 (2020).
-  [doi:10.1038/s41592-020-0938-1](https://doi.org/10.1038/s41592-020-0938-1)

@@ -518,6 +518,3 @@ pixel size) and fits it by least squares.  Here:
   via the EM algorithm. *J R Stat Soc B* 39, 1 (1977).
   [doi:10.1111/j.2517-6161.1977.tb01600.x](https://doi.org/10.1111/j.2517-6161.1977.tb01600.x)
   -- expectation-maximization, used for the two-Gaussian start.
-* Ries J. SMAP: a modular super-resolution microscopy analysis platform for
-  SMLM data. *Nat Methods* 17, 870 (2020).
-  [doi:10.1038/s41592-020-0938-1](https://doi.org/10.1038/s41592-020-0938-1)

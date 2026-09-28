@@ -231,6 +231,3 @@ numbers.  What changed:
 * Thompson RE, Larson DR, Webb WW. Precise nanometer localization analysis
   for individual fluorescent probes. *Biophys J* 82, 2775 (2002).
   [doi:10.1016/S0006-3495(02)75618-X](https://doi.org/10.1016/S0006-3495%2802%2975618-X)
-* Ries J. SMAP: a modular super-resolution microscopy analysis platform for
-  SMLM data. *Nat Methods* 17, 870 (2020).
-  [doi:10.1038/s41592-020-0938-1](https://doi.org/10.1038/s41592-020-0938-1)

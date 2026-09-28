@@ -498,6 +498,3 @@ run.
   that achieves theoretically minimum uncertainty. *Nat Methods* 7, 373
   (2010). [doi:10.1038/nmeth.1449](https://doi.org/10.1038/nmeth.1449) --
   the maximum likelihood Gaussian fit and its CRLB.
-* Ries J. SMAP: a modular super-resolution microscopy analysis platform for
-  SMLM data. *Nat Methods* 17, 870 (2020).
-  [doi:10.1038/s41592-020-0938-1](https://doi.org/10.1038/s41592-020-0938-1)

@@ -404,9 +404,16 @@ holds everything else.
   formula with both.
 * **Differences from SMAP** from the MATLAB itself (`../SMAP`, `jries/SMAP`),
   concretely: what SMAP does, what this does, and why.
+* **The paper a method comes from is cited in *What it does***, where the
+  method is first named ("RCC (Wang et al. 2014)"), with its DOI link, so a
+  reader knows at once whose method it is.  *In detail* cites it again and
+  says briefly what the code does differently from the publication -- a
+  constant, a step dropped or added, a different estimator -- and why.  A
+  plugin with no method paper behind it cites none.
 * **References** that were checked (PubMed or the journal), with a DOI link;
   write a `(` or `)` in a URL as `%28` / `%29`.  Say in a few words what each
-  one is cited for when it is not obvious.
+  one is cited for when it is not obvious.  SMAP itself is not cited: it is
+  the program this one comes from, and *Differences from SMAP* covers it.
 * Spelling as the plugin's module.  Look at the rendered page (the Help
   window, or the exported HTML) before calling it done.
 

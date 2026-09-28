@@ -482,6 +482,3 @@ differences:
   Lett* 8, 2463 (2008).
   [doi:10.1021/nl801471d](https://doi.org/10.1021/nl801471d) -- ratiometric
   multicolour localization with two detection channels.
-* Ries J. SMAP: a modular super-resolution microscopy analysis platform for
-  SMLM data. *Nat Methods* 17, 870 (2020).
-  [doi:10.1038/s41592-020-0938-1](https://doi.org/10.1038/s41592-020-0938-1)

@@ -521,6 +521,3 @@ the ratio, refined by a parabola.  Here:
   superresolution microscopy by combined spectral-demixing and biplane
   imaging. *Biophys J* 109, 3 (2015).
   [doi:10.1016/j.bpj.2015.05.026](https://doi.org/10.1016/j.bpj.2015.05.026)
-* Ries J. SMAP: a modular super-resolution microscopy analysis platform for
-  SMLM data. *Nat Methods* 17, 870 (2020).
-  [doi:10.1038/s41592-020-0938-1](https://doi.org/10.1038/s41592-020-0938-1)
