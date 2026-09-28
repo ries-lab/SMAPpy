@@ -828,6 +828,10 @@ def _quantile_range(locs, name: Optional[str]):
     return (lo, hi) if hi > lo else None
 
 
+PAGE = "Panels/Render tab"
+HELP = dict(helpable=True, help_tip="what the Render tab's controls do (F1)")
+
+
 class RenderTab(QWidget):
     def __init__(self, session: Session, view=None, parent=None):
         super().__init__(parent)
@@ -846,13 +850,14 @@ class RenderTab(QWidget):
 
         # the whole picture, every visible layer, above the layer strip
         self.overview = Overview(session, view)
-        section = CollapsibleSection("overview", self.overview, expanded=True, detachable=True)
+        section = CollapsibleSection("overview", self.overview, expanded=True,
+                                     detachable=True, **HELP)
         section.detach_requested.connect(lambda: detach_to_window(section, self.window()))
         layout.addWidget(section)
         self.strip = LayerStrip(session)
         layout.addWidget(self.strip)
         self.filter = FilterWidget(session)
-        self.filter_section = CollapsibleSection("filter", self.filter, expanded=True)
+        self.filter_section = CollapsibleSection("filter", self.filter, expanded=True, **HELP)
         layout.addWidget(self.filter_section)
 
         image = QWidget()
@@ -869,7 +874,7 @@ class RenderTab(QWidget):
         image_form.addRow("x0 (nm)", self.image_x0)
         image_form.addRow("y0 (nm)", self.image_y0)
         image_form.addRow("frame", self.image_frame)
-        self.image_section = CollapsibleSection("image", image, expanded=True)
+        self.image_section = CollapsibleSection("image", image, expanded=True, **HELP)
         self.image_section.hide()
         layout.addWidget(self.image_section)
         for w in (self.image_pixelsize, self.image_x0, self.image_y0):
@@ -967,13 +972,18 @@ class RenderTab(QWidget):
         more_form.addRow("gamma", self.gamma)
         more_form.addRow("", self.white)
         form.addRow(CollapsibleSection("more", more, expanded=False))
-        layout.addWidget(CollapsibleSection("display", display, expanded=True))
+        layout.addWidget(CollapsibleSection("display", display, expanded=True, **HELP))
         # last and closed: the ordinary picture is x against y, and this is
         # what turns the renderer into SMAP's versatile one
         self.axes = AxesSection(session, view)
         self.axes.changed.connect(lambda: self._bind_layer(self.strip.current))
-        layout.addWidget(CollapsibleSection("axes", self.axes, expanded=False))
+        layout.addWidget(CollapsibleSection("axes", self.axes, expanded=False, **HELP))
         layout.addStretch(1)
+        # every section's ? and F1 open the tab's page
+        from .help_window import attach_help, help_section
+        for child in self.findChildren(CollapsibleSection):
+            help_section(child, PAGE)
+        attach_help(self, PAGE, within=True)
 
         self.strip.selected.connect(self._bind_layer)
         self.strip.add_image_requested.connect(self._add_image)

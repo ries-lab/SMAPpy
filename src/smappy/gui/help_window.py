@@ -44,6 +44,26 @@ def show_help(path: Optional[str] = None, parent=None) -> "HelpWindow":
     return _WINDOW
 
 
+def attach_help(widget, path: str, within: bool = False) -> None:
+    """F1 on ``widget`` opens ``path``'s page.
+
+    ``within`` limits it to while the focus is inside the widget: the Render
+    tab shares its window with the plugin panels, whose own F1 would
+    otherwise make the key ambiguous, and Qt then fires neither.
+    """
+    from PySide6.QtGui import QKeySequence, QShortcut
+    shortcut = QShortcut(QKeySequence.HelpContents, widget,
+                         lambda: show_help(path, widget.window()))
+    if within:
+        shortcut.setContext(Qt.WidgetWithChildrenShortcut)
+
+
+def help_section(section, path: str) -> None:
+    """Give a section's title bar a ? that opens ``path``'s page."""
+    if section.help_button is not None:
+        section.help_requested.connect(lambda: show_help(path, section.window()))
+
+
 def _middle(document: QTextDocument) -> float:
     """Where Qt centres an inline image with ``vertical-align: middle``.
 
@@ -121,6 +141,12 @@ class HelpWindow(QMainWindow):
                 item.setToolTip(0, (ref.description or path) +
                                 "\n(no written page yet: settings only)")
             self._items[path] = item
+        # the tabs and windows that are not plugins, on a branch of their own
+        for path, panel in docs.panels().items():
+            item = QTreeWidgetItem(group(docs.PANEL_ROOT), [panel.name])
+            item.setData(0, Qt.UserRole, path)
+            item.setToolTip(0, panel.description or panel.name)
+            self._items[path] = item
         self.tree.expandAll()
 
     def _on_item(self, item: QTreeWidgetItem) -> None:
@@ -141,21 +167,24 @@ class HelpWindow(QMainWindow):
             "<h1>Plugin documentation</h1><p>Pick a plugin on the left.  Each "
             "page says what the plugin does, how it works and what every "
             "setting means; the settings table is read off the plugin itself, "
-            "so it is always the one you are looking at.  A grey name has no "
-            "written page yet, only that table.</p><p>The <b>?</b> in a "
-            "plugin's title bar, or F1 in its panel, opens its page here.</p>")
+            "so it is always the one you are looking at.  <i>Panels</i> are the "
+            "tabs and windows that are not plugins -- the Render tab, the ROI "
+            "manager, the 3D view -- with their controls explained.</p><p>The "
+            "<b>?</b> in a plugin's or a section's title bar, or F1, opens its "
+            "page here.</p>")
 
     def show_page(self, path: str) -> None:
         """Render ``path``'s page.  Importing the plugin is the price of it."""
         document = self.browser.document()
         try:
-            plugin_cls = plugins.get(path)
+            plugin_cls = (docs.panels()[path] if path.startswith(docs.PANEL_ROOT + "/")
+                          else plugins.get(path))
         except Exception as error:
             self.current = path
             self.browser.setHtml(f"<h1>{path}</h1><p>This plugin could not be "
                                  f"loaded: {error}</p>")
             return
-        ref = plugins.refs().get(path)
+        ref = None if isinstance(plugin_cls, docs.Panel) else plugins.refs().get(path)
         QGuiApplication.setOverrideCursor(Qt.WaitCursor)
         try:
             color = self.palette().color(QPalette.Text).name()
@@ -175,7 +204,7 @@ class HelpWindow(QMainWindow):
             image.setDevicePixelRatio(docs.SCALE)
             document.addResource(QTextDocument.ImageResource, QUrl(name), image)
         self.browser.setHtml(rendered.html)
-        self.setWindowTitle(f"{plugin_cls.name} - plugin documentation")
+        self.setWindowTitle(f"{plugin_cls.name} - documentation")
         item = self._items.get(path)
         if item is not None:
             self.tree.setCurrentItem(item)

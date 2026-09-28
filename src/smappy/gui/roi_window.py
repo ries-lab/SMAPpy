@@ -203,6 +203,8 @@ class ROIManagerWindow(QMainWindow):
 
     def __init__(self, session: Session, parent=None):
         super().__init__(parent)
+        from .help_window import attach_help
+        attach_help(self, 'Panels/ROI manager')
         self.setWindowFlag(Qt.Window, True)      # a window, not a child widget
         self.setWindowTitle("SMAPpy ROI manager")
         self.session = session

@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 from urllib.parse import unquote
 
-from . import STYLE, page_file, render
+from . import STYLE, page_file, panels, render
 
 WEB_STYLE = """
 body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -51,7 +51,8 @@ def export(out: Path, paths: Optional[List[str]] = None,
     from .. import plugins
 
     refs = plugins.refs()
-    wanted = sorted(paths or refs)
+    shown = panels()
+    wanted = sorted(paths or list(refs) + list(shown))
     out.mkdir(parents=True, exist_ok=True)
     errors: Dict[str, List[str]] = {}
 
@@ -62,7 +63,7 @@ def export(out: Path, paths: Optional[List[str]] = None,
 
     for path in wanted:
         try:
-            cls = plugins.get(path)
+            cls = shown[path] if path in shown else plugins.get(path)
         except Exception as error:
             errors[path] = [f"could not load: {error}"]
             continue
@@ -95,8 +96,10 @@ def export(out: Path, paths: Optional[List[str]] = None,
                          '<ul class="index">')
             group = head
         ref = refs.get(path)
-        written = page_file(path, ref.origin if ref else None) is not None
-        description = html.escape(ref.description) if ref and ref.description else ""
+        panel = shown.get(path)
+        written = panel is not None or page_file(path, ref.origin if ref else None) is not None
+        text = panel.description if panel is not None else (ref.description if ref else "")
+        description = html.escape(text) if text else ""
         lines.append(f'<li><a href="{slug(path)}.html">{html.escape(path.rsplit("/", 1)[-1])}'
                      f'</a>{"" if written else " <i>(settings only)</i>"}'
                      f'{" &ndash; " + description if description else ""}</li>')

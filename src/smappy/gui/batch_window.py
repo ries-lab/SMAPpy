@@ -43,6 +43,8 @@ class BatchWindow(QMainWindow):
     def __init__(self, session: Optional[Session] = None,
                  open_result: Optional[Callable[[str], None]] = None, parent=None):
         super().__init__(parent)
+        from .help_window import attach_help
+        attach_help(self, 'Panels/Batch window')
         self.setWindowFlag(Qt.Window, True)
         self.setWindowTitle("SMAPpy batch")
         self.setAcceptDrops(True)

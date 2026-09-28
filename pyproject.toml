@@ -111,6 +111,8 @@ where = ["src"]
 # the plugins' pages, read by the Help window (`smappy.docs`), one folder per
 # level of the menu tree
 "smappy.plugins" = ["docs/*.md", "docs/*/*.md", "docs/*/*/*.md", "docs/*/*/*/*.md"]
+# and the pages of the tabs and windows that are not plugins
+"smappy.docs" = ["panels/*.md"]
 
 [tool.cibuildwheel]
 # numpy is deliberately not a build dependency: the extensions include only

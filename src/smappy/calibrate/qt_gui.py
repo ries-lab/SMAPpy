@@ -172,6 +172,8 @@ class CalibrationWindow(QMainWindow):
 
     def __init__(self, paths=(), settings=None, parent=None):
         super().__init__(parent)
+        from ..gui.help_window import attach_help
+        attach_help(self, 'Panels/Bead calibration')
         self.setWindowFlag(Qt.Window, True)
         self.setWindowTitle("SMAPpy - bead calibration")
         self.paths: List[str] = [str(p) for p in paths]

@@ -31,7 +31,8 @@ class CollapsibleSection(QWidget):
 
     def __init__(self, title: str, content: QWidget, expanded: bool = False,
                  detachable: bool = False, star: Optional[bool] = None,
-                 helpable: bool = False, parent=None):
+                 helpable: bool = False, help_tip: Optional[str] = None,
+                 parent=None):
         super().__init__(parent)
         self.content = content
         self.button = QToolButton(text=title, checkable=True, checked=expanded)
@@ -51,8 +52,8 @@ class CollapsibleSection(QWidget):
         self.help_button = None
         if helpable:
             self.help_button = QToolButton(text="?", autoRaise=True)
-            self.help_button.setToolTip("what this plugin does, how it works, "
-                                        "and every setting (F1)")
+            self.help_button.setToolTip(help_tip or "what this plugin does, how "
+                                        "it works, and every setting (F1)")
             self.help_button.clicked.connect(self.help_requested)
             header.addWidget(self.help_button)
         self.detach_button = None

@@ -87,6 +87,7 @@ class Page:
     body: str = ""
     version: Optional[str] = None
     covers: List[str] = field(default_factory=list)
+    meta: Dict[str, Any] = field(default_factory=dict)   # the whole front matter
 
     @property
     def written(self) -> bool:
@@ -128,10 +129,60 @@ def read_page(file: Optional[Path]) -> Page:
     if isinstance(covers, str):
         covers = [covers]
     return Page(Path(file), text, None if version is None else str(version),
-                [str(c) for c in covers])
+                [str(c) for c in covers], dict(meta))
+
+
+# ------------------------------------------------------------------ panels
+PANELS = Path(__file__).with_name("panels")
+PANEL_ROOT = "Panels"
+
+
+@dataclass
+class Panel:
+    """A page for what is not a plugin: a tab, a window, a tool.
+
+    It stands where a plugin class would in `render` -- a path, a name, a
+    summary -- with no settings to generate a table from: those panels build
+    their widgets by hand, so the page names its controls itself, one
+    ``### label`` each under *Controls*, and a test checks the labels against
+    the widget (the front matter's ``widget``) so a renamed control fails.
+    Its path is under ``Panels/``, so a page links to one as to a plugin
+    (``plugin:Panels/Render tab``).
+    """
+    path: str
+    name: str
+    file: Path
+    description: str = ""
+    widget: str = ""
+    version = None
+    scope = "locs"
+    live = False
+    __doc__ = ""
+
+    @staticmethod
+    def has_preview() -> bool:
+        return False
+
+    @staticmethod
+    def specs() -> dict:
+        return {}
+
+
+def panels() -> Dict[str, Panel]:
+    """Every panel page shipped, by path."""
+    out: Dict[str, Panel] = {}
+    for file in sorted(PANELS.glob("*.md")):
+        page = read_page(file)
+        name = str(page.meta.get("title") or file.stem)
+        path = f"{PANEL_ROOT}/{file.stem}"
+        out[path] = Panel(path, name, file, str(page.meta.get("summary") or ""),
+                          str(page.meta.get("widget") or ""))
+    return out
 
 
 def page_for(plugin_cls, origin: Optional[Path] = None) -> Page:
+    if isinstance(plugin_cls, Panel):
+        return read_page(plugin_cls.file)
     if origin is None:
         origin = _origin(plugin_cls)
     return read_page(page_file(plugin_cls.path, origin))
@@ -320,7 +371,8 @@ def header(plugin_cls) -> str:
     """The generated top of every page: name, place, what it is."""
     path = plugin_cls.path or ""
     crumbs = " &rsaquo; ".join(html.escape(p) for p in path.split("/")[:-1])
-    facts = [f"version {html.escape(str(plugin_cls.version))}"]
+    facts = ([] if plugin_cls.version is None
+             else [f"version {html.escape(str(plugin_cls.version))}"])
     if getattr(plugin_cls, "scope", "locs") == "site":
         facts.append("runs once per ROI")
     try:
@@ -331,7 +383,7 @@ def header(plugin_cls) -> str:
     if getattr(plugin_cls, "live", False):
         facts.append("can run live")
     out = [f"<h1>{html.escape(plugin_cls.name or path)}</h1>",
-           f'<p class="crumbs">{crumbs} &middot; {" &middot; ".join(facts)}</p>']
+           f'<p class="crumbs">{" &middot; ".join([crumbs] + facts)}</p>']
     summary = plugin_cls.description or (plugin_cls.__doc__ or "").strip().split("\n")[0]
     if summary:
         # formatted, not escaped: a description may name a `column`
@@ -661,11 +713,14 @@ def render(plugin_cls, color: str = "black", size_pt: float = 10.0,
     except Exception as error:
         specs = {}
         out.errors.append(f"settings: {error}")
-    table = parameter_table(specs, notes, converter)
-    if "<!--parameters-->" in body:
-        body = body.replace("<!--parameters-->", table)
+    if isinstance(plugin_cls, Panel):
+        pass              # its controls are written on the page: no table
     else:
-        body = body.rstrip() + "\n\n## Parameters\n\n" + table + "\n"
+        table = parameter_table(specs, notes, converter)
+        if "<!--parameters-->" in body:
+            body = body.replace("<!--parameters-->", table)
+        else:
+            body = body.rstrip() + "\n\n## Parameters\n\n" + table + "\n"
     if not page.written:
         body = ('<p class="missing">No written page for this plugin yet: what '
                 'follows is generated from the plugin itself.</p>\n\n' + body)

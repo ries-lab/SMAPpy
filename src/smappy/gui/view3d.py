@@ -812,6 +812,8 @@ class _ControlsWindow(QWidget):
 class View3DWindow(QMainWindow):
     def __init__(self, session: Session, parent=None):
         super().__init__(parent)
+        from .help_window import attach_help
+        attach_help(self, 'Panels/3D view')
         self.setWindowTitle("SMAPpy 3D")
         self._fitted = False
         self._placed = False

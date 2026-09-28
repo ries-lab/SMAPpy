@@ -26,6 +26,8 @@ from .widgets import CONTROL_WIDTH, CollapsibleSection
 class ROIHeader(QWidget):
     def __init__(self, session: Session, view=None, parent=None):
         super().__init__(parent)
+        from .help_window import attach_help
+        attach_help(self, 'Panels/ROI tab', within=True)
         self.session = session
         self.view = view
         self.manager: Optional[QWidget] = None     # not `window`: that is a QWidget method
