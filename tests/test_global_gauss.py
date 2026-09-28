@@ -148,15 +148,16 @@ def test_sharing_x_and_y_beats_either_channel_alone():
 
 
 def test_a_photon_factor_makes_the_shared_number_the_total():
-    """With the photons shared, the link's factor is the splitter's ratio and
-    the one fitted number is the total as channel 0 sees it."""
+    """With the photons shared, the link's factors split the one fitted number
+    between the channels, and what is reported is the total over them --
+    read with the link the fit had, as `paired_to_localizations` does."""
     ratio = 0.4
     rois, link, _ = two_colour(200, ratio=ratio, widths=(1.2, 1.2))
     link[:, 1, 0, N] = 1 - ratio
     link[:, 1, 1, N] = ratio
     model = GlobalGaussianPSF(sigma=(1.2, 1.2),
                               shared=(True, True, True, False, False))
-    p = model.unpack(model.fit(rois, link, iterations=60, n_threads=1))
+    p = model.unpack(model.fit(rois, link, iterations=60, n_threads=1), link)
 
     assert abs(np.median(p["photons"]) - 4000.) < 150.
     # nothing to divide, so no colour: `ratio` is zero by construction
