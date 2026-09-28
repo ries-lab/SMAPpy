@@ -22,7 +22,6 @@ from typing import Any, Dict, List, Optional, Sequence
 
 import yaml
 
-from ..columns import current
 from ..plugins import settings_from, settings_values
 from ..workspace import Instance
 
@@ -65,8 +64,7 @@ def instances_from_run(recorded: Sequence[Dict[str, Any]]) -> List[Instance]:
     """The instances a recorded run's pipeline describes.
 
     A project can carry runs and no pipeline of its own -- a script that
-    passed its steps straight to `evaluate`, or a file from before the
-    pipeline travelled with the data -- and the run says exactly what ran,
+    passed its steps straight to `evaluate` -- and the run says exactly what ran,
     down to the parameters.  Reading it back is what lets the stored numbers
     still be checked and reported.
     """
@@ -165,4 +163,4 @@ def save(instances: Sequence[Instance], path) -> Path:
 
 
 def load(path) -> List[Instance]:
-    return from_dict(current(yaml.safe_load(Path(path).read_text()) or {}))
+    return from_dict(yaml.safe_load(Path(path).read_text()) or {})

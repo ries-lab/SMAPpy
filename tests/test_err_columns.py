@@ -1,46 +1,15 @@
-"""Precisions follow one rule, ``<quantity>_err_<unit>``, and what was saved
-under the old names still reads.
+"""Precisions follow one rule, ``<quantity>_err_<unit>``.
 
-``loc_precision_nm`` is now ``xy_err_nm``, the RMS of ``x_err_nm`` and
-``y_err_nm``, and ``loc_precision_z_nm`` is ``z_err_nm`` -- the name SMAPpy's
-own 3D fit always wrote, so its z precision now reaches Statistics and the
-render.
+The lateral precision is ``xy_err_nm``, the RMS of ``x_err_nm`` and
+``y_err_nm``, and the axial one is ``z_err_nm`` -- the name SMAPpy's own 3D
+fit writes, so its z precision reaches Statistics and the render.
 """
 import numpy as np
-import pytest
 
-from smappy import chain
-from smappy.chain import chain_class
-from smappy.columns import RENAMED, add_xy_err, current, current_name
+from smappy.columns import add_xy_err
 from smappy.locs import Localizations, to_nm
-from smappy.session import Session
 
 from test_batch_foundations import blinks
-
-
-# ------------------------------------------------------------------ the map
-def test_an_old_name_is_renamed_as_a_word_in_keys_and_expressions():
-    assert current_name("loc_precision_nm") == "xy_err_nm"
-    assert current_name("loc_precision_z_nm") == "z_err_nm"
-    assert current_name("loc_precision_pix_ch1") == "xy_err_pix_ch1"
-    assert (current_name("(loc_precision_nm < 25) & (loc_precision_z_nm < 60)")
-            == "(xy_err_nm < 25) & (z_err_nm < 60)")
-    # a name that only contains an old one is somebody else's column
-    assert current_name("my_loc_precision_nm") == "my_loc_precision_nm"
-    assert current_name("loc_precision_nm2") == "loc_precision_nm2"
-
-
-def test_nested_state_is_renamed_and_a_new_name_already_there_wins():
-    old = {"bounds": {"loc_precision_nm": [None, 25.0], "photons": [100, None]},
-           "steps": [{"values": {"field": "loc_precision_z_nm"}}],
-           "n": 3, "array": np.arange(3)}
-    new = current(old)
-    assert new["bounds"] == {"xy_err_nm": [None, 25.0], "photons": [100, None]}
-    assert new["steps"][0]["values"]["field"] == "z_err_nm"
-    assert new["n"] == 3 and new["array"] is old["array"]
-    both = current({"loc_precision_nm": 1, "xy_err_nm": 2})
-    assert both == {"xy_err_nm": 2}
-    assert set(RENAMED.values()) == {"xy_err_nm", "xy_err_pix", "z_err_nm"}
 
 
 # ------------------------------------------------------------- xy_err itself
@@ -80,109 +49,6 @@ def test_after_grouping_it_is_derived_from_the_combined_errors():
     first = locs["group_id"] == 1
     by_rule = 1 / np.sqrt(np.sum(1 / locs["xy_err_nm"][first].astype(float) ** 2))
     assert abs(grouped["xy_err_nm"][0] - by_rule) > 1e-4
-
-
-# --------------------------------------------------------------- old files
-def old_table(n=50, seed=0):
-    rng = np.random.default_rng(seed)
-    return Localizations(
-        {"x_nm": rng.uniform(0, 1000, n), "y_nm": rng.uniform(0, 1000, n),
-         "z_nm": rng.uniform(-300, 300, n), "frame": np.arange(n, dtype=np.int64),
-         "photons": rng.uniform(500, 5000, n),
-         "loc_precision_nm": rng.uniform(3, 30, n),
-         "loc_precision_z_nm": rng.uniform(10, 60, n)},
-        {"units": "nm",
-         "derived": [{"field": "sharp", "expression": "loc_precision_nm < 10",
-                      "grouped": "recompute"}],
-         "roi_project": {"filters": {"loc_precision_nm": [None, 25.0]}}})
-
-
-def test_an_hdf5_file_with_the_old_names_opens_under_the_new_ones(tmp_path):
-    from smappy.io.formats import load
-    from smappy.io.hdf5 import (load_gui_state, load_localizations,
-                                load_results, save_gui_state,
-                                save_localizations, save_results)
-    written = old_table()
-    path = save_localizations(tmp_path / "old.hdf5", written, written.metadata)
-    save_gui_state(path, {"tabs": [{"name": "Analysis", "instances": [
-        {"values": {"expression": "loc_precision_nm < 20"}}]}]})
-    save_results(path, {"Analysis/Measure/X": {"settings": {"field": "loc_precision_nm"}}})
-    # the file really does carry the old names; only reading renames them
-    assert "loc_precision_nm" in load_localizations(path, renamed=False)
-
-    locs, _ = load(path)
-    assert "loc_precision_nm" not in locs and "loc_precision_z_nm" not in locs
-    np.testing.assert_array_equal(locs["xy_err_nm"], written["loc_precision_nm"])
-    np.testing.assert_array_equal(locs["z_err_nm"], written["loc_precision_z_nm"])
-    assert locs.metadata["derived"][0]["expression"] == "xy_err_nm < 10"
-    assert locs.metadata["roi_project"]["filters"] == {"xy_err_nm": [None, 25.0]}
-    state = load_gui_state(path)
-    assert state["tabs"][0]["instances"][0]["values"]["expression"] == "xy_err_nm < 20"
-    assert load_results(path)["Analysis/Measure/X"]["settings"]["field"] == "xy_err_nm"
-
-    # and a session opened on it filters by the new name out of the box
-    session = Session()
-    session.load(path)
-    assert "xy_err_nm" in session.layers[0].filter.ranges
-    # saving writes only the new names
-    session.save(tmp_path / "new.hdf5")
-    again = load_localizations(tmp_path / "new.hdf5", renamed=False)
-    assert "xy_err_nm" in again and "loc_precision_nm" not in again
-
-
-OLD_CHAIN = """\
-schema: smappy-chain-v1
-steps:
-  - plugin: Chain/Layers
-    label: filter
-    version: "1"
-    values:
-      layers:
-        - grouped: false
-          start: empty
-          bounds:
-            - {field: loc_precision_nm, hi: 20}
-      remove: true
-  - plugin: Analysis/Process/Math Parser
-    label: flag
-    values: {field: sharp, expression: "loc_precision_nm < 10"}
-"""
-
-
-def test_a_chain_saved_with_the_old_names_reads_and_runs(tmp_path):
-    path = tmp_path / "old.chain.yaml"
-    path.write_text(OLD_CHAIN)
-    spec = chain.read(path)
-    assert spec.steps[0].values["layers"][0]["bounds"][0]["field"] == "xy_err_nm"
-    session = Session(blinks())
-    cls = chain_class(spec)
-    session.run(cls(), cls.Settings())
-    kept = blinks()["xy_err_nm"] <= 20
-    assert len(session.locs) == int(kept.sum())
-    assert session.layers[0].filter.ranges == {"xy_err_nm": (None, 20.0)}
-    np.testing.assert_array_equal(session.locs["sharp"] != 0,
-                                  session.locs["xy_err_nm"] < 10)
-
-
-def test_a_batch_job_and_a_workspace_with_the_old_names_read(tmp_path):
-    from pathlib import Path
-
-    import yaml
-
-    from smappy import batch, workspace
-    examples = Path(__file__).parent.parent / "docs" / "examples"
-    for name in ("cells.batch.yaml", "filter_drift_statistics.chain.yaml"):
-        text = (examples / name).read_text().replace("xy_err_nm", "loc_precision_nm")
-        assert "loc_precision_nm" in text
-        (tmp_path / name).write_text(text)
-    job = batch.read_job(tmp_path / "cells.batch.yaml")
-    assert "loc_precision_nm" not in repr(job) and "xy_err_nm" in repr(job)
-
-    saved = workspace.Workspace.default().to_dict()
-    saved["tabs"][0]["instances"][0]["values"] = {"expression": "loc_precision_nm < 5"}
-    (tmp_path / "ws.yaml").write_text(yaml.safe_dump(saved))
-    loaded = workspace.load(tmp_path / "ws.yaml").to_dict()
-    assert loaded["tabs"][0]["instances"][0]["values"] == {"expression": "xy_err_nm < 5"}
 
 
 def test_a_thunderstorm_csv_brings_both_uncertainties(tmp_path):

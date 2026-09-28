@@ -346,9 +346,7 @@ their light in the secondary half, a dye with a quarter comes back at a
 split as the beads did gives their total, both within 1%.  (Before version
 2 the secondary's photons were read in the beads' units -- that dye came
 back at 0.57, with 3.4 times its photons -- and before version 3 a linked
-fit reported the main half's share rather than the total.)  A calibration
-saved before the shares were stored had the main half's brightest plane
-at 1, and its shares are worked out from that on loading.
+fit reported the main half's share rather than the total.)
 
 **Mirrored splitters.**  A splitter that mirrors one half is handled by the
 link: the local scale of the transformation along the mirrored axis is

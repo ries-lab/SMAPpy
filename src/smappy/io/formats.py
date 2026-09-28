@@ -20,7 +20,6 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
-from ..columns import current_name
 from ..locs import Localizations
 
 
@@ -421,7 +420,7 @@ def guess_csv_mapping(headers: Sequence[str]) -> Dict[str, str]:
     mapping = {}
     for h in headers:
         name, unit = _clean(h)
-        target = CSV_NAMES.get(current_name(name))
+        target = CSV_NAMES.get(name)
         if target and target not in mapping.values():
             mapping[h] = target
     return mapping
@@ -441,9 +440,7 @@ def _load_csv(path: Path, mapping: Optional[Dict[str, str]] = None,
     data = np.atleast_2d(data)
     if data.shape[1] != len(headers):
         data = data.reshape(-1, len(headers))
-    # the headers are the file's own; a target saved before a rename is not
-    mapping = {h: current_name(c) for h, c in
-               dict(mapping or guess_csv_mapping(headers)).items()}
+    mapping = dict(mapping or guess_csv_mapping(headers))
     missing = [c for c in CSV_REQUIRED if c not in mapping.values()]
     if missing:
         raise ValueError(f"{path.name}: no column for {', '.join(missing)}; "

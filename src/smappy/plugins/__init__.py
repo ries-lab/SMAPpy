@@ -489,28 +489,6 @@ class Plugin:
     # either way.
     text_window: bool = False
 
-    def __init_subclass__(cls, **kwargs):
-        """Catch a plugin written against the old signature with a real error.
-
-        `run(locs, selection, settings, ...)` would otherwise be handed a
-        `Context` as its `locs` and the settings as its `selection`, and fail
-        somewhere far away.
-        """
-        super().__init_subclass__(**kwargs)
-        run = cls.__dict__.get("run")
-        if run is None:
-            return
-        try:
-            names = list(inspect.signature(run).parameters)
-        except (TypeError, ValueError):
-            return
-        if len(names) > 1 and names[1] in ("locs", "localizations"):
-            raise TypeError(
-                f"{cls.__name__}.run takes {names[1]!r}: plugins now take a "
-                "Context, `def run(self, ctx, settings)`.  ctx.locs and "
-                "ctx.selection replace the first two arguments, ctx.report "
-                "replaces progress, ctx.emit replaces stream.")
-
     def run(self, ctx: Context, settings) -> Result:
         """Do the work.
 

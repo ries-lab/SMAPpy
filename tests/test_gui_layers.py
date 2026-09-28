@@ -240,7 +240,7 @@ def test_the_invert_tick_and_the_inversion_are_one_setting():
     tab.invert.setChecked(False)
     assert layer.get_display().invert is False
 
-    # a workspace written before there was a choice carries a plain True
+    # a plain True, from a script that does not choose, is the default
     layer.set_display(dataclasses.replace(layer.get_display(), invert=True))
     tab._bind_layer(0)
     assert tab.invert.isChecked()

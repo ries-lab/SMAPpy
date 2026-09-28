@@ -83,8 +83,7 @@ mapping(fig.subplots(), [(h, guessed.get(h)) for h in headers])
 | `background_std` | `bkgstd` |
 | `channel`, `logl_rel`, `id` | `channel`; `llrel`; `id` |
 
-A name used before a column was renamed is read under the new one, and when
-two headers mean the same column the first one wins.
+When two headers mean the same column the first one wins.
 
 **Units are not converted.**  The unit in a header is taken off and not
 looked at, so `x [px]` is read as if it were in nanometres.  A table in

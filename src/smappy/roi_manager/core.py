@@ -18,7 +18,6 @@ from uuid import uuid4
 import h5py
 import numpy as np
 
-from ..columns import current
 from ..group import GroupSettings
 from ..io.hdf5 import load_localizations
 from ..locs import Localizations, to_nm
@@ -304,7 +303,7 @@ class ROIProject:
 
         The project's pipeline, or -- when it has none -- the pipeline of the
         newest run, which is what a script that handed its steps straight to
-        `evaluate` leaves behind, and what an older file carries.  Falling
+        `evaluate` leaves behind.  Falling
         back to the installed evaluators instead would report a pipeline
         nobody ran.
         """
@@ -335,8 +334,7 @@ class ROIProject:
         """The newest stored entry for each step of this ROI, and its state.
 
         ``{label: (entry or None, state)}`` where state is "current" (same
-        data and same parameters), "stale" (something changed), "unverified"
-        (stored before signatures were per step, so it cannot say) or
+        data and same parameters), "stale" (something changed) or
         "missing".  Only the steps that would run are reported: a step taken
         out of the pipeline stops contributing columns.
         """
@@ -360,9 +358,7 @@ class ROIProject:
             if signature in by_signature:
                 found[label] = (by_signature[signature], "current")
             elif label in by_label:
-                entry = by_label[label]
-                found[label] = (entry, "stale" if entry.get("signature")
-                                else "unverified")
+                found[label] = (by_label[label], "stale")
             else:
                 found[label] = (None, "missing")
         return found
@@ -538,10 +534,10 @@ class ROIProject:
         A row is left out while any of its steps is out of date or missing:
         half a row of this pipeline's numbers and half of the last one's is
         worse than no row, and `needs_evaluation` says how many are waiting.
-        A step that cannot be checked -- stored before signatures were per
-        step, or produced by an evaluator that is not installed here -- is
-        trusted and reported: it was true when it was written, and dropping
-        it would lose an older file's results on opening it.
+        A step that cannot be checked -- produced by an evaluator that is not
+        installed here -- is trusted and reported: it was true when it was
+        written, and dropping it would lose the file's results on opening it
+        on another machine.
         """
         from . import pipeline as pipeline_module
         steps = self.resolved(steps)
@@ -620,7 +616,7 @@ class ROIProject:
         with h5py.File(path, 'r') as f:
             if f.attrs.get('format') != 'smappy-roi-project' or f.attrs.get('format_version') != 1:
                 raise ValueError("Unsupported ROI project format")
-            doc = current(json.loads(f['project'][()]))
+            doc = json.loads(f['project'][()])
         project = cls()
         project.set_geometry(doc['size_nm'], doc['shape'])
         project.set_tiles(doc.get('tile_nm', 0.0))
@@ -631,10 +627,7 @@ class ROIProject:
             source_path = (source_paths or {}).get(saved['id'], path.parent / saved['path'])
             source = project.add_source(load_localizations(source_path), path=source_path,
                                         name=saved['name'], source_id=saved['id'])
-            # a project saved before a column rename fingerprinted the old names
-            if (source.fingerprint != saved['fingerprint']
-                    and Source(load_localizations(source_path, renamed=False)
-                               ).fingerprint != saved['fingerprint']):
+            if source.fingerprint != saved['fingerprint']:
                 raise ValueError(f"Source contents changed: {source_path}. Restore the original source.")
         for saved in doc['rois']:
             roi = ROI(**saved)

@@ -1262,12 +1262,11 @@ of either costing the whole pipeline over everything.
 Stored entries are matched by signature first and by label second, so a step
 that was renamed or moved up the pipeline keeps its results.  A state is one
 of four, and the difference between the last two is worth keeping: `current`,
-`stale` (a signature that no longer matches), `unverified` (no per-step
-signature -- an older file, or an evaluator that is not installed here, so it
-cannot be checked) and `missing`.  `results()` drops a row with anything
-stale or missing in it, and reports an unverified one: it was true when it
-was written, and dropping it would lose an older file's results on opening
-it.
+`stale` (a signature that no longer matches), `unverified` (an evaluator
+that is not installed here, so it cannot be checked) and `missing`.
+`results()` drops a row with anything stale or missing in it, and reports an
+unverified one: it was true when it was written, and dropping it would lose
+the file's results on a machine without that evaluator.
 
 ## Evaluating the ROI being looked at
 
@@ -1570,15 +1569,6 @@ Grouping it by the rule directly gives a slightly different number, and the
 grouped table would disagree with itself.  A table with only a lateral
 precision (SMAP's `locprecnm`, ThunderSTORM's `uncertainty`, MINFLUX's
 estimate) keeps the one it has.
-
-Old names are renamed where things are read in, in one place: `columns.RENAMED`
-and `columns.current`, applied to an HDF5 table's columns and metadata (a
-derived column's expression, the ROI project's filters), the GUI state and tool
-results stored with it, workspaces, chain and batch files, ROI projects and
-pipelines, and the Math Parser's remembered expressions.  It renames whole
-words, so an old name inside an expression is renamed too.  Only the new names
-are written.  An ROI project fingerprints its source's column names; one saved
-before the rename is checked against the file as it is on disk.
 
 ## The simulation model
 

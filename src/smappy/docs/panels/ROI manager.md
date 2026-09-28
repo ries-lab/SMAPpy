@@ -221,12 +221,13 @@ the result is stored with a signature, a hash of
 
 A stored result is *current* when a result with the same signature exists,
 *out of date* when there is one under the step's name with another
-signature, and *missing* otherwise.  Results written before signatures were
-kept per step are *unverified*.  An ROI is waiting (orange) when it is
-included and any step is not current.  A row enters the result table only
-when none of its steps is out of date or missing, so that a table never
-mixes numbers from two versions of the pipeline; unverified steps are
-trusted, so that an older file keeps its results.  Because the key is the
+signature, and *missing* otherwise.  Results of an evaluator that is not
+installed here cannot be checked and are *unverified*.  An ROI is waiting
+(orange) when it is included and any step is not current.  A row enters the
+result table only when none of its steps is out of date or missing, so that
+a table never mixes numbers from two versions of the pipeline; unverified
+steps are trusted, so that a file opened on another machine keeps its
+results.  Because the key is the
 content and not the name, renaming a step does not put anything out of date,
 and changing the global ROI size does not affect ROIs with their own polygon.
 

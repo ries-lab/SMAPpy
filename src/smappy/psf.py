@@ -231,28 +231,21 @@ def signal_integral(calibration) -> float:
     A dual bead calibration normalises its two PSFs together, so that their
     signal sums to one and the pair keeps the beads' split; each channel's
     share is stored with it, ``photon_normalization``
-    (`calibrate.core.positive_pair_models`).  A calibration saved before the
-    share was stored had the main half's brightest plane at one, pedestal
-    included -- it was lifted by a constant to keep the spline positive,
-    which a fit's background takes rather than its photons -- and the share
-    is worked out from it, less that constant.  Without either record (SMAP's calibrations,
-    one built by hand) the spline is taken to be normalised to one.
+    (`calibrate.core.positive_pair_models`).  A calibration without that
+    record (SMAP's calibrations, one built by hand) is taken to be normalised
+    to one -- unless it is a dual bead calibration of this program's, whose
+    shares are then unknown and which has to be rebuilt.
     """
     p = getattr(calibration, "parameters", None) or {}
     if "photon_normalization" in p:              # stored with the PSF
         value = float(p["photon_normalization"])
         return value if np.isfinite(value) and value > 0 else 1.0
-    if "peak_plane_integral" not in p:
-        return 1.0
-    # a calibration saved before the share was stored: the main half's
-    # brightest plane was 1, pedestal included
-    integral = float(p["peak_plane_integral"])
-    offset = float(p.get("positivity_offset_before_normalization", 0.0))
-    norm = float(p.get("common_normalization", 0.0))
-    psf = getattr(calibration, "psf", None)
-    if offset > 0 and norm > 0 and psf is not None:
-        integral -= offset / norm * psf.shape[1] * psf.shape[2]
-    return integral if np.isfinite(integral) and integral > 0 else 1.0
+    if str(p.get("method", "")).startswith("smappy_dual_bead"):
+        source = getattr(calibration, "source", None)
+        raise ValueError(f"{source or 'this dual calibration'} does not store "
+                         "its channels' photon shares (photon_normalization); "
+                         "rebuild it from the bead stacks")
+    return 1.0
 
 
 def photon_scales(calibrations) -> np.ndarray:

@@ -37,9 +37,7 @@ with tempfile.TemporaryDirectory() as folder:
 ```
 
 **1. The columns** are read from `/locs`, one dataset each, with the types
-they were saved with.  A column saved under a name that has since been
-renamed is read under its new name, and so is every mention of it in the
-metadata -- a derived column's recipe names the columns it is made from.
+they were saved with.
 
 **2. The metadata** is read back from the file's attribute, and with it:
 

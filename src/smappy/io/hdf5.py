@@ -18,7 +18,6 @@ from typing import Dict, Optional
 import h5py
 import numpy as np
 
-from ..columns import current
 from ..locs import Localizations
 
 FORMAT_VERSION = 1
@@ -157,8 +156,7 @@ def load_gui_state(path) -> Optional[Dict[str, object]]:
         with h5py.File(path, "r") as f:
             if GUI_STATE not in f:
                 return None
-            # a state saved before a column was renamed names the old one
-            return current(json.loads(f[GUI_STATE][()]))
+            return json.loads(f[GUI_STATE][()])
     except (OSError, KeyError, ValueError):
         return None
 
@@ -202,20 +200,14 @@ def load_results(path) -> Dict[str, object]:
         with h5py.File(path, "r") as f:
             if RESULTS not in f:
                 return {}
-            saved = current(json.loads(f[RESULTS][()]))
+            saved = json.loads(f[RESULTS][()])
     except (OSError, KeyError, ValueError, TypeError):
         return {}
     return saved if isinstance(saved, dict) else {}
 
 
-def load_localizations(path, renamed: bool = True) -> Localizations:
-    """Read a table written by :class:`LocalizationWriter`.
-
-    A file written before a column was renamed is read under the new names,
-    its metadata too -- a derived column's recipe names the columns it is
-    computed from.  ``renamed=False`` reads it as it is on disk, which only a
-    check against a fingerprint taken before the rename wants.
-    """
+def load_localizations(path) -> Localizations:
+    """Read a table written by :class:`LocalizationWriter`."""
     with h5py.File(path, "r") as f:
         if not isinstance(f.get("locs"), h5py.Group):
             what = ("a table in one dataset, as Picasso writes"
@@ -226,9 +218,7 @@ def load_localizations(path, renamed: bool = True) -> Localizations:
         metadata = {}
         if "metadata" in f.attrs:
             metadata = json.loads(f.attrs["metadata"])
-    if not renamed:
-        return Localizations(columns, metadata)
-    return Localizations(current(columns), current(metadata))
+    return Localizations(columns, metadata)
 
 
 def _json_default(obj):

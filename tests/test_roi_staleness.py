@@ -80,18 +80,6 @@ def test_a_step_that_was_never_run_is_missing_rather_than_stale():
     assert project.latest(ids[0])[0] is None
 
 
-def test_a_record_from_before_per_step_signatures_is_trusted_but_labelled():
-    """An older file's results are reported; they just cannot be checked."""
-    project, ids = a_project()
-    project.evaluate()
-    for record in project.runs[-1]["records"].values():
-        for entry in record["steps"].values():
-            del entry["signature"]
-    assert states(project, ids[0]) == {"Statistics": "unverified"}
-    assert len(project.results()) == 2             # not lost on opening the file
-    assert set(project.needs_evaluation()) == set(ids)
-
-
 # ------------------------------------------------------- running only those
 
 def test_two_steps_go_stale_one_at_a_time():

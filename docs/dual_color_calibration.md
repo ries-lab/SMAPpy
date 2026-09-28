@@ -219,8 +219,8 @@ One calibration serves both uses of a split camera:
   channel's PSF and multiplied by its `photon_normalization`, which gives the
   photons in each channel; the total is their sum.
 
-Calibrations saved before `photon_normalization` was stored had the main
-channel's brightest plane at 1; the fit works their shares out on loading.
+A dual calibration without `photon_normalization` is refused by the fit, with
+the message to rebuild it.
 
 ## Storage and validation
 

@@ -131,9 +131,7 @@ evaluation window filter correctly under one global tree.
 
 `Plugin.__call__` keeps the scripting shape: `plugin(locs, sel, radius_nm=30)`
 builds the context itself, and `locs` may be left out entirely for a plugin that
-makes its own.  A plugin still written against the old signature is refused by
-`__init_subclass__` with a message saying what to do, rather than being handed a
-`Context` as its `locs` and failing somewhere far away.
+makes its own.
 
 ### A tab is a named list of instances
 

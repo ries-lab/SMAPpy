@@ -95,13 +95,6 @@ def test_scope_says_what_a_plugin_is():
     assert PerSite.scope == "site"
 
 
-def test_the_old_signature_fails_where_it_is_written_not_far_away():
-    with pytest.raises(TypeError, match="plugins now take a Context"):
-        class Stale(Plugin):
-            def run(self, locs, selection, settings, progress=None, stream=None):
-                return Result()
-
-
 def test_calling_a_plugin_needs_no_localizations_at_all():
     class Maker(Plugin):
         def run(self, ctx, settings):

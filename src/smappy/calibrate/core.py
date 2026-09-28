@@ -747,7 +747,6 @@ def positive_pair_models(raw, dz_nm, settings):
     for model in models:
         model.parameters['spline_minimum'] = (_spline_minimum(model.coeff)
                                               / float(model.psf.max()))
-        model.parameters['peak_plane_integral'] = float(model.psf.sum(axis=(1, 2)).max())
     return models, list(raw/norm)
 
 

@@ -41,7 +41,6 @@ from typing import Dict, List, Optional
 
 import numpy as np
 
-from ..columns import current
 from ..locs import Localizations
 from ..mathparse import (CONSTANTS, FUNCTIONS, GROUPED_CHOICES, RECOMPUTE,
                          ExpressionError, evaluate, names_in, recipes, remember)
@@ -72,7 +71,7 @@ def history() -> List[Dict[str, str]]:
     import yaml
     path = history_file()
     try:
-        entries = current(yaml.safe_load(path.read_text()) or [])
+        entries = yaml.safe_load(path.read_text()) or []
     except (OSError, yaml.YAMLError):
         return []
     if not isinstance(entries, list):

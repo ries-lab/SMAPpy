@@ -20,7 +20,6 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog
                                QScrollArea, QSlider, QToolButton, QVBoxLayout, QWidget)
 
 from .. import lut as luts
-from ..filter import quantile_range  # noqa: F401  (kept for callers)
 from ..render import FieldOfView, RenderAxes, axis_unit, is_position
 from ..session import Layer, Session
 from ..viewer import FIELD_LUT, INTENSITY_LUT

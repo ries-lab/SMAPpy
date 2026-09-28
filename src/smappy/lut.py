@@ -216,8 +216,8 @@ def get(lut: LUT, invert=False) -> np.ndarray:
     """Resolve a LUT name (or pass an array through), inverted if asked.
 
     ``invert`` is a name from `INVERSIONS` -- which inversion, they are not the
-    same picture -- or a plain ``True`` for `DEFAULT_INVERSION`, which is what
-    a settings file written before there was a choice carries.
+    same picture -- or a plain ``True`` for `DEFAULT_INVERSION`, so that a
+    script can say ``invert=True`` without choosing.
     """
     if isinstance(lut, str):
         try:

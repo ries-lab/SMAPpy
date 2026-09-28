@@ -338,7 +338,13 @@ def remember(locs: Localizations, field: str, expression: str,
     A redefinition keeps its place in the order rather than moving to the end:
     a field defined from it would otherwise be computed from the old value
     once and the new one after a reload.
+
+    An expression that reads the field it writes is refused: every grouping
+    re-evaluates the recipes, and such a one would compound.
     """
+    if expression and field in names_in(expression):
+        raise ValueError(f"{field} = {expression} reads the field it writes "
+                         f"and cannot be kept as a recipe")
     found = recipes(locs)
     entry = {"field": field, "expression": expression.strip(),
              "grouped": grouped if grouped in GROUPED_CHOICES else RECOMPUTE}
@@ -375,10 +381,6 @@ def apply_recipes(locs: Localizations, only: Optional[Sequence[str]] = None,
             continue
         if not expression:
             continue          # a rule, not an expression: nothing to run here
-        if field in names_in(expression):
-            # reads what it writes: re-running it compounds (MathParser no
-            # longer stores such a recipe; a file saved before may carry one)
-            continue
         if recipe.get("where") == "selection":
             # computed for part of the table only, so the expression alone
             # does not say what the field is; the values that are there stand

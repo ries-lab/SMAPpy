@@ -269,8 +269,8 @@ def test_the_default_inversion_is_smaps_lutinvert():
         luts.get("hot", invert="reversed")
 
 
-def test_an_old_display_setting_still_means_an_inversion():
-    """A workspace written before there was a choice carries a plain True."""
+def test_a_plain_true_means_the_default_inversion():
+    """``invert=True`` from a script, which does not choose, still inverts."""
     from smappy.render import DisplaySettings
 
     assert DisplaySettings().invert is False

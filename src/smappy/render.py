@@ -598,8 +598,8 @@ class DisplaySettings:
 
     lut: luts.LUT = "hot"
     # False, or which inversion (`lut.INVERSIONS`): they are not the same
-    # picture past a ramp of one hue.  A plain True is what a file written
-    # before there was a choice carries, and means `lut.DEFAULT_INVERSION`.
+    # picture past a ramp of one hue.  A plain True, from a script that does
+    # not choose, means `lut.DEFAULT_INVERSION`.
     invert: Union[bool, str] = False
     contrast: float = DEFAULT_CONTRAST   # saturate 10^-contrast of the pixels
     imax: Optional[float] = None         # an absolute scale, overriding contrast

@@ -267,8 +267,8 @@ def _match(a: np.ndarray, b: np.ndarray, tolerance: float):
 def build_link(reference: Candidates, secondary: Candidates, residual: np.ndarray,
                calibration: DualColorCalibration,
                origin: Tuple[float, float] = (0.0, 0.0),
-               photon_ratio: Optional[float] = None,
-               roisize: Optional[int] = None) -> np.ndarray:
+               photon_ratio: Optional[float] = None, *,
+               roisize: int) -> np.ndarray:
     """The ``(n, 2, 2, 5)`` link the global fitter takes.
 
     The fitter evaluates each channel at ``factor * global + offset``, in that
@@ -286,8 +286,6 @@ def build_link(reference: Candidates, secondary: Candidates, residual: np.ndarra
     term is a hundredth of a pixel; for a *mirrored* splitter the factor is -1
     and without it the partner channel is evaluated at a negative coordinate,
     outside its ROI -- its photons fit to nothing and the colour is lost.
-    ``roisize`` is required for that; without it the old corner-anchored form
-    is kept, for callers that build a link by hand.
     """
     n = len(reference)
     link = np.zeros((n, 2, 2, 5), np.float32)
@@ -300,10 +298,9 @@ def build_link(reference: Candidates, secondary: Candidates, residual: np.ndarra
                         reference.x + ox, reference.y + oy)
     link[:, 1, 1, 0] = fx
     link[:, 1, 1, 1] = fy
-    if roisize is not None:
-        half = (int(roisize) - 1) / 2.0
-        link[:, 0, 1, 0] += (1.0 - fx) * half
-        link[:, 0, 1, 1] += (1.0 - fy) * half
+    half = (int(roisize) - 1) / 2.0
+    link[:, 0, 1, 0] += (1.0 - fx) * half
+    link[:, 0, 1, 1] += (1.0 - fy) * half
     # The factor is on the secondary's *model*, and a dual bead calibration's
     # secondary spline already carries the beads' split
     # (`GlobalSplinePSF.photon_scales`): multiplying by the ratio again
