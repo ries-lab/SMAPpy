@@ -6,7 +6,7 @@ description: Gaussian fit, localization statistics
 steps:
   - plugin: Localize/Gaussian 2D
     label: fit
-    version: "1"
+    version: "2"
     values:
       camera.conversion: 0.5           # null (or leaving it out) reads it from the file
       camera.offset: 100.0
