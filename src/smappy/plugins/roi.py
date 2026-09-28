@@ -190,7 +190,9 @@ class Statistics(Plugin):
 
 @dataclass
 class HistogramSettings:
-    bins: int = param(20, label="bins", min=1)
+    bins: int = param(20, label="bins", min=1,
+                      help="number of equal-width bins, spanning each column's "
+                           "smallest to largest value")
     fields: str = param("", label="columns",
                         help="comma separated; empty means every numeric column")
 

@@ -27,9 +27,6 @@ UNDOCUMENTED = {
     "File/Load/smappy HDF5",
     "File/Save/smappy HDF5",
     "File/Simulate/Blinking Structure",
-    "ROIManager/Analyze/Histograms",
-    "ROIManager/Evaluate/Statistics",
-    "ROIManager/Segment/Density Peaks",
 }
 
 
