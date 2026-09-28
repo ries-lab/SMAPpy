@@ -480,14 +480,14 @@ not been measured: the data do not resolve it.
 
 ## Differences from SMAP
 
-SMAP's `lineprofile` (with `make_lineprofiles` and `fitgeneralprofile`)
-makes a histogram of the ROI with a fixed bin width (2 nm, or the render
-pixel size) and fits it by least squares.  Here:
+Based on SMAP's `Analyze/measure/lineprofile`
+([Ries 2020](https://doi.org/10.1038/s41592-020-0938-1)), which makes a
+histogram of the ROI with a fixed bin width (2 nm, or the render pixel size)
+and fits it by least squares.  Here:
 
 * **Unbinned maximum likelihood** replaces the least-squares fit to a
   histogram: with few localizations the bin width moves the answer by more
-  than its error bar.  The binned fit is kept for comparison, with Poisson
-  weights rather than SMAP's unweighted least squares.
+  than its error bar.
 * **Each localization's own precision** is folded into the model.  SMAP
   either fits one width for everything or fixes it to the median precision
   (`sigma=<locp>`).
@@ -495,18 +495,9 @@ pixel size) and fits it by least squares.  Here:
   model.  SMAP's models are curves with an amplitude and a constant offset,
   fitted to the counts; here every model is a probability density over the
   ROI, which is what makes the models comparable by their likelihood.
-* **The two-Gaussian start** comes from expectation-maximization with three
-  starts; SMAP fits one Gaussian, then a second to the residual, as the start
-  of the two-peak fit.
 * **The step** is a single edge.  SMAP's *Flat* is a top hat of fitted length
   $L$ -- two edges; here an edge is fitted on its own, which does not need
   the other end of the structure to be in the ROI.
-* **Model comparison and error bars** -- log-likelihood, AIC, BIC,
-  Fisher-information errors and the bootstrap -- are new; SMAP reports the
-  values only.
-* SMAP fits the profiles along, across and in z at once; here one is
-  chosen with *profile*.  As in SMAP, each visible layer is fitted
-  separately, and *length* is SMAP's *set length*.
 
 ## References
 
@@ -518,3 +509,6 @@ pixel size) and fits it by least squares.  Here:
   via the EM algorithm. *J R Stat Soc B* 39, 1 (1977).
   [doi:10.1111/j.2517-6161.1977.tb01600.x](https://doi.org/10.1111/j.2517-6161.1977.tb01600.x)
   -- expectation-maximization, used for the two-Gaussian start.
+* Ries J. SMAP: a modular super-resolution microscopy analysis platform for
+  SMLM data. *Nat Methods* 17, 870 (2020).
+  [doi:10.1038/s41592-020-0938-1](https://doi.org/10.1038/s41592-020-0938-1)

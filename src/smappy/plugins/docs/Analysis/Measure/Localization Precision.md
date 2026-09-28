@@ -314,30 +314,23 @@ estimates the precision from nearest neighbours.  Here:
 * every pair within the search radius is taken, not only the nearest one,
   so that the background of different molecules has the known shape
   $2d/d_{\max}^2$ (above);
-* the single-$\sigma$ fit is the NeNA number, and the photon law and the
-  CRLB-scaled fit are added to it, because the pairs are the frames in which
-  a blink began or ended and are not a typical localization (step 3).
+* the photon law and the CRLB-scaled fit are added to the single-$\sigma$
+  (NeNA) fit, because the pairs are the frames in which a blink began or
+  ended and are not a typical localization (step 3).
 
-FRC follows [Nieuwenhuizen et al. 2013](https://doi.org/10.1038/nmeth.2448):
-two independent halves, the correlation over rings, the fixed threshold of
-1/7, and the Fourier plane correlation for 3D.  It departs in three places:
+FRC follows [Nieuwenhuizen et al. 2013](https://doi.org/10.1038/nmeth.2448),
+with the fixed threshold of 1/7, and departs in three places:
 
-* The paper corrects the curve for repeated localizations of one emitter by
-  dividing its numerator by the average blur of the localization
-  uncertainties, and estimates from that how often an emitter was localized.
-  Here nothing is divided: the blur envelope is drawn beside the curve,
-  because dividing amplifies the noise at exactly the frequencies that are
-  read, takes the curve off the 0 to 1 scale the threshold belongs to, and
-  uses the precision that is being checked.
+* The paper divides the curve's numerator by the average blur of the
+  localization uncertainties.  Here nothing is divided: the blur envelope is
+  drawn beside the curve, because dividing amplifies the noise at exactly the
+  frequencies that are read and uses the precision that is being checked.
 * The halves are dealt in blocks of frames, so a blink stays in one half
   (all but the few that straddle a block boundary) and cannot correlate with
-  itself; a molecule that blinks again later can still land in both.
+  itself.
 * Each Fourier plane is summed only over the band of frequencies the other
   two axes resolve: over the whole plane, the axial resolution of one
   dataset read 89 nm on a 20 nm lateral voxel and 417 nm on a 4 nm one.
-
-How this differs from SMAP's port of the FRC is under *Differences from
-SMAP*.
 
 ## Parameters
 
@@ -447,23 +440,20 @@ reports.
 
 ## Differences from SMAP
 
-SMAP has no pairwise-displacement (NeNA) measurement and no comparison of the
-data with the CRLB; only the two neighbours of this plugin's other parts:
+The FRC is based on SMAP's `Analyze/measure/FRCresolution`, and the CRLB
+histogram on its `Analyze/measure/Locstatistics`
+([Ries 2020](https://doi.org/10.1038/s41592-020-0938-1)); the pairwise
+displacement (NeNA) and the comparison with the CRLB are new.
 
-* **The CRLB histogram.**  SMAP's *Locstatistics* shows the precision
-  histogram and reads its maximum, median and rising edge off it.  Here it is
-  the fit of [Localization Statistics](plugin:Analysis/Measure/Localization Statistics),
+* **The CRLB histogram.**  SMAP reads the maximum, median and rising edge off
+  the histogram.  Here it is the fit of
+  [Localization Statistics](plugin:Analysis/Measure/Localization Statistics),
   with $\sigma_c$.
-* **FRC.**  SMAP's *FRCresolution* is a port of the MATLAB of Nieuwenhuizen
-  et al.  It splits the table into blocks of equal numbers of
-  localizations, 10 by default, dealt alternately or at random once; renders
-  on a 3 nm pixel; clips the brightest pixels at the 0.9999 quantile; and
-  smooths with loess.  Here the blocks are equal stretches of *frames*, 20 by
-  default, so a blink is never split between the halves; the deal is repeated
-  and averaged and the spread is the error bar; the pixel is found from the
-  data; nothing is clipped (clipping changes the spectrum); and the smoothing
-  is Savitzky-Golay of the same span.  The per-axis plane correlation and the
-  blur envelope are not in SMAP (a deblurred curve is there, commented out).
+* **FRC halves.**  SMAP splits the table into blocks of equal numbers of
+  localizations.  Here the blocks are equal stretches of *frames*, so a blink
+  is never split between the halves.
+* **No clipping.**  SMAP clips the brightest pixels at the 0.9999 quantile;
+  here nothing is clipped, because clipping changes the spectrum.
 
 ## References
 
@@ -486,3 +476,6 @@ data with the CRLB; only the two neighbours of this plugin's other parts:
   microscopy. *Nat Methods* 7, 377 (2010).
   [doi:10.1038/nmeth.1447](https://doi.org/10.1038/nmeth.1447) -- the
   precision a fit can reach, and its $1/\sqrt{N}$ scaling.
+* Ries J. SMAP: a modular super-resolution microscopy analysis platform for
+  SMLM data. *Nat Methods* 17, 870 (2020).
+  [doi:10.1038/s41592-020-0938-1](https://doi.org/10.1038/s41592-020-0938-1)

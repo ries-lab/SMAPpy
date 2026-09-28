@@ -206,8 +206,9 @@ the fit or the filter.
 
 ## Differences from SMAP
 
-SMAP's *Locstatistics* shows the same histograms and reports the same
-numbers.  What changed:
+Based on SMAP's `Analyze/measure/Locstatistics`
+([Ries 2020](https://doi.org/10.1038/s41592-020-0938-1)), which shows the
+same histograms and reports the same numbers.  What changed:
 
 * **Photons.**  SMAP fits an exponential to the histogram by least squares,
   from 1.2 times the position of its maximum.  Here it is maximum likelihood
@@ -231,3 +232,6 @@ numbers.  What changed:
 * Thompson RE, Larson DR, Webb WW. Precise nanometer localization analysis
   for individual fluorescent probes. *Biophys J* 82, 2775 (2002).
   [doi:10.1016/S0006-3495(02)75618-X](https://doi.org/10.1016/S0006-3495%2802%2975618-X)
+* Ries J. SMAP: a modular super-resolution microscopy analysis platform for
+  SMLM data. *Nat Methods* 17, 870 (2020).
+  [doi:10.1038/s41592-020-0938-1](https://doi.org/10.1038/s41592-020-0938-1)
