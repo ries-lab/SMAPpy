@@ -196,16 +196,13 @@ reasoning is here so that it does not have to be re-derived.
   the tooltip.  Both drift plugins do it; a plugin that keeps nothing offers
   its figure for as long as the session lasts, as before.
 * **Bead calibration is a Qt window in this process** (`calibrate/qt_gui.py`),
-  opened from the Localize tab or the Tools menu.  Only the widgets are new:
-  the work is `calibrate.core` and `calibrate.dual` as before, and the five
-  plot pages are drawn by the very methods the Tk window uses -- they touch
-  nothing but a matplotlib figure and a little state, so they are borrowed
-  and given stand-ins for the Tk variables, the bead table and the notebook.
-  Single channel and dual colour both run.  A saved calibration goes straight
-  into the Spline 3D fitter's settings -- or, for a dual-colour one, into
-  Spline 3D 2C's.  The Tk interface is still there
-  (`smappy-calibrate --tk`) but macOS ships Tk 8.5, which draws blank
-  windows, so the Qt one is the default.
+  opened from the Localize tab or the Tools menu (and on its own by
+  `smappy-calibrate`).  It holds only widgets: the work is
+  `calibrate.core` and `calibrate.dual`, and the five plot pages are
+  `calibrate.plots`, functions of the result and of the selected and
+  excluded beads that draw onto a matplotlib figure.  Single channel and dual
+  colour both run.  A saved calibration goes straight into the Spline 3D
+  fitter's settings -- or, for a dual-colour one, into Spline 3D 2C's.
 
 ## Code map
 
@@ -224,7 +221,8 @@ reasoning is here so that it does not have to be re-derived.
     smappy/gui/view3d.py         the 3D window, its panel and mouse
     smappy/gui/roi_tab.py        the ROI tab: geometry, find, evaluate
     smappy/gui/roi_window.py     the ROI manager window: four quadrants
-    smappy/calibrate/qt_gui.py   bead calibration in Qt, borrowing the plots
+    smappy/calibrate/qt_gui.py   bead calibration in Qt: widgets only
+    smappy/calibrate/plots.py    its pages, drawn onto a matplotlib Figure
     smappy/roi_manager/link.py   the ROI project backed by the session
     smappy/gui/params.py         Settings dataclass -> form widget, and back
     smappy/gui/widgets.py        CollapsibleSection

@@ -11,10 +11,10 @@ assumed for the native workflow.
 
 ## Interactive use
 
-Install the existing viewer extra and use a Python installation with Tk:
+The window is Qt, which the package depends on anyway:
 
 ```sh
-pip install -e '.[viewer]'
+pip install -e .
 smappy-calibrate /path/to/bead_acquisitions
 ```
 
@@ -206,7 +206,7 @@ No MATLAB source files were changed.
 | Registration/rejection writes plotting markers into rejected stack data | Keep diagnostic state separate from pixel arrays |
 | Registration uses circular correlation | Retain its coarse/full plus central-refinement structure, but use overlap-normalized linear correlation to prevent wraparound |
 | 64-by-64 solve is repeated for every spline cell | Use batched separable cubic transforms |
-| GUI objects/global variables are passed into numerical routines | Pure computation with a progress callback; optional Tk/matplotlib frontend |
+| GUI objects/global variables are passed into numerical routines | Pure computation with a progress callback; a Qt window over matplotlib figures |
 
 Scientific improvements to consider after this version: robust background surfaces,
 noise-aware registration/averaging, saturation detection with camera-specific limits,

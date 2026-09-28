@@ -6,6 +6,9 @@ nanometres. No camera pixel size, gain conversion, or mirroring is applied.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
+import re
+import time
 from typing import Optional
 
 import numpy as np
@@ -110,6 +113,84 @@ class CalibrationResult:
                        'messages_json': self.messages, 'z_crop_start': self.z_crop_start}
         diagnostics.update({'refit_'+k: v for k, v in self.refits.items()})
         save_spline_calibration(path, self.calibration, diagnostics, overwrite=overwrite)
+
+
+# What a saved calibration is called and where it goes, for either mode: the
+# window proposes it, and the tutorials save under it.
+MICROSCOPE = re.compile(r'(?:^|[_\-. /])(M\d{1,2})(?=$|[_\-. /])')
+DATE_IN_NAME = re.compile(r'(?:^|[_\-])(\d{6}|\d{8})(?=$|[_\-])')
+
+
+def acquisition_date(path):
+    """The day the beads were taken, as SMAP writes it: YYMMDD.
+
+    Micro-Manager records it in the summary metadata, which is where it
+    belongs; the file's own timestamp is the fallback, since a stack that was
+    copied around still dates the experiment better than nothing does.
+    """
+    path = Path(path)
+    folder = path if path.is_dir() else path.parent
+    for candidate in (folder / 'metadata.txt', path):
+        try:
+            if candidate.name == 'metadata.txt' and candidate.is_file():
+                with open(candidate, 'r', errors='replace') as handle:
+                    text = handle.read(20000)
+                found = re.search(r'"Date"\s*:\s*"(\d{4})-(\d{2})-(\d{2})', text)
+                if found:
+                    return found.group(1)[2:]+found.group(2)+found.group(3)
+            elif candidate.is_file() and candidate.suffix.lower() in ('.tif', '.tiff'):
+                import tifffile
+                with tifffile.TiffFile(candidate) as tf:
+                    summary = (tf.micromanager_metadata or {}).get('Summary') or {}
+                date = str(summary.get('Date') or summary.get('Time') or '')[:10]
+                found = re.match(r'(\d{4})-(\d{2})-(\d{2})', date)
+                if found:
+                    return found.group(1)[2:]+found.group(2)+found.group(3)
+        except Exception:
+            pass
+    try:
+        stamp = time.localtime((folder if folder.exists() else path).stat().st_mtime)
+        return time.strftime('%y%m%d', stamp)
+    except OSError:
+        return ''
+
+
+def calibration_save_defaults(paths, dual=False):
+    """Where to put a calibration, and what to call it.
+
+    ``<date>_<dataset>_<M#>_<3Dcal|2Ccal>``, which is what a calibration has to
+    say for itself once a few dozen of them share a drive: when the beads were
+    taken, which experiment they belong to, which microscope they came off and
+    which kind of fit they are for.  Nothing that the dataset folder already
+    says is repeated -- these names carry the date and the microscope more
+    often than not.
+    """
+    modality = '2Ccal' if dual else '3Dcal'
+    if not paths:
+        return Path.cwd(), 'beads_'+modality
+    first = Path(paths[0]).expanduser().resolve()
+    stack_folder = first if first.is_dir() else first.parent
+    destination = stack_folder.parent
+    dataset = destination.name or stack_folder.name or 'beads'
+    parts = [dataset]
+    date = acquisition_date(first)
+    if date and not DATE_IN_NAME.search(dataset):
+        parts.insert(0, date)
+    if not MICROSCOPE.search(dataset):
+        found = MICROSCOPE.search(str(first))
+        if found:
+            parts.append(found.group(1))
+    parts.append(modality)
+    return destination, '_'.join(parts)
+
+
+def calibration_save_path(path):
+    """Native save dialogs may append an extension to an existing extension."""
+    path = Path(path)
+    name = path.name
+    while name.lower().endswith('.h5'):
+        name = name[:-3]
+    return path.with_name((name or 'beads_calibration')+'.h5')
 
 
 def detect_beads(images, settings):

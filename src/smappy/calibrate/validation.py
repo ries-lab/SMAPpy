@@ -43,6 +43,46 @@ def aligned_midline_profiles(result, bead_ids=None, normalize=True):
             'average_x': average_x, 'average_z': average_z}
 
 
+def paired_profiles(result):
+    """Midlines of the aligned pairs, both channels on one amplitude scale.
+
+    Each pair is scaled by one factor, its median ratio to the averaged pair
+    over the averaged pair's brightest quarter of voxels, never channel by
+    channel: the brightness split between the channels is part of what the
+    calibration learned, and normalising them separately would hide it.  The
+    secondary channel comes back in native camera orientation.
+    """
+    r = result.registration
+    ids = np.flatnonzero(r.accepted)
+    reference = np.asarray(r.channel_raw_psfs)
+    p, crop = r.beads.settings.padding, r.z_crop_start
+    samples = []
+    bright = reference > np.quantile(reference, .75)
+    for i in ids:
+        sample = np.stack([ndimage.shift(r.beads.original_volumes[i, ch],
+                                         r.shifts[i]+r.beads.channel_offsets[i, ch],
+                                         order=3, mode='constant') for ch in range(2)])
+        sample = sample[:, crop:sample.shape[1]-crop, p:-p, p:-p]
+        valid = bright & (reference > 1e-12)
+        factor = np.median(sample[valid]/reference[valid])
+        samples.append(sample/max(float(factor), 1e-15))
+    samples = np.asarray(samples)
+    output = []
+    for ch in range(2):
+        volume = samples[:, ch]
+        average = reference[ch].copy()
+        mirror = result.beads.geometry['mirror_axis_xy']
+        if ch and mirror is not None:
+            volume = np.flip(volume, 3-mirror)
+            average = np.flip(average, 2-mirror)
+        z, y, x = (n//2 for n in average.shape)
+        output.append({'bead_id': ids, 'x_px': np.arange(average.shape[2])-x,
+                       'z_nm': result.calibration.main.z_index_to_nm(np.arange(average.shape[0])),
+                       'x_profiles': volume[:, z, y, :], 'z_profiles': volume[:, :, y, x],
+                       'average_x': average[z, y, :], 'average_z': average[:, y, x]})
+    return output
+
+
 def fit_bead_diagnostics(result, bead_ids=None, plane_stride=5):
     """Return fitted-vs-expected z, xy, and residuals in camera ADU units.
 

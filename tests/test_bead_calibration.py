@@ -8,7 +8,7 @@ from smappy.calibrate import (BeadStack, CalibrationSettings, collect_beads,
 from smappy.calibrate.core import (BeadCollection, estimate_shift, robust_shape_error,
                                    spline_coefficients)
 from smappy.calibrate.input import _assemble
-from smappy.calibrate.gui import _stack_contrast, _stack_slice
+from smappy.calibrate.plots import stack_slice
 from smappy.io.calibration import (SplineCalibration, evaluate_spline,
                                    load_spline_calibration, save_spline_calibration)
 
@@ -56,12 +56,9 @@ def test_shape_error_ignores_scale_but_detects_psf_distortion():
 
 def test_stack_browser_orientations_preserve_zyx_axes():
     volume = np.arange(4*5*6).reshape(4, 5, 6)
-    np.testing.assert_array_equal(_stack_slice(volume, 'XY', 2), volume[2, :, :])
-    np.testing.assert_array_equal(_stack_slice(volume, 'XZ', 3), volume[:, 3, :])
-    np.testing.assert_array_equal(_stack_slice(volume, 'YZ', 4), volume[:, :, 4])
-    image = np.array([[-2., 1.], [3., 8.]])
-    assert _stack_contrast(volume, image, True) == (0., 8.)
-    assert _stack_contrast(volume, image, False)[1] > 8
+    np.testing.assert_array_equal(stack_slice(volume, 'XY', 2), volume[2, :, :])
+    np.testing.assert_array_equal(stack_slice(volume, 'XZ', 3), volume[:, 3, :])
+    np.testing.assert_array_equal(stack_slice(volume, 'YZ', 4), volume[:, :, 4])
 
 
 def test_z_groups_are_sorted_and_repeats_not_concatenated():
@@ -302,7 +299,7 @@ def test_brightness_range_and_integer_saturation_reject_but_retain_beads():
 def test_calibration_save_defaults_and_single_extension(tmp_path):
     """A calibration names the day, the dataset, the scope and the mode."""
     import re
-    from smappy.calibrate.gui import calibration_save_defaults, calibration_save_path
+    from smappy.calibrate.core import calibration_save_defaults, calibration_save_path
     dataset = tmp_path/'bead_dataset'
     stack = dataset/'Pos0'
     stack.mkdir(parents=True)
@@ -318,7 +315,7 @@ def test_calibration_save_defaults_and_single_extension(tmp_path):
 
 
 def test_a_name_that_already_says_the_date_or_the_microscope_does_not_repeat_it(tmp_path):
-    from smappy.calibrate.gui import calibration_save_defaults
+    from smappy.calibrate.core import calibration_save_defaults
     stack = tmp_path/'230501_Ulf_NPC_M5'/'Pos0'
     stack.mkdir(parents=True)
     (stack/'beads.ome.tif').touch()
@@ -328,39 +325,3 @@ def test_a_name_that_already_says_the_date_or_the_microscope_does_not_repeat_it(
     other.mkdir(parents=True)
     (other/'beads.ome.tif').touch()
     assert calibration_save_defaults([other])[1].endswith('_Ulf_NPC_M7_3Dcal')
-
-
-def test_save_dialog_normalizes_before_overwrite_check(tmp_path, monkeypatch):
-    from types import SimpleNamespace
-    # the Tk interface is the legacy one and Tk is not always installed --
-    # macOS ships a version that draws blank windows, which is why the Qt one
-    # is the default.  A machine without it skips this rather than failing a
-    # suite over an interface it cannot run.
-    pytest.importorskip("tkinter")
-    from tkinter import filedialog, messagebox
-    from smappy.calibrate.gui import CalibrationWindow
-    stack = tmp_path/'bead_dataset'/'Pos0'
-    stack.mkdir(parents=True)
-    image = stack/'beads.ome.tif'
-    image.touch()
-    from smappy.calibrate.gui import calibration_save_defaults
-    destination = stack.parent/(calibration_save_defaults([image])[1]+'.h5')
-    destination.touch()
-    dialogs, saved, confirmations = [], [], []
-    def choose(**kwargs):
-        dialogs.append(kwargs)
-        return str(destination)+'.h5'
-    monkeypatch.setattr(filedialog, 'asksaveasfilename', choose)
-    monkeypatch.setattr(messagebox, 'askyesno', lambda *args, **kwargs: confirmations.append(args) or True)
-    settings = object()
-    result = SimpleNamespace(reasons=[], beads=SimpleNamespace(settings=settings),
-                             save=lambda path, overwrite: saved.append((path, overwrite)))
-    def unexpected_error(exc):
-        raise exc
-    window = SimpleNamespace(root=None, result=result, excluded=set(), settings=lambda:settings,
-        paths=[image], result_paths=[image], status=SimpleNamespace(set=lambda value:None), error=unexpected_error)
-    CalibrationWindow.save(window)
-    assert dialogs[0]['initialdir'] == str(stack.parent)
-    assert dialogs[0]['initialfile'].endswith('bead_dataset_3Dcal')
-    assert saved == [(destination, True)]
-    assert confirmations[0][1] == str(destination)

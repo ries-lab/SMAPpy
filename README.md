@@ -199,7 +199,7 @@ measurements, the noise floor they are judged against, and what did *not* help.
 
 Tools → bead calibration in the GUI, or `smappy-calibrate` on its own: add files
 or directories, pool their stacks, review the automatically selected beads,
-exclude some and rebuild.  The window is Qt (`--tk` still opens the old Tk one).
+exclude some and rebuild.
 
     smappy-calibrate /path/to/bead_acquisitions
     smappy-calibrate PATHS --out CAL.h5           # headless

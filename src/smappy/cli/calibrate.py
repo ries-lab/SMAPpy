@@ -16,8 +16,6 @@ def main():
     p.add_argument('--reprojection-threshold', type=float, default=2., help='initial RANSAC radius in pixels')
     p.add_argument('--transform-axis-limit', type=float, default=.15,
                    help='round-two screening: maximum absolute dx and dy in pixels')
-    p.add_argument('--tk', action='store_true',
-                   help='the old Tk interface; needs Tk 8.6 (macOS ships a broken 8.5)')
     args = p.parse_args()
     from ..calibrate import calibrate, CalibrationSettings
     settings = CalibrationSettings(dz_nm=args.dz, roi_size=args.roi_size,
@@ -37,20 +35,8 @@ def main():
         result.save(args.out)
         print(f'Saved {args.out}: {result.accepted.sum()} accepted beads')
     else:
-        if not args.tk:
-            try:
-                from ..calibrate.qt_gui import show_calibration_qt
-            except ImportError:
-                pass                      # no PySide6: fall through to Tk
-            else:
-                show_calibration_qt(args.paths, settings)
-                return
-        if args.layout:
-            from ..calibrate.dual_gui import show_dual_calibration
-            show_dual_calibration(args.paths, settings)
-            return
-        from ..calibrate.gui import show_calibration
-        show_calibration(args.paths, settings)
+        from ..calibrate.qt_gui import show_calibration_qt
+        show_calibration_qt(args.paths, settings)
 
 
 if __name__ == '__main__':

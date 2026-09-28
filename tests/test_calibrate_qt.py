@@ -1,5 +1,4 @@
-"""The Qt calibration window: the widgets are new, the plots are the Tk ones."""
-import numpy as np
+"""The calibration window: its widgets, and the pages `calibrate.plots` draws in it."""
 import pytest
 
 pytest.importorskip("PySide6")
@@ -104,8 +103,7 @@ def test_the_dual_fit_quality_page_refits_with_the_two_channel_fitter(app):
     from test_dual_calibration import synthetic
     from smappy.calibrate.dual import calibrate_dual
     from smappy.calibrate.qt_gui import CalibrationWindow
-    from smappy.calibrate.unified_gui import paired_profiles
-    from smappy.calibrate.validation import fit_paired_bead_diagnostics
+    from smappy.calibrate.validation import fit_paired_bead_diagnostics, paired_profiles
 
     stack, settings = synthetic("up-down mirrored", "upper")
     result = calibrate_dual([stack], settings)

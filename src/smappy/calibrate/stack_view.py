@@ -19,18 +19,9 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QHBoxLayout,
                                QLabel, QMainWindow, QSlider, QVBoxLayout, QWidget)
 
+from .plots import stack_slice
+
 ORIENTATIONS = ("XY", "XZ", "YZ")
-
-
-def stack_slice(volume: np.ndarray, orientation: str, index: int) -> np.ndarray:
-    """One displayed plane out of a z,y,x stack."""
-    if orientation == "XY":
-        return volume[index]
-    if orientation == "XZ":
-        return volume[:, index, :]
-    if orientation == "YZ":
-        return volume[:, :, index]
-    raise ValueError(f"unknown orientation {orientation!r}")
 
 
 class StackViewer(QMainWindow):

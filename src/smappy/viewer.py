@@ -950,7 +950,7 @@ class Viewer:
             self._on_grouped()
 
     def _open_bead_calibration(self, _event=None) -> None:
-        """Open calibration in its own process so Tk cannot block this GUI loop."""
+        """Open calibration in its own process: a Qt window with an event loop of its own."""
         import subprocess
         import sys
 

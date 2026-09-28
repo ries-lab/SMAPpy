@@ -131,7 +131,7 @@ def make(d) -> None:
            spot=[window.bead_table], point=window.bead_table)
 
     d.chapter("Save and use")
-    from ...calibrate.gui import calibration_save_defaults
+    from ...calibrate.core import calibration_save_defaults
     folder, name = calibration_save_defaults(window.paths, dual=True)
     path = Path(folder) / (name + ".h5")
     result.save(path, overwrite=True)

@@ -218,7 +218,7 @@ def make(d) -> None:
     d.shot("Save the calibration next to the beads; the name says what it is.",
            spot=[window.save_button], point=window.save_button, click=True,
            zoom=d.around(window.save_button, 700))
-    from ...calibrate.gui import calibration_save_defaults
+    from ...calibrate.core import calibration_save_defaults
     from pathlib import Path
     folder, name = calibration_save_defaults(window.paths, dual=False)
     path = Path(folder) / (name + ".h5")

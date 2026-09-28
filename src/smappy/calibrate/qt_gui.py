@@ -1,15 +1,15 @@
-"""Bead PSF calibration in Qt.
+"""The bead PSF calibration window.
 
-Only the widgets are new.  The work is `calibrate.core` and `calibrate.dual`
-as before, and the figures are drawn by the very methods the Tk window uses:
-they touch nothing but a matplotlib `Figure` and a little state, so they are
-borrowed here and given Qt-side stand-ins for the Tk variables, the bead
-table and the notebook.  Single channel and dual colour both run, chosen by
-the mode selector, exactly as in the Tk window.
+Only widgets live here.  The work is `calibrate.core` (single channel) and
+`calibrate.dual` (dual colour), run on a worker thread; the pages are
+`calibrate.plots`, functions of the result and of which beads are selected
+and excluded, so this window only decides which page is in front and hands
+them the table's state.  The mode selector picks single channel or dual
+colour, and switching keeps the files and the settings both modes share.
 """
 from __future__ import annotations
 
-from dataclasses import asdict, fields
+from dataclasses import fields
 from pathlib import Path
 from typing import List, Optional
 
@@ -25,11 +25,11 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QFileDia
 from ..gui.params import SettingsForm
 from ..gui.widgets import CollapsibleSection
 from ..plugins import ParamInfo, param_specs
-from .core import CalibrationSettings, build_calibration, collect_beads
+from . import plots
+from .core import (CalibrationSettings, build_calibration, calibration_save_defaults,
+                   calibration_save_path, collect_beads)
 from .dual import LAYOUTS, DualColorSettings, collect_dual_beads, build_dual_calibration
-from .gui import CalibrationWindow as TkCalibration, calibration_save_defaults
 from .input import discover_acquisitions
-from .unified_gui import UnifiedCalibrationWindow as TkUnified
 
 PAGES = ("Overview", "Transformation", "Fit quality", "Field diagnostics", "Bead diagnostics")
 COLUMNS = ("bead", "stack", "x, y (px)", "brightness", "dz (nm)", "correlation",
@@ -65,78 +65,6 @@ SETTING_INFO = {
 }
 
 
-class _Var:
-    """Stands in for a Tk variable in the borrowed drawing code."""
-
-    def __init__(self, value):
-        self._value = value
-
-    def get(self):
-        return self._value
-
-    def set(self, value):
-        self._value = value
-
-
-class _Selection:
-    """Stands in for the Tk tree's selection, which the plots read."""
-
-    def __init__(self, window):
-        self.window = window
-
-    def selection(self):
-        return [str(i) for i in self.window.selected_beads()]
-
-    def exists(self, i):
-        return 0 <= int(i) < self.window.table.rowCount()
-
-
-class _Notebook:
-    """Stands in for the Tk notebook: which plot page is in front."""
-
-    def __init__(self, tabs):
-        self.tabs = tabs
-
-    def select(self, index=None):
-        if index is None:
-            return self.tabs.currentIndex()
-        self.tabs.setCurrentIndex(int(index))
-        return None
-
-    def index(self, which):
-        return self.tabs.currentIndex() if which in ("current", None) else int(which)
-
-    def tab(self, index, **kwargs):
-        if "state" in kwargs:
-            self.tabs.setTabEnabled(index, kwargs["state"] == "normal")
-
-
-class _Status:
-    """Stands in for the Tk status variable."""
-
-    def __init__(self, bar):
-        self.bar = bar
-
-    def set(self, message):
-        self.bar.showMessage(str(message))
-
-    def get(self):
-        return self.bar.currentMessage()
-
-
-class _TkButton:
-    """Stands in for a Tk button, for the two `configure` calls in the plots."""
-
-    def __init__(self, button):
-        self.button = button
-
-    def configure(self, text=None, state=None, **_):
-        if text is not None:
-            self.button.setText(text)
-        if state is not None:
-            self.button.setEnabled(state == "normal")
-
-
 class _Worker(QObject):
     done = Signal(str, object)
     progress = Signal(str)
@@ -159,17 +87,6 @@ class CalibrationWindow(QMainWindow):
     # colour -- which decides *which* fitter it belongs in
     calibrated = Signal(str, bool)
 
-    # borrowed from the Tk implementation: pure matplotlib over the state below
-    draw = TkUnified.draw
-    draw_single = TkCalibration.draw
-    draw_transformation = TkUnified.draw_transformation
-    draw_field_diagnostics = TkUnified.draw_field_diagnostics
-    draw_bead_diagnostics = TkUnified.draw_bead_diagnostics
-    draw_current = TkUnified.draw_current
-    redraw_profiles = TkUnified.redraw_profiles
-    origin = TkUnified.origin
-    acquisitions = TkUnified.acquisitions
-
     def __init__(self, paths=(), settings=None, parent=None):
         super().__init__(parent)
         from ..gui.help_window import attach_help
@@ -184,11 +101,8 @@ class CalibrationWindow(QMainWindow):
         self.excluded: set = set()
         self.busy = False
         self._thread = None
-
-        # the state the borrowed drawing code reads
-        self.mode = _Var("Single channel")
+        self.mode = "Single channel"
         self.stack_viewer: Optional[QWidget] = None
-        self.table = _Selection(self)   # what the borrowed plots read
 
         control = self._controls(settings)
         scroll = QScrollArea(widgetResizable=True)
@@ -207,8 +121,6 @@ class CalibrationWindow(QMainWindow):
             canvas.mpl_connect("pick_event", self.pick_pair)
             self.tabs.addTab(canvas, title)
             self.pages.append((figure, canvas))
-        self.figure, self.canvas = self.pages[0]
-        self.notebook = _Notebook(self.tabs)
         self.tabs.currentChanged.connect(lambda _: self.redraw())
 
         self.bead_table = QTableWidget(0, len(COLUMNS))
@@ -250,8 +162,6 @@ class CalibrationWindow(QMainWindow):
         whole.setSizes([390, 1000])
         self.setCentralWidget(whole)
         self.status_bar = self.statusBar()
-        self.status = _Status(self.status_bar)      # what the borrowed plots write to
-        self.fit_quality_button = _TkButton(self.quality_button)
         self.resize(1400, 900)
         self.update_mode()
         self._refresh_files()
@@ -292,7 +202,7 @@ class CalibrationWindow(QMainWindow):
         layout.addLayout(mode_row)
 
         # both forms are built once and one is hidden, so switching mode keeps
-        # what was typed, as the Tk window does
+        # what was typed
         self.settings_holder = QWidget()
         self.settings_layout = QVBoxLayout(self.settings_holder)
         self.settings_layout.setContentsMargins(0, 0, 0, 0)
@@ -359,13 +269,13 @@ class CalibrationWindow(QMainWindow):
     # ---------------------------------------------------------------- mode
     @property
     def is_dual(self) -> bool:
-        return self.mode.get() == "Dual colour"
+        return self.mode == "Dual colour"
 
     def mode_changed(self, text: str) -> None:
         if self.busy:
-            self.mode_box.setCurrentText(self.mode.get())
+            self.mode_box.setCurrentText(self.mode)
             return
-        self.mode.set(text)
+        self.mode = text
         self.result = self.diagnostics = self.profile_data = None
         self.showing_quality = False
         self.excluded.clear()
@@ -526,9 +436,8 @@ class CalibrationWindow(QMainWindow):
         def job():
             from .validation import (aligned_midline_profiles,
                                      fit_bead_diagnostics,
-                                     fit_paired_bead_diagnostics)
+                                     fit_paired_bead_diagnostics, paired_profiles)
             if dual:
-                from .unified_gui import paired_profiles
                 fitted = fit_paired_bead_diagnostics(result)
                 result.registration.refits = {"global": fitted}
                 return fitted, paired_profiles(result)
@@ -580,23 +489,35 @@ class CalibrationWindow(QMainWindow):
 
     # ------------------------------------------------------------ drawing
     def redraw(self) -> None:
+        """Draw the page in front; a page is drawn when it is looked at."""
         if self.result is None:
             return
         page = self.tabs.currentIndex()
-        self.figure, self.canvas = self.pages[page]
+        figure, canvas = self.pages[page]
+        result, selected, excluded = self.result, self.selected_beads(), self.excluded
         try:
             if page == 0:
-                self.draw()
-            elif page in (1, 3):
-                self.draw_transformation()
+                draw = plots.draw_pairs if self.is_dual else plots.draw_overview
+                draw(figure, result, selected, excluded)
+            elif page == 1:
+                plots.draw_transformation(figure, result, selected, excluded)
+            elif page == 3:
+                plots.draw_field(figure, result, selected, excluded)
             elif page == 2:
-                self.draw_quality()
+                if self.diagnostics is None:
+                    return
+                if self.is_dual:
+                    plots.draw_paired_fit_quality(figure, result, self.diagnostics,
+                                                  self.profile_data, selected)
+                else:
+                    self.status_bar.showMessage(plots.draw_fit_quality(
+                        figure, self.diagnostics, self.profile_data, selected))
             else:
-                self.draw_bead_diagnostics()
+                plots.draw_beads(figure, result, selected, excluded, dual=self.is_dual)
         except Exception as error:
             self.status_bar.showMessage(f"could not draw: {type(error).__name__}: {error}")
             return
-        self.canvas.draw_idle()
+        canvas.draw_idle()
 
     def pick_pair(self, event) -> None:
         ids = getattr(event.artist, "pair_ids", None)
@@ -628,95 +549,6 @@ class CalibrationWindow(QMainWindow):
         if isinstance(geometry, dict):
             hints['split_position'] = geometry.get('split_position')
         self.form.set_hints({k: v for k, v in hints.items() if v is not None})
-
-    # ------------------------------------------------------- fit quality
-    def draw_quality(self) -> None:
-        """Single channel borrows the Tk page; dual colour has its own."""
-        if not self.is_dual:
-            return TkCalibration.draw_quality(self)
-        if self.diagnostics is None:
-            return
-        d = self.diagnostics
-        selected = set(self.selected_beads())
-        acquisitions = set(self.acquisitions())
-        records = self.result.beads.records
-        self.figure.clear()
-        axes = self.figure.subplots(2, 4)
-
-        def shown(i):
-            return i < 0 or records[int(i)]["stack"] in acquisitions
-
-        for i in np.unique(d["bead_id"]):
-            if not shown(i):
-                continue
-            use = d["bead_id"] == i
-            order = np.argsort(d["expected_z_nm"][use])
-            style = (dict(color="black", lw=2.5, zorder=5) if i == -1 else
-                     dict(lw=2 if i in selected else 0.7, alpha=0.8))
-            for column, key in ((0, "fitted_z_nm"), (1, "centered_error_nm"),
-                                (2, "ratio")):
-                axes[0, column].plot(d["expected_z_nm"][use][order],
-                                     d[key][use][order], **style)
-        limits = [float(np.min(d["expected_z_nm"])), float(np.max(d["expected_z_nm"]))]
-        axes[0, 0].plot(limits, limits, "k--", lw=0.5)
-        axes[0, 0].set(title="two-channel fit: z", xlabel="expected z (nm)",
-                       ylabel="fitted z (nm)")
-        axes[0, 1].axhline(0, color="gray", lw=0.5)
-        axes[0, 1].set(title="centered z error", xlabel="expected z (nm)",
-                       ylabel="error (nm)")
-        ratio = self.result.calibration.parameters.get(
-            "secondary_main_brightness_ratio")
-        if ratio:
-            # the splitter's ratio is divided out in the link, so a correctly
-            # fitted pair sits at one half, not at the raw brightness ratio
-            axes[0, 2].axhline(0.5, color="gray", lw=0.5)
-        # a fraction, so the axis is the whole fraction: left to itself
-        # matplotlib would show a 1e-6 offset around a constant ratio and say
-        # nothing about how well the colour actually separates
-        axes[0, 2].set(title="fitted photon ratio", xlabel="expected z (nm)",
-                       ylabel="secondary / total", ylim=(0, 1))
-        error = d["centered_error_nm"][np.isfinite(d["centered_error_nm"])
-                                       & (d["bead_id"] >= 0)]
-        if len(error):
-            axes[0, 3].hist(error, bins=min(40, max(8, len(error)//10)),
-                            color="steelblue")
-            axes[0, 3].axvline(0, color="gray", lw=0.5)
-            axes[0, 3].set(title=f"z error: {np.std(error):.1f} nm rms",
-                           xlabel="centered z error (nm)", ylabel="bead planes")
-        else:
-            axes[0, 3].set_axis_off()
-
-        for ch, name in enumerate(("main", "secondary")):
-            profiles = self.profile_data[ch]
-            # the profiles come back in native camera orientation, so the
-            # model has to be the native one too, not the mirrored twin the
-            # registration worked in
-            psf = (self.result.calibration.main if ch == 0
-                   else self.result.calibration.secondary).psf
-            models = (("x", psf[len(psf)//2, psf.shape[1]//2]),
-                      ("z", psf[:, psf.shape[1]//2, psf.shape[2]//2]))
-            for offset, (axis, model) in enumerate(models):
-                ax = axes[1, 2*ch+offset]
-                coord = profiles[axis+("_px" if axis == "x" else "_nm")]
-                for i, curve in zip(profiles["bead_id"], profiles[axis+"_profiles"]):
-                    if shown(i):
-                        ax.plot(coord, curve, lw=2 if i in selected else 0.6, alpha=0.6)
-                ax.plot(coord, profiles["average_"+axis], "k", lw=2, label="average")
-                ax.plot(coord, model, "--", color="royalblue", lw=2, label="spline")
-                ax.set(title=f"{name} {axis} profile",
-                       xlabel=axis+(" (pixels)" if axis == "x" else " (nm)"),
-                       ylabel="intensity (calibration scale)")
-                ax.legend(fontsize=7)
-                ax.margins(x=0.02, y=0.05)
-        for ax in axes.ravel():
-            ax.title.set_fontsize(9)
-            ax.tick_params(labelsize=8)
-            ax.xaxis.label.set_size(9)
-            ax.yaxis.label.set_size(9)
-        self.figure.suptitle("beads refitted with the two-channel global fit: "
-                             "one shared z per pair; black is the averaged pair",
-                             fontsize=9)
-        self.canvas.draw_idle()
 
     # -------------------------------------------------------- stack viewer
     def average_stacks(self):
@@ -767,6 +599,9 @@ class CalibrationWindow(QMainWindow):
                                               "Calibration (*.h5 *.hdf5)")
         if not path:
             return
+        if not path.lower().endswith(".hdf5"):
+            # one .h5, whether the name was typed without it or a dialog added another
+            path = str(calibration_save_path(path))
         try:
             self.result.save(path, overwrite=True)
         except Exception as error:
