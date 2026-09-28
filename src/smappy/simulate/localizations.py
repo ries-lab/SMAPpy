@@ -120,7 +120,8 @@ def _log_integral(tau):
 
 
 def spot_sigma(z_nm, optics) -> np.ndarray:
-    """The PSF's width at ``z_nm``: the mean of x and y for an astigmatic one."""
+    """The PSF's width at ``z_nm``: for an astigmatic one the geometric mean of
+    x and y, ``sqrt(sx * sy)``, the width of the circle of the same area."""
     from .camera import astigmatic_sigmas
     z = np.asarray(z_nm, float)
     if not optics.astigmatism:

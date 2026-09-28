@@ -13,7 +13,8 @@ that measured spline PSF instead (`io.calibration.evaluate_spline`, the
 fitter's own model evaluation), which is the way out of fitting the model one
 simulated with.  With an EM gain the camera is an EMCCD: the electrons of a
 pixel are a gamma of its Poisson count, the multiplication noise that doubles
-the variance, then divided by the gain as the fitter expects.
+the variance, and they reach the file multiplied by the gain, as a camera's
+do; the fitter divides by it again, from the gain the source reports.
 
 Nothing is dropped, however dim.  Two spots close together in one frame are what a fitter
 has to cope with, and the frames are the fitter's test, not the simulator's;

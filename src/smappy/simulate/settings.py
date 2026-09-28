@@ -141,8 +141,9 @@ class LocalizationOutputSettings:
                             advanced=True,
                             help="the z precision as a multiple of the lateral one")
     emccd: bool = param(False, label="EMCCD", advanced=True,
-                        help="the excess noise of EM gain: the precision is "
-                             "worse by sqrt(2)")
+                        help="localizations only: the excess noise of EM gain, "
+                             "the precision worse by sqrt(2); the camera frames' "
+                             "is EM gain there")
 
 
 @dataclass
@@ -166,9 +167,9 @@ class CameraOutputSettings:
     read_noise: float = param(1.5, label="read noise", unit="ADU", min=0,
                               help="Gaussian noise per pixel and frame, in counts")
     em_gain: float = param(0.0, label="EM gain", min=0,
-                           help="0: an sCMOS; otherwise an EMCCD with this gain, its "
-                                "multiplication noise included (the excess factor "
-                                "of 2)")
+                           help="camera frames only.  0: an sCMOS; otherwise an "
+                                "EMCCD with this gain, its multiplication noise "
+                                "included (the excess factor of 2)")
     load_truth: bool = param(False, label="load the truth",
                              help="the true positions of every spot drawn, as a "
                                   "localization table")
@@ -190,8 +191,9 @@ class SimulationSettings:
                                   help="spread between localizations, or between "
                                        "frames for the camera; 0: always the same")
     drift: bool = param(False, label="add drift",
-                        help="a smooth random walk plus a slow creep of ~100 nm; "
-                             "the truth is kept in the metadata as drift_truth")
+                        help="a random walk plus a slow creep of ~100 nm -- over "
+                             "a long acquisition the walk is as large; the truth "
+                             "is kept in the metadata as drift_truth")
     seed: int = param(0, label="seed", min=0,
                       help="the same seed and settings give the same simulation")
     structure: StructureSettings = param(default_factory=StructureSettings,
