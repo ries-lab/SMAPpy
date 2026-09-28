@@ -258,8 +258,6 @@ differences:
 * Smith et al. fit four parameters, with the PSF width measured beforehand
   and held fixed; here the width is a fifth parameter, started at *start
   sigma*.
-* They run a fixed number of iterations, which suits a GPU; here a fit stops
-  once the deviance settles, and runs on the CPU's cores.
 * They leave out read noise, negligible on an EMCCD at high gain; here its
   variance is added for an sCMOS (*Read noise* above).
 * Li et al. drop the model's second derivatives from the curvature, which
@@ -267,8 +265,7 @@ differences:
   replaced by the model $\mu_i$ -- the expected information $H$ above -- so
   that a background near zero no longer shrinks the steps to nothing.  They
   raise $\lambda$ tenfold after any step that does not lower the deviance;
-  here only after one that raised it by more than half, and, as there, when
-  the curvature is not positive definite.
+  here only after one that raised it by more than half.
 
 ## Parameters
 
@@ -326,8 +323,8 @@ it can always be told how a table was made.
 
 ## Differences from SMAP
 
-The fitter is SMAP's (the Ries lab's GPU MLE fitter, run here on the CPU).
-Deliberate changes:
+Based on SMAP's `fit_fastsimple` workflow and its `MLE_GPU_Yiming` fitter
+([Ries 2020](https://doi.org/10.1038/s41592-020-0938-1)).  The main changes:
 
 * The curvature used for the steps is the expected (Fisher) information
   rather than the observed one, and the background starts at the ROI's
@@ -336,15 +333,10 @@ Deliberate changes:
   background.
 * The position is not clamped to the centre of the ROI; runaway fits are
   removed by *max fit distance* instead.
-* Candidates at the image border are dropped rather than fitted in a ROI
-  shifted off centre, which biased them.
 * **Read noise** is one variance for the whole chip, added to data and model
   (1 electron by default without EM gain); SMAP's sCMOS mode reads a
   per-pixel variance map instead, which is not ported.
-* No Anscombe transform or background estimation before
-  detection; the filter pads the image by repeating its edge rather than with
-  zeros.
-* EM excess noise is handled outside the fitter, by the factor of 2 above.
+* No Anscombe transform or background estimation before detection.
 
 ## References
 
@@ -370,3 +362,6 @@ Deliberate changes:
   microscopy. *Biophys J* 86, 1185 (2004).
   [doi:10.1016/S0006-3495(04)74193-4](https://doi.org/10.1016/S0006-3495%2804%2974193-4)
   -- the Fisher information limit.
+* Ries J. SMAP: a modular super-resolution microscopy analysis platform for
+  SMLM data. *Nat Methods* 17, 870 (2020).
+  [doi:10.1038/s41592-020-0938-1](https://doi.org/10.1038/s41592-020-0938-1)

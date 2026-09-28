@@ -369,15 +369,12 @@ departs from the publication:
 * **The bead positions.**  The paper fits each channel's beads with that
   channel's own spline model to find the transformation.  Here each bead is
   located by an elliptical Gaussian fitted to the average of the 11 middle
-  planes of its stack, before any spline exists.  The stacks are then aligned and
-  averaged with one shift per bead pair for both halves, keeping the halves'
-  fixed relation, as in the paper.
+  planes of its stack, before any spline exists.
 * **One photon ratio, from the beads.**  With *link photons* on, the paper
   takes each dye's ratio from single-molecule data, and for colour it fits
   every molecule at each dye's ratio and keeps the most likely.  Here the
-  ratio is the beads' split, which the PSFs carry, or a typed *photon ratio*;
-  colour comes only from the free photon split and
-  [Assign colours](plugin:Analysis/Dual-Color/AssignColors).
+  ratio is the beads' split, or a typed *photon ratio*; colour comes only
+  from the free photon split.
 
 ## Parameters
 
@@ -456,21 +453,11 @@ What to check, beyond the checks of [Spline 3D](plugin:Localize/Spline 3D)
 
 ## Differences from SMAP
 
-The workflow is SMAP's `fit_global_dualchannel` -- `PeakFinder`,
-`PeakCombiner`, `RoiAdder`, `RoiCutterWF` and the `MLE_global_spline` fitter,
-the GlobLoc fitter of Li et al. (2022) -- run here on the CPU.  The
-differences:
+Based on SMAP's `fit_global_dualchannel` workflow and its `MLE_global_spline`
+fitter ([Ries 2020](https://doi.org/10.1038/s41592-020-0938-1)).  The main
+changes:
 
-* **The calibration** is the Dual-colour calibration's HDF5 file, not a
-  `_3dcal.mat` from SMAP's global calibration; one calibration serves the
-  whole field (SMAP can hold several regions), and there is no refractive
-  index factor (SMAP's is 0.8 when switched on).
-* **The link is fixed by the form**: x, y, z, photons and background, each
-  linked or not.  SMAP's global table also sets a factor per parameter;
-  channel weights, a choice of which channel's x and y are reported (SMAP:
-  either, or the mean), several z starts and sCMOS variance maps are not
-  offered.  x and y are always the main half's.
-* **The photons are scaled back the same way.**  SMAP stores a
+* **The photons are scaled back differently.**  SMAP stores a
   normalisation per channel with the global calibration (`normf`),
   multiplies each channel's fitted photons by it and divides a typed-in
   photon ratio by the secondary's.  Here the PSFs are normalised together
@@ -482,14 +469,9 @@ differences:
   dip -- counts that lift into the normalisation, and then clips at zero.
   Here the PSFs are only clipped, so the fitted background is the
   background.
-* **No image is mirrored.**  SMAP flips the second channel's ROIs for a
-  mirrored splitter; here the secondary PSF is kept in the camera's
-  orientation and the mirror is a factor of $-1$ in the link.
-* **Detection per half, pairing, and the finishing steps** are those of
-  [Gaussian 2D 2C](plugin:Localize/Gaussian 2D 2C): the dynamic cutoff set for
-  each half on its own, a pair merged at a mean weighted by the square root of
-  the peak heights (SMAP's two-channel `PeakCombiner` weights by their square),
-  and drift correction and colour assignment as part of the fit.
+* **No refractive index factor** (SMAP's is 0.8 when switched on).
+* **Detection per half**, as in [Gaussian 2D 2C](plugin:Localize/Gaussian 2D 2C):
+  the dynamic cutoff is set for each half on its own.
 
 ## References
 
@@ -507,3 +489,6 @@ differences:
   Lett* 8, 2463 (2008).
   [doi:10.1021/nl801471d](https://doi.org/10.1021/nl801471d) -- ratiometric
   multicolour localization with two detection channels.
+* Ries J. SMAP: a modular super-resolution microscopy analysis platform for
+  SMLM data. *Nat Methods* 17, 870 (2020).
+  [doi:10.1038/s41592-020-0938-1](https://doi.org/10.1038/s41592-020-0938-1)

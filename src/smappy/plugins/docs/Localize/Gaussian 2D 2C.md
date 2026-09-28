@@ -360,17 +360,11 @@ offers a Gaussian PSF beside its spline.  Where the code departs from the public
   $(1 - f)\,h$ above), so a mirrored splitter, $f = -1$, needs no flipped
   image.
 * **No bead calibration is needed.**  The paper builds its transformation from
-  beads and may re-measure it on the single molecules; here the movie alone
-  can give it (*calibrate from this movie*), by voting on the vectors between
-  localizations of the same frame.
-* **Unpaired peaks are fitted**, which is the paper's argument for a global
-  fit (a molecule too dim in one channel to be detected there): the candidate
-  list is every peak of either half, not only the pairs.
+  beads; here the movie alone can give it (*calibrate from this movie*), by
+  voting on the vectors between localizations of the same frame.
 * **Colour from the free photon split only.**  The paper also fits each
   molecule with the photon ratio fixed at each dye's value and keeps the most
-  likely; that is not offered here.  With *link photons* on, one ratio is
-  used, 1 or the bead calibration's, where the paper takes each dye's from
-  the single-molecule data.
+  likely; that is not offered here.
 
 ## Parameters
 
@@ -475,37 +469,22 @@ What to check:
 
 ## Differences from SMAP
 
-SMAP does ratiometric 2D in two ways, and this plugin replaces both with one
-run.
+Based on SMAP's ratiometric workflow (`fit_wavelet_dualcolorratiometric`)
+and its global fit (`fit_global_dualchannel`, with the `MLE_global_spline`
+fitter in *PSF free* mode)
+([Ries 2020](https://doi.org/10.1038/s41592-020-0938-1)).  The main changes:
 
-* **SMAP's ratiometric workflow** (`fit_wavelet_dualcolorratiometric`) fits
-  the whole frame single-channel, registers the halves on those localizations
-  (`RegisterLocs2`), and then goes back to the movie to *measure* the intensity
-  of the partner spot at the transformed position (`Get2CIntImagesWF`,
-  `Intensity2Channel`).  Here both spots are fitted in one linked maximum
-  likelihood fit, and the photon split comes out of it.
-* **SMAP's global fit** (`fit_global_dualchannel`: `PeakFinder`,
-  `PeakCombiner`, `RoiAdder`, `RoiCutterWF`, `MLE_global_spline`, whose
-  *PSF free* mode is a global Gaussian) needs the transformation from an
-  earlier registration.  Here it can be measured from the movie in the same
-  run, and the registration differs from `RegisterLocs2`: it votes on the
-  vectors between localization pairs rather than cross-correlating rendered
-  images, so no split position, initial shift or magnification has to be
-  known; it weights pairs by their precision; and it takes its frames spread
-  over the movie, skipping the start.
+* **Fitted, not measured, photons.**  SMAP's ratiometric workflow fits the
+  whole frame single-channel and then goes back to the movie to *measure*
+  the intensity of the partner spot at the transformed position
+  (`Get2CIntImagesWF`, `Intensity2Channel`).  Here both spots are fitted in
+  one linked maximum likelihood fit, and the photon split comes out of it.
+* **The transformation from the movie.**  SMAP's global fit needs it from an
+  earlier registration (`RegisterLocs2`, cross-correlating rendered images).
+  Here it can be measured in the same run, by voting on the vectors between
+  localization pairs, weighted by their precision.
 * **Detection per half.**  The dynamic cutoff is set for each half on its
   own; SMAP's workflows run one peak finder over the whole frame.
-* **Pairing.**  A matched pair is merged at a mean weighted by the square
-  root of the peak heights (as `PeakCombiner` does for 4Pi); its two-channel
-  branch weights by their square.  The 4 px matching distance is SMAP's.
-* **Fewer options.**  x and y are always the main half's (SMAP can also take
-  channel 2's or the mean); no channel weights and no sCMOS variance map.
-  SMAP's photon ratio for linked photons is typed in; here it defaults to the
-  bead calibration's, or 1.  The
-  width is free per half by default.
-* **Finishing.**  Drift correction and colour assignment run as part of the
-  fit, with the Analysis tab's plugins, instead of as separate steps of the
-  workflow.
 
 ## References
 
@@ -523,3 +502,6 @@ run.
   that achieves theoretically minimum uncertainty. *Nat Methods* 7, 373
   (2010). [doi:10.1038/nmeth.1449](https://doi.org/10.1038/nmeth.1449) --
   the maximum likelihood Gaussian fit and its CRLB.
+* Ries J. SMAP: a modular super-resolution microscopy analysis platform for
+  SMLM data. *Nat Methods* 17, 870 (2020).
+  [doi:10.1038/s41592-020-0938-1](https://doi.org/10.1038/s41592-020-0938-1)

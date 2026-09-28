@@ -248,7 +248,7 @@ dominating a fit at low background (see
 
 **Compared with the paper.**  The method is that of
 [Li et al. 2018](https://doi.org/10.1038/nmeth.4661); what the code does
-differently (the first three concern the Bead calibration tool; a SMAP
+differently (the first two concern the Bead calibration tool; a SMAP
 calibration brings its own coefficients):
 
 * **The beads' background and scale.**  The paper subtracts each bead stack's
@@ -258,15 +258,11 @@ calibration brings its own coefficients):
 * **Smoothing.**  The paper smooths along z with a smoothing B-spline; here
   with a Gaussian of *smoothing z* (20 nm by default), after which negative
   values are set to zero.
-* **Coefficients.**  The paper upsamples each voxel and solves for its 64
-  coefficients; here they come from a not-a-knot cubic spline along each axis
-  in turn, three batched passes instead of one solve per voxel.
 * **The fit.**  The expected information as curvature (see
-  [Gaussian 2D](plugin:Localize/Gaussian 2D)), on the CPU rather than a GPU;
-  one z start, where the paper fits a PSF without astigmatism twice, from
-  500 nm above and below focus, and keeps the more likely; one read-noise
-  variance for the chip, where the paper's sCMOS model has one per pixel; and
-  no refractive-index factor (the paper multiplies z by 0.75).
+  [Gaussian 2D](plugin:Localize/Gaussian 2D)); one z start, where the paper
+  fits twice, from 500 nm above and below focus, and keeps the more likely;
+  one read-noise variance for the chip, where the paper's sCMOS model has one
+  per pixel; and no refractive-index factor (the paper multiplies z by 0.75).
 
 ## Parameters
 
@@ -325,33 +321,24 @@ What to check:
 
 ## Differences from SMAP
 
-The fitter is SMAP's spline fitter (the Ries lab's `GPUmleFit_LM` /
-`CPUmleFit_LM`, fit mode *Spline*), run here on the CPU, with the changes of
-the [Gaussian fitter](plugin:Localize/Gaussian 2D): the expected information as
-curvature and the background started at the ROI's border (together they stop
-fits at low background from sticking at no background, which in the spline
-fitter froze z at its start), no clamp of x and y, border candidates dropped.
-Beyond those:
+Based on SMAP's `fit_fastsimple` workflow and its `MLE_GPU_Yiming` fitter in
+*Spline* mode ([Ries 2020](https://doi.org/10.1038/s41592-020-0938-1)).  The
+main changes:
 
+* **The steps**, as in the [Gaussian fitter](plugin:Localize/Gaussian 2D):
+  the expected information as curvature and the background started at the
+  ROI's border (together they stop fits at low background from sticking at
+  no background, which in the spline fitter froze z at its start), and no
+  clamp of x and y.
 * **One z start**, at the focal plane unless *start z* says otherwise.  SMAP
   starts at the centre of the spline grid plus an offset set in the GUI, and
-  accepts several starts, keeping the fit with the best likelihood; several
-  starts are not offered here.
+  accepts several starts, keeping the fit with the best likelihood.
 * **No refractive-index correction.**  SMAP's fitter has an optional factor
   (0.8 by default when switched on); here z stays in objective nanometres.
-* **One calibration for the whole field.**  A `_3dcal.mat` with a spatially
-  varying calibration (several regions) is refused.  SMAP's other 3D models
-  (the astigmatic Gaussian z-fit, Zernike), its additional Gaussian fit and
-  sCMOS variance maps are not offered.
-* **Mirroring from the calibration.**  SMAP flips mirrored data when the
-  images are loaded; here each ROI is flipped when the calibration says
-  `emmirror`, and the EM settings of beads and data are compared.
 * **Calibrations of its own.**  The Bead calibration tool follows SMAP's
-  `calibrate3D_g` -- detect beads, register their stacks in two passes,
-  average, smooth, interpolate -- but saves an HDF5 file, smooths in stated
-  units (nm in z) rather than SMAP's dimensionless parameter, uses a linear
-  rather than circular correlation to align beads, and crops z to where all
-  accepted beads overlap, which can make its z range narrower than SMAP's.
+  `calibrate3D_g`, but uses a linear rather than circular correlation to
+  align beads, and crops z to where all accepted beads overlap, which can
+  make its z range narrower than SMAP's.
 
 ## References
 
@@ -372,3 +359,6 @@ Beyond those:
   that achieves theoretically minimum uncertainty. *Nat Methods* 7, 373
   (2010). [doi:10.1038/nmeth.1449](https://doi.org/10.1038/nmeth.1449) --
   the maximum likelihood fit and its CRLB.
+* Ries J. SMAP: a modular super-resolution microscopy analysis platform for
+  SMLM data. *Nat Methods* 17, 870 (2020).
+  [doi:10.1038/s41592-020-0938-1](https://doi.org/10.1038/s41592-020-0938-1)
