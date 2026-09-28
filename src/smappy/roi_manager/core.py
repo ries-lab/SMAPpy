@@ -22,7 +22,7 @@ from ..columns import current
 from ..group import GroupSettings
 from ..io.hdf5 import load_localizations
 from ..locs import Localizations, to_nm
-from ..viewer import DEFAULT_BOUNDS, ViewState
+from ..viewer import ViewState
 
 
 def json_text(value):
@@ -135,6 +135,8 @@ class ROIProject:
         self.size_nm = 300.0  # circle diameter or square side length
         self.shape = "circle"
         self.tile_nm = 0.0    # a grid over each file for a systematic walk; 0 = none
+        # the bounds a layer opens with, so a scripted project filters as the GUI does
+        from ..session import DEFAULT_BOUNDS
         self.filters = dict(DEFAULT_BOUNDS)
         self.grouped = False
         self.group_settings = GroupSettings()

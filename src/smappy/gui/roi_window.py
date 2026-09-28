@@ -340,8 +340,8 @@ class ROIManagerWindow(QMainWindow):
         self.polygon_button = QPushButton("Polygon")
         self.polygon_button.setCheckable(True)
         self.polygon_button.setToolTip("draw an outline in this image: a click per "
-                                       "vertex, the first vertex or a double-click "
-                                       "closes it, Escape cancels")
+                                       "vertex, a click on the first vertex closes it, "
+                                       "Escape cancels")
         self.polygon_button.clicked.connect(lambda: self._start_drawing("polygon"))
         self.direction_button = QPushButton("Direction")
         self.direction_button.setCheckable(True)
@@ -731,8 +731,8 @@ class ROIManagerWindow(QMainWindow):
         self.roi_pane.set_tracking(True)
         self.polygon_button.setChecked(kind == "polygon")
         self.direction_button.setChecked(kind == "direction")
-        self.status.showMessage("a click per vertex; the first vertex or a "
-                                "double-click closes it, Escape cancels" if kind == "polygon"
+        self.status.showMessage("a click per vertex; a click on the first vertex "
+                                "closes it, Escape cancels" if kind == "polygon"
                                 else "click the start, then the end")
 
     def _cancel_drawing(self) -> None:

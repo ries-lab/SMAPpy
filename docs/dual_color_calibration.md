@@ -9,7 +9,7 @@ frame in one global fit, pages under Help > Plugin documentation.
 ## Use
 
 Open **Tools → bead calibration…** in the localization viewer,
-or run `smappy-calibrate`. Set **Calibration mode → Dual color**. Choose a layout, the main channel,
+or run `smappy-calibrate`. Set **mode → Dual colour**. Choose a layout, the main channel,
 and optionally a split position. Supported layouts are right-left and up-down,
 each with or without reflection of the secondary channel along the split axis.
 The main channel selector names the actual half: left/right or upper/lower.
@@ -69,7 +69,7 @@ The Bead diagnostics tab restores per-channel brightness versus shared XY shift,
 shape residual versus z shift, and shape residual versus correlation. Colors
 distinguish PSF, transformation-only, and rejected pairs, with gold selection
 outlines and clickable points. Select rows and toggle exclusion, then use
-**Rebuild from beads**. Settings or exclusions must be applied before saving.
+**Recalculate**. Settings or exclusions must be applied before saving.
 The paired average browser displays synchronized XY/XZ/YZ panels, with shared
 slice position, linked contrast by default, and optional independent contrast.
 The upper-limit factor multiplies the current slice maximum (or stack maximum
@@ -85,9 +85,9 @@ channel fills its panel without changing data or relative intensities; read the
 numerical intensity ticks when comparing channels. **Calculate fit quality** runs
 the diagnostics once per calibration and is disabled when results are available;
 tabs handle navigation. Rebuilding clears diagnostics and re-enables calculation.
-Refits use the existing
-single-channel production fitter independently;
-they are diagnostics, not a simultaneous dual-channel fit.
+Refits use the two-channel fitter (`fit_paired_bead_diagnostics`), x, y and z
+shared and the photons free per channel, one fit per bead pair on its
+aligned ROIs, as a two-colour dataset is fitted; they are diagnostics and never change the saved PSFs.
 
 Saving defaults to `<dataset-folder>_calibration.h5` in the parent of the first
 stack directory. For example, input `260709_MM_BeadCal_2C/Pos0/stack.ome.tif`
@@ -193,7 +193,7 @@ fifth of the light, from 9 simulated beads -- and a fit's background absorbed
 it, so the fitted background read low by the photons times the offset and sat
 on the fitter's floor at low backgrounds. Clipping keeps the noise above zero,
 so the light is counted before clipping, where the noise averages out: the
-photons then come back within 0.7% from 9 to 27 simulated beads. Clipping
+photons then come back within half a per cent from 9 to 27 simulated beads. Clipping
 still matters although the fit keeps its model positive: the likelihood weighs
 a pixel by 1/model, and an unclipped negative dip, times a bright molecule's
 photons, brings the model near zero at a low background (z scattered by 55 nm

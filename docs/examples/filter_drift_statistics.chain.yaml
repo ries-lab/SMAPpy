@@ -6,7 +6,7 @@ grouping: layer
 steps:
   - plugin: Chain/Layers
     label: filter
-    version: "1"
+    version: "2"
     values:
       layers:
         - grouped: true

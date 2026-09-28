@@ -265,12 +265,14 @@ def _to_rgb(rendered: RenderedImage, lut, invert, imax, contrast, gamma,
 class SigmaSettings:
     """How a localization precision becomes a rendering sigma.
 
-    Straight from SMAP, because it is what makes precision-weighted images
+    SMAP's policy, because it is what makes precision-weighted images
     readable rather than a field of single bright pixels: blow the precision up
     a little (``factor``), never let a blob fall below a floor -- an absolute
     one in data units and one tied to the rendered pixel size -- and cap the
     outliers, since a handful of localizations with an absurd precision would
-    otherwise dominate the render time.
+    otherwise dominate the render time.  SMAP caps at 400 nm; the cap here is
+    relative, a multiple of the median, so that it means the same on a table
+    in pixels or on custom axes.
     """
 
     factor: float = 1.0

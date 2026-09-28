@@ -40,8 +40,7 @@ COLUMNS = ("use", "input", "pattern", "overrides", "status")
 class BatchWindow(QMainWindow):
     """Files, a chain, output options, and a subprocess that runs them."""
 
-    def __init__(self, session: Optional[Session] = None,
-                 open_result: Optional[Callable[[str], None]] = None, parent=None):
+    def __init__(self, open_result: Optional[Callable[[str], None]] = None, parent=None):
         super().__init__(parent)
         from .help_window import attach_help
         attach_help(self, 'Panels/Batch window')

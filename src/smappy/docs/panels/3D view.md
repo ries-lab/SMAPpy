@@ -50,14 +50,15 @@ i, j = np.unravel_index(np.argmin(d), d.shape)
 a, b = pores[i], pores[j]
 u = (b - a) / np.hypot(*(b - a))
 roi = Region.line(a - 250 * u, b + 250 * u, 250.0)
-slab = Slab.from_region(roi, (-200.0, 200.0))
+slab = Slab.from_region(roi, (-100.0, 100.0))
 inside = slab.mask(x, y, z)
 EDGES = [(0, 1), (2, 3), (4, 5), (6, 7), (0, 2), (1, 3), (4, 6), (5, 7),
          (0, 4), (1, 5), (2, 6), (3, 7)]
 
 def view(ax, projection, title):
-    projection.fit(slab, 320, 200)
-    fov = projection.fov(320, 200)
+    projection.fit(slab, 480, 240)
+    projection.zoom *= 0.6                  # closer than the whole box
+    fov = projection.fov(480, 240)
     rgb, _ = render_layer_3d(locs, np.ones(len(locs), bool), projection, slab, fov,
                              RenderSettings(), DisplaySettings())
     ax.imshow(rgb, extent=(fov.x0, fov.x1, fov.y1, fov.y0))
@@ -80,7 +81,7 @@ filter.  While *follow 2D ROI* is ticked, the box follows the ROI as it is
 drawn or dragged.
 
 ```figure Simulated nuclear pores (Nup96) seen from the top.  A line ROI drawn through two neighbouring pores becomes a slab turned in the plane (yellow): its long axis is the line, its width the line's width.  The localizations inside it (black) are all the 3D view draws.
-w = 1500
+w = 1000
 cx, cy = slab.center[:2]
 near = (np.abs(x - cx) < w) & (np.abs(y - cy) < w)
 fig.set_size_inches(4.2, 3.6)
@@ -110,7 +111,7 @@ hides the back (*opacity*), or the colour says how near each localization
 is (*colour by depth*).
 
 ```figure The slab above, from the top, from the front (along its width, so z is vertical) and tilted by 45°.  From the top each pore is a ring; from the front the two rings of each pore, 50 nm apart in z, are seen edge on.
-fig.set_size_inches(7.5, 2.0)
+fig.set_size_inches(7.5, 2.1)
 axes = fig.subplots(1, 3)
 top = Projection(); top.preset("top", slab.angle)
 front = Projection(); front.preset("front", slab.angle)

@@ -198,6 +198,12 @@ class ROIHeader(QWidget):
             return
         if file_id is None:
             return
+        if not self.session.axes().is_default:
+            # an ROI is a place in nanometres; this region is in the picture's units
+            QMessageBox.information(self, "custom axes",
+                                    "the 2D view shows custom axes; switch them off to "
+                                    "draw a region that can become an ROI")
+            return
         points = np.asarray(region.points, float)
         if region.kind == "rect":
             x0, y0, x1, y1 = region.bounds
@@ -205,7 +211,11 @@ class ROIHeader(QWidget):
         else:
             polygon = points.tolist()
         center = np.asarray(polygon, float).mean(axis=0)
-        self.project.add_roi(file_id, [float(center[0]), float(center[1])], polygon=polygon)
+        try:
+            self.project.add_roi(file_id, [float(center[0]), float(center[1])], polygon=polygon)
+        except ValueError as error:          # a line of zero width, a degenerate outline
+            QMessageBox.information(self, "not an ROI", str(error))
+            return
         self._update_counts()
         self._notify()
         self.summary.setText(f"added the drawn {region.kind} as an ROI")

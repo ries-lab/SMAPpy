@@ -728,7 +728,9 @@ def positive_pair_models(raw, dz_nm, settings):
     # beads) that number is the emitter's total.  Fitted with a photon number
     # per channel (two colours), each is multiplied back by its channel's own
     # share, `photon_normalization`, stored with the PSF.  The light is read
-    # over the planes around focus, where z = 0 is.
+    # over the planes around z = 0, the aligned stack centre -- the plane the
+    # calibration calls focus, so a stack taken off focus shifts its z scale
+    # and this window together.
     norm = float(sum(light))
     if not np.isfinite(norm) or norm <= 0 or min(light) <= 0:
         raise ValueError('invalid paired PSF normalization')

@@ -423,7 +423,7 @@ class View3D(QWidget):
                 st = layer.state
                 weight += render_layer_3d(st.locs, st.filter.mask, proj, slab, fov,
                                           st.settings, st.display,
-                                          index=getattr(st, "index", None))[1].weight
+                                          index=getattr(st, "cull_index", None))[1].weight
         return weight
 
     def move_along_sight(self, steps: float) -> None:
@@ -456,7 +456,13 @@ class View3D(QWidget):
             slab.center -= self.projection.view_axis(2) * slab.size.min() * 0.1 * steps
             self.session.changed("slab")
         elif mods & Qt.ShiftModifier and slab is not None:      # thickness along it
-            axis = int(np.argmax(np.abs(self.projection.view_axis(2))))
+            # size is in the slab's own axes, turned by its angle about z, so
+            # the line of sight is turned into them before choosing one
+            sight = self.projection.view_axis(2)
+            turn = np.radians(slab.angle)
+            c, s = np.cos(turn), np.sin(turn)
+            local = (c*sight[0] + s*sight[1], -s*sight[0] + c*sight[1], sight[2])
+            axis = int(np.argmax(np.abs(local)))
             slab.size[axis] = max(slab.size[axis] * (1.1 ** -steps), 1.0)
             self.session.changed("slab")
         else:

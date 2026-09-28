@@ -73,7 +73,9 @@ overview's *update*.
 
 ## Find, review, evaluate, histogram
 
-**Find candidates** operates on the current file's filtered localizations. It
+Candidates are found by the **Density Peaks** segmenter
+(`ROIManager/Segment/Density Peaks`, pinned in the ROI tab), which operates on
+the current file's filtered localizations. It
 bins coordinates into a density image, smooths it, finds local peaks, recenters
 on nearby localizations, and suppresses nearby centers. Defaults target compact
 structures of about 100 nm diameter:
@@ -90,17 +92,20 @@ These are detection settings, separate from the analysis ROI size. Outlines are 
 and a draft is blue and dashed; a drawing in progress is a dashed cyan rubber
 line and a direction is a magenta arrow.
 
-**Evaluate all** runs on every included ROI across all files. The
-statistics evaluator returns localization count, arithmetic mean lateral
+**Run on every ROI**, in the *Evaluation pipeline...* window, runs the
+pipeline on every included ROI across all files (**Re-evaluate what changed**
+only on those whose results are out of date or missing). The **Statistics**
+evaluator (`ROIManager/Evaluate/Statistics`) returns localization count, arithmetic mean lateral
 localization precision (`xy_err_nm`), and arithmetic mean photons.
 Nonfinite measurement values are omitted from each mean; their finite sample
 counts are saved separately. Empty selections return count zero and NaN means.
 Missing required measurement columns produce a per-ROI error without stopping
 other ROIs. Select the error row to see its message.
 
-**Histograms** plots the current results for included ROIs.  NaN means are
+The **Histograms** analysis (`ROIManager/Analyze/Histograms`) plots the
+current results for included ROIs.  NaN means are
 omitted, with the number of missing values shown.  A histogram is a snapshot:
-press **Histograms** again after anything changes.
+run it again after anything changes.
 
 Synthetic tests cover two 100 nm rings and two blobs, each with 30 localizations.
 Detection settings still need checking on experimental NPC data, especially for

@@ -116,8 +116,9 @@ needs.  SMAP splits the same way (`renderSMAP` / `drawerSMAP`).
 * Not ported: the transparency/occlusion modes (`gaussrenderT`,
   `gaussrenderTx`), layers and compositing, the DL/tiff modes, grouped
   localizations, `normalizeFoV`, `remout`.  The sigma policy (`gaussfac`,
-  `mingaussnm`, `mingausspix`, the cap at 10x the median) is kept, in
-  `SigmaSettings`, because it is what makes precision-weighted images readable.
+  `mingaussnm`, `mingausspix`) is kept, in `SigmaSettings`, with SMAP's
+  absolute 400 nm cap replaced by one at 10x the median, which means the same
+  in any unit, because it is what makes precision-weighted images readable.
 
 ### Any column against any other
 

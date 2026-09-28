@@ -97,7 +97,7 @@ is far from the others' (*brightness range*) or that reaches the camera's
 maximum (*saturation*) is set aside: it is either two beads, a clump, or
 clipped.
 
-```figure Left: the maximum projection of a simulated bead stack, with the beads that were found (circles, the size of the ROI).  Right: one bead's box at three heights of the objective -- the astigmatic spot is stretched one way below focus and the other way above.
+```figure Left: the maximum projection of a simulated bead stack, with the beads that were found (boxes, the size of the ROI).  Right: one bead's box at three heights of the objective -- the astigmatic spot is stretched one way below focus and the other way above.
 fig.set_size_inches(7.5, 2.7)
 grid = fig.add_gridspec(1, 4, width_ratios=[1.5, 1, 1, 1])
 ax = fig.add_subplot(grid[0])
@@ -142,7 +142,7 @@ its brightest plane holds exactly one photon.  A fitted photon number is then
 the photons in the molecule's in-focus image.  Only the planes that every
 accepted bead covers after its z shift are kept.
 
-```figure Top: a side view (x against z) of a single bead, of the average of the accepted beads, and of the smoothed model the fitter uses -- each average is less noisy than its parts.  Bottom right: the light in each plane of the model; the brightest plane is 1 by construction.
+```figure Left: side views (x against emitter z) of one bead as it was cut out, of the aligned average of the accepted beads, and of the smoothed model the fitter uses; the spot is narrow in x on one side of focus and wide on the other.  Right: the light in each plane of the model -- nearly constant in z, since a bead loses little light out of the box, and 1 in the brightest plane by construction.
 fig.set_size_inches(7.5, 4.2)
 axes = fig.subplots(1, 4)
 psf = cal.psf
@@ -164,7 +164,8 @@ for ax in axes[1:3]:
     ax.set_yticklabels([])
 axes[3].plot(psf.sum(axis=(1, 2)), z_model, color="#1f77b4")
 axes[3].axvline(1.0, color="0.6", lw=0.8, ls="--")
-axes[3].set_ylim(*extent_z[::-1][::-1])
+axes[3].set_ylim(*extent_z)
+axes[3].set_xlim(0, 1.15)
 axes[3].set_xlabel("light per plane", fontsize=8)
 axes[3].set_title("normalisation", fontsize=9)
 axes[3].set_yticklabels([]); axes[3].tick_params(labelsize=7)
@@ -223,7 +224,7 @@ secondary.  Steps 1 and 2 run in each half on its own.  Then:
   averages are normalised **together**, so that the models keep the beads'
   split of the light between the halves.
 
-```figure Dual colour.  Left: the light in each plane of the two models; the dashed band is the five planes around the stack's centre over which the two together are set to one photon, so the main half (70 % of the beads' light in this simulation) and the secondary (30 %) keep their share.  Right: how far each bead pair lands from its partner after the transformation, in pixels; the box is the *dx/dy limit* a pair must meet.
+```figure Dual colour.  Left: the light in each plane of the two models; the grey band is the five planes around the stack's centre over which the two together are set to one photon, so the main half (70 % of the beads' light in this simulation) and the secondary (30 %) keep their share.  Right: how far each bead pair lands from its partner after the transformation, in pixels; the box is the *dx/dy limit* a pair must meet.
 cal2 = dual.calibration
 fig.set_size_inches(7.2, 3.0)
 left, right = fig.subplots(1, 2, gridspec_kw={"width_ratios": [1.4, 1]})
@@ -237,7 +238,9 @@ dz2 = cal2.main.dz
 left.axvspan(z2[centre] - (FOCAL_PLANES + 0.5) * dz2, z2[centre] + (FOCAL_PLANES + 0.5) * dz2,
              color="0.85", zorder=0)
 left.set_xlabel("emitter z (nm)", fontsize=8); left.set_ylabel("light per plane", fontsize=8)
-left.legend(fontsize=7, frameon=False)
+left.set_ylim(0, 1.15)
+left.legend(fontsize=7, frameon=False, loc="center right")
+fig.subplots_adjust(wspace=0.35)
 used = dual.transform_accepted
 delta = dual.transform_fit.dxdy
 limit = dual.beads.settings.transform_axis_limit_px
@@ -287,8 +290,7 @@ by maximising the correlation of the trilinearly shifted volume within
 $\pm1$ of it.  The first pass covers the whole stack; the median shift is
 subtracted, so that *max xy shift* and *max z shift* are measured from the
 consensus of the beads and not from the reference; the refinement passes
-(*iterations* minus one) correlate the central planes only, $\mathrm{max}(7,
-\textit{alignment range}/dz)$ of them.  Every bead is resampled once, with
+(*iterations* minus one) correlate the central planes only, $\max(7, A/dz)$ of them, $A$ the *alignment range*.  Every bead is resampled once, with
 cubic interpolation, from its original box by its accumulated shift.
 
 **Shape score.**  Each bead is scaled to the current average $T$ by
@@ -321,7 +323,7 @@ the focal plane, in objective nanometres.
 
 **Dual colour: the normalisation.**  Both averages are smoothed the same way.
 Before clipping, each half's light is read as the mean plane sum over the
-centre plane and FOCAL_PLANES = 2 planes either side,
+centre plane and `FOCAL_PLANES` = 2 planes either side,
 
 $$L_c = \frac{1}{5} \sum_{k = k_0 - 2}^{k_0 + 2}\ \sum_{x,y} \left(G * \bar V_c\right)_k , \qquad \mathrm{PSF}_c = \frac{\max\left(0,\ G * \bar V_c\right)}{L_1 + L_2} ,$$
 
@@ -357,9 +359,9 @@ within *RANSAC radius*; the inlier set is refitted until it stops changing,
 and then refined by least squares on the reprojection error in the main half
 with the robust soft-L1 loss
 
-$$\rho(r) = 2 s^2 \left(\sqrt{1 + (r/s)^2} - 1\right) , \qquad s = \frac{\textit{dx/dy limit}}{2} ,$$
+$$\rho(r) = 2 s^2 \left(\sqrt{1 + (r/s)^2} - 1\right) ,$$
 
-which is quadratic for small errors and grows only linearly for large ones.
+$s$ half the *dx/dy limit*, which is quadratic for small errors and grows only linearly for large ones.
 Round two keeps the round-one inliers whose $|dx|$ **and** $|dy|$ are both
 within the *dx/dy limit* and fits again on that fixed set.  The map must not
 cross infinity anywhere on the camera image, forwards or backwards.  The
@@ -405,7 +407,7 @@ Adds stacks one by one.
 
 ### Add folder...
 Adds a folder; with *search subdirectories* ticked, every acquisition found
-inside it, each position of a multi-position series counting as one.
+inside it.
 
 ### Remove
 Removes the selected entries from the list.
@@ -523,13 +525,13 @@ background; the status bar says how many beads were used.
 
 ### Calculate fit quality
 Refits the beads with the model just built and draws the *Fit quality*
-page.  It takes a few seconds.
+page.
 
 ### Save calibration...
-Writes the calibration as `.h5`, by default beside the bead data.  Saving
-also puts it into the fitter's *calibration* field in the main window --
-Spline 3D for a single-channel calibration, Spline 3D 2C for a dual-colour
-one.
+Writes the calibration as `.h5`, by default named after the bead data's
+folder and saved beside it.  Opened from the main window, saving also puts
+it into the fitter's *calibration* field -- Spline 3D for a single-channel
+calibration, Spline 3D 2C for a dual-colour one.
 
 ### Use in the Spline 3D fitter
 Puts the calibration last saved into the fitter again, for when the field
@@ -561,7 +563,8 @@ for the average, the centred error, and the lateral and axial profiles of the
 beads against the model.  Good: a straight line of slope 1 over the
 useful range and a centred error of a few nanometres; the ends of the range,
 where the spot is faint and wide, are always worse.  Dual colour adds the
-fitted photon split, which should be flat in z.
+fitted photon split, secondary over total, which should be flat in z at one
+half: the models already carry the beads' split.
 
 ### Field diagnostics
 Dual colour: the main half's beads overlaid with the transformed secondary
