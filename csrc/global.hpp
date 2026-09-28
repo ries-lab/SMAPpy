@@ -113,6 +113,7 @@ inline void accumulate_global(const Model* models, const float* const* data, int
         for (int iy = 0; iy < sz; ++iy) {
             for (int c = 0; c < C; ++c) {
                 models[c].value(ix, iy, theta + c * P, dudt, &mu[c]);
+                mu[c] = std::max(mu[c], MIN_MODEL);    // see lm.hpp's accumulate
                 chain<Model>(link, dudt, c, nv, dudt_global + c * nv);
                 d[c] = data[c][iy * sz + ix];
 
@@ -156,6 +157,7 @@ inline void crlb_and_logl_global(const Model* models, const float* const* data, 
         for (int iy = 0; iy < sz; ++iy) {
             for (int c = 0; c < C; ++c) {
                 models[c].value(ix, iy, theta + c * P, dudt, &mu[c]);
+                mu[c] = std::max(mu[c], MIN_MODEL);    // as in the fit
                 chain<Model>(link, dudt, c, nv, dudt_global + c * nv);
                 d[c] = data[c][iy * sz + ix];
             }

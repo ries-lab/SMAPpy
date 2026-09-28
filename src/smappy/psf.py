@@ -231,13 +231,11 @@ def signal_integral(calibration) -> float:
     A dual bead calibration normalises its two PSFs together, so that their
     signal sums to one and the pair keeps the beads' split; each channel's
     share is stored with it, ``photon_normalization``
-    (`calibrate.core.positive_pair_models`).  The signal is the plane sum
-    less the constant the calibration adds to keep the spline positive,
-    which a fit's background takes rather than its photons -- 15% of the
-    main half's sum and 40% of a secondary half with a fifth of the light,
-    enough to read that fifth as a third.  A calibration saved before the
-    share was stored had the main half's brightest plane at one, and the
-    share is worked out from it.  Without either record (SMAP's calibrations,
+    (`calibrate.core.positive_pair_models`).  A calibration saved before the
+    share was stored had the main half's brightest plane at one, pedestal
+    included -- it was lifted by a constant to keep the spline positive,
+    which a fit's background takes rather than its photons -- and the share
+    is worked out from it, less that constant.  Without either record (SMAP's calibrations,
     one built by hand) the spline is taken to be normalised to one.
     """
     p = getattr(calibration, "parameters", None) or {}
@@ -331,10 +329,8 @@ class GlobalSplinePSF(_GlobalPSF):
         split -- the total 3.4x the truth for a splitter sending a fifth of
         the light to the second half -- and the ratio against the beads'
         rather than the dye's.  SMAP divides by the same number
-        (``PhotonRatios / normf``).  Less the positivity pedestal, which the
-        main half has too, so the total comes out in photons and not 17%
-        above them.  A calibration without the record (SMAP's, one built by
-        hand) is taken to be normalised per channel.
+        (``PhotonRatios / normf``).  A calibration without the record (SMAP's,
+        one built by hand) is taken to be normalised per channel.
         """
         return np.array([signal_integral(c) for c in self.calibrations], float)
 

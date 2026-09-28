@@ -897,7 +897,9 @@ class DualSplineFit(_FitPlugin):
     # 2: photons and ratio in photons, not in the beads' split; linked photons
     #    count that split once
     # 3: the PSFs normalised together; linked photons are the total
-    version = "3"
+    # 4: a calibration's PSFs clipped at zero, not lifted: the background is
+    #    the background (the version is the calibration's as much as the fit's)
+    version = "4"
     Settings = DualSplineFitSettings
     params = {**GaussianFit.params, **finish_params()}
 

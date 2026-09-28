@@ -23,7 +23,7 @@ constexpr float INIT_LAMBDA = 0.1f;
 constexpr float SCALE_UP = 10.0f;
 constexpr float SCALE_DOWN = 0.1f;
 constexpr float ACCEPTANCE = 1.5f;
-constexpr float MIN_MODEL = 1e-3f;  // photons; see accumulate
+constexpr float MIN_MODEL = 1e-3f;  // photons: the model's floor; see accumulate
 
 // Accumulate the Poisson log-likelihood error, its gradient and the
 // Hessian (the expected information, see below) over all pixels of the ROI.
@@ -42,6 +42,11 @@ inline void accumulate(const Model& model, const float* data, int sz,
     for (int ix = 0; ix < sz; ++ix)
         for (int iy = 0; iy < sz; ++iy) {
             model.value(ix, iy, theta, dudt, &mu);
+            // A spline may dip a little below zero between knots next to a
+            // PSF clipped at zero (`calibrate.core.positive_pair_models`);
+            // with the background low, the model would too, and its log is
+            // not defined.  The model is floored where it is read.
+            mu = std::max(mu, MIN_MODEL);
             float d = data[iy * sz + ix];
 
             if (d > 0.0f)
@@ -82,6 +87,7 @@ inline void crlb_and_logl(const Model& model, const float* data, int sz,
     for (int ix = 0; ix < sz; ++ix)
         for (int iy = 0; iy < sz; ++iy) {
             model.value(ix, iy, theta, dudt, &mu);
+            mu = std::max(mu, MIN_MODEL);          // as in accumulate
             const float d = data[iy * sz + ix];
 
             for (int k = 0; k < NV; ++k)

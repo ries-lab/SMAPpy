@@ -1,5 +1,5 @@
 ---
-version: "3"
+version: "4"
 covers: [smappy.psf.GlobalSplinePSF, smappy.dualfit.combine_peaks, smappy.dualfit.build_link, smappy.dualfit.cut_paired_rois, smappy.dualfit.paired_to_localizations, smappy.dualfit.DualChannelEngine, smappy.calibrate.dual.build_dual_calibration, smappy.calibrate.dual.fit_dual_transform, smappy.calibrate.core.positive_pair_models, smappy.calibrate.dual.load_dual_color_calibration, smappy.plugins.fit.DualSplineFit, smappy.plugins.fit.finish_localizations]
 ---
 
@@ -294,19 +294,29 @@ because x, y and z are linked, the photons of both halves count in every one
 of them.
 
 **The normalisation.**  Each half's PSF is the average of its bead images,
-smoothed, with a constant $p_c$ added to every pixel so that the cubic spline
-is positive everywhere.  That constant is not light: in a fit it is taken up
-by the background, so it is left out of what a PSF holds.  Half $c$'s
-signal is
+smoothed and clipped at zero: the tails of an average of a few beads scatter
+about zero, and a PSF has no negative light.  Half $c$'s signal is
 
-$$S_c = \left\langle \sum_{\mathrm{ROI}} \mathrm{PSF}_c(z) \right\rangle_{|z| \leq 2\,\Delta z} - p_c\, n_{\mathrm{px}} ,$$
+$$S_c = \left\langle \sum_{\mathrm{ROI}} \mathrm{PSF}_c(z) \right\rangle_{|z| \leq 2\,\Delta z} ,$$
 
 the plane sum averaged over the focal plane and the two planes either side
-of it ($\Delta z$ the calibration's step), less the constant over the
-$n_{\mathrm{px}}$ pixels of a plane.  Both PSFs are divided by $S_0 + S_1$,
-and $s_c = S_c / (S_0 + S_1)$ is stored with each, so $s_0 + s_1 = 1$.  The
-constant matters: it is about 15% of a bright half's plane sum and 40% of a
-half with a fifth of the light, enough to read that fifth as a third.
+of it ($\Delta z$ the calibration's step).  Both PSFs are divided by
+$S_0 + S_1$, and $s_c = S_c / (S_0 + S_1)$ is stored with each, so
+$s_0 + s_1 = 1$.
+
+Clipping keeps a little of the noise, the part above zero: on a simulated
+calibration from 9 beads the photons read 1.5% high and the ratio 0.005 high,
+and from 27 beads 0.8% and 0.003.  Between its knots the cubic spline can dip
+slightly below zero next to a clipped tail; the calibration records the
+lowest value as `spline_minimum` (a fraction of the peak, a few per mille),
+and the fit floors its model at $10^{-3}$ photons, so a low background never
+makes it negative.  Before version 4 the PSFs were not clipped but lifted: a
+constant was added to every pixel, large enough to prove the spline positive
+everywhere.  That constant was the worst noise dip anywhere in the volume --
+11% of a bright half's signal and 40% of a half with a fifth of the light,
+from 9 beads -- and the fit's background took it: the photons survived, but
+the fitted background read low by the photons times the constant, and at a
+photon per pixel it sat on its floor.
 
 **Photons.**  With the link's photon factor $f_c$ ($f_0 = 1$), half $c$'s
 model is $f_c \hat{N}\,\mathrm{PSF}_c$ when the photons are linked, and
@@ -429,8 +439,13 @@ differences:
   multiplies each channel's fitted photons by it and divides a typed-in
   photon ratio by the secondary's.  Here the PSFs are normalised together
   so that they hold one photon at focus, the share $s_c$ is what is stored,
-  the constant added for positivity is left out of it, and a linked fit
-  with no ratio given takes the beads' split and reports the total.
+  and a linked fit with no ratio given takes the beads' split and reports
+  the total.
+* **The tails are clipped, not lifted.**  SMAP's calibration (`getstackcal`)
+  subtracts the volume's minimum -- lifting every pixel by the worst noise
+  dip -- counts that lift into the normalisation, and then clips at zero.
+  Here the PSFs are only clipped, so the fitted background is the
+  background.
 * **No image is mirrored.**  SMAP flips the second channel's ROIs for a
   mirrored splitter; here the secondary PSF is kept in the camera's
   orientation and the mirror is a factor of $-1$ in the link.

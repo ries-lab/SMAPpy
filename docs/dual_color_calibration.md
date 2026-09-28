@@ -184,15 +184,21 @@ photon-noise test. Noise-aware shape scores, soft PSF weights, and spatially var
 PSF models are not implemented in this step. The new FoV diagnostics help identify
 smooth field-dependent mismatch before changing those algorithms.
 
-After Gaussian smoothing, a separate constant offset makes each channel's cubic
-PSF strictly positive. A Bernstein coefficient lower bound over every cubic cell
-accounts for interpolation undershoot between positive knots. The relative floor
-is 1e-6 of the channel peak (absolute minimum 1e-12 before common normalization).
-Offsets and normalization are saved. Both channels are then divided by **one
+After Gaussian smoothing each channel's PSF is **clipped at zero**. It used to
+be lifted instead: a constant offset, large enough that a Bernstein coefficient
+bound proved the cubic spline positive everywhere. That offset was the worst
+noise dip anywhere in the averaged volume, added to every pixel of every
+plane -- 11% of a bright channel's focal signal and 40% of a channel with a
+fifth of the light, from 9 simulated beads -- and a fit's background absorbed
+it, so the fitted background read low by the photons times the offset and sat
+on the fitter's floor at low backgrounds. Clipping keeps only the noise above
+zero (photons about 1% high from 9-27 beads). The cubic spline can still dip
+slightly below zero between knots next to a clipped tail; its lowest value is
+recorded as `spline_minimum` (relative to the peak), and the fitter floors its
+model at 1e-3 photons. Both channels are then divided by **one
 common factor**, so they keep the beads' relative amplitudes: the factor makes
 the two channels' signal around the focal plane (the plane sums over the focal
-plane and two planes either side, less the positivity offset, which a fit's
-background absorbs) add up to 1. Each model stores its share of that sum as
+plane and two planes either side) add up to 1. Each model stores its share of that sum as
 `photon_normalization`, so the two shares add up to 1 too. Unmodified
 unsmoothed averages are retained for review. The measured median
 secondary/main bead brightness ratio is saved too. Intensities are in camera
@@ -224,7 +230,7 @@ an explicit instruction to use `load_dual_color_calibration()`.
 
 Focused tests cover all four layouts, selectable reference halves, unequal regions,
 shared z shifts, retention of relative channel axial offsets and intensity ratios,
-continuous spline positivity, projective outliers/degeneracy, coordinate fallback,
+PSFs clipped at zero and normalised together, projective outliers/degeneracy, coordinate fallback,
 exclusion/rebuild, and save/load compatibility. To reproduce the real-data check:
 
 ```sh
@@ -289,9 +295,8 @@ projective residuals ranged from 0.0192 to 0.0701 pixels. Each channel supplied
 | Held-out median absolute centered z error | 4.77 nm | 6.51 nm |
 | Held-out 90th percentile absolute centered z error | 15.30 nm | 18.68 nm |
 
-The final exported float32 coefficient arrays have strictly positive continuous
-Bernstein lower bounds of 5.56e-8 and 1.13e-8 in their common normalized scale.
-These measurements are a single-acquisition holdout, not a general accuracy claim.
+(That calibration was made with the positivity offset described above, since
+replaced by clipping.) These measurements are a single-acquisition holdout, not a general accuracy claim.
 Automatic shape rejection is conservative: inspect the rejected pairs and the
 field coverage before relying on extrapolation across the entire camera.
 

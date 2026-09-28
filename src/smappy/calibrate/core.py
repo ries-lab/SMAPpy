@@ -694,59 +694,60 @@ FOCAL_PLANES = 2
 
 
 def positive_pair_models(raw, dz_nm, settings):
-    """Constant channel offsets certify positivity throughout every cubic cell.
+    """The two channels' PSFs, clipped at zero and normalised together.
 
-    A polynomial lies within its Bernstein coefficient bounds on [0,1]^3.
-    Bounding the actual float32 coefficients also covers cubic undershoot.
+    Clipped, as the single-channel calibration and SMAP's (`getstackcal`)
+    are.  This used to add a constant to each channel instead, large enough
+    that a Bernstein bound certified the cubic spline positive everywhere --
+    and that constant was the worst noise dip anywhere in the volume, added
+    to every pixel of every plane: 11% of the main half's focal signal and
+    40% of a half with a fifth of the light, from 9 beads.  A fit's
+    background took it, so the photons survived; the background did not --
+    it read low by the photons times the constant, and at a photon per pixel
+    it sat on the fitter's floor.  Clipping the noise of the tails costs
+    0.7% and 2.7% of phantom signal instead.  The spline can still dip a
+    little below zero between knots near the clipped tails; the fitter floors
+    its model for that (`lm.hpp`, MIN_MODEL), and the dip is recorded here,
+    relative to the peak, as ``spline_minimum``.
     """
-    from math import comb
     s = settings
     psfs = ndimage.gaussian_filter(raw, (0, s.smooth_z_nm/dz_nm, s.smooth_xy_px,
                                         s.smooth_xy_px), mode='reflect')
-    transform = np.array([[comb(k, i)/comb(3, i) if i <= k else 0
-                           for i in range(4)] for k in range(4)])
-    def lower_bound(coeff):
-        powers = coeff.reshape(4, 4, 4, -1).astype(float)
-        return float(np.einsum('ai,bj,ck,ijkn->abcn', transform, transform, transform,
-                              powers, optimize=True).min())
-    offsets = []
-    for psf in psfs:
-        coeff = spline_coefficients(psf)
-        epsilon = max(float(np.max(np.abs(psf)))*1e-6, 1e-12)
-        offset = max(0., epsilon-lower_bound(coeff))
-        psf += offset
-        offsets.append(offset)
+    psfs = np.maximum(psfs, 0)
     # One factor for both channels, so that the pair keeps the beads' split,
     # chosen so that their signal together is one photon at focus: fitted
     # with one shared photon number (biplane, the split taken from the
     # beads) that number is the emitter's total.  Fitted with a photon number
     # per channel (two colours), each is multiplied back by its channel's own
-    # share, `photon_normalization`, stored with the PSF.  The signal is the
-    # plane sum less the positivity offset, which a fit's background takes,
-    # and it is read over the planes around focus, where z = 0 is.
-    npx = psfs.shape[2]*psfs.shape[3]
+    # share, `photon_normalization`, stored with the PSF.  The signal is read
+    # over the planes around focus, where z = 0 is.
     centre = (psfs.shape[1]-1)//2
     around = slice(max(centre-FOCAL_PLANES, 0), centre+FOCAL_PLANES+1)
-    signal = [float((psf[around].sum(axis=(1, 2)) - offset*npx).mean())
-              for psf, offset in zip(psfs, offsets)]
+    signal = [float(psf[around].sum(axis=(1, 2)).mean()) for psf in psfs]
     norm = float(sum(signal))
     if not np.isfinite(norm) or norm <= 0 or min(signal) <= 0:
         raise ValueError('invalid paired PSF normalization')
     models = [SplineCalibration(spline_coefficients(psf/norm), dz_nm,
               (psf.shape[0]-1)/2, x0=(s.roi_size-1)/2, psf=psf/norm, em_mirror=False,
-              parameters={'method': 'smappy_dual_bead_v2', 'settings': asdict(s),
-                          'positivity_offset_before_normalization': offset,
+              parameters={'method': 'smappy_dual_bead_v3', 'settings': asdict(s),
                           'common_normalization': norm,
                           'normalization': 'joint: both channels\' signal around '
                                            'focus sums to 1',
                           'photon_normalization': share/norm,
-                          'positivity': 'Bernstein lower bound; relative floor 1e-6',
+                          'positivity': 'smoothed PSF clipped at zero',
                           'z_reference': 'joint aligned stack center'})
-              for psf, offset, share in zip(psfs, offsets, signal)]
+              for psf, share in zip(psfs, signal)]
     for model in models:
-        bound = lower_bound(model.coeff)
-        if not np.isfinite(bound) or bound <= 0:
-            raise ValueError('could not certify strict positivity of the final float32 spline')
-        model.parameters['continuous_positive_lower_bound'] = bound
+        model.parameters['spline_minimum'] = (_spline_minimum(model.coeff)
+                                              / float(model.psf.max()))
         model.parameters['peak_plane_integral'] = float(model.psf.sum(axis=(1, 2)).max())
     return models, list(raw/norm)
+
+
+def _spline_minimum(coeff, samples=4):
+    """The lowest value the cubic spline takes, on a grid inside each cell."""
+    t = np.linspace(0, 1, samples)
+    powers = np.stack([t**0, t, t**2, t**3])
+    c = np.asarray(coeff, float).reshape(4, 4, 4, -1)
+    return float(np.einsum('ia,jb,kc,ijkn->abcn', powers, powers, powers, c,
+                           optimize=True).min())

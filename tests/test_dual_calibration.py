@@ -85,15 +85,23 @@ def test_shape_outliers_do_not_refit_or_reduce_transformation_support(tmp_path):
         np.testing.assert_allclose(d['transform_weights_xy'], result.transform_fit.weights_xy)
 
 
-def test_continuous_spline_positivity_and_common_normalization():
+def test_the_pair_is_clipped_at_zero_and_normalised_together():
+    """Clipped rather than lifted: a constant added to every pixel was the
+    worst noise dip of the volume, 11-40% of the signal, and the fit's
+    background read low by it."""
     z, y, x = np.mgrid[-4:5, -4:5, -4:5]
     raw = np.exp(-x*x-y*y-z*z/4)-.02
     settings = DualColorSettings(roi_size=9, smooth_z_nm=0)
     models, _ = positive_pair_models(np.stack((raw, raw*3)), 20, settings)
-    assert models[0].psf.min() > 0
+    assert models[0].psf.min() == 0
     np.testing.assert_allclose(models[1].psf, models[0].psf*3, rtol=2e-5, atol=1e-8)
-    for zpos in np.linspace(.05, 7.95, 41):
-        assert evaluate_spline(models[0], 2.3, 1.8, zpos, 5).min() > 0
+    # the tails are zero, not lifted, and what dips below between knots is
+    # recorded -- a small fraction of the peak
+    assert 'positivity_offset_before_normalization' not in models[0].parameters
+    assert -0.05 < models[0].parameters['spline_minimum'] <= 0
+    lowest = min(evaluate_spline(models[0], 2.3, 1.8, zpos, 5).min()
+                 for zpos in np.linspace(.05, 7.95, 41))
+    assert lowest >= models[0].parameters['spline_minimum']*models[0].psf.max() - 1e-7
 
 
 def synthetic(layout, main):
@@ -333,12 +341,8 @@ def test_the_two_psfs_are_normalised_together_and_keep_their_shares(dim_secondar
     assert sum(shares) == pytest.approx(1.0, abs=1e-6)
     assert shares[1] == pytest.approx(0.2, abs=0.02)     # the beads' split
     for c, share in zip((cal.main, cal.secondary), shares):
-        p = c.parameters
-        npx = c.psf.shape[1]*c.psf.shape[2]
         centre = (c.psf.shape[0]-1)//2
-        signal = (c.psf[centre].sum()
-                  - p['positivity_offset_before_normalization']/p['common_normalization']*npx)
-        assert signal == pytest.approx(share, rel=0.03)
+        assert c.psf[centre].sum() == pytest.approx(share, rel=0.03)
 
 
 def test_the_shares_survive_a_save(dim_secondary, tmp_path):
@@ -351,3 +355,22 @@ def test_the_shares_survive_a_save(dim_secondary, tmp_path):
     for before, after in ((dim_secondary.main, loaded.main),
                           (dim_secondary.secondary, loaded.secondary)):
         assert signal_integral(after) == pytest.approx(signal_integral(before))
+
+
+def test_the_fitted_background_is_the_background(dim_secondary):
+    """The PSFs were lifted by the worst noise dip of the volume, which the
+    background absorbed: it read low by the photons times that constant, and
+    at a photon per pixel every fit of a bright molecule sat on the floor."""
+    from smappy.psf import GlobalSplinePSF
+    cal = dim_secondary
+    model = GlobalSplinePSF((cal.main, cal.secondary))
+    link = np.zeros((400, 2, 2, 5), np.float32)
+    link[:, 1] = 1.0
+    fit = model.fit(_molecules(0.25, photons=10000, background=1.0), link)
+    values = model.unpack(fit, link)
+    assert np.isfinite(fit.logl).all()
+    for channel in (0, 1):
+        background = values[f'background_ch{channel}']
+        assert np.median(background) == pytest.approx(1.0, abs=0.15)
+        assert np.mean(background < 0.02) < 0.05          # not on the floor
+    assert np.median(values['photons']) == pytest.approx(10000, rel=0.03)
