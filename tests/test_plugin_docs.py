@@ -15,18 +15,7 @@ from smappy.docs import markup
 # gets a page (docs/<path>.md beside the plugins) or a line here, and a page
 # that is written takes its plugin off.  Until then the Help window shows the
 # summary and the settings table, generated.
-UNDOCUMENTED = {
-    "Analysis/Process/History",
-    "Analysis/Register/Calibrate transform",
-    "Chain/Layers",
-    "File/Export/Image",
-    "File/Load/Auto",
-    "File/Load/MINFLUX",
-    "File/Load/SMAP",
-    "File/Load/csv",
-    "File/Load/smappy HDF5",
-    "File/Save/smappy HDF5",
-}
+UNDOCUMENTED: set = set()
 
 
 def shipped():
@@ -98,11 +87,18 @@ def test_a_written_page_renders_with_its_maths_and_figures(path):
         assert data.startswith(b"<svg" if name.endswith(".svg") else b"\x89PNG\r\n\x1a\n")
 
 
-def test_a_plugin_without_a_page_still_gets_its_settings():
-    rendered = docs.render(plugins.get("File/Load/csv"))
+def test_a_plugin_without_a_page_still_gets_its_settings(tmp_path):
+    """Every shipped plugin has a page now; a dropped-in one may not."""
+    folder = tmp_path / "Mine" / "Tools"
+    folder.mkdir(parents=True)
+    (folder / "thing.py").write_text(textwrap.dedent(PLUGIN))
+    from smappy.plugins.discovery import load_module
+    cls = load_module(folder / "thing.py").Thing
+    cls.path, cls.name = "Mine/Tools/Thing", "Thing"
+    rendered = docs.render(cls, origin=folder / "thing.py")
     assert rendered.errors == []
     assert "No written page" in rendered.html
-    assert "<code class=\"name\">mapping</code>" in rendered.html
+    assert "<code class=\"name\">radius_nm</code>" in rendered.html
 
 
 # ---------------------------------------------------------------- the pages
@@ -346,7 +342,8 @@ def test_a_plugins_title_bar_has_a_question_mark_that_opens_its_page(app):
     # a link to another plugin's page is followed in the same window
     window._on_link(QUrl("plugin:File/Load/MINFLUX"))
     assert window.current == "File/Load/MINFLUX"
-    assert "No written page" in window.browser.toPlainText()
+    assert "MINFLUX" in window.browser.toPlainText()
+    assert "No written page" not in window.browser.toPlainText()
 
 
 def test_a_plugin_in_its_own_window_has_the_question_mark_too(app):

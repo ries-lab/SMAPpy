@@ -249,3 +249,35 @@ def test_two_steps_share_a_row_and_collisions_are_qualified():
     assert row['first.n'] == 2 and row['second.n'] == 2
     assert 'n' not in row
     assert row['first.only_here'] == 1 and row['second.only_here'] == 1
+
+
+def test_a_script_can_trust_the_finder():
+    """Found candidates are unreviewed and evaluate() passes over them, so
+    the documented find-then-evaluate evaluated nothing; reviewed=True says
+    the script trusts the finder."""
+    locs, _ = pores()
+    p = ROIProject()
+    s = p.add_source(locs)
+    p.find(s.id, reviewed=True)
+    p.evaluate()
+    assert len(p.results()) == 4
+
+
+def test_the_default_histograms_leave_out_the_counts_behind_the_means():
+    locs, _ = pores()
+    p = ROIProject()
+    s = p.add_source(locs)
+    p.find(s.id, reviewed=True)
+    p.evaluate()
+    drawn = histograms(p.results(), HistogramSettings(bins=10))
+    assert set(drawn) == {'n_localizations', 'mean_precision_nm', 'mean_photons'}
+
+
+def test_a_pixel_precision_is_averaged_under_a_pixel_name():
+    from smappy.plugins.roi import StatisticsSettings, site_statistics
+    locs = Localizations({'x_pix': np.zeros(3), 'y_pix': np.zeros(3),
+                          'xy_err_pix': np.array([0.1, 0.2, 0.3]),
+                          'photons': np.ones(3)}, {'units': 'pixel'})
+    values = site_statistics(locs, StatisticsSettings(precision_column='xy_err_pix'))
+    assert values['mean_precision_pix'] == pytest.approx(0.2)
+    assert 'mean_precision_nm' not in values

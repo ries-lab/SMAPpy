@@ -141,9 +141,16 @@ class StatisticsSettings:
         help="the column averaged as the site's localization precision")
 
 
+def precision_name(column: str) -> str:
+    """The result's name for a precision column, in that column's unit: a
+    pixel table's ``xy_err_pix`` averages to pixels, not nanometres."""
+    return "mean_precision_pix" if column.endswith("_pix") else "mean_precision_nm"
+
+
 def site_statistics(locs, settings: StatisticsSettings) -> Dict[str, Any]:
     out: Dict[str, Any] = {"n_localizations": len(locs)}
-    for column, name in ((settings.precision_column, "mean_precision_nm"),
+    for column, name in ((settings.precision_column,
+                          precision_name(settings.precision_column)),
                          ("photons", "mean_photons")):
         if column not in locs:
             raise ValueError(f"statistics requires {column}")
@@ -178,8 +185,10 @@ class Statistics(Plugin):
             ax.set_aspect("equal")
             ax.set_xlabel("x (nm)")
             ax.set_ylabel("y (nm)")
+            name = precision_name(settings.precision_column)
+            unit = "px" if name.endswith("_pix") else "nm"
             ax.set_title(f"{values['n_localizations']} localizations, "
-                         f"{values['mean_precision_nm']:.1f} nm precision")
+                         f"{values[name]:.1f} {unit} precision")
 
         return Result(text=f"{values['n_localizations']} localizations",
                       plot=plot if len(ctx.locs) else None,
@@ -194,7 +203,8 @@ class HistogramSettings:
                       help="number of equal-width bins, spanning each column's "
                            "smallest to largest value")
     fields: str = param("", label="columns",
-                        help="comma separated; empty means every numeric column")
+                        help="comma separated; empty means every numeric "
+                             "column but the counts behind the means")
 
 
 def histograms(rows: Sequence[Dict[str, Any]], settings: HistogramSettings
@@ -204,8 +214,11 @@ def histograms(rows: Sequence[Dict[str, Any]], settings: HistogramSettings
         return {}
     named = [f.strip() for f in settings.fields.split(",") if f.strip()]
     if not named:
+        # every numeric column but the ids and the ``_n`` counts, which only
+        # say how many values went into a mean -- nearly always the
+        # localization count again
         named = [k for k in rows[0]
-                 if k not in ("roi_id", "file_id")
+                 if k not in ("roi_id", "file_id") and not k.endswith("_n")
                  and all(isinstance(r.get(k), (int, float)) and not isinstance(r.get(k), bool)
                          for r in rows)]
     out = {}

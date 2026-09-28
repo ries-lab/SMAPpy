@@ -42,11 +42,14 @@ TRANSFORM_FILTER = "Channel transformation (*_2ct.h5 *.h5 *.hdf5)"
 class RegisterLocsSettings:
     """The registration, plus where to put it."""
     registration: RegisterSettings = field(default_factory=RegisterSettings)
-    save: bool = param(True, label="save transformation")
+    save: bool = param(True, label="save transformation",
+                       help="write it to a file a two-colour fit can read")
     path: str = param("", label="file", kind="save_file",
                       file_filter=TRANSFORM_FILTER,
-                      help="auto: <table>_2ct.h5 beside the localizations")
-    overwrite: bool = param(False, advanced=True)
+                      help="auto: <name>_2ct.h5 beside the movie the table was "
+                           "fitted from (or the file it was read from)")
+    overwrite: bool = param(False, advanced=True,
+                            help="replace a file that is already there")
 
 
 def chip_pixels(locs, report=None):
@@ -108,11 +111,14 @@ class CalibrateChannelTransform(Plugin):
         "registration.layout": ParamInfo(
             label="layout", choices=(("auto", "detect"), "right-left",
                                      "right-left mirrored", "up-down",
-                                     "up-down mirrored")),
+                                     "up-down mirrored"),
+            help="how the chip is split; detect votes for all of them and "
+                 "keeps the sharpest"),
         "registration.main_channel": ParamInfo(
             label="main channel",
             choices=(("auto", "the left or upper half"), "left", "right",
-                     "upper", "lower")),
+                     "upper", "lower"),
+            help="the half the other is mapped onto, the reference"),
         "registration.model": ParamInfo(
             label="transformation", choices=(
                 ("projective", "projective (8 coefficients)"),
@@ -131,18 +137,31 @@ class CalibrateChannelTransform(Plugin):
             label="fine matching", unit="px", min=0,
             help="second pass over clean matches only, which is where the "
                  "accuracy comes from; 0 skips it"),
-        "registration.vote_bin_px": ParamInfo(label="vote bin", unit="px",
-                                              min=0.1, advanced=True),
-        "registration.vote_smooth_px": ParamInfo(label="vote smoothing",
-                                                 unit="px", min=0.1, advanced=True),
-        "registration.min_pairs": ParamInfo(label="minimum pairs", min=4,
-                                            advanced=True),
-        "registration.max_pairs": ParamInfo(label="pairs used in the fit", min=4,
-                                            advanced=True),
+        "registration.adapt_fine_tolerance": ParamInfo(
+            help="widen the fine matching to what the coarse fit misses its "
+                 "own pairs by, when those pairs are clean"),
+        "registration.vote_bin_px": ParamInfo(
+            label="vote bin", unit="px", min=0.1, advanced=True,
+            help="the bin of the histogram of pair vectors the offset is "
+                 "voted in"),
+        "registration.vote_smooth_px": ParamInfo(
+            label="vote smoothing", unit="px", min=0.1, advanced=True,
+            help="the width of the difference-of-Gaussians filter the vote "
+                 "is scored with"),
+        "registration.min_pairs": ParamInfo(
+            label="minimum pairs", min=4, advanced=True,
+            help="fewer pairs than this and the registration refuses"),
+        "registration.max_pairs": ParamInfo(
+            label="pairs used in the fit", min=4, advanced=True,
+            help="at most this many pairs, drawn at random, go into each fit"),
         "registration.reprojection_threshold_px": ParamInfo(
-            label="outlier threshold", unit="px", min=0.01, advanced=True),
+            label="outlier threshold", unit="px", min=0.01, advanced=True,
+            help="the robust (RANSAC) fit's inlier radius, at least; it widens "
+                 "with the matching tolerance"),
         "registration.transform_axis_limit_px": ParamInfo(
-            label="dx/dy limit", unit="px", min=0.01, advanced=True),
+            label="dx/dy limit", unit="px", min=0.01, advanced=True,
+            help="the largest |dx| or |dy| a pair may keep after the first "
+                 "fit, at least; it widens with the matching tolerance"),
     }
     main = ("registration", "save", "path")
 

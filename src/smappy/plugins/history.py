@@ -141,8 +141,9 @@ def write(found: Sequence[Dict], path) -> Path:
 class HistorySettings:
     changes_only: bool = param(
         False, label="only what changed the localizations",
-        help="leave out the measurements and the loads, keeping the runs that "
-             "the numbers in this table depend on")
+        help="keep only the entries marked *, the runs the numbers in this "
+             "table depend on; leave out saves, exports and the plain load "
+             "lines")
     show_settings: bool = param(True, label="with the settings",
                                 help="the parameters each run was given")
     path: str = param("", label="export to", kind="save_file",

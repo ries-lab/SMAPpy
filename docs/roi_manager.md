@@ -80,11 +80,11 @@ structures of about 100 nm diameter:
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| Bin | 20 nm | Density-image pixel width |
-| Sigma | 50 nm | Gaussian smoothing standard deviation |
-| Spacing | 150 nm | Minimum distance from an accepted or existing center |
-| Count radius | 75 nm | Neighborhood used to recenter and check count |
-| Min count | 10 | Minimum filtered localizations within that radius |
+| bin | 20 nm | Density-image pixel width |
+| smoothing | 50 nm | Gaussian smoothing standard deviation |
+| separation | 150 nm | Minimum distance from an accepted or existing center |
+| count radius | 75 nm | Neighborhood used to recenter and check count |
+| minimum count | 10 | Minimum filtered localizations within that radius |
 
 These are detection settings, separate from the analysis ROI size. Outlines are amber, grey when the ROI is excluded, green when it is selected,
 and a draft is blue and dashed; a drawing in progress is a dashed cyan rubber
@@ -131,21 +131,24 @@ numerical results. Old runs remain available in `project.runs`.
 ## Python API and plugins
 
 ```python
-from smappy.roi_manager import ROIProject, Histograms
+from smappy.plugins.roi import HistogramSettings
+from smappy.roi_manager import ROIProject, histograms
 
 project = ROIProject()
 source = project.add_file("localizations.h5")
 project.set_geometry(300, "circle")
 project.set_filters({"xy_err_nm": (None, 25), "photons": (500, None)})
 
-candidates = project.find(source.id, parameters={"min_count": 15})
+# candidates are unreviewed, and evaluate() passes over unreviewed ROIs;
+# reviewed=True trusts the finder (the GUI reviews automatically)
+candidates = project.find(source.id, parameters={"min_count": 15}, reviewed=True)
 
 # Or add one by hand:
 roi = project.add_roi(source.id, [1500, 2500])
 locs = project.extract(roi)
 run = project.evaluate()
 rows = project.results()
-histograms = Histograms().analyze(rows, {"bins": 20})
+counts = histograms(rows, HistogramSettings(bins=20))
 project.save("experiment.rois.h5")
 ```
 

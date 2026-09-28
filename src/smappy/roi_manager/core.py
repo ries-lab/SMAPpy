@@ -556,8 +556,15 @@ class ROIProject:
                 rows.append({"roi_id": roi.id, "file_id": roi.file_id, **values})
         return rows
 
-    def find(self, file_id, plugin=None, settings=None, parameters=None):
-        """Propose candidate ROIs on one file with a segmentation plugin."""
+    def find(self, file_id, plugin=None, settings=None, parameters=None,
+             reviewed=False):
+        """Propose candidate ROIs on one file with a segmentation plugin.
+
+        Candidates are unreviewed by default, and `evaluate` and `results`
+        pass over unreviewed ROIs: they are proposals until someone has
+        looked at them.  A script that trusts the finder says
+        ``reviewed=True``; the GUI's `SessionROIs` reviews automatically.
+        """
         from ..plugins import settings_from, settings_values
         from ..plugins.roi import DensityPeaks
         if plugin is None:
@@ -572,7 +579,8 @@ class ROIProject:
                   "group_settings": asdict(self.group_settings) if self.grouped else None}
         existing = [roi.center for roi in self.rois.values() if roi.file_id == file_id]
         centers = plugin.propose(state.locs[state.filter.indices], settings, existing)
-        return [self.add_roi(file_id, c, reviewed=False, origin=origin) for c in centers]
+        return [self.add_roi(file_id, c, reviewed=reviewed, origin=origin)
+                for c in centers]
 
     def save(self, path):
         """Atomic sidecar save. In-memory sources must first be saved as localizations."""

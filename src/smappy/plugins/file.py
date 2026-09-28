@@ -33,7 +33,8 @@ LOCS_FILTER = "Localizations (*.hdf5 *.h5 *.mat *.csv *.npy *.zip *.json)"
 
 @dataclass
 class LoadSettings:
-    path: str = param("", label="file", kind="open_file", file_filter=LOCS_FILTER)
+    path: str = param("", label="file", kind="open_file", file_filter=LOCS_FILTER,
+                      help="the localization file to read")
     append: bool = param(False, label="add to the open files",
                          help="join the table as one more file instead of "
                               "replacing everything; this is File > Add file")
@@ -108,8 +109,8 @@ class LoadMinflux(_Load):
 @dataclass
 class LoadCsvSettings(LoadSettings):
     mapping: str = param("", label="columns", advanced=True,
-                         help="x_nm=xnm, y_nm=ynm, ... ; empty means guess from "
-                              "the header")
+                         help="header=column pairs, e.g. X=x_nm, Y=y_nm, T=frame; "
+                              "empty means guess from the header")
 
 
 @register("File/Load/csv")
@@ -133,11 +134,12 @@ class LoadCsv(_Load):
 
 @dataclass
 class SaveSettings:
-    path: str = param("", label="file", kind="save_file", file_filter="")
+    path: str = param("", label="file", kind="save_file", file_filter="",
+                      help="an .hdf5 or .h5 file; empty saves over the open file")
     gui_state: bool = param(
         True, label="save the GUI state too",
-        help="the tabs, their plugins and their parameters, so reopening this "
-             "file restores the session that produced it")
+        help="the tabs, their plugins and their parameters, for File > "
+             "Restore GUI state from file to put back")
 
 
 @register("File/Save/smappy HDF5")
@@ -164,7 +166,8 @@ class Save(Plugin):
 @dataclass
 class ExportImageSettings:
     path: str = param("", label="file", kind="save_file",
-                      file_filter="PNG (*.png);;TIFF (*.tif);;JPEG (*.jpg)")
+                      file_filter="PNG (*.png);;TIFF (*.tif);;JPEG (*.jpg)",
+                      help="the picture; its extension (.png, .tif, .jpg) is its format")
     pixelsize_nm: float = param(10.0, label="pixel", unit="nm", min=0.01,
                                 help="the rendered pixel, in the table's units")
 
