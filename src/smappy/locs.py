@@ -163,7 +163,9 @@ _PIXEL_COLUMNS = {
     "peak_x_pix": "peak_x_nm", "peak_y_pix": "peak_y_nm",
     "xy_err_pix": "xy_err_nm",
     "sigma_pix": "sigma_nm", "sigma_x_pix": "sigma_x_nm",
-    "sigma_y_pix": "sigma_y_nm",
+    "sigma_y_pix": "sigma_y_nm", "sigma_err_pix": "sigma_err_nm",
+    # an unlinked two-channel fit: the partner's position against the link's
+    "dx_pix": "dx_nm", "dy_pix": "dy_nm",
 }
 
 
@@ -171,7 +173,9 @@ _PIXEL_COLUMNS = {
 #: precision, a width -- is scaled by the mean, which is exact for the square
 #: pixels almost every microscope has and the only sensible answer otherwise.
 _AXIS = {"x_pix": 0, "x_err_pix": 0, "peak_x_pix": 0, "sigma_x_pix": 0,
-         "y_pix": 1, "y_err_pix": 1, "peak_y_pix": 1, "sigma_y_pix": 1}
+         "dx_pix": 0,
+         "y_pix": 1, "y_err_pix": 1, "peak_y_pix": 1, "sigma_y_pix": 1,
+         "dy_pix": 1}
 
 
 def _base_column(name: str):

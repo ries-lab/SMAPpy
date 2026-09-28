@@ -430,6 +430,7 @@ class DualBeads:
     unmatched: list
     initial_transformation: np.ndarray | None = None
     initial_residuals: np.ndarray | None = None
+    em_on: bool | None = None       # as `BeadCollection.em_on`
 
 
 def collect_dual_beads(inputs, settings=None, progress=None):
@@ -443,8 +444,17 @@ def collect_dual_beads(inputs, settings=None, progress=None):
     inputs = list(inputs)
     if not inputs:
         raise ValueError('select bead acquisitions')
-    stacks = inputs if isinstance(inputs[0], BeadStack) else [st for p in discover_acquisitions(inputs)
-                    for st in read_bead_stacks(p, s.dz_nm)]
+    em_states = []
+    if isinstance(inputs[0], BeadStack):
+        stacks = inputs
+    else:
+        paths = discover_acquisitions(inputs)
+        stacks = [st for p in paths for st in read_bead_stacks(p, s.dz_nm)]
+        # the EM gain the beads were taken with, so that fitting data taken
+        # the other way warns (the PSF is mirrored): dual calibrations never
+        # recorded it, and the warning the fitters call could not fire
+        from .core import _em_on
+        em_states = [_em_on(p) for p in paths]
     shape = stacks[0].images.shape[-2:]
     axis = 1 if 'right-left' in s.layout else 0  # y,x array axes
     split = s.split_position if s.split_position is not None else shape[axis]//2
@@ -550,8 +560,11 @@ def collect_dual_beads(inputs, settings=None, progress=None):
                 'convention': 'zero-based pixel centers; split is first index of second half'}
     unmatched = [[i for i in range(len(c.records)) if i not in set(pairs[:, ch])]
                  for ch, c in enumerate(channels)]
+    known = {state for state in em_states if state is not None}
+    em_on = known.pop() if len(known) == 1 and None not in em_states else None
     return DualBeads(channels, records, projections, sources, s, geometry,
-                     points[0][pairs[:, 0]], points[1][pairs[:, 1]], pairs, unmatched)
+                     points[0][pairs[:, 0]], points[1][pairs[:, 1]], pairs, unmatched,
+                     em_on=em_on)
 
 
 @dataclass
@@ -673,6 +686,9 @@ def build_dual_calibration(beads, excluded=(), progress=None):
                 (('eligible', eligible), ('transformation', mask), ('psf', result.accepted))}
     result.messages.append(f'{mask.sum()} transformation pairs; {result.accepted.sum()} PSF pairs. '
                            'Shape rejection does not alter the transformation.')
+    em_on = getattr(beads, 'em_on', None)
+    models[0].em_on = em_on
+    secondary.em_on = em_on
     cal = DualColorCalibration(models[0], secondary, h, beads.geometry,
           {'settings': asdict(s), 'secondary_main_brightness_ratio': float(np.median(ratios)),
            'transform_method': 'two-round RANSAC / soft-L1 geometric refinement; dx/dy screening',
@@ -716,6 +732,8 @@ def save_dual_color_calibration(path, calibration, result=None, overwrite=False)
             for name, model in zip(('main', 'secondary'), (calibration.main, calibration.secondary)):
                 g = f.create_group(name)
                 g.attrs.update(dz=model.dz, z0=model.z0, x0=model.x0)
+                if model.em_on is not None:
+                    g.attrs['em_on'] = bool(model.em_on)
                 g['parameters_json'] = json.dumps(model.parameters)
                 g.create_dataset('coeff', data=model.coeff, compression='gzip')
                 g.create_dataset('psf', data=model.psf, compression='gzip')
@@ -766,7 +784,8 @@ def load_dual_color_calibration(path):
             g = f[name]
             model = SplineCalibration(np.ascontiguousarray(g['coeff'][...]), float(g.attrs['dz']),
                     float(g.attrs['z0']), x0=float(g.attrs['x0']), psf=g['psf'][...],
-                    em_mirror=False, source=Path(path), parameters=json.loads(g['parameters_json'][()]))
+                    em_mirror=False, source=Path(path), parameters=json.loads(g['parameters_json'][()]),
+                    em_on=bool(g.attrs['em_on']) if 'em_on' in g.attrs else None)
             _validate_native_calibration(model)
             models.append(model)
         if models[0].z0 != models[1].z0 or models[0].dz != models[1].dz or models[0].shape != models[1].shape:

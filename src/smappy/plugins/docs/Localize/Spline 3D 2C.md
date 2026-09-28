@@ -265,16 +265,25 @@ flipped.
 
 ### model.calibration
 Made once per microscope configuration: the same objective, dichroic,
-filters, camera settings and split as the data.
+filters, camera settings and split as the data.  It records whether the beads
+were taken with EM gain, and data taken the other way is warned about (an EM
+register mirrors the image, and the PSF with it).  The first frames are
+checked against its geometry: a calibration made on another camera ROI is
+refused, and a movie with no camera ROI in its metadata is taken to start at
+the chip's corner, with a warning.
 
 ### model.link_xy
-Unlinked, each half fits its own position; the table still carries only the
-main half's, so this is a check of the fit, not a way to read the secondary
-positions out.
+Unlinked, each half fits its own position.  The table's position is the
+main half's, and `dx_nm_ch1`, `dy_nm_ch1` say how far the secondary half put
+the molecule from where the calibration's transformation expects it: a check
+of the calibration on this data, whose median should be near 0.  Relink for
+the real fit.
 
 ### model.link_z
-Unlinked, each half fits its own z and the table has the main half's -- the
-precision of one half, with the other only along for its photons.
+Unlinked, each half fits its own z.  `z_nm` is the main half's -- the
+precision of one half -- and `dz_nm_ch1` is the secondary half's z minus it,
+which should scatter about 0 at every height if the two PSF models share
+their focus.
 
 ### model.link_photons
 With the photons linked, `ratio` is 0 for every localization and colour
@@ -308,6 +317,7 @@ photons of each half beside the totals:
 | `channel` | the colour Assign colours gave it: 1, 2, or 0 for none |
 | `logl`, `logl_rel` | the log-likelihood, and per pixel of both ROIs |
 | `peak_x_nm`, `peak_y_nm`, `iterations` | the candidate in the main half, and the steps taken |
+| `dx_nm_ch1`, `dy_nm_ch1`, `dz_nm_ch1` | unlinked only: the secondary half's position against the calibration's |
 
 What to check, beyond the checks of [Spline 3D](plugin:Localize/Spline 3D)
 (the z histogram, `logl_rel`, `z_err_nm`):

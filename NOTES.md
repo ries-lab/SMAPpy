@@ -11,8 +11,10 @@ Poisson noise only.  Fit models: `gauss_free`, `gauss_xy`, `cspline`.
 
 Deliberately **not** ported: sCMOS per-pixel variance, the Anscombe transform
 and probability cutoff, background estimation, minimum-distance filtering,
-mean-PSF / MIP-PSF detection filters, ROI masks, multi-channel / global fitting,
-Zernike and astigmatic-Gaussian z models, multiple z start values.
+mean-PSF / MIP-PSF detection filters, ROI masks, Zernike and
+astigmatic-Gaussian z models, multiple z start values.  Two-channel global
+fitting of a split frame came later, and has sections of its own ("Two colours
+in 2D" and the dual-colour calibration in `docs/dual_color_calibration.md`).
 
 ## Departures from SMAP, and why
 
@@ -1328,10 +1330,12 @@ PSF model taken out, and it departs from SMAP in what replaces it.
 `fit_wavelet_dualcolorratiometric` fits the whole frame single-channel, finds
 the transformation, then goes back to the movie and *measures* the partner
 intensity at the transformed position (`Get2CIntImagesWF` ->
-`Intensity2Channel`).  SMAP has no global Gaussian fitter -- only
-`MLE_global_spline`.  We do, because `global_fit` in `csrc/global.hpp` was
-written as a template over the model and instantiating it for `GaussFree` is a
-binding, not an algorithm.  So this is one pass instead of two, a proper linked
+`Intensity2Channel`).  SMAP does have a global Gaussian -- `MLE_global_spline`
+has a "PSF free" mode through `mleFit_LM_global`, and
+`shared/mexfiles/mleFit_LM_global_gauss.m` sits beside it -- but its
+ratiometric workflow does not use it.  Here it is the whole workflow, because
+`global_fit` in `csrc/global.hpp` was written as a template over the model and
+instantiating it for `GaussFree` is a binding, not an algorithm.  So this is one pass instead of two, a proper linked
 MLE instead of a readout, and the photon ratio falls out of the fit rather than
 being assembled afterwards.
 

@@ -212,6 +212,45 @@ def test_linking_the_photons_makes_the_ratio_meaningless_but_z_tighter():
     assert spread["all"] <= spread["xyz"]
 
 
+def test_an_unlinked_fit_keeps_how_far_the_partner_is_in_x_y_and_z():
+    """With x, y and z free, the secondary half's values used to be dropped;
+    the differences are what says whether the calibration holds."""
+    rng = np.random.default_rng(5)
+    cal = dual_calibration()
+    frames = np.stack([split_frame([(25.0, 15.0)], 22.0, 12000., 0.5, 30., rng, cal)
+                       for _ in range(60)])
+    engine = DualChannelEngine(
+        camera(), finder(), GlobalSplinePSF((cal.main, cal.secondary), (False,) * 5),
+        cal, FitSettings(roisize=13, output_unit="pixel"))
+    engine.push(frames, 0)
+    locs = engine.flush()
+    for name in ("dx_pix_ch1", "dy_pix_ch1", "dz_nm_ch1"):
+        assert name in locs
+    assert abs(np.median(locs["dx_pix_ch1"])) < 0.05
+    assert abs(np.median(locs["dy_pix_ch1"])) < 0.05
+    assert abs(np.median(locs["dz_nm_ch1"])) < 15.0
+    assert np.std(locs["dz_nm_ch1"]) > 0            # two fits, not one copied
+
+
+def test_a_dual_calibration_keeps_the_em_gain_and_a_mismatch_is_reported(tmp_path):
+    """Dual calibrations never recorded it, so the warning could not fire."""
+    from smappy.calibrate.dual import load_dual_color_calibration
+    from smappy.plugins.fit import (DualModelSettings, DualSplineFit,
+                                    DualSplineFitSettings)
+    cal = dual_calibration()
+    cal.main.em_on = cal.secondary.em_on = True
+    path = _dual_calibration_file(tmp_path / "em_3dcal.h5", cal)
+    loaded = load_dual_color_calibration(path)
+    assert loaded.main.em_on is True and loaded.secondary.em_on is True
+
+    told = []
+    settings = DualSplineFitSettings(model=DualModelSettings(calibration=str(path)))
+    with pytest.warns(UserWarning, match="EM gain mismatch"):
+        DualSplineFit()._model_telling(Context(progress=told.append), settings,
+                                       CameraMetadata(em_on=False))
+    assert any("EM gain mismatch" in line for line in told)
+
+
 def test_a_split_frame_runs_through_fit_stack_style_blocks():
     """Blocks are buffered and flushed like the single-channel engine's."""
     rng = np.random.default_rng(5)

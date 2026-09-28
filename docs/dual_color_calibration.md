@@ -2,7 +2,9 @@
 
 The first version generates two spline PSFs with one common axial reference,
 a strictly two-dimensional projective transformation, and pair diagnostics.
-Simultaneous dual-channel localization is a separate future feature.
+The calibration is what `Localize/Spline 3D 2C` fits with (and, for its
+transformation alone, `Localize/Gaussian 2D 2C`): both halves of the split
+frame in one global fit, pages under Help > Plugin documentation.
 
 ## Use
 
@@ -107,7 +109,11 @@ ROIs cannot be pooled with missing ROI information. Before future application,
 calibrations require identical dimensions and warn that equal dimensions cannot
 prove an identical camera location. A differing known ROI is rejected. Full-chip
 application requires the target ROI to locate the pixels; missing metadata warns
-and raises an error rather than silently applying an unknown origin.
+and raises an error rather than silently applying an unknown origin.  The two
+two-colour fitters run this check on their first frames.  A movie with no ROI
+in its metadata is the exception there -- the camera settings have no ROI to
+give instead -- and is fitted as if it began at the chip's corner, with a
+warning.
 
 ## Numerical behavior
 

@@ -117,6 +117,54 @@ def test_the_table_has_no_half_converted_widths():
     assert "photons_ch1" in nm          # not a length, left alone
 
 
+def test_an_unlinked_fit_keeps_how_far_the_partner_is_from_the_link():
+    """Unlinking x and y is how to check the transformation, and the partner's
+    position used to be dropped: the table had the reference's alone."""
+    from smappy.detect import AbsoluteCutoff, DoGFilter, PeakFinder
+    from smappy.dualfit import DualChannelEngine
+
+    rng = np.random.default_rng(6)
+    frames, _ = movie(30, rng, transform())
+    raw = (frames + 100).astype(np.uint16)
+    finder = PeakFinder(DoGFilter(1.2), AbsoluteCutoff(25.0))
+
+    def fit(t, shared):
+        model = GlobalGaussianPSF(sigma=1.2, shared=shared)
+        engine = DualChannelEngine(camera(), finder, model, t,
+                                   FitSettings(roisize=13, output_unit="nm"))
+        engine.push(raw, first_frame=0)
+        return engine.flush()
+
+    free = (False, False, False, False, False)
+    right = fit(transform(), free)
+    assert "dx_nm_ch1" in right and "dy_nm_ch1" in right
+    assert abs(np.median(right["dx_nm_ch1"])) < 5          # 0.05 px
+    assert abs(np.median(right["dy_nm_ch1"])) < 5
+    # a transformation that puts the partner a third of a pixel too far right
+    # says so: the partner is found that far left of where the link expects
+    wrong = fit(transform(dx=0.37 + 0.33), free)
+    assert np.median(wrong["dx_nm_ch1"]) == pytest.approx(-33.0, abs=5)
+    assert abs(np.median(wrong["dy_nm_ch1"])) < 5
+    # linked, there is nothing to compare
+    assert "dx_nm_ch1" not in fit(transform(), (True, True, False, False, False))
+    # and every width and its error is in nm in an nm table
+    assert not [name for name in right.keys() if "_pix" in name]
+
+
+def test_frames_from_another_camera_roi_are_refused():
+    """The geometry check existed and neither fitter called it."""
+    from smappy.detect import AbsoluteCutoff, DoGFilter, PeakFinder
+    from smappy.dualfit import DualChannelEngine
+
+    t = transform()
+    t.geometry["coordinate_system"] = "roi-local"
+    engine = DualChannelEngine(camera(), PeakFinder(DoGFilter(1.2), AbsoluteCutoff(25.0)),
+                               GlobalGaussianPSF(sigma=1.2), t,
+                               FitSettings(roisize=13, output_unit="pixel"))
+    with pytest.raises(ValueError, match="original bead image"):
+        engine.push(np.zeros((2, SHAPE[0] + 8, SHAPE[1]), np.uint16) + 100)
+
+
 # -------------------------------------------------------------- the plugin
 def test_the_2c2d_plugin_calibrates_on_the_movie_and_then_fits_it(tmp_path):
     """The whole workflow as the Localize tab drives it: a split-frame TIFF and

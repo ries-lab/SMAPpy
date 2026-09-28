@@ -338,13 +338,21 @@ $N_1 / (N_0 + N_1)$.  With *link photons* on, $N_1 = r\,N_0$ for the
 *photon ratio* $r$, `photons` is the one fitted $N_0$ -- the main half's
 count -- and `ratio` is 0: there is no split left to measure.  `logl_rel` is the log-likelihood per pixel of
 the two ROIs together.  EM gain is handled as in the single-channel fit.
+The first frames are checked against the transformation's geometry: a
+registration made on another camera ROI is refused, and a movie without a
+camera ROI in its metadata is taken to start at the chip's corner, with a
+warning.
 
 ## Parameters
 
 ### model.link_xy
-Unlinked, each half fits its own position and the pair is only a shared ROI
-placement; the table still carries the main half's position only, so this is
-not a way to read the secondary positions out.
+Unlinked, each half fits its own position.  The table's position is the
+main half's, and `dx_nm_ch1`, `dy_nm_ch1` say how far the secondary half put
+the molecule from where the transformation expects it, in the main half's
+coordinates.  Their median over the field should be close to 0 and their
+scatter about the precision; a trend across the field means the
+transformation does not hold there.  Relink for the real fit: linked, both
+halves pin one position and the precision is better.
 
 ### model.link_photons
 On, one photon number is fitted and the secondary half is expected to hold

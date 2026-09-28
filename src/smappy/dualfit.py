@@ -391,6 +391,23 @@ def paired_to_localizations(result, pairs: PairedROIs, model, cam) -> "Localizat
                 # a width is already in pixels; only the counts carry the gain
                 scale = 1.0 if name.startswith("sigma") else excess
                 cols[name] = p[name] * scale
+    # Unlinked, each channel fitted its own position, and the partner's was
+    # dropped: the table has one x, the reference's.  Kept as the difference
+    # from where the link would have put it -- channel c at factor * x +
+    # offset linked, x_c + offset free, so the offset cancels -- in the
+    # reference's pixels.  That is what unlinking is for: the scatter of
+    # these is how well the transformation holds, over the field.
+    for channel in range(1, model.n_channels):
+        for index, (name, column) in enumerate((("x_roi", "dx_pix"),
+                                                ("y_roi", "dy_pix"))):
+            other = p.get(f"{name}_ch{channel}")
+            if other is None:
+                continue
+            factor = pairs.link[:, 1, channel, index].astype(float)
+            with np.errstate(invalid="ignore", divide="ignore"):
+                cols[f"{column}_ch{channel}"] = other / factor - p[f"{name}_ch0"]
+        if model.is_3d and f"z_nm_ch{channel}" in p:
+            cols[f"dz_nm_ch{channel}"] = p[f"z_nm_ch{channel}"] - p["z_nm_ch0"]
     add_xy_err(cols)
     return Localizations({k: np.asarray(v) for k, v in cols.items()}, {})
 
@@ -412,6 +429,7 @@ class DualChannelEngine:
 
     _pairs: List[PairedROIs] = field(default_factory=list, init=False)
     _buffered: int = field(default=0, init=False)
+    _checked: bool = field(default=False, init=False)
     stats: dict = field(default_factory=dict, init=False)
 
     def __post_init__(self):
@@ -422,10 +440,44 @@ class DualChannelEngine:
                       "localizations": 0, "dropped_at_border": 0, "rejected": 0,
                       "detect_seconds": 0.0, "fit_seconds": 0.0}
 
+    def _check_frames(self, shape) -> None:
+        """Is this the camera the transformation was measured on?
+
+        Once, on the first frames.  The calibration's own check
+        (`calibrate.dual.check_geometry`) -- a ROI-local one must see the bead
+        images' shape, a full-chip one a ROI of the frame's size -- which the
+        fitters never called, so a movie from another camera ROI was fitted
+        with a registration that did not belong to it.  A camera without a
+        ROI is taken to sit at the chip's corner, which is what the offsets
+        of the fit assume anyway -- said, for a full-chip transformation,
+        since the camera settings offer no ROI to give instead.
+        """
+        self._checked = True
+        validate = getattr(self.calibration, "validate_image", None)
+        if validate is None:
+            return
+        import warnings
+        roi = self.camera.roi
+        if roi is None:
+            roi = (0, 0, int(shape[-1]), int(shape[-2]))
+            if getattr(self.calibration, "geometry", {}).get(
+                    "coordinate_system") == "camera-chip":
+                warnings.warn("the movie has no camera ROI: a full-chip "
+                              "transformation is applied as if the frames "
+                              "began at the chip's corner", stacklevel=3)
+        with warnings.catch_warnings():
+            # that a ROI-local shape cannot prove the camera position is true
+            # and nothing to act on here -- the 2C plugins make exactly such a
+            # registration from the movie they then fit
+            warnings.filterwarnings("ignore", message="ROI-local calibration")
+            validate(shape, tuple(int(v) for v in roi))
+
     def push(self, frames: np.ndarray, first_frame: int = 0):
         import time
         from .camera import to_photons
 
+        if not self._checked:
+            self._check_frames(np.shape(frames))
         started = time.perf_counter()
         photons = to_photons(frames, self.camera) / self.camera.excess_noise
         candidates, _ = self.finder(photons, first_frame=first_frame,
