@@ -41,6 +41,23 @@ GROUPED_BY_DEFAULT = True
 DEFAULT_GROUP_SETTINGS = GroupSettings(dx=50.0, dt=1)
 
 
+def default_bounds(locs: Localizations) -> Dict[str, Tuple]:
+    """What a new layer starts with on this table.
+
+    The defaults, then the bounds the table carries with it (`KEPT_BOUNDS`:
+    Remove Localizations' hide flag), for the columns the table has.  One
+    function for a layer and for Chain/Layers' *start from defaults*, which
+    kept its own copy without the carried bounds and so showed what the file
+    had hidden.
+    """
+    bounds = dict(DEFAULT_BOUNDS)
+    if "z_nm" not in locs:
+        bounds.update(DEFAULT_BOUNDS_2D)
+    bounds.update({f: tuple(b) for f, b in
+                   (locs.metadata.get(KEPT_BOUNDS) or {}).items()})
+    return {f: b for f, b in bounds.items() if f in locs}
+
+
 class Layer:
     """A filter and how its localizations are drawn -- or a pixel image.
 
@@ -124,16 +141,8 @@ class Layer:
         return self.state.bounds()
 
     def apply_defaults(self) -> None:
-        locs = self.locs
-        bounds = dict(DEFAULT_BOUNDS)
-        if "z_nm" not in locs:
-            bounds.update(DEFAULT_BOUNDS_2D)
-        for field, (lo, hi) in bounds.items():
-            if field in locs:
-                self.set_bound(field, lo, hi)
-        for field, (lo, hi) in (locs.metadata.get(KEPT_BOUNDS) or {}).items():
-            if field in locs:
-                self.set_bound(field, lo, hi)
+        for field, (lo, hi) in default_bounds(self.locs).items():
+            self.set_bound(field, lo, hi)
 
     def set_bound(self, field: str, lo: Optional[float], hi: Optional[float]) -> None:
         """A bound applies to the grouped and the ungrouped table alike, so

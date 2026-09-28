@@ -231,3 +231,16 @@ def test_the_history_shows_a_chain_as_its_steps():
     assert "* flag (Analysis/Process/Math Parser)" in text
     assert "expression = photons > 500" in text
     assert "  Count (Test/Chain/Count): 40 rows" in text   # the layer shows grouped
+
+
+def test_start_from_defaults_keeps_what_the_file_hides():
+    """Remove Localizations' hide flag travels with the table as a kept
+    bound; Chain/Layers' 'defaults' had its own copy of the defaults without
+    it, and showed the hidden localizations again."""
+    import numpy as np
+    from smappy.locs import KEPT_BOUNDS, Localizations
+    from smappy.plugins.chain_layers import default_bounds
+    locs = Localizations({"x_nm": np.zeros(3), "y_nm": np.zeros(3),
+                          "use": np.array([1.0, 0.0, 1.0])},
+                         {KEPT_BOUNDS: {"use": [0.5, None]}})
+    assert default_bounds(locs)["use"] == (0.5, None)

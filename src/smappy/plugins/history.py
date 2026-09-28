@@ -1,8 +1,10 @@
 """What has been done to these localizations, and with which numbers.
 
-Every run is logged -- `Session.apply` records the plugin, the line it
-reported and the settings it actually used -- and the log is written into the
-localization file and read back when the file is reopened.  It is the answer
+Every run that changes the localizations is logged -- `Session.apply`
+records the plugin, the line it reported and the settings it actually used;
+a run that only measures is not, unless the plugin says so (`Plugin.logged`)
+-- and the log is written into the localization file and read back when the
+file is reopened.  It is the answer
 to the question that comes up months later in front of a figure: *is this the
 drift-corrected table, and what was the segmentation set to?*
 

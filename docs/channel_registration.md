@@ -71,8 +71,9 @@ must not be fitted on.
 Round one pairs by the vote alone, mutually nearest within 20 px, frame by
 frame, and fits a projective map through `fit_dual_transform` (RANSAC, then a
 soft-L1 refinement under a componentwise dx/dy screen -- the same function the
-bead calibration uses).  Round two re-pairs through that map at 1.5 px and
-refits: SMAP's coarse pass followed by clean matches only.
+bead calibration uses).  Round two re-pairs through that map at the fine
+tolerance -- 1.0 px by default now; the measurements on this page were taken
+at 1.5 px -- and refits: SMAP's coarse pass followed by clean matches only.
 
 Two stages, not three.  Measured on simulated data with a 3° rotation and 2%
 scale:
@@ -106,10 +107,14 @@ residual on the pairs it kept.
 Two things prevent it.
 
 **The tight tolerance follows the misfit.**  After the coarse round, the
-residual is measured over *every* pair it matched -- not over the ones it
-chose to keep, which is the distinction that matters, because the rejected
-ones are the edges.  The tight round then opens up to `PAIR_MARGIN` times the
-98th percentile of that, so it can still reach what the coarse fit missed.
+residual of the pairs it accepted is measured, and the tight round opens up
+to `PAIR_MARGIN` (3) times the 98th percentile of that, up to the coarse
+tolerance, so it can still reach what the coarse fit missed at the edges.
+It does so only when the coarse round accepted at least `MIN_CLEAN_FRACTION`
+(60%) of its pairs: a distorted field keeps nearly all of them, a dense or
+contaminated one about a third, and there a large residual means chance
+partners rather than distortion.  (An earlier version measured the residual
+over every matched pair, rejected ones included; the table below is from it.)
 Measured against ground truth, with a field distortion a projective map cannot
 absorb:
 

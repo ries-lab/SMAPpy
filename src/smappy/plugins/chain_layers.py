@@ -60,12 +60,10 @@ def _number(value) -> Optional[float]:
 
 
 def default_bounds(locs) -> Dict[str, Tuple[Optional[float], Optional[float]]]:
-    """What a new layer starts with on this table (`Layer.apply_defaults`)."""
-    from ..session import DEFAULT_BOUNDS, DEFAULT_BOUNDS_2D
-    bounds = dict(DEFAULT_BOUNDS)
-    if "z_nm" not in locs:
-        bounds.update(DEFAULT_BOUNDS_2D)
-    return {f: b for f, b in bounds.items() if f in locs}
+    """What a new layer starts with on this table: `session.default_bounds`,
+    the carried bounds (a hide flag) included."""
+    from ..session import default_bounds as layer_defaults
+    return layer_defaults(locs)
 
 
 def resolve_layer(locs, layer: Dict[str, Any],
@@ -131,7 +129,8 @@ class ChainLayers(Plugin):
     """The layers' bounds and grouping, as the Render tab would set them."""
     Settings = LayersSettings
     favorite = False
-    version = "1"
+    # 2: 'defaults' includes the bounds the table carries (a hide flag)
+    version = "2"
 
     def run(self, ctx: Context, settings: LayersSettings) -> Result:
         locs = ctx.locs

@@ -1,5 +1,5 @@
 ---
-version: "1"
+version: "2"
 covers: [smappy.plugins.chain_layers.default_layers, smappy.plugins.chain_layers.default_bounds, smappy.plugins.chain_layers.resolve_layer, smappy.plugins.chain_layers.kept_by_any, smappy.filter.quantile_range, smappy.session.Session.set_layer_configs]
 ---
 
@@ -91,7 +91,10 @@ what the next plugins are given.
 **The defaults.**  `defaults` starts from the bounds a freshly opened table
 gets: `xy_err_nm` at most 25 nm, `logl_rel` at least -2, `z_nm` between -500
 and 500 nm, and, for a 2D table (no `z_nm`), `sigma_nm` at most 180 nm -- each
-only where the table has the column.  A new layer is grouped by default.
+only where the table has the column -- and then the bounds the table carries
+with it, such as the `use` flag Remove Localizations writes when it hides
+localizations, so what the file hides stays hidden.  (Before version 2 the
+carried bounds were left out.)  A new layer is grouped by default.
 
 **Quantiles.**  A quantile row's limits are fractions $q_{\mathrm{lo}}$ and
 $q_{\mathrm{hi}}$ between 0 and 1.  They become the bound

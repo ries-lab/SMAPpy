@@ -103,7 +103,7 @@ class LoadSMAP(_Load):
 
 @register("File/Load/MINFLUX")
 class LoadMinflux(_Load):
-    """Read a MINFLUX ``.npy``, ``.zip`` or ``.json`` export."""
+    """Read a MINFLUX `.npy`, `.zip` or `.json` export."""
     format = "MINFLUX"
     favorite = False
 
