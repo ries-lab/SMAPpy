@@ -178,6 +178,9 @@ class ExportImage(Plugin):
 
     Settings = ExportImageSettings
     logged = True          # which picture came from this table, and how
+    # 2: the colours scaled to 8 bits (the file was black); the layer's
+    #    grouped table when it shows blinks; an empty selection refused
+    version = "2"
 
     def run(self, ctx: Context, settings: ExportImageSettings) -> Result:
         from ..render import save_image
@@ -185,16 +188,28 @@ class ExportImage(Plugin):
             raise ValueError("choose where to save")
         if not len(ctx.locs):
             raise ValueError("nothing to render")
-        # the picture should look like the window does, so the render and
-        # display settings come from the layer rather than from defaults
+        # the picture should look like the window does: the layer's render
+        # and display settings, and its table -- the grouped one when the
+        # layer shows blinks, which drawn ungrouped was a localization per
+        # frame -- cut to what it selects
         render = display = None
+        locs, selection = ctx.table()
         if ctx.session is not None and ctx.session.layers:
-            layer = ctx.session.layers[ctx.session.first_locs_layer()]
+            index = ctx.layer
+            if not 0 <= index < len(ctx.session.layers) or \
+                    ctx.session.layers[index].is_image:
+                index = ctx.session.first_locs_layer()
+            layer = ctx.session.layers[index]
             render, display = layer.state.settings, layer.get_display()
-        written = save_image(ctx.locs, settings.path,
+        if not len(selection):
+            # an empty selection drew the whole table, which is not what the
+            # window shows
+            raise ValueError("nothing selected to render: the filter or the "
+                             "ROI leaves no localization")
+        written = save_image(locs, settings.path,
                              pixelsize=settings.pixelsize_nm,
                              settings=render, display=display,
-                             select=ctx.selection.mask if len(ctx.selection) else None)
+                             select=selection.mask)
         return Result(text=f"written to {written}", data={"path": written},
                       settings=settings)
 

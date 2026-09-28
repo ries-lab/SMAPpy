@@ -374,3 +374,15 @@ def test_the_fitted_background_is_the_background(dim_secondary):
         assert np.median(background) == pytest.approx(1.0, abs=0.15)
         assert np.mean(background < 0.02) < 0.05          # not on the floor
     assert np.median(values['photons']) == pytest.approx(10000, rel=0.03)
+
+
+@pytest.mark.parametrize("n", [4, 5, 20000])
+def test_the_projective_fit_is_exact_from_four_pairs_to_twenty_thousand(n):
+    """The full SVD built a 2n x 2n matrix nobody used: 12.8 GB at the
+    registration's default of 20000 pairs."""
+    rng = np.random.default_rng(0)
+    truth = np.array([[1.01, 0.02, 3.0], [-0.01, 0.99, -2.0], [1e-5, 2e-5, 1.0]])
+    source = rng.uniform(0, 500, (n, 2))
+    mapped = np.c_[source, np.ones(n)] @ truth.T
+    fitted = np.asarray(fit_projective(source, mapped[:, :2] / mapped[:, 2:]))
+    assert np.allclose(fitted / fitted[2, 2], truth, atol=1e-9)

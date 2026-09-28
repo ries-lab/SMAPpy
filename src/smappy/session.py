@@ -351,13 +351,21 @@ class Session:
         """
         locs, info, grouped = read_and_group(path, self.group_settings, append=append,
                                              progress=progress, **reader_args)
-        added = self.add_file(locs, info, append=append, grouped=grouped)
-        if not append:
-            # after `add_file`, which clears them with the rest of the session
-            from .io.hdf5 import load_results
-            self.results = load_results(path)
-            self.changed("results")
-        return added
+        return self.add_file(locs, info, append=append, grouped=grouped)
+
+    @staticmethod
+    def _file_results(info: FileInfo) -> Dict[str, Dict]:
+        """The tool results saved in the file ``info`` names; {} otherwise.
+
+        Only a smappy HDF5 file has them, and `load_results` answers {} for
+        anything it cannot read, so a table built in memory or read from
+        another format opens with none, as before.
+        """
+        path = getattr(info, "path", "") or ""
+        if not str(path).lower().endswith((".h5", ".hdf5")):
+            return {}
+        from .io.hdf5 import load_results
+        return load_results(path)
 
     def add_file(self, locs: Localizations, info: FileInfo, append: bool = False,
                  grouped: Optional[Localizations] = None) -> FileInfo:
@@ -386,7 +394,12 @@ class Session:
             # else, and clearing it here is what used to lose it -- `save`
             # writes this list back over the file's
             self.history = file_history(locs)
-            self.results = {}
+            # and what the tools kept with the file comes back with it, by
+            # whichever way it was opened -- the GUI and the File/Load
+            # plugins come here without passing `load`, and the next save,
+            # writing only what the session has, used to drop it
+            self.results = self._file_results(info)
+            self.changed("results")
             saved = self.locs.metadata.get("roi")
             self.set_roi(Region.from_dict(saved) if saved else None)
             self._rois = None            # this file's own ROIs, read on first use
@@ -462,8 +475,13 @@ class Session:
         gets written is whatever `gui_state_provider` returns, so the session
         stays ignorant of tabs and windows; the GUI sets it.
         """
+        from .io.formats import writer_for
         from .io.hdf5 import save_gui_state, save_localizations, save_results
         path = Path(path or self.path)
+        # before anything is written: the path is the open file's by default,
+        # and a SMAP _sml.mat, a csv or a MINFLUX export is not a file this
+        # writes -- it used to be overwritten with HDF5 under its own name
+        writer_for(path)
         metadata = dict(self.locs.metadata)
         # all of it goes in one JSON attribute, so the log is capped rather
         # than allowed to grow without limit over a file's life

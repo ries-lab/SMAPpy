@@ -1,5 +1,5 @@
 ---
-version: "1"
+version: "2"
 covers: [smappy.render.save_image, smappy.render.render_locs, smappy.render.FieldOfView.from_range, smappy.render.SigmaSettings.apply, smappy.render.normalize]
 ---
 
@@ -11,12 +11,14 @@ It is the picture for a figure, a report or a thumbnail: rendered again
 from the localizations, so a 5 nm pixel over a whole cell gives a file
 thousands of pixels wide, however small the window is.
 
-It draws what the first localization layer shows -- its filter, and the ROI
-if one is drawn -- with that layer's render and colour settings, so the
-file looks like the window.  The picture is framed tightly around those
-localizations.  They are drawn one per frame, as fitted, even when the
-layer shows them grouped, so the picture of a grouped layer is not quite
-the one in the window.
+It draws what the layer shows -- its filter, the ROI if one is drawn, and
+the grouped table (one localization per blink) when the layer shows blinks
+-- with that layer's render and colour settings, so the file looks like the
+window.  The picture is framed tightly around those localizations.  A
+filter or ROI that leaves nothing is refused rather than exporting the
+whole table.  (Before version 2 a grouped layer was drawn one localization
+per frame, and the file came out nearly black: the colours were written as
+0 or 1 out of 255.)
 
 It is a picture, not a measurement: 8-bit colour, with the brightness
 scaled for display.  To analyse the localizations elsewhere, save the table

@@ -752,5 +752,10 @@ def save_image(locs, path, pixelsize: float = 10.0,
     rgb = (display or DisplaySettings()).apply(rendered)
 
     path = _Path(path)
-    Image.fromarray(np.asarray(rgb, dtype=np.uint8)).save(path)
+    # the display's colours are in [0, 1]; cast as they were, every pixel was
+    # 0 or 1 of 255 and the file was black
+    rgb = np.asarray(rgb)
+    if np.issubdtype(rgb.dtype, np.floating):
+        rgb = np.round(np.clip(rgb, 0.0, 1.0) * 255.0)
+    Image.fromarray(rgb.astype(np.uint8)).save(path)
     return path

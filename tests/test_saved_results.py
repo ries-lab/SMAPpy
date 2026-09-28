@@ -142,3 +142,32 @@ def test_the_panel_picks_up_a_file_opened_after_it_was_built(tmp_path):
     assert not panel.plot_button.isEnabled()
     opened.load(path)
     assert panel.plot_button.isEnabled()
+
+
+def test_the_curve_comes_back_however_the_file_is_opened_and_survives_a_save(tmp_path):
+    """The GUI and the File/Load plugins open a file through `add_file`, not
+    `load`: the results stayed behind, and the next save dropped them."""
+    from smappy import plugins
+    session = Session(table())
+    session.apply(CometDrift(), Result(data={"drift": a_drift()}))
+    path = session.save(tmp_path / "corrected.hdf5", gui_state=False)
+
+    opened = Session()
+    loader = plugins.get("File/Load/smappy HDF5")()
+    settings = loader.Settings(path=str(path))
+    opened.apply(loader, loader.run(opened.context(), settings))
+    assert COMET in opened.results
+    again = opened.save(tmp_path / "again.hdf5", gui_state=False)
+    assert COMET in load_results(again)
+
+
+def test_saving_does_not_write_hdf5_over_another_programs_file(tmp_path):
+    """File > Save saves to the open file's path, and after opening a SMAP
+    _sml.mat it wrote HDF5 into it, replacing the original."""
+    original = tmp_path / "run_sml.mat"
+    original.write_bytes(b"MATLAB 5.0 MAT-file placeholder")
+    session = Session(table())
+    session.path = original
+    with pytest.raises(ValueError, match="no writer"):
+        session.save(gui_state=False)
+    assert original.read_bytes() == b"MATLAB 5.0 MAT-file placeholder"

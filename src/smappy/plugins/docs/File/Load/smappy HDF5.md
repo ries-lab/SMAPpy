@@ -96,6 +96,10 @@ table, one row per blink, comes on top.
 of the program writes is dropped rather than stopping the file from
 opening, and at most the last 500 are kept.
 
+**Tool results come back.**  What a tool kept with the file -- a drift
+curve, say (`/results/saved`) -- is read with it, however the file is
+opened, so its *Plot* works again, and the next save writes it back.
+
 **What is not restored.**  The GUI state that may be in the file (`/gui`)
 is left alone: opening a colleague's file does not rearrange your tabs.
 File > Restore GUI state from file puts it back on request.

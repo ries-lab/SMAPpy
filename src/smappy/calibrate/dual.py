@@ -78,7 +78,11 @@ def fit_projective(source, target):
     z, o = np.zeros(len(a)), np.ones(len(a))
     design = np.stack((np.c_[-x, -y, -o, z, z, z, u*x, u*y, u],
                        np.c_[z, z, z, -x, -y, -o, v*x, v*y, v]), axis=1).reshape(-1, 9)
-    _, singular, vectors = np.linalg.svd(design, full_matrices=True)
+    # only V is used: the full U of a (2n x 9) design is 2n x 2n, 12.8 GB at
+    # 20000 pairs.  Reduced, V is still complete once there are at least nine
+    # rows; four pairs make eight, and the null vector is then the ninth row
+    # only the full form has
+    _, singular, vectors = np.linalg.svd(design, full_matrices=len(design) < 9)
     if singular[7] < singular[0]*1e-8:
         raise ValueError('ill-conditioned projective point coverage')
     h = np.linalg.inv(nb) @ vectors[-1].reshape(3, 3) @ na

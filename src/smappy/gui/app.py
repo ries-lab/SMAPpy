@@ -741,7 +741,14 @@ class ControlWindow(QMainWindow):
                 self.session.open_image(path, px, x0, y0)
 
     def save(self) -> None:
+        from ..io.formats import writer_for
         if self.session.path is None:
+            return self.save_as()
+        try:
+            writer_for(self.session.path)
+        except ValueError:
+            # opened from another program's format: saving over it would
+            # replace that file with HDF5, so ask where instead
             return self.save_as()
         self.session.save()
         self.statusBar().showMessage(f"saved {self.session.path}")

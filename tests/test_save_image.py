@@ -60,3 +60,39 @@ def test_it_needs_no_window(monkeypatch, tmp_path):
     import sys
     monkeypatch.setitem(sys.modules, "matplotlib.pyplot", None)
     save_image(table(), tmp_path / "headless.png", pixelsize=10.0)
+
+
+def test_the_file_has_the_displays_colours_not_a_black_picture(tmp_path):
+    """The display's colours are in [0, 1], and cast to bytes as they were
+    every pixel came out 0 or 1 of 255."""
+    from smappy.render import FieldOfView, render_locs
+    locs = table(2000)
+    fov = FieldOfView.around(locs["x_nm"], locs["y_nm"], pixelsize=10.0)
+    expected = DisplaySettings().apply(render_locs(locs, fov))
+    path = save_image(locs, tmp_path / "bright.png", pixelsize=10.0, fov=fov)
+    with Image.open(path) as image:
+        written = np.asarray(image)
+    assert written.max() == 255
+    assert np.abs(written / 255.0 - expected).max() <= 1 / 255 + 1e-6
+
+
+def test_the_export_draws_the_layers_grouped_table(tmp_path):
+    from smappy import plugins
+    from smappy.plugins.file import ExportImageSettings
+    from smappy.session import Session
+    from smappy.simulate import simulate
+    session = Session(simulate(n_frames=800, seed=3))
+    layer = session.layers[0]
+    layer.show_grouped(True)
+    ctx = session.context()
+    served = []
+    real = ctx.table
+    ctx.table = lambda *a, **k: served.append(real(*a, **k)) or served[-1]
+    plugin = plugins.get("File/Export/Image")()
+    plugin.run(ctx, ExportImageSettings(path=str(tmp_path / "g.png")))
+    locs, _ = served[0]
+    assert len(locs) < len(session.locs)          # one row per blink
+    layer.state.sets["ungrouped"].filter.set("photons", 1e12, None)
+    layer.show_grouped(False)
+    with pytest.raises(ValueError, match="nothing selected"):
+        plugin.run(session.context(), ExportImageSettings(path=str(tmp_path / "e.png")))
