@@ -9,7 +9,9 @@ This is the 3D fitter.  It does what [Gaussian 2D](plugin:Localize/Gaussian 2D)
 does -- reads the camera frames, finds the single fluorophores that are on,
 and fits each one to get its position far below the size of a pixel -- but
 the model it fits is not a Gaussian.  It is the **measured** image of a point
-source on this microscope, at every height, taken from a *bead calibration*.
+source on this microscope, at every height, taken from a *bead calibration*
+and interpolated with cubic splines -- the method of
+[Li et al. 2018](https://doi.org/10.1038/nmeth.4661).
 Because that image changes with the emitter's distance from the focal plane,
 the fit also tells how far it was: every localization gets a `z_nm` and a
 `z_err_nm` besides `x`, `y` and the photons.
@@ -243,6 +245,28 @@ added to data and model, one electron without EM gain by default (*read
 noise*), which also keeps a pixel whose spline model nears zero from
 dominating a fit at low background (see
 [Gaussian 2D](plugin:Localize/Gaussian 2D)).
+
+**Compared with the paper.**  The method is that of
+[Li et al. 2018](https://doi.org/10.1038/nmeth.4661); what the code does
+differently (the first three concern the Bead calibration tool; a SMAP
+calibration brings its own coefficients):
+
+* **The beads' background and scale.**  The paper subtracts each bead stack's
+  minimum and divides by the summed intensity of its central plane; here each
+  stack loses the median of its border pixels over all planes, and the
+  average is scaled so that its brightest plane sums to 1.
+* **Smoothing.**  The paper smooths along z with a smoothing B-spline; here
+  with a Gaussian of *smoothing z* (20 nm by default), after which negative
+  values are set to zero.
+* **Coefficients.**  The paper upsamples each voxel and solves for its 64
+  coefficients; here they come from a not-a-knot cubic spline along each axis
+  in turn, three batched passes instead of one solve per voxel.
+* **The fit.**  The expected information as curvature (see
+  [Gaussian 2D](plugin:Localize/Gaussian 2D)), on the CPU rather than a GPU;
+  one z start, where the paper fits a PSF without astigmatism twice, from
+  500 nm above and below focus, and keeps the more likely; one read-noise
+  variance for the chip, where the paper's sCMOS model has one per pixel; and
+  no refractive-index factor (the paper multiplies z by 0.75).
 
 ## Parameters
 

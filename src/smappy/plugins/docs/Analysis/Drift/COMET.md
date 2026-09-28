@@ -8,8 +8,9 @@ covers: [smappy.drift.estimate_drift, smappy.drift._estimate_spline, smappy.drif
 Over a long acquisition the sample drifts by tens to hundreds of nanometres,
 and every localization is off by however far it had moved in its frame (the
 [RCC](plugin:Analysis/Drift/RCC) page says more about where drift comes from
-and what it does to the image).  COMET measures that drift from the
-localizations themselves -- no beads, no fiducial markers -- and subtracts it.
+and what it does to the image).  COMET
+([Reinkensmeier et al. 2026](https://doi.org/10.64898/2026.03.27.714864))
+measures that drift from the localizations themselves -- no beads, no fiducial markers -- and subtracts it.
 
 It does not make images.  It asks a simpler question of the localizations
 directly: if the drift were known and taken out, a molecule seen early and
@@ -225,6 +226,19 @@ windows* windows (grouping as set here), subtracts it, and runs COMET on
 what is left; again the two add.  In both, the second pass searches a small
 radius, which is what makes it fast.  The fit in each pass is the one
 asked for, the spline or the time windows.
+
+**Compared with the paper.**
+[Reinkensmeier et al. 2026](https://doi.org/10.64898/2026.03.27.714864)
+present COMET as working directly on 2D or 3D localizations and following
+drift with a finer time resolution than image cross-correlation.  The
+default here gives some of that time resolution up on purpose: the drift is
+a smooth B-spline with a coefficient every 2000 frames, not one value per
+time window.  On a real dataset the spline's noise was 0.8-1.0 nm against
+1.3-1.7 nm for the time-window fit, and finer knots were noisier without
+being sharper.  Drift that changes faster than that wants a smaller *knot
+spacing*, or *fit spline* off, which is the time-window fit of the paper's
+software.  How this plugin departs from that software (COMET 1.1.0,
+vendored here) is listed under *Differences from COMET and SMAP*.
 
 **The cost estimate.**  The pairs within $R$ are counted with a KD-tree on a
 fixed random sample of at most 60 000 of the selected localizations and

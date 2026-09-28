@@ -8,8 +8,11 @@ covers: [smappy.pipeline.LocalizationEngine, smappy.detect.PeakFinder, smappy.de
 This is where a localization table comes from.  It reads the raw camera
 frames of an acquisition, finds the single fluorophores that are on in each
 frame, and fits each one with a model of its image -- a 2D Gaussian whose
-width is fitted too -- to get its position with a precision far below the
-size of a pixel.  The result is one row per fluorophore per frame: `x`, `y`,
+width is fitted too -- by maximum likelihood
+([Smith et al. 2010](https://doi.org/10.1038/nmeth.1449)), with the
+Levenberg-Marquardt fitter of
+[Li et al. 2018](https://doi.org/10.1038/nmeth.4661), to get its position
+with a precision far below the size of a pixel.  The result is one row per fluorophore per frame: `x`, `y`,
 photons, background, the PSF width, and how precisely each is known.
 
 Use it for **2D** data.  For 3D data from an astigmatic or otherwise
@@ -246,6 +249,26 @@ most of them.
 **Speed.**  Detection runs on blocks of frames; ROIs are collected and fitted
 in batches (*ROIs per fit*), on all cores, in C++.  Reading the file runs in
 the background while the previous block is processed.
+
+**Compared with the papers.**  The fit and its CRLB are those of
+[Smith et al. 2010](https://doi.org/10.1038/nmeth.1449), and the steps those
+of [Li et al. 2018](https://doi.org/10.1038/nmeth.4661), with these
+differences:
+
+* Smith et al. fit four parameters, with the PSF width measured beforehand
+  and held fixed; here the width is a fifth parameter, started at *start
+  sigma*.
+* They run a fixed number of iterations, which suits a GPU; here a fit stops
+  once the deviance settles, and runs on the CPU's cores.
+* They leave out read noise, negligible on an EMCCD at high gain; here its
+  variance is added for an sCMOS (*Read noise* above).
+* Li et al. drop the model's second derivatives from the curvature, which
+  leaves $n_i/\mu_i^2$ as each pixel's weight; here the data $n_i$ in it is
+  replaced by the model $\mu_i$ -- the expected information $H$ above -- so
+  that a background near zero no longer shrinks the steps to nothing.  They
+  raise $\lambda$ tenfold after any step that does not lower the deviance;
+  here only after one that raised it by more than half, and, as there, when
+  the curvature is not positive definite.
 
 ## Parameters
 

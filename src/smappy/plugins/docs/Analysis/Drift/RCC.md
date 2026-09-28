@@ -10,7 +10,8 @@ nanometres: the stage creeps, the objective warms up, the coverslip settles.
 Every localization is then off by however far the sample had moved in its
 frame, and the super-resolved image is smeared by the whole path.
 
-RCC (*redundant cross-correlation*) measures that path from the
+RCC (*redundant cross-correlation*,
+[Wang et al. 2014](https://doi.org/10.1364/OE.22.015982)) measures that path from the
 localizations themselves -- no beads or fiducial markers are needed -- and
 subtracts it.  It cuts the acquisition into time windows, makes an image of
 each, and asks how far one image has to be shifted to match another.  The
@@ -193,6 +194,18 @@ up at one z by the fitter -- would pull the answer towards no drift.  The
 axial peak is searched within *max axial drift*, which is kept smaller than
 the lateral range because a z profile is much less structured than an image
 and a wide range lets the maximum wander.
+
+**Compared with the paper.**  The method is that of
+[Wang et al. 2014](https://doi.org/10.1364/OE.22.015982): images of time
+windows made from the localizations, every window correlated with every
+other, and the drift solved from the redundant set of shifts -- an approach
+they took over from the correction of beam-induced motion in cryo-electron
+microscopy.  The recipe around that idea is not the paper's but SMAP's
+version of it, changed where measurements here said so (*Differences from
+SMAP* lists how): blinks are grouped before the images are made, the peak
+is located by a quadratic fit, a pair that disagrees with the rest is
+weighted down by the Cauchy weight above, the drift is interpolated to
+frames by PCHIP, and z comes from the tiled z histograms.
 
 **What limits the precision.**  The noise of the curve falls with more
 localizations per window, and rises with more windows (fewer localizations
