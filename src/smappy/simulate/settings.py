@@ -97,13 +97,21 @@ class BlinkingSettings:
 @dataclass
 class OpticsSettings:
     """The PSF and the pixel, for the precision and for the frames."""
-    pixelsize_nm: float = param(100.0, label="pixel size", unit="nm", min=1)
-    sigma_nm: float = param(130.0, label="PSF sigma", unit="nm", min=1)
+    pixelsize_nm: float = param(100.0, label="pixel size", unit="nm", min=1,
+                                help="the camera pixel in the sample: enters the "
+                                     "precision and sets the frames' scale")
+    sigma_nm: float = param(130.0, label="PSF sigma", unit="nm", min=1,
+                            help="the width (standard deviation) of the Gaussian "
+                                 "spot in focus")
     astigmatism: bool = param(False, label="astigmatic",
                               help="a cylindrical lens: the spot's widths follow z")
     focal_offset_nm: float = param(300.0, label="focal offset", unit="nm",
-                                   advanced=True)
-    depth_nm: float = param(400.0, label="focal depth", unit="nm", min=1, advanced=True)
+                                   advanced=True,
+                                   help="astigmatic: x is in focus at +this z, "
+                                        "y at -this")
+    depth_nm: float = param(400.0, label="focal depth", unit="nm", min=1, advanced=True,
+                            help="astigmatic: how far from its focus a width has "
+                                 "grown by sqrt(2)")
     calibration: str = param("", label="PSF calibration", kind="open_file",
                              file_filter="Calibrations (*_3dcal.mat *_3Dcal.mat *.h5);;"
                                          "All files (*)",
@@ -126,9 +134,12 @@ class LocalizationOutputSettings:
                        help="emitters on in one frame closer than the separation "
                             "below are one spot: dropped, or fitted as one at "
                             "their photon-weighted mean")
-    min_separation_nm: float = param(250.0, label="separation", unit="nm", min=0)
+    min_separation_nm: float = param(250.0, label="separation", unit="nm", min=0,
+                                     help="closer than this in one frame, two "
+                                          "emitters are one spot; 0: never")
     z_factor: float = param(3.0, label="z precision", unit="x lateral", min=0,
-                            advanced=True)
+                            advanced=True,
+                            help="the z precision as a multiple of the lateral one")
     emccd: bool = param(False, label="EMCCD", advanced=True,
                         help="the excess noise of EM gain: the precision is "
                              "worse by sqrt(2)")
@@ -145,10 +156,15 @@ class CameraOutputSettings:
     tiff: bool = param(False, label="also write a TIFF",
                        help="the frames themselves, beside the recipe, for other "
                             "software")
-    size_px: int = param(100, label="size", unit="pixels", min=8)
-    conversion: float = param(0.5, unit="e-/ADU", min=1e-6)
-    offset: float = param(100.0, unit="ADU")
-    read_noise: float = param(1.5, label="read noise", unit="ADU", min=0)
+    size_px: int = param(100, label="size", unit="pixels", min=8,
+                         help="the side of the square frame, which covers x and y "
+                              "from 0 to this times the pixel size")
+    conversion: float = param(0.5, unit="e-/ADU", min=1e-6,
+                              help="electrons per camera count")
+    offset: float = param(100.0, unit="ADU",
+                          help="the camera count of a dark pixel")
+    read_noise: float = param(1.5, label="read noise", unit="ADU", min=0,
+                              help="Gaussian noise per pixel and frame, in counts")
     em_gain: float = param(0.0, label="EM gain", min=0,
                            help="0: an sCMOS; otherwise an EMCCD with this gain, its "
                                 "multiplication noise included (the excess factor "
@@ -162,16 +178,22 @@ class CameraOutputSettings:
 class SimulationSettings:
     output: str = param("localizations", label="simulate",
                         choices=(("localizations", "localizations"),
-                                 ("camera", "camera frames")))
-    n_frames: int = param(20000, label="frames", min=1)
-    background: float = param(20.0, label="background", unit="photons/pixel", min=0)
+                                 ("camera", "camera frames")),
+                        help="a localization table directly, or camera frames "
+                             "for a fitter to fit")
+    n_frames: int = param(20000, label="frames", min=1,
+                          help="the length of the measurement")
+    background: float = param(20.0, label="background", unit="photons/pixel", min=0,
+                              help="per pixel and frame: in the precision, or "
+                                   "drawn into the frames")
     background_std: float = param(0.0, label="background std", min=0,
                                   help="spread between localizations, or between "
                                        "frames for the camera; 0: always the same")
     drift: bool = param(False, label="add drift",
                         help="a smooth random walk plus a slow creep of ~100 nm; "
                              "the truth is kept in the metadata as drift_truth")
-    seed: int = param(0, label="seed", min=0)
+    seed: int = param(0, label="seed", min=0,
+                      help="the same seed and settings give the same simulation")
     structure: StructureSettings = param(default_factory=StructureSettings,
                                          label="structure")
     labelling: LabellingSettings = param(default_factory=LabellingSettings,

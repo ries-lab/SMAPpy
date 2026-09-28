@@ -26,7 +26,6 @@ UNDOCUMENTED = {
     "File/Load/csv",
     "File/Load/smappy HDF5",
     "File/Save/smappy HDF5",
-    "File/Simulate/Blinking Structure",
 }
 
 
