@@ -213,7 +213,7 @@ rather than something already drawn.
 | `photons`, `background` | per localization |
 | `xy_err_nm` | lateral precision, the RMS of `x_err_nm` and `y_err_nm`; `xy_err_pix` in a pixel table |
 | `z_err_nm` | axial precision, when the fit produced one |
-| `n_in_group` | **on-time in frames**; grouping writes it onto both tables |
+| `n_in_group` | **on-time in frames** (for a table with a trace id, `tid`, the localizations in the trace); grouping writes it onto both tables |
 | `group_id` | which group a localization was linked into, 1-based; on the grouped table, its own row |
 | `sigma_nm`, `sigma_y_nm`, `logl_rel` | PSF width and fit quality |
 | `filenumber`, `channel` | which file, which channel |
