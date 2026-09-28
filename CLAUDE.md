@@ -344,6 +344,15 @@ people who use the plugin -- biologists and biophysicists -- so they can
 understand the algorithm without reading the code.  The format is in
 `src/smappy/docs/__init__.py`; `Analysis/Drift/RCC.md` is the example to copy.
 
+The tabs and windows that are not plugins (the Render tab, the ROI tab and
+manager, the 3D view, the bead calibration, the batch window) have pages too,
+in `src/smappy/docs/panels/`, with `title`, `summary` and `widget` in the
+front matter and a *Controls* section in place of *Parameters*: one
+`### label` per control, the label exactly as the panel shows it.
+`tests/test_panel_docs.py` builds each panel and fails on a label it does not
+show, so a session that renames a control or adds one updates the panel's
+page too.
+
 **Writing it is part of the work, and it is yours.**  A session that adds a
 plugin writes its page in the same change.  A session that changes what a
 plugin computes -- the algorithm, a normalisation, a default that moves the
