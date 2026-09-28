@@ -109,3 +109,14 @@ def test_threads_give_the_same_answer():
     many = model.fit(rois, n_threads=8)
     assert np.array_equal(one.theta, many.theta)
     assert np.array_equal(one.logl, many.logl)
+
+
+def test_a_hot_pixel_does_not_drive_the_width_to_zero():
+    """A width of zero divides by zero in the pixel integral; the free-width
+    Gaussian stops at a tenth of its start, as the elliptical one does."""
+    from smappy.psf import GaussianPSF
+    rois = np.full((20, 11, 11), 5.0, np.float32)
+    rois[:, 5, 5] = 500.0
+    result = GaussianPSF(sigma=1.3).fit(rois)
+    assert np.isfinite(result.theta).all() and np.isfinite(result.crlb).all()
+    assert result.theta[:, 4].min() >= 0.13 - 1e-6

@@ -125,7 +125,9 @@ struct GaussFree {
     void clamp(float* theta, int sz) const {
         theta[2] = std::max(theta[2], 1.0f);
         theta[3] = std::max(theta[3], 0.01f);
-        theta[4] = std::max(theta[4], 0.0f);
+        // a width of zero divides by zero in int_gauss_1d; floored as
+        // GaussXY floors its widths
+        theta[4] = std::max(theta[4], sigma_start / 10.0f);
         theta[4] = std::min(theta[4], sz / 2.0f);
     }
 };
