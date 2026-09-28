@@ -105,8 +105,6 @@ def test_read_and_group_is_the_one_implementation(saved):
     assert grouped is not None                       # linked, because not appending
     _, _, not_linked = read_and_group(saved, GroupSettings(), append=True)
     assert not_linked is None                        # add_file re-links the merge
-    _, _, off = read_and_group(saved, GroupSettings(), group=False)
-    assert off is None
 
 
 # ------------------------------------------------------------- the rest

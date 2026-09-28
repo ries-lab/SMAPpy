@@ -1,6 +1,6 @@
 ---
-version: "1"
-covers: [smappy.io.formats._load_minflux, smappy.io.formats._minflux_records, smappy.io.formats._minflux_from_json]
+version: "2"
+covers: [smappy.io.formats._load_minflux, smappy.io.formats._minflux_records, smappy.io.formats._minflux_from_json, smappy.group.by_trace]
 ---
 
 ## What it does
@@ -121,10 +121,14 @@ localizations with fewer than 36 photons are hidden when the file opens.
 | `efo`, `cfr`, `dcr`, `efc`, `ecc`, `fbg` | the same, where the export has them |
 | `iteration` | `itr`, the number of the last iteration |
 
-**Linking.**  The blinks are linked by *link blinks* as for any other file,
-by distance (50 nm) and consecutive `frame`.  Here that joins consecutive
-localizations of the same molecule -- usually the localizations of one
-trace -- into one; turn *link blinks* off to keep every localization.
+**Grouping by trace.**  The instrument has already said which localizations
+belong to one molecule: those of one trace, `tid`.  So the grouped table has
+one row per trace -- its mean position, its summed photons, its first
+`frame`, and in `n_in_group` how many localizations it had -- rather than
+the distance-and-frame linking of a camera file, which would cut a trace
+wherever it wandered 50 nm between two localizations.  Before version 2 it
+was linked like a camera file.  To look at every localization, untick
+*grouped* on the layer.
 
 **Positions** are kept as the instrument gives them; they are not shifted to
 start at zero.  The file's entry in the session (`metadata["files"]`)

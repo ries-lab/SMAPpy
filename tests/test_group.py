@@ -506,3 +506,23 @@ def test_a_group_of_one_survives_every_mode():
     for mode, expect in [(0, [3, 5, 7]), (1, [3, 5, 7]), (4, [3, 5, 7]), (5, [3, 5, 7])]:
         assert np.allclose(_group.combine(values, weights, order, starts, mode, 1),
                            expect)
+
+
+def test_a_table_with_trace_ids_is_grouped_one_row_per_trace():
+    """MINFLUX: a trace that wanders further than dx between localizations,
+    and two traces in the same place at the same time, stay what the
+    instrument said they were -- one row each, per file."""
+    rng = np.random.default_rng(3)
+    tid = np.repeat([7, 7, 9, 7], [20, 20, 30, 5])        # tid 7 again in file 2
+    filenumber = np.repeat([1, 1, 1, 2], [20, 20, 30, 5])
+    n = len(tid)
+    x = np.where(tid == 7, 0.0, 10.0) + np.arange(n) * 30.0   # 30 nm steps
+    locs = Localizations({"x_nm": x + rng.normal(0, 1, n), "y_nm": np.zeros(n),
+                          "frame": np.arange(n), "photons": np.full(n, 10.0),
+                          "tid": tid, "filenumber": filenumber}, {})
+    grouped, index = group(locs, GroupSettings(dx=20.0))
+    assert len(grouped) == 3
+    assert sorted(grouped["n_in_group"]) == [5, 30, 40]
+    assert set(np.asarray(grouped["tid"])) == {7, 9}
+    assert sorted(np.asarray(grouped["photons"])) == [50.0, 300.0, 400.0]
+    assert list(locs["group_id"]) == list(index)

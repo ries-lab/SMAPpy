@@ -55,8 +55,8 @@ first file's `info`, and in a `-v7.3` file also the frame count, the
 conversion, the offset and the EM gain.  They are kept in the table's
 metadata under `smap`.
 
-**4. Linking.**  As with every loader, the blinks are then linked, unless
-*link blinks* says not to (see [Auto](plugin:File/Load/Auto)).
+**4. Linking.**  As with every loader, the blinks are then linked (see
+[Auto](plugin:File/Load/Auto)).
 
 ```figure What happened to the columns of a file shaped like SMAP's, as this plugin read it: renamed where this program has a name for the quantity, kept as they are where it has none, and dropped where nothing here reads them.
 def mapping(ax, pairs):

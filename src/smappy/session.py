@@ -277,7 +277,7 @@ def file_history(locs: Localizations) -> List[Dict]:
 
 def read_and_group(path, group_settings: GroupSettings, append: bool = False,
                    progress: Optional[Callable[[str], None]] = None,
-                   group: Optional[bool] = None, reader=None, **reader_args):
+                   reader=None, **reader_args):
     """Read a localization file and link it: ``(locs, info, grouped)``.
 
     The one implementation, used by the GUI's `LoadTask`, by `Session.load` and
@@ -290,10 +290,10 @@ def read_and_group(path, group_settings: GroupSettings, append: bool = False,
     if progress:
         progress("loading")
     locs, info = load_any(path, reader=reader, **reader_args)
-    if group is None:
-        group = GROUPED_BY_DEFAULT
     grouped = None
-    if not append and group and len(locs) and "frame" in locs:
+    # every layer opens grouped, so a file not linked here would be linked
+    # there anyway -- on the session's thread rather than this one
+    if not append and GROUPED_BY_DEFAULT and len(locs) and "frame" in locs:
         from .group import group as link
         grouped, _ = link(locs, group_settings,
                           progress=(lambda text, _f: progress(f"Grouper: {text}"))

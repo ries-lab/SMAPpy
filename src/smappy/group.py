@@ -115,6 +115,7 @@ COMBINE_MODES: Dict[str, str] = {
     "logl_rel": "max",
     "frame": "min",
     "iterations": "max",
+    "tid": "min",           # one trace per group: its id, kept an integer
 }
 
 # Columns that have no meaningful group value; see the module docstring.
@@ -560,6 +561,20 @@ def combine(locs: Localizations, group_index: np.ndarray,
     return grouped
 
 
+#: the column that says which localizations one trace is (MINFLUX's `tid`)
+TRACE = "tid"
+
+
+def by_trace(trace, blocks=None) -> np.ndarray:
+    """1-based group ids, one per trace id -- per file and channel, since a
+    trace id is only unique within the file that numbered it."""
+    keys = np.asarray(trace, np.int64)[:, None]
+    if blocks is not None:
+        keys = np.concatenate([np.asarray(blocks, np.int64), keys], axis=1)
+    _, inverse = np.unique(keys, axis=0, return_inverse=True)
+    return inverse.reshape(-1).astype(np.int64) + 1
+
+
 @dataclass(frozen=True)
 class GroupSettings:
     """How to link.  ``dx`` is in the units of the table (nm, normally)."""
@@ -613,16 +628,26 @@ def group(locs: Localizations, settings: Optional[GroupSettings] = None,
 
     ``progress(text, fraction)`` reports the two stages; it is what the GUI
     puts in its status bar while this runs off the main thread.
+
+    A table with a trace id (`tid`, MINFLUX) is grouped by trace instead:
+    the instrument has already said which localizations are one molecule,
+    and its `frame` is only the rank in time, so linking by distance and
+    consecutive frames would cut a trace wherever it wandered 50 nm.
     """
     settings = settings or GroupSettings()
     from .render import positions
 
+    present = [locs[name] for name in settings.block_fields if name in locs]
+    blocks = np.stack(present, axis=1) if present else None
+    if TRACE in locs:
+        group_index = by_trace(locs[TRACE], blocks)
+        grouped = combine(locs, group_index, progress=progress)
+        if attach_columns:
+            attach(locs, grouped, group_index)
+        return grouped, group_index
     x, y = positions(locs)
     if "frame" not in locs:
         raise KeyError("grouping needs a 'frame' column")
-
-    present = [locs[name] for name in settings.block_fields if name in locs]
-    blocks = np.stack(present, axis=1) if present else None
     if settings.link_chunks > 1:
         from ._group_chunked import connect_chunked
         group_index = connect_chunked(x, y, locs["frame"], settings.dx, settings.dt,

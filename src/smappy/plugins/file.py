@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from ..io.formats import (FileInfo, name_filter, reader_for, reader_named,
                           save_filter, writer_for)
@@ -38,8 +38,6 @@ class LoadSettings:
     append: bool = param(False, label="add to the open files",
                          help="join the table as one more file instead of "
                               "replacing everything; this is File > Add file")
-    group: Optional[bool] = param(None, label="link blinks", advanced=True,
-                                  help="auto: link unless the file is being added")
 
 
 class _Load(Plugin):
@@ -70,7 +68,7 @@ class _Load(Plugin):
         group_settings = (ctx.session.group_settings if ctx.session is not None
                           else GroupSettings())
         locs, info, grouped = read_and_group(
-            path, group_settings, append=settings.append, group=settings.group,
+            path, group_settings, append=settings.append,
             progress=ctx.report, reader=reader,
             **self.reader_args(path, settings))
         text = f"{len(locs)} localizations from {path.name} ({info.format})"
@@ -83,6 +81,8 @@ class _Load(Plugin):
 @register("File/Load/Auto")
 class LoadAuto(_Load):
     """Read any known format, choosing the reader by the file name."""
+    # 2: no *link blinks*; a table with a trace id is grouped by trace
+    version = "2"
 
 
 @register("File/Load/smappy HDF5")
@@ -106,6 +106,8 @@ class LoadMinflux(_Load):
     """Read a MINFLUX `.npy`, `.zip` or `.json` export."""
     format = "MINFLUX"
     favorite = False
+    # 2: grouped by trace (`tid`), not linked by distance and frame
+    version = "2"
 
 
 @dataclass

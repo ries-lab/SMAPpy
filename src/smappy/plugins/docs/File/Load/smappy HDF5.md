@@ -56,8 +56,7 @@ they were saved with.
   summary, a simulation's settings.
 
 **3. Linking.**  The grouped table is not in the file; it is made again by
-linking, unless *link blinks* says not to (see
-[Auto](plugin:File/Load/Auto)).
+linking (see [Auto](plugin:File/Load/Auto)).
 
 ```figure A simulated table, one Math Parser run and a drawn ROI, saved and opened again with this plugin: what the new session starts from.
 fig.set_size_inches(7.5, 1.7)

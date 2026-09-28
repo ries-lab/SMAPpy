@@ -1,5 +1,5 @@
 ---
-version: "1"
+version: "2"
 covers: [smappy.io.formats.reader_for, smappy.io.formats._is_smappy, smappy.io.formats._has_saveloc, smappy.session.read_and_group]
 ---
 
@@ -75,7 +75,10 @@ are linked into one, with the session's linking settings (within 50 nm and
 a gap of 1 frame by default; the *parameters* dialog of the Render tab).
 The linked table is what a layer shows when it is *grouped*, which is how
 it opens.  An added file is not linked here: it is linked together with the
-files already open.
+files already open.  A table with a trace id (`tid`, as a MINFLUX export
+has) is grouped by trace instead, one row per trace.  To look at every
+localization, untick *grouped* on the layer: the ungrouped table is always
+kept.
 
 ```figure Which reader Auto chose for a set of files: by the ending, and by what is inside where the ending is ambiguous.  Grey: refused.
 fig.set_size_inches(5.2, 2.6)
@@ -112,14 +115,6 @@ column $c$ -- 4 for most columns, 8 for `frame` -- so some 60 bytes per
 localization for a fitted 3D table, plus the grouped table.  Linking a
 table of tens of millions of localizations takes minutes.  Here it is done while the file is read, off
 the window's thread, so the window stays usable and says what it is doing.
-
-## Parameters
-
-### group
-*auto* and on are the same: a file that replaces what is open is linked, an
-added one is not.  Off, the reader does not link -- but the layer that
-shows the file opens grouped and links it then, on the session's thread,
-so it saves no time.
 
 ## Output
 

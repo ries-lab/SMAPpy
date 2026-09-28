@@ -284,7 +284,7 @@ csv needs a column mapping.  Adding a format is still a one-line
 
 Seeded with:
 
-    File/Load/Auto            by extension; append, and whether to link blinks
+    File/Load/Auto            by extension; append or replace
     File/Load/<format>        smappy HDF5, SMAP _sml.mat, MINFLUX, csv --
                               present but unpinned, since Auto covers them
     File/Save/smappy HDF5     with the GUI state, or without
@@ -303,8 +303,8 @@ every loader plugin call.  `File -> Open` still drives it through `LoadTask`
 rather than through the plugin: the menu owns a multi-file queue, a progress
 line and the csv mapping dialog, none of which a panel expresses, and routing it
 through the plugin would add indirection without removing code.  What the tab
-adds is the options as checkboxes -- append, and whether to link blinks -- beside
-the menu's separate *Add file* action.
+adds is the option as a checkbox -- append -- beside the menu's separate
+*Add file* action.
 
 A loader runs in the panel's worker thread and must not touch the session, so it
 returns its work as `Result.files` and `Session.apply` adds it on the thread
