@@ -228,27 +228,22 @@ expression; *Preview* shows it before the table has it.
 
 ## Differences from SMAP
 
-SMAP's `Process/Modify/MathParser` does the same job.  What differs:
+Based on SMAP's `Process/Modify/MathParser`
+([Ries 2020](https://doi.org/10.1038/s41592-020-0938-1)).  What differs:
 
 * **Parsed, not evaluated.**  SMAP puts `locs.` in front of every field name
   in the string and runs it with MATLAB's `eval`, so any MATLAB is allowed.
-  Here the expression is read and only arithmetic over columns is run (see
-  *In detail*), for the security reason above and so that a missing column
-  or a precedence mistake is reported before anything is computed.
-* **No dots.**  MATLAB needs `.*`, `./` and `.^` to stay elementwise; numpy
-  is elementwise already, so `*`, `/` and `**` are written.  `&` and `|`
-  bind tighter than a comparison here and looser in MATLAB, which is why an
-  unbracketed comparison is refused.
-* **Reductions** (`z_nm - median(z_nm)`) are allowed here as functions.
-* **Where it is written.**  SMAP chooses one file or all files; here it is
-  all localizations or the current selection (filter, ROI and slab).
+  Here only arithmetic over columns is run (see *In detail*), and a missing
+  column or a precedence mistake is reported before anything is computed.
+* **Precedence.**  `&` and `|` bind tighter than a comparison here and looser
+  in MATLAB, which is why an unbracketed comparison is refused.
 * **Grouping.**  SMAP has a *regroup and filter* checkbox that links the
   whole table again after the calculation.  Here the column carries a rule
   for the grouped table instead, so recomputing an on-time or reducing a
   flag does not depend on relinking.
-* **History.**  SMAP keeps 10 equations, and drops every earlier entry
-  whose equation contains the new one, whatever field it went into; here it
-  keeps 20, and drops only an entry with the same field *and* expression, so
-  the same formula written into two fields is kept twice.
-* **Precision.**  The result is float32, like the rest of the table, rather
-  than double.
+
+## References
+
+* Ries J. SMAP: a modular super-resolution microscopy analysis platform for
+  SMLM data. *Nat Methods* 17, 870 (2020).
+  [doi:10.1038/s41592-020-0938-1](https://doi.org/10.1038/s41592-020-0938-1)

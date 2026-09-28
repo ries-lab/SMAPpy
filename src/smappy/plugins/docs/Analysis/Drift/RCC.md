@@ -197,15 +197,11 @@ and a wide range lets the maximum wander.
 
 **Compared with the paper.**  The method is that of
 [Wang et al. 2014](https://doi.org/10.1364/OE.22.015982): images of time
-windows made from the localizations, every window correlated with every
-other, and the drift solved from the redundant set of shifts -- an approach
-they took over from the correction of beam-induced motion in cryo-electron
-microscopy.  The recipe around that idea is not the paper's but SMAP's
-version of it, changed where measurements here said so (*Differences from
-SMAP* lists how): blinks are grouped before the images are made, the peak
-is located by a quadratic fit, a pair that disagrees with the rest is
-weighted down by the Cauchy weight above, the drift is interpolated to
-frames by PCHIP, and z comes from the tiled z histograms.
+windows, every window correlated with every other, and the drift solved from
+the redundant set of shifts.  The main changes are SMAP's and this code's
+(*Differences from SMAP*): blinks are grouped before the images are made, a
+pair that disagrees with the rest is weighted down by the Cauchy weight above,
+and z comes from the tiled z histograms.
 
 **What limits the precision.**  The noise of the curve falls with more
 localizations per window, and rises with more windows (fewer localizations
@@ -257,15 +253,10 @@ localizations, or a larger *pixel size*.
 
 ## Differences from SMAP
 
-Ported from SMAP's `finddriftfeature` and `finddisplacementZ2`, with these
-changes:
+Based on SMAP's `Drift/driftcorrectionXYZ`
+([Ries 2020](https://doi.org/10.1038/s41592-020-0938-1)), its
+`finddriftfeature` in particular.
 
-* The correlation peak is found with a quadratic fit rather than a 2D
-  Gaussian fit: the peak of a correlation is not Gaussian, and the quadratic
-  is a linear problem with no starting values.
-* The pair equations are solved by iteratively reweighted least squares with
-  a Cauchy weight, rather than MATLAB's robust nonlinear fit.  The problem is
-  linear, so it needs no nonlinear fit.
 * The axial pass tiles the field in x *and* y and removes the lateral drift
   first; with slices spanning the whole field in y the axial shifts came out
   uncorrelated with COMET's, against a correlation of 0.96 with square tiles.
@@ -281,3 +272,6 @@ changes:
   in 3D fluorescence photoactivation localization microscopy. *Opt Express*
   19, 15009 (2011).
   [doi:10.1364/OE.19.015009](https://doi.org/10.1364/OE.19.015009)
+* Ries J. SMAP: a modular super-resolution microscopy analysis platform for
+  SMLM data. *Nat Methods* 17, 870 (2020).
+  [doi:10.1038/s41592-020-0938-1](https://doi.org/10.1038/s41592-020-0938-1)

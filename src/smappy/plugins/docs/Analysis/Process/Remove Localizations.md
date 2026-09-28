@@ -157,21 +157,21 @@ with the table, and a reopened file hides the same localizations again.
 
 ## Differences from SMAP
 
-SMAP's `Process/Modify/RemoveLocs` does the same job, with three modes
-("remove inside ROI", "remove outside ROI", "keep visible inside ROI"), an
-*all files* checkbox and a *set property: active* checkbox.  Here:
+Based on SMAP's `Process/Modify/RemoveLocs`
+([Ries 2020](https://doi.org/10.1038/s41592-020-0938-1)).  Here:
 
-* **What counts as inside** is one setting.  SMAP's third mode quietly adds
-  the layers' filters to the ROI; here that is *region* = *the selection*
-  (the filter, the ROI and the slab), and it combines with either side.
-* **Which files** are acted on is not a setting.  SMAP restricts the first two
-  modes to the files shown in the layers unless *all files* is ticked; here
-  *the drawn ROI* acts on every file, and *the selection* on what the layer
-  shows, which is how one file is picked.
-* **Hiding.**  SMAP's *set property: active* writes an `active` field,
-  combined with an earlier one, as here.  Here the column is named by *flag*,
+* **What counts as inside** is one setting.  SMAP's "keep visible inside ROI"
+  mode quietly adds the layers' filters to the ROI; here that is *region* =
+  *the selection* (the filter, the ROI and the slab), and it combines with
+  either side.
+* **Hiding.**  SMAP's *set property: active* writes an `active` field and
+  regroups the table after every run.  Here the column is named by *flag*,
   the filter is set on it so the hidden localizations actually disappear, and
-  it carries the rule *all* for grouping.  SMAP regroups the table after
-  every run; here nothing is relinked unless a layer is showing the grouped
-  table.
-* A run that would remove nothing or everything is refused.
+  it carries the rule *all* for grouping, so nothing is relinked unless a
+  layer is showing the grouped table.
+
+## References
+
+* Ries J. SMAP: a modular super-resolution microscopy analysis platform for
+  SMLM data. *Nat Methods* 17, 870 (2020).
+  [doi:10.1038/s41592-020-0938-1](https://doi.org/10.1038/s41592-020-0938-1)

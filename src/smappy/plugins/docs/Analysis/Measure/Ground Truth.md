@@ -336,19 +336,16 @@ over the 0.5th to 99.5th percentile of true z.
 frame by frame and scores recall, precision, the Jaccard index and the RMS
 error.  Its assessment differs from this one in four places:
 
-* It pairs by a presorted nearest-neighbour search within 250 nm, which it
-  reports gives results close to the Hungarian algorithm.  Here the exact
-  optimal assignment is taken, within 100 nm by default and, if asked, within
-  a z radius as well.
-* It keeps the brightest 75% of the true activations.  Here a spot counts
-  from a fixed number of emitted photons, and the unpaired localizations
-  beside an uncounted spot or dimmer than that number are set aside as well
-  as the ones paired with it.
+* It pairs by a presorted nearest-neighbour search within 250 nm; here the
+  exact optimal assignment is taken, within 100 nm by default and, if asked,
+  within a z radius as well.
+* It keeps the brightest 75% of the true activations; here a spot counts
+  from a fixed number of emitted photons.
 * It leaves out the fluorophores within 450 nm of the border of the field;
-  here none is left out for being near the border.
+  here none is.
 * It corrects the depth-dependent lateral shift of its experimental PSFs
-  (the "wobble") before comparing; here nothing is corrected, and such a
-  shift shows in the bias and the error.
+  (the "wobble") before comparing; here such a shift shows in the bias and
+  the error.
 
 ## Parameters
 
@@ -417,35 +414,24 @@ excess is crowding.
 
 ## Differences from SMAP
 
-SMAP's `CompareToGroundTruth` (with `simulationerror` and `matchlocsall`)
-compares two loaded layers, one of which is the ground truth.  Here:
+Does the job of SMAP's `other/CompareToGroundTruth`
+([Ries 2020](https://doi.org/10.1038/s41592-020-0938-1)), which compares two
+loaded layers, one of which is the ground truth.  Here:
 
-* **The truth is redrawn from the simulation** rather than loaded as a
-  second table.  SMAP's options for putting the two in register -- shifts
-  and scale factors per coordinate, and which fields to use -- have no
-  equivalent: the simulation and the fit share their frames and coordinates.
-* **Pairing is the optimal assignment.**  SMAP's `matchlocshd` sorts the
-  candidate pairs of a frame by distance and takes them nearest first,
-  skipping any whose partner is taken, which can pair fewer spots in a
-  crowded frame.
-* **The z radius makes or breaks a pair.**  SMAP (search radius "100 300")
-  pairs laterally, counts every pair as a true positive, and leaves pairs
-  more than 300 nm apart in z out of the errors only.
+* **Pairing is the optimal assignment.**  SMAP's `matchlocshd` takes the
+  candidate pairs of a frame nearest first, skipping any whose partner is
+  taken, which can pair fewer spots in a crowded frame.
+* **The z radius makes or breaks a pair.**  SMAP pairs laterally, counts
+  every pair as a true positive, and leaves pairs more than 300 nm apart in
+  z out of the errors only.
 * **Not every true spot counts.**  SMAP scores every localization of the
   truth layer; the photon threshold, *isolated spots only* and the
   localizations set aside are new here.
 * **Bias, error and pull are computed directly.**  SMAP fits a Gaussian to
-  the histogram of the errors, takes its centre as the shift, reports the
-  lateral RMS error after taking that shift out, and reports the fitted width
-  of the normalised errors.  Here the bias is the mean, the RMS error
-  includes it, per axis, and the pull's spread is the robust MAD.  SMAP's
-  errors are ground truth minus fit; here fit minus truth.
-* **The precision is the table's own.**  SMAP can also normalise by a
-  Cramér-Rao bound computed from a 3D calibration, or by the truth layer's
-  errors.
-* SMAP's F1 score, its efficiency score (from the SMLM challenge) and its
-  photon and background comparisons are not reported.  The slope of fitted
-  against true z is new; in SMAP that code is commented out.
+  the histogram of the errors and reports its centre, the lateral RMS error
+  after taking that shift out, and the fitted width of the normalised
+  errors.  Here the bias is the mean, the RMS error includes it, per axis,
+  and the pull's spread is the robust MAD.
 
 ## References
 
@@ -463,3 +449,6 @@ compares two loaded layers, one of which is the ground truth.  Here:
   Logist Q* 2, 83 (1955).
   [doi:10.1002/nav.3800020109](https://doi.org/10.1002/nav.3800020109)
   -- the assignment problem that the pairing solves.
+* Ries J. SMAP: a modular super-resolution microscopy analysis platform for
+  SMLM data. *Nat Methods* 17, 870 (2020).
+  [doi:10.1038/s41592-020-0938-1](https://doi.org/10.1038/s41592-020-0938-1)

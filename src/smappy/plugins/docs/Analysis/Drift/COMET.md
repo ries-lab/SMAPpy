@@ -233,12 +233,9 @@ present COMET as working directly on 2D or 3D localizations and following
 drift with a finer time resolution than image cross-correlation.  The
 default here gives some of that time resolution up on purpose: the drift is
 a smooth B-spline with a coefficient every 2000 frames, not one value per
-time window.  On a real dataset the spline's noise was 0.8-1.0 nm against
-1.3-1.7 nm for the time-window fit, and finer knots were noisier without
-being sharper.  Drift that changes faster than that wants a smaller *knot
-spacing*, or *fit spline* off, which is the time-window fit of the paper's
-software.  How this plugin departs from that software (COMET 1.1.0,
-vendored here) is listed under *Differences from COMET and SMAP*.
+time window, which was less noisy on a real dataset.  *fit spline* off is
+the time-window fit of the paper's software; *Differences from COMET and
+SMAP* lists the other changes.
 
 **The cost estimate.**  The pairs within $R$ are counted with a KD-tree on a
 fixed random sample of at most 60 000 of the selected localizations and
@@ -365,29 +362,14 @@ COMET in these ways:
 * **The spline is the default.**  Upstream COMET fits one drift per time
   window and interpolates.  Here the drift is fitted directly as a B-spline
   in time, with COMET's cost.  On a real dataset, both grouped, its noise
-  was 0.8-1.0 nm against the time-window fit's 1.3-1.7 nm, at the same
-  speed.
+  was 0.8-1.0 nm against the time-window fit's 1.3-1.7 nm.
 * **Grouping first**, by default, which COMET does not do.
-* **A looser optimiser tolerance**, $10^{-7}$ against COMET's
-  $2 \times 10^{-13}$ (a thousand times machine precision), for less than half the cost evaluations and
-  a change far below any localization precision.
-* **The kernel** is C++ rather than numba, and skips pairs beyond $6\sigma$
-  by default.
-* **Quality control** works on the CPU, where upstream supports it only on
-  the GPU backends.  Its criterion is also different: upstream discards a
+* **Quality control** has a different criterion: upstream discards a
   window whose overlap does not beat its no-drift overlap by at least the
-  standard deviation of the no-drift overlap *across windows*.  On a bleaching sample that spread
-  mostly measures the falling density, and flagged 90 of 92 windows on one
-  dataset.  The lift divides the density out.
+  standard deviation of the no-drift overlap *across windows*.  On a
+  bleaching sample that spread mostly measures the falling density, and
+  flagged 90 of 92 windows on one dataset.  The lift divides the density out.
 * **Two passes** and **RCC first** are additions.
-* **The cost is estimated before the run**, from a sample, for both fits.
-  Upstream counts pairs only within grid cells, which came out 40% low on the
-  datasets checked, and only warns above 500 million pairs.
-* **Estimated from the selection, applied to everything**, with the drift
-  covering every frame of the table; a table in pixels is converted to nm
-  for the estimate and back.
-* *target sigma* defaults to 30 nm, where upstream's library function
-  defaults to 1 nm.
 
 ## References
 

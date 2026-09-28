@@ -367,16 +367,13 @@ $r$ to the 0.1th and 99.9th percentile of $r$.
 
 **Compared with the papers.**  Reading a molecule's colour from how its
 photons divide between two detection channels is the method of
-[Bossi et al. 2008](https://doi.org/10.1021/nl801471d).  The two photon
-numbers come here from a global fit with the photons free, and
+[Bossi et al. 2008](https://doi.org/10.1021/nl801471d).
 [Li et al. 2022](https://doi.org/10.1038/s41467-022-30719-4) assign colours
-from such a fit by a threshold on the photon ratio -- which is what *split at
-the minima* does, with the boundaries found in the histogram rather than set
-by hand.  Li et al. also fit every molecule with the photon ratio fixed at
+from a global fit by a threshold on the photon ratio -- which is what *split
+at the minima* does, with the boundaries found in the histogram rather than
+set by hand.  Li et al. also fit every molecule with the photon ratio fixed at
 each dye's value and keep the most likely fit; that is not done here.  The
-probabilistic method is not taken from these papers: the probability from
-the binomial split, the crosstalk bound and the *sigma* test were worked out
-for this plugin.
+probabilistic method was worked out for this plugin.
 
 ## Parameters
 
@@ -489,27 +486,17 @@ table.
 
 ## Differences from SMAP
 
-SMAP's `Intensity2Channel` (with `get_intensity2ch`) draws the two channels'
-intensities against each other, on log scales by default, and the user types
-in the lines that divide them: a *slope* (1 by default), an *offset*, an
-*edge* excluded on either side (0.5 in $\log_{10}$, a factor of about three
-in the ratio) and a minimum intensity per channel.  Localizations between the
-lines get channel 5, and those with no partner intensity channels 3 and 4,
-which *associate unassigned* folds into 1 and 2.  `Intensity2ManyChannels`
-lets the user draw a polygon per colour in the same plane, and
-`intensity_ratios_channels` finds the peaks of a photon-weighted histogram of
-the ratio, refined by a parabola.  Here:
+Does the job of SMAP's `Assign2C/Intensity2Channel`
+([Ries 2020](https://doi.org/10.1038/s41592-020-0938-1)), which draws the two
+channels' intensities against each other and lets the user type in the lines
+that divide them (a *slope*, an *offset* and an *edge* excluded on either
+side).  Here:
 
 * **The boundaries are found**, not typed in: from the peaks and valleys of
-  the histogram of $r$, or from *expected r*.  The minima method's band
-  is, like SMAP's *edge*, the space between two lines of constant ratio.
+  the histogram of $r$, or from *expected r*.
 * **The probabilistic method is new.**  It gives each localization a
   probability of each colour from its own photons and their fitted errors, a
   crosstalk bound, and a test against each dye's ratio.
-* **Unassigned is 0**, not 5, and there are no channels 3 and 4: the
-  two-colour fit always gives both photon numbers.
-* **The histogram is not photon-weighted.**  It counts localizations, so the
-  share of each colour is a share of localizations.
 * SMAP measures the partner's intensity after a single-channel fit; here both
   photon numbers come from one global fit of the pair (see NOTES.md, "Two
   colours in 2D").
@@ -540,3 +527,6 @@ the ratio, refined by a parabola.  Here:
   superresolution microscopy by combined spectral-demixing and biplane
   imaging. *Biophys J* 109, 3 (2015).
   [doi:10.1016/j.bpj.2015.05.026](https://doi.org/10.1016/j.bpj.2015.05.026)
+* Ries J. SMAP: a modular super-resolution microscopy analysis platform for
+  SMLM data. *Nat Methods* 17, 870 (2020).
+  [doi:10.1038/s41592-020-0938-1](https://doi.org/10.1038/s41592-020-0938-1)
