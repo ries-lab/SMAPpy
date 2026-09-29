@@ -316,6 +316,10 @@ in).  `tests/test_file_plugins.py::test_the_file_tab_ships_with_the_four_it_need
 asserts the File tab's exact contents, so a new File plugin needs a line there
 too (it is a Qt test and skips without PySide6).
 
+`tests/test_control_width.py` builds every shipped plugin's panel and fails if
+it is wider than the control column (`CONTROL_WIDTH`): a new plugin with a long
+label, a long choice or a wide row of widgets fails there.
+
 `tests/test_tutorial.py` runs every tutorial storyboard against the real GUI
 (`python -m smappy.tutorial`, see `src/smappy/tutorial/__init__.py`), so a GUI
 change that breaks a tutorial fails there: fix the storyboard in
