@@ -213,7 +213,12 @@ def compare(fitted: Localizations, truth: Localizations, radius: float = 100.0,
                         fn=n_counted - tp, set_aside=set_aside,
                         true_photons=np.asarray(truth["photons"])[counted],
                         found=found[counted])
-    names = [("x", "x_nm", "xy_err_nm"), ("y", "y_nm", "xy_err_nm")]
+    # each lateral axis by its own precision where the fit reports one: an
+    # astigmatic PSF is narrower in x than in y on one side of focus and the
+    # other way round on the other, and divided by the RMS of the two
+    # (`xy_err_nm`) the x pull of a spline fit to its own PSF read 0.86-0.96 (8 runs)
+    names = [(a, f"{a}_nm", f"{a}_err_nm" if f"{a}_err_nm" in fitted else "xy_err_nm")
+             for a in "xy"]
     if "z_nm" in fitted and "z_nm" in truth:
         names.append(("z", "z_nm", "z_err_nm"))
     for axis, col, err in names:
@@ -280,7 +285,8 @@ def _draw_error(ax, c: Comparison) -> None:
     edges = np.quantile(ph, np.linspace(0, 1, 11))
     k = np.clip(np.searchsorted(edges, ph, side="right") - 1, 0, 9)
     measured = [np.sqrt(np.mean(d[k == i] ** 2)) for i in range(10)]
-    claimed = [np.median(c.pairs["err_x"][k == i]) for i in range(10)]
+    lateral = np.sqrt((c.pairs["err_x"]**2 + c.pairs.get("err_y", c.pairs["err_x"])**2) / 2)
+    claimed = [np.median(lateral[k == i]) for i in range(10)]
     centre = [np.median(ph[k == i]) for i in range(10)]
     ax.loglog(centre, measured, "o", ms=4, label="measured (RMS per axis)")
     ax.loglog(centre, claimed, "-", lw=1.2, label="reported precision")
@@ -358,7 +364,7 @@ class GroundTruth(Plugin):
     Settings = GroundTruthSettings
     # 2: dim spots not counted by default; a z radius.  3: a drift-corrected
     # table is compared with the truth less the drift's mean
-    version = "3"
+    version = "4"
 
     def run(self, ctx: Context, settings: GroundTruthSettings) -> Result:
         from ..simulate import ISOLATED_NM

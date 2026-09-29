@@ -1,5 +1,5 @@
 ---
-version: "3"
+version: "4"
 covers: [smappy.plugins.ground_truth.truth_for, smappy.plugins.ground_truth.match, smappy.plugins.ground_truth._near_any, smappy.plugins.ground_truth.compare, smappy.plugins.ground_truth.Comparison, smappy.plugins.ground_truth.GroundTruth.run, smappy.plugins.ground_truth.draw_all, smappy.plugins.ground_truth._draw_recall, smappy.plugins.ground_truth._draw_error, smappy.plugins.ground_truth._draw_pull, smappy.plugins.ground_truth._draw_z, smappy.simulate.camera.camera_truth, smappy.simulate.camera.neighbour_distance]
 ---
 
@@ -42,7 +42,8 @@ second to redraw.  A fit that names a `*.sim.yaml` that has since been moved
 is refused with a message saying so; name the file under *simulation*.
 
 The comparison takes a fraction of a second.  For the precision to be
-scored, the table needs `xy_err_nm` (and `z_err_nm` for z).
+scored, the table needs `x_err_nm` and `y_err_nm`, or `xy_err_nm` for both
+(and `z_err_nm` for z).
 
 ## How it works
 
@@ -185,7 +186,7 @@ systematic shift that a good fit does not have.  Its root mean square is the
 **RMS error**, the typical distance from the truth, bias included.
 
 **7. Is the precision honest?**  Every localization carries a precision,
-the error the fit believes it has (`xy_err_nm`, `z_err_nm`).  Dividing each
+the error the fit believes it has (`x_err_nm`, `y_err_nm`, `z_err_nm`).  Dividing each
 error by its own precision gives a number that should scatter like a
 standard normal distribution -- spread 1 -- when the precisions are right.
 The plugin reports that spread as **error / reported precision**.  Above 1,
@@ -304,8 +305,8 @@ the fitted minus the true coordinate:
 $$\mathrm{bias} = \frac{1}{TP} \sum_i \delta_i, \qquad \mathrm{RMS} = \sqrt{\frac{1}{TP} \sum_i \delta_i^2} .$$
 
 The RMS error therefore contains the bias:
-$\mathrm{RMS}^2 = \mathrm{bias}^2 + \mathrm{variance}$.  x and y are each
-divided by `xy_err_nm`, z by `z_err_nm`, for the pull $p_i = \delta_i /
+$\mathrm{RMS}^2 = \mathrm{bias}^2 + \mathrm{variance}$.  x is divided by
+`x_err_nm`, y by `y_err_nm` and z by `z_err_nm`, for the pull $p_i = \delta_i /
 \sigma_i$ (pairs with $\sigma_i \leq 0$ left out), and the reported spread
 is the scaled median absolute deviation
 
@@ -313,8 +314,12 @@ $$s_p = 1.4826\ \mathrm{median}_i \left| p_i - \mathrm{median}_j\, p_j \right| ,
 
 which is the standard deviation for a Gaussian, ignores a few wrong pairs,
 and is unmoved by a shift common to all $p_i$ -- though not by a bias in
-nanometres, which is a different $p$ for every precision.  An axis without its precision column has bias and RMS
-only.
+nanometres, which is a different $p$ for every precision.  Each axis by its
+own precision, because an astigmatic spot is narrower in x than in y on one
+side of focus and the other way round on the other: divided by `xy_err_nm`,
+the RMS of the two, a spline fit to frames drawn from its own PSF read an x
+pull of 0.86 to 0.96.  A table with `xy_err_nm` only has both axes divided
+by it.  An axis without a precision column has bias and RMS only.
 
 **The z slope.**  With more than 10 found pairs, `z_nm` in both tables and
 true z not all equal, the least-squares line $\hat{z} = a z + b$ gives the
@@ -326,7 +331,8 @@ and draws the fraction found in each non-empty bin.  The error panel,
 drawn with at least 20 found pairs, splits them into ten equal-sized groups
 by their *fitted* photons and draws, per group, the measured error per axis
 $\sqrt{\langle (\delta_x^2 + \delta_y^2)/2 \rangle}$ against the median
-reported `xy_err_nm`.  The pull panel has 60 bins from $-5$ to $5$, with
+reported precision per axis, $\sqrt{(\sigma_x^2 + \sigma_y^2)/2}$ (which is
+`xy_err_nm`).  The pull panel has 60 bins from $-5$ to $5$, with
 the standard normal density dashed.  The z panel is a 60 by 60 histogram of
 fitted against true z, with the identity dashed and the fitted line drawn
 over the 0.5th to 99.5th percentile of true z.
