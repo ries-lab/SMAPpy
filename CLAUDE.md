@@ -195,6 +195,10 @@ filter on a column the run has just written -- a plugin cannot set it itself,
 because a filter belongs to the table it was built from and the new table
 exists only once `Session.apply` has set it.
 
+`Result.data["images"]` hands the session the camera frames a fit kept
+(`smappy.rawframes`); they replace the session's raw frames, since a fit
+replaces the table.
+
 The figures of one result share a window, a tab each beyond the first, and a
 tab is drawn when it is looked at and not before -- so a plugin with six
 figures costs what one costs, and a plot must be a closure over its data
