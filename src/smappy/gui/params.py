@@ -79,7 +79,10 @@ class _Field(QWidget):
             self.widget = QLineEdit()
             self.widget.setMaximumWidth(80)
             self.widget.editingFinished.connect(self.changed)
-        if info.kind not in ("open_file", "save_file", "dir", "text"):
+        if isinstance(self.widget, QComboBox):
+            # first call on the room, up to its cap: see _fit_combo
+            row.addWidget(self.widget, 100)
+        elif info.kind not in ("open_file", "save_file", "dir", "text"):
             row.addWidget(self.widget)
         if spec.optional and choices is None and spec.type is not bool:
             self.auto = QCheckBox("auto")
@@ -107,6 +110,25 @@ class _Field(QWidget):
             value, label = choice if isinstance(choice, tuple) else (choice, str(choice))
             self.widget.addItem(label, value)
             self._values.append(value)
+        self._fit_combo()
+
+    def _fit_combo(self) -> None:
+        """As wide as its longest choice when there is room, narrower when not.
+
+        A combo box asks for its longest choice as its *minimum*, and one long
+        choice ("ring and cross, with scattered points (demo)") made the whole
+        section wider than the control column: it scrolled sideways and took
+        the title bar's ? and detach arrow out of view.  So the minimum is a
+        few characters, the natural width is the cap, and the list that drops
+        down is still wide enough to read every choice.
+        """
+        box = self.widget
+        box.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        natural = box.sizeHint().width()
+        box.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        box.setMinimumContentsLength(8)
+        box.setMaximumWidth(max(natural, box.minimumSizeHint().width()))
+        box.view().setMinimumWidth(natural)
 
     def refresh(self) -> None:
         """Re-read choices that are computed rather than fixed.
@@ -253,11 +275,18 @@ class LayersField(QWidget):
         self.take = QPushButton("from current layers")
         self.take.setToolTip("the bounds and grouping the Render tab shows now")
         self.take.clicked.connect(self.take_from_session)
-        for w in (self.which, add_layer, remove_layer, self.take):
+        # "from current layers" on a line of its own: beside the layer
+        # buttons the row was wider than the control column
+        for w in (self.which, add_layer, remove_layer):
             top.addWidget(w)
+        for button in (add_layer, remove_layer, self.take):
+            button.setMinimumWidth(button.fontMetrics().horizontalAdvance(button.text()) + 20)
         top.addStretch(1)
         layout.addLayout(top)
-        options = QHBoxLayout()
+        take = QHBoxLayout()
+        take.addWidget(self.take)
+        take.addStretch(1)
+        layout.addLayout(take)
         self.grouped = QComboBox()
         for value, label in self.GROUPING:
             self.grouped.addItem(label, value)
@@ -267,11 +296,14 @@ class LayersField(QWidget):
             self.start.setItemData(self.start.count() - 1, label, Qt.ToolTipRole)
         for w in (self.grouped, self.start):
             w.currentIndexChanged.connect(self._edited)
-        options.addWidget(QLabel("grouping"))
-        options.addWidget(self.grouped)
-        options.addWidget(QLabel("start from"))
-        options.addWidget(self.start)
-        options.addStretch(1)
+        # one per line, for the same reason
+        options = QFormLayout()
+        options.setContentsMargins(0, 0, 0, 0)
+        for label, box in (("grouping", self.grouped), ("start from", self.start)):
+            line = QHBoxLayout()
+            line.addWidget(box)
+            line.addStretch(1)
+            options.addRow(label, line)
         layout.addLayout(options)
         self.table = QTableWidget(0, len(self.COLUMNS))
         self.table.setHorizontalHeaderLabels(self.COLUMNS)

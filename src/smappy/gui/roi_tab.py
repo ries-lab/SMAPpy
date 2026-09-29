@@ -12,15 +12,15 @@ from __future__ import annotations
 from typing import Dict, Optional
 
 import numpy as np
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import QSize
 from PySide6.QtWidgets import (QComboBox, QDoubleSpinBox, QFormLayout,
                                QHeaderView, QLabel, QMessageBox,
-                               QPushButton, QScrollArea, QTableWidget,
+                               QPushButton, QTableWidget,
                                QTableWidgetItem, QVBoxLayout, QWidget)
 
 from ..roi_manager import pipeline as pipeline_module
 from ..session import Session
-from .widgets import CONTROL_WIDTH, CollapsibleSection
+from .widgets import CONTROL_WIDTH, CollapsibleSection, ColumnScroll
 
 
 class ROIHeader(QWidget):
@@ -36,13 +36,9 @@ class ROIHeader(QWidget):
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
-        scroll = QScrollArea(widgetResizable=True)
-        scroll.setFrameShape(QScrollArea.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         inner = QWidget()
-        scroll.setWidget(inner)
-        outer.addWidget(scroll)
         layout = QVBoxLayout(inner)
+        outer.addWidget(ColumnScroll(inner))
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(4)
 
@@ -82,7 +78,7 @@ class ROIHeader(QWidget):
                                     "2D view into an analysis ROI")
         self.from_region.clicked.connect(self._from_region)
         form.addRow(self.from_region)
-        layout.addWidget(CollapsibleSection("geometry", geometry, expanded=True))
+        layout.addWidget(CollapsibleSection("geometry", geometry, expanded=True, major=True))
 
         # -------------------------------------------------------- evaluate
         evaluate = QWidget()
@@ -103,7 +99,7 @@ class ROIHeader(QWidget):
         self.summary.setWordWrap(True)
         self.summary.setStyleSheet("color: gray")
         elayout.addWidget(self.summary)
-        layout.addWidget(CollapsibleSection("evaluate", evaluate, expanded=True))
+        layout.addWidget(CollapsibleSection("evaluate", evaluate, expanded=True, major=True))
         layout.addStretch(1)
 
         session.on_change(self._on_session)

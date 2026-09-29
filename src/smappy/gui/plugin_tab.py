@@ -17,7 +17,7 @@ from typing import Dict, List, Optional
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QHBoxLayout, QLabel, QLineEdit, QInputDialog, QMenu,
-                               QPushButton, QScrollArea, QToolButton, QVBoxLayout,
+                               QPushButton, QToolButton, QVBoxLayout,
                                QWidget)
 
 from .. import plugins
@@ -27,7 +27,7 @@ from .chain_panel import ChainPanel, is_chain, spec_of
 from .chooser import choose_plugin
 from .plugin_panel import PluginPanel
 from .help_window import show_help
-from .widgets import CollapsibleSection, detach_to_window
+from .widgets import CollapsibleSection, ColumnScroll, detach_to_window
 
 
 class _Slot(QWidget):
@@ -122,10 +122,7 @@ class PluginTab(QWidget):
         self.inner = QWidget()
         self.stack = QVBoxLayout(self.inner)
         self.stack.setContentsMargins(0, 0, 0, 0)
-        scroll = QScrollArea(widgetResizable=True)
-        scroll.setWidget(self.inner)
-        scroll.setFrameShape(QScrollArea.NoFrame)
-        layout.addWidget(scroll)
+        layout.addWidget(ColumnScroll(self.inner))
         self.rebuild()
 
     def panels(self):
@@ -164,7 +161,7 @@ class PluginTab(QWidget):
             title = instance.title(inline.name if inline is not None
                                    else ref.name if ref else "")
             section = CollapsibleSection(title, slot, detachable=True,
-                                         helpable=ref is not None)
+                                         helpable=ref is not None, major=True)
             section.help_requested.connect(
                 lambda p=instance.plugin: show_help(p, self.window()))
             if ref is None and inline is None:

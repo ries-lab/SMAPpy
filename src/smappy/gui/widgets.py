@@ -4,13 +4,47 @@ from __future__ import annotations
 from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import (QFrame, QHBoxLayout, QToolButton, QVBoxLayout,
-                               QWidget)
+from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLayout, QScrollArea,
+                               QToolButton, QVBoxLayout, QWidget)
 
 # The control window's width.  A tab whose content would ask for more (a long
 # file name in a wrapping label) caps its own hint at this, so one tab never
 # widens the window for the other three.
 CONTROL_WIDTH = 380
+
+# a plugin's title against its parts' (`CollapsibleSection`'s ``major``)
+MAJOR_SCALE = 1.3
+
+
+class ColumnScroll(QScrollArea):
+    """A column of sections that scrolls up and down, never sideways.
+
+    A plain scroll area grows its content to the content's minimum width, so
+    one control wider than the column -- a combo box with a long choice, a
+    long label on a larger font -- widened every section in the tab, and the
+    title bars' ? and detach arrow went out of view on the right.  Here the
+    content is held to the viewport's width whatever it asks for: a control
+    that is too wide is clipped inside its own section, and the title bars,
+    which ask for little, always fit.  `tests/test_control_width.py` keeps
+    the shipped plugins from needing the clipping at all.
+    """
+
+    def __init__(self, widget: Optional[QWidget] = None, parent=None):
+        super().__init__(parent)
+        self.setWidgetResizable(True)
+        self.setFrameShape(QScrollArea.NoFrame)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        if widget is not None:
+            self.setWidget(widget)
+
+    def setWidget(self, widget: QWidget) -> None:
+        # the layout would otherwise set the widget's minimum to what it
+        # asks for, and the scroll area never sizes a widget below that;
+        # an explicit minimum width of 1 is what makes it take the viewport's
+        if widget.layout() is not None:
+            widget.layout().setSizeConstraint(QLayout.SetNoConstraint)
+        widget.setMinimumWidth(1)
+        super().setWidget(widget)
 
 
 class CollapsibleSection(QWidget):
@@ -22,6 +56,11 @@ class CollapsibleSection(QWidget):
     ``helpable`` a **?** beside it asks for the page documenting what is in
     the section (`help_requested`); it stays when the content is detached,
     since that is when the section's title bar is all there is to click.
+
+    ``major`` is a plugin's own section, titled larger than the parts and
+    "more" folds inside it: at one size, a fitter's *source*, *camera* and
+    *fit* read as plugins of their own, and its Run button below them as
+    belonging to none.
     """
 
     toggled = Signal(bool)
@@ -32,12 +71,17 @@ class CollapsibleSection(QWidget):
     def __init__(self, title: str, content: QWidget, expanded: bool = False,
                  detachable: bool = False, star: Optional[bool] = None,
                  helpable: bool = False, help_tip: Optional[str] = None,
-                 parent=None):
+                 major: bool = False, parent=None):
         super().__init__(parent)
         self.content = content
         self.button = QToolButton(text=title, checkable=True, checked=expanded)
         self.button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-        self.button.setStyleSheet("QToolButton { border: none; font-weight: bold; }")
+        style = "border: none; font-weight: bold;"
+        if major:
+            size = self.button.font().pointSizeF()
+            if size > 0:
+                style += f" font-size: {size * MAJOR_SCALE:.1f}pt;"
+        self.button.setStyleSheet(f"QToolButton {{ {style} }}")
         header = QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
         header.addWidget(self.button)

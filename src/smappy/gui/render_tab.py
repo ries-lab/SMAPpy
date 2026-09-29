@@ -17,14 +17,14 @@ from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog,
                                QFormLayout, QHBoxLayout, QLabel, QLineEdit,
                                QListWidget, QListWidgetItem, QMenu, QPushButton,
-                               QScrollArea, QSlider, QToolButton, QVBoxLayout, QWidget)
+                               QSlider, QToolButton, QVBoxLayout, QWidget)
 
 from .. import lut as luts
 from ..render import FieldOfView, RenderAxes, axis_unit, is_position
 from ..session import Layer, Session
 from ..viewer import FIELD_LUT, INTENSITY_LUT
 from .render_view import nice_below
-from .widgets import CollapsibleSection, detach_to_window
+from .widgets import CollapsibleSection, ColumnScroll, detach_to_window
 
 # the fields with a quick button, best-named alternative first
 QUICK_FIELDS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
@@ -831,7 +831,9 @@ def _quantile_range(locs, name: Optional[str]):
 
 
 PAGE = "Panels/Render tab"
-HELP = dict(helpable=True, help_tip="what the Render tab's controls do (F1)")
+# the tab's own sections: titled as a plugin's are, larger than the folds inside
+HELP = dict(helpable=True, major=True,
+            help_tip="what the Render tab's controls do (F1)")
 
 
 class RenderTab(QWidget):
@@ -840,13 +842,9 @@ class RenderTab(QWidget):
         self.session = session
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
-        scroll = QScrollArea(widgetResizable=True)
-        scroll.setFrameShape(QScrollArea.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         inner = QWidget()
-        scroll.setWidget(inner)
-        outer.addWidget(scroll)
         layout = QVBoxLayout(inner)              # the tab's content; scrolls when short
+        outer.addWidget(ColumnScroll(inner))
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(4)
 
