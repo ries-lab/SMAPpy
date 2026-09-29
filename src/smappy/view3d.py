@@ -18,7 +18,7 @@ import numpy as np
 from .locs import Localizations
 from .regions import Region
 from .render import (DisplaySettings, FieldOfView, RenderAxes, RenderSettings,
-                     RenderedImage, explicit_sigmas, is_position, normalize,
+                     RenderedImage, explicit_sigmas, is_position, normalize, psf_sigmas,
                      render_locs)
 
 PREVIEW_POINTS = 2_000_000       # at most this many while the mouse drags
@@ -376,6 +376,13 @@ def projected_settings(locs: Localizations, settings: RenderSettings
     * anything else -- photons against frame -- cannot keep a width per axis
       once they are mixed, so the two explicit widths are averaged into one.
     """
+    if settings.mode == "dl":
+        # a turned view was never seen by a camera: its pixels and its PSF
+        # have no direction to lie in, so the nearest thing is one Gaussian
+        # as wide as the typical PSF
+        sx, _ = psf_sigmas(locs)
+        settings = replace(settings, mode="gauss", sigma_y=None,
+                           sigma=float(np.median(sx)) if np.size(sx) else 0.0)
     axes = settings.axes
     if axes.is_default:
         return settings, 1.0

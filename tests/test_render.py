@@ -287,3 +287,37 @@ def test_a_table_with_no_columns_yet_renders_as_an_empty_picture():
     image = render_locs(Localizations({}, {}), fov)
     assert image.weight.shape == (fov.ny, fov.nx) and not image.weight.any()
     assert image.n_locs == 0
+
+
+def test_dl_draws_each_spot_as_wide_as_its_psf_on_camera_pixels():
+    from smappy.locs import Localizations
+    from smappy.render import RenderSettings, render_locs
+    n = 20000
+    rng = np.random.default_rng(0)
+    locs = Localizations({"x_nm": np.full(n, 1030.0, np.float32),
+                          "y_nm": np.full(n, 1070.0, np.float32),
+                          "sigma_nm": np.full(n, 150.0, np.float32)},
+                         {"units": "nm", "pixelsize_nm": 110.0})
+    fov = FieldOfView.from_range((0, 2200), (0, 2200), 11.0)
+    image = render_locs(locs, fov, RenderSettings(mode="dl")).weight
+    blocks = image.reshape(20, 10, 20, 10)       # 10 view pixels per camera pixel
+    assert np.allclose(blocks, blocks[:, :1, :, :1])   # flat within a camera pixel
+    camera = blocks[:, 0, :, 0]
+    # the PSF's width comes back from the camera image's second moment
+    centres = (np.arange(20) + 0.5) * 110.0
+    profile = camera.sum(axis=0)
+    mean = (profile * centres).sum() / profile.sum()
+    var = (profile * (centres - mean) ** 2).sum() / profile.sum()
+    assert mean == pytest.approx(1030.0, abs=5)
+    assert np.sqrt(var - 110.0 ** 2 / 12) == pytest.approx(150.0, rel=0.05)
+
+
+def test_dl_draws_a_failed_or_missing_psf_one_camera_pixel_wide():
+    from smappy.locs import Localizations
+    from smappy.render import psf_sigmas
+    locs = Localizations({"x_nm": np.zeros(3, np.float32), "y_nm": np.zeros(3, np.float32),
+                          "sigma_nm": np.array([120.0, -5.0, 4000.0], np.float32)},
+                         {"units": "nm", "camera": {"pixelsize_um": [0.127, 0.127]}})
+    sx, sy = psf_sigmas(locs)
+    np.testing.assert_allclose(sx, [120.0, 127.0, 127.0])
+    assert sy is None

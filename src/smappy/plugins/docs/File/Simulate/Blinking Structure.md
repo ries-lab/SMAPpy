@@ -68,14 +68,18 @@ one is also an example of the syntax:
   two pores per µm², each turned at random.
 * **filaments** -- 40 straight filaments, 3 µm long, placed and turned at
   random.
-* **pie** -- a disc of eight segments, each labelled at twice the density of
-  the one before, from 25 to 3200 labels per µm²: where localizations start
-  to overlap can be read off by segment.
+* **pie** -- a resolution star after ThunderSTORM's
+  ([Ovesný et al. 2014](https://doi.org/10.1093/bioinformatics/btu202)): 32
+  wedges, 4 µm long, alternately labelled and empty.  The gap between two
+  spokes narrows towards the centre -- a fifth of the radius, so 50 nm at
+  255 nm from it -- and where the spokes merge is the resolution.  The
+  labelled wedges rise in density by √2 each, from 25 to 4525 labels per
+  µm², so the same picture shows where localizations start to overlap.
 
 A new structure is a YAML file chosen as the *structure file*, or dropped
 into that folder to become a built-in.
 
-```figure The four built-in structures, as label positions.  The pores and filaments are copies of one element, each placed and turned anew; the pie's segments double in density going anticlockwise from the right.
+```figure The four built-in structures, as label positions.  The pores and filaments are copies of one element, each placed and turned anew; the pie's spokes rise in density going anticlockwise from the right.
 fig.set_size_inches(7.5, 2.3)
 axes = fig.subplots(1, 4, gridspec_kw={"wspace": 0.35})
 for ax, name in zip(axes, ("demo", "filaments", "npc", "pie")):

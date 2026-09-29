@@ -46,7 +46,7 @@ from .filter import LocFilter, quantile_range
 from .group import GroupSettings, group
 from .locs import Localizations
 from .render import (DisplaySettings, FieldOfView, RenderSettings, RenderedImage,
-                     positions, render_locs)
+                     camera_pixelsize_nm, positions, render_locs)
 from .spatial import GrowingIndex, SpatialIndex
 
 # The fields worth a filter control, best alternative first.  Everything else
@@ -328,6 +328,10 @@ class ViewState:
             return 0.0
         if self.settings.mode == "gauss":
             return self.settings.sigma
+        if self.settings.mode == "dl":
+            # a PSF on whole camera pixels: about one pixel wide in focus,
+            # up to three out of focus on an astigmatic one
+            return 3 * camera_pixelsize_nm(self.locs)
         s = self.settings.sigma_settings
         floor = max(s.min_sigma, s.min_sigma_pixels * pixelsize)
         return max(floor, s.max_factor * self.current.median_precision * s.factor)

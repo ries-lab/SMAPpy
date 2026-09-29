@@ -67,9 +67,9 @@ class CsvMappingDialog(QDialog):
                 "pixelsize_nm": self.pixelsize.value() if units == "px" else None}
 
 
-class ParametersDialog(QDialog):
-    """Session-wide parameters that belong to no layer: how localizations are
-    grouped into blinks.  OK regroups every layer."""
+class GroupingDialog(QDialog):
+    """How localizations are linked into blinks: session-wide, belonging to no
+    layer.  OK regroups every layer."""
 
     def __init__(self, session, parent=None):
         super().__init__(parent)
@@ -77,7 +77,7 @@ class ParametersDialog(QDialog):
         from ..plugins import ParamInfo, param_specs
         from .params import SettingsForm
         self.session = session
-        self.setWindowTitle("parameters")
+        self.setWindowTitle("grouping")
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("<b>grouping</b>: localizations of one blink are merged"))
         note = QLabel("Linking is lateral: emitters within the link box in consecutive "

@@ -107,16 +107,16 @@ def make(d) -> None:
            point=tab.grouped, click=True)
     tab.grouped.click()
     d.settle()
-    from ...gui.dialogs import ParametersDialog
-    dialog = ParametersDialog(session, control)
+    from ...gui.dialogs import GroupingDialog
+    dialog = GroupingDialog(session, control)
     dialog.show()
     d.settle()
-    x, y, w, h = d.rect(tab.overview.parameters_button)
+    x, y, w, h = d.rect(tab.grouping_button)
     d.place(dialog, x + w + 20, y - 40)
-    d.shot("Parameters, beside the overview, sets how far a molecule may move "
+    d.shot("Link settings, beside grouped, sets how far a molecule may move "
            "between frames, and how many dark frames a blink may have.",
-           spot=[tab.overview.parameters_button, d.window_rect(dialog)],
-           point=tab.overview.parameters_button, click=True,
+           spot=[tab.grouping_button, d.window_rect(dialog)],
+           point=tab.grouping_button, click=True,
            zoom=d.around(dialog, 800))
     dialog.reject()
     d.settle()

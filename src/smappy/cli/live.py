@@ -44,7 +44,7 @@ def main() -> None:
     ap.add_argument("--max-fit-distance", type=float, default=None)
     ap.add_argument("--units", choices=["pixel", "nm", "pixel+nm"], default="nm")
     ap.add_argument("--threads", type=int, default=0, help="0 = one per core")
-    ap.add_argument("--mode", choices=["hist", "gauss", "precision"], default="precision")
+    ap.add_argument("--mode", choices=["hist", "gauss", "precision", "dl"], default="precision")
     add_camera_arguments(ap)
     a = ap.parse_args()
 

@@ -40,6 +40,7 @@ of twice.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Optional, Tuple, Union
 
@@ -579,7 +580,7 @@ class RenderSettings:
     that axis.
     """
 
-    mode: str = "precision"     # "hist", "gauss" (one sigma), "precision"
+    mode: str = "precision"     # "hist", "gauss" (one sigma), "precision", "dl"
     sigma: float = 10.0         # native units of the x axis, for mode="gauss"
     sigma_y: Optional[float] = None      # None: `sigma`, where that means anything
     sigma_settings: "SigmaSettings" = field(default_factory=lambda: SigmaSettings())
@@ -651,9 +652,11 @@ def render_sigmas(locs: Localizations, settings: "RenderSettings", fov: FieldOfV
     """
     if settings.mode == "hist":
         return None, None
-    if settings.mode not in ("gauss", "precision"):
+    if settings.mode == "dl":
+        return psf_sigmas(locs, select)
+    if settings.mode not in MODES:
         raise ValueError(f"unknown mode {settings.mode!r}; "
-                         "use 'hist', 'gauss' or 'precision'")
+                         f"use one of {', '.join(repr(m) for m in MODES)}")
     axes = settings.axes
     x_name, y_name = axes.names(locs)
     explicit_x, explicit_y = explicit_sigmas(locs, settings)
@@ -716,9 +719,101 @@ def render_locs(locs: Localizations, fov: FieldOfView,
                                           float(np.nanmax(values)))
         colors = luts.colors(values, display.lut, lo, hi, display.invert)
 
+    if settings.mode == "dl":
+        if not settings.axes.is_default:
+            raise ValueError("DL rendering draws what the camera saw, so it needs "
+                             "the positions on both axes")
+        camera = camera_grid(fov, camera_pixelsize_nm(locs))
+        coarse = render(x, y, camera, sigma=sigma, sigma_y=sigma_y, weights=weights,
+                        colors=colors, roi_sigma=settings.roi_sigma,
+                        n_threads=n_threads, use_extension=use_extension)
+        return resample_nearest(coarse, fov)
     return render(x, y, fov, sigma=sigma, sigma_y=sigma_y, weights=weights,
                   colors=colors, roi_sigma=settings.roi_sigma, n_threads=n_threads,
                   use_extension=use_extension)
+
+
+# ------------------------------------------------------------ diffraction limited
+#
+# SMAP's "DL" mode: every localization drawn as the spot the camera saw -- a
+# Gaussian as wide as its fitted PSF, on the camera's own pixels -- so a
+# super-resolved picture can be set beside the widefield image it came from,
+# or the two told apart in a figure.  It is the Gaussian renderer on a grid of
+# camera pixels, blown up to the view without interpolation so the pixels
+# stay visible.  As SMAP (renderSMAP.m, case 'dl'): the width is `sigma_nm`
+# (and `sigma_y_nm`, astigmatic), and one camera pixel where the fit left no
+# usable width.
+
+MODES = ("hist", "gauss", "precision", "dl")
+DL_PIXELSIZE_NM = 100.0     # a camera pixel, when the table records none
+DL_MAX_SIGMA_NM = 1500.0    # SMAP's: a wider fitted PSF is a failed fit
+
+
+def camera_pixelsize_nm(locs: Localizations) -> float:
+    """The camera pixel the table was fitted from, in nm.
+
+    From the fit's metadata (``pixelsize_nm``, or the camera's
+    ``pixelsize_um``), a simulation's optics, or `DL_PIXELSIZE_NM`.
+    """
+    meta = locs.metadata
+    value = meta.get("pixelsize_nm")
+    if value is None:
+        camera = meta.get("camera")
+        micron = camera.get("pixelsize_um") if isinstance(camera, dict) else None
+        if isinstance(micron, (list, tuple)):
+            micron = micron[0] if micron else None
+        value = None if micron is None else float(micron) * 1000.0
+    if value is None:
+        sim = meta.get("simulation_settings")
+        optics = sim.get("optics") if isinstance(sim, dict) else None
+        value = optics.get("pixelsize_nm") if isinstance(optics, dict) else None
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return DL_PIXELSIZE_NM
+    return value if np.isfinite(value) and value > 0 else DL_PIXELSIZE_NM
+
+
+def psf_sigmas(locs: Localizations, select=None):
+    """Each localization's PSF width, x and y, in nm, for the DL mode.
+
+    A width that is missing, not positive or beyond `DL_MAX_SIGMA_NM` is one
+    camera pixel instead.  ``sigma_y`` is ``None`` when the fit had one width.
+    """
+    pixel = camera_pixelsize_nm(locs)
+
+    def width(name):
+        if name not in locs:
+            return None
+        values = np.asarray(locs[name] if select is None else locs[name][select],
+                            dtype=np.float32)
+        bad = ~(np.isfinite(values) & (values > 0) & (values < DL_MAX_SIGMA_NM))
+        return np.where(bad, np.float32(pixel), values).astype(np.float32)
+
+    sx = width("sigma_nm")
+    if sx is None:
+        return np.float32(pixel), None
+    return sx, width("sigma_y_nm")
+
+
+def camera_grid(fov: FieldOfView, pixelsize: float) -> FieldOfView:
+    """Camera pixels covering ``fov``, their edges on multiples of the pixel."""
+    ix0, iy0 = math.floor(fov.x0 / pixelsize), math.floor(fov.y0 / pixelsize)
+    ix1, iy1 = math.ceil(fov.x1 / pixelsize), math.ceil(fov.y1 / pixelsize)
+    return FieldOfView(ix0 * pixelsize, iy0 * pixelsize, float(pixelsize),
+                       max(ix1 - ix0, 1), max(iy1 - iy0, 1))
+
+
+def resample_nearest(image: RenderedImage, fov: FieldOfView) -> RenderedImage:
+    """``image``'s planes onto ``fov``, each view pixel from the one it lies in."""
+    src = image.fov
+    xs = fov.x0 + (np.arange(fov.nx) + 0.5) * fov.pixelsize
+    ys = fov.y0 + (np.arange(fov.ny) + 0.5) * fov.pixelsize
+    ix = np.clip(np.floor((xs - src.x0) / src.pixelsize).astype(np.int64), 0, src.nx - 1)
+    iy = np.clip(np.floor((ys - src.y0) / src.pixelsize).astype(np.int64), 0, src.ny - 1)
+    weight = image.weight[np.ix_(iy, ix)]
+    color = None if image.color is None else image.color[np.ix_(iy, ix)]
+    return RenderedImage(fov, weight, color, image.n_locs)
 
 
 def save_image(locs, path, pixelsize: float = 10.0,

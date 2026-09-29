@@ -16,7 +16,7 @@ from typing import Optional
 from urllib.parse import unquote
 
 from PySide6.QtCore import QByteArray, QRectF, Qt, QUrl
-from PySide6.QtGui import QDesktopServices, QFontMetricsF, QGuiApplication, QImage, \
+from PySide6.QtGui import QDesktopServices, QFontInfo, QFontMetricsF, QGuiApplication, QImage, \
     QKeySequence, QPainter, QPalette, QShortcut, QTextDocument
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (QMainWindow, QSplitter, QTextBrowser,
@@ -76,6 +76,18 @@ def _middle(document: QTextDocument) -> float:
     that, which is what puts their baseline on the text's.
     """
     return QFontMetricsF(document.defaultFont()).xHeight() / 4
+
+
+def _size_pt(browser) -> float:
+    """The text's size as `docs.render` reads it: points at 96 dpi.
+
+    The formulas are laid out in pixels at 96 per inch, but Qt draws a point
+    as ``logicalDpiY / 72`` pixels -- one on macOS, where the maths came out
+    half as large again as the text around it.  So the size handed on is the
+    text's height in pixels, expressed as points at 96 dpi.
+    """
+    pixels = QFontInfo(browser.font()).pixelSize()
+    return pixels * 72 / 96 if pixels > 0 else 10.0
 
 
 def _image(name: str, data: bytes) -> QImage:
@@ -201,9 +213,8 @@ class HelpWindow(QMainWindow):
         QGuiApplication.setOverrideCursor(Qt.WaitCursor)
         try:
             color = self.palette().color(QPalette.Text).name()
-            size = self.browser.font().pointSizeF()
             rendered = docs.render(plugin_cls, color=color,
-                                   size_pt=size if size > 0 else 10.0,
+                                   size_pt=_size_pt(self.browser),
                                    origin=ref.origin if ref else None,
                                    middle_px=_middle(document))
         finally:

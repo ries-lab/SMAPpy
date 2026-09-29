@@ -97,12 +97,15 @@ def test_every_preset_loads_and_the_pores_have_32_labels_each():
     assert len(set(pores.copy)) == pytest.approx(2 * 81, rel=0.2)    # 2 per um^2
 
 
-def test_the_pie_doubles_its_density_from_segment_to_segment():
+def test_the_pie_alternates_labelled_and_empty_wedges_rising_by_root_two():
     labels = load_structure("pie").sample(np.random.default_rng(0))
     xy = labels.xyz[:, :2] - 5000
-    segment = (np.arctan2(xy[:, 1], xy[:, 0]) % (2 * np.pi)) // (np.pi / 4)
-    per_um2 = np.bincount(segment.astype(int), minlength=8) / (np.pi * 4.0 ** 2 / 8)
-    np.testing.assert_allclose(per_um2[2:], 25 * 2.0 ** np.arange(2, 8), rtol=0.1)
+    wedge = ((np.arctan2(xy[:, 1], xy[:, 0]) % (2 * np.pi)) // (np.pi / 16)).astype(int)
+    counts = np.bincount(wedge, minlength=32)
+    assert counts[1::2].sum() < 1e-4 * counts.sum()   # every other one empty (the
+                                                      # vertices are whole nm)
+    per_um2 = counts[0::2] / (4 * 0.5 * 4.0 ** 2 * np.sin(np.pi / 64))  # 4 triangles
+    np.testing.assert_allclose(per_um2[4:], 25 * 2.0 ** (np.arange(4, 16) / 2), rtol=0.1)
     assert np.all(np.diff(per_um2) > 0)
 
 

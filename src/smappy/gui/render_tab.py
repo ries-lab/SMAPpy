@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog
 
 from .. import lut as luts
 from ..render import FieldOfView, RenderAxes, axis_unit, is_position
+from ..filter import histogram_range
 from ..session import Layer, Session
 from ..viewer import FIELD_LUT, INTENSITY_LUT
 from .render_view import nice_below
@@ -66,6 +67,7 @@ class FilterWidget(QWidget):
         self.layer: Optional[Layer] = None
         self.layer_index = 0
         self._hist_cache: Dict[Tuple[int, str], tuple] = {}
+        self._shown_region = (None, None)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(2)
@@ -220,12 +222,8 @@ class FilterWidget(QWidget):
                 pick = np.random.default_rng(0).integers(0, values.size, HIST_SAMPLE)
                 values = values[pick]
             values = values.astype(np.float64)
-            finite = values[np.isfinite(values)]
-            lo, hi = ((float(np.quantile(finite, 0.01)), float(np.quantile(finite, 0.99)))
-                      if finite.size else (0.0, 1.0))                  # not the outliers
-            if hi <= lo:
-                hi = lo + 1.0
-            counts, edges = np.histogram(values, bins=HIST_BINS, range=(lo, hi))
+            counts, edges = np.histogram(values, bins=HIST_BINS,
+                                         range=histogram_range(values))  # the bulk
             self._hist_cache[key] = (counts, edges)
         return self._hist_cache[key]
 
@@ -253,8 +251,10 @@ class FilterWidget(QWidget):
         self.hi.set(hi)
         # the region stands in for an open bound at the histogram's edge
         self.region.blockSignals(True)
-        self.region.setRegion((edges[0] if lo is None else lo,
-                               edges[-1] if hi is None else hi))
+        self._shown_region = (edges[0] if lo is None else lo,
+                              edges[-1] if hi is None else hi)
+        self.region.setRegion(self._shown_region)
+        self._shown_region = tuple(self.region.getRegion())   # as the item keeps it
         self.region.blockSignals(False)
         self.plot.setXRange(edges[0], edges[-1], padding=0.02)
         self._update_count()
@@ -318,10 +318,19 @@ class FilterWidget(QWidget):
 
     def _on_region(self) -> None:
         lo, hi = self.region.getRegion()
-        _, edges = self._histogram(self.current_field())
-        # dragged to the edge means "no bound", so the tail is not cut off
-        self._apply(None if lo <= edges[0] else float(lo),
-                    None if hi >= edges[-1] else float(hi))
+        name = self.current_field()
+        _, edges = self._histogram(name)
+        # As SMAP: an end dragged to the edge means "no bound", so the tail is
+        # not cut off; anywhere else it is the number.  Only the end that was
+        # dragged: the other keeps its bound, which may lie beyond the
+        # histogram (the 25 nm precision bound over a sharp simulation).
+        old_lo, old_hi = self.layer.filter.ranges.get(name, (None, None))
+        shown_lo, shown_hi = self._shown_region
+        if lo != shown_lo:
+            old_lo = None if lo <= edges[0] else float(lo)
+        if hi != shown_hi:
+            old_hi = None if hi >= edges[-1] else float(hi)
+        self._apply(old_lo, old_hi)
 
     def _on_numbers(self) -> None:
         try:
@@ -499,10 +508,6 @@ class Overview(QWidget):
         self.update_button = QPushButton("update")
         self.update_button.setToolTip("re-render with the current layers")
         row.addWidget(self.update_button)
-        self.parameters_button = QPushButton("parameters...")
-        self.parameters_button.setToolTip("settings that are not a layer's: grouping")
-        self.parameters_button.clicked.connect(self._parameters)
-        row.addWidget(self.parameters_button)
         row.addStretch(1)
         layout.addLayout(row)
         self.update_button.clicked.connect(self.update_image)
@@ -521,11 +526,6 @@ class Overview(QWidget):
         if what == "locs":
             self.image.clear()
             QTimer.singleShot(0, self.update_image)
-
-    def _parameters(self) -> None:
-        from .dialogs import ParametersDialog
-        dialog = ParametersDialog(self.session, self)
-        dialog.exec()
 
     def update_image(self) -> None:
         if self.view is None or not (len(self.session.locs)
@@ -886,7 +886,7 @@ class RenderTab(QWidget):
         form.setContentsMargins(0, 0, 0, 0)
         form.setVerticalSpacing(2)
         self.mode = QComboBox()
-        self.mode.addItems(["precision", "gauss", "hist"])
+        self.mode.addItems(["precision", "gauss", "hist", "dl"])
         self.color = QComboBox()
         self.color.addItem("intensity", None)
         self.color.addItem("field", "field")
@@ -943,7 +943,18 @@ class RenderTab(QWidget):
         form.addRow("colour range", self.color_range_row)
         form.addRow("LUT", lut_row)
         form.addRow("contrast", self.contrast)
-        form.addRow("", self.grouped)
+        # the linking settings sit beside the switch that uses them; they are
+        # the session's, not the layer's, so OK regroups every grouped layer
+        self.grouping_button = QPushButton("link settings...")
+        self.grouping_button.setToolTip("how localizations are linked into blinks: "
+                                        "distance and gap, for every layer")
+        self.grouping_button.clicked.connect(self._grouping)
+        grouped_row = QHBoxLayout()
+        grouped_row.setContentsMargins(0, 0, 0, 0)
+        grouped_row.addWidget(self.grouped)
+        grouped_row.addWidget(self.grouping_button)
+        grouped_row.addStretch(1)
+        form.addRow("", grouped_row)
         more = QWidget()
         more_form = QFormLayout(more)
         more_form.setContentsMargins(0, 0, 0, 0)
@@ -1220,6 +1231,10 @@ class RenderTab(QWidget):
                 px, x0, y0 = dialog.values()
                 self.session.open_image(path, px, x0, y0)
         self.strip.select(len(self.session.layers) - 1)
+
+    def _grouping(self) -> None:
+        from .dialogs import GroupingDialog
+        GroupingDialog(self.session, self).exec()
 
     def _on_grouped(self, on: bool) -> None:
         self.session.show_grouped(self.strip.current, on)   # links once per table

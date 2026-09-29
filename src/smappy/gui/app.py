@@ -278,7 +278,9 @@ class ControlWindow(QMainWindow):
                 widget.changed.connect(self.save_workspace)
                 self.plugin_tabs.append(widget)
             self.tabs.addTab(widget, tab.name)
-        wanted = self.workspace.layout.get("active_tab", current) or "Render"
+        # a rebuild keeps the tab one was on; a start opens on File, where
+        # every session begins (open, fit or simulate), whatever was last open
+        wanted = current or "File"
         for i in range(self.tabs.count()):
             if self.tabs.tabText(i) == wanted:
                 self.tabs.setCurrentIndex(i)
@@ -377,7 +379,6 @@ class ControlWindow(QMainWindow):
                 if which:
                     opened[tab.name] = which
         self.workspace.layout = {
-            "active_tab": self.tabs.tabText(self.tabs.currentIndex()),
             "open": opened,
             "geometry": bytes(self.saveGeometry().toBase64()).decode(),
         }

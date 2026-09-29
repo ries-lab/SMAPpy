@@ -18,7 +18,7 @@ def main() -> None:
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("file", help="localizations saved by smappy-fit")
     p.add_argument("--mode", default="precision",
-                   choices=["hist", "gauss", "precision"])
+                   choices=["hist", "gauss", "precision", "dl"])
     p.add_argument("--sigma", type=float, default=10.0,
                    help="rendering sigma for --mode gauss, in the file's units")
     p.add_argument("--color", default=None,

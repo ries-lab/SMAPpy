@@ -2,7 +2,7 @@
 title: Render tab
 summary: The layers of the picture -- which localizations each one shows, and how it is drawn.
 widget: smappy.gui.render_tab.RenderTab
-covers: [smappy.session.Layer, smappy.session.default_bounds, smappy.filter.LocFilter, smappy.group.group, smappy.group.connect, smappy.group.combine, smappy.render.render_locs, smappy.render.render_sigmas, smappy.render.SigmaSettings, smappy.render.to_rgb, smappy.render.RenderAxes, smappy.lut.on_white, smappy.lut.invert_sum, smappy.lut.complement]
+covers: [smappy.session.Layer, smappy.session.default_bounds, smappy.filter.LocFilter, smappy.group.group, smappy.group.connect, smappy.group.combine, smappy.render.render_locs, smappy.render.render_sigmas, smappy.render.psf_sigmas, smappy.render.camera_pixelsize_nm, smappy.render.camera_grid, smappy.render.SigmaSettings, smappy.render.to_rgb, smappy.render.RenderAxes, smappy.lut.on_white, smappy.lut.invert_sum, smappy.lut.complement]
 ---
 
 ## What it does
@@ -105,8 +105,8 @@ single localization -- at their weighted mean position, with the photons of
 all of them and a correspondingly better precision.  A grouped picture is
 cleaner and counts molecules more fairly: a long blink no longer weighs more
 than a short one.  Layers are grouped by default (*grouped*); the linking
-distance and the number of dark frames allowed are set under
-*parameters...*, for every layer at once.
+distance and the number of dark frames allowed are set under *link
+settings...*, beside it, for every layer at once.
 
 ```figure The same localizations (with the default bounds, drawn as a histogram) before and after grouping, and how many frames each blink was linked over.
 fig.set_size_inches(7.5, 2.6)
@@ -128,14 +128,24 @@ localization as the same Gaussian blob, of width *sigma x (gauss)*.
 localization precision times the *precision factor*
 ([Baddeley et al. 2010](https://doi.org/10.1017/S143192760999122X)): a
 precise localization is a sharp dot, an uncertain one a faint wide blur, so
-the picture shows how well each position is known.
+the picture shows how well each position is known.  *dl* (diffraction
+limited) draws what the camera saw instead: each localization as a spot as
+wide as its fitted PSF, on the camera's own pixels -- the widefield picture
+of the same molecules, to set beside the super-resolved one.
 
-```figure The crossing of the two lines, 800 nm across, drawn with each of the three modes.
+```figure The crossing of the two lines, 800 nm across, drawn with each of the three super-resolution modes.
 fig.set_size_inches(7.5, 2.6)
 axes = fig.subplots(1, 3)
 draw(axes[0], "hist", mode="hist")
 draw(axes[1], "gauss, sigma 10 nm", mode="gauss", sigma=10.0)
 draw(axes[2], "precision, factor 0.5")
+```
+
+```figure The whole field, 10 µm across, in *precision* and in *dl*: on 100 nm camera pixels the ring and the lines are as wide as the PSF, as the camera saw them.
+fig.set_size_inches(5.2, 2.6)
+axes = fig.subplots(1, 2)
+draw(axes[0], "precision", fov=whole)
+draw(axes[1], "dl", fov=whole, mode="dl")
 ```
 
 **5. Brightness and colour.**  A super-resolution image has a few very bright
@@ -229,6 +239,17 @@ precision is drawn at the floor.  On an axis that is z, the axial precision
 position at all (photons, frame), there is no precision, and the explicit
 width is used -- zero, plain binning, unless set.
 
+**The *dl* mode.**  As SMAP's DL: the picture is rendered on a grid of
+camera pixels -- their edges on multiples of the pixel size $a$, which comes
+from the fit's metadata (`pixelsize_nm`, or the camera's), a simulation's
+optics, or 100 nm -- with each localization a Gaussian of width `sigma_nm`
+(and `sigma_y_nm` vertically, where the fit had two), and then blown up to
+the view pixel by pixel, without interpolation, so that the camera's pixels
+stay visible.  A width that is missing, not positive or above 1500 nm (a
+failed fit) is one camera pixel.  It needs the positions on both axes; the
+3D view, whose turned picture no camera saw, draws it as *gauss* at the
+median PSF width.
+
 **Contrast and gamma.**  With $I$ the rendered intensity of a pixel and $c$
 the *contrast*, the pixel value that becomes full scale is the quantile
 
@@ -272,10 +293,16 @@ between -500 and 500 nm, plus `sigma_nm` at most 180 nm on a 2D table (in 3D the
 table has that column, and any bounds the file carries from
 [Remove Localizations](plugin:Analysis/Process/Remove Localizations).  A bound
 applies to the grouped and the ungrouped table alike, so what is drawn and
-what a plugin gets never disagree.  The histogram spans the 1st to 99th
-percentile of the column in 120 bins (of a random sample of two million, for a
-larger table); dragging an edge of the shaded range to the end of the
-histogram removes that end of the bound, so the tail is not cut off.
+what a plugin gets never disagree.  The histogram spans the bulk of the
+column in 120 bins (of a random sample of two million, for a larger table):
+the 1st to 99th percentile, cut to three interquartile ranges beyond the
+quartiles, so that the long tail of a precision column -- a few faint spots
+with errors of hundreds of nanometres -- does not squeeze the rest into one
+bar.  As in SMAP, dragging an edge of the shaded range to the end of
+the histogram removes that end of the bound, so the tail is not cut off, and
+anywhere else it is the number.  Only the dragged end changes: a bound that
+lies beyond the histogram (the 25 nm one, on a sharp table) stays until its
+own edge is moved or its number typed.
 
 **Grouping.**  The linking follows SMAP's: the localizations are sorted by
 frame and x, and each one not yet linked starts a new blink.  From the
@@ -314,12 +341,6 @@ opened; it can be taken out into a window of its own.
 ### update
 Draws the overview again with the current layers -- after a filter, a LUT or
 a layer has changed.
-
-### parameters...
-The linking parameters of grouping, *link within* (nm) and *gap* (frames),
-for every layer at once.  OK groups all the layers again and records the new
-parameters in the file's history, since the grouped table cannot tell which
-ones produced it.
 
 ### +
 Adds a layer: *localizations* or *image...*.  The layer strip also has one
@@ -402,7 +423,9 @@ gamma and white background.
 ### render
 *precision* for the usual picture.  *gauss* when every spot should look
 alike, e.g. to compare layers of different quality; *hist* for counting, or
-at a pixel size well above the precision.
+at a pixel size well above the precision.  *dl* for the widefield picture:
+zoomed out it looks like the average of the raw frames, which is a check that
+the fit found what was there.
 
 ### colour by
 *intensity* colours by brightness through the LUT; *field* colours by the
@@ -436,6 +459,12 @@ brightness.
 Draws one localization per blink.  The first switch links the table, which
 takes seconds to minutes on a large one; after that it is free.  Plugins get
 the ungrouped table unless they ask for the grouped one.
+
+### link settings...
+The linking parameters of grouping, *link within* (nm) and *gap* (frames),
+for every layer at once.  OK groups all the layers again and records the new
+parameters in the file's history, since the grouped table cannot tell which
+ones produced it.
 
 ### more
 The rendering widths, gamma and the white background.
@@ -500,8 +529,8 @@ Based on SMAP's layer panel (`gui.GuiChannel`), its renderer
 ([Ries 2020](https://doi.org/10.1038/s41592-020-0938-1)).
 
 * **The modes are renamed.**  SMAP's *Gauss* (width from the precision) is
-  *precision* here, and its *constGauss* is *gauss*.  SMAP's DL, tiff, raw and
-  Other modes and its intensity coding (photons, blinks) are not in the tab.
+  *precision* here, its *constGauss* is *gauss*, and its *DL* is *dl*, with
+  the same widths and fallback.  SMAP's tiff, raw and Other modes and its intensity coding (photons, blinks) are not in the tab.
 * **The width from the precision.**  SMAP draws at 0.4 times the precision,
   with a floor of 3 nm or 0.7 pixels and a cap at 400 nm; here the factor is
   0.5, the floor is 0.7 pixels alone, and the cap is ten times the median
@@ -516,8 +545,8 @@ Based on SMAP's layer panel (`gui.GuiChannel`), its renderer
 * **Contrast** is SMAP's quantile contrast with the same meaning; the default
   is 3, where SMAP uses 3.5, which is darker.
 * **Grouping** links within 50 nm and one dark frame, where SMAP's File tab
-  starts at 35 nm, and its parameters sit under *parameters...* rather than
-  in the File tab.  The summed photons' error adds in quadrature and each
+  starts at 35 nm, and its parameters sit under *link settings...*, beside
+  *grouped*, rather than in the File tab.  The summed photons' error adds in quadrature and each
   coordinate is weighted by its own error; SMAP uses the precision rule and
   the lateral precision for all of them.
 * **The versatile renderer** is the renderer itself, set in the *axes*

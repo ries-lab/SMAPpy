@@ -178,6 +178,32 @@ class LocFilter:
         return (f"{len(self)} of {self._n} localizations: " + ", ".join(parts))
 
 
+def histogram_range(values: np.ndarray) -> Tuple[float, float]:
+    """The span a field's histogram is drawn over: the bulk, not the tail.
+
+    The 1st to 99th percentile, cut further to three interquartile ranges
+    beyond the quartiles (Tukey's far-out fences).  The percentiles alone are
+    not enough for a column with a long tail: a simulation keeps spots down to
+    10 photons, whose precision runs to hundreds of nanometres, so the 99th
+    percentile of ``xy_err_nm`` is 120 nm over a median of 5 and the histogram
+    is one bar at the left.  The fences put its edge at 24 nm, and leave a
+    symmetric or exponential column (positions, frames, photons) at its
+    percentiles.
+    """
+    values = np.asarray(values, dtype=np.float64)
+    values = values[np.isfinite(values)]
+    if values.size == 0:
+        return (0.0, 1.0)
+    p1, q1, q3, p99 = np.quantile(values, (0.01, 0.25, 0.75, 0.99))
+    iqr = q3 - q1
+    lo, hi = float(max(p1, q1 - 3 * iqr)), float(min(p99, q3 + 3 * iqr))
+    if hi <= lo:                            # a column of (nearly) one value
+        lo, hi = float(p1), float(p99)
+    if hi <= lo:
+        hi = lo + 1.0
+    return (lo, hi)
+
+
 def quantile_range(locs: Localizations, field: str, lower: float = 0.001,
                    upper: float = 0.999) -> Tuple[float, float]:
     """A sensible starting range for a field, ignoring its tails.

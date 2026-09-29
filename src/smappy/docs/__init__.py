@@ -548,8 +548,11 @@ def _mathtext(tex: str, display: bool, color: str, size_pt: float) -> MathImage:
     parsed = MathTextParser("path").parse(text, dpi=96, prop=prop)
     buffer = io.BytesIO()
     math_to_image(text, buffer, prop=prop, dpi=96 * SCALE, format="png", color=color)
+    # parsed.height is the whole height, depth included: adding the depth
+    # again declared the image taller than it is, and every formula was
+    # stretched upright -- the "squeezed" look
     return MathImage(buffer.getvalue(), "png", float(parsed.width),
-                     float(parsed.height + parsed.depth), float(parsed.depth), "mathtext")
+                     float(parsed.height), float(parsed.depth), "mathtext")
 
 
 def _pad_svg(svg: bytes, top: float, bottom: float) -> bytes:

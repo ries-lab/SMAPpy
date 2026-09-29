@@ -21,7 +21,7 @@ from . import STYLE, page_file, panels, render
 
 WEB_STYLE = """
 body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-       max-width: 860px; margin: 2em auto; padding: 0 16px; color: #1d1d1f;
+       font-size: 16px; max-width: 860px; margin: 2em auto; padding: 0 16px; color: #1d1d1f;
        background: #fff; }
 a { color: #0b62c4; }
 table { border-collapse: collapse; }
@@ -69,7 +69,8 @@ def export(out: Path, paths: Optional[List[str]] = None,
             continue
         ref = refs.get(path)
         report(f"{path}")
-        rendered = render(cls, link=link, origin=ref.origin if ref else None)
+        # 16 px text is 12 pt at the 96 dpi the formulas are laid out at
+        rendered = render(cls, size_pt=12.0, link=link, origin=ref.origin if ref else None)
         name = slug(path)
         assets = out / name
         text = rendered.html
