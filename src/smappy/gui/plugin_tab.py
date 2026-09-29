@@ -161,7 +161,7 @@ class PluginTab(QWidget):
             title = instance.title(inline.name if inline is not None
                                    else ref.name if ref else "")
             section = CollapsibleSection(title, slot, detachable=True,
-                                         helpable=ref is not None)
+                                         helpable=ref is not None, major=True)
             section.help_requested.connect(
                 lambda p=instance.plugin: show_help(p, self.window()))
             if ref is None and inline is None:

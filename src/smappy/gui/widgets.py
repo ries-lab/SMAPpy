@@ -12,6 +12,9 @@ from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLayout, QScrollArea,
 # widens the window for the other three.
 CONTROL_WIDTH = 380
 
+# a plugin's title against its parts' (`CollapsibleSection`'s ``major``)
+MAJOR_SCALE = 1.3
+
 
 class ColumnScroll(QScrollArea):
     """A column of sections that scrolls up and down, never sideways.
@@ -53,6 +56,11 @@ class CollapsibleSection(QWidget):
     ``helpable`` a **?** beside it asks for the page documenting what is in
     the section (`help_requested`); it stays when the content is detached,
     since that is when the section's title bar is all there is to click.
+
+    ``major`` is a plugin's own section, titled larger than the parts and
+    "more" folds inside it: at one size, a fitter's *source*, *camera* and
+    *fit* read as plugins of their own, and its Run button below them as
+    belonging to none.
     """
 
     toggled = Signal(bool)
@@ -63,12 +71,17 @@ class CollapsibleSection(QWidget):
     def __init__(self, title: str, content: QWidget, expanded: bool = False,
                  detachable: bool = False, star: Optional[bool] = None,
                  helpable: bool = False, help_tip: Optional[str] = None,
-                 parent=None):
+                 major: bool = False, parent=None):
         super().__init__(parent)
         self.content = content
         self.button = QToolButton(text=title, checkable=True, checked=expanded)
         self.button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-        self.button.setStyleSheet("QToolButton { border: none; font-weight: bold; }")
+        style = "border: none; font-weight: bold;"
+        if major:
+            size = self.button.font().pointSizeF()
+            if size > 0:
+                style += f" font-size: {size * MAJOR_SCALE:.1f}pt;"
+        self.button.setStyleSheet(f"QToolButton {{ {style} }}")
         header = QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
         header.addWidget(self.button)
