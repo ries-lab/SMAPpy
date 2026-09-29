@@ -831,7 +831,9 @@ def _quantile_range(locs, name: Optional[str]):
 
 
 PAGE = "Panels/Render tab"
-HELP = dict(helpable=True, help_tip="what the Render tab's controls do (F1)")
+# the tab's own sections: titled as a plugin's are, larger than the folds inside
+HELP = dict(helpable=True, major=True,
+            help_tip="what the Render tab's controls do (F1)")
 
 
 class RenderTab(QWidget):
