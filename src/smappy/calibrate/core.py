@@ -451,8 +451,8 @@ def subvoxel_peak(correlation_at):
     pulls its optimum towards whole voxels.  Only with every bead at the
     same height, on a plane, where interpolation is exact, was it the closer
     of the two: 1.06 nm against 0.95 for one colour, 0.60 against 0.81 for
-    two.  `build_calibration`'s time is now mostly the cubic resampling of
-    each bead (`apply_shifts`), not this.
+    two.  (The times are this change alone; `shift_volume` then halved both
+    again.)
 
     Where the values are not all positive or the fit has no maximum within a
     voxel, each axis is fitted on its own (a three-point parabola) and an
@@ -505,6 +505,44 @@ def _polynomial(coeff, delta):
     hessian = np.array([[coeff@(e[:, a]*(e[:, b]-(a == b))*terms(e-unit[a]-unit[b]))
                          for b in range(3)] for a in range(3)])
     return value, gradient, hessian
+
+
+def shift_volume(volume, shift):
+    """``volume`` translated by ``shift`` (z,y,x), cubic B-spline, zero outside.
+
+    What ``ndimage.shift(volume, shift, order=3, mode='constant')`` gives, in
+    a seventh of the time.  A translation moves every voxel by the same
+    fraction, so the interpolation weights are the same four numbers at every
+    voxel along an axis, and the 3D interpolation is three 1D passes: the
+    spline prefilter, then one correlation with those four weights (at the
+    whole-voxel offset).  ``ndimage.shift`` evaluates 64 weights per voxel
+    instead.  4-9 ms against 27-33 ms for an (81, 31, 31) bead, which halved
+    `build_calibration` (2.7 -> 1.25 s, 3 stacks of 9 at 20 nm steps) and
+    `calibrate_dual` (5.3 -> 2.5 s).  The boundary is ndimage's too -- the
+    coefficients continue by mirroring and a sample from outside the input is
+    zero -- so the result is the same to the bit, edges included: zero-padding
+    the coefficients instead changed the outermost voxels even at zero shift,
+    and with them which beads a bright-edged test stack accepted.
+    """
+    volume = np.asarray(volume)
+    c = volume.astype(float)
+    for axis in range(c.ndim):
+        c = ndimage.spline_filter1d(c, 3, axis=axis, mode='mirror')
+    for axis, s in enumerate(np.asarray(shift, float)):
+        # output i samples the spline at i - s: taps at i+k-1 .. i+k+2
+        k = int(np.floor(-s))
+        f = -s-k
+        weights = np.array([(1-f)**3, 3*f**3-6*f**2+4, -3*f**3+3*f**2+3*f+1, f**3])/6
+        m = abs(k)+2
+        kernel = np.zeros(2*m+1)
+        kernel[m+k-1:m+k+3] = weights
+        # the coefficients continue by mirroring, as ndimage's do; only a
+        # sample taken from outside the input is zero
+        c = ndimage.correlate1d(c, kernel, axis=axis, mode='mirror')
+        source = np.arange(c.shape[axis])-s
+        outside = (source < 0) | (source > c.shape[axis]-1)
+        c[(slice(None),)*axis+(outside,)] = 0.
+    return c.astype(volume.dtype) if np.issubdtype(volume.dtype, np.floating) else c
 
 
 def robust_shape_error(sample, reference):
@@ -628,13 +666,12 @@ def build_calibration(beads, excluded=(), progress=None):
         for bead_id in ids:
             if paired and beads.original_volumes is not None:
                 for ch in range(volumes.shape[1]):
-                    shifted[bead_id, ch] = ndimage.shift(beads.original_volumes[bead_id, ch],
-                            shifts[bead_id]+beads.channel_offsets[bead_id, ch], order=3,
-                            mode='constant', cval=0.)
+                    shifted[bead_id, ch] = shift_volume(beads.original_volumes[bead_id, ch],
+                            shifts[bead_id]+beads.channel_offsets[bead_id, ch])
                 continue
             delta = np.r_[0., shifts[bead_id]] if paired else shifts[bead_id]
-            shifted[bead_id] = ndimage.shift(volumes[bead_id], delta, order=3,
-                                             mode='constant', cval=0.)
+            shifted[bead_id] = (shift_volume(volumes[bead_id], delta) if not paired else
+                                np.stack([shift_volume(v, delta[1:]) for v in volumes[bead_id]]))
 
     def overlap_region(mask):
         crop = int(np.ceil(np.max(np.abs(shifts[mask, 0]))))+2

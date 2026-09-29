@@ -14,7 +14,7 @@ import numpy as np
 from scipy import ndimage, optimize
 from scipy.spatial import cKDTree, ConvexHull, QhullError
 
-from .core import (CalibrationSettings, BeadCollection, collect_beads,
+from .core import (shift_volume, CalibrationSettings, BeadCollection, collect_beads,
                    build_calibration, spline_coefficients, robust_shape_error)
 from .input import BeadStack, discover_acquisitions, read_bead_stacks
 from ..io.calibration import SplineCalibration, _validate_native_calibration
@@ -655,7 +655,7 @@ def build_dual_calibration(beads, excluded=(), progress=None):
         scale = ra['brightness_adu']+rb['brightness_adu']
         original_volumes.append(np.stack((va, vb))/scale)
         offsets.append(np.stack((np.zeros(3), correction)))
-        vb = ndimage.shift(vb, correction, order=3, mode='constant')
+        vb = shift_volume(vb, correction)
         pair_volumes.append(np.stack((va, vb))/scale)
         reason = ('projective initialization outlier' if not coarse[i] else 'transformation dx/dy outlier')
         if not eligible[i]:
@@ -675,9 +675,8 @@ def build_dual_calibration(beads, excluded=(), progress=None):
     reference = np.asarray(result.channel_raw_psfs)
     crop, padding = result.z_crop_start, s.padding
     for i in np.flatnonzero(~result.accepted):
-        sample = np.stack([ndimage.shift(result.beads.original_volumes[i, ch],
-                    result.shifts[i]+result.beads.channel_offsets[i, ch], order=3,
-                    mode='constant', cval=0.) for ch in range(2)])
+        sample = np.stack([shift_volume(result.beads.original_volumes[i, ch],
+                    result.shifts[i]+result.beads.channel_offsets[i, ch]) for ch in range(2)])
         sample = sample[:, crop:sample.shape[1]-crop, padding:-padding, padding:-padding]
         result.residuals[i], result.correlations[i] = robust_shape_error(sample, reference)
     secondary = models[1]

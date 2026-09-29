@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 import numpy as np
-from scipy import ndimage
+
+from .core import shift_volume
 
 
 def aligned_midline_profiles(result, bead_ids=None, normalize=True):
@@ -15,8 +16,7 @@ def aligned_midline_profiles(result, bead_ids=None, normalize=True):
     crop_z = result.z_crop_start
     x_profiles, z_profiles = [], []
     for i in ids:
-        volume = ndimage.shift(beads.volumes[i], result.shifts[i], order=3,
-                               mode='constant', cval=0.)
+        volume = shift_volume(beads.volumes[i], result.shifts[i])
         volume = volume[crop_z:volume.shape[0]-crop_z, p:volume.shape[1]-p,
                         p:volume.shape[2]-p]
         zc, yc, xc = (n//2 for n in volume.shape)
@@ -59,9 +59,9 @@ def paired_profiles(result):
     samples = []
     bright = reference > np.quantile(reference, .75)
     for i in ids:
-        sample = np.stack([ndimage.shift(r.beads.original_volumes[i, ch],
-                                         r.shifts[i]+r.beads.channel_offsets[i, ch],
-                                         order=3, mode='constant') for ch in range(2)])
+        sample = np.stack([shift_volume(r.beads.original_volumes[i, ch],
+                                        r.shifts[i]+r.beads.channel_offsets[i, ch])
+                           for ch in range(2)])
         sample = sample[:, crop:sample.shape[1]-crop, p:-p, p:-p]
         valid = bright & (reference > 1e-12)
         factor = np.median(sample[valid]/reference[valid])

@@ -5,7 +5,7 @@ from scipy import ndimage
 
 from smappy.calibrate import (BeadStack, CalibrationSettings, collect_beads,
                               build_calibration, discover_acquisitions, read_bead_stacks)
-from smappy.calibrate.core import (BeadCollection, estimate_shift, robust_shape_error,
+from smappy.calibrate.core import (BeadCollection, estimate_shift, robust_shape_error, shift_volume,
                                    spline_coefficients)
 from smappy.calibrate.input import _assemble
 from smappy.calibrate.plots import stack_slice
@@ -63,6 +63,16 @@ def test_a_simulated_bead_off_the_voxel_grid_comes_back_at_its_offset():
                              z_window=25, lateral_window=13)
         np.testing.assert_allclose(got[0], -(1+f), atol=.06)       # planes: 1.2 nm
         np.testing.assert_allclose(got[1:], [f, -f/2], atol=.01)   # pixels
+
+
+def test_the_separable_shift_is_ndimage_shift_edges_included():
+    # bright up to its borders, the case where a boundary rule shows
+    volume = np.random.default_rng(1).random((41, 17, 17)).astype(np.float32)+1
+    for shift in ([0., 0., 0.], [.37, -.61, .23], [-2.4, 1.3, -.8], [5.5, -4., 4.]):
+        got = shift_volume(volume, shift)
+        assert got.dtype == volume.dtype
+        np.testing.assert_allclose(
+            got, ndimage.shift(volume, shift, order=3, mode='constant', cval=0.), atol=1e-6)
 
 
 def test_shape_error_ignores_scale_but_detects_psf_distortion():
