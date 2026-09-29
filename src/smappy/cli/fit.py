@@ -2,7 +2,7 @@
 
   smappy-fit DATA OUT --camera CONFIG.yaml [--cal FILE]
              [--frames N] [--roisize N] [--sigma S]
-             [--cutoff F] [--filter dog|gauss]
+             [--cutoff F] [--filter dog|gauss] [--raw-frames N]
 
 The camera is stated in --camera or with --pixelsize/--conversion/--offset;
 --cameras CAMERAS.mat is an optional shortcut where a SMAP settings file exists.
@@ -13,10 +13,11 @@ import time
 from ..detect import (AbsoluteCutoff, DoGFilter, DynamicCutoff,
                             GaussFilter, PeakFinder)
 from ..io.calibration import load_spline_calibration, warn_on_em_mismatch
-from ..io.hdf5 import LocalizationWriter
+from ..io.hdf5 import LocalizationWriter, save_images
 from ..io.tiff import open_stack
 from ..pipeline import FitSettings, fit_stack, provenance
 from ..psf import GaussianPSF, SplinePSF
+from ..rawframes import RawFrameKeeper
 
 from .camera_args import add_camera_arguments, camera_from_args
 
@@ -35,6 +36,8 @@ def main() -> None:
     ap.add_argument("--units", choices=["pixel", "nm", "pixel+nm"], default="pixel")
     ap.add_argument("--threads", type=int, default=0, help="0 = one per core")
     ap.add_argument("--read-ahead", type=int, default=2)
+    ap.add_argument("--raw-frames", type=int, default=50,
+                    help="camera frames kept in OUT after their average; 0 = none")
     add_camera_arguments(ap)
     a = ap.parse_args()
 
@@ -69,12 +72,16 @@ def main() -> None:
                   f"{s['localizations']} locs", end="", flush=True)
 
 
+    keeper = RawFrameKeeper(a.raw_frames, 0, n_frames)
     with LocalizationWriter(a.out) as writer:
         writer.set_metadata(provenance(cam, finder, model, settings, source=a.data))
-        _, engine = fit_stack(src.frames(chunk=a.chunk, stop=n_frames), cam, finder,
-                              model, settings, sink=writer.append, progress=show,
-                              read_ahead=a.read_ahead)
+        _, engine = fit_stack(keeper.watch(src.frames(chunk=a.chunk, stop=n_frames)),
+                              cam, finder, model, settings, sink=writer.append,
+                              progress=show, read_ahead=a.read_ahead)
         n_written = len(writer)
+    raw = keeper.image(cam, settings.output_unit, source=str(a.data), name="raw frames")
+    if raw is not None:
+        save_images(a.out, [raw])
     elapsed = time.time() - t0
 
     s = engine.stats

@@ -433,6 +433,12 @@ Their pages, [RCC](plugin:Analysis/Drift/RCC) and
 [COMET](plugin:Analysis/Drift/COMET), say which to choose; the settings under
 *RCC drift* and *COMET drift* are theirs.
 
+### output.raw_frames
+50 is enough to see what the camera saw at the start, the end and a few
+points between.  Each kept frame costs its size in the file: for a
+256 x 256 ROI about a quarter of a megabyte, for a full 2048 x 2048 sCMOS
+chip 16 MB, so fifty of those are 800 MB -- set fewer there.
+
 ## Output
 
 The table, one row per molecule and frame:
@@ -467,6 +473,17 @@ What to check:
   across the field; a width that grows towards one side is a half out of
   focus there.
 
+**The camera frames.**  The file also keeps a few of the frames the table
+was fitted from, in photons (counts minus offset, times the conversion):
+first the average of every frame fitted, then the first fitted frame, then
+the rest spaced evenly up to the last one, as many as *raw frames* asks for,
+each with its frame number -- the same number as in `frame`.  In the Render
+tab they are a *source* of an image layer, placed in the table's coordinates,
+so they lie under the localizations: whether a structure is really there,
+where the cell edge is, or whether the focus was lost can be checked without
+the original stack.  The average is the one to start with; a localization of
+frame 17 should sit on a spot in frame 17.
+
 ## Differences from SMAP
 
 Based on SMAP's ratiometric workflow (`fit_wavelet_dualcolorratiometric`)
@@ -485,6 +502,10 @@ fitter in *PSF free* mode)
   localization pairs, weighted by their precision.
 * **Detection per half.**  The dynamic cutoff is set for each half on its
   own; SMAP's workflows run one peak finder over the whole frame.
+* **Raw frames by number, not by spacing.**  SMAP's CameraConverter keeps
+  every `diffrawframes`-th frame after the average; here a number of frames
+  is kept, spaced evenly over the fitted range, so that a long acquisition
+  does not fill the file with them.
 
 ## References
 

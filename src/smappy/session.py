@@ -108,7 +108,17 @@ class Layer:
         layer.visible = True
         layer.state = None
         layer.display = display or DisplaySettings(lut="gray")
+        # the layer's own plane, not the image's: two layers may show the
+        # average and one frame of the same kept stack
+        layer.frame = int(image.frame)
         return layer
+
+    def show_image(self, image: ImageData, frame: int = 0) -> None:
+        """Point an image layer at another image: the source it shows.  A
+        layer still called after its old image is renamed after the new."""
+        if self.image is not None and self.name == (self.image.name or "image"):
+            self.name = image.name or "image"
+        self.image, self.frame = image, int(frame)
 
     @property
     def is_image(self) -> bool:
@@ -130,7 +140,7 @@ class Layer:
         layers up turns the sum over once rather than every layer.
         """
         if self.is_image:
-            rendered = self.image.resample(fov)
+            rendered = self.image.resample(fov, self.frame)
             return self.display.apply(rendered, white_background), rendered
         return self.state.image(fov, white_background)
 
@@ -318,6 +328,11 @@ class Session:
         self.slab_shown = True
         self.projection = Projection()
         self.files: List[FileInfo] = []
+        # every pixel image the session knows: the TIFFs opened as images and
+        # the camera frames each file kept (`kind == "raw"`, with the file's
+        # number in `metadata["filenumber"]`).  An image layer shows one of
+        # them; the Render tab offers them all as its sources.
+        self.images: List[ImageData] = []
         self.history: List[Dict] = []
         # what the tools that ran on this file left behind, by plugin path:
         # enough to draw their figures again, saved with the file and read
@@ -376,6 +391,41 @@ class Session:
         from .io.hdf5 import load_results
         return load_results(path)
 
+    @staticmethod
+    def _file_images(info: FileInfo) -> List[ImageData]:
+        """The images kept in the file ``info`` names, as `_file_results`."""
+        path = getattr(info, "path", "") or ""
+        if not str(path).lower().endswith((".h5", ".hdf5")):
+            return []
+        from .io.hdf5 import load_images
+        return load_images(path)
+
+    def _take_images(self, images: Sequence[ImageData], number: int) -> None:
+        """Add a file's images; its raw frames are file ``number``'s.
+
+        A file saved from a session of several keeps each one's frames under
+        that file's number; opened again they keep their order, from
+        ``number`` on.  A TIFF saved with a file is simply an image again, and
+        one the session has already (the same file) is not added twice.
+        """
+        raws = [im for im in images if im.kind == "raw"]
+        saved = sorted({int(im.metadata.get("filenumber", 0)) for im in raws})
+        for im in images:
+            if im.kind == "raw":
+                im.metadata["filenumber"] = number + saved.index(
+                    int(im.metadata.get("filenumber", 0)))
+            elif im.path and any(o.kind != "raw" and o.path == im.path
+                                 and o.shape == im.shape for o in self.images):
+                continue
+            self.images.append(im)
+        if images:
+            self.changed("images")
+
+    def raw_images(self, number: Optional[int] = None) -> List[ImageData]:
+        """The camera frames the files kept -- file ``number``'s, or all."""
+        return [im for im in self.images if im.kind == "raw" and
+                (number is None or im.metadata.get("filenumber") == number)]
+
     def add_file(self, locs: Localizations, info: FileInfo, append: bool = False,
                  grouped: Optional[Localizations] = None) -> FileInfo:
         """``grouped`` is ``locs`` already linked, for a caller that did the
@@ -386,8 +436,12 @@ class Session:
         if not append or not len(self.locs):
             self.files = []
             self.path = Path(info.path)
+            # the frames belong to the files they were kept with; an image
+            # opened as one stays, as its layer does
+            self.images = [im for im in self.images if im.kind != "raw"]
         number = len(self.files)
         self.files.append(info)
+        self._take_images(self._file_images(info), number)
         columns = dict(locs.columns)
         columns["filenumber"] = np.full(len(locs), number, np.int32)
         locs = Localizations(columns, dict(locs.metadata))
@@ -442,6 +496,15 @@ class Session:
         renumbered[renumbered > number] -= 1
         columns["filenumber"] = renumbered
         removed = self.files.pop(number)
+        kept = []
+        for im in self.images:
+            owner = im.metadata.get("filenumber") if im.kind == "raw" else None
+            if owner == number:
+                continue
+            if owner is not None and owner > number:
+                im.metadata["filenumber"] = owner - 1
+            kept.append(im)
+        self.images = kept
         locs = Localizations(columns, dict(self.locs.metadata))
         locs.metadata["files"] = [f.to_dict() for f in self.files]
         for layer in self.layers:               # a layer's file choice follows the numbering
@@ -452,8 +515,24 @@ class Session:
         self.log("remove file", removed.name, changed=True)
 
     # -------------------------------------------------------------- images
-    def add_image(self, image: ImageData, name: Optional[str] = None) -> Layer:
+    def add_image(self, image: Optional[ImageData] = None,
+                  name: Optional[str] = None, frame: int = 0) -> Layer:
+        """A layer showing ``image``, which joins the session's sources.
+
+        Without one, the layer shows the camera frames kept with the file --
+        their average -- when there are any: it is what a new image layer is
+        nearly always for, the camera's view under the localizations.
+        """
+        if image is None:
+            raws = self.raw_images()
+            if not raws:
+                raise ValueError("no image: open one, or fit with raw frames kept")
+            image = raws[0]
+        if all(im is not image for im in self.images):
+            self.images.append(image)
+            self.changed("images")
         layer = Layer.from_image(image, name)
+        layer.frame = int(frame)
         self.layers.append(layer)
         self.changed("layers")
         return layer
@@ -461,6 +540,25 @@ class Session:
     def open_image(self, path, pixelsize: Optional[float] = None,
                    x0: float = 0.0, y0: float = 0.0) -> Layer:
         return self.add_image(load_image(path, pixelsize, x0, y0))
+
+    def load_image(self, path, pixelsize: Optional[float] = None,
+                   x0: float = 0.0, y0: float = 0.0) -> ImageData:
+        """Open an image as a source, without a layer of its own."""
+        image = load_image(path, pixelsize, x0, y0)
+        self.images.append(image)
+        self.changed("images")
+        return image
+
+    def saved_images(self) -> List[ImageData]:
+        """What `save` keeps: every file's raw frames, and each image a
+        layer shows.  An image opened and then left is not kept: the file
+        records what was looked at, not everything that was tried."""
+        shown = [l.image for l in self.layers if l.is_image]
+        out = self.raw_images()
+        for im in shown:
+            if all(im is not o for o in out):
+                out.append(im)
+        return out
 
     def full_view(self, margin_fraction: float = 0.01):
         """The ranges covering every visible layer -- or all, if none is."""
@@ -502,9 +600,18 @@ class Session:
         # through the file was left off
         if rois and (rois["rois"] or rois["runs"] or rois.get("tile_nm")):
             metadata["roi_project"] = rois
+        # read before the file is started again: frames opened from it are
+        # read from it a plane at a time (`StoredStack`)
+        from .io.hdf5 import save_images
+        images = [_in_memory(im, path) for im in self.saved_images()]
+        for im in images:
+            if im.kind == "raw":
+                im.metadata["filenumber"] = int(im.metadata.get("filenumber", 0))
         save_localizations(path, self.locs, metadata)
-        # after the table: both write into the same file, and the results are
+        # after the table: all of these write into the same file, and they are
         # a convenience where the localizations are the point
+        if images:
+            save_images(path, images)
         if self.results:
             save_results(path, self.results)
         if gui_state is None:
@@ -719,6 +826,7 @@ class Session:
         copy.locs = self.locs
         copy.path = self.path
         copy.files = list(self.files)
+        copy.images = list(self.images)
         copy.history = list(self.history)
         copy.roi, copy.slab = self.roi, self.slab
         copy.select_in_slab = self.select_in_slab
@@ -1132,6 +1240,17 @@ class Session:
             # after the plugin rather than after the fact that a table changed
             self.set_locs(result.locs, label=plugin.path.rsplit("/", 1)[-1],
                           text=result.text or "")
+        # The camera frames a fit kept (`smappy.rawframes`), with the table it
+        # has just set.  A fit replaces the whole table, so these are all the
+        # raw frames there are now -- including any just read back from the
+        # file it wrote, which are the same frames.
+        images = (result.data or {}).get("images") or []
+        if images:
+            self.images = [im for im in self.images if im.kind != "raw"]
+            for im in images:
+                im.metadata["filenumber"] = 0
+                self.images.append(im)
+            self.changed("images")
         # After the files: opening one starts the log again from the file's
         # own, and an entry written before it would be the one thing lost --
         # which is how a loader's settings never reached the history.
@@ -1200,3 +1319,17 @@ class Session:
         self.history.append({"time": datetime.now().isoformat(timespec="seconds"),
                              "what": what, "text": text, **extra})
         self.changed("history")
+
+
+def _in_memory(image: ImageData, path: Path) -> ImageData:
+    """``image`` with its pixels read, if they are in the file at ``path``.
+
+    Saving starts that file again, so an image still read from it plane by
+    plane must be read in full first, and is kept in memory from then on.
+    """
+    data = image.data
+    stored = getattr(data, "path", None)
+    if stored is None or Path(stored).resolve() != Path(path).resolve():
+        return image
+    image.data = np.asarray(data)
+    return image

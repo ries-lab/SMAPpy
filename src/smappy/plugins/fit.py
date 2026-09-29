@@ -196,6 +196,9 @@ class OutputSettings:
                       file_filter="HDF5 (*.hdf5 *.h5)",
                       help="filled from the source: <acquisition>_locs.hdf5 "
                            "next to the folder the images are in")
+    raw_frames: int = param(50, label="raw frames", min=0, advanced=True,
+                            help="camera frames kept with the table, in "
+                                 "photons, after their average; 0: none")
 
     def resolve(self, source_path: str) -> Optional[Path]:
         if not self.save:
@@ -699,6 +702,12 @@ class _FitPlugin(Plugin):
             stop = min(src.stop, source.n_frames) if src.stop else None
             blocks = source.frames(chunk=src.chunk, start=src.start, stop=stop)
             total = max((stop if stop is not None else source.n_frames) - src.start, 0)
+        # the frames kept with the table: counted as they go past, so the
+        # stack is read once, for the fit
+        from ..rawframes import RawFrameKeeper
+        keeper = RawFrameKeeper(settings.output.raw_frames, src.start,
+                                None if src.live else src.start + total)
+        blocks = keeper.watch(blocks)
 
         ctx.emit("start", {"extent": camera_extent(camera, source.shape, fit.output_unit),
                            "path": out})
@@ -774,10 +783,18 @@ class _FitPlugin(Plugin):
             record["history"] = finished.locs.metadata.get("history") or []
             from ..io.hdf5 import save_localizations
             save_localizations(out, finished.locs, record)
+        raw = keeper.image(camera, fit.output_unit, source=str(src.path),
+                           name=f"{Path(str(src.path)).name}: raw frames")
+        if raw is not None and out is not None:
+            # last, after any rewrite above: that one starts the file again
+            from ..io.hdf5 import save_images
+            save_images(out, [raw])
         if finished.notes:
             text = "\n".join([text] + finished.notes)
         return Result(locs=finished.locs, text=text, plots=finished.plots,
-                      data={"stats": stats, "path": out}, settings=settings)
+                      data={"stats": stats, "path": out,
+                            "images": [raw] if raw is not None else []},
+                      settings=settings)
 
 
 def _open(src: SourceSettings, watch: bool):
@@ -1322,7 +1339,7 @@ class DualGaussianFit(_FitPlugin):
                 # pixels as well as nm: a transformation is a statement about
                 # the camera, and is fitted in chip pixels
                 fit=replace(settings.fit, output_unit="pixel+nm"),
-                output=OutputSettings(save=False))
+                output=OutputSettings(save=False, raw_frames=0))
             # the provisional split only decides which half a localization is
             # in, for the threshold and for the count; the seam the fit will
             # actually use is measured by the registration afterwards

@@ -369,7 +369,11 @@ class LayerStrip(QWidget):
         self.add.setToolTip("add a layer")
         menu = QMenu(self.add)
         menu.addAction("localizations", self._add)
-        menu.addAction("image...", self.add_image_requested)
+        # emitted from a function, not handed the signal: PySide6 takes the
+        # second argument as a slot and *calls* it, a signal instance is not
+        # callable, and the TypeError is printed and swallowed -- the menu
+        # entry did nothing at all
+        menu.addAction("image...", lambda: self.add_image_requested.emit())
         self.add.setMenu(menu)
         self.remove = QToolButton(text="-")
         self.remove.setToolTip("remove this layer")
@@ -864,22 +868,33 @@ class RenderTab(QWidget):
         image_form = QFormLayout(image)
         image_form.setContentsMargins(0, 0, 0, 0)
         image_form.setVerticalSpacing(2)
-        self.image_name = QLabel("")
+        # what the layer shows: the frames each open file kept, any image
+        # opened, or a new one -- one list, so that the camera's view and a
+        # widefield TIFF are chosen the same way
+        self.image_source = QComboBox()
+        self.image_source.setToolTip("the frames kept with a file, or an image")
         self.image_pixelsize = QDoubleSpinBox(minimum=0.01, maximum=1e6, decimals=2)
         self.image_x0 = QDoubleSpinBox(minimum=-1e9, maximum=1e9, decimals=1)
         self.image_y0 = QDoubleSpinBox(minimum=-1e9, maximum=1e9, decimals=1)
         self.image_frame = QSlider(Qt.Horizontal)
-        image_form.addRow("file", self.image_name)
+        self.image_frame_label = QLabel("")
+        self.image_frame_label.setToolTip("which frame of the stack is shown")
+        frame_row = QHBoxLayout()
+        frame_row.setContentsMargins(0, 0, 0, 0)
+        frame_row.addWidget(self.image_frame, 1)
+        frame_row.addWidget(self.image_frame_label)
+        image_form.addRow("source", self.image_source)
         image_form.addRow("pixel size (nm)", self.image_pixelsize)
         image_form.addRow("x0 (nm)", self.image_x0)
         image_form.addRow("y0 (nm)", self.image_y0)
-        image_form.addRow("frame", self.image_frame)
+        image_form.addRow("frame", frame_row)
         self.image_section = CollapsibleSection("image", image, expanded=True, **HELP)
         self.image_section.hide()
         layout.addWidget(self.image_section)
         for w in (self.image_pixelsize, self.image_x0, self.image_y0):
             w.valueChanged.connect(self._on_image)
         self.image_frame.valueChanged.connect(self._on_image)
+        self.image_source.activated.connect(self._on_image_source)
 
         display = QWidget()
         form = QFormLayout(display)
@@ -1016,6 +1031,8 @@ class RenderTab(QWidget):
             self.axes.bind()
         elif what == "layers":
             self.strip.rebuild()
+        elif what == "images" and self.layer.is_image:
+            self._fill_image_sources(self.layer)
         elif what == "regrouped":
             self._bind_layer(self.strip.current)
         elif what in ("roi", "roi-edited"):
@@ -1059,7 +1076,8 @@ class RenderTab(QWidget):
                    self.lut, self.invert, self.invert_mode, self.white,
                    self.contrast, self.gamma,
                    self.grouped,
-                   self.image_pixelsize, self.image_x0, self.image_y0, self.image_frame)
+                   self.image_source, self.image_pixelsize, self.image_x0,
+                   self.image_y0, self.image_frame)
         for w in widgets:
             w.blockSignals(True)
         self.filter_section.setVisible(not layer.is_image)
@@ -1068,13 +1086,14 @@ class RenderTab(QWidget):
             w.setEnabled(not layer.is_image)
         if layer.is_image:
             img = layer.image
-            self.image_name.setText(img.name)
+            self._fill_image_sources(layer)
             self.image_pixelsize.setValue(img.pixelsize)
             self.image_x0.setValue(img.x0)
             self.image_y0.setValue(img.y0)
             self.image_frame.setRange(0, img.n_frames - 1)
-            self.image_frame.setValue(img.frame)
+            self.image_frame.setValue(layer.frame)
             self.image_frame.setEnabled(img.n_frames > 1)
+            self.image_frame_label.setText(img.label(layer.frame))
             display = layer.get_display()
             self.lut.setCurrentText(display.lut if isinstance(display.lut, str) else "gray")
             self._show_invert(display.invert)
@@ -1196,29 +1215,79 @@ class RenderTab(QWidget):
         self.session.changed("layer")
 
     def _on_image(self) -> None:
-        img = self.layer.image
+        layer = self.layer
+        img = layer.image
         if img is None:
             return
+        # the pixel size is the x one; a camera with oblong pixels keeps its
+        # ratio, which is the camera's and not something set here
+        ratio = img.pixelsize_xy[1] / img.pixelsize
         img.pixelsize = self.image_pixelsize.value()
+        if img.pixelsize_y is not None:
+            img.pixelsize_y = img.pixelsize * ratio
         img.x0, img.y0 = self.image_x0.value(), self.image_y0.value()
-        img.frame = self.image_frame.value()
+        layer.frame = self.image_frame.value()
+        self.image_frame_label.setText(img.label(layer.frame))
         self.session.changed("layer")
 
-    def _add_image(self) -> None:
+    def _fill_image_sources(self, layer: Layer) -> None:
+        """Every image the session has, the layer's own chosen, and *open
+        file...* last."""
+        box = self.image_source
+        blocked = box.blockSignals(True)
+        box.clear()
+        for im in self.session.images:
+            box.addItem(im.name or "image", im)
+        if all(im is not layer.image for im in self.session.images):
+            box.addItem(layer.image.name or "image", layer.image)
+        box.addItem("open file...", None)
+        box.setCurrentIndex(next(i for i in range(box.count())
+                                 if box.itemData(i) is layer.image))
+        box.blockSignals(blocked)
+
+    def _on_image_source(self, index: int) -> None:
+        layer = self.layer
+        image = self.image_source.itemData(index)
+        if image is None:
+            image = self._open_image_file()
+            if image is None:                    # cancelled: nothing changes
+                self._fill_image_sources(layer)
+                return
+        # the first plane: for kept frames the average, which is the one to
+        # line up with the localizations before stepping through the rest
+        layer.show_image(image, 0)
+        self.strip.rebuild()                     # the button's tooltip is the name
+        self._bind_layer(self.strip.current)
+        self.session.changed("layer")
+
+    def _open_image_file(self):
+        """Ask for an image file and open it as a source; None if cancelled."""
         from .dialogs import PixelSizeDialog
         from PySide6.QtWidgets import QDialog
+        from pathlib import Path
         start = str(self.session.path.parent) if self.session.path else ""
         path, _ = QFileDialog.getOpenFileName(self, "Open image", start,
                                               "Images (*.tif *.tiff *.png)")
         if not path:
-            return
+            return None
         try:
-            self.session.open_image(path)
+            return self.session.load_image(path)
         except ValueError:
-            dialog = PixelSizeDialog(path.rsplit("/", 1)[-1], parent=self)
+            dialog = PixelSizeDialog(Path(path).name, parent=self)
             if dialog.exec() == QDialog.Accepted:
                 px, x0, y0 = dialog.values()
-                self.session.open_image(path, px, x0, y0)
+                return self.session.load_image(path, px, x0, y0)
+        return None
+
+    def _add_image(self) -> None:
+        """*+ > image...*: the file's kept frames if it has any, else a file."""
+        if self.session.raw_images():
+            self.session.add_image()
+        else:
+            image = self._open_image_file()
+            if image is None:
+                return
+            self.session.add_image(image)
         self.strip.select(len(self.session.layers) - 1)
 
     def _on_grouped(self, on: bool) -> None:

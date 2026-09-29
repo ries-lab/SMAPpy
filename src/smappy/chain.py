@@ -371,6 +371,7 @@ class ChainPlugin(Plugin):
         lines: List[str] = []
         layers = None
         path = None
+        images = None
         for key, step, cls in self.steps:
             label = step.title()
             sub = getattr(settings, key)
@@ -420,6 +421,8 @@ class ChainPlugin(Plugin):
             if "layers" in (result.data or {}) or "bounds" in (result.data or {}):
                 layers = session.layer_configs()
             path = (result.data or {}).get("path") or path
+            # a fit's kept frames go on with the table, as its path does
+            images = (result.data or {}).get("images") or images
             first = result.text.splitlines()[0] if result.text else "done"
             lines.append(f"{label}: {first}")
         changed = any(r["changed"] for r in records)
@@ -428,6 +431,8 @@ class ChainPlugin(Plugin):
             data["layers"] = layers
         if path:
             data["path"] = path
+        if images:
+            data["images"] = images
         return Result(locs=session.locs if changed else None,
                       text="\n".join(lines) or "no steps", plots=plots, data=data,
                       settings=settings,

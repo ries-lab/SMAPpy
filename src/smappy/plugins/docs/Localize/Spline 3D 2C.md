@@ -420,6 +420,12 @@ calibration's lateral size.
 With z in the table, both RCC and COMET correct z as well unless their
 *correct z* says otherwise.
 
+### output.raw_frames
+50 is enough to see what the camera saw at the start, the end and a few
+points between.  Each kept frame costs its size in the file: for a
+256 x 256 ROI about a quarter of a megabyte, for a full 2048 x 2048 sCMOS
+chip 16 MB, so fifty of those are 800 MB -- set fewer there.
+
 ## Output
 
 The table has the columns of [Spline 3D](plugin:Localize/Spline 3D), with the
@@ -449,6 +455,17 @@ What to check, beyond the checks of [Spline 3D](plugin:Localize/Spline 3D)
   with z: a ratio that drifts with height means the two PSFs do not describe
   the two halves at the same z.
 
+**The camera frames.**  The file also keeps a few of the frames the table
+was fitted from, in photons (counts minus offset, times the conversion):
+first the average of every frame fitted, then the first fitted frame, then
+the rest spaced evenly up to the last one, as many as *raw frames* asks for,
+each with its frame number -- the same number as in `frame`.  In the Render
+tab they are a *source* of an image layer, placed in the table's coordinates,
+so they lie under the localizations: whether a structure is really there,
+where the cell edge is, or whether the focus was lost can be checked without
+the original stack.  The average is the one to start with; a localization of
+frame 17 should sit on a spot in frame 17.
+
 ## Differences from SMAP
 
 Based on SMAP's `fit_global_dualchannel` workflow and its `MLE_global_spline`
@@ -470,6 +487,10 @@ changes:
 * **No refractive index factor** (SMAP's is 0.8 when switched on).
 * **Detection per half**, as in [Gaussian 2D 2C](plugin:Localize/Gaussian 2D 2C):
   the dynamic cutoff is set for each half on its own.
+* **Raw frames by number, not by spacing.**  SMAP's CameraConverter keeps
+  every `diffrawframes`-th frame after the average; here a number of frames
+  is kept, spaced evenly over the fitted range, so that a long acquisition
+  does not fill the file with them.
 
 ## References
 

@@ -1244,6 +1244,31 @@ meant the log that was saved was the one the table had been loaded with rather
 than the one with the run that had just finished in it.  The caller's copy is
 the newer of the two; the table's now fills in only what was not given.
 
+### The camera frames, kept with the table
+
+A fit also leaves behind what the camera saw (`smappy.rawframes`), as SMAP's
+CameraConverter does: the average of every fitted frame, then the first
+fitted frame and the rest spaced evenly over the range -- 50 by default,
+*raw frames* in the fitter's output settings -- in photons, each with its
+frame number in the table's numbering.  SMAP keeps every `diffrawframes`-th
+frame instead; a number rather than a spacing keeps a 500,000-frame run from
+filling its file with them.  A live fit does not know its length, so it keeps
+every k-th frame and doubles k, dropping every second one, whenever there are
+more than asked for.  The average is summed in ADU as the blocks go past and
+converted once, which is the same number because the conversion is linear.
+
+They go under `/images` in the localization file, one group per image with
+the placement (pixel size, the edge of pixel 0 in the table's units) in its
+attributes, and are read a plane at a time (`io.hdf5.StoredStack`): fifty
+frames of a full sCMOS chip are 800 MB, which opening a table should not
+cost.  Everything else that writes into the file (`save_localizations`,
+mode "w") starts it again, so the images are written *after* the table --
+by the fitter after its finishing steps have rewritten it, and by
+`Session.save`, which first reads in full any image still read from the file
+it is about to replace.  A session saves every file's frames and every image
+a layer shows, and on opening they are sources for an image layer rather
+than layers: most of the time one looks at the localizations.
+
 ## What is still current, per step
 
 A record used to carry one signature, over the ROI's inputs -- the source, the
