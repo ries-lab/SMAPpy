@@ -78,7 +78,7 @@ class ROIHeader(QWidget):
                                     "2D view into an analysis ROI")
         self.from_region.clicked.connect(self._from_region)
         form.addRow(self.from_region)
-        layout.addWidget(CollapsibleSection("geometry", geometry, expanded=True))
+        layout.addWidget(CollapsibleSection("geometry", geometry, expanded=True, major=True))
 
         # -------------------------------------------------------- evaluate
         evaluate = QWidget()
@@ -99,7 +99,7 @@ class ROIHeader(QWidget):
         self.summary.setWordWrap(True)
         self.summary.setStyleSheet("color: gray")
         elayout.addWidget(self.summary)
-        layout.addWidget(CollapsibleSection("evaluate", evaluate, expanded=True))
+        layout.addWidget(CollapsibleSection("evaluate", evaluate, expanded=True, major=True))
         layout.addStretch(1)
 
         session.on_change(self._on_session)
