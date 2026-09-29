@@ -238,10 +238,16 @@ The state therefore goes in a `/gui` group as a variable-length string dataset,
 not in `f.attrs`, and the existing `metadata` attribute is left alone.
 
 Beyond the pipeline, the rest of the GUI state -- tabs, their instances and
-values, window layout -- is saved:
+values, which section is open -- is saved:
 
-* in a **workspace** file, auto-saved to the config directory and restored at
-  startup, and saveable under a name;
+* in a **GUI file**, and only when someone asks: *File > Save GUI* overwrites
+  the loaded one, *Save GUI as* writes a new one, *Load GUI* reads one, and the
+  next start opens whichever was saved or loaded last (the shipped default when
+  none was, or it has gone).  Nothing is written behind the user's back: one
+  installation serves a lab, and a value one person typed that the program
+  remembered would silently become everyone's default.  The window's position
+  is the one exception, kept in `window.yaml` beside the configuration, since
+  it moves no number;
 * and, optionally, **appended to the localization file**, so reopening a dataset
   restores the session that produced it.
 
@@ -253,8 +259,7 @@ the only part that is worthless as provenance -- while the plugin state is small
 preference turns the embedding off (`save_gui_state_in_files`) for anyone who
 wants their data files to contain only data.  Reading it back is deliberately
 *not* automatic: rearranging someone's tabs because they opened a colleague's
-dataset would be a surprise, and their own last session is already restored from
-the auto-saved workspace, so it is a menu item, *Restore GUI state from file*.  Values are a flat map of dotted names read off the form
+dataset would be a surprise, so it is a menu item, *Restore GUI state from file*.  Values are a flat map of dotted names read off the form
 widgets -- so a form left mid-edit with an unparseable number is still saveable,
 and a panel never opened keeps the values it was given rather than being
 blanked -- and are read back a field at a time: a name the plugin no longer has

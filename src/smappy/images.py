@@ -4,6 +4,11 @@ rendered super-resolution TIFF, a transmitted-light picture.
 An `ImageData` sits at ``(x0, y0)`` in the coordinates of the table with a
 pixel of ``pixelsize`` (nm), and can be resampled onto any `FieldOfView`, so
 a viewer treats it like a rendered layer: the same LUT, contrast and gamma.
+
+The camera frames a fit keeps (`smappy.rawframes`) are one of these too, with
+``kind = "raw"`` and each plane's frame number in ``frames``: the session
+lists them beside any TIFF it has opened, and an image layer shows whichever
+one is chosen.
 """
 from __future__ import annotations
 
@@ -26,6 +31,16 @@ class ImageData:
     path: Optional[str] = None
     frame: int = 0                   # for a stack: which plane is shown
     metadata: Dict = field(default_factory=dict)
+    pixelsize_y: Optional[float] = None   # None: square pixels
+    # "image" (a file opened as one) or "raw" (the frames a fit kept)
+    kind: str = "image"
+    # per plane: its camera frame number, -1 for an average; None for a file
+    frames: Optional[np.ndarray] = None
+
+    @property
+    def pixelsize_xy(self) -> Tuple[float, float]:
+        return (self.pixelsize, self.pixelsize if self.pixelsize_y is None
+                else self.pixelsize_y)
 
     @property
     def n_frames(self) -> int:
@@ -33,31 +48,52 @@ class ImageData:
 
     @property
     def plane(self) -> np.ndarray:
-        return self.data[min(self.frame, self.n_frames - 1)] if self.data.ndim == 3 else self.data
+        return self.plane_at(self.frame)
+
+    def plane_at(self, index: int) -> np.ndarray:
+        if self.data.ndim != 3:
+            return self.data
+        return self.data[int(np.clip(index, 0, self.n_frames - 1))]
+
+    def label(self, index: int) -> str:
+        """What plane ``index`` is, in words: the slider says it beside it."""
+        if self.frames is None or not 0 <= index < len(self.frames):
+            return f"plane {index + 1} of {self.n_frames}" if self.n_frames > 1 else ""
+        number = int(self.frames[index])
+        if number < 0:
+            n = self.metadata.get("n_averaged")
+            return f"average of {n} frames" if n else "average"
+        return f"frame {number}"
 
     @property
     def shape(self) -> Tuple[int, int]:
-        return self.plane.shape
+        return tuple(self.data.shape[-2:])
 
     @property
     def bounds(self) -> Tuple[float, float, float, float]:
         """(x0, y0, x1, y1) covered by the pixels."""
         ny, nx = self.shape
-        return (self.x0, self.y0, self.x0 + nx * self.pixelsize, self.y0 + ny * self.pixelsize)
+        px, py = self.pixelsize_xy
+        return (self.x0, self.y0, self.x0 + nx * px, self.y0 + ny * py)
 
-    def resample(self, fov: FieldOfView) -> RenderedImage:
+    def resample(self, fov: FieldOfView, frame: Optional[int] = None) -> RenderedImage:
         """Nearest-neighbour onto ``fov``; outside the image is zero.
+
+        ``frame`` is the plane of a stack, by default the image's own
+        ``frame``: a layer keeps its own, so that two layers can show the
+        average and one frame of the same stack.
 
         Averaging when the view pixel is coarser than the image is left for
         later; nearest is right whenever one zooms in, which is the usual case
         for an overlay under localizations.
         """
-        plane = self.plane
+        plane = self.plane_at(self.frame if frame is None else frame)
         ny, nx = plane.shape
+        px, py = self.pixelsize_xy
         xs = fov.x0 + (np.arange(fov.nx) + 0.5) * fov.pixelsize
         ys = fov.y0 + (np.arange(fov.ny) + 0.5) * fov.pixelsize
-        ix = np.floor((xs - self.x0) / self.pixelsize).astype(np.int64)
-        iy = np.floor((ys - self.y0) / self.pixelsize).astype(np.int64)
+        ix = np.floor((xs - self.x0) / px).astype(np.int64)
+        iy = np.floor((ys - self.y0) / py).astype(np.int64)
         okx, oky = (ix >= 0) & (ix < nx), (iy >= 0) & (iy < ny)
         out = np.zeros((fov.ny, fov.nx), np.float32)
         if okx.any() and oky.any():

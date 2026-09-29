@@ -30,7 +30,8 @@ def fit(data, out=None, camera: CameraLike = None, calibration=None, *,
         max_fit_distance: Optional[float] = None, threads: int = 0,
         chunk: int = 200, frames: Optional[int] = None,
         settings: Optional[FitSettings] = None, progress=None, on_block=None,
-        read_ahead: int = 2, collect: bool = True) -> Localizations:
+        read_ahead: int = 2, collect: bool = True,
+        raw_frames: int = 50) -> Localizations:
     """Fit a dataset and, with ``out``, write it to HDF5.
 
     ``data`` is a path to an acquisition, an
@@ -60,10 +61,18 @@ def fit(data, out=None, camera: CameraLike = None, calibration=None, *,
     so it should return quickly; ``progress(engine)`` is the cheaper hook when
     only the running counts are wanted, and those include the *candidate* count,
     which is available before anything is fitted.
+
+    ``raw_frames`` camera frames are kept in ``out`` beside the table, in
+    photons, after the average of every frame fitted (`smappy.rawframes`);
+    0 keeps none, and without ``out`` there is nowhere to keep them.
     """
     from .io.hdf5 import LocalizationWriter
 
     source, blocks = _frames(data, chunk, frames)
+    from .rawframes import RawFrameKeeper
+    keeper = RawFrameKeeper(raw_frames if out is not None else 0, 0,
+                            _n_frames(data, source, frames))
+    blocks = keeper.watch(blocks)
     cam = _camera(camera, source, presets)
     model = _model(calibration, sigma, cam)
     finder = PeakFinder(DoGFilter(sigma) if filter == "dog" else GaussFilter(sigma),
@@ -99,6 +108,11 @@ def fit(data, out=None, camera: CameraLike = None, calibration=None, *,
     finally:
         if writer is not None:
             writer.close()
+    raw = keeper.image(cam, settings.output_unit, source=_source_name(data, source),
+                       name="raw frames")
+    if raw is not None:
+        from .io.hdf5 import save_images
+        save_images(out, [raw])
 
     collected.metadata["stats"] = dict(engine.stats)
     return collected
@@ -134,6 +148,16 @@ def _frames(data, chunk: int, frames: Optional[int]
             block = block[None]
         return None, [(0, block)]
     return None, data                                # already (index, block)
+
+
+def _n_frames(data, source, frames: Optional[int]) -> Optional[int]:
+    """How many frames `_frames` will hand over, when that is known."""
+    if source is not None:
+        return min(frames, source.n_frames) if frames else source.n_frames
+    if isinstance(data, np.ndarray):
+        n = 1 if data.ndim == 2 else len(data)
+        return min(frames, n) if frames else n
+    return None                                      # an iterable: live
 
 
 def _camera(camera: CameraLike, source, presets) -> CameraMetadata:

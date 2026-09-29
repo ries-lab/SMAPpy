@@ -12,6 +12,14 @@ collision, `modulename_2`, for exactly this reason -- so the ROI pipeline is a
 
 Nothing here imports Qt: the ROI pipeline is provenance and has to be readable
 without a GUI, and window geometry is carried as opaque text the GUI encodes.
+
+**Nothing is saved behind the user's back.**  One installation is shared by a
+lab, so a value one person typed and the program remembered would silently
+become everyone's default.  A GUI file is written only by *Save GUI* or *Save
+GUI as*, and read at start only because someone saved or loaded it last
+(`remember`); with none, the shipped default is built afresh.  The one thing
+kept automatically is where the window was (`window_state`), which moves no
+number.
 """
 from __future__ import annotations
 
@@ -26,7 +34,9 @@ import yaml
 from . import config
 
 VERSION = 1
-WORKSPACE_NAME = "workspace.yaml"
+GUI_SUFFIX = ".gui.yaml"
+WINDOW_NAME = "window.yaml"          # the window's geometry, and nothing else
+REMEMBERED = "gui"                   # config key: the GUI last saved or loaded
 
 # What a fresh install shows.  `seed` is used *once*, to generate the workspace
 # from whatever plugins are actually installed; afterwards the workspace is
@@ -93,7 +103,7 @@ class Tab:
 
 @dataclass
 class Workspace:
-    """Everything the GUI restores: the tabs, and where the window was."""
+    """A GUI: the tabs, their values, and which section each has open."""
     tabs: List[Tab] = field(default_factory=list)
     layout: Dict[str, Any] = field(default_factory=dict)
     version: int = VERSION
@@ -167,7 +177,14 @@ class Workspace:
 
     # ------------------------------------------------------------ the file
     def save(self, path=None) -> Path:
-        path = Path(path) if path else (self.path or default_path())
+        """Write to ``path``, or back to the file this was read from.
+
+        There is no fallback location: a workspace with neither is the shipped
+        default, and writing it anywhere implicit is what this module avoids.
+        """
+        path = Path(path) if path else self.path
+        if path is None:
+            raise ValueError("the shipped default has no file: give a path")
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(yaml.safe_dump(self.to_dict(), sort_keys=False))
         self.path = path
@@ -190,13 +207,32 @@ class Workspace:
         return [i.plugin for i in gone]
 
 
-def default_path() -> Path:
-    return config.config_dir() / WORKSPACE_NAME
+def display_name(path: Optional[Path]) -> str:
+    """What the title bar calls a GUI: its file name without the suffix."""
+    if path is None:
+        return "default GUI"
+    name = Path(path).name
+    for suffix in (GUI_SUFFIX, ".yaml", ".yml"):
+        if name.endswith(suffix) and len(name) > len(suffix):
+            return name[:-len(suffix)]
+    return name
+
+
+def guis_dir() -> Path:
+    """Where *Save GUI as* offers to put a GUI first; any folder will do."""
+    return config.config_dir() / "guis"
 
 
 def load(path=None) -> Workspace:
-    """The workspace at ``path``, or the auto-saved one, or the shipped default."""
-    path = Path(path) if path else default_path()
+    """The workspace at ``path``, or the shipped default.
+
+    A file that is missing, unreadable or has no tabs also gives the default,
+    with no path: *Save GUI* then asks where to write rather than overwriting
+    the broken file.
+    """
+    if not path:
+        return Workspace.default()
+    path = Path(path)
     if not path.exists():
         return Workspace.default()
     try:
@@ -206,3 +242,48 @@ def load(path=None) -> Workspace:
     if not isinstance(data, dict) or not data.get("tabs"):
         return Workspace.default()
     return Workspace.from_dict(data, path=path)
+
+
+# ------------------------------------------------- what the next start opens
+
+def remembered() -> Optional[Path]:
+    """The GUI file last saved or loaded, if it is still there.
+
+    The likely next user is the one who was just working; a file that has gone
+    since is forgotten quietly, and the shipped default stands.
+    """
+    raw = config.get(REMEMBERED)
+    if not raw:
+        return None
+    path = Path(str(raw)).expanduser()
+    return path if path.is_file() else None
+
+
+def remember(path: Optional[Path]) -> None:
+    """Open ``path`` at the next start; None goes back to the shipped default."""
+    config.set(REMEMBERED, str(Path(path).expanduser().resolve()) if path else None)
+
+
+def load_startup() -> Workspace:
+    return load(remembered())
+
+
+# ------------------------------------------------------- where the window was
+
+def window_file() -> Path:
+    return config.config_dir() / WINDOW_NAME
+
+
+def window_state() -> Dict[str, Any]:
+    """The geometry saved at the last quit, as opaque text; {} if none."""
+    try:
+        data = yaml.safe_load(window_file().read_text()) or {}
+    except (OSError, yaml.YAMLError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def save_window_state(state: Dict[str, Any]) -> None:
+    path = window_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.safe_dump(dict(state), sort_keys=False))

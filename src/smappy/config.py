@@ -2,8 +2,8 @@
 
 Kept out of Qt on purpose -- the plugin scanner reads the extra plugin roots
 from here and `smappy.plugins` must stay importable in a script (see GUI.md).
-Qt's own `QSettings` still holds transient window state; anything a user would
-want to look at or edit by hand belongs here instead.
+The GUI's tabs and values are not here: they live in GUI files the user saves
+and loads (`smappy.workspace`), and this file only names the last one.
 """
 from __future__ import annotations
 

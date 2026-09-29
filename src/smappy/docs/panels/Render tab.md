@@ -59,9 +59,10 @@ def draw(ax, title, fov=zoom, **change):
 
 **1. Layers.**  A file opens as one layer.  **+** adds another, which starts
 as a copy of the selected one -- a second layer is nearly always the first
-with one thing changed.  A layer can also be a pixel image (a widefield or a
-diffraction-limited picture of the same cells), which is placed under the
-localizations by its pixel size and position.  The layers are drawn one by one
+with one thing changed.  A layer can also be a pixel image, placed under the
+localizations by its pixel size and position: the camera frames the fit kept
+with the file (their average, and a few single frames), or a widefield or
+diffraction-limited picture of the same cells.  The layers are drawn one by one
 and their colours added.
 
 **2. The filter.**  A filter is a range per column: keep the localizations
@@ -361,8 +362,10 @@ selected one -- its bounds, files, display and grouping -- and the tab moves
 onto it.
 
 ### image...
-Adds a TIFF or PNG image as a layer.  If the file does not say its pixel size,
-a dialog asks for it and for where its first pixel lies.
+Adds an image layer.  When a file open has camera frames kept with it, the
+new layer shows their average; otherwise it asks for a TIFF or PNG.  If the
+file does not say its pixel size, a dialog asks for it and for where its
+first pixel lies.
 
 ### -
 Removes the selected layer.  There is always at least one.
@@ -399,8 +402,15 @@ Unticks every file -- the layer then shows nothing until one is ticked.
 Shown instead of the filter for an image layer: where the image lies under
 the localizations.
 
-### file
-The image's file name.
+### source
+What the layer shows.  The list has the camera frames each open file kept
+(*name: raw frames* -- the average of every fitted frame, then single frames
+spaced over the acquisition, in photons), every image opened, and *open
+file...* for another TIFF or PNG.  The kept frames are placed by the camera's
+pixel size and ROI, so they lie under the localizations without adjusting
+anything.  Saving the localizations keeps the kept frames and every image a
+layer shows in the file, with their pixel size and position, and opening it
+again offers them here.
 
 ### pixel size (nm)
 Must be the image's real pixel size in the sample, or it will not line up with
@@ -414,7 +424,9 @@ Adjust it (and *y0*) to register the image to the localizations.
 Where the image's first pixel lies in y.
 
 ### frame
-For a stack, which frame is shown.
+For a stack, which frame is shown; the label beside it says which --
+*average of 2000 frames*, or *frame 17*, the number the `frame` column uses.
+Each layer has its own, so two layers can show the average and one frame.
 
 ### display
 How the selected layer is drawn.  An image layer uses only the LUT, contrast,

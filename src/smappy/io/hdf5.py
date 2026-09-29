@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional, Tuple
 
 import h5py
 import numpy as np
@@ -204,6 +204,115 @@ def load_results(path) -> Dict[str, object]:
     except (OSError, KeyError, ValueError, TypeError):
         return {}
     return saved if isinstance(saved, dict) else {}
+
+
+# -------------------------------------------------------------------- images
+#
+# Pixel images kept with the table: the camera frames a fit kept
+# (`smappy.rawframes`) and any image a layer showed when the file was saved.
+# One group each under /images, the pixels in a dataset chunked by plane and
+# the placement in its attributes, so that a plane is read without the rest.
+#
+# Written with mode "a", after the table: `save_localizations` starts the file
+# again, and anything written before it would be gone.
+
+IMAGES = "images"
+
+
+def save_images(path, images) -> None:
+    """Write (or clear) the images kept in an existing localization file.
+
+    ``images`` are `ImageData`.  One whose pixels are still in *this* file
+    (`StoredStack`) is read in full first, since its group is replaced.
+    """
+    images = list(images or ())
+    arrays = [np.asarray(im.data, dtype=np.float32) for im in images]
+    with h5py.File(path, "a") as f:
+        if IMAGES in f:
+            del f[IMAGES]
+        if not images:
+            return
+        group = f.create_group(IMAGES)
+        for n, (im, data) in enumerate(zip(images, arrays)):
+            g = group.create_group(str(n))
+            g.create_dataset("data", data=data, compression="lzf",
+                             chunks=(1,) + data.shape[1:] if data.ndim == 3 else None)
+            if im.frames is not None:
+                g.create_dataset("frames", data=np.asarray(im.frames, np.int64))
+            px, py = im.pixelsize_xy
+            g.attrs.update({"name": im.name or "", "kind": im.kind,
+                            "pixelsize": float(px), "pixelsize_y": float(py),
+                            "x0": float(im.x0), "y0": float(im.y0),
+                            "path": str(im.path or ""),
+                            "metadata": json.dumps(im.metadata or {},
+                                                   default=_json_default)})
+
+
+class StoredStack:
+    """The pixels of a kept image, read from the file a plane at a time.
+
+    A fit keeps 51 frames, and on a full sCMOS chip that is 800 MB: reading
+    them all whenever the file is opened would make opening a table cost what
+    the table does not need.  A layer shows one plane, so one plane is read,
+    and the last one read is kept.  ``np.asarray`` reads everything, which is
+    what saving does.
+    """
+
+    def __init__(self, path, key: str, shape, dtype):
+        self.path, self.key = str(path), key
+        self.shape, self.dtype = tuple(shape), np.dtype(dtype)
+        self._cached: Tuple = (None, None)
+
+    @property
+    def ndim(self) -> int:
+        return len(self.shape)
+
+    def __len__(self) -> int:
+        return self.shape[0]
+
+    def __getitem__(self, index):
+        if isinstance(index, (int, np.integer)) and self._cached[0] == int(index):
+            return self._cached[1]
+        with h5py.File(self.path, "r") as f:
+            plane = f[self.key][index]
+        if isinstance(index, (int, np.integer)):
+            self._cached = (int(index), plane)
+        return plane
+
+    def __array__(self, dtype=None, copy=None):
+        with h5py.File(self.path, "r") as f:
+            data = f[self.key][()]
+        return data if dtype is None else data.astype(dtype)
+
+
+def load_images(path) -> List:
+    """The images kept in a localization file, as `ImageData`; [] if none.
+
+    Never raises: a file without them, or a damaged group, opens without.
+    """
+    from ..images import ImageData
+    out = []
+    try:
+        with h5py.File(path, "r") as f:
+            group = f.get(IMAGES)
+            if not isinstance(group, h5py.Group):
+                return []
+            for key in sorted(group, key=lambda k: int(k) if k.isdigit() else 1e9):
+                g = group[key]
+                data = g["data"]
+                a = g.attrs
+                px, py = float(a.get("pixelsize", 1.0)), float(a.get("pixelsize_y", 0) or 0)
+                out.append(ImageData(
+                    data=StoredStack(path, f"{IMAGES}/{key}/data", data.shape, data.dtype),
+                    pixelsize=px, pixelsize_y=py if py and py != px else None,
+                    x0=float(a.get("x0", 0.0)), y0=float(a.get("y0", 0.0)),
+                    name=str(a.get("name", "")), path=str(a.get("path", "")) or None,
+                    kind=str(a.get("kind", "image")),
+                    frames=g["frames"][()] if "frames" in g else None,
+                    metadata=json.loads(a.get("metadata", "{}"))))
+    except (OSError, KeyError, ValueError, TypeError):
+        return out
+    return out
 
 
 def load_localizations(path) -> Localizations:
