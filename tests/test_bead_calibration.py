@@ -41,6 +41,30 @@ def test_subpixel_registration_recovers_known_shift():
     np.testing.assert_allclose(got, -shift, atol=.12)
 
 
+def test_a_simulated_bead_off_the_voxel_grid_comes_back_at_its_offset():
+    # smappy.simulate's astigmatic PSF at 20 nm steps, a bead a quarter, a
+    # half and three quarters of a voxel off the reference in every axis,
+    # registered as the central refinement pass registers it.  The Powell
+    # refinement this replaced was 0.27 of a plane out here.
+    from scipy.special import erf
+    from smappy.simulate import ASTIGMATISM, astigmatic_sigmas
+
+    def bead(z_nm, y, x, dz_nm=20., size=31):
+        z = np.arange(-800., 800.1, dz_nm)
+        sx, sy = (w/100*np.sqrt(2) for w in astigmatic_sigmas(z_nm-z, 130., *ASTIGMATISM))
+        k = np.arange(size)-size//2
+        ex = .5*(erf((k+.5-x)/sx[:, None])-erf((k-.5-x)/sx[:, None]))
+        ey = .5*(erf((k+.5-y)/sy[:, None])-erf((k-.5-y)/sy[:, None]))
+        return ey[:, :, None]*ex[:, None, :]
+
+    reference = bead(0., 0., 0.)
+    for f in (.25, .5, .75):
+        got = estimate_shift(reference, bead(20.+20.*f, -f, f/2), [11, 5, 5],
+                             z_window=25, lateral_window=13)
+        np.testing.assert_allclose(got[0], -(1+f), atol=.06)       # planes: 1.2 nm
+        np.testing.assert_allclose(got[1:], [f, -f/2], atol=.01)   # pixels
+
+
 def test_shape_error_ignores_scale_but_detects_psf_distortion():
     reference = psf(41, 17)
     same_shape = 2.7 * reference

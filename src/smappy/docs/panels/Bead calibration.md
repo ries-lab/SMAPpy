@@ -2,7 +2,7 @@
 title: Bead calibration
 summary: Turns z-stacks of fluorescent beads into the measured 3D PSF model the Spline 3D fitters use, and for a split camera into two models and the transformation between the halves.
 widget: smappy.calibrate.qt_gui.CalibrationWindow
-covers: [smappy.calibrate.core.detect_beads, smappy.calibrate.core.collect_beads, smappy.calibrate.core.estimate_shift, smappy.calibrate.core.robust_shape_error, smappy.calibrate.core.build_calibration, smappy.calibrate.core._single_model, smappy.calibrate.core.spline_coefficients, smappy.calibrate.core.positive_pair_models, smappy.calibrate.core.FOCAL_PLANES, smappy.calibrate.dual.collect_dual_beads, smappy.calibrate.dual.fit_dual_transform, smappy.calibrate.dual.robust_projective, smappy.calibrate.dual.refine_projective, smappy.calibrate.dual.build_dual_calibration, smappy.calibrate.validation.fit_bead_diagnostics, smappy.calibrate.validation.fit_paired_bead_diagnostics, smappy.calibrate.qt_gui.CalibrationWindow]
+covers: [smappy.calibrate.core.detect_beads, smappy.calibrate.core.collect_beads, smappy.calibrate.core.estimate_shift, smappy.calibrate.core.subvoxel_peak, smappy.calibrate.core.robust_shape_error, smappy.calibrate.core.build_calibration, smappy.calibrate.core._single_model, smappy.calibrate.core.spline_coefficients, smappy.calibrate.core.positive_pair_models, smappy.calibrate.core.FOCAL_PLANES, smappy.calibrate.dual.collect_dual_beads, smappy.calibrate.dual.fit_dual_transform, smappy.calibrate.dual.robust_projective, smappy.calibrate.dual.refine_projective, smappy.calibrate.dual.build_dual_calibration, smappy.calibrate.validation.fit_bead_diagnostics, smappy.calibrate.validation.fit_paired_bead_diagnostics, smappy.calibrate.qt_gui.CalibrationWindow]
 ---
 
 ## What it does
@@ -285,9 +285,22 @@ $$C(\Delta) = \frac{\sum_\mathbf{r} R(\mathbf{r})\, M(\mathbf{r} - \Delta)}{\sqr
 each lag normalised by the energy in the part of the two volumes that
 actually overlap at that lag, so an edge contributes nothing it does not
 have.  The search is within a central $13 \times 13$ pixel window
-laterally.  The integer peak is refined to a fraction of a pixel and a plane
-by maximising the correlation of the trilinearly shifted volume within
-$\pm1$ of it.  The first pass covers the whole stack; the median shift is
+laterally.  The integer peak is refined to a fraction of a pixel and a
+plane from the correlation itself, without resampling the bead: $C$ is
+taken, over one fixed overlap, at the 27 whole-voxel lags around the peak,
+the triquadratic through their logarithms (every $z^i y^j x^k$ with
+$i, j, k \leq 2$) is found, and its maximum within $\pm1$ voxel is the shift.
+The logarithm, because the peak is close to a Gaussian; the triquadratic
+rather than a quadratic, because at 20 nm steps the peak is some two hundred
+times flatter along z than across, and its z curvature changes with the
+lateral offset (an astigmatic PSF's width changes with z) -- a quadratic
+folds that change into the z shift and pulls every bead towards a whole
+plane.  On simulated beads at 20 nm steps the shifts come back within 1.4 nm
+rms in z and 0.004 pixels laterally.  Maximising the correlation of a
+linearly interpolated bead, as this did before, took nine times as long and
+left 5.7 nm: interpolation smooths by an amount that depends on the
+fraction, and draws the optimum towards whole planes.
+The first pass covers the whole stack; the median shift is
 subtracted, so that *max xy shift* and *max z shift* are measured from the
 consensus of the beads and not from the reference; the refinement passes
 (*iterations* minus one) correlate the central planes only, $\max(7, A/dz)$ of them, $A$ the *alignment range*.  Every bead is resampled once, with
@@ -602,7 +615,10 @@ Based on SMAP's bead calibrator, `calibrate3D_GUI_g` in `fit3Dcspline`
 * **Alignment** uses a linear, overlap-normalised correlation rather than a
   circular one, the shift limits reject a bead after the search instead of
   bounding it, and a bead's shape is scored against the average of the
-  *other* beads.
+  *other* beads.  SMAP finds the sub-voxel peak by upsampling both stacks
+  fourfold and interpolating their correlation cubically; here the
+  correlation is taken at whole voxels only, and its peak interpolated by
+  the triquadratic above.
 * **Two halves, normalised together.**  SMAP divides both averages by the
   main half's brightest plane (main at 1, secondary at its ratio).  Here the
   two halves' light around focus together is one photon, counted before

@@ -139,7 +139,9 @@ reference for diagnostics only and never contribute to the model.
   match the structure and scale of SMAP's full-stack plus 50-frame refinement at
   10 nm spacing. Correlation uses the central 13 by 13 pixels. Unlike SMAP's
   circular FFT, overlap-normalized linear correlation cannot wrap signal from one
-  edge to the other. Subpixel refinement is performed locally around its peak.
+  edge to the other. The subpixel shift is interpolated from the correlation at the
+  27 whole-voxel lags around its peak (the triquadratic through their logarithms;
+  `core.subvoxel_peak`), without resampling the bead.
   The common shift origin is the median coarse shift.
 - Maximum shifts are acceptance limits, not search bounds. After the broad search,
   beads beyond +/-250 nm in z or a radial 3-pixel xy displacement are excluded

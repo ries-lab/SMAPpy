@@ -12,7 +12,7 @@ import time
 from typing import Optional
 
 import numpy as np
-from scipy import ndimage, optimize, signal
+from scipy import ndimage, signal
 from scipy.interpolate import CubicSpline
 from scipy.spatial import cKDTree
 
@@ -392,24 +392,119 @@ def estimate_shift(reference, moving, limits=None, z_window=None, lateral_window
     if np.any(hi-lo < 3):
         quality = float(block[peak])
         return (initial, quality) if return_quality else initial
-    grid = np.mgrid[tuple(slice(a, b) for a, b in zip(lo, hi))].astype(float)
-    ref = reference[tuple(slice(a, b) for a, b in zip(lo, hi))].ravel()
+    region = tuple(slice(a, b) for a, b in zip(lo, hi))
+    ref = reference[region].ravel()
     ref -= ref.mean()
     ref /= max(np.linalg.norm(ref), 1e-15)
 
-    def objective(delta):
-        shift = initial+delta
-        sample = ndimage.map_coordinates(moving, grid-shift[:, None, None, None],
-                                         order=1, prefilter=False).ravel()
-        sample -= sample.mean()
-        return 1-np.dot(sample, ref)/max(np.linalg.norm(sample), 1e-15)
+    base = initial.astype(int)
 
-    refined = optimize.minimize(objective, np.zeros(3), method='Powell',
-                                bounds=[(-1., 1.)]*3,
-                                options={'xtol': .005, 'ftol': 1e-7, 'maxiter': 30})
-    shift = initial+refined.x
-    quality = float(1-objective(refined.x))
+    def correlation_at(lag):
+        sample = moving[tuple(slice(a-d, b-d) for a, b, d in zip(lo, hi, base+lag))].ravel()
+        sample = sample-sample.mean()
+        return np.dot(sample, ref)/max(np.linalg.norm(sample), 1e-15)
+
+    delta, quality = subvoxel_peak(correlation_at)
+    shift = initial+delta
     return (shift, quality) if return_quality else shift
+
+
+def subvoxel_peak(correlation_at):
+    """The sub-voxel maximum of a correlation, from its 27 values around a peak.
+
+    ``correlation_at(lag)`` is the normalised correlation with the moving
+    stack displaced by a whole-voxel ``lag`` in {-1, 0, 1}^3 from the integer
+    peak -- a slice and a dot product, with no resampling.  Their logarithm
+    is interpolated by the triquadratic through all 27 (every z^i y^j x^k,
+    i, j, k <= 2), and its maximum, found by Newton's method, is the shift,
+    limited to a voxel either way.
+
+    The logarithm, because the correlation of two blurred spots is close to
+    a Gaussian peak, which it makes a quadratic.  The triquadratic rather
+    than a quadratic, because the peak is far flatter in z than across -- at
+    20 nm steps the correlation drops 0.05% over a plane and 11% over a
+    pixel -- and its z curvature changes with the lateral offset, since an
+    astigmatic PSF's width changes with z.  A least-squares quadratic
+    averaged that change into the z curvature and pulled every bead towards
+    a whole plane, by 0.15 of a plane at a half-plane offset (noiseless, the
+    PSF of `tests/test_bead_calibration.py`; the triquadratic: 0.013, the
+    Powell refinement 0.07).  With the mixed cubic terms added it still left
+    1.3 nm z error on simulated beads all at one height, where the
+    triquadratic leaves 0.95.
+
+    This replaced maximising the same correlation over resampled stacks:
+    linear interpolation, Powell within a voxel, ~80 evaluations and ~80 ms
+    a bead.  Simulated beads (`smappy.simulate`'s PSF, 20000 photons; 3
+    stacks of 9 at 20 nm steps, each bead at its own height within +-60 nm
+    and off the pixel grid, 3 seeds), against their true shifts:
+
+                                  Powell     this
+        refinement, per bead          80 ms      9 ms
+        `build_calibration`           6.1 s      2.5 s
+        `calibrate_dual`              11.4 s     5.2 s
+        z error, rms                  5.7 nm     1.4 nm
+        lateral error, rms            0.006 px   0.0035 px
+        refitted beads' z error, rms  5.25 nm    5.34 nm
+
+    (40 nm steps: z error 9.4 -> 2.1 nm.)  Linear interpolation smooths the
+    moving stack by an amount that depends on the fractional shift, which
+    pulls its optimum towards whole voxels.  Only with every bead at the
+    same height, on a plane, where interpolation is exact, was it the closer
+    of the two: 1.06 nm against 0.95 for one colour, 0.60 against 0.81 for
+    two.  `build_calibration`'s time is now mostly the cubic resampling of
+    each bead (`apply_shifts`), not this.
+
+    Where the values are not all positive or the fit has no maximum within a
+    voxel, each axis is fitted on its own (a three-point parabola) and an
+    axis without a maximum keeps its integer peak.  Returns the shift from the
+    integer peak and the correlation at it.
+    """
+    values = np.array([correlation_at(lag) for lag in _LAGS])
+    centre = float(values[13])
+    if np.all(values > 0) and np.all(np.isfinite(values)):
+        coeff = _INTERPOLATE@np.log(values)
+        delta = np.zeros(3)
+        for _ in range(10):
+            _, gradient, hessian = _polynomial(coeff, delta)
+            if not np.all(np.linalg.eigvalsh(hessian) < 0):
+                break
+            step = np.linalg.solve(hessian, -gradient)
+            delta = delta+step
+            if np.max(np.abs(delta)) > 1:
+                break
+            if np.max(np.abs(step)) < 1e-5:
+                return delta, float(np.exp(_polynomial(coeff, delta)[0]))
+    delta = np.zeros(3)
+    for axis, (lower, upper) in enumerate(((values[4], values[22]), (values[10], values[16]),
+                                           (values[12], values[14]))):
+        curvature = lower-2*centre+upper
+        if curvature < 0:
+            delta[axis] = np.clip(.5*(lower-upper)/curvature, -1, 1)
+    return delta, centre
+
+
+# the lags {-1, 0, 1}^3 in z,y,x order (the centre is the 13th), the
+# exponents of the triquadratic through them, and the matrix that takes the
+# 27 values to its coefficients
+_LAGS = np.stack(np.meshgrid(*[[-1, 0, 1]]*3, indexing='ij'), -1).reshape(-1, 3)
+_EXPONENTS = np.array([(i, j, k) for i in range(3) for j in range(3) for k in range(3)])
+_INTERPOLATE = np.linalg.inv(np.prod(_LAGS[:, None, :].astype(float)**_EXPONENTS[None],
+                                     axis=2))
+
+
+def _polynomial(coeff, delta):
+    """Value, gradient and Hessian at ``delta`` of sum_k c_k prod_i delta_i^e_ki."""
+    e = _EXPONENTS
+    unit = np.eye(3, dtype=int)
+
+    def terms(exponents):  # a negative exponent only ever meets a zero factor
+        return np.prod(delta**np.maximum(exponents, 0), axis=1)
+
+    value = float(coeff@terms(e))
+    gradient = np.array([coeff@(e[:, a]*terms(e-unit[a])) for a in range(3)])
+    hessian = np.array([[coeff@(e[:, a]*(e[:, b]-(a == b))*terms(e-unit[a]-unit[b]))
+                         for b in range(3)] for a in range(3)])
+    return value, gradient, hessian
 
 
 def robust_shape_error(sample, reference):
@@ -753,20 +848,18 @@ def estimate_pair_shift(reference, moving, limits=None, z_window=None,
     hi = np.minimum(starts+widths, np.floor(shape+initial-2).astype(int))
     if np.any(hi-lo < 3):
         return (initial, float(block[peak])) if return_quality else initial
-    grid = np.mgrid[tuple(slice(a, b) for a, b in zip(lo, hi))].astype(float)
-    r = reference[(slice(None),)+tuple(slice(a, b) for a, b in zip(lo, hi))].copy()
+    region = tuple(slice(a, b) for a, b in zip(lo, hi))
+    r = reference[(slice(None),)+region].copy()
     r -= r.mean(axis=(1, 2, 3), keepdims=True)
     r = r.ravel()/max(np.linalg.norm(r), 1e-15)
-    def objective(delta):
-        sample = np.stack([ndimage.map_coordinates(ch, grid-(initial+delta)[:, None, None, None],
-                            order=1, prefilter=False) for ch in moving])
-        sample -= sample.mean(axis=(1, 2, 3), keepdims=True)
-        return 1-np.dot(sample.ravel(), r)/max(np.linalg.norm(sample), 1e-15)
-    result = optimize.minimize(objective, np.zeros(3), method='Powell',
-            bounds=[(-1., 1.)]*3, options={'xtol': .005, 'ftol': 1e-7, 'maxiter': 30})
-    shift = initial+result.x
-    return (shift, float(1-objective(result.x))) if return_quality else shift
-
+    base = initial.astype(int)
+    def correlation_at(lag):
+        sample = moving[(slice(None),)+tuple(slice(a-d, b-d) for a, b, d in zip(lo, hi, base+lag))]
+        sample = sample-sample.mean(axis=(1, 2, 3), keepdims=True)
+        return np.dot(sample.ravel(), r)/max(np.linalg.norm(sample), 1e-15)
+    delta, quality = subvoxel_peak(correlation_at)
+    shift = initial+delta
+    return (shift, quality) if return_quality else shift
 
 # the planes either side of focus a paired PSF's signal is read over, for the
 # normalisation: enough that one plane's noise does not set it, few enough
