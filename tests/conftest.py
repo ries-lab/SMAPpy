@@ -1,9 +1,9 @@
 """Keep the tests off the developer's screen and out of their real settings.
 
-`smappy.config` and the workspace live in the platform's config directory, and
-a GUI test builds a `ControlWindow`, which reads the workspace on the way up
-and writes it on the way down.  Without this the suite would take its plugin
-roots from whatever the developer has configured and overwrite their tabs.
+`smappy.config` lives in the platform's config directory, and a GUI test
+builds a `ControlWindow`, which opens the GUI file named there on the way up
+and writes the window position on the way down.  Without this the suite would
+take its plugin roots and tabs from whatever the developer has configured.
 """
 import os
 

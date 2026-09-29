@@ -16,8 +16,8 @@ in desktop coordinates.  Those rectangles go to the player, which draws the
 spotlight and the pointer itself, so they can move between steps.
 
 The configuration is a directory of its own (``SMAPPY_CONFIG_DIR``, and a
-QSettings path beside it): a tutorial shows the shipped workspace, not the
-favourites of whoever runs it, and writes nothing into theirs.
+QSettings path beside it): a tutorial shows the shipped GUI, not the one
+whoever runs it saved last, and writes nothing into theirs.
 """
 from __future__ import annotations
 

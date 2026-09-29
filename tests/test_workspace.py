@@ -1,4 +1,4 @@
-"""Tabs as curated lists over one tree, and the state that survives a restart."""
+"""Tabs as curated lists over one tree, and the GUI files that keep them."""
 import pytest
 
 from smappy import plugins
@@ -207,14 +207,16 @@ def test_values_survive_being_saved_and_reopened(window, tmp_path):
     tab.slots[instance.id].panel.form.restore({"segmentation_var": 11})
     instance.label = "COMET (coarse)"
     path = tmp_path / "saved.yaml"
-    window.save_workspace(path)
+    window.save_gui_to(path)
 
     reopened = load(path)
     back = next(t for t in reopened.tabs if t.name == "Analysis")
     assert back.instances[0].label == "COMET (coarse)"
     assert back.instances[0].values["segmentation_var"] == 11
     assert reopened.layout["open"]["Analysis"] == instance.id
-    assert reopened.layout["geometry"]
+    # the screen's business, not the GUI's; and a GUI starts on File
+    assert "geometry" not in reopened.layout
+    assert "active_tab" not in reopened.layout
 
 
 def test_an_unopened_panel_keeps_the_values_it_was_given(window, tmp_path):
@@ -223,10 +225,108 @@ def test_an_unopened_panel_keeps_the_values_it_was_given(window, tmp_path):
     instance = tab.tab.instances[1]
     instance.values = {"pixelsize_nm": 42.0}
     assert tab.slots[instance.id].panel is None
-    window.save_workspace(tmp_path / "saved.yaml")
+    window.save_gui_to(tmp_path / "saved.yaml")
     back = load(tmp_path / "saved.yaml")
     kept = next(t for t in back.tabs if t.name == "Analysis").instances[1]
     assert kept.values == {"pixelsize_nm": 42.0}
+
+
+def make_window():
+    from smappy.gui.app import ControlWindow, RenderWindow
+    from smappy.session import Session
+    session = Session()
+    return ControlWindow(session, RenderWindow(session))
+
+
+def comet_value(window):
+    tab = tab_named(window, "Analysis")
+    return next(i for i in tab.tab.instances if i.plugin == COMET).values.get(
+        "segmentation_var")
+
+
+def set_comet_value(window, value):
+    tab = tab_named(window, "Analysis")
+    instance = next(i for i in tab.tab.instances if i.plugin == COMET)
+    tab.open_section(instance.id)
+    tab.slots[instance.id].panel.form.restore({"segmentation_var": value})
+
+
+def test_nothing_typed_survives_a_restart_unless_it_was_saved(window, tmp_path):
+    """One installation, many users: a value one person typed must not become
+    the next person's default by the program remembering it."""
+    from PySide6.QtWidgets import QApplication
+    set_comet_value(window, 17)
+    window.tabs.setCurrentIndex(3)
+    QApplication.instance().aboutToQuit.emit()
+    written = {p.name for p in (tmp_path / "config").rglob("*") if p.is_file()}
+    assert written <= {"window.yaml"}         # where the window was, nothing else
+
+    again = make_window()
+    assert comet_value(again) is None
+    assert again.tabs.tabText(again.tabs.currentIndex()) == "File"
+    assert again.workspace.path is None
+    assert "default GUI" in again.windowTitle()
+
+
+def test_a_saved_gui_is_what_the_next_start_opens(window, tmp_path):
+    set_comet_value(window, 17)
+    path = window.save_gui_to(tmp_path / "jonas.gui.yaml")
+    assert window.windowTitle().endswith("jonas")
+
+    again = make_window()
+    assert again.workspace.path == path.resolve()
+    assert comet_value(again) == 17
+    assert again.windowTitle().endswith("jonas")
+    assert again.tabs.tabText(again.tabs.currentIndex()) == "File"
+
+
+def test_save_gui_overwrites_the_loaded_file_and_nothing_else(window, tmp_path):
+    path = window.save_gui_to(tmp_path / "lab.gui.yaml")
+    set_comet_value(window, 23)
+    window.save_gui()
+    assert next(i for t in load(path).tabs for i in t.instances
+                if i.plugin == COMET).values["segmentation_var"] == 23
+
+
+def test_save_gui_on_the_shipped_default_asks_where(window, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QFileDialog
+    target = tmp_path / "mine.gui.yaml"
+    asked = []
+
+    def ask(*args, **kwargs):
+        asked.append(args)
+        return str(target), ""
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", ask)
+    assert window.workspace.path is None
+    window.save_gui()
+    assert asked and target.exists()
+    assert window.workspace.path == target
+
+
+def test_loading_a_gui_replaces_the_values_and_is_remembered(window, tmp_path):
+    set_comet_value(window, 31)
+    path = window.save_gui_to(tmp_path / "other.gui.yaml")
+    window.load_default_gui()
+    assert comet_value(window) is None
+    assert make_window().workspace.path is None      # the default, next time too
+
+    window.load_gui_from(path)
+    assert comet_value(window) == 31
+    assert window.tabs.tabText(window.tabs.currentIndex()) == "File"
+    assert make_window().workspace.path == path.resolve()
+
+
+def test_a_remembered_gui_that_has_gone_gives_the_default(window, tmp_path):
+    path = window.save_gui_to(tmp_path / "gone.gui.yaml")
+    path.unlink()
+    assert make_window().workspace.path is None
+
+
+def test_the_window_position_is_kept_apart_from_the_gui(window, tmp_path):
+    from smappy import workspace
+    window.save_window_state()
+    assert workspace.window_state()["geometry"]
+    make_window()                              # reads it back without error
 
 
 def test_removing_and_reordering_from_the_tab_edits_the_workspace(window):

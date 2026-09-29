@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from PySide6.QtCore import QElapsedTimer, QSettings, Qt, QThread, QTimer, Signal
+from PySide6.QtCore import QElapsedTimer, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (QApplication, QCheckBox, QDialog, QFileDialog, QHBoxLayout,
                                QMessageBox, QPushButton,
@@ -89,8 +89,9 @@ class ControlWindow(QMainWindow):
         super().__init__()
         self.session = session
         self.render_window = render
-        self.setWindowTitle("SMAPpy")
-        self.workspace = workspace_module.load()
+        # the GUI last saved or loaded, or the shipped one: never one written
+        # behind anybody's back (see `workspace`)
+        self.workspace = workspace_module.load_startup()
         missing = self.workspace.prune(list(plugins.refs()))
         if missing:
             print("workspace: dropped pins for plugins that are not installed: "
@@ -100,6 +101,7 @@ class ControlWindow(QMainWindow):
         self.plugin_tabs: List[PluginTab] = []
         self.roi_tab: Optional[ROIHeader] = None
         self.build_tabs()
+        self._update_title()
         self.setCentralWidget(self.tabs)
         # tall on purpose: with a file open the Render tab's own content wants
         # some 700 px, and scrolling for the display settings every time is
@@ -139,8 +141,10 @@ class ControlWindow(QMainWindow):
         menu.addSeparator()
         self._action(menu, "Restore GUI state from file...", None,
                      self.restore_state_from_file)
-        self._action(menu, "Save workspace as...", None, self.save_workspace_as)
-        self._action(menu, "Open workspace...", None, self.load_workspace_from)
+        self._action(menu, "Save GUI", None, self.save_gui)
+        self._action(menu, "Save GUI as...", None, self.save_gui_as)
+        self._action(menu, "Load GUI...", None, self.load_gui)
+        self._action(menu, "Load default GUI", None, self.load_default_gui)
         self._action(menu, "Preferences...", QKeySequence.Preferences,
                      self.open_preferences)
         menu.addSeparator()
@@ -175,7 +179,7 @@ class ControlWindow(QMainWindow):
         self._action(view, "Reset view", "Ctrl+0", render.view.reset)
         self._action(view, "Show render window", None, render.show)
         QApplication.instance().aboutToQuit.connect(self.stop_loading)
-        QApplication.instance().aboutToQuit.connect(self.save_workspace)
+        QApplication.instance().aboutToQuit.connect(self.save_window_state)
         session.gui_state_provider = self.plugin_state
         session.on_change(self._on_session)
         self._on_session("locs")
@@ -275,10 +279,11 @@ class ControlWindow(QMainWindow):
                 widget = RenderTab(self.session, self.render_window.view)
             else:
                 widget = PluginTab(tab, self.session, header=self.header_for(tab.header))
-                widget.changed.connect(self.save_workspace)
                 self.plugin_tabs.append(widget)
             self.tabs.addTab(widget, tab.name)
-        wanted = self.workspace.layout.get("active_tab", current) or "Render"
+        # a rebuild keeps the tab one is on; a start is on File, whatever
+        # tab the GUI was saved from
+        wanted = current or "File"
         for i in range(self.tabs.count()):
             if self.tabs.tabText(i) == wanted:
                 self.tabs.setCurrentIndex(i)
@@ -325,27 +330,19 @@ class ControlWindow(QMainWindow):
         PreferencesDialog(self.workspace, self).exec()
         if [(t.name, t.kind) for t in self.workspace.tabs] != before:
             self.build_tabs()
-        self.save_workspace()
 
     # ---------------------------------------------------------- workspace
     def plugin_state(self) -> dict:
-        """What goes into a localization file's `gui` group.
-
-        The plugin state but *not* the window geometry: geometry is
-        machine-specific, travels badly to a colleague's screen, and is the one
-        part that is worthless as a record of how the file was made.
-        """
-        state = self.collect_workspace().to_dict()
-        state["layout"] = {k: v for k, v in state.get("layout", {}).items()
-                           if k != "geometry"}
-        return state
+        """What goes into a localization file's `gui` group: the GUI as a
+        file would have it, which already leaves out the window geometry."""
+        return self.collect_workspace().to_dict()
 
     def restore_state_from_file(self) -> None:
         """Take the tabs and their parameters from a file that carries them.
 
         Not done automatically on open: rearranging someone's tabs because they
-        looked at a colleague's dataset would be a surprise, and the auto-saved
-        workspace already restores their own last session.
+        looked at a colleague's dataset would be a surprise.  What is restored
+        has no GUI file of its own, so *Save GUI* asks where to put it.
         """
         from ..io.hdf5 import load_gui_state
         start = str(self.session.path) if self.session.path else ""
@@ -361,6 +358,7 @@ class ControlWindow(QMainWindow):
         self.workspace = Workspace.from_dict(state)
         missing = self.workspace.prune(list(plugins.refs()))
         self.build_tabs()
+        self._update_title(f"from {Path(path).name}")
         if missing:
             QMessageBox.information(
                 self, "Restore GUI state",
@@ -368,7 +366,11 @@ class ControlWindow(QMainWindow):
                 + "\n".join(sorted(set(missing))))
 
     def collect_workspace(self) -> Workspace:
-        """The workspace as it stands: values, order, and where the window is."""
+        """The workspace as it stands: values, order, and which section is open.
+
+        Not which tab is in front, nor where the window is: a GUI starts on
+        File, and the geometry belongs to the screen, not to the GUI.
+        """
         opened = {}
         for tab, widget in zip(self.workspace.tabs, self._tab_widgets()):
             if isinstance(widget, PluginTab):
@@ -376,41 +378,94 @@ class ControlWindow(QMainWindow):
                 which = widget.open_instance()
                 if which:
                     opened[tab.name] = which
-        self.workspace.layout = {
-            "active_tab": self.tabs.tabText(self.tabs.currentIndex()),
-            "open": opened,
-            "geometry": bytes(self.saveGeometry().toBase64()).decode(),
-        }
+        self.workspace.layout = {"open": opened}
         return self.workspace
 
-    def save_workspace(self, path=None) -> None:
+    def _update_title(self, name: Optional[str] = None) -> None:
+        """Say whose GUI this is, so nobody saves over somebody else's."""
+        name = name or workspace_module.display_name(self.workspace.path)
+        self.setWindowTitle(f"SMAPpy \u2014 {name}")
+
+    def save_gui_to(self, path) -> Path:
+        """Write the GUI to ``path``, make it the loaded one and the next start."""
+        written = self.collect_workspace().save(path)
+        workspace_module.remember(written)
+        self._update_title()
+        return written
+
+    def save_gui(self) -> None:
+        """Overwrite the loaded GUI file; with none loaded, ask for one.
+
+        The shipped default is never written into: it lives in the package,
+        which may be read-only and is the same for everybody.
+        """
+        if self.workspace.path is None:
+            self.save_gui_as()
+            return
+        self._write_gui(self.workspace.path)
+
+    def save_gui_as(self) -> None:
+        start = self.workspace.path or (workspace_module.guis_dir()
+                                        / f"my{workspace_module.GUI_SUFFIX}")
+        start.parent.mkdir(parents=True, exist_ok=True)
+        path, _ = QFileDialog.getSaveFileName(self, "Save GUI", str(start),
+                                              "GUI (*.yaml)")
+        if path:
+            self._write_gui(path)
+
+    def _write_gui(self, path) -> None:
         try:
-            self.collect_workspace().save(path)
+            self.save_gui_to(path)
+        except OSError as e:
+            QMessageBox.warning(self, "Save GUI", f"could not write {path}:\n{e}")
+
+    def load_gui(self) -> None:
+        start = self.workspace.path.parent if self.workspace.path else \
+            workspace_module.guis_dir()
+        path, _ = QFileDialog.getOpenFileName(self, "Load GUI", str(start),
+                                              "GUI (*.yaml)")
+        if path:
+            self.load_gui_from(path)
+
+    def load_gui_from(self, path) -> None:
+        """Replace the tabs and values with those of a GUI file.
+
+        A file that does not read gives the shipped default, and is not
+        remembered, so the next start is not a broken one.
+        """
+        self.workspace = workspace_module.load(path)
+        missing = self.workspace.prune(list(plugins.refs()))
+        self.tabs.clear()               # start on File, not on the tab one was on
+        self.build_tabs()
+        workspace_module.remember(self.workspace.path)
+        self._update_title()
+        if path and self.workspace.path is None:
+            QMessageBox.information(self, "Load GUI",
+                                    f"{path} is not a GUI file; the default is loaded")
+        elif missing:
+            QMessageBox.information(
+                self, "Load GUI",
+                "loaded, without plugins that are not installed here:\n"
+                + "\n".join(sorted(set(missing))))
+
+    def load_default_gui(self) -> None:
+        """The shipped GUI, and the shipped GUI at the next start too."""
+        self.load_gui_from(None)
+
+    def save_window_state(self) -> None:
+        """Where the window is: the one thing kept without being asked."""
+        try:
+            workspace_module.save_window_state(
+                {"geometry": bytes(self.saveGeometry().toBase64()).decode()})
         except OSError as e:                 # a read-only config dir must not
-            print(f"could not save the workspace: {e}")      # cost you the quit
+            print(f"could not save the window position: {e}")   # cost the quit
 
     def restore_layout(self) -> None:
-        geometry = self.workspace.layout.get("geometry")
-        if not geometry:
+        geometry = workspace_module.window_state().get("geometry")
+        if not isinstance(geometry, str) or not geometry:
             return
         from PySide6.QtCore import QByteArray
         self.restoreGeometry(QByteArray.fromBase64(geometry.encode()))
-
-    def save_workspace_as(self) -> None:
-        path, _ = QFileDialog.getSaveFileName(self, "Save workspace", "",
-                                              "Workspace (*.yaml)")
-        if path:
-            self.collect_workspace().save(path)
-
-    def load_workspace_from(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Open workspace", "",
-                                              "Workspace (*.yaml)")
-        if not path:
-            return
-        self.workspace = workspace_module.load(path)
-        self.workspace.prune(list(plugins.refs()))
-        self.build_tabs()
-        self.restore_layout()
 
     def _open_manager(self) -> None:
         if self.roi_tab is not None:
