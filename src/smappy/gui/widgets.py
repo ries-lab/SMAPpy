@@ -4,13 +4,44 @@ from __future__ import annotations
 from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import (QFrame, QHBoxLayout, QToolButton, QVBoxLayout,
-                               QWidget)
+from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLayout, QScrollArea,
+                               QToolButton, QVBoxLayout, QWidget)
 
 # The control window's width.  A tab whose content would ask for more (a long
 # file name in a wrapping label) caps its own hint at this, so one tab never
 # widens the window for the other three.
 CONTROL_WIDTH = 380
+
+
+class ColumnScroll(QScrollArea):
+    """A column of sections that scrolls up and down, never sideways.
+
+    A plain scroll area grows its content to the content's minimum width, so
+    one control wider than the column -- a combo box with a long choice, a
+    long label on a larger font -- widened every section in the tab, and the
+    title bars' ? and detach arrow went out of view on the right.  Here the
+    content is held to the viewport's width whatever it asks for: a control
+    that is too wide is clipped inside its own section, and the title bars,
+    which ask for little, always fit.  `tests/test_control_width.py` keeps
+    the shipped plugins from needing the clipping at all.
+    """
+
+    def __init__(self, widget: Optional[QWidget] = None, parent=None):
+        super().__init__(parent)
+        self.setWidgetResizable(True)
+        self.setFrameShape(QScrollArea.NoFrame)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        if widget is not None:
+            self.setWidget(widget)
+
+    def setWidget(self, widget: QWidget) -> None:
+        # the layout would otherwise set the widget's minimum to what it
+        # asks for, and the scroll area never sizes a widget below that;
+        # an explicit minimum width of 1 is what makes it take the viewport's
+        if widget.layout() is not None:
+            widget.layout().setSizeConstraint(QLayout.SetNoConstraint)
+        widget.setMinimumWidth(1)
+        super().setWidget(widget)
 
 
 class CollapsibleSection(QWidget):

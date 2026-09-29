@@ -12,12 +12,13 @@ from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QKeySequence, QShortcut, QTextCursor
 from PySide6.QtWidgets import (QCheckBox, QHBoxLayout, QLabel, QMainWindow,
                                QMessageBox, QPlainTextEdit, QPushButton,
-                               QScrollArea, QSpinBox, QToolButton, QVBoxLayout,
+                               QSpinBox, QToolButton, QVBoxLayout,
                                QWidget)
 
 from ..plugins import Plugin, Result
 from ..session import Session
 from .params import SettingsForm
+from .widgets import ColumnScroll
 
 
 
@@ -518,9 +519,7 @@ class PluginWindow(QMainWindow):
         self.setWindowFlag(Qt.Window, True)
         self.setWindowTitle(plugin_cls.name or plugin_cls.path)
         self.panel = PluginPanel(plugin_cls, session)
-        area = QScrollArea()
-        area.setWidgetResizable(True)
-        area.setWidget(self.panel)
+        area = ColumnScroll(self.panel)
         # the same ? as a section's title bar, in the one place a window has
         self.help_button = QToolButton(text="?", autoRaise=True)
         self.help_button.setToolTip("what this plugin does, how it works, "

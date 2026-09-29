@@ -26,6 +26,9 @@ from .. import docs, plugins
 
 _WINDOW: Optional["HelpWindow"] = None
 
+# the page's text against the rest of the GUI's
+TEXT_SCALE = 1.25
+
 
 def show_help(path: Optional[str] = None, parent=None) -> "HelpWindow":
     """Open the Help window, on ``path``'s page if given."""
@@ -105,6 +108,16 @@ class HelpWindow(QMainWindow):
         self.browser.setOpenLinks(False)
         self.browser.anchorClicked.connect(self._on_link)
         self.browser.document().setDefaultStyleSheet(docs.STYLE)
+        # a page is read, not glanced at like a control: the application's
+        # font, sized for a dense column of settings, is small for prose.
+        # Set before the first page, whose formulas are drawn to this size.
+        font = self.browser.font()
+        if font.pointSizeF() > 0:
+            font.setPointSizeF(font.pointSizeF() * TEXT_SCALE)
+        else:
+            font.setPixelSize(round(font.pixelSize() * TEXT_SCALE))
+        self.browser.setFont(font)
+        self.browser.document().setDefaultFont(font)
         splitter = QSplitter()
         splitter.addWidget(self.tree)
         splitter.addWidget(self.browser)
