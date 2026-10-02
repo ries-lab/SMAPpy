@@ -109,3 +109,15 @@ def app():
     pytest.importorskip("PySide6")
     from PySide6.QtWidgets import QApplication
     return QApplication.instance() or QApplication([])
+
+
+def test_the_static_site_files_the_windows_first_and_links_home(tmp_path):
+    """``python -m smappy.docs`` -- what is published beside the tutorials."""
+    from smappy.docs.__main__ import export
+    errors = export(tmp_path, ["Panels/Batch window", "Analysis/Process/History"],
+                    report=lambda *_: None, home="../")
+    assert errors == {}
+    index = (tmp_path / "index.html").read_text()
+    assert index.index("windows and tabs") < index.index("Analysis")
+    assert 'href="../"' in index and "SMAPpy help pages" in index
+    assert (tmp_path / "panels-batch-window.html").exists()

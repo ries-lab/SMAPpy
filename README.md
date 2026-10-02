@@ -44,10 +44,10 @@ has short guided tours on simulated data you can follow along with. Start with
 
 **Help pages.** Every plugin and the main parts of the GUI have a help page.
 It explains the theoretical background and every control. Open it with the
-**?** button on the plugin or panel, with F1, or from *Help → Plugin
-documentation*. To write the same pages as a static website:
-
-    python -m smappy.docs -o DIR
+**?** in a plugin's or a Render-tab section's title bar, with F1 in any panel or
+window, or from *Help → Plugin documentation*. The same pages are online at
+[ries-lab.github.io/SMAPpy/help](https://ries-lab.github.io/SMAPpy/help/), and
+`python -m smappy.docs -o DIR` writes them as a static website.
 
 **For developers.** [GUI.md](GUI.md) describes the architecture.
 [docs/](docs/) holds design notes on the plugin system and individual

@@ -1,4 +1,5 @@
-# The tutorials, rebuilt from the program and published on GitHub Pages.
+# The tutorials and the help pages, rebuilt from the program and published
+# on GitHub Pages.
 #
 # A tutorial is a storyboard that drives the real GUI (src/smappy/tutorial), so
 # it is built here rather than kept as files: every push to main that touches
@@ -8,6 +9,7 @@
 #
 # Needs Pages switched on once: Settings -> Pages -> Build and deployment ->
 # Source: "GitHub Actions".  The site is then https://ries-lab.github.io/SMAPpy/
+# and the help pages https://ries-lab.github.io/SMAPpy/help/
 name: tutorials
 
 on:
@@ -67,6 +69,10 @@ jobs:
 
       - name: Build the tutorials
         run: python -m smappy.tutorial -o site --voice "voices/$VOICE.onnx"
+
+      # the help pages beside them, the same the ? button opens in the program
+      - name: Build the help pages
+        run: python -m smappy.docs -o site/help --home ../
 
       - uses: actions/upload-pages-artifact@v3
         with:

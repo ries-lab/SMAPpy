@@ -299,6 +299,11 @@ footer a { color: var(--accent-ink); }
     the program: File &rarr; Simulate.</p>
   </header>
 __SECTIONS__
+  <section><h2>Reference</h2><ul class="tuts">
+    <li class="tut"><a href="help/"><span class="name">Help pages</span>
+    <span class="about">What every window and plugin does, how it works, and every
+    setting, with the maths and figures &ndash; the pages the ? button opens in the
+    program.</span></a></li></ul></section>
   <footer>Made from the program itself, and rebuilt when it changes.
   <a href="https://github.com/ries-lab/SMAPpy">SMAPpy on GitHub</a></footer>
 </div>
