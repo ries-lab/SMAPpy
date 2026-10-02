@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QFileDialog, QHBoxLayout,
 from .. import plugins
 from ..roi_manager import pipeline as pipeline_module
 from ..workspace import Instance
+from . import folders
 from .chooser import choose_plugin
 from .params import SettingsForm
 
@@ -273,17 +274,19 @@ class EvaluationWindow(QWidget):
 
     # -------------------------------------------------------------- files
     def save_as(self) -> None:
-        path, _ = QFileDialog.getSaveFileName(self, "Save pipeline", "",
+        path, _ = QFileDialog.getSaveFileName(self, "Save pipeline", folders.start(),
                                               "Pipeline (*.yaml)")
         if path:
+            folders.remember(path)
             pipeline_module.save(self.save_values(), path)
             self.status.setText(f"saved to {path}")
 
     def load_from(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Load pipeline", "",
+        path, _ = QFileDialog.getOpenFileName(self, "Load pipeline", folders.start(),
                                               "Pipeline (*.yaml)")
         if not path:
             return
+        folders.remember(path)
         loaded = pipeline_module.load(path)
         if not loaded:
             QMessageBox.warning(self, "Load pipeline", "no steps in that file")

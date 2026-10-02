@@ -24,6 +24,7 @@ from .. import lut as luts
 from ..regions import Region
 from ..render import FieldOfView, axis_unit
 from ..session import Session
+from . import folders
 
 TILE = 1.5          # render this many view widths, so a pan needs no render
 _LIVE_THREADS = []  # every render thread, so exit can stop them all
@@ -551,6 +552,29 @@ class RenderToolBar(QToolBar):
         self.addWidget(self.counts)
         view.session.on_change(self._update_counts)
         self._update_counts("locs")
+        self._style_buttons()
+
+    def _style_buttons(self) -> None:
+        """Buttons in the label's font, bold and framed, so they read as buttons.
+
+        A toolbar's buttons are frameless, and on macOS Qt gives QToolButton
+        the small system font, so *Save*, *ROI* and *Reset view* came out
+        smaller and fainter than the *width* and layer labels beside them --
+        and looked like labels too.  The size is the label's, measured rather
+        than written down, so it follows the platform and the user's font.
+        """
+        font = self.width_label.font()
+        size = (f"{font.pointSizeF():g}pt" if font.pointSizeF() > 0
+                else f"{font.pixelSize()}px")
+        self.setStyleSheet(
+            f"QToolButton {{ font-size: {size}; font-weight: bold;"
+            " border: 1px solid palette(mid); border-radius: 4px;"
+            " padding: 2px 8px; margin: 1px 2px; background: palette(button); }"
+            " QToolButton:hover { background: palette(light); }"
+            " QToolButton:pressed { background: palette(midlight); }"
+            " QToolButton[popupMode=\"2\"] { padding-right: 16px; }"
+            " QToolButton::menu-indicator { subcontrol-origin: padding;"
+            " subcontrol-position: right center; right: 4px; }")
 
     def _update_counts(self, what: str) -> None:
         """Localizations per layer, and inside the ROI when there is one."""
@@ -601,12 +625,14 @@ class RenderToolBar(QToolBar):
 
     def _default(self, suffix: str) -> str:
         path = self.view.session.path
-        return str(path.with_name(path.stem + "_image" + suffix)) if path else ""
+        return (str(path.with_name(path.stem + "_image" + suffix)) if path
+                else folders.start("image" + suffix))
 
     def _png(self) -> None:
         path, _ = QFileDialog.getSaveFileName(self, "Save image", self._default(".png"),
                                               "PNG (*.png)")
         if path:
+            folders.remember(path)
             self.view.save_png(path)
 
     def _tiff(self, what: str) -> None:
@@ -618,6 +644,7 @@ class RenderToolBar(QToolBar):
         path, _ = QFileDialog.getSaveFileName(self, "Save TIFF", self._default(".tif"),
                                               "TIFF (*.tif *.tiff)")
         if path:
+            folders.remember(path)
             self.view.save_tiff(path, pixelsize, what)
 
 

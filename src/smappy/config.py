@@ -96,3 +96,43 @@ def plugin_roots() -> List[Path]:
 
 def set_plugin_roots(roots) -> None:
     set("plugin_roots", [str(Path(p).expanduser()) for p in roots])
+
+
+# -------------------------------------------------------------- last folder
+
+def last_folder() -> Path | None:
+    """Where the last file was opened or saved, for the next dialog to start.
+
+    A folder that has since gone (an unplugged drive, a renamed run) gives
+    its nearest parent that is still there, which is usually still closer to
+    the data than the home directory.
+    """
+    raw = get("last_folder")
+    if not raw:
+        return None
+    folder = Path(str(raw)).expanduser()
+    for candidate in (folder, *folder.parents):
+        if candidate.is_dir():
+            return candidate
+    return None
+
+
+def remember_folder(path, up: int = 0) -> None:
+    """Remember the folder of ``path`` (a file, or a folder itself), ``up``
+    levels higher.
+
+    ``up=1`` is for a camera stack: acquisition software writes each stack
+    into a folder of its own, so the next stack is in a sibling of this
+    one's folder, and the folder above is where to start looking.
+    """
+    if not path:
+        return
+    folder = Path(str(path)).expanduser()
+    if not folder.is_dir():
+        folder = folder.parent
+    for _ in range(up):
+        if folder.parent != folder:
+            folder = folder.parent
+    folder = folder.resolve()
+    if str(folder) != get("last_folder"):
+        set("last_folder", str(folder))

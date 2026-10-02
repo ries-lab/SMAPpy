@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QFileDia
                                QSplitter, QTabWidget, QTableWidget, QTableWidgetItem,
                                QVBoxLayout, QWidget)
 
+from ..gui import folders
 from ..gui.params import SettingsForm
 from ..gui.widgets import CollapsibleSection
 from ..plugins import ParamInfo, param_specs
@@ -312,15 +313,18 @@ class CalibrationWindow(QMainWindow):
         self._refresh_files()
 
     def add_files(self) -> None:
-        paths, _ = QFileDialog.getOpenFileNames(self, "Bead stacks", "",
+        paths, _ = QFileDialog.getOpenFileNames(self, "Bead stacks", folders.start(),
                                                 "Image stacks (*.tif *.tiff *.ome.tif);;"
                                                 "All files (*)")
+        folders.remember(paths, stack=True)
         self.add_paths(paths)
 
     def add_directory(self) -> None:
-        path = QFileDialog.getExistingDirectory(self, "Folder of bead stacks")
+        path = QFileDialog.getExistingDirectory(self, "Folder of bead stacks",
+                                                folders.start())
         if not path:
             return
+        folders.remember(path)
         if self.subdirectories.isChecked():
             try:
                 found = [str(p) for p in discover_acquisitions([path])]
