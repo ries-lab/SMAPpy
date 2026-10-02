@@ -32,6 +32,7 @@ from typing import Iterator, List, Optional, Tuple
 import numpy as np
 import tifffile
 
+from ..frametags import tags_of_page
 from .tiff import ImageSource, _first_of_series, _series_files, open_stack
 
 
@@ -47,7 +48,7 @@ class WatchSettings:
 
 def watch_stack(path, chunk: int = 100, settings: Optional[WatchSettings] = None,
                 start: int = 0, stop: Optional[int] = None,
-                stop_event=None, on_wait=None
+                stop_event=None, on_wait=None, tags=None
                 ) -> Iterator[Tuple[int, np.ndarray]]:
     """Yield ``(first_frame, block)`` from an acquisition as it is written.
 
@@ -58,11 +59,13 @@ def watch_stack(path, chunk: int = 100, settings: Optional[WatchSettings] = None
     ``stop_event`` is a :class:`threading.Event` that ends the stream early --
     what a viewer sets when its window is closed.  ``on_wait(seconds)`` is
     called on each idle poll with the time since the last new frame, for a
-    progress line.
+    progress line.  ``tags`` is a `smappy.frametags.FrameTags` that is handed
+    each frame's metadata as it is read.
     """
     settings = settings or WatchSettings()
     ndtiff = _wait_for_ndtiff(path, settings, stop_event)
     if ndtiff is not None:
+        ndtiff.tags = tags
         yield from ndtiff.watch(chunk=chunk, settings=settings, start=start,
                                 stop=stop, stop_event=stop_event, on_wait=on_wait)
         return
@@ -89,14 +92,18 @@ def watch_stack(path, chunk: int = 100, settings: Optional[WatchSettings] = None
         while file_i < len(files) and not done:
             is_last = file_i == len(files) - 1
             hold = settings.hold_last and is_last and not final
+            planes = [] if tags is not None else None
             images, page_i, exhausted = _read_new_pages(files[file_i], page_i,
-                                                        hold_last=hold)
-            for image in images:
+                                                        hold_last=hold,
+                                                        metadata=planes)
+            for k, image in enumerate(images):
                 if (stop is not None and index >= stop) or _stopped(stop_event):
                     done = True
                     break
                 if index >= start:
                     buffer.append(image)
+                    if tags is not None:
+                        tags.add(index, planes[k])
                     if len(buffer) == chunk:
                         yield buffer_start, np.stack(buffer)
                         buffer_start += len(buffer)
@@ -193,9 +200,12 @@ def _looks_like_ndtiff(directory: Path) -> bool:
     return directory.is_dir() and any(directory.glob("*NDTiffStack*.tif"))
 
 
-def _read_new_pages(path: Path, page_i: int, hold_last: bool
+def _read_new_pages(path: Path, page_i: int, hold_last: bool,
+                    metadata: Optional[list] = None
                     ) -> Tuple[List[np.ndarray], int, bool]:
     """Pages of ``path`` from ``page_i`` on, and whether the file is exhausted.
+
+    ``metadata``, a list, is extended with each page's Micro-Manager metadata.
 
     The file is opened afresh every time: `tifffile` reads the page list once,
     so a handle kept open would never see the pages written after it.
@@ -207,10 +217,15 @@ def _read_new_pages(path: Path, page_i: int, hold_last: bool
                 available -= 1
             images = []
             for i in range(page_i, max(available, page_i)):
-                images.append(tf.pages[i].asarray())
+                page = tf.pages[i]
+                images.append(page.asarray())
+                if metadata is not None:
+                    metadata.append(tags_of_page(page))
             return images, page_i + len(images), page_i + len(images) >= available
     except Exception:
         # a file caught mid-write: nothing new this time round
+        if metadata is not None:
+            metadata.clear()
         return [], page_i, False
 
 

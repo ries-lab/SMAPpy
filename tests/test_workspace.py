@@ -12,6 +12,7 @@ PROFILE = "Analysis/Measure/Line Profile"
 PRECISION = "Analysis/Measure/Localization Precision"
 STATS = "Analysis/Measure/Localization Statistics"
 HISTORY = "Analysis/Process/History"
+TAGS = "Analysis/Process/Image Tags"
 MATH = "Analysis/Process/Math Parser"
 REMOVE = "Analysis/Process/Remove Localizations"
 REGISTER = "Analysis/Register/Calibrate transform"
@@ -50,7 +51,7 @@ def test_the_default_workspace_is_seeded_from_what_is_installed():
     assert [t.name for t in ws.tabs] == ["File", "Localize", "Render", "Analysis", "ROI"]
     analysis = next(t for t in ws.tabs if t.name == "Analysis")
     assert sorted(i.plugin for i in analysis.instances) == [
-        COMET, RCC, COLORS, TRUTH, PROFILE, PRECISION, STATS, HISTORY, MATH, REMOVE,
+        COMET, RCC, COLORS, TRUTH, PROFILE, PRECISION, STATS, HISTORY, TAGS, MATH, REMOVE,
         REGISTER]
     assert next(t for t in ws.tabs if t.name == "Render").kind == "render"
     # a tab the *user* adds starts empty; only the shipped ones are seeded
@@ -81,7 +82,7 @@ def test_a_round_trip_keeps_order_labels_and_values(tmp_path):
     assert [i.title() for i in tab.instances] == [
         "COMET (coarse)", "RCC", "AssignColors", "Ground Truth", "Line Profile",
         "Localization Precision", "Localization Statistics", "History",
-        "Math Parser", "Remove Localizations", "Calibrate transform",
+        "Image Tags", "Math Parser", "Remove Localizations", "Calibrate transform",
         "COMET (coarse)"]
     assert tab.instances[0].values == {"segmentation_var": 12}
     assert back.layout["active_tab"] == "Analysis"
@@ -128,7 +129,7 @@ def test_pruning_reports_what_it_dropped():
     gone = ws.prune(list(plugins.refs()))
     assert gone == ["Gone/Away"]
     assert [i.plugin for i in tab.instances] == [
-        COMET, RCC, COLORS, TRUTH, PROFILE, PRECISION, STATS, HISTORY, MATH, REMOVE,
+        COMET, RCC, COLORS, TRUTH, PROFILE, PRECISION, STATS, HISTORY, TAGS, MATH, REMOVE,
         REGISTER]
 
 

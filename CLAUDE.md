@@ -68,6 +68,7 @@ shape, so read the one closest to what you are writing:
 | reads the session and reports | `history.py` (the log, with an optional export) |
 | sets up layers and filters from settings | `chain_layers.py` (bounds as rows per layer, `Result.data["layers"]`) |
 | scores a fit against a simulation | `ground_truth.py` (the truth redrawn from the recipe, matched per frame) |
+| draws what the microscope recorded per frame | `image_tags.py` (the fit's `metadata["frame_tags"]`) |
 
 A chain of plugins that runs as one, and running one over many files
 (`smappy-batch`, the batch window): `docs/batch.md`.
@@ -238,6 +239,11 @@ accident, and it survives a save.  Usually the recipe is an expression
 (`math_parser.py`); a column that was *measured* per localization and only
 needs the rule -- the `use` flag `remove_locs.py` writes -- is a recipe with
 a rule and no expression.
+
+A fitted table also carries `metadata["frame_tags"]` (the image tags that
+changed, per frame: `smappy.frametags`) and `metadata["acquisition"]` (the
+Micro-Manager summary, devices and comment); both are written beside `/locs`,
+not in the metadata attribute.
 
 ## What the picture's axes are
 

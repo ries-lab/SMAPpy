@@ -199,6 +199,10 @@ class OutputSettings:
     raw_frames: int = param(50, label="raw frames", min=0, advanced=True,
                             help="camera frames kept with the table, in "
                                  "photons, after their average; 0: none")
+    show_tags: str = param("PIZStage", label="show image tags",
+                           help="image tags drawn when the fit is done, "
+                                "names or parts of names; empty: none "
+                                "(Analysis/Process/Image Tags)")
 
     def resolve(self, source_path: str) -> Optional[Path]:
         if not self.save:
@@ -693,13 +697,18 @@ class _FitPlugin(Plugin):
         model = self._model_telling(ctx, settings, camera)
         out = settings.output.resolve(src.path)
 
+        # what the microscope recorded per frame, read with the pixels
+        from ..frametags import FrameTags, acquisition
+        tags = FrameTags()
         if src.live:
             from ..io.watch import WatchSettings, watch_stack
             blocks = watch_stack(src.path, chunk=src.chunk, start=src.start, stop=src.stop,
-                                 settings=WatchSettings(timeout=src.live_timeout))
+                                 settings=WatchSettings(timeout=src.live_timeout),
+                                 tags=tags)
             total = None                 # a growing stack has no end to count to
         else:
             stop = min(src.stop, source.n_frames) if src.stop else None
+            source.tags = tags
             blocks = source.frames(chunk=src.chunk, start=src.start, stop=stop)
             total = max((stop if stop is not None else source.n_frames) - src.start, 0)
         # the frames kept with the table: counted as they go past, so the
@@ -712,6 +721,7 @@ class _FitPlugin(Plugin):
         ctx.emit("start", {"extent": camera_extent(camera, source.shape, fit.output_unit),
                            "path": out})
         record = provenance(camera, finder, model, fit, source=src.path)
+        record["acquisition"] = acquisition(source)
         writer = None
         if out is not None:
             writer = LocalizationWriter(out)
@@ -750,13 +760,19 @@ class _FitPlugin(Plugin):
             from ..pipeline import drive
             engine = self.engine(settings, camera, finder, model)
             drive(engine, blocks, sink=sink, progress=report, read_ahead=2)
+            record["frame_tags"] = tags.table()
             if writer is not None:
-                writer.set_metadata({"stats": dict(engine.stats)})
+                writer.set_metadata({"stats": dict(engine.stats),
+                                     "frame_tags": record["frame_tags"],
+                                     "acquisition": record["acquisition"]})
         finally:
             if writer is not None:
                 writer.close()
         stats = dict(engine.stats)
         collected.metadata["stats"] = stats
+        for key in ("frame_tags", "acquisition"):
+            if record[key]:
+                collected.metadata[key] = record[key]
         seconds = time.perf_counter() - started
         rate = stats["frames"] / seconds if seconds > 0 else 0.0
         text = (f"{stats['localizations']} localizations from {stats['frames']} frames"
@@ -791,7 +807,15 @@ class _FitPlugin(Plugin):
             save_images(out, [raw])
         if finished.notes:
             text = "\n".join([text] + finished.notes)
-        return Result(locs=finished.locs, text=text, plots=finished.plots,
+        plots = dict(finished.plots)
+        if record["frame_tags"] and settings.output.show_tags:
+            from .image_tags import names, plots as tag_plots, summary
+            shown = names(record["frame_tags"], settings.output.show_tags)
+            plots.update(tag_plots(record["frame_tags"], shown,
+                                   np.asarray(finished.locs["frame"])))
+            if shown:
+                text = "\n".join([text, summary(record["frame_tags"], shown)])
+        return Result(locs=finished.locs, text=text, plots=plots,
                       data={"stats": stats, "path": out,
                             "images": [raw] if raw is not None else []},
                       settings=settings)

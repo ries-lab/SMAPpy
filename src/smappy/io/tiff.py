@@ -15,7 +15,7 @@ be finite -- the same interface works for online analysis later.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Iterator, List, Optional, Tuple
 
@@ -23,6 +23,7 @@ import numpy as np
 import tifffile
 
 from ..camera_db import Resolution
+from ..frametags import tags_of_page
 from ..metadata import CameraMetadata
 
 
@@ -37,6 +38,9 @@ class ImageSource:
     n_frames_declared: Optional[int]  # what MM planned, if it said
     mm_metadata: Dict[str, object]  # per-plane metadata of the first frame
     summary: Dict[str, object]
+    #: a `smappy.frametags.FrameTags` that `frames` hands each frame's
+    #: metadata to, when set -- read with the pixels, so it costs no pass
+    tags: Optional[object] = field(default=None, repr=False)
 
     def __len__(self) -> int:
         return self.n_frames
@@ -62,6 +66,8 @@ class ImageSource:
                         index += 1
                         continue
                     buffer.append(page.asarray())
+                    if self.tags is not None:
+                        self.tags.add(index, tags_of_page(page))
                     if len(buffer) == chunk:
                         yield buffer_start, np.stack(buffer)
                         buffer_start += len(buffer)

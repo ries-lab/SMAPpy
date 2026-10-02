@@ -24,6 +24,7 @@ from typing import Dict, Iterator, List, Optional, Tuple
 import numpy as np
 import tifffile
 
+from ..frametags import tags_of_page
 from .tiff import ImageSource
 
 METADATA_NAME = "metadata.txt"
@@ -157,8 +158,13 @@ class SingleImageSource(ImageSource):
             return super().frame(index)
         if not 0 <= index < self.n_frames:
             raise IndexError(f"frame {index} beyond end of stack ({self.n_frames})")
+        return self._read(index, record=False)
+
+    def _read(self, index: int, record: bool = True) -> np.ndarray:
         path, page = self._at(index)
         with tifffile.TiffFile(path) as tf:
+            if record and self.tags is not None:
+                self.tags.add(index, tags_of_page(tf.pages[page]))
             return tf.pages[page].asarray()
 
     def frames(self, chunk: int = 100, start: int = 0,
@@ -169,7 +175,7 @@ class SingleImageSource(ImageSource):
         stop = self.n_frames if stop is None else min(stop, self.n_frames)
         for first in range(max(start, 0), stop, chunk):
             last = min(first+chunk, stop)
-            yield first, np.stack([self.frame(i) for i in range(first, last)])
+            yield first, np.stack([self._read(i) for i in range(first, last)])
 
     def watch(self, chunk: int = 100, **kwargs) -> Iterator:
         raise NotImplementedError(

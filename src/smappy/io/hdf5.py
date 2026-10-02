@@ -58,8 +58,12 @@ class LocalizationWriter:
         self._write_metadata()
 
     def _write_metadata(self) -> None:
-        self._file.attrs["metadata"] = json.dumps(self._metadata,
+        small = {k: v for k, v in self._metadata.items() if k not in LARGE}
+        self._file.attrs["metadata"] = json.dumps(small,
                                                   default=_json_default, indent=1)
+        for key in LARGE:
+            if key in self._metadata:
+                _write_large(self._file, key, self._metadata[key])
 
     def append(self, locs: Localizations) -> None:
         if len(locs) == 0:
@@ -111,6 +115,62 @@ class LocalizationWriter:
 
     def __len__(self) -> int:
         return self._n
+
+
+# ------------------------------------------------------- metadata too large
+#
+# Two parts of the metadata are beyond what the JSON attribute can hold -- an
+# HDF5 attribute is bounded by the object header, about 64 kB -- and are
+# written beside the table instead: the image tags (`smappy.frametags`), a
+# column per tag over the frames, and the acquisition's static metadata, a
+# Micro-Manager summary and device list of about 40 kB.  They are read back
+# into `metadata` under the same keys, so nothing else knows the difference.
+
+LARGE = ("frame_tags", "acquisition")
+
+
+def _write_large(f, key: str, value) -> None:
+    if key in f:
+        del f[key]
+    if not value:
+        return
+    if key != "frame_tags":
+        f.create_dataset(key, data=json.dumps(value, default=_json_default),
+                         dtype=h5py.string_dtype("utf-8"))
+        return
+    # one dataset per tag, named by position: a Micro-Manager key may hold
+    # anything, a "/" included, and the names are kept in order in an attribute
+    group = f.create_group(key)
+    names = list(value)
+    for i, name in enumerate(names):
+        column = np.asarray(value[name])
+        if column.dtype.kind in "OUS":
+            group.create_dataset(str(i), data=[str(v) for v in column],
+                                 dtype=h5py.string_dtype("utf-8"))
+        else:
+            group.create_dataset(str(i), data=column, compression="lzf")
+    group.attrs["names"] = json.dumps(names)
+
+
+def _read_large(f) -> Dict[str, object]:
+    out = {}
+    for key in LARGE:
+        item = f.get(key)
+        try:
+            if isinstance(item, h5py.Dataset):
+                out[key] = json.loads(item[()])
+            elif isinstance(item, h5py.Group):
+                names = json.loads(item.attrs["names"])
+                tags = {}
+                for i, name in enumerate(names):
+                    data = item[str(i)]
+                    tags[name] = (data.asstr()[()].astype(object)
+                                  if h5py.check_string_dtype(data.dtype)
+                                  else data[()])
+                out[key] = tags
+        except (KeyError, ValueError, TypeError):
+            continue             # a damaged part: the table still opens
+    return out
 
 
 def save_localizations(path, locs: Localizations,
@@ -327,6 +387,7 @@ def load_localizations(path) -> Localizations:
         metadata = {}
         if "metadata" in f.attrs:
             metadata = json.loads(f.attrs["metadata"])
+        metadata.update(_read_large(f))
     return Localizations(columns, metadata)
 
 

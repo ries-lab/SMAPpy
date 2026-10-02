@@ -439,6 +439,12 @@ points between.  Each kept frame costs its size in the file: for a
 256 x 256 ROI about a quarter of a megabyte, for a full 2048 x 2048 sCMOS
 chip 16 MB, so fifty of those are 800 MB -- set fewer there.
 
+### output.show_tags
+`PIZStage` draws the piezo position, which shows at once whether the focus
+lock held.  On a microscope whose piezo has another name, put that name (or
+part of it) here.  Every tag that changed is kept in the file whatever this
+says; Analysis/Process/Image Tags draws any of them later.
+
 ## Output
 
 The table, one row per molecule and frame:

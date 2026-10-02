@@ -102,9 +102,10 @@ def fit(data, out=None, camera: CameraLike = None, calibration=None, *,
     try:
         _, engine = fit_stack(blocks, cam, finder, model, settings, sink=sink,
                               progress=progress, read_ahead=read_ahead)
+        extra = _acquisition(source)
         if writer is not None:
             # what the run actually did, beside how it was set up
-            writer.set_metadata({"stats": dict(engine.stats)})
+            writer.set_metadata({"stats": dict(engine.stats), **extra})
     finally:
         if writer is not None:
             writer.close()
@@ -115,7 +116,18 @@ def fit(data, out=None, camera: CameraLike = None, calibration=None, *,
         save_images(out, [raw])
 
     collected.metadata["stats"] = dict(engine.stats)
+    collected.metadata.update(extra)
     return collected
+
+
+def _acquisition(source) -> dict:
+    """The image tags recorded while reading, and the static metadata."""
+    if source is None:
+        return {}
+    from .frametags import acquisition
+    tags = source.tags.table() if getattr(source, "tags", None) else {}
+    out = {"frame_tags": tags, "acquisition": acquisition(source)}
+    return {k: v for k, v in out.items() if v}
 
 
 def view(locs, settings=None, display=None, block: bool = True,
@@ -140,6 +152,8 @@ def _frames(data, chunk: int, frames: Optional[int]
         from .io.tiff import open_stack
         data = open_stack(data)
     if hasattr(data, "frames"):                      # an ImageSource
+        from .frametags import FrameTags
+        data.tags = FrameTags()                      # recorded as it is read
         stop = min(frames, data.n_frames) if frames else None
         return data, data.frames(chunk=chunk, stop=stop)
     if isinstance(data, np.ndarray):

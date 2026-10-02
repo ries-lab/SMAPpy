@@ -233,7 +233,13 @@ class NDTiffSource(ImageSource):
         stop = len(self.index) if stop is None else min(stop, len(self.index))
         for first in range(start, stop, chunk):
             last = min(first + chunk, stop)
-            yield first, np.stack([self.frame(i) for i in range(first, last)])
+            yield first, self._block(first, last)
+
+    def _block(self, first: int, last: int) -> np.ndarray:
+        if self.tags is not None:
+            for i in range(first, last):
+                self.tags.add(i, _frame_metadata(self, self.index, i))
+        return np.stack([self.frame(i) for i in range(first, last)])
 
     def watch(self, chunk: int = 100, settings=None, start: int = 0,
               stop: Optional[int] = None, stop_event=None, on_wait=None
@@ -255,7 +261,7 @@ class NDTiffSource(ImageSource):
             available = len(self.index) if stop is None else min(stop, len(self.index))
             while index < available and not _stopped(stop_event):
                 last = min(index + chunk, available)
-                yield index, np.stack([self.frame(i) for i in range(index, last)])
+                yield index, self._block(index, last)
                 index = last
                 last_new = time.monotonic()
             if stop is not None and index >= stop:

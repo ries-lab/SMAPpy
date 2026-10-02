@@ -52,7 +52,11 @@ settings), the recipes of derived columns, the bounds a plugin asked to
 keep with the table, a drift correction's summary, the camera and the fit
 settings of a table that came from a fit, the simulation's settings for a
 simulated one, the ROI that is drawn, and the ROI manager's project if it
-was used.
+was used.  Two parts of a fitted table's metadata are too large for an
+attribute and go beside it: the image tags (what the microscope recorded per
+frame, such as the piezo position) into `/frame_tags`, and the acquisition's
+Micro-Manager summary and device properties into `/acquisition`.  Both are
+read back into the metadata when the file is opened.
 
 **3. What the tools kept.**  Some plugins keep what they worked out -- a
 drift curve, say -- so that its figure can be drawn again later.  That goes

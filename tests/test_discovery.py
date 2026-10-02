@@ -242,8 +242,8 @@ def test_refs_and_tree_do_not_import_but_available_does():
         "Analysis/Measure/Ground Truth", "Analysis/Measure/Line Profile",
         "Analysis/Measure/Localization Precision",
         "Analysis/Measure/Localization Statistics",
-        "Analysis/Process/History", "Analysis/Process/Math Parser",
-        "Analysis/Process/Remove Localizations",
+        "Analysis/Process/History", "Analysis/Process/Image Tags",
+        "Analysis/Process/Math Parser", "Analysis/Process/Remove Localizations",
         "Analysis/Register/Calibrate transform"}
     assert isinstance(plugins.tree()["Analysis"]["Drift"]["COMET"], PluginRef)
     classes = plugins.available("Analysis/")
