@@ -436,24 +436,59 @@ class MathImage:
     depth: float                # how far it reaches below the baseline
     renderer: str = ""
 
-    def centred(self, middle: float) -> "MathImage":
-        """Padded so that its centre sits ``middle`` above the baseline.
+    def on_line(self, line: "QtLine") -> "MathImage":
+        """Padded so that Qt, centring it, puts its baseline on the text's.
 
-        A viewer that can only centre an inline image on the line (Qt's
-        ``vertical-align: middle``) then puts the formula's baseline on the
-        text's, where a subscript or a fraction would otherwise drag it down.
+        A viewer that can only centre an inline image (Qt's
+        ``vertical-align: middle``) does not centre it on a fixed height: Qt
+        gives the image an ascent of ``(height + x/2) / 2`` and a descent of
+        ``(height - x/2) / 2`` (`QTextDocumentLayout::resizeInlineObject`),
+        the line takes the larger of those and the font's own, and the image
+        is drawn in the middle of that line.  So where it lands depends on
+        how tall it is against the text: centring every formula a quarter of
+        an x-height up, which is right only for one taller than the line,
+        left the usual inline formula a pixel or more above the text.
+
+        The padding is found by bisection: padding the top raises the
+        image's centre faster than it raises the line's, padding the bottom
+        lowers it faster, so the mismatch is monotonic in either.
         """
-        above = self.height - self.depth
-        extra = (above - self.depth) - 2 * middle
-        top, bottom = (0.0, extra) if extra > 0 else (-extra, 0.0)
-        if top == bottom == 0:
+        above0, below0 = self.height - self.depth, self.depth
+
+        def mismatch(top: float, bottom: float) -> float:
+            above, below = above0 + top, below0 + bottom
+            height = above + below
+            line_above = max(line.ascent, (height + line.half_x) / 2)
+            line_below = max(line.descent, (height - line.half_x) / 2)
+            return (above - below) - (line_above - line_below)
+
+        start = mismatch(0.0, 0.0)
+        if abs(start) < 1e-3:
             return self
+        side = (lambda pad: mismatch(pad, 0.0)) if start < 0 else \
+            (lambda pad: -mismatch(0.0, pad))
+        low, high = 0.0, 1.0
+        while side(high) < 0:
+            high *= 2
+        for _ in range(40):
+            mid = (low + high) / 2
+            low, high = (mid, high) if side(mid) < 0 else (low, mid)
+        top, bottom = (high, 0.0) if start < 0 else (0.0, high)
         if self.ext == "svg":
             data = _pad_svg(self.data, top, bottom)
         else:
             data = _pad_png(self.data, top * SCALE, bottom * SCALE)
         return MathImage(data, self.ext, self.width, self.height + top + bottom,
                          self.depth + bottom, self.renderer)
+
+
+@dataclass
+class QtLine:
+    """The text line Qt sets an inline formula in, in logical pixels: the
+    font's ascent and descent, and half its x-height as Qt rounds it."""
+    ascent: float
+    descent: float
+    half_x: float
 
 
 _MATH_CACHE: Dict[str, MathImage] = {}
@@ -653,15 +688,14 @@ def _png_size(png: bytes) -> Tuple[int, int]:
 # ------------------------------------------------------------------ rendering
 def render(plugin_cls, color: str = "black", size_pt: float = 10.0,
            figures: bool = True, link=None, origin: Optional[Path] = None,
-           middle_px: Optional[float] = None) -> Rendered:
+           qt_line: Optional[QtLine] = None) -> Rendered:
     """The whole page for ``plugin_cls``: generated and written parts together.
 
     ``color`` is the text colour the maths is drawn in, so a dark palette gets
     light formulas.  An inline formula is put on the baseline with
     ``vertical-align`` by its depth, which a browser honours; a viewer that
-    can only centre an image (Qt) passes ``middle_px`` -- how far above the
-    baseline it centres one -- and gets formulas padded to suit
-    (`MathImage.centred`).  ``link`` rewrites a link target (the exporter turns
+    can only centre an image (Qt) passes ``qt_line`` -- the line it centres
+    one in -- and gets formulas padded to suit (`MathImage.on_line`).  ``link`` rewrites a link target (the exporter turns
     ``plugin:`` links into files).  A figure that fails is shown as its error
     rather than failing the page; `Rendered.errors` collects them.
     """
@@ -679,12 +713,12 @@ def render(plugin_cls, color: str = "black", size_pt: float = 10.0,
         except Exception as error:
             out.errors.append(f"maths {tex!r}: {error}")
             return f"<code>{html.escape(tex)}</code>"
-        if not display and middle_px is not None:
-            image = image.centred(middle_px)
+        if not display and qt_line is not None:
+            image = image.on_line(qt_line)
         file = name("math", image.ext)
         out.images[file] = image.data
         align = ("" if display else ' style="vertical-align: middle"'
-                 if middle_px is not None else
+                 if qt_line is not None else
                  f' style="vertical-align: {-image.depth:.1f}px"')
         img = (f'<img src="{file}" width="{image.width:.0f}" '
                f'height="{image.height:.0f}"{align}>')

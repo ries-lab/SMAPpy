@@ -16,8 +16,8 @@ from typing import Optional
 from urllib.parse import unquote
 
 from PySide6.QtCore import QByteArray, QRectF, Qt, QUrl
-from PySide6.QtGui import QDesktopServices, QFontInfo, QFontMetricsF, QGuiApplication, QImage, \
-    QKeySequence, QPainter, QPalette, QShortcut, QTextDocument
+from PySide6.QtGui import QDesktopServices, QFontInfo, QFontMetrics, QFontMetricsF, \
+    QGuiApplication, QImage, QKeySequence, QPainter, QPalette, QShortcut, QTextDocument
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (QMainWindow, QSplitter, QTextBrowser,
                                QTreeWidget, QTreeWidgetItem)
@@ -67,15 +67,17 @@ def help_section(section, path: str) -> None:
         section.help_requested.connect(lambda: show_help(path, section.window()))
 
 
-def _middle(document: QTextDocument) -> float:
-    """Where Qt centres an inline image with ``vertical-align: middle``.
+def _line(document: QTextDocument) -> docs.QtLine:
+    """The line Qt centres an inline image in (`docs.MathImage.on_line`).
 
-    A quarter of the x-height above the baseline: Qt gives the image an
-    ascent of ``(height + x/2) / 2`` and a descent of ``(height - x/2) / 2``
-    (`QTextDocumentLayout::resizeInlineObject`).  The formulas are padded to
-    that, which is what puts their baseline on the text's.
+    The ascent and descent are the font's; the x-height is the integer one,
+    as `QTextDocumentLayout::resizeInlineObject` reads it through
+    `QFontMetrics`, not `QFontMetricsF`.
     """
-    return QFontMetricsF(document.defaultFont()).xHeight() / 4
+    font = document.defaultFont()
+    metrics = QFontMetricsF(font)
+    return docs.QtLine(metrics.ascent(), metrics.descent(),
+                       QFontMetrics(font).xHeight() / 2)
 
 
 def _size_pt(browser) -> float:
@@ -216,7 +218,7 @@ class HelpWindow(QMainWindow):
             rendered = docs.render(plugin_cls, color=color,
                                    size_pt=_size_pt(self.browser),
                                    origin=ref.origin if ref else None,
-                                   middle_px=_middle(document))
+                                   qt_line=_line(document))
         finally:
             QGuiApplication.restoreOverrideCursor()
         self.current = path

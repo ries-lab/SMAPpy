@@ -274,14 +274,20 @@ def test_the_fallback_can_be_asked_for(monkeypatch):
 
 
 @pytest.mark.parametrize("renderer", ["ziamath", "mathtext"])
-def test_a_centred_formula_has_its_baseline_on_the_line(renderer):
-    """Qt can only centre an inline image; padded, the centre lands where Qt
-    puts it (``middle`` above the baseline) with the baseline on the text's."""
+def test_a_formula_padded_for_qt_sits_in_the_middle_of_the_line_qt_gives_it(renderer):
+    """Qt centres an inline image in its line, and the line is the taller of
+    the font and the image: padded, the formula's centre is where Qt puts it,
+    whether it is smaller than the text, taller, or in between."""
     image = docs.math_image("\\sigma_{\\max}^2", False, renderer=renderer)
-    for middle in (1.0, 6.0):
-        padded = image.centred(middle)
+    for line in (docs.QtLine(14.5, 3.5, 4.0), docs.QtLine(29.0, 7.0, 8.0),
+                 docs.QtLine(3.0, 1.0, 1.0)):
+        padded = image.on_line(line)
         above, below = padded.height - padded.depth, padded.depth
-        assert abs((above - below) / 2 - middle) < 0.6
+        line_above = max(line.ascent, (padded.height + line.half_x) / 2)
+        line_below = max(line.descent, (padded.height - line.half_x) / 2)
+        # a PNG is padded in whole device pixels
+        assert abs((above - below) - (line_above - line_below)) < (
+            0.01 if renderer == "ziamath" else 2 / docs.SCALE)
         if renderer == "ziamath":                   # the SVG says the same
             height = float(re.search(rb'<svg[^>]*height="([^"]+)"', padded.data).group(1))
             assert abs(height - padded.height) < 0.01
@@ -342,6 +348,46 @@ def test_a_plugins_title_bar_has_a_question_mark_that_opens_its_page(app):
     assert window.current == "File/Load/MINFLUX"
     assert "MINFLUX" in window.browser.toPlainText()
     assert "No written page" not in window.browser.toPlainText()
+
+
+def test_an_inline_formula_in_the_help_window_sits_on_the_texts_baseline(app):
+    """Measured in pixels: the bottom of a capital at the start of a formula
+    against the bottom of the word before it, at two text sizes."""
+    import numpy as np
+    from PySide6.QtCore import QUrl, Qt
+    from PySide6.QtGui import QFont, QImage, QPainter, QTextDocument
+    from smappy.gui import help_window
+
+    scale = 4
+    for pixels in (15, 30):
+        document = QTextDocument()
+        document.setDefaultStyleSheet(docs.STYLE)
+        font = QFont()
+        font.setPixelSize(pixels)
+        document.setDefaultFont(font)
+        for tex in ("A", "T_{kl}", "\\hat{N}_0^{(2)}"):
+            image = docs.math_image(tex, False, size_pt=pixels * 72 / 96).on_line(
+                help_window._line(document))
+            drawn = help_window._image("f.svg", image.data)
+            drawn.setDevicePixelRatio(docs.SCALE)
+            document.addResource(QTextDocument.ImageResource, QUrl("f.svg"), drawn)
+            document.setHtml(f'<p>and <img src="f.svg" width="{image.width:.0f}" '
+                             f'height="{image.height:.0f}" style="vertical-align: middle"></p>')
+            document.setTextWidth(400)
+            out = QImage(400 * scale, 120 * scale, QImage.Format_ARGB32)
+            out.setDevicePixelRatio(scale)
+            out.fill(Qt.white)
+            painter = QPainter(out)
+            document.drawContents(painter)
+            painter.end()
+            ink = np.frombuffer(out.constBits(), np.uint8).reshape(
+                out.height(), -1, 4)[:, :out.width(), 0] < 128
+            columns = np.flatnonzero(ink.any(0))
+            gap = np.flatnonzero(np.diff(columns) > 2 * scale)[0]
+            word = np.flatnonzero(ink[:, :columns[gap] + 1].any(1)).max()
+            start = columns[gap + 1]
+            capital = np.flatnonzero(ink[:, start:start + pixels * scale // 4].any(1)).max()
+            assert abs(word - capital) / scale <= 0.5, (pixels, tex)
 
 
 def test_a_plugin_in_its_own_window_has_the_question_mark_too(app):
