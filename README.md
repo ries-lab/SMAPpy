@@ -38,15 +38,20 @@ From a checkout, activate the venv first or run `.venv/bin/smappy-gui`.
 
 ## Tutorials and documentation
 
-* **Tutorials:** [ries-lab.github.io/SMAPpy](https://ries-lab.github.io/SMAPpy/)
-  has short guided tours on simulated data you can follow along with. Start
-  with [SMAPpy in three minutes](https://ries-lab.github.io/SMAPpy/quickstart/).
-* **Plugin documentation:** every plugin and panel has its own page, opened
-  from *Help → Plugin documentation* or with F1 in the GUI.
-  `python -m smappy.docs -o DIR` writes the same pages as a static website.
-* **Developers:** [GUI.md](GUI.md) describes the architecture,
-  [docs/](docs/) the plugin system and individual workflows, and
-  [NOTES.md](NOTES.md) the design decisions and measurements.
+**Tutorials.** [ries-lab.github.io/SMAPpy](https://ries-lab.github.io/SMAPpy/)
+has short guided tours on simulated data you can follow along with. Start with
+[SMAPpy in three minutes](https://ries-lab.github.io/SMAPpy/quickstart/).
+
+**Help pages.** Every plugin and the main parts of the GUI have a help page.
+It explains the theoretical background and every control. Open it with the
+**?** button on the plugin or panel, with F1, or from *Help → Plugin
+documentation*. To write the same pages as a static website:
+
+    python -m smappy.docs -o DIR
+
+**Further reading.** [docs/](docs/) has guides to individual workflows and the
+plugin system. [GUI.md](GUI.md) describes the architecture and
+[NOTES.md](NOTES.md) the design decisions and measurements.
 
 ## Tests
 
