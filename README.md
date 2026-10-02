@@ -49,9 +49,9 @@ documentation*. To write the same pages as a static website:
 
     python -m smappy.docs -o DIR
 
-**Further reading.** [docs/](docs/) has guides to individual workflows and the
-plugin system. [GUI.md](GUI.md) describes the architecture and
-[NOTES.md](NOTES.md) the design decisions and measurements.
+**For developers.** [GUI.md](GUI.md) describes the architecture.
+[docs/](docs/) holds design notes on the plugin system and individual
+algorithms. [NOTES.md](NOTES.md) records design decisions and measurements.
 
 ## Tests
 
