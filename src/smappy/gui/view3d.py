@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog
 
 from ..render import FieldOfView, axis_unit
 from ..session import Session
+from . import folders
 from .render_view import bar_label, nice_step
 from .widgets import CONTROL_WIDTH, place_beside
 from ..view3d import (PRESETS, PREVIEW_SCALE, PreviewBudget, Projection, Slab, render_3d,
@@ -867,8 +868,10 @@ class View3DWindow(QMainWindow):
         rgb = self.view.image_rgb()
         if rgb is None:
             return
-        path, _ = QFileDialog.getSaveFileName(self, "Save 3D image", "", "PNG (*.png)")
+        path, _ = QFileDialog.getSaveFileName(self, "Save 3D image", folders.start(),
+                                              "PNG (*.png)")
         if path:
+            folders.remember(path)
             data = (np.ascontiguousarray(rgb) * 255).astype(np.uint8)
             h, w, _ = data.shape
             QImage(data.data, w, h, 3 * w, QImage.Format_RGB888).save(path)
@@ -878,9 +881,11 @@ class View3DWindow(QMainWindow):
                                                round(self.view.projection.zoom, 2), 0.1, 10000, 2)
         if not ok:
             return
-        path, _ = QFileDialog.getSaveFileName(self, "Save 3D TIFF", "", "TIFF (*.tif *.tiff)")
+        path, _ = QFileDialog.getSaveFileName(self, "Save 3D TIFF", folders.start(),
+                                              "TIFF (*.tif *.tiff)")
         if not path:
             return
+        folders.remember(path)
         import tifffile
         data = self.view.render_at(pixelsize, what)
         data = (data * 255).astype(np.uint8) if what == "rgb" else data.astype(np.float32)

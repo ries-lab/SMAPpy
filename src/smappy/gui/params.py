@@ -6,6 +6,7 @@ with its own form inside, so a fitter assembled from parts reads as one.
 from __future__ import annotations
 
 import dataclasses
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import Qt, Signal
@@ -15,6 +16,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFormLayout,
                                QToolButton, QVBoxLayout, QWidget)
 
 from ..plugins import ParamSpec, param_specs
+from . import folders
 from .widgets import CollapsibleSection
 
 
@@ -183,6 +185,8 @@ class _Field(QWidget):
     def _browse(self) -> None:
         kind, name_filter = self.spec.info.kind, self.spec.info.file_filter
         current = self.widget.text()
+        if not current or Path(current).parent == Path("."):
+            current = folders.start(current)    # nothing better to go on
         if kind == "open_file":
             path, _ = QFileDialog.getOpenFileName(self, self.spec.name, current, name_filter)
         elif kind == "save_file":
@@ -190,6 +194,7 @@ class _Field(QWidget):
         else:
             path = QFileDialog.getExistingDirectory(self, self.spec.name, current)
         if path:
+            folders.remember(path, stack=kind == "open_file")
             self.widget.setText(path)
             self.changed.emit()
 

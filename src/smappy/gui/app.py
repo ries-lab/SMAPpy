@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QDialog, QFileDialog, QH
 from .. import plugins, workspace as workspace_module
 from ..io.formats import (csv_columns, guess_csv_mapping, load as load_any,
                           name_filter, reader_for)
+from . import folders
 from .dialogs import CsvMappingDialog, PixelSizeDialog
 from ..session import Session, read_and_group
 from ..workspace import Workspace
@@ -345,7 +346,7 @@ class ControlWindow(QMainWindow):
         has no GUI file of its own, so *Save GUI* asks where to put it.
         """
         from ..io.hdf5 import load_gui_state
-        start = str(self.session.path) if self.session.path else ""
+        start = str(self.session.path) if self.session.path else folders.start()
         path, _ = QFileDialog.getOpenFileName(self, "Restore GUI state from",
                                               start, name_filter())
         if not path:
@@ -671,7 +672,7 @@ class ControlWindow(QMainWindow):
         runs; everything else -- panning, the filters, the other windows --
         keeps working on the file that is already open.
         """
-        start = str(self.session.path.parent) if self.session.path else ""
+        start = folders.start()
         paths, _ = QFileDialog.getOpenFileNames(self, "Add localizations" if append
                                                 else "Open localizations", start, name_filter())
         self.load_paths(paths, append=append)
@@ -679,6 +680,7 @@ class ControlWindow(QMainWindow):
     def load_paths(self, paths, append: bool = False, reset_view: bool = False) -> None:
         """Queue files for the loader.  ``reset_view`` frames the first one,
         which is what starting with a file on the command line wants."""
+        folders.remember(paths)      # however it came: dialog, drop, command line
         for i, path in enumerate(paths):
             args = {}
             if self._needs_mapping(path):
@@ -782,11 +784,11 @@ class ControlWindow(QMainWindow):
         return not {"x_nm", "y_nm"} <= guessed
 
     def open_image(self) -> None:
-        start = str(self.session.path.parent) if self.session.path else ""
-        path, _ = QFileDialog.getOpenFileName(self, "Open image", start,
+        path, _ = QFileDialog.getOpenFileName(self, "Open image", folders.start(),
                                               "Images (*.tif *.tiff *.png)")
         if not path:
             return
+        folders.remember(path)
         try:
             self.session.open_image(path)
         except ValueError:                                  # no pixel size in the file
@@ -809,10 +811,11 @@ class ControlWindow(QMainWindow):
         self.statusBar().showMessage(f"saved {self.session.path}")
 
     def save_as(self) -> None:
-        start = str(self.session.path) if self.session.path else ""
+        start = str(self.session.path) if self.session.path else folders.start()
         path, _ = QFileDialog.getSaveFileName(self, "Save localizations", start,
                                               "HDF5 (*.h5 *.hdf5)")
         if path:
+            folders.remember(path)
             self.session.save(path)
             self._on_session("locs")
 

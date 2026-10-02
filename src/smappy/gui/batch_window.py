@@ -32,6 +32,7 @@ from ..batch import Input, Job, Output
 from ..chain import ChainSpec
 from ..session import Session
 from ..workspace import Instance
+from . import folders
 from .chain_panel import ChainPanel
 
 COLUMNS = ("use", "input", "pattern", "overrides", "status")
@@ -244,14 +245,16 @@ class BatchWindow(QMainWindow):
         return found
 
     def add_files(self) -> None:
-        paths, _ = QFileDialog.getOpenFileNames(self, "Add files")
+        paths, _ = QFileDialog.getOpenFileNames(self, "Add files", folders.start())
+        folders.remember(paths, stack=True)
         for path in paths:
             self.add_input(Input(file=path))
 
     def add_folder(self) -> None:
-        folder = QFileDialog.getExistingDirectory(self, "Add folder")
+        folder = QFileDialog.getExistingDirectory(self, "Add folder", folders.start())
         if not folder:
             return
+        folders.remember(folder)
         kind = self._kind()
         pattern, ok = QInputDialog.getText(
             self, "Pattern", "files matching (comma-separated):",
@@ -364,15 +367,16 @@ class BatchWindow(QMainWindow):
         self.setWindowTitle(f"SMAPpy batch -- {self.job_path.name}")
 
     def open_job(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Open job", "",
+        path, _ = QFileDialog.getOpenFileName(self, "Open job", folders.start(),
                                               "Batch jobs (*.batch.yaml *.batch.json)")
         if path:
+            folders.remember(path)
             self.load_job(path)
 
     def save_job(self, ask: bool = True) -> Optional[Path]:
         target = self.job_path
         if ask or target is None:
-            start = str(target or Path.cwd() / "job.batch.yaml")
+            start = str(target or folders.start("job.batch.yaml"))
             chosen, _ = QFileDialog.getSaveFileName(self, "Save job", start,
                                                     "Batch jobs (*.batch.yaml)")
             if not chosen:
@@ -511,8 +515,9 @@ class BatchWindow(QMainWindow):
 
     def _browse_output(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Output folder",
-                                                  self.out_folder.text())
+                                                  self.out_folder.text() or folders.start())
         if folder:
+            folders.remember(folder)
             self.out_folder.setText(folder)
 
 

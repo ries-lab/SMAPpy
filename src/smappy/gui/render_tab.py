@@ -24,6 +24,7 @@ from ..render import FieldOfView, RenderAxes, axis_unit, is_position
 from ..filter import histogram_range
 from ..session import Layer, Session
 from ..viewer import FIELD_LUT, INTENSITY_LUT
+from . import folders
 from .render_view import nice_below
 from .widgets import CollapsibleSection, ColumnScroll, detach_to_window
 
@@ -1276,11 +1277,11 @@ class RenderTab(QWidget):
         from .dialogs import PixelSizeDialog
         from PySide6.QtWidgets import QDialog
         from pathlib import Path
-        start = str(self.session.path.parent) if self.session.path else ""
-        path, _ = QFileDialog.getOpenFileName(self, "Open image", start,
+        path, _ = QFileDialog.getOpenFileName(self, "Open image", folders.start(),
                                               "Images (*.tif *.tiff *.png)")
         if not path:
             return None
+        folders.remember(path)
         try:
             return self.session.load_image(path)
         except ValueError:
