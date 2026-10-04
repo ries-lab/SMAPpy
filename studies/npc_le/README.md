@@ -328,6 +328,75 @@ one blink has about 11 in all), and at 500 photons the checks reject 20 to
 section 11 does not model: two simulations at 500 photons, one blink, ELE
 0.35 gave 18 sites and an estimate of 0.535.
 
+## Segmentation, junk and the fit from k corners
+
+`selection.py`, `found.py`, `joint.py`.  The fit is the joint distribution of
+(corners at 20 nm, localizations per pore) *conditioned on at least k corners*
+(exact, by a 4-state transfer matrix around the ring and a 2D FFT; checked
+against a Monte Carlo), so that whatever the segmentation loses below k
+corners biases neither histogram.  The simulation has junk that is not a ring
+(`npc_junk.yaml`: blobs 40 nm across, pore-sized filled squares, 300 nm
+filament pieces, single molecules), how much being an arbitrary choice:
+the order of the methods carries over, the size of the biases does not.
+The segmentations:
+
+* **default**: the segmenter as it is (*min localizations* 10);
+* **lenient**: *min localizations* 4 -- a pore showing 4 corners has at
+  least 4 localizations in the band the segmenter counts, so 4 removes only
+  what cannot qualify, and more loses sparse pores that do;
+* **adaptive**: the segmenter's candidates with its checks off, judged on
+  the localizations better than 20 nm: the radius, and each one's distance
+  from the ring in units of its own precision (|z| > 3 at most 1 %, by a
+  binomial test of the count).  This needs nothing about the blinking, adapts
+  to the photons, and rejects filled structures whether the site is on them
+  or beside them (the ring filter puts it beside a filled blob);
+* **none**: every candidate.
+
+Corners are counted from 40 nm out (55 +- 15 nm), and the spillage takes
+each localization's own distance from the centre.  Sites are centred on the
+localizations better than 20 nm.
+
+**12. Segmentation does not lose pores by their corners alone.**  Fraction of
+the pores showing k corners (at their true centre) that are found, all
+conditions:
+
+| k | default | lenient | adaptive | none |
+|---|---|---|---|---|
+| 4 | 27 % | 75 % | 82 % | 91 % |
+| 5 | 59 % | 87 % | 92 % | 97 % |
+| 6 | 81 % | 91 % | 94 % | 98 % |
+| 8 | 96 % | 97 % | 97 % | 99.8 % |
+
+Even with no checks a pore with 4 corners is found less often (the ring
+filter and the centring prefer full rings; a sparse pore found more than
+20 nm off-centre counts as missed).  From 6 corners up it is nearly flat.
+
+**13. The bias, with junk.**  Points against the simulated ELE, 0.35 / 0.5 /
+0.7, 5 pools of about 1100 pores:
+
+| photons | blinks | default | adaptive, k ≥ 4 | adaptive, k ≥ 5 | adaptive, k ≥ 6 | none, k ≥ 6 |
+|---|---|---|---|---|---|---|
+| 5000 | 1 | 6.3 / −2.4 / −7.4 | 0.7 / −2.2 / −4.4 | 0.8 / −1.6 / −3.3 | 0.9 / −1.3 / −2.6 | 1.6 / −3.8 / −8.3 |
+| 5000 | 3 | −1.4 / −4.2 / −11.1 | −0.4 / −1.4 / −3.2 | −0.1 / −0.6 / −1.4 | 0.0 / −0.4 / −0.8 | −0.5 / −2.2 / −8.0 |
+| 5000 | 10 | −2.4 / −6.2 / −15.3 | −1.0 / −2.3 / −5.0 | −0.5 / −1.2 / −2.1 | −0.3 / −0.9 / −0.9 | −1.0 / −3.3 / −10.7 |
+| 500 | 1 | 20.5 / 13.1 / 5.0 | 2.1 / −1.6 / −3.0 | 2.2 / −3.4 / −2.7 | 2.1 / −5.5 / −4.3 | 2.4 / −7.0 / −7.9 |
+| 500 | 3 | 3.3 / −1.0 / −8.9 | 1.6 / −1.2 / −7.7 | 2.0 / 0.7 / −2.7 | 1.6 / 0.9 / 0.0 | 0.4 / −1.7 / −4.5 |
+| 500 | 10 | −3.9 / −10.7 / −26.7 | −2.0 / −6.4 / −18.1 | −0.8 / −3.7 / −11.4 | −0.6 / −2.0 / −5.6 | −2.5 / −6.6 / −17.9 |
+
+The spread between pools is 0.5 to 0.8 points.  Without junk
+(`selection_nojunk.csv`) the adaptive segmentation is within 1.4 points at
+5000 photons for any k, and within 4.3 (k ≥ 4) or 3.5 (k ≥ 6) at 500.
+
+* The defaults lose the sparse pores that do show 4 corners (+21 at 500
+  photons, one blink, ELE 0.35).
+* The junk left is what reaches k corners: what a higher k removes.  With
+  the adaptive checks and k ≥ 6 the bias is within 2.6 points at 5000
+  photons and 5.6 at 500.
+* A higher k costs where few pores show that many corners: one blink at 500
+  photons, ELE 0.5, goes from −1.6 (k ≥ 4) to −5.5 (k ≥ 6).
+* The checks matter more than k: without them, the same k ≥ 6 is up to 18
+  points off.
+
 ## What follows
 
 * **Make the selection explicit and model it.**  Keep a pore when it shows at
