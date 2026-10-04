@@ -1,0 +1,92 @@
+# The tilted Nup96 pores of npc_tilt.yaml (dye 1) and junk that is not a
+# ring (dye 2): blobs 40 nm across, filled squares the size of a pore,
+# 300 nm pieces of filament, and single molecules over the whole field.
+name: nuclear pores (Nup96), tilted, with junk
+parts:
+- elements:
+  - points:
+    - [53.4, 5.6, 25]
+    - [53.4, -5.6, 25]
+    - [33.8, 41.7, 25]
+    - [41.7, 33.8, 25]
+    - [-5.6, 53.4, 25]
+    - [5.6, 53.4, 25]
+    - [-41.7, 33.8, 25]
+    - [-33.8, 41.7, 25]
+    - [-53.4, -5.6, 25]
+    - [-53.4, 5.6, 25]
+    - [-33.8, -41.7, 25]
+    - [-41.7, -33.8, 25]
+    - [5.6, -53.4, 25]
+    - [-5.6, -53.4, 25]
+    - [41.7, -33.8, 25]
+    - [33.8, -41.7, 25]
+    - [53.4, 5.6, -25]
+    - [53.4, -5.6, -25]
+    - [33.8, 41.7, -25]
+    - [41.7, 33.8, -25]
+    - [-5.6, 53.4, -25]
+    - [5.6, 53.4, -25]
+    - [-41.7, 33.8, -25]
+    - [-33.8, 41.7, -25]
+    - [-53.4, -5.6, -25]
+    - [-53.4, 5.6, -25]
+    - [-33.8, -41.7, -25]
+    - [-41.7, -33.8, -25]
+    - [5.6, -53.4, -25]
+    - [-5.6, -53.4, -25]
+    - [41.7, -33.8, -25]
+    - [33.8, -41.7, -25]
+  copies:
+    density: 2
+    field: &id001 [500, 500, 9500, 9500]
+    placement: random
+    rotation: random
+    tilt: 10
+    min_distance: 200
+- elements:
+  - polygon:
+    - [-20, -20]
+    - [20, -20]
+    - [20, 20]
+    - [-20, 20]
+    density: 0.008
+    dye: 2
+  copies:
+    density: 0.5
+    field: *id001
+    placement: random
+    rotation: random
+- elements:
+  - polygon:
+    - [-55, -55]
+    - [55, -55]
+    - [55, 55]
+    - [-55, 55]
+    density: 0.0025
+    dye: 2
+  copies:
+    density: 0.3
+    field: *id001
+    placement: random
+    rotation: random
+- elements:
+  - line:
+    - [-150, 0, 0]
+    - [150, 0, 0]
+    density: 0.06
+    width: 10
+    dye: 2
+  copies:
+    density: 0.3
+    field: *id001
+    placement: random
+    rotation: random
+- elements:
+  - polygon:
+    - [500, 500]
+    - [9500, 500]
+    - [9500, 9500]
+    - [500, 9500]
+    density: 3.0e-06
+    dye: 2

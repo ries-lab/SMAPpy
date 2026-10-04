@@ -36,6 +36,7 @@ from smappy.simulate.settings import (BlinkingSettings, LabellingSettings,
 
 HERE = Path(__file__).resolve().parent
 STRUCTURE = HERE / "npc_tilt.yaml"
+JUNK = HERE / "npc_junk.yaml"            # the same pores, and junk that is not a ring
 CORNERS = 8
 STEP = 2 * np.pi / CORNERS
 R, DR = 50.0, 20.0                 # NPC Corners' defaults
@@ -65,7 +66,7 @@ class Pore:
     detected: int
 
 
-def settings_for(efficiency, photons, blinks, seed) -> SimulationSettings:
+def settings_for(efficiency, photons, blinks, seed, junk=False) -> SimulationSettings:
     # As the experiments are run: imaged until every fluorophore has bleached
     # ("every blink": a geometric number of blinks, mean `blinks`, bleaching
     # 1 / blinks), and the activation raised so that the blinks are spread
@@ -73,7 +74,7 @@ def settings_for(efficiency, photons, blinks, seed) -> SimulationSettings:
     # emitters in a frame is the same for every condition.
     return SimulationSettings(
         n_frames=FRAMES_PER_BLINK * int(np.ceil(blinks)), seed=seed,
-        structure=StructureSettings(file=str(STRUCTURE)),
+        structure=StructureSettings(file=str(JUNK if junk else STRUCTURE)),
         labelling=LabellingSettings(efficiency=efficiency),
         blinking=BlinkingSettings(blinks=blinks, photons=photons,
                                   photons_std=photons / 2, activation="all"))
@@ -98,6 +99,7 @@ def corner_of(theta, phase) -> np.ndarray:
 
 GROUPING = "precision"            # or "smappy": the fixed 50 nm of smappy.group
 LINK_SIGMAS, LINK_MAX_NM = 3.0, 200.0
+CENTRE_SIGMA_NM = 20.0
 
 
 def group_by_precision(locs):
@@ -155,13 +157,9 @@ def group_by_precision(locs):
     return Localizations(columns, dict(locs.metadata)), gid + 1
 
 
-def pores_of(settings: SimulationSettings, segment: NPCSegmentSettings = None,
-             truth_only: bool = True) -> List[Pore]:
-    """The pores the segmenter finds.  By default with *min localizations* 3
-    and only the sites on a true pore (the counting under study, not the
-    segmentation); ``segment=NPCSegmentSettings(), truth_only=False`` is the
-    pipeline as a user runs it, junk sites included (their truth fields are
-    those of the nearest pore and mean nothing)."""
+def prepare(settings: SimulationSettings) -> dict:
+    """Simulate, group, and work out the truth: everything the sites are
+    then measured on, so several segmentations can share one simulation."""
     locs = simulate(settings)
     grouped, _ = group_by_precision(locs) if GROUPING == "precision" else group(locs)
     truth = ground_truth(settings)
@@ -175,44 +173,53 @@ def pores_of(settings: SimulationSettings, segment: NPCSegmentSettings = None,
         mine = f.copy == c
         th = np.arctan2(f.xyz[mine, 1] - centres[c, 1], f.xyz[mine, 0] - centres[c, 0])
         f_corner[mine] = corner_of(th, turn[c])
-
-    # the precision of every localization in the field, which is what a
-    # cutoff's pass fraction q is measured on
-    pores_of.sigma_all = np.asarray(grouped["xy_err_nm"], float)
+    # pores are the copies labelled with dye 1; dye 2 is junk (npc_junk.yaml)
+    pores = np.unique(f.copy[f.dye == 1])
+    from scipy.spatial import cKDTree
     x = np.asarray(grouped["x_nm"], float)
     y = np.asarray(grouped["y_nm"], float)
-    sigma = np.asarray(grouped["xy_err_nm"], float)
-    emitter = np.asarray(grouped["emitter"]).round().astype(int)
-    copy = np.asarray(grouped["copy"]).round().astype(int)
-    from scipy.spatial import cKDTree
-    tree = cKDTree(np.column_stack((x, y)))
-    out = []
-    # 3 on the ring, not 10: one row per blink, and at one blink a pore at
-    # low efficiency has only a dozen.  The segmenter is not under study, so a
-    # site counts only when it is on a true pore (within 20 nm, one per pore):
-    # at 500 photons it also proposes as many sites again on scattered
-    # imprecise localizations, which `pores_of.junk` counts
-    pores_of.junk = 0
+    return {"grouped": grouped, "f": f, "f_corner": f_corner, "centres": centres,
+            "turn": turn, "pores": pores, "true_tree": cKDTree(centres[pores]),
+            "x": x, "y": y, "sigma": np.asarray(grouped["xy_err_nm"], float),
+            "emitter": np.asarray(grouped["emitter"]).round().astype(int),
+            "copy": np.asarray(grouped["copy"]).round().astype(int),
+            "tree": cKDTree(np.column_stack((x, y)))}
+
+
+def pores_from_sites(ctx: dict, centres_found, truth_only: bool = True) -> List[Pore]:
+    """A Pore per site; with `truth_only`, only the sites on a true pore
+    (within 20 nm, one per pore).  `found` and `junk` count both kinds."""
+    x, y, sigma, tree = ctx["x"], ctx["y"], ctx["sigma"], ctx["tree"]
+    f, f_corner, centres, turn = ctx["f"], ctx["f_corner"], ctx["centres"], ctx["turn"]
+    copy, emitter = ctx["copy"], ctx["emitter"]
+    pores_from_sites.junk = pores_from_sites.found = 0
     taken = set()
-    from scipy.spatial import cKDTree as _Tree
-    true_tree = _Tree(centres)
-    if segment is None:
-        segment = NPCSegmentSettings(min_locs=3)
-    pores_of.found = 0
-    for site in segment_npcs(grouped, segment):
-        if not site["use"]:
+    out = []
+    for centre_found in centres_found:
+        near = np.asarray(tree.query_ball_point(centre_found, WINDOW))
+        if not len(near):
             continue
-        distance, c = true_tree.query(site["center"])
+        xs, ys, ss = x[near], y[near], sigma[near]
+        # centred on the precise localizations: at 500 photons most of the
+        # others are tens of nm off and pulled the centre with them
+        sharp = ss < CENTRE_SIGMA_NM
+        fit_on = sharp if sharp.sum() >= 3 else np.ones_like(sharp)
+        centre = fit_circle(xs[fit_on], ys[fit_on], centre_found, radius=R, scale=DR)[:2]
+        for _ in range(2):                       # and on the window around it
+            close_in = fit_on & (np.hypot(xs - centre[0], ys - centre[1]) < R + 2 * DR)
+            if close_in.sum() >= 3:
+                centre = fit_circle(xs[close_in], ys[close_in], centre, radius=R,
+                                    scale=DR)[:2]
+        # matched to the truth after centring, which is the centre counted on
+        distance, i = ctx["true_tree"].query(centre)
+        c = int(ctx["pores"][i])
         if distance > 20 or c in taken:
-            pores_of.junk += 1
+            pores_from_sites.junk += 1
             if truth_only:
                 continue
         else:
             taken.add(c)
-            pores_of.found += 1
-        near = np.asarray(tree.query_ball_point(site["center"], WINDOW))
-        xs, ys, ss = x[near], y[near], sigma[near]
-        centre = fit_circle(xs, ys, site["center"], radius=R, scale=DR)[:2]
+            pores_from_sites.found += 1
         theta, s, kept, inside = ring(xs, ys, ss, centre)
         close = np.hypot(xs - centre[0], ys - centre[1]) < R + 3 * DR
         theta_t, s_t, kept_t, _ = ring(xs, ys, ss, centres[c])
@@ -230,6 +237,27 @@ def pores_of(settings: SimulationSettings, segment: NPCSegmentSettings = None,
             theta_true_centre=theta_t, s_true_centre=s_t, kept_true_centre=kept_t,
             labelled=len(np.unique(f_corner[mine])),
             detected=len(np.unique(f_corner[emitter[own]]))))
+    return out
+
+
+def pores_of(settings: SimulationSettings, segment: NPCSegmentSettings = None,
+             truth_only: bool = True) -> List[Pore]:
+    """The pores the segmenter finds.  By default with *min localizations* 3
+    and only the sites on a true pore (the counting under study, not the
+    segmentation); ``segment=NPCSegmentSettings(), truth_only=False`` is the
+    pipeline as a user runs it, junk sites included (their truth fields are
+    those of the nearest pore and mean nothing).  At 500 photons the
+    segmenter at 3 proposes as many sites again on scattered imprecise
+    localizations, which `pores_of.junk` counts."""
+    ctx = prepare(settings)
+    # the precision of every localization in the field, which is what a
+    # cutoff's pass fraction q is measured on
+    pores_of.sigma_all = ctx["sigma"]
+    sites = [site["center"] for site in
+             segment_npcs(ctx["grouped"], segment or NPCSegmentSettings(min_locs=3))
+             if site["use"]]
+    out = pores_from_sites(ctx, sites, truth_only)
+    pores_of.junk, pores_of.found = pores_from_sites.junk, pores_from_sites.found
     return out
 
 
