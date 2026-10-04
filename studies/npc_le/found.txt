@@ -1,0 +1,27 @@
+found, of the pores showing 4 corners or more:
+                default  lenient  adaptive   none
+photons blinks                                   
+500     1         0.419    0.803     0.887  0.956
+        3         0.819    0.831     0.936  0.980
+        10        0.917    0.917     0.970  0.990
+5000    1         0.883    0.991     0.976  0.997
+        3         0.999    0.999     0.978  0.999
+        10        0.998    0.998     0.962  0.999
+
+by corners shown (all conditions):
+   default  lenient  adaptive   none
+k                                   
+4    0.265    0.749     0.824  0.914
+5    0.586    0.870     0.918  0.973
+6    0.813    0.914     0.943  0.984
+7    0.902    0.926     0.966  0.993
+8    0.964    0.966     0.973  0.998
+
+by corners, 500 photons, 1 blink:
+   default  lenient  adaptive   none
+k                                   
+4    0.140    0.746     0.813  0.902
+5    0.377    0.821     0.901  0.969
+6    0.585    0.852     0.923  0.973
+7    0.655    0.782     0.918  0.991
+8    0.875    0.812     0.938  1.000

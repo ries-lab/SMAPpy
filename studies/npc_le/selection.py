@@ -91,18 +91,25 @@ SEGMENTATIONS = {
 }
 
 
+import os
+JUNK = os.environ.get("NPC_JUNK", "1") == "1"
+ONLY = [v for v in os.environ.get("NPC_SEGMENTATIONS", "").split(",") if v]
+K_MINS = [int(v) for v in os.environ.get("NPC_K_MINS", "4").split(",")]
+
+
 def one_condition(condition):
     efficiency, photons, blinks = condition
+    segmentations = {n: f for n, f in SEGMENTATIONS.items() if not ONLY or n in ONLY}
     rows = []
     for replicate in range(REPLICATES):
-        pores = {name: [] for name in SEGMENTATIONS}
-        stats = {name: {"found": 0, "junk": 0} for name in SEGMENTATIONS}
+        pores = {name: [] for name in segmentations}
+        stats = {name: {"found": 0, "junk": 0} for name in segmentations}
         sigma_all = []
         for seed in range(1 + replicate * POOL, 1 + (replicate + 1) * POOL):
             ctx = bench.prepare(bench.settings_for(efficiency, photons, blinks, seed,
-                                                   junk=True))
+                                                   junk=JUNK))
             sigma_all.append(ctx["sigma"])
-            for name, segment in SEGMENTATIONS.items():
+            for name, segment in segmentations.items():
                 pores[name] += bench.pores_from_sites(ctx, segment(ctx["grouped"]),
                                                       truth_only=False)
                 stats[name]["found"] += bench.pores_from_sites.found
@@ -110,13 +117,15 @@ def one_condition(condition):
         sigma_all = np.concatenate(sigma_all)
         row = {"efficiency": efficiency, "photons": photons, "blinks": blinks,
                "replicate": replicate, "pores_total": POOL * 162}
-        for name in SEGMENTATIONS:
+        for name in segmentations:
             k, n, radius = joint.pore_counts(pores[name])
-            le, p, used, _ = joint.fit(k, n, sigma_all, radius)
             row.update({f"{name} found": stats[name]["found"],
                         f"{name} junk": stats[name]["junk"],
-                        f"{name} fitted": used, f"{name} le": le, f"{name} p": p,
                         f"{name} counting": counting(pores[name])})
+            for k_min in K_MINS:
+                le, p, used, _ = joint.fit(k, n, sigma_all, radius, k_min=k_min)
+                tag = name if k_min == 4 else f"{name} k>={k_min}"
+                row.update({f"{tag} fitted": used, f"{tag} le": le, f"{tag} p": p})
         rows.append(row)
         print({k: (round(v, 3) if isinstance(v, float) else v) for k, v in row.items()},
               flush=True)
