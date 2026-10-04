@@ -54,6 +54,8 @@ class Pore:
     blink: np.ndarray              # which grouped row (for subsampling)
     phase_fit: float
     phase_true: float
+    sigma: np.ndarray              # precision of each ring localization, nm
+    sigma_window: np.ndarray       # precision of every localization near the pore
     theta_true_centre: np.ndarray  # same localizations, around the true centre
     s_true_centre: np.ndarray
     kept_true_centre: np.ndarray
@@ -136,6 +138,7 @@ def pores_of(settings: SimulationSettings) -> List[Pore]:
         xs, ys, ss = x[near], y[near], sigma[near]
         centre = fit_circle(xs, ys, site["center"], radius=R, scale=DR)[:2]
         theta, s, kept, inside = ring(xs, ys, ss, centre)
+        close = np.hypot(xs - centre[0], ys - centre[1]) < R + 3 * DR
         theta_t, s_t, kept_t, _ = ring(xs, ys, ss, centres[c])
         if not kept.any():
             continue
@@ -144,6 +147,7 @@ def pores_of(settings: SimulationSettings) -> List[Pore]:
         own = near[copy[near] == c]
         out.append(Pore(
             theta=theta, s=s, kept=kept, blink=near[inside],
+            sigma=ss[inside], sigma_window=ss[close],
             phase_fit=circular_phase(theta[kept], w),
             phase_true=float(np.mod(turn[c] + STEP / 2, STEP) - STEP / 2),
             theta_true_centre=theta_t, s_true_centre=s_t, kept_true_centre=kept_t,
