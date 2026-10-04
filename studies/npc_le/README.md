@@ -250,13 +250,65 @@ photons for 1, 3, 10 blinks).
   of neighbouring pores in the 110 nm window.  That is a problem of how N is
   measured, not of the model.
 
+## Filtering less and correcting for the spillage
+
+`spill.py`.  Two changes to the joint fit of section 10.
+
+**Grouping by precision** (`bench.group_by_precision`, now the bench's
+default).  smappy's grouping links within a fixed 50 nm, and at 500 photons a
+dim frame at the end of a blink (precision 100 nm and more) lands beyond it:
+one blink became 1.55 grouped rows, which the blinking model reads as more
+blinks.  Linking consecutive frames within $3\sqrt{\sigma_1^2 + \sigma_2^2}$
+(at most 200 nm) leaves 1.14 rows per blink (1.0 at 10 blinks), with 1 % of
+rows mixing two emitters; a fixed 200 nm reaches 1.11 but mixes 3.4 %.
+
+**N below a loose cutoff.**  The localizations per pore are counted within
+100 nm of the centre and better than 30 nm, which keeps out the scattered
+localizations of neighbouring pores; each copy's count is then a thinned
+geometric (zero-modified), with q the fraction of all localizations of the
+field that pass.
+
+**The spillage model.**  The corners are counted with every localization
+better than an explicit 20 nm, which does not depend on what the peak finding
+lets through.  A localization lands in a given neighbour's segment with
+probability $\varepsilon$, computed from the precisions of the counted
+localizations and the margin to the border ($\pi r/8$, $r$ the ring's
+radius from the precise localizations, less the $\pm 5.6$ nm of a corner's
+two copies, with 4 nm added for tilt and the rotation fit): 0.06 at 500
+photons, 0.01 at 5000.  Localizations spill independently, so a corner's
+split into stay / left / right with $(1 - 2\varepsilon, \varepsilon,
+\varepsilon)$, and the distribution of the segments seen around the ring is
+exact through a $64 \times 64$ transfer matrix over consecutive corners.  It
+is the binomial at $\varepsilon = 0$, and matches a Monte Carlo of its own
+assumptions to the third decimal.
+
+**11. With the spillage modelled, a 20 nm cutoff gives the labelled ELE to
+about 2 points everywhere, one blink at 500 photons included.**  Bias against
+the labelled ELE, points, ELE 0.35 / 0.5 / 0.7, 5 pools of about 1000 pores:
+
+| photons | blinks | 20 nm, no spillage | 20 nm, spillage | 20 nm, spillage, ≥ 4 |
+|---|---|---|---|---|
+| 5000 | 1 | −0.6 / −1.3 / −2.1 | −0.5 / −1.0 / −1.7 | −0.6 / −1.0 / −1.7 |
+| 5000 | 3 | 1.0 / 0.7 / 0.4 | 0.1 / −0.1 / −0.1 | 0.1 / −0.1 / −0.1 |
+| 5000 | 10 | 3.6 / 3.7 / 3.3 | 0.3 / 0.3 / 1.0 | 0.3 / 0.2 / 1.0 |
+| 500 | 1 | 1.5 / −1.7 / −7.0 | 2.5 / 0.4 / −3.3 | 2.9 / 1.4 / −2.7 |
+| 500 | 3 | 4.1 / 2.8 / 1.2 | 0.2 / −1.5 / −2.3 | 0.1 / −1.6 / −2.3 |
+| 500 | 10 | 11.8 / 11.4 / 9.5 | 0.7 / −0.3 / 1.2 | 0.6 / −0.2 / 1.2 |
+
+The spread between pools is 0.2 to 2.3 points.  The fitted blinks are right
+(p = 0.99 / 0.96 / 0.92 at 500 photons and one blink, for ELE 0.35 / 0.5 /
+0.7; 0.31 to 0.34 for 3 blinks; 0.10 for 10).  Without the spillage term the
+same cutoff is up to 12 points high; with it, what is left is at ELE 0.7,
+where the histogram is least sensitive (finding 6).  Fitting the corners
+only from 4 up changes nothing: the localizations carry the rest.
+
 ## What follows
 
-* **Measure N better.**  Count a pore's localizations in a tighter window,
-  or only those better than a loose cutoff (the N model then thins each
-  blink with that cutoff's pass fraction), and see whether the one-blink case
-  at 500 photons recovers.  Fit only the cutoffs below the strays (6 nm at
-  500 photons with many blinks).
+* **The method to take into the plugin**: the corner histogram at an explicit
+  cutoff (20 nm) with the spillage model, fitted jointly with the histogram
+  of localizations per pore (better than 30 nm, within 100 nm), on grouping
+  that links by precision.  It gives the labelled ELE and the blinks per
+  fluorophore.
 * Before any of it goes into the plugin, break each assumption above in the
   simulation: other blink-number distributions, brightness that varies
   between fluorophores, background localizations, labelling that varies
