@@ -155,7 +155,13 @@ def group_by_precision(locs):
     return Localizations(columns, dict(locs.metadata)), gid + 1
 
 
-def pores_of(settings: SimulationSettings) -> List[Pore]:
+def pores_of(settings: SimulationSettings, segment: NPCSegmentSettings = None,
+             truth_only: bool = True) -> List[Pore]:
+    """The pores the segmenter finds.  By default with *min localizations* 3
+    and only the sites on a true pore (the counting under study, not the
+    segmentation); ``segment=NPCSegmentSettings(), truth_only=False`` is the
+    pipeline as a user runs it, junk sites included (their truth fields are
+    those of the nearest pore and mean nothing)."""
     locs = simulate(settings)
     grouped, _ = group_by_precision(locs) if GROUPING == "precision" else group(locs)
     truth = ground_truth(settings)
@@ -190,14 +196,20 @@ def pores_of(settings: SimulationSettings) -> List[Pore]:
     taken = set()
     from scipy.spatial import cKDTree as _Tree
     true_tree = _Tree(centres)
-    for site in segment_npcs(grouped, NPCSegmentSettings(min_locs=3)):
+    if segment is None:
+        segment = NPCSegmentSettings(min_locs=3)
+    pores_of.found = 0
+    for site in segment_npcs(grouped, segment):
         if not site["use"]:
             continue
         distance, c = true_tree.query(site["center"])
         if distance > 20 or c in taken:
             pores_of.junk += 1
-            continue
-        taken.add(c)
+            if truth_only:
+                continue
+        else:
+            taken.add(c)
+            pores_of.found += 1
         near = np.asarray(tree.query_ball_point(site["center"], WINDOW))
         xs, ys, ss = x[near], y[near], sigma[near]
         centre = fit_circle(xs, ys, site["center"], radius=R, scale=DR)[:2]

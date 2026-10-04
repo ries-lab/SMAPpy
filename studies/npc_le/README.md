@@ -302,7 +302,40 @@ same cutoff is up to 12 points high; with it, what is left is at ELE 0.7,
 where the histogram is least sensitive (finding 6).  Fitting the corners
 only from 4 up changes nothing: the localizations carry the rest.
 
+## The segmentation in the loop
+
+`pipeline.py`.  Every estimate above was made on the pores the segmenter
+found, but with *min localizations* 3 instead of the default 10, only the
+sites on a true pore, and against the labelled ELE *of the found pores* --
+so a segmentation that prefers well-labelled pores moved the reference with
+it.  Against the efficiency the simulation was run with, the spillage fit of
+section 11 is +4.4 points at 500 photons, one blink, ELE 0.35 (the found
+pores are 1.9 points better labelled than all), and within 2 at 5000.
+
+With the segmenter's defaults it is much worse.  Fraction of the true pores
+found, by N (localizations better than 30 nm within 100 nm):
+
+| photons, blinks, ELE | all | N 5–8 | 9–12 | 13–16 | more |
+|---|---|---|---|---|---|
+| 500, 1, 0.35 | 6 % | 1 % | 16 % | 89 % | |
+| 500, 1, 0.5 | 31 % | 4 % | 32 % | 72 % | 100 % |
+| 500, 3, 0.35 | 68 % | 18 % | 36 % | 60 % | 62–83 % |
+| 5000, 1, 0.35 | 62 % | 0 % | 71 % | 100 % | 100 % |
+
+*min localizations* 10 is too high for grouped data (a pore at ELE 0.35 with
+one blink has about 11 in all), and at 500 photons the checks reject 20 to
+40 % even of well-populated pores.  The selection is on N, which the fit of
+section 11 does not model: two simulations at 500 photons, one blink, ELE
+0.35 gave 18 sites and an estimate of 0.535.
+
 ## What follows
+
+* **Make the selection explicit and model it.**  Keep a pore when it shows at
+  least 4 corners at the fitted cutoff, run the segmenter leniently enough
+  that it does not select before that, and fit the joint distribution of
+  (corners, N) conditioned on 4 corners or more.  With the corners' state
+  reduced to "seen so far" and "spills right", the ring is a 4 x 4 transfer
+  matrix, which makes the joint distribution cheap.
 
 * **The method to take into the plugin**: the corner histogram at an explicit
   cutoff (20 nm) with the spillage model, fitted jointly with the histogram
