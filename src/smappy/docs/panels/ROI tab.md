@@ -19,9 +19,14 @@ and size -- and opens the two windows the work is done in: the
 [ROI manager](plugin:Panels/ROI manager), where sites are found, drawn,
 included or excluded, and looked at one by one, and the *evaluation* window,
 where the measurements to make on every site are chosen and run.  Below the
-tab's own controls sit the ROI plugins pinned to it: by default one that finds
-sites (*Density Peaks*) and one that summarises the measurements
-(*Histograms*).
+tab's own controls sit the ROI plugins pinned to it.  By default these are
+the ones that find sites -- [Density Peaks](plugin:ROIManager/Segment/Density Peaks)
+for any compact structure, [NPC](plugin:ROIManager/Segment/NPC) for nuclear
+pores -- the ones that summarise the measurements --
+[Histograms](plugin:ROIManager/Analyze/Histograms) and
+[NPC Labeling Efficiency](plugin:ROIManager/Analyze/NPC Labeling Efficiency)
+-- and [NPC Analysis](plugin:ROIManager/Workflow/NPC Analysis), which finds
+the pores, measures them and fits their labelling efficiency in one run.
 
 An ROI sees what the image shows: the localizations of its file that pass a
 layer's filter, grouped if that layer is grouped.  So clean the data in the
