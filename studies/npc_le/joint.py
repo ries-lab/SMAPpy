@@ -51,12 +51,21 @@ def classes(sigma_all, radius, cutoff=CUTOFF, n_cutoff=N_CUTOFF, window=N_WINDOW
     wa = (s < cutoff) * band
     a = float(np.mean(wa))
     b = float(np.mean((s < n_cutoff) * inside)) - a
-    eps = spill.spill_eps(s[wa > 0], radius) if a > 0 else 0.0
-    if a > 0:      # weighted by the band probability, as the counted ones are
-        margin = np.pi * radius / CORNERS
-        width = np.sqrt(s ** 2 + spill.EXTRA_NM ** 2)
-        e = 0.5 * (norm.sf((margin - spill.SPOKE_NM) / width)
-                   + norm.sf((margin + spill.SPOKE_NM) / width))
+    eps = 0.0
+    if a > 0:
+        # Each localization at its own distance rho from the centre: the
+        # angular margin to the border is pi/8 -+ the copies' offset, and its
+        # angular error is width / rho, so one nearer the centre spills more.
+        # Averaged over where it lands in the band (a radial Gaussian about the
+        # ring), weighted as the counted ones are.
+        lo, hi = bench.R - bench.DR, bench.R + bench.DR
+        rho = np.linspace(lo, hi, 13)[None, :]
+        density = norm.pdf((rho - radius) / s[:, None])
+        width = np.sqrt(s ** 2 + spill.EXTRA_NM ** 2)[:, None]
+        delta = spill.SPOKE_NM / radius
+        e = 0.5 * (norm.sf((np.pi / CORNERS - delta) * rho / width)
+                   + norm.sf((np.pi / CORNERS + delta) * rho / width))
+        e = np.sum(e * density, axis=1) / np.maximum(density.sum(axis=1), 1e-300)
         eps = float(np.sum(wa * e) / np.sum(wa))
     return a, max(b, 0.0), eps
 

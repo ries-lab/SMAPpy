@@ -36,6 +36,8 @@ ALPHA = 0.05                     # a fraction fails when its count is this unlik
 # on the precise localizations a pore has a few percent inside and outside, so
 # the limits can be tighter than the segmenter's, which count every one
 CHECKS = NPCSegmentSettings(max_inside=0.1, max_outside=0.2)
+RADIAL_EXTRA_NM = 5.0            # tilt and the label, beyond the precision
+FAR_FRACTION = 0.01              # of |z| > 3 a pore may have
 OPEN = NPCSegmentSettings(min_locs=3, min_radius_nm=0.0, max_radius_nm=1e9,
                           max_inside=1.0, max_outside=1.0, min_spread_nm=0.0)
 
@@ -48,7 +50,7 @@ def adaptive(grouped, settings=CHECKS, cutoff=joint.CUTOFF):
     precise = s < cutoff
     from scipy.spatial import cKDTree
     tree = cKDTree(np.column_stack((x[precise], y[precise])))
-    xp, yp = x[precise], y[precise]
+    xp, yp, sp = x[precise], y[precise], s[precise]
     R, dR = settings.radius_nm, settings.ring_width_nm
     out = []
     for site in segment_npcs(grouped, OPEN):
@@ -56,17 +58,23 @@ def adaptive(grouped, settings=CHECKS, cutoff=joint.CUTOFF):
         n = len(near)
         if n < 3:
             continue
-        c = site["center"]
+        c = np.asarray(site["center"], float)
+        # centred on the precise localizations, the ring's radius fixed
+        c = np.asarray(fit_circle(xp[near], yp[near], c, radius=R, scale=dR)[:2])
         r = np.hypot(xp[near] - c[0], yp[near] - c[1])
-        inside, outside = int(np.sum(r < R - dR)), int(np.sum(r > R + dR))
-        if binom.sf(inside - 1, n, settings.max_inside) < ALPHA:
-            continue
-        if binom.sf(outside - 1, n, settings.max_outside) < ALPHA:
-            continue
         radius = fit_circle(xp[near], yp[near], c, scale=dR)[2]
         if not settings.min_radius_nm <= radius <= settings.max_radius_nm:
             continue
-        out.append(c)
+        # Far from the ring for its own precision?  On a pore |z| > 3 happens
+        # 0.3 % of the time; a filled structure, centred or seen from beside
+        # it as an arc, has many.  Judged by count, so a sparse pore is not
+        # rejected for one stray, and scaled by each precision, so the test is
+        # the same at 500 photons as at 5000.
+        z = (r - radius) / np.sqrt(sp[near] ** 2 + RADIAL_EXTRA_NM ** 2)
+        far = int(np.sum(np.abs(z) > 3))
+        if binom.sf(far - 1, n, FAR_FRACTION) < ALPHA:
+            continue
+        out.append(site["center"])
     return out
 
 
@@ -117,7 +125,9 @@ def main():
     conditions = list(itertools.product((0.35, 0.5, 0.7), (500, 5000), (1, 3, 10)))
     with Pool() as pool:
         rows = [r for part in pool.map(one_condition, conditions) for r in part]
-    with open(HERE / "selection.csv", "w", newline="") as handle:
+    import sys
+    name = sys.argv[1] if len(sys.argv) > 1 else "selection.csv"
+    with open(HERE / name, "w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
         writer.writeheader()
         writer.writerows(rows)

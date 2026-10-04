@@ -39,7 +39,10 @@ STRUCTURE = HERE / "npc_tilt.yaml"
 JUNK = HERE / "npc_junk.yaml"            # the same pores, and junk that is not a ring
 CORNERS = 8
 STEP = 2 * np.pi / CORNERS
-R, DR = 50.0, 20.0                 # NPC Corners' defaults
+# the ring band the corners are counted in: the segmenter's ring, 40 to 70 nm.
+# Localizations closer to the centre are left out: a corner's segment there is
+# narrower than its spread (NPC Corners' defaults, 50 +- 20, reach to 30 nm)
+R, DR = 55.0, 15.0
 WINDOW = 150.0                     # the localizations of a site, nm
 SPOKE = 5.6 / 53.7                 # half the angle between a spoke's two copies
 FRAMES_PER_BLINK = 1000
