@@ -6,7 +6,7 @@ simulation was run with.  The simulation has junk that is not a ring
 (`npc_junk.yaml`).  The segmentations:
 
 * ``default``: the NPC segmenter with its defaults;
-* ``lenient``: *min localizations* 3, its checks as they are;
+* ``lenient``: *min localizations* 4, its checks as they are;
 * ``adaptive``: the segmenter's candidates with its checks off, judged again
   on the localizations better than the corner cutoff (so that imprecise ones
   do not count as outside), each fraction by a binomial test of its count
@@ -38,7 +38,10 @@ ALPHA = 0.05                     # a fraction fails when its count is this unlik
 CHECKS = NPCSegmentSettings(max_inside=0.1, max_outside=0.2)
 RADIAL_EXTRA_NM = 5.0            # tilt and the label, beyond the precision
 FAR_FRACTION = 0.01              # of |z| > 3 a pore may have
-OPEN = NPCSegmentSettings(min_locs=3, min_radius_nm=0.0, max_radius_nm=1e9,
+# 4 localizations, the fewest a pore showing 4 corners can have: no more, or
+# the sparse pores that still show 4 corners are lost
+MIN_LOCS = 4
+OPEN = NPCSegmentSettings(min_locs=MIN_LOCS, min_radius_nm=0.0, max_radius_nm=1e9,
                           max_inside=1.0, max_outside=1.0, min_spread_nm=0.0)
 
 
@@ -82,7 +85,7 @@ SEGMENTATIONS = {
     "default": lambda g: [q["center"] for q in segment_npcs(g, NPCSegmentSettings())
                           if q["use"]],
     "lenient": lambda g: [q["center"] for q in
-                          segment_npcs(g, NPCSegmentSettings(min_locs=3)) if q["use"]],
+                          segment_npcs(g, NPCSegmentSettings(min_locs=MIN_LOCS)) if q["use"]],
     "adaptive": adaptive,
     "none": lambda g: [q["center"] for q in segment_npcs(g, OPEN)],
 }

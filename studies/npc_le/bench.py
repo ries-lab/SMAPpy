@@ -197,6 +197,7 @@ def pores_from_sites(ctx: dict, centres_found, truth_only: bool = True) -> List[
     copy, emitter = ctx["copy"], ctx["emitter"]
     pores_from_sites.junk = pores_from_sites.found = 0
     taken = set()
+    pores_from_sites.taken = taken
     out = []
     for centre_found in centres_found:
         near = np.asarray(tree.query_ball_point(centre_found, WINDOW))
@@ -223,6 +224,7 @@ def pores_from_sites(ctx: dict, centres_found, truth_only: bool = True) -> List[
         else:
             taken.add(c)
             pores_from_sites.found += 1
+        pores_from_sites.taken = taken
         theta, s, kept, inside = ring(xs, ys, ss, centre)
         close = np.hypot(xs - centre[0], ys - centre[1]) < R + 3 * DR
         theta_t, s_t, kept_t, _ = ring(xs, ys, ss, centres[c])
