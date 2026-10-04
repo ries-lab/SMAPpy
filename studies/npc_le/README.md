@@ -200,18 +200,63 @@ What all of these assume, and the simulation gives them for free:
 * blinks whose brightness is independent of the fluorophore they come from;
 * one grouped row per blink.
 
+## All pores together: the histograms fitted jointly
+
+`pooled.py`.  Everything is fitted to histograms over all pores, the way the
+plugin fits the corners.  Each estimate pools 7 simulations (about 1000 pores;
+fewer at 500 photons, where fewer are found) and is repeated on 5 independent
+pools; the spread between pools is the precision at that size.
+
+* **counting**: the plain corner histogram (the plugin's rule, 15.7 nm),
+  fitted from 4 corners up, since pores with fewer are the ones a
+  segmentation misses.
+* **localization histogram (N)**: the localizations per pore.  A pore's
+  labelled copies are binomial in LE, and each has a geometric number of
+  blinks of mean 1/p, so N given M labelled copies is M plus a negative
+  binomial.  Its mean and its spread both enter the fit.
+* **joint**: the N histogram with the corner histograms at 6, 8 and 10 nm,
+  each at efficiency $LE \cdot d(q, p)$; LE and p both free.  The cutoff
+  histograms are fitted over 0..8: which pores are in the sample is decided
+  by all their localizations, not by the bright ones.
+* **joint, plain histogram**: the N histogram with the plain corner
+  histogram (4..8), at $LE \cdot d(q, p)$ with q the fraction better than
+  15.7 nm.
+
+**10. With 1000 pores the joint fits are good to about a point where the
+corners are resolved.**  Bias against the labelled ELE, points, ELE 0.35 /
+0.5 / 0.7, mean of 5 pools:
+
+| photons | blinks | counting | N alone | joint | joint, plain histogram |
+|---|---|---|---|---|---|
+| 5000 | 1 | −4.3 / −6.1 / −9.7 | −0.8 / −1.5 / −3.1 | −0.5 / −1.0 / −2.7 | −0.9 / −1.4 / −3.1 |
+| 5000 | 3 | −0.6 / −1.3 / −3.0 | 1.2 / 1.2 / 2.3 | 0.4 / 0.1 / −0.1 | 0.8 / 0.6 / 0.3 |
+| 5000 | 10 | 2.5 / 2.3 / 1.3 | 2.2 / 2.9 / 4.7 | 1.0 / 0.9 / 1.0 | 2.9 / 2.9 / 2.7 |
+| 500 | 1 | −25 / −34 / −48 | −4.2 / −5.0 / −9.8 | −4.7 / −5.5 / −10.4 | −4.6 / −5.9 / −11.7 |
+| 500 | 3 | −13 / −19 / −28 | 1.6 / 1.1 / 0.8 | 0.6 / −0.1 / −0.3 | 2.0 / 0.9 / −1.0 |
+| 500 | 10 | 1.9 / −0.9 / −4.6 | 3.6 / 4.2 / 5.2 | 3.7 / 3.6 / 4.1 | 9.5 / 8.9 / 8.1 |
+
+The spread between pools is 0.1 to 2 points: at 1000 pores what is left is
+bias, not noise.  The fitted blinks are right (p = 0.99, 0.35, 0.11 at 5000
+photons for 1, 3, 10 blinks).
+
+* The joint fit with tight cutoffs is within about a point at 5000 photons
+  (−2.7 at one blink and ELE 0.7) and at 500 photons with 3 blinks.
+* With the plain histogram instead, the strays it lets in come back: +3 at
+  5000 photons and +9 at 500 with 10 blinks.  The model has no term for them,
+  which is why the tight cutoffs do better.
+* 500 photons, 10 blinks: +4, the strays already at 8 and 10 nm (finding 7).
+* 500 photons, 1 blink: −5 to −10.  The N histogram reads 1.2 blinks for 1
+  (p = 0.82): N is overdispersed, most likely by the imprecise localizations
+  of neighbouring pores in the 110 nm window.  That is a problem of how N is
+  measured, not of the model.
+
 ## What follows
 
-* **An integrated likelihood per pore.**  Each pore contributes two numbers:
-  its localizations N and the corners seen at a tight cutoff, k.  Their
-  joint distribution follows from the same ingredients -- labelled copies
-  per corner (binomial in LE), blinks per copy (geometric in *p*), each
-  blink passing the cutoff with *q* -- by convolving one corner's
-  distribution of (rows, seen) eight times.  Fitting LE and *p* by maximum
-  likelihood over the pores uses the mean of N, its spread, and the corners
-  together, with the right weight on each, and should hold where each alone
-  is weak (one blink at low photons).  An extra parameter for variation
-  between pores would make the spread of N trustworthy on real data.
+* **Measure N better.**  Count a pore's localizations in a tighter window,
+  or only those better than a loose cutoff (the N model then thins each
+  blink with that cutoff's pass fraction), and see whether the one-blink case
+  at 500 photons recovers.  Fit only the cutoffs below the strays (6 nm at
+  500 photons with many blinks).
 * Before any of it goes into the plugin, break each assumption above in the
   simulation: other blink-number distributions, brightness that varies
   between fluorophores, background localizations, labelling that varies
