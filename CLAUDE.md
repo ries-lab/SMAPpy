@@ -70,6 +70,7 @@ shape, so read the one closest to what you are writing:
 | scores a fit against a simulation | `ground_truth.py` (the truth redrawn from the recipe, matched per frame) |
 | draws what the microscope recorded per frame | `image_tags.py` (the fit's `metadata["frame_tags"]`) |
 | finds a structure by its shape and judges it, then counts it | `npc.py` (a ring filter and circle fit in the segmenter, a per-site count, and a model of whole pores in `smappy/npc.py` fitted to the site table) |
+| runs the ROI manager's segment, evaluate and analyse as one | `npc.py`'s `NPCWorkflow` (the three plugins' settings as parts, `ROIProject.find` and `ROIProject.evaluate` on the pores it found) |
 
 A chain of plugins that runs as one, and running one over many files
 (`smappy-batch`, the batch window): `docs/batch.md`.

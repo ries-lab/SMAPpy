@@ -308,6 +308,15 @@ the batch and never the GUI -- and reads its progress lines.
 * **Inputs of more than one file.**
 * **Parallel files** (`jobs: N`), for analysis-only chains on many cores.
 * **Branching chains.**  Deliberately linear; see above.
+* **Evaluators in a chain.**  A step with `scope = "site"` is refused
+  (`chain.py`: it runs once per ROI and belongs in the ROI manager's
+  pipeline), so a chain cannot yet segment, evaluate every ROI and analyse
+  the site table.  How best to allow it is open -- a step that runs a list
+  of evaluators over the ROIs a segmenter step made, the ROI manager's
+  pipeline as a step, or something else -- and so is what the scratch
+  session does with the ROIs and their runs.  Until then a plugin does it
+  by hand: `ROIManager/Workflow/NPC Analysis` calls `ROIProject.find` and
+  `ROIProject.evaluate` itself.
 
 ## For agents
 
