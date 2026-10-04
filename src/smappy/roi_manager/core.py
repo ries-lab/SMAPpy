@@ -576,9 +576,19 @@ class ROIProject:
                   "filters": state.filter.ranges, "grouped": self.grouped,
                   "group_settings": asdict(self.group_settings) if self.grouped else None}
         existing = [roi.center for roi in self.rois.values() if roi.file_id == file_id]
-        centers = plugin.propose(state.locs[state.filter.indices], settings, existing)
-        return [self.add_roi(file_id, c, reviewed=reviewed, origin=origin)
-                for c in centers]
+        found = []
+        for proposed in plugin.propose(state.locs[state.filter.indices], settings,
+                                       existing):
+            # a centre, or a dict for a finder that also judges what it found:
+            # its "use", and what it measured, kept with the ROI's origin
+            if isinstance(proposed, dict):
+                roi = self.add_roi(file_id, proposed["center"], reviewed=reviewed,
+                                   origin={**origin, **proposed.get("origin", {})})
+                roi.use = bool(proposed.get("use", True))
+            else:
+                roi = self.add_roi(file_id, proposed, reviewed=reviewed, origin=origin)
+            found.append(roi)
+        return found
 
     def save(self, path):
         """Atomic sidecar save. In-memory sources must first be saved as localizations."""

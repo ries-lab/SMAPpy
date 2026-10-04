@@ -54,10 +54,13 @@ class Step:
 
 
 def default_instances() -> List[Instance]:
-    """What a pipeline starts as: every installed evaluator, once."""
+    """What a pipeline starts as: every installed evaluator that is a
+    `favorite`, once.  A specialised one -- NPC Corners -- says it is not, and
+    is added when the data call for it rather than run on every site."""
     from .. import plugins
     return [Instance(plugin=path)
-            for path, ref in sorted(plugins.refs().items()) if ref.scope == SCOPE]
+            for path, ref in sorted(plugins.refs().items())
+            if ref.scope == SCOPE and ref.favorite]
 
 
 def instances_from_run(recorded: Sequence[Dict[str, Any]]) -> List[Instance]:

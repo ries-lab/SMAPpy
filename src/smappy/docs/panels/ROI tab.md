@@ -220,7 +220,9 @@ row in the site table.
 ### Evaluation pipeline...
 Opens the evaluation window: which evaluators run, in what order, with which
 settings, and the buttons that run them on every ROI or re-run only what
-changed.  A new pipeline starts with every installed evaluator once.  The
+changed.  A new pipeline starts with the general evaluators, once each;
+a specialised one, such as NPC Corners, is added here when the data call
+for it.  The
 pipeline is saved in the file with the results, because the site table's
 columns mean nothing without it.
 

@@ -221,7 +221,9 @@ This plugin replaces the generic part of `ROIManager/Segment/segmentCME` and
   pixel, and candidates too close to each other, or to ROIs already there,
   are suppressed.
 * There is no ring filter: a blur of about the structure's radius already
-  gives a pore a single peak.
+  gives a pore a single peak.  For nuclear pores,
+  [NPC](plugin:ROIManager/Segment/NPC) keeps SMAP's ring filter and judges
+  each candidate's shape as well.
 
 ## References
 

@@ -27,11 +27,14 @@ def table(centers, per=10, seed=0):
 
 # ------------------------------------------------------------- the plugins
 
-def test_the_three_are_registered_where_smap_puts_them():
+def test_the_roi_plugins_are_registered_where_smap_puts_them():
     found = plugins.refs("ROIManager/")
     assert set(found) == {"ROIManager/Segment/Density Peaks",
+                          "ROIManager/Segment/NPC",
                           "ROIManager/Evaluate/Statistics",
-                          "ROIManager/Analyze/Histograms"}
+                          "ROIManager/Evaluate/NPC Corners",
+                          "ROIManager/Analyze/Histograms",
+                          "ROIManager/Analyze/NPC Labeling Efficiency"}
     # scope is what marks an evaluator, not the folder it sits in
     assert found["ROIManager/Evaluate/Statistics"].scope == "site"
     assert found["ROIManager/Segment/Density Peaks"].scope == "locs"
@@ -79,6 +82,12 @@ def test_a_pipeline_step_is_the_same_instance_type_a_tab_pins():
     assert step.label == "Statistics" and step.version == "1"
     assert step.settings.precision_column == "xy_err_nm"
     assert step.as_record()["plugin"] == "ROIManager/Evaluate/Statistics"
+
+
+def test_a_specialised_evaluator_is_offered_but_not_in_the_default_pipeline():
+    assert plugins.refs()["ROIManager/Evaluate/NPC Corners"].scope == "site"
+    assert [i.plugin for i in pipeline_module.default_instances()] == \
+        ["ROIManager/Evaluate/Statistics"]
 
 
 def test_a_disabled_step_is_skipped():
@@ -180,7 +189,8 @@ def app():
 def test_the_evaluation_window_offers_only_evaluators(app):
     from smappy.gui.chooser import PluginTree
     tree = PluginTree(scope="site")
-    assert list(tree.refs) == ["ROIManager/Evaluate/Statistics"]
+    assert sorted(tree.refs) == ["ROIManager/Evaluate/NPC Corners",
+                                 "ROIManager/Evaluate/Statistics"]
     assert set(PluginTree(scope="locs").refs).isdisjoint(tree.refs)
 
 

@@ -444,7 +444,8 @@ class Plugin:
     name: str = ""                 # set by `register` from the path's last part
     path: str = ""                 # "Analysis/Drift/COMET"
     description: str = ""
-    favorite: bool = True          # pinned in the shipped workspace
+    favorite: bool = True          # pinned in the shipped workspace; for an
+                                   # evaluator, in the default evaluation pipeline
     # "locs": run once over the selection.  "site": run once per ROI, with
     # `ctx.site` set -- what makes a plugin an ROI evaluator.  It is a property
     # of the plugin, not of its folder, which is what lets the evaluation

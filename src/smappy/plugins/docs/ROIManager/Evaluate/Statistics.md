@@ -12,8 +12,8 @@ and returns a row of numbers for it.  The rows of all sites together make the
 *site table*, which the Analyze plugins, such as
 [Histograms](plugin:ROIManager/Analyze/Histograms), summarise.
 
-Statistics is the simplest evaluator.  A new pipeline runs every installed
-evaluator once, and in a plain installation that is this one.  For each site it reports three numbers: how many
+Statistics is the simplest evaluator.  A new pipeline starts with the
+general evaluators, and in a plain installation that is this one.  For each site it reports three numbers: how many
 localizations it holds, their mean localization precision and their mean
 photon count.  They are the first thing to look at in a set of sites: a
 count far from the others marks a site that is empty, doubled or sits on
