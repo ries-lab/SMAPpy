@@ -179,19 +179,16 @@ def estimate(pores, sigma_all, cutoff, n_cutoff, n_window, lo, spill=True):
 
 VARIANTS = {
     # name: cutoff, N cutoff, N window, fit from, spill model
-    "tight 6, N all": (6.0, 1e9, 110.0, 0, False),
-    "tight 6, N<30": (6.0, 30.0, 100.0, 0, False),
-    "15 no spill, N<30": (15.0, 30.0, 100.0, 0, False),
-    "15 spill, N<30": (15.0, 30.0, 100.0, 0, True),
-    "15 spill, N<30, >=4": (15.0, 30.0, 100.0, 4, True),
-    "15 spill, N<20": (15.0, 20.0, 100.0, 0, True),
+    "20 no spill": (20.0, 30.0, 100.0, 0, False),
+    "20 spill": (20.0, 30.0, 100.0, 0, True),
+    "20 spill, >=4": (20.0, 30.0, 100.0, 4, True),
 }
 
 
-def main():
+def one_condition(condition):
+    efficiency, photons, blinks = condition
     rows = []
-    for efficiency, photons, blinks in itertools.product((0.35, 0.5, 0.7), (500, 5000),
-                                                         (1, 3, 10)):
+    if True:
         for replicate in range(REPLICATES):
             pores, sigma_all = [], []
             for seed in range(1 + replicate * POOL, 1 + (replicate + 1) * POOL):
@@ -215,6 +212,14 @@ def main():
             rows.append(row)
             print({k: (round(v, 3) if isinstance(v, float) else v) for k, v in row.items()
                    if not k.startswith(("p ", "eps "))}, flush=True)
+    return rows
+
+
+def main():
+    from multiprocessing import Pool
+    conditions = list(itertools.product((0.35, 0.5, 0.7), (500, 5000), (1, 3, 10)))
+    with Pool() as pool:
+        rows = [r for part in pool.map(one_condition, conditions) for r in part]
     with open(HERE / "spill.csv", "w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
         writer.writeheader()
