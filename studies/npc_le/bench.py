@@ -56,6 +56,8 @@ class Pore:
     phase_true: float
     sigma: np.ndarray              # precision of each ring localization, nm
     sigma_window: np.ndarray       # precision of every localization near the pore
+    rho_near: np.ndarray           # distance from the fitted centre, within WINDOW
+    sigma_near: np.ndarray         # precision of the same
     theta_true_centre: np.ndarray  # same localizations, around the true centre
     s_true_centre: np.ndarray
     kept_true_centre: np.ndarray
@@ -94,9 +96,68 @@ def corner_of(theta, phase) -> np.ndarray:
     return np.floor(np.mod(theta - phase + STEP / 2, 2 * np.pi) / STEP).astype(int)
 
 
+GROUPING = "precision"            # or "smappy": the fixed 50 nm of smappy.group
+LINK_SIGMAS, LINK_MAX_NM = 3.0, 200.0
+
+
+def group_by_precision(locs):
+    """Link localizations in consecutive frames when they are closer than
+    3 sqrt(s1^2 + s2^2) (and 200 nm): a dim frame at the end of a blink has
+    a precision of 100 nm and more and lands beyond smappy's fixed 50 nm, so
+    one blink became 1.5 rows at 500 photons.  Positions are combined with
+    inverse-variance weights, precisions as 1 / sqrt(sum 1 / s^2); the truth
+    columns come from the most precise localization of the group."""
+    from scipy.spatial import cKDTree
+    frame = np.asarray(locs["frame"], np.int64)
+    x = np.asarray(locs["x_nm"], float)
+    y = np.asarray(locs["y_nm"], float)
+    s = np.asarray(locs["xy_err_nm"], float)
+    order = np.argsort(frame, kind="stable")
+    parent = np.arange(len(x))
+
+    def root(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+    starts = np.searchsorted(frame[order], np.unique(frame))
+    bounds = dict(zip(np.unique(frame), zip(starts, list(starts[1:]) + [len(x)])))
+    for f, (a, b) in bounds.items():
+        if f + 1 not in bounds:
+            continue
+        here = order[a:b]
+        c, d = bounds[f + 1]
+        there = order[c:d]
+        tree = cKDTree(np.column_stack((x[there], y[there])))
+        for i in here:
+            for j in tree.query_ball_point((x[i], y[i]), LINK_MAX_NM):
+                k = there[j]
+                dist = np.hypot(x[i] - x[k], y[i] - y[k])
+                if dist < LINK_SIGMAS * np.hypot(s[i], s[k]):
+                    parent[root(k)] = root(i)
+    ids = np.array([root(i) for i in range(len(x))])
+    _, gid = np.unique(ids, return_inverse=True)
+    w = 1 / s ** 2
+    wsum = np.bincount(gid, w)
+    columns = {"x_nm": np.bincount(gid, w * x) / wsum,
+               "y_nm": np.bincount(gid, w * y) / wsum,
+               "xy_err_nm": 1 / np.sqrt(wsum),
+               "photons": np.bincount(gid, np.asarray(locs["photons"], float)),
+               "frame": np.minimum.reduceat(frame[np.argsort(gid, kind="stable")],
+                                            np.r_[0, np.cumsum(np.bincount(gid))[:-1]])}
+    best = np.full(gid.max() + 1, -1)
+    rank = np.argsort(-w, kind="stable")             # most precise first
+    for i in rank[::-1]:
+        best[gid[i]] = i
+    for name in ("emitter", "copy"):
+        columns[name] = np.asarray(locs[name])[best]
+    from smappy.locs import Localizations
+    return Localizations(columns, dict(locs.metadata)), gid + 1
+
+
 def pores_of(settings: SimulationSettings) -> List[Pore]:
     locs = simulate(settings)
-    grouped, _ = group(locs)
+    grouped, _ = group_by_precision(locs) if GROUPING == "precision" else group(locs)
     truth = ground_truth(settings)
     poses = locs.metadata["copies"]
     centres = np.column_stack((poses["x_nm"], poses["y_nm"]))
@@ -109,6 +170,9 @@ def pores_of(settings: SimulationSettings) -> List[Pore]:
         th = np.arctan2(f.xyz[mine, 1] - centres[c, 1], f.xyz[mine, 0] - centres[c, 0])
         f_corner[mine] = corner_of(th, turn[c])
 
+    # the precision of every localization in the field, which is what a
+    # cutoff's pass fraction q is measured on
+    pores_of.sigma_all = np.asarray(grouped["xy_err_nm"], float)
     x = np.asarray(grouped["x_nm"], float)
     y = np.asarray(grouped["y_nm"], float)
     sigma = np.asarray(grouped["xy_err_nm"], float)
@@ -148,6 +212,7 @@ def pores_of(settings: SimulationSettings) -> List[Pore]:
         out.append(Pore(
             theta=theta, s=s, kept=kept, blink=near[inside],
             sigma=ss[inside], sigma_window=ss[close],
+            rho_near=np.hypot(xs - centre[0], ys - centre[1]), sigma_near=ss,
             phase_fit=circular_phase(theta[kept], w),
             phase_true=float(np.mod(turn[c] + STEP / 2, STEP) - STEP / 2),
             theta_true_centre=theta_t, s_true_centre=s_t, kept_true_centre=kept_t,
