@@ -135,6 +135,9 @@ def one_condition(condition):
 def main():
     from multiprocessing import Pool
     conditions = list(itertools.product((0.35, 0.5, 0.7), (500, 5000), (1, 3, 10)))
+    if os.environ.get("NPC_CONDITIONS"):     # "0.5/5000/1;0.7/500/3", to finish a run
+        conditions = [tuple(float(v) if "." in v else int(v) for v in c.split("/"))
+                      for c in os.environ["NPC_CONDITIONS"].split(";")]
     with Pool() as pool:
         rows = [r for part in pool.map(one_condition, conditions) for r in part]
     import sys
