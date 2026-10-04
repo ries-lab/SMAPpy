@@ -69,6 +69,7 @@ shape, so read the one closest to what you are writing:
 | sets up layers and filters from settings | `chain_layers.py` (bounds as rows per layer, `Result.data["layers"]`) |
 | scores a fit against a simulation | `ground_truth.py` (the truth redrawn from the recipe, matched per frame) |
 | draws what the microscope recorded per frame | `image_tags.py` (the fit's `metadata["frame_tags"]`) |
+| finds a structure by its shape and judges it, then counts it | `npc.py` (a ring filter and circle fit in the segmenter, a per-site count, a model fitted to the site table) |
 
 A chain of plugins that runs as one, and running one over many files
 (`smappy-batch`, the batch window): `docs/batch.md`.
@@ -346,6 +347,8 @@ renders with its maths and figures.
 
 Plugins reach the shipped workspace by themselves: the Analysis tab seeds from
 `Analysis/` and `favorite` defaults to True, so there is no registry to edit.
+For an evaluator (`scope = "site"`), `favorite` also decides whether it is in a
+new evaluation pipeline; a specialised one (`NPC Corners`) sets it False.
 
 ## The plugin's page
 
