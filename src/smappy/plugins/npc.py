@@ -1,5 +1,5 @@
 """Nuclear pore complexes: finding them, counting their corners, and the
-effective labelling efficiency that follows.
+labelling efficiency that follows.
 
 Three plugins, one for each step of the ROI manager, ported from SMAP's
 ``segmentNPC`` with ``NPCsegmentCleanup``, ``NPCLabelingQuantify_s`` and
@@ -7,30 +7,51 @@ Three plugins, one for each step of the ROI manager, ported from SMAP's
 
 * **Segment/NPC** filters a density image with a ring, fits a circle to every
   candidate and keeps the ones that look like a pore.
-* **Evaluate/NPC Corners** counts how many of a pore's eight corners hold a
-  localization.
-* **Analyze/NPC Labeling Efficiency** fits the histogram of those counts with
-  the binomial model of the paper.
+* **Evaluate/NPC Corners** counts, per pore, the corners seen with the
+  precise localizations and the localizations it has -- and SMAP's corner
+  count beside them.
+* **Analyze/NPC Labeling Efficiency** fits the two jointly over all pores
+  with the model of `smappy.npc`, or SMAP's corner histogram alone.
 
-Departures from SMAP, and why:
+Why it is not SMAP's corner counting, and why the settings are what they are,
+is measured in ``studies/npc_le`` (its README has the numbers):
+
+* Counting a corner from any localization in its segment is biased both ways
+  -- imprecise localizations spill into empty neighbours and open them, and a
+  precision filter loses the corners whose blinks were dim -- by up to 10
+  points of efficiency at 5000 photons per blink and far more at 500.  The
+  joint model counts with a cutoff (20 nm), models the spill, and takes the
+  blinks from the localizations per pore, which is what extrapolates to the
+  dim fluorophores the cutoff loses.
+* The fit is conditioned on 5 corners or more.  The pores a segmentation
+  loses are the sparse ones, and junk rarely shows 5 corners; fitting from 4
+  left up to 18 points of bias with junk, from 5 about 11 at worst and from 6
+  about 6, but 6 costs where few pores show that many corners (one blink).
+* The segmenter judges a candidate on its localizations better than the same
+  cutoff: its fitted radius, and how far each lies from the ring in units of
+  its own precision.  Fractions inside and outside counted on every
+  localization reject sparse pores at low photon numbers (imprecise
+  localizations land inside) and pass pore-sized filled blobs (the ring filter
+  puts the site beside a filled blob, not on it, and from there it is an
+  arc).  *min localizations* is 4 -- a pore showing 4 corners has at least 4
+  -- since more loses the sparse pores that still show 5.
+* Corners are counted from 40 nm out: nearer the centre a corner's segment is
+  narrower than a localization's spread.
+
+Smaller departures:
 
 * The ring filter is a zero-sum kernel -- a Gaussian ring minus a disc of the
   same weight -- instead of SMAP's ring followed by a difference of Gaussians
   with a cutoff in filtered-image units.  A uniform background gives zero by
   construction, and the threshold that decides becomes a number of
-  localizations on the ring, which means the same thing at any pixel size.
-* What SMAP split between a segmenter and a clean-up evaluator happens in one
-  run here: the circle fit and the quality control are what makes a candidate
-  a pore, and the user asked for them in the segmenter.  The PSF-width check
-  is dropped; that is a layer filter.
+  localizations, which means the same at any pixel size.
 * The circle fits use a soft-L1 loss, so the background inside the window
   does not pull the centre; SMAP's ``fitposring`` is plain least squares.
 * The rotation of a pore is the weighted circular mean of ``8 theta`` instead
-  of a least-squares fit of a sawtooth: closed form, no start value, no local
-  minima.
-* The histogram fit is maximum likelihood of the binomial model conditioned on
-  the fit range, with a bootstrap error.  SMAP's least squares on the square
-  root of the histogram is kept as a choice, to compare against.
+  of a least-squares fit of a sawtooth: closed form, no start value.
+* SMAP's analysis is kept as the *corners (SMAP)* method, its histogram
+  fitted by maximum likelihood conditioned on the fit range, or by SMAP's
+  least squares on the square root of the histogram.
 """
 from __future__ import annotations
 
@@ -45,9 +66,17 @@ from .roi import MAX_FINDER_PIXELS, current_file
 # SMAP's NPCLabelingQuantify counts a localization towards a corner only when
 # its precision is below 0.4 of the arc between two corners (15.7 nm at 50 nm)
 PRECISION_OF_ARC = 0.4
+SMAP_RADIUS_NM, SMAP_RING_WIDTH_NM = 50.0, 20.0
 # fixed-radius fits of a candidate's centre: the second is on the window
 # around the first answer, which a filter peak a pixel or two off can need
 FIT_PASSES = 2
+# a localization further than this many of its precisions from the ring is
+# "far"; on a pore that happens 0.3 % of the time
+FAR_SIGMAS = 3.0
+
+
+def precision_column(locs) -> Optional[str]:
+    return next((n for n in ("xy_err_nm", "x_err_nm") if n in locs), None)
 
 
 # ------------------------------------------------------------------ geometry
@@ -115,34 +144,35 @@ def ring_kernel(radius_nm: float, width_nm: float, pixel_nm: float) -> np.ndarra
 class NPCSegmentSettings:
     radius_nm: float = param(55.0, label="radius", unit="nm", min=1.0,
                              help="radius of the pore: the ring the filter looks for "
-                                  "and the one the bands are drawn around")
+                                  "and the one the band is drawn around")
     ring_width_nm: float = param(15.0, label="ring width", unit="nm", min=1.0,
-                                 help="half the width of the band counted as the ring; "
-                                      "also the width of the filter's ring")
-    min_locs: int = param(10, label="min localizations", min=1,
+                                 help="half the width of the ring band; also the "
+                                      "width of the filter's ring")
+    min_locs: int = param(4, label="min localizations", min=1,
                           help="localizations a candidate needs in the ring band")
+    precision_nm: float = param(20.0, label="judge on precision", unit="nm", min=0.1,
+                                help="the checks use only localizations more "
+                                     "precise than this")
     min_radius_nm: float = param(40.0, label="min fitted radius", unit="nm", min=0.0,
                                  help="smallest fitted radius that is a pore")
     max_radius_nm: float = param(70.0, label="max fitted radius", unit="nm", min=0.0,
                                  help="largest fitted radius that is a pore")
-    max_inside: float = param(0.2, label="max inside", min=0.0, max=1.0,
-                              help="largest fraction of the window's localizations "
-                                   "inside the ring band")
-    max_outside: float = param(0.4, label="max outside", min=0.0, max=1.0,
-                               help="largest fraction of the window's localizations "
-                                    "outside the ring band")
-    # off by default: it is what rejects an arc of a neighbouring pore, but
-    # it also rejects real pores with few corners labelled -- the ones the
-    # labelling efficiency is measured from -- and with the separation above
-    # 2 R the simulations show no arcs left for it to catch
-    min_spread_nm: float = param(0.0, label="min spread", unit="nm", min=0.0,
-                                 help="smallest spread of the localizations around "
-                                      "their mean, (det cov)^1/4; 0 turns it off")
+    max_far: float = param(0.01, label="max far", min=0.0, max=1.0,
+                           help="largest fraction of localizations more than 3 "
+                                "of their precisions from the ring")
     keep_rejected: bool = param(False, label="keep rejected",
                                 help="add candidates that fail the checks as ROIs "
                                      "that are not used, to look at them")
+    radial_alpha: float = param(0.05, label="far test level", min=1e-6, max=0.5,
+                                advanced=True,
+                                help="a candidate fails when its far ones are this "
+                                     "unlikely for a pore")
+    radial_extra_nm: float = param(5.0, label="ring spread", unit="nm", min=0.0,
+                                   advanced=True,
+                                   help="tilt and label, added to each precision "
+                                        "in the far test")
     window_nm: float = param(100.0, label="window", unit="nm", min=1.0, advanced=True,
-                             help="radius around a candidate that is fitted and counted")
+                             help="radius around a candidate that is fitted and judged")
     separation_nm: float = param(120.0, label="separation", unit="nm", min=0.0,
                                  advanced=True,
                                  help="reject a candidate this close to a stronger "
@@ -189,50 +219,57 @@ def candidates(image: np.ndarray, origin, pixel: float, separation_nm: float
             for i in order]
 
 
-def ring_quality(x, y, center, settings: NPCSegmentSettings) -> Dict[str, Any]:
-    """Fit and judge one candidate.
+def ring_quality(x, y, center, settings: NPCSegmentSettings, sigma=None
+                 ) -> Dict[str, Any]:
+    """Fit and judge one candidate, on its precise localizations.
 
     The centre is fitted with the radius fixed, twice, the second time on the
-    window around the first answer; that centre is the site.  The radius is
-    then fitted free, and the window's localizations are split into inside,
-    ring and outside by their distance from the centre:
-    ``r < R - dR``, ``R - dR <= r <= R + dR`` and ``r > R + dR``.
+    window around the first answer, using the localizations better than
+    *judge on precision* (all of them when the table has no precision, or
+    fewer than 3 are); that centre is the site.  On the same localizations
+    the radius is fitted free, and each one's distance from that circle is
+    taken in units of its own precision (widened by the *ring spread*):
+    ``z = (r - radius) / sqrt(sigma^2 + extra^2)``.  A pore has few with
+    |z| > 3; a filled structure, whether the site is on it or beside it, has
+    many.  The candidate fails when the count of far ones is more than
+    *max far* explains (binomial, at *far test level*) -- by count, so that a
+    sparse pore is not rejected for one stray.
     """
+    from scipy.stats import binom
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
     R, dR = settings.radius_nm, settings.ring_width_nm
+    precise = (np.ones(len(x), bool) if sigma is None
+               else np.asarray(sigma, float) < settings.precision_nm)
     c = np.asarray(center, dtype=float)
     for _ in range(FIT_PASSES):
         near = np.hypot(x - c[0], y - c[1]) <= settings.window_nm
-        c = np.array(fit_circle(x[near], y[near], c, radius=R, scale=dR)[:2])
+        on = near & precise if np.sum(near & precise) >= 3 else near
+        c = np.array(fit_circle(x[on], y[on], c, radius=R, scale=dR)[:2])
     r = np.hypot(x - c[0], y - c[1])
     near = r <= settings.window_nm
-    xw, yw, rw = x[near], y[near], r[near]
-    n = len(rw)
-    radius = fit_circle(xw, yw, c, scale=dR)[2] if n >= 3 else np.nan
-    inside = int(np.sum(rw < R - dR))
-    outside = int(np.sum(rw > R + dR))
-    ring = n - inside - outside
-    if n >= 3:
-        eig = np.clip(np.linalg.eigvalsh(np.cov(xw, yw)), 0, None)
-        spread = float(np.prod(eig) ** 0.25)
-    else:
-        spread = 0.0
-    out = {"center": c.tolist(), "radius_nm": float(radius), "n_ring": ring,
-           "n_window": n, "fraction_inside": inside / n if n else np.nan,
-           "fraction_outside": outside / n if n else np.nan, "spread_nm": spread}
+    ring = int(np.sum(near & (r >= R - dR) & (r <= R + dR)))
+    use = near & precise
+    n = int(use.sum())
+    radius = fit_circle(x[use], y[use], c, scale=dR)[2] if n >= 3 else np.nan
+    far, p_far = 0, 1.0
+    if sigma is not None and n >= 3 and np.isfinite(radius):
+        z = (r[use] - radius) / np.sqrt(np.asarray(sigma, float)[use] ** 2
+                                        + settings.radial_extra_nm ** 2)
+        far = int(np.sum(np.abs(z) > FAR_SIGMAS))
+        p_far = float(binom.sf(far - 1, n, settings.max_far)) if far else 1.0
     failed = []
     if ring < settings.min_locs:
         failed.append("localizations")
-    if not settings.min_radius_nm <= radius <= settings.max_radius_nm:
+    if n < 3:
+        failed.append("precise localizations")
+    elif not settings.min_radius_nm <= radius <= settings.max_radius_nm:
         failed.append("radius")
-    if not out["fraction_inside"] <= settings.max_inside:
-        failed.append("inside")
-    if not out["fraction_outside"] <= settings.max_outside:
-        failed.append("outside")
-    if spread < settings.min_spread_nm:
-        failed.append("spread")
-    out["failed"] = failed
-    out["use"] = not failed
-    return out
+    if p_far < settings.radial_alpha:
+        failed.append("far")
+    return {"center": c.tolist(), "radius_nm": float(radius), "n_ring": ring,
+            "n_precise": n, "far_fraction": far / n if n else np.nan,
+            "far_p": p_far, "failed": failed, "use": not failed}
 
 
 class KDList:
@@ -272,7 +309,12 @@ def segment_npcs(locs, settings: NPCSegmentSettings, existing: Sequence = ()
             raise ValueError(f"{name} must be positive")
     xy = np.column_stack((np.asarray(locs["x_nm"], dtype=float),
                           np.asarray(locs["y_nm"], dtype=float)))
-    xy = xy[np.isfinite(xy).all(axis=1)]
+    column = precision_column(locs)
+    sigma = None if column is None else np.asarray(locs[column], dtype=float)
+    finite = np.isfinite(xy).all(axis=1)
+    xy = xy[finite]
+    if sigma is not None:
+        sigma = sigma[finite]
     if len(xy) < settings.min_locs:
         return []
     image, origin = ring_filtered(xy, settings)
@@ -292,7 +334,8 @@ def segment_npcs(locs, settings: NPCSegmentSettings, existing: Sequence = ()
         if n_ring < settings.min_locs or accepted.near(center, settings.separation_nm):
             continue
         window = np.asarray(tree.query_ball_point(center, settings.window_nm + 2 * dR))
-        site = ring_quality(xy[window, 0], xy[window, 1], center, settings)
+        site = ring_quality(xy[window, 0], xy[window, 1], center, settings,
+                            None if sigma is None else sigma[window])
         c = np.asarray(site["center"])
         if accepted.near(c, settings.separation_nm):
             continue
@@ -304,16 +347,15 @@ def segment_npcs(locs, settings: NPCSegmentSettings, existing: Sequence = ()
 
 def draw_quality(figure, sites: Sequence[Dict[str, Any]],
                  settings: NPCSegmentSettings) -> None:
-    """The four checks as histograms, the limits drawn in, kept and rejected
+    """The checks as histograms, the limits drawn in, kept and rejected
     stacked: where the cut falls against the distribution."""
     checks = (("radius_nm", "fitted radius (nm)",
                (settings.min_radius_nm, settings.max_radius_nm)),
-              ("fraction_inside", "fraction inside", (None, settings.max_inside)),
-              ("fraction_outside", "fraction outside", (None, settings.max_outside)),
-              ("spread_nm", "spread (nm)", (settings.min_spread_nm, None)))
+              ("far_fraction", "fraction far from the ring", (None, None)),
+              ("n_precise", "precise localizations", (None, None)))
     used = np.array([s["use"] for s in sites], dtype=bool)
-    axes = figure.subplots(2, 2, gridspec_kw={"hspace": 0.55, "wspace": 0.45})
-    for ax, (key, label, limits) in zip(axes.ravel(), checks):
+    axes = figure.subplots(1, 3, gridspec_kw={"wspace": 0.45})
+    for ax, (key, label, limits) in zip(np.ravel(axes), checks):
         values = np.array([s[key] for s in sites], dtype=float)
         finite = np.isfinite(values)
         if finite.any():
@@ -350,7 +392,7 @@ class NPCSegment(Plugin):
     those that look like a pore."""
 
     Settings = NPCSegmentSettings
-    version = "1"
+    version = "2"
 
     def propose(self, locs, settings: NPCSegmentSettings,
                 existing: Sequence = ()) -> List[Dict[str, Any]]:
@@ -362,9 +404,8 @@ class NPCSegment(Plugin):
         self.last = sites
         keep = [s for s in sites if s["use"] or settings.keep_rejected]
         return [{"center": s["center"], "use": s["use"],
-                 "origin": {k: s[k] for k in ("radius_nm", "n_ring", "fraction_inside",
-                                              "fraction_outside", "spread_nm",
-                                              "failed")}}
+                 "origin": {k: s[k] for k in ("radius_nm", "n_ring", "n_precise",
+                                              "far_fraction", "failed")}}
                 for s in keep]
 
     def run(self, ctx: Context, settings: NPCSegmentSettings) -> Result:
@@ -387,6 +428,8 @@ class NPCSegment(Plugin):
                     "centers": [r.center for r in found if r.use]}
         kept = sum(s["use"] for s in sites)
         text = f"{kept} pores of {len(sites)} candidates"
+        if precision_column(locs) is None:
+            text += " (no precision column: the far test is off)"
         if sites and kept < len(sites):
             reasons: Dict[str, int] = {}
             for s in sites:
@@ -400,68 +443,89 @@ class NPCSegment(Plugin):
                       plot=(lambda ax: draw_sites(ax, xy, sites, settings))
                       if sites else None,
                       plots={"checks": Plot(lambda f: draw_quality(f, sites, settings),
-                                            panels=4, size=(6, 5))} if sites else {})
+                                            panels=3, size=(8, 2.8))} if sites else {})
 
 
 # ---------------------------------------------------------------- corners
 
 @dataclass
 class NPCCornersSettings:
-    radius_nm: float = param(50.0, label="radius", unit="nm", min=1.0,
-                             help="radius of the ring the localizations are taken from")
-    ring_width_nm: float = param(20.0, label="ring width", unit="nm", min=1.0,
+    radius_nm: float = param(55.0, label="radius", unit="nm", min=1.0,
+                             help="radius of the ring band the corners are counted in")
+    ring_width_nm: float = param(15.0, label="ring width", unit="nm", min=1.0,
                                  help="half the width of the ring band")
+    precision_nm: float = param(20.0, label="corner precision", unit="nm", min=0.1,
+                                help="corners are counted with the localizations "
+                                     "more precise than this")
+    n_precision_nm: float = param(30.0, label="count precision", unit="nm", min=0.1,
+                                  help="the localizations per pore are those more "
+                                       "precise than this")
+    n_window_nm: float = param(100.0, label="count window", unit="nm", min=1.0,
+                               help="... and within this distance of the centre")
     corners: int = param(8, label="corners", min=2,
                          help="symmetry of the pore: segments around the ring")
-    min_locs: int = param(1, label="min per corner", min=1,
+    min_locs: int = param(1, label="min per corner", min=1, advanced=True,
                           help="localizations a corner needs to count as seen")
 
 
-def precision_column(locs) -> Optional[str]:
-    return next((n for n in ("xy_err_nm", "x_err_nm") if n in locs), None)
+def segments(theta, weight, corners: int, min_locs: int):
+    """``(seen, rotation, per corner)``: the rotation the weighted circular mean
+    of ``corners * theta``, each localization in the segment centred on the
+    nearest corner, a segment with `min_locs` a corner seen."""
+    if not len(theta):
+        return 0, float("nan"), [0] * corners
+    step = 2 * np.pi / corners
+    phase = np.angle(np.sum(weight * np.exp(1j * corners * theta))) / corners
+    segment = np.floor(np.mod(theta - phase + step / 2, 2 * np.pi) / step).astype(int)
+    per_corner = np.bincount(segment, minlength=corners)[:corners]
+    return int(np.sum(per_corner >= min_locs)), float(phase), per_corner.tolist()
 
 
 def count_corners(x, y, center, settings: NPCCornersSettings, precision=None
                   ) -> Dict[str, Any]:
-    """How many of a pore's corners hold a localization.
+    """The corners a pore shows and the localizations it has.
 
-    The centre is fitted with the radius fixed, and the localizations in the
-    ring band whose precision is better than 0.4 of the arc between two
-    corners are kept.  The pore's rotation is the circular mean of
-    ``corners * theta`` weighted by ``1 / dtheta^2`` (``dtheta`` the
-    precision over the distance from the centre); the ring is cut into
-    segments centred on the corners, and a segment with ``min_locs``
-    localizations is a corner seen.
+    The centre is fitted with the radius fixed on the localizations better
+    than *corner precision* (all of them, without a precision), then twice
+    more on those within ``R + 2 dR``.  ``n_corners``: the corners seen with
+    those precise localizations in the band ``R +- dR``.  ``n_localizations``:
+    the localizations better than *count precision* within *count window*.
+    ``n_corners_smap``: SMAP's count, every localization in 50 +- 20 nm better
+    than 0.4 of the arc between corners, around the same centre.
     """
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
     R, dR, n = settings.radius_nm, settings.ring_width_nm, int(settings.corners)
-    step = 2 * np.pi / n
-    x0, y0, _ = fit_circle(x, y, center, radius=R, scale=dR)
-    near = np.hypot(x - x0, y - y0) <= R + dR
-    radius = fit_circle(x[near], y[near], (x0, y0), scale=dR)[2] if near.sum() >= 3 \
-        else float("nan")
-    rho = np.hypot(x - x0, y - y0)
-    theta = np.arctan2(y - y0, x - x0)
-    ring = (rho > R - dR) & (rho < R + dR)
-    if precision is not None:
-        precision = np.asarray(precision, dtype=float)
-        ring &= precision < PRECISION_OF_ARC * step * R
-        weight = 1.0 / np.maximum(precision / np.maximum(rho, 1e-9), 1e-6) ** 2
-    else:
-        weight = np.ones_like(rho)
-    out = {"n_corners": 0, "n_ring_locs": int(ring.sum()),
-           "n_within_locs": int(np.sum(rho < R + dR)),
-           "radius_nm": float(radius), "rotation_deg": float("nan"),
-           "x_nm": x0, "y_nm": y0, "per_corner": [0] * n}
-    if not ring.any():
-        return out
-    phase = np.angle(np.sum(weight[ring] * np.exp(1j * n * theta[ring]))) / n
-    segment = np.floor(np.mod(theta[ring] - phase + step / 2, 2 * np.pi) / step)
-    per_corner = np.bincount(segment.astype(int), minlength=n)[:n]
-    out.update(n_corners=int(np.sum(per_corner >= settings.min_locs)),
-               rotation_deg=float(np.degrees(phase)), per_corner=per_corner.tolist())
-    return out
+    sigma = None if precision is None else np.asarray(precision, dtype=float)
+    sharp = np.ones(len(x), bool) if sigma is None else sigma < settings.precision_nm
+    fit_on = sharp if sharp.sum() >= 3 else np.ones(len(x), bool)
+    c = np.asarray(fit_circle(x[fit_on], y[fit_on], center, radius=R, scale=dR)[:2])
+    for _ in range(FIT_PASSES):
+        close = fit_on & (np.hypot(x - c[0], y - c[1]) < R + 2 * dR)
+        if close.sum() >= 3:
+            c = np.asarray(fit_circle(x[close], y[close], c, radius=R, scale=dR)[:2])
+    rho = np.hypot(x - c[0], y - c[1])
+    theta = np.arctan2(y - c[1], x - c[0])
+    band = sharp & (rho >= R - dR) & (rho <= R + dR)
+    weight = (np.ones(len(x)) if sigma is None
+              else 1.0 / np.maximum(sigma / np.maximum(rho, 1e-9), 1e-6) ** 2)
+    seen, phase, per_corner = segments(theta[band], weight[band], n, settings.min_locs)
+    counted = (np.ones(len(x), bool) if sigma is None
+               else sigma < settings.n_precision_nm) & (rho < settings.n_window_nm)
+    # SMAP's rule, around the same centre
+    smap = (rho > SMAP_RADIUS_NM - SMAP_RING_WIDTH_NM) & (rho < SMAP_RADIUS_NM
+                                                         + SMAP_RING_WIDTH_NM)
+    if sigma is not None:
+        smap &= sigma < PRECISION_OF_ARC * 2 * np.pi / n * SMAP_RADIUS_NM
+    seen_smap, _, _ = segments(theta[smap], weight[smap], n, settings.min_locs)
+    radius = (fit_circle(x[band], y[band], c, scale=dR)[2] if band.sum() >= 3
+              else float("nan"))
+    return {"n_corners": seen, "n_localizations": int(counted.sum()),
+            "n_corners_smap": seen_smap, "n_ring_locs": int(band.sum()),
+            "radius_nm": float(radius),
+            "ring_radius_nm": float(np.median(rho[band])) if band.any() else float("nan"),
+            "rotation_deg": float(np.degrees(phase)),
+            "x_nm": float(c[0]), "y_nm": float(c[1]), "per_corner": per_corner}
 
 
 def draw_corners(ax, x, y, values: Dict[str, Any], settings: NPCCornersSettings,
@@ -472,9 +536,9 @@ def draw_corners(ax, x, y, values: Dict[str, Any], settings: NPCCornersSettings,
     R, dR, n = settings.radius_nm, settings.ring_width_nm, int(settings.corners)
     x0, y0 = values["x_nm"], values["y_nm"]
     rho = np.hypot(x - x0, y - y0)
-    ring = (rho > R - dR) & (rho < R + dR)
+    ring = (rho >= R - dR) & (rho <= R + dR)
     if precision is not None:
-        ring &= np.asarray(precision) < PRECISION_OF_ARC * 2 * np.pi / n * R
+        ring &= np.asarray(precision) < settings.precision_nm
     ax.scatter(x[~ring] - x0, y[~ring] - y0, s=5, c="0.7", linewidths=0)
     ax.scatter(x[ring] - x0, y[ring] - y0, s=7, c="#2f7fd0", linewidths=0)
     for r, style in ((R, "-"), (R - dR, ":"), (R + dR, ":")):
@@ -496,16 +560,16 @@ def draw_corners(ax, x, y, values: Dict[str, Any], settings: NPCCornersSettings,
     ax.set_xlabel("x (nm)")
     ax.set_ylabel("y (nm)")
     ax.set_title(f"{values['n_corners']} of {n} corners, "
-                 f"radius {values['radius_nm']:.1f} nm")
+                 f"{values['n_localizations']} localizations")
 
 
 @register("ROIManager/Evaluate/NPC Corners")
 class NPCCorners(Plugin):
-    """Counts how many corners of a nuclear pore hold a localization."""
+    """Counts the corners a nuclear pore shows and the localizations it has."""
 
     Settings = NPCCornersSettings
     scope = "site"
-    version = "1"
+    version = "2"
     # not in the default evaluation pipeline: added when the data are pores
     favorite = False
 
@@ -520,7 +584,9 @@ class NPCCorners(Plugin):
         center = (ctx.site or {}).get("center") or [float(np.mean(x)), float(np.mean(y))]
         values = count_corners(x, y, center, settings, precision)
         data = {k: v for k, v in values.items() if k != "per_corner"}
-        return Result(text=f"{values['n_corners']} corners", data=data,
+        return Result(text=f"{values['n_corners']} corners, "
+                           f"{values['n_localizations']} localizations",
+                      data=data,
                       plot=lambda ax: draw_corners(ax, x, y, values, settings, precision),
                       settings=settings)
 
@@ -573,22 +639,28 @@ def fit_sqrt_lsq(counts: np.ndarray, corners: int, per_corner: int,
 FITS = {"likelihood": fit_likelihood, "sqrt least squares (SMAP)": fit_sqrt_lsq}
 
 
+METHODS = (("joint", "corners and localizations"), ("smap", "corners (SMAP)"))
+
+
 @dataclass
 class LabelingEfficiencySettings:
-    corners: int = param(8, label="corners", min=2,
+    method: str = param("joint", label="method", choices=METHODS,
+                        help="the joint model of corners and localizations, or "
+                             "SMAP's corner histogram alone")
+    fit_min: int = param(5, label="fit from", min=0,
+                         help="only pores with at least this many corners")
+    corners: int = param(8, label="corners", min=2, advanced=True,
                          help="corners of a pore")
-    per_corner: int = param(4, label="proteins per corner", min=1,
+    per_corner: int = param(4, label="proteins per corner", min=1, advanced=True,
                             help="copies of the labelled protein in one corner")
-    fit_min: int = param(3, label="fit from", min=0,
-                         help="fewest corners in the fit range")
-    fit_max: int = param(8, label="fit to", min=0,
-                         help="most corners in the fit range")
-    fit: str = param("likelihood", label="fit",
+    fit_max: int = param(8, label="fit to", min=0, advanced=True,
+                         help="most corners in the fit range (SMAP's method)")
+    fit: str = param("likelihood", label="SMAP fit", advanced=True,
                      choices=(("likelihood", "maximum likelihood"),
                               ("sqrt least squares (SMAP)", "SMAP's least squares")),
-                     help="how the model is fitted to the histogram")
+                     help="how SMAP's method fits its histogram")
     bootstrap: int = param(100, label="bootstrap", min=0, advanced=True,
-                           help="resamplings of the sites for the error; 0: none")
+                           help="resamplings of the sites for SMAP's error; 0: none")
 
 
 def labeling_efficiency(n_corners, settings: LabelingEfficiencySettings,
@@ -622,6 +694,24 @@ def labeling_efficiency(n_corners, settings: LabelingEfficiencySettings,
     return {"efficiency": efficiency, "error": error, "counts": counts,
             "n_sites": int(len(n)), "n_fitted": in_range,
             "corner_probability": float(corner_probability(efficiency, per))}
+
+
+def joint_efficiency(k, n, sigma_field, corner_settings: NPCCornersSettings,
+                     ring_radius: float, fit_min: int = 5, per_corner: int = 4
+                     ) -> Dict[str, Any]:
+    """The labelled efficiency and the blinks per copy from the corners `k`
+    and localizations `n` of each pore (NPC Corners), with the precisions
+    `sigma_field` of every localization of the field -- `smappy.npc`."""
+    from .. import npc as model
+    cs = corner_settings
+    a, b, eps = model.localization_classes(
+        sigma_field, ring_radius, (cs.radius_nm - cs.ring_width_nm,
+                                   cs.radius_nm + cs.ring_width_nm),
+        cs.precision_nm, cs.n_precision_nm, cs.n_window_nm, int(cs.corners))
+    out = model.fit(k, n, a, b, eps, k_min=fit_min, corners=int(cs.corners),
+                    per_corner=per_corner)
+    out.update(a=a, b=b, eps=eps, k=np.asarray(k, int), n=np.asarray(n, int))
+    return out
 
 
 def true_corners(locs, corners: int = 8) -> Dict[int, int]:
@@ -696,12 +786,46 @@ def simulated_efficiency(project, rows) -> Optional[float]:
     return None if value is None else float(value)
 
 
-def corner_column(rows) -> Optional[str]:
-    """``n_corners``, or the qualified name a pipeline with two corner
-    counters gives it."""
+def column(rows, name: str) -> Optional[str]:
+    """`name`, or the qualified name a pipeline with two such steps gives it."""
     keys = list(rows[0]) if rows else []
-    return next((k for k in keys if k == "n_corners"),
-                next((k for k in keys if k.endswith(".n_corners")), None))
+    return next((k for k in keys if k == name),
+                next((k for k in keys if k.endswith("." + name)), None))
+
+
+def corner_column(rows) -> Optional[str]:
+    return column(rows, "n_corners")
+
+
+def corner_settings(project) -> NPCCornersSettings:
+    """The settings NPC Corners ran with in this project's pipeline -- the
+    cutoffs the counts mean something with -- or its defaults."""
+    if project is not None:
+        try:
+            for step in project.resolved():
+                if step.path == "ROIManager/Evaluate/NPC Corners":
+                    return step.settings
+        except Exception:
+            pass
+    return NPCCornersSettings()
+
+
+def field_precisions(project, rows) -> np.ndarray:
+    """The precision of every localization of the files the sites are in, as
+    the layer filters them -- what a cutoff's pass fraction is measured on."""
+    out = []
+    for file_id in {project.rois[r["roi_id"]].file_id for r in rows
+                    if r["roi_id"] in project.rois}:
+        state = project.state(file_id)
+        locs = state.locs[state.filter.indices]
+        name = precision_column(locs)
+        if name is None:
+            raise ValueError("the joint model needs the localization precision "
+                             "(xy_err_nm); use the corners (SMAP) method")
+        out.append(np.asarray(locs[name], float))
+    if not out:
+        raise ValueError("the sites' files are not in the ROI manager")
+    return np.concatenate(out)
 
 
 def draw_histogram(ax, fitted: Dict[str, Any], settings: LabelingEfficiencySettings,
@@ -729,13 +853,48 @@ def draw_histogram(ax, fitted: Dict[str, Any], settings: LabelingEfficiencySetti
     ax.legend(fontsize=7, frameon=False)
 
 
+def draw_joint(figure, fitted: Dict[str, Any], truth=None) -> None:
+    """The two histograms the joint fit explains, over the pores it used, and
+    the model's at the fitted efficiency and blinks."""
+    from .. import npc as model
+    k_min = fitted["k_min"]
+    use = fitted["k"] >= k_min
+    k, n = fitted["k"][use], fitted["n"][use]
+    corners_model, n_model = model.marginals(fitted["pmf"], k_min)
+    left, right = figure.subplots(1, 2, gridspec_kw={"wspace": 0.35})
+    kk = np.arange(len(corners_model))
+    left.bar(kk, np.bincount(k, minlength=len(kk)), color="0.7", label="pores")
+    left.plot(kk[k_min:], len(k) * corners_model[k_min:], "o-", color="#d62728", ms=4,
+              lw=1, label=f"model: {100 * fitted['efficiency']:.1f} %")
+    if truth is not None:
+        left.set_title(f"labelled (truth): {100 * truth:.1f} %", fontsize=8)
+    left.set_xlabel("corners seen")
+    left.set_ylabel("pores")
+    left.set_xticks(kk)
+    left.legend(fontsize=7, frameon=False)
+    top = int(max(n.max(), 1))
+    width = max(1, int(np.ceil((top + 1) / 40)))
+    edges = np.arange(0, top + width + 1, width)
+    counts, _ = np.histogram(n, bins=edges)
+    right.bar(edges[:-1], counts, width=width, align="edge", color="0.7")
+    padded = np.zeros(edges[-1])
+    length = min(len(n_model), edges[-1])
+    padded[:length] = n_model[:length]
+    per_bin = padded.reshape(-1, width).sum(axis=1)
+    right.plot(edges[:-1] + width / 2, len(n) * per_bin, "-", color="#d62728", lw=1,
+               label=f"{fitted['blinks']:.2f} blinks per copy")
+    right.set_xlabel("localizations per pore")
+    right.set_ylabel("pores")
+    right.legend(fontsize=7, frameon=False)
+
+
 @register("ROIManager/Analyze/NPC Labeling Efficiency")
 class NPCLabelingEfficiency(Plugin):
-    """The effective labelling efficiency from the corners seen per nuclear
-    pore (NPC Corners)."""
+    """The labelling efficiency of nuclear pores, from the corners each shows
+    and the localizations it has (NPC Corners)."""
 
     Settings = LabelingEfficiencySettings
-    version = "1"
+    version = "2"
 
     def run(self, ctx: Context, settings: LabelingEfficiencySettings) -> Result:
         rows = ctx.site_table
@@ -743,34 +902,76 @@ class NPCLabelingEfficiency(Plugin):
             rows = ctx.rois.results()
         if not rows:
             raise ValueError("evaluate some ROIs first: there is no site table")
-        column = corner_column(rows)
-        if column is None:
-            raise ValueError("the site table has no n_corners: add NPC Corners to "
-                             "the evaluation and evaluate")
-        n = np.array([r.get(column, np.nan) for r in rows], dtype=float)
-        fitted = labeling_efficiency(n, settings)
-        text = (f"effective labelling efficiency {100 * fitted['efficiency']:.1f} "
-                f"± {100 * fitted['error']:.1f} % from {fitted['n_sites']} pores "
-                f"({fitted['n_fitted']} in the fit range)")
-        data = {"efficiency": fitted["efficiency"], "error": fitted["error"],
-                "n_sites": fitted["n_sites"], "counts": fitted["counts"].tolist(),
-                "corner_probability": fitted["corner_probability"]}
+        name = column(rows, "n_corners_smap" if settings.method == "smap" else "n_corners")
+        if name is None:
+            raise ValueError("the site table has no corner counts: add NPC Corners "
+                             "to the evaluation and evaluate")
+        k = np.array([r.get(name, np.nan) for r in rows], dtype=float)
         truth = None
         known = site_truth(ctx.rois, rows, int(settings.corners)) \
             if ctx.rois is not None else None
         if known is not None and np.isfinite(known).sum() >= 5:
             try:
-                truth = labeling_efficiency(known, settings)
+                truth = labeling_efficiency(
+                    known, LabelingEfficiencySettings(corners=settings.corners,
+                                                      per_corner=settings.per_corner,
+                                                      fit_min=0, bootstrap=0))
             except ValueError:
                 truth = None
+        if settings.method == "smap":
+            result = self._smap(k, settings, truth)
+        else:
+            result = self._joint(ctx, rows, k, settings, truth)
         simulated = simulated_efficiency(ctx.rois, rows) if ctx.rois is not None else None
         if simulated is not None:
-            data["simulated_efficiency"] = simulated
-            text += f"; simulated with {100 * simulated:.0f} %"
+            result.data["simulated_efficiency"] = simulated
+            result.text += f"; simulated with {100 * simulated:.0f} %"
         if truth is not None:
-            data["true_efficiency"] = truth["efficiency"]
-            data["true_counts"] = truth["counts"].tolist()
-            text += (f"; the same pores' labelled corners give "
-                     f"{100 * truth['efficiency']:.1f} %")
+            result.data["true_efficiency"] = truth["efficiency"]
+            result.data["true_counts"] = truth["counts"].tolist()
+            result.text += (f"; the same pores' labelled corners give "
+                            f"{100 * truth['efficiency']:.1f} %")
+        return result
+
+    def _joint(self, ctx, rows, k, settings, truth) -> Result:
+        n_name = column(rows, "n_localizations")
+        if n_name is None:
+            raise ValueError("the site table has no n_localizations: evaluate again "
+                             "with this version of NPC Corners")
+        n = np.array([r.get(n_name, np.nan) for r in rows], dtype=float)
+        ok = np.isfinite(k) & np.isfinite(n)
+        radius_name = column(rows, "ring_radius_nm")
+        radii = np.array([r.get(radius_name, np.nan) for r in rows], float) \
+            if radius_name else np.array([np.nan])
+        ring_radius = float(np.nanmedian(radii)) if np.isfinite(radii).any() else 53.7
+        if ctx.rois is None:
+            raise ValueError("the joint model needs the ROI manager's files, for the "
+                             "precisions of the whole field")
+        fitted = joint_efficiency(k[ok].astype(int), n[ok].astype(int),
+                                  field_precisions(ctx.rois, rows),
+                                  corner_settings(ctx.rois), ring_radius,
+                                  int(settings.fit_min), int(settings.per_corner))
+        text = (f"labelling efficiency {100 * fitted['efficiency']:.1f} "
+                f"± {100 * fitted['error']:.1f} %, {fitted['blinks']:.2f} "
+                f"± {fitted['blinks_error']:.2f} blinks per copy, from "
+                f"{fitted['pores']} pores with {settings.fit_min} corners or more "
+                f"(of {int(ok.sum())})")
+        data = {key: fitted[key] for key in ("efficiency", "error", "blinks",
+                                             "blinks_error", "pores", "a", "b", "eps")}
+        data["counts"] = np.bincount(k[ok].astype(int),
+                                     minlength=int(settings.corners) + 1).tolist()
+        true = None if truth is None else truth["efficiency"]
+        return Result(text=text, data=data, settings=settings,
+                      plot=Plot(lambda f: draw_joint(f, fitted, true), panels=2,
+                                size=(8, 3.4)))
+
+    def _smap(self, k, settings, truth) -> Result:
+        fitted = labeling_efficiency(k, settings)
+        text = (f"labelling efficiency (SMAP) {100 * fitted['efficiency']:.1f} "
+                f"± {100 * fitted['error']:.1f} % from {fitted['n_sites']} pores "
+                f"({fitted['n_fitted']} in the fit range)")
+        data = {"efficiency": fitted["efficiency"], "error": fitted["error"],
+                "n_sites": fitted["n_sites"], "counts": fitted["counts"].tolist(),
+                "corner_probability": fitted["corner_probability"]}
         return Result(text=text, data=data, settings=settings,
                       plot=lambda ax: draw_histogram(ax, fitted, settings, truth))
