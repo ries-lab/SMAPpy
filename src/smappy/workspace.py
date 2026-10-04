@@ -49,7 +49,7 @@ DEFAULT_TABS = (
     {"name": "Analysis", "kind": "plugins", "seed": "Analysis/"},
     # a tuple seeds in the order given: finding sites comes before summarising them
     {"name": "ROI", "kind": "plugins", "header": "roi",
-     "seed": ("ROIManager/Segment/", "ROIManager/Analyze/")},
+     "seed": ("ROIManager/Segment/", "ROIManager/Analyze/", "ROIManager/Workflow/")},
 )
 
 

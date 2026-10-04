@@ -301,3 +301,39 @@ def test_the_analysis_asks_for_the_corner_counter_when_it_is_missing():
         plugins.get("ROIManager/Analyze/NPC Labeling Efficiency")().run(
             Context(site_table=[{"roi_id": "a", "n_localizations": 3}]),
             LabelingEfficiencySettings())
+
+
+def test_the_workflow_gives_what_the_three_steps_give_and_replaces_its_pores():
+    from smappy.session import Session
+    from smappy.workspace import Instance
+    session = Session(pores(0.5, seed=2))
+    session.show_grouped(0, True)
+    project = session.rois
+    file_id = next(iter(project.sources))
+    drawn = project.add_roi(file_id, (100.0, 100.0))       # by hand: kept
+    workflow = plugins.get("ROIManager/Workflow/NPC Analysis")
+    result = workflow()(ctx=session.context())
+    pores_found = result.data["pores_found"]
+    assert pores_found > 140 and result.data["pores_counted"] == pores_found
+    assert abs(result.data["efficiency"] - 0.5) < 0.04
+    assert {"pores", "checks"} <= set(result.plots)
+
+    # the same, step by step
+    ids = [r.id for r in project.rois.values() if r.id != drawn.id]
+    project.evaluate([Instance(plugin="ROIManager/Evaluate/NPC Corners")], roi_ids=ids)
+    rows = [r for r in project.results() if r["roi_id"] in ids]
+    by_hand = plugins.get("ROIManager/Analyze/NPC Labeling Efficiency")().analyse(
+        project, rows, LabelingEfficiencySettings(), NPCCornersSettings())
+    assert abs(by_hand.data["efficiency"] - result.data["efficiency"]) < 1e-6
+
+    again = workflow()(ctx=session.context())
+    assert len(project.rois) == pores_found + 1 and drawn.id in project.rois
+    assert abs(again.data["efficiency"] - result.data["efficiency"]) < 1e-6
+
+
+def test_the_workflow_says_when_the_layer_is_not_grouped():
+    from smappy.session import Session
+    session = Session(pores(0.5, seed=4))
+    session.show_grouped(0, False)
+    result = plugins.get("ROIManager/Workflow/NPC Analysis")()(ctx=session.context())
+    assert "not grouped" in result.text

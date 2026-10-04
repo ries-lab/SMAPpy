@@ -34,7 +34,8 @@ def test_the_roi_plugins_are_registered_where_smap_puts_them():
                           "ROIManager/Evaluate/Statistics",
                           "ROIManager/Evaluate/NPC Corners",
                           "ROIManager/Analyze/Histograms",
-                          "ROIManager/Analyze/NPC Labeling Efficiency"}
+                          "ROIManager/Analyze/NPC Labeling Efficiency",
+                          "ROIManager/Workflow/NPC Analysis"}
     # scope is what marks an evaluator, not the folder it sits in
     assert found["ROIManager/Evaluate/Statistics"].scope == "site"
     assert found["ROIManager/Segment/Density Peaks"].scope == "locs"
