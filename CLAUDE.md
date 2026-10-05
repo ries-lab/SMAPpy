@@ -43,6 +43,9 @@ Running the tests -- two tiers:
   thirds of the suite's time, and they are where a GUI or docs change breaks.
   The summary's "skipped" count includes them, so a run without `--slow` has
   not checked them; say so if you stop short of it.  No CI runs the tests.
+* **A PR description states the `--slow` run's result** on a line of its own
+  -- "`--slow -n auto`: 1321 passed, 4 skipped" -- or says plainly that it was
+  not run and why, so a reviewer can see from the PR whether it was done.
 * Mark a new test `slow` when it takes more than about 4 s.
 * `-n auto` needs pytest-xdist (the `test` extra); `conftest.py` gives each
   worker one BLAS thread, without which four workers are barely faster than one.
