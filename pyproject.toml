@@ -86,6 +86,20 @@ gpu = ["wgpu>=0.19"]
 # --voice: Piper, an offline neural voice; the voice model is a download of
 # its own (see smappy.tutorial.voice).
 tutorial = ["playwright>=1.40", "piper-tts>=1.2"]
+# What the test suite needs beyond the package: `pip install -e .[test]`.
+test = ["pytest>=7", "pytest-timeout>=2.1"]
+
+[tool.pytest.ini_options]
+# Every test has a limit, so a hung one fails with its name and a traceback
+# instead of a suite that never ends -- a modal dialog nobody answers is the
+# usual cause in a GUI test.  The slowest test takes about 130 s with eight
+# running in parallel (`--durations`), so 300 s is not a limit a healthy
+# test meets.  `timeout` is pytest-timeout's (`.[test]`); without it
+# conftest.py declares the key so that it is not a warning, and only the
+# faulthandler stays: at 240 s it prints every thread's stack, which shows
+# where a hang inside Qt is, and lets the test go on.
+timeout = 300
+faulthandler_timeout = 240
 
 [project.scripts]
 smappy-fit = "smappy.cli.fit:main"

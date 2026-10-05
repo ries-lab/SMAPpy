@@ -19,6 +19,16 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("MPLBACKEND", "Agg")
 
 
+def pytest_addoption(parser):
+    """`timeout` in pyproject.toml belongs to pytest-timeout; without that
+    plugin it is declared here, so that it is not an unknown-option warning.
+    The faulthandler's dump at `faulthandler_timeout` is what is left then."""
+    try:
+        import pytest_timeout  # noqa: F401
+    except ImportError:
+        parser.addini("timeout", "per-test limit in seconds (needs pytest-timeout)")
+
+
 @pytest.fixture(autouse=True, scope="session")
 def isolated_config(tmp_path_factory):
     import os
