@@ -1,6 +1,6 @@
 ---
 version: "2"
-covers: [smappy.npc.localization_classes, smappy.npc.joint_pmf, smappy.npc.fit, smappy.plugins.npc.joint_efficiency, smappy.plugins.npc.labeling_efficiency, smappy.plugins.npc.fit_likelihood, smappy.plugins.npc.fit_sqrt_lsq, smappy.plugins.npc.true_corners, smappy.plugins.npc.corner_evaluation]
+covers: [smappy.npc.localization_classes, smappy.npc.joint_pmf, smappy.npc.fit, smappy.plugins.npc.joint_efficiency, smappy.plugins.npc.labeling_efficiency, smappy.plugins.npc.fit_likelihood, smappy.plugins.npc.fit_sqrt_lsq, smappy.plugins.npc.true_corners, smappy.plugins.npc.corner_settings, smappy.plugins.roi.choose_evaluation]
 ---
 
 ## What it does
