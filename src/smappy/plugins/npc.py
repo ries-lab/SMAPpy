@@ -13,6 +13,10 @@ Three plugins, one for each step of the ROI manager, ported from SMAP's
 * **Analyze/NPC Labeling Efficiency** fits the two jointly over all pores
   with the model of `smappy.npc`, or SMAP's corner histogram alone.
 
+*Workflow/NPC Analysis*, which runs the three in one go, is not a plugin but
+a chain of them, ``npc_analysis.chain.yaml`` beside this file: a chain runs an
+evaluator over every ROI before its next step (`smappy.chain`).
+
 Why it is not SMAP's corner counting, and why the settings are what they are,
 is measured in ``studies/npc_le`` (its README has the numbers):
 
@@ -163,6 +167,9 @@ class NPCSegmentSettings:
     keep_rejected: bool = param(False, label="keep rejected",
                                 help="add candidates that fail the checks as ROIs "
                                      "that are not used, to look at them")
+    replace: bool = param(False, label="replace earlier pores",
+                          help="remove the ROIs this segmenter made on the file "
+                               "before finding the pores again")
     radial_alpha: float = param(0.05, label="far test level", min=1e-6, max=0.5,
                                 advanced=True,
                                 help="a candidate fails when its far ones are this "
@@ -386,6 +393,15 @@ def draw_sites(ax, xy: np.ndarray, sites: Sequence[Dict[str, Any]],
     ax.set_ylabel("y (nm)")
 
 
+SEGMENTER = "ROIManager/Segment/NPC"
+
+
+def npc_rois(project, file_id) -> List[Any]:
+    """The ROIs the NPC segmenter made in this file."""
+    return [roi for roi in project.rois.values()
+            if roi.file_id == file_id and (roi.origin or {}).get("method") == SEGMENTER]
+
+
 @register("ROIManager/Segment/NPC")
 class NPCSegment(Plugin):
     """Finds nuclear pores with a ring filter, fits a circle to each and keeps
@@ -419,6 +435,9 @@ class NPCSegment(Plugin):
             file_id = current_file(project)
             if file_id is None:
                 raise ValueError("no file to search: load localizations first")
+            if settings.replace:
+                for roi in npc_rois(project, file_id):
+                    del project.rois[roi.id]
             state = project.state(file_id)
             locs = state.locs[state.filter.indices]
             self.last = []
@@ -902,7 +921,11 @@ class NPCLabelingEfficiency(Plugin):
             rows = ctx.rois.results()
         if not rows:
             raise ValueError("evaluate some ROIs first: there is no site table")
-        return self.analyse(ctx.rois, rows, settings, corner_settings(ctx.rois))
+        result = self.analyse(ctx.rois, rows, settings, corner_settings(ctx.rois))
+        if settings.method != "smap" and getattr(ctx.rois, "grouped", True) is False:
+            result.text += ("; the layer is not grouped: the model expects one "
+                            "localization per blink")
+        return result
 
     def analyse(self, project, rows, settings: LabelingEfficiencySettings,
                 count: NPCCornersSettings) -> Result:
@@ -980,99 +1003,3 @@ class NPCLabelingEfficiency(Plugin):
                 "corner_probability": fitted["corner_probability"]}
         return Result(text=text, data=data, settings=settings,
                       plot=lambda ax: draw_histogram(ax, fitted, settings, truth))
-
-
-# ------------------------------------------------------------------ workflow
-
-SEGMENTER = "ROIManager/Segment/NPC"
-
-
-@dataclass
-class NPCWorkflowSettings:
-    segment: NPCSegmentSettings = param(default_factory=NPCSegmentSettings,
-                                        label="find the pores")
-    count: NPCCornersSettings = param(default_factory=NPCCornersSettings,
-                                      label="count corners", collapsed=True)
-    analysis: LabelingEfficiencySettings = param(default_factory=LabelingEfficiencySettings,
-                                                 label="labelling efficiency",
-                                                 collapsed=True)
-    replace: bool = param(True, label="replace earlier pores",
-                          help="remove the ROIs an earlier run put on this file's "
-                               "pores before finding them again")
-
-
-def npc_rois(project, file_id) -> List[Any]:
-    """The ROIs the NPC segmenter made in this file."""
-    return [roi for roi in project.rois.values()
-            if roi.file_id == file_id and (roi.origin or {}).get("method") == SEGMENTER]
-
-
-def rows_of(run) -> List[Dict[str, Any]]:
-    """The site rows an evaluation run produced, as `ROIProject.results` gives
-    them, without the steps that failed on a site."""
-    from ..roi_manager import pipeline as pipeline_module
-    out = []
-    for roi_id, record in (run.get("records") or {}).items():
-        values = pipeline_module.merged_values(record)
-        if values:
-            out.append({"roi_id": roi_id, "file_id": record.get("file_id"), **values})
-    return out
-
-
-@register("ROIManager/Workflow/NPC Analysis")
-class NPCWorkflow(Plugin):
-    """Finds the nuclear pores of the file, counts their corners and
-    localizations, and fits the labelling efficiency, in one run."""
-
-    Settings = NPCWorkflowSettings
-    version = "1"
-
-    def run(self, ctx: Context, settings: NPCWorkflowSettings) -> Result:
-        from ..workspace import Instance
-        from . import settings_values
-        project = ctx.rois
-        if project is None:
-            raise ValueError("the workflow works in the ROI manager: load "
-                             "localizations first")
-        file_id = current_file(project)
-        if file_id is None:
-            raise ValueError("no file to search: load localizations first")
-        if settings.replace:
-            for roi in npc_rois(project, file_id):
-                del project.rois[roi.id]
-
-        ctx.report("finding the pores")
-        segmenter = NPCSegment()
-        segmenter.last = []
-        state = project.state(file_id)
-        locs = state.locs[state.filter.indices]
-        found = project.find(file_id, plugin=segmenter, settings=settings.segment)
-        sites = segmenter.last
-        ids = [roi.id for roi in npc_rois(project, file_id) if roi.use]
-        if not ids:
-            raise ValueError("no pores found: see the segmenter's checks")
-
-        ctx.report(f"counting the corners of {len(ids)} pores")
-        step = Instance(plugin="ROIManager/Evaluate/NPC Corners",
-                        values=settings_values(settings.count))
-        run = project.evaluate([step], roi_ids=ids,
-                               progress=lambda i, n: ctx.report(f"counting {i} of {n}"))
-        rows = rows_of(run)
-
-        ctx.report("fitting the labelling efficiency")
-        result = NPCLabelingEfficiency().analyse(project, rows, settings.analysis,
-                                                 settings.count)
-        text = (f"{len(found)} pores found ({sum(s['use'] for s in sites)} of "
-                f"{len(sites)} candidates passed), {len(rows)} counted; " + result.text)
-        if getattr(project, "grouped", True) is False:
-            text += ("; the layer is not grouped: the model expects one "
-                     "localization per blink")
-        xy = np.column_stack((np.asarray(locs["x_nm"], dtype=float),
-                              np.asarray(locs["y_nm"], dtype=float)))
-        plots = {"pores": lambda ax: draw_sites(ax, xy, sites, settings.segment),
-                 "checks": Plot(lambda f: draw_quality(f, sites, settings.segment),
-                                panels=3, size=(8, 2.8))}
-        data = {**result.data, "pores_found": len(found), "candidates": len(sites),
-                "pores_counted": len(rows), "rois": found}
-        return Result(text=text, data=data, settings=settings, plot=result.plot,
-                      plots=plots)

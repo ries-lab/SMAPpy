@@ -303,37 +303,68 @@ def test_the_analysis_asks_for_the_corner_counter_when_it_is_missing():
             LabelingEfficiencySettings())
 
 
-def test_the_workflow_gives_what_the_three_steps_give_and_replaces_its_pores():
+def test_the_npc_chain_gives_what_the_three_steps_give_and_replaces_its_pores():
+    """The shipped NPC Analysis is a chain: segment, evaluate every pore,
+    analyse -- and its ROIs, runs and pipeline reach the session's project."""
     from smappy.session import Session
-    from smappy.workspace import Instance
     session = Session(pores(0.5, seed=2))
+    project = session.rois
+    file_id = next(iter(project.sources))
+    drawn = project.add_roi(file_id, (100.0, 100.0))       # by hand, and empty
+    chain = plugins.get("ROIManager/Workflow/NPC Analysis")
+    result = session.run(chain(), chain.Settings())
+    assert session.layers[0].grouped                       # the chain's first step
+    steps = result.data["results"]
+    found = steps["find_the_pores"].data["rois"]
+    assert len(found) > 140
+    # every included ROI is evaluated; the empty one fails on its own
+    counted = steps["count_corners"].data
+    assert counted["sites"] == len(found) + 1 and counted["failed"] == 1
+    assert "failed on 1: ValueError: no localizations" in steps["count_corners"].text
+    fitted = steps["labelling_efficiency"].data
+    assert abs(fitted["efficiency"] - 0.5) < 0.04
+    assert {"find the pores", "find the pores: checks",
+            "labelling efficiency"} <= set(result.plots)
+    # nothing was done to the real project until the chain's result came back
+    assert drawn.id in project.rois and len(project.rois) == len(found) + 1
+    assert [s.path for s in project.resolved()] == ["ROIManager/Evaluate/NPC Corners"]
+    rows = project.results()
+    assert len(rows) == len(found)
+
+    # the same, step by step on the session's project
+    by_hand = plugins.get("ROIManager/Analyze/NPC Labeling Efficiency")().analyse(
+        project, rows, LabelingEfficiencySettings(), NPCCornersSettings())
+    assert abs(by_hand.data["efficiency"] - fitted["efficiency"]) < 1e-6
+
+    again = session.run(chain(), chain.Settings())
+    assert len(project.rois) == len(found) + 1 and drawn.id in project.rois
+    assert abs(again.data["results"]["labelling_efficiency"].data["efficiency"]
+               - fitted["efficiency"]) < 1e-6
+
+
+def test_the_segmenter_replaces_only_its_own_pores_when_asked():
+    from smappy.session import Session
+    session = Session(pores(0.5, seed=3))
     session.show_grouped(0, True)
     project = session.rois
     file_id = next(iter(project.sources))
-    drawn = project.add_roi(file_id, (100.0, 100.0))       # by hand: kept
-    workflow = plugins.get("ROIManager/Workflow/NPC Analysis")
-    result = workflow()(ctx=session.context())
-    pores_found = result.data["pores_found"]
-    assert pores_found > 140 and result.data["pores_counted"] == pores_found
-    assert abs(result.data["efficiency"] - 0.5) < 0.04
-    assert {"pores", "checks"} <= set(result.plots)
-
-    # the same, step by step
-    ids = [r.id for r in project.rois.values() if r.id != drawn.id]
-    project.evaluate([Instance(plugin="ROIManager/Evaluate/NPC Corners")], roi_ids=ids)
-    rows = [r for r in project.results() if r["roi_id"] in ids]
-    by_hand = plugins.get("ROIManager/Analyze/NPC Labeling Efficiency")().analyse(
-        project, rows, LabelingEfficiencySettings(), NPCCornersSettings())
-    assert abs(by_hand.data["efficiency"] - result.data["efficiency"]) < 1e-6
-
-    again = workflow()(ctx=session.context())
-    assert len(project.rois) == pores_found + 1 and drawn.id in project.rois
-    assert abs(again.data["efficiency"] - result.data["efficiency"]) < 1e-6
+    drawn = project.add_roi(file_id, (100.0, 100.0))
+    segment = plugins.get("ROIManager/Segment/NPC")
+    first = len(segment()(ctx=session.context()).data["rois"])
+    assert len(segment()(ctx=session.context()).data["rois"]) == 0   # all suppressed
+    again = segment()(ctx=session.context(), settings=NPCSegmentSettings(replace=True))
+    assert len(again.data["rois"]) == first
+    assert len(project.rois) == first + 1 and drawn.id in project.rois
 
 
-def test_the_workflow_says_when_the_layer_is_not_grouped():
+def test_the_analysis_says_when_the_layer_is_not_grouped():
     from smappy.session import Session
+    from smappy.workspace import Instance
     session = Session(pores(0.5, seed=4))
     session.show_grouped(0, False)
-    result = plugins.get("ROIManager/Workflow/NPC Analysis")()(ctx=session.context())
+    project = session.rois
+    plugins.get("ROIManager/Segment/NPC")()(ctx=session.context())
+    project.evaluate([Instance(plugin="ROIManager/Evaluate/NPC Corners")])
+    result = plugins.get("ROIManager/Analyze/NPC Labeling Efficiency")()(
+        ctx=session.context())
     assert "not grouped" in result.text

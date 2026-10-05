@@ -855,6 +855,16 @@ class Session:
             first = first or made
         if not any(not l.is_image for l in copy.layers):
             copy.layers.insert(0, Layer(copy.locs))
+        if self._rois is not None:
+            # the ROI manager's project as it is now, not as the file was
+            # saved: a chain's segmenter adds to it and its evaluators run on
+            # it, and the chain hands it back as `data["roi_project"]`
+            from .roi_manager.link import SessionROIs
+            copy._rois = SessionROIs(copy)
+            copy._rois.layer = self._rois.layer
+            copy._rois.auto_review = self._rois.auto_review
+            copy._rois.sync()
+            copy._rois.from_dict(self._rois.to_dict())
         return copy
 
     def remove_layer(self, index: int) -> None:
@@ -1273,6 +1283,12 @@ class Session:
         # Render tab's work done by a plugin (`Chain/Layers`)
         if (result.data or {}).get("layers"):
             self.set_layer_configs(result.data["layers"])
+        # the ROI manager's project as a chain left it: the ROIs its segmenter
+        # found, the runs of its evaluators and the pipeline they make.  Into
+        # the project that is there, which the ROI manager's window holds.
+        if (result.data or {}).get("roi_project") is not None:
+            self.rois.from_dict(result.data["roi_project"])
+            self.changed("rois")
         # last: a plugin that opened a file has just cleared the session, this
         # one included, and what it worked out belongs to the file it opened
         self.remember(plugin, result)

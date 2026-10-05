@@ -1,83 +1,89 @@
 ---
 version: "1"
-covers: [smappy.plugins.npc.NPCWorkflow.run, smappy.plugins.npc.npc_rois, smappy.plugins.npc.rows_of, smappy.roi_manager.core.ROIProject.evaluate]
+covers: [smappy.chain.ChainPlugin.run, smappy.chain.evaluate_sites, smappy.plugins.npc.NPCSegment.run, smappy.plugins.npc.npc_rois, smappy.roi_manager.core.ROIProject.evaluate]
 ---
 
 ## What it does
 
 The labelling efficiency of nuclear pores takes three steps in the ROI
 manager: find the pores, count each one's corners and localizations, and fit
-the efficiency to all of them.  This plugin runs the three in one go, on the
-file the ROI manager is showing, and shows the results of all three in one
+the efficiency to all of them.  This runs the three in one go, on the file
+the ROI manager is showing, and shows the results of all three in one
 window.
 
-Each step is the plugin of its own: [NPC](plugin:ROIManager/Segment/NPC),
+It is a *chain* -- the plugins it runs, one after the other, each with its
+own settings in a section of this panel -- rather than a plugin of its own:
+[NPC](plugin:ROIManager/Segment/NPC),
 [NPC Corners](plugin:ROIManager/Evaluate/NPC Corners) and
-[NPC Labeling Efficiency](plugin:ROIManager/Analyze/NPC Labeling Efficiency),
-with the same settings, in three sections of this panel.  Their pages explain
-the methods; this one only what running them together changes.
+[NPC Labeling Efficiency](plugin:ROIManager/Analyze/NPC Labeling Efficiency).
+Their pages explain the methods; this one only what running them together
+changes.  Because it is a chain, it can be edited (*edit steps*), saved
+under another name, and run over many files in a batch.
 
 Use it for the standard analysis, and the three plugins separately to look at
 one step more closely -- the ROIs this one makes are ordinary ROIs, and can be
-walked through, judged and evaluated again in the ROI manager.  It needs
-grouped localizations with their precision (`xy_err_nm`): set the layer to
-grouped first.
+walked through, judged and evaluated again in the ROI manager.  It needs the
+localization precision (`xy_err_nm`).
 
 ## How it works
 
-**1. Find the pores.**  The file's earlier NPC ROIs are removed, when
-*replace earlier pores* is ticked, and the pores are found with the
-settings of the *find the pores* section.  ROIs drawn by hand, or made by
-another segmenter, are left alone and not counted.
+**1. Group.**  The *layers* step switches the first layer to grouped, one
+localization per blink, as the model expects; its filter stays as the Render
+tab has it.
 
-**2. Count.**  Every pore the segmenter kept is evaluated with NPC Corners,
-with the settings of the *count corners* section: its corners seen with the
-precise localizations, and its localizations.  The numbers are stored with
-the ROIs, as an evaluation in the ROI manager stores them.
+**2. Find the pores.**  The file's earlier NPC ROIs are removed (*replace
+earlier pores* is ticked in the *find the pores* section), and the pores are
+found with the settings of that section.  ROIs drawn by hand, or made by
+another segmenter, are left alone.
 
-**3. Fit.**  The labelling efficiency and the blinks per copy are fitted to
-those pores with the settings of the *labelling efficiency* section, with the
-cutoffs of the *count corners* section.
+**3. Count.**  NPC Corners is run on every ROI the manager includes, with
+the settings of the *count corners* section, before the next step starts:
+each pore's corners seen with the precise localizations, and its
+localizations.  The numbers are stored with the ROIs, as an evaluation in the
+ROI manager stores them.
 
-The window shows the fit (the corner and localization histograms with the
-model), the pores found and the segmenter's checks.
+**4. Fit.**  The labelling efficiency and the blinks per copy are fitted to
+all the counted ROIs with the settings of the *labelling efficiency* section.
+
+The window shows the pores found, the segmenter's checks and the fit (the
+corner and localization histograms with the model).
 
 ## In detail
 
-**Which pores are counted.**  The ROIs of the current file that the NPC
-segmenter made (their origin says so) and that are used.  With *replace
-earlier pores* off, the pores of an earlier run stay, the new run adds only
-what is new (a candidate near an existing ROI is suppressed), and all of them
-are counted.
+**An evaluator in a chain.**  A plugin that measures one ROI at a time
+(NPC Corners here) runs, as a chain step, over every ROI the manager
+includes -- every one that is ticked *use*, whoever made it -- and the chain
+goes on only when all are done.  A ROI on which it fails (no localizations,
+say) loses its own row and is counted in the step's line, not the run.
 
-**The cutoffs.**  Run separately, NPC Labeling Efficiency takes the cutoffs
-of NPC Corners from the evaluation pipeline.  Here they come from the *count
-corners* section, so the counts and the model always agree, whatever the
-evaluation pipeline holds.
+**The evaluation pipeline.**  The chain's evaluators become the ROI
+manager's evaluation pipeline, replacing what it held: the site table's
+columns mean nothing without the settings that made them, and NPC Labeling
+Efficiency reads the rows -- and the cutoffs of NPC Corners -- through it.
+So the counts and the model always agree, and the evaluation window shows
+afterwards exactly what the chain measured.
 
-**The record.**  The ROIs keep how they were found, and the counts are stored
-as an evaluation run with the NPC Corners settings used, so the ROI manager
-shows them and they are saved with the file.
+**Nothing changes until the end.**  The chain runs on a copy of the session,
+ROI manager included; the ROIs it found, the evaluation run and the pipeline
+reach the ROI manager only when the whole chain has succeeded.  A step that
+fails leaves the ROI manager as it was.
 
-**Grouping.**  The model assumes one localization per blink.  On a layer
-that is not grouped, the plugin still runs, and its text says so.
-
-## Parameters
-
-### replace
-On, a second run with other settings gives a fresh answer.  Off, to add the
-pores of a second region or a second pass to those already found.
+**Re-running.**  With *replace earlier pores* off, the pores of an earlier
+run stay, a new run adds only what is new (a candidate near an existing ROI
+is suppressed), and all of them are counted.  Results that are still current
+-- the same ROI, data and settings -- are carried forward rather than
+measured again.
 
 ## Output
 
-* **The text**: the pores found and counted, then the labelling efficiency
-  and the blinks per copy with their errors, as NPC Labeling Efficiency gives
-  them; on a simulation also the simulated efficiency and the truth.
-* **The figures**: the fit, the pores found (fitted circles, kept in blue,
-  rejected in grey), and the segmenter's checks.
+* **The text**: one line per step -- the grouping, the pores found among the
+  candidates, the ROIs evaluated, then the labelling efficiency and the
+  blinks per copy with their errors, as NPC Labeling Efficiency gives them;
+  on a simulation also the simulated efficiency and the truth.
+* **The figures**: the pores found (fitted circles, kept in blue, rejected in
+  grey), the segmenter's checks, and the fit.
 * **The ROIs** of the pores, with their counts, in the ROI manager.
-* **Data**: what NPC Labeling Efficiency returns, and `pores_found`,
-  `candidates`, `pores_counted`.
+* **The log**: one entry for the chain, with every step's settings.
 
 ## Differences from SMAP
 

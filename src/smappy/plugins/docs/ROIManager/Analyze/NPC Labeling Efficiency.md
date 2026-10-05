@@ -171,7 +171,8 @@ its own; the same ELE and blinking in every pore; a geometric number of
 blinks; a blink's brightness independent of its fluorophore; and one grouped
 localization per blink.  A grouping that leaves a blink in several rows --
 smappy's links within a fixed 50 nm, which a dim frame at 500 photons misses
--- reads as more blinks.
+-- reads as more blinks.  On a layer that is not grouped at all the plugin
+still runs, and its text says so.
 
 **Simulated data.**  When the sites come from a simulated table, the plugin
 also reports the efficiency it was simulated with, and fits the labelled
@@ -221,7 +222,8 @@ SMAP's method only.  100 gives the error to two digits.
 
 * **The text**: the ELE and the blinks per copy with their errors, and the
   pores fitted of all.  On a simulation also the simulated efficiency and the
-  ELE of the same pores' labelled corners.
+  ELE of the same pores' labelled corners.  A note when the layer is not
+  grouped.
 * **The figure**: the corners seen and the localizations per pore of the
   pores fitted (grey), and the model at the fitted values (red).  A good fit
   follows both.  More pores at either end of the localization histogram than

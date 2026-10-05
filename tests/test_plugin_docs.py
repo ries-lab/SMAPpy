@@ -19,8 +19,10 @@ UNDOCUMENTED: set = set()
 
 
 def shipped():
+    """The plugins and chains that ship: a shipped chain is a plugin to the
+    person who opens it, and has a page like one."""
     return {path: ref for path, ref in plugins.refs().items()
-            if ref.root == "builtin" and ref.kind == "plugin"}
+            if ref.root == "builtin"}
 
 
 def documented():

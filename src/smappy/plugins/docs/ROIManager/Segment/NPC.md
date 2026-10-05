@@ -231,6 +231,13 @@ figure shows real pores rejected for *far*.
 Tick it while choosing the settings: each rejected candidate becomes an ROI
 that is not used, and its origin lists the checks it failed.
 
+### replace
+On, a second run with other settings gives a fresh answer: the ROIs an
+earlier run of this segmenter made on the file go first (their origin says
+which).  Off, to add the pores of a second region or a second pass to those
+already found -- a candidate near an existing ROI is suppressed.  ROIs drawn
+by hand or made by another segmenter stay either way.
+
 ## Output
 
 * **ROIs**, one per pore, added to the current file in the ROI manager and

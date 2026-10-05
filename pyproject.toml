@@ -110,7 +110,7 @@ where = ["src"]
 "smappy" = ["data/*.json", "data/structures/*.yaml"]
 # the plugins' pages, read by the Help window (`smappy.docs`), one folder per
 # level of the menu tree
-"smappy.plugins" = ["docs/*.md", "docs/*/*.md", "docs/*/*/*.md", "docs/*/*/*/*.md"]
+"smappy.plugins" = ["*.chain.yaml", "docs/*.md", "docs/*/*.md", "docs/*/*/*.md", "docs/*/*/*/*.md"]
 # and the pages of the tabs and windows that are not plugins
 "smappy.docs" = ["panels/*.md"]
 

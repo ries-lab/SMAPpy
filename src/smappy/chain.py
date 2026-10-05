@@ -19,6 +19,15 @@ the ones that shape this module:
   result does: one undo step, one log entry, and a chain that can run in the
   GUI's worker thread like any plugin.
 
+* **An evaluator is a step over every site.**  A plugin with
+  ``scope = "site"`` measures one ROI; as a step it is run over every
+  included ROI of the ROI manager's project (`ROIProject.evaluate`) before
+  the next step starts, so a chain can segment, evaluate and analyse the
+  site table as a person does in the ROI manager.  The chain's evaluators
+  become the project's evaluation pipeline, because the site table's
+  columns mean nothing without the pipeline that made them, and the
+  analysis that follows reads the rows through it.
+
 * **Linear.**  SMAP's workflows were graphs; `NOTES.md` ("No module chain")
   records why the fitting pipeline is not, and the same reasons hold here --
   a chain does what a person clicking through the tabs would do, in order.
@@ -280,12 +289,17 @@ def step_settings_class(key: str, plugin_cls, step: Step) -> type:
                 made = field(default=value, metadata=f.metadata)
             columns.append((f.name, hints.get(f.name, Any), made))
     required = getattr(plugin_cls, "grouping", None)
+    if is_evaluator(plugin_cls):
+        help = ("an evaluator sees what the ROI manager shows: the filter "
+                "and grouping of the layer it follows")
+    elif required:
+        help = f"this plugin only works {required}"
+    else:
+        help = ("which table this step reads: auto takes the chain's choice, "
+                "or each layer's own")
     columns.append((GROUPING_FIELD, str, param(
         required or step.grouping, label="grouping", choices=STEP_GROUPINGS,
-        advanced=True,
-        help=(f"this plugin only works {required}" if required else
-              "which table this step reads: auto takes the chain's choice, "
-              "or each layer's own"))))
+        advanced=True, help=help)))
     name = "".join(w.capitalize() for w in key.split("_")) + "Step"
     return make_dataclass(name, columns, namespace={"__module__": __name__})
 
@@ -318,6 +332,58 @@ def is_source(plugin_cls) -> bool:
     images, and anything else is handed localization files.
     """
     return plugin_cls.path.startswith(("Localize/", "File/Load/", "File/Simulate/"))
+
+
+def is_evaluator(plugin_cls) -> bool:
+    """Does this plugin measure one ROI at a time (``scope = "site"``)?"""
+    return getattr(plugin_cls, "scope", "locs") == "site"
+
+
+def evaluate_sites(project, plugin_cls, label: str, settings,
+                   pipeline: List[Any], progress=None) -> Result:
+    """An evaluator as a chain step: run over every included ROI.
+
+    ``pipeline`` is the chain's evaluators so far, as `workspace.Instance`s;
+    this one joins it and the list becomes the project's evaluation pipeline
+    -- what the ROI manager shows, and what `ROIProject.results` reads the
+    rows through, so the analysis step after this one sees these columns and
+    the settings that made them.  Results still current from an earlier run
+    with the same data and settings are carried forward rather than measured
+    again.
+    """
+    from .roi_manager import pipeline as pipeline_module
+    from .workspace import Instance
+    if project is None:
+        raise ValueError("there is no ROI manager project to evaluate")
+    ids = [i for i, roi in project.rois.items() if roi.reviewed and roi.use]
+    if not ids:
+        raise ValueError("there are no ROIs to evaluate: find or draw some first")
+    pipeline.append(Instance(plugin=plugin_cls.path, label=label,
+                             values=settings_values(settings)))
+    project.pipeline = list(pipeline)
+    steps = project.resolved()
+    run = project.evaluate(steps=steps[-1:], roi_ids=ids, reuse=True,
+                           progress=(lambda i, n: progress(f"{i} of {n} sites"))
+                           if progress else None)
+    failed: Dict[str, int] = {}
+    for record in run["records"].values():
+        for why in pipeline_module.errors(record).values():
+            failed[why] = failed.get(why, 0) + 1
+    text = f"{len(ids)} sites evaluated"
+    if failed:
+        text += (f", failed on {sum(failed.values())}: " +
+                 "; ".join(f"{why} ({n})" for why, n in
+                           sorted(failed.items(), key=lambda kv: -kv[1])[:3]))
+    return Result(text=text, settings=settings,
+                  data={"sites": len(ids), "failed": sum(failed.values()),
+                        "run": run["id"], "label": steps[-1].label})
+
+
+def _roi_signature(session) -> Optional[str]:
+    """The ROI project as text, to tell whether a chain changed it."""
+    from .roi_manager.core import json_text
+    state = session.roi_state()
+    return None if state is None else json_text(state)
 
 
 # ------------------------------------------------------------- the plugin
@@ -372,13 +438,15 @@ class ChainPlugin(Plugin):
         layers = None
         path = None
         images = None
+        rois_before = _roi_signature(session)
+        evaluators: List[Any] = []        # the chain's pipeline, as it grows
         for key, step, cls in self.steps:
             label = step.title()
             sub = getattr(settings, key)
             plugin = cls()
             own = plugin_settings(cls, sub)
-            grouping = effective_grouping(cls.grouping, getattr(sub, GROUPING_FIELD),
-                                          settings.grouping)
+            grouping = None if is_evaluator(cls) else effective_grouping(
+                cls.grouping, getattr(sub, GROUPING_FIELD), settings.grouping)
             sctx = session.context(min(ctx.layer, len(session.layers) - 1),
                                    progress=lambda text, l=label: ctx.report(f"{l}: {text}"),
                                    grouping=grouping)
@@ -391,7 +459,12 @@ class ChainPlugin(Plugin):
             ctx.report(f"{label}: starting")
             started = time.perf_counter()
             try:
-                result = plugin.run(sctx, own)
+                if is_evaluator(cls):
+                    result = evaluate_sites(
+                        session.rois, cls, step.label, own, evaluators,
+                        progress=lambda text, l=label: ctx.report(f"{l}: {text}"))
+                else:
+                    result = plugin.run(sctx, own)
             except Exception as error:
                 raise ChainError(f"step {label!r} ({cls.path}) failed -- "
                                  f"{type(error).__name__}: {error}") from error
@@ -433,6 +506,10 @@ class ChainPlugin(Plugin):
             data["path"] = path
         if images:
             data["images"] = images
+        # the ROIs a segmenter found and the runs an evaluator made, which
+        # `Session.apply` puts into the session's project
+        if _roi_signature(session) != rois_before:
+            data["roi_project"] = session.roi_state()
         return Result(locs=session.locs if changed else None,
                       text="\n".join(lines) or "no steps", plots=plots, data=data,
                       settings=settings,
@@ -494,7 +571,7 @@ class ChainPlugin(Plugin):
             except Exception:
                 found = None
             out.update({f"{key}.{k}": v for k, v in (found or {}).items()})
-            if cls.grouping:
+            if cls.grouping or is_evaluator(cls):
                 out[f"{key}.{GROUPING_FIELD}"] = False
         return out or None
 
@@ -546,9 +623,6 @@ def chain_class(spec: ChainSpec, path: Optional[str] = None) -> type:
         except KeyError:
             raise ChainError(f"step {step.title()!r} needs the plugin "
                              f"{step.plugin!r}, which is not installed") from None
-        if getattr(cls, "scope", "locs") == "site":
-            raise ChainError(f"step {step.title()!r}: {step.plugin} runs once per "
-                             "ROI and belongs in the ROI manager's pipeline")
         step_cls = step_settings_class(key, cls, step)
         columns.append((key, step_cls, param(
             default_factory=step_cls, label=step.title(), collapsed=True,

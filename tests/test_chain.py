@@ -244,3 +244,91 @@ def test_start_from_defaults_keeps_what_the_file_hides():
                           "use": np.array([1.0, 0.0, 1.0])},
                          {KEPT_BOUNDS: {"use": [0.5, None]}})
     assert default_bounds(locs)["use"] == (0.5, None)
+
+
+# ------------------------------------------------------------ evaluators
+
+def four_sites():
+    """Four clusters of 100, far apart, ungrouped: one ROI each."""
+    rng = np.random.default_rng(3)
+    centers = [(2000, 2000), (6000, 2000), (2000, 6000), (6000, 6000)]
+    x = np.concatenate([rng.normal(cx, 20, 100) for cx, _ in centers])
+    y = np.concatenate([rng.normal(cy, 20, 100) for _, cy in centers])
+    n = len(x)
+    session = Session(Localizations({
+        "x_nm": x, "y_nm": y, "frame": np.arange(n),
+        "photons": np.full(n, 300.0), "xy_err_nm": np.full(n, 9.0)}))
+    session.show_grouped(0, False)
+    session.rois.set_geometry(400)
+    return session
+
+
+SEGMENT = {"plugin": "ROIManager/Segment/Density Peaks", "label": "find",
+           "values": {"sigma_nm": 60.0, "separation_nm": 1000.0, "min_count": 20}}
+
+
+def test_an_evaluator_step_runs_on_every_site_before_the_next_step():
+    session = four_sites()
+    drawn = session.rois.add_roi(next(iter(session.rois.sources)), (9000.0, 9000.0))
+    drawn.use = False                                   # excluded: not evaluated
+    cls = chain_class(spec(SEGMENT,
+                           {"plugin": "ROIManager/Evaluate/Statistics", "label": "stats"},
+                           {"plugin": "ROIManager/Analyze/Histograms"}))
+    result = session.run(cls(), cls.Settings())
+    steps = result.data["results"]
+    assert steps["stats"].text == "4 sites evaluated"
+    assert steps["stats"].data["sites"] == 4
+    # the analysis after it read the four rows the evaluator had just made
+    assert "4 ROIs" in steps["histograms"].text
+    # the ROIs, the run and the pipeline are the session's now
+    project = session.rois
+    assert len(project.rois) == 5 and drawn.id in project.rois
+    rows = project.results()
+    assert len(rows) == 4 and {r["n_localizations"] for r in rows} == {100}
+    assert [(i.plugin, i.label) for i in project.pipeline] == [
+        ("ROIManager/Evaluate/Statistics", "stats")]
+    # and the log says so, step by step
+    assert [s["plugin"] for s in session.history[-1]["steps"]] == [
+        "ROIManager/Segment/Density Peaks", "ROIManager/Evaluate/Statistics",
+        "ROIManager/Analyze/Histograms"]
+    assert session.history[-1]["steps"][1]["grouping"] == "layer"
+
+
+def test_a_chain_changes_the_roi_project_only_through_its_result():
+    session = four_sites()
+    cls = chain_class(spec(SEGMENT, {"plugin": "ROIManager/Evaluate/Statistics"}))
+    result = cls().run(session.context(), cls.Settings())
+    assert len(session.rois.rois) == 0 and session.rois.runs == []
+    assert len(result.data["roi_project"]["rois"]) == 4
+    session.apply(cls(), result)
+    assert len(session.rois.rois) == 4 and len(session.rois.runs) == 1
+
+
+def test_a_chain_that_leaves_the_rois_alone_hands_none_back():
+    session = four_sites()
+    cls = chain_class(spec({"plugin": "Test/Chain/Count"}))
+    assert "roi_project" not in cls().run(session.context(), cls.Settings()).data
+
+
+def test_an_evaluator_with_no_sites_to_measure_stops_the_chain():
+    session = four_sites()
+    cls = chain_class(spec({"plugin": "ROIManager/Evaluate/Statistics", "label": "stats"}))
+    with pytest.raises(ChainError, match="'stats'.*no ROIs to evaluate"):
+        session.run(cls(), cls.Settings())
+
+
+def test_a_second_evaluator_joins_the_pipeline_and_both_columns_reach_the_rows():
+    session = four_sites()
+    cls = chain_class(spec(SEGMENT,
+                           {"plugin": "ROIManager/Evaluate/Statistics", "label": "a"},
+                           {"plugin": "ROIManager/Evaluate/Statistics", "label": "b"}))
+    session.run(cls(), cls.Settings())
+    assert [i.label for i in session.rois.pipeline] == ["a", "b"]
+    rows = session.rois.results()
+    assert len(rows) == 4 and "a.n_localizations" in rows[0] \
+        and "b.n_localizations" in rows[0]
+
+
+def test_an_evaluators_grouping_is_the_roi_managers_and_cannot_be_chosen():
+    cls = chain_class(spec({"plugin": "ROIManager/Evaluate/Statistics", "label": "stats"}))
+    assert cls().active(cls.Settings())["stats.use_grouping"] is False

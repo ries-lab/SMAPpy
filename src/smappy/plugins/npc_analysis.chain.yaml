@@ -1,0 +1,33 @@
+# The labelling efficiency of nuclear pores, as the ROI manager does it by
+# hand: group, find the pores, count every pore's corners and localizations,
+# fit the efficiency to all of them.  Shipped as a chain rather than a plugin
+# -- the steps are the three NPC plugins with their own settings.
+schema: smappy-chain-v1
+path: ROIManager/Workflow/NPC Analysis
+description: >-
+  Finds the nuclear pores of the file, counts their corners and
+  localizations, and fits the labelling efficiency, in one run.
+grouping: layer
+steps:
+  - plugin: Chain/Layers
+    label: layers
+    version: "2"
+    values:
+      layers:
+        - grouped: true            # the model wants one localization per blink
+          start: keep              # the filter as the Render tab has it
+          bounds: []
+      remove: false
+  - plugin: ROIManager/Segment/NPC
+    label: find the pores
+    version: "2"
+    values:
+      replace: true
+  - plugin: ROIManager/Evaluate/NPC Corners
+    label: count corners
+    version: "2"
+    values: {}
+  - plugin: ROIManager/Analyze/NPC Labeling Efficiency
+    label: labelling efficiency
+    version: "2"
+    values: {}
