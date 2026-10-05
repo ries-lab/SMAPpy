@@ -52,11 +52,30 @@ def pytest_collection_modifyitems(config, items):
     every edit might.  They are skipped, not deselected, so the summary says
     how many were left out; `--slow` runs everything, as before a PR."""
     if config.getoption("--slow"):
+        # longest first: collected last (`test_tutorial`), the tutorials were
+        # a tail of 20-50 s tests that four workers sat through after
+        # everything else had finished
+        items.sort(key=lambda item: "slow" not in item.keywords)
         return
     skip = pytest.mark.skip(reason="slow: run with --slow")
     for item in items:
         if "slow" in item.keywords:
             item.add_marker(skip)
+
+
+@pytest.hookimpl(optionalhook=True)
+def pytest_xdist_make_scheduler(config, log):
+    """Work stealing, unless `--dist` asked for something else.
+
+    xdist's default hands each worker a contiguous run of the list, and the
+    tutorials -- twelve tests of 15-50 s -- landed on one worker: 372 s for it
+    while the other three idled after ~100 s, and `--slow -n 4` took 6:50.
+    Stealing evens it out: 3:53.
+    """
+    if config.getoption("dist") != "load":
+        return None
+    from xdist.scheduler import WorkStealingScheduling
+    return WorkStealingScheduling(config, log)
 
 
 @pytest.fixture(autouse=True, scope="session")
