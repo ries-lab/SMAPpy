@@ -29,11 +29,23 @@ moved.
 A fresh container has **no numpy**.  Before anything else:
 
     pip install -e .                    # builds the C++ extensions too
-    pip install -e .[test]              # pytest and pytest-timeout: every test has a 300 s limit
+    pip install -e .[test]              # pytest, pytest-timeout (a 300 s limit per test), pytest-xdist
 
-Running the tests:
+Running the tests -- two tiers:
 
-    python -m pytest tests -q           # `tests`, not `.`
+    python -m pytest tests -q -n auto           # after each change: ~1 min, the slow tier skipped
+    python -m pytest tests -q -n auto --slow    # before a PR or a push of major work: everything, ~6 min
+
+* **Run the slow tier before you open a PR, and before you call major work
+  done** -- a new plugin, a change to the GUI, a tutorial, a page or what an
+  algorithm computes.  It is about 60 tests marked `@pytest.mark.slow` (the
+  tutorials, the pages' figures, the large numerical checks) that are two
+  thirds of the suite's time, and they are where a GUI or docs change breaks.
+  The summary's "skipped" count includes them, so a run without `--slow` has
+  not checked them; say so if you stop short of it.  No CI runs the tests.
+* Mark a new test `slow` when it takes more than about 4 s.
+* `-n auto` needs pytest-xdist (the `test` extra); `conftest.py` gives each
+  worker one BLAS thread, without which four workers are barely faster than one.
 
 * Plain `pytest` collects `externaltools/Comet`, which imports numba and errors
   out.  Always name `tests`.
@@ -338,6 +350,7 @@ it is wider than the control column (`CONTROL_WIDTH`): a new plugin with a long
 label, a long choice or a wide row of widgets fails there.
 
 `tests/test_tutorial.py` runs every tutorial storyboard against the real GUI
+(slow tier: `--slow`)
 (`python -m smappy.tutorial`, see `src/smappy/tutorial/__init__.py`), so a GUI
 change that breaks a tutorial fails there: fix the storyboard in
 `src/smappy/tutorial/topics/`, which usually means a widget that was renamed
@@ -349,7 +362,7 @@ speak.
 exists or the plugin is in `UNDOCUMENTED` (the plugins written before pages
 were -- a list that only shrinks, and a new plugin never joins it), that its
 `version` is the plugin's, that every setting is explained, and that it
-renders with its maths and figures.
+renders with its maths and figures (the figures in the slow tier).
 
 Plugins reach the shipped workspace by themselves: the Analysis tab seeds from
 `Analysis/` and `favorite` defaults to True, so there is no registry to edit.
