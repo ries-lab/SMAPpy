@@ -110,9 +110,11 @@ class Thing(Plugin):
   imports inside functions (`from scipy.ndimage import ...`), as the shipped
   plugins do.
 * `scope = "site"` makes it an ROI evaluator, run once per ROI with `ctx.site`
-  set; in a chain it runs over every included ROI before the next step, and
-  the chain's evaluators become the ROI manager's pipeline.  Otherwise it runs
-  once over the selection.
+  set; in a chain it runs over every included ROI before the next step.  Its
+  results belong to the ROI, whoever ran them, under the evaluation's name
+  (`ROIProject.evaluations`; a renamed one is a second evaluation), so an
+  analysis reads `ROIProject.results()` and never the pipeline.  Otherwise it
+  runs once over the selection.
 * Override `preview` for a plugin that can show its work before committing;
   the GUI grows a button when it is overridden and nothing when it is not.
 * Override `preflight` to put a question before a run whose cost you can know

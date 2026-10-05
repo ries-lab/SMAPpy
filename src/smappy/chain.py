@@ -23,10 +23,11 @@ the ones that shape this module:
   ``scope = "site"`` measures one ROI; as a step it is run over every
   included ROI of the ROI manager's project (`ROIProject.evaluate`) before
   the next step starts, so a chain can segment, evaluate and analyse the
-  site table as a person does in the ROI manager.  The chain's evaluators
-  become the project's evaluation pipeline, because the site table's
-  columns mean nothing without the pipeline that made them, and the
-  analysis that follows reads the rows through it.
+  site table as a person does in the ROI manager.  Its results are stored
+  with the ROIs like any evaluation's, under the step's name, and the
+  evaluation window's pipeline is left as the user set it up: a result
+  belongs to the ROI and says how it was made (`ROIProject.evaluations`),
+  so nothing downstream needs to know which pipeline ran it.
 
 * **Linear.**  SMAP's workflows were graphs; `NOTES.md` ("No module chain")
   records why the fitting pipeline is not, and the same reasons hold here --
@@ -339,17 +340,17 @@ def is_evaluator(plugin_cls) -> bool:
     return getattr(plugin_cls, "scope", "locs") == "site"
 
 
-def evaluate_sites(project, plugin_cls, label: str, settings,
-                   pipeline: List[Any], progress=None) -> Result:
+def evaluate_sites(project, plugin_cls, label: str, settings, chain: str = "",
+                   progress=None) -> Result:
     """An evaluator as a chain step: run over every included ROI.
 
-    ``pipeline`` is the chain's evaluators so far, as `workspace.Instance`s;
-    this one joins it and the list becomes the project's evaluation pipeline
-    -- what the ROI manager shows, and what `ROIProject.results` reads the
-    rows through, so the analysis step after this one sees these columns and
-    the settings that made them.  Results still current from an earlier run
-    with the same data and settings are carried forward rather than measured
-    again.
+    Stored as an evaluation run of its own, marked with the chain that made
+    it, under ``label`` (the plugin's name when empty) -- so it replaces what
+    an evaluation of that name measured before, and stands beside one of
+    another name.  The project's pipeline is not touched: it is the
+    evaluation window's, set up by the user for their own work.  Results
+    still current from an earlier run with the same data and settings are
+    carried forward rather than measured again.
     """
     from .roi_manager import pipeline as pipeline_module
     from .workspace import Instance
@@ -358,13 +359,13 @@ def evaluate_sites(project, plugin_cls, label: str, settings,
     ids = [i for i, roi in project.rois.items() if roi.reviewed and roi.use]
     if not ids:
         raise ValueError("there are no ROIs to evaluate: find or draw some first")
-    pipeline.append(Instance(plugin=plugin_cls.path, label=label,
-                             values=settings_values(settings)))
-    project.pipeline = list(pipeline)
-    steps = project.resolved()
-    run = project.evaluate(steps=steps[-1:], roi_ids=ids, reuse=True,
+    steps = pipeline_module.resolve([Instance(plugin=plugin_cls.path, label=label,
+                                              values=settings_values(settings))])
+    run = project.evaluate(steps=steps, roi_ids=ids, reuse=True,
                            progress=(lambda i, n: progress(f"{i} of {n} sites"))
                            if progress else None)
+    if chain:
+        run["chain"] = chain
     failed: Dict[str, int] = {}
     for record in run["records"].values():
         for why in pipeline_module.errors(record).values():
@@ -376,7 +377,7 @@ def evaluate_sites(project, plugin_cls, label: str, settings,
                            sorted(failed.items(), key=lambda kv: -kv[1])[:3]))
     return Result(text=text, settings=settings,
                   data={"sites": len(ids), "failed": sum(failed.values()),
-                        "run": run["id"], "label": steps[-1].label})
+                        "run": run["id"], "label": steps[0].label})
 
 
 def _roi_signature(session) -> Optional[str]:
@@ -439,7 +440,6 @@ class ChainPlugin(Plugin):
         path = None
         images = None
         rois_before = _roi_signature(session)
-        evaluators: List[Any] = []        # the chain's pipeline, as it grows
         for key, step, cls in self.steps:
             label = step.title()
             sub = getattr(settings, key)
@@ -461,7 +461,7 @@ class ChainPlugin(Plugin):
             try:
                 if is_evaluator(cls):
                     result = evaluate_sites(
-                        session.rois, cls, step.label, own, evaluators,
+                        session.rois, cls, step.label, own, chain=self.path,
                         progress=lambda text, l=label: ctx.report(f"{l}: {text}"))
                 else:
                     result = plugin.run(sctx, own)

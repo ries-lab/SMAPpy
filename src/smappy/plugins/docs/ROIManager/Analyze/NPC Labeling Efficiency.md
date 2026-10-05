@@ -1,6 +1,6 @@
 ---
 version: "2"
-covers: [smappy.npc.localization_classes, smappy.npc.joint_pmf, smappy.npc.fit, smappy.plugins.npc.joint_efficiency, smappy.plugins.npc.labeling_efficiency, smappy.plugins.npc.fit_likelihood, smappy.plugins.npc.fit_sqrt_lsq, smappy.plugins.npc.true_corners]
+covers: [smappy.npc.localization_classes, smappy.npc.joint_pmf, smappy.npc.fit, smappy.plugins.npc.joint_efficiency, smappy.plugins.npc.labeling_efficiency, smappy.plugins.npc.fit_likelihood, smappy.plugins.npc.fit_sqrt_lsq, smappy.plugins.npc.true_corners, smappy.plugins.npc.corner_evaluation]
 ---
 
 ## What it does
@@ -173,6 +173,15 @@ localization per blink.  A grouping that leaves a blink in several rows --
 smappy's links within a fixed 50 nm, which a dim frame at 500 photons misses
 -- reads as more blinks.  On a layer that is not grouped at all the plugin
 still runs, and its text says so.
+
+**Which counts.**  The counts are those of an NPC Corners evaluation, made by
+the evaluation window or a chain.  With one, it is used whatever it is
+called; with several -- NPC Corners renamed and run with other settings, to
+compare -- the one not renamed is used, or the one named in *counts from*.
+The cutoffs of the model are those that evaluation counted with, as stored
+with its results, not what the evaluation window holds now.  If some sites
+were counted with other settings than the rest under the same name, the
+plugin refuses and asks for them to be evaluated again.
 
 **Simulated data.**  When the sites come from a simulated table, the plugin
 also reports the efficiency it was simulated with, and fits the labelled

@@ -23,9 +23,8 @@ steps:
     version: "2"
     values:
       replace: true
-  - plugin: ROIManager/Evaluate/NPC Corners
-    label: count corners
-    version: "2"
+  - plugin: ROIManager/Evaluate/NPC Corners    # not renamed: replaces an earlier
+    version: "2"                                # "NPC Corners", stands beside a renamed one
     values: {}
   - plugin: ROIManager/Analyze/NPC Labeling Efficiency
     label: labelling efficiency

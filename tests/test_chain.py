@@ -280,13 +280,14 @@ def test_an_evaluator_step_runs_on_every_site_before_the_next_step():
     assert steps["stats"].data["sites"] == 4
     # the analysis after it read the four rows the evaluator had just made
     assert "4 ROIs" in steps["histograms"].text
-    # the ROIs, the run and the pipeline are the session's now
+    # the ROIs and the run are the session's now; the window's pipeline is
+    # still the user's, and the rows are there without it
     project = session.rois
     assert len(project.rois) == 5 and drawn.id in project.rois
     rows = project.results()
     assert len(rows) == 4 and {r["n_localizations"] for r in rows} == {100}
-    assert [(i.plugin, i.label) for i in project.pipeline] == [
-        ("ROIManager/Evaluate/Statistics", "stats")]
+    assert project.pipeline == [] and project.runs[-1]["chain"] == cls.path
+    assert project.labels() == ["stats"]
     # and the log says so, step by step
     assert [s["plugin"] for s in session.history[-1]["steps"]] == [
         "ROIManager/Segment/Density Peaks", "ROIManager/Evaluate/Statistics",
@@ -317,13 +318,13 @@ def test_an_evaluator_with_no_sites_to_measure_stops_the_chain():
         session.run(cls(), cls.Settings())
 
 
-def test_a_second_evaluator_joins_the_pipeline_and_both_columns_reach_the_rows():
+def test_one_evaluator_under_two_names_gives_two_sets_of_columns():
     session = four_sites()
     cls = chain_class(spec(SEGMENT,
                            {"plugin": "ROIManager/Evaluate/Statistics", "label": "a"},
                            {"plugin": "ROIManager/Evaluate/Statistics", "label": "b"}))
     session.run(cls(), cls.Settings())
-    assert [i.label for i in session.rois.pipeline] == ["a", "b"]
+    assert set(session.rois.labels()) == {"a", "b"}
     rows = session.rois.results()
     assert len(rows) == 4 and "a.n_localizations" in rows[0] \
         and "b.n_localizations" in rows[0]
@@ -332,3 +333,19 @@ def test_a_second_evaluator_joins_the_pipeline_and_both_columns_reach_the_rows()
 def test_an_evaluators_grouping_is_the_roi_managers_and_cannot_be_chosen():
     cls = chain_class(spec({"plugin": "ROIManager/Evaluate/Statistics", "label": "stats"}))
     assert cls().active(cls.Settings())["stats.use_grouping"] is False
+
+
+def test_a_chains_evaluation_and_the_windows_stand_side_by_side():
+    """The window's pipeline runs after a chain: both evaluations are on the
+    ROIs, and the chain's run is not taken for the window's pipeline."""
+    from smappy.workspace import Instance
+    session = four_sites()
+    cls = chain_class(spec(SEGMENT, {"plugin": "ROIManager/Evaluate/Statistics",
+                                     "label": "chain stats"}))
+    session.run(cls(), cls.Settings())
+    project = session.rois
+    assert [s.label for s in project.resolved()] != ["chain stats"]
+    project.evaluate([Instance(plugin="ROIManager/Evaluate/Statistics")])
+    assert set(project.labels()) == {"chain stats", "Statistics"}
+    row = project.results()[0]
+    assert row["chain stats.n_localizations"] == row["Statistics.n_localizations"] == 100

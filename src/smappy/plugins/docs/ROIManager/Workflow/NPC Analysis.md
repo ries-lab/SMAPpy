@@ -1,6 +1,6 @@
 ---
 version: "1"
-covers: [smappy.chain.ChainPlugin.run, smappy.chain.evaluate_sites, smappy.plugins.npc.NPCSegment.run, smappy.plugins.npc.npc_rois, smappy.roi_manager.core.ROIProject.evaluate]
+covers: [smappy.chain.ChainPlugin.run, smappy.chain.evaluate_sites, smappy.plugins.npc.NPCSegment.run, smappy.plugins.npc.npc_rois, smappy.roi_manager.core.ROIProject.evaluate, smappy.roi_manager.core.ROIProject.evaluations]
 ---
 
 ## What it does
@@ -37,7 +37,7 @@ found with the settings of that section.  ROIs drawn by hand, or made by
 another segmenter, are left alone.
 
 **3. Count.**  NPC Corners is run on every ROI the manager includes, with
-the settings of the *count corners* section, before the next step starts:
+the settings of the *NPC Corners* section, before the next step starts:
 each pore's corners seen with the precise localizations, and its
 localizations.  The numbers are stored with the ROIs, as an evaluation in the
 ROI manager stores them.
@@ -56,12 +56,15 @@ includes -- every one that is ticked *use*, whoever made it -- and the chain
 goes on only when all are done.  A ROI on which it fails (no localizations,
 say) loses its own row and is counted in the step's line, not the run.
 
-**The evaluation pipeline.**  The chain's evaluators become the ROI
-manager's evaluation pipeline, replacing what it held: the site table's
-columns mean nothing without the settings that made them, and NPC Labeling
-Efficiency reads the rows -- and the cutoffs of NPC Corners -- through it.
-So the counts and the model always agree, and the evaluation window shows
-afterwards exactly what the chain measured.
+**The evaluation window is left alone.**  The counts are stored with the
+ROIs as an evaluation called *NPC Corners*, like any other, and the
+evaluation window's pipeline stays as it was set up -- for this work or for
+another.  A result belongs to its ROI, whoever ran it, so the site table
+shows the chain's counts beside the pipeline's numbers, and NPC Labeling
+Efficiency run again from the ROI tab finds them, with the cutoffs they were
+counted with.  Running the chain again replaces its counts; to keep a second
+set beside the first -- other cutoffs, to compare -- rename the NPC Corners
+step (*edit steps*), and name it in the analysis's *counts from*.
 
 **Nothing changes until the end.**  The chain runs on a copy of the session,
 ROI manager included; the ROIs it found, the evaluation run and the pipeline
@@ -77,7 +80,7 @@ measured again.
 ## Output
 
 * **The text**: one line per step -- the grouping, the pores found among the
-  candidates, the ROIs evaluated, then the labelling efficiency and the
+  candidates, the ROIs counted, then the labelling efficiency and the
   blinks per copy with their errors, as NPC Labeling Efficiency gives them;
   on a simulation also the simulated efficiency and the truth.
 * **The figures**: the pores found (fitted circles, kept in blue, rejected in

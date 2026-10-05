@@ -314,6 +314,8 @@ class ROIProject:
             instances = self.pipeline
         if not instances:
             for run in reversed(self.runs):
+                if run.get("chain"):
+                    continue        # a chain's evaluators are its own, not the window's
                 instances = pipeline_module.instances_from_run(run.get("pipeline") or [])
                 if instances:
                     break
@@ -362,6 +364,68 @@ class ROIProject:
             else:
                 found[label] = (None, "missing")
         return found
+
+    def evaluations(self, roi_id):
+        """Every evaluation this ROI has had that still describes it.
+
+        ``{label: (entry, step)}``: under each name, the newest stored result
+        that was computed from the ROI's data as it is now (place, file,
+        filter, grouping), and the step that made it -- plugin, version,
+        parameters -- as its run recorded it.  The name is what makes two
+        evaluations different: the same evaluator renamed and run with other
+        settings is a second evaluation beside the first, so the two can be
+        compared, and running it again under its old name replaces the old
+        numbers.  Whether the GUI's pipeline, a chain or a script ran it does
+        not matter: a result belongs to the ROI, and says itself how it was
+        made.
+        """
+        inputs = json.loads(json_text(self.inputs(self.rois[roi_id])))
+        data = digest(inputs)
+        found = {}
+        for run in reversed(self.runs):
+            record = (run.get("records") or {}).get(roi_id)
+            if record is None:
+                continue
+            made_by = {s.get("label"): s for s in run.get("pipeline") or []}
+            for label, entry in (record.get("steps") or {}).items():
+                if label in found:
+                    continue
+                step = made_by.get(label) or {}
+                if entry.get("signature") and step:
+                    identity = {k: v for k, v in step.items() if k != "label"}
+                    current = entry["signature"] == digest({"inputs": inputs,
+                                                            "step": identity})
+                else:                     # written before entries were signed
+                    current = record.get("signature") == data
+                if current:
+                    found[label] = (entry, step)
+        return found
+
+    def evaluation_steps(self, label, roi_ids=None):
+        """The distinct steps that made the evaluation called ``label`` on these
+        ROIs (all included ones by default): one, unless some ROIs were
+        evaluated again with other settings and some not."""
+        ids = self._included() if roi_ids is None else list(roi_ids)
+        out = []
+        for roi_id in ids:
+            entry, step = self.evaluations(roi_id).get(label, (None, None))
+            if step and step not in out:
+                out.append(step)
+        return out
+
+    def labels(self, plugin=None, roi_ids=None):
+        """The names of the current evaluations on these ROIs, newest
+        evaluator first, optionally only those made by ``plugin``."""
+        ids = self._included() if roi_ids is None else list(roi_ids)
+        out = []
+        for roi_id in ids:
+            for label, (entry, step) in self.evaluations(roi_id).items():
+                if label not in out and (plugin is None or step.get("plugin") == plugin):
+                    out.append(label)
+        return out
+
+    def _included(self):
+        return [i for i, roi in self.rois.items() if roi.reviewed and roi.use]
 
     def stale_steps(self, roi_id, steps=None):
         """The steps of this ROI that would have to run to be sure."""
@@ -521,6 +585,10 @@ class ROIProject:
                                 for label in (record.get("steps") or {})}
             return None, {}
         found = self.entries(roi_id, steps)
+        # and what else has measured this ROI: a chain's evaluators, or a
+        # renamed one that is no longer in the pipeline
+        for label, (entry, _) in self.evaluations(roi_id).items():
+            found.setdefault(label, (entry, "current"))
         if all(entry is None for entry, _ in found.values()):
             return None, {label: state for label, (_, state) in found.items()}
         record = {"file_id": self.rois[roi_id].file_id,
@@ -529,16 +597,40 @@ class ROIProject:
         return record, {label: state for label, (_, state) in found.items()}
 
     def results(self, steps=None):
-        """Current successful rows for reviewed, included ROIs only.
+        """The site table: a row per reviewed, included ROI that has results.
 
-        A row is left out while any of its steps is out of date or missing:
-        half a row of this pipeline's numbers and half of the last one's is
-        worse than no row, and `needs_evaluation` says how many are waiting.
-        A step that cannot be checked -- produced by an evaluator that is not
-        installed here -- is trusted and reported: it was true when it was
-        written, and dropping it would lose the file's results on opening it
-        on another machine.
+        A row holds every evaluation the ROI has that still describes it
+        (`evaluations`), whoever ran it -- the evaluation window's pipeline,
+        a chain, a script -- the pipeline's first, then the rest by name.  A
+        column keeps its plain name while one evaluation writes it, and is
+        qualified with the evaluation's name when two do
+        (`pipeline.merged_values`), so two settings of one evaluator run
+        under two names read side by side.
+
+        With ``steps`` the row is instead those steps only, and is left out
+        while any of them is out of date or missing: what a pipeline would
+        report, for a caller that wants exactly that.
         """
+        from . import pipeline as pipeline_module
+        if steps is not None:
+            return self._pipeline_results(steps)
+        order = {}
+        try:
+            order = {step.label: n for n, step in enumerate(self.resolved())}
+        except Exception:
+            pass
+        rows = []
+        for roi_id in self._included():
+            found = self.evaluations(roi_id)
+            labels = sorted(found, key=lambda l: (order.get(l, len(order)), l))
+            values = pipeline_module.merged_values(
+                {"steps": {label: found[label][0] for label in labels}})
+            if values:
+                roi = self.rois[roi_id]
+                rows.append({"roi_id": roi.id, "file_id": roi.file_id, **values})
+        return rows
+
+    def _pipeline_results(self, steps):
         from . import pipeline as pipeline_module
         steps = self.resolved(steps)
         rows = []
@@ -546,9 +638,11 @@ class ROIProject:
             if not roi.reviewed or not roi.use:
                 continue
             record, states = self.latest(roi.id, steps)
-            if record is None or any(state in ("stale", "missing")
-                                     for state in states.values()):
+            if record is None or any(states.get(step.label) in ("stale", "missing", None)
+                                     for step in steps):
                 continue
+            record = {**record, "steps": {step.label: record["steps"][step.label]
+                                          for step in steps}}
             values = pipeline_module.merged_values(record)
             if values:
                 rows.append({"roi_id": roi.id, "file_id": roi.file_id, **values})

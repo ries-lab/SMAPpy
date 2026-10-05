@@ -124,11 +124,18 @@ Decided 2026-10-05.  A chain can do what the ROI manager does by hand:
   done.  A ROI on which it fails loses its row and is counted in the step's
   line; no ROI at all fails the step.  Results still current (same ROI, data
   and settings) are carried forward;
-* the chain's evaluators, in order, **become the project's evaluation
-  pipeline**, replacing what it held: the site table's columns mean nothing
-  without the settings that made them, and an analysis step after them
-  (`ROIManager/Analyze/...`) reads the rows through `ROIProject.results`,
-  which reads them through the pipeline;
+* its results are **stored with the ROIs** as an evaluation run of their own,
+  marked with the chain (`run["chain"]`), under the step's name -- the
+  plugin's when the step is not renamed.  The evaluation window's pipeline
+  is not touched: it is the user's, set up for whatever they do next.  A
+  result belongs to its ROI and says how it was made
+  (`ROIProject.evaluations`: the newest result under each name that is
+  still true of the ROI's data, with its plugin, version and parameters),
+  so the site table (`ROIProject.results`) holds the chain's columns beside
+  the pipeline's, and an analysis step -- in the chain, or run from the GUI
+  afterwards -- reads them without knowing who ran them.  The name is the
+  identity: the same evaluator under its name again replaces its numbers,
+  renamed it adds a second set to compare;
 * an evaluator sees what the ROI manager shows -- the filter and grouping of
   the layer it follows, the first unless changed -- so its step's grouping
   choice is greyed out; a `Chain/Layers` step before it is how a chain sets
@@ -143,7 +150,9 @@ succeeded.  Undo does not take the ROIs back: the ROI manager has no undo.
 
 The shipped `ROIManager/Workflow/NPC Analysis` is such a chain
 (`src/smappy/plugins/npc_analysis.chain.yaml`): group, NPC segmenter, NPC
-Corners, NPC Labeling Efficiency.
+Corners, NPC Labeling Efficiency, which takes the counts by the plugin that
+made them and its cutoffs from their settings (*counts from* when there are
+several).
 
 ### Building a chain in the GUI
 

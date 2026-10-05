@@ -145,12 +145,16 @@ for the selected ROI, one tab per evaluator.  Stepping down the list redraws
 it in place, so that sites are compared like with like.
 
 **7. Out of date.**  Every result is stored with a record of what it was
-computed from.  When that changes -- the ROI moved, the data were corrected,
-a filter or an evaluator's parameter was edited -- the result is out of
-date.  Its number in the list turns orange, the status bar counts how many
-wait, and the ROI drops out of the results until it is evaluated again.
+computed from.  When the ROI's data change -- the ROI moved, the data were
+corrected, a filter was edited -- its results no longer describe it: its
+number in the list turns orange, the status bar counts how many wait, and
+the ROI drops out of the results until it is evaluated again.  Editing an
+evaluator's parameter also turns every ROI orange, since the pipeline would
+now compute something else, but the results it has stay in the table until
+then: they are still true of the ROI, made with the old settings, and say
+so.
 
-```figure The first 14 numbers of the ROI list, and the size of the result table, through four edits: after an evaluation with Statistics everything is current (black); moving ROI 3 by 40 nm puts only that ROI out of date (orange); excluding ROI 6 greys it and takes it out of the results; editing a parameter of the evaluator puts every included ROI out of date, and no result is current.
+```figure The first 14 numbers of the ROI list, and the size of the result table, through four edits: after an evaluation with Statistics everything is current (black); moving ROI 3 by 40 nm puts only that ROI out of date (orange) and out of the results; excluding ROI 6 greys it and takes it out of the results; editing a parameter of the evaluator puts every included ROI out of date, while the results made with the old setting stay until they are replaced.
 for r in found:
     r.use, r.direction = True, None
 project.pipeline = [Instance(plugin="ROIManager/Evaluate/Statistics")]
@@ -219,17 +223,26 @@ the result is stored with a signature, a hash of
 * the evaluator, its version and all its parameters, but not the name of the
   step.
 
-A stored result is *current* when a result with the same signature exists,
-*out of date* when there is one under the step's name with another
+For the pipeline, a step is *current* when a result with the same signature
+exists, *out of date* when there is one under the step's name with another
 signature, and *missing* otherwise.  Results of an evaluator that is not
 installed here cannot be checked and are *unverified*.  An ROI is waiting
-(orange) when it is included and any step is not current.  A row enters the
-result table only when none of its steps is out of date or missing, so that
-a table never mixes numbers from two versions of the pipeline; unverified
-steps are trusted, so that a file opened on another machine keeps its
-results.  Because the key is the
-content and not the name, renaming a step does not put anything out of date,
-and changing the global ROI size does not affect ROIs with their own polygon.
+(orange) when it is included and any step is not current.  Because the
+signature is the content and not the name, evaluating a renamed step with
+unchanged settings copies the numbers rather than measuring again, and
+changing the global ROI size does not affect ROIs with their own polygon.
+
+**What the result table holds.**  A result belongs to its ROI, whoever ran
+it -- this pipeline, a chain, a script.  An ROI's row holds, under each
+evaluation's name, the newest result that was computed from the ROI's data
+as they are now (the signature without the evaluator part); the pipeline's
+evaluations come first.  The name is what tells two evaluations apart:
+running the same evaluator again under its name replaces its numbers, and
+running it renamed, with other settings, puts a second set beside the first,
+so the two can be compared.  A column keeps its plain name while only one
+evaluation writes it, and is called `<name>.<column>` when two do.  Each
+result keeps the settings it was made with, which is what an analysis such
+as NPC Labeling Efficiency reads its cutoffs from.
 
 **What runs when a site is selected.**  With *plot the evaluation* on, the
 evaluator whose tab is open is always run on the selected ROI, because a
