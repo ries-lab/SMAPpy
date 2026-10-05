@@ -529,6 +529,8 @@ def main(argv=None) -> int:
         apply_style(app)
     except Exception:
         pass
+    from .collector import collect_on_gui_thread
+    collect_on_gui_thread(app)
     window = BatchWindow()
     args = (argv if argv is not None else sys.argv)[1:]
     if args:

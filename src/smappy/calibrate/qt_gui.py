@@ -636,6 +636,8 @@ def show_calibration_qt(paths=(), settings=None):
         app = QApplication([])
     from ..gui.widgets import apply_style
     apply_style(app)                 # the same editable fields as the main GUI
+    from ..gui.collector import collect_on_gui_thread
+    collect_on_gui_thread(app)
     window = CalibrationWindow(paths, settings)
     window.show()
     if standalone:

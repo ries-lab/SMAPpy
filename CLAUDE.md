@@ -51,11 +51,13 @@ Running the tests -- two tiers:
   worker one BLAS thread (without it four workers are barely faster than one),
   makes work stealing the default (xdist's own piles the tutorials onto one
   worker) and runs the slow tests first.
-* **Automatic garbage collection is off in the tests**; `conftest.py` collects
-  on the main thread every 100 tests.  The collector otherwise runs in
-  whichever thread allocates, and a Qt widget a GUI test left in a reference
-  cycle, destroyed on a fit's reader thread, deadlocked the worker.  A test
-  that needs an object gone calls `gc.collect()` itself.
+* **Automatic garbage collection is off, in the tests and in the app.**  The
+  collector otherwise runs in whichever thread allocates, and a Qt widget
+  left in a reference cycle, destroyed on a fit's reader thread, deadlocked
+  a test worker.  `conftest.py` collects on the main thread every 100 tests;
+  the GUI's entry points call `gui/collector.collect_on_gui_thread`, a timer
+  on the GUI thread.  A test that needs an object gone calls `gc.collect()`
+  itself; a new entry point that makes a QApplication installs the collector.
 
 * Plain `pytest` collects `externaltools/Comet`, which imports numba and errors
   out.  Always name `tests`.

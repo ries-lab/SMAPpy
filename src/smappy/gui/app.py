@@ -26,6 +26,7 @@ from .render_tab import RenderTab
 from .roi_tab import ROIHeader
 from .render_view import RenderToolBar, RenderView
 from .widgets import CONTROL_WIDTH, apply_style, place_beside
+from .collector import collect_on_gui_thread
 
 
 class LoadTask(QThread):
@@ -859,6 +860,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     argv = sys.argv if argv is None else argv
     app = QApplication.instance() or QApplication(argv)
     apply_style(app)
+    collect_on_gui_thread(app)
     _start_log()
     session = Session()
     render = RenderWindow(session)
