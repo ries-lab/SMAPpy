@@ -14,10 +14,21 @@ namespace {
 using Doubles = py::array_t<double, py::array::c_style | py::array::forcecast>;
 using Frames = py::array_t<int64_t, py::array::c_style | py::array::forcecast>;
 
+// `var`, if given, is the squared lateral precision per localization and
+// switches the box test for the precision one; see group.hpp.
 py::tuple connect(const Doubles& x, const Doubles& y, const Frames& frame,
-                  double dx, int64_t dt) {
+                  double dx, int64_t dt, py::object var_obj, double k2,
+                  double r2min) {
     if (x.ndim() != 1 || y.size() != x.size() || frame.size() != x.size())
         throw std::invalid_argument("x, y and frame must be matching 1-D arrays");
+    Doubles var;
+    const double* var_ptr = nullptr;
+    if (!var_obj.is_none()) {
+        var = var_obj.cast<Doubles>();
+        if (var.size() != x.size())
+            throw std::invalid_argument("var must match x");
+        var_ptr = var.data();
+    }
 
     const py::ssize_t n = x.size();
     py::array_t<int64_t> list(n);
@@ -27,7 +38,8 @@ py::tuple connect(const Doubles& x, const Doubles& y, const Frames& frame,
     {
         py::gil_scoped_release release;   // sequential, but long-running
         groups = smappy::connect_single(x.data(), y.data(), frame.data(), n, dx,
-                                         dt, list.mutable_data());
+                                         dt, list.mutable_data(), var_ptr, k2,
+                                         r2min);
     }
     return py::make_tuple(list, groups);
 }
@@ -88,7 +100,8 @@ py::array_t<double> combine(const py::array& values, py::object weights_obj,
 PYBIND11_MODULE(_group, m) {
     m.doc() = "Frame-to-frame linking of localizations.";
     m.def("connect", &connect, py::arg("x"), py::arg("y"), py::arg("frame"),
-          py::arg("dx"), py::arg("dt"),
+          py::arg("dx"), py::arg("dt"), py::arg("var") = py::none(),
+          py::arg("k2") = 0.0, py::arg("r2min") = 0.0,
           "Link one block sorted by (frame, x); returns (group_ids, n_groups).");
     m.def("combine", &combine, py::arg("values"), py::arg("weights"), py::arg("order"),
           py::arg("starts"), py::arg("mode"), py::arg("threads") = 0,

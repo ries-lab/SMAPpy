@@ -107,7 +107,10 @@ all of them and a correspondingly better precision.  A grouped picture is
 cleaner and counts molecules more fairly: a long blink no longer weighs more
 than a short one.  Layers are grouped by default (*grouped*); the linking
 distance and the number of dark frames allowed are set under *link
-settings...*, beside it, for every layer at once.
+settings...*, beside it, for every layer at once.  The distance is either
+fixed or, with *link by* set to *precision*, scaled by how precisely each
+localization was measured: bright ones are held close together, dim ones may
+lie further apart.
 
 ```figure The same localizations (with the default bounds, drawn as a histogram) before and after grouping, and how many frames each blink was linked over.
 fig.set_size_inches(7.5, 2.6)
@@ -311,7 +314,25 @@ blink's running position it looks in the next frame for the first
 unlinked localization inside a box of half-width $d$ (*link within*, 50 nm)
 in both x and y -- the first found, not the nearest -- and moves the running
 position halfway towards it.  A blink may skip up to *gap* dark frames (1)
-before it is closed.  Files and channels are linked separately.  Each blink
+before it is closed.  With *link by* *precision* (SMAP's locprec mode) the
+box becomes a circle whose radius depends on the localizations: one joins
+the blink if its distance $r$ from the running position satisfies
+
+$$r^2 < k^2 \left( \sigma_h^2 + \sigma^2 \right)$$
+
+with $\sigma$ its lateral precision (`xy_err_nm`), $\sigma_h$ the precision
+of the running position (which improves as it averages, $\sigma_h^2 \to
+(\sigma_h^2 + \sigma^2)/4$ at each link), and $k$ 2.5 -- and $r$ is always
+allowed up to *at least* (10 nm) and never beyond *at most* (150 nm).  For
+one emitter $r^2 / (\sigma_h^2 + \sigma^2)$ follows a chi-squared
+distribution with two degrees of freedom, so a link is kept with
+probability $1 - e^{-k^2/2}$: 96% at $k = 2.5$, 99.97% at $k = 4$.  A
+localization without a precision may link up to *at most*; a table without
+a precision column is linked by the fixed box, with a warning.  Unlike
+SMAP, which took the first localization's precision for both terms, the
+precision of the candidate and of the running position are used, and the
+bounds clamp $r$ itself rather than each $k \sigma$.  Files and channels
+are linked separately.  Each blink
 then becomes one row: positions weighted by $1/\sigma^2$ (x by `x_err_nm`,
 y by `y_err_nm`, z by `z_err_nm` where the table has them), photons and
 background summed, precisions combined as $1/\sqrt{\sum_i 1/\sigma_i^2}$,
@@ -473,8 +494,14 @@ takes seconds to minutes on a large one; after that it is free.  Plugins get
 the ungrouped table unless they ask for the grouped one.
 
 ### link settings...
-The linking parameters of grouping, *link within* (nm) and *gap* (frames),
-for every layer at once.  OK groups all the layers again and records the new
+The linking parameters of grouping, for every layer at once: *link by* --
+*fixed distance*, a box of half-width *link within* (nm), or *precision*, a
+radius of *k* times the two localizations' combined precision, held between
+*at least* and *at most* (nm) -- and *gap* (frames).  A fixed box wide
+enough to keep the dim localizations of a blink together also merges bright
+neighbours that their precision could tell apart; linking by precision
+avoids both, at the price of cutting the 4% of links that fall beyond 2.5
+sigma (raise *k* to keep more).  OK groups all the layers again and records the new
 parameters in the file's history, since the grouped table cannot tell which
 ones produced it.
 

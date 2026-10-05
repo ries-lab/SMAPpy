@@ -76,6 +76,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import os
+import warnings
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
@@ -319,9 +320,26 @@ def sorted_order(x, frame, keys=(), workers: Optional[int] = None) -> np.ndarray
     return order
 
 
+def precision_limits(precision, k: float, dx_min: float = 0.0
+                     ) -> Tuple[np.ndarray, float, float]:
+    """What the linker's precision test is handed: ``(var, k^2, dx_min^2)``.
+
+    A localization without a usable precision (NaN, zero is fine) gets an
+    infinite variance, which the walk's clamp turns into the upper bound -- it
+    links as it would by the fixed box, rather than not at all.
+    """
+    if not k > 0:
+        raise ValueError(f"the precision factor k must be positive, not {k}")
+    var = np.asarray(precision, np.float64) ** 2
+    var = np.where(np.isfinite(var), var, np.inf)
+    return var, float(k) ** 2, float(dx_min) ** 2
+
+
 def connect(x, y, frame, dx: float = 50.0, dt: int = 1,
             blocks: Optional[np.ndarray] = None,
-            progress: Optional[Progress] = None) -> np.ndarray:
+            progress: Optional[Progress] = None,
+            precision: Optional[np.ndarray] = None, k: float = 2.5,
+            dx_min: float = 0.0) -> np.ndarray:
     """Assign every localization a 1-based group id, in the input order.
 
     ``dx`` is the half-width of the search box in the units of x and y, ``dt``
@@ -329,6 +347,16 @@ def connect(x, y, frame, dx: float = 50.0, dt: int = 1,
     localizations that linking may not cross (a file or channel number); linking
     is run once per block, rather than SMAP's trick of zeroing the frame at each
     boundary, which leaves the array no longer sorted by frame.
+
+    With ``precision`` (the lateral precision per localization, in the units
+    of x and y) the box becomes SMAP's precision test: a localization joins a
+    particle when its distance ``r`` from the running position satisfies
+    ``r^2 < k^2 (s_h^2 + s^2)``, with ``s_h`` the running position's own
+    precision, and ``r`` is held between ``dx_min`` and ``dx`` whatever the
+    precisions say.  ``dx`` is then the upper bound, not the box.  ``k`` is in
+    standard deviations of the *difference* along one axis, so ``r^2 / (s_h^2 +
+    s^2)`` is chi-squared with two degrees of freedom and ``k = 2.5`` keeps
+    ``1 - exp(-k^2/2)`` = 96% of a blink's true links.
 
     Linking is lateral only.  A z window was offered and is gone: an emitter's
     fitted z wanders by more than the axial precision between frames, so a
@@ -349,6 +377,12 @@ def connect(x, y, frame, dx: float = 50.0, dt: int = 1,
         b = np.asarray(blocks)
         keys = tuple(b.T) if b.ndim == 2 else (b,)
 
+    var = k2 = r2min = None
+    if precision is not None:
+        var, k2, r2min = precision_limits(precision, k, dx_min)
+        if var.shape != x.shape:
+            raise ValueError("precision must match x")
+
     # the linker needs (frame, x) ascending, within a block
     order = sorted_order(x, frame, keys)
     out = np.zeros(x.size, np.int64)
@@ -368,7 +402,11 @@ def connect(x, y, frame, dx: float = 50.0, dt: int = 1,
             label = "connect" if n_blocks == 1 else f"connect (block {i + 1}/{n_blocks})"
             progress(label, begin / max(x.size, 1))
         block = order[begin:end]
-        ids, n_groups = _group.connect(x[block], y[block], frame[block], dx, dt)
+        if var is None:
+            ids, n_groups = _group.connect(x[block], y[block], frame[block], dx, dt)
+        else:
+            ids, n_groups = _group.connect(x[block], y[block], frame[block], dx, dt,
+                                           var[block], k2, r2min)
         out[block] = ids + offset
         offset += n_groups
     return out
@@ -575,11 +613,30 @@ def by_trace(trace, blocks=None) -> np.ndarray:
     return inverse.reshape(-1).astype(np.int64) + 1
 
 
+#: how `GroupSettings.link` may decide whether two localizations are one blink
+LINK_MODES = ("fixed", "precision")
+
+
 @dataclass(frozen=True)
 class GroupSettings:
-    """How to link.  ``dx`` is in the units of the table (nm, normally)."""
+    """How to link.  Distances are in the units of the table (nm, normally).
 
+    ``link`` is ``"fixed"`` -- the ``dx`` box, the same for every localization
+    -- or ``"precision"``, SMAP's other mode: the allowed distance is ``k``
+    times what the two localizations' precisions allow, held between ``dx_min``
+    and ``dx_max`` (see `connect`).  A fixed box wide enough for the dim
+    localizations of a blink also merges bright neighbours that the precision
+    could tell apart; scaling it by the precision keeps each pair to what its
+    own fit can resolve.  The fields of the other mode are kept but unused,
+    so switching back and forth loses nothing.
+    """
+
+    # in the order the grouping dialog shows them
+    link: str = "fixed"
     dx: float = 50.0
+    k: float = 2.5
+    dx_min: float = 10.0
+    dx_max: float = 150.0
     dt: int = 1
     block_fields: Sequence[str] = ("filenumber", "channel")
     # How many pieces the frame axis is cut into for the linking, which runs
@@ -615,6 +672,21 @@ def attach(locs: Localizations, grouped: Localizations,
     apply_recipes(locs)
 
 
+def _link_precision(locs: Localizations) -> np.ndarray:
+    """The lateral precision in the unit of the positions linking runs on."""
+    from .render import POSITION_FIELDS
+    x_name = next(x for x, y in POSITION_FIELDS if x in locs and y in locs)
+    unit = x_name.rsplit("_", 1)[1]
+    name = f"xy_err_{unit}"
+    if name in locs:
+        return np.asarray(locs[name], np.float64)
+    if f"x_err_{unit}" in locs and f"y_err_{unit}" in locs:
+        return xy_err(locs[f"x_err_{unit}"], locs[f"y_err_{unit}"]).astype(np.float64)
+    errs = sorted(n for n in locs.keys() if "_err" in n)
+    raise KeyError(f"linking by precision needs '{name}' (positions are {x_name}); "
+                   f"the table has {', '.join(errs) or 'no precision column'}")
+
+
 def group(locs: Localizations, settings: Optional[GroupSettings] = None,
           progress: Optional[Progress] = None, attach_columns: bool = True
           ) -> Tuple[Localizations, np.ndarray]:
@@ -648,14 +720,28 @@ def group(locs: Localizations, settings: Optional[GroupSettings] = None,
     x, y = positions(locs)
     if "frame" not in locs:
         raise KeyError("grouping needs a 'frame' column")
+    dx, by_precision = settings.dx, {}
+    if settings.link == "precision":
+        try:
+            precision = _link_precision(locs)
+        except KeyError as missing:
+            # every file opens grouped, so refusing would refuse to open it
+            warnings.warn(f"{missing.args[0]}: linked by the fixed box instead")
+        else:
+            dx = settings.dx_max
+            by_precision = dict(precision=precision, k=settings.k,
+                                dx_min=settings.dx_min)
+    elif settings.link != "fixed":
+        raise ValueError(f"unknown link mode {settings.link!r}; "
+                         f"one of {', '.join(LINK_MODES)}")
     if settings.link_chunks > 1:
         from ._group_chunked import connect_chunked
-        group_index = connect_chunked(x, y, locs["frame"], settings.dx, settings.dt,
+        group_index = connect_chunked(x, y, locs["frame"], dx, settings.dt,
                                       blocks, n_chunks=settings.link_chunks,
-                                      progress=progress)
+                                      progress=progress, **by_precision)
     else:
-        group_index = connect(x, y, locs["frame"], settings.dx, settings.dt, blocks,
-                              progress=progress)
+        group_index = connect(x, y, locs["frame"], dx, settings.dt, blocks,
+                              progress=progress, **by_precision)
     grouped = combine(locs, group_index, progress=progress)
     if attach_columns:
         attach(locs, grouped, group_index)

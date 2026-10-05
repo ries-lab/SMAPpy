@@ -526,3 +526,143 @@ def test_a_table_with_trace_ids_is_grouped_one_row_per_trace():
     assert set(np.asarray(grouped["tid"])) == {7, 9}
     assert sorted(np.asarray(grouped["photons"])) == [50.0, 300.0, 400.0]
     assert list(locs["group_id"]) == list(index)
+
+
+# ------------------------------------------------- linking by precision ------
+# `GroupSettings(link="precision")`: SMAP's other mode, r^2 < k^2 (s_h^2 + s^2)
+# held between dx_min and dx_max.
+
+def _pairs(n, sigma, seed=0):
+    """``n`` emitters, each localized in two consecutive frames with precision
+    ``sigma``, far enough apart that only the pair can link."""
+    rng = np.random.default_rng(seed)
+    centre = np.arange(n) * 10_000.0
+    x = np.concatenate([centre + rng.normal(0, sigma, n), centre + rng.normal(0, sigma, n)])
+    y = rng.normal(0, sigma, 2 * n)
+    frame = np.repeat([0, 1], n).astype(np.int64)
+    return x, y, frame, np.full(2 * n, sigma)
+
+
+def test_linking_by_precision_keeps_the_fraction_k_predicts():
+    """r^2 / (s1^2 + s2^2) is chi-squared with two degrees of freedom, so a
+    pair links with probability 1 - exp(-k^2 / 2): 95.6% at k = 2.5."""
+    n = 20_000
+    x, y, frame, s = _pairs(n, 20.0)
+    for k in (1.5, 2.5):
+        ids = connect(x, y, frame, 1000.0, 0, precision=s, k=k)
+        linked = (n * 2 - len(np.unique(ids))) / n
+        assert linked == pytest.approx(1 - np.exp(-k ** 2 / 2), abs=0.01)
+
+
+def test_linking_by_precision_is_held_between_its_bounds():
+    frame = np.array([0, 1])
+    y = np.zeros(2)
+    tight = np.full(2, 1.0)                    # k*sqrt(2) = 3.5 nm on its own
+    assert len(np.unique(connect(np.array([0.0, 8.0]), y, frame, 150.0, 0,
+                                 precision=tight, k=2.5, dx_min=10.0))) == 1
+    assert len(np.unique(connect(np.array([0.0, 8.0]), y, frame, 150.0, 0,
+                                 precision=tight, k=2.5, dx_min=0.0))) == 2
+    loose = np.full(2, 100.0)                  # 354 nm on its own
+    assert len(np.unique(connect(np.array([0.0, 140.0]), y, frame, 150.0, 0,
+                                 precision=loose, k=2.5))) == 1
+    assert len(np.unique(connect(np.array([0.0, 160.0]), y, frame, 150.0, 0,
+                                 precision=loose, k=2.5))) == 2
+    # a radius, not the box: the corner of the fixed box is out of reach
+    assert len(np.unique(connect(np.array([0.0, 120.0]), np.array([0.0, 120.0]),
+                                 frame, 150.0, 0, precision=loose, k=2.5))) == 2
+
+
+def test_a_localization_without_a_precision_links_to_the_upper_bound():
+    frame = np.array([0, 1])
+    s = np.array([5.0, np.nan])
+    assert len(np.unique(connect(np.array([0.0, 140.0]), np.zeros(2), frame, 150.0,
+                                 0, precision=s, k=2.5))) == 1
+
+
+def _neighbours_and_dim_blinks(seed=0):
+    """Bright emitters 30 nm from a neighbour that blinks just after them, and
+    dim ones whose localizations scatter by 35 nm: what a fixed box gets wrong
+    both ways."""
+    rng = np.random.default_rng(seed)
+    x, y, frame, s, truth = [], [], [], [], []
+    for e in range(300):
+        cx, f0 = e * 5000.0, 0
+        if e % 2:                             # a bright pair, one after the other
+            for i, (dx_, n) in enumerate(((0.0, 4), (30.0, 4))):
+                x += list(cx + dx_ + rng.normal(0, 3, n)); y += list(rng.normal(0, 3, n))
+                frame += list(range(f0 + 4 * i, f0 + 4 * i + n)); s += [3.0] * n
+                truth += [2 * e + i] * n
+        else:                                 # one dim blink, 8 frames long
+            x += list(cx + rng.normal(0, 35, 8)); y += list(rng.normal(0, 35, 8))
+            frame += list(range(8)); s += [35.0] * 8; truth += [2 * e] * 8
+    return Localizations({"x_nm": np.array(x, np.float32), "y_nm": np.array(y, np.float32),
+                          "frame": np.array(frame, np.int64),
+                          "xy_err_nm": np.array(s, np.float32),
+                          "photons": np.ones(len(x), np.float32)},
+                         {"units": "nm"}), np.array(truth)
+
+
+def test_linking_by_precision_separates_bright_neighbours_and_keeps_dim_blinks():
+    locs, truth = _neighbours_and_dim_blinks()
+    # one chunk: the table is 8 frames long, and eight chunks would be all seam
+    _, fixed = group(locs, GroupSettings(dx=50.0, dt=1, link_chunks=1),
+                     attach_columns=False)
+    _, prec = group(locs, GroupSettings(link="precision", dt=1, link_chunks=1),
+                    attach_columns=False)
+    bright = np.isin(truth, truth[locs["xy_err_nm"] == 3.0])
+    dim = ~bright
+
+    def split(ids, mask):                     # emitters whose blink was cut
+        return sum(len(np.unique(ids[mask & (truth == t)])) > 1
+                   for t in np.unique(truth[mask]))
+
+    def merged(ids, mask):                    # groups holding two emitters
+        return sum(len(np.unique(truth[mask & (ids == g)])) > 1
+                   for g in np.unique(ids[mask]))
+
+    assert merged(fixed, bright) == 150       # a 50 nm box joins every pair
+    assert merged(prec, bright) == 0
+    # and cuts dim blinks; k = 2.5 still drops 4.4% of links by design, so
+    # about a quarter of 8-frame blinks lose one -- against all of them
+    assert split(fixed, dim) > 140
+    assert split(prec, dim) < 60
+
+
+def test_chunked_linking_by_precision_stays_within_a_hair_of_the_control():
+    from smappy._group_chunked import connect_chunked
+    x, y, f = _blinking()
+    s = np.random.default_rng(1).uniform(4, 30, len(x))
+    args = dict(precision=s, k=2.5, dx_min=10.0)
+    control = connect(x, y, f, 150.0, 1, **args)
+    assert np.array_equal(connect_chunked(x, y, f, 150.0, 1, n_chunks=1, **args),
+                          control)
+    for n_chunks in (2, 8):
+        stats = {}
+        ids = connect_chunked(x, y, f, 150.0, 1, n_chunks=n_chunks, stats=stats, **args)
+        assert len(np.unique(ids)) == ids.max()
+        # looser than the box's 0.999: the running precision is state a head
+        # re-seeded past the seam does not have, so its next links can differ.
+        # This table is all seams -- 300 of 3300 traces cross one at 8 chunks
+        assert _same_partition(control, ids) > 0.995
+        assert stats["rejoined"] > 0
+
+
+def test_linking_by_precision_reads_the_precision_in_the_unit_of_the_positions():
+    locs, _ = _neighbours_and_dim_blinks()
+    pix = Localizations({"x_pix": locs["x_nm"] / 100, "y_pix": locs["y_nm"] / 100,
+                         "frame": locs["frame"], "xy_err_pix": locs["xy_err_nm"] / 100,
+                         "xy_err_nm": np.full(len(locs), 1e6, np.float32)}, {})
+    settings = GroupSettings(link="precision", dx_min=0.1, dx_max=1.5, link_chunks=1)
+    _, a = group(locs, GroupSettings(link="precision", link_chunks=1),
+                 attach_columns=False)
+    _, b = group(pix, settings, attach_columns=False)
+    assert np.array_equal(a, b)
+
+
+def test_linking_by_precision_without_a_precision_falls_back_to_the_box():
+    x, y, f = _blinking(n_emitters=300, frames=100)
+    locs = Localizations({"x_nm": x, "y_nm": y, "frame": f}, {"units": "nm"})
+    with pytest.warns(UserWarning, match="xy_err_nm"):
+        _, ids = group(locs, GroupSettings(link="precision"), attach_columns=False)
+    _, box = group(locs, GroupSettings(), attach_columns=False)
+    assert np.array_equal(ids, box)
