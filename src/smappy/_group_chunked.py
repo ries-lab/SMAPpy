@@ -61,9 +61,13 @@ then re-linked from the seam forward until the assignment stops changing, which
 is exact if the re-link is carried far enough to converge and is a change to the
 C++ walk, not to this file.
 
-Which is why this is not wired into `group()`.  The walk is 5.5 s of a 66 s
-open; `combine` is 17 s, exact, and parallel as it stands.  There are exact
-seconds on the table and these are approximate ones.
+`group()` uses it nonetheless, through `GroupSettings.link_chunks` (8 by
+default; 1 is the sequential walk).  The residual is confined to the seams, a
+handful of traces in a file of millions, and the linking was one of the
+things that took a 57 M localization open from 134 s to 56 s (see the
+`smappy.group` docstring).  The chunk count is a setting rather than a thread
+count because the cut changes the answer: the cut points come from the data,
+so the same file groups the same way on any machine.
 ``scripts/check_chunked_grouping.py`` measures both against the sequential walk.
 
 Linking by precision (``precision=``, see `smappy.group.connect`) adds one

@@ -268,9 +268,10 @@ def test_sorted_order_handles_negative_and_far_apart_frames():
 
 # ----------------------------------------------------- chunked linking ------
 # `smappy._group_chunked` links slices of the frame axis in parallel and repairs
-# the seams.  It is an approximation and is not wired into `group()`; these pin
-# the two things that make it usable at all -- that one chunk is the sequential
-# walk exactly, and that more chunks stay within a hair of it.
+# the seams.  It is an approximation, and `group()` uses it by default
+# (`GroupSettings.link_chunks`); these pin the two things that make it usable
+# at all -- that one chunk is the sequential walk exactly, and that more chunks
+# stay within a hair of it.
 
 def _blinking(n_emitters=3000, frames=400, mean_on=3.0, seed=0):
     rng = np.random.default_rng(seed)
