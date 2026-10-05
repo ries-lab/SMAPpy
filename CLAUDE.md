@@ -29,7 +29,7 @@ moved.
 A fresh container has **no numpy**.  Before anything else:
 
     pip install -e .                    # builds the C++ extensions too
-    pip install pytest                  # not a dependency, and not in the container
+    pip install -e .[test]              # pytest and pytest-timeout: every test has a 300 s limit
 
 Running the tests:
 
