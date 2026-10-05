@@ -60,6 +60,43 @@ def pytest_collection_modifyitems(config, items):
 
 
 @pytest.fixture(autouse=True, scope="session")
+def collect_on_the_main_thread():
+    """Garbage is collected here, after each test, and never by chance.
+
+    A GUI test that drops a widget in a reference cycle leaves it for the
+    cyclic collector, which runs in whichever thread happens to allocate next
+    -- often a fit's reader thread in a later test.  A QWidget destroyed there
+    closes its window, and `QWindow::close` waits for the GUI thread to flush
+    window-system events: the GUI thread is the test, blocked waiting for the
+    fit, and the worker hangs.  That was `test_live` failing in about half of
+    the parallel `--slow` runs, and the 300 s timeouts in the 3D view and
+    render-axes tests.  Collecting only on the main thread is pyqtgraph's
+    `GarbageCollector` remedy for the same thing.
+    """
+    import gc
+    gc.disable()
+    yield
+    gc.enable()
+
+
+_tests_since_collect = 0
+
+
+@pytest.fixture(autouse=True)
+def _collect_after_each_test(collect_on_the_main_thread):
+    """It is `gc.disable` that keeps collection off the other threads; how
+    often this runs is only memory.  After every test it doubled the suite's
+    time, so every 100th."""
+    global _tests_since_collect
+    yield
+    _tests_since_collect += 1
+    if _tests_since_collect >= 100:
+        import gc
+        gc.collect()
+        _tests_since_collect = 0
+
+
+@pytest.fixture(autouse=True, scope="session")
 def isolated_config(tmp_path_factory):
     import os
     directory = tmp_path_factory.mktemp("config")
