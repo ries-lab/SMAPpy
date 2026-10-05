@@ -1,5 +1,7 @@
 """A chain of plugins runs as one plugin: its file, its settings, its run,
 its record, and the rules that decide which table each step reads."""
+from dataclasses import dataclass
+
 import numpy as np
 import pytest
 
@@ -349,3 +351,56 @@ def test_a_chains_evaluation_and_the_windows_stand_side_by_side():
     assert set(project.labels()) == {"chain stats", "Statistics"}
     row = project.results()[0]
     assert row["chain stats.n_localizations"] == row["Statistics.n_localizations"] == 100
+
+
+def test_histograms_of_every_evaluation_need_no_choice():
+    """Two evaluations on the ROIs: Histograms draws both unless one is named."""
+    from smappy.workspace import Instance
+    session = four_sites()
+    cls = chain_class(spec(SEGMENT))
+    session.run(cls(), cls.Settings())
+    project = session.rois
+    project.evaluate([Instance(plugin="ROIManager/Evaluate/Statistics", label="a")])
+    project.evaluate([Instance(plugin="ROIManager/Evaluate/Statistics", label="b",
+                               values={"precision_column": "photons"})])
+    cls = chain_class(spec({"plugin": "ROIManager/Analyze/Histograms", "label": "h",
+                            "values": {"evaluation": ""}}))
+    # Histograms draws every evaluation unless one is named: nothing to ask
+    assert cls().preflight(session.context(), cls.Settings()) is None
+    result = session.run(cls(), cls.Settings())
+    assert {"a.n_localizations", "b.n_localizations"} <= set(
+        result.data["results"]["h"].data["histograms"])
+
+
+@dataclass
+class WhichSettings:
+    pick: str = ""
+
+
+@register("Test/Chain/Which")
+class Which(Plugin):
+    """Asks which, until told."""
+    Settings = WhichSettings
+
+    def preflight(self, ctx, settings):
+        from dataclasses import replace
+        from smappy.plugins import PreflightChoice, PreflightQuestion
+        if settings.pick:
+            return None
+        return PreflightQuestion("which?", run_label="", choices=[
+            PreflightChoice(label=x, settings=replace(settings, pick=x))
+            for x in ("left", "right")])
+
+    def run(self, ctx, settings):
+        return Result(text=settings.pick)
+
+
+def test_a_chain_puts_a_steps_choice_as_its_own_before_running():
+    cls = chain_class(spec({"plugin": "Test/Chain/Count"},
+                           {"plugin": "Test/Chain/Which", "label": "w"}))
+    session = Session(with_sigma(blinks()))
+    asked = cls().preflight(session.context(), cls.Settings())
+    assert asked.run_label == "" and asked.text == "w: which?"
+    right = next(c for c in asked.choices if c.label == "right").settings
+    assert right.w.pick == "right" and cls().preflight(session.context(), right) is None
+    assert session.run(cls(), right).data["results"]["w"].text == "right"

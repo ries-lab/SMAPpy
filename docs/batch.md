@@ -151,8 +151,18 @@ succeeded.  Undo does not take the ROIs back: the ROI manager has no undo.
 The shipped `ROIManager/Workflow/NPC Analysis` is such a chain
 (`src/smappy/plugins/npc_analysis.chain.yaml`): group, NPC segmenter, NPC
 Corners, NPC Labeling Efficiency, which takes the counts by the plugin that
-made them and its cutoffs from their settings (*counts from* when there are
-several).
+made them and its cutoffs from their settings.
+
+An ROI analysis (`plugins.roi.SiteAnalysisPlugin`: `evaluator`, the path of
+what it reads, and a *results from* field) reads the evaluation the chain
+made, told by `Context.evaluations` -- the chain's evaluations so far,
+planned ones included when the chain asks its questions up front.  Without
+one, the only evaluation on the ROIs; with several and none named, its
+`preflight` asks *which* -- a `PreflightQuestion` with no plain run -- and
+the chain puts that question as its own before running, the choice setting
+the step's field (the GUI asks again until nothing is left to choose).  In
+a batch nobody is there to answer, so such a file is skipped, saying why:
+name the evaluation in the chain.
 
 ### Building a chain in the GUI
 

@@ -49,8 +49,8 @@ from dataclasses import dataclass, field, fields, make_dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from .plugins import (Context, ParamInfo, Plugin, PreflightQuestion, Result,
-                      _hint_from_text, param, settings_from, settings_values)
+from .plugins import (Context, ParamInfo, Plugin, PreflightChoice, PreflightQuestion,
+                      Result, _hint_from_text, param, settings_from, settings_values)
 
 SCHEMA = "smappy-chain-v1"
 SUFFIX = ".chain.yaml"
@@ -380,6 +380,15 @@ def evaluate_sites(project, plugin_cls, label: str, settings, chain: str = "",
                         "run": run["id"], "label": steps[0].label})
 
 
+def _with_step(settings, key: str, plugin_cls, own):
+    """The chain's settings with one step's replaced by ``own``, the plugin's
+    own settings: what a step's preflight choice runs the chain with."""
+    sub = getattr(settings, key)
+    sub = dataclasses.replace(sub, **{f.name: copy.deepcopy(getattr(own, f.name))
+                                      for f in fields(plugin_cls.Settings) if f.init})
+    return dataclasses.replace(settings, **{key: sub})
+
+
 def _roi_signature(session) -> Optional[str]:
     """The ROI project as text, to tell whether a chain changed it."""
     from .roi_manager.core import json_text
@@ -413,18 +422,41 @@ class ChainPlugin(Plugin):
 
         Asked of the table as it is now, so a step late in the chain is asked
         about a table its predecessors have not changed yet -- the cost of
-        asking once instead of stopping in the middle for an answer.
+        asking once instead of stopping in the middle for an answer.  A step
+        is told which evaluations the steps before it will have made, so an
+        ROI analysis after the chain's own evaluator does not ask which.
+
+        A step that asks to *choose* (a `PreflightQuestion` without a plain
+        run, such as which of several evaluations to analyse) is put first,
+        with its choices as the chain's: taking one sets that step's field,
+        and the GUI asks again until nothing is left to choose.
         """
         questions = []
+        made: List[Tuple[str, str]] = []
         for key, step, cls in self.steps:
             sub = getattr(settings, key)
+            own = plugin_settings(cls, sub)
+            sctx = copy.copy(ctx)
+            sctx.evaluations = list(made)
+            if is_evaluator(cls):
+                made.append((step.label or cls.name, cls.path))
             try:
-                asked = cls().preflight(ctx, plugin_settings(cls, sub))
+                asked = cls().preflight(sctx, own)
             except Exception:
                 asked = None           # an estimate is a courtesy (see PluginPanel)
-            if asked:
-                text = asked.text if isinstance(asked, PreflightQuestion) else str(asked)
-                questions.append(f"{step.title()}: {text}")
+            if not asked:
+                continue
+            if isinstance(asked, PreflightQuestion) and asked.choices \
+                    and not asked.run_label:
+                choices = [PreflightChoice(
+                    label=c.label, help=c.help,
+                    settings=None if c.settings is None
+                    else _with_step(settings, key, cls, c.settings))
+                    for c in asked.choices]
+                return PreflightQuestion(text=f"{step.title()}: {asked.text}",
+                                         choices=choices, run_label="")
+            text = asked.text if isinstance(asked, PreflightQuestion) else str(asked)
+            questions.append(f"{step.title()}: {text}")
         return "\n\n".join(questions) or None
 
     def run(self, ctx: Context, settings) -> Result:
@@ -440,6 +472,7 @@ class ChainPlugin(Plugin):
         path = None
         images = None
         rois_before = _roi_signature(session)
+        made: List[Tuple[str, str]] = []  # (name, evaluator) of the chain's evaluations
         for key, step, cls in self.steps:
             label = step.title()
             sub = getattr(settings, key)
@@ -449,7 +482,7 @@ class ChainPlugin(Plugin):
                 cls.grouping, getattr(sub, GROUPING_FIELD), settings.grouping)
             sctx = session.context(min(ctx.layer, len(session.layers) - 1),
                                    progress=lambda text, l=label: ctx.report(f"{l}: {text}"),
-                                   grouping=grouping)
+                                   grouping=grouping, evaluations=list(made))
             if self.preflight_policy != "proceed":
                 asked = plugin.preflight(sctx, own)
                 if asked:
@@ -474,6 +507,8 @@ class ChainPlugin(Plugin):
                     "new table: there is no way from one row per blink back to "
                     "the localizations, so run it ungrouped")
             session.apply(plugin, result)
+            if is_evaluator(cls):
+                made.append((result.data["label"], cls.path))
             seconds = time.perf_counter() - started
             changed = result.locs is not None or bool(result.files)
             records.append({"key": key, "label": label, "plugin": cls.path,

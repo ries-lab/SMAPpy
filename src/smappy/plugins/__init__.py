@@ -258,7 +258,8 @@ class Context:
                  progress: Optional[Callable[[str], None]] = None,
                  stream: Optional[Callable[[str, Any], None]] = None,
                  site=None, site_table: Optional[Sequence[Dict[str, Any]]] = None,
-                 rois=None, grouping: Optional[str] = None):
+                 rois=None, grouping: Optional[str] = None,
+                 evaluations: Sequence[Tuple[str, str]] = ()):
         self.session = session
         self.layer = layer
         # "grouped", "ungrouped", or None for each layer's own: what a chain
@@ -270,6 +271,10 @@ class Context:
         self.served_grouped = False
         self.site = site                    # the ROI, for a scope="site" plugin
         self.site_table = site_table        # the rows evaluation produced
+        # (name, evaluator path) of the evaluations a chain has made before
+        # this step, oldest first: an ROI analysis in a chain reads its own
+        # chain's results unless told otherwise (`roi.choose_evaluation`)
+        self.evaluations = list(evaluations)
         self._rois = rois                   # a project without a session
         self._progress = progress
         self._stream = stream
@@ -407,6 +412,8 @@ class PreflightQuestion:
     """
     text: str
     choices: Sequence[PreflightChoice] = ()
+    # empty: no plain run is offered -- the question is which, not whether,
+    # and the GUI asks again once one is chosen, for the next such question
     run_label: str = "Run anyway"
 
 

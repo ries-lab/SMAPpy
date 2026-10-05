@@ -20,6 +20,11 @@ from ..session import Session
 from .params import SettingsForm
 from .widgets import ColumnScroll
 
+# questions of *which* asked in a row before a run: one per step of a chain
+# that has to choose, and a bound so a preflight that never settles cannot
+# keep the dialog coming back
+MAX_CHOICES = 8
+
 
 
 class _Worker(QObject):
@@ -329,6 +334,23 @@ class PluginPanel(QWidget):
         """
         from ..plugins import PreflightQuestion
 
+        # a question that asks *which* (no plain run) is answered by a choice,
+        # and the settings it carries may raise the next one -- a chain with
+        # two such steps -- so those are asked until none is left
+        for _ in range(MAX_CHOICES):
+            go, chosen, question = self._ask(settings)
+            if not go:
+                return go, chosen
+            if chosen is settings or not (isinstance(question, PreflightQuestion)
+                                          and not question.run_label):
+                return go, chosen
+            settings = chosen
+        return True, settings
+
+    def _ask(self, settings):
+        """One preflight question: ``(go, settings, question)``."""
+        from ..plugins import PreflightQuestion
+
         try:
             context = self.session.context(progress=self.output.appendPlainText,
                                            grouping=self.plugin.grouping)
@@ -340,9 +362,9 @@ class PluginPanel(QWidget):
             # says so rather than vanishing, so that a broken preflight is
             # visible as one.
             self.output.appendPlainText(f"(no estimate: {type(e).__name__}: {e})")
-            return True, settings
+            return True, settings, None
         if not question:
-            return True, settings
+            return True, settings, None
         title = f"{self.plugin.name}: before running"
         if not isinstance(question, PreflightQuestion):
             answer = QMessageBox.question(
@@ -350,15 +372,15 @@ class PluginPanel(QWidget):
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No)
             if answer == QMessageBox.StandardButton.Yes:
-                return True, settings
-            return self._not_run()
+                return True, settings, question
+            return (*self._not_run(), question)
         chosen = self.ask_choice(title, question)
         if chosen is None:
-            return self._not_run()
+            return (*self._not_run(), question)
         if chosen.settings is not None:
             self.output.appendPlainText(f"chose: {chosen.label}")
-            return True, chosen.settings
-        return True, settings
+            return True, chosen.settings, question
+        return True, settings, question
 
     def _not_run(self):
         self.output.appendPlainText("not run")
@@ -387,7 +409,8 @@ class PluginPanel(QWidget):
                 button.setToolTip(choice.help)
             buttons.append((button, choice))
         plain = PreflightChoice(label=question.run_label)
-        run = box.addButton(question.run_label, QMessageBox.ButtonRole.AcceptRole)
+        run = (box.addButton(question.run_label, QMessageBox.ButtonRole.AcceptRole)
+               if question.run_label else None)
         cancel = box.addButton(QMessageBox.StandardButton.Cancel)
         box.setDefaultButton(buttons[0][0] if buttons else cancel)
         detail = "\n\n".join(f"{c.label}\n{c.help}" for c in question.choices if c.help)

@@ -16,11 +16,12 @@ plugin, a session or a project.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
-from . import Context, Plot, Plugin, Result, param, register
+from . import (Context, Plot, Plugin, PreflightChoice, PreflightQuestion, Result,
+               param, register)
 
 MAX_FINDER_PIXELS = 16_000_000
 
@@ -205,6 +206,9 @@ class HistogramSettings:
     fields: str = param("", label="columns",
                         help="comma separated; empty means every numeric "
                              "column but the counts behind the means")
+    evaluation: str = param("", label="results from",
+                            help="the evaluation whose columns are drawn, by its "
+                                 "name; empty: every evaluation on the ROIs")
 
 
 def histograms(rows: Sequence[Dict[str, Any]], settings: HistogramSettings
@@ -232,17 +236,119 @@ def histograms(rows: Sequence[Dict[str, Any]], settings: HistogramSettings
     return out
 
 
+# ---------------------------------------------------------------- analysis
+
+EVALUATION_HELP = ("the evaluation whose results are analysed, by its name; "
+                   "empty: the only one there is, or the chain's own -- asked "
+                   "when there are several")
+
+
+class AmbiguousEvaluation(ValueError):
+    """More than one evaluation could be meant, and nothing says which."""
+
+    def __init__(self, evaluator: str, labels: Sequence[str]):
+        self.labels = list(labels)
+        name = evaluator.rsplit("/", 1)[-1] if evaluator else "evaluator"
+        super().__init__(f"the ROIs have {len(labels)} {name} evaluations "
+                         f"({', '.join(labels)}): name one in *results from*")
+
+
+def choose_evaluation(project, evaluator: str = "", chosen: str = "",
+                      made: Sequence = (), roi_ids=None) -> Optional[str]:
+    """The name of the evaluation an ROI analysis reads.
+
+    ``chosen`` when the user named one; else, in a chain that has made an
+    evaluation by ``evaluator`` (``made``: its ``(name, path)`` so far), the
+    chain's own, newest; else the only one on the ROIs.  None when there is
+    none -- the analysis says what is missing.  Several, and nothing saying
+    which, is `AmbiguousEvaluation`: a guess between two settings of the same
+    evaluator would be a result nobody chose.  ``evaluator`` empty means any.
+    """
+    found = project.labels(evaluator or None, roi_ids) if project is not None else []
+    own = [name for name, path in made if not evaluator or path == evaluator]
+    if chosen:
+        if chosen not in found and chosen not in own:
+            raise ValueError(f"no evaluation on the ROIs is called {chosen!r}"
+                             + (f"; there is {', '.join(found)}" if found else ""))
+        return chosen
+    if own:
+        return own[-1]
+    if len(found) == 1:
+        return found[0]
+    if not found:
+        return None
+    raise AmbiguousEvaluation(evaluator, found)
+
+
+class SiteAnalysisPlugin(Plugin):
+    """An ROI manager analysis: it summarises what evaluators measured.
+
+    ``evaluator`` is the path of the evaluator whose results it reads (empty:
+    any).  Its settings have a field ``evaluation`` (*results from*) naming
+    which evaluation, by its name: the same evaluator renamed and run with
+    other settings is a second evaluation, to compare, and the analysis must
+    know which one it is about.  Empty takes the only one, or the chain's
+    own; when that leaves several, `preflight` asks, once, with a button per
+    evaluation, and the answer is written into the field.
+    """
+    evaluator: str = ""
+
+    def evaluation(self, ctx: Context, settings) -> Optional[str]:
+        """The evaluation this run reads, by name (`choose_evaluation`)."""
+        return choose_evaluation(ctx.rois, self.evaluator,
+                                 getattr(settings, "evaluation", ""),
+                                 ctx.evaluations)
+
+    def rows(self, ctx: Context, settings) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+        """The site table of that evaluation, and its name.  A context that
+        brings its own table (`site_table`) is taken as it is."""
+        if ctx.site_table is not None:
+            return list(ctx.site_table), getattr(settings, "evaluation", "") or None
+        if ctx.rois is None:
+            raise ValueError("evaluate some ROIs first: there is no site table")
+        label = self.evaluation(ctx, settings)
+        if label is None and self.evaluator:
+            return [], None
+        return ctx.rois.results(labels=None if label is None else [label]), label
+
+    def preflight(self, ctx: Context, settings):
+        """Which evaluation, when that is not clear: a choice, not a yes."""
+        try:
+            self.evaluation(ctx, settings)
+        except AmbiguousEvaluation as unclear:
+            from dataclasses import replace
+            project = ctx.rois
+            choices = []
+            for label in unclear.labels:
+                made = project.evaluation_steps(label) if project is not None else []
+                values = (made[0].get("parameters") if made else None) or {}
+                choices.append(PreflightChoice(
+                    label=label, settings=replace(settings, evaluation=label),
+                    help=", ".join(f"{k} {v}" for k, v in values.items())))
+            name = self.evaluator.rsplit("/", 1)[-1] or "evaluator"
+            return PreflightQuestion(
+                text=f"The ROIs have {len(unclear.labels)} {name} evaluations. "
+                     f"Which should {self.name or 'the analysis'} read?",
+                choices=choices, run_label="")
+        return None
+
+
 @register("ROIManager/Analyze/Histograms")
-class Histograms(Plugin):
+class Histograms(SiteAnalysisPlugin):
     """Distributions of the evaluation results, one histogram per column."""
 
     Settings = HistogramSettings
     version = "1"
 
+    def evaluation(self, ctx: Context, settings) -> Optional[str]:
+        # every column of every evaluation unless one is named: a histogram
+        # of each is the overview, and nothing here can be ambiguous
+        if settings.evaluation:
+            return choose_evaluation(ctx.rois, "", settings.evaluation)
+        return None
+
     def run(self, ctx: Context, settings: HistogramSettings) -> Result:
-        rows = ctx.site_table
-        if rows is None and ctx.rois is not None:
-            rows = ctx.rois.results()
+        rows, _ = self.rows(ctx, settings)
         if not rows:
             raise ValueError("evaluate some ROIs first: there is no site table")
         data = histograms(rows, settings)

@@ -176,12 +176,14 @@ still runs, and its text says so.
 
 **Which counts.**  The counts are those of an NPC Corners evaluation, made by
 the evaluation window or a chain.  With one, it is used whatever it is
-called; with several -- NPC Corners renamed and run with other settings, to
-compare -- the one not renamed is used, or the one named in *counts from*.
-The cutoffs of the model are those that evaluation counted with, as stored
-with its results, not what the evaluation window holds now.  If some sites
-were counted with other settings than the rest under the same name, the
-plugin refuses and asks for them to be evaluated again.
+called; in a chain, the one the chain itself made.  With several -- NPC
+Corners renamed and run with other settings, to compare -- and nothing
+naming one, the plugin asks before it runs, with a button per evaluation
+and its settings beside it, and the answer goes into *results from*, so it
+is asked once.  The cutoffs of the model are those that evaluation counted
+with, as stored with its results, not what the evaluation window holds now.
+If some sites were counted with other settings than the rest under the same
+name, the plugin refuses and asks for them to be evaluated again.
 
 **Simulated data.**  When the sites come from a simulated table, the plugin
 also reports the efficiency it was simulated with, and fits the labelled

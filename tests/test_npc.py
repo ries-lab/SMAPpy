@@ -349,9 +349,8 @@ def test_the_npc_chain_gives_what_the_three_steps_give_and_leaves_the_pipeline_a
                - fitted["efficiency"]) < 1e-6
 
 
-def test_a_renamed_corner_count_stands_beside_the_first_and_is_chosen_by_name():
-    """Two settings of NPC Corners, under two names, to compare: the analysis
-    takes the one not renamed, or the one named, with that one's cutoffs."""
+def two_corner_counts():
+    """Pores counted twice: as NPC Corners, and renamed with a stricter cutoff."""
     from smappy.session import Session
     from smappy.workspace import Instance
     session = Session(pores(0.5, seed=2))
@@ -361,28 +360,69 @@ def test_a_renamed_corner_count_stands_beside_the_first_and_is_chosen_by_name():
     project.evaluate([Instance(plugin="ROIManager/Evaluate/NPC Corners")])
     project.evaluate([Instance(plugin="ROIManager/Evaluate/NPC Corners", label="strict",
                                values={"precision_nm": 12.0})])
+    return session
+
+
+def test_a_renamed_corner_count_stands_beside_the_first_and_is_chosen_by_name():
+    """Two settings of NPC Corners, under two names, to compare: the analysis
+    asks which, and reads the one named with that one's cutoffs."""
+    session = two_corner_counts()
+    project = session.rois
     rows = project.results()
     assert "NPC Corners.n_corners" in rows[0] and "strict.n_corners" in rows[0]
     assert all(r["strict.n_corners"] <= r["NPC Corners.n_corners"] for r in rows)
     analysis = plugins.get("ROIManager/Analyze/NPC Labeling Efficiency")
-    plain = analysis()(ctx=session.context())
-    strict = analysis()(ctx=session.context(),
-                        settings=LabelingEfficiencySettings(evaluation="strict"))
+    # nothing says which: a script is told, the GUI is asked (a choice, no
+    # plain run), and each choice carries the settings it would run with
+    with pytest.raises(ValueError, match="2 NPC Corners evaluations"):
+        analysis()(ctx=session.context())
+    asked = analysis().preflight(session.context(), LabelingEfficiencySettings())
+    assert asked.run_label == "" and {c.label for c in asked.choices} == {
+        "NPC Corners", "strict"}
+    by_name = {c.label: c for c in asked.choices}
+    assert by_name["strict"].settings.evaluation == "strict"
+    assert "precision_nm 12.0" in by_name["strict"].help
+    plain = analysis()(ctx=session.context(), settings=by_name["NPC Corners"].settings)
+    strict = analysis()(ctx=session.context(), settings=by_name["strict"].settings)
     assert "counted by 'strict'" in strict.text and "counted by" not in plain.text
     # both answer the same question, each with its own cutoffs
     assert abs(plain.data["efficiency"] - 0.5) < 0.05
     assert abs(strict.data["efficiency"] - 0.5) < 0.05
     assert plain.data["counts"] != strict.data["counts"]
-    with pytest.raises(ValueError, match="no NPC Corners evaluation is called 'loose'"):
+    with pytest.raises(ValueError, match="no evaluation on the ROIs is called 'loose'"):
         analysis()(ctx=session.context(),
                    settings=LabelingEfficiencySettings(evaluation="loose"))
-    # running the first again under its own name replaces it, not adds a third
+    # once named, nothing is asked
+    assert analysis().preflight(session.context(), by_name["strict"].settings) is None
+
+
+def test_running_an_evaluation_again_under_its_name_replaces_it():
+    from smappy.plugins.npc import corner_settings
+    from smappy.workspace import Instance
+    session = two_corner_counts()
+    project = session.rois
     project.evaluate([Instance(plugin="ROIManager/Evaluate/NPC Corners",
                                values={"precision_nm": 25.0})])
-    assert project.labels("ROIManager/Evaluate/NPC Corners") == ["NPC Corners", "strict"]
-    _, count = __import__("smappy.plugins.npc", fromlist=["x"]).corner_evaluation(
-        project, project.results())
-    assert count.precision_nm == 25.0
+    assert sorted(project.labels("ROIManager/Evaluate/NPC Corners")) == [
+        "NPC Corners", "strict"]
+    rows = project.results(labels=["NPC Corners"])
+    assert "n_corners" in rows[0] and "strict.n_corners" not in rows[0]
+    assert corner_settings(project, "NPC Corners", rows).precision_nm == 25.0
+
+
+def test_the_npc_chain_reads_its_own_counts_without_asking():
+    """With two corner counts already on the ROIs, the chain's analysis takes
+    the one the chain itself makes."""
+    session = two_corner_counts()
+    chain = plugins.get("ROIManager/Workflow/NPC Analysis")
+    settings = chain.Settings()
+    settings.npc_corners.precision_nm = 15.0
+    assert chain().preflight(session.context(), settings) is None
+    result = session.run(chain(), settings)
+    efficiency = result.data["results"]["labelling_efficiency"]
+    assert abs(efficiency.data["efficiency"] - 0.5) < 0.05
+    from smappy.plugins.npc import corner_settings
+    assert corner_settings(session.rois, "NPC Corners").precision_nm == 15.0
 
 
 def test_the_segmenter_replaces_only_its_own_pores_when_asked():

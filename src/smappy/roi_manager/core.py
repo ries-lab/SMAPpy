@@ -596,7 +596,7 @@ class ROIProject:
                             if entry is not None}}
         return record, {label: state for label, (_, state) in found.items()}
 
-    def results(self, steps=None):
+    def results(self, steps=None, labels=None):
         """The site table: a row per reviewed, included ROI that has results.
 
         A row holds every evaluation the ROI has that still describes it
@@ -606,6 +606,10 @@ class ROIProject:
         qualified with the evaluation's name when two do
         (`pipeline.merged_values`), so two settings of one evaluator run
         under two names read side by side.
+
+        With ``labels`` only those evaluations are in it, so a column is
+        called as its evaluator calls it: what an analysis of one evaluation
+        reads (`plugins.roi.SiteAnalysisPlugin`).
 
         With ``steps`` the row is instead those steps only, and is left out
         while any of them is out of date or missing: what a pipeline would
@@ -622,9 +626,10 @@ class ROIProject:
         rows = []
         for roi_id in self._included():
             found = self.evaluations(roi_id)
-            labels = sorted(found, key=lambda l: (order.get(l, len(order)), l))
+            names = sorted((l for l in found if labels is None or l in labels),
+                           key=lambda l: (order.get(l, len(order)), l))
             values = pipeline_module.merged_values(
-                {"steps": {label: found[label][0] for label in labels}})
+                {"steps": {label: found[label][0] for label in names}})
             if values:
                 roi = self.rois[roi_id]
                 rows.append({"roi_id": roi.id, "file_id": roi.file_id, **values})

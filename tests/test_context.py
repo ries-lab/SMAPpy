@@ -272,6 +272,52 @@ def test_a_preflight_choice_runs_with_the_settings_it_carries(monkeypatch):
     assert not used and panel.status.text() == "cancelled"
 
 
+def test_choices_of_which_are_asked_until_none_is_left(monkeypatch):
+    """A question with no plain run asks *which*; the choice may raise the
+    next one (two steps of a chain), and each is put once."""
+    pytest.importorskip("PySide6")
+    from dataclasses import dataclass, replace
+    from PySide6.QtWidgets import QApplication
+
+    from smappy.plugins import PreflightChoice, PreflightQuestion
+
+    QApplication.instance() or QApplication([])
+
+    @dataclass
+    class Two:
+        first: str = ""
+        second: str = ""
+
+    class Choosy(Plugin):
+        path = "Test/Which"
+        name = "Which"
+        Settings = Two
+
+        def preflight(self, ctx, settings):
+            for name in ("first", "second"):
+                if not getattr(settings, name):
+                    return PreflightQuestion(f"which {name}?", run_label="", choices=[
+                        PreflightChoice(label=x, settings=replace(settings, **{name: x}))
+                        for x in ("a", "b")])
+            return None
+
+        def run(self, ctx, settings):
+            return Result()
+
+    from smappy.gui.plugin_panel import PluginPanel
+    asked = []
+
+    def choose(self, title, question):
+        asked.append(question.text)
+        return question.choices[-1]
+
+    monkeypatch.setattr(PluginPanel, "ask_choice", choose)
+    panel = PluginPanel(Choosy, Session(table()))
+    go, settings = panel._preflight(Two())
+    assert go and settings == Two(first="b", second="b")
+    assert asked == ["which first?", "which second?"]
+
+
 def test_a_preflight_that_fails_does_not_block_the_run():
     """An estimate is a courtesy; a table it cannot read must not stop work."""
     pytest.importorskip("PySide6")

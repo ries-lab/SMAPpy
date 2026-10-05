@@ -64,7 +64,9 @@ shows the chain's counts beside the pipeline's numbers, and NPC Labeling
 Efficiency run again from the ROI tab finds them, with the cutoffs they were
 counted with.  Running the chain again replaces its counts; to keep a second
 set beside the first -- other cutoffs, to compare -- rename the NPC Corners
-step (*edit steps*), and name it in the analysis's *counts from*.
+step (*edit steps*).  The chain's analysis reads the chain's own counts,
+whatever else is on the ROIs; run from the ROI tab afterwards, it asks which
+evaluation to read when there are several.
 
 **Nothing changes until the end.**  The chain runs on a copy of the session,
 ROI manager included; the ROIs it found, the evaluation run and the pipeline

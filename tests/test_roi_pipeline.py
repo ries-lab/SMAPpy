@@ -252,6 +252,11 @@ def test_find_evaluate_and_analyse_through_the_session(app):
     window = EvaluationWindow(session)
     window.run()
     assert "4 ROIs, 1 step(s)" in window.status.text()
+    # the session's log says what was evaluated, with each evaluator's settings
+    entry = session.history[-1]
+    assert entry["what"] == "ROIManager/Evaluate" and "4 ROIs" in entry["text"]
+    assert entry["steps"][0]["plugin"] == "ROIManager/Evaluate/Statistics"
+    assert "precision_column" in entry["steps"][0]["values"]
     rows = project.results()
     assert len(rows) == 4 and rows[0]["n_localizations"] == 100
 

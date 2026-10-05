@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QFileDialog, QHBoxLayout,
                                QWidget)
 
 from .. import plugins
+from ..plugins import settings_values
 from ..roi_manager import pipeline as pipeline_module
 from ..workspace import Instance
 from . import folders
@@ -248,10 +249,18 @@ class EvaluationWindow(QWidget):
         progress.setValue(len(ids))
         failed = sum(1 for record in run["records"].values()
                      if pipeline_module.errors(record))
-        self.status.setText(
-            f"{len(run['records'])} ROIs, {len(steps)} step(s)"
-            + (f", {waiting} of them out of date" if reuse else "")
-            + (f"; {failed} with a failing step" if failed else ""))
+        text = (f"{len(run['records'])} ROIs, {len(steps)} step(s)"
+                + (f", {waiting} of them out of date" if reuse else "")
+                + (f"; {failed} with a failing step" if failed else ""))
+        self.status.setText(text)
+        # into the session's log, each evaluator with its settings: the
+        # numbers are in the file with the ROIs, and this says when and with
+        # what they were made, beside everything else that was done
+        self.session.log("ROIManager/Evaluate", text, run=run["id"],
+                         steps=[{"label": step.label, "plugin": step.path,
+                                 "version": step.version,
+                                 "values": settings_values(step.settings)}
+                                for step in steps])
         self.refresh_counts()
         self.ran.emit(run)
 

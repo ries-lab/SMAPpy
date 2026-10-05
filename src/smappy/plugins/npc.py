@@ -65,7 +65,8 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 from . import Context, Plot, Plugin, Result, param, register, settings_from
-from .roi import MAX_FINDER_PIXELS, current_file
+from .roi import (EVALUATION_HELP, MAX_FINDER_PIXELS, SiteAnalysisPlugin,
+                  current_file)
 
 # SMAP's NPCLabelingQuantify counts a localization towards a corner only when
 # its precision is below 0.4 of the arc between two corners (15.7 nm at 50 nm)
@@ -668,6 +669,7 @@ class LabelingEfficiencySettings:
                              "SMAP's corner histogram alone")
     fit_min: int = param(5, label="fit from", min=0,
                          help="only pores with at least this many corners")
+    evaluation: str = param("", label="results from", help=EVALUATION_HELP)
     corners: int = param(8, label="corners", min=2, advanced=True,
                          help="corners of a pore")
     per_corner: int = param(4, label="proteins per corner", min=1, advanced=True,
@@ -680,9 +682,6 @@ class LabelingEfficiencySettings:
                      help="how SMAP's method fits its histogram")
     bootstrap: int = param(100, label="bootstrap", min=0, advanced=True,
                            help="resamplings of the sites for SMAP's error; 0: none")
-    evaluation: str = param("", label="counts from", advanced=True,
-                            help="the NPC Corners evaluation to analyse, by its "
-                                 "name; empty: the only one, or the one not renamed")
 
 
 def labeling_efficiency(n_corners, settings: LabelingEfficiencySettings,
@@ -829,41 +828,19 @@ def corner_column(rows) -> Optional[str]:
     return column(rows, "n_corners")
 
 
-def corner_evaluation(project, rows, chosen: str = ""
-                      ) -> Tuple[Optional[str], NPCCornersSettings]:
-    """Which NPC Corners evaluation of these sites to analyse, and the
-    settings it counted with -- the cutoffs the counts mean something with.
-
-    By name: ``chosen``, else the only one there is, else the one not
-    renamed.  The settings are the evaluation's own, as its run recorded
-    them, not whatever the evaluation window holds now, so the model is
-    always fitted with the cutoffs the corners were counted with.
-    """
-    if project is None:
-        return (chosen or None), NPCCornersSettings()
-    ids = [r["roi_id"] for r in rows if r.get("roi_id") in project.rois]
-    labels = project.labels(CORNERS, ids)
-    plain = CORNERS.rsplit("/", 1)[-1]
-    if chosen:
-        if chosen not in labels:
-            raise ValueError(f"no NPC Corners evaluation is called {chosen!r}"
-                             + (f"; there is {', '.join(labels)}" if labels else ""))
-        label = chosen
-    elif len(labels) == 1:
-        label = labels[0]
-    elif plain in labels:
-        label = plain
-    elif not labels:
-        return None, NPCCornersSettings()     # `analyse` says what is missing
-    else:
-        raise ValueError(f"there are several NPC Corners evaluations "
-                         f"({', '.join(labels)}): name one in *counts from*")
-    steps = project.evaluation_steps(label, ids)
-    if len(steps) > 1:
+def corner_settings(project, label: Optional[str], rows=()) -> NPCCornersSettings:
+    """The settings the NPC Corners evaluation called ``label`` counted these
+    sites with -- the cutoffs the counts mean something with -- as its run
+    recorded them, not whatever the evaluation window holds now."""
+    if project is None or not label:
+        return NPCCornersSettings()
+    ids = [r["roi_id"] for r in rows if r.get("roi_id") in project.rois] or None
+    made = project.evaluation_steps(label, ids)
+    if len(made) > 1:
         raise ValueError(f"the sites were counted with different settings under "
                          f"{label!r}: evaluate them all again")
-    values = (steps[0].get("parameters") if steps else None) or {}
-    return label, settings_from(NPCCornersSettings, values)
+    values = (made[0].get("parameters") if made else None) or {}
+    return settings_from(NPCCornersSettings, values)
 
 
 def field_precisions(project, rows) -> np.ndarray:
@@ -945,20 +922,21 @@ def draw_joint(figure, fitted: Dict[str, Any], truth=None) -> None:
 
 
 @register("ROIManager/Analyze/NPC Labeling Efficiency")
-class NPCLabelingEfficiency(Plugin):
+class NPCLabelingEfficiency(SiteAnalysisPlugin):
     """The labelling efficiency of nuclear pores, from the corners each shows
     and the localizations it has (NPC Corners)."""
 
     Settings = LabelingEfficiencySettings
     version = "2"
 
+    evaluator = CORNERS
+
     def run(self, ctx: Context, settings: LabelingEfficiencySettings) -> Result:
-        rows = ctx.site_table
-        if rows is None and ctx.rois is not None:
-            rows = ctx.rois.results()
+        rows, label = self.rows(ctx, settings)
         if not rows:
-            raise ValueError("evaluate some ROIs first: there is no site table")
-        label, count = corner_evaluation(ctx.rois, rows, settings.evaluation)
+            raise ValueError("the ROIs have no corner counts: evaluate them with "
+                             "NPC Corners first")
+        count = corner_settings(ctx.rois, label, rows)
         result = self.analyse(ctx.rois, rows, settings, count, label)
         if label and label != CORNERS.rsplit("/", 1)[-1]:
             result.text += f"; counted by {label!r}"
