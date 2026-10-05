@@ -18,13 +18,21 @@ from typing import Dict, List, Optional
 
 import numpy as np
 
-from ..group import GroupSettings
+from ..group import GROUP_COLUMNS, GroupSettings
 from ..locs import Localizations
 from ..render import RenderAxes
 from ..viewer import ViewState
 from .core import ROI, ROIProject, digest, json_text, point, polygon_vertices
 
 FORMAT_VERSION = 1
+
+# Columns the session writes onto the table itself, rather than the data
+# bringing them: `Session.load` adds `filenumber`, and grouping adds the group
+# columns in place.  Whether they are there yet says nothing about the
+# localizations, so the fingerprint counts them as always present -- present
+# rather than absent so that the fingerprints already saved, which were taken
+# from loaded, usually grouped tables, still match.
+BOOKKEEPING = ("filenumber",) + GROUP_COLUMNS
 
 
 class SessionSource:
@@ -104,17 +112,20 @@ class SessionROIs(ROIProject):
 
         Row count, column names and a sample of the positions -- enough to
         notice a corrected or refitted table, cheap enough to recompute on
-        every staleness check, and unchanged by a rename or a "save as".
+        every staleness check, and unchanged by a rename or a "save as" --
+        or by a save and reopen, which adds `filenumber` to a table that
+        never came from a file (see `BOOKKEEPING`).
         """
         locs = self.session.locs
+        names = sorted(set(locs.columns) | set(BOOKKEEPING))
         if not len(locs):
-            return digest([0, sorted(locs.columns)])
+            return digest([0, names])
         rows = np.arange(len(locs))
         if "filenumber" in locs and len(self.sources) > 1:
             rows = rows[np.asarray(locs["filenumber"]) == source.number]
         sample = rows[:: max(1, len(rows) // 512)][:512]
         values = [np.asarray(locs[c])[sample] for c in ("x_nm", "y_nm") if c in locs]
-        return digest([len(rows), sorted(locs.columns),
+        return digest([len(rows), names,
                        [np.round(v.astype(float), 3).tolist() for v in values]])
 
     def _slice(self, source: SessionSource) -> Localizations:

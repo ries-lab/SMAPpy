@@ -57,6 +57,43 @@ def test_rois_follow_the_layer_and_survive_a_save(tmp_path):
     assert len(restored.extract(next(iter(restored.rois.values())))) > 0
 
 
+def test_results_of_a_table_that_never_came_from_a_file_survive_a_save(tmp_path):
+    # a simulated or freshly fitted table has no `filenumber` until it is
+    # reopened, and grouping writes its columns onto the table in place:
+    # neither is a change to the data, so neither may make a result stale
+    s = Session(_table())
+    s.show_grouped(0, True)
+    project = s.rois
+    file_id = next(iter(project.sources))
+    assert project.find(file_id, parameters={"min_count": 5})
+    project.evaluate()
+    grouped = len(project.results())
+    assert grouped == len(project.rois)
+
+    out = s.save(tmp_path / "grouped.hdf5", gui_state=False)
+    back = Session()
+    back.load(out)
+    assert "filenumber" in back.locs and "filenumber" not in s.locs
+    back.show_grouped(0, True)
+    assert len(back.rois.results()) == grouped
+
+    # evaluated ungrouped, then grouped and ungrouped again before saving
+    s = Session(_table())
+    project = s.rois
+    project.find(next(iter(project.sources)), parameters={"min_count": 5})
+    project.evaluate()
+    ungrouped = len(project.results())
+    assert ungrouped == len(project.rois)
+    s.show_grouped(0, True)
+    s.show_grouped(0, False)
+    assert "group_id" in s.locs
+    assert len(project.results()) == ungrouped
+    out = s.save(tmp_path / "ungrouped.hdf5", gui_state=False)
+    back = Session()
+    back.load(out)
+    assert len(back.rois.results()) == ungrouped
+
+
 def test_geometry_and_review_round_trip(tmp_path):
     path = tmp_path / "locs.hdf5"
     save_localizations(path, _table(1000))
