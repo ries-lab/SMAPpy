@@ -34,7 +34,11 @@ A fresh container has **no numpy**.  Before anything else:
 Running the tests -- two tiers:
 
     python -m pytest tests -q -n auto           # after each change: ~1 min, the slow tier skipped
-    python -m pytest tests -q -n auto --slow    # before a PR or a push of major work: everything, ~6 min
+    python -m pytest tests -q --slow            # before a PR or a push of major work: everything, ~12 min
+
+* **The slow tier runs in one process for now**: with `-n auto` it hangs
+  intermittently -- a worker deadlocks starting a thread (PR #4) -- so a
+  parallel failure there is not evidence against your change.
 
 * **Run the slow tier before you open a PR, and before you call major work
   done** -- a new plugin, a change to the GUI, a tutorial, a page or what an
@@ -44,7 +48,7 @@ Running the tests -- two tiers:
   The summary's "skipped" count includes them, so a run without `--slow` has
   not checked them; say so if you stop short of it.  No CI runs the tests.
 * **A PR description states the `--slow` run's result** on a line of its own
-  -- "`--slow -n auto`: 1321 passed, 4 skipped" -- or says plainly that it was
+  -- "`--slow`: 1321 passed, 4 skipped" -- or says plainly that it was
   not run and why, so a reviewer can see from the PR whether it was done.
 * Mark a new test `slow` when it takes more than about 4 s.
 * `-n auto` needs pytest-xdist (the `test` extra); `conftest.py` gives each
