@@ -87,7 +87,8 @@ gpu = ["wgpu>=0.19"]
 # its own (see smappy.tutorial.voice).
 tutorial = ["playwright>=1.40", "piper-tts>=1.2"]
 # What the test suite needs beyond the package: `pip install -e .[test]`.
-test = ["pytest>=7", "pytest-timeout>=2.1"]
+# pytest-xdist is for the whole suite before a PR: `pytest tests --slow -n auto`.
+test = ["pytest>=7", "pytest-timeout>=2.1", "pytest-xdist>=3"]
 
 [tool.pytest.ini_options]
 # Every test has a limit, so a hung one fails with its name and a traceback

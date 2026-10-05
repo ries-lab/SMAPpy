@@ -303,6 +303,7 @@ def test_the_analysis_asks_for_the_corner_counter_when_it_is_missing():
             LabelingEfficiencySettings())
 
 
+@pytest.mark.slow
 def test_the_npc_chain_gives_what_the_three_steps_give_and_leaves_the_pipeline_alone():
     """The shipped NPC Analysis is a chain: segment, evaluate every pore,
     analyse.  Its ROIs and counts reach the session's project; the evaluation

@@ -209,6 +209,7 @@ def test_the_frames_keep_close_spots_and_the_truth_says_how_close():
             np.testing.assert_allclose(truth["neighbour_nm"][t], d[:, 1], atol=0.01)
 
 
+@pytest.mark.slow
 def test_the_split_camera_frames_give_back_their_transformation_and_their_dyes(tmp_path):
     """`dual_camera_frames` through the two-colour fit, as its tutorial runs it:
     the transformation measured from the movie is the simulated one, and the

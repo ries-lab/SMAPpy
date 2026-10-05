@@ -181,6 +181,7 @@ def test_the_scaled_fit_measures_how_far_the_data_misses_the_bound():
     assert found.scaled.sigma == pytest.approx(9.0, abs=0.6)
 
 
+@pytest.mark.slow
 def test_the_frame_gap_curve_separates_drift_from_precision():
     locs = blinking(sigma=5.0, on_time=6, walk=3.0, seed=5)
     found = measure(locs, max_gap=4)

@@ -80,6 +80,7 @@ def test_every_setting_of_a_documented_plugin_is_explained(path):
 
 
 @pytest.mark.parametrize("path", documented())
+@pytest.mark.slow
 def test_a_written_page_renders_with_its_maths_and_figures(path):
     """Figures and formulas are the page's choice -- a loader has little to
     draw -- but those it has must render."""

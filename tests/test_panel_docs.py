@@ -64,6 +64,7 @@ def test_every_panel_has_a_page():
 
 
 @pytest.mark.parametrize("path", sorted(PANELS))
+@pytest.mark.slow
 def test_a_panel_page_renders_with_its_figures(path):
     panel = docs.panels()[path]
     rendered = docs.render(panel)

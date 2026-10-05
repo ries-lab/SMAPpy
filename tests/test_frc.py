@@ -179,6 +179,7 @@ def volume_picture(sigma=8.0, sigma_z=None, n_emitters=20000, repeats=20,
     return xyz[:, 0], xyz[:, 1], xyz[:, 2], frame
 
 
+@pytest.mark.slow
 def test_the_planes_find_the_same_resolution_along_every_axis_when_it_is_isotropic():
     out = fpc_resolution(*volume_picture(sigma=8.0), repeats=2)
     assert out.ok
@@ -187,6 +188,7 @@ def test_the_planes_find_the_same_resolution_along_every_axis_when_it_is_isotrop
     assert out.anisotropy == pytest.approx(1.0, abs=0.25)
 
 
+@pytest.mark.slow
 def test_the_planes_measure_the_axial_resolution_separately_from_the_lateral():
     # the axial error is three times the lateral, and that is what comes back:
     # a shell would have averaged the two into a number describing neither
@@ -197,6 +199,7 @@ def test_the_planes_measure_the_axial_resolution_separately_from_the_lateral():
     assert out.axes["z"].resolution > 2 * out.axes["x"].resolution
 
 
+@pytest.mark.slow
 def test_the_axial_sampling_follows_the_axial_resolution_and_not_the_lateral():
     # left to 2.5 x the lateral voxel, a sharply resolved z would be measured
     # at its own sampling; the coarse pass is there to stop that

@@ -18,15 +18,45 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("MPLBACKEND", "Agg")
 
+# Under pytest-xdist (`-n auto`) every worker is a process of its own, and
+# OpenBLAS would start a thread per core in each: four workers on four cores
+# took 9:36 for what one does in 11:22, and capped at one thread each 5:57.
+# Set before numpy is imported, and inherited by the tutorials' subprocesses.
+if os.environ.get("PYTEST_XDIST_WORKER"):
+    for _name in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
+        os.environ.setdefault(_name, "1")
+
 
 def pytest_addoption(parser):
     """`timeout` in pyproject.toml belongs to pytest-timeout; without that
     plugin it is declared here, so that it is not an unknown-option warning.
     The faulthandler's dump at `faulthandler_timeout` is what is left then."""
+    parser.addoption("--slow", action="store_true",
+                     help="also run the tests marked slow: the tutorials, the "
+                          "pages' figures and the large numerical checks")
     try:
         import pytest_timeout  # noqa: F401
     except ImportError:
         parser.addini("timeout", "per-test limit in seconds (needs pytest-timeout)")
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", "slow: seconds or more each; skipped unless --slow is given")
+
+
+def pytest_collection_modifyitems(config, items):
+    """Two tiers.  The tests marked slow are about two thirds of the suite's
+    time in a few dozen tests -- the tutorials alone half of it -- and check
+    what a change to the GUI, a page or an algorithm breaks rather than what
+    every edit might.  They are skipped, not deselected, so the summary says
+    how many were left out; `--slow` runs everything, as before a PR."""
+    if config.getoption("--slow"):
+        return
+    skip = pytest.mark.skip(reason="slow: run with --slow")
+    for item in items:
+        if "slow" in item.keywords:
+            item.add_marker(skip)
 
 
 @pytest.fixture(autouse=True, scope="session")
