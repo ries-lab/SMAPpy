@@ -66,7 +66,7 @@ import numpy as np
 
 from . import Context, Plot, Plugin, Result, param, register, settings_from
 from .roi import (EVALUATION_HELP, MAX_FINDER_PIXELS, SiteAnalysisPlugin,
-                  current_file)
+                  auto_only, current_file)
 
 # SMAP's NPCLabelingQuantify counts a localization towards a corner only when
 # its precision is below 0.4 of the arc between two corners (15.7 nm at 50 nm)
@@ -669,7 +669,8 @@ class LabelingEfficiencySettings:
                              "SMAP's corner histogram alone")
     fit_min: int = param(5, label="fit from", min=0,
                          help="only pores with at least this many corners")
-    evaluation: str = param("", label="results from", help=EVALUATION_HELP)
+    evaluation: str = param("", label="results from", choices=auto_only,
+                            help=EVALUATION_HELP)
     corners: int = param(8, label="corners", min=2, advanced=True,
                          help="corners of a pore")
     per_corner: int = param(4, label="proteins per corner", min=1, advanced=True,

@@ -198,6 +198,12 @@ class Statistics(Plugin):
 
 # ----------------------------------------------------------------- analysis
 
+def auto_only():
+    """*results from* without a session: only *auto*.  The plugin's
+    `choices` puts the evaluations on the ROIs beside it."""
+    return [("", "auto")]
+
+
 @dataclass
 class HistogramSettings:
     bins: int = param(20, label="bins", min=1,
@@ -206,9 +212,9 @@ class HistogramSettings:
     fields: str = param("", label="columns",
                         help="comma separated; empty means every numeric "
                              "column but the counts behind the means")
-    evaluation: str = param("", label="results from",
-                            help="the evaluation whose columns are drawn, by its "
-                                 "name; empty: every evaluation on the ROIs")
+    evaluation: str = param("", label="results from", choices=auto_only,
+                            help="the evaluation whose columns are drawn; "
+                                 "auto: every evaluation on the ROIs")
 
 
 def histograms(rows: Sequence[Dict[str, Any]], settings: HistogramSettings
@@ -238,9 +244,9 @@ def histograms(rows: Sequence[Dict[str, Any]], settings: HistogramSettings
 
 # ---------------------------------------------------------------- analysis
 
-EVALUATION_HELP = ("the evaluation whose results are analysed, by its name; "
-                   "empty: the only one there is, or the chain's own -- asked "
-                   "when there are several")
+EVALUATION_HELP = ("the evaluation whose results are analysed; auto: the only "
+                   "one there is, or the chain's own -- asked when there are "
+                   "several")
 
 
 class AmbiguousEvaluation(ValueError):
@@ -311,6 +317,27 @@ class SiteAnalysisPlugin(Plugin):
             return [], None
         return ctx.rois.results(labels=None if label is None else [label]), label
 
+    # what *auto* is called when it means every evaluation (Histograms)
+    auto_label = ""
+
+    def choices(self, ctx: Context, settings):
+        """*results from*: *auto*, saying what it resolves to, then every
+        evaluation by `evaluator` on the ROIs -- a chain's own included,
+        before it has run."""
+        from dataclasses import replace
+        project = ctx.rois
+        found = project.labels(self.evaluator or None) if project is not None else []
+        for name, path in ctx.evaluations:
+            if (not self.evaluator or path == self.evaluator) and name not in found:
+                found.append(name)
+        try:
+            meant = self.evaluation(ctx, replace(settings, evaluation=""))
+            auto = (f"auto ({meant})" if meant else
+                    f"auto ({self.auto_label})" if self.auto_label else "auto")
+        except AmbiguousEvaluation:
+            auto = "auto (asks which)"
+        return {"evaluation": [("", auto)] + [(name, name) for name in sorted(found)]}
+
     def preflight(self, ctx: Context, settings):
         """Which evaluation, when that is not clear: a choice, not a yes."""
         try:
@@ -339,6 +366,7 @@ class Histograms(SiteAnalysisPlugin):
 
     Settings = HistogramSettings
     version = "1"
+    auto_label = "all"
 
     def evaluation(self, ctx: Context, settings) -> Optional[str]:
         # every column of every evaluation unless one is named: a histogram

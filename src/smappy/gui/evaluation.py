@@ -261,6 +261,9 @@ class EvaluationWindow(QWidget):
                                  "version": step.version,
                                  "values": settings_values(step.settings)}
                                 for step in steps])
+        # what is on the ROIs changed: a panel offering their evaluations
+        # (*results from*) reads them again
+        self.session.changed("rois")
         self.refresh_counts()
         self.ran.emit(run)
 

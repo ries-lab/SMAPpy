@@ -106,9 +106,10 @@ Names as in the site table, for example
 with every site counted as missing.
 
 ### evaluation
-Empty for an overview of everything measured.  Name one evaluation to see
-only its columns, under their own names -- one of two settings of the same
-evaluator, say, when both are on the ROIs.
+*auto* for an overview of everything measured.  The list offers every
+evaluation on the ROIs; pick one to see only its columns, under their own
+names -- one of two settings of the same evaluator, say, when both are on
+the ROIs.
 
 ## Output
 

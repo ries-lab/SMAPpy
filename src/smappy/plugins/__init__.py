@@ -591,6 +591,20 @@ class Plugin:
         """
         return None
 
+    def choices(self, ctx: "Context", settings) -> Optional[Dict[str, Sequence]]:
+        """The choices of fields whose list depends on the session.
+
+        Keyed by dotted name, ``[(value, label), ...]``: the evaluations on
+        the ROIs, say, for an ROI analysis's *results from*.  The field
+        declares a callable ``choices`` (what a form without a session
+        offers) and the GUI replaces its list with this one when the panel is
+        built, after a run, and when the ROIs or their results change.  A
+        value the list does not have is kept and shown as unavailable, never
+        swapped for the first entry.  Return None when nothing depends on
+        the session.
+        """
+        return None
+
     def active(self, settings) -> Optional[Dict[str, bool]]:
         """Which fields the current settings actually read, by dotted name.
 

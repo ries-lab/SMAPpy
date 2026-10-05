@@ -170,6 +170,7 @@ class PluginPanel(QWidget):
         self.progressed.connect(self._on_progress)
         self.streamed.connect(self._on_stream)
         self._active()
+        self._choices()
         session.on_change(self._on_session)
         self._take_saved()
 
@@ -179,6 +180,8 @@ class PluginPanel(QWidget):
         self.session.off_change(self._on_session)
 
     def _on_session(self, what: str) -> None:
+        if what in ("locs", "rois"):
+            self._choices()
         if what in ("locs", "results"):
             self._take_saved()
         elif what in ("roi", "roi-edited") and self.live is not None \
@@ -255,6 +258,17 @@ class PluginPanel(QWidget):
             return
         if hints:
             self.form.set_hints(hints)
+
+    def _choices(self) -> None:
+        """Re-read the lists the session decides (`Plugin.choices`): the
+        evaluations on the ROIs, for an ROI analysis.  Best effort, like the
+        hints: a list that cannot be worked out leaves the one there is."""
+        try:
+            lists = self.plugin.choices(self.session.context(), self.form.value())
+        except Exception:
+            return
+        if lists:
+            self.form.set_choices(lists)
 
     def _active(self) -> None:
         """Grey out the fields the current settings do not read."""
@@ -466,8 +480,9 @@ class PluginPanel(QWidget):
             self.show_text()          # a log: not something to scroll through
                                       # a four-line slot (`Plugin.text_window`)
         # a run may have added to a list the form offers -- the expressions
-        # the math parser has been given, say
+        # the math parser has been given, the evaluations a chain made
         self.form.refresh()
+        self._choices()
         for button in self._buttons():
             button.setEnabled(True)
         self.plot_button.setEnabled(bool(result.figures()))

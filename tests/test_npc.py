@@ -451,3 +451,59 @@ def test_the_analysis_says_when_the_layer_is_not_grouped():
     result = plugins.get("ROIManager/Analyze/NPC Labeling Efficiency")()(
         ctx=session.context())
     assert "not grouped" in result.text
+
+
+# --------------------------------------------------------- results from, GUI
+
+def entries(field):
+    box = field.widget
+    return [(box.itemData(i), box.itemText(i)) for i in range(box.count())]
+
+
+def test_results_from_offers_the_evaluations_on_the_rois():
+    """A dropdown, auto first and saying what it would take; refreshed when
+    an evaluation runs; a saved name the ROIs lack is kept, not swapped."""
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    from smappy.gui.plugin_panel import PluginPanel
+    from smappy.session import Session
+    from smappy.workspace import Instance
+
+    session = Session(pores(0.5, seed=2))
+    session.show_grouped(0, True)
+    panel = PluginPanel(plugins.get("ROIManager/Analyze/NPC Labeling Efficiency"),
+                        session)
+    field = panel.form.fields["evaluation"]
+    assert entries(field) == [("", "auto")]                  # nothing yet
+
+    project = session.rois
+    plugins.get("ROIManager/Segment/NPC")()(ctx=session.context())
+    project.evaluate([Instance(plugin="ROIManager/Evaluate/NPC Corners")])
+    session.changed("rois")
+    assert entries(field) == [("", "auto (NPC Corners)"), ("NPC Corners", "NPC Corners")]
+
+    project.evaluate([Instance(plugin="ROIManager/Evaluate/NPC Corners", label="strict",
+                               values={"precision_nm": 12.0})])
+    session.changed("rois")
+    assert entries(field) == [("", "auto (asks which)"), ("NPC Corners", "NPC Corners"),
+                              ("strict", "strict")]
+    field.set("strict")
+    assert panel.form.value().evaluation == "strict"
+    # a name from a saved workspace that these ROIs do not have
+    field.set("loose")
+    assert panel.form.value().evaluation == "loose"
+    assert ("loose", "loose (not available)") in entries(field)
+
+
+def test_the_npc_chains_analysis_offers_the_chains_own_counts_before_it_has_run():
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    from smappy.gui.plugin_panel import PluginPanel
+    from smappy.session import Session
+
+    panel = PluginPanel(plugins.get("ROIManager/Workflow/NPC Analysis"),
+                        Session(pores(0.5, seed=2)))
+    field = panel.form.fields["labelling_efficiency"].fields["evaluation"]
+    assert entries(field) == [("", "auto (NPC Corners)"), ("NPC Corners", "NPC Corners")]

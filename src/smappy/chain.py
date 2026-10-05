@@ -598,6 +598,23 @@ class ChainPlugin(Plugin):
             out.update({f"{key}.{k}": v for k, v in (found or {}).items()})
         return out or None
 
+    def choices(self, ctx: Context, settings):
+        """Each step's session-dependent choices, told -- as in `preflight` --
+        which evaluations the steps before it will have made."""
+        out = {}
+        made: List[Tuple[str, str]] = []
+        for key, step, cls in self.steps:
+            sctx = copy.copy(ctx)
+            sctx.evaluations = list(made)
+            if is_evaluator(cls):
+                made.append((step.label or cls.name, cls.path))
+            try:
+                found = cls().choices(sctx, plugin_settings(cls, getattr(settings, key)))
+            except Exception:
+                found = None
+            out.update({f"{key}.{k}": v for k, v in (found or {}).items()})
+        return out or None
+
     def active(self, settings):
         out = {}
         for key, step, cls in self.steps:
