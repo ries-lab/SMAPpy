@@ -70,7 +70,7 @@ shape, so read the one closest to what you are writing:
 | scores a fit against a simulation | `ground_truth.py` (the truth redrawn from the recipe, matched per frame) |
 | draws what the microscope recorded per frame | `image_tags.py` (the fit's `metadata["frame_tags"]`) |
 | finds a structure by its shape and judges it, then counts it | `npc.py` (a ring filter and circle fit in the segmenter, a per-site count, and a model of whole pores in `smappy/npc.py` fitted to the site table) |
-| runs the ROI manager's segment, evaluate and analyse as one | `npc.py`'s `NPCWorkflow` (the three plugins' settings as parts, `ROIProject.find` and `ROIProject.evaluate` on the pores it found) |
+| runs the ROI manager's segment, evaluate and analyse as one | `npc_analysis.chain.yaml` (a shipped chain: an evaluator step runs over every ROI before the next; `docs/batch.md`, "ROIs: segment, evaluate, analyse") |
 
 A chain of plugins that runs as one, and running one over many files
 (`smappy-batch`, the batch window): `docs/batch.md`.
@@ -110,7 +110,9 @@ class Thing(Plugin):
   imports inside functions (`from scipy.ndimage import ...`), as the shipped
   plugins do.
 * `scope = "site"` makes it an ROI evaluator, run once per ROI with `ctx.site`
-  set.  Otherwise it runs once over the selection.
+  set; in a chain it runs over every included ROI before the next step, and
+  the chain's evaluators become the ROI manager's pipeline.  Otherwise it runs
+  once over the selection.
 * Override `preview` for a plugin that can show its work before committing;
   the GUI grows a button when it is overridden and nothing when it is not.
 * Override `preflight` to put a question before a run whose cost you can know
