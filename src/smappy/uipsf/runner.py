@@ -61,13 +61,14 @@ def find_python(setting: str = "") -> str:
 
 
 def write_job(directory: Path, images: np.ndarray, psftype: str, channeltype: str,
-              params: dict) -> Path:
+              params: dict, channel_shift=None) -> Path:
     """The job directory the worker reads."""
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     np.save(directory / "images.npy", np.ascontiguousarray(images, dtype=np.float32))
     (directory / "job.json").write_text(json.dumps(
-        {"psftype": psftype, "channeltype": channeltype, "params": params}, indent=1))
+        {"psftype": psftype, "channeltype": channeltype, "params": params,
+         "channel_shift": channel_shift}, indent=1))
     return directory
 
 

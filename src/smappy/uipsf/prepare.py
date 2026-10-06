@@ -115,8 +115,9 @@ def channel_shift(channels: np.ndarray) -> list:
     which it finds by matching bead coordinates -- and on a regular pattern
     of beads that locked onto the neighbouring bead, 30 px off, leaving one
     pair.  The cross-correlation of the two channels' projections peaks where
-    *all* the beads overlap, which a neighbour's shift cannot match.  Handed
-    to uiPSF as ``channel_shift``: per channel, target minus reference.
+    *all* the beads overlap, which a neighbour's shift cannot match.  Per
+    channel, target minus reference, [y, x]: what uiPSF's multi-channel data
+    calls ``shiftxy``, and what `worker.py` sets before uiPSF pairs the beads.
     """
     from scipy import ndimage
     ny, nx = channels.shape[-2:]

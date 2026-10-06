@@ -209,13 +209,14 @@ class UiPSFCalibration(Plugin):
             zernike_order=lp.zernike_order, depth_um=b.depth_um, z_range_um=b.z_range_um,
             min_photon=b.min_photon, z_bins=b.z_bins, per_bin=b.per_bin, repeat=b.repeat,
             start_from=_uipsf_file(b.start_from) if settings.data == "blinking" else "")
-        if dual and settings.data == "beads":
-            params["channel_shift"] = prepare.channel_shift(data.images)
+        shift = (prepare.channel_shift(data.images)
+                 if dual and settings.data == "beads" else None)
         out = output_path(settings)
         job = (out.with_name(out.stem + "_uipsf_job") if lp.keep_job
                else Path(tempfile.mkdtemp(prefix="smappy-uipsf-")))
         result = learn(data.images, data=settings.data, model=settings.model, dual=dual,
-                       params=params, workdir=job, python=lp.python, progress=ctx.report)
+                       params=params, workdir=job, python=lp.python, progress=ctx.report,
+                       channel_shift=shift)
         em_on = getattr(data.camera, "em_on", None)
         calibration = (convert.dual_calibration(result, data.split, sources, em_on=em_on)
                        if dual else convert.single_calibration(result, em_on=em_on))

@@ -91,12 +91,17 @@ def _merge(target: dict, extra: dict) -> None:
 
 def learn(images, *, data: str, model: str, dual: bool, params: dict,
           workdir=None, python: str = "",
-          progress: Optional[Callable[[str], None]] = None) -> Path:
-    """Run uiPSF on ``images`` (`prepare`'s); the result file it wrote."""
+          progress: Optional[Callable[[str], None]] = None, channel_shift=None) -> Path:
+    """Run uiPSF on ``images`` (`prepare`'s); the result file it wrote.
+
+    ``channel_shift`` (`prepare.channel_shift`) is where the worker starts
+    uiPSF's pairing of two channels' beads; None leaves uiPSF to find it.
+    """
     from . import runner
     psftype, override = PSFTYPES[(data, model)]
     if override:
         params = dict(params, PSFtype=override)
     workdir = Path(workdir) if workdir else Path(tempfile.mkdtemp(prefix="smappy-uipsf-"))
-    runner.write_job(workdir, images, psftype, "2ch" if dual else "1ch", params)
+    runner.write_job(workdir, images, psftype, "2ch" if dual else "1ch", params,
+                     channel_shift)
     return runner.run(workdir, python=python, progress=progress)

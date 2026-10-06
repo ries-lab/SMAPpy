@@ -1750,9 +1750,11 @@ saving) is the price of keeping it out of that window.
   with the background in, and simulated two-colour beads (a background a
   fifth of the peak) lost 15 of 18 beads to spurious maxima.  And it
   measures the shift between the channels by cross-correlating their
-  projections (`prepare.channel_shift`, passed as `channel_shift`, which
-  the uiPSF branch reads): uiPSF's own guess, from bead coordinates, took
-  the neighbour on a 30 px grid of beads and paired one bead.
+  projections (`prepare.channel_shift`), which `worker.py` sets as the
+  multi-channel data's `shiftxy` before uiPSF pairs the beads: uiPSF's own
+  guess, from bead coordinates, took the neighbour on a 30 px grid of beads
+  and paired one bead.  It is set from the worker, on uiPSF's class, rather
+  than by a new uiPSF parameter, so that uiPSF's main stays as it is.
 * **Voxels, not uiPSF's spline.**  uiPSF's `locres/coeff` is normalised to
   the median plane sum after subtracting the minimum; the fitter's photons
   assume the brightest plane sums to one.  `res/I_model` is clipped,

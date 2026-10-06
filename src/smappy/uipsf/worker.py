@@ -41,6 +41,30 @@ def merge(target, overrides):
             target[key] = value
 
 
+def preset_channel_shift(shift):
+    """Start uiPSF's pairing of two channels' beads from a known shift.
+
+    uiPSF finds the shift between the channels from bead coordinates, unless
+    its multi-channel data already has one (``shiftxy``, target minus
+    reference, [y, x] per channel) when ``process`` runs -- which is set here,
+    on the class, because ``prep_data`` makes the object and processes it in
+    one call.  smappy measures the shift by cross-correlation
+    (`prepare.channel_shift`): uiPSF's own guess paired each bead of a
+    regular grid with its neighbour.  Done here rather than in uiPSF so that
+    uiPSF itself is unchanged.
+    """
+    import numpy as np
+    from psflearning.learning.data_representation.PreprocessedImageDataMultiChannel_file \
+        import PreprocessedImageDataMultiChannel as Multi
+    process = Multi.process
+
+    def process_from_shift(self, *args, **kwargs):
+        if self.shiftxy is None:
+            self.shiftxy = np.float32(shift)
+        return process(self, *args, **kwargs)
+    Multi.process = process_from_shift
+
+
 def main(directory):
     os.environ.setdefault("MPLBACKEND", "Agg")      # uiPSF imports pyplot
     import numpy as np
@@ -67,6 +91,8 @@ def main(directory):
         multi = L.param.option.multi
         L.param.option.multi.defocus = [multi.defocus_offset + i*multi.defocus_delay
                                         for i in range(n)]
+    if job.get("channel_shift") and L.param.channeltype == "multi":
+        preset_channel_shift(job["channel_shift"])
     start = time.time()
     L.getpsfclass()
     say("stage", "finding the emitters")
