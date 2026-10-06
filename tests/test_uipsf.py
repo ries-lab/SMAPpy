@@ -251,14 +251,16 @@ def test_every_tab_of_a_result_draws_into_a_figure_and_into_a_page(tmp_path, dua
     from smappy.uipsf import plots
     data = convert.read(bead_result(tmp_path, dual))
     tabs = plots.figures(data)
-    expected = ["data vs model", "localization bias", "pupil", "beads"]
+    from smappy.plugins import Plot
+    expected = ["data vs model", "localization bias", "pupil", "Zernike", "beads"]
     assert list(tabs) == expected + (["channel transformation"] if dual else [])
     for draw, panels, size in tabs.values():
+        plot = Plot(draw=draw, panels=panels, size=size)
         figure = Figure(figsize=size, layout="constrained")
-        draw(figure)
+        plot.draw_into(figure)
         figure.savefig(tmp_path / "tab.png")
         page = Figure().subfigures(1, 2)[1]     # the All page hands out subfigures
-        draw(page)
+        plot.draw_into(page)
         assert page.axes
 
 
@@ -269,6 +271,9 @@ def test_the_bias_and_the_transformation_residuals_come_out_in_nanometres(tmp_pa
     assert np.allclose(x, 3.0) and np.allclose(y, 0.0) and np.allclose(z, DZ_NM)
     main, residual = plots.transformation_residuals(data)
     np.testing.assert_allclose(residual, 0, atol=1e-6)
+    # 0.5 rad of Noll 6 at 680 nm, in both channels
+    for label, noll, nm in plots.zernike_phases(data):
+        assert nm[list(noll).index(6)] == pytest.approx(0.5 * 680 / (2 * np.pi))
 
 
 def test_in_situ_data_are_averaged_per_plane_of_the_model(tmp_path):
@@ -290,7 +295,7 @@ def test_in_situ_data_are_averaged_per_plane_of_the_model(tmp_path):
     data = convert.read(path)
     (label, measured, modelled, what), = plots.data_and_model(data)
     np.testing.assert_allclose(measured[:, 0, 0], [2.0, 0.0, 5.0, 0.0, 7.0])
-    assert list(plots.figures(data)) == ["data vs model", "pupil", "emitters"]
+    assert list(plots.figures(data)) == ["data vs model", "pupil", "Zernike", "emitters"]
 
 
 def test_a_profile_says_what_it_knows_and_refuses_what_it_does_not(tmp_path, monkeypatch):
@@ -395,7 +400,7 @@ def test_uipsf_learns_simulated_beads_that_spline_3d_then_fits_in_z(tmp_path, mo
     calibration = result.data["calibration"]
     assert load_spline_calibration(calibration).psf.shape[1] == 21
     assert [f.name for f in result.figures()] == ["data vs model", "localization bias",
-                                                  "pupil", "beads"]
+                                                  "pupil", "Zernike", "beads"]
     frames, truth = camera_frames(300, seed=3, astigmatism=ASTIGMATISM,
                                   labelling=LabellingSettings(efficiency=0.1))
     tifffile.imwrite(tmp_path / "frames.tif", frames)

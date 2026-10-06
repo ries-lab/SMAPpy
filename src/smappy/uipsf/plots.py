@@ -11,6 +11,8 @@ dict `convert.read` gives), each into the figure it is handed:
 * `draw_localization_bias`: ``showlocalization``
 * `draw_pupil`: ``showzernike`` (``showpupil`` for a model without Zernike
   coefficients)
+* `draw_zernike`: the aberrations as bars, the channels side by side --
+  ``showzernike``'s coefficients, read off more easily
 * `draw_emitters`: ``showcoord``
 * `draw_transformation`: ``showtransform``, as residuals rather than overlays
 
@@ -31,6 +33,9 @@ PLANES = 6
 # the terms uiPSF's showzernike names, by Noll index
 NAMED = {5: "astigmatism 45", 6: "astigmatism 0", 7: "coma y", 8: "coma x",
          11: "spherical", 22: "2nd spherical"}
+# the same, short enough to sit side by side under the Zernike bars
+SHORT = {5: "astig. 45", 6: "astig. 0", 7: "coma y", 8: "coma x", 11: "spherical",
+         22: "2nd spher."}
 
 
 def channels(data):
@@ -236,11 +241,52 @@ def draw_pupil(figure, data) -> None:
                 bbox=dict(boxstyle="round", fc="white", ec="0.7", alpha=0.85))
 
 
+def zernike_phases(data):
+    """``[(label, Noll indices, phase in nm rms)]`` per channel, from Noll 5 up."""
+    wavelength = _wavelength_nm(data)
+    out = []
+    for label, res in channels(data):
+        if "zernike_coeff" not in res:
+            continue
+        phase = np.asarray(res["zernike_coeff"], float).reshape(2, -1)[1]
+        noll = np.arange(1, len(phase) + 1)
+        out.append((label, noll[4:], phase[4:] * wavelength / (2 * np.pi)))
+    return out
+
+
+def draw_zernike(ax, data) -> None:
+    """The aberrations as bars, Noll index 5 up, the channels side by side.
+
+    Piston, tilt and defocus are left out: they only place the emitter.  The
+    named terms are labelled under the axis, so astigmatism, coma and
+    spherical can be read off without counting.
+    """
+    rows = zernike_phases(data)
+    if not rows:
+        ax.text(0.5, 0.5, "free pupil: no Zernike terms", ha="center", transform=ax.transAxes)
+        ax.set_axis_off()
+        return
+    width = 0.8 / len(rows)
+    for k, (label, noll, nm) in enumerate(rows):
+        ax.bar(noll + (k - (len(rows) - 1) / 2) * width, nm, width=width, label=label or None)
+    ax.axhline(0, color="0.5", lw=0.8)
+    named = [j for j in NAMED if j <= rows[0][1][-1]]
+    ax.set_xticks(named, [f"{SHORT[j]} ({j})" for j in named], fontsize=7,
+                  rotation=40, ha="right", rotation_mode="anchor")
+    ax.set_xticks(rows[0][1], minor=True)
+    ax.set_xlim(rows[0][1][0] - 1, rows[0][1][-1] + 1)
+    ax.set(xlabel="Noll index", ylabel="phase (nm rms)")
+    if len(rows) > 1:
+        ax.legend(fontsize=8)
+
+
 def draw_emitters(figure, data) -> None:
     """Every emitter found, and those uiPSF kept for the model, per channel."""
     rows = channels(data)
     size = np.asarray(data["rois"]["image_size"]).ravel()
-    axes = figure.subplots(1, len(rows), squeeze=False)[0]
+    # one channel is one panel, and a one-panel plot is handed an axis
+    axes = (figure.subplots(1, len(rows), squeeze=False)[0]
+            if hasattr(figure, "subplots") else [figure])
     beads = not _insitu(data)
     for ax, (label, res) in zip(axes, rows):
         found, kept = np.asarray(res["cor_all"]), np.asarray(res["cor"])
@@ -297,13 +343,19 @@ def draw_transformation(figure, data) -> None:
 
 
 def figures(data):
-    """``{tab name: (draw(figure), panels, size)}`` for what this result has."""
+    """``{tab name: (draw, panels, size)}`` for what this result has.
+
+    ``draw`` takes the figure when ``panels`` > 1 and an axis when it is 1,
+    as `smappy.plugins.Plot` hands them out.
+    """
     n = len(channels(data))
     out = {"data vs model": (lambda fig: draw_data_vs_model(fig, data),
                              2 * n * (PLANES + 1), (11, 2.6 * n))}
     if has_localization_bias(data):
         out["localization bias"] = (lambda fig: draw_localization_bias(fig, data), 3, (11, 3.5))
     out["pupil"] = (lambda fig: draw_pupil(fig, data), 3 * n, (11, 3.3 * n))
+    # one panel: handed an axis, as a plain plot(ax) is
+    out["Zernike"] = (lambda ax: draw_zernike(ax, data), 1, (9, 4))
     out["emitters" if _insitu(data) else "beads"] = (lambda fig: draw_emitters(fig, data),
                                                      n, (4.5 * n, 4.5))
     if n > 1 and "T" in data["res"]:

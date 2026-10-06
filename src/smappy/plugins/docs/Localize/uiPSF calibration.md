@@ -1,6 +1,6 @@
 ---
 version: "1"
-covers: [smappy.uipsf.prepare.Split, smappy.uipsf.prepare.channel_shift, smappy.uipsf.prepare.subtract_background, smappy.uipsf.prepare.read_beads, smappy.uipsf.prepare.read_movie, smappy.uipsf.uipsf_parameters, smappy.uipsf.runner.run, smappy.uipsf.convert.single_calibration, smappy.uipsf.convert.dual_calibration, smappy.uipsf.convert.channel_transformation, smappy.uipsf.microscopes.Microscope, smappy.uipsf.plots.figures, smappy.uipsf.plots.data_and_model, smappy.uipsf.plots.localization_bias, smappy.uipsf.plots.pupil_images, smappy.uipsf.plots.transformation_residuals]
+covers: [smappy.uipsf.prepare.Split, smappy.uipsf.prepare.channel_shift, smappy.uipsf.prepare.subtract_background, smappy.uipsf.prepare.read_beads, smappy.uipsf.prepare.read_movie, smappy.uipsf.uipsf_parameters, smappy.uipsf.runner.run, smappy.uipsf.convert.single_calibration, smappy.uipsf.convert.dual_calibration, smappy.uipsf.convert.channel_transformation, smappy.uipsf.microscopes.Microscope, smappy.uipsf.plots.figures, smappy.uipsf.plots.data_and_model, smappy.uipsf.plots.localization_bias, smappy.uipsf.plots.pupil_images, smappy.uipsf.plots.zernike_phases, smappy.uipsf.plots.transformation_residuals]
 ---
 
 ## What it does
@@ -317,7 +317,8 @@ aberrations in nanometres of wavefront, and two numbers from uiPSF's own
 check of the result.  The first is the median bias of the beads, refitted
 with the model.  The second, for two channels, is how far the
 transformation leaves each bead pair apart.  The figures are uiPSF's own
-diagnostics, the ones its notebooks show, one tab each:
+diagnostics, the ones its notebooks show, one tab each, and a bar chart of
+the aberrations:
 
 * **data vs model**: the measured spot above and uiPSF's model of it below,
   at planes through the model and in an x–z section, per channel.  For beads
@@ -341,6 +342,10 @@ diagnostics, the ones its notebooks show, one tab each:
   uiPSF names.  Astigmatism (5, 6) is expected with an astigmatic lens, and
   spherical (11) grows with depth in water.  Large coma (7, 8) points at a
   tilted or misaligned optic.
+* **Zernike**: the same phases as bars, from term 5 up, the channels side by
+  side and the named terms labelled under the axis.  Two channels of one
+  microscope should share most of their aberrations.  A term that differs
+  between them belongs to the optics after the splitter.
 * **beads** or **emitters**: where uiPSF found emitters (grey) and which it
   used for the model (red circles), in the channel as uiPSF saw it.  Beads
   too close to another or to the edge are dropped before they count as
