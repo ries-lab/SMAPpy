@@ -72,6 +72,9 @@ Running the tests -- two tiers:
   `test_roi_session`), which is the environment and not your change.
 * `SMAPPY_TEST_CAL=/path/to/_3dcal.mat` enables the tests that want real
   calibration data; without it they skip.
+* `SMAPPY_UIPSF_PYTHON=/path/to/python` (of an environment with uiPSF, as the
+  page of `Localize/uiPSF calibration` installs it) enables the slow test that
+  runs uiPSF itself, a few minutes on a CPU; without it it skips.
 
 ## Writing a plugin
 
@@ -96,6 +99,7 @@ shape, so read the one closest to what you are writing:
 | finds a structure by its shape and judges it, then counts it | `npc.py` (a ring filter and circle fit in the segmenter, a per-site count, and a model of whole pores in `smappy/npc.py` fitted to the site table) |
 | summarises what evaluators measured | `roi.py`'s `SiteAnalysisPlugin` (an evaluator to read, a *results from* field, a preflight that asks which when there are several) |
 | runs the ROI manager's segment, evaluate and analyse as one | `npc_analysis.chain.yaml` (a shipped chain: an evaluator step runs over every ROI before the next; `docs/batch.md`, "ROIs: segment, evaluate, analyse") |
+| runs an external program in its own Python | `uipsf.py` (`smappy.uipsf`: a worker script under that program's interpreter, progress read from its output, the result converted into smappy's own file) |
 
 A chain of plugins that runs as one, and running one over many files
 (`smappy-batch`, the batch window): `docs/batch.md`.
@@ -355,7 +359,9 @@ a new plugin there fails four tests until it is listed in both (the workspace
 ones name the seeded Analysis tab, including the order its titles come back
 in).  `tests/test_file_plugins.py::test_the_file_tab_ships_with_the_four_it_needs`
 asserts the File tab's exact contents, so a new File plugin needs a line there
-too (it is a Qt test and skips without PySide6).
+too (it is a Qt test and skips without PySide6).  Likewise
+`tests/test_workspace.py::test_the_window_opens_the_shipped_tabs` lists the
+Localize tab's titles, so a new Localize plugin needs a line there.
 
 `tests/test_control_width.py` builds every shipped plugin's panel and fails if
 it is wider than the control column (`CONTROL_WIDTH`): a new plugin with a long

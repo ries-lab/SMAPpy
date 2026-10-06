@@ -34,7 +34,7 @@ calibration.  For a split camera it holds both channels' models and the
 transformation between the halves, which uiPSF learns together with the PSF.
 
 **What it needs.**  uiPSF itself, installed in a Python environment of its own
-(it brings TensorFlow; see *Installing uiPSF* below), and a **microscope
+(see *Installing uiPSF* below), and a **microscope
 profile**: the objective's numerical aperture, the refractive indices, the
 emission wavelength and, for a split camera, how the halves are arranged.
 From beads: one or more z-stacks, as for the bead calibration.  From blinking
@@ -56,6 +56,66 @@ non-uniform illumination of the pupil, a damaged optic -- the voxel model or
 the bead calibration is the safer choice.  Field-dependent and 4Pi models,
 which uiPSF also learns, are not offered: the fitters here use one PSF for the
 whole field.
+
+## Installing uiPSF
+
+smappy does **not** install uiPSF, and installing smappy does not bring it.
+uiPSF needs TensorFlow, which is large and wants its own versions of numpy
+and Python, so it lives in a Python environment of its own.  smappy starts
+uiPSF in that environment when the plugin runs, and needs to be told once
+where it is.  Everything below is done once per computer.
+
+**1. An environment with uiPSF.**  With conda (Miniconda or Anaconda), in a
+terminal (on Windows, the Anaconda Prompt):
+
+```
+conda create -n uipsf python=3.12
+conda activate uipsf
+git clone --branch claude/friendly-cerf-qt2sfj https://github.com/ries-lab/uiPSF
+pip install -e uiPSF
+```
+
+The last line installs uiPSF with TensorFlow and everything else it needs.
+It has to be this branch of uiPSF: its main branch needs Python 3.7 and
+TensorFlow 2.9, which do not run on current Macs or with current numpy.
+Without conda, `python3.12 -m venv uipsf-env` and that environment's `pip` do
+the same.
+
+**2. Check it.**  Still in that environment:
+
+```
+python -c "import psflearning.psflearninglib; print('uiPSF works')"
+python -c "import sys; print(sys.executable)"
+```
+
+The second line prints the environment's Python, for example
+`/Users/me/miniconda3/envs/uipsf/bin/python` on a Mac,
+`/home/me/miniconda3/envs/uipsf/bin/python` on Linux, or
+`C:\Users\me\miniconda3\envs\uipsf\python.exe` on Windows.
+
+**3. Tell smappy.**  Once for all plugins and sessions, add a line with that
+path to smappy's configuration file, `config.yaml` in
+`~/Library/Application Support/smappy/` (Mac), `~/.config/smappy/` (Linux) or
+`%APPDATA%\smappy\` (Windows), creating the file if it is not there:
+
+```
+uipsf_python: /Users/me/miniconda3/envs/uipsf/bin/python
+```
+
+Or give the path in the plugin itself, as *uiPSF python* (under *learning*,
+"more"), or in the environment variable `SMAPPY_UIPSF_PYTHON`.  The plugin's
+setting wins over the file, and the file over the variable.
+
+If uiPSF can be imported in the Python smappy itself runs in, nothing needs to
+be set, but a separate environment is what keeps TensorFlow from fighting
+smappy's own packages.
+
+**A graphics card.**  uiPSF runs on the CPU by default, which works
+everywhere and takes minutes for beads (see *Running time* below).  On Linux
+with an NVIDIA card, `pip install "tensorflow[and-cuda]"` in the uiPSF
+environment lets it use the card.  On Windows TensorFlow uses no graphics card
+after version 2.10, except under WSL2.  On a Mac uiPSF runs on the CPU, and
+Apple-silicon Macs run it natively.
 
 ## How it works
 
@@ -170,28 +230,19 @@ TensorFlow's Apple-GPU plugin has not been tried with it, and the pupil model
 is built on complex numbers and Fourier transforms, which that plugin has
 supported only in part.
 
-**Installing uiPSF.**  In a Python environment of its own (tried with Python
-3.12 and TensorFlow 2.21):
-
-    pip install tensorflow tensorflow-probability[tf] h5py omegaconf dotted_dict \
-        czifile scikit-image matplotlib tqdm
-    pip install --no-deps -e /path/to/uiPSF
-
-The plugin needs uiPSF's branch that runs on current numpy and TensorFlow.
-Then give that environment's python as *uiPSF python*, or once and for all as
-`uipsf_python` in smappy's configuration file, or in `SMAPPY_UIPSF_PYTHON`.
-
 **Microscope profiles.**  A profile is a YAML file, `example.yaml` ships as
 a template:
 
-    name: M2, astigmatic, two colour
-    NA: 1.43
-    refractive_index: {immersion: 1.516, medium: 1.335, coverslip: 1.516}
-    emission_wavelength_nm: 680
-    roi_size_px: 25
-    dual: {layout: up-down mirrored, main_channel: upper}
-    insitu: {zernike_index: [5], zernike_coeff: [0.5]}
-    uipsf: {}
+```
+name: M2, astigmatic, two colour
+NA: 1.43
+refractive_index: {immersion: 1.516, medium: 1.335, coverslip: 1.516}
+emission_wavelength_nm: 680
+roi_size_px: 25
+dual: {layout: up-down mirrored, main_channel: upper}
+insitu: {zernike_index: [5], zernike_coeff: [0.5]}
+uipsf: {}
+```
 
 Profiles are found in the folders named by `SMAPPY_MICROSCOPES` (a group's
 shared folder, say), then in `microscopes/` in smappy's configuration folder,
