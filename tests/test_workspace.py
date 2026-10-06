@@ -168,7 +168,8 @@ def test_the_window_opens_the_shipped_tabs(window):
         ["File", "Localize", "Render", "Analysis", "ROI"]
     localize = tab_named(window, "Localize")
     assert [s.title for s in localize.sections] == \
-        ["Gaussian 2D", "Gaussian 2D 2C", "Spline 3D", "Spline 3D 2C"]
+        ["Gaussian 2D", "Gaussian 2D 2C", "Spline 3D", "Spline 3D 2C",
+         "uiPSF calibration"]
 
 
 def test_opening_a_section_is_what_imports_the_plugin(window):
