@@ -1,6 +1,6 @@
 ---
 version: "1"
-covers: [smappy.uipsf.prepare.Split, smappy.uipsf.prepare.channel_shift, smappy.uipsf.prepare.subtract_background, smappy.uipsf.prepare.read_beads, smappy.uipsf.prepare.read_movie, smappy.uipsf.uipsf_parameters, smappy.uipsf.runner.run, smappy.uipsf.convert.single_calibration, smappy.uipsf.convert.dual_calibration, smappy.uipsf.convert.channel_transformation, smappy.uipsf.microscopes.Microscope]
+covers: [smappy.uipsf.prepare.Split, smappy.uipsf.prepare.channel_shift, smappy.uipsf.prepare.subtract_background, smappy.uipsf.prepare.read_beads, smappy.uipsf.prepare.read_movie, smappy.uipsf.uipsf_parameters, smappy.uipsf.runner.run, smappy.uipsf.convert.single_calibration, smappy.uipsf.convert.dual_calibration, smappy.uipsf.convert.channel_transformation, smappy.uipsf.microscopes.Microscope, smappy.uipsf.plots.figures, smappy.uipsf.plots.data_and_model, smappy.uipsf.plots.localization_bias, smappy.uipsf.plots.pupil_images, smappy.uipsf.plots.transformation_residuals]
 ---
 
 ## What it does
@@ -312,13 +312,48 @@ beside the data) is what Spline 3D or Spline 3D 2C take as their
 pupil, the per-emitter fits and the model, which SMAP and uiPSF's own
 notebooks read.
 
-**The figures** show the model through focus, x–z and y–z, and its focal
-plane; for two channels both, the secondary in the camera's orientation.  An
-astigmatic PSF is wide in x on one side of focus and in y on the other.  The
-second tab shows the learnt aberrations in nanometres of wavefront per
-Zernike term: astigmatism (5, 6) for an astigmatic lens, spherical (11)
-growing with depth in water.  Large coma (7, 8) points at a tilted or
-misaligned optic.
+**The text** names both files, the model's z range, its largest
+aberrations in nanometres of wavefront, and two numbers from uiPSF's own
+check of the result.  The first is the median bias of the beads, refitted
+with the model.  The second, for two channels, is how far the
+transformation leaves each bead pair apart.  The figures are uiPSF's own
+diagnostics, the ones its notebooks show, one tab each:
+
+* **data vs model**: the measured spot above and uiPSF's model of it below,
+  at planes through the model and in an x–z section, per channel.  For beads
+  it is one bead, the one the model fits as well as it fits most, and the
+  planes are labelled by stage position.  From blinking molecules the
+  molecules are averaged per plane of the model by their fitted height, and
+  the planes are labelled by height above the coverslip.  Planes no molecule
+  fell into stay black.  Data and model should look alike in every plane; a
+  difference that grows away from focus means the model misses an
+  aberration.
+* **localization bias** (beads): uiPSF refits every bead in every plane with
+  the learnt model.  This is x, y and z of each fit minus where the bead
+  was, against the stage position, one grey line per bead and their median
+  in red.  A few nanometres in x and y, and a z bias of a few tens of
+  nanometres at most over the range you will fit, are good.  A slope in z means the model's z scale
+  is off.  A bias that grows towards the ends of the stack marks where the
+  model stops being trustworthy.
+* **pupil**: per channel, the pupil's magnitude, the aberration it adds to
+  the wavefront (from Zernike term 5 up, in nm), and every Zernike term:
+  phase as bars in nm rms, magnitude as dots.  The box names the terms
+  uiPSF names.  Astigmatism (5, 6) is expected with an astigmatic lens, and
+  spherical (11) grows with depth in water.  Large coma (7, 8) points at a
+  tilted or misaligned optic.
+* **beads** or **emitters**: where uiPSF found emitters (grey) and which it
+  used for the model (red circles), in the channel as uiPSF saw it.  Beads
+  too close to another or to the edge are dropped before they count as
+  found.  Of those found, uiPSF leaves out the ones beyond *max beads* and
+  those it rejects as outliers after a first round of learning.  From
+  blinking molecules it also leaves out the dim and the poorly fitted, and
+  more than each z slice takes (*per bin*).
+* **channel transformation** (two channels): for every bead pair, where the
+  secondary channel's bead lies minus where the transformation puts it, in
+  nanometres.  On the left the residuals are drawn as arrows over the field,
+  with the longest given in the title; on the right they are scattered.
+  Residuals of a few nanometres are good.  Arrows that all point one way in
+  part of the field mean the transformation cannot follow the splitter there.
 
 **A bad result** shows as a model with structure that changes erratically
 from plane to plane, or as fitted z that does not follow the stage when the

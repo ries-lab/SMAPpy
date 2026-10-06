@@ -225,11 +225,12 @@ class UiPSFCalibration(Plugin):
         shutil.copyfile(result, raw)
         if not lp.keep_job:
             shutil.rmtree(job, ignore_errors=True)
-        text = summary(calibration, out, raw)
-        return Result(text=text, settings=settings,
-                      plot=Plot(draw=lambda fig: draw_models(fig, calibration),
-                                panels=6 if dual else 3, size=(10, 6 if dual else 3.5)),
-                      plots={"Zernike": lambda ax: draw_zernike(ax, calibration)},
+        from ..uipsf import plots
+        learnt = convert.read(raw)
+        figures = [Plot(draw=draw, name=name, panels=panels, size=size)
+                   for name, (draw, panels, size) in plots.figures(learnt).items()]
+        return Result(text=summary(calibration, out, raw, learnt), settings=settings,
+                      plot=figures[0], plots={f.name: f for f in figures[1:]},
                       data={"calibration": str(out), "uipsf_result": str(raw),
                             "dual": dual})
 
@@ -260,8 +261,9 @@ def _models(calibration):
     return [("", calibration)]
 
 
-def summary(calibration, out: Path, raw: Path) -> str:
-    """What the run made: the file, the model's extent and the main aberrations."""
+def summary(calibration, out: Path, raw: Path, learnt=None) -> str:
+    """What the run made: the file, the model's extent, the main aberrations,
+    and -- from uiPSF's result -- how well the beads and the channels fit."""
     lines = [f"saved {out}", f"uiPSF's own result: {raw}"]
     for name, model in _models(calibration):
         nz = model.psf.shape[0]
@@ -277,40 +279,16 @@ def summary(calibration, out: Path, raw: Path) -> str:
         lines.append("channel transformation (secondary -> main, chip px): "
                      + np.array2string(calibration.transformation / calibration.transformation[2, 2],
                                        precision=4, suppress_small=True).replace("\n", ""))
+    if learnt is not None:
+        from ..uipsf import plots
+        if plots.has_localization_bias(learnt):
+            bias = [np.nanmedian(np.abs(b)) for b in plots.localization_bias(learnt)]
+            lines.append("beads refitted with the model, median |bias|: x {:.1f}, "
+                         "y {:.1f}, z {:.1f} nm".format(*bias))
+        if len(plots.channels(learnt)) > 1 and "T" in learnt["res"]:
+            _, residual = plots.transformation_residuals(learnt)
+            p = learnt["params"]["pixel_size"]
+            rms = np.sqrt(np.mean(residual ** 2, axis=0)) * 1000 * np.array(
+                [float(p["y"]), float(p["x"])])
+            lines.append(f"transformation residual, rms: x {rms[1]:.1f}, y {rms[0]:.1f} nm")
     return "\n".join(lines)
-
-
-def draw_models(figure, calibration) -> None:
-    """Each channel's model through focus: x-z, y-z, and the focal plane."""
-    rows = _models(calibration)
-    axes = figure.subplots(len(rows), 3, squeeze=False)
-    for (name, model), row in zip(rows, axes):
-        psf = model.psf
-        nz, ny, nx = psf.shape
-        extent_z = (model.z_index_to_nm(nz - 0.5), model.z_index_to_nm(-0.5))
-        focus = int(round(model.z0))
-        row[0].imshow(psf[::-1, ny // 2, :], aspect="auto", cmap="magma",
-                      extent=(-0.5, nx - 0.5) + extent_z)
-        row[0].set(xlabel="x (px)", ylabel="z (nm)", title=f"{name} x-z".strip())
-        row[1].imshow(psf[::-1, :, nx // 2], aspect="auto", cmap="magma",
-                      extent=(-0.5, ny - 0.5) + extent_z)
-        row[1].set(xlabel="y (px)", title=f"{name} y-z".strip())
-        row[2].imshow(psf[min(max(focus, 0), nz - 1)], cmap="magma")
-        row[2].set(xlabel="x (px)", ylabel="y (px)", title=f"{name} z = 0".strip())
-
-
-def draw_zernike(ax, calibration) -> None:
-    """The pupil's aberrations, Noll index 5 up, in nm rms of wavefront."""
-    width = 0.8 / len(_models(calibration))
-    for k, (name, model) in enumerate(_models(calibration)):
-        rows = [row for row in model.parameters.get("zernike", []) if row[0] > 4]
-        if not rows:
-            continue
-        j = np.array([row[0] for row in rows])
-        ax.bar(j + (k - (len(_models(calibration)) - 1) / 2) * width,
-               [row[3] for row in rows], width=width, label=name or None)
-    ax.axhline(0, color="0.5", lw=0.8)
-    ax.set(xlabel="Noll index", ylabel="phase (nm rms)",
-           title="aberrations (5, 6: astigmatism; 7, 8: coma; 11: spherical)")
-    if len(_models(calibration)) > 1:
-        ax.legend()

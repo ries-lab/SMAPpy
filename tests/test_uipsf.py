@@ -42,19 +42,20 @@ def params(psftype="zernike_vector", stage_pos=1.0, med=1.335, imm=1.516):
                        "model": {"zernike_nl": []}}}
 
 
-def write_result(path, res, p):
+def write_result(path, res, p, rois=None, locres=None):
     """A file laid out as uiPSF's `writeh5file` lays one out."""
+    def put(group, items):
+        for key, value in items.items():
+            if isinstance(value, dict):
+                put(group.create_group(key), value)
+            else:
+                group[key] = value
     with h5py.File(path, "w") as f:
         f.attrs["params"] = json.dumps(p)
-        g = f.create_group("res")
-        for key, value in res.items():
-            if isinstance(value, dict):
-                sub = g.create_group(key)
-                for k, v in value.items():
-                    sub[k] = v
-            else:
-                g[key] = value
-        f.create_group("locres")["coeff"] = np.zeros(1)
+        put(f.create_group("res"), res)
+        put(f.create_group("locres"), locres or {"coeff": np.zeros(1)})
+        if rois is not None:
+            put(f.create_group("rois"), rois)
     return path
 
 
@@ -201,6 +202,97 @@ def test_two_channels_share_one_normalisation_and_the_secondary_is_unmirrored(tm
     np.testing.assert_allclose(again.transformation, calibration.transformation)
 
 
+def bead_result(tmp_path, dual=False):
+    """A complete uiPSF bead result, one or two channels, as the plots read it.
+
+    The second channel sits 2 px right and 1 px down of the first, which is
+    what ``T`` says: the transformation's residuals are zero by construction.
+    The localization bias is a known 3 nm in x and one plane in z.
+    """
+    rng = np.random.default_rng(5)
+    model = bead_model()
+    nz, n = len(model), 6
+    zernike = np.zeros((2, 45))
+    zernike[0, 0], zernike[1, 5] = 1.0, 0.5
+    yy, xx = np.mgrid[:64, :64]
+    pupil = ((yy - 31.5) ** 2 + (xx - 31.5) ** 2 < 30 ** 2).astype(np.complex64)
+    cor = np.array([[20, 20], [20, 60], [60, 20], [60, 60], [40, 40], [30, 70]])
+    pos = np.c_[np.full(n, nz / 2), cor + rng.uniform(-0.3, 0.3, (n, 2))]
+
+    def channel(shift):
+        return {"I_model": model, "intensity": np.full((n, nz), 2000.0),
+                "zernike_coeff": zernike, "zernike_polynomial": np.ones((45, 64, 64)),
+                "pupil": pupil, "pos": pos + [0, *shift], "cor": cor + shift,
+                "cor_all": np.r_[cor + shift, [[5, 5]]]}
+    stacks = np.stack([model * 2000 + rng.normal(0, 1, model.shape) for _ in range(n)])
+    loc = {"x": np.full((n, nz), 0.03), "y": np.zeros((n, nz)),
+           "z": np.tile(np.arange(nz) + 1.0, (n, 1))}
+    if not dual:
+        return write_result(tmp_path / "single.h5", channel(np.zeros(2)), params(),
+                            {"psf_data": stacks, "psf_fit": stacks * 0.98,
+                             "cor": cor, "image_size": [1, nz, 80, 80]},
+                            {"loc": loc})
+    T = np.eye(3)
+    T[2, :2] = [1.0, 2.0]                   # rows (y, x, 1) - c: + (1, 2)
+    return write_result(tmp_path / "dual.h5",
+                        {"channel0": channel(np.zeros(2)), "channel1": channel(np.array([1, 2])),
+                         "T": T, "imgcenter": np.array([40.0, 40.0, 0.0])},
+                        params(), {"psf_data": np.stack([stacks, stacks]),
+                                   "psf_fit": np.stack([stacks, stacks]),
+                                   "cor": np.stack([cor, cor + [1, 2]]),
+                                   "image_size": [2, 1, nz, 80, 80]}, {"loc": loc})
+
+
+@pytest.mark.parametrize("dual", [False, True])
+def test_every_tab_of_a_result_draws_into_a_figure_and_into_a_page(tmp_path, dual):
+    import matplotlib
+    matplotlib.use("Agg")
+    from matplotlib.figure import Figure
+    from smappy.uipsf import plots
+    data = convert.read(bead_result(tmp_path, dual))
+    tabs = plots.figures(data)
+    expected = ["data vs model", "localization bias", "pupil", "beads"]
+    assert list(tabs) == expected + (["channel transformation"] if dual else [])
+    for draw, panels, size in tabs.values():
+        figure = Figure(figsize=size, layout="constrained")
+        draw(figure)
+        figure.savefig(tmp_path / "tab.png")
+        page = Figure().subfigures(1, 2)[1]     # the All page hands out subfigures
+        draw(page)
+        assert page.axes
+
+
+def test_the_bias_and_the_transformation_residuals_come_out_in_nanometres(tmp_path):
+    from smappy.uipsf import plots
+    data = convert.read(bead_result(tmp_path, dual=True))
+    x, y, z = plots.localization_bias(data)
+    assert np.allclose(x, 3.0) and np.allclose(y, 0.0) and np.allclose(z, DZ_NM)
+    main, residual = plots.transformation_residuals(data)
+    np.testing.assert_allclose(residual, 0, atol=1e-6)
+
+
+def test_in_situ_data_are_averaged_per_plane_of_the_model(tmp_path):
+    """Molecules fall into the model's planes by their fitted height, as uiPSF bins them."""
+    from smappy.uipsf import plots
+    nz, zoffset = 5, 10.0
+    model = np.ones((nz, 7, 7))
+    z = np.array([10.2, 10.7, 12.5, 14.9])          # planes 0, 0, 2, 4
+    rois = np.stack([np.full((7, 7), v) for v in (1.0, 3.0, 5.0, 7.0)])
+    path = write_result(tmp_path / "insitu.h5",
+                        {"I_model": model, "pos": np.c_[z, np.zeros((4, 2))],
+                         "zoffset": np.array([[zoffset]]), "stagepos": np.array([1.0]),
+                         "cor": np.zeros((4, 2)), "cor_all": np.zeros((9, 2)),
+                         "pupil": np.ones((8, 8), np.complex64)},
+                        params("insitu_zernike"),
+                        {"psf_data": rois, "psf_fit": rois, "image_size": [100, 64, 64]},
+                        {"loc": {"x": np.zeros((4, 1)), "y": np.zeros((4, 1)),
+                                 "z": np.zeros((4, 1))}})
+    data = convert.read(path)
+    (label, measured, modelled, what), = plots.data_and_model(data)
+    np.testing.assert_allclose(measured[:, 0, 0], [2.0, 0.0, 5.0, 0.0, 7.0])
+    assert list(plots.figures(data)) == ["data vs model", "pupil", "emitters"]
+
+
 def test_a_profile_says_what_it_knows_and_refuses_what_it_does_not(tmp_path, monkeypatch):
     shipped = microscopes.load("example")
     assert shipped.dual["layout"] == "up-down mirrored" and shipped.NA == 1.43
@@ -302,6 +394,8 @@ def test_uipsf_learns_simulated_beads_that_spline_3d_then_fits_in_z(tmp_path, mo
         learning=LearningPart(iterations=60)))
     calibration = result.data["calibration"]
     assert load_spline_calibration(calibration).psf.shape[1] == 21
+    assert [f.name for f in result.figures()] == ["data vs model", "localization bias",
+                                                  "pupil", "beads"]
     frames, truth = camera_frames(300, seed=3, astigmatism=ASTIGMATISM,
                                   labelling=LabellingSettings(efficiency=0.1))
     tifffile.imwrite(tmp_path / "frames.tif", frames)
