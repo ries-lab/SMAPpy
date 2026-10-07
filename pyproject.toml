@@ -122,7 +122,7 @@ where = ["src"]
 # the camera database: a file that is read at run time, so it has to be in the
 # wheel and not only in the checkout
 # and the simulator's built-in structures, likewise
-"smappy" = ["data/*.json", "data/structures/*.yaml"]
+"smappy" = ["data/*.json", "data/structures/*.yaml", "data/microscopes/*.yaml"]
 # the plugins' pages, read by the Help window (`smappy.docs`), one folder per
 # level of the menu tree
 "smappy.plugins" = ["*.chain.yaml", "docs/*.md", "docs/*/*.md", "docs/*/*/*.md", "docs/*/*/*/*.md"]

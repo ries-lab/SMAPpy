@@ -1721,6 +1721,82 @@ Left out for now: a non-flat background, the precision from a spline PSF's
 CRLB (SMAP has it) rather than Mortensen's, and using a loaded table as the
 structure.
 
+## uiPSF calibrations
+
+`Localize/uiPSF calibration` (`smappy.uipsf`) has uiPSF learn a PSF model
+from bead stacks or blinking molecules and saves it as an ordinary spline
+calibration.  It is a plugin of its own, not a mode of the bead calibration
+window: uiPSF is optional and external, and the duplication (reading stacks,
+saving) is the price of keeping it out of that window.
+
+* **A process of its own.**  uiPSF pins its own TensorFlow, so it runs under
+  the interpreter of its own environment (`runner.find_python`: the
+  plugin's setting, `uipsf_python` in the config, `$SMAPPY_UIPSF_PYTHON`,
+  else this Python if it has `psflearning`), as `uipsf/worker.py`, which
+  imports nothing of smappy's.  The two talk through a job folder
+  (`images.npy`, `job.json`) and tagged lines on stdout; uiPSF's tqdm bars
+  are passed on, thinned to one per stage or five seconds.  Nothing in
+  smappy imports TensorFlow.
+* **smappy reads the data, not uiPSF.**  Camera to photons, the stacks' z
+  from Micro-Manager, the split of a two-channel camera
+  (`prepare.Split`): all as smappy's own calibration and fitter do them,
+  and uiPSF's `prep_data` gets arrays.  This is also what makes the channel
+  transformation recoverable: the cut is known exactly, so uiPSF's `T`
+  (main (y, x, 1) - imgcenter, right-multiplied, into the secondary's
+  flipped array) can be taken back to chip pixels and refitted as the
+  projective secondary -> main map `dualfit` reads.
+* **Two things smappy does for uiPSF's bead finder.**  It subtracts each
+  stack's median: uiPSF's threshold is relative to the brightest maximum
+  with the background in, and simulated two-colour beads (a background a
+  fifth of the peak) lost 15 of 18 beads to spurious maxima.  And it
+  measures the shift between the channels by cross-correlating their
+  projections (`prepare.channel_shift`), which `worker.py` sets as the
+  multi-channel data's `shiftxy` before uiPSF pairs the beads: uiPSF's own
+  guess, from bead coordinates, took the neighbour on a 30 px grid of beads
+  and paired one bead.  It is set from the worker, on uiPSF's class, rather
+  than by a new uiPSF parameter, so that uiPSF's main stays as it is.
+* **Voxels, not uiPSF's spline.**  uiPSF's `locres/coeff` is normalised to
+  the median plane sum after subtracting the minimum; the fitter's photons
+  assume the brightest plane sums to one.  `res/I_model` is clipped,
+  normalised and splined exactly as `_single_model` /
+  `positive_pair_models` do (two channels jointly, the split from uiPSF's
+  per-channel intensities), so a fit cannot tell the calibrations apart.
+* **z.**  A bead model is uiPSF's `Zrange`, centred on the pupil focus, in
+  stack order: smappy's convention as is (checked: smappy's own calibration
+  of the same simulated beads has the same astigmatism against index).  An
+  in situ model's planes are heights above the coverslip, the other way up
+  (uiPSF itself seeds an in situ run from a bead file's `I_model_reverse`):
+  reversed, with z = 0 at `stagepos * n_med / n_imm`.
+* **Measured** on simulated astigmatic beads (2 stacks, 41 planes, 18 beads,
+  4 CPU cores, uiPSF 100 iterations): 3 minutes; Spline 3D with the result
+  fits simulated frames with z slope 1.03, intercept 2 nm (smappy's own
+  calibration: 1.00).  Frames drawn with that uiPSF model and fitted with
+  it: slope 1.00, photons 1.00.
+* **In situ is not validated.**  On frames drawn with a physical (uiPSF
+  bead) PSF, 3000 frames, two rounds (12 minutes), the in situ model had
+  the right sign and zero but its z ran 0.76 of the truth, with photons 10%
+  high; plane by plane it matches the true PSF at about 1.3 times the
+  height.  Started from Noll 6 instead of 5 it converged to a model whose z
+  ran backwards.  The conversion is not the cause (a hand-written in situ
+  file converts exactly, tests/test_uipsf.py); whether this is uiPSF on
+  real data or the simulation (a demo structure only +-300 nm deep) needs
+  real data with a bead calibration beside it.
+* **uiPSF on current numpy and TensorFlow.**  uiPSF's main pinned
+  TensorFlow 2.9 / Python 3.7, which has no Apple-silicon build.
+  ries-lab/uiPSF#17 makes it run on numpy 2 and TensorFlow
+  2.21 (hdfdict replaced, tkinter dropped, NEP 50 dtype casts), tried with
+  Python 3.12 on Linux, and is meant to leave main's users where they were:
+  its `setup.py` still installs TensorFlow 2.9.1 / tensorflow-probability
+  0.17 on Python 3.7 and keeps native Windows on Python 3.8-3.10 below
+  TensorFlow 2.11 (the last with its GPU support) and numpy below 1.24;
+  only elsewhere does it allow current TensorFlow.  On the old stack
+  (TensorFlow 2.9.1, tensorflow-probability 0.17, numpy 1.23.5; Python 3.9,
+  as no 3.7 could be installed here) main and #17's branch learnt the same
+  jobs -- one-channel beads, two-channel beads, in situ, 15 iterations each,
+  driven by `worker.py` -- with every array of the result bit-identical, and
+  `io.h5.load` (hdfdict on main, h5py on the branch) read them back alike.
+  The worker drives uiPSF from before #17 as well.
+
 ## Open questions
 
 * **Pages for what is not a plugin.**  Every plugin has a page behind its ?
