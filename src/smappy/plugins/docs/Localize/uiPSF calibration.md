@@ -71,17 +71,17 @@ terminal (on Windows, the Anaconda Prompt):
 ```
 conda create -n uipsf python=3.12
 conda activate uipsf
-git clone --branch claude/friendly-cerf-qt2sfj https://github.com/ries-lab/uiPSF
+git clone https://github.com/ries-lab/uiPSF
 pip install -e uiPSF
 ```
 
-The last line installs uiPSF with TensorFlow and everything else it needs.
-For a new environment it has to be this branch of uiPSF: its main branch
-needs Python 3.7 and TensorFlow 2.9, which do not run on current Macs or with
-current numpy.  An environment already made from uiPSF's main branch, with
-its old versions, works too (tried on Linux), and there the branch and main
-learn exactly the same PSF.  Without conda,
-`python3.12 -m venv uipsf-env` and that environment's `pip` do the same.
+The last line installs uiPSF with TensorFlow and everything else it needs;
+on Python 3.12 that is a current TensorFlow, which runs on current Macs too.
+uiPSF from before October 2026 needed Python 3.7 and TensorFlow 2.9, which
+do not install there; an environment already made from it works as it is
+(tried on Linux), and the current uiPSF learns exactly the same PSF in it.
+Without conda, `python3.12 -m venv uipsf-env` and that environment's `pip`
+do the same.
 
 **2. Check it.**  Still in that environment:
 

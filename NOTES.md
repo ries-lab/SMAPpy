@@ -1781,9 +1781,9 @@ saving) is the price of keeping it out of that window.
   file converts exactly, tests/test_uipsf.py); whether this is uiPSF on
   real data or the simulation (a demo structure only +-300 nm deep) needs
   real data with a bead calibration beside it.
-* **uiPSF's branch.**  uiPSF's main pins TensorFlow 2.9 / Python 3.7, which
-  has no Apple-silicon build.  The `claude/friendly-cerf-qt2sfj` branch of
-  ries-lab/uiPSF (ries-lab/uiPSF#17) also runs on numpy 2 and TensorFlow
+* **uiPSF on current numpy and TensorFlow.**  uiPSF's main pinned
+  TensorFlow 2.9 / Python 3.7, which has no Apple-silicon build.
+  ries-lab/uiPSF#17 makes it run on numpy 2 and TensorFlow
   2.21 (hdfdict replaced, tkinter dropped, NEP 50 dtype casts), tried with
   Python 3.12 on Linux, and is meant to leave main's users where they were:
   its `setup.py` still installs TensorFlow 2.9.1 / tensorflow-probability
@@ -1791,11 +1791,11 @@ saving) is the price of keeping it out of that window.
   TensorFlow 2.11 (the last with its GPU support) and numpy below 1.24;
   only elsewhere does it allow current TensorFlow.  On the old stack
   (TensorFlow 2.9.1, tensorflow-probability 0.17, numpy 1.23.5; Python 3.9,
-  as no 3.7 could be installed here) main and the branch learnt the same
+  as no 3.7 could be installed here) main and #17's branch learnt the same
   jobs -- one-channel beads, two-channel beads, in situ, 15 iterations each,
   driven by `worker.py` -- with every array of the result bit-identical, and
   `io.h5.load` (hdfdict on main, h5py on the branch) read them back alike.
-  The worker drives an unchanged main as well.
+  The worker drives uiPSF from before #17 as well.
 
 ## Open questions
 
