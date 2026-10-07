@@ -10,7 +10,7 @@ from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (QApplication, QCheckBox, QDialog, QFileDialog, QHBoxLayout,
                                QMessageBox, QPushButton,
                                QLabel, QLineEdit,
-                               QMainWindow, QScrollArea, QTabWidget, QVBoxLayout,
+                               QMainWindow, QMenu, QScrollArea, QTabWidget, QVBoxLayout,
                                QWidget)
 
 from .. import plugins, workspace as workspace_module
@@ -72,6 +72,19 @@ def _keys(standard, fallback: str):
     return unique
 
 
+def _add_menu(parent, title: str, owner: QWidget) -> QMenu:
+    """``parent.addMenu(title)``, but with a menu that Qt owns.
+
+    PySide6 6.10 hands the menu that ``addMenu(str)`` makes to Python, so it
+    is deleted with the last reference to it: the File and Tools menus died
+    when ``__init__`` returned, and the Plugins submenus with
+    ``_fill_plugins_menu``.  A parent keeps it for as long as the window.
+    """
+    menu = QMenu(title, owner)
+    parent.addMenu(menu)
+    return menu
+
+
 def window_shortcuts(window: QWidget, with_quit: bool = True) -> None:
     """Cmd/Ctrl+W closes this window, Cmd/Ctrl+Q quits: on every window."""
     close = QAction("Close window", window, triggered=window.close)
@@ -124,7 +137,7 @@ class ControlWindow(QMainWindow):
         self._ticker = QTimer(self)
         self._ticker.timeout.connect(self._tick)
 
-        menu = self.menuBar().addMenu("File")
+        menu = _add_menu(self.menuBar(), "File", self)
         open_ = self._action(menu, "Open...", QKeySequence.Open, self.open)
         add = self._action(menu, "Add file...", "Ctrl+Shift+O", lambda: self.open(append=True))
         image = self._action(menu, "Open image...", None, self.open_image)
@@ -133,10 +146,10 @@ class ControlWindow(QMainWindow):
         menu.addSeparator()
         self.undo_action = self._action(menu, "Undo", QKeySequence.Undo,
                                         lambda: self.session.undo())
-        self.undo_menu = menu.addMenu("Undo steps")
+        self.undo_menu = _add_menu(menu, "Undo steps", menu)
         self.redo_action = self._action(menu, "Redo", None, lambda: self.session.redo())
         self.redo_action.setShortcuts(_keys(QKeySequence.Redo, "Ctrl+Shift+Z"))
-        self.redo_menu = menu.addMenu("Redo steps")
+        self.redo_menu = _add_menu(menu, "Redo steps", menu)
         self._load_locked = [open_, add, image, save, save_as, self.undo_action,
                              self.redo_action, self.undo_menu.menuAction(),
                              self.redo_menu.menuAction()]
@@ -153,17 +166,17 @@ class ControlWindow(QMainWindow):
         quit_ = self._action(menu, "Quit", None, lambda: QApplication.instance().quit())
         quit_.setShortcuts(_keys(QKeySequence.Quit, "Ctrl+Q"))
         window_shortcuts(self, with_quit=False)
-        view = self.menuBar().addMenu("View")
+        view = _add_menu(self.menuBar(), "View", self)
         self.view3d_window = None
         self.calibration_window = None
         self._action(view, "3D view", "Ctrl+3", self.show_3d)
-        self.plugins_menu = self.menuBar().addMenu("Plugins")
+        self.plugins_menu = _add_menu(self.menuBar(), "Plugins", self)
         self._plugin_windows: dict = {}
         # filled when it is opened, from the scan rather than from imports, so
         # the menu costs nothing at start and a plugin dropped into the folder
         # is in it without a restart
         self.plugins_menu.aboutToShow.connect(self._fill_plugins_menu)
-        tools = self.menuBar().addMenu("Tools")
+        tools = _add_menu(self.menuBar(), "Tools", self)
         self._action(tools, "ROI manager", "Ctrl+R", self._open_manager)
         self._action(tools, "ROI evaluation...", None, self._open_evaluation)
         tools.addSeparator()
@@ -175,7 +188,7 @@ class ControlWindow(QMainWindow):
         tools.addSeparator()
         self.batch_window = None
         self._action(tools, "Batch...", None, self.open_batch)
-        help_ = self.menuBar().addMenu("Help")
+        help_ = _add_menu(self.menuBar(), "Help", self)
         self._action(help_, "Plugin documentation", None, self.show_plugin_docs)
         help_.addSeparator()
         self._action(help_, "Save a bug report...", None, self.save_bug_report)
@@ -485,6 +498,10 @@ class ControlWindow(QMainWindow):
         from .. import plugins as registry
 
         menu = self.plugins_menu
+        # clear() leaves the submenus, which the menu owns: the last show's
+        # would pile up, one tree per opening
+        for old in menu.findChildren(QMenu, options=Qt.FindDirectChildrenOnly):
+            old.deleteLater()
         menu.clear()
         self._action(menu, "Find a plugin...", "Ctrl+Shift+P", self.choose_plugin_window)
         menu.addSeparator()
@@ -494,7 +511,8 @@ class ControlWindow(QMainWindow):
             if path in groups:
                 return groups[path]
             head, _, leaf = path.rpartition("/")
-            groups[path] = group_for(head).addMenu(leaf)
+            parent = group_for(head)
+            groups[path] = _add_menu(parent, leaf, parent)
             return groups[path]
 
         for path, ref in sorted(registry.refs().items()):
