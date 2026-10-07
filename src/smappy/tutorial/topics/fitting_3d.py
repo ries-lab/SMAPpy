@@ -159,8 +159,8 @@ def make(d) -> None:
     d.chapter("The calibration window")
     tools = menu(d, "Tools")
     item = menu_item(d, tools, "Bead calibration")
-    d.shot("Tools, Bead calibration opens its window. The Localize tab has the "
-           "same button.",
+    d.shot("Tools, Bead calibration opens its window. The Localize tab has it "
+           "too, as a section beside the fitters.",
            spot=[item], point=item, click=True, zoom=d.around(tools, 700))
     tools.close()
     control.open_calibration()

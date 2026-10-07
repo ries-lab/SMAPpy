@@ -10,7 +10,7 @@ from dataclasses import asdict, is_dataclass
 from datetime import datetime
 from pathlib import Path
 import numpy as np
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from .filter import LocFilter
 from .group import GROUP_COLUMNS, GroupSettings
@@ -345,6 +345,9 @@ class Session:
         # set by the GUI: what to write into the file's `gui` group.  A session
         # in a script has none, and saves only data.
         self.gui_state_provider: Optional[Callable[[], Dict]] = None
+        # set by the GUI: the windows a plugin may open (`Plugin.window`), by
+        # name, each called with the plugin's settings
+        self.window_openers: Dict[str, Callable[[Any], None]] = {}
         # False in a chain's scratch copy: the chain keeps one record and one
         # undo step for all its steps, so the copy keeps neither (`scratch`)
         self.recording = True

@@ -167,9 +167,11 @@ class ControlWindow(QMainWindow):
         self._action(tools, "ROI manager", "Ctrl+R", self._open_manager)
         self._action(tools, "ROI evaluation...", None, self._open_evaluation)
         tools.addSeparator()
-        self._action(tools, "Bead calibration...", None, self.open_calibration)
-        self._action(tools, "Dual-colour calibration...", None,
-                     lambda: self.open_calibration(dual=True))
+        # the window is also the Localize tab's Bead calibration plugin, which
+        # says which mode to open in; from here it opens as it was left
+        self._action(tools, "Bead calibration...", None, lambda: self.open_calibration())
+        session.window_openers["bead calibration"] = \
+            lambda settings: self.open_calibration(dual=settings.mode == "dual")
         tools.addSeparator()
         self.batch_window = None
         self._action(tools, "Batch...", None, self.open_batch)
@@ -220,11 +222,6 @@ class ControlWindow(QMainWindow):
         box = QWidget()
         row = QHBoxLayout(box)
         row.setContentsMargins(0, 0, 0, 0)
-        button = QPushButton("Bead calibration...")
-        button.setToolTip("build an experimental spline PSF calibration from "
-                          "bead z-stacks; opens its own window")
-        button.clicked.connect(self.open_calibration)
-        row.addWidget(button)
         camera = QPushButton("Camera parameters...")
         camera.setToolTip("what the fit thinks the camera is, and where every "
                           "value came from: this file's tags, the readout mode "
@@ -572,18 +569,20 @@ class ControlWindow(QMainWindow):
                 # whichever entry was picked
                 entry.triggered.connect(lambda checked=False, count=n, run=go: run(count))
 
-    def open_calibration(self, dual: bool = False) -> None:
+    def open_calibration(self, dual: Optional[bool] = None) -> None:
         """The calibration window: bead stacks in, a spline calibration out.
 
         A window of its own, like the 3D viewer, but in this process, so a
-        saved calibration can go straight into the Spline 3D fitter.
+        saved calibration can go straight into the Spline 3D fitter.  ``dual``
+        sets the mode; None leaves it as it was.
         """
         from ..calibrate.qt_gui import CalibrationWindow
         if self.calibration_window is None:
             self.calibration_window = CalibrationWindow(parent=self)
             self.calibration_window.calibrated.connect(self.use_calibration)
-        if dual:
-            self.calibration_window.mode_box.setCurrentText("Dual colour")
+        if dual is not None:
+            self.calibration_window.mode_box.setCurrentText(
+                "Dual colour" if dual else "Single channel")
         self.calibration_window.show()
         self.calibration_window.raise_()
 

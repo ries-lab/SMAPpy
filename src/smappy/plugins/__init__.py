@@ -496,6 +496,13 @@ class Plugin:
     # nobody reads four lines at a time.  The Text button offers the window
     # either way.
     text_window: bool = False
+    # A window of the GUI's that this plugin opens instead of running: the
+    # panel's button becomes *Open* and hands the settings to whatever the
+    # GUI registered under this name (`Session.window_openers`).  For a tool
+    # that is interactive through and through -- the bead calibration, with
+    # its bead table -- and which a form and a Run button cannot be; the
+    # plugin is what lets it sit in a tab, and it imports no Qt to do so.
+    window: Optional[str] = None
 
     def run(self, ctx: Context, settings) -> Result:
         """Do the work.

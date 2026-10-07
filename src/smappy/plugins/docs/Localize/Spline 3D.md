@@ -27,7 +27,7 @@ What it needs:
 
 * **A calibration** of this microscope, in this configuration: a z-stack of
   fluorescent beads on a coverslip, turned into a model with
-  **Tools > Bead calibration...** (the button of the same name on the
+  **Tools > Bead calibration...** (the *Bead calibration* section of the
   Localize tab opens it too; saving the calibration puts it into this
   plugin's *calibration* field).  A SMAP `_3dcal.mat` works as well.  Take
   the beads with the same objective, lens, filters, camera and camera

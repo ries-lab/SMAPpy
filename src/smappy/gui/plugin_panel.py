@@ -160,7 +160,17 @@ class PluginPanel(QWidget):
         shortcut = QShortcut(QKeySequence.HelpContents, self, self.show_help)
         shortcut.setContext(Qt.WidgetWithChildrenShortcut)
 
-        self.run_button.clicked.connect(self.run)
+        if self.plugin.window:
+            # a launcher (`Plugin.window`): nothing runs here, so nothing to
+            # plot or read; the window it opens is the result
+            self.run_button.setText("Open")
+            self.run_button.setToolTip("open the window, set up as above")
+            self.plot_button.hide()
+            self.text_button.hide()
+            self.output.hide()
+            self.run_button.clicked.connect(self.open_window)
+        else:
+            self.run_button.clicked.connect(self.run)
         self.plot_button.clicked.connect(self.plot)
         self.text_button.clicked.connect(self.show_text)
         self._live_running = False
@@ -293,6 +303,20 @@ class PluginPanel(QWidget):
 
     def run(self) -> None:
         self._start("run", "running...")
+
+    def open_window(self) -> None:
+        """Hand the settings to the window the plugin names (`Plugin.window`)."""
+        try:
+            settings = self.form.value()
+        except ValueError as e:
+            self.status.setText(str(e))
+            return
+        opener = self.session.window_openers.get(self.plugin.window)
+        if opener is None:
+            self.status.setText(f"no {self.plugin.window} window in this program")
+            return
+        self.status.setText("")
+        opener(settings)
 
     def _start(self, job: str, message: str, **kwargs) -> None:
         try:

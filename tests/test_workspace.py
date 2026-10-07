@@ -168,8 +168,30 @@ def test_the_window_opens_the_shipped_tabs(window):
         ["File", "Localize", "Render", "Analysis", "ROI"]
     localize = tab_named(window, "Localize")
     assert [s.title for s in localize.sections] == \
-        ["Gaussian 2D", "Gaussian 2D 2C", "Spline 3D", "Spline 3D 2C",
-         "uiPSF calibration"]
+        ["Bead calibration", "Gaussian 2D", "Gaussian 2D 2C", "Spline 3D",
+         "Spline 3D 2C", "uiPSF calibration"]
+
+
+def test_the_bead_calibration_section_opens_the_window_in_its_mode(window):
+    localize = tab_named(window, "Localize")
+    instance = next(i for i in localize.tab.instances
+                    if i.plugin == "Localize/Bead calibration")
+    localize.open_section(instance.id)
+    panel = localize.slots[instance.id].panel
+    assert panel.run_button.text() == "Open"
+    panel.form.set_values({"mode": "dual"})
+    panel.run_button.click()
+    assert window.calibration_window.is_dual
+    panel.form.set_values({"mode": "single"})
+    panel.run_button.click()
+    assert not window.calibration_window.is_dual
+
+
+def test_the_tools_menu_has_the_bead_calibration_once(window):
+    from PySide6.QtGui import QAction
+    titles = [a.text() for a in window.findChildren(QAction)
+              if "calibration" in a.text().lower()]
+    assert titles == ["Bead calibration..."]
 
 
 def test_opening_a_section_is_what_imports_the_plugin(window):
