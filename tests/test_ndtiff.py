@@ -252,3 +252,13 @@ def test_a_watch_whose_writer_has_finished_reads_the_rest_and_ends(tmp_path):
                                         settings=WatchSettings(poll=0.01, timeout=30))])
     assert np.array_equal(read, frames)
     assert time.monotonic() - t0 < 5          # not the 30 s timeout
+
+
+def test_a_dataset_kept_under_full_resolution_is_found_from_the_folder_above(tmp_path):
+    """ndstorage writes a dataset that may have a pyramid into
+    ``Full resolution/``; MicroClaw names the folder above it."""
+    frames = stack()
+    write_ndtiff(tmp_path / "acq" / "Full resolution", frames)
+    assert is_ndtiff(tmp_path / "acq")
+    source = open_ndtiff(tmp_path / "acq")
+    assert np.array_equal(source.frame(3), frames[3])

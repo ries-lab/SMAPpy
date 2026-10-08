@@ -225,7 +225,8 @@ def _looks_like_ndtiff(directory: Path) -> bool:
     NDTiffStorage writes its stack file before the index, so between the two
     there is a moment that would otherwise be read as a Micro-Manager series.
     """
-    return directory.is_dir() and any(directory.glob("*NDTiffStack*.tif"))
+    return directory.is_dir() and (any(directory.glob("*NDTiffStack*.tif")) or
+                                   any(directory.glob("Full resolution/*NDTiffStack*.tif")))
 
 
 def _read_new_pages(path: Path, page_i: int, hold_last: bool,

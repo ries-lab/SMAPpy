@@ -324,9 +324,15 @@ def open_ndtiff(path) -> NDTiffSource:
     return source
 
 
+# where ndstorage keeps the full-resolution images of a dataset that has (or
+# could have) a pyramid; MicroClaw's acquisitions are written this way, and
+# the folder a user or a caller names is the one above it
+FULL_RESOLUTION = "Full resolution"
+
+
 def _dataset_folder(path) -> Optional[Path]:
     path = Path(path)
-    for folder in (path, path.parent):
+    for folder in (path, path / FULL_RESOLUTION, path.parent):
         if (folder / INDEX_NAME).is_file():
             return folder
     return None
