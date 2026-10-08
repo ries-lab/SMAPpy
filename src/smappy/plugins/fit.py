@@ -690,7 +690,7 @@ class _FitPlugin(Plugin):
         src = settings.source
         if not src.path:
             raise ValueError("choose a source file")
-        source = _open(src, watch=src.live)
+        source = _open(src, watch=src.live, stop_event=ctx.stop)
         camera = settings.camera.resolve(source)
         fit = settings.fit
         finder = self.finder(settings, camera)
@@ -702,14 +702,18 @@ class _FitPlugin(Plugin):
         tags = FrameTags()
         if src.live:
             from ..io.watch import WatchSettings, watch_stack
+            # given `ctx.writer_finished`, the writer's word ends the watch
+            # and *stop after* is never consulted (`smappy.io.watch`)
             blocks = watch_stack(src.path, chunk=src.chunk, start=src.start, stop=src.stop,
                                  settings=WatchSettings(timeout=src.live_timeout),
-                                 tags=tags)
+                                 tags=tags, stop_event=ctx.stop,
+                                 finished=ctx.writer_finished, idle_blocks=True)
             total = None                 # a growing stack has no end to count to
         else:
             stop = min(src.stop, source.n_frames) if src.stop else None
             source.tags = tags
-            blocks = source.frames(chunk=src.chunk, start=src.start, stop=stop)
+            blocks = _until(source.frames(chunk=src.chunk, start=src.start, stop=stop),
+                            ctx.stop)
             total = max((stop if stop is not None else source.n_frames) - src.start, 0)
         # the frames kept with the table: counted as they go past, so the
         # stack is read once, for the fit
@@ -759,7 +763,8 @@ class _FitPlugin(Plugin):
         try:
             from ..pipeline import drive
             engine = self.engine(settings, camera, finder, model)
-            drive(engine, blocks, sink=sink, progress=report, read_ahead=2)
+            drive(engine, blocks, sink=sink, progress=report, read_ahead=2,
+                  flush_seconds=LIVE_FLUSH_SECONDS if src.live else None)
             record["frame_tags"] = tags.table()
             if writer is not None:
                 writer.set_metadata({"stats": dict(engine.stats),
@@ -775,11 +780,17 @@ class _FitPlugin(Plugin):
                 collected.metadata[key] = record[key]
         seconds = time.perf_counter() - started
         rate = stats["frames"] / seconds if seconds > 0 else 0.0
+        stopped = ctx.stop is not None and ctx.stop.is_set()
         text = (f"{stats['localizations']} localizations from {stats['frames']} frames"
                 f" in {seconds:.1f} s ({rate:,.1f} frames/s)"
+                + (", stopped early" if stopped else "")
                 + (f", saved to {out}" if out else ""))
 
-        finished = self.finish(ctx, settings, collected.compact())
+        # A stopped run keeps the raw fit and finishes nothing: whoever asked
+        # wants the file now (MicroClaw allows ten seconds), and a drift
+        # correction of part of an acquisition is not one anybody asked for.
+        finished = (Finished(collected.compact()) if stopped
+                    else self.finish(ctx, settings, collected.compact()))
         # the table in hand says what it was fitted from, as its file does: a
         # comparison with a simulation's truth finds the recipe by it
         finished.locs.metadata.setdefault("source", str(src.path))
@@ -816,15 +827,29 @@ class _FitPlugin(Plugin):
             if shown:
                 text = "\n".join([text, summary(record["frame_tags"], shown)])
         return Result(locs=finished.locs, text=text, plots=plots,
-                      data={"stats": stats, "path": out,
+                      data={"stats": stats, "path": out, "stopped": stopped,
                             "images": [raw] if raw is not None else []},
                       settings=settings)
 
 
-def _open(src: SourceSettings, watch: bool):
+# how often a live fit fits what it has buffered, whether or not the buffer is
+# full: the interval at which a sparse acquisition appears on screen
+LIVE_FLUSH_SECONDS = 5.0
+
+
+def _until(blocks, stop_event):
+    """``blocks`` until ``stop_event`` is set; all of them without one."""
+    for item in blocks:
+        if stop_event is not None and stop_event.is_set():
+            return
+        yield item
+
+
+def _open(src: SourceSettings, watch: bool, stop_event=None):
     if watch:
         from ..io.watch import WatchSettings, open_growing_stack
-        return open_growing_stack(src.path, WatchSettings(timeout=src.live_timeout))
+        return open_growing_stack(src.path, WatchSettings(timeout=src.live_timeout),
+                                  stop_event=stop_event)
     from ..io.tiff import open_stack
     return open_stack(src.path)
 

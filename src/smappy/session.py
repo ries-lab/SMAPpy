@@ -315,6 +315,11 @@ class Session:
     def __init__(self, locs: Optional[Localizations] = None, path=None):
         self.locs = locs if locs is not None else Localizations({}, {})
         self.path: Optional[Path] = Path(path) if path else None
+        # Files `save` refuses to write over.  A fit run for MicroClaw hands
+        # its file on as the job's result, with a digest taken there and then,
+        # and the window stays open on it: a Ctrl+S afterwards would change
+        # what the record vouches for.  The session's work goes to a new file.
+        self.protected: set = set()
         self.layers: List[Layer] = [Layer(self.locs)]
         self.roi: Optional[Region] = None          # the drawn 2D ROI (regions.py)
         self._rois = None                          # the ROI manager's project
@@ -578,6 +583,13 @@ class Session:
     def first_locs_layer(self) -> int:
         return next((i for i, l in enumerate(self.layers) if not l.is_image), 0)
 
+    def is_protected(self, path) -> bool:
+        """Whether ``path`` is one of the files `save` will not write over."""
+        if not path:
+            return False
+        target = Path(path).resolve()
+        return any(target == Path(p).resolve() for p in self.protected)
+
     def save(self, path=None, gui_state: Optional[bool] = None) -> Path:
         """Write the table, its history, its ROIs and -- optionally -- the GUI.
 
@@ -588,6 +600,9 @@ class Session:
         from .io.formats import writer_for
         from .io.hdf5 import save_gui_state, save_localizations, save_results
         path = Path(path or self.path)
+        if self.is_protected(path):
+            raise ValueError(f"{path.name} is kept as the fit wrote it: "
+                             f"save under another name")
         # before anything is written: the path is the open file's by default,
         # and a SMAP _sml.mat, a csv or a MINFLUX export is not a file this
         # writes -- it used to be overwritten with HDF5 under its own name

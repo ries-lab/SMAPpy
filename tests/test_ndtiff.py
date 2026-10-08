@@ -206,3 +206,59 @@ def test_a_micro_manager_tiff_is_not_mistaken_for_ndtiff(tmp_path):
     source = open_growing_stack(directory, WatchSettings(poll=0.01, timeout=0.2,
                                                           appear_timeout=1.0))
     assert type(source).__name__ == "ImageSource"
+
+
+def test_a_pause_does_not_end_a_watch_that_waits_for_the_writer(tmp_path):
+    """With ``finished`` given, idle time is not the end of the acquisition.
+
+    The writer pauses for several timeouts -- a refocus, a time-lapse
+    interval -- and then writes more; only setting the event ends the watch,
+    and the frames written just before it are still read.
+    """
+    from smappy.io.watch import WatchSettings
+
+    frames = stack(n=6)
+    folder = write_ndtiff(tmp_path / "ds", frames[:2])
+    source = open_ndtiff(folder)
+    finished = threading.Event()
+    settings = WatchSettings(poll=0.02, timeout=0.1)
+
+    def microscope():
+        time.sleep(0.5)                       # five timeouts with nothing new
+        write_ndtiff(folder, frames[:4])
+        time.sleep(0.3)
+        write_ndtiff(folder, frames)
+        finished.set()                        # straight after the last frame
+
+    writer = threading.Thread(target=microscope)
+    writer.start()
+    read = np.concatenate([block for _, block in
+                           source.watch(chunk=2, settings=settings,
+                                        finished=finished)])
+    writer.join()
+    assert np.array_equal(read, frames)
+
+
+def test_a_watch_whose_writer_has_finished_reads_the_rest_and_ends(tmp_path):
+    from smappy.io.watch import WatchSettings
+
+    frames = stack(n=5)
+    source = open_ndtiff(write_ndtiff(tmp_path / "ds", frames))
+    finished = threading.Event()
+    finished.set()
+    t0 = time.monotonic()
+    read = np.concatenate([block for _, block in
+                           source.watch(chunk=2, finished=finished,
+                                        settings=WatchSettings(poll=0.01, timeout=30))])
+    assert np.array_equal(read, frames)
+    assert time.monotonic() - t0 < 5          # not the 30 s timeout
+
+
+def test_a_dataset_kept_under_full_resolution_is_found_from_the_folder_above(tmp_path):
+    """ndstorage writes a dataset that may have a pyramid into
+    ``Full resolution/``; MicroClaw names the folder above it."""
+    frames = stack()
+    write_ndtiff(tmp_path / "acq" / "Full resolution", frames)
+    assert is_ndtiff(tmp_path / "acq")
+    source = open_ndtiff(tmp_path / "acq")
+    assert np.array_equal(source.frame(3), frames[3])

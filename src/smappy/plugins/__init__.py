@@ -259,7 +259,8 @@ class Context:
                  stream: Optional[Callable[[str, Any], None]] = None,
                  site=None, site_table: Optional[Sequence[Dict[str, Any]]] = None,
                  rois=None, grouping: Optional[str] = None,
-                 evaluations: Sequence[Tuple[str, str]] = ()):
+                 evaluations: Sequence[Tuple[str, str]] = (),
+                 stop=None, writer_finished=None):
         self.session = session
         self.layer = layer
         # "grouped", "ungrouped", or None for each layer's own: what a chain
@@ -276,6 +277,14 @@ class Context:
         # chain's results unless told otherwise (`roi.choose_evaluation`)
         self.evaluations = list(evaluations)
         self._rois = rois                   # a project without a session
+        # Two `threading.Event`s for a run that lasts as long as an
+        # acquisition, set from another thread; None when nobody can.
+        # `stop` asks it to end early and keep what it has -- a fit then
+        # closes its file and returns the table so far.  `writer_finished`
+        # says a live source is complete, which ends the watch on it after
+        # one more read instead of after an idle timeout (`smappy.io.watch`).
+        self.stop = stop
+        self.writer_finished = writer_finished
         self._progress = progress
         self._stream = stream
         if locs is None:
@@ -347,7 +356,8 @@ class Context:
                        selection=self.selection if selection is None else selection,
                        layer=self.layer, progress=self._progress,
                        stream=self._stream, site=site, site_table=self.site_table,
-                       rois=self._rois, grouping=self.grouping)
+                       rois=self._rois, grouping=self.grouping,
+                       stop=self.stop, writer_finished=self.writer_finished)
 
 
 @dataclass
