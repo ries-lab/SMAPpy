@@ -750,8 +750,10 @@ nothing would appear in the meantime.  The timer is checked once per block, so
 during a pause the watch sends empty blocks (`idle_blocks`) for it to be checked
 on -- without them, what was buffered before a pause stayed off the screen
 until the pause was over.  The GUI's live fit flushes every 5 s
-(`LIVE_FLUSH_SECONDS`); `smappy.live.LiveFit` still has its own loop and does
-not send idle blocks yet.
+(`LIVE_FLUSH_SECONDS`), and `smappy-live` every `LiveSettings.flush_seconds`
+(5 s, `--flush`): `live_view` asks its source for idle blocks too (a
+`QueueSource` sends them as the file watchers do), and `LiveFit`, which keeps
+its own loop for its stop event, skips them as `drive` does.
 
 Checked against the offline path on 300 frames of the astigmatic dataset,
 replayed frame by frame into a growing two-file series: same 28724

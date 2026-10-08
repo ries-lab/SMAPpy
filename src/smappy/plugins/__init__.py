@@ -164,6 +164,19 @@ def settings_from(settings_cls: Optional[type], values: Optional[Dict[str, Any]]
     """
     if settings_cls is None or not dataclasses.is_dataclass(settings_cls):
         return None
+    return _from_specs(settings_cls, param_specs(settings_cls), values)
+
+
+def _from_specs(settings_cls: type, specs: Dict[str, "ParamSpec"],
+                values: Optional[Dict[str, Any]]):
+    """`settings_from` over specs whose defaults are already resolved.
+
+    A part's defaults are its *parent's* -- `GaussianFitSettings` declares
+    ``fit = FitSettings(output_unit="nm")`` -- and `param_specs` carries them
+    down; building a part from its own class instead quietly reset them, so
+    the form and a script made different settings from the same values (a
+    fit from `settings_from` came out in pixels).
+    """
     nested: Dict[str, Dict[str, Any]] = {}
     flat: Dict[str, Any] = {}
     for key, value in (values or {}).items():
@@ -173,17 +186,18 @@ def settings_from(settings_cls: Optional[type], values: Optional[Dict[str, Any]]
         else:
             flat[head] = value
     kwargs = {}
-    specs = param_specs(settings_cls)
     for name, spec in specs.items():
         if spec.children is not None:
             if isinstance(flat.get(name), dict):
                 # the nested spelling; a dotted key given as well wins
                 nested[name] = {**flat[name], **nested.get(name, {})}
-            child = settings_from(spec.type, nested.get(name))
+            child = _from_specs(spec.type, spec.children, nested.get(name))
             if child is not None:
                 kwargs[name] = child
         elif name in flat:
             kwargs[name] = flat[name]
+        elif spec.default is not None:
+            kwargs[name] = spec.default     # the resolved default, the parent's
     try:
         return settings_cls(**kwargs)
     except (TypeError, ValueError):
