@@ -231,6 +231,26 @@ dark frames) and combines each run into one row using the per-column rules from
 * **Blocks are linked separately** rather than by SMAP's trick of zeroing the
   frame at each boundary, which leaves the array no longer sorted by frame and
   lets a group start in one block and search into the next.
+* **Linking by precision** is SMAP's `locprec` mode (`connectsinglesigma.c`),
+  `GroupSettings(link="precision")`: a localization joins when its distance
+  from the running position satisfies `r^2 < k^2 (s_h^2 + s^2)`, held between
+  `dx_min` and `dx_max` (10 and 150 nm), with `k = 2.5` as in SMAP.  Two
+  departures.  SMAP takes *the seed's* precision for both terms -- `lph` and
+  `dxsigma[thisentry]` are the same localization's, and the test one's never
+  enters -- so a bright seed held a dim trace to its own precision; here `s`
+  is the candidate's and `s_h` the running position's, carried through the
+  walk's own mean as `(s_h^2 + s^2)/4`.  And the bounds clamp the distance,
+  not each term: SMAP floors every `2.5 s` at `dx_min` first, so its smallest
+  radius was `sqrt(2) dx_min`.  With the two precisions right,
+  `r^2/(s_h^2 + s^2)` is chi-squared with two degrees of freedom, so `k = 2.5`
+  keeps 95.6% of a blink's links -- and cuts the other 4.4%, which a fixed box
+  wide enough does not.  A localization with no precision (NaN) links to
+  `dx_max`; a table with no precision column falls back to the box, with a
+  warning, because every file is grouped as it opens.  The chunked linker
+  carries the precision across its seams too, but a head re-seeded past a
+  seam starts with its own precision rather than the trace's running one, so
+  it is a little less exact there than for the box (0.996 against 0.999 on
+  the all-seam test table).
 * **The error of a summed quantity adds in quadrature.**  This is the rule that
   keeps shot noise consistent: with `e_i = sqrt(N_i)`, `sqrt(sum(e_i^2))` is
   `sqrt(sum(N_i))` exactly -- the shot noise of the summed photons.  SMAP
