@@ -235,3 +235,15 @@ def test_live_view_takes_a_queue_source(tmp_path):
         plt.close(viewer.figure)
 
     assert len(load_localizations(out)) == 6
+
+
+def test_idle_blocks_are_empty_and_say_where_the_next_frame_goes():
+    """While nothing is pushed, a fit still gets a block to flush its buffer on."""
+    source = queue_source(shape=SHAPE)
+    source.push(np.stack([frame(0), frame(1)]))
+    blocks = read(source, chunk=8, idle_blocks=True)    # ends on the timeout
+    assert (blocks[0][0], len(blocks[0][1])) == (0, 2)
+    idle = blocks[1:]
+    assert len(idle) > 5
+    assert all(start == 2 and block.shape == (0, *SHAPE)
+               and block.dtype == np.uint16 for start, block in idle)
