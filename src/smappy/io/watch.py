@@ -7,6 +7,15 @@ again, and stop once nothing new has appeared for a while -- which is how an
 acquisition ends, since Micro-Manager does not announce it and the frame count
 in the summary metadata is what was *planned*, not what was written.
 
+Unless somebody does announce it.  A program that drives the microscope
+(MicroClaw) knows when the writer has finished, and a pause in an acquisition
+-- a refocus, a laser being changed, a long time-lapse interval -- is then not
+an end: the ``finished`` event replaces the idle timeout altogether.  While it
+is unset the watch waits however long it takes; once it is set, one more pass
+reads everything there is, the held-back last page included, and the stream
+ends.  Raising the timeout instead would only move the pause that ends a fit
+too early.
+
 Three things make this safe against a writer working on the same file:
 
 * **The last page of the file being written is held back** until another page
@@ -48,8 +57,8 @@ class WatchSettings:
 
 def watch_stack(path, chunk: int = 100, settings: Optional[WatchSettings] = None,
                 start: int = 0, stop: Optional[int] = None,
-                stop_event=None, on_wait=None, tags=None
-                ) -> Iterator[Tuple[int, np.ndarray]]:
+                stop_event=None, on_wait=None, tags=None, finished=None,
+                idle_blocks: bool = False) -> Iterator[Tuple[int, np.ndarray]]:
     """Yield ``(first_frame, block)`` from an acquisition as it is written.
 
     Blocks are ``chunk`` frames, except that whatever has accumulated is handed
@@ -61,13 +70,21 @@ def watch_stack(path, chunk: int = 100, settings: Optional[WatchSettings] = None
     called on each idle poll with the time since the last new frame, for a
     progress line.  ``tags`` is a `smappy.frametags.FrameTags` that is handed
     each frame's metadata as it is read.
+
+    ``finished``, a :class:`threading.Event`, is set once the writer is known
+    to be done; given one, idle time never ends the stream (see the module
+    docstring).  ``idle_blocks`` yields an empty block on every idle poll, so
+    that whoever consumes the stream gets to act while nothing arrives -- a
+    fit holding thousands of ROIs in its buffer fits them during a pause,
+    rather than at the next frame, which may be minutes away.
     """
     settings = settings or WatchSettings()
     ndtiff = _wait_for_ndtiff(path, settings, stop_event)
     if ndtiff is not None:
         ndtiff.tags = tags
         yield from ndtiff.watch(chunk=chunk, settings=settings, start=start,
-                                stop=stop, stop_event=stop_event, on_wait=on_wait)
+                                stop=stop, stop_event=stop_event, on_wait=on_wait,
+                                finished=finished, idle_blocks=idle_blocks)
         return
 
     first = _wait_for_file(path, settings, stop_event)
@@ -84,8 +101,13 @@ def watch_stack(path, chunk: int = 100, settings: Optional[WatchSettings] = None
     # the acquisition has clearly ended nothing is going to follow it, so the
     # timeout triggers one more pass that does read it
     final = False
+    empty = None               # an idle block, once the frame shape is known
 
     while not _stopped(stop_event):
+        # read before the pages are: a frame written just before the writer
+        # said it was done is then still in this pass
+        if _stopped(finished):
+            final = True
         files = _series_files(first)
         arrived = 0
 
@@ -96,6 +118,8 @@ def watch_stack(path, chunk: int = 100, settings: Optional[WatchSettings] = None
             images, page_i, exhausted = _read_new_pages(files[file_i], page_i,
                                                         hold_last=hold,
                                                         metadata=planes)
+            if images and empty is None:
+                empty = np.empty((0, *images[0].shape), images[0].dtype)
             for k, image in enumerate(images):
                 if (stop is not None and index >= stop) or _stopped(stop_event):
                     done = True
@@ -127,11 +151,13 @@ def watch_stack(path, chunk: int = 100, settings: Optional[WatchSettings] = None
             break
 
         waited = time.monotonic() - last_new
-        if waited >= settings.timeout:
+        if finished is None and waited >= settings.timeout:
             final = True
             continue
         if on_wait is not None:
             on_wait(waited)
+        if idle_blocks and empty is not None:
+            yield buffer_start, empty
         _sleep(settings.poll, stop_event)
 
 
@@ -149,6 +175,8 @@ def open_growing_stack(path, settings: Optional[WatchSettings] = None,
         return ndtiff
 
     first = _wait_for_file(path, settings, stop_event)
+    if _stopped(stop_event):
+        raise InterruptedError(f"stopped while waiting for {path} to appear")
     if first is None:
         raise TimeoutError(f"no readable TIFF appeared at {path} within "
                            f"{settings.appear_timeout} s")

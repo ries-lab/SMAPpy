@@ -62,6 +62,10 @@ class PluginPanel(QWidget):
     # is what keeps `_on_progress` and `_on_stream` off that thread.
     progressed = Signal(str)
     streamed = Signal(str, object)
+    # ("done", Result) or ("failed", traceback) once a run or preview is over
+    # and the panel has dealt with it: what a caller that started the run
+    # itself (`gui.live_session`) waits for
+    ended = Signal(str, object)
 
     def __init__(self, plugin_cls: Type[Plugin], session: Session, parent=None):
         super().__init__(parent)
@@ -318,16 +322,26 @@ class PluginPanel(QWidget):
         self.status.setText("")
         opener(settings)
 
-    def _start(self, job: str, message: str, **kwargs) -> None:
+    def start_run(self, ask: bool = True, **context) -> bool:
+        """Run with the form's settings; whether the run started.
+
+        ``context`` goes into the run's `Context` -- `stop` and
+        `writer_finished` for a run something else controls -- and ``ask=False``
+        skips the preflight question, for a run nobody is there to answer.
+        """
+        return self._start("run", "running...", context=context, ask=ask)
+
+    def _start(self, job: str, message: str, context=None, ask: bool = True,
+               **kwargs) -> bool:
         try:
             settings = self.form.value()
         except ValueError as e:
             self.status.setText(f"bad value: {e}")
-            return
-        if job == "run":
+            return False
+        if job == "run" and ask:
             go, chosen = self._preflight(settings)
             if not go:
-                return
+                return False
             if chosen is not settings:
                 # a preflight choice may hand back other settings than the
                 # form's; showing them is what keeps the run from being a
@@ -338,7 +352,8 @@ class PluginPanel(QWidget):
         # selection now, so the worker cannot race a live fit rebinding them
         context = self.session.context(progress=self.progressed.emit,
                                        stream=self.streamed.emit,
-                                       grouping=self.plugin.grouping)
+                                       grouping=self.plugin.grouping,
+                                       **(context or {}))
         self._job = job
         for button in self._buttons():
             button.setEnabled(False)
@@ -356,6 +371,7 @@ class PluginPanel(QWidget):
         for sig in (self._worker.done, self._worker.failed):
             sig.connect(self._thread.quit)
         self._thread.start()
+        return True
 
     def _preflight(self, settings):
         """Ask the plugin whether this run wants agreeing to first.
@@ -514,6 +530,7 @@ class PluginPanel(QWidget):
             "show the plugin's result figure (the drift curves, say)")
         if self._job == "preview" and result.figures():
             self.plot(raise_window=not live)
+        self.ended.emit("done", result)
 
     def _on_failed(self, text: str) -> None:
         live, self._live_running = self._live_running, False
@@ -526,9 +543,11 @@ class PluginPanel(QWidget):
             # few localizations in it, which is not a failure to report: the
             # next position will ask again
             self.status.setText("live: " + text.strip().splitlines()[-1][:60])
+            self.ended.emit("failed", text)
             return
         self.output.appendPlainText(text.strip().splitlines()[-1])
         self.status.setText("failed")
+        self.ended.emit("failed", text)
 
     def show_text(self) -> None:
         """What the run reported, in a window that can hold it."""

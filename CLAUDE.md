@@ -101,6 +101,7 @@ shape, so read the one closest to what you are writing:
 | runs the ROI manager's segment, evaluate and analyse as one | `npc_analysis.chain.yaml` (a shipped chain: an evaluator step runs over every ROI before the next; `docs/batch.md`, "ROIs: segment, evaluate, analyse") |
 | opens an interactive window of the GUI's | `bead_calibration.py` (`Plugin.window`: the button opens what the GUI registered in `session.window_openers`) |
 | runs an external program in its own Python | `uipsf.py` (`smappy.uipsf`: a worker script under that program's interpreter, progress read from its output, the result converted into smappy's own file) |
+| is run by MicroClaw during an acquisition | `gui/live_session.py` (the GUI on a fit another program controls through `Context.stop` and `writer_finished`; the package and its protocol runner are `ries-lab/smappy-microclaw`) |
 
 A chain of plugins that runs as one, and running one over many files
 (`smappy-batch`, the batch window): `docs/batch.md`.
@@ -184,6 +185,9 @@ written this way; it is also what makes the tests readable.
   never assume a session exists.
 * `ctx.report(text)` for progress, `ctx.emit(event, payload)` to hand partial
   results on.  Both are no-ops when nobody is listening.
+* `ctx.stop` and `ctx.writer_finished` -- `threading.Event`s or None, set from
+  another thread: end the run early keeping what it has, and "the live source
+  is complete".  The Fit plugin honours both; a long plugin may check `stop`.
 * The **grouped** table (one row per blink) is a table of its own, with its own
   filter, at `session.layers[i].state.sets["grouped"]`; it exists only once the
   user has switched that layer to grouped, and `state.grouped_stale` says it no

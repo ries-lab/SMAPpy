@@ -817,7 +817,7 @@ class ControlWindow(QMainWindow):
 
     def save(self) -> None:
         from ..io.formats import writer_for
-        if self.session.path is None:
+        if self.session.path is None or self.session.is_protected(self.session.path):
             return self.save_as()
         try:
             writer_for(self.session.path)
@@ -830,11 +830,18 @@ class ControlWindow(QMainWindow):
 
     def save_as(self) -> None:
         start = str(self.session.path) if self.session.path else folders.start()
+        if self.session.is_protected(start):
+            here = Path(start)          # offer a new name beside the kept file
+            start = str(here.with_name(f"{here.stem}_edited{here.suffix}"))
         path, _ = QFileDialog.getSaveFileName(self, "Save localizations", start,
                                               "HDF5 (*.h5 *.hdf5)")
         if path:
             folders.remember(path)
-            self.session.save(path)
+            try:
+                self.session.save(path)
+            except ValueError as error:
+                QMessageBox.warning(self, "Not saved", str(error))
+                return
             self._on_session("locs")
 
 

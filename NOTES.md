@@ -728,9 +728,30 @@ mid-write raises instead of returning half an image -- and the file list is
 re-globbed on each poll, so the `_1.ome.tif` that appears when the current file
 fills up is picked up without reopening anything.
 
+**Unless somebody says when it ended.**  A program that drives the microscope
+(MicroClaw) knows when the writer has finished, and then a pause -- a refocus,
+a laser change, a time-lapse interval -- must not end the fit: `finished`, an
+event handed to the watch, replaces the timeout altogether, and once it is set
+one more pass reads everything and the stream ends.  A longer timeout would
+only move the pause that ends the fit too early, which is why MicroClaw's
+protocol (its `design/84`) asks for the event and not for a number.  The
+Fit plugin takes it from `Context.writer_finished`, and `Context.stop` ends a
+run early with its file closed and nothing finished (no drift correction of
+half an acquisition; the caller allows ten seconds).
+`smappy.gui.live_session` is the GUI opened on such a run: the same session
+and windows, the run started without its preflight question, and the fit's
+file added to `Session.protected`, because the caller hands it on with a
+digest while the window stays open and a Ctrl+S would change what that digest
+vouches for.
+
 **The engine is flushed on a timer as well as when its ROI buffer fills.**  The
 buffer holds 15000 ROIs; a sparse sample would take minutes to fill it, and
-nothing would appear in the meantime.
+nothing would appear in the meantime.  The timer is checked once per block, so
+during a pause the watch sends empty blocks (`idle_blocks`) for it to be checked
+on -- without them, what was buffered before a pause stayed off the screen
+until the pause was over.  The GUI's live fit flushes every 5 s
+(`LIVE_FLUSH_SECONDS`); `smappy.live.LiveFit` still has its own loop and does
+not send idle blocks yet.
 
 Checked against the offline path on 300 frames of the astigmatic dataset,
 replayed frame by frame into a growing two-file series: same 28724

@@ -242,14 +242,17 @@ class NDTiffSource(ImageSource):
         return np.stack([self.frame(i) for i in range(first, last)])
 
     def watch(self, chunk: int = 100, settings=None, start: int = 0,
-              stop: Optional[int] = None, stop_event=None, on_wait=None
+              stop: Optional[int] = None, stop_event=None, on_wait=None,
+              finished=None, idle_blocks: bool = False
               ) -> Iterator[Tuple[int, np.ndarray]]:
         """Yield blocks as the acquisition writes them.
 
         The index gains a record only once an image is complete, so following it
         needs none of the care a growing TIFF does -- re-read it, and read what
         is new.  It stops when nothing has arrived for ``settings.timeout``,
-        which is how an acquisition ends.
+        which is how an acquisition ends -- or, given a ``finished`` event,
+        only once that is set and what was written by then has been read
+        (`smappy.io.watch`, which also says what ``idle_blocks`` is for).
         """
         from .watch import WatchSettings, _sleep, _stopped
 
@@ -257,6 +260,9 @@ class NDTiffSource(ImageSource):
         index = start
         last_new = time.monotonic()
         while not _stopped(stop_event):
+            # before the reload, so the last pass sees every frame written
+            # before the writer said it was done
+            ending = _stopped(finished)
             self.reload()
             available = len(self.index) if stop is None else min(stop, len(self.index))
             while index < available and not _stopped(stop_event):
@@ -264,13 +270,15 @@ class NDTiffSource(ImageSource):
                 yield index, self._block(index, last)
                 index = last
                 last_new = time.monotonic()
-            if stop is not None and index >= stop:
+            if ending or (stop is not None and index >= stop):
                 break
             waited = time.monotonic() - last_new
-            if waited >= settings.timeout:
+            if finished is None and waited >= settings.timeout:
                 break
             if on_wait is not None:
                 on_wait(waited)
+            if idle_blocks:
+                yield index, np.empty((0, *self.shape), self.dtype)
             _sleep(settings.poll, stop_event)
 
     # -------------------------------------------------------------- refreshing
