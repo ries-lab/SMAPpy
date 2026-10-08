@@ -93,14 +93,18 @@ class LiveSession:
     def __init__(self, plugin_path: str, settings, *,
                  on_finished: Optional[Callable[[LiveOutcome], None]] = None,
                  on_progress: Optional[Callable[[str], None]] = None,
-                 on_closed: Optional[Callable[[], None]] = None):
+                 on_closed: Optional[Callable[[], None]] = None,
+                 stop: Optional[threading.Event] = None,
+                 writer_finished: Optional[threading.Event] = None):
         self.plugin_path = plugin_path
         self.settings = settings
         self.on_finished = on_finished
         self.on_progress = on_progress
         self.on_closed = on_closed
-        self.stop = threading.Event()
-        self.writer_finished = threading.Event()
+        # the caller's own events when it has them -- a protocol reader that
+        # sets them as the messages arrive -- else ours, set through these
+        self.stop = stop or threading.Event()
+        self.writer_finished = writer_finished or threading.Event()
         self.outcome: Optional[LiveOutcome] = None
         self.session = None
         self.control = None
