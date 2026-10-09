@@ -1,5 +1,5 @@
 ---
-version: "3"
+version: "4"
 covers: [smappy.dualfit.combine_peaks, smappy.dualfit.build_link, smappy.dualfit.cut_paired_rois, smappy.dualfit.paired_to_localizations, smappy.dualfit.DualChannelEngine, smappy.psf.GlobalGaussianPSF, smappy.detect.find_candidates, smappy.plugins.fit.DualGaussianFit, smappy.plugins.fit.calibration_blocks, smappy.plugins.fit.finish_localizations, smappy.calibrate.transform.register_channels]
 ---
 
