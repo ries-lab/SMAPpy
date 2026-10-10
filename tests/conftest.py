@@ -63,6 +63,40 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(skip)
 
 
+_exitstatus = 0
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_sessionfinish(session, exitstatus):
+    global _exitstatus
+    _exitstatus = int(exitstatus)
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_unconfigure(config):
+    """A process that loaded Qt leaves without Python's teardown.
+
+    After the run, Python frees the windows the GUI tests left in whatever
+    order it reaches them, and PySide 6.8 with pyqtgraph does not survive
+    every order: a main window dropped mid-cascade through a pyqtgraph scene,
+    a slot's weak reference firing into PySide's connection table, or
+    `Py_FinalizeEx` clearing that table under connections to objects already
+    gone.  Each was a segfault after the results were in -- the run green,
+    and on a Mac a "Python quit unexpectedly" for about one worker a full
+    `--slow` run.  Deleting the windows first, with `deleteLater`, is worse:
+    pyqtgraph's layouts crash in Qt's order too, in every worker.  So this is
+    pyqtgraph's own remedy (`pg.exit`): everything is reported by now -- an
+    xdist worker sent its "workerfinished", flushed, in `pytest_sessionfinish`
+    -- and the process ends with the run's status and nothing freed.
+    """
+    import sys
+    if "PySide6.QtCore" not in sys.modules:
+        return
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(_exitstatus)
+
+
 @pytest.hookimpl(optionalhook=True)
 def pytest_xdist_make_scheduler(config, log):
     """Work stealing, unless `--dist` asked for something else.
