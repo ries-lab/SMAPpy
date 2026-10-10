@@ -42,10 +42,11 @@ class StackViewer(QMainWindow):
         self.mirror_axis = mirror_axis
         self.set_volumes(volumes, titles)
 
-        from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
         from matplotlib.figure import Figure
+
+        from ..gui.canvas import canvas_class
         self.figure = Figure(figsize=(8, 6), constrained_layout=True)
-        self.canvas = FigureCanvasQTAgg(self.figure)
+        self.canvas = canvas_class()(self.figure)
 
         whole = QWidget()
         layout = QVBoxLayout(whole)

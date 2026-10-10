@@ -139,12 +139,24 @@ _tests_since_collect = 0
 def _collect_after_each_test(collect_on_the_main_thread):
     """It is `gc.disable` that keeps collection off the other threads; how
     often this runs is only memory.  After every test it doubled the suite's
-    time, so every 100th."""
+    time, so every 100th.
+
+    The app's entry points hold its screens before they collect
+    (`collector.keep_screens`); a test makes its own QApplication, so the
+    screens are held here, or collecting two matplotlib windows deletes the
+    `QScreen` and the next window to hide segfaults."""
     global _tests_since_collect
     yield
     _tests_since_collect += 1
     if _tests_since_collect >= 100:
         import gc
+        import sys
+        if "PySide6.QtWidgets" in sys.modules:
+            from PySide6.QtWidgets import QApplication
+            app = QApplication.instance()
+            if app is not None:
+                from smappy.gui.collector import keep_screens
+                keep_screens(app)
         gc.collect()
         _tests_since_collect = 0
 

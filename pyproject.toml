@@ -47,12 +47,11 @@ dependencies = [
     # The PySide6 meta-package additionally pulls PySide6-Addons (QtWebEngine,
     # Qt3D, Multimedia, ...), which measures 800 MB installed for nothing.
     # 6.11 dropped to cp310-abi3 wheels, so Python 3.9 resolves to 6.10.3.
-    # Below 6.9: from 6.9 a main window freed by the garbage collector through
-    # a parent widget segfaults in its destructor (`QScreen::handle` under
-    # `QCursor::pos` under `~QWidget`), in every full test run on 6.9.3 and
-    # 6.10.3 and never on 6.8.3 -- and the app collects on a timer too.  Lift
-    # the cap once the window's ownership is fixed.
-    "PySide6-Essentials>=6.6,<6.9",
+    # 6.9 and 6.10 crashed until two PySide bugs were worked around: the
+    # collector deleting the QScreen (`gui/collector.keep_screens`) and an
+    # exception from matplotlib's queued redraw left pending in processEvents
+    # (`gui/canvas.py`).  Tested on 6.8.3, 6.9.3 and 6.10.3.
+    "PySide6-Essentials>=6.6",
     "pyqtgraph>=0.13",
     "matplotlib>=3.4",  # the render LUTs, and the plugins' result plots
     # the plugins' pages set their maths with it: TeX's layout from an

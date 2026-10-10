@@ -43,10 +43,11 @@ def _canvas_classes():
     """Imported late: matplotlib's Qt backend is not free to import."""
     import matplotlib
     matplotlib.use("QtAgg")
-    from matplotlib.backends.backend_qtagg import (FigureCanvasQTAgg,
-                                                   NavigationToolbar2QT)
+    from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
     from matplotlib.figure import Figure
-    return FigureCanvasQTAgg, NavigationToolbar2QT, Figure
+
+    from .canvas import canvas_class
+    return canvas_class(), NavigationToolbar2QT, Figure
 
 
 class FigurePane(QWidget):
