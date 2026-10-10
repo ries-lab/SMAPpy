@@ -115,7 +115,6 @@ class RenderView(QWidget):
         self._timer = QTimer(singleShot=True, interval=40)
         self._timer.timeout.connect(self.render)
         self.view.sigRangeChanged.connect(self.schedule)
-        self.graphics.viewport().installEventFilter(self)     # the trackpad's pinch
         session.on_change(self._on_session)
         # side by side: the first panel is this view, which keeps the ROI
         # tools; the others are `_Mirror`s linked to it, which pan and zoom
@@ -154,6 +153,9 @@ class RenderView(QWidget):
         self._pressed = False
         self.graphics.setFocusPolicy(Qt.StrongFocus)
         self.graphics.keyPressEvent = self._on_key
+        # the trackpad's pinch, and the clicks of a drawing: installed last,
+        # since the viewport has events for it before __init__ is through
+        self.graphics.viewport().installEventFilter(self)
         self.reset()
 
     def eventFilter(self, obj, event) -> bool:

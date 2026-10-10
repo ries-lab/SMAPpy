@@ -57,7 +57,8 @@ Running the tests -- two tiers:
   a test worker.  `conftest.py` collects on the main thread every 100 tests;
   the GUI's entry points call `gui/collector.collect_on_gui_thread`, a timer
   on the GUI thread.  A test that needs an object gone calls `gc.collect()`
-  itself; a new entry point that makes a QApplication installs the collector.
+  itself; a new entry point that makes a QApplication installs the collector
+  and the icon (`gui/icon.install_icon`).
 
 * Plain `pytest` collects `externaltools/Comet`, which imports numba and errors
   out.  Always name `tests`.
