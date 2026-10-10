@@ -27,6 +27,7 @@ from ..session import Session
 from . import folders
 
 TILE = 1.5          # render this many view widths, so a pan needs no render
+DEFAULT_PIXEL = 10.0  # nm per screen pixel that a click on *pixel* zooms to
 _LIVE_THREADS = []  # every render thread, so exit can stop them all
 
 
@@ -224,6 +225,24 @@ class RenderView(QWidget):
         size = self.graphics.size()
         return FieldOfView.fit((rect.left(), rect.right()), (rect.top(), rect.bottom()),
                                nx or max(size.width(), 16), ny or max(size.height(), 16))
+
+    def pixel_size(self) -> float:
+        """What one screen pixel is in render units: nm, in the ordinary picture."""
+        return self.current_fov().pixelsize
+
+    def set_pixel_size(self, pixelsize: float) -> None:
+        """Zoom about the centre until one screen pixel is ``pixelsize``.
+
+        SMAP's *pixrec*: the pixel size is the zoom.  It is not a setting that
+        stays -- the next scroll changes it again, as any zoom does.
+        """
+        if not pixelsize > 0:
+            return
+        size = self.graphics.size()
+        w, h = max(size.width(), 16) * pixelsize, max(size.height(), 16) * pixelsize
+        centre = self.view.viewRect().center()
+        self.view.setRange(QRectF(centre.x() - w / 2, centre.y() - h / 2, w, h),
+                           padding=0)
 
     def center_on(self, x: float, y: float) -> None:
         """Move the view to (x, y) at the current zoom."""
@@ -544,9 +563,26 @@ class RenderToolBar(QToolBar):
                                    "in the 3D window")
         self.line_width.valueChanged.connect(self._on_width)
         self.addWidget(self.line_width)
-        self._width_unit()
 
         self.addAction(QAction("Reset view", self, triggered=view.reset))
+
+        # The size of a screen pixel, as SMAP shows it: the zoom, written as
+        # a number.  Typing one zooms to it; the button goes to DEFAULT_PIXEL.
+        self.pixel_button = QToolButton(text="pixel")
+        self.pixel_button.setToolTip(f"zoom to {DEFAULT_PIXEL:g} nm per screen pixel")
+        self.pixel_button.clicked.connect(lambda: self.pixel.setValue(DEFAULT_PIXEL))
+        self.addWidget(self.pixel_button)
+        self.pixel = QDoubleSpinBox(minimum=0.01, maximum=1e6, decimals=2)
+        self.pixel.setKeyboardTracking(False)
+        self.pixel.setMaximumWidth(110)
+        self.pixel.setToolTip("what one screen pixel is: type a size to zoom to "
+                              "it, scroll to zoom as usual")
+        self.pixel.valueChanged.connect(view.set_pixel_size)
+        self.addWidget(self.pixel)
+        view.view.sigRangeChanged.connect(self._show_pixel)
+        self._show_pixel()
+        self._width_unit()
+
         self.counts = QLabel("")
         self.counts.setStyleSheet("padding-left: 12px")
         self.addWidget(self.counts)
@@ -599,6 +635,12 @@ class RenderToolBar(QToolBar):
             parts.append(f"{layer.name}: {n}")
         self.counts.setText("   ".join(parts))
 
+    def _show_pixel(self, *_) -> None:
+        """The pixel size after a zoom, written without zooming again."""
+        blocked = self.pixel.blockSignals(True)
+        self.pixel.setValue(self.view.pixel_size())
+        self.pixel.blockSignals(blocked)
+
     def _set_kind(self, kind: str, name: str) -> None:
         self.kind = kind
         self.roi_button.setText(f"ROI: {name}")
@@ -621,7 +663,9 @@ class RenderToolBar(QToolBar):
         except KeyError:
             name = "x_nm"
         unit = axis_unit(name)
-        self.line_width.setSuffix(f" {unit}" if unit in ("nm", "pixels") else "")
+        suffix = f" {unit}" if unit in ("nm", "pixels") else ""
+        self.line_width.setSuffix(suffix)
+        self.pixel.setSuffix(suffix)
 
     def _default(self, suffix: str) -> str:
         path = self.view.session.path

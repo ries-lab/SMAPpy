@@ -75,6 +75,30 @@ def test_the_line_width_is_on_the_toolbar_and_moves_the_line(app):
     assert bar.line_width.value() == 77.0
 
 
+def test_the_pixel_size_shows_the_zoom_and_typing_one_zooms_to_it(app):
+    """SMAP's pixrec: the zoom is a pixel size one can read and type."""
+    from smappy.gui.render_view import DEFAULT_PIXEL, RenderToolBar, RenderView
+
+    session = Session(table())
+    view = RenderView(session)
+    view.resize(400, 300)
+    bar = RenderToolBar(view)
+    view.reset()
+    assert bar.pixel.value() == pytest.approx(view.pixel_size(), abs=0.01)
+
+    centre = view.view.viewRect().center()
+    bar.pixel.setValue(4.0)
+    assert view.pixel_size() == pytest.approx(4.0, rel=0.01)
+    assert view.view.viewRect().center().x() == pytest.approx(centre.x(), abs=1)
+
+    view.view.scaleBy((2, 2))                  # a zoom moves the number
+    assert bar.pixel.value() == pytest.approx(8.0, rel=0.02)
+
+    bar.pixel_button.click()
+    assert view.pixel_size() == pytest.approx(DEFAULT_PIXEL, rel=0.01)
+    assert bar.pixel.suffix() == " nm"
+
+
 def blinks(n_emitters=300, on=3):
     """Each emitter on for ``on`` consecutive frames, a few nm apart: grouping
     makes exactly one localization of each."""
