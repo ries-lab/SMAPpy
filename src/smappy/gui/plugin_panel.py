@@ -25,6 +25,9 @@ from .widgets import ColumnScroll
 # keep the dialog coming back
 MAX_CHOICES = 8
 
+# the status of a run that warned: what was said is in the output box
+WARNING_STYLE = "color: #c06000; font-weight: bold;"
+
 
 
 class _Worker(QObject):
@@ -180,6 +183,7 @@ class PluginPanel(QWidget):
         self.text_button.clicked.connect(self.show_text)
         self._live_running = False
         self._show_figures = True
+        self._warnings = 0
         self._live_timer = QTimer(self, singleShot=True, interval=120)
         self._live_timer.timeout.connect(self._live_step)
         self.form.field_changed.connect(self._react)
@@ -302,7 +306,18 @@ class PluginPanel(QWidget):
             self.form.set_active(flags)
 
     def _on_stream(self, event: str, payload) -> None:
-        if event == "start":
+        if event == "warning":
+            if self._live_running:
+                return            # a live step says nothing (`_on_progress`)
+            # a line of its own that progress does not overwrite: the next
+            # progress line goes below it
+            self._warnings += 1
+            self.output.appendPlainText(f"warning: {payload}")
+            self._progress_lines = 0
+            self.status.setText(f"running... ({self._warnings} warning"
+                                f"{'s' if self._warnings > 1 else ''})")
+            self.status.setStyleSheet(WARNING_STYLE)
+        elif event == "start":
             self.session.begin_live(payload.get("extent"), payload.get("path"))
         elif event == "block":
             self.session.append(payload)
@@ -370,6 +385,8 @@ class PluginPanel(QWidget):
         for button in self._buttons():
             button.setEnabled(False)
         self.status.setText(message)
+        self.status.setStyleSheet("")
+        self._warnings = 0
         self._progress_lines = 0
         self._thread = QThread()
         # Qt's default thread stack (512 kB on macOS) is too small for HDF5 and
@@ -526,7 +543,11 @@ class PluginPanel(QWidget):
         if not live:
             self.output.appendPlainText(result.text)
         self._progress_lines = 0
-        self.status.setText("live" if live else "done")
+        if self._warnings and not live:
+            self.status.setText(f"done, {self._warnings} warning"
+                                f"{'s' if self._warnings > 1 else ''}")
+        else:
+            self.status.setText("live" if live else "done")
         self.text_button.setEnabled(bool(result.text))
         if not live and self.plugin.text_window and result.text:
             self.show_text()          # a log: not something to scroll through

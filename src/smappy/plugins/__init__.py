@@ -301,6 +301,7 @@ class Context:
         self.writer_finished = writer_finished
         self._progress = progress
         self._stream = stream
+        self.warnings: List[str] = []       # what `warn` was told, in order
         if locs is None:
             locs = session.locs if session is not None else Localizations({}, {})
         self.locs = locs
@@ -351,6 +352,22 @@ class Context:
         """Say what is happening.  A no-op when nobody is listening."""
         if self._progress:
             self._progress(text)
+
+    def warn(self, text: str) -> None:
+        """Say something the user must not miss, and keep it.
+
+        A progress line is overwritten by the next one, which is how an EM-gain
+        mismatch reported at the start of a fit vanished under its frame
+        count.  A warning goes to whoever listens as a ``("warning", text)``
+        event -- the panel keeps it as a line of its own -- or as a progress
+        line when only progress is listened to, and it stays in `warnings`
+        for the plugin to put in what it returns.
+        """
+        self.warnings.append(text)
+        if self._stream:
+            self._stream("warning", text)
+        elif self._progress:
+            self._progress(f"warning: {text}")
 
     def emit(self, event: str, payload: Any) -> None:
         """Hand a partial result on while still running.

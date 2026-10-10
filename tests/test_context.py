@@ -462,6 +462,38 @@ def test_a_live_plugin_without_a_preview_measures_with_run_and_applies_nothing()
     assert panel._window is not None
 
 
+def test_a_warning_stays_on_screen_when_progress_follows_it():
+    """It was a progress line, and the next progress line replaced it."""
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication([])
+
+    class Warns(Plugin):
+        path = "Test/Warns"
+        name = "Warns"
+        Settings = None
+
+        def run(self, ctx, settings):
+            ctx.report("frame 1")
+            ctx.warn("the calibration was taken with EM gain")
+            for i in range(2, 5):
+                ctx.report(f"frame {i}")
+            return Result(text="fitted\n" + "\n".join(
+                f"warning: {w}" for w in ctx.warnings))
+
+    from smappy.gui.plugin_panel import PluginPanel
+    panel = PluginPanel(Warns, Session(table()))
+    panel.run()
+    while panel._thread is not None and panel._thread.isRunning():
+        app.processEvents()
+    app.processEvents()
+    lines = panel.output.toPlainText().splitlines()
+    assert lines[:3] == ["frame 1", "warning: the calibration was taken with EM gain",
+                         "frame 4"]
+    assert panel.status.text() == "done, 1 warning"
+
+
 def test_a_live_plugin_refits_while_the_roi_moves_and_says_nothing_about_it():
     """Ten times a second: no line in the log, no window taking the focus.
     The figure redrawing where it already is is the whole output."""

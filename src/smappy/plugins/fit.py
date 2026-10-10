@@ -419,14 +419,15 @@ class _FitPlugin(Plugin):
         Loading a calibration can warn -- the beads were taken with EM gain
         and the data without, say, so the model may be mirrored against the
         data -- and a Python warning goes to a console a GUI user never sees.
-        It goes to the run's report as well, which the panel shows.
+        It goes to the run as a warning as well (`Context.warn`), which the
+        panel keeps in view and the run puts in its text and its file.
         """
         import warnings
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             model = self.model(settings, camera)
         for warning in caught:
-            ctx.report(f"warning: {warning.message}")
+            ctx.warn(str(warning.message))
             warnings.warn_explicit(warning.message, warning.category,
                                    warning.filename, warning.lineno)
         return model
@@ -602,6 +603,8 @@ class _FitPlugin(Plugin):
                 # pixels, then: a preview is about detection and shape, and
                 # nm coordinates would only fail on the missing pixel size
                 engine.settings = replace(engine.settings, output_unit="pixel")
+                ctx.warn("no pixel size: the preview is in pixels, and a run "
+                         "will refuse to start without one")
             engine.push(raw[None], first_frame=index)
             locs = engine.flush()
         except Exception as error:
@@ -766,16 +769,21 @@ class _FitPlugin(Plugin):
             drive(engine, blocks, sink=sink, progress=report, read_ahead=2,
                   flush_seconds=LIVE_FLUSH_SECONDS if src.live else None)
             record["frame_tags"] = tags.table()
+            # kept with the localizations, so a file that was fitted against
+            # a mismatched calibration says so whoever opens it
+            record["warnings"] = list(ctx.warnings)
             if writer is not None:
                 writer.set_metadata({"stats": dict(engine.stats),
                                      "frame_tags": record["frame_tags"],
-                                     "acquisition": record["acquisition"]})
+                                     "acquisition": record["acquisition"]}
+                                    | ({"warnings": record["warnings"]}
+                                       if record["warnings"] else {}))
         finally:
             if writer is not None:
                 writer.close()
         stats = dict(engine.stats)
         collected.metadata["stats"] = stats
-        for key in ("frame_tags", "acquisition"):
+        for key in ("frame_tags", "acquisition", "warnings"):
             if record[key]:
                 collected.metadata[key] = record[key]
         seconds = time.perf_counter() - started
@@ -818,6 +826,10 @@ class _FitPlugin(Plugin):
             save_images(out, [raw])
         if finished.notes:
             text = "\n".join([text] + finished.notes)
+        # in the text, so they are in the session's history and the file's
+        # with it, beside the run they belong to
+        if ctx.warnings:
+            text = "\n".join([text] + [f"warning: {w}" for w in ctx.warnings])
         plots = dict(finished.plots)
         if record["frame_tags"] and settings.output.show_tags:
             from .image_tags import names, plots as tag_plots, summary

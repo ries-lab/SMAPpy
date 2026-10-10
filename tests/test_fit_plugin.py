@@ -125,3 +125,53 @@ def test_progress_counts_the_frames_and_says_how_fast(stack, tmp_path):
     assert all("of 20 " in m and "frames/s" in m for m in messages)
     assert "left" in messages[0] and "left" not in messages[-1]   # not at the end
     assert "frames/s" in result.text
+
+
+def test_a_fit_keeps_its_warnings_in_its_text_its_history_and_its_file(stack, tmp_path,
+                                                                       monkeypatch):
+    """An EM-gain mismatch was reported as a progress line, which the frame
+    count overwrote: nothing on screen or on disk said the fit had warned."""
+    import warnings
+
+    from smappy.io.hdf5 import load_localizations
+    from smappy.session import Session
+
+    model = GaussianFit.model
+
+    def warning_model(self, settings, camera):
+        warnings.warn("EM gain mismatch: the calibration was taken with EM gain")
+        return model(self, settings, camera)
+
+    monkeypatch.setattr(GaussianFit, "model", warning_model)
+    out = tmp_path / "warned.hdf5"
+    settings = GaussianFitSettings(
+        source=SourceSettings(path=str(stack), chunk=8),
+        camera=CameraSettings(conversion=1.0, offset=100.0, pixelsize_um=0.1),
+        detection=DetectionSettings(cutoff_mode="absolute", cutoff=40.0),
+        output=OutputSettings(path=str(out)))
+    events = []
+    ctx = Context(stream=lambda e, p: events.append((e, p)))
+    with pytest.warns(UserWarning):
+        result = GaussianFit().run(ctx, settings)
+    assert [p for e, p in events if e == "warning"] == ctx.warnings
+    assert "warning: EM gain mismatch" in result.text
+    assert any("EM gain mismatch" in w for w in result.locs.metadata["warnings"])
+    assert any("EM gain mismatch" in w
+               for w in load_localizations(out).metadata["warnings"])
+
+    session = Session()
+    session.apply(GaussianFit(), result)
+    assert "warning: EM gain mismatch" in session.history[-1]["text"]
+
+
+def test_a_fit_without_warnings_writes_none(stack, tmp_path):
+    out = tmp_path / "clean.hdf5"
+    settings = GaussianFitSettings(
+        source=SourceSettings(path=str(stack), chunk=8),
+        camera=CameraSettings(conversion=1.0, offset=100.0, pixelsize_um=0.1),
+        detection=DetectionSettings(cutoff_mode="absolute", cutoff=40.0),
+        output=OutputSettings(path=str(out)))
+    result = GaussianFit().run(Context(), settings)
+    assert "warning:" not in result.text
+    from smappy.io.hdf5 import load_localizations
+    assert "warnings" not in load_localizations(out).metadata
