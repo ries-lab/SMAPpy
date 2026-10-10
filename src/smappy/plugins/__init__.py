@@ -461,6 +461,9 @@ class Result:
     # more for the log entry, beside the path, the text and the settings: a
     # chain puts its steps here, so the history shows what each one did
     log: Dict[str, Any] = field(default_factory=dict)
+    # what the figures are of, for the window's title beside the plugin's
+    # name: "NeNA, CRLB, FRC of layer 1, 30000 localizations"
+    title: str = ""
 
     def figures(self) -> List[Plot]:
         """Everything there is to draw, as `Plot`s, the main one first."""

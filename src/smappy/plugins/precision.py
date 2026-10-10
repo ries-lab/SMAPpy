@@ -144,9 +144,9 @@ A filter on precision (and so, through the fitter's detection threshold,
 effectively on photons) does not bias these estimates -- it *conditions* them.
 The displacement fit on a filtered table answers "how well is what I am
 looking at placed", which is the right question for the image in front of you
-and the wrong one for "how good is this sample".  Hence ``source``, which runs
-both and prints them side by side: the difference between them is what
-filtering bought.
+and the wrong one for "how good is this sample".  The plugin measures what is
+shown and nothing beside it: the whole table side by side doubled every figure
+to answer a question nobody had asked, and clearing the filter asks it.
 
 Three things to know about the filtered case:
 
@@ -178,7 +178,7 @@ the selection is measured (`slab_thickness`).
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -1047,6 +1047,20 @@ def _unit(found: Sequence[Measurement]) -> str:
     return found[0].unit if found else "nm"
 
 
+def _title(what: str, numbers: Sequence[str], empty: str) -> str:
+    """A panel's title: the method and what is plotted, then the numbers --
+    "sigma = 4.2 nm" alone did not say which of three methods it came from."""
+    if not numbers:
+        return f"{what}\n{empty}"
+    return f"{what}\n" + "   ".join(numbers)
+
+
+def _named(measurement: Measurement, found: Sequence[Measurement], text: str) -> str:
+    """The numbers of one measurement, named only when a panel holds several:
+    the plugin measures one, a script may compare two."""
+    return f"{measurement.name}: {text}" if len(found) > 1 else text
+
+
 def panel_axes(target, n: int):
     """``n`` axes, from a figure or from the single axis of a one-panel plot.
 
@@ -1120,11 +1134,12 @@ def _radial_title(found: Sequence[Measurement]) -> str:
     parts = []
     for measurement in found:
         if measurement.radial is not None and measurement.radial.ok:
-            text = f"{measurement.name}: sigma = {measurement.radial.sigma:.2f} nm"
+            text = f"sigma = {measurement.radial.sigma:.2f} {measurement.unit}"
             if measurement.scaled is not None and measurement.scaled.ok:
                 text += f", kappa = {measurement.scaled.kappa:.2f}"
-            parts.append(text)
-    return "   ".join(parts) if parts else "no fit"
+            parts.append(_named(measurement, found, text))
+    return _title("NeNA: distance between a molecule's localizations in "
+                  "consecutive frames", parts, "no fit")
 
 
 def draw_axes(figure, found: Sequence[Measurement], bins: int = 80) -> None:
@@ -1155,11 +1170,15 @@ def draw_axes(figure, found: Sequence[Measurement], bins: int = 80) -> None:
                 ax.plot(x, scale * axis_density(x, fit.sigma, fit.fraction, half,
                                                 "flat" if axis == "z" else "chord"),
                         color=color, linewidth=1.6)
-                titles.append(f"{measurement.name}: sigma_{axis} = "
-                              f"{fit.sigma:.2f} +/- {fit.sigma_error:.2f} nm")
+                au = "nm" if axis == "z" else measurement.unit
+                titles.append(_named(measurement, found,
+                                     f"sigma_{axis} = {fit.sigma:.2f} +/- "
+                                     f"{fit.sigma_error:.2f} {au}"))
         ax.set_xlabel(f"{axis} displacement ({'nm' if axis == 'z' else _unit(found)})")
         ax.set_ylabel("pairs")
-        ax.set_title("   ".join(titles) if titles else f"no fit for {axis}",
+        ax.set_title(_title(f"NeNA along {axis}: signed displacement between "
+                            "consecutive frames", titles,
+                            f"no fit for {axis}"),
                      fontsize=7.5, color="0.25")
         if len(found) > 1:
             ax.legend(fontsize=7, frameon=False)
@@ -1202,11 +1221,12 @@ def _gap_title(found: Sequence[Measurement]) -> str:
         line = measurement.gap_line
         if line and np.isfinite(line.get("sigma0", np.nan)) and line.get("n", 0) > 1:
             u = measurement.unit
-            parts.append(f"{measurement.name}: sigma(gap -> 0) = "
-                         f"{line['sigma0']:.2f} {u}, "
-                         + (f"{line['step']:.2f} {u} per root frame"
-                            if line.get("moving") else "no motion"))
-    return "   ".join(parts) if parts else "one gap: no motion to see"
+            parts.append(_named(measurement, found,
+                                f"sigma(gap -> 0) = {line['sigma0']:.2f} {u}, "
+                                + (f"{line['step']:.2f} {u} per root frame"
+                                   if line.get("moving") else "no motion")))
+    return _title("NeNA against the frame gap: flat when nothing moves", parts,
+                  "one gap: no motion to see")
 
 
 def draw_crlb(figure, found: Sequence[Measurement], bins: int = 80) -> None:
@@ -1234,17 +1254,20 @@ def draw_crlb(figure, found: Sequence[Measurement], bins: int = 80) -> None:
                         len(values) * (edges[1] - edges[0])
                         * precision_density(centres, a),
                         color=color, linewidth=1.5)
-                titles.append(f"{measurement.name}: sigma_c = "
-                              f"{stats['sigma_c']:.2f} nm")
+                cu = "nm" if key == "axial" else measurement.unit
+                titles.append(_named(measurement, found,
+                                     f"sigma_c = {stats['sigma_c']:.2f} {cu}"))
             fit = (measurement.radial if key == "lateral"
                    else measurement.axes.get("z"))
             if fit is not None and fit.ok:
                 ax.axvline(fit.sigma, color=color, linestyle="--", linewidth=1.0,
-                           label=f"{measurement.name}: pairwise")
+                           label=_named(measurement, found, "NeNA sigma"))
         ax.set_xlabel(f"{key} precision ({'nm' if key == 'axial' else _unit(found)})")
         ax.set_ylabel("localizations")
         ax.legend(fontsize=6.5, frameon=False)
-        ax.set_title("   ".join(titles) if titles else f"no {key} precision",
+        ax.set_title(_title(f"CRLB: the {key} precision the fitter reported "
+                            "for each localization", titles,
+                            f"no {key} precision"),
                      fontsize=7.5, color="0.25")
 
 
@@ -1262,8 +1285,9 @@ def draw_frc(ax, found: Sequence[Measurement]) -> None:
         if curve.ok:
             ax.axvline(1.0 / curve.resolution, color=color, linewidth=0.9,
                        linestyle=":")
-            titles.append(f"{measurement.name}: {curve.resolution:.1f} +/- "
-                          f"{curve.error:.1f} nm")
+            titles.append(_named(measurement, found,
+                                 f"resolution = {curve.resolution:.1f} +/- "
+                                 f"{curve.error:.1f} {measurement.unit}"))
         fit = measurement.radial
         if fit is not None and fit.ok:
             # not a fit to the data: what the measured precision alone leaves
@@ -1280,8 +1304,9 @@ def draw_frc(ax, found: Sequence[Measurement]) -> None:
     ax.set_ylim(-0.2, 1.05)
     ax.set_xlim(left=0)
     ax.legend(fontsize=6.5, frameon=False)
-    ax.set_title("   ".join(titles) if titles else "no FRC", fontsize=7.5,
-                 color="0.25")
+    ax.set_title(_title("FRC: correlation of two half-images against spatial "
+                        "frequency", titles, "no FRC"),
+                 fontsize=7.5, color="0.25")
 
 
 AXIS_COLORS = {"x": "#1f77b4", "y": "#2ca02c", "z": "#d62728"}
@@ -1313,9 +1338,9 @@ def draw_planes(ax, found: Sequence[Measurement]) -> None:
                 ax.axvline(1.0 / curve.resolution, color=color, linewidth=0.7,
                            linestyle=":")
         if planes.ok:
-            titles.append(f"{measurement.name}: " + ", ".join(
+            titles.append(_named(measurement, found, ", ".join(
                 f"{name} {curve.resolution:.0f} nm"
-                for name, curve in planes.axes.items() if curve.ok))
+                for name, curve in planes.axes.items() if curve.ok)))
     ax.axhline(THRESHOLD_LINE, color="0.35", linewidth=0.9)
     ax.text(0.99, THRESHOLD_LINE, " 1/7", transform=ax.get_yaxis_transform(),
             ha="right", va="bottom", fontsize=7, color="0.35")
@@ -1325,7 +1350,8 @@ def draw_planes(ax, found: Sequence[Measurement]) -> None:
     ax.set_ylim(-0.2, 1.05)
     ax.set_xlim(left=0)
     ax.legend(fontsize=6.5, frameon=False)
-    ax.set_title("   ".join(titles) if titles else "no per-axis resolution",
+    ax.set_title(_title("FRC per axis: correlation of two half-volumes along "
+                        "x, y and z", titles, "no per-axis resolution"),
                  fontsize=7.5, color="0.25")
 
 
@@ -1333,12 +1359,6 @@ def draw_planes(ax, found: Sequence[Measurement]) -> None:
 
 @dataclass
 class PrecisionSettings:
-    source: str = param("both", label="localizations",
-                        choices=(("selection", "as plotted (filter and ROI)"),
-                                 ("all", "all, unfiltered"),
-                                 ("both", "both, side by side")),
-                        help="what the image is worth, what the sample is "
-                             "worth, or the two compared")
     pairwise: bool = param(True, label="pairwise displacement (NeNA)",
                            help="the experimental precision, from molecules "
                                 "localized in more than one frame")
@@ -1361,6 +1381,9 @@ class PrecisionSettings:
                                 "from planes of the 3D transform rather than "
                                 "rings of a 2D one.  3D data, and a ROI rather "
                                 "than a whole field of view")
+    diagnostics: bool = param(False, label="diagnostic plots",
+                              help="NeNA per axis and against the frame gap: "
+                                   "drift, motion and an anisotropic PSF")
     frc_blocks: int = param(20, label="FRC blocks", min=2, advanced=True,
                             help="the acquisition is cut into this many "
                                  "stretches of frames before the two halves "
@@ -1392,32 +1415,29 @@ class LocalizationPrecision(Plugin):
     """The precision the data shows, beside the precision the fitter expected."""
 
     Settings = PrecisionSettings
-    version = "3"        # 2: finds a SMAPpy 3D fit's z precision, z_err_nm
+    version = "4"        # 2: finds a SMAPpy 3D fit's z precision, z_err_nm
     #                      3: a filter cut honoured by the CRLB fit; the FRC's
     #                         automatic pixel on a large field; motion only
     #                         when the slope is significant
+    #                      4: the selection only, never the whole table beside it
 
     def run(self, ctx: Context, settings: PrecisionSettings) -> Result:
         if not (settings.pairwise or settings.crlb or settings.frc
                 or settings.frc_axes):
             raise ValueError("nothing to measure: tick a method")
-        sources: List[Tuple[str, Localizations, bool]] = []
-        everything = len(ctx.selection) == len(ctx.locs)
-        if settings.source in ("selection", "both") and not everything:
-            ctx.selection.require(MIN_FOR_FIT, ctx.report, "a precision")
-            sources.append((ctx.selection.name or "selection",
-                            ctx.selection.apply(ctx.locs), True))
-        if settings.source in ("all", "both") or everything:
-            sources.append(("all localizations", ctx.locs, False))
-
+        # What is plotted, and only that: the filter, the ROI and the slab.
+        # The whole table beside it was a second answer to a question the
+        # user had not asked, and doubled every figure.
+        filtered = len(ctx.selection) != len(ctx.locs)
+        name = ctx.selection.name or "selection"
+        ctx.selection.require(MIN_FOR_FIT, ctx.report, "a precision")
+        locs = ctx.selection.apply(ctx.locs)
+        if not len(locs):
+            raise ValueError(f"no localizations in {name}")
         bounds = filter_bounds(ctx.session, ctx.layer)
         slab = slab_thickness(ctx.session, bounds)
-        found: List[Measurement] = []
-        for name, locs, filtered in sources:
-            if not len(locs):
-                raise ValueError(f"no localizations in {name}")
-            ctx.report(f"{name}: {len(locs)} localizations")
-            found.append(measure(
+        ctx.report(f"{name}: {len(locs)} localizations")
+        found: List[Measurement] = [measure(
                 locs, name=name, reach=settings.reach_nm,
                 reach_z=settings.reach_z_nm, max_gap=settings.max_gap,
                 pairwise=settings.pairwise, crlb=settings.crlb,
@@ -1427,37 +1447,47 @@ class LocalizationPrecision(Plugin):
                 bounds=bounds if filtered else {},
                 max_frame_pairs=settings.max_frame_pairs,
                 max_pairs=settings.max_pairs, seed=settings.seed,
-                slab_nm=slab if filtered else None, report=ctx.report))
+                slab_nm=slab if filtered else None, report=ctx.report)]
 
+        # One figure per method, named after it; the per-axis and frame-gap
+        # NeNA are diagnostics and are drawn only when asked for.
         plots: Dict[str, object] = {}
-        if settings.pairwise and any(m.displacements for m in found):
-            plots["per axis"] = Plot(
-                draw=lambda figure: draw_axes(figure, found, settings.bins),
-                panels=max((len(m.axes) for m in found), default=1) or 1,
-                size=(5.5, 6.0))
-            if settings.max_gap > 1:
-                plots["frame gap"] = Plot(draw=lambda ax: draw_gaps(ax, found),
-                                          size=(5.5, 3.4))
+        if settings.pairwise and any(m.radial is not None for m in found):
+            plots["NeNA"] = Plot(draw=lambda ax: draw_radial(ax, found, settings.bins),
+                                 size=(5.5, 3.4))
+        if settings.crlb and any(m.crlb for m in found):
+            plots["CRLB"] = Plot(
+                draw=lambda figure: draw_crlb(figure, found, settings.bins),
+                panels=max((len(m.crlb) for m in found), default=1) or 1,
+                size=(5.5, 4.4))
         if settings.frc and any(m.frc is not None and len(m.frc.curve)
                                 for m in found):
             plots["FRC"] = Plot(draw=lambda ax: draw_frc(ax, found),
                                 size=(5.5, 3.4))
         if settings.frc_axes and any(m.fpc is not None and m.fpc.axes
                                      for m in found):
-            plots["per axis FRC"] = Plot(draw=lambda ax: draw_planes(ax, found),
+            plots["FRC per axis"] = Plot(draw=lambda ax: draw_planes(ax, found),
                                          size=(5.5, 3.4))
-        if settings.crlb and any(m.crlb for m in found):
-            plots["CRLB"] = Plot(
-                draw=lambda figure: draw_crlb(figure, found, settings.bins),
-                panels=max((len(m.crlb) for m in found), default=1) or 1,
-                size=(5.5, 4.4))
-
-        main = None
-        if settings.pairwise and any(m.radial is not None for m in found):
-            main = Plot(draw=lambda ax: draw_radial(ax, found, settings.bins),
-                        size=(5.5, 3.4))
-        elif plots:
-            main = plots.pop(next(iter(plots)))
+        if settings.diagnostics and settings.pairwise and any(
+                m.displacements for m in found):
+            plots["NeNA per axis"] = Plot(
+                draw=lambda figure: draw_axes(figure, found, settings.bins),
+                panels=max((len(m.axes) for m in found), default=1) or 1,
+                size=(5.5, 6.0))
+            if settings.max_gap > 1:
+                plots["NeNA vs frame gap"] = Plot(
+                    draw=lambda ax: draw_gaps(ax, found), size=(5.5, 3.4))
+        # the first is the main figure and keeps its name, so its tab says
+        # which method it is rather than "figure"
+        first = next(iter(plots), None)
+        main = (replace(plots.pop(first), name=first)
+                if first is not None else None)
+        methods = [m for m, on in (("NeNA", settings.pairwise),
+                                   ("CRLB", settings.crlb),
+                                   ("FRC", settings.frc or settings.frc_axes))
+                   if on]
+        title = (f"{', '.join(methods)} of {name}, "
+                 f"{found[0].n_locs} localizations")
 
         data = {"measurements": found,
                 "sigma": {m.name: (m.radial.sigma if m.radial and m.radial.ok
@@ -1473,7 +1503,7 @@ class LocalizationPrecision(Plugin):
                                        if m.photon_law and m.photon_law.ok
                                        else float("nan")) for m in found}}
         return Result(text=summary(found), data=data, plot=main, plots=plots,
-                      settings=settings)
+                      settings=settings, title=title)
 
     def keep(self, result: Result):
         """The numbers, without the pairs: a precision is worth reopening.

@@ -278,21 +278,41 @@ def test_a_fit_with_too_few_pairs_says_so_rather_than_inventing_a_number():
     assert not fit.ok and "too few" in fit.message
 
 
-def test_the_plugin_reports_the_selection_and_the_whole_table_side_by_side():
+def test_the_plugin_measures_the_selection_and_names_each_figure_by_its_method():
     locs = blinking(sigma=8.0, seed=13, spread=True)
     selection = Selection(np.asarray(locs["y_nm"]) < 2500.0, name="half")
     ctx = Context(locs=locs, selection=selection)
     result = LocalizationPrecision()(ctx=ctx, max_gap=2)
-    assert len(result.data["measurements"]) == 2
-    assert set(result.data["sigma"]) == {"half", "all localizations"}
+    assert [m.name for m in result.data["measurements"]] == ["half"]
+    assert result.data["measurements"][0].n_locs == int(selection.mask.sum())
     # every localization has its own precision here, so one sigma over all of
     # them is an effective value above the median rather than the median
-    for sigma in result.data["sigma"].values():
-        assert 8.0 < sigma < 12.0
-    for amplitude in result.data["amplitude"].values():
-        assert np.sqrt(amplitude / 2000.0) == pytest.approx(8.0, abs=0.8)
+    assert 8.0 < result.data["sigma"]["half"] < 12.0
+    assert np.sqrt(result.data["amplitude"]["half"] / 2000.0) == pytest.approx(8.0, abs=0.8)
     assert "kappa" in result.text and "CRLB" in result.text
-    assert {"per axis", "frame gap", "CRLB"} <= set(result.plots)
+    assert [f.name for f in result.figures()] == ["NeNA", "CRLB", "FRC"]
+    assert result.title.startswith("NeNA, CRLB, FRC of half")
+
+
+def test_the_diagnostic_plots_are_drawn_only_when_asked_for():
+    locs = blinking(sigma=8.0, seed=13, spread=True)
+    result = LocalizationPrecision()(ctx=Context(locs=locs), max_gap=2, frc=False,
+                                     diagnostics=True)
+    assert [f.name for f in result.figures()] == [
+        "NeNA", "CRLB", "NeNA per axis", "NeNA vs frame gap"]
+
+
+def test_each_panel_title_says_which_method_it_shows():
+    import matplotlib
+    matplotlib.use("Agg")
+    from matplotlib.figure import Figure
+    locs = blinking(sigma=8.0, seed=13, spread=True)
+    result = LocalizationPrecision()(ctx=Context(locs=locs), max_gap=2, frc=False)
+    for plot in result.figures():
+        figure = Figure()
+        plot.draw_into(figure)
+        titles = [ax.get_title() for ax in figure.axes]
+        assert titles and all(t.startswith(plot.name) for t in titles), titles
 
 
 def sigma_at_photons_of(amplitude, photons):

@@ -572,7 +572,7 @@ class PluginPanel(QWidget):
         if self._window is None:
             self._window = ResultWindow(self.plugin.name, self)
         self._window.show()
-        self._window.show_plots(self.result.figures())
+        self._window.show_plots(self.result.figures(), self.result.title)
         if raise_window:
             self._window.raise_()
 
