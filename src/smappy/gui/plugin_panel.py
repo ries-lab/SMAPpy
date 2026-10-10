@@ -45,7 +45,8 @@ class _Worker(QObject):
         except Exception:                   # a File plugin has no table yet
             n = None
         try:
-            work = getattr(plugin, self.job)
+            # a live step is a run nobody keeps (`PluginPanel._live_step`)
+            work = getattr(plugin, "run" if self.job == "live" else self.job)
             # into the diagnostic log: what ran, with what, and the traceback
             # if it failed -- the first thing a bug report is asked for
             with running(plugin, self.job, settings, n):
@@ -131,9 +132,9 @@ class PluginPanel(QWidget):
         self.text_button.setEnabled(False)
         # a measurement one aims with rather than one asked for afterwards:
         # the plugin says it is cheap enough (`Plugin.live`) and the tick
-        # re-previews while the ROI is dragged
+        # re-measures while the ROI is dragged
         self.live: Optional[QCheckBox] = None
-        if plugin_cls.live and plugin_cls.has_preview():
+        if plugin_cls.live:
             self.live = QCheckBox("live")
             self.live.setToolTip("redraw while the ROI is moved, without "
                                  "touching the session")
@@ -178,6 +179,7 @@ class PluginPanel(QWidget):
         self.plot_button.clicked.connect(self.plot)
         self.text_button.clicked.connect(self.show_text)
         self._live_running = False
+        self._show_figures = True
         self._live_timer = QTimer(self, singleShot=True, interval=120)
         self._live_timer.timeout.connect(self._live_step)
         self.form.field_changed.connect(self._react)
@@ -221,7 +223,13 @@ class PluginPanel(QWidget):
             self._live_timer.start()          # try again once it is free
             return
         self._live_running = True
-        self.preview()
+        # its preview where it has one; otherwise the run itself, which is
+        # then looked at and not applied -- a measurement that only draws
+        # needs no Preview button to be aimed
+        if self.plugin.has_preview():
+            self.preview()
+        else:
+            self._start("live", "measuring...")
 
     def _take_saved(self) -> None:
         """Offer the figure of a run that is over: this file carries its result.
@@ -328,6 +336,7 @@ class PluginPanel(QWidget):
         ``context`` goes into the run's `Context` -- `stop` and
         `writer_finished` for a run something else controls -- and ``ask=False``
         skips the preflight question, for a run nobody is there to answer.
+        Nor are its figures opened: they wait for Plot.
         """
         return self._start("run", "running...", context=context, ask=ask)
 
@@ -355,6 +364,9 @@ class PluginPanel(QWidget):
                                        grouping=self.plugin.grouping,
                                        **(context or {}))
         self._job = job
+        # a run somebody asked for shows its figures when it is done; one
+        # that nobody is there to answer (`start_run(ask=False)`) does not
+        self._show_figures = ask
         for button in self._buttons():
             button.setEnabled(False)
         self.status.setText(message)
@@ -505,8 +517,8 @@ class PluginPanel(QWidget):
         live, self._live_running = self._live_running, False
         self.result = result
         # a preview is looked at, never applied: it exists so that the session
-        # is not changed before the settings are right
-        if self._job != "preview":
+        # is not changed before the settings are right; nor is a live step
+        if self._job not in ("preview", "live"):
             self.session.apply(self.plugin, result)
         # A live step happens ten times a second while the ROI is dragged, so
         # it writes no line, opens no window and takes no focus: the figure
@@ -528,7 +540,9 @@ class PluginPanel(QWidget):
         self.plot_button.setEnabled(bool(result.figures()))
         self.plot_button.setToolTip(
             "show the plugin's result figure (the drift curves, say)")
-        if self._job == "preview" and result.figures():
+        # The figures are what most runs are for: a measurement is read off
+        # them, so the window opens without a second click on Plot.
+        if result.figures() and (live or self._show_figures):
             self.plot(raise_window=not live)
         self.ended.emit("done", result)
 

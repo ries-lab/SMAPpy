@@ -546,10 +546,11 @@ class Plugin:
     # is of the whole selection rather than of one frame -- see
     # `preview_wants_frame` -- and the GUI then asks for no frame number
     # Cheap enough to redo while the ROI is dragged.  A plugin that says so
-    # and overrides `preview` gets a *live* tick in the GUI, which re-previews
-    # between drag events -- what makes a measurement something one aims with
-    # rather than something one asks for and reads afterwards.  Only claim it
-    # for work measured in tens of milliseconds on a normal selection.
+    # gets a *live* tick in the GUI, which measures again between drag events
+    # -- its `preview` if it has one, otherwise `run`, looked at and never
+    # applied -- what makes a measurement something one aims with rather than
+    # something one asks for and reads afterwards.  Only claim it for work
+    # measured in tens of milliseconds on a normal selection.
     live: bool = False
 
     def preview(self, ctx: Context, settings, frame: int = 0) -> Result:
