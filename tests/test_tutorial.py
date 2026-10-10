@@ -65,7 +65,8 @@ def test_every_tutorial_builds_from_the_real_gui(tmp_path, topic):
     import os
     done = subprocess.run([sys.executable, "-m", "smappy.tutorial", topic,
                            "-o", str(tmp_path)], capture_output=True, text=True,
-                          timeout=600, env={**os.environ, "SMAPPY_TUTORIAL_DRAFT": "1"})
+                          timeout=600, env={**os.environ, "SMAPPY_TUTORIAL_DRAFT": "1",
+                                            "SMAPPY_TUTORIAL_DATA": str(tmp_path / "SMAPpy demo")})
     if done.returncode and "libEGL" in done.stderr:
         pytest.skip("Qt's libraries are not installed")
     assert done.returncode == 0, done.stderr[-3000:]

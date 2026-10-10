@@ -372,7 +372,11 @@ class Director:
         Short and plain, because it is on screen: a file field shows the path,
         and a temporary directory's name is noise to whoever watches.
         """
-        path = Path(tempfile.gettempdir()) / "SMAPpy demo"
+        # SMAPPY_TUTORIAL_DATA moves it, for the test: tutorials run side by
+        # side there, and two that fit the same demo acquisition into one
+        # file found it locked by the other
+        path = Path(os.environ.get("SMAPPY_TUTORIAL_DATA")
+                    or Path(tempfile.gettempdir()) / "SMAPpy demo")
         path.mkdir(parents=True, exist_ok=True)
         return path
 
