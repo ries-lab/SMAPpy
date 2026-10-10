@@ -115,10 +115,11 @@ class CalibrationWindow(QMainWindow):
         self.tabs = QTabWidget()
         self.pages = []
         for title in PAGES:
-            from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
             from matplotlib.figure import Figure
+
+            from ..gui.canvas import canvas_class
             figure = Figure(figsize=(9, 6), constrained_layout=True)
-            canvas = FigureCanvasQTAgg(figure)
+            canvas = canvas_class()(figure)
             canvas.mpl_connect("pick_event", self.pick_pair)
             self.tabs.addTab(canvas, title)
             self.pages.append((figure, canvas))

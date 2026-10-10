@@ -59,6 +59,11 @@ Running the tests -- two tiers:
   on the GUI thread.  A test that needs an object gone calls `gc.collect()`
   itself; a new entry point that makes a QApplication installs the collector
   and the icon (`gui/icon.install_icon`).
+* **A `QTimer.singleShot` callable must never raise.**  PySide leaves its
+  exception pending inside `processEvents`, and the next Python override Qt
+  calls segfaults (6.10) or hangs.  Catch and print inside it, or connect a
+  `QTimer`'s `timeout` signal instead.  Make matplotlib canvases with
+  `gui/canvas.canvas_class()`, whose queued redraw survives a deleted canvas.
 
 * Plain `pytest` collects `externaltools/Comet`, which imports numba and errors
   out.  Always name `tests`.
