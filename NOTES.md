@@ -433,16 +433,12 @@ M1 Pro, 46,005 frames of 200x200, spline fit, ROI 13: **35.9 s** (1283 frames/s,
 
 Findings worth keeping:
 
-* the C++ single-pass maximum search beats `scipy.ndimage.maximum_filter` 5.2x
-  (short-circuit evaluation rejects most pixels after one comparison)
-* the 2-D DoG kernel has **rank 2**, so it is not separable -- subtracting the
-  1-D kernels is wrong.  Subtracting the 2-D kernels and doing one convolution
-  is exact and, below radius 4, faster than the fused separable passes
-  (`_SEPARABLE_FROM_RADIUS`)
+* the C++ single-pass maximum search beats `scipy.ndimage.maximum_filter` 5.2x (short-circuit evaluation rejects most pixels after one comparison)
+* the 2-D DoG kernel has **rank 2**, so it is not separable -- subtracting the 1-D kernels is wrong.  Subtracting the 2-D kernels and doing one convolution is exact and, below radius 4, faster than the fused separable passes (`_SEPARABLE_FROM_RADIUS`)
 * SMAP's DoG window is `max(ceil(6*sigma-1), 3)`: radius 3 for sigma 1.2
 * threading gives ~4x on filtering and maxima, ~6.5x on fitting
-* the per-frame dynamic-cutoff loop is the last serial part (~2.7 s, 80% of it
-  numpy dispatch overhead).  It could be vectorised with one lexsort per chunk.
+* the dynamic cutoff ran as a Python loop over frames (~2.7 s of the detection's 12.9 s, 80% of it numpy dispatch overhead).  It needs three order statistics, not a sort: `csrc/cutoff.hpp` finds them with nth_element, frames over threads, **9.3 -> 1.1 ms** per 200 frames.  A lexsort over the block, the obvious vectorisation, is slower than the loop it replaced.
+* its quantiles are SMAP's nearest rank (`myquantilefast`); smappy had `np.quantile`'s interpolation only because it is numpy's default.  The cutoff rises slightly, dropping 0.01-0.14 % of the candidates, those at the threshold.  Note that clang fuses `a * b - c` into an FMA by default, so a kernel that has to match a reference bit for bit must prevent it (`cutoff.hpp`).
 
 ### Rendering
 

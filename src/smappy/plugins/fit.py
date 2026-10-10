@@ -946,7 +946,8 @@ class GaussianFit(_FitPlugin):
     description = "Detect and fit with a free-width Gaussian PSF: x, y, photons, sigma."
     Settings = GaussianFitSettings
     # 2: the camera's read noise in the likelihood (1 e- without EM gain)
-    version = "2"
+    # 3: the dynamic cutoff's quantiles nearest-rank, as SMAP takes them
+    version = "3"
     params = {f"fit.{k}": v for k, v in FIT_PARAMS.items()}
 
     def model(self, settings, camera):
@@ -959,7 +960,8 @@ class SplineFit(_FitPlugin):
                    "calibration: adds z.")
     Settings = SplineFitSettings
     # 2: the camera's read noise in the likelihood (1 e- without EM gain)
-    version = "2"
+    # 3: the dynamic cutoff's quantiles nearest-rank, as SMAP takes them
+    version = "3"
     params = GaussianFit.params
 
     def model(self, settings, camera):
@@ -987,7 +989,8 @@ class DualSplineFit(_FitPlugin):
     #    the background (the version is the calibration's as much as the fit's)
     # 5: the camera's read noise in the likelihood; the calibration's photon
     #    shares from the light before clipping
-    version = "5"
+    # 6: the dynamic cutoff's quantiles nearest-rank, as SMAP takes them
+    version = "6"
     Settings = DualSplineFitSettings
     params = {**GaussianFit.params, **finish_params()}
 
@@ -1297,7 +1300,8 @@ class DualGaussianFit(_FitPlugin):
                    "registration can be measured from the movie itself.")
     # 2: linked photons are the total over both halves, not the main half's
     # 3: the camera's read noise in the likelihood (1 e- without EM gain)
-    version = "3"
+    # 4: the dynamic cutoff's quantiles nearest-rank, as SMAP takes them
+    version = "4"
     Settings = DualGaussianFitSettings
     params = {**GaussianFit.params, **finish_params(), **REGISTRATION_PARAMS}
 

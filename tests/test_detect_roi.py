@@ -112,6 +112,58 @@ def test_dynamic_cutoff_scales_with_the_distribution():
     assert DynamicCutoff(3.0)(rng.normal(10, 1, 1000)) > weak
 
 
+def test_the_dynamic_cutoff_takes_smaps_nearest_rank_quantiles():
+    """20 maxima: the 4th, 10th and 16th smallest, as SMAP's myquantilefast
+    picks them.  np.quantile would interpolate to 0.88, 1.35 and 2.42."""
+    values = np.array([0.4, 0.6, 0.7, 0.8, 0.9, 1.0, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5,
+                       1.6, 1.8, 2.0, 2.3, 2.9, 3.5, 41.0, 95.0], np.float32)
+    q20, q50, q80 = 0.8, 1.3, 2.3
+    expected = q50 + 1.7 * (q80 - q20) / 0.6
+    assert DynamicCutoff(1.7)(values) == pytest.approx(expected, abs=1e-5)
+    starts = np.array([0, values.size])
+    assert DynamicCutoff(1.7).thresholds(values, starts)[0] == pytest.approx(expected,
+                                                                              abs=1e-5)
+
+
+@pytest.mark.parametrize("extension", [True, False])
+def test_the_cutoff_of_a_block_is_the_cutoff_of_each_frame_bit_for_bit(
+        extension, monkeypatch):
+    """Empty frames, frames under ten maxima, ties, and values far from 1."""
+    if not extension:
+        monkeypatch.setattr("smappy.detect._fit3d", None)
+    rng = np.random.default_rng(3)
+    cutoff = DynamicCutoff(1.7)
+    for trial in range(60):
+        counts = rng.integers(0, 2000 if trial % 2 else 25, rng.integers(1, 40))
+        starts = np.concatenate([[0], np.cumsum(counts)])
+        values = (rng.gamma(2, 3, starts[-1]) * 10.0 ** rng.integers(-3, 4))
+        if trial % 3 == 0:
+            values = np.round(values, 1)
+        values = values.astype(np.float32)
+        block = cutoff.thresholds(values, starts)
+        for i, (a, b) in enumerate(zip(starts[:-1], starts[1:])):
+            if b > a:
+                assert block[i] == np.float32(cutoff(values[a:b]))
+
+
+@pytest.mark.parametrize("split", [None, (1, 30), (0, 17)])
+def test_detection_keeps_what_the_per_frame_loop_keeps(split):
+    """A cutoff that is not a DynamicCutoff still takes the loop: the reference."""
+    rng = np.random.default_rng(4)
+    images = rng.normal(20, 3, (20, 48, 60)).astype(np.float32)
+    for frame in images:
+        frame += _spots(rng.uniform(5, 55, (4, 2)), shape=(48, 60), background=0.0)
+    images[3] = 0.0                                  # a frame with no maxima
+    images[5] = _spots([(20, 20), (40, 30)], shape=(48, 60))  # one with two
+    filtered = DoGFilter(1.2)(images)
+    cutoff = DynamicCutoff(1.7)
+    fast = find_candidates(filtered, cutoff, split=split)
+    loop = find_candidates(filtered, lambda v: cutoff(v), split=split)
+    assert len(fast) > 0
+    for name in ("frame", "x", "y", "value"):
+        assert np.array_equal(getattr(fast, name), getattr(loop, name))
+
+
 @pytest.mark.parametrize("n_threads", [1, 2, 8])
 def test_threading_does_not_change_detection(n_threads):
     """Threaded filtering and peak finding must be bit-identical to serial."""

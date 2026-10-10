@@ -1,5 +1,5 @@
 ---
-version: "2"
+version: "3"
 covers: [smappy.pipeline.LocalizationEngine, smappy.detect.PeakFinder, smappy.detect.DynamicCutoff, smappy.psf.GaussianPSF, smappy.camera.to_photons, smappy.rawframes.RawFrameKeeper]
 ---
 
@@ -82,7 +82,9 @@ cutoff is set above it,
 $$\mathrm{cutoff} = \mathrm{median} + f \cdot \frac{q_{80} - q_{20}}{0.6} ,$$
 
 with $q_{20}$ and $q_{80}$ the 20th and 80th percentiles of the maxima of that
-frame, and $f$ the *cutoff value* (1.7).  The fraction is a robust measure of
+frame, and $f$ the *cutoff value* (1.7).  A percentile is taken as SMAP takes
+it: the $p$-th of $n$ maxima is the $\lceil np \rceil$-th smallest, with no
+interpolation between neighbours.  The fraction is a robust measure of
 the spread of the noise, so the cutoff is "$f$ noise widths above the typical
 maximum" whatever the background.  The **absolute** cutoff is a fixed
 number, in photons of the filtered image.  Lower values find dimmer

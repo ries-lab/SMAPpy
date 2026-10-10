@@ -12,6 +12,7 @@
 #include <thread>
 #include <vector>
 
+#include "cutoff.hpp"
 #include "filters.hpp"
 #include "lm.hpp"
 #include "maxima.hpp"
@@ -339,6 +340,30 @@ py::tuple find_maxima(const Array& images, float threshold, int n_threads) {
                           std::move(value));
 }
 
+py::array_t<float> segment_cutoffs(
+        const py::array_t<float, py::array::c_style | py::array::forcecast>& values,
+        const py::array_t<int64_t, py::array::c_style | py::array::forcecast>& starts,
+        double factor, long long min_count, int n_threads) {
+    if (values.ndim() != 1 || starts.ndim() != 1 || starts.shape(0) < 1)
+        throw std::invalid_argument("values and starts must be 1-D, starts non-empty");
+    const long long segments = starts.shape(0) - 1;
+    const int64_t* s = starts.data();
+    for (long long i = 0; i < segments; ++i)
+        if (s[i] < 0 || s[i] > s[i + 1] || s[i + 1] > values.shape(0))
+            throw std::invalid_argument("starts must ascend within values");
+    py::array_t<float> out(segments);
+    float* o = out.mutable_data();
+    const float* v = values.data();
+    {
+        py::gil_scoped_release release;
+        smappy::parallel_ranges(segments, smappy::resolve_threads(n_threads, segments),
+                                [&](long long begin, long long end, int) {
+            smappy::segment_cutoffs(v, s, begin, end, factor, min_count, o);
+        });
+    }
+    return out;
+}
+
 }  // namespace
 
 PYBIND11_MODULE(_fit3d, m) {
@@ -362,6 +387,10 @@ PYBIND11_MODULE(_fit3d, m) {
           py::arg("threshold") = -std::numeric_limits<float>::infinity(),
           py::arg("n_threads") = 0,
           "Strict 3x3 local maxima of an image block -> (frame, y, x, value).");
+    m.def("segment_cutoffs", &segment_cutoffs, py::arg("values"), py::arg("starts"),
+          py::arg("factor"), py::arg("min_count") = 10, py::arg("n_threads") = 0,
+          "Dynamic cutoff of each segment values[starts[i]:starts[i+1]], as float32; "
+          "NaN below min_count.");
 
     m.def("fit_cspline", &fit_cspline, py::arg("rois"), py::arg("coeff"),
           py::arg("z_start"), py::arg("iterations") = 50, py::arg("n_threads") = 0,

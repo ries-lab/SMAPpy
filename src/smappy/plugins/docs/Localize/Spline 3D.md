@@ -1,5 +1,5 @@
 ---
-version: "2"
+version: "3"
 covers: [smappy.psf.SplinePSF, smappy.io.calibration.load_spline_calibration, smappy.io.calibration.SplineCalibration, smappy.io.calibration.evaluate_spline, smappy.io.calibration.warn_on_em_mismatch, smappy.roi.cut_rois, smappy.calibrate.core.build_calibration]
 ---
 
