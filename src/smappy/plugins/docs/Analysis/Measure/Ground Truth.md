@@ -32,7 +32,7 @@ analysis.  It is of no use on real data.
 * a fit of simulated camera frames -- a `*.sim.yaml` opened in a fitter,
   which writes the file's name into the table as its `source`;
 * or a table made directly by
-  [Blinking Structure](plugin:File/Simulate/Blinking Structure), which
+  [Simulate structure](plugin:File/Simulate/Blinking Structure), which
   carries its simulation settings with it;
 * or any table, with the simulation file named under *simulation*.
 
