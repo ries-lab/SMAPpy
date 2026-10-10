@@ -121,8 +121,9 @@ where = ["src"]
 "smappy._comet" = ["LICENSE.txt"]
 # the camera database: a file that is read at run time, so it has to be in the
 # wheel and not only in the checkout
-# and the simulator's built-in structures, likewise
-"smappy" = ["data/*.json", "data/structures/*.yaml", "data/microscopes/*.yaml"]
+# and the simulator's built-in structures, likewise, and the window icon
+"smappy" = ["data/*.json", "data/structures/*.yaml", "data/microscopes/*.yaml",
+            "data/icons/*.svg", "data/icons/*.png"]
 # the plugins' pages, read by the Help window (`smappy.docs`), one folder per
 # level of the menu tree
 "smappy.plugins" = ["*.chain.yaml", "docs/*.md", "docs/*/*.md", "docs/*/*/*.md", "docs/*/*/*/*.md"]

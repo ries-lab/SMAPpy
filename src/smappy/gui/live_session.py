@@ -129,6 +129,8 @@ class LiveSession:
         app = QApplication.instance() or QApplication([sys.argv[0]])
         apply_style(app)
         collect_on_gui_thread(app)
+        from .icon import install_icon
+        install_icon(app)
         self.session = Session()
         out = self.settings.output.resolve(self.settings.source.path)
         if out is not None:

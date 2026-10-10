@@ -99,6 +99,8 @@ class Director:
         apply_style(self.app)
         from ..gui.collector import collect_on_gui_thread
         collect_on_gui_thread(self.app)
+        from ..gui.icon import install_icon
+        install_icon(self.app)
         self.session = Session()
         self.render = RenderWindow(self.session)
         self.control = ControlWindow(self.session, self.render)
