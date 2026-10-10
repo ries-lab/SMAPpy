@@ -22,7 +22,7 @@ PEAK = 0.97          # the brightest pixel's place on the LUT
 FLOOR = 0.06         # dimmer than this is left black
 PIN = "#bb0000"
 PIN_PATH = "M50 92 C41 78 19 62 19 40 A31 31 0 1 1 81 40 C81 62 59 78 50 92Z"
-HEAD = (50, 40, 27)  # the circle the PSF is cropped to: cx, cy, r
+HEAD = (50, 40, 27)  # the circle the PSF is cut to: cx, cy, r
 GRID = (22, 12, 56)  # the pixel grid: x0, y0, size, in a 100 x 100 box
 
 
@@ -42,23 +42,71 @@ def pixel(i, c, s):
 
 
 def psf_rects():
+    """The pixels, each already cut to the head's circle.
+
+    Not an SVG clip-path: Qt's renderer does not antialias a clip, and the
+    circle came out stepped while the pin's filled outline was smooth.  A
+    pixel the circle crosses is drawn as its intersection with the circle
+    instead, a filled polygon, antialiased like every other shape.
+    """
     x0, y0, size = GRID
     w = size / N_PIX
     cx, cy = CENTRE_PIX
     v = [[pixel(i, cx, SIGMA_PIX) * pixel(j, cy, SIGMA_PIX)
           for i in range(N_PIX)] for j in range(N_PIX)]
     top = max(map(max, v))
+    hx, hy, r = HEAD
     rects = []
     for j in range(N_PIX):
         for i in range(N_PIX):
             f = v[j][i] / top * PEAK
-            if f >= FLOOR:
-                # 0.3 of overlap, so no hairline of background shows between
-                # neighbouring pixels when the icon is antialiased
-                rects.append(f'  <rect x="{x0 + i * w:.2f}" y="{y0 + j * w:.2f}" '
-                             f'width="{w + 0.3:.2f}" height="{w + 0.3:.2f}" '
-                             f'fill="{hot(f)}"/>')
+            if f < FLOOR:
+                continue
+            # 0.3 of overlap, so no hairline of background shows between
+            # neighbouring pixels when the icon is antialiased
+            x, y, s = x0 + i * w, y0 + j * w, w + 0.3
+            corners = [(x, y), (x + s, y), (x + s, y + s), (x, y + s)]
+            if all(math.hypot(px - hx, py - hy) <= r for px, py in corners):
+                rects.append(f'  <rect x="{x:.2f}" y="{y:.2f}" width="{s:.2f}" '
+                             f'height="{s:.2f}" fill="{hot(f)}"/>')
+                continue
+            cut = _clip(corners, _circle(hx, hy, r))
+            if len(cut) >= 3:
+                d = "M" + "L".join(f"{px:.2f} {py:.2f}" for px, py in cut) + "Z"
+                rects.append(f'  <path d="{d}" fill="{hot(f)}"/>')
     return rects
+
+
+def _circle(cx, cy, r, n=180):
+    """The circle as a polygon, counter-clockwise in SVG's y-down frame."""
+    return [(cx + r * math.cos(2 * math.pi * k / n),
+             cy + r * math.sin(2 * math.pi * k / n)) for k in range(n)]
+
+
+def _clip(subject, clip):
+    """Sutherland-Hodgman: ``subject`` cut to the convex polygon ``clip``."""
+    def inside(p, a, b):
+        return (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]) >= 0
+
+    def meet(p, q, a, b):
+        dx, dy = q[0] - p[0], q[1] - p[1]
+        ex, ey = b[0] - a[0], b[1] - a[1]
+        t = (ex * (p[1] - a[1]) - ey * (p[0] - a[0])) / (ey * dx - ex * dy)
+        return p[0] + t * dx, p[1] + t * dy
+
+    out = subject
+    for a, b in zip(clip, clip[1:] + clip[:1]):
+        points, out = out, []
+        for p, q in zip(points, points[1:] + points[:1]):
+            if inside(q, a, b):
+                if not inside(p, a, b):
+                    out.append(meet(p, q, a, b))
+                out.append(q)
+            elif inside(p, a, b):
+                out.append(meet(p, q, a, b))
+        if not out:
+            break
+    return out
 
 
 def crosshair():
@@ -76,13 +124,9 @@ def svg():
     cx, cy, r = HEAD
     return "\n".join([
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">',
-        f'  <defs><clipPath id="head"><circle cx="{cx}" cy="{cy}" r="{r}"/>'
-        '</clipPath></defs>',
         f'  <path d="{PIN_PATH}" fill="{PIN}"/>',
         f'  <circle cx="{cx}" cy="{cy}" r="{r}" fill="#000"/>',
-        '  <g clip-path="url(#head)">',
         *psf_rects(),
-        '  </g>',
         crosshair(),
         '</svg>', ""])
 
