@@ -159,8 +159,8 @@ class Thing(Plugin):
 * Set `live = True` on a plugin whose work is tens of milliseconds: the GUI
   grows a *live* tick and measures again while the ROI is dragged (its
   `preview` if it has one, else `run`, never applied), silently (no log line,
-  no window, no focus).  It turns a
-  measurement one asks for into one that can be aimed.
+  no window, no focus).  It turns a measurement one asks for into one that
+  can be aimed.
 * **A plugin that measures usually wants one answer per layer**, not one over
   the selection: a line is drawn over two channels and the measurement is how
   they differ.  `session.selection(i)` is layer `i`'s, and `line_profile.py`'s
@@ -324,8 +324,8 @@ way and what was left out of SMAP's `VersatileRenderer`.
 ## Simulated data
 
 `smappy.simulate` is one model with two outputs, and the `File/Simulate/
-Blinking Structure` plugin (shown as *Simulate structure*) is its form: structure -> labelling -> blinking ->
-localizations or camera frames.  NOTES.md, "The simulation model", has the
+Blinking Structure` plugin (shown as *Simulate structure*) is its form:
+structure -> labelling -> blinking -> localizations or camera frames.  NOTES.md, "The simulation model", has the
 assumptions.  What a session needs:
 
 * Structures are YAML (the syntax is in `simulate/structure.py`); the
