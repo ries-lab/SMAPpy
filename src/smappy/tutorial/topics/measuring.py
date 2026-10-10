@@ -45,7 +45,7 @@ def _run_and_plot(d, panel, fraction: float = 0.8):
 def make(d) -> None:
     session, render = d.session, d.render
     file_tab = show_tab(d, "File")
-    _, simulate = open_section(d, file_tab, "Blinking Structure")
+    _, simulate = open_section(d, file_tab, "Simulate structure")
     simulate.run_button.click()
     d.settle()
 

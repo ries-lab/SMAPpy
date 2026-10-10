@@ -148,6 +148,7 @@ class Thing(Plugin):
   runs once over the selection.
 * Override `preview` for a plugin that can show its work before committing;
   the GUI grows a button when it is overridden and nothing when it is not.
+  A plugin that changes nothing needs none: Run opens its figures.
 * Override `preflight` to put a question before a run whose cost you can know
   in a fraction of a second -- `drift_comet.py` does, rather than letting
   someone find out over the next twenty minutes.  Returning a
@@ -155,10 +156,11 @@ class Thing(Plugin):
   plain yes, each carrying the settings it would run with: COMET offers an RCC
   prepass, because "no" is not a useful answer to "this will take an
   afternoon".
-* Set `live = True` on a plugin whose work is tens of milliseconds and which
-  overrides `preview`: the GUI grows a *live* tick and re-previews while the
-  ROI is dragged, silently (no log line, no window, no focus).  It turns a
-  measurement one asks for into one that can be aimed.
+* Set `live = True` on a plugin whose work is tens of milliseconds: the GUI
+  grows a *live* tick and measures again while the ROI is dragged (its
+  `preview` if it has one, else `run`, never applied), silently (no log line,
+  no window, no focus).  It turns a measurement one asks for into one that
+  can be aimed.
 * **A plugin that measures usually wants one answer per layer**, not one over
   the selection: a line is drawn over two channels and the measurement is how
   they differ.  `session.selection(i)` is layer `i`'s, and `line_profile.py`'s
@@ -185,6 +187,9 @@ written this way; it is also what makes the tests readable.
   never assume a session exists.
 * `ctx.report(text)` for progress, `ctx.emit(event, payload)` to hand partial
   results on.  Both are no-ops when nobody is listening.
+* `ctx.warn(text)` for what must not be missed: kept in `ctx.warnings`, shown
+  as its own line that progress does not overwrite.  Put the warnings in the
+  result's text if they should reach the history.
 * `ctx.stop` and `ctx.writer_finished` -- `threading.Event`s or None, set from
   another thread: end the run early keeping what it has, and "the live source
   is complete".  The Fit plugin honours both; a long plugin may check `stop`.
@@ -199,8 +204,9 @@ written this way; it is also what makes the tests readable.
 
 ### The result
 
-`Result(locs=..., text=..., plot=..., plots={...}, data={...}, settings=...)`,
-every part optional.  `plot(ax)` is handed **one** axis; for a grid, pass
+`Result(locs=..., text=..., plot=..., plots={...}, data={...}, settings=...,
+title=...)`, every part optional (`title` says what the figures are of, in
+the figure window's title).  `plot(ax)` is handed **one** axis; for a grid, pass
 `Plot(draw, panels=n, size=(w, h))` instead, and `draw` is handed the figure
 and lays out its own panels (`statistics.py`, `ROIManager/Analyze/Histograms`
 and the fit preview all do this).  Never set the figure's size or its layout
@@ -318,8 +324,8 @@ way and what was left out of SMAP's `VersatileRenderer`.
 ## Simulated data
 
 `smappy.simulate` is one model with two outputs, and the `File/Simulate/
-Blinking Structure` plugin is its form: structure -> labelling -> blinking ->
-localizations or camera frames.  NOTES.md, "The simulation model", has the
+Blinking Structure` plugin (shown as *Simulate structure*) is its form:
+structure -> labelling -> blinking -> localizations or camera frames.  NOTES.md, "The simulation model", has the
 assumptions.  What a session needs:
 
 * Structures are YAML (the syntax is in `simulate/structure.py`); the

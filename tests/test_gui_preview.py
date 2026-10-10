@@ -142,10 +142,8 @@ def test_the_figures_share_one_window_and_draw_when_looked_at(app):
                           plots={"second": lambda ax: drawn.append("second")})
 
     panel = PluginPanel(Plotter, Session())
-    panel._on_done(panel.plugin.run(None, None))
-
     before = set(plt.get_fignums())
-    panel.plot()
+    panel._on_done(panel.plugin.run(None, None))   # a run opens its figures
     window = panel._window
     assert [window.tabs.tabText(i) for i in range(window.tabs.count())] == [
         "figure", "second", "All"]

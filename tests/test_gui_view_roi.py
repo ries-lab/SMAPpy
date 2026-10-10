@@ -75,6 +75,30 @@ def test_the_line_width_is_on_the_toolbar_and_moves_the_line(app):
     assert bar.line_width.value() == 77.0
 
 
+def test_the_pixel_size_shows_the_zoom_and_typing_one_zooms_to_it(app):
+    """SMAP's pixrec: the zoom is a pixel size one can read and type."""
+    from smappy.gui.render_view import DEFAULT_PIXEL, RenderToolBar, RenderView
+
+    session = Session(table())
+    view = RenderView(session)
+    view.resize(400, 300)
+    bar = RenderToolBar(view)
+    view.reset()
+    assert bar.pixel.value() == pytest.approx(view.pixel_size(), abs=0.01)
+
+    centre = view.view.viewRect().center()
+    bar.pixel.setValue(4.0)
+    assert view.pixel_size() == pytest.approx(4.0, rel=0.01)
+    assert view.view.viewRect().center().x() == pytest.approx(centre.x(), abs=1)
+
+    view.view.scaleBy((2, 2))                  # a zoom moves the number
+    assert bar.pixel.value() == pytest.approx(8.0, rel=0.02)
+
+    bar.pixel_button.click()
+    assert view.pixel_size() == pytest.approx(DEFAULT_PIXEL, rel=0.01)
+    assert bar.pixel.suffix() == " nm"
+
+
 def blinks(n_emitters=300, on=3):
     """Each emitter on for ``on`` consecutive frames, a few nm apart: grouping
     makes exactly one localization of each."""
@@ -120,3 +144,63 @@ def test_a_grouped_layer_counts_blinks_inside_the_roi_as_it_does_outside(app):
 
     session.show_grouped(0, False)
     assert len(session.shown_selection(0)) == len(session.selection(0))
+
+
+def test_layers_side_by_side_get_a_panel_each_and_the_overlay_is_their_sum(app, tmp_path):
+    """SMAP's split and comp: a picture per layer, and the added-up one after."""
+    from smappy.gui.render_view import RenderView
+
+    session = Session(table())
+    session.add_layer()
+    view = RenderView(session)
+    view.resize(800, 400)
+    view.reset()
+    assert view.panels == ["overlay"] and not view.mirrors
+
+    view.set_layout_mode("side")
+    assert view.panels == [0, 1] and len(view.mirrors) == 1
+    view.set_layout_mode("side+overlay")
+    assert view.panels == [0, 1, "overlay"] and len(view.mirrors) == 2
+    assert [m.label.textItem.toPlainText() for m in view.mirrors] == [
+        session.layers[1].name, "overlay"]
+
+    fov = view.current_fov()
+    first, second, overlay = view.panel_images(fov)
+    summed, _ = view.composite(fov)
+    assert np.allclose(overlay, summed)
+    assert np.allclose(overlay, np.clip(first + second, 0, 1))
+
+    # the outline of the ROI is on every panel, which pan with the first
+    session.set_roi(Region.rect(1000, 1000, 3000, 3000))
+    assert all(m.outline[1].isVisible() for m in view.mirrors)
+    view.view.translateBy(x=500)
+    assert view.mirrors[0].view.viewRect() == view.view.viewRect()
+
+    path = tmp_path / "panels.png"
+    view.save_png(path)
+    from PIL import Image
+    assert Image.open(path).size[0] > 2.5 * fov.nx          # three across
+
+    session.layers[1].visible = False
+    session.changed("layer")
+    assert view.panels == ["overlay"] and not view.mirrors  # one layer: one panel
+
+    with pytest.raises(ValueError):
+        view.set_layout_mode("tiled")
+
+
+def test_the_panels_go_whichever_way_shows_the_data_larger(app):
+    from smappy.gui.render_view import RenderView
+
+    def arranged(stretch_x):
+        locs = table()
+        locs.columns["x_nm"] = locs.columns["x_nm"] * stretch_x
+        session = Session(locs)
+        session.add_layer()
+        view = RenderView(session)
+        view.resize(800, 600)
+        view.set_layout_mode("side")
+        return view.stacked
+
+    assert arranged(4.0)                 # 40 by 10 µm: one above the other
+    assert not arranged(0.5)             # 5 by 10 µm: side by side

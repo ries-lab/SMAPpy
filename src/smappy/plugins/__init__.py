@@ -301,6 +301,7 @@ class Context:
         self.writer_finished = writer_finished
         self._progress = progress
         self._stream = stream
+        self.warnings: List[str] = []       # what `warn` was told, in order
         if locs is None:
             locs = session.locs if session is not None else Localizations({}, {})
         self.locs = locs
@@ -351,6 +352,22 @@ class Context:
         """Say what is happening.  A no-op when nobody is listening."""
         if self._progress:
             self._progress(text)
+
+    def warn(self, text: str) -> None:
+        """Say something the user must not miss, and keep it.
+
+        A progress line is overwritten by the next one, which is how an EM-gain
+        mismatch reported at the start of a fit vanished under its frame
+        count.  A warning goes to whoever listens as a ``("warning", text)``
+        event -- the panel keeps it as a line of its own -- or as a progress
+        line when only progress is listened to, and it stays in `warnings`
+        for the plugin to put in what it returns.
+        """
+        self.warnings.append(text)
+        if self._stream:
+            self._stream("warning", text)
+        elif self._progress:
+            self._progress(f"warning: {text}")
 
     def emit(self, event: str, payload: Any) -> None:
         """Hand a partial result on while still running.
@@ -461,6 +478,9 @@ class Result:
     # more for the log entry, beside the path, the text and the settings: a
     # chain puts its steps here, so the history shows what each one did
     log: Dict[str, Any] = field(default_factory=dict)
+    # what the figures are of, for the window's title beside the plugin's
+    # name: "NeNA, CRLB, FRC of layer 1, 30000 localizations"
+    title: str = ""
 
     def figures(self) -> List[Plot]:
         """Everything there is to draw, as `Plot`s, the main one first."""
@@ -543,10 +563,11 @@ class Plugin:
     # is of the whole selection rather than of one frame -- see
     # `preview_wants_frame` -- and the GUI then asks for no frame number
     # Cheap enough to redo while the ROI is dragged.  A plugin that says so
-    # and overrides `preview` gets a *live* tick in the GUI, which re-previews
-    # between drag events -- what makes a measurement something one aims with
-    # rather than something one asks for and reads afterwards.  Only claim it
-    # for work measured in tens of milliseconds on a normal selection.
+    # gets a *live* tick in the GUI, which measures again between drag events
+    # -- its `preview` if it has one, otherwise `run`, looked at and never
+    # applied -- what makes a measurement something one aims with rather than
+    # something one asks for and reads afterwards.  Only claim it for work
+    # measured in tens of milliseconds on a normal selection.
     live: bool = False
 
     def preview(self, ctx: Context, settings, frame: int = 0) -> Result:

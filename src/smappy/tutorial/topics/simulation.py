@@ -51,7 +51,7 @@ def make(d) -> None:
 
     d.chapter("The structure")
     file_tab = show_tab(d, "File")
-    _, sim = open_section(d, file_tab, "Blinking Structure")
+    _, sim = open_section(d, file_tab, "Simulate structure")
     top = d.union(field(sim, "output"), field(sim, "seed"))
     d.shot("Simulate is in the File tab. What to make, how many frames, the "
            "background, drift and the random seed come first.",

@@ -86,7 +86,7 @@ def make(d) -> None:
                "SMAPpy estimates the drift from the data and takes it out.")
 
     file_tab = show_tab(d, "File")
-    _, simulate = open_section(d, file_tab, "Blinking Structure")
+    _, simulate = open_section(d, file_tab, "Simulate structure")
     type_into(simulate, "drift", True)
     d.settle()
     d.shot("To practise, Simulate adds drift on request, and remembers how much, "

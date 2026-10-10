@@ -225,6 +225,10 @@ class SimulateBlinks(Plugin):
     """A labelled structure, blinking: localizations to try, or camera frames
     to fit (`smappy.simulate`)."""
 
+    # the path keeps the old name, so the GUIs and chains saved with it still
+    # find the plugin; the name is what the panel says, and "Blinking
+    # Structure" did not say that it simulates
+    name = "Simulate structure"
     Settings = SimulationSettings
     # 3: localizations down to 10 photons; free linkage, poses.  4: the
     # precision is Mortensen's maximum-likelihood one, not least squares'

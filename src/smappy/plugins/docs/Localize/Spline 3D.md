@@ -237,9 +237,11 @@ from the Bead calibration tool are never mirrored.
 **EM gain.**  A calibration records whether the beads were taken with EM
 gain -- the Bead calibration tool reads it from the bead files' metadata, a
 SMAP calibration carries it -- and if the data's camera says otherwise, the
-fit warns, in the plugin's output: the EM register of many EMCCDs reads out mirrored, so a model
+fit warns: the EM register of many EMCCDs reads out mirrored, so a model
 from beads on the other port is mirrored against the data, and every fit is
-then subtly wrong.  The fit is not stopped.  The EM gain's excess noise is
+then subtly wrong.  The fit is not stopped.  The warning stays in the
+plugin's output and its status, and goes into the run's text, so the history
+and the fitted file (`metadata["warnings"]`) keep it.  The EM gain's excess noise is
 handled as in the Gaussian fitter.  So is the camera's read noise: its variance is
 added to data and model, one electron without EM gain by default (*read
 noise*), which also keeps a pixel whose spline model nears zero from

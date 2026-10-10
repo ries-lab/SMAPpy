@@ -27,6 +27,15 @@ from ..session import Session
 from . import folders
 
 TILE = 1.5          # render this many view widths, so a pan needs no render
+DEFAULT_PIXEL = 10.0  # nm per screen pixel that a click on *pixel* zooms to
+
+# How the layers are laid out: added up into one picture, as SMAP does by
+# default, or a picture each side by side (SMAP's *split*), with or without
+# the added-up one after them (*comp*).
+LAYOUTS = (("overlay", "overlay"), ("side", "side by side"),
+           ("side+overlay", "side by side + overlay"))
+PANEL_LABEL = (255, 255, 255)
+PANEL_BORDER = pg.mkPen((128, 128, 128), width=1)
 _LIVE_THREADS = []  # every render thread, so exit can stop them all
 
 
@@ -70,7 +79,7 @@ class _Renderer(QObject):
 
     def render(self, view: "RenderView", fov: FieldOfView, generation: int) -> None:
         try:
-            rgb, _ = view.composite(fov)
+            rgb = view.panel_images(fov)
         except Exception as e:
             # Always answer.  Returning in silence left the view waiting for
             # this render forever, so it never asked for another: one failure
@@ -108,6 +117,14 @@ class RenderView(QWidget):
         self.view.sigRangeChanged.connect(self.schedule)
         self.graphics.viewport().installEventFilter(self)     # the trackpad's pinch
         session.on_change(self._on_session)
+        # side by side: the first panel is this view, which keeps the ROI
+        # tools; the others are `_Mirror`s linked to it, which pan and zoom
+        # with it and show the ROI's outline
+        self.layout_mode = "overlay"
+        self.panels: List = ["overlay"]  # what each panel shows, this view first
+        self.mirrors: List[_Mirror] = []
+        self.stacked = False             # panels one above another
+        self.label = _panel_label(self.view)
         self.fov = None                  # the field of view of the shown tile
         self.tile_valid = False
         self._generation = 0             # the newest request; older results are dropped
@@ -160,12 +177,119 @@ class RenderView(QWidget):
     def _on_session(self, what: str) -> None:
         if what == "locs":
             self.tile_valid = False
+            self._arrange()
             self.reset()
         elif what in ("layer", "layers", "append", "regrouped"):
             self.tile_valid = False      # the picture changed, not just the view
+            self._arrange()
             self.schedule()
         elif what == "roi":
             self._show_roi(self.session.roi)
+
+    # ------------------------------------------------------------ panels
+    def set_layout_mode(self, mode: str) -> None:
+        """"overlay", "side" or "side+overlay": see `LAYOUTS`."""
+        if mode not in dict(LAYOUTS):
+            raise ValueError(f"layout {mode!r}: one of {', '.join(dict(LAYOUTS))}")
+        self.layout_mode = mode
+        self.tile_valid = False
+        shown = self.view.viewRect()
+        self._arrange(force=True)
+        # the same place, in panels of another size: lockAspect widens the
+        # range to the new shape around it
+        self.view.setRange(shown, padding=0)
+        self.schedule()
+
+    def panel_specs(self) -> List:
+        """What each panel shows: a layer's index, or "overlay"."""
+        if self.layout_mode == "overlay":
+            return ["overlay"]
+        shown = [i for i, layer in enumerate(self.session.layers) if layer.visible]
+        if len(shown) < 2:
+            return ["overlay"]           # one layer is its own overlay
+        return shown + (["overlay"] if self.layout_mode == "side+overlay" else [])
+
+    def _stack(self, n: int) -> bool:
+        """Whether ``n`` panels go one above another: whichever way shows the
+        data larger in this window.  SMAP stacks data 1.3 times wider than
+        tall whatever the window; this also turns with the window."""
+        try:
+            (x0, x1), (y0, y1) = self.session.full_view()
+        except Exception:
+            return False
+        w, h = max(x1 - x0, 1e-9), max(y1 - y0, 1e-9)
+        size = self.graphics.size()
+        W, H = max(size.width(), 1), max(size.height(), 1)
+        across = min(W / n / w, H / h)
+        above = min(W / w, H / n / h)
+        return above > across
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if len(self.panels) > 1:
+            self._arrange()
+
+    def _arrange(self, force: bool = False) -> None:
+        """Make the panels the layers and the layout ask for."""
+        specs = self.panel_specs()
+        stacked = self._stack(len(specs)) if len(specs) > 1 else False
+        if not force and specs == self.panels and stacked == self.stacked:
+            self._name_panels()
+            return
+        for mirror in self.mirrors:
+            mirror.remove(self.graphics)
+        self.mirrors = []
+        self.panels, self.stacked = specs, stacked
+        for n in range(1, len(specs)):
+            row, col = (n, 0) if stacked else (0, n)
+            self.mirrors.append(_Mirror(self.graphics, self.view, row, col))
+        # a grey frame tells the panels apart, as SMAP's grey line does
+        self.view.setBorder(PANEL_BORDER if self.mirrors else None)
+        # the panels' sizes now, not at the next event: a reset straight after
+        # would fit the data to the old size
+        self.graphics.ci.layout.activate()
+        self._name_panels()
+        self._mirror_roi()
+
+    def _name_panels(self) -> None:
+        names = [self._panel_name(spec) for spec in self.panels]
+        many = len(self.panels) > 1
+        self.label.setText(names[0] if many else "")
+        for mirror, name in zip(self.mirrors, names[1:]):
+            mirror.label.setText(name)
+
+    def _panel_name(self, spec) -> str:
+        if spec == "overlay":
+            return "overlay"
+        try:
+            return self.session.layers[spec].name
+        except IndexError:
+            return ""
+
+    def panel_images(self, fov: FieldOfView) -> List[np.ndarray]:
+        """An RGB image per panel on ``fov``; one for the overlay alone.
+
+        Each layer is rendered once: the overlay of the side-by-side panels
+        is their sum, as `composite` makes it.
+        """
+        specs = list(self.panels)
+        if specs == ["overlay"]:
+            return [self.composite(fov)[0]]
+        images, white_any = {}, False
+        total = np.zeros((fov.ny, fov.nx, 3), np.float32)
+        for i, layer in enumerate(self.session.layers):
+            if not layer.visible:
+                continue
+            white = layer.get_display().white_background
+            white_any = white_any or white
+            image, _ = layer.render(fov, white_background=False)
+            total += image
+            image = np.clip(image, 0, 1)
+            images[i] = luts.on_white(image) if white else image
+        total = np.clip(total, 0, 1)
+        images["overlay"] = luts.on_white(total) if white_any else total
+        blank = np.zeros((fov.ny, fov.nx, 3), np.float32)
+        return [images.get(spec, blank) for spec in specs]
 
     def schedule(self) -> None:
         self._timer.start()
@@ -219,11 +343,39 @@ class RenderView(QWidget):
         # white and would swallow everything drawn on either of them
         return (luts.on_white(rgb) if white else rgb), weight
 
+    def _screen_size(self) -> Tuple[int, int]:
+        """The main panel's size in screen pixels: the whole widget unless
+        the layers are side by side and it is one of several."""
+        if self.mirrors:
+            size = self.view.size()
+            if size.width() >= 16 and size.height() >= 16:
+                return int(size.width()), int(size.height())
+        size = self.graphics.size()
+        return max(size.width(), 16), max(size.height(), 16)
+
     def current_fov(self, nx: int = None, ny: int = None) -> FieldOfView:
         rect = self.view.viewRect()
-        size = self.graphics.size()
+        w, h = self._screen_size()
         return FieldOfView.fit((rect.left(), rect.right()), (rect.top(), rect.bottom()),
-                               nx or max(size.width(), 16), ny or max(size.height(), 16))
+                               nx or w, ny or h)
+
+    def pixel_size(self) -> float:
+        """What one screen pixel is in render units: nm, in the ordinary picture."""
+        return self.current_fov().pixelsize
+
+    def set_pixel_size(self, pixelsize: float) -> None:
+        """Zoom about the centre until one screen pixel is ``pixelsize``.
+
+        SMAP's *pixrec*: the pixel size is the zoom.  It is not a setting that
+        stays -- the next scroll changes it again, as any zoom does.
+        """
+        if not pixelsize > 0:
+            return
+        w, h = self._screen_size()
+        w, h = w * pixelsize, h * pixelsize
+        centre = self.view.viewRect().center()
+        self.view.setRange(QRectF(centre.x() - w / 2, centre.y() - h / 2, w, h),
+                           padding=0)
 
     def center_on(self, x: float, y: float) -> None:
         """Move the view to (x, y) at the current zoom."""
@@ -270,11 +422,15 @@ class RenderView(QWidget):
         self._busy = False
         if generation != self._generation:      # superseded while it ran
             self._pending = True
+        elif len(rgb) != 1 + len(self.mirrors):  # the panels changed meanwhile
+            self._pending = True
         else:
-            rgb = np.ascontiguousarray(rgb)
-            self.image.setImage(rgb, levels=[0, 1] if rgb.dtype.kind == "f" else None,
-                                autoLevels=False)
-            self.image.setRect(QRectF(fov.x0, fov.y0, fov.x1 - fov.x0, fov.y1 - fov.y0))
+            rect = QRectF(fov.x0, fov.y0, fov.x1 - fov.x0, fov.y1 - fov.y0)
+            for item, image in zip([self.image] + [m.image for m in self.mirrors], rgb):
+                image = np.ascontiguousarray(image)
+                item.setImage(image, levels=[0, 1] if image.dtype.kind == "f" else None,
+                              autoLevels=False)
+                item.setRect(rect)
             self.fov = fov
             self.tile_valid = True
         if self._pending:
@@ -314,6 +470,9 @@ class RenderView(QWidget):
         versatile = not axes.is_default and len(self.session.locs)
         if self.view.yInverted() == bool(versatile):
             self.view.invertY(not versatile)
+        for mirror in self.mirrors:
+            if mirror.view.yInverted() != self.view.yInverted():
+                mirror.view.invertY(self.view.yInverted())
         self.scalebar.setVisible(not versatile)
         self.axis_bars.setVisible(versatile)
         if versatile:
@@ -417,6 +576,7 @@ class RenderView(QWidget):
             self.view.removeItem(self.roi_halo)
             self.roi_halo = None
         if region is None:
+            self._mirror_roi()
             return
         if region.kind == "rect":
             x0, y0, x1, y1 = region.bounds
@@ -444,6 +604,14 @@ class RenderView(QWidget):
         if self.roi_halo is None or self.roi_item is None:
             return
         self.roi_halo.setPath(self.roi_item.mapToParent(self.roi_item.shape()))
+        self._mirror_roi()
+
+    def _mirror_roi(self) -> None:
+        """The ROI's outline on every other panel, where it is drawn, not edited."""
+        path = (self.roi_item.mapToParent(self.roi_item.shape())
+                if self.roi_item is not None else None)
+        for mirror in self.mirrors:
+            mirror.show_outline(path)
 
     def _roi_edited(self) -> None:
         item, old = self.roi_item, self.session.roi
@@ -466,8 +634,20 @@ class RenderView(QWidget):
 
     # ------------------------------------------------------------- saving
     def save_png(self, path) -> None:
-        """The view as displayed, 8-bit RGB."""
-        rgb = (self.render_now() * 255).astype(np.uint8)
+        """The view as displayed, 8-bit RGB: the panels side by side, if they are."""
+        panels = self.panel_images(self.current_fov())
+        if len(panels) > 1:
+            # a grey line between panels, as SMAP draws it
+            h, w, _ = panels[0].shape
+            line = np.full((h, 2, 3) if not self.stacked else (2, w, 3), 0.5,
+                           np.float32)
+            joined = []
+            for n, panel in enumerate(panels):
+                joined += ([line] if n else []) + [panel]
+            rgb = np.concatenate(joined, axis=0 if self.stacked else 1)
+        else:
+            rgb = panels[0]
+        rgb = (np.ascontiguousarray(rgb) * 255).astype(np.uint8)
         h, w, _ = rgb.shape
         QImage(rgb.data, w, h, 3 * w, QImage.Format_RGB888).save(str(path))
 
@@ -490,6 +670,53 @@ class RenderView(QWidget):
                          resolution=(1 / px_um, 1 / px_um),
                          metadata={"unit": "um", "pixelsize_nm": pixelsize,
                                    "x0": fov.x0, "y0": fov.y0})
+
+
+def _panel_label(view) -> pg.TextItem:
+    """A panel's name in its top left corner, fixed on the screen."""
+    label = pg.TextItem("", color=PANEL_LABEL, anchor=(0, 0))
+    label.setParentItem(view)
+    label.setPos(4, 2)
+    label.setZValue(100)
+    return label
+
+
+class _Mirror:
+    """A further panel: its own image of the same tile, panned and zoomed
+    with the main view, with the ROI's outline drawn on it."""
+
+    def __init__(self, graphics, main, row: int, col: int):
+        self.view = graphics.addViewBox(row=row, col=col, lockAspect=True,
+                                        invertY=main.yInverted(), enableMenu=False,
+                                        border=PANEL_BORDER)
+        # it follows the main view and never fits itself to its image: the
+        # link would carry that fit back to the main view and every panel
+        self.view.disableAutoRange()
+        self.view.setXLink(main)
+        self.view.setYLink(main)
+        self.image = pg.ImageItem(axisOrder="row-major")
+        self.view.addItem(self.image)
+        self.outline = []
+        for pen in (ROI_HALO_PEN, ROI_PEN):
+            item = QGraphicsPathItem()
+            item.setPen(pen)
+            item.setBrush(Qt.NoBrush)
+            item.setZValue(50)
+            item.setVisible(False)
+            self.view.addItem(item)
+            self.outline.append(item)
+        self.label = _panel_label(self.view)
+
+    def show_outline(self, path) -> None:
+        for item in self.outline:
+            item.setVisible(path is not None)
+            if path is not None:
+                item.setPath(path)
+
+    def remove(self, graphics) -> None:
+        self.view.setXLink(None)
+        self.view.setYLink(None)
+        graphics.removeItem(self.view)
 
 
 class RenderToolBar(QToolBar):
@@ -544,9 +771,46 @@ class RenderToolBar(QToolBar):
                                    "in the 3D window")
         self.line_width.valueChanged.connect(self._on_width)
         self.addWidget(self.line_width)
-        self._width_unit()
 
         self.addAction(QAction("Reset view", self, triggered=view.reset))
+
+        # SMAP's *split* and *comp* ticks, as one choice of three
+        self.layers_button = QToolButton(popupMode=QToolButton.InstantPopup)
+        self.layers_button.setToolTip("the layers added up into one picture, or a "
+                                      "picture each side by side (stacked when "
+                                      "the data is wide), with or without the "
+                                      "added-up one after them")
+        layers_menu = QMenu(self.layers_button)
+        layouts = QActionGroup(layers_menu)
+        self.layout_actions = {}
+        for mode, name in LAYOUTS:
+            action = layers_menu.addAction(name)
+            action.setCheckable(True)
+            action.setChecked(mode == view.layout_mode)
+            action.triggered.connect(lambda _=False, m=mode: self.set_layout(m))
+            layouts.addAction(action)
+            self.layout_actions[mode] = action
+        self.layers_button.setMenu(layers_menu)
+        self.addWidget(self.layers_button)
+        self._layout_text()
+
+        # The size of a screen pixel, as SMAP shows it: the zoom, written as
+        # a number.  Typing one zooms to it; the button goes to DEFAULT_PIXEL.
+        self.pixel_button = QToolButton(text="pixel")
+        self.pixel_button.setToolTip(f"zoom to {DEFAULT_PIXEL:g} nm per screen pixel")
+        self.pixel_button.clicked.connect(lambda: self.pixel.setValue(DEFAULT_PIXEL))
+        self.addWidget(self.pixel_button)
+        self.pixel = QDoubleSpinBox(minimum=0.01, maximum=1e6, decimals=2)
+        self.pixel.setKeyboardTracking(False)
+        self.pixel.setMaximumWidth(110)
+        self.pixel.setToolTip("what one screen pixel is: type a size to zoom to "
+                              "it, scroll to zoom as usual")
+        self.pixel.valueChanged.connect(view.set_pixel_size)
+        self.addWidget(self.pixel)
+        view.view.sigRangeChanged.connect(self._show_pixel)
+        self._show_pixel()
+        self._width_unit()
+
         self.counts = QLabel("")
         self.counts.setStyleSheet("padding-left: 12px")
         self.addWidget(self.counts)
@@ -599,6 +863,21 @@ class RenderToolBar(QToolBar):
             parts.append(f"{layer.name}: {n}")
         self.counts.setText("   ".join(parts))
 
+    def set_layout(self, mode: str) -> None:
+        """Overlay, side by side, or both: `LAYOUTS`."""
+        self.view.set_layout_mode(mode)
+        self.layout_actions[mode].setChecked(True)
+        self._layout_text()
+
+    def _layout_text(self) -> None:
+        self.layers_button.setText(f"Layers: {dict(LAYOUTS)[self.view.layout_mode]}")
+
+    def _show_pixel(self, *_) -> None:
+        """The pixel size after a zoom, written without zooming again."""
+        blocked = self.pixel.blockSignals(True)
+        self.pixel.setValue(self.view.pixel_size())
+        self.pixel.blockSignals(blocked)
+
     def _set_kind(self, kind: str, name: str) -> None:
         self.kind = kind
         self.roi_button.setText(f"ROI: {name}")
@@ -621,7 +900,9 @@ class RenderToolBar(QToolBar):
         except KeyError:
             name = "x_nm"
         unit = axis_unit(name)
-        self.line_width.setSuffix(f" {unit}" if unit in ("nm", "pixels") else "")
+        suffix = f" {unit}" if unit in ("nm", "pixels") else ""
+        self.line_width.setSuffix(suffix)
+        self.pixel.setSuffix(suffix)
 
     def _default(self, suffix: str) -> str:
         path = self.view.session.path

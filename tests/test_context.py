@@ -384,6 +384,116 @@ def test_a_report_stays_in_the_panel_unless_the_plugin_is_a_log():
     assert panel._text_window.view.toPlainText().endswith("line 39")
 
 
+def test_run_opens_the_figures_and_a_run_nobody_asked_for_does_not():
+    """A measurement is read off its figures, so Run shows them; a run started
+    for nobody (`start_run(ask=False)`, a fit MicroClaw drives) waits for Plot."""
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication([])
+
+    class Drawn(Plugin):
+        path = "Test/Drawn"
+        name = "Drawn"
+        Settings = None
+
+        def run(self, ctx, settings):
+            return Result(text="done", plot=lambda ax: ax.plot([0, 1], [0, 1]))
+
+    from smappy.gui.plugin_panel import PluginPanel
+
+    def finish(panel):
+        while panel._thread is not None and panel._thread.isRunning():
+            app.processEvents()
+        app.processEvents()
+
+    asked = PluginPanel(Drawn, Session(table()))
+    asked.run()
+    finish(asked)
+    assert asked._window is not None and asked._window.isVisible()
+    asked._window.close()
+
+    unattended = PluginPanel(Drawn, Session(table()))
+    assert unattended.start_run(ask=False)
+    finish(unattended)
+    assert unattended._window is None
+    assert unattended.plot_button.isEnabled()          # Plot still offers them
+
+
+def test_a_live_plugin_without_a_preview_measures_with_run_and_applies_nothing():
+    pytest.importorskip("PySide6")
+    import time
+
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication([])
+    runs = []
+
+    class Aimed(Plugin):
+        path = "Test/AimedByRun"
+        name = "AimedByRun"
+        Settings = None
+        live = True
+
+        def run(self, ctx, settings):
+            runs.append(1)
+            return Result(text="measured", plot=lambda ax: ax.plot([0, 1], [0, 1]))
+
+    from smappy.gui.plugin_panel import PluginPanel
+    session = Session(table())
+    applied = []
+    session.apply = lambda plugin, result: applied.append(result)
+    panel = PluginPanel(Aimed, session)
+    assert panel.preview_button is None and panel.live is not None
+
+    panel.live.setChecked(True)
+    session.set_roi(Region.line((0, 0), (500, 500), 100.0))
+    deadline = time.time() + 20
+    while not runs and time.time() < deadline:
+        app.processEvents()
+        time.sleep(0.01)
+    while panel._thread is not None and panel._thread.isRunning():
+        app.processEvents()
+    app.processEvents()
+    panel.live.setChecked(False)
+
+    assert runs and not applied
+    assert panel.status.text() == "live"
+    assert panel._window is not None
+
+
+def test_a_warning_stays_on_screen_when_progress_follows_it():
+    """It was a progress line, and the next progress line replaced it."""
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication([])
+
+    class Warns(Plugin):
+        path = "Test/Warns"
+        name = "Warns"
+        Settings = None
+
+        def run(self, ctx, settings):
+            ctx.report("frame 1")
+            ctx.warn("the calibration was taken with EM gain")
+            for i in range(2, 5):
+                ctx.report(f"frame {i}")
+            return Result(text="fitted\n" + "\n".join(
+                f"warning: {w}" for w in ctx.warnings))
+
+    from smappy.gui.plugin_panel import PluginPanel
+    panel = PluginPanel(Warns, Session(table()))
+    panel.run()
+    while panel._thread is not None and panel._thread.isRunning():
+        app.processEvents()
+    app.processEvents()
+    lines = panel.output.toPlainText().splitlines()
+    assert lines[:3] == ["frame 1", "warning: the calibration was taken with EM gain",
+                         "frame 4"]
+    assert panel.status.text() == "done, 1 warning"
+
+
 def test_a_live_plugin_refits_while_the_roi_moves_and_says_nothing_about_it():
     """Ten times a second: no line in the log, no window taking the focus.
     The figure redrawing where it already is is the whole output."""

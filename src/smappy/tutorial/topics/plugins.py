@@ -1,22 +1,23 @@
-"""Plugins: how any plugin is found, set up, previewed, run and kept.
+"""Plugins: how any plugin is found, set up, run and kept.
 
 Every analysis in SMAPpy is a plugin, and they all work the same way, so
 this is the one place the way is shown: the Analysis tab and its find box,
-the settings form, Preview, *live*, Run and Text, a plugin in a window of
+the settings form, Run and its figures, *live*, Text, a plugin in a window of
 its own, and what a run leaves behind (undo, and the History log).
 
-Line Profile is the example because it has everything -- a preview, *live*,
-a fit to look at -- and because a line across one of the simulated lines has
-a width the fit should find.  What the measuring plugins measure, and how
+Line Profile is the example because it has everything -- *live*, a fit to
+look at -- and because a line across one of the simulated lines has a width
+the fit should find.  Preview belongs to the plugins that change the table,
+and the fitting tutorials show it.  What the measuring plugins measure, and how
 to read it, is the measuring tutorial's.
 """
 from __future__ import annotations
 
 from .common import field, open_section, place_beside, show_tab, tab_button, toolbar
 
-TITLE = "Plugins: running, previewing, plotting"
-DESCRIPTION = ("How every plugin works: finding it, its settings, Preview and "
-               "live, Run, and what a run leaves behind.")
+TITLE = "Plugins: running, plotting, live"
+DESCRIPTION = ("How every plugin works: finding it, its settings, Run and its "
+               "figures, live, and what a run leaves behind.")
 
 # a line of the simulated structure (`simulate.structure`): from (1000, 1500)
 # to (9000, 7500) nm, so a line ROI across it is along (-0.6, 0.8)
@@ -38,7 +39,7 @@ def make(d) -> None:
 
     # the tour's simulated table, made the way it shows (File -> Simulate)
     file_tab = show_tab(d, "File")
-    _, simulate = open_section(d, file_tab, "Blinking Structure")
+    _, simulate = open_section(d, file_tab, "Simulate structure")
     simulate.run_button.click()
     d.settle()
 
@@ -77,7 +78,7 @@ def make(d) -> None:
            "to see what it does; more holds the rest.",
            spot=[panel.form], zoom=d.around(panel.form, 760))
 
-    d.chapter("Preview and live")
+    d.chapter("Run and live")
     for name, value in (("axis", "along"), ("model", "gauss")):
         f = field(panel, name)
         f.set(value)
@@ -94,10 +95,10 @@ def make(d) -> None:
                              centre[0] + 450, centre[1] + 450, pad=4),
                  field(panel, "axis"), field(panel, "model")],
            point=d.at_data(*centre))
-    d.shot("Preview does the work and draws it, without changing anything.",
-           spot=[panel.preview_button], point=panel.preview_button, click=True,
-           zoom=d.around(panel.preview_button, 760))
-    panel.preview_button.click()
+    d.shot("Run measures and opens the figures.",
+           spot=[panel.run_button], point=panel.run_button, click=True,
+           zoom=d.around(panel.run_button, 760))
+    panel.run_button.click()
     d.settle()
     window = panel._window
     # the simulated line scatters by 15 nm (`simulate.structure`): a fit far
@@ -129,13 +130,11 @@ def make(d) -> None:
         window.hide()
         panel.live.setChecked(False)
 
-    d.chapter("Run and Text")
-    panel.run_button.click()
-    d.settle()
-    d.shot("Run does the same and keeps the result: the numbers appear below, "
-           "Text opens them in full, Plot draws the figures again.",
+    d.chapter("Text and Plot")
+    d.shot("The numbers appear below. Text opens them in full, Plot opens the "
+           "figures again.",
            spot=[panel.output, panel.text_button, panel.plot_button],
-           point=panel.run_button, click=True, zoom=d.around(panel.output, 760))
+           zoom=d.around(panel.output, 760))
 
     d.chapter("Several at once")
     if section.detach_button is not None:
@@ -172,10 +171,11 @@ def make(d) -> None:
     d.card("What to remember",
            "<ul><li>Find a plugin in its tab, with find, or in the Plugins "
            "menu.</li>"
-           "<li><b>Preview</b> shows the work without changing anything; "
-           "<b>live</b> follows the ROI.</li>"
-           "<li><b>Run</b> keeps the result; <b>Text</b> and <b>Plot</b> show "
-           "it again.</li>"
+           "<li><b>Run</b> measures and opens the figures; <b>live</b> "
+           "follows the ROI.</li>"
+           "<li><b>Text</b> and <b>Plot</b> show the result again.</li>"
+           "<li>A plugin that changes the table has <b>Preview</b>: the work "
+           "shown, nothing changed.</li>"
            "<li>What changes the table can be undone, and is kept in the "
            "history.</li></ul>",
            say="That is how every plugin works. Next: the measuring plugins, and "

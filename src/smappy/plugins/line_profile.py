@@ -1563,17 +1563,10 @@ class LineProfile(Plugin):
                   "n": sum(len(l.profile.values) for l in layers)},
             plot=profile_plot, plots=plots)
 
-    # cheap enough to redo while the line is dragged; see `Plugin.live`
+    # cheap enough to redo while the line is dragged; see `Plugin.live`.  No
+    # preview: `run` changes nothing, so a preview would be the same as Run,
+    # and Run draws the figures.
     live = True
-
-    def preview(self, ctx: Context, settings: LineProfileSettings) -> Result:
-        """The same measurement, not applied to anything.
-
-        `run` changes no localizations either, so this is `run` -- what the
-        preview is for here is the *live* tick, which wants a result without a
-        line in the history for every position the line was dragged through.
-        """
-        return self.run(ctx, settings)
 
 
 def fit_layers(ctx: Context, settings: LineProfileSettings,

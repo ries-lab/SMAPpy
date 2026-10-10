@@ -25,6 +25,9 @@ from .widgets import ColumnScroll
 # keep the dialog coming back
 MAX_CHOICES = 8
 
+# the status of a run that warned: what was said is in the output box
+WARNING_STYLE = "color: #c06000; font-weight: bold;"
+
 
 
 class _Worker(QObject):
@@ -45,7 +48,8 @@ class _Worker(QObject):
         except Exception:                   # a File plugin has no table yet
             n = None
         try:
-            work = getattr(plugin, self.job)
+            # a live step is a run nobody keeps (`PluginPanel._live_step`)
+            work = getattr(plugin, "run" if self.job == "live" else self.job)
             # into the diagnostic log: what ran, with what, and the traceback
             # if it failed -- the first thing a bug report is asked for
             with running(plugin, self.job, settings, n):
@@ -131,9 +135,9 @@ class PluginPanel(QWidget):
         self.text_button.setEnabled(False)
         # a measurement one aims with rather than one asked for afterwards:
         # the plugin says it is cheap enough (`Plugin.live`) and the tick
-        # re-previews while the ROI is dragged
+        # re-measures while the ROI is dragged
         self.live: Optional[QCheckBox] = None
-        if plugin_cls.live and plugin_cls.has_preview():
+        if plugin_cls.live:
             self.live = QCheckBox("live")
             self.live.setToolTip("redraw while the ROI is moved, without "
                                  "touching the session")
@@ -178,6 +182,8 @@ class PluginPanel(QWidget):
         self.plot_button.clicked.connect(self.plot)
         self.text_button.clicked.connect(self.show_text)
         self._live_running = False
+        self._show_figures = True
+        self._warnings = 0
         self._live_timer = QTimer(self, singleShot=True, interval=120)
         self._live_timer.timeout.connect(self._live_step)
         self.form.field_changed.connect(self._react)
@@ -221,7 +227,13 @@ class PluginPanel(QWidget):
             self._live_timer.start()          # try again once it is free
             return
         self._live_running = True
-        self.preview()
+        # its preview where it has one; otherwise the run itself, which is
+        # then looked at and not applied -- a measurement that only draws
+        # needs no Preview button to be aimed
+        if self.plugin.has_preview():
+            self.preview()
+        else:
+            self._start("live", "measuring...")
 
     def _take_saved(self) -> None:
         """Offer the figure of a run that is over: this file carries its result.
@@ -294,7 +306,18 @@ class PluginPanel(QWidget):
             self.form.set_active(flags)
 
     def _on_stream(self, event: str, payload) -> None:
-        if event == "start":
+        if event == "warning":
+            if self._live_running:
+                return            # a live step says nothing (`_on_progress`)
+            # a line of its own that progress does not overwrite: the next
+            # progress line goes below it
+            self._warnings += 1
+            self.output.appendPlainText(f"warning: {payload}")
+            self._progress_lines = 0
+            self.status.setText(f"running... ({self._warnings} warning"
+                                f"{'s' if self._warnings > 1 else ''})")
+            self.status.setStyleSheet(WARNING_STYLE)
+        elif event == "start":
             self.session.begin_live(payload.get("extent"), payload.get("path"))
         elif event == "block":
             self.session.append(payload)
@@ -328,6 +351,7 @@ class PluginPanel(QWidget):
         ``context`` goes into the run's `Context` -- `stop` and
         `writer_finished` for a run something else controls -- and ``ask=False``
         skips the preflight question, for a run nobody is there to answer.
+        Nor are its figures opened: they wait for Plot.
         """
         return self._start("run", "running...", context=context, ask=ask)
 
@@ -355,9 +379,14 @@ class PluginPanel(QWidget):
                                        grouping=self.plugin.grouping,
                                        **(context or {}))
         self._job = job
+        # a run somebody asked for shows its figures when it is done; one
+        # that nobody is there to answer (`start_run(ask=False)`) does not
+        self._show_figures = ask
         for button in self._buttons():
             button.setEnabled(False)
         self.status.setText(message)
+        self.status.setStyleSheet("")
+        self._warnings = 0
         self._progress_lines = 0
         self._thread = QThread()
         # Qt's default thread stack (512 kB on macOS) is too small for HDF5 and
@@ -505,8 +534,8 @@ class PluginPanel(QWidget):
         live, self._live_running = self._live_running, False
         self.result = result
         # a preview is looked at, never applied: it exists so that the session
-        # is not changed before the settings are right
-        if self._job != "preview":
+        # is not changed before the settings are right; nor is a live step
+        if self._job not in ("preview", "live"):
             self.session.apply(self.plugin, result)
         # A live step happens ten times a second while the ROI is dragged, so
         # it writes no line, opens no window and takes no focus: the figure
@@ -514,7 +543,11 @@ class PluginPanel(QWidget):
         if not live:
             self.output.appendPlainText(result.text)
         self._progress_lines = 0
-        self.status.setText("live" if live else "done")
+        if self._warnings and not live:
+            self.status.setText(f"done, {self._warnings} warning"
+                                f"{'s' if self._warnings > 1 else ''}")
+        else:
+            self.status.setText("live" if live else "done")
         self.text_button.setEnabled(bool(result.text))
         if not live and self.plugin.text_window and result.text:
             self.show_text()          # a log: not something to scroll through
@@ -528,7 +561,9 @@ class PluginPanel(QWidget):
         self.plot_button.setEnabled(bool(result.figures()))
         self.plot_button.setToolTip(
             "show the plugin's result figure (the drift curves, say)")
-        if self._job == "preview" and result.figures():
+        # The figures are what most runs are for: a measurement is read off
+        # them, so the window opens without a second click on Plot.
+        if result.figures() and (live or self._show_figures):
             self.plot(raise_window=not live)
         self.ended.emit("done", result)
 
@@ -572,7 +607,7 @@ class PluginPanel(QWidget):
         if self._window is None:
             self._window = ResultWindow(self.plugin.name, self)
         self._window.show()
-        self._window.show_plots(self.result.figures())
+        self._window.show_plots(self.result.figures(), self.result.title)
         if raise_window:
             self._window.raise_()
 
