@@ -28,6 +28,8 @@ from .render_view import RenderToolBar, RenderView
 from .widgets import CONTROL_WIDTH, apply_style, place_beside
 from .collector import collect_on_gui_thread
 from .icon import install_icon
+from . import identity
+from .identity import install_identity
 
 
 class LoadTask(QThread):
@@ -120,6 +122,7 @@ class ControlWindow(QMainWindow):
         super().__init__()
         self.session = session
         self.render_window = render
+        self.setProperty(identity.OWN_TITLE, True)      # names the session itself
         # the GUI last saved or loaded, or the shipped one: never one written
         # behind anybody's back (see `workspace`)
         self.workspace = workspace_module.load_startup()
@@ -159,6 +162,7 @@ class ControlWindow(QMainWindow):
         image = self._action(menu, "Open image...", None, self.open_image)
         save = self._action(menu, "Save", QKeySequence.Save, self.save)
         save_as = self._action(menu, "Save as...", QKeySequence.SaveAs, self.save_as)
+        self._action(menu, "Session name...", None, self.rename_session)
         menu.addSeparator()
         self._action(menu, "Restore GUI state from file...", None,
                      self.restore_state_from_file)
@@ -479,9 +483,28 @@ class ControlWindow(QMainWindow):
         return self.workspace
 
     def _update_title(self, name: Optional[str] = None) -> None:
-        """Say whose GUI this is, so nobody saves over somebody else's."""
-        name = name or workspace_module.display_name(self.workspace.path)
-        self.setWindowTitle(f"SMAPpy \u2014 {name}")
+        """Say whose GUI this is, so nobody saves over somebody else's --
+        and, once named, which session this is (`identity`)."""
+        if name is not None:
+            self._gui_name = name
+        gui = getattr(self, "_gui_name", None) or \
+            workspace_module.display_name(self.workspace.path)
+        if self.session.name or self.session.colour:
+            text = identity.title(self.session, "SMAPpy")
+            self.setWindowTitle(f"{text} (GUI: {gui})")
+        else:
+            self.setWindowTitle(f"SMAPpy \u2014 {gui}")
+        colour = identity.colour_hex(self.session)
+        # a stripe as well as the circle: seen from across the room, and on a
+        # title font that draws the circle in black
+        self.statusBar().setStyleSheet(
+            f"QStatusBar {{ border-top: 4px solid {colour}; }}" if colour else "")
+
+    def rename_session(self) -> None:
+        """Ask for the session's name and colour (`identity.NameDialog`)."""
+        answer = identity.NameDialog.ask(self, self.session)
+        if answer is not None:
+            self.session.rename(*answer)
 
     def save_gui_to(self, path) -> Path:
         """Write the GUI to ``path``, make it the loaded one and the next start."""
@@ -790,7 +813,16 @@ class ControlWindow(QMainWindow):
         n = len(self.session.locs)
         shown = self._shown_text()
         self.statusBar().showMessage(f"{name}: {n} localizations" + (f", {shown}" if shown else ""))
-        self.render_window.setWindowTitle(f"SMAPpy - {name}" + (f" - {shown}" if shown else ""))
+        if what in ("name", "locs"):
+            self._update_title()
+        if self.session.name or self.session.colour:
+            name = self.session.display_name or name
+        self.render_window.setWindowTitle(
+            f"{identity.mark(self.session)} SMAPpy - {name}".strip()
+            + (f" - {shown}" if shown else ""))
+        colour = identity.colour_hex(self.session)
+        self.render_window.toolbar.setStyleSheet(
+            f"QToolBar {{ border-bottom: 4px solid {colour}; }}" if colour else "")
 
     def _shown_text(self) -> str:
         """What the render window actually draws: kept by each visible layer.
@@ -982,7 +1014,9 @@ class RenderWindow(QMainWindow):
         super().__init__()
         self.view = RenderView(session)
         self.setCentralWidget(self.view)
-        self.addToolBar(RenderToolBar(self.view))
+        self.toolbar = RenderToolBar(self.view)
+        self.addToolBar(self.toolbar)
+        self.setProperty(identity.OWN_TITLE, True)      # names the session itself
         self.resize(900, 900)
         window_shortcuts(self)
 
@@ -1024,6 +1058,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     install_icon(app)
     _start_log()
     session = Session()
+    install_identity(app, session)
     render = RenderWindow(session)
     control = ControlWindow(session, render)
     screen = app.primaryScreen().availableGeometry()

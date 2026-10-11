@@ -264,6 +264,17 @@ class Layer:
         return Selection(mask, layer=index, name=self.name)
 
 
+# The colours a session can be marked with, and the mark each puts in a
+# window title.  Coloured circles because a title bar takes no colour of its
+# own, and these are drawn in colour by every platform's title font.
+COLOURS: Dict[str, Tuple[str, str]] = {
+    "red": ("#d62728", "\U0001F534"), "orange": ("#ff7f0e", "\U0001F7E0"),
+    "yellow": ("#e8c000", "\U0001F7E1"), "green": ("#2ca02c", "\U0001F7E2"),
+    "blue": ("#1f77b4", "\U0001F535"), "purple": ("#9467bd", "\U0001F7E3"),
+    "brown": ("#8c564b", "\U0001F7E4"),
+}
+
+
 class LiveTableError(ValueError):
     """A result that changes the localizations, while a fit still adds to them."""
 
@@ -360,14 +371,21 @@ class Session:
         # False in a chain's scratch copy: the chain keeps one record and one
         # undo step for all its steps, so the copy keeps neither (`scratch`)
         self.recording = True
+        # What this session is called and its colour, for telling several
+        # apart -- two instances side by side, or a snapshot of a live fit
+        # beside the fit -- in every window title (`gui.identity`).  Empty
+        # name: the file's.  The colour is a name from `COLOURS`, "" for none.
+        self.name = ""
+        self.colour = ""
 
     # ----------------------------------------------------------- observers
     def on_change(self, callback: Callable[[str], None]) -> None:
         """``callback(what)``: "locs" (new table), "layer" (a filter or display
         setting changed), "layers" (added/removed/visibility), "history" or
         "results" (a tool kept something worth drawing again), "rois" (the
-        ROI manager's project) and "roi-preview" (a segmenter's proposals,
-        `Session.show_preview`)."""
+        ROI manager's project), "roi-preview" (a segmenter's proposals,
+        `Session.show_preview`) and "name" (`rename`, or a file opened with
+        a name of its own)."""
         self._listeners.append(callback)
 
     def off_change(self, callback: Callable[[str], None]) -> None:
@@ -479,6 +497,9 @@ class Session:
             self.changed("results")
             saved = self.locs.metadata.get("roi")
             self.set_roi(Region.from_dict(saved) if saved else None)
+            # a name belongs to the dataset it was given to: a new file takes
+            # its own, or none, rather than the last one's
+            self._take_identity(self.locs.metadata.get("session"))
             self._rois = None            # this file's own ROIs, read on first use
             self.changed("rois")
         else:
@@ -498,6 +519,25 @@ class Session:
 
     def file_names(self) -> List[str]:
         return [f.name for f in self.files]
+
+    @property
+    def display_name(self) -> str:
+        """What the windows call this session: its name, else its file's."""
+        if self.name:
+            return self.name
+        names = self.file_names()
+        if len(names) == 1:
+            return names[0]
+        return f"{len(names)} files" if names else ""
+
+    def rename(self, name: str, colour: Optional[str] = None) -> None:
+        """Name the session (and colour it); "" goes back to the file's name."""
+        if colour is not None and colour and colour not in COLOURS:
+            raise ValueError(f"unknown colour {colour!r}: one of {', '.join(COLOURS)}")
+        self.name = " ".join(str(name).split())
+        if colour is not None:
+            self.colour = colour
+        self.changed("name")
 
     def remove_file(self, number: int) -> None:
         """Drop one file's localizations; the others are renumbered densely."""
@@ -619,6 +659,10 @@ class Session:
         metadata["history"] = self.history[-MAX_HISTORY:]
         if self.roi is not None:
             metadata["roi"] = self.roi.to_dict()
+        if self.name or self.colour:
+            metadata["session"] = {"name": self.name, "colour": self.colour}
+        else:
+            metadata.pop("session", None)
         rois = self.roi_state()
         # a tile grid alone is worth keeping: it is where a systematic walk
         # through the file was left off
@@ -929,6 +973,16 @@ class Session:
         if path is not None:
             self.path = Path(path)
         self.changed("locs")
+
+    def _take_identity(self, saved) -> None:
+        name = colour = ""
+        if isinstance(saved, dict):
+            name = str(saved.get("name") or "")
+            colour = str(saved.get("colour") or "")
+            colour = colour if colour in COLOURS else ""
+        if (name, colour) != (self.name, self.colour):
+            self.name, self.colour = name, colour
+        self.changed("name")       # the file's name is the default either way
 
     def end_live(self) -> None:
         """The fit ended without a finished table -- it failed: keep what came.
