@@ -57,8 +57,9 @@ Running the tests -- two tiers:
   a test worker.  `conftest.py` collects on the main thread every 100 tests;
   the GUI's entry points call `gui/collector.collect_on_gui_thread`, a timer
   on the GUI thread.  A test that needs an object gone calls `gc.collect()`
-  itself; a new entry point that makes a QApplication installs the collector
-  and the icon (`gui/icon.install_icon`).
+  itself; a new entry point that makes a QApplication installs the collector,
+  the icon (`gui/icon.install_icon`) and the session's identity
+  (`gui/identity.install_identity`: its name and colour in every window title).
 * **A `QTimer.singleShot` callable must never raise.**  PySide leaves its
   exception pending inside `processEvents`, and the next Python override Qt
   calls segfaults (6.10) or hangs.  Catch and print inside it, or connect a
@@ -107,6 +108,7 @@ shape, so read the one closest to what you are writing:
 | runs the ROI manager's segment, evaluate and analyse as one | `npc_analysis.chain.yaml` (a shipped chain: an evaluator step runs over every ROI before the next; `docs/batch.md`, "ROIs: segment, evaluate, analyse") |
 | opens an interactive window of the GUI's | `bead_calibration.py` (`Plugin.window`: the button opens what the GUI registered in `session.window_openers`) |
 | runs an external program in its own Python | `uipsf.py` (`smappy.uipsf`: a worker script under that program's interpreter, progress read from its output, the result converted into smappy's own file) |
+| hands the session to a new instance | `smappy.handoff` (*File > Open in a new window*: the table through shared memory, the rest as JSON, `smappy-gui --handoff`) |
 | is run by MicroClaw during an acquisition | `gui/live_session.py` (the GUI on a fit another program controls through `Context.stop` and `writer_finished`; the package and its protocol runner are `ries-lab/smappy-microclaw`) |
 
 A chain of plugins that runs as one, and running one over many files
@@ -167,6 +169,14 @@ class Thing(Plugin):
   window by name (`Notice(text, action, window)`, the same
   `session.window_openers` as `Plugin.window`).  The fitters use it for a file
   whose camera is not in the database, opening the camera editor.
+* `changes_locs` -- True if `run` hands back a new table (or files), False
+  if not; every shipped plugin declares it (`tests/test_changes_locs.py`),
+  and `changes_locs_for(settings)` refines it where it depends on the
+  settings.  While a fit is still appending, `Session.apply` refuses a table
+  change and the GUI asks before such a run, offering a new window.  A change
+  that is a column computed from the others can return a `LiveRecipe`
+  instead (`data["live_recipe"]`, with `live_recipe_for`), which follows the
+  live table: `math_parser.py`, `assign_colors.py`.
 * Set `live = True` on a plugin whose work is tens of milliseconds: the GUI
   grows a *live* tick and measures again while the ROI is dragged (its
   `preview` if it has one, else `run`, never applied), silently (no log line,
@@ -174,8 +184,10 @@ class Thing(Plugin):
   can be aimed.
 * **A plugin that measures usually wants one answer per layer**, not one over
   the selection: a line is drawn over two channels and the measurement is how
-  they differ.  `session.selection(i)` is layer `i`'s, and `line_profile.py`'s
-  `_groups` is the shape to copy.
+  they differ.  `ctx.layer_selection(i)` is layer `i`'s (not
+  `session.selection(i)`: during a live fit the session's table has grown
+  since the context was made), and `line_profile.py`'s `_groups` is the
+  shape to copy.
 
 **Put the algorithm in module-level functions that take arrays** and let `run`
 be the thin wrapper.  A script, a test and a notebook should be able to get the
@@ -184,7 +196,8 @@ written this way; it is also what makes the tests readable.
 
 ### The context
 
-* `ctx.locs` -- the whole table, **always the ungrouped one**.
+* `ctx.locs` -- the whole table, **always the ungrouped one**; during a live
+  fit, a snapshot taken when the run started.
 * `ctx.table(layer)` -- `(locs, selection)`, grouped or not as the layer, a
   chain and `Plugin.grouping` decide.  Read this, not `ctx.locs`, in a plugin
   that should honour a chain's grouping; `Session.table` links the grouped
