@@ -274,7 +274,7 @@ def test_an_evaluator_step_runs_on_every_site_before_the_next_step():
     drawn = session.rois.add_roi(next(iter(session.rois.sources)), (9000.0, 9000.0))
     drawn.use = False                                   # excluded: not evaluated
     cls = chain_class(spec(SEGMENT,
-                           {"plugin": "ROIManager/Evaluate/Statistics", "label": "stats"},
+                           {"plugin": "ROIManager/Evaluate/Statistics", "regions": "rois", "label": "stats"},
                            {"plugin": "ROIManager/Analyze/Histograms"}))
     result = session.run(cls(), cls.Settings())
     steps = result.data["results"]
@@ -299,7 +299,7 @@ def test_an_evaluator_step_runs_on_every_site_before_the_next_step():
 
 def test_a_chain_changes_the_roi_project_only_through_its_result():
     session = four_sites()
-    cls = chain_class(spec(SEGMENT, {"plugin": "ROIManager/Evaluate/Statistics"}))
+    cls = chain_class(spec(SEGMENT, {"plugin": "ROIManager/Evaluate/Statistics", "regions": "rois"}))
     result = cls().run(session.context(), cls.Settings())
     assert len(session.rois.rois) == 0 and session.rois.runs == []
     assert len(result.data["roi_project"]["rois"]) == 4
@@ -315,7 +315,7 @@ def test_a_chain_that_leaves_the_rois_alone_hands_none_back():
 
 def test_an_evaluator_with_no_sites_to_measure_stops_the_chain():
     session = four_sites()
-    cls = chain_class(spec({"plugin": "ROIManager/Evaluate/Statistics", "label": "stats"}))
+    cls = chain_class(spec({"plugin": "ROIManager/Evaluate/Statistics", "regions": "rois", "label": "stats"}))
     with pytest.raises(ChainError, match="'stats'.*no ROIs to evaluate"):
         session.run(cls(), cls.Settings())
 
@@ -323,8 +323,8 @@ def test_an_evaluator_with_no_sites_to_measure_stops_the_chain():
 def test_one_evaluator_under_two_names_gives_two_sets_of_columns():
     session = four_sites()
     cls = chain_class(spec(SEGMENT,
-                           {"plugin": "ROIManager/Evaluate/Statistics", "label": "a"},
-                           {"plugin": "ROIManager/Evaluate/Statistics", "label": "b"}))
+                           {"plugin": "ROIManager/Evaluate/Statistics", "regions": "rois", "label": "a"},
+                           {"plugin": "ROIManager/Evaluate/Statistics", "regions": "rois", "label": "b"}))
     session.run(cls(), cls.Settings())
     assert set(session.rois.labels()) == {"a", "b"}
     rows = session.rois.results()
@@ -333,8 +333,24 @@ def test_one_evaluator_under_two_names_gives_two_sets_of_columns():
 
 
 def test_an_evaluators_grouping_is_the_roi_managers_and_cannot_be_chosen():
-    cls = chain_class(spec({"plugin": "ROIManager/Evaluate/Statistics", "label": "stats"}))
+    cls = chain_class(spec({"plugin": "ROIManager/Evaluate/Statistics", "regions": "rois", "label": "stats"}))
     assert cls().active(cls.Settings())["stats.use_grouping"] is False
+
+
+def test_a_per_region_step_on_the_view_runs_once_and_keeps_nothing_with_the_rois():
+    session = four_sites()
+    cls = chain_class(spec(SEGMENT, {"plugin": "ROIManager/Evaluate/Statistics",
+                                     "label": "stats"}))
+    settings = cls.Settings()
+    assert settings.stats.run_on == "view"
+    assert (cls().active(settings) or {}).get("stats.use_grouping") is not False
+    result = session.run(cls(), settings)
+    assert result.data["results"]["stats"].values["n_localizations"] == \
+        len(session.selection(0))                       # the whole view, once
+    assert session.rois.runs == []                     # measured the view, not the ROIs
+    assert cls.current_spec(settings).steps[1].regions == "view"
+    settings.stats.run_on = "rois"
+    assert cls.current_spec(settings).to_dict()["steps"][1]["regions"] == "rois"
 
 
 def test_a_chains_evaluation_and_the_windows_stand_side_by_side():
@@ -342,7 +358,7 @@ def test_a_chains_evaluation_and_the_windows_stand_side_by_side():
     ROIs, and the chain's run is not taken for the window's pipeline."""
     from smappy.workspace import Instance
     session = four_sites()
-    cls = chain_class(spec(SEGMENT, {"plugin": "ROIManager/Evaluate/Statistics",
+    cls = chain_class(spec(SEGMENT, {"plugin": "ROIManager/Evaluate/Statistics", "regions": "rois",
                                      "label": "chain stats"}))
     session.run(cls(), cls.Settings())
     project = session.rois

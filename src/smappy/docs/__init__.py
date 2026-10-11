@@ -155,7 +155,7 @@ class Panel:
     description: str = ""
     widget: str = ""
     version = None
-    scope = "locs"
+    per_region = False
     live = False
     __doc__ = ""
 
@@ -373,8 +373,8 @@ def header(plugin_cls) -> str:
     crumbs = " &rsaquo; ".join(html.escape(p) for p in path.split("/")[:-1])
     facts = ([] if plugin_cls.version is None
              else [f"version {html.escape(str(plugin_cls.version))}"])
-    if getattr(plugin_cls, "scope", "locs") == "site":
-        facts.append("runs once per ROI")
+    if getattr(plugin_cls, "per_region", False):
+        facts.append("can run once per region")
     try:
         if plugin_cls.has_preview():
             facts.append("has a preview")

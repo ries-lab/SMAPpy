@@ -208,12 +208,13 @@ def test_a_failing_step_costs_its_columns_and_not_the_run():
 
     class Mean(Plugin):
         name, version = 'example', '1'
-        scope = 'site'
+        per_region = True
 
         def run(self, ctx, settings):
-            if not len(ctx.locs):
+            locs = ctx.selection.apply(ctx.locs)
+            if not len(locs):
                 raise ValueError('empty ROI')
-            return Result(data={'x': float(ctx.locs['x_nm'].mean())})
+            return Result(values={'x': float(locs['x_nm'].mean())})
 
     p = ROIProject()
     s = p.add_source(table([0]))
@@ -232,10 +233,10 @@ def test_two_steps_share_a_row_and_collisions_are_qualified():
     from smappy.plugins import Plugin, Result
 
     class Count(Plugin):
-        scope = 'site'
+        per_region = True
 
         def run(self, ctx, settings):
-            return Result(data={'n': len(ctx.locs), 'only_here': 1})
+            return Result(values={'n': len(ctx.selection), 'only_here': 1})
 
     p = ROIProject()
     s = p.add_source(table([0, 10]))

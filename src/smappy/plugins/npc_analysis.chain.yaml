@@ -25,6 +25,7 @@ steps:
       replace: true
   - plugin: ROIManager/Evaluate/NPC Corners    # not renamed: replaces an earlier
     version: "2"                                # "NPC Corners", stands beside a renamed one
+    regions: rois                               # once in each pore, not on the view
     values: {}
   - plugin: ROIManager/Analyze/NPC Labeling Efficiency
     label: labelling efficiency

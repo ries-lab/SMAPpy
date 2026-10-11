@@ -34,7 +34,7 @@ def test_folders_name_the_plugin(tmp_path):
     assert ref.name == "My Drift" and ref.attr == "MyDrift"
     assert ref.description == "the one line that wins over the docstring"
     assert ref.group == "Analysis/Drift" and ref.parts[0] == "Analysis"
-    assert ref.scope == "locs" and ref.favorite
+    assert ref.per_region is False and ref.favorite
 
 
 def test_docstring_is_the_description_when_nothing_else_says(tmp_path):
@@ -64,12 +64,12 @@ def test_register_wins_over_the_folder_and_gives_several_per_file(tmp_path):
 
         @register("Localize/Beta")
         class Beta(_Base):
-            scope = "site"
+            per_region = True
     """)
     refs, problems = scan([("test", tmp_path)])
     assert problems == []
     assert set(refs) == {"Localize/Alpha", "Localize/Beta"}
-    assert refs["Localize/Beta"].scope == "site"
+    assert refs["Localize/Beta"].per_region is True
     assert "Wherever/Two" not in refs           # the folder no longer names it
 
 
@@ -79,15 +79,15 @@ def test_arbitrary_depth(tmp_path):
     assert "MyLab/Cluster/2D/Dbscan" in refs
 
 
-def test_scope_must_be_one_we_know(tmp_path):
+def test_per_region_must_be_true_itself(tmp_path):
     write(tmp_path, "A/odd.py", """
         from smappy.plugins import Plugin
 
         class Odd(Plugin):
-            scope = "somewhere else"
+            per_region = "yes"
     """)
     refs, _ = scan([("test", tmp_path)])
-    assert refs["A/Odd"].scope == "locs"
+    assert refs["A/Odd"].per_region is False
 
 
 def test_computed_attributes_are_left_alone_rather_than_guessed(tmp_path):

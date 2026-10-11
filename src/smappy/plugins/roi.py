@@ -5,10 +5,11 @@ Three kinds, all ordinary plugins:
 * **Segment** proposes candidate ROIs on a whole file.  It runs once, and
   derives from `SegmenterPlugin`, which gives it a Preview: the same
   proposals, drawn in the ROI manager and not added.
-* **Evaluate** measures *one* ROI and returns that site's row.  It declares
-  ``scope = "site"``, which is the only thing that marks it as an evaluator --
-  a property of the plugin, not of its folder, so the evaluation window can
-  filter correctly with one shared plugin tree.
+* **Evaluate** measures *one* ROI and returns that site's row in
+  `Result.values`.  It declares ``per_region = True``, which is what the
+  evaluation window offers -- a property of the plugin, not of its folder, so
+  the window can filter correctly with one shared plugin tree -- and runs on
+  the view like any other plugin as well (`docs/regions.md`).
 * **Analyze** reads the table evaluation produced and summarises it.  It runs
   once, over ``ctx.site_table``.
 
@@ -255,7 +256,7 @@ class Statistics(Plugin):
 
     Settings = StatisticsSettings
     changes_locs = False
-    scope = "site"
+    per_region = True
     version = "1"
 
     def run(self, ctx: Context, settings: StatisticsSettings) -> Result:
@@ -283,7 +284,7 @@ class Statistics(Plugin):
 
         return Result(text=f"{values['n_localizations']} localizations",
                       plot=plot if len(locs) else None,
-                      data=values, settings=settings)
+                      data=values, values=values, settings=settings)
 
 
 # ----------------------------------------------------------------- analysis

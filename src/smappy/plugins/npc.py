@@ -589,7 +589,7 @@ class NPCCorners(Plugin):
 
     Settings = NPCCornersSettings
     changes_locs = False
-    scope = "site"
+    per_region = True
     version = "2"
     # not in the default evaluation pipeline: added when the data are pores
     favorite = False
@@ -609,7 +609,8 @@ class NPCCorners(Plugin):
         data = {k: v for k, v in values.items() if k != "per_corner"}
         return Result(text=f"{values['n_corners']} corners, "
                            f"{values['n_localizations']} localizations",
-                      data=data,
+                      data=data, values=data,
+                      arrays={"per_corner": np.asarray(values["per_corner"])},
                       plot=lambda ax: draw_corners(ax, x, y, values, settings, precision),
                       settings=settings)
 

@@ -70,13 +70,13 @@ def test_report_and_emit_reach_their_callbacks():
     assert result.text == "100 in, 100 selected"
 
 
-def test_scope_says_what_a_plugin_is():
-    assert Plugin.scope == "locs" and Echo.scope == "locs"
+def test_per_region_says_a_plugin_hands_back_values():
+    assert Plugin.per_region is False and Echo.per_region is False
 
-    class PerSite(Plugin):
-        scope = "site"
+    class PerRegion(Plugin):
+        per_region = True
 
-    assert PerSite.scope == "site"
+    assert PerRegion.per_region is True
 
 
 def test_calling_a_plugin_needs_no_localizations_at_all():

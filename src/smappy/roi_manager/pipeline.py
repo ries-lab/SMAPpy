@@ -25,7 +25,6 @@ import yaml
 from ..plugins import settings_from, settings_values
 from ..workspace import Instance
 
-SCOPE = "site"
 
 
 @dataclass
@@ -60,7 +59,7 @@ def default_instances() -> List[Instance]:
     from .. import plugins
     return [Instance(plugin=path)
             for path, ref in sorted(plugins.refs().items())
-            if ref.scope == SCOPE and ref.favorite]
+            if ref.per_region and ref.favorite]
 
 
 def instances_from_run(recorded: Sequence[Dict[str, Any]]) -> List[Instance]:
@@ -80,7 +79,7 @@ def instances_from_run(recorded: Sequence[Dict[str, Any]]) -> List[Instance]:
 def evaluators() -> Dict[str, Any]:
     """Every plugin that measures one ROI, by path."""
     from .. import plugins
-    return {p: r for p, r in plugins.refs().items() if r.scope == SCOPE}
+    return {p: r for p, r in plugins.refs().items() if r.per_region}
 
 
 def resolve(instances: Sequence[Instance], skip_disabled: bool = True) -> List[Step]:

@@ -215,12 +215,9 @@ class PluginTab(QWidget):
 
     # ------------------------------------------------------------- editing
     def add_plugin(self) -> None:
-        # only what a tab can actually run: a scope="site" evaluator measures
-        # one ROI and belongs to the evaluation pipeline, so pinning it here
-        # would give a Run button that can only fail.  This is a restriction of
-        # the contract, not of the folder -- any *runnable* plugin, from any
-        # branch of the tree, can be pinned to any tab.
-        path = choose_plugin(self.window(), scope="locs")
+        # any plugin, from any branch of the tree: one that can run per
+        # region runs on the view as well (`docs/regions.md`)
+        path = choose_plugin(self.window())
         if not path:
             return
         instance = Instance(plugin=path)

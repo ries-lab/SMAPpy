@@ -26,33 +26,33 @@ class Drawing(Plugin):
     """An evaluator with a figure, which the shipped ones do not have."""
     name = "Drawing"
     path = "ROIManager/Evaluate/Drawing"
-    scope = "site"
+    per_region = True
     Settings = DrawingSettings
 
     def run(self, ctx, settings):
-        x = np.asarray(ctx.locs["x_nm"])
+        x = np.asarray(ctx.selection.apply(ctx.locs)["x_nm"])
         return Result(text=f"{len(x)} localizations",
                       plot=lambda ax: ax.hist(x, bins=settings.bins),
                       plots={"positions": lambda ax: ax.plot(x, x)},
-                      data={"n": len(x)}, settings=settings)
+                      values={"n": len(x)}, settings=settings)
 
 
 class Other(Plugin):
     """A second evaluator with a figure, to watch what the first one costs."""
     name = "Other"
     path = "ROIManager/Evaluate/Other"
-    scope = "site"
+    per_region = True
     Settings = DrawingSettings
 
     def run(self, ctx, settings):
-        n = len(ctx.locs)
-        return Result(text=f"{n}", plot=lambda ax: ax.bar([0], [n]), data={"n": n})
+        n = len(ctx.selection)
+        return Result(text=f"{n}", plot=lambda ax: ax.bar([0], [n]), values={"n": n})
 
 
 class Failing(Plugin):
     name = "Failing"
     path = "ROIManager/Evaluate/Failing"
-    scope = "site"
+    per_region = True
     Settings = DrawingSettings
 
     def run(self, ctx, settings):

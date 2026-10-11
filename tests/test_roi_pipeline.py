@@ -36,9 +36,9 @@ def test_the_roi_plugins_are_registered_where_smap_puts_them():
                           "ROIManager/Analyze/Histograms",
                           "ROIManager/Analyze/NPC Labeling Efficiency",
                           "ROIManager/Workflow/NPC Analysis"}
-    # scope is what marks an evaluator, not the folder it sits in
-    assert found["ROIManager/Evaluate/Statistics"].scope == "site"
-    assert found["ROIManager/Segment/Density Peaks"].scope == "locs"
+    # per_region is what marks an evaluator, not the folder it sits in
+    assert found["ROIManager/Evaluate/Statistics"].per_region
+    assert not found["ROIManager/Segment/Density Peaks"].per_region
 
 
 def test_the_defaults_dict_became_a_typed_settings_class():
@@ -86,7 +86,7 @@ def test_a_pipeline_step_is_the_same_instance_type_a_tab_pins():
 
 
 def test_a_specialised_evaluator_is_offered_but_not_in_the_default_pipeline():
-    assert plugins.refs()["ROIManager/Evaluate/NPC Corners"].scope == "site"
+    assert plugins.refs()["ROIManager/Evaluate/NPC Corners"].per_region
     assert [i.plugin for i in pipeline_module.default_instances()] == \
         ["ROIManager/Evaluate/Statistics"]
 
@@ -289,10 +289,10 @@ def app():
 
 def test_the_evaluation_window_offers_only_evaluators(app):
     from smappy.gui.chooser import PluginTree
-    tree = PluginTree(scope="site")
+    tree = PluginTree(per_region=True)
     assert sorted(tree.refs) == ["ROIManager/Evaluate/NPC Corners",
                                  "ROIManager/Evaluate/Statistics"]
-    assert set(PluginTree(scope="locs").refs).isdisjoint(tree.refs)
+    assert set(tree.refs) < set(PluginTree().refs)
 
 
 def test_the_window_edits_the_pipeline_and_keeps_the_values(app):
@@ -316,11 +316,11 @@ def test_the_window_edits_the_pipeline_and_keeps_the_values(app):
     assert [s.label for s in pipeline_module.resolve(window.instances)] == ["Statistics"]
 
 
-def test_a_tab_will_not_pin_an_evaluator(app):
-    """A scope="site" plugin has no site in a tab, so its Run could only fail."""
+def test_a_tab_pins_a_per_region_plugin_too(app):
+    """One that can run per region runs on the view as well."""
     from smappy.gui.chooser import PluginTree
-    assert "ROIManager/Evaluate/Statistics" not in PluginTree(scope="locs").refs
-    assert "ROIManager/Segment/Density Peaks" in PluginTree(scope="locs").refs
+    assert "ROIManager/Evaluate/Statistics" in PluginTree().refs
+    assert "ROIManager/Segment/Density Peaks" in PluginTree().refs
 
 
 def test_find_evaluate_and_analyse_through_the_session(app):

@@ -553,6 +553,13 @@ class Result:
     # than in one crowded axis
     plots: Dict[str, Any] = field(default_factory=dict)
     data: Dict[str, Any] = field(default_factory=dict)  # anything else
+    # What a run in one region stores as that region's results
+    # (`docs/regions.md`): `values` the numbers, a column each of the region
+    # table; `arrays` named arrays -- a fixed-size one (eight corner counts)
+    # or one of the region's own length.  Only these are kept per region;
+    # `data` and the figures are for the run that made them.
+    values: Dict[str, Any] = field(default_factory=dict)
+    arrays: Dict[str, Any] = field(default_factory=dict)
     settings: Any = None                    # what was actually used
     # more for the log entry, beside the path, the text and the settings: a
     # chain puts its steps here, so the history shows what each one did
@@ -607,13 +614,15 @@ class Plugin:
     name: str = ""                 # set by `register` from the path's last part
     path: str = ""                 # "Analysis/Drift/COMET"
     description: str = ""
-    favorite: bool = True          # pinned in the shipped workspace; for an
-                                   # evaluator, in the default evaluation pipeline
-    # "locs": run once over the selection.  "site": run once per ROI, with
-    # `ctx.region` set -- what makes a plugin an ROI evaluator.  It is a property
-    # of the plugin, not of its folder, which is what lets the evaluation
-    # window filter correctly when every plugin lives in one tree.
-    scope: str = "locs"
+    favorite: bool = True          # pinned in the shipped workspace; for a
+                                   # per-region plugin, in the default
+                                   # evaluation pipeline
+    # Whether `run` hands back `Result.values`, and so can be run once per
+    # region and kept as that region's row (`docs/regions.md`).  Not a kind
+    # of plugin -- such a plugin runs on the view like any other -- but what
+    # the evaluation window and a chain need to know before running it,
+    # which is why it is declared rather than found out.
+    per_region: bool = False
     Settings: type = None
     # presentation for fields that were not declared with `param`
     params: Dict[str, ParamInfo] = {}

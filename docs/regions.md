@@ -381,7 +381,15 @@ Each step leaves the program working and the suite green.
      filters and grouping, so results saved before read as out of date once.
      `SessionROIs`' per-file states stay for now: they draw the manager's
      images and hold its index, and decide nothing a measurement sees.
-   * *2b*: `Result.values` / `Result.arrays`, the `per_region` flag.
+   * *2b, done 2026-10-11*: `Result.values` / `Result.arrays`, and
+     `per_region = True` in place of `scope = "site"`.  The runner stores only
+     those (`core.region_entry`: a value that is not a number is refused, an
+     array goes in `arrays`, kept as a JSON list until step 3); `data` and the
+     figures stay with the run.  A tab's chooser offers every plugin, the
+     evaluation window the `per_region` ones.  A chain step of such a plugin
+     says where it runs, `regions: view` (the default) or `rois` -- the
+     step's own choice until blocks replace it; the shipped NPC chain says
+     `rois`.
    * *2c*: one statistics plugin, with `slow=True` on its fits.
 3. **Region sources and one runner**, ROIs first, then id columns, with the
    region table in columns, in the file and as a session table with its filter;

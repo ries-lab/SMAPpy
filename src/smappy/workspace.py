@@ -125,14 +125,10 @@ class Workspace:
         for spec in DEFAULT_TABS:
             seed = spec.get("seed") or ()
             prefixes = (seed,) if isinstance(seed, str) else tuple(seed)
-            # scope="site" is skipped: an evaluator measures one ROI and has no
-            # meaning outside the evaluation pipeline, so a tab's Run button
-            # could only fail.
             instances = [Instance(plugin=path)
                          for prefix in prefixes
                          for path, ref in sorted(refs.items())
-                         if path.startswith(prefix) and ref.favorite
-                         and ref.scope == "locs"]
+                         if path.startswith(prefix) and ref.favorite]
             tabs.append(Tab(name=spec["name"], kind=spec.get("kind", "plugins"),
                             header=spec.get("header", ""), instances=instances))
         return cls(tabs=tabs)

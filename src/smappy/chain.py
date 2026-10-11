@@ -20,7 +20,8 @@ the ones that shape this module:
   GUI's worker thread like any plugin.
 
 * **An evaluator is a step over every site.**  A plugin with
-  ``scope = "site"`` measures one ROI; as a step it is run over every
+  ``per_region = True`` can measure one ROI; as a step set to *run on* each
+  ROI it is run over every
   included ROI of the ROI manager's project (`ROIProject.evaluate`) before
   the next step starts, so a chain can segment, evaluate and analyse the
   site table as a person does in the ROI manager.  Its results are stored
@@ -60,6 +61,12 @@ CHAIN_GROUPINGS = ("layer", "grouped", "ungrouped")
 # the field a step's settings gain; a plugin with a field of this name cannot
 # be a step, and says so rather than having its field shadowed
 GROUPING_FIELD = "use_grouping"
+# where a step of a plugin that can run per region runs: once on the view, or
+# once in each ROI.  The step's own choice until a chain has blocks
+# (`docs/regions.md`), where a step in a block runs per region and one outside
+# runs on the view.
+REGIONS_FIELD = "run_on"
+STEP_REGIONS = (("view", "the view"), ("rois", "each ROI"))
 # where a chain lands in the tree when its file does not say
 DEFAULT_GROUP = "Analysis/Chains"
 
@@ -86,6 +93,7 @@ class Step:
     values: Dict[str, Any] = field(default_factory=dict)   # by dotted name
     version: str = ""                            # the plugin's, when saved
     grouping: str = "auto"                       # auto | grouped | ungrouped
+    regions: str = "view"                        # view | rois (per-region plugins)
     enabled: bool = True
 
     def title(self) -> str:
@@ -99,6 +107,8 @@ class Step:
             out["version"] = self.version
         if self.grouping != "auto":
             out["grouping"] = self.grouping
+        if self.regions != "view":
+            out["regions"] = self.regions
         if not self.enabled:
             out["enabled"] = False
         out["values"] = dict(self.values)
@@ -112,12 +122,17 @@ class Step:
         if grouping not in STEP_GROUPINGS:
             raise ChainError(f"step {raw['plugin']!r}: grouping {grouping!r} is not "
                              f"one of {', '.join(STEP_GROUPINGS)}")
+        regions = str(raw.get("regions", "view"))
+        if regions not in dict(STEP_REGIONS):
+            raise ChainError(f"step {raw['plugin']!r}: regions {regions!r} is not "
+                             f"one of {', '.join(dict(STEP_REGIONS))}")
         values = raw.get("values") or {}
         if not isinstance(values, dict):
             raise ChainError(f"step {raw['plugin']!r}: `values` must be a mapping")
         return cls(plugin=str(raw["plugin"]), label=str(raw.get("label") or ""),
                    values=dict(values), version=str(raw.get("version") or ""),
-                   grouping=grouping, enabled=bool(raw.get("enabled", True)))
+                   grouping=grouping, regions=regions,
+                   enabled=bool(raw.get("enabled", True)))
 
 
 @dataclass
@@ -279,9 +294,9 @@ def step_settings_class(key: str, plugin_cls, step: Step) -> type:
         for f in fields(base):
             if not f.init:
                 continue
-            if f.name == GROUPING_FIELD:
+            if f.name in (GROUPING_FIELD, REGIONS_FIELD):
                 raise ChainError(f"{plugin_cls.path} has a field called "
-                                 f"{GROUPING_FIELD!r}, which a chain step needs")
+                                 f"{f.name!r}, which a chain step needs")
             value = getattr(defaults, f.name)
             if isinstance(value, (list, dict, set)) or dataclasses.is_dataclass(value):
                 made = field(default_factory=lambda v=value: copy.deepcopy(v),
@@ -290,17 +305,19 @@ def step_settings_class(key: str, plugin_cls, step: Step) -> type:
                 made = field(default=value, metadata=f.metadata)
             columns.append((f.name, hints.get(f.name, Any), made))
     required = getattr(plugin_cls, "grouping", None)
-    if is_evaluator(plugin_cls):
-        help = ("an evaluator sees what the ROI manager shows: the filter "
-                "and grouping of the layer it follows")
-    elif required:
+    if required:
         help = f"this plugin only works {required}"
     else:
         help = ("which table this step reads: auto takes the chain's choice, "
-                "or each layer's own")
+                "or each layer's own; in each ROI, each layer's own")
     columns.append((GROUPING_FIELD, str, param(
         required or step.grouping, label="grouping", choices=STEP_GROUPINGS,
         advanced=True, help=help)))
+    if is_evaluator(plugin_cls):
+        columns.append((REGIONS_FIELD, str, param(
+            step.regions, label="run on", choices=STEP_REGIONS,
+            help="once on the view, or once in each ROI of the ROI manager, "
+                 "its results kept with the ROI")))
     name = "".join(w.capitalize() for w in key.split("_")) + "Step"
     return make_dataclass(name, columns, namespace={"__module__": __name__})
 
@@ -336,8 +353,14 @@ def is_source(plugin_cls) -> bool:
 
 
 def is_evaluator(plugin_cls) -> bool:
-    """Does this plugin measure one ROI at a time (``scope = "site"``)?"""
-    return getattr(plugin_cls, "scope", "locs") == "site"
+    """Can this plugin measure one region at a time (`Plugin.per_region`)?"""
+    return bool(getattr(plugin_cls, "per_region", False))
+
+
+def per_roi(plugin_cls, step_settings) -> bool:
+    """Does this step run once in each ROI rather than once on the view?"""
+    return (is_evaluator(plugin_cls)
+            and getattr(step_settings, REGIONS_FIELD, "view") == "rois")
 
 
 def evaluate_sites(project, plugin_cls, label: str, settings, chain: str = "",
@@ -452,7 +475,7 @@ class ChainPlugin(Plugin):
             own = plugin_settings(cls, sub)
             sctx = copy.copy(ctx)
             sctx.evaluations = list(made)
-            if is_evaluator(cls):
+            if per_roi(cls, sub):
                 made.append((step.label or cls.name, cls.path))
             try:
                 asked = cls().preflight(sctx, own)
@@ -492,7 +515,7 @@ class ChainPlugin(Plugin):
             sub = getattr(settings, key)
             plugin = cls()
             own = plugin_settings(cls, sub)
-            grouping = None if is_evaluator(cls) else effective_grouping(
+            grouping = None if per_roi(cls, sub) else effective_grouping(
                 cls.grouping, getattr(sub, GROUPING_FIELD), settings.grouping)
             sctx = session.context(min(ctx.layer, len(session.layers) - 1),
                                    progress=lambda text, l=label: ctx.report(f"{l}: {text}"),
@@ -506,7 +529,7 @@ class ChainPlugin(Plugin):
             ctx.report(f"{label}: starting")
             started = time.perf_counter()
             try:
-                if is_evaluator(cls):
+                if per_roi(cls, sub):
                     result = evaluate_sites(
                         session.rois, cls, step.label, own, chain=self.path,
                         progress=lambda text, l=label: ctx.report(f"{l}: {text}"))
@@ -521,7 +544,7 @@ class ChainPlugin(Plugin):
                     "new table: there is no way from one row per blink back to "
                     "the localizations, so run it ungrouped")
             session.apply(plugin, result)
-            if is_evaluator(cls):
+            if per_roi(cls, sub):
                 made.append((result.data["label"], cls.path))
             seconds = time.perf_counter() - started
             changed = result.locs is not None or bool(result.files)
@@ -597,7 +620,7 @@ class ChainPlugin(Plugin):
 
     def react(self, changed: str, settings):
         key, cls, rest = self._step(changed)
-        if cls is None or not rest or rest == GROUPING_FIELD:
+        if cls is None or not rest or rest in (GROUPING_FIELD, REGIONS_FIELD):
             return None
         replies = cls().react(rest, plugin_settings(cls, getattr(settings, key)))
         return {f"{key}.{k}": v for k, v in (replies or {}).items()} or None
@@ -620,7 +643,7 @@ class ChainPlugin(Plugin):
         for key, step, cls in self.steps:
             sctx = copy.copy(ctx)
             sctx.evaluations = list(made)
-            if is_evaluator(cls):
+            if per_roi(cls, getattr(settings, key)):
                 made.append((step.label or cls.name, cls.path))
             try:
                 found = cls().choices(sctx, plugin_settings(cls, getattr(settings, key)))
@@ -637,7 +660,7 @@ class ChainPlugin(Plugin):
             except Exception:
                 found = None
             out.update({f"{key}.{k}": v for k, v in (found or {}).items()})
-            if cls.grouping or is_evaluator(cls):
+            if cls.grouping or per_roi(cls, getattr(settings, key)):
                 out[f"{key}.{GROUPING_FIELD}"] = False
         return out or None
 
@@ -659,6 +682,7 @@ class ChainPlugin(Plugin):
                 step.values = settings_values(plugin_settings(plugin, sub))
                 step.grouping = ("auto" if plugin.grouping
                                  else getattr(sub, GROUPING_FIELD))
+                step.regions = getattr(sub, REGIONS_FIELD, "view")
                 step.version = plugin.version
             steps.append(step)
         grouping = settings.grouping if settings is not None else cls.spec.grouping

@@ -80,6 +80,31 @@ def rows_in(locs, index, region, keep=None):
     return np.sort(candidates[region.mask(x, y)])
 
 
+def region_entry(result) -> Dict:
+    """What one run in one region stores: its `Result.values`, a number
+    each, and its `Result.arrays`.
+
+    A value that is not a number (or a string, a flag, None) is refused
+    rather than stored: the values are the region table's columns, and a
+    list in a column is a table nobody can histogram.  An array belongs in
+    `arrays`.  Until the region table is written in columns (step 3 of
+    `docs/regions.md`) the arrays are kept as JSON lists beside the values.
+    """
+    values = {}
+    for name, value in (result.values or {}).items():
+        if isinstance(value, np.generic):
+            value = value.item()
+        if value is not None and not isinstance(value, (bool, int, float, str)):
+            raise TypeError(f"value {name!r} is a {type(value).__name__}, not a "
+                            "number: put it in Result.arrays")
+        values[name] = value
+    entry = {"values": values}
+    if result.arrays:
+        entry["arrays"] = {name: np.asarray(a).tolist()
+                           for name, a in result.arrays.items()}
+    return json.loads(json_text(entry))
+
+
 @dataclass
 class ROI:
     file_id: str
@@ -668,7 +693,7 @@ class ROIProject:
         """
         try:
             result = step.plugin.run(self._context(region, tables), step.settings)
-            return {"values": json.loads(json_text(result.data or {}))}, result
+            return region_entry(result), result
         except Exception as error:
             return {"error": f"{type(error).__name__}: {error}"}, None
 

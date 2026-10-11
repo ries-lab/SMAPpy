@@ -59,7 +59,7 @@ that is ever wanted it is one more root, not a new mechanism.
 
 At startup the scanner walks the roots and *parses* each `.py` with `ast`
 without executing it, reading the class name, its `@register` argument, and any
-literal `name`, `description`, `favorite` and `scope` assignments -- falling
+literal `name`, `description`, `favorite` and `per_region` assignments -- falling
 back to the first line of the docstring for the description.  The result is a
 `PluginRef`:
 
@@ -69,7 +69,7 @@ class PluginRef:
     path: str            # "Analysis/Drift/COMET"
     name: str
     description: str
-    scope: str           # "locs" or "site"
+    per_region: bool     # hands back Result.values: can run per region
     origin: Path         # the file
     attr: str            # the class in it
     root: str            # which root it came from, for the UI and for errors
@@ -117,17 +117,18 @@ loader calls `ctx.session.add_file(...)`; an ROI finder returns
 so loaders, savers, the simulator and the ROI plugins all get favourites,
 parameter forms, validation and state saving for free.
 
-Plugins that are called once per ROI say so with a class attribute rather than a
-different base class:
+Plugins that can be called once per ROI say so with a class attribute rather
+than a different base class:
 
 ```python
-scope = "locs"   # default: run once over the selection
-scope = "site"   # run per ROI; ctx.site is set, Result.data is that site's row
+per_region = True   # hands back Result.values: can run per region as well
 ```
 
-`scope` is the only thing that separates an evaluator from any other plugin, and
-it is a property of the plugin, not of its folder -- which is what lets the
-evaluation window filter correctly under one global tree.
+It replaced `scope = "site"` on 2026-10-11 (`docs/regions.md`): such a plugin
+is no longer a kind apart -- it runs on the view like any other, and per ROI
+in `ROIProject.region_context`, with `ctx.region` set and `Result.values` that
+ROI's row.  It is a property of the plugin, not of its folder -- which is what
+lets the evaluation window filter correctly under one global tree.
 
 `Plugin.__call__` keeps the scripting shape: `plugin(locs, sel, radius_nm=30)`
 builds the context itself, and `locs` may be left out entirely for a plugin that
@@ -195,10 +196,9 @@ The ROI tab is one of these, holding `ROIManager/Segment/*` and
 `ROIManager/Analyze/*` pins -- ordinary run-once plugins -- plus its header,
 which carries the geometry every ROI shares and the ways into the two windows.
 
-The chooser opened from a tab offers only `scope == "locs"` plugins.  That is a
-restriction of the contract and not of the folder: an evaluator has no site in a
-tab, so pinning one there could only produce a Run button that fails.  Any
-*runnable* plugin, from any branch of the tree, can still be pinned to any tab.
+The chooser opened from a tab offers every plugin, from any branch of the
+tree.  (It offered only `scope == "locs"` ones until evaluators became
+ordinary plugins that run on the view as well; `docs/regions.md`.)
 
 ### The ROI evaluation pipeline is a separate window
 
@@ -216,7 +216,7 @@ So the ROI manager opens an **Evaluation** window, laid out like SMAP's
 `SEEvaluationGui`: the pipeline on the left as a checkbox-and-name list that can
 be reordered, renamed, duplicated and removed, and the selected instance's
 parameter form on the right.  Its `+` opens the same plugin chooser, filtered to
-`scope == "site"`.  The list is `list[Instance]` -- the same type a tab holds --
+`per_region` plugins.  The list is `list[Instance]` -- the same type a tab holds --
 so ordering, renaming and duplicate handling are one implementation.
 
 A step whose plugin raises costs its own columns and not the ROI, nor the ROIs

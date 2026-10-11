@@ -71,6 +71,10 @@ steps:
 * A step's grouping is `<key>.use_grouping` among the chain's settings (the
   field a step's settings gain; a plugin may not have a field of that name),
   and the chain's own is `grouping`.
+* A step of a `per_region` plugin says where it runs: `regions: view` (the
+  default, left out of the file) or `regions: rois`, once in each ROI; among
+  the settings it is `<key>.run_on`.  Until chains have blocks
+  (`docs/regions.md`).
 
 ### A chain is one plugin
 
@@ -121,7 +125,9 @@ Decided 2026-10-05.  A chain can do what the ROI manager does by hand:
 
 * a **segmenter** (`ROIManager/Segment/...`) is an ordinary step; the ROIs it
   finds go into the scratch session's ROI project;
-* an **evaluator** (`scope = "site"`) is run over *every* ROI the project
+* an **evaluator** -- a `per_region` plugin whose step says `regions: rois`
+  (*run on* each ROI; the default, `view`, runs it once on the view like any
+  other step) -- is run over *every* ROI the project
   includes -- reviewed and ticked *use*, whoever made it -- with
   `ROIProject.evaluate`, and the chain goes on only when all of them are
   done.  A ROI on which it fails loses its row and is counted in the step's
