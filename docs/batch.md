@@ -71,10 +71,23 @@ steps:
 * A step's grouping is `<key>.use_grouping` among the chain's settings (the
   field a step's settings gain; a plugin may not have a field of that name),
   and the chain's own is `grouping`.
-* A step of a `per_region` plugin says where it runs: `regions: view` (the
-  default, left out of the file) or `regions: rois`, once in each ROI; among
-  the settings it is `<key>.run_on`.  Until chains have blocks
-  (`docs/regions.md`).
+* A step may be a **block** (`docs/regions.md`): steps of its own run once in
+  each region, written
+
+  ```yaml
+  - block: each pore            # its label; empty: "for each ROI"
+    regions: rois               # rois, or an id column such as cluster_id
+    write_back: [corner]        # optional: columns merged into the table
+    merge: last                 # optional: last | first | mean | any
+    keep_figures: auto          # optional: auto | yes | no
+    steps:
+      - plugin: ROIManager/Evaluate/NPC Corners
+        values: {}
+  ```
+
+  A block's step may be a block or a chain.  Among the chain's settings a
+  block is a part, `<key>.regions`, `<key>.write_back`, ... and its steps
+  inside it, `<key>.<step key>.<field>`.
 
 ### A chain is one plugin
 
@@ -118,23 +131,21 @@ default `skip`: the file is skipped and the report says why).
 
 ### ROIs: segment, evaluate, analyse
 
-*To be replaced* -- `docs/regions.md` (2026-10-11): an evaluator step becomes
-a block run once per region.  What follows describes the code as it still is.
-
-Decided 2026-10-05.  A chain can do what the ROI manager does by hand:
+Decided 2026-10-05, and since 2026-10-11 through blocks (`docs/regions.md`).
+A chain can do what the ROI manager does by hand:
 
 * a **segmenter** (`ROIManager/Segment/...`) is an ordinary step; the ROIs it
   finds go into the scratch session's ROI project;
-* an **evaluator** -- a `per_region` plugin whose step says `regions: rois`
-  (*run on* each ROI; the default, `view`, runs it once on the view like any
-  other step) -- is run over *every* ROI the project
+* a **block over the ROIs** runs its steps in *every* ROI the project
   includes -- reviewed and ticked *use*, whoever made it -- with
   `ROIProject.evaluate`, and the chain goes on only when all of them are
-  done.  A ROI on which it fails loses its row and is counted in the step's
-  line; no ROI at all fails the step.  Results still current (same ROI, data
-  and settings) are carried forward;
+  done.  A ROI on which a step fails loses that step's entry and is counted
+  in the block's line; no ROI at all fails the block.  Results still current
+  (same ROI, data and settings) are carried forward, unless the block writes
+  columns back;
 * its results are **stored with the ROIs** as an evaluation run of their own,
-  marked with the chain (`run["chain"]`), under the step's name -- the
+  marked with the block (`run["chain"]`, ``block <label>``), under each
+  step's name -- the
   plugin's when the step is not renamed.  The evaluation window's pipeline
   is not touched: it is the user's, set up for whatever they do next.  A
   result belongs to its ROI and says how it was made
@@ -145,10 +156,12 @@ Decided 2026-10-05.  A chain can do what the ROI manager does by hand:
   afterwards -- reads them without knowing who ran them.  The name is the
   identity: the same evaluator under its name again replaces its numbers,
   renamed it adds a second set to compare;
-* an evaluator sees the ROI with every layer's filter and grouping
+* a step in a block sees the ROI with every layer's filter and grouping
   (`ROIProject.region_context`; the layer the ROI manager follows, the first
-  unless changed, is its default), so its step's grouping choice is greyed
-  out; a `Chain/Layers` step before it is how a chain sets that up.
+  unless changed, is its default), so its grouping choice is greyed out; a
+  `Chain/Layers` step before the block is how a chain sets that up.  What
+  a block measures per region of an id column is handed back the same way,
+  as `Result.data["id_regions"]` into `Session.id_regions`.
 
 The scratch session carries a copy of the ROI project as it is
 (`Session.scratch`), and the chain hands the copy back as

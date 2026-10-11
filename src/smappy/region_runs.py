@@ -206,6 +206,45 @@ class ColumnRegions:
         return table, mask, np.sort(order[at[found]])
 
 
+class ContextRegions(ColumnRegions):
+    """The regions of an id column of a context's own table -- a block
+    inside another block's region: the region narrows, and every layer's
+    selection is cut on from the region's."""
+
+    def __init__(self, ctx, column: str):
+        if column not in ctx.locs:
+            raise ValueError(f"the region's table has no {column!r}: a step "
+                             "before the block has to write it")
+        self.ctx = ctx
+        self.session = None
+        self.locs = ctx.locs
+        self.column = column
+        self.layer = ctx.layer
+        self.ids, self.rows = split_ids(self.locs[column])
+        self._grouped = {}
+
+    def inputs(self) -> Dict[str, Any]:
+        return {"rows": len(self.locs), "column": self.column,
+                "ids": _hash(np.ascontiguousarray(np.asarray(self.locs[self.column])))}
+
+    def tables(self, k: int):
+        from .plugins import Selection
+        rows = self.rows[k]
+        locs = self.locs[rows]
+        pinned = {}
+        for i, entry in (self.ctx._pinned or {}).items():
+            table, selection = entry["ungrouped"]
+            if len(table) != len(self.locs):
+                continue                     # a layer that is not this table's
+            pinned[i] = {"ungrouped": (locs, Selection(np.asarray(selection.mask)[rows],
+                                                       layer=i, name=selection.name)),
+                         "shows": "ungrouped"}
+        if self.layer not in pinned:
+            pinned[self.layer] = {"ungrouped": (locs, Selection.all(len(rows))),
+                                  "shows": "ungrouped"}
+        return pinned, rows, self.layer, self.ctx.session
+
+
 def _hash(a: np.ndarray) -> str:
     import hashlib
     return hashlib.sha256(memoryview(np.ascontiguousarray(a)).cast("B")).hexdigest()
@@ -223,7 +262,8 @@ def _layer_inputs(lay) -> Dict[str, Any]:
 def evaluate_regions(source: ColumnRegions, steps: Sequence, tables: Optional[
         Dict[str, RegionTable]] = None, report: Optional[Callable[[str], None]] = None,
         tick: Optional[Callable[[int, int], None]] = None, stop=None,
-        reuse: bool = True, keep_figures: bool = False) -> Dict[str, RegionTable]:
+        reuse: bool = True, keep_figures: bool = False, after=None,
+        tag: bool = False) -> Dict[str, RegionTable]:
     """Run ``steps`` (`roi_manager.pipeline.Step`s) once in each region of
     ``source``, a table per step by its label.
 
@@ -234,45 +274,245 @@ def evaluate_regions(source: ColumnRegions, steps: Sequence, tables: Optional[
     regions, keeping what was measured; the regions not reached have no row.
     ``keep_figures`` keeps each region's figure data (`Plugin.keep`) -- off
     by default, since to look at clusters one makes ROIs of them.
+
+    The steps of a region run in one `RegionScratch`, a new table handed on;
+    so when one step must run, they all do -- a stored result of a step
+    before it cannot hand on the table it measured.  ``after(region_id,
+    scratch, original)`` is told each region's tables at the end, and
+    ``tag`` gives them their rows (a block's write-back).
     """
     import json
-    from .roi_manager.core import digest, json_text
+    from .roi_manager.core import changes_table, digest, json_text
     tables = dict(tables or {})
     inputs = json.loads(json_text(source.inputs()))
     data = digest(inputs)
     ids = source.region_ids()
-    todo = []
+    signatures, before = {}, []
     for step in steps:
-        signature = digest({"inputs": inputs, "step": step.identity()})
-        table = tables.get(step.label)
-        if reuse and table is not None and len(table) == len(ids) and all(
-                r in table and table.entry(r).get("signature") == signature for r in ids):
-            continue
-        tables[step.label] = RegionTable(step.label)
-        todo.append((step, signature))
-    if not todo:
+        signatures[step.label] = digest({"inputs": inputs, "step": step.identity(),
+                                         **({"after": list(before)} if before else {})})
+        if changes_table(step):
+            before.append(step.identity())
+    current = reuse and after is None and all(
+        step.label in tables and len(tables[step.label]) == len(ids) and all(
+            r in tables[step.label]
+            and tables[step.label].entry(r).get("signature") == signatures[step.label]
+            for r in ids) for step in steps)
+    if current:
         return tables
+    for step in steps:
+        tables[step.label] = RegionTable(step.label)
     progress = Progress(len(ids), report, tick)
     for k, region_id in enumerate(ids):
         if stopped(stop):
             break
-        cut = source.tables(k)
-        for step, signature in todo:
-            entry = _run_one(step, cut, region_id, keep_figures)
-            entry["signature"] = signature
+        scratch = RegionScratch(source.tables(k), None, region_id, tag=tag)
+        original = scratch.locs
+        for step in steps:
+            entry = _run_one(step, scratch, keep_figures)
+            entry["signature"] = signatures[step.label]
             tables[step.label].set(region_id, entry, step.as_record(), data)
+        if after is not None:
+            after(region_id, scratch, original)
         progress(k + 1)
     return tables
 
 
-def _run_one(step, cut, region_id, keep: bool = False) -> Dict[str, Any]:
-    from .plugins import Context
+def _run_one(step, scratch, keep: bool = False) -> Dict[str, Any]:
     from .roi_manager.core import region_entry
-    pinned, rows, layer, session = cut
-    locs, selection = pinned[layer]["ungrouped"]
     try:
-        ctx = Context(session=session, locs=locs, selection=selection, layer=layer,
-                      pinned=pinned, rows=rows, region_id=region_id)
-        return region_entry(step.plugin.run(ctx, step.settings), step.plugin, keep)
+        result = step.plugin.run(scratch.context(), step.settings)
+        scratch.apply(result, step.label)
+        return region_entry(result, step.plugin, keep)
     except Exception as error:
         return {"error": f"{type(error).__name__}: {error}"}
+
+
+# ------------------------------------------- a region's tables, step by step
+
+ROW = "_row"        # the hidden column: which row of the real table a row is
+
+
+class RegionScratch:
+    """One region's tables while the steps of a block run in it.
+
+    Starts as what `ROIProject._region_tables` or `ColumnRegions.tables` cut;
+    a step that hands back a new table (`Result.locs`) replaces the region's
+    table for the steps after it -- each layer's filter applied to it again,
+    the grouped table dropped, since a new table has not been linked.  With
+    ``tag``, the table carries `ROW`, the row of the real table each row came
+    from, which is what a block writes columns back by; a plugin that builds
+    its table from the columns it was given keeps it.
+    """
+
+    def __init__(self, cut, region=None, region_id: Optional[str] = None,
+                 tag: bool = False):
+        pinned, rows, layer, session = cut
+        self.region, self.region_id = region, region_id
+        self.layer, self.session = layer, session
+        self.start_rows = np.asarray(rows)
+        self.rows = self.start_rows              # None once the table has changed
+        self.changed = False
+        # tables a step made of regions inside this one (a block in a block),
+        # by the step's label: kept beside its numbers by the outer block
+        self.children: Dict[str, Dict[str, RegionTable]] = {}
+        if tag:
+            pinned = {i: dict(entry) for i, entry in pinned.items()}
+            first = next(iter(pinned.values()))["ungrouped"][0]
+            tagged = Localizations({**first.columns, ROW: self.start_rows.astype(np.int64)},
+                                   dict(first.metadata))
+            for entry in pinned.values():
+                entry["ungrouped"] = (tagged, entry["ungrouped"][1])
+        self.pinned = pinned
+
+    @property
+    def locs(self) -> Localizations:
+        return self.pinned[self.layer]["ungrouped"][0]
+
+    def context(self, **extra):
+        from .plugins import Context
+        locs, selection = self.pinned[self.layer]["ungrouped"]
+        return Context(session=self.session, locs=locs, selection=selection,
+                       layer=self.layer, pinned=self.pinned, rows=self.rows,
+                       region=self.region, region_id=self.region_id, **extra)
+
+    def apply(self, result, label: str = "") -> None:
+        """What a step handed back: a new table becomes the region's, and the
+        tables of regions inside this one are kept as its children."""
+        if result is None:
+            return
+        inner = (result.data or {}).get("region_tables")
+        if inner:
+            self.children[label] = dict(inner)
+        if result.locs is None:
+            return
+        from .filter import LocFilter
+        from .plugins import Selection
+        new = result.locs
+        for i, entry in self.pinned.items():
+            mask = np.ones(len(new), dtype=bool)
+            if self.session is not None and i < len(self.session.layers):
+                ranges = self.session.layers[i].state.sets["ungrouped"].filter.ranges
+                f = LocFilter(new)
+                for name, (lo, hi) in ranges.items():
+                    if name in new:
+                        f.set(name, lo, hi)
+                mask = np.asarray(f.mask, dtype=bool)
+            old = entry["ungrouped"][1]
+            entry.clear()
+            entry["ungrouped"] = (new, Selection(mask, layer=i, roi=self.region,
+                                                 name=old.name))
+            entry["shows"] = "ungrouped"
+        self.rows = None
+        self.changed = True
+
+
+class WriteBack:
+    """The columns a block writes back into the real table, and how.
+
+    ``columns`` are merged by `ROW` after every region has run: a row in no
+    region keeps its value (NaN, or 0 for an id or a flag, in a new column);
+    a row in several overlapping regions takes the value the ``rule`` says
+    -- ``last`` (the default) or ``first`` region's, the ``mean``, or
+    ``any`` for a flag.  ``use`` among them also flags the rows a region's
+    steps removed (False), rather than deleting them: a deletion merged over
+    overlapping regions would mean nothing.
+    """
+
+    RULES = ("last", "first", "mean", "any")
+
+    def __init__(self, columns: Sequence[str] = (), rule: str = "last"):
+        if rule not in self.RULES:
+            raise ValueError(f"merge rule {rule!r} is not one of {', '.join(self.RULES)}")
+        self.columns = [c for c in columns if c and c != ROW]
+        self.rule = rule
+        self.parts: List[Tuple[np.ndarray, np.ndarray, Dict[str, np.ndarray]]] = []
+        self.missing: Dict[str, int] = {}
+
+    def __bool__(self) -> bool:
+        return bool(self.columns)
+
+    def add(self, scratch: RegionScratch) -> None:
+        """One region's final table, as far as the written columns go."""
+        locs = scratch.locs
+        if ROW not in locs:
+            raise ValueError("a step built a table without the rows it came from "
+                             f"({ROW}): nothing of it can be written back")
+        values = {}
+        for c in self.columns:
+            if c in locs:
+                values[c] = np.asarray(locs[c])
+            elif c != "use":
+                self.missing[c] = self.missing.get(c, 0) + 1
+        self.parts.append((scratch.start_rows, np.asarray(locs[ROW]), values))
+
+    def merge(self, locs: Localizations) -> Localizations:
+        """The real table with the written columns merged in."""
+        n = len(locs)
+        columns = dict(locs.columns)
+        for c in self.columns:
+            pieces = [(rows, values[c]) for _, rows, values in self.parts if c in values]
+            if c == "use":
+                pieces += [(np.setdiff1d(start, rows), np.zeros(len(np.setdiff1d(start, rows)),
+                                                                bool))
+                           for start, rows, values in self.parts]
+            if not pieces:
+                continue
+            dtype = np.result_type(*[v.dtype for _, v in pieces])
+            if c in columns:
+                out = np.array(columns[c], copy=True)
+                out = out.astype(np.result_type(out.dtype, dtype), copy=False)
+            elif dtype.kind == "f":
+                out = np.full(n, np.nan, dtype=dtype)
+            elif c == "use":
+                out = np.ones(n, dtype=bool)
+            else:
+                out = np.zeros(n, dtype=dtype)
+            if self.rule == "mean" and out.dtype.kind in "fiu":
+                total = np.zeros(n)
+                count = np.zeros(n)
+                for rows, v in pieces:
+                    np.add.at(total, rows, v.astype(float))
+                    np.add.at(count, rows, 1)
+                out = out.astype(float)
+                hit = count > 0
+                out[hit] = total[hit] / count[hit]
+            elif self.rule == "any":
+                out = out.astype(bool) if c not in locs.columns else out
+                hit = np.zeros(n, dtype=bool)
+                for rows, v in pieces:
+                    np.logical_or.at(hit, rows, v.astype(bool))
+                touched = np.zeros(n, dtype=bool)
+                for rows, _ in pieces:
+                    touched[rows] = True
+                out[touched] = hit[touched]
+            else:
+                order = pieces if self.rule == "last" else pieces[::-1]
+                for rows, v in order:
+                    out[rows] = v
+            columns[c] = out
+        return Localizations(columns, dict(locs.metadata))
+
+
+def changed_columns(before: Localizations, scratch: RegionScratch) -> List[str]:
+    """The columns a region's steps added or changed: what a block warns
+    about when it is not told to write them back."""
+    after = scratch.locs
+    if not scratch.changed:
+        return []
+    out = [c for c in after.keys() if c != ROW and c not in before]
+    if ROW in after:
+        rows = np.searchsorted(scratch.start_rows, np.asarray(after[ROW]))
+        for c in after.keys():
+            if c == ROW or c not in before:
+                continue
+            old = np.asarray(before[c])[rows]
+            new = np.asarray(after[c])
+            same = (old == new) | (_isnan(old) & _isnan(new))
+            if not np.all(same):
+                out.append(c)
+    return out
+
+
+def _isnan(a: np.ndarray) -> np.ndarray:
+    return np.isnan(a) if a.dtype.kind == "f" else np.zeros(a.shape, dtype=bool)

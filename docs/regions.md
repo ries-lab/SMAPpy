@@ -441,6 +441,26 @@ Each step leaves the program working and the suite green.
    filter in the GUI, and the summarising plugins reading it (steps 4 and 6).
 4. **Blocks** in chains, the nesting rules and the cycle check, write-back and
    its warning; one step-list editor, the evaluation window becoming it.
+   * *4a, done*: `chain.Block` (its file form in `docs/batch.md`) and
+     `blocks.block_class`, a `BlockPlugin` built on `ChainPlugin`, so
+     preflight, choices, hints and `react` reach a block's steps as a
+     chain's.  The steps of a region run in one `region_runs.RegionScratch`
+     (a table handed on; `_row` ties rows to the real table); once one step
+     must run, every step before it that changes the table runs too, and a
+     step's signature includes the identities of those before it.
+     `WriteBack` merges named columns by `_row` with the rule, `use` also
+     flagging dropped rows; a changed column not written back is warned
+     about once, the warning reaching the chain's caller.  A block in a
+     block repeats over an id column of the region's table
+     (`ContextRegions`); its tables are kept beside the outer's, rows named
+     ``outer:inner``, and survive a save with their outer ROI.  A segmenter
+     in a block is refused.  `chain.load_class` refuses a chain that
+     contains itself, naming the loop.  The interim `regions: rois` step
+     field is gone; the shipped NPC chain is a block (`each pore`).
+     Per-cluster results come back from a chain's scratch session as
+     `data["id_regions"]`.
+   * *4b*: timing, *Check*, the preflight estimate.
+   * *4c*: the one editor.
 5. **Clusters**: DBSCAN under *Regions/Find* writing `cluster_id` and
    `n_in_cluster`, clusters to ROIs, *ROI to column*.
 6. **The tree** moved to `Analysis/Measure` and `Analysis/Regions`, the tab

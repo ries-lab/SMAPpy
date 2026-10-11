@@ -61,12 +61,9 @@ CHAIN_GROUPINGS = ("layer", "grouped", "ungrouped")
 # the field a step's settings gain; a plugin with a field of this name cannot
 # be a step, and says so rather than having its field shadowed
 GROUPING_FIELD = "use_grouping"
-# where a step of a plugin that can run per region runs: once on the view, or
-# once in each ROI.  The step's own choice until a chain has blocks
-# (`docs/regions.md`), where a step in a block runs per region and one outside
-# runs on the view.
-REGIONS_FIELD = "run_on"
-STEP_REGIONS = (("view", "the view"), ("rois", "each ROI"))
+# a block's choices: what it repeats over, and how it merges overlaps
+BLOCK_ROIS = "rois"
+KEEP_FIGURES = ("auto", "yes", "no")
 # where a chain lands in the tree when its file does not say
 DEFAULT_GROUP = "Analysis/Chains"
 
@@ -93,7 +90,6 @@ class Step:
     values: Dict[str, Any] = field(default_factory=dict)   # by dotted name
     version: str = ""                            # the plugin's, when saved
     grouping: str = "auto"                       # auto | grouped | ungrouped
-    regions: str = "view"                        # view | rois (per-region plugins)
     enabled: bool = True
 
     def title(self) -> str:
@@ -107,8 +103,6 @@ class Step:
             out["version"] = self.version
         if self.grouping != "auto":
             out["grouping"] = self.grouping
-        if self.regions != "view":
-            out["regions"] = self.regions
         if not self.enabled:
             out["enabled"] = False
         out["values"] = dict(self.values)
@@ -122,17 +116,87 @@ class Step:
         if grouping not in STEP_GROUPINGS:
             raise ChainError(f"step {raw['plugin']!r}: grouping {grouping!r} is not "
                              f"one of {', '.join(STEP_GROUPINGS)}")
-        regions = str(raw.get("regions", "view"))
-        if regions not in dict(STEP_REGIONS):
-            raise ChainError(f"step {raw['plugin']!r}: regions {regions!r} is not "
-                             f"one of {', '.join(dict(STEP_REGIONS))}")
         values = raw.get("values") or {}
         if not isinstance(values, dict):
             raise ChainError(f"step {raw['plugin']!r}: `values` must be a mapping")
         return cls(plugin=str(raw["plugin"]), label=str(raw.get("label") or ""),
                    values=dict(values), version=str(raw.get("version") or ""),
-                   grouping=grouping, regions=regions,
-                   enabled=bool(raw.get("enabled", True)))
+                   grouping=grouping, enabled=bool(raw.get("enabled", True)))
+
+
+@dataclass
+class Block:
+    """A list of steps run once in each region (`docs/regions.md`).
+
+    ``regions`` is what it repeats over: ``rois``, every included ROI of the
+    ROI manager, or the name of an id column (``cluster_id``).  In each
+    region the steps run on that region's tables, a table one hands back
+    handed to the next, all of it thrown away afterwards but the numbers
+    each step returned -- and the columns named in ``write_back``, merged
+    into the real table by ``merge`` where regions overlap.  A step may be a
+    block itself, or a chain.
+    """
+    steps: List[Any] = field(default_factory=list)   # Step or Block
+    label: str = ""
+    regions: str = BLOCK_ROIS
+    write_back: List[str] = field(default_factory=list)
+    merge: str = "last"
+    keep_figures: str = "auto"       # auto: on for ROIs, off for an id column
+    enabled: bool = True
+    plugin: str = ""                 # a step's field, empty: a block has none
+    grouping: str = "auto"
+
+    def title(self) -> str:
+        if self.label:
+            return self.label
+        return "for each ROI" if self.regions == BLOCK_ROIS else f"for each {self.regions}"
+
+    def keys(self) -> List[str]:
+        return unique_keys([s.title() for s in self.steps])
+
+    def to_dict(self) -> Dict[str, Any]:
+        out: Dict[str, Any] = {"block": self.label, "regions": self.regions}
+        if self.write_back:
+            out["write_back"] = list(self.write_back)
+        if self.merge != "last":
+            out["merge"] = self.merge
+        if self.keep_figures != "auto":
+            out["keep_figures"] = self.keep_figures
+        if not self.enabled:
+            out["enabled"] = False
+        out["steps"] = [s.to_dict() for s in self.steps]
+        return out
+
+    @classmethod
+    def from_dict(cls, raw: Dict[str, Any]) -> "Block":
+        from .region_runs import WriteBack
+        steps = raw.get("steps") or []
+        if not isinstance(steps, list):
+            raise ChainError("a block's `steps` must be a list")
+        merge = str(raw.get("merge", "last"))
+        if merge not in WriteBack.RULES:
+            raise ChainError(f"block merge {merge!r} is not one of "
+                             f"{', '.join(WriteBack.RULES)}")
+        keep = str(raw.get("keep_figures", "auto"))
+        if keep not in KEEP_FIGURES:
+            raise ChainError(f"block keep_figures {keep!r} is not one of "
+                             f"{', '.join(KEEP_FIGURES)}")
+        write_back = raw.get("write_back") or []
+        if isinstance(write_back, str):
+            write_back = [c.strip() for c in write_back.split(",") if c.strip()]
+        return cls(steps=[step_from_dict(s) for s in steps],
+                   label=str(raw.get("block") or raw.get("label") or ""),
+                   regions=str(raw.get("regions") or BLOCK_ROIS),
+                   write_back=[str(c) for c in write_back], merge=merge,
+                   keep_figures=keep, enabled=bool(raw.get("enabled", True)))
+
+
+def step_from_dict(raw: Dict[str, Any]):
+    """A step of a chain's file: a plugin step, or a block (``block:``)."""
+    if isinstance(raw, dict) and ("block" in raw or ("steps" in raw
+                                                     and "plugin" not in raw)):
+        return Block.from_dict(raw)
+    return Step.from_dict(raw)
 
 
 @dataclass
@@ -181,7 +245,7 @@ class ChainSpec:
         steps = raw.get("steps") or []
         if not isinstance(steps, list):
             raise ChainError("`steps` must be a list")
-        return cls(steps=[Step.from_dict(s) for s in steps],
+        return cls(steps=[step_from_dict(s) for s in steps],
                    path=str(raw.get("path") or ""),
                    description=str(raw.get("description") or ""),
                    grouping=grouping, origin=origin)
@@ -294,7 +358,7 @@ def step_settings_class(key: str, plugin_cls, step: Step) -> type:
         for f in fields(base):
             if not f.init:
                 continue
-            if f.name in (GROUPING_FIELD, REGIONS_FIELD):
+            if f.name == GROUPING_FIELD:
                 raise ChainError(f"{plugin_cls.path} has a field called "
                                  f"{f.name!r}, which a chain step needs")
             value = getattr(defaults, f.name)
@@ -313,11 +377,6 @@ def step_settings_class(key: str, plugin_cls, step: Step) -> type:
     columns.append((GROUPING_FIELD, str, param(
         required or step.grouping, label="grouping", choices=STEP_GROUPINGS,
         advanced=True, help=help)))
-    if is_evaluator(plugin_cls):
-        columns.append((REGIONS_FIELD, str, param(
-            step.regions, label="run on", choices=STEP_REGIONS,
-            help="once on the view, or once in each ROI of the ROI manager, "
-                 "its results kept with the ROI")))
     name = "".join(w.capitalize() for w in key.split("_")) + "Step"
     return make_dataclass(name, columns, namespace={"__module__": __name__})
 
@@ -357,50 +416,13 @@ def is_evaluator(plugin_cls) -> bool:
     return bool(getattr(plugin_cls, "per_region", False))
 
 
-def per_roi(plugin_cls, step_settings) -> bool:
-    """Does this step run once in each ROI rather than once on the view?"""
-    return (is_evaluator(plugin_cls)
-            and getattr(step_settings, REGIONS_FIELD, "view") == "rois")
-
-
-def evaluate_sites(project, plugin_cls, label: str, settings, chain: str = "",
-                   progress=None, stop=None) -> Result:
-    """An evaluator as a chain step: run over every included ROI.
-
-    Stored as an evaluation run of its own, marked with the chain that made
-    it, under ``label`` (the plugin's name when empty) -- so it replaces what
-    an evaluation of that name measured before, and stands beside one of
-    another name.  The project's pipeline is not touched: it is the
-    evaluation window's, set up by the user for their own work.  Results
-    still current from an earlier run with the same data and settings are
-    carried forward rather than measured again.
-    """
-    from .roi_manager import pipeline as pipeline_module
-    from .workspace import Instance
-    if project is None:
-        raise ValueError("there is no ROI manager project to evaluate")
-    ids = [i for i, roi in project.rois.items() if roi.reviewed and roi.use]
-    if not ids:
-        raise ValueError("there are no ROIs to evaluate: find or draw some first")
-    steps = pipeline_module.resolve([Instance(plugin=plugin_cls.path, label=label,
-                                              values=settings_values(settings))])
-    run = project.evaluate(steps=steps, roi_ids=ids, reuse=True, chain=chain,
-                           report=progress, stop=stop)
-    failed: Dict[str, int] = {}
-    for record in run["records"].values():
-        for why in pipeline_module.errors(record).values():
-            failed[why] = failed.get(why, 0) + 1
-    done = len(run["records"])
-    text = f"{done} sites evaluated"
-    if done < len(ids):
-        text += f", stopped before the other {len(ids) - done}"
-    if failed:
-        text += (f", failed on {sum(failed.values())}: " +
-                 "; ".join(f"{why} ({n})" for why, n in
-                           sorted(failed.items(), key=lambda kv: -kv[1])[:3]))
-    return Result(text=text, settings=settings,
-                  data={"sites": done, "failed": sum(failed.values()),
-                        "run": run["id"], "label": steps[0].label})
+def made_by(plugin_cls, step_settings) -> List[Tuple[str, str]]:
+    """The evaluations a step leaves on the ROIs, as ``(name, plugin path)``:
+    a block over the ROIs leaves one per step; anything else none."""
+    from .blocks import BlockPlugin
+    if isinstance(plugin_cls, type) and issubclass(plugin_cls, BlockPlugin):
+        return plugin_cls.evaluations(step_settings)
+    return []
 
 
 def _with_step(settings, key: str, plugin_cls, own):
@@ -475,8 +497,7 @@ class ChainPlugin(Plugin):
             own = plugin_settings(cls, sub)
             sctx = copy.copy(ctx)
             sctx.evaluations = list(made)
-            if per_roi(cls, sub):
-                made.append((step.label or cls.name, cls.path))
+            made.extend(made_by(cls, sub))
             try:
                 asked = cls().preflight(sctx, own)
             except Exception:
@@ -515,8 +536,8 @@ class ChainPlugin(Plugin):
             sub = getattr(settings, key)
             plugin = cls()
             own = plugin_settings(cls, sub)
-            grouping = None if per_roi(cls, sub) else effective_grouping(
-                cls.grouping, getattr(sub, GROUPING_FIELD), settings.grouping)
+            grouping = (None if not hasattr(sub, GROUPING_FIELD) else effective_grouping(
+                cls.grouping, getattr(sub, GROUPING_FIELD), settings.grouping))
             sctx = session.context(min(ctx.layer, len(session.layers) - 1),
                                    progress=lambda text, l=label: ctx.report(f"{l}: {text}"),
                                    grouping=grouping, evaluations=list(made))
@@ -528,14 +549,9 @@ class ChainPlugin(Plugin):
                     raise stop(f"{label}: {text}")
             ctx.report(f"{label}: starting")
             started = time.perf_counter()
+            sctx.stop = ctx.stop
             try:
-                if per_roi(cls, sub):
-                    result = evaluate_sites(
-                        session.rois, cls, step.label, own, chain=self.path,
-                        progress=lambda text, l=label: ctx.report(f"{l}: {text}"),
-                        stop=ctx.stop)
-                else:
-                    result = plugin.run(sctx, own)
+                result = plugin.run(sctx, own)
             except Exception as error:
                 raise ChainError(f"step {label!r} ({cls.path}) failed -- "
                                  f"{type(error).__name__}: {error}") from error
@@ -545,8 +561,9 @@ class ChainPlugin(Plugin):
                     "new table: there is no way from one row per blink back to "
                     "the localizations, so run it ungrouped")
             session.apply(plugin, result)
-            if per_roi(cls, sub):
-                made.append((result.data["label"], cls.path))
+            made.extend((result.data or {}).get("evaluations") or [])
+            for warning in sctx.warnings:
+                ctx.warn(warning)
             seconds = time.perf_counter() - started
             changed = result.locs is not None or bool(result.files)
             records.append({"key": key, "label": label, "plugin": cls.path,
@@ -583,6 +600,9 @@ class ChainPlugin(Plugin):
         # `Session.apply` puts into the session's project
         if _roi_signature(session) != rois_before:
             data["roi_project"] = session.roi_state()
+        # and what blocks measured per region of an id column
+        if session._id_regions:
+            data["id_regions"] = session.id_regions
         return Result(locs=session.locs if changed else None,
                       text="\n".join(lines) or "no steps", plots=plots, data=data,
                       settings=settings,
@@ -621,7 +641,7 @@ class ChainPlugin(Plugin):
 
     def react(self, changed: str, settings):
         key, cls, rest = self._step(changed)
-        if cls is None or not rest or rest in (GROUPING_FIELD, REGIONS_FIELD):
+        if cls is None or not rest or rest == GROUPING_FIELD:
             return None
         replies = cls().react(rest, plugin_settings(cls, getattr(settings, key)))
         return {f"{key}.{k}": v for k, v in (replies or {}).items()} or None
@@ -644,8 +664,7 @@ class ChainPlugin(Plugin):
         for key, step, cls in self.steps:
             sctx = copy.copy(ctx)
             sctx.evaluations = list(made)
-            if per_roi(cls, getattr(settings, key)):
-                made.append((step.label or cls.name, cls.path))
+            made.extend(made_by(cls, getattr(settings, key)))
             try:
                 found = cls().choices(sctx, plugin_settings(cls, getattr(settings, key)))
             except Exception:
@@ -661,7 +680,7 @@ class ChainPlugin(Plugin):
             except Exception:
                 found = None
             out.update({f"{key}.{k}": v for k, v in (found or {}).items()})
-            if cls.grouping or per_roi(cls, getattr(settings, key)):
+            if cls.grouping and hasattr(getattr(settings, key), GROUPING_FIELD):
                 out[f"{key}.{GROUPING_FIELD}"] = False
         return out or None
 
@@ -680,11 +699,13 @@ class ChainPlugin(Plugin):
             if key in by_key and settings is not None:
                 sub = getattr(settings, key)
                 plugin = by_key[key][1]
-                step.values = settings_values(plugin_settings(plugin, sub))
-                step.grouping = ("auto" if plugin.grouping
-                                 else getattr(sub, GROUPING_FIELD))
-                step.regions = getattr(sub, REGIONS_FIELD, "view")
-                step.version = plugin.version
+                if isinstance(step, Block):
+                    step = plugin.block_from(sub)
+                else:
+                    step.values = settings_values(plugin_settings(plugin, sub))
+                    step.grouping = ("auto" if plugin.grouping
+                                     else getattr(sub, GROUPING_FIELD))
+                    step.version = plugin.version
             steps.append(step)
         grouping = settings.grouping if settings is not None else cls.spec.grouping
         return ChainSpec(steps=steps, path=cls.spec.path,
@@ -709,11 +730,16 @@ def chain_class(spec: ChainSpec, path: Optional[str] = None) -> type:
     for key, step in zip(keys, spec.steps):
         if not step.enabled:
             continue
-        try:
-            cls = plugins.get(step.plugin)
-        except KeyError:
-            raise ChainError(f"step {step.title()!r} needs the plugin "
-                             f"{step.plugin!r}, which is not installed") from None
+        if isinstance(step, Block):
+            from .blocks import block_class
+            cls = block_class(step)
+            columns.append((key, cls.Settings, param(
+                default_factory=cls.Settings, label=step.title(), collapsed=True,
+                help=cls.description)))
+            extras.update(_flat_infos(cls.specs(), f"{key}."))
+            steps.append((key, step, cls))
+            continue
+        cls = step_plugin(step)
         step_cls = step_settings_class(key, cls, step)
         columns.append((key, step_cls, param(
             default_factory=step_cls, label=step.title(), collapsed=True,
@@ -732,8 +758,33 @@ def chain_class(spec: ChainSpec, path: Optional[str] = None) -> type:
     return type(f"Chain_{identifier(name)}", (ChainPlugin,), attrs)
 
 
+# the chain files being built, innermost last: a chain that contains itself,
+# directly or through another, would otherwise build forever
+_BUILDING: List[str] = []
+
+
 def load_class(origin, tree_path: Optional[str] = None) -> type:
     """The plugin class for a chain file, at ``tree_path`` if discovery placed
     it.  Built afresh each time it is asked for: the file is a few lines and
-    may have been saved a moment ago."""
-    return chain_class(read(origin), path=tree_path)
+    may have been saved a moment ago.  A chain that contains itself is
+    refused, naming the loop."""
+    key = str(Path(origin).resolve())
+    if key in _BUILDING:
+        loop = _BUILDING[_BUILDING.index(key):] + [key]
+        raise ChainError("a chain cannot contain itself: "
+                         + " -> ".join(chain_title(Path(k)) for k in loop))
+    _BUILDING.append(key)
+    try:
+        return chain_class(read(origin), path=tree_path)
+    finally:
+        _BUILDING.pop()
+
+
+def step_plugin(step: Step) -> type:
+    """The plugin class a step names, or a `ChainError` that says which."""
+    from . import plugins
+    try:
+        return plugins.get(step.plugin)
+    except KeyError:
+        raise ChainError(f"step {step.title()!r} needs the plugin "
+                         f"{step.plugin!r}, which is not installed") from None

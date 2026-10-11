@@ -152,8 +152,10 @@ class RegionTable:
         return "" if i is None else self.data[i]
 
     def keep_only(self, region_ids) -> None:
-        """Drop the rows of regions not in ``region_ids`` (ROIs that are gone)."""
-        keep = [i for i, r in enumerate(self.ids) if r in set(map(str, region_ids))]
+        """Drop the rows of regions not in ``region_ids`` (ROIs that are gone);
+        a row of a region inside one (``outer:inner``) goes with its outer."""
+        wanted = set(map(str, region_ids))
+        keep = [i for i, r in enumerate(self.ids) if _belongs(r, wanted)]
         if len(keep) == len(self.ids):
             return
         self.ids = [self.ids[i] for i in keep]
@@ -191,7 +193,7 @@ class RegionTable:
             rows = range(len(self.ids))
         else:
             wanted = set(map(str, region_ids))
-            rows = [i for i, r in enumerate(self.ids) if r in wanted]
+            rows = [i for i, r in enumerate(self.ids) if _belongs(r, wanted)]
         return {"label": self.label, "ids": [self.ids[i] for i in rows],
                 "steps": self.steps,
                 "step_of": [self.step_of[i] for i in rows],
@@ -315,6 +317,10 @@ class RegionTable:
             table.arrays[name] = [values[offsets[i]:offsets[i + 1]].copy() if present[i]
                                   else None for i in range(n)]
         return table
+
+
+def _belongs(region_id: str, wanted) -> bool:
+    return region_id in wanted or region_id.split(":", 1)[0] in wanted
 
 
 def _plain(value):

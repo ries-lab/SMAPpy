@@ -54,8 +54,10 @@ class Expensive(Plugin):
 
 
 def spec(*steps, grouping="layer"):
-    return ChainSpec(steps=[s if isinstance(s, Step) else Step(**s) for s in steps],
-                     grouping=grouping)
+    from smappy.chain import step_from_dict
+    return ChainSpec(steps=[s if not isinstance(s, dict) else
+                            (step_from_dict(s) if "block" in s else Step(**s))
+                            for s in steps], grouping=grouping)
 
 
 def test_a_chain_file_reads_back_as_it_was_written(tmp_path):
@@ -269,17 +271,21 @@ SEGMENT = {"plugin": "ROIManager/Segment/Density Peaks", "label": "find",
            "values": {"sigma_nm": 60.0, "separation_nm": 1000.0, "min_count": 20}}
 
 
+def each_roi(*steps, label="sites"):
+    """A block over the ROIs, as a chain's file says it."""
+    return {"block": label, "regions": "rois", "steps": list(steps)}
+
+
 def test_an_evaluator_step_runs_on_every_site_before_the_next_step():
     session = four_sites()
     drawn = session.rois.add_roi(next(iter(session.rois.sources)), (9000.0, 9000.0))
     drawn.use = False                                   # excluded: not evaluated
-    cls = chain_class(spec(SEGMENT,
-                           {"plugin": "Analysis/Measure/Localization Statistics", "regions": "rois", "label": "stats"},
+    cls = chain_class(spec(SEGMENT, each_roi({"plugin": "Analysis/Measure/Localization Statistics", "label": "stats"}),
                            {"plugin": "ROIManager/Analyze/Histograms"}))
     result = session.run(cls(), cls.Settings())
     steps = result.data["results"]
-    assert steps["stats"].text == "4 sites evaluated"
-    assert steps["stats"].data["sites"] == 4
+    assert steps["sites"].text == "4 ROIs, 1 step(s)"
+    assert steps["sites"].data["regions"] == 4
     # the analysis after it read the four rows the evaluator had just made
     assert "4 ROIs" in steps["histograms"].text
     # the ROIs and the run are the session's now; the window's pipeline is
@@ -288,18 +294,18 @@ def test_an_evaluator_step_runs_on_every_site_before_the_next_step():
     assert len(project.rois) == 5 and drawn.id in project.rois
     rows = project.results()
     assert len(rows) == 4 and {r["n_localizations"] for r in rows} == {100}
-    assert project.pipeline == [] and project.runs[-1]["chain"] == cls.path
+    assert project.pipeline == [] and project.runs[-1]["chain"] == "block sites"
     assert project.labels() == ["stats"]
     # and the log says so, step by step
     assert [s["plugin"] for s in session.history[-1]["steps"]] == [
-        "ROIManager/Segment/Density Peaks", "Analysis/Measure/Localization Statistics",
+        "ROIManager/Segment/Density Peaks", "Chain/Block",
         "ROIManager/Analyze/Histograms"]
     assert session.history[-1]["steps"][1]["grouping"] == "layer"
 
 
 def test_a_chain_changes_the_roi_project_only_through_its_result():
     session = four_sites()
-    cls = chain_class(spec(SEGMENT, {"plugin": "Analysis/Measure/Localization Statistics", "regions": "rois"}))
+    cls = chain_class(spec(SEGMENT, each_roi({"plugin": "Analysis/Measure/Localization Statistics"})))
     result = cls().run(session.context(), cls.Settings())
     assert len(session.rois.rois) == 0 and session.rois.runs == []
     assert len(result.data["roi_project"]["rois"]) == 4
@@ -315,16 +321,15 @@ def test_a_chain_that_leaves_the_rois_alone_hands_none_back():
 
 def test_an_evaluator_with_no_sites_to_measure_stops_the_chain():
     session = four_sites()
-    cls = chain_class(spec({"plugin": "Analysis/Measure/Localization Statistics", "regions": "rois", "label": "stats"}))
-    with pytest.raises(ChainError, match="'stats'.*no ROIs to evaluate"):
+    cls = chain_class(spec(each_roi({"plugin": "Analysis/Measure/Localization Statistics", "label": "stats"})))
+    with pytest.raises(ChainError, match="'sites'.*no ROIs to evaluate"):
         session.run(cls(), cls.Settings())
 
 
 def test_one_evaluator_under_two_names_gives_two_sets_of_columns():
     session = four_sites()
-    cls = chain_class(spec(SEGMENT,
-                           {"plugin": "Analysis/Measure/Localization Statistics", "regions": "rois", "label": "a"},
-                           {"plugin": "Analysis/Measure/Localization Statistics", "regions": "rois", "label": "b"}))
+    cls = chain_class(spec(SEGMENT, each_roi({"plugin": "Analysis/Measure/Localization Statistics", "label": "a"},
+                                             {"plugin": "Analysis/Measure/Localization Statistics", "label": "b"})))
     session.run(cls(), cls.Settings())
     assert set(session.rois.labels()) == {"a", "b"}
     rows = session.rois.results()
@@ -332,9 +337,9 @@ def test_one_evaluator_under_two_names_gives_two_sets_of_columns():
         and "b.n_localizations" in rows[0]
 
 
-def test_an_evaluators_grouping_is_the_roi_managers_and_cannot_be_chosen():
-    cls = chain_class(spec({"plugin": "Analysis/Measure/Localization Statistics", "regions": "rois", "label": "stats"}))
-    assert cls().active(cls.Settings())["stats.use_grouping"] is False
+def test_a_steps_grouping_in_a_block_is_each_layers_own_and_cannot_be_chosen():
+    cls = chain_class(spec(each_roi({"plugin": "Analysis/Measure/Localization Statistics", "label": "stats"})))
+    assert cls().active(cls.Settings())["sites.stats.use_grouping"] is False
 
 
 def test_a_per_region_step_on_the_view_runs_once_and_keeps_nothing_with_the_rois():
@@ -342,15 +347,11 @@ def test_a_per_region_step_on_the_view_runs_once_and_keeps_nothing_with_the_rois
     cls = chain_class(spec(SEGMENT, {"plugin": "Analysis/Measure/Localization Statistics",
                                      "label": "stats"}))
     settings = cls.Settings()
-    assert settings.stats.run_on == "view"
     assert (cls().active(settings) or {}).get("stats.use_grouping") is not False
     result = session.run(cls(), settings)
     assert result.data["results"]["stats"].values["n_localizations"] == \
         len(session.selection(0))                       # the whole view, once
     assert session.rois.runs == []                     # measured the view, not the ROIs
-    assert cls.current_spec(settings).steps[1].regions == "view"
-    settings.stats.run_on = "rois"
-    assert cls.current_spec(settings).to_dict()["steps"][1]["regions"] == "rois"
 
 
 def test_a_chains_evaluation_and_the_windows_stand_side_by_side():
@@ -358,8 +359,7 @@ def test_a_chains_evaluation_and_the_windows_stand_side_by_side():
     ROIs, and the chain's run is not taken for the window's pipeline."""
     from smappy.workspace import Instance
     session = four_sites()
-    cls = chain_class(spec(SEGMENT, {"plugin": "Analysis/Measure/Localization Statistics", "regions": "rois",
-                                     "label": "chain stats"}))
+    cls = chain_class(spec(SEGMENT, each_roi({"plugin": "Analysis/Measure/Localization Statistics", "label": "chain stats"})))
     session.run(cls(), cls.Settings())
     project = session.rois
     assert [s.label for s in project.resolved()] != ["chain stats"]

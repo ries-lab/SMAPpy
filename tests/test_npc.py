@@ -322,16 +322,18 @@ def test_the_npc_chain_gives_what_the_three_steps_give_and_leaves_the_pipeline_a
     found = steps["find_the_pores"].data["rois"]
     assert len(found) > 140
     # every included ROI is evaluated; the empty one fails on its own
-    counted = steps["npc_corners"].data
-    assert counted["sites"] == len(found) + 1 and counted["failed"] == 1
-    assert "failed on 1: ValueError: no localizations" in steps["npc_corners"].text
+    counted = steps["each_pore"].data
+    assert counted["regions"] == len(found) + 1 and counted["failed"] == 1
+    assert "1 failed" in steps["each_pore"].text
+    assert project.tables["NPC Corners"].entry(drawn.id)["error"] == \
+        "ValueError: no localizations in this ROI"
     fitted = steps["labelling_efficiency"].data
     assert abs(fitted["efficiency"] - 0.5) < 0.04
     assert {"find the pores", "find the pores: checks",
             "labelling efficiency"} <= set(result.plots)
     assert drawn.id in project.rois and len(project.rois) == len(found) + 1
     assert [i.plugin for i in project.pipeline] == ["Analysis/Measure/Localization Statistics"]
-    assert project.runs[-1]["chain"] == "ROIManager/Workflow/NPC Analysis"
+    assert project.runs[-1]["chain"] == "block each pore"
 
     # the analysis run from the GUI afterwards finds the chain's counts
     analysis = plugins.get("ROIManager/Analyze/NPC Labeling Efficiency")
@@ -417,7 +419,7 @@ def test_the_npc_chain_reads_its_own_counts_without_asking():
     session = two_corner_counts()
     chain = plugins.get("ROIManager/Workflow/NPC Analysis")
     settings = chain.Settings()
-    settings.npc_corners.precision_nm = 15.0
+    settings.each_pore.npc_corners.precision_nm = 15.0
     assert chain().preflight(session.context(), settings) is None
     result = session.run(chain(), settings)
     efficiency = result.data["results"]["labelling_efficiency"]

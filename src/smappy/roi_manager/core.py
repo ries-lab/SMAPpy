@@ -81,6 +81,16 @@ def rows_in(locs, index, region, keep=None):
     return np.sort(candidates[region.mask(x, y)])
 
 
+def changes_table(step) -> bool:
+    """Does this step hand back a new table (`Plugin.changes_locs_for`)?  In
+    a region's run its table is what the steps after it measure."""
+    try:
+        answer = step.plugin.changes_locs_for(step.settings)
+    except Exception:
+        answer = getattr(step.plugin, "changes_locs", None)
+    return answer is True
+
+
 def region_entry(result, plugin=None, keep: bool = False) -> Dict:
     """What one run in one region stores: its `Result.values`, a number
     each, and its `Result.arrays`.
@@ -518,14 +528,29 @@ class ROIProject:
             instances = pipeline_module.default_instances()
         return pipeline_module.resolve(instances)
 
-    def step_signature(self, step, inputs):
+    def step_signature(self, step, inputs, before=()):
         """What this step's result depends on: the data *and* the parameters.
 
         The record used to carry one signature over the ROI's inputs alone,
         so editing an evaluator's parameter left every stored number looking
         perfectly current -- the one case where "out of date" matters most.
+        ``before`` are the identities of the steps before it that change the
+        region's table (`changes_table`): in a block what a step measures is
+        what they left, so editing one of them is editing it.
         """
-        return digest({"inputs": inputs, "step": step.identity()})
+        if not before:
+            return digest({"inputs": inputs, "step": step.identity()})
+        return digest({"inputs": inputs, "step": step.identity(),
+                       "after": list(before)})
+
+    def signatures(self, steps, inputs):
+        """`step_signature` for each step, by label, in order."""
+        out, before = {}, []
+        for step in steps:
+            out[step.label] = self.step_signature(step, inputs, before)
+            if changes_table(step):
+                before.append(step.identity())
+        return out
 
     def entries(self, roi_id, steps=None):
         """The newest stored entry for each step of this ROI, and its state.
@@ -537,7 +562,7 @@ class ROIProject:
         """
         steps = self.resolved(steps)
         inputs = json.loads(json_text(self.inputs(self.rois[roi_id])))
-        wanted = {step.label: self.step_signature(step, inputs) for step in steps}
+        wanted = self.signatures(steps, inputs)
         # by signature as well as by label: a step that was renamed, or moved
         # up the pipeline, measured the same thing and its numbers stand.  The
         # label is what the columns are called, and calling them something
@@ -635,7 +660,8 @@ class ROIProject:
 
     # -------------------------------------------------------------- running
     def evaluate(self, instances=None, roi_ids=None, progress=None, steps=None,
-                 reuse=False, chain="", report=None, stop=None):
+                 reuse=False, chain="", report=None, stop=None, after=None,
+                 tag=False):
         """Run a pipeline over every reviewed, included ROI.
 
         `instances` is a list of `workspace.Instance` -- the same type a tab
@@ -652,7 +678,7 @@ class ROIProject:
         gets the status line -- percentage, rate, time left
         (`region_runs.Progress`); ``stop`` (an Event, or a callable such as a
         dialog's ``wasCanceled``) ends the run between ROIs, keeping the ones
-        measured.
+        measured.  ``after`` and ``tag`` are a block's (`_evaluate_record`).
         """
         steps = self.resolved(steps, instances)
         ids = list(self.rois) if roi_ids is None else list(roi_ids)
@@ -663,7 +689,8 @@ class ROIProject:
         for n, roi_id in enumerate(ids):
             if stopped(stop):
                 break
-            record, _, _ = self._evaluate_record(roi_id, steps, reuse=reuse)
+            record, _, _ = self._evaluate_record(roi_id, steps, reuse=reuse,
+                                                 after=after, tag=tag)
             records[roi_id] = record
             status(n + 1)
         run = self._log(steps, len(records), chain=chain,
@@ -695,36 +722,55 @@ class ROIProject:
     def _newest_first(self):
         return reversed(list(self.tables.items()))
 
-    def _evaluate_record(self, roi_id, steps, reuse=False, force=(), run="stale"):
+    def _evaluate_record(self, roi_id, steps, reuse=False, force=(), run="stale",
+                         after=None, tag=False):
         """One ROI: a complete record, and the results of what actually ran.
 
         `force` names steps to run even when their stored result is current,
         which is how a figure is got back: the numbers are in the record but
         a plot is a closure over the data it drew, and nothing in a file can
-        bring that back.
+        bring that back -- unless the row kept what its figure is drawn from
+        (`Plugin.keep`), which is then restored instead of measuring again.
 
         `run="forced"` runs nothing else -- a stored result that is out of
         date is carried forward as it is, still signed with what made it, so
         it goes on reading as out of date.  That is the ROI manager with
         re-evaluation turned off: scrolling a list stays free, and what is
         shown is what was measured, labelled for what it is.
+
+        The steps run in one `RegionScratch`: a step that hands back a new
+        table hands it to the steps after it.  So once a step has to run,
+        every step before it that changes the table runs as well, whatever
+        is stored.  ``after(roi_id, scratch, original)`` is told the region's
+        tables at the end (a block's write-back); ``tag`` gives them the
+        rows they came from.
         """
+        from ..region_runs import RegionScratch
         roi = self.rois[roi_id]
         inputs = json.loads(json_text(self.inputs(roi)))
+        wanted = self.signatures(steps, inputs)
         known = self.entries(roi_id, steps) if reuse else {}
-        tables = region = None
+        plan = []
+        for step in steps:
+            entry, state = known.get(step.label, (None, "missing"))
+            keep = entry is not None and (state == "current" or run == "forced")
+            plan.append([step, entry, state, keep])
+        last = max((k for k, (step, _, _, keep) in enumerate(plan)
+                    if not keep or step.label in force), default=-1)
+        for k in range(last):
+            if changes_table(plan[k][0]):
+                plan[k][3] = False                   # its table is needed
+        scratch = None
         record = {"inputs": inputs, "signature": digest(inputs),
                   "file_id": roi.file_id, "steps": {}}
         results = {}
         updated = []
-        for step in steps:
-            entry, state = known.get(step.label, (None, "missing"))
-            keep = entry is not None and (state == "current" or run == "forced")
+        for step, entry, state, keep in plan:
             if keep and step.label not in force:
                 record["steps"][step.label] = dict(entry)
                 results[step.label] = None          # kept, so not drawn
                 continue
-            if keep and entry.get("kept"):
+            if keep and entry.get("kept") and not changes_table(step):
                 # the figure from what the row kept: no measuring again
                 try:
                     restored = step.plugin.restore(entry["kept"])
@@ -734,30 +780,35 @@ class ROIProject:
                     record["steps"][step.label] = dict(entry)
                     results[step.label] = restored
                     continue
-            if tables is None:                      # only if something runs
+            if scratch is None:                     # only if something runs
                 region = self.region(roi)
-                tables = self._region_tables(roi, region)
+                scratch = RegionScratch(self._region_tables(roi, region), region,
+                                        roi_id, tag=tag)
+                original = scratch.locs
             if state != "current":
                 # a step re-run only for its figure tells nobody anything
                 # new, and storing it again would grow the file per click
                 updated.append(step.label)
-            entry, result = self._one_step(step, region, tables, roi_id)
-            entry["signature"] = self.step_signature(step, inputs)
+            entry, result = self._one_step(step, scratch)
+            entry["signature"] = wanted[step.label]
             record["steps"][step.label] = entry
             results[step.label] = result
+        if after is not None and scratch is not None:
+            after(roi_id, scratch, original)
         return record, results, updated
 
-    def _one_step(self, step, region, tables, roi_id=None):
+    def _one_step(self, step, scratch):
         """One evaluator on one ROI, as (what is recorded, what it returned).
 
         The record is data and outlives the session; the result is the live
         object, with the figures the evaluator drew, and is kept by nobody
         unless the caller wants it.  A failure is recorded, not raised.
-        ``tables`` is what `_region_tables` cut, shared by the steps.
+        A new table the step hands back becomes the ROI's for the steps after
+        it (`RegionScratch.apply`).
         """
         try:
-            result = step.plugin.run(self._context(region, tables, region_id=roi_id),
-                                     step.settings)
+            result = step.plugin.run(scratch.context(rois=self), step.settings)
+            scratch.apply(result, step.label)
             return region_entry(result, step.plugin, step.keep), result
         except Exception as error:
             return {"error": f"{type(error).__name__}: {error}"}, None
