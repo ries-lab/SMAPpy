@@ -61,10 +61,21 @@ then re-linked from the seam forward until the assignment stops changing, which
 is exact if the re-link is carried far enough to converge and is a change to the
 C++ walk, not to this file.
 
-Which is why this is not wired into `group()`.  The walk is 5.5 s of a 66 s
-open; `combine` is 17 s, exact, and parallel as it stands.  There are exact
-seconds on the table and these are approximate ones.
+`group()` uses it nonetheless, through `GroupSettings.link_chunks` (8 by
+default; 1 is the sequential walk).  The residual is confined to the seams, a
+handful of traces in a file of millions, and the linking was one of the
+things that took a 57 M localization open from 134 s to 56 s (see the
+`smappy.group` docstring).  The chunk count is a setting rather than a thread
+count because the cut changes the answer: the cut points come from the data,
+so the same file groups the same way on any machine.
 ``scripts/check_chunked_grouping.py`` measures both against the sequential walk.
+
+Linking by precision (``precision=``, see `smappy.group.connect`) adds one
+more piece of state to the walk -- the running position's variance -- and a
+head re-seeded past a seam starts from its own, not the trace's, so its next
+links can differ.  The stitch carries the tail's variance and applies the same
+test, which puts the first link back; the residual is that much larger (0.996
+against 0.999 on the test table, which is mostly seams).
 """
 from __future__ import annotations
 
@@ -73,7 +84,7 @@ from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
 
-from .group import sorted_order
+from .group import precision_limits, sorted_order
 
 try:
     from . import _group
@@ -106,7 +117,7 @@ def chunk_edges(frame: np.ndarray, n_chunks: int, lo: int = 0,
     return edges
 
 
-def _link_chunks(ids, x, y, frame, dx, dt, edges, workers):
+def _link_chunks(ids, x, y, frame, dx, dt, edges, workers, prec=None):
     """Every chunk linked at once, then the ids made unique across them.
 
     `ids` is indexed like the sorted table, so everything after this -- the
@@ -114,7 +125,10 @@ def _link_chunks(ids, x, y, frame, dx, dt, edges, workers):
     """
     def one(k):
         a, b = edges[k], edges[k + 1]
-        return _group.connect(x[a:b], y[a:b], frame[a:b], dx, dt)
+        if prec is None:
+            return _group.connect(x[a:b], y[a:b], frame[a:b], dx, dt)
+        var, k2, r2min = prec
+        return _group.connect(x[a:b], y[a:b], frame[a:b], dx, dt, var[a:b], k2, r2min)
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
         results = list(pool.map(one, range(len(edges) - 1)))
@@ -166,21 +180,31 @@ class _Merges:
         return dense[root[ids]], int(used.sum())
 
 
-def _running_state(xs, ys):
-    """The walk's own recursive mean: ``xh = (xh + x_new) / 2``, in order."""
+def _running_state(xs, ys, vs=None):
+    """The walk's own recursive mean: ``xh = (xh + x_new) / 2``, in order.
+
+    With ``vs`` (squared precisions) also the running position's variance,
+    ``vh = (vh + v_new) / 4``, as the precision test carries it.
+    """
     xh, yh = float(xs[0]), float(ys[0])
+    vh = float(vs[0]) if vs is not None else 0.0
     for i in range(1, len(xs)):
         xh = (float(xs[i]) + xh) / 2
         yh = (float(ys[i]) + yh) / 2
-    return xh, yh
+        if vs is not None:
+            vh = (vh + float(vs[i])) / 4
+    return xh, yh, vh
 
 
-def _stitch(x, y, frame, dx, dt, ids, a, b, c, merges) -> Tuple[int, int]:
+def _stitch(x, y, frame, dx, dt, ids, a, b, c, merges, prec=None) -> Tuple[int, int]:
     """Repair one seam: chunk [a, b) against chunk [b, c).
 
     Returns (traces rejoined, tails that reached the seam).  Both sides are
     small -- only the last and first ``dt + 2`` frames take part -- so this is
     Python over a few thousand rows however large the table is.
+
+    ``prec`` is ``(var, k^2, dx_min^2)`` for the precision test, as the walk
+    takes it, and None for the box.
     """
     if b <= a or c <= b:
         return 0, 0
@@ -199,8 +223,11 @@ def _stitch(x, y, frame, dx, dt, ids, a, b, c, merges) -> Tuple[int, int]:
     member = np.isin(ids[a:b], tail_ids)
     m_ids, m_x, m_y = ids[a:b][member], x[a:b][member], y[a:b][member]
     m_f = frame[a:b][member]
+    m_v = prec[0][a:b][member] if prec is not None else None
     order = np.argsort(m_ids, kind="stable")             # frame order kept inside
     m_ids, m_x, m_y, m_f = m_ids[order], m_x[order], m_y[order], m_f[order]
+    if m_v is not None:
+        m_v = m_v[order]
     starts = np.concatenate(([0], np.flatnonzero(m_ids[1:] != m_ids[:-1]) + 1,
                              [len(m_ids)]))
 
@@ -208,8 +235,10 @@ def _stitch(x, y, frame, dx, dt, ids, a, b, c, merges) -> Tuple[int, int]:
     for s, e in zip(starts[:-1], starts[1:]):
         if int(m_f[e - 1]) < first - reach:               # died before the seam
             continue
-        xh, yh = _running_state(m_x[s:e], m_y[s:e])
-        tails.append((int(m_f[s]), float(m_x[s]), int(m_f[e - 1]), xh, yh, int(m_ids[s])))
+        xh, yh, vh = _running_state(m_x[s:e], m_y[s:e],
+                                    None if m_v is None else m_v[s:e])
+        tails.append((int(m_f[s]), float(m_x[s]), int(m_f[e - 1]), xh, yh, vh,
+                      int(m_ids[s])))
     if not tails:
         return 0, 0
     tails.sort()                    # by where the trace was SEEDED
@@ -218,6 +247,7 @@ def _stitch(x, y, frame, dx, dt, ids, a, b, c, merges) -> Tuple[int, int]:
     head_to = b + int(np.searchsorted(frame[b:c], first + reach, side="right"))
     hx, hy, hf = x[b:head_to], y[b:head_to], frame[b:head_to]
     h_ids = ids[b:head_to]
+    hv = prec[0][b:head_to] if prec is not None else None
     # a head may be joined only at its seed: taking it mid-trace would drag a
     # group that the sequential walk had already given to someone else
     seed = np.zeros(len(h_ids), bool)
@@ -226,7 +256,7 @@ def _stitch(x, y, frame, dx, dt, ids, a, b, c, merges) -> Tuple[int, int]:
     taken = np.zeros(len(h_ids), bool)
 
     joined = 0
-    for _sf, _sx, fh, xh, yh, gid in tails:
+    for _sf, _sx, fh, xh, yh, vh, gid in tails:
         dark = 0
         while dark <= dt:
             nxt = fh + 1
@@ -241,8 +271,15 @@ def _stitch(x, y, frame, dx, dt, ids, a, b, c, merges) -> Tuple[int, int]:
                         break
                     if taken[j] or not seed[j]:
                         continue
-                    if not (yh - dx < hy[j] < yh + dx):
-                        continue
+                    if prec is None:
+                        if not (yh - dx < hy[j] < yh + dx):
+                            continue
+                    else:
+                        # the walk's test, clamp and all; see csrc/group.hpp
+                        _, k2, r2min = prec
+                        limit = min(max(k2 * (vh + float(hv[j])), r2min), dx * dx)
+                        if not (hx[j] - xh) ** 2 + (hy[j] - yh) ** 2 < limit:
+                            continue
                     merges.union(gid, int(h_ids[j]))
                     taken[j] = True
                     joined += 1
@@ -258,10 +295,12 @@ def _stitch(x, y, frame, dx, dt, ids, a, b, c, merges) -> Tuple[int, int]:
 def connect_chunked(x, y, frame, dx: float = 50.0, dt: int = 1,
                     blocks: Optional[np.ndarray] = None, n_chunks: int = 8,
                     workers: Optional[int] = None, progress=None,
-                    stats: Optional[dict] = None) -> np.ndarray:
+                    stats: Optional[dict] = None,
+                    precision: Optional[np.ndarray] = None, k: float = 2.5,
+                    dx_min: float = 0.0) -> np.ndarray:
     """`smappy.group.connect`, with the linking spread over threads.
 
-    Same arguments and same return -- 1-based group ids in the input order --
+    Same arguments (``precision``, ``k`` and ``dx_min`` included) and same return -- 1-based group ids in the input order --
     plus ``n_chunks``, how many pieces the frame axis is cut into.  One chunk
     is the sequential algorithm exactly.  ``stats``, if given, is filled with
     ``rejoined`` (traces put back together across a cut) and ``at_seams`` (how
@@ -275,6 +314,9 @@ def connect_chunked(x, y, frame, dx: float = 50.0, dt: int = 1,
     x = np.asarray(x, np.float64)
     y = np.asarray(y, np.float64)
     frame = np.asarray(np.rint(np.asarray(frame, np.float64)), np.int64)
+    prec = None
+    if precision is not None:
+        prec = precision_limits(precision, k, dx_min)
 
     keys: Tuple[np.ndarray, ...] = ()
     if blocks is not None:
@@ -285,6 +327,8 @@ def connect_chunked(x, y, frame, dx: float = 50.0, dt: int = 1,
     order = sorted_order(x, frame, keys, workers)
 
     xs, ys, fs = x[order], y[order], frame[order]
+    if prec is not None:
+        prec = (prec[0][order],) + prec[1:]
 
     if keys:
         stacked = np.stack([np.asarray(k)[order] for k in keys], axis=1)
@@ -303,11 +347,12 @@ def connect_chunked(x, y, frame, dx: float = 50.0, dt: int = 1,
             label = "connect" if n_blocks == 1 else f"connect (block {bi + 1}/{n_blocks})"
             progress(label, lo / max(x.size, 1))
         edges = chunk_edges(fs, n_chunks, int(lo), int(hi))
-        n_local = _link_chunks(ids, xs, ys, fs, dx, dt, edges, workers)
+        n_local = _link_chunks(ids, xs, ys, fs, dx, dt, edges, workers, prec)
         merges = _Merges(n_local)
         for k in range(len(edges) - 2):
             joined, seen = _stitch(xs, ys, fs, dx, dt, ids,
-                                   edges[k], edges[k + 1], edges[k + 2], merges)
+                                   edges[k], edges[k + 1], edges[k + 2], merges,
+                                   prec)
             if stats is not None:
                 stats["rejoined"] += joined
                 stats["at_seams"] += seen
