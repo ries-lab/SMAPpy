@@ -3,7 +3,8 @@
 SMAPpy (`smappy` in code) is a Python SMLM package: TIFF -> photons -> peak finding -> MLE fit ->
 localization table -> analysis, with a Qt GUI over the same functions.  Read
 `NOTES.md` for the decisions behind the fitting pipeline and
-`docs/plugin-architecture.md` for why the plugin system is shaped as it is.
+`docs/plugin-architecture.md` for why the plugin system is shaped as it is,
+and `docs/regions.md` for ROIs, clusters and what is measured per region.
 This file is the practical part: what a session needs before it can write a
 plugin, and the traps that cost time.  It is a summary written at one moment
 and the code moves, so treat it as a starting point, not as authority -- and
@@ -94,7 +95,7 @@ shape, so read the one closest to what you are writing:
 | rewrites the table and hands it back | `assign_colors.py` (`Result.locs`, a preview) |
 | a long computation with progress | `drift_comet.py`, `drift_rcc.py` |
 | loads, saves, exports, simulates | `file.py` (a plugin per format, no input table; the simulator's model is `smappy.simulate`) |
-| finds, measures or summarises ROIs | `roi.py` (a segmenter derives from `SegmenterPlugin`, which gives it a Preview, *replace* (`replace_param()`) and a step of the ROI undo; `scope = "site"`; analyse) |
+| finds, measures or summarises ROIs | `roi.py` (a segmenter derives from `SegmenterPlugin`, which gives it a Preview, *replace* (`replace_param()`) and a step of the ROI undo; `scope = "site"`; analyse) -- moving to `Analysis/Regions/Find`, measurements to `Analysis/Measure` (`docs/regions.md`) |
 | parts, presets, a C++ backend | `fit.py` (nested settings dataclasses) |
 | adds a derived column, no output | `math_parser.py` (an expression, kept with the table as a recipe) |
 | removes or flags localizations | `remove_locs.py` (a region, a new table or a filtered flag) |
@@ -104,8 +105,8 @@ shape, so read the one closest to what you are writing:
 | scores a fit against a simulation | `ground_truth.py` (the truth redrawn from the recipe, matched per frame) |
 | draws what the microscope recorded per frame | `image_tags.py` (the fit's `metadata["frame_tags"]`) |
 | finds a structure by its shape and judges it, then counts it | `npc.py` (a ring filter and circle fit in the segmenter, a per-site count, and a model of whole pores in `smappy/npc.py` fitted to the site table) |
-| summarises what evaluators measured | `roi.py`'s `SiteAnalysisPlugin` (an evaluator to read, a *results from* field, a preflight that asks which when there are several) |
-| runs the ROI manager's segment, evaluate and analyse as one | `npc_analysis.chain.yaml` (a shipped chain: an evaluator step runs over every ROI before the next; `docs/batch.md`, "ROIs: segment, evaluate, analyse") |
+| summarises what evaluators measured | `roi.py`'s `SiteAnalysisPlugin` (an evaluator to read, a *results from* field, a preflight that asks which when there are several) -- becoming table plugins on the region table, under `Analysis/Regions/Summarize` (`docs/regions.md`) |
+| runs the ROI manager's segment, evaluate and analyse as one | `npc_analysis.chain.yaml` (a shipped chain: an evaluator step runs over every ROI before the next; `docs/batch.md`, "ROIs: segment, evaluate, analyse") -- to become a chain with a block run once per region (`docs/regions.md`) |
 | opens an interactive window of the GUI's | `bead_calibration.py` (`Plugin.window`: the button opens what the GUI registered in `session.window_openers`) |
 | runs an external program in its own Python | `uipsf.py` (`smappy.uipsf`: a worker script under that program's interpreter, progress read from its output, the result converted into smappy's own file) |
 | hands the session to a new instance | `smappy.handoff` (*File > Open in a new window*: the table through shared memory, the rest as JSON, `smappy-gui --handoff`) |
@@ -148,9 +149,13 @@ class Thing(Plugin):
   plugin that imports torch costs nothing until someone opens it.  Keep heavy
   imports inside functions (`from scipy.ndimage import ...`), as the shipped
   plugins do.
-* `scope = "site"` makes it an ROI evaluator, run once per ROI with `ctx.site`
-  set; in a chain it runs over every included ROI before the next step.  Its
-  results belong to the ROI, whoever ran them, under the evaluation's name
+* **Being replaced** (`docs/regions.md`, not built yet): a plugin that
+  returns `Result.values` / `Result.arrays` can be a step in a block, run once
+  per region (an ROI, or an id such as `cluster_id`) with `ctx.region` set;
+  `scope` goes.  Until that lands, the code is still: `scope = "site"` makes
+  it an ROI evaluator, run once per ROI with `ctx.site` set; in a chain it
+  runs over every included ROI before the next step.  Its results belong to
+  the ROI, whoever ran them, under the evaluation's name
   (`ROIProject.evaluations`; a renamed one is a second evaluation), so an
   analysis reads `ROIProject.results()` and never the pipeline.  Otherwise it
   runs once over the selection.
@@ -290,6 +295,7 @@ rather than something already drawn.
 | `z_err_nm` | axial precision, when the fit produced one |
 | `n_in_group` | **on-time in frames** (for a table with a trace id, `tid`, the localizations in the trace); grouping writes it onto both tables |
 | `group_id` | which group a localization was linked into, 1-based; on the grouped table, its own row |
+| `cluster_id`, `n_in_cluster` | which cluster, 1-based, 0 for none, and the localizations in it -- planned (`docs/regions.md`), nothing writes them yet |
 | `sigma_nm`, `sigma_y_nm`, `logl_rel` | PSF width and fit quality |
 | `filenumber`, `channel` | which file, which channel |
 
