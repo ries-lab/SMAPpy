@@ -15,7 +15,8 @@ import pytest
 from smappy import docs
 
 PANELS = {"Panels/Render tab", "Panels/ROI tab", "Panels/ROI manager",
-          "Panels/3D view", "Panels/Bead calibration", "Panels/Batch window"}
+          "Panels/3D view", "Panels/Bead calibration", "Panels/Batch window",
+          "Panels/Camera editor"}
 
 
 def controls(page_text: str):

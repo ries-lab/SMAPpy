@@ -435,6 +435,7 @@ class CameraDatabase:
 # ------------------------------------------------------------------ the default
 
 _cache: Optional[CameraDatabase] = None
+_revision = 0
 
 
 def user_file() -> Path:
@@ -450,9 +451,10 @@ def database(reload: bool = False) -> CameraDatabase:
     with neither the database is empty and every parameter comes from the
     image metadata, as it did before there was a database.
     """
-    global _cache
+    global _cache, _revision
     if _cache is not None and not reload:
         return _cache
+    _revision += 1
     shipped = CameraDatabase()
     if SHIPPED.exists():
         try:
@@ -468,3 +470,216 @@ def database(reload: bool = False) -> CameraDatabase:
             warnings.warn(f"{path} could not be read: {error}", stacklevel=2)
     _cache = shipped
     return _cache
+
+
+def revision() -> int:
+    """How many times the database has been read: a cache keyed on it notices
+    a camera that was added while the program ran."""
+    return _revision
+
+
+# ------------------------------------------------------------- a new entry
+#
+# What the camera editor starts from.  A file from a camera nobody has entered
+# still says most of what the entry needs -- the device, its serial number,
+# which tags carry the gain and the readout mode -- and only the conversion
+# and the baseline have to be typed, from the camera's data sheet or its
+# calibration.  So the draft guesses everything it can from the tags and
+# leaves those two empty: a guessed conversion is exactly what the database
+# exists to prevent.
+
+#: device tags that name one camera, best first: a serial number survives
+#: a renamed device, a model name does not tell two of a kind apart
+IDENTIFYING = ("SerialNumber", "Serial Number", "CameraID", "Camera ID",
+               "Camera", "CameraName", "Description")
+
+#: device tags that set a readout mode, which the conversion and the baseline
+#: depend on.  ``Gain`` is the pre-amp gain on a Photometrics camera, which
+#: reports its EM gain as ``MultiplierGain``, and the EM gain itself on an
+#: iXon, so it is a mode tag only on the first (`draft`).
+MODE_TAGS = ("ReadoutMode", "ReadoutRate", "Readout Rate", "PixelReadoutRate",
+             "Pre-Amp-Gain", "PreAmpGain", "Port", "Output_Amplifier",
+             "Sensitivity/DynamicRange", "ScanMode", "ReadoutSpeed")
+
+#: the parameters the editor shows, in its order; anything else an entry
+#: carries (a frame interval) is kept as it is
+EDITED = ("conversion", "offset", "pixelsize_um", "em_on", "emgain",
+          "exposure_ms", "roi")
+
+
+def device_of(metadata: Dict[str, Any]) -> str:
+    """The Micro-Manager camera device that took this file, or ``""``."""
+    return str(metadata.get("Core-Camera") or metadata.get("Camera") or "").strip()
+
+
+def generalise(tag: str, prefix: str) -> str:
+    """``Evolve512-Gain`` -> ``{prefix}-Gain``: the inverse of `expand`."""
+    tag = str(tag)
+    if prefix and tag.startswith(prefix + "-"):
+        return "{prefix}" + tag[len(prefix):]
+    return tag
+
+
+def draft(metadata: Dict[str, Any], name: str = "") -> Camera:
+    """A camera entry for the device that took this file, from its tags.
+
+    Everything the tags can say is filled in: the device as the prefix, the
+    serial number to recognise it by, the tags that carry the EM gain, the
+    exposure and the ROI, the pixel size if the file has a calibrated one,
+    and -- where the device reports a readout mode -- conversion and offset
+    marked as depending on it.  Their *values* are left empty (`with_mode`
+    sets them for this file's mode): the tags never carry them.
+    """
+    metadata = dict(metadata or {})
+    device = device_of(metadata)
+    prefix = device if device and any(str(k).startswith(device + "-")
+                                      for k in metadata) else ""
+
+    def has(key: str) -> bool:
+        return bool(prefix) and f"{prefix}-{key}" in metadata
+
+    identify = None
+    for key in IDENTIFYING:
+        if has(key) and str(metadata[f"{prefix}-{key}"]).strip():
+            identify = Parameter(tag="{prefix}-" + key, read="exact",
+                                 argument=str(metadata[f"{prefix}-{key}"]).strip())
+            break
+
+    parameters: Dict[str, Parameter] = {}
+    # Photometrics reports the EM gain as MultiplierGain and the pre-amp gain
+    # as Gain; Andor reports the EM gain as Gain
+    gain_is_preamp = has("MultiplierGain") or has("Port")
+    if has("Port"):
+        parameters["em_on"] = Parameter(tag="{prefix}-Port", read="not_equals",
+                                        argument="Normal")
+    elif has("Output_Amplifier"):
+        parameters["em_on"] = Parameter(tag="{prefix}-Output_Amplifier",
+                                        read="not_equals", argument="Conventional")
+    elif has("EMSwitch"):
+        parameters["em_on"] = Parameter(tag="{prefix}-EMSwitch", read="equals",
+                                        argument="On")
+    else:
+        parameters["em_on"] = Parameter(fixed=False)
+    gain = "MultiplierGain" if gain_is_preamp else "Gain"
+    if parameters["em_on"].tag and has(gain):
+        parameters["emgain"] = Parameter(tag="{prefix}-" + gain, read="number")
+    else:
+        parameters["emgain"] = Parameter(fixed=1.0)
+
+    modes = [key for key in MODE_TAGS if has(key)]
+    if gain_is_preamp and has("Gain"):
+        modes.append("Gain")
+    for key in ("conversion", "offset"):
+        parameters[key] = Parameter(state=True) if modes else Parameter(fixed=None)
+
+    pixelsize = read_number(metadata.get("PixelSizeUm", ""))
+    parameters["pixelsize_um"] = Parameter(fixed=pixelsize or None)
+    if "Exposure-ms" in metadata:
+        parameters["exposure_ms"] = Parameter(tag="Exposure-ms", read="number")
+    elif has("Exposure"):
+        parameters["exposure_ms"] = Parameter(tag="{prefix}-Exposure", read="number")
+    if "ROI" in metadata:
+        parameters["roi"] = Parameter(tag="ROI", read="numbers")
+
+    camera = Camera(name=name or device or "my camera", prefix=prefix,
+                    identify=identify, parameters=parameters)
+    if modes:
+        camera = with_mode(camera, metadata, ["{prefix}-" + key for key in modes], {})
+    return camera
+
+
+def mode_tags(camera: Camera) -> List[str]:
+    """Every tag any of this camera's readout modes is recognised by."""
+    seen: List[str] = []
+    for state in camera.states:
+        seen += [tag for tag in state.match if tag not in seen]
+    return seen
+
+
+def with_mode(camera: Camera, metadata: Dict[str, Any], tags: Sequence[str],
+              values: Dict[str, Any]) -> Camera:
+    """This camera, with this file's readout mode recognised by `tags`.
+
+    The mode is what those tags read in this file, and it carries `values`.
+    It replaces the mode the file already matched -- correcting a conversion
+    -- or one recognised by the same tags and values, and is added otherwise:
+    a camera's other modes are never touched, because each of them was
+    measured on its own.
+    """
+    import copy
+    camera = copy.deepcopy(camera)
+    match = {generalise(tag, camera.prefix):
+             str(metadata.get(expand(tag, camera.prefix), "")).strip()
+             for tag in tags}
+    if not match:
+        return camera              # a mode recognised by nothing matches nothing
+    new = State(match=match, values={k: v for k, v in values.items()
+                                     if v is not None})
+    current = camera.state_for(metadata)
+    for i, state in enumerate(camera.states):
+        if state is current or state.match == match:
+            new.name = state.name if state.match == match else ""
+            camera.states[i] = new
+            break
+    else:
+        camera.states.append(new)
+    return camera
+
+
+def problems(camera: Camera, metadata: Dict[str, Any],
+             known: Optional[CameraDatabase] = None) -> List[str]:
+    """What is wrong with this entry, for this file, in words.
+
+    The editor shows these before it saves, and only a missing name stops
+    it: an entry with no tag to be recognised by can still be chosen by hand,
+    and one that leaves the conversion unknown is still a camera the fit can
+    be told the rest of.  They say what the fit will still be missing.
+    """
+    out: List[str] = []
+    if not camera.name.strip():
+        out.append("the camera needs a name")
+    if camera.identify is None or not camera.identify.tag:
+        out.append("no tag to recognise it by: it can only be chosen by hand, "
+                   "under camera in the Localize tab")
+    elif metadata and not camera.identifies(metadata):
+        out.append(f"this file does not match {camera.identified_by(metadata)}: "
+                   f"the entry would not recognise it")
+    if known is not None and camera.identify is not None and metadata:
+        other = known.identify(metadata)
+        if other is not None and other.name != camera.name:
+            out.append(f"this file is already recognised as {other.name}, "
+                       f"which comes first")
+    if any(p.state for p in camera.parameters.values()) and metadata \
+            and camera.state_for(metadata) is None:
+        out.append("no readout mode recognises this file: tick the tags that "
+                   "set it")
+    resolved = camera.resolve(metadata) if metadata else None
+    if resolved is not None:
+        missing = [n for n in ("conversion", "offset", "pixelsize_um")
+                   if resolved.values.get(n) is None]
+        if missing:
+            out.append("still unknown for this file: " + ", ".join(missing))
+    return out
+
+
+def save_camera(camera: Camera, path=None) -> Path:
+    """Add this camera to the user's database, or replace it there by name.
+
+    Always the user's file (`user_file`), never the shipped one: an update
+    of smappy replaces the shipped list, and a camera of the lab's own must
+    survive it.  A camera that has the name of a shipped one takes its place
+    (`CameraDatabase.joined_with`), which is how a shipped entry is corrected
+    or given another readout mode.  The database is read again afterwards, so
+    the next file opened is recognised.
+    """
+    path = Path(path) if path is not None else user_file()
+    mine = CameraDatabase.load(path) if path.exists() else CameraDatabase()
+    for i, existing in enumerate(mine.cameras):
+        if existing.name == camera.name:
+            mine.cameras[i] = camera
+            break
+    else:
+        mine.cameras.append(camera)
+    mine.save(path)
+    database(reload=True)
+    return path

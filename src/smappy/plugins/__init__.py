@@ -459,6 +459,22 @@ class PreflightQuestion:
 
 
 @dataclass
+class Notice:
+    """Something about the settings as they stand that the user should see
+    before running: a line under the form, and a button that does something
+    about it.
+
+    `window` names a window of the GUI's (`Session.window_openers`), opened
+    with the form's settings, as `Plugin.window` does -- so the plugin says
+    what is wrong and where it is put right without importing Qt.  A GUI with
+    no such window shows the line and no button.
+    """
+    text: str
+    action: str = ""                 # the button's text
+    window: Optional[str] = None
+
+
+@dataclass
 class Result:
     """What a plugin hands back.  Every part is optional."""
     locs: Optional[Localizations] = None    # replaces the session's table
@@ -666,6 +682,16 @@ class Plugin:
         a greyed field keeps its value and still comes back from the form -- so
         it is presentation, and a script may ignore it.  Return None when every
         field is always live.
+        """
+        return None
+
+    def notice(self, settings) -> Optional[Notice]:
+        """What the panel should say about these settings before a run.
+
+        Asked after every edit, like `hints`, and as cheap: a fitter says
+        here that the file's camera is not in the database, while the file is
+        being chosen rather than when the run fails for want of a
+        conversion.  None says nothing.
         """
         return None
 

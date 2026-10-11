@@ -31,7 +31,7 @@ from ..calibrate.transform import RegisterSettings
 from ..pipeline import FitSettings, fit_stack, provenance
 from ..psf import GaussianPSF, SplinePSF
 from ..rcc import RCCSettings
-from . import Context, ParamInfo, Plot, Plugin, Result, param, register
+from . import Context, Notice, ParamInfo, Plot, Plugin, Result, param, register
 from .assign_colors import AssignColorSettings
 
 # a simulation's recipe opens as an acquisition too (`smappy.simulate.source`)
@@ -402,6 +402,27 @@ def _preset_choices() -> List:
     return choices
 
 
+def camera_resolution(settings):
+    """The camera behind a fitter's settings: the database, the file, the
+    user's fields -- or None when the source cannot be opened.
+
+    A function of the settings alone, so that the camera editor can be opened
+    on what a fitter is set to fit without the fitter that is set to fit it.
+    """
+    try:
+        from ..io.tiff import resolve_camera
+        source = _open(settings.source, watch=False)
+        overrides = settings.camera.overrides()
+        if settings.camera.preset:
+            preset = asdict(CameraMetadata.from_yaml(settings.camera.preset))
+            overrides = {**{k: v for k, v in preset.items() if v is not None},
+                         **overrides}
+        return resolve_camera(source, camera=settings.camera.camera,
+                              overrides=overrides)
+    except Exception:
+        return None
+
+
 # -------------------------------------------------------------------- wrappers
 class _FitPlugin(Plugin):
     """What both fitters share: opening the source, streaming, saving."""
@@ -465,31 +486,70 @@ class _FitPlugin(Plugin):
         the hints below and the parameter view read, so that what the view
         shows is what the fit will use and not a second opinion.
 
-        Cached on the source path and the camera settings, because this opens
-        the acquisition and the GUI asks after every keystroke.
+        Cached on the source path, the camera settings and the database's
+        revision (a camera added in the editor is seen at once), because this
+        opens the acquisition and the GUI asks after every keystroke.
         """
+        from ..camera_db import revision
         path = settings.source.path
         if not path:
             return None
         key = (path, settings.camera.preset, settings.camera.camera, tuple(
             getattr(settings.camera, name) for name in self.CAMERA_FIELDS),
-            settings.camera.pixelsize_y_um)
+            settings.camera.pixelsize_y_um, revision())
         if getattr(self, "_camera_key", None) == key:
             return self._camera_value
-        try:
-            from ..io.tiff import resolve_camera
-            source = _open(settings.source, watch=False)
-            overrides = settings.camera.overrides()
-            if settings.camera.preset:
-                preset = asdict(CameraMetadata.from_yaml(settings.camera.preset))
-                overrides = {**{k: v for k, v in preset.items() if v is not None},
-                             **overrides}
-            resolved = resolve_camera(source, camera=settings.camera.camera,
-                                      overrides=overrides)
-        except Exception:
+        resolved = camera_resolution(settings)
+        if resolved is None:
             return None
         self._camera_key, self._camera_value = key, resolved
         return resolved
+
+    def notice(self, settings) -> Optional[Notice]:
+        """A file whose camera the database does not know, said while it is
+        chosen, with the way to add it.
+
+        Said even when the fields are all typed in, for a file that names its
+        camera: the numbers are then right for this file, and the next file
+        from the same camera will need them typed again.  Not for a
+        simulation, which says exactly what its camera is, nor for a bare
+        TIFF whose numbers are typed in, which has nothing to be recognised
+        by.
+        """
+        from ..io.tiff import SIMULATED
+        resolved = self.resolution(settings)
+        if resolved is None:
+            return None
+        origin = (resolved.sources or {}).get("camera_name")
+        if origin is not None and (origin.kind, origin.detail) == SIMULATED:
+            return None
+        missing = [{"pixelsize_um": "pixel size"}.get(name, name)
+                   for name in resolved.missing]           # as the form says
+        if resolved.camera is None:
+            if settings.camera.camera:
+                return None            # a name the database no longer has
+            device = resolved.values.get("camera_name")
+            if not device and not missing:
+                return None            # a bare TIFF, its numbers typed in
+            text = (f"camera {device!r} is not in the camera database"
+                    if device else "this file names no camera")
+            text += (f": {', '.join(missing)} must be typed in below."
+                     if missing else ".")
+            return Notice(text, "Add camera...", "camera editor")
+        modal = [name for name, parameter in resolved.camera.parameters.items()
+                 if parameter.state]
+        if resolved.state is None and modal:
+            unknown = [name for name in modal if name in missing]
+            text = f"{resolved.camera_name}: this readout mode is not in the camera database"
+            text += (f", so {', '.join(unknown)} "
+                     f"{'is' if len(unknown) == 1 else 'are'} not known." if unknown
+                     else "; the values typed below are used.")
+            return Notice(text, "Add readout mode...", "camera editor")
+        return None
+
+    def choices(self, ctx: Context, settings) -> Optional[Dict[str, Any]]:
+        """The database's cameras, read again: one may have been added."""
+        return {"camera.camera": _camera_choices()}
 
     def _camera(self, settings) -> Optional[CameraMetadata]:
         """The camera as it stands: the file's metadata under the user's values.

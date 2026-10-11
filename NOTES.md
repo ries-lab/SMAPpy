@@ -1378,6 +1378,19 @@ shows, and the reason it exists: a conversion that is wrong by a factor of two
 looks exactly like a conversion that is right until something says where it
 came from.
 
+A camera is added from a file it took (`gui/camera_editor.py`, over
+`camera_db.draft`, `with_mode` and `save_camera`).  The fitters say a file's
+camera or readout mode is unknown as soon as the file is chosen
+(`Plugin.notice`), not when the run fails for want of a conversion, and offer
+the editor there.  The draft fills in everything the tags say -- the device as
+the prefix, the serial number, which tag is the EM gain, which tags set the
+mode -- and leaves the conversion and offset empty, by the same rule as
+above.  Modes are added one file at a time: saving replaces only the mode this
+file is in and keeps the others, each of which was measured on its own.  What
+is saved goes into the user's `cameras.json`, never the shipped list an
+update replaces; a shipped camera edited there is saved as the user's copy
+under its own name, which `joined_with` puts in its place.
+
 A pixel size is one number or two.  Almost every microscope has square pixels;
 where x and y differ the database keeps both, `to_nm` scales each axis by its
 own, and a width or a precision -- which is neither x nor y -- by the mean.

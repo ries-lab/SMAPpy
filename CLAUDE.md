@@ -162,6 +162,11 @@ class Thing(Plugin):
   plain yes, each carrying the settings it would run with: COMET offers an RCC
   prepass, because "no" is not a useful answer to "this will take an
   afternoon".
+* Override `notice` to say something about the settings as they stand, before
+  any run -- a line under the form, and optionally a button that opens a GUI
+  window by name (`Notice(text, action, window)`, the same
+  `session.window_openers` as `Plugin.window`).  The fitters use it for a file
+  whose camera is not in the database, opening the camera editor.
 * Set `live = True` on a plugin whose work is tens of milliseconds: the GUI
   grows a *live* tick and measures again while the ROI is dragged (its
   `preview` if it has one, else `run`, never applied), silently (no log line,

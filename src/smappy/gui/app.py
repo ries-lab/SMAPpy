@@ -186,6 +186,9 @@ class ControlWindow(QMainWindow):
         self._action(tools, "Bead calibration...", None, lambda: self.open_calibration())
         session.window_openers["bead calibration"] = \
             lambda settings: self.open_calibration(dual=settings.mode == "dual")
+        # a fitter whose file's camera is not in the database offers this
+        # (`Plugin.notice`), opened on the file that fitter is set to
+        session.window_openers["camera editor"] = self.open_camera_editor
         tools.addSeparator()
         self.batch_window = None
         self._action(tools, "Batch...", None, self.open_batch)
@@ -242,6 +245,11 @@ class ControlWindow(QMainWindow):
                           "the database recognised, or what you set here")
         camera.clicked.connect(self.open_camera_parameters)
         row.addWidget(camera)
+        editor = QPushButton("Camera editor...")
+        editor.setToolTip("add the camera of the file being fitted to your camera "
+                          "database, or give a known camera another readout mode")
+        editor.clicked.connect(lambda: self.open_camera_editor())
+        row.addWidget(editor)
         row.addStretch(1)
         return box
 
@@ -270,6 +278,47 @@ class ControlWindow(QMainWindow):
             return
         self._camera_window = open_for(panel.plugin, settings, self,
                                        getattr(self, "_camera_window", None))
+        self._camera_window.open_editor = self.edit_camera
+
+    def open_camera_editor(self, settings=None) -> None:
+        """The camera editor, on the file a fitter is set to.
+
+        `settings` are the fitter's that asked (`Plugin.notice`); without them
+        the first open fitter's are used, and without a fitter the editor
+        opens on no file at all, for typing an entry in by hand.
+        """
+        if settings is None:
+            panel = self._fitting_panel()
+            if panel is not None:
+                try:
+                    settings = panel.form.value()
+                except ValueError:
+                    settings = None
+        resolved = None
+        if settings is not None:
+            from ..plugins.fit import camera_resolution
+            resolved = camera_resolution(settings)
+        if resolved is None:
+            self.edit_camera({}, None)
+        else:
+            self.edit_camera(resolved.metadata, resolved.camera)
+
+    def edit_camera(self, metadata, camera=None) -> None:
+        """Show the camera editor on these tags, starting from `camera`."""
+        from .camera_editor import open_editor
+        window = getattr(self, "_camera_editor", None)
+        self._camera_editor = open_editor(metadata, camera, self, window)
+        if window is None:
+            self._camera_editor.saved.connect(self._camera_saved)
+
+    def _camera_saved(self, name: str) -> None:
+        """A camera went into the database: what read the old one reads again."""
+        for tab in self.plugin_tabs:
+            for panel in tab.panels():
+                panel.refresh_derived()
+        window = getattr(self, "_camera_window", None)
+        if window is not None and window.isVisible():
+            window.refresh()
 
     def _fitting_panel(self):
         """The first open panel that knows how to resolve a camera."""
