@@ -171,7 +171,7 @@ class EvaluationWindow(QWidget):
         path = choose_plugin(self, per_region=True, title="Add an evaluator")
         if not path:
             return
-        self.instances.append(Instance(plugin=path))
+        self.instances.append(pipeline_module.instance_for(path))
         self.rebuild(len(self.instances) - 1)
 
     def remove(self) -> None:

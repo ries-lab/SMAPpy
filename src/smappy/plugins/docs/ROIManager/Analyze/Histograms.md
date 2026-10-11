@@ -8,7 +8,7 @@ covers: [smappy.plugins.roi.histograms, smappy.roi_manager.core.ROIProject.resul
 The ROI manager works in three steps: sites are found
 ([Density Peaks](plugin:ROIManager/Segment/Density Peaks), or by hand), each
 site is evaluated by plugins that run once per ROI (such as
-[Statistics](plugin:ROIManager/Evaluate/Statistics)), and the collection of
+[Localization Statistics](plugin:Analysis/Measure/Localization Statistics)), and the collection of
 results is analysed.  Evaluation leaves a *site table*: one row per site, one
 column per number an evaluator returned.
 

@@ -390,7 +390,14 @@ Each step leaves the program working and the suite green.
      says where it runs, `regions: view` (the default) or `rois` -- the
      step's own choice until blocks replace it; the shipped NPC chain says
      `rois`.
-   * *2c*: one statistics plugin, with `slow=True` on its fits.
+   * *2c, done 2026-10-11*: one statistics plugin.  Localization Statistics
+     is `per_region`, returns its numbers as values (`statistics_values`),
+     gives an empty site a row of zero and NaNs, never takes a site's
+     on-time from the session's whole grouped table, and has *fit the
+     precision model* (`slow=True`: the fit is 10 of its 11 ms).  The ROI
+     `Statistics` is gone.  `param(..., slow=True)` and `fast_values` exist;
+     the evaluation pipeline adds a plugin with its slow switches off
+     (`pipeline.instance_for`).
 3. **Region sources and one runner**, ROIs first, then id columns, with the
    region table in columns, in the file and as a session table with its filter;
    `keep` and `restore` per region, and the switch.

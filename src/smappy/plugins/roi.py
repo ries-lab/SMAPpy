@@ -9,7 +9,9 @@ Three kinds, all ordinary plugins:
   `Result.values`.  It declares ``per_region = True``, which is what the
   evaluation window offers -- a property of the plugin, not of its folder, so
   the window can filter correctly with one shared plugin tree -- and runs on
-  the view like any other plugin as well (`docs/regions.md`).
+  the view like any other plugin as well (`docs/regions.md`).  None lives
+  here any more: the statistics an ROI gets are Localization Statistics'
+  (`statistics.py`), the same plugin as on the view.
 * **Analyze** reads the table evaluation produced and summarises it.  It runs
   once, over ``ctx.site_table``.
 
@@ -219,72 +221,6 @@ def current_file(project) -> Optional[str]:
     if chosen in project.sources:
         return chosen
     return next(iter(project.sources), None)
-
-
-# -------------------------------------------------------------- evaluation
-
-@dataclass
-class StatisticsSettings:
-    precision_column: str = param(
-        "xy_err_nm", label="precision column",
-        help="the column averaged as the site's localization precision")
-
-
-def precision_name(column: str) -> str:
-    """The result's name for a precision column, in that column's unit: a
-    pixel table's ``xy_err_pix`` averages to pixels, not nanometres."""
-    return "mean_precision_pix" if column.endswith("_pix") else "mean_precision_nm"
-
-
-def site_statistics(locs, settings: StatisticsSettings) -> Dict[str, Any]:
-    out: Dict[str, Any] = {"n_localizations": len(locs)}
-    for column, name in ((settings.precision_column,
-                          precision_name(settings.precision_column)),
-                         ("photons", "mean_photons")):
-        if column not in locs:
-            raise ValueError(f"statistics requires {column}")
-        values = np.asarray(locs[column], dtype=float)
-        finite = values[np.isfinite(values)]
-        out[name] = float(finite.mean()) if len(finite) else float("nan")
-        out[name + "_n"] = len(finite)
-    return out
-
-
-@register("ROIManager/Evaluate/Statistics")
-class Statistics(Plugin):
-    """Counts a site's localizations and averages their precision and photons."""
-
-    Settings = StatisticsSettings
-    changes_locs = False
-    per_region = True
-    version = "1"
-
-    def run(self, ctx: Context, settings: StatisticsSettings) -> Result:
-        table, selection = ctx.table()
-        locs = selection.apply(table)
-        values = site_statistics(locs, settings)
-
-        def plot(ax) -> None:
-            """The site itself, as the numbers' sanity check.
-
-            The ROI manager redraws this in the same window for every site, so
-            what it is for is the comparison: two hundred localizations in a
-            ring and two hundred in a smear give the same three numbers.
-            """
-            x = np.asarray(locs["x_nm"], dtype=float)
-            y = np.asarray(locs["y_nm"], dtype=float)
-            ax.scatter(x, y, s=6, c="#2f7fd0", alpha=0.6, linewidths=0)
-            ax.set_aspect("equal")
-            ax.set_xlabel("x (nm)")
-            ax.set_ylabel("y (nm)")
-            name = precision_name(settings.precision_column)
-            unit = "px" if name.endswith("_pix") else "nm"
-            ax.set_title(f"{values['n_localizations']} localizations, "
-                         f"{values[name]:.1f} {unit} precision")
-
-        return Result(text=f"{values['n_localizations']} localizations",
-                      plot=plot if len(locs) else None,
-                      data=values, values=values, settings=settings)
 
 
 # ----------------------------------------------------------------- analysis

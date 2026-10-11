@@ -48,7 +48,7 @@ def test_statistics_review_and_stale_results():
     run = p.evaluate()
     values = merged_values(run['records'][roi.id])
     assert values['n_localizations'] == 3
-    assert [step['label'] for step in run['pipeline']] == ['Statistics']
+    assert [step['label'] for step in run['pipeline']] == ['Localization Statistics']
     assert values['mean_precision_nm'] == 11
     assert values['mean_photons'] == 200
     assert len(p.results()) == 1
@@ -97,7 +97,6 @@ def test_empty_and_nonfinite_measurements():
     p.evaluate()
     rows = p.results()
     assert rows[0]['mean_photons'] == 200
-    assert rows[0]['mean_photons_n'] == 2
     assert rows[1]['n_localizations'] == 0
     assert np.isnan(rows[1]['mean_photons'])
     hist = histograms(rows, HistogramSettings(bins=10))
@@ -264,21 +263,23 @@ def test_a_script_can_trust_the_finder():
     assert len(p.results()) == 4
 
 
-def test_the_default_histograms_leave_out_the_counts_behind_the_means():
+def test_the_default_histograms_draw_every_number_the_statistics_gave():
     locs, _ = pores()
     p = ROIProject()
     s = p.add_source(locs)
     p.find(s.id, reviewed=True)
     p.evaluate()
     drawn = histograms(p.results(), HistogramSettings(bins=10))
-    assert set(drawn) == {'n_localizations', 'mean_precision_nm', 'mean_photons'}
+    assert set(drawn) == {'n_localizations', 'mean_photons', 'median_photons',
+                          'photons_n0', 'mean_precision_nm', 'median_precision_nm',
+                          'sigma_c_nm'}
 
 
 def test_a_pixel_precision_is_averaged_under_a_pixel_name():
-    from smappy.plugins.roi import StatisticsSettings, site_statistics
+    from smappy.plugins.statistics import statistics, statistics_values
     locs = Localizations({'x_pix': np.zeros(3), 'y_pix': np.zeros(3),
                           'xy_err_pix': np.array([0.1, 0.2, 0.3]),
                           'photons': np.ones(3)}, {'units': 'pixel'})
-    values = site_statistics(locs, StatisticsSettings(precision_column='xy_err_pix'))
+    values = statistics_values(locs, statistics(locs))
     assert values['mean_precision_pix'] == pytest.approx(0.2)
     assert 'mean_precision_nm' not in values

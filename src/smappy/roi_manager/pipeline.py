@@ -54,12 +54,26 @@ class Step:
 
 def default_instances() -> List[Instance]:
     """What a pipeline starts as: every installed evaluator that is a
-    `favorite`, once.  A specialised one -- NPC Corners -- says it is not, and
-    is added when the data call for it rather than run on every site."""
+    `favorite`, once, with its slow options off (`instance_for`).  A
+    specialised one -- NPC Corners -- says it is not, and is added when the
+    data call for it rather than run on every site."""
     from .. import plugins
-    return [Instance(plugin=path)
+    return [instance_for(path)
             for path, ref in sorted(plugins.refs().items())
             if ref.per_region and ref.favorite]
+
+
+def instance_for(path: str) -> Instance:
+    """A plugin as a step of the pipeline: its `slow` switches off, since a
+    step runs once per ROI (`docs/regions.md`, "Slow, optional parts").  A
+    plugin that cannot be imported gets no values and fails where it runs."""
+    from .. import plugins
+    from ..plugins import fast_values
+    try:
+        cls = plugins.get(path)
+    except Exception:
+        return Instance(plugin=path)
+    return Instance(plugin=path, values=fast_values(cls.Settings))
 
 
 def instances_from_run(recorded: Sequence[Dict[str, Any]]) -> List[Instance]:

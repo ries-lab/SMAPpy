@@ -260,7 +260,9 @@ def precision_model(precision, low: Optional[float] = None,
         "n": len(values),
         "median": float(np.median(values)) if len(values) else float("nan"),
         "method": method}
-    if len(values) < MIN_FOR_FIT:
+    if len(values) < MIN_FOR_FIT or method == "none":
+        # "none": the median and the histogram's own landmarks only -- the fit
+        # is most of what this costs, ~10 ms whatever the count
         out.update(sigma_c=float("nan"), max=float("nan"), rising=float("nan"),
                    low=float("nan"), high=float("nan"))
         return out
@@ -487,13 +489,18 @@ def ontime_distribution(frames, exposure_ms: float = 0.0) -> Distribution:
 def statistics(locs: Localizations, bins: int = 100, photon_start: float = 0.0,
                on_time: Optional[Sequence[float]] = None,
                exposure_ms: float = 0.0,
-               precision_fit: str = "histogram") -> List[Distribution]:
+               precision_fit: str = "histogram",
+               fit_precision: bool = True) -> List[Distribution]:
     """Every distribution the table can supply, in reading order.
 
     ``on_time`` is given separately because it lives in the *grouped* table:
     one row per blink, not one per frame.  A table that carries ``n_in_group``
     already -- a grouped file, or a grouped layer -- supplies it itself.
+    Without ``fit_precision`` the precision model is not fitted: the median
+    and the histogram's landmarks are still there.
     """
+    if not fit_precision:
+        precision_fit = "none"
     found: List[Distribution] = []
     if "photons" in locs:
         found.append(photon_distribution(locs["photons"], bins, photon_start))
@@ -514,6 +521,41 @@ def statistics(locs: Localizations, bins: int = 100, photon_start: float = 0.0,
     if on_time is not None and len(on_time):
         found.append(ontime_distribution(on_time, exposure_ms))
     return found
+
+
+def statistics_values(locs: Localizations, found: Sequence[Distribution]
+                      ) -> Dict[str, float]:
+    """The numbers of a description, a column each of a region table.
+
+    The count, then per distribution its centre and its fitted parameter:
+    the photons' mean, median and ``N0``; the precision's mean, median and
+    ``sigma_c`` (NaN when the model was not fitted), in the column's unit;
+    the on-time's ``tau`` and the blinks it was counted over.
+    """
+    out: Dict[str, float] = {"n_localizations": len(locs)}
+    by_key = {d.key: d for d in found}
+    if "photons" in by_key:
+        stats = by_key["photons"].stats
+        out.update(mean_photons=stats["mean"], median_photons=stats["median"],
+                   photons_n0=stats["n0"])
+    for key, column_names, suffix in (("precision", PRECISION_FIELDS, ""),
+                                      ("precision_z", PRECISION_Z_FIELDS, "z_")):
+        if key not in by_key:
+            continue
+        column = next(n for n in column_names if n in locs)
+        unit = "pix" if column.endswith("_pix") else "nm"
+        values = np.asarray(locs[column], dtype=float)
+        values = values[np.isfinite(values)]
+        stats = by_key[key].stats
+        out[f"mean_{suffix}precision_{unit}"] = (float(values.mean()) if len(values)
+                                                 else float("nan"))
+        out[f"median_{suffix}precision_{unit}"] = stats["median"]
+        out[f"sigma_c_{suffix}{unit}"] = stats["sigma_c"]
+    if "on_time" in by_key:
+        stats = by_key["on_time"].stats
+        out.update(on_time_frames=stats["tau"], n_blinks=stats["n"])
+    return {k: (float(v) if not isinstance(v, (int, np.integer)) else int(v))
+            for k, v in out.items()}
 
 
 # --------------------------------------------------------------------- drawing
@@ -590,6 +632,9 @@ class StatisticsSettings:
     exposure_ms: float = param(0.0, label="exposure", unit="ms", min=0.0,
                                advanced=True,
                                help="0: the on-time is reported in frames only")
+    fit_precision: bool = param(True, label="fit the precision model", slow=True,
+                                help="off: the precision's median and landmarks "
+                                     "only, without sigma_c")
 
 
 def blink_on_times(locs: Localizations) -> np.ndarray:
@@ -658,6 +703,7 @@ class LocalizationStatistics(Plugin):
 
     Settings = StatisticsSettings
     changes_locs = False
+    per_region = True
     # 2: the table the layer shows rather than always the ungrouped one, and
     # the on-time counted once per blink rather than once per frame
     version = "3"        # 3: finds a SMAPpy 3D fit's z precision, z_err_nm
@@ -669,23 +715,29 @@ class LocalizationStatistics(Plugin):
             locs = table
             where = "all localizations"
         else:
-            selection.require(MIN_FOR_FIT, ctx.report, "a distribution")
+            if ctx.region is None:
+                # in a region an empty one is an answer -- no localizations
+                # here -- and a row that says so, not a failure
+                selection.require(MIN_FOR_FIT, ctx.report, "a distribution")
             locs = selection.apply(table)
             where = str(selection)
         if grouped:
             where += " (grouped)"
-        if not len(locs):
+        if not len(locs) and ctx.region is None:
             raise ValueError("no localizations to describe")
         on_time, why = None, ""
         if "n_in_group" in locs:
             on_time = blink_on_times(locs)
-        else:
+        elif ctx.region is None:
             on_time, why = grouped_on_time(ctx.session, ctx.layer,
                                            settings.source != "all")
+        # in a region the session's grouped table is the whole field's, not
+        # the region's: no on-time unless the region's own table has it
         found = statistics(locs, bins=settings.bins,
                            photon_start=settings.photon_start, on_time=on_time,
                            exposure_ms=settings.exposure_ms,
-                           precision_fit=settings.precision_fit)
+                           precision_fit=settings.precision_fit,
+                           fit_precision=settings.fit_precision)
         if not found:
             raise ValueError("the table has no photons, precision or on-time: "
                              f"it has {', '.join(sorted(locs.keys()))}")
@@ -710,5 +762,6 @@ class LocalizationStatistics(Plugin):
             draw_all(figure, found)
 
         return Result(text="\n".join(lines), data=data, settings=settings,
+                      values=statistics_values(locs, found),
                       plot=Plot(draw=plot, panels=len(found),
                                 size=(5.5, max(2.1 * len(found), 2.1))))

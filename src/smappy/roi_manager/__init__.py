@@ -18,9 +18,8 @@ that the folder tree stays the plugin tree; they are re-exported here because
 this is where one goes looking for them.
 """
 from .core import ROI, ROIProject
-from ..plugins.roi import (DensityPeaks, Histograms, Statistics, density_peaks,
-                           histograms, site_statistics)
+from ..plugins.roi import DensityPeaks, Histograms, density_peaks, histograms
 from .pipeline import Step
 
-__all__ = ['ROI', 'ROIProject', 'Step', 'DensityPeaks', 'Statistics', 'Histograms',
-           'density_peaks', 'site_statistics', 'histograms']
+__all__ = ['ROI', 'ROIProject', 'Step', 'DensityPeaks', 'Histograms',
+           'density_peaks', 'histograms']

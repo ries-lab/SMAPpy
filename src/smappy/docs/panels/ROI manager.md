@@ -24,8 +24,9 @@ The work goes in four steps:
 2. **Review** them: step through the list, look at each site, and untick
    *use* for the ones that are not what they should be.
 3. **Evaluate** every site with a pipeline of evaluators, such as
-   [Statistics](plugin:ROIManager/Evaluate/Statistics).  Each evaluator adds
-   columns to the site's row.
+   [Localization Statistics](plugin:Analysis/Measure/Localization Statistics) -- the same plugin as on the
+   whole view, run once in each ROI.  Each evaluator adds columns to the
+   site's row.
 4. **Analyse** the table, for example with
    [Histograms](plugin:ROIManager/Analyze/Histograms) in the ROI tab.
 
@@ -158,10 +159,10 @@ now compute something else, but the results it has stay in the table until
 then: they are still true of the ROI, made with the old settings, and say
 so.
 
-```figure The first 14 numbers of the ROI list, and the size of the result table, through four edits: after an evaluation with Statistics everything is current (black); moving ROI 3 by 40 nm puts only that ROI out of date (orange) and out of the results; excluding ROI 6 greys it and takes it out of the results; editing a parameter of the evaluator puts every included ROI out of date, while the results made with the old setting stay until they are replaced.
+```figure The first 14 numbers of the ROI list, and the size of the result table, through four edits: after an evaluation with Localization Statistics everything is current (black); moving ROI 3 by 40 nm puts only that ROI out of date (orange) and out of the results; excluding ROI 6 greys it and takes it out of the results; editing a parameter of the evaluator puts every included ROI out of date, while the results made with the old setting stay until they are replaced.
 for r in found:
     r.use, r.direction = True, None
-project.pipeline = [Instance(plugin="ROIManager/Evaluate/Statistics")]
+project.pipeline = [Instance(plugin="Analysis/Measure/Localization Statistics", values={"fit_precision": False})]
 project.evaluate()
 
 def column(ax, title):
@@ -181,8 +182,8 @@ project.move_roi(found[2].id, np.asarray(found[2].center) + 40)
 column(axes[1], "ROI 3 moved")
 found[5].use = False
 column(axes[2], "ROI 6 excluded")
-project.pipeline = [Instance(plugin="ROIManager/Evaluate/Statistics",
-                             values={"precision_column": "z_err_nm"})]
+project.pipeline = [Instance(plugin="Analysis/Measure/Localization Statistics",
+                             values={"fit_precision": False, "bins": 50})]
 column(axes[3], "a parameter edited")
 ```
 

@@ -18,7 +18,7 @@ manager's three steps:
 
 1. **Segment** (this plugin): find the sites in a file.
 2. **Evaluate**: measure every site, with plugins that run once per ROI,
-   such as [Statistics](plugin:ROIManager/Evaluate/Statistics).
+   such as [Localization Statistics](plugin:Analysis/Measure/Localization Statistics).
 3. **Analyze**: summarise the collection of sites, for example as
    [Histograms](plugin:ROIManager/Analyze/Histograms).
 

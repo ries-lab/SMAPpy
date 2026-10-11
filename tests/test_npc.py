@@ -312,7 +312,7 @@ def test_the_npc_chain_gives_what_the_three_steps_give_and_leaves_the_pipeline_a
     from smappy.workspace import Instance
     session = Session(pores(0.5, seed=2))
     project = session.rois
-    project.pipeline = [Instance(plugin="ROIManager/Evaluate/Statistics")]
+    project.pipeline = [Instance(plugin="Analysis/Measure/Localization Statistics")]
     file_id = next(iter(project.sources))
     drawn = project.add_roi(file_id, (100.0, 100.0))       # by hand, and empty
     chain = plugins.get("ROIManager/Workflow/NPC Analysis")
@@ -330,7 +330,7 @@ def test_the_npc_chain_gives_what_the_three_steps_give_and_leaves_the_pipeline_a
     assert {"find the pores", "find the pores: checks",
             "labelling efficiency"} <= set(result.plots)
     assert drawn.id in project.rois and len(project.rois) == len(found) + 1
-    assert [i.plugin for i in project.pipeline] == ["ROIManager/Evaluate/Statistics"]
+    assert [i.plugin for i in project.pipeline] == ["Analysis/Measure/Localization Statistics"]
     assert project.runs[-1]["chain"] == "ROIManager/Workflow/NPC Analysis"
 
     # the analysis run from the GUI afterwards finds the chain's counts

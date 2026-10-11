@@ -1,6 +1,6 @@
 ---
 version: "3"
-covers: [smappy.plugins.statistics.statistics, smappy.plugins.statistics.precision_model, smappy.plugins.statistics.photon_decay, smappy.plugins.statistics.ontime_decay]
+covers: [smappy.plugins.statistics.statistics, smappy.plugins.statistics.statistics_values, smappy.plugins.statistics.precision_model, smappy.plugins.statistics.photon_decay, smappy.plugins.statistics.ontime_decay]
 ---
 
 ## What it does
@@ -20,6 +20,13 @@ typical precision $\sigma_c$ and the mean on-time $\tau$.
 
 It describes the localizations of the layer as they are shown -- after its
 filter and inside the ROI -- unless *localizations* is set to *all*.
+
+The same plugin measures every site of the
+[ROI manager](plugin:Panels/ROI manager), once per ROI: in its evaluation
+pipeline, or as a chain step set to *run on* each ROI.  Each ROI then gets a
+row of numbers (see *Output*), and a site with nothing in it gets a count of
+zero rather than an error.  There the precision model starts switched off
+(*fit the precision model*), since its fit is most of what a site costs.
 
 ```figure-setup
 from smappy.simulate import simulate
@@ -190,6 +197,13 @@ threshold -- a second, dim population, for example.
 See *How it works*: the histogram fit is robust to the failed fits every
 dataset contains; the likelihood is the efficient estimator on clean data.
 
+### fit_precision
+The fit takes about 10 ms whatever the number of localizations -- nothing
+next to one run on the view, but 10 s over a thousand ROIs and a quarter of
+an hour over a hundred thousand clusters.  Off, the histogram, its median and
+its landmarks are still there; only the model curve and $\sigma_c$ go.  A
+site of a few dozen localizations has too few for a meaningful fit anyway.
+
 ## Output
 
 * **Plot**: one panel per distribution, as in the figure above.
@@ -197,6 +211,14 @@ dataset contains; the likelihood is the efficient estimator on clean data.
   median photons; the maximum and rising edge of the precision, from the
   histogram and from the model, its median and $\sigma_c$; $\tau$ and the mean
   on-time.  If the on-time could not be shown, the reason.
+* **Per ROI**, the row each site gets: `n_localizations`; `mean_photons`,
+  `median_photons` and `photons_n0`; `mean_precision_nm`,
+  `median_precision_nm` and `sigma_c_nm` (`_pix` for a table in pixels,
+  `sigma_c` NaN when the model was not fitted); for 3D data the same with
+  `z_` (`median_z_precision_nm`, ...); and where the site's table carries
+  `n_in_group`, `on_time_frames` ($\tau$) and `n_blinks`.  The on-time of a
+  site comes from its own rows only: the session's grouped table, which the
+  view falls back on, is the whole field's.
 
 What to expect: $N_0$ of a few thousand photons for a good organic dye in a
 good buffer, fewer for fluorescent proteins; a lateral $\sigma_c$ of about

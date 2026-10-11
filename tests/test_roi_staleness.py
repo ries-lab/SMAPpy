@@ -15,7 +15,7 @@ from smappy.roi_manager import ROIProject                              # noqa: E
 from smappy.roi_manager import pipeline as pipeline_module             # noqa: E402
 from smappy.workspace import Instance                                  # noqa: E402
 
-STATISTICS = "ROIManager/Evaluate/Statistics"
+STATISTICS = "Analysis/Measure/Localization Statistics"
 
 
 def table(centers, per=4, seed=0):
@@ -47,19 +47,19 @@ def states(project, roi_id):
 def test_an_edited_parameter_makes_the_stored_numbers_out_of_date():
     project, ids = a_project()
     project.evaluate()
-    assert states(project, ids[0]) == {"Statistics": "current"}
+    assert states(project, ids[0]) == {"Localization Statistics": "current"}
     assert len(project.results()) == 2
 
-    project.pipeline[0].values = {"precision_column": "photons"}
-    assert states(project, ids[0]) == {"Statistics": "stale"}
+    project.pipeline[0].values = {"bins": 50}
+    assert states(project, ids[0]) == {"Localization Statistics": "stale"}
     assert set(project.needs_evaluation()) == set(ids)
     # the numbers stay in the site table until they are replaced: still true
     # of the ROIs, and saying which settings made them
     assert len(project.results()) == 2
-    made = project.evaluation_steps("Statistics")
-    assert len(made) == 1 and "photons" not in str(made[0]["parameters"])
+    made = project.evaluation_steps("Localization Statistics")
+    assert len(made) == 1 and made[0]["parameters"]["bins"] != 50
     project.evaluate()
-    assert "photons" in str(project.evaluation_steps("Statistics")[0]["parameters"])
+    assert project.evaluation_steps("Localization Statistics")[0]["parameters"]["bins"] == 50
 
 
 def test_renaming_a_step_does_not_invalidate_anything():
@@ -75,14 +75,14 @@ def test_moving_an_roi_invalidates_that_roi_and_no_other():
     project, ids = a_project()
     project.evaluate()
     project.move_roi(ids[0], [500, 0])
-    assert states(project, ids[0]) == {"Statistics": "stale"}
-    assert states(project, ids[1]) == {"Statistics": "current"}
+    assert states(project, ids[0]) == {"Localization Statistics": "stale"}
+    assert states(project, ids[1]) == {"Localization Statistics": "current"}
     assert project.needs_evaluation() == [ids[0]]
 
 
 def test_a_step_that_was_never_run_is_missing_rather_than_stale():
     project, ids = a_project()
-    assert states(project, ids[0]) == {"Statistics": "missing"}
+    assert states(project, ids[0]) == {"Localization Statistics": "missing"}
     assert project.latest(ids[0])[0] is None
 
 
@@ -92,23 +92,25 @@ def test_two_steps_go_stale_one_at_a_time():
     project, ids = a_project()
     project.pipeline.append(Instance(plugin=STATISTICS, label="photons"))
     project.evaluate()
-    assert states(project, ids[0]) == {"Statistics": "current", "photons": "current"}
+    assert states(project, ids[0]) == {"Localization Statistics": "current", "photons": "current"}
 
-    project.pipeline[1].values = {"precision_column": "photons"}
-    assert states(project, ids[0]) == {"Statistics": "current", "photons": "stale"}
+    project.pipeline[1].values = {"bins": 50}
+    assert states(project, ids[0]) == {"Localization Statistics": "current", "photons": "stale"}
 
 
 def test_re_evaluating_runs_the_stale_step_and_copies_the_rest_forward():
     project, ids = a_project()
     project.pipeline.append(Instance(plugin=STATISTICS, label="photons"))
     project.evaluate()
-    before = project.runs[-1]["records"][ids[0]]["steps"]["Statistics"]
+    steps = project.runs[-1]["records"][ids[0]]["steps"]
+    before, photons = steps["Localization Statistics"], steps["photons"]
 
-    project.pipeline[1].values = {"precision_column": "photons"}
+    project.pipeline[1].values = {"bins": 50}
     run = project.evaluate(reuse=True)
     after = run["records"][ids[0]]["steps"]
-    assert after["Statistics"] == before           # copied, not run again
-    assert after["photons"]["values"]["mean_precision_nm"] == 200.0
+    assert after["Localization Statistics"] == before           # copied, not run again
+    assert after["photons"]["signature"] != photons["signature"]  # run again
+    assert after["photons"]["values"]["mean_precision_nm"] == 11.0
     assert not project.needs_evaluation()
     assert len(project.results()) == 2
 
@@ -118,32 +120,32 @@ def test_one_site_reuses_what_is_current_and_says_what_it_ran():
     project, ids = a_project()
     project.evaluate()
     record, results, _ = project.evaluate_one(ids[0], reuse=True)
-    assert results["Statistics"] is None           # kept, so nothing to draw
-    assert record["steps"]["Statistics"]["values"]["n_localizations"] == 4
+    assert results["Localization Statistics"] is None           # kept, so nothing to draw
+    assert record["steps"]["Localization Statistics"]["values"]["n_localizations"] == 4
 
-    project.pipeline[0].values = {"precision_column": "photons"}
+    project.pipeline[0].values = {"bins": 50}
     record, results, _ = project.evaluate_one(ids[0], reuse=True)
-    assert results["Statistics"] is not None       # stale, so it ran
-    assert record["steps"]["Statistics"]["values"]["mean_precision_nm"] == 200.0
+    assert results["Localization Statistics"] is not None       # stale, so it ran
+    assert record["steps"]["Localization Statistics"]["values"]["mean_precision_nm"] == 11.0
 
 
 def test_a_figure_can_be_asked_for_even_when_the_numbers_are_current():
     """A plot is a closure; nothing stored brings it back, so it re-runs."""
     project, ids = a_project()
     project.evaluate()
-    _, results, _ = project.evaluate_one(ids[0], reuse=True, force=["Statistics"])
-    assert results["Statistics"].figures()
+    _, results, _ = project.evaluate_one(ids[0], reuse=True, force=["Localization Statistics"])
+    assert results["Localization Statistics"].figures()
 
 
 def test_what_a_site_re_evaluation_stores_makes_it_current():
     project, ids = a_project()
     project.evaluate()
-    project.pipeline[0].values = {"precision_column": "photons"}
+    project.pipeline[0].values = {"bins": 50}
     assert project.needs_evaluation() == list(ids)
 
     project.evaluate_one(ids[0], reuse=True, store=True)
     assert project.needs_evaluation() == [ids[1]]  # only the one looked at
-    assert states(project, ids[0]) == {"Statistics": "current"}
+    assert states(project, ids[0]) == {"Localization Statistics": "current"}
     assert project.runs[-1]["scope"] == "site"     # honest about what it was
 
     project.evaluate_one(ids[0], reuse=True, store=True)
@@ -157,7 +159,7 @@ def test_a_pipeline_nobody_stored_is_read_back_from_the_run():
     steps = pipeline_module.resolve([Instance(plugin=STATISTICS)])
     project.evaluate(steps=steps)
     assert len(project.results()) == 2
-    assert states(project, ids[0]) == {"Statistics": "current"}
+    assert states(project, ids[0]) == {"Localization Statistics": "current"}
 
 
 def test_the_evaluation_window_re_runs_only_what_changed(tmp_path):
@@ -182,7 +184,7 @@ def test_the_evaluation_window_re_runs_only_what_changed(tmp_path):
     window.run(reuse=True)
     assert "every ROI is up to date" in window.status.text()
 
-    window.instances[0].values = {"precision_column": "photons"}
+    window.instances[0].values = {"bins": 50}
     window.forms.clear()                           # the value, not a stale form
     window.refresh_counts()
     assert "(2)" in window.changed_button.text()

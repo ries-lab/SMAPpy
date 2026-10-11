@@ -41,6 +41,24 @@ class ParamInfo:
     # for a part: shown folded until it is opened.  A chain's steps are, so a
     # chain of eight plugins reads as eight lines rather than eight forms
     collapsed: bool = False
+    # a bool that turns on optional work which costs time per run -- a
+    # bootstrap, a fit beside the numbers -- and that a run over many regions
+    # starts without (`fast_values`; docs/regions.md, "Slow, optional parts")
+    slow: bool = False
+
+
+def fast_values(settings_cls: type, prefix: str = "") -> Dict[str, Any]:
+    """The dotted names of the `slow` switches of a settings class, off:
+    what a plugin is set to when it is added to run once per region."""
+    def walk(specs, prefix):
+        for name, spec in specs.items():
+            if spec.children:
+                walk(spec.children, f"{prefix}{name}.")
+            elif spec.info.slow:
+                out[prefix + name] = False
+    out: Dict[str, Any] = {}
+    walk(param_specs(settings_cls), prefix)
+    return out
 
 
 def param(default: Any = MISSING, *, default_factory: Any = MISSING, **info):

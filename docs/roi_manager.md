@@ -94,11 +94,12 @@ line and a direction is a magenta arrow.
 
 **Run on every ROI**, in the *Evaluation pipeline...* window, runs the
 pipeline on every included ROI across all files (**Re-evaluate what changed**
-only on those whose results are out of date or missing). The **Statistics**
-evaluator (`ROIManager/Evaluate/Statistics`) returns localization count, arithmetic mean lateral
-localization precision (`xy_err_nm`), and arithmetic mean photons.
-Nonfinite measurement values are omitted from each mean; their finite sample
-counts are saved separately. Empty selections return count zero and NaN means.
+only on those whose results are out of date or missing). **Localization
+Statistics** (`Analysis/Measure/Localization Statistics`, the same plugin as
+on the view) returns the localization count, the mean and median photons and
+`N0`, the mean and median lateral precision and, when its precision model is
+switched on, `sigma_c`.  Nonfinite values are omitted from each mean. Empty
+selections return count zero and NaN means.
 Missing required measurement columns produce a per-ROI error without stopping
 other ROIs. Select the error row to see its message.
 
