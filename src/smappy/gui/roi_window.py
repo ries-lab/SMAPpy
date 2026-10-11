@@ -31,6 +31,10 @@ ROI_PEN = pg.mkPen("#2e9e4f", width=2)          # the selected ROI
 EXCLUDED_PEN = pg.mkPen("#8a8a8a", width=1)     # not used
 EXCLUDED_ACTIVE_PEN = pg.mkPen("#8a8a8a", width=2)
 OTHER_PEN = pg.mkPen("#ffb300", width=1)
+# a segmenter's preview: proposed, not added -- grey and dashed, so it reads
+# as provisional over any LUT; the ones the finder rejected only dotted
+PREVIEW_PEN = pg.mkPen("#b0b0b0", width=1.5, style=Qt.DashLine)
+PREVIEW_REJECTED_PEN = pg.mkPen("#8a8a8a", width=1, style=Qt.DotLine)
 FRAME_PEN = pg.mkPen("#ffd54a", width=1)
 TILE_PEN = pg.mkPen("#5a6a7a", width=1)         # the grid
 TILE_HERE_PEN = pg.mkPen("#00c4ff", width=2)    # the tile being looked at
@@ -113,7 +117,9 @@ class ImagePane(QWidget):
         self.image = pg.ImageItem(axisOrder="row-major")
         self.view.addItem(self.image)
         self.shapes = {name: pg.PlotDataItem(pen=pen, connect="finite")
-                       for name, pen in (("others", OTHER_PEN), ("excluded", EXCLUDED_PEN),
+                       for name, pen in (("preview", PREVIEW_PEN),
+                                         ("preview_rejected", PREVIEW_REJECTED_PEN),
+                                         ("others", OTHER_PEN), ("excluded", EXCLUDED_PEN),
                                          ("excluded_active", EXCLUDED_ACTIVE_PEN),
                                          ("roi", ROI_PEN), ("draft", DRAFT_PEN),
                                          ("direction", DIRECTION_PEN),
@@ -295,6 +301,14 @@ class ROIManagerWindow(QMainWindow):
         self.remove_button.setToolTip("remove the selected ROI")
         self.remove_button.clicked.connect(self._remove)
         llayout.addWidget(self.remove_button)
+        # shown only while a segmenter's preview is drawn: Run adds it, a
+        # new preview replaces it, and this is the way to have neither
+        self.clear_preview_button = QPushButton("Discard preview")
+        self.clear_preview_button.setToolTip("remove the grey ROIs a segmenter's "
+                                             "Preview proposed, adding none of them")
+        self.clear_preview_button.clicked.connect(self.session.clear_preview)
+        self.clear_preview_button.setVisible(False)
+        llayout.addWidget(self.clear_preview_button)
         # the pipeline is set up in the control window's ROI tab, but it is
         # here that its results are looked at, one site after another; the
         # same window, opened from where the eye already is
@@ -411,6 +425,9 @@ class ROIManagerWindow(QMainWindow):
     def _on_session(self, what: str) -> None:
         if what in ("locs", "rois", "layers"):
             self.refresh(files=True)
+        elif what == "roi-preview":
+            self._fill_table()           # the status line counts the preview
+            self.redraw()
         elif what in ("layer", "regrouped"):
             self.project.sync()
             self.redraw()
@@ -471,8 +488,13 @@ class ROIManagerWindow(QMainWindow):
                 self.table.selectRow(row)
         self._loading = was_loading
         used = sum(1 for r in project.rois.values() if r.use)
+        preview = project.segment_preview
+        self.clear_preview_button.setVisible(preview is not None)
+        proposed = (f"; previewing {len(preview['sites'])} (grey): Run adds them"
+                    if preview is not None else "")
         self.status.showMessage(f"{len(self._rows)} ROIs, {used} used"
-                                + (f", {len(waiting)} to evaluate" if waiting else ""))
+                                + (f", {len(waiting)} to evaluate" if waiting else "")
+                                + proposed)
 
     # ------------------------------------------------------------ drawing
     def redraw(self) -> None:
@@ -486,9 +508,16 @@ class ROIManagerWindow(QMainWindow):
         x0, y0, x1, y1 = state.index.bounds
         self.file_pane.render(state, x0, x1, y0, y1)
         rois = project.rois_of(file_id)
+        preview = project.segment_preview
+        if preview is not None and preview.get("file_id") == file_id:
+            # a replacing run removes these first, so the preview hides them
+            replaced = set(preview.get("replaces") or ())
+            rois = [roi for roi in rois if roi.id not in replaced]
+        else:
+            preview = None
 
         # the file: every ROI, small, over the tile grid
-        self._draw_outlines(self.file_pane, rois)
+        self._draw_outlines(self.file_pane, rois, preview)
         self._draw_tiles(file_id)
 
         centre = self.zoom_center
@@ -498,7 +527,7 @@ class ROIManagerWindow(QMainWindow):
         half = self.zoom_pane.width_nm / 2
         self.zoom_pane.render(state, centre[0] - half, centre[0] + half,
                               centre[1] - half, centre[1] + half)
-        self._draw_outlines(self.zoom_pane, rois)
+        self._draw_outlines(self.zoom_pane, rois, preview)
         self.zoom_pane.draw("draft", *([[], []] if self.draft is None else
                                        outline(self.draft, project.shape, project.size_nm)))
         # the frame the zoom covers, on the file image
@@ -579,9 +608,18 @@ class ROIManagerWindow(QMainWindow):
         self.redraw()
         self.status.showMessage(f"tile {index + 1} of {len(tiles)}")
 
-    def _draw_outlines(self, pane, rois) -> None:
-        """Every ROI on one pane: grey when it is not used, green when selected."""
+    def _draw_outlines(self, pane, rois, preview=None) -> None:
+        """Every ROI on one pane: grey when it is not used, green when
+        selected; and a segmenter's preview, dashed."""
         project = self.project
+        for name, use in (("preview", True), ("preview_rejected", False)):
+            xs, ys = [], []
+            for site in (preview or {}).get("sites", ()):
+                if bool(site.get("use", True)) == use:
+                    ox, oy = outline(site["center"], project.shape, project.size_nm)
+                    xs.extend(list(ox) + [np.nan])
+                    ys.extend(list(oy) + [np.nan])
+            pane.draw(name, xs, ys)
         groups = {"others": [], "excluded": [], "excluded_active": [], "roi": []}
         for roi in rois:
             active = roi.id == self.active

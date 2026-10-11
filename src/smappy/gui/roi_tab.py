@@ -128,6 +128,9 @@ class ROIHeader(QWidget):
     def _on_session(self, what: str) -> None:
         if what in ("locs", "layers", "rois"):
             self.refresh(files_changed=True)
+        elif what == "roi-preview" and self.project.segment_preview is not None:
+            # a preview is drawn in the manager and nowhere else
+            self.open_manager()
         elif what in ("layer", "regrouped"):
             self.project.sync()
 

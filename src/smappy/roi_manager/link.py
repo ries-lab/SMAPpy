@@ -184,6 +184,7 @@ class SessionROIs(ROIProject):
         self.runs = []
         self.navigation = {}
         self.pipeline = []
+        self.segment_preview = None
         if not doc:
             return
         doc = json.loads(json_text(doc)) if not isinstance(doc, dict) else doc

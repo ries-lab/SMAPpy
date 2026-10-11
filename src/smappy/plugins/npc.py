@@ -65,7 +65,8 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 from . import Context, Plot, Plugin, Result, param, register, settings_from
-from .roi import (EVALUATION_HELP, MAX_FINDER_PIXELS, SiteAnalysisPlugin,
+from .roi import (EVALUATION_HELP, MAX_FINDER_PIXELS, SegmenterPlugin,
+                  SiteAnalysisPlugin,
                   auto_only, current_file)
 
 # SMAP's NPCLabelingQuantify counts a localization towards a corner only when
@@ -404,7 +405,7 @@ def npc_rois(project, file_id) -> List[Any]:
 
 
 @register("ROIManager/Segment/NPC")
-class NPCSegment(Plugin):
+class NPCSegment(SegmenterPlugin):
     """Finds nuclear pores with a ring filter, fits a circle to each and keeps
     those that look like a pore."""
 
@@ -425,7 +426,11 @@ class NPCSegment(Plugin):
                                               "far_fraction", "failed")}}
                 for s in keep]
 
-    def run(self, ctx: Context, settings: NPCSegmentSettings) -> Result:
+    def replaced(self, project, file_id, settings: NPCSegmentSettings) -> List[str]:
+        return [roi.id for roi in npc_rois(project, file_id)] if settings.replace else []
+
+    def segment(self, ctx: Context, settings: NPCSegmentSettings,
+                commit: bool) -> Result:
         project = ctx.rois
         if project is None:
             locs = ctx.locs
@@ -436,16 +441,13 @@ class NPCSegment(Plugin):
             file_id = current_file(project)
             if file_id is None:
                 raise ValueError("no file to search: load localizations first")
-            if settings.replace:
-                for roi in npc_rois(project, file_id):
-                    del project.rois[roi.id]
             state = project.state(file_id)
             locs = state.locs[state.filter.indices]
             self.last = []
-            found = project.find(file_id, plugin=self, settings=settings)
+            proposed, data = self.found(project, file_id, settings, commit)
             sites = self.last
-            data = {"sites": sites, "rois": found,
-                    "centers": [r.center for r in found if r.use]}
+            data = {**data, "sites": sites,
+                    "centers": [p["center"] for p in proposed if p["use"]]}
         kept = sum(s["use"] for s in sites)
         text = f"{kept} pores of {len(sites)} candidates"
         if precision_column(locs) is None:
@@ -457,6 +459,8 @@ class NPCSegment(Plugin):
                     reasons[f] = reasons.get(f, 0) + 1
             text += "; rejected for " + ", ".join(f"{k} ({v})" for k, v in
                                                   sorted(reasons.items()))
+        if not commit:
+            text = "preview: " + text
         xy = np.column_stack((np.asarray(locs["x_nm"], dtype=float),
                               np.asarray(locs["y_nm"], dtype=float)))
         return Result(text=text, settings=settings, data=data,

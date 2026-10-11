@@ -196,6 +196,10 @@ background of the same size holds.
   manager, brightest first.  They are included (*use*) from the start.
 * **The text** says how many candidates were found.
 
+*Preview* finds the same sites and adds none: they are drawn grey and
+dashed in the ROI manager, and the next preview replaces them.  Try
+settings with it until the sites sit on the structures, then *Run*.
+
 A good result has one site on each structure and none on the background.
 Sites on empty background: raise *minimum count*.  Faint structures missed:
 lower it.  Two sites on one structure: raise *separation* or *smoothing*.

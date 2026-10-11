@@ -145,6 +145,12 @@ class ROIProject:
         # the project because the columns of a site table mean nothing without
         # knowing which evaluators produced them, with what parameters.
         self.pipeline = []
+        # What a segmenter's Preview proposed and nobody has added yet:
+        # ``{"file_id", "method", "sites": [{"center", "use"}], "replaces":
+        # [roi ids]}``, or None.  Drawn by the manager and never saved -- it
+        # exists so that a finder's settings can be tried without each try
+        # leaving ROIs behind to be removed by hand.
+        self.segment_preview = None
         self._filter_keys = {}
 
     def add_file(self, path):
@@ -662,6 +668,25 @@ class ROIProject:
         looked at them.  A script that trusts the finder says
         ``reviewed=True``; the GUI's `SessionROIs` reviews automatically.
         """
+        origin, proposals = self.propose(file_id, plugin, settings, parameters)
+        found = []
+        for proposed in proposals:
+            roi = self.add_roi(file_id, proposed["center"], reviewed=reviewed,
+                               origin={**origin, **proposed["origin"]})
+            roi.use = proposed["use"]
+            found.append(roi)
+        return found
+
+    def propose(self, file_id, plugin=None, settings=None, parameters=None,
+                exclude=()):
+        """``(origin, proposals)``: what `find` would add, adding nothing.
+
+        Each proposal is ``{"center", "use", "origin"}``, the last what the
+        finder measured, to go into the ROI's origin beside the provenance.
+        The ROIs in `exclude` are left out of the ones the finder keeps its
+        distance from -- the ones a run would remove first, so that a
+        preview of a replacing run proposes what the run will add.
+        """
         from ..plugins import settings_from, settings_values
         from ..plugins.roi import DensityPeaks
         if plugin is None:
@@ -674,20 +699,21 @@ class ROIProject:
                   "parameters": settings_values(settings),
                   "filters": state.filter.ranges, "grouped": self.grouped,
                   "group_settings": asdict(self.group_settings) if self.grouped else None}
-        existing = [roi.center for roi in self.rois.values() if roi.file_id == file_id]
-        found = []
+        exclude = set(exclude)
+        existing = [roi.center for roi in self.rois.values()
+                    if roi.file_id == file_id and roi.id not in exclude]
+        proposals = []
         for proposed in plugin.propose(state.locs[state.filter.indices], settings,
                                        existing):
             # a centre, or a dict for a finder that also judges what it found:
             # its "use", and what it measured, kept with the ROI's origin
             if isinstance(proposed, dict):
-                roi = self.add_roi(file_id, proposed["center"], reviewed=reviewed,
-                                   origin={**origin, **proposed.get("origin", {})})
-                roi.use = bool(proposed.get("use", True))
+                proposals.append({"center": point(proposed["center"]),
+                                  "use": bool(proposed.get("use", True)),
+                                  "origin": dict(proposed.get("origin", {}))})
             else:
-                roi = self.add_roi(file_id, proposed, reviewed=reviewed, origin=origin)
-            found.append(roi)
-        return found
+                proposals.append({"center": point(proposed), "use": True, "origin": {}})
+        return origin, proposals
 
     def save(self, path):
         """Atomic sidecar save. In-memory sources must first be saved as localizations."""

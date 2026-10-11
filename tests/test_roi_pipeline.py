@@ -178,6 +178,46 @@ def test_a_renamed_field_costs_that_field_and_not_the_pipeline():
     assert rebuilt.min_count == DensityPeakSettings().min_count
 
 
+def test_a_segmenter_preview_proposes_what_run_adds_and_adds_nothing():
+    from smappy.plugins.roi import DensityPeaks
+    from smappy.session import Session
+    session = Session(table([(0, 0), (3000, 0), (0, 3000)], per=40))
+    session.show_grouped(0, False)
+    settings = DensityPeakSettings(separation_nm=1000.0, min_count=20)
+    finder = DensityPeaks()
+    preview = finder.preview(session.context(), settings)
+    assert session.rois.rois == {}
+    sites = preview.data["roi_preview"]["sites"]
+    assert len(sites) == 3 and preview.text == "3 candidates previewed"
+
+    # the session puts it where the manager draws it; a run adds the same
+    # ROIs and takes the preview away
+    session.show_preview(finder, preview)
+    assert session.rois.segment_preview["sites"] == sites
+    run = finder.run(session.context(), settings)
+    session.apply(finder, run)
+    assert session.rois.segment_preview is None
+    assert sorted(r.center for r in session.rois.rois.values()) == \
+        sorted(s["center"] for s in sites)
+
+
+def test_propose_is_find_without_the_adding():
+    project = ROIProject()
+    project.set_geometry(300)
+    source = project.add_source(table([(0, 0), (3000, 0)], per=40))
+    settings = DensityPeakSettings(separation_nm=1000.0, min_count=20)
+    origin, proposals = project.propose(source.id, settings=settings)
+    assert project.rois == {} and len(proposals) == 2
+    assert origin["method"] == "ROIManager/Segment/Density Peaks"
+    found = project.find(source.id, settings=settings)
+    assert [r.center for r in found] == [p["center"] for p in proposals]
+    # the found ROIs are what a second proposal keeps its distance from,
+    # unless they are the ones a run would remove first
+    assert project.propose(source.id, settings=settings)[1] == []
+    assert len(project.propose(source.id, settings=settings,
+                               exclude=[r.id for r in found])[1]) == 2
+
+
 # ---------------------------------------------------------------- the GUI
 
 @pytest.fixture
@@ -263,3 +303,52 @@ def test_find_evaluate_and_analyse_through_the_session(app):
     analysis = plugins.get("ROIManager/Analyze/Histograms")()(ctx=session.context())
     assert "4 ROIs" in analysis.text
     assert analysis.plot is not None
+
+
+def test_the_manager_draws_a_preview_and_run_turns_it_into_rois(app):
+    """Preview opens the manager with the proposals dashed and no ROI added;
+    a second preview replaces the first; Run adds them and the window,
+    which used to miss a segmenter's run, lists them."""
+    from PySide6.QtCore import QEventLoop, QTimer
+    from smappy.gui.plugin_panel import PluginPanel
+    from smappy.gui.roi_tab import ROIHeader
+    from smappy.session import Session
+
+    session = Session(table([(0, 0), (3000, 0), (0, 3000), (3000, 3000)], per=40))
+    session.show_grouped(0, False)
+    header = ROIHeader(session)
+    panel = PluginPanel(plugins.get("ROIManager/Segment/Density Peaks"), session)
+    panel.form.restore({"separation_nm": 1000.0, "min_count": 20})
+
+    def wait(start):
+        loop = QEventLoop()
+        panel.ended.connect(loop.quit)
+        start()
+        QTimer.singleShot(10000, loop.quit)          # never hang the suite
+        loop.exec()
+        panel.ended.disconnect(loop.quit)
+        app.processEvents()
+
+    wait(panel.preview)
+    window = header.manager
+    assert window is not None and session.rois.rois == {}
+    xs, _ = window.file_pane.shapes["preview"].getData()
+    assert np.isnan(xs).sum() == 4                   # four outlines
+    assert window.clear_preview_button.isVisibleTo(window)
+    assert "previewing 4" in window.status.currentMessage()
+
+    panel.form.restore({"min_count": 1000})
+    wait(panel.preview)
+    assert session.rois.segment_preview["sites"] == []
+
+    panel.form.restore({"min_count": 20})
+    wait(panel.run)
+    assert len(session.rois.rois) == 4 and window.table.rowCount() == 4
+    assert session.rois.segment_preview is None
+    assert window.file_pane.shapes["preview"].getData()[0] is None or \
+        not len(window.file_pane.shapes["preview"].getData()[0])
+    assert not window.clear_preview_button.isVisibleTo(window)
+
+    wait(panel.preview)
+    window.clear_preview_button.click()
+    assert session.rois.segment_preview is None and len(session.rois.rois) == 4
