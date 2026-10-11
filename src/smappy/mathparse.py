@@ -178,6 +178,17 @@ def names_in(expression: str) -> Set[str]:
         - called - set(CONSTANTS)
 
 
+REDUCTIONS = frozenset({"mean", "median", "std", "sum", "min", "max",
+                        "percentile", "count"})
+
+
+def reduces(expression: str) -> bool:
+    """Whether the expression reduces a column to a number somewhere, so
+    that one row's value depends on every other row's: `z_nm - median(z_nm)`."""
+    return any(isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+               and node.func.id in REDUCTIONS for node in ast.walk(parse(expression)))
+
+
 def _evaluate_node(node: ast.AST, names: Dict[str, Any], expression: str) -> Any:
     if isinstance(node, ast.Expression):
         return _evaluate_node(node.body, names, expression)

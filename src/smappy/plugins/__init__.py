@@ -551,6 +551,39 @@ class Result:
                         if draw is not None]
 
 
+class LiveRecipe:
+    """A table change that can follow a fit while it is still appending.
+
+    A table change cannot go into a table a fit is still adding to
+    (`Session.apply`) -- unless it is a recipe: columns computed from the
+    other columns, which the session can work out for the table so far and
+    then for every block as it arrives, and once more for the finished
+    table.  A plugin that can be one puts it in its result as
+    ``data["live_recipe"]``, and says so before the run in
+    `Plugin.live_recipe_for`.  The Math Parser's expression is one, and the
+    colour assignment, with the modes it found, is another.
+
+    `columns` must work on any table with the columns it reads -- a block of
+    a hundred rows as well as the whole table -- and must not write a
+    position: the spatial index of a live table is extended, never rebuilt.
+    ``whole`` says the values of earlier rows depend on later ones (a
+    reduction, ``z_nm - median(z_nm)``): the column is then recomputed over
+    the whole table on every append, not only for the new block.
+    """
+
+    name = ""                       # the plugin's, for the log
+    whole = False
+
+    def columns(self, locs: Localizations) -> Dict[str, np.ndarray]:
+        raise NotImplementedError
+
+    def final(self, locs: Localizations) -> Localizations:
+        """The finished table with the recipe applied: `columns`, unless the
+        recipe has something better to do once the whole table is there."""
+        return Localizations({**locs.columns, **self.columns(locs)},
+                             dict(locs.metadata))
+
+
 class Plugin:
     """Base class.  Subclasses set ``Settings`` and implement ``run``."""
 
@@ -672,6 +705,11 @@ class Plugin:
     def changes_locs_for(self, settings) -> Optional[bool]:
         """Whether a run with ``settings`` changes the table; see `changes_locs`."""
         return self.changes_locs
+
+    def live_recipe_for(self, settings) -> bool:
+        """Whether a run with ``settings`` hands back a `LiveRecipe`, and so
+        can change a table a fit is still appending to.  False by default."""
+        return False
 
     def preflight(self, ctx: Context, settings):
         """Anything to put to the user before `run` starts, or None to start.

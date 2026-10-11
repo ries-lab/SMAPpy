@@ -123,3 +123,92 @@ def test_a_layer_added_during_a_live_fit_takes_each_block_once():
     assert "group_id" not in session.locs
     for layer in session.layers:
         assert layer.filter.n_rows == 200
+
+
+# ------------------------------------------------------------ live recipes
+def two_colour_block(frame, n=400):
+    """Two dyes: one puts 80 % of its photons in channel 1, the other 20 %."""
+    rng = np.random.default_rng(frame)
+    dye = rng.integers(0, 2, n)
+    total = rng.uniform(2000, 6000, n)
+    share = np.where(dye == 0, 0.8, 0.2)
+    first = rng.poisson(total * share).astype(float)
+    second = rng.poisson(total * (1 - share)).astype(float)
+    return Localizations({"x_nm": rng.uniform(0, 5000, n),
+                          "y_nm": rng.uniform(0, 5000, n),
+                          "frame": np.full(n, frame, np.int64),
+                          "photons": first + second,
+                          "photons_ch1": first, "photons_ch2": second,
+                          "dye": dye}, {})
+
+
+def test_an_expression_follows_the_live_table_block_by_block():
+    import dataclasses
+    from smappy import plugins
+    session = live_session()
+    cls = plugins.get("Analysis/Process/Math Parser")
+    settings = dataclasses.replace(cls.Settings(), field="bright",
+                                   expression="photons > 1000")
+    plugin = cls()
+    assert plugin.live_recipe_for(settings)
+    session.append(block(4))                       # after the snapshot
+    session.apply(plugin, plugin.run(session.context(), settings))
+    session.append(block(5))
+    assert session.live and len(session.locs) == 250
+    np.testing.assert_array_equal(np.asarray(session.locs["bright"]) > 0.5,
+                                  np.asarray(session.locs["photons"]) > 1000)
+    assert session.history[-1]["what"] == "Analysis/Process/Math Parser"
+
+
+def test_a_reduction_is_recomputed_over_the_whole_table_as_it_grows():
+    import dataclasses
+    from smappy import plugins
+    session = live_session()
+    cls = plugins.get("Analysis/Process/Math Parser")
+    settings = dataclasses.replace(cls.Settings(), field="centred",
+                                   expression="photons - median(photons)")
+    session.apply(cls(), cls().run(session.context(), settings))
+    session.layers[0].set_bound("centred", 0, None)
+    session.append(block(4))
+    photons = np.asarray(session.locs["photons"])
+    np.testing.assert_allclose(session.locs["centred"],
+                               photons - np.median(photons), rtol=1e-5, atol=1e-2)
+    # the filter on the column follows its new values too
+    assert session.layers[0].filter.mask.sum() == (session.locs["centred"] >= 0).sum()
+
+
+def test_an_expression_over_the_selection_cannot_follow_a_live_table():
+    import dataclasses
+    from smappy import plugins
+    cls = plugins.get("Analysis/Process/Math Parser")
+    settings = dataclasses.replace(cls.Settings(), where="selection")
+    assert not cls().live_recipe_for(settings)
+    shift = dataclasses.replace(cls.Settings(), field="x_nm", expression="y_nm")
+    assert not cls().live_recipe_for(shift)        # a position: not a recipe
+
+
+def test_colours_follow_the_live_table_and_are_found_again_when_it_is_finished():
+    from smappy.plugins.assign_colors import AssignColors
+    session = Session()
+    session.begin_live((0, 5000, 0, 5000))
+    for frame in range(1, 4):
+        session.append(two_colour_block(frame))
+    plugin = AssignColors()
+    settings = plugin.Settings()
+    session.apply(plugin, plugin.run(session.context(), settings))
+    session.append(two_colour_block(4))
+    channel = np.asarray(session.locs["channel"])
+    dye = np.asarray(session.locs["dye"])
+    new = slice(1200, 1600)                       # the block after the run
+    decided = channel[new] > 0
+    assert decided.mean() > 0.8
+    # one colour per dye, whichever number it got
+    for d in (0, 1):
+        assert len(set(channel[new][decided & (dye[new] == d)])) == 1
+
+    finished = session.locs.snapshot().compact()
+    for name in ("channel", "color_ratio"):
+        finished.columns.pop(name)
+    session.apply(Shift(), Result(locs=finished, text="fit"), finishes_live=True)
+    assert not session.live and "channel" in session.locs
+    assert session.history[-2]["what"] == "live recipes"

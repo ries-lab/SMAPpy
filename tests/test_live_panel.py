@@ -60,20 +60,16 @@ class Measures(Plugin):
 
 
 def run_and_wait(panel, app):
+    """Run and wait for the panel to finish -- on its `ended` signal, so that
+    `_on_done` stays the slot it is, on the GUI thread (a plain function put
+    in its place is called on the worker's)."""
     from PySide6.QtCore import QEventLoop, QTimer
     loop = QEventLoop()
-    original = panel._on_done
-
-    def done(result):
-        original(result)
-        loop.quit()
-
-    panel._on_done = done
+    panel.ended.connect(lambda *_: loop.quit())
     panel.run()
     QTimer.singleShot(10000, loop.quit)
     loop.exec()
-    for _ in range(5):
-        app.processEvents()
+    app.processEvents()
 
 
 def test_a_declared_table_change_is_offered_a_new_window_before_it_runs(app):
@@ -110,6 +106,11 @@ def test_an_undeclared_table_change_is_held_back_and_then_offered(app):
     run_and_wait(panel, app)
     assert session.live and len(session.locs) == 300      # not applied
     assert "not applied" in panel.output.toPlainText()
+    import time
+    end = time.monotonic() + 5                            # asked on a timer
+    while not asked and time.monotonic() < end:
+        app.processEvents()
+        time.sleep(0.01)
     assert asked and "run again in a new window" in asked[0]
 
 
@@ -120,3 +121,20 @@ def test_a_measurement_runs_on_the_live_table_as_it_was(app):
     panel.ask_new_window = lambda text: pytest.fail("a measurement asks nothing")
     run_and_wait(panel, app)
     assert "300 seen" in panel.output.toPlainText()
+
+
+def test_an_expression_runs_during_a_live_fit_and_follows_it(app, tmp_path, monkeypatch):
+    """A recipe asks nothing: it goes into the live table and every block."""
+    import dataclasses
+    from smappy import plugins
+    from smappy.gui.plugin_panel import PluginPanel
+    monkeypatch.setenv("SMAPPY_CONFIG_DIR", str(tmp_path))
+    session = live_session()
+    cls = plugins.get("Analysis/Process/Math Parser")
+    panel = PluginPanel(cls, session)
+    panel.form.set(dataclasses.replace(cls.Settings(), field="bright",
+                                       expression="photons > 1000"))
+    panel.ask_new_window = lambda text: pytest.fail("a recipe asks nothing")
+    run_and_wait(panel, app)
+    session.append(block(9))
+    assert session.live and "bright" in session.locs and len(session.locs) == 400

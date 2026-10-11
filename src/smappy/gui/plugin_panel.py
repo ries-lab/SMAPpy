@@ -422,7 +422,10 @@ class PluginPanel(QWidget):
             self.status.setText(f"bad value: {e}")
             return False
         if (job == "run" and self.session.live and not self._owns_live
-                and self.plugin.changes_locs_for(settings)):
+                and self.plugin.changes_locs_for(settings)
+                and not self.plugin.live_recipe_for(settings)):
+            # (a recipe -- an expression, a colour assignment -- follows the
+            # live table instead: `Session._follow`)
             # known before the run: say so now, not after minutes of work
             name = self.plugin.name or self.plugin.path
             self._offer_new_window(

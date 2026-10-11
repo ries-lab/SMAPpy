@@ -361,6 +361,8 @@ class Session:
         # every table this session replaced, newest last; see `smappy.undo`
         self.undo_stack = undo_stack()
         self._live = False                 # the table is being appended to
+        # what follows the live table: `LiveRecipe`s applied while it grows
+        self._recipes: List = []
         self._listeners: List[Callable[[str], None]] = []
         # set by the GUI: what to write into the file's `gui` group.  A session
         # in a script has none, and saves only data.
@@ -977,6 +979,7 @@ class Session:
         if len(self.locs):
             self._push_undo("live acquisition")
         self._live = True
+        self._recipes = []
         self.locs = Localizations({}, {})
         self.layers = [Layer(self.locs, live=True, extent=extent)]
         if path is not None:
@@ -993,6 +996,61 @@ class Session:
             self.name, self.colour = name, colour
         self.changed("name")       # the file's name is the default either way
 
+    # ------------------------------------------------------- live recipes
+    def _follow(self, recipe, plugin: Plugin, result: Result) -> None:
+        """Apply a `LiveRecipe` to the live table now, and to every block.
+
+        The table is the one the fit is still appending to, so the columns go
+        into it in place -- on the table so far, which has grown since the
+        plugin's snapshot -- rather than replacing it.  No undo step: there is
+        no table before it to go back to that the fit could go on filling.
+        """
+        recipe.name = recipe.name or plugin.path.rsplit("/", 1)[-1]
+        self._set_columns(recipe.columns(self.locs))
+        derived = result.locs.metadata.get("derived") if result.locs is not None else None
+        if derived is not None:          # the math parser's recipe, for grouping
+            self.locs.metadata["derived"] = derived
+        self._recipes.append(recipe)
+        self.changed("append")
+
+    def _set_columns(self, columns: Dict[str, np.ndarray]) -> None:
+        """Put columns into the live table, every layer's filter following."""
+        for name, values in columns.items():
+            values = np.asarray(values)
+            self.locs.columns[name] = values
+            self.locs._buffers[name] = values    # `extend` grows it from here
+        for layer in self.layers:
+            if layer.is_image:
+                continue
+            ranges = layer.state.sets["ungrouped"].filter.ranges
+            for name in columns:
+                if name in ranges:               # its mask is of the old values
+                    layer.set_bound(name, *ranges[name])
+
+    def _recipe_block(self, block: Localizations) -> Localizations:
+        """A block with the recipes' columns, so it matches the live table."""
+        if not self._recipes:
+            return block
+        columns = dict(block.columns)
+        for recipe in self._recipes:
+            columns.update(recipe.columns(Localizations(columns, block.metadata)))
+        return Localizations(columns, block.metadata)
+
+    def _finish_recipes(self, locs: Localizations) -> Localizations:
+        """The fit's finished table with the live recipes applied again --
+        over all of it, once, which for a reduction or a colour histogram is
+        the answer the partial table only approximated."""
+        names = []
+        for recipe in self._recipes:
+            derived = self.locs.metadata.get("derived")
+            locs = recipe.final(locs)
+            if derived is not None:
+                locs.metadata["derived"] = derived
+            names.append(recipe.name)
+        self._recipes = []
+        self.log("live recipes", "applied to the finished table: " + ", ".join(names))
+        return locs
+
     def end_live(self) -> None:
         """The fit ended without a finished table -- it failed: keep what came.
 
@@ -1003,12 +1061,17 @@ class Session:
             self.set_locs(self.locs.snapshot(), undoable=False)
 
     def append(self, block: Localizations) -> int:
-        """Add a block to the live table; every layer takes it in."""
+        """Add a block to the live table; every layer takes it in -- with the
+        columns of the recipes followed so far (`_follow`)."""
+        block = self._recipe_block(block)
         n = 0
         for layer in self.layers:
             if not layer.is_image:
                 n = layer.append(block)
         self.locs = self.layers[self.first_locs_layer()].state.sets["ungrouped"].locs
+        for recipe in self._recipes:
+            if recipe.whole and n:
+                self._set_columns(recipe.columns(self.locs))
         if n:
             self.changed("append")
         return n
@@ -1386,18 +1449,23 @@ class Session:
         While a fit is still appending (`live`), a result that changes the
         localizations is refused with `LiveTableError`, before anything is
         touched -- except the fit's own, ``finishes_live``, which is the
-        finished form of the table it has been streaming.  Applied, a drift
+        finished form of the table it has been streaming, and one that
+        carries a `LiveRecipe`, which follows the live table (`_follow`).  Applied, a drift
         correction replaced the growing table with one that could not take
         the next block, and the fit's result then replaced it in turn: the
         view stopped, the correction was lost, and the log kept a line for a
         correction the table did not have.
         """
-        if (self._live and not finishes_live
+        recipe = ((result.data or {}).get("live_recipe")
+                  if self._live and not finishes_live and not result.files else None)
+        if (self._live and not finishes_live and recipe is None
                 and (result.locs is not None or result.files)):
             name = plugin.path.rsplit("/", 1)[-1] or type(plugin).__name__
             raise LiveTableError(
                 f"{name} changes the localizations, and the fit is still "
                 f"adding to them: not applied")
+        if finishes_live and self._recipes and result.locs is not None:
+            result.locs = self._finish_recipes(result.locs)
         settings = result.settings
         # The log is the provenance of the localizations, so what goes in it
         # is what changed them -- a measurement can be repeated from the file
@@ -1422,6 +1490,8 @@ class Session:
                                                 format=plugin.path, n=len(result.locs)))
             if not where:
                 self.path = None         # nowhere to save back to until asked
+        elif result.locs is not None and recipe is not None:
+            self._follow(recipe, plugin, result)
         elif result.locs is not None:
             # the menu says what it is about to undo, so the step is named
             # after the plugin rather than after the fact that a table changed
