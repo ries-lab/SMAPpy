@@ -409,8 +409,10 @@ Each step leaves the program working and the suite green.
      replaced under the same name is gone, so editing a parameter back no
      longer finds the old numbers current -- it measures again.  An older
      file's records are read into tables (`absorb_run`).
-   * *3c*: region tables as HDF5 datasets in the localization file, not in
-     the metadata JSON; the saver may leave them out.
+   * *3c, done*: region tables as HDF5 groups under `/regions` in the
+     localization file, not in the metadata attribute (read back into the
+     ROI project's JSON as columns); *save the ROI results* on the saver
+     leaves them out.
    * *3d*: id-column regions and the shared runner, with percentage, rate,
      time left and stop.
    * *3e*: `keep` / `restore` per region and the switch.

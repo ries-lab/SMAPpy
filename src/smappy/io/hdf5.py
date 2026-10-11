@@ -59,6 +59,12 @@ class LocalizationWriter:
 
     def _write_metadata(self) -> None:
         small = {k: v for k, v in self._metadata.items() if k not in LARGE}
+        rois = small.get("roi_project")
+        if isinstance(rois, dict) and "tables" in rois:
+            # the ROI results are columns: datasets of their own, not text in
+            # the attribute (`_write_regions`)
+            small["roi_project"] = {k: v for k, v in rois.items() if k != "tables"}
+            _write_regions(self._file, rois.get("tables") or [])
         self._file.attrs["metadata"] = json.dumps(small,
                                                   default=_json_default, indent=1)
         for key in LARGE:
@@ -150,6 +156,42 @@ def _write_large(f, key: str, value) -> None:
         else:
             group.create_dataset(str(i), data=column, compression="lzf")
     group.attrs["names"] = json.dumps(names)
+
+
+# The ROI project's results (`region_table.RegionTable`), a group per table,
+# numbered: an evaluation's name may hold a "/".  Columns in datasets, so ten
+# thousand ROIs cost what their numbers do rather than a megabyte of JSON in
+# the metadata attribute.
+REGIONS = "regions"
+
+
+def _write_regions(f, tables) -> None:
+    from ..region_table import RegionTable
+    if REGIONS in f:
+        del f[REGIONS]
+    if not tables:
+        return
+    group = f.create_group(REGIONS)
+    for n, table in enumerate(tables):
+        if not isinstance(table, RegionTable):
+            table = RegionTable.from_dict(table)
+        table.to_hdf5(group.create_group(str(n)))
+
+
+def _read_regions(f) -> list:
+    """The region tables as plain data, the form the ROI project's JSON
+    carries them in -- so the table's metadata stays JSON throughout."""
+    from ..region_table import RegionTable
+    group = f.get(REGIONS)
+    if not isinstance(group, h5py.Group):
+        return []
+    out = []
+    for key in sorted(group, key=lambda k: int(k) if k.isdigit() else 1e9):
+        try:
+            out.append(RegionTable.from_hdf5(group[key]).to_dict())
+        except (KeyError, ValueError, TypeError, OSError):
+            continue                # a damaged table costs itself, not the file
+    return out
 
 
 def _read_large(f) -> Dict[str, object]:
@@ -388,6 +430,10 @@ def load_localizations(path) -> Localizations:
         if "metadata" in f.attrs:
             metadata = json.loads(f.attrs["metadata"])
         metadata.update(_read_large(f))
+        if isinstance(metadata.get("roi_project"), dict):
+            tables = _read_regions(f)
+            if tables:
+                metadata["roi_project"]["tables"] = tables
     return Localizations(columns, metadata)
 
 

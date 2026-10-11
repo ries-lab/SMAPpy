@@ -1,6 +1,6 @@
 ---
 version: "1"
-covers: [smappy.session.Session.save, smappy.io.hdf5.save_localizations, smappy.io.hdf5.save_results, smappy.io.hdf5.save_gui_state]
+covers: [smappy.session.Session.save, smappy.io.hdf5.save_localizations, smappy.io.hdf5.save_results, smappy.io.hdf5.save_gui_state, smappy.region_table.RegionTable.to_hdf5]
 ---
 
 ## What it does
@@ -56,7 +56,10 @@ was used.  Two parts of a fitted table's metadata are too large for an
 attribute and go beside it: the image tags (what the microscope recorded per
 frame, such as the piezo position) into `/frame_tags`, and the acquisition's
 Micro-Manager summary and device properties into `/acquisition`.  Both are
-read back into the metadata when the file is opened.
+read back into the metadata when the file is opened.  So do the numbers the
+ROI manager's evaluations measured: a group per evaluation under `/regions`,
+a dataset per column and a row per ROI, so a thousand ROIs cost what their
+numbers do rather than a megabyte of text in the attribute.
 
 **3. What the tools kept.**  Some plugins keep what they worked out -- a
 drift curve, say -- so that its figure can be drawn again later.  That goes
@@ -127,6 +130,12 @@ opening a `_sml.mat` or a csv, give the new file a name.
 Useful for a file that is a record of how it was analysed; it costs little
 space.  Nothing is restored unless someone asks for it, so it does no
 harm in a file that is shared.
+
+### region_results
+Off, the ROIs are kept -- their places, shapes, *use* flags and comments --
+and what was measured in them is not; the ROI manager shows them as not
+evaluated when the file is opened again.  Worth it only when the results
+are large, many evaluations over many ROIs, and can be measured again.
 
 ## Output
 

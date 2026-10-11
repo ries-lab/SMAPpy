@@ -661,12 +661,16 @@ class Session:
             metadata["roi_project"] = rois
         return metadata
 
-    def save(self, path=None, gui_state: Optional[bool] = None) -> Path:
+    def save(self, path=None, gui_state: Optional[bool] = None,
+             region_results: bool = True) -> Path:
         """Write the table, its history, its ROIs and -- optionally -- the GUI.
 
         `gui_state` defaults to the `save_gui_state_in_files` preference.  What
         gets written is whatever `gui_state_provider` returns, so the session
-        stays ignorant of tabs and windows; the GUI sets it.
+        stays ignorant of tabs and windows; the GUI sets it.  Without
+        `region_results` the ROIs are saved and the numbers measured in them
+        are not -- for a project whose results are large and can be measured
+        again.
         """
         from .io.formats import writer_for
         from .io.hdf5 import save_gui_state, save_localizations, save_results
@@ -679,6 +683,9 @@ class Session:
         # writes -- it used to be overwritten with HDF5 under its own name
         writer_for(path)
         metadata = self.file_metadata()
+        if not region_results and isinstance(metadata.get("roi_project"), dict):
+            metadata["roi_project"] = {k: v for k, v in metadata["roi_project"].items()
+                                       if k != "tables"}
         # read before the file is started again: frames opened from it are
         # read from it a plane at a time (`StoredStack`)
         from .io.hdf5 import save_images
