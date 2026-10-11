@@ -85,6 +85,18 @@ class FigurePane(QWidget):
         self.canvas.draw_idle()
         self.stale = False
 
+    def clipboard_image(self):
+        """The figure as a picture to paste, at twice the screen's resolution:
+        a screen grab is too coarse for a slide."""
+        from io import BytesIO
+        from PySide6.QtGui import QImage
+        if self.plot is None:
+            return None
+        self.draw()
+        buffer = BytesIO()
+        self.figure.savefig(buffer, format="png", dpi=2 * self.figure.get_dpi())
+        return QImage.fromData(buffer.getvalue(), "PNG")
+
 
 def summary_plot(plots: Sequence[Plot]) -> Plot:
     """Every figure on one page, as the window's *All* tab.
@@ -111,6 +123,10 @@ class DetachedFigure(QMainWindow):
         self.setWindowFlag(Qt.Window, True)
         self.setWindowTitle(title)
         self._name = name
+
+    def clipboard_image(self):
+        pane = self.centralWidget()
+        return pane.clipboard_image() if isinstance(pane, FigurePane) else None
 
     def closeEvent(self, event) -> None:           # noqa: N802 (Qt's name)
         self.closed.emit(self._name)
@@ -275,6 +291,11 @@ class FigureTabs(QWidget):
             parts.append(_label(name))
         return ": ".join(parts)
 
+    def clipboard_image(self):
+        """The figure being looked at, for Edit > Copy."""
+        pane = self.tabs.currentWidget()
+        return pane.clipboard_image() if isinstance(pane, FigurePane) else None
+
     def close_detached(self) -> None:
         """Whatever was torn off goes with the window it came from."""
         for window in list(self.detached.values()):
@@ -315,6 +336,9 @@ class ResultWindow(QMainWindow):
 
     def detach(self, index: int) -> None:
         self.figures.detach(index)
+
+    def clipboard_image(self):
+        return self.figures.clipboard_image()
 
     def show_plots(self, plots: Sequence[Plot], subtitle: str = "") -> None:
         self.setWindowTitle(f"{self._title}: {subtitle}" if subtitle else self._title)
