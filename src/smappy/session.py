@@ -264,6 +264,10 @@ class Layer:
         return Selection(mask, layer=index, name=self.name)
 
 
+class LiveTableError(ValueError):
+    """A result that changes the localizations, while a fit still adds to them."""
+
+
 # How many log entries a file carries.  One entry is a plugin path, a line of
 # text and its settings -- a few hundred bytes -- and the whole metadata block
 # is written as a single HDF5 attribute, so the oldest are dropped rather than
@@ -732,8 +736,11 @@ class Session:
         template = None
         if like is not None and 0 <= like < len(self.layers) and not self.layers[like].is_image:
             template = self.layers[like]
+        # live: the table is still being appended to, so the new layer must
+        # take blocks too, and must not link it (linking writes `group_id`
+        # into the table every layer shares)
         layer = Layer(self.locs, name=f"layer {len(self.layers) + 1}",
-                      share=self._locs_layer(),
+                      share=self._locs_layer(), live=self._live,
                       defaults=template is None,
                       settings=(dataclasses.replace(template.state.settings)
                                 if template is not None else None),
@@ -831,7 +838,7 @@ class Session:
                 self.show_grouped(index, bool(config["grouped"]))
         self.changed("layer")
 
-    def scratch(self) -> "Session":
+    def scratch(self, locs: Optional[Localizations] = None) -> "Session":
         """A headless copy to run a chain on: same table, layers, filters,
         grouping, ROI and slab; no undo, no log, no listeners.
 
@@ -843,7 +850,17 @@ class Session:
         """
         copy = Session()
         copy.recording = False
-        copy.locs = self.locs
+        # A live table is one object that keeps growing, and building the
+        # copy's layers links it, which writes `group_id` onto the table it
+        # is given: shared, that broke the live view's next append on a
+        # column mismatch.  A snapshot shares the arrays and nothing else.
+        # ``locs`` is that snapshot when the caller already holds one -- a
+        # pinned context's, taken on the GUI thread, which a chain running on
+        # a worker passes rather than snapshotting a table that may be
+        # growing as it reads it.
+        if locs is None:
+            locs = self.locs.snapshot() if self._live else self.locs
+        copy.locs = locs
         copy.path = self.path
         copy.files = list(self.files)
         copy.images = list(self.images)
@@ -861,7 +878,7 @@ class Session:
             sets = layer.state.sets
             grouped = (sets["grouped"].locs if "grouped" in sets
                        and not layer.state.grouped_stale else None)
-            made = Layer(self.locs, name=layer.name, defaults=False,
+            made = Layer(copy.locs, name=layer.name, defaults=False,
                          settings=dataclasses.replace(layer.state.settings),
                          display=dataclasses.replace(layer.get_display()),
                          group_settings=layer.group_settings,
@@ -893,6 +910,11 @@ class Session:
             self.changed("layers")
 
     # ------------------------------------------------------------ streaming
+    @property
+    def live(self) -> bool:
+        """Whether a fit is still appending to the table (`begin_live`)."""
+        return self._live
+
     def begin_live(self, extent=None, path=None) -> None:
         """Start an empty table that `append` grows, for a running fit.
 
@@ -907,6 +929,15 @@ class Session:
         if path is not None:
             self.path = Path(path)
         self.changed("locs")
+
+    def end_live(self) -> None:
+        """The fit ended without a finished table -- it failed: keep what came.
+
+        What was appended stays, as an ordinary table, so the session is not
+        left refusing every table change for a fit that will never finish.
+        """
+        if self._live:
+            self.set_locs(self.locs.snapshot(), undoable=False)
 
     def append(self, block: Localizations) -> int:
         """Add a block to the live table; every layer takes it in."""
@@ -1223,9 +1254,54 @@ class Session:
         Built on the caller's thread: the table and the selection are read
         here, so handing the context to a worker cannot race a live fit
         rebinding them.
+
+        While a fit is still appending, reading them here is not enough: the
+        live table is one object whose columns `append` replaces with longer
+        ones, so a plugin holding it saw it grow under it -- a mask of 50 rows
+        over a table of 100, or ``x_nm`` read before a block and ``y_nm``
+        after it.  The context is then *pinned*: a snapshot of the table
+        (`Localizations.snapshot`, no copy) and every layer's selection over
+        exactly those rows, all taken now, on this thread.
         """
+        if self._live and "locs" not in extra:
+            pinned = self._pinned_tables()
+            index = layer if not self.layers[layer].is_image else self.first_locs_layer()
+            locs, selection = pinned[index]["ungrouped"]
+            return Context(session=self, layer=layer, progress=progress,
+                           stream=stream, locs=locs, selection=selection,
+                           pinned=pinned, **extra)
         return Context(session=self, layer=layer, progress=progress,
                        stream=stream, **extra)
+
+    def _pinned_tables(self) -> Dict[int, Dict[str, Tuple[Localizations, Selection]]]:
+        """Every locs layer's ``(table, selection)``, as of now, for `context`.
+
+        The ungrouped table is one snapshot shared by all layers.  A grouped
+        table is offered only where the layer already has one: it is a table
+        of its own, never appended to, so it is safe to hand on -- but it
+        does not include what arrived since it was linked, and linking a
+        table that is still growing, on a worker, is exactly the race this
+        avoids.
+        """
+        locs = self.locs.snapshot()
+        n = len(locs)
+        out: Dict[int, Dict[str, Tuple[Localizations, Selection]]] = {}
+        for i, lay in enumerate(self.layers):
+            if lay.is_image:
+                continue
+            sel = lay.selection(i)
+            # the filter's mask may already be longer than the snapshot if a
+            # block came in between; rows are only ever added at the end, so
+            # its first n entries are the snapshot's
+            sel.mask = sel.mask[:n].copy()
+            tables = {"ungrouped": (locs, self._clip(sel, locs, i))}
+            if "grouped" in lay.state.sets:
+                locset = lay.state.sets["grouped"]
+                gsel = Selection(locset.filter.mask.copy(), layer=i,
+                                 name=f"{lay.name}, grouped")
+                tables["grouped"] = (locset.locs, self._clip(gsel, locset.locs, i))
+            out[i] = tables
+        return out
 
     def run(self, plugin: Plugin, settings=None, layer: int = 0,
             progress: Optional[Callable[[str], None]] = None,
@@ -1240,7 +1316,25 @@ class Session:
         self.apply(plugin, result)
         return result
 
-    def apply(self, plugin: Plugin, result: Result) -> None:
+    def apply(self, plugin: Plugin, result: Result, *,
+              finishes_live: bool = False) -> None:
+        """Put a result in place: its table, its files, its log line, its keep.
+
+        While a fit is still appending (`live`), a result that changes the
+        localizations is refused with `LiveTableError`, before anything is
+        touched -- except the fit's own, ``finishes_live``, which is the
+        finished form of the table it has been streaming.  Applied, a drift
+        correction replaced the growing table with one that could not take
+        the next block, and the fit's result then replaced it in turn: the
+        view stopped, the correction was lost, and the log kept a line for a
+        correction the table did not have.
+        """
+        if (self._live and not finishes_live
+                and (result.locs is not None or result.files)):
+            name = plugin.path.rsplit("/", 1)[-1] or type(plugin).__name__
+            raise LiveTableError(
+                f"{name} changes the localizations, and the fit is still "
+                f"adding to them: not applied")
         settings = result.settings
         # The log is the provenance of the localizations, so what goes in it
         # is what changed them -- a measurement can be repeated from the file

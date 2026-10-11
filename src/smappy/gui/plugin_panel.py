@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (QCheckBox, QHBoxLayout, QLabel, QMainWindow,
                                QWidget)
 
 from ..plugins import Plugin, Result
-from ..session import Session
+from ..session import LiveTableError, Session
 from .params import SettingsForm
 from .widgets import ColumnScroll
 
@@ -197,6 +197,10 @@ class PluginPanel(QWidget):
         self.plot_button.clicked.connect(self.plot)
         self.text_button.clicked.connect(self.show_text)
         self._live_running = False
+        # this panel's run started the session's live table (the "start" it
+        # streamed): its result is that table's finished form, the one
+        # table change `Session.apply` takes while a fit is appending
+        self._owns_live = False
         self._show_figures = True
         self._warnings = 0
         self._live_timer = QTimer(self, singleShot=True, interval=120)
@@ -373,6 +377,7 @@ class PluginPanel(QWidget):
             self.status.setStyleSheet(WARNING_STYLE)
         elif event == "start":
             self.session.begin_live(payload.get("extent"), payload.get("path"))
+            self._owns_live = True
         elif event == "block":
             self.session.append(payload)
 
@@ -589,8 +594,13 @@ class PluginPanel(QWidget):
         self.result = result
         # a preview is looked at, never applied: it exists so that the session
         # is not changed before the settings are right; nor is a live step
+        held_back = None
         if self._job not in ("preview", "live"):
-            self.session.apply(self.plugin, result)
+            owns, self._owns_live = self._owns_live, False
+            try:
+                self.session.apply(self.plugin, result, finishes_live=owns)
+            except LiveTableError as e:
+                held_back = str(e)
         else:
             self.session.show_preview(self.plugin, result)
         # A live step happens ten times a second while the ROI is dragged, so
@@ -599,7 +609,11 @@ class PluginPanel(QWidget):
         if not live:
             self.output.appendPlainText(result.text)
         self._progress_lines = 0
-        if self._warnings and not live:
+        if held_back is not None:
+            self.output.appendPlainText(held_back + " (its figures are shown)")
+            self.status.setText("not applied: the fit is still running")
+            self.status.setStyleSheet(WARNING_STYLE)
+        elif self._warnings and not live:
             self.status.setText(f"done, {self._warnings} warning"
                                 f"{'s' if self._warnings > 1 else ''}")
         else:
@@ -625,6 +639,11 @@ class PluginPanel(QWidget):
 
     def _on_failed(self, text: str) -> None:
         live, self._live_running = self._live_running, False
+        if self._owns_live:
+            # the fit that was streaming failed: what it streamed stays, as
+            # an ordinary table (`Session.end_live`)
+            self._owns_live = False
+            self.session.end_live()
         self._progress_lines = 0
         print(text)
         for button in self._buttons():

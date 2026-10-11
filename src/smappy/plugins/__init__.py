@@ -274,8 +274,13 @@ class Context:
                  site=None, site_table: Optional[Sequence[Dict[str, Any]]] = None,
                  rois=None, grouping: Optional[str] = None,
                  evaluations: Sequence[Tuple[str, str]] = (),
-                 stop=None, writer_finished=None):
+                 stop=None, writer_finished=None, pinned=None):
         self.session = session
+        # layer -> {"ungrouped"/"grouped": (locs, selection)}, taken when the
+        # session's table was still being appended to (`Session.context`):
+        # then `table` and `layer_selection` answer from these and never
+        # read the growing table from the worker
+        self._pinned = pinned
         self.layer = layer
         # "grouped", "ungrouped", or None for each layer's own: what a chain
         # (or the plugin's own requirement) has decided `table` should hand
@@ -337,6 +342,8 @@ class Context:
         with a message rather than answered with the ungrouped table.
         """
         index = self.layer if layer is None else layer
+        if self._pinned is not None:
+            return self._pinned_table(index)
         if self.session is None:
             if self.grouping == "grouped":
                 raise ValueError("a grouped table needs a session: link the "
@@ -347,6 +354,45 @@ class Context:
         if locs is not self.session.locs:
             self.served_grouped = True
         return locs, selection
+
+    def _pinned_table(self, index: int) -> Tuple[Localizations, "Selection"]:
+        session = self.session
+        if session.layers[index].is_image:
+            index = session.first_locs_layer()
+        tables = self._pinned[index]
+        lay = session.layers[index]
+        grouped = lay.grouped if self.grouping is None else self.grouping == "grouped"
+        if not grouped:
+            return tables["ungrouped"]
+        if "grouped" not in tables:
+            raise ValueError("no grouped table while the fit is still adding "
+                             "localizations: show the layer grouped first, or "
+                             "run this ungrouped")
+        self.served_grouped = True
+        return tables["grouped"]
+
+    def layer_selection(self, layer: int,
+                        without: Tuple[str, ...] = ()) -> "Selection":
+        """Layer ``layer``'s selection over `locs` (the ungrouped table).
+
+        `Session.selection`, except that it agrees with `locs` while a fit is
+        still appending: a plugin that reads several layers -- one answer per
+        layer -- asks here rather than the session, whose table has grown
+        since this context was made.
+        """
+        if self.session is None:
+            if layer != self.layer or without:
+                raise ValueError("other layers need a session")
+            return self.selection
+        if self._pinned is None:
+            return self.session.selection(layer, without)
+        index = (self.session.first_locs_layer()
+                 if self.session.layers[layer].is_image else layer)
+        if not without:
+            return self._pinned[index]["ungrouped"][1]
+        sel = self.session.selection(index, without)
+        sel.mask = sel.mask[:len(self.locs)]      # rows are only ever appended
+        return sel
 
     def report(self, text: str) -> None:
         """Say what is happening.  A no-op when nobody is listening."""

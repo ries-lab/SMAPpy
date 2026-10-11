@@ -164,9 +164,19 @@ class LocSet:
             raise TypeError("this table was not opened for appending; "
                             "build the ViewState with live=True")
         x, y = positions(new)
-        self.locs.extend(new)
+        # Several sets can be over one table -- a second layer during a live
+        # fit -- and share its index.  The first to take a block extends the
+        # table and the index; the others extend only their own filter.  Each
+        # used to extend the table, so a second layer doubled every block.
+        before = self.filter.n_rows
+        if len(self.locs) == before:
+            self.locs.extend(new)
+        elif len(self.locs) != before + n:
+            raise ValueError(f"the table has {len(self.locs)} rows, this set "
+                             f"{before}: it cannot take a block of {n}")
         self.filter.append(n)
-        self.index.append(x, y)
+        if self.index.n_localizations < len(self.locs):
+            self.index.append(x, y)
         self._update_precision(force=False)
         return n
 

@@ -92,6 +92,17 @@ class Localizations:
             buffer[n:n + m] = values
             self.columns[k] = buffer[:n + m]
 
+    def snapshot(self) -> "Localizations":
+        """The table as it is now, untouched by any later `extend`.
+
+        A new table over the same arrays, so it costs nothing: `extend` writes
+        only past the end of what is there, or into a new buffer, and replaces
+        the views in *this* table's `columns` -- never in the snapshot's.  It
+        is what a live table hands to anything that reads it on another
+        thread, or keeps it while the fit goes on adding to the original.
+        """
+        return Localizations(dict(self.columns), dict(self.metadata))
+
     def compact(self) -> "Localizations":
         """Release the spare capacity left by `extend`."""
         self.columns = {k: np.array(v, copy=True) for k, v in self.columns.items()}

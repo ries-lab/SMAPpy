@@ -1637,7 +1637,7 @@ def _groups(ctx: Context, settings: LineProfileSettings):
         for i, layer in enumerate(getattr(session, "layers", [])):
             if layer.is_image or not layer.visible:
                 continue
-            locs = session.selection(i).apply(ctx.locs)
+            locs = ctx.layer_selection(i).apply(ctx.locs)
             taken = [colour for _, colour, _ in found]
             found.append((layer.name,
                           layer_colour(layer.get_display(), len(found), taken),

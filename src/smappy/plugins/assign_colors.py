@@ -571,7 +571,7 @@ def histogram_selection(ctx: Context):
     lay = session.layers[layer]
     if lay.is_image or "channel" not in lay.state.sets["ungrouped"].filter:
         return ctx.selection
-    return session.selection(layer, without=("channel",))
+    return ctx.layer_selection(layer, without=("channel",))
 
 
 @register("Analysis/Dual-Color/AssignColors")

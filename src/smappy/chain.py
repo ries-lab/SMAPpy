@@ -461,7 +461,7 @@ class ChainPlugin(Plugin):
 
     def run(self, ctx: Context, settings) -> Result:
         from .session import Session
-        session = (ctx.session.scratch() if ctx.session is not None
+        session = (ctx.session.scratch(ctx.locs) if ctx.session is not None
                    else Session(ctx.locs).scratch())
         records: List[Dict[str, Any]] = []
         results: Dict[str, Result] = {}
