@@ -636,6 +636,29 @@ class Session:
         target = Path(path).resolve()
         return any(target == Path(p).resolve() for p in self.protected)
 
+    def file_metadata(self) -> Dict[str, Any]:
+        """The table's metadata as a file carries it: with the session's log,
+        its ROI, its name and the ROI manager's project.  What `save` writes,
+        and what a new instance is handed (`smappy.handoff`)."""
+        metadata = dict(self.locs.metadata)
+        # all of it goes in one JSON attribute, so the log is capped rather
+        # than allowed to grow without limit over a file's life
+        metadata["history"] = self.history[-MAX_HISTORY:]
+        if self.roi is not None:
+            metadata["roi"] = self.roi.to_dict()
+        else:
+            metadata.pop("roi", None)
+        if self.name or self.colour:
+            metadata["session"] = {"name": self.name, "colour": self.colour}
+        else:
+            metadata.pop("session", None)
+        rois = self.roi_state()
+        # a tile grid alone is worth keeping: it is where a systematic walk
+        # through the file was left off
+        if rois and (rois["rois"] or rois["runs"] or rois.get("tile_nm")):
+            metadata["roi_project"] = rois
+        return metadata
+
     def save(self, path=None, gui_state: Optional[bool] = None) -> Path:
         """Write the table, its history, its ROIs and -- optionally -- the GUI.
 
@@ -653,21 +676,7 @@ class Session:
         # and a SMAP _sml.mat, a csv or a MINFLUX export is not a file this
         # writes -- it used to be overwritten with HDF5 under its own name
         writer_for(path)
-        metadata = dict(self.locs.metadata)
-        # all of it goes in one JSON attribute, so the log is capped rather
-        # than allowed to grow without limit over a file's life
-        metadata["history"] = self.history[-MAX_HISTORY:]
-        if self.roi is not None:
-            metadata["roi"] = self.roi.to_dict()
-        if self.name or self.colour:
-            metadata["session"] = {"name": self.name, "colour": self.colour}
-        else:
-            metadata.pop("session", None)
-        rois = self.roi_state()
-        # a tile grid alone is worth keeping: it is where a systematic walk
-        # through the file was left off
-        if rois and (rois["rois"] or rois["runs"] or rois.get("tile_nm")):
-            metadata["roi_project"] = rois
+        metadata = self.file_metadata()
         # read before the file is started again: frames opened from it are
         # read from it a plane at a time (`StoredStack`)
         from .io.hdf5 import save_images

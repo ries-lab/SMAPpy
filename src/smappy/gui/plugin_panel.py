@@ -421,6 +421,16 @@ class PluginPanel(QWidget):
         except ValueError as e:
             self.status.setText(f"bad value: {e}")
             return False
+        if (job == "run" and self.session.live and not self._owns_live
+                and self.plugin.changes_locs_for(settings)):
+            # known before the run: say so now, not after minutes of work
+            name = self.plugin.name or self.plugin.path
+            self._offer_new_window(
+                settings, f"The fit is still adding localizations, and {name} "
+                          "changes them, so it cannot run on this session now.\n\n"
+                          "It can run in a new window instead, on the "
+                          "localizations so far; the fit carries on here.")
+            return False
         if job == "run" and ask:
             go, chosen = self._preflight(settings)
             if not go:
@@ -529,6 +539,31 @@ class PluginPanel(QWidget):
         self.status.setText("cancelled")
         return False, None
 
+    def _offer_new_window(self, settings, text: str) -> bool:
+        """Ask whether to run in a new instance; start it if so (`handoff`)."""
+        if not self.ask_new_window(text):
+            self.status.setText("not run: the fit is still running")
+            return False
+        opener = self.session.window_openers.get("new window")
+        if opener is None:
+            self.status.setText("no new window in this program")
+            return False
+        if opener(run=(self.plugin, settings)) is None:
+            return False
+        self.status.setText("running in a new window")
+        return True
+
+    def ask_new_window(self, text: str) -> bool:
+        """Run in a new window, or cancel: a dialog, which a test replaces."""
+        box = QMessageBox(self)
+        box.setWindowTitle(f"{self.plugin.name}: the fit is still running")
+        box.setText(text)
+        new = box.addButton("Run in a new window", QMessageBox.ButtonRole.AcceptRole)
+        box.addButton(QMessageBox.StandardButton.Cancel)
+        box.setDefaultButton(new)
+        box.exec()
+        return box.clickedButton() is new
+
     def ask_choice(self, title: str, question):
         """Put a question with alternatives; the choice, or None to cancel.
 
@@ -610,9 +645,11 @@ class PluginPanel(QWidget):
             self.output.appendPlainText(result.text)
         self._progress_lines = 0
         if held_back is not None:
+            # a plugin that did not say beforehand (`Plugin.changes_locs`)
             self.output.appendPlainText(held_back + " (its figures are shown)")
             self.status.setText("not applied: the fit is still running")
             self.status.setStyleSheet(WARNING_STYLE)
+            QTimer.singleShot(0, lambda: self._held_back(held_back))
         elif self._warnings and not live:
             self.status.setText(f"done, {self._warnings} warning"
                                 f"{'s' if self._warnings > 1 else ''}")
@@ -636,6 +673,15 @@ class PluginPanel(QWidget):
         if result.figures() and (live or self._show_figures):
             self.plot(raise_window=not live)
         self.ended.emit("done", result)
+
+    def _held_back(self, text: str) -> None:
+        try:
+            self._offer_new_window(self.result.settings,
+                                   f"{text}.\n\nIt can run again in a new window, "
+                                   "on the localizations so far; the fit carries "
+                                   "on here.")
+        except Exception:                    # a singleShot callable must not raise
+            traceback.print_exc()
 
     def _on_failed(self, text: str) -> None:
         live, self._live_running = self._live_running, False
