@@ -39,9 +39,16 @@ def test_a_cycle_is_freed_on_the_gui_thread_however_much_a_worker_allocates(app,
     freed_on = []
     Cycle(freed_on)
 
-    def allocate():                     # enough to trip every generation's threshold
-        for _ in range(200_000):
-            [[]]
+    # Enough to trip the collector's threshold -- and kept alive until it has
+    # run, because since Python 3.13 an object that is freed again no longer
+    # counts towards a collection: with `[[]]` thrown away the counts barely
+    # moved, and the test passed only when something before it had left them
+    # high (it failed whenever the suite's own collection every 100 tests
+    # happened to come just before it).
+    kept = []
+
+    def allocate():
+        kept.extend([] for _ in range(200_000))
     worker = threading.Thread(target=allocate)
     worker.start()
     worker.join()
@@ -51,6 +58,7 @@ def test_a_cycle_is_freed_on_the_gui_thread_however_much_a_worker_allocates(app,
     while not freed_on and time.monotonic() < end:
         app.processEvents()
         time.sleep(0.01)
+    del kept
     assert freed_on == [threading.main_thread()]
 
 

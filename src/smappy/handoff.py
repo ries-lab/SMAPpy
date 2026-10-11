@@ -128,7 +128,6 @@ def session_state(session, gui_state=None, view=None) -> Dict[str, Any]:
         "gui_state": _plain(gui_state) if gui_state is not None else None,
         # what the copy was taken from, for its log
         "source": str(session.path) if session.path else session.display_name,
-        "n": len(session.locs),
     }
 
 
