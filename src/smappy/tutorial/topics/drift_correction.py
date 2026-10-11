@@ -149,12 +149,12 @@ def make(d) -> None:
            spot=[d.rect(render.view.graphics, pad=-2)], point=d.at_data(7480, 4700))
 
     d.chapter("COMET")
-    file_menu = menu(d, "File")
-    d.shot("To try COMET on the same data, undo the correction first: File, "
+    edit_menu = menu(d, "Edit")
+    d.shot("To try COMET on the same data, undo the correction first: Edit, "
            "Undo, or Ctrl+Z.",
-           spot=[menu_item(d, file_menu, "Undo")], point=menu_item(d, file_menu, "Undo"),
-           click=True, zoom=d.around(file_menu, 700))
-    file_menu.close()
+           spot=[menu_item(d, edit_menu, "Undo")], point=menu_item(d, edit_menu, "Undo"),
+           click=True, zoom=d.around(edit_menu, 700))
+    edit_menu.close()
     session.undo()
     _all_frames(d, tab)
     analysis = show_tab(d, "Analysis")

@@ -301,3 +301,21 @@ def test_closing_the_site_window_stops_the_measuring(app, monkeypatch):
     runs = len(project.runs)
     window.select(ids[1])
     assert len(project.runs) == runs
+
+
+def test_copy_takes_the_roi_pane_and_the_evaluators_figure(app, monkeypatch):
+    monkeypatch.setattr(pipeline_module, "resolve", lambda instances: steps(Drawing))
+    window, project = a_window(app)
+    window.show()
+    window.evaluate_live.setChecked(True)
+    window.select(next(iter(project.rois)))
+    app.processEvents()
+    # the ROI pane, outlines and all, when the mouse is over none of them
+    image = window.clipboard_image()
+    pane = window.roi_pane.graphics
+    assert (image.width(), image.height()) == (pane.width(), pane.height())
+    # the site window: the figure of the evaluator being looked at
+    figure = window._site.clipboard_image()
+    assert figure is not None and not figure.isNull()
+    window._site.close()
+    window.close()

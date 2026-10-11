@@ -86,6 +86,21 @@ def _add_menu(parent, title: str, owner: QWidget) -> QMenu:
     return menu
 
 
+def _copy_selected_text(widget) -> bool:
+    """Let a text widget with something selected copy it itself."""
+    if widget is None or not hasattr(widget, "copy"):
+        return False
+    if hasattr(widget, "hasSelectedText"):            # line edits, labels
+        selected = widget.hasSelectedText()
+    elif hasattr(widget, "textCursor"):               # text edits and browsers
+        selected = widget.textCursor().hasSelection()
+    else:
+        return False
+    if selected:
+        widget.copy()
+    return selected
+
+
 def window_shortcuts(window: QWidget, with_quit: bool = True) -> None:
     """Cmd/Ctrl+W closes this window, Cmd/Ctrl+Q quits: on every window."""
     close = QAction("Close window", window, triggered=window.close)
@@ -145,16 +160,6 @@ class ControlWindow(QMainWindow):
         save = self._action(menu, "Save", QKeySequence.Save, self.save)
         save_as = self._action(menu, "Save as...", QKeySequence.SaveAs, self.save_as)
         menu.addSeparator()
-        self.undo_action = self._action(menu, "Undo", QKeySequence.Undo,
-                                        lambda: self.session.undo())
-        self.undo_menu = _add_menu(menu, "Undo steps", menu)
-        self.redo_action = self._action(menu, "Redo", None, lambda: self.session.redo())
-        self.redo_action.setShortcuts(_keys(QKeySequence.Redo, "Ctrl+Shift+Z"))
-        self.redo_menu = _add_menu(menu, "Redo steps", menu)
-        self._load_locked = [open_, add, image, save, save_as, self.undo_action,
-                             self.redo_action, self.undo_menu.menuAction(),
-                             self.redo_menu.menuAction()]
-        menu.addSeparator()
         self._action(menu, "Restore GUI state from file...", None,
                      self.restore_state_from_file)
         self._action(menu, "Save GUI", None, self.save_gui)
@@ -167,6 +172,36 @@ class ControlWindow(QMainWindow):
         quit_ = self._action(menu, "Quit", None, lambda: QApplication.instance().quit())
         quit_.setShortcuts(_keys(QKeySequence.Quit, "Ctrl+Q"))
         window_shortcuts(self, with_quit=False)
+        edit = _add_menu(self.menuBar(), "Edit", self)
+        self.undo_action = self._action(edit, "Undo", QKeySequence.Undo,
+                                        lambda: self.session.undo())
+        self.undo_menu = _add_menu(edit, "Undo steps", edit)
+        self.redo_action = self._action(edit, "Redo", None, lambda: self.session.redo())
+        self.redo_action.setShortcuts(_keys(QKeySequence.Redo, "Ctrl+Shift+Z"))
+        self.redo_menu = _add_menu(edit, "Redo steps", edit)
+        # Ctrl+Z undoes from the picture too, which is where one sees what to
+        # undo; not from every window -- in the batch or calibration window
+        # it would take back a step of a table that window is not about
+        render.addAction(self.undo_action)
+        render.addAction(self.redo_action)
+        self._load_locked = [open_, add, image, save, save_as, self.undo_action,
+                             self.redo_action, self.undo_menu.menuAction(),
+                             self.redo_menu.menuAction()]
+        edit.addSeparator()
+        self.copy_action = self._action(edit, "Copy", QKeySequence.Copy, self.copy)
+        self.copy_action.setToolTip("the selected text, else the picture of the "
+                                    "window in front: the render, the 3D view, "
+                                    "the ROI manager or a figure")
+        # application-wide, so Ctrl+C in a figure window copies the figure.  A
+        # text field still copies its own text: Qt offers it the key first
+        self.copy_action.setShortcutContext(Qt.ApplicationShortcut)
+        self._action(edit, "Copy rendered image", None,
+                     lambda: self.copy(self.render_window))
+        edit.setToolTipsVisible(True)
+        # the window Copy means when it is chosen from this menu, which makes
+        # the control window the active one: the last picture that was
+        self._picture_window: Optional[QWidget] = None
+        QApplication.instance().focusWindowChanged.connect(self._on_focus_window)
         view = _add_menu(self.menuBar(), "View", self)
         self.view3d_window = None
         self.calibration_window = None
@@ -607,6 +642,53 @@ class ControlWindow(QMainWindow):
         menu.addAction(action)
         return action
 
+    # ---------------------------------------------------------------- copy
+    def _on_focus_window(self, window) -> None:
+        """Remember the last window that has a picture to copy."""
+        widget = next((w for w in QApplication.topLevelWidgets()
+                       if window is not None and w.windowHandle() == window), None)
+        if widget is not None and hasattr(widget, "clipboard_image"):
+            self._picture_window = widget
+
+    def _copy_window(self) -> QWidget:
+        """The window Copy is about: the one in front if it has a picture,
+        else the last one that did, else the render window."""
+        active = QApplication.activeWindow()
+        if active is not None and active is not self:
+            return active
+        last = self._picture_window
+        try:
+            if last is not None and last.isVisible():
+                return last
+        except RuntimeError:                      # closed and deleted since
+            self._picture_window = None
+        return self.render_window
+
+    def copy(self, window: Optional[QWidget] = None) -> bool:
+        """Copy what is in front: selected text, else that window's picture.
+
+        Any window can take part by having a ``clipboard_image()`` that
+        returns a QImage, or None when it has nothing to show.  The picture
+        is put on the clipboard as an image, to paste into a slide or a
+        notebook; saving it at a chosen pixel size is the Save menus' job.
+        Returns whether anything was copied.
+        """
+        if window is None:
+            focus = QApplication.focusWidget()
+            if _copy_selected_text(focus):
+                return True
+            window = self._copy_window()
+        grab = getattr(window, "clipboard_image", None)
+        image = grab() if grab is not None else None
+        if image is None or image.isNull():
+            self.statusBar().showMessage("Nothing to copy here", 3000)
+            return False
+        QApplication.clipboard().setImage(image)
+        self.statusBar().showMessage(
+            f"Copied {window.windowTitle() or 'the picture'} "
+            f"({image.width()} x {image.height()} pixels)", 3000)
+        return True
+
     def _refresh_undo(self) -> None:
         """The menu says what it would undo, and lists the steps behind it.
 
@@ -903,6 +985,10 @@ class RenderWindow(QMainWindow):
         self.addToolBar(RenderToolBar(self.view))
         self.resize(900, 900)
         window_shortcuts(self)
+
+    def clipboard_image(self):
+        """What Edit > Copy puts on the clipboard: the view as displayed."""
+        return self.view.qimage()
 
 
 def _start_log() -> None:

@@ -637,6 +637,10 @@ class RenderView(QWidget):
     # ------------------------------------------------------------- saving
     def save_png(self, path) -> None:
         """The view as displayed, 8-bit RGB: the panels side by side, if they are."""
+        self.qimage().save(str(path))
+
+    def qimage(self) -> QImage:
+        """The view as displayed, as a QImage: what Save PNG writes and Copy copies."""
         panels = self.panel_images(self.current_fov())
         if len(panels) > 1:
             # a grey line between panels, as SMAP draws it
@@ -651,7 +655,8 @@ class RenderView(QWidget):
             rgb = panels[0]
         rgb = (np.ascontiguousarray(rgb) * 255).astype(np.uint8)
         h, w, _ = rgb.shape
-        QImage(rgb.data, w, h, 3 * w, QImage.Format_RGB888).save(str(path))
+        # a copy: the QImage would otherwise point into an array about to go
+        return QImage(rgb.data, w, h, 3 * w, QImage.Format_RGB888).copy()
 
     def save_tiff(self, path, pixelsize: float, what: str = "rgb") -> None:
         """Re-render the current field of view at ``pixelsize`` (data units).
