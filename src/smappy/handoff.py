@@ -169,7 +169,7 @@ class Offer:
         if self.block is not None:
             self.block.close()
             try:
-                self.block.unlink()
+                _unlink(self.block)
             except FileNotFoundError:
                 pass
             self.block = None
@@ -200,6 +200,23 @@ def _shared_memory(size: int, name: Optional[str] = None):
         except Exception:
             pass
     return block
+
+
+def _unlink(block) -> None:
+    """Unlink a block made by `_shared_memory`.
+
+    Before Python 3.13 `unlink` also unregisters the block from the resource
+    tracker, which `_shared_memory` has already done; the tracker then prints
+    a KeyError traceback for every handoff.  Registering it again first keeps
+    the two balanced.
+    """
+    if getattr(block, "_track", True) and os.name == "posix":
+        try:
+            from multiprocessing import resource_tracker
+            resource_tracker.register(block._name, "shared_memory")
+        except Exception:
+            pass
+    block.unlink()
 
 
 def offer(session, *, name: str = "", colour: str = "", gui_state=None,
@@ -235,7 +252,7 @@ def offer(session, *, name: str = "", colour: str = "", gui_state=None,
             json.dump(state, f, default=_json_default)
     except Exception:
         block.close()
-        block.unlink()
+        _unlink(block)
         Path(where).unlink(missing_ok=True)
         raise
     return Offer(Path(where), block)

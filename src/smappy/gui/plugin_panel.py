@@ -194,7 +194,9 @@ class PluginPanel(QWidget):
             self.run_button.clicked.connect(self.open_window)
         else:
             self.run_button.clicked.connect(self.run)
-        self.plot_button.clicked.connect(self.plot)
+        # not `self.plot`: `clicked` hands on `checked` (False), which PySide
+        # puts in the bool `raise_window` and the window stays behind
+        self.plot_button.clicked.connect(lambda: self.plot())
         self.text_button.clicked.connect(self.show_text)
         self._live_running = False
         # this panel's run started the session's live table (the "start" it

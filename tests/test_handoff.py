@@ -126,6 +126,29 @@ def test_the_control_window_hands_its_session_to_another(app, tmp_path):
         uninstall_identity(app)
 
 
+
+def test_the_menu_entry_starts_the_new_instance(app, monkeypatch):
+    """`triggered` hands on `checked`; it must not reach `start` and make an
+    offer with nothing started to take it."""
+    from PySide6.QtGui import QAction
+    from smappy.gui.app import ControlWindow, RenderWindow
+    from smappy.gui.identity import uninstall_identity
+    launched = []
+    monkeypatch.setattr(handoff, "launch", launched.append)
+    session = live_session()
+    render = RenderWindow(session)
+    control = ControlWindow(session, render)
+    try:
+        action = next(a for a in control.findChildren(QAction)
+                      if a.text() == "Open in a new window")
+        action.trigger()
+        assert launched == [control._offers[0].path]
+    finally:
+        control.release_offers()
+        control.close()
+        render.close()
+        uninstall_identity(app)
+
 @pytest.mark.slow
 def test_a_new_instance_starts_and_takes_the_session(tmp_path):
     """The whole path: the program started as *Open in a new window* starts

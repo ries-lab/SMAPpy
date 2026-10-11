@@ -186,9 +186,12 @@ class ControlWindow(QMainWindow):
         save = self._action(menu, "Save", QKeySequence.Save, self.save)
         save_as = self._action(menu, "Save as...", QKeySequence.SaveAs, self.save_as)
         self._action(menu, "Session name...", None, self.rename_session)
-        self.copy_action = self._action(menu, "Open in a new window", "Ctrl+Shift+N",
-                                        self.open_in_new_window)
-        self.copy_action.setToolTip("the session as it is now -- table, layers, "
+        # a lambda: `triggered` hands on `checked` (False), which would land
+        # in `start` and make the offer without starting anything to take it
+        self.new_window_action = self._action(menu, "Open in a new window",
+                                              "Ctrl+Shift+N",
+                                              lambda: self.open_in_new_window())
+        self.new_window_action.setToolTip("the session as it is now -- table, layers, "
                                     "filters, ROIs -- in a new instance of the "
                                     "program; a live fit carries on here")
         menu.addSeparator()
@@ -219,7 +222,7 @@ class ControlWindow(QMainWindow):
         self._offers: list = []            # sessions handed to new instances
         self._offer_timer = QTimer(self, interval=500)
         self._offer_timer.timeout.connect(self._check_offers)
-        self._load_locked = [open_, add, image, save, save_as, self.copy_action,
+        self._load_locked = [open_, add, image, save, save_as, self.new_window_action,
                              self.undo_action,
                              self.redo_action, self.undo_menu.menuAction(),
                              self.redo_menu.menuAction()]
