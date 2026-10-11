@@ -2,7 +2,7 @@
 title: ROI manager
 summary: The window where sites are found, looked at one by one, kept or excluded, and evaluated.
 widget: smappy.gui.roi_window.ROIManagerWindow
-covers: [smappy.gui.roi_window.ROIManagerWindow.evaluate_active, smappy.gui.roi_window.rim_distance, smappy.gui.roi_window.outline, smappy.roi_manager.core.ROIProject.tiles, smappy.roi_manager.core.ROIProject.indices, smappy.roi_manager.core.ROIProject.inputs, smappy.roi_manager.core.ROIProject.entries, smappy.roi_manager.core.ROIProject.needs_evaluation, smappy.roi_manager.core.ROIProject.results, smappy.roi_manager.core.ROIProject.evaluate_one, smappy.roi_manager.link.SessionROIs.sync, smappy.roi_manager.link.SessionROIs._fingerprint, smappy.roi_manager.core.ROIProject.propose, smappy.plugins.roi.SegmenterPlugin.found]
+covers: [smappy.gui.roi_window.ROIManagerWindow.evaluate_active, smappy.gui.roi_window.rim_distance, smappy.gui.roi_window.outline, smappy.roi_manager.core.ROIProject.tiles, smappy.roi_manager.core.ROIProject.indices, smappy.roi_manager.core.ROIProject.inputs, smappy.roi_manager.core.ROIProject.entries, smappy.roi_manager.core.ROIProject.needs_evaluation, smappy.roi_manager.core.ROIProject.results, smappy.roi_manager.core.ROIProject.evaluate_one, smappy.roi_manager.link.SessionROIs.sync, smappy.roi_manager.link.SessionROIs._fingerprint, smappy.roi_manager.core.ROIProject.propose, smappy.plugins.roi.SegmenterPlugin.found, smappy.roi_manager.core.ROIHistory, smappy.roi_manager.core.ROIProject.edit]
 ---
 
 ## What it does
@@ -85,7 +85,7 @@ candidates to the file shown here.  Its *Preview* button proposes them
 without adding them: they are drawn grey and dashed (the ones the finder
 rejected dotted), each preview replaces the last, and *Run* adds them.  That
 is how a finder's settings are tuned without removing the last try's ROIs by
-hand.  A click on empty space in the zoom drafts
+hand; and a run that was not wanted is taken back with *Undo*.  A click on empty space in the zoom drafts
 an ROI by hand (blue, dashed); *Add* stores it.  A click on an ROI's
 *outline* selects it, while a click *inside* one drafts a new ROI, so that
 overlapping ROIs can be drawn.
@@ -289,6 +289,21 @@ Enter does the same.
 ### Remove
 Deletes the selected ROI.  To keep an ROI out of the analysis without
 losing it, untick *use* instead.
+
+### Undo
+Takes back the last edit of the ROIs: a segmenter's run (all the ROIs it
+added, and any it replaced), an ROI added, removed, included or excluded,
+an outline or a direction.  Ctrl+Z in this window does the same; the
+tooltip says what it would undo.  This is the ROI manager's own undo, apart
+from the main window's, which undoes changes to the localizations: one
+never undoes the other.  Evaluations are not steps, since they can be run
+again, and their results stay with the ROI, so an ROI brought back brings
+its numbers back.  Twenty steps are kept, and opening another file starts
+afresh.
+
+### Redo
+Puts back what *Undo* took back (Ctrl+Shift+Z, or the platform's own redo key, Ctrl+Y on Windows and Linux).  A new edit
+after an undo makes the undone step unrecoverable.
 
 ### Discard preview
 Shown while a segmenter's preview is drawn.  Takes the grey proposals away

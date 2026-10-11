@@ -66,7 +66,7 @@ import numpy as np
 
 from . import Context, Plot, Plugin, Result, param, register, settings_from
 from .roi import (EVALUATION_HELP, MAX_FINDER_PIXELS, SegmenterPlugin,
-                  SiteAnalysisPlugin,
+                  SiteAnalysisPlugin, replace_param,
                   auto_only, current_file)
 
 # SMAP's NPCLabelingQuantify counts a localization towards a corner only when
@@ -169,9 +169,7 @@ class NPCSegmentSettings:
     keep_rejected: bool = param(False, label="keep rejected",
                                 help="add candidates that fail the checks as ROIs "
                                      "that are not used, to look at them")
-    replace: bool = param(False, label="replace earlier pores",
-                          help="remove the ROIs this segmenter made on the file "
-                               "before finding the pores again")
+    replace: bool = replace_param("pores")
     radial_alpha: float = param(0.05, label="far test level", min=1e-6, max=0.5,
                                 advanced=True,
                                 help="a candidate fails when its far ones are this "
@@ -425,9 +423,6 @@ class NPCSegment(SegmenterPlugin):
                  "origin": {k: s[k] for k in ("radius_nm", "n_ring", "n_precise",
                                               "far_fraction", "failed")}}
                 for s in keep]
-
-    def replaced(self, project, file_id, settings: NPCSegmentSettings) -> List[str]:
-        return [roi.id for roi in npc_rois(project, file_id)] if settings.replace else []
 
     def segment(self, ctx: Context, settings: NPCSegmentSettings,
                 commit: bool) -> Result:

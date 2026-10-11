@@ -297,10 +297,21 @@ class ROIManagerWindow(QMainWindow):
         roi_side_list.addWidget(self.table, 1)
         side.addLayout(roi_side_list, 0)
         llayout.addLayout(side, 1)
+        edits = QHBoxLayout()
+        edits.setSpacing(3)
         self.remove_button = QPushButton("Remove")
         self.remove_button.setToolTip("remove the selected ROI")
         self.remove_button.clicked.connect(self._remove)
-        llayout.addWidget(self.remove_button)
+        # the ROIs' own undo (`ROIProject.history`), not the main window's,
+        # which is for tables: Ctrl+Z here never undoes a drift correction
+        self.undo_button = QPushButton("Undo")
+        self.undo_button.clicked.connect(self.undo)
+        self.redo_button = QPushButton("Redo")
+        self.redo_button.clicked.connect(self.redo)
+        edits.addWidget(self.remove_button, 1)
+        edits.addWidget(self.undo_button)
+        edits.addWidget(self.redo_button)
+        llayout.addLayout(edits)
         # shown only while a segmenter's preview is drawn: Run adds it, a
         # new preview replaces it, and this is the way to have neither
         self.clear_preview_button = QPushButton("Discard preview")
@@ -335,6 +346,16 @@ class ROIManagerWindow(QMainWindow):
             "stored, marked for what they are.")
         self.re_evaluate.toggled.connect(self._on_re_evaluate)
         llayout.addWidget(self.re_evaluate)
+        # the platform's keys, and Ctrl+Shift+Z everywhere, as the main window
+        # has them; once each, since two shortcuts on one key fire neither
+        keys = [(QKeySequence(QKeySequence.Undo), self.undo),
+                (QKeySequence(QKeySequence.Redo), self.redo)]
+        if QKeySequence("Ctrl+Shift+Z") not in (k for k, _ in keys):
+            keys.append((QKeySequence("Ctrl+Shift+Z"), self.redo))
+        for sequence, slot in keys:
+            shortcut = QShortcut(sequence, self)
+            shortcut.setContext(Qt.WindowShortcut)
+            shortcut.activated.connect(slot)
         toggle = QShortcut(QKeySequence(Qt.Key_Space), self)
         toggle.setContext(Qt.WindowShortcut)
         toggle.activated.connect(self._toggle)
@@ -499,6 +520,7 @@ class ROIManagerWindow(QMainWindow):
     # ------------------------------------------------------------ drawing
     def redraw(self) -> None:
         project = self.project
+        self._update_undo()
         file_id = self.current_file()
         if file_id is None:
             for pane in (self.file_pane, self.zoom_pane, self.roi_pane):
@@ -811,6 +833,37 @@ class ROIManagerWindow(QMainWindow):
             v = np.vstack([v, v[0]])               # show how it would close
         self.roi_pane.draw("drawing", v[:, 0], v[:, 1])
 
+    # ---------------------------------------------------------------- undo
+    def _update_undo(self) -> None:
+        history = self.project.history
+        for button, can, label, what in (
+                (self.undo_button, history.can_undo, history.undo_label, "undo"),
+                (self.redo_button, history.can_redo, history.redo_label, "redo")):
+            button.setEnabled(can)
+            button.setToolTip(f"{what}: {label}" if can else f"nothing to {what}")
+
+    def _edit(self, what: str):
+        """An undoable edit, named after the selected ROI's number."""
+        roi = self._selected()
+        number = self.project.numbers().get(roi.id) if roi is not None else None
+        return self.project.edit(f"{what} ROI {number}" if number else what)
+
+    def undo(self) -> None:
+        self._travel(self.project.undo, "undid")
+
+    def redo(self) -> None:
+        self._travel(self.project.redo, "redid")
+
+    def _travel(self, step, verb: str) -> None:
+        label = step()
+        if label is None:
+            return
+        if self.active not in self.project.rois:
+            self.active = None
+        # the ROI tab counts them too, and its listener is the session's
+        self.session.changed("rois")
+        self.status.showMessage(f"{verb} {label}")
+
     def _finish_polygon(self) -> None:
         polygon = [[float(p[0]), float(p[1])] for p in self._points]
         self._cancel_drawing()
@@ -822,8 +875,9 @@ class ROIManagerWindow(QMainWindow):
             self.draft = centre                    # a drafted ROI with this outline
             self.draft_polygon = polygon
         else:
-            roi.polygon = polygon
-            roi.center = [float(centre[0]), float(centre[1])]
+            with self._edit("Outline"):
+                roi.polygon = polygon
+                roi.center = [float(centre[0]), float(centre[1])]
             self.changed.emit()
         self.redraw()
 
@@ -836,7 +890,8 @@ class ROIManagerWindow(QMainWindow):
                 self.draft = np.asarray(line, float).mean(axis=0)
             self.draft_direction = line
         else:
-            roi.direction = line
+            with self._edit("Direction of"):
+                roi.direction = line
             self.changed.emit()
         self.redraw()
 
@@ -847,7 +902,8 @@ class ROIManagerWindow(QMainWindow):
             self.draft_polygon = None
         roi = self._selected()
         if roi is not None and self.draft is None:
-            roi.polygon = None
+            with self._edit("Clear shape of"):
+                roi.polygon = None
             self.changed.emit()
         self.redraw()
 
@@ -857,7 +913,8 @@ class ROIManagerWindow(QMainWindow):
             self.draft_direction = None
         roi = self._selected()
         if roi is not None and self.draft is None:
-            roi.direction = None
+            with self._edit("Clear line of"):
+                roi.direction = None
             self.changed.emit()
         self.redraw()
 
@@ -882,7 +939,10 @@ class ROIManagerWindow(QMainWindow):
         if self._loading or item.column() != 2 or item.row() >= len(self._rows):
             return
         roi = self.project.rois[self._rows[item.row()]]
-        roi.use = item.checkState() == Qt.Checked
+        use = item.checkState() == Qt.Checked
+        number = self.project.numbers().get(roi.id)
+        with self.project.edit(f"{'Include' if use else 'Exclude'} ROI {number}"):
+            roi.use = use
         self._fill_table()
         self.redraw()
         self.changed.emit()
@@ -1013,9 +1073,11 @@ class ROIManagerWindow(QMainWindow):
         file_id = self.current_file()
         if file_id is None or self.draft is None:
             return
-        roi = self.project.add_roi(file_id, [float(self.draft[0]), float(self.draft[1])],
-                                   polygon=self.draft_polygon)
-        roi.direction = self.draft_direction
+        with self.project.edit("Add ROI") as step:
+            roi = self.project.add_roi(file_id, [float(self.draft[0]), float(self.draft[1])],
+                                       polygon=self.draft_polygon)
+            roi.direction = self.draft_direction
+            step.label = f"Add ROI {self.project.numbers().get(roi.id)}"
         self.draft = self.draft_polygon = self.draft_direction = None
         self.active = roi.id
         self._fill_table()
@@ -1029,7 +1091,8 @@ class ROIManagerWindow(QMainWindow):
         """Space: include or exclude the selected ROI."""
         roi = self._selected()
         if roi is not None:
-            roi.use = not roi.use
+            with self._edit("Include" if not roi.use else "Exclude"):
+                roi.use = not roi.use
             self._fill_table()
             self.redraw()
             self.changed.emit()
@@ -1037,7 +1100,8 @@ class ROIManagerWindow(QMainWindow):
     def _remove(self) -> None:
         roi = self._selected()
         if roi is not None:
-            self.project.rois.pop(roi.id, None)
+            with self._edit("Remove"):
+                self.project.rois.pop(roi.id, None)
             self.active = None
             self._fill_table()
             self.redraw()

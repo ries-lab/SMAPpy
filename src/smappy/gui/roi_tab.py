@@ -211,7 +211,9 @@ class ROIHeader(QWidget):
             polygon = points.tolist()
         center = np.asarray(polygon, float).mean(axis=0)
         try:
-            self.project.add_roi(file_id, [float(center[0]), float(center[1])], polygon=polygon)
+            with self.project.edit(f"Add the drawn {region.kind}"):
+                self.project.add_roi(file_id, [float(center[0]), float(center[1])],
+                                     polygon=polygon)
         except ValueError as error:          # a line of zero width, a degenerate outline
             QMessageBox.information(self, "not an ROI", str(error))
             return

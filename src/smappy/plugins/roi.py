@@ -28,6 +28,19 @@ from . import (Context, Plot, Plugin, PreflightChoice, PreflightQuestion, Result
 MAX_FINDER_PIXELS = 16_000_000
 
 
+def replace_param(what: str = "ROIs"):
+    """The *replace* setting every segmenter's settings end with.
+
+    A chain or a batch has no Preview, and running one again on a file it
+    has segmented before would otherwise find nothing: every candidate is
+    within the separation of an ROI the last run made.  So a segmenter's
+    settings carry this field, and `SegmenterPlugin.replaced` reads it.
+    """
+    return param(False, label=f"replace earlier {what}",
+                 help="remove the ROIs this segmenter made on the file "
+                      "before finding them again")
+
+
 # ------------------------------------------------------------ segmentation
 
 @dataclass
@@ -43,6 +56,7 @@ class DensityPeakSettings:
                                         "the minimum count")
     min_count: int = param(10, label="minimum count", min=1,
                            help="a peak with fewer localizations is not a site")
+    replace: bool = replace_param()
 
 
 def density_peaks(locs, settings: DensityPeakSettings,
@@ -112,7 +126,11 @@ class SegmenterPlugin(Plugin):
 
     A subclass implements `propose` (what `ROIProject.find` calls) and
     `segment`, which does the work of `run` and `preview` both and goes
-    through `found` for the one place they differ.
+    through `found` for the one place they differ.  Its settings end with
+    ``replace: bool = replace_param()``; see `replace_param` for why.
+
+    A run is one step of the project's ROI undo (`ROIProject.edit`), the
+    ROIs it replaced included.
     """
 
     preview_help = ("propose the ROIs and draw them, grey, in the ROI manager "
@@ -126,8 +144,12 @@ class SegmenterPlugin(Plugin):
         raise NotImplementedError
 
     def replaced(self, project, file_id, settings) -> List[str]:
-        """The ROIs a run removes before it adds its own; none by default."""
-        return []
+        """The ROIs a run removes before it adds its own: with *replace*,
+        those this segmenter made on the file (their origin names it)."""
+        if not getattr(settings, "replace", False):
+            return []
+        return [roi.id for roi in project.rois.values() if roi.file_id == file_id
+                and (roi.origin or {}).get("method") == self.path]
 
     def run(self, ctx: Context, settings) -> Result:
         return self.segment(ctx, settings, commit=True)
@@ -146,9 +168,12 @@ class SegmenterPlugin(Plugin):
         """
         replaced = self.replaced(project, file_id, settings)
         if commit:
-            for roi_id in replaced:
-                project.rois.pop(roi_id, None)
-            rois = project.find(file_id, plugin=self, settings=settings)
+            with project.edit(self.name) as step:
+                for roi_id in replaced:
+                    project.rois.pop(roi_id, None)
+                rois = project.find(file_id, plugin=self, settings=settings)
+                step.label = f"{self.name}: {len(rois)} ROIs" + (
+                    f" for {len(replaced)}" if replaced else "")
             return [{"center": r.center, "use": r.use} for r in rois], {"rois": rois}
         _, proposals = project.propose(file_id, self, settings, exclude=replaced)
         sites = [{"center": p["center"], "use": p["use"]} for p in proposals]

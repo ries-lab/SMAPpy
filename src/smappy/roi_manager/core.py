@@ -5,14 +5,15 @@ uses the same ViewState filter as rendering, never the visible field of view.
 """
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from contextlib import contextmanager
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 import hashlib
 import json
 import os
 from pathlib import Path
 import tempfile
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 from uuid import uuid4
 
 import h5py
@@ -98,6 +99,87 @@ class ROI:
     origin: dict = field(default_factory=lambda: {"method": "manual"})
 
 
+# Past this nobody is walking back through a list of edits.
+MAX_ROI_STEPS = 20
+
+
+@dataclass
+class ROIStep:
+    """One edit of the ROIs, and the ROIs as they were before it."""
+    label: str
+    rois: Dict[str, "ROI"]
+
+
+def copy_rois(rois: Dict[str, "ROI"]) -> Dict[str, "ROI"]:
+    """A copy that later edits cannot reach.  Shallow per ROI, which is
+    enough because an ROI is only ever edited by assigning its fields --
+    ``roi.use = ...``, ``roi.polygon = [...]``, never ``roi.center[0] = ...``
+    -- so the lists and the origin dict can be shared."""
+    return {roi_id: replace(roi) for roi_id, roi in rois.items()}
+
+
+class ROIHistory:
+    """Undo and redo for the set of ROIs, apart from the session's undo.
+
+    The session's undo is for tables (`smappy.undo` says why only tables);
+    this one is for the ROI manager's edits: a segmenter's run, an ROI
+    added, removed, excluded or reshaped.  Not for evaluations, which can be
+    run again, and whose results stay with the ROI's id -- so an ROI brought
+    back by an undo brings its numbers back with it.  Whole copies of the
+    ROIs rather than diffs: an ROI is a few small fields, and a step of a
+    few thousand costs less than a millisecond's worth of thinking about
+    what a diff would have to cover.
+    """
+
+    def __init__(self, max_steps: int = MAX_ROI_STEPS):
+        self.max_steps = max_steps
+        self._undo: List[ROIStep] = []
+        self._redo: List[ROIStep] = []
+
+    @property
+    def can_undo(self) -> bool:
+        return bool(self._undo)
+
+    @property
+    def can_redo(self) -> bool:
+        return bool(self._redo)
+
+    @property
+    def undo_label(self) -> Optional[str]:
+        return self._undo[-1].label if self._undo else None
+
+    @property
+    def redo_label(self) -> Optional[str]:
+        return self._redo[-1].label if self._redo else None
+
+    def push(self, step: ROIStep) -> None:
+        self._undo.append(step)
+        del self._undo[:-self.max_steps]
+        self._redo.clear()
+
+    def undo(self, rois: Dict[str, "ROI"]) -> Optional[ROIStep]:
+        """Put the ROIs before the last edit into `rois`; the edit undone."""
+        return self._travel(rois, self._undo, self._redo)
+
+    def redo(self, rois: Dict[str, "ROI"]) -> Optional[ROIStep]:
+        return self._travel(rois, self._redo, self._undo)
+
+    @staticmethod
+    def _travel(rois, source, target) -> Optional[ROIStep]:
+        if not source:
+            return None
+        step = source.pop()
+        target.append(ROIStep(step.label, copy_rois(rois)))
+        # in place: whoever holds the project's dict keeps holding the ROIs
+        rois.clear()
+        rois.update(copy_rois(step.rois))
+        return step
+
+    def clear(self) -> None:
+        self._undo.clear()
+        self._redo.clear()
+
+
 class Source:
     def __init__(self, locs, path=None, name=None, source_id=None):
         if "x_nm" not in locs or "y_nm" not in locs:
@@ -151,6 +233,7 @@ class ROIProject:
         # exists so that a finder's settings can be tried without each try
         # leaving ROIs behind to be removed by hand.
         self.segment_preview = None
+        self.history = ROIHistory()
         self._filter_keys = {}
 
     def add_file(self, path):
@@ -243,6 +326,28 @@ class ROIProject:
                 state.filter.set(k, *bounds)
             self._filter_keys[key] = signature
         return state
+
+    @contextmanager
+    def edit(self, label: str):
+        """An undoable edit of the ROIs: ``with project.edit("Remove ROI 3"):``.
+
+        Yields the step, whose label may be finished once the edit knows
+        what it did; nothing is recorded when the ROIs come out unchanged,
+        so a run that found nothing leaves no step to undo.
+        """
+        step = ROIStep(label, copy_rois(self.rois))
+        yield step
+        if step.rois != self.rois:
+            self.history.push(step)
+
+    def undo(self) -> Optional[str]:
+        """Undo the last edit of the ROIs; what it was, or None."""
+        step = self.history.undo(self.rois)
+        return step.label if step else None
+
+    def redo(self) -> Optional[str]:
+        step = self.history.redo(self.rois)
+        return step.label if step else None
 
     def add_roi(self, file_id, center, polygon=None, reviewed=True, origin=None):
         if file_id not in self.sources:
