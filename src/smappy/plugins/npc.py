@@ -408,6 +408,7 @@ class NPCSegment(SegmenterPlugin):
     those that look like a pore."""
 
     Settings = NPCSegmentSettings
+    changes_locs = False
     version = "2"
 
     def propose(self, locs, settings: NPCSegmentSettings,
@@ -587,6 +588,7 @@ class NPCCorners(Plugin):
     """Counts the corners a nuclear pore shows and the localizations it has."""
 
     Settings = NPCCornersSettings
+    changes_locs = False
     scope = "site"
     version = "2"
     # not in the default evaluation pipeline: added when the data are pores
@@ -927,6 +929,7 @@ class NPCLabelingEfficiency(SiteAnalysisPlugin):
     and the localizations it has (NPC Corners)."""
 
     Settings = LabelingEfficiencySettings
+    changes_locs = False
     version = "2"
 
     evaluator = CORNERS

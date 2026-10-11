@@ -362,6 +362,7 @@ class GroundTruth(Plugin):
     """A fit of a simulation against where the molecules really were."""
 
     Settings = GroundTruthSettings
+    changes_locs = False
     # 2: dim spots not counted by default; a z radius.  3: a drift-corrected
     # table is compared with the truth less the drift's mean
     version = "4"

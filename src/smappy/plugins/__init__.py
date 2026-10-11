@@ -602,6 +602,15 @@ class Plugin:
     # nobody reads four lines at a time.  The Text button offers the window
     # either way.
     text_window: bool = False
+    # Whether `run` hands back a new table (`Result.locs`, or files that
+    # replace it): True for a correction, a filter, a new column, a loader or
+    # a fit; False for a measurement, an ROI tool or an export.  Known before
+    # the run, which is what lets the GUI ask first rather than after minutes
+    # of work -- while a fit is still appending, a table change cannot go
+    # into the session (`Session.apply`).  None, for a plugin that does not
+    # say, is asked about once it has run.  Where it depends on the settings,
+    # override `changes_locs_for` too.
+    changes_locs: Optional[bool] = None
     # A window of the GUI's that this plugin opens instead of running: the
     # panel's button becomes *Open* and hands the settings to whatever the
     # GUI registered under this name (`Session.window_openers`).  For a tool
@@ -659,6 +668,10 @@ class Plugin:
             return "frame" in inspect.signature(cls.preview).parameters
         except (TypeError, ValueError):
             return True
+
+    def changes_locs_for(self, settings) -> Optional[bool]:
+        """Whether a run with ``settings`` changes the table; see `changes_locs`."""
+        return self.changes_locs
 
     def preflight(self, ctx: Context, settings):
         """Anything to put to the user before `run` starts, or None to start.

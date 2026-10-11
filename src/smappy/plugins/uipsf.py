@@ -175,6 +175,7 @@ class UiPSFCalibration(Plugin):
                    "blinking molecules themselves, and save it as a calibration "
                    "for Spline 3D and Spline 3D 2C")
     Settings = UiPSFSettings
+    changes_locs = False
     version = "1"
     main = ("data", "path", "microscope", "channels", "model", "output")
 

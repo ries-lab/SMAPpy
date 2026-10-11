@@ -1415,6 +1415,7 @@ class LocalizationPrecision(Plugin):
     """The precision the data shows, beside the precision the fitter expected."""
 
     Settings = PrecisionSettings
+    changes_locs = False
     version = "4"        # 2: finds a SMAPpy 3D fit's z precision, z_err_nm
     #                      3: a filter cut honoured by the CRLB fit; the FRC's
     #                         automatic pixel on a large field; motion only

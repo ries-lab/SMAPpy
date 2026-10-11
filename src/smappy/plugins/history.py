@@ -160,6 +160,7 @@ class History(Plugin):
     """What has been done to these localizations, with the settings used."""
 
     Settings = HistorySettings
+    changes_locs = False
     text_window = True        # the log is the result, and it is long
 
     def run(self, ctx: Context, settings: HistorySettings) -> Result:

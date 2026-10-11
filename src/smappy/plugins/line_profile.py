@@ -1496,6 +1496,7 @@ class LineProfile(Plugin):
     """Profiles along or across a line ROI, fitted without binning them."""
 
     Settings = LineProfileSettings
+    changes_locs = False
     # 2: the two-Gaussian start tries peaks far apart; 3: z_err_nm; 4: the
     # EM starts are tried narrow as well, so a close pair is not merged; the
     # binned fit integrates over its bins; the z window is the filter's, in nm

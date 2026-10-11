@@ -584,6 +584,7 @@ class AssignColors(Plugin):
                    "probabilities, and `channel`: the colour decided on, or 0 "
                    "where the probabilities are too close to choose between "
                    "and where no colour fits at all.")
+    changes_locs = True
     preview_help = ("draw the histogram of r with the modes, the boundaries "
                     "and what would be assigned, and the same decision over "
                     "the two channels' intensities.  Nothing is saved and the "

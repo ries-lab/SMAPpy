@@ -130,6 +130,7 @@ class ImageTags(Plugin):
     against frame."""
 
     Settings = ImageTagsSettings
+    changes_locs = False
     version = "1"
 
     def run(self, ctx: Context, settings: ImageTagsSettings) -> Result:

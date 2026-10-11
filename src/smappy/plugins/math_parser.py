@@ -210,6 +210,7 @@ class MathParser(Plugin):
     """A new localization field from an expression in the existing ones."""
 
     Settings = MathSettings
+    changes_locs = True
     version = "1"
 
     def react(self, changed: str, settings: MathSettings):

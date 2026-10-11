@@ -417,6 +417,20 @@ class ChainPlugin(Plugin):
             return "images"
         return "localizations"
 
+    def changes_locs_for(self, settings) -> Optional[bool]:
+        """Whether any step changes the table: True if one does, None if one
+        does not say and none does, else False."""
+        answers = []
+        for key, step, cls in self.steps:
+            try:
+                answers.append(cls().changes_locs_for(
+                    plugin_settings(cls, getattr(settings, key))))
+            except Exception:
+                answers.append(cls.changes_locs)
+        if any(a is True for a in answers):
+            return True
+        return None if any(a is None for a in answers) else False
+
     def preflight(self, ctx: Context, settings):
         """Every step's question, asked once, before any of them runs.
 
