@@ -2,7 +2,9 @@
 
 Three kinds, all ordinary plugins:
 
-* **Segment** proposes candidate ROIs on a whole file.  It runs once.
+* **Segment** proposes candidate ROIs on a whole file.  It runs once, and
+  derives from `SegmenterPlugin`, which gives it a Preview: the same
+  proposals, drawn in the ROI manager and not added.
 * **Evaluate** measures *one* ROI and returns that site's row.  It declares
   ``scope = "site"``, which is the only thing that marks it as an evaluator --
   a property of the plugin, not of its folder, so the evaluation window can
@@ -26,6 +28,19 @@ from . import (Context, Plot, Plugin, PreflightChoice, PreflightQuestion, Result
 MAX_FINDER_PIXELS = 16_000_000
 
 
+def replace_param(what: str = "ROIs"):
+    """The *replace* setting every segmenter's settings end with.
+
+    A chain or a batch has no Preview, and running one again on a file it
+    has segmented before would otherwise find nothing: every candidate is
+    within the separation of an ROI the last run made.  So a segmenter's
+    settings carry this field, and `SegmenterPlugin.replaced` reads it.
+    """
+    return param(False, label=f"replace earlier {what}",
+                 help="remove the ROIs this segmenter made on the file "
+                      "before finding them again")
+
+
 # ------------------------------------------------------------ segmentation
 
 @dataclass
@@ -41,6 +56,7 @@ class DensityPeakSettings:
                                         "the minimum count")
     min_count: int = param(10, label="minimum count", min=1,
                            help="a peak with fewer localizations is not a site")
+    replace: bool = replace_param()
 
 
 def density_peaks(locs, settings: DensityPeakSettings,
@@ -98,8 +114,75 @@ def density_peaks(locs, settings: DensityPeakSettings,
     return found
 
 
+class SegmenterPlugin(Plugin):
+    """A finder: proposes ROIs on the file the manager is showing.
+
+    Its Preview runs the same finder and adds nothing: the proposals go to
+    the manager as `ROIProject.segment_preview`, drawn in grey, each preview
+    replacing the last, and only Run adds them.  The undo stack cannot do
+    this job -- it holds tables, and ROIs are not one -- and removing the
+    last try's ROIs by hand after every change of a setting is how a finder
+    stops being tuned.
+
+    A subclass implements `propose` (what `ROIProject.find` calls) and
+    `segment`, which does the work of `run` and `preview` both and goes
+    through `found` for the one place they differ.  Its settings end with
+    ``replace: bool = replace_param()``; see `replace_param` for why.
+
+    A run is one step of the project's ROI undo (`ROIProject.edit`), the
+    ROIs it replaced included.
+    """
+
+    preview_help = ("propose the ROIs and draw them, grey, in the ROI manager "
+                    "without adding them; Run adds them")
+
+    def propose(self, locs, settings, existing: Sequence = ()) -> List[Any]:
+        """Centres, or ``{"center", "use", "origin"}`` dicts; see `ROIProject.find`."""
+        raise NotImplementedError
+
+    def segment(self, ctx: Context, settings, commit: bool) -> Result:
+        raise NotImplementedError
+
+    def replaced(self, project, file_id, settings) -> List[str]:
+        """The ROIs a run removes before it adds its own: with *replace*,
+        those this segmenter made on the file (their origin names it)."""
+        if not getattr(settings, "replace", False):
+            return []
+        return [roi.id for roi in project.rois.values() if roi.file_id == file_id
+                and (roi.origin or {}).get("method") == self.path]
+
+    def run(self, ctx: Context, settings) -> Result:
+        return self.segment(ctx, settings, commit=True)
+
+    def preview(self, ctx: Context, settings) -> Result:
+        return self.segment(ctx, settings, commit=False)
+
+    def found(self, project, file_id, settings, commit: bool
+              ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+        """``(sites, data)``: each site ``{"center", "use"}``, and the result's
+        data -- the ROIs a run added, or the preview for the manager.
+
+        Previewing changes nothing in the project, not even the preview
+        itself: this runs on a worker thread, and the session puts the
+        preview in place on the GUI thread (`Session.show_preview`).
+        """
+        replaced = self.replaced(project, file_id, settings)
+        if commit:
+            with project.edit(self.name) as step:
+                for roi_id in replaced:
+                    project.rois.pop(roi_id, None)
+                rois = project.find(file_id, plugin=self, settings=settings)
+                step.label = f"{self.name}: {len(rois)} ROIs" + (
+                    f" for {len(replaced)}" if replaced else "")
+            return [{"center": r.center, "use": r.use} for r in rois], {"rois": rois}
+        _, proposals = project.propose(file_id, self, settings, exclude=replaced)
+        sites = [{"center": p["center"], "use": p["use"]} for p in proposals]
+        return sites, {"roi_preview": {"file_id": file_id, "method": self.path,
+                                       "sites": sites, "replaces": list(replaced)}}
+
+
 @register("ROIManager/Segment/Density Peaks")
-class DensityPeaks(Plugin):
+class DensityPeaks(SegmenterPlugin):
     """Proposes ROIs where localizations pile up, after a Gaussian blur."""
 
     Settings = DensityPeakSettings
@@ -111,7 +194,8 @@ class DensityPeaks(Plugin):
         provenance, so `run` can go through the project without recursing."""
         return density_peaks(locs, settings, existing)
 
-    def run(self, ctx: Context, settings: DensityPeakSettings) -> Result:
+    def segment(self, ctx: Context, settings: DensityPeakSettings,
+                commit: bool) -> Result:
         project = ctx.rois
         if project is None:                 # no session: just report the centres
             centers = density_peaks(ctx.locs, settings)
@@ -120,9 +204,10 @@ class DensityPeaks(Plugin):
         file_id = current_file(project)
         if file_id is None:
             raise ValueError("no file to search: load localizations first")
-        found = project.find(file_id, plugin=self, settings=settings)
-        return Result(text=f"{len(found)} candidates found", settings=settings,
-                      data={"rois": found, "centers": [r.center for r in found]})
+        sites, data = self.found(project, file_id, settings, commit)
+        text = f"{len(sites)} candidates " + ("found" if commit else "previewed")
+        return Result(text=text, settings=settings,
+                      data={**data, "centers": [s["center"] for s in sites]})
 
 
 def current_file(project) -> Optional[str]:

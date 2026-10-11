@@ -591,6 +591,8 @@ class PluginPanel(QWidget):
         # is not changed before the settings are right; nor is a live step
         if self._job not in ("preview", "live"):
             self.session.apply(self.plugin, result)
+        else:
+            self.session.show_preview(self.plugin, result)
         # A live step happens ten times a second while the ROI is dragged, so
         # it writes no line, opens no window and takes no focus: the figure
         # redrawing where it already is *is* the output.

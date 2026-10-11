@@ -128,6 +128,9 @@ class ROIHeader(QWidget):
     def _on_session(self, what: str) -> None:
         if what in ("locs", "layers", "rois"):
             self.refresh(files_changed=True)
+        elif what == "roi-preview" and self.project.segment_preview is not None:
+            # a preview is drawn in the manager and nowhere else
+            self.open_manager()
         elif what in ("layer", "regrouped"):
             self.project.sync()
 
@@ -208,7 +211,9 @@ class ROIHeader(QWidget):
             polygon = points.tolist()
         center = np.asarray(polygon, float).mean(axis=0)
         try:
-            self.project.add_roi(file_id, [float(center[0]), float(center[1])], polygon=polygon)
+            with self.project.edit(f"Add the drawn {region.kind}"):
+                self.project.add_roi(file_id, [float(center[0]), float(center[1])],
+                                     polygon=polygon)
         except ValueError as error:          # a line of zero width, a degenerate outline
             QMessageBox.information(self, "not an ROI", str(error))
             return
