@@ -441,6 +441,31 @@ def test_the_segmenter_replaces_only_its_own_pores_when_asked():
     assert len(project.rois) == first + 1 and drawn.id in project.rois
 
 
+def test_a_replacing_preview_proposes_what_the_run_adds_and_changes_nothing():
+    """Previewed with *replace*, the earlier pores are what the run would
+    remove: they are listed, kept out of the distance check, and still there."""
+    from smappy.session import Session
+    session = Session(pores(0.5, seed=3))
+    session.show_grouped(0, True)
+    project = session.rois
+    file_id = next(iter(project.sources))
+    drawn = project.add_roi(file_id, (100.0, 100.0))
+    segment = plugins.get("ROIManager/Segment/NPC")()
+    first = segment(ctx=session.context()).data["rois"]
+    before = set(project.rois)
+    settings = NPCSegmentSettings(replace=True)
+    preview = segment.preview(session.context(), settings)
+    proposed = preview.data["roi_preview"]
+    assert preview.text.startswith("preview: ")
+    assert set(project.rois) == before
+    assert sorted(proposed["replaces"]) == sorted(r.id for r in first)
+    assert drawn.id not in proposed["replaces"]
+    assert len(proposed["sites"]) == len(first)
+    again = segment(ctx=session.context(), settings=settings).data["rois"]
+    assert sorted(map(tuple, (s["center"] for s in proposed["sites"]))) == \
+        sorted(tuple(r.center) for r in again)
+
+
 def test_the_analysis_says_when_the_layer_is_not_grouped():
     from smappy.session import Session
     from smappy.workspace import Instance

@@ -44,7 +44,7 @@ def test_the_roi_plugins_are_registered_where_smap_puts_them():
 def test_the_defaults_dict_became_a_typed_settings_class():
     specs = plugins.get("ROIManager/Segment/Density Peaks").specs()
     assert set(specs) == {"bin_nm", "sigma_nm", "separation_nm",
-                          "count_radius_nm", "min_count"}
+                          "count_radius_nm", "min_count", "replace"}
     assert specs["bin_nm"].type is float and specs["bin_nm"].info.unit == "nm"
     assert specs["min_count"].type is int and specs["min_count"].info.min == 1
 
@@ -178,6 +178,106 @@ def test_a_renamed_field_costs_that_field_and_not_the_pipeline():
     assert rebuilt.min_count == DensityPeakSettings().min_count
 
 
+def test_a_segmenter_preview_proposes_what_run_adds_and_adds_nothing():
+    from smappy.plugins.roi import DensityPeaks
+    from smappy.session import Session
+    session = Session(table([(0, 0), (3000, 0), (0, 3000)], per=40))
+    session.show_grouped(0, False)
+    settings = DensityPeakSettings(separation_nm=1000.0, min_count=20)
+    finder = DensityPeaks()
+    preview = finder.preview(session.context(), settings)
+    assert session.rois.rois == {}
+    sites = preview.data["roi_preview"]["sites"]
+    assert len(sites) == 3 and preview.text == "3 candidates previewed"
+
+    # the session puts it where the manager draws it; a run adds the same
+    # ROIs and takes the preview away
+    session.show_preview(finder, preview)
+    assert session.rois.segment_preview["sites"] == sites
+    run = finder.run(session.context(), settings)
+    session.apply(finder, run)
+    assert session.rois.segment_preview is None
+    assert sorted(r.center for r in session.rois.rois.values()) == \
+        sorted(s["center"] for s in sites)
+
+
+def test_propose_is_find_without_the_adding():
+    project = ROIProject()
+    project.set_geometry(300)
+    source = project.add_source(table([(0, 0), (3000, 0)], per=40))
+    settings = DensityPeakSettings(separation_nm=1000.0, min_count=20)
+    origin, proposals = project.propose(source.id, settings=settings)
+    assert project.rois == {} and len(proposals) == 2
+    assert origin["method"] == "ROIManager/Segment/Density Peaks"
+    found = project.find(source.id, settings=settings)
+    assert [r.center for r in found] == [p["center"] for p in proposals]
+    # the found ROIs are what a second proposal keeps its distance from,
+    # unless they are the ones a run would remove first
+    assert project.propose(source.id, settings=settings)[1] == []
+    assert len(project.propose(source.id, settings=settings,
+                               exclude=[r.id for r in found])[1]) == 2
+
+
+def test_an_roi_edit_is_undone_and_redone_and_a_no_op_leaves_no_step():
+    project = ROIProject()
+    source = project.add_source(table([(0, 0)]))
+    with project.edit("Add ROI"):
+        kept = project.add_roi(source.id, (0.0, 0.0))
+    with project.edit("Exclude ROI 1"):
+        kept.use = False
+    with project.edit("nothing"):
+        pass
+    assert project.history.undo_label == "Exclude ROI 1"
+    assert project.undo() == "Exclude ROI 1" and project.rois[kept.id].use
+    assert project.undo() == "Add ROI" and project.rois == {}
+    assert project.undo() is None
+    assert project.redo() == "Add ROI" and list(project.rois) == [kept.id]
+    # a new edit is a new branch: what was undone cannot come back
+    with project.edit("Remove ROI 1"):
+        project.rois.clear()
+    assert not project.history.can_redo
+
+
+def test_the_roi_undo_keeps_twenty_steps():
+    project = ROIProject()
+    source = project.add_source(table([(0, 0)]))
+    for i in range(25):
+        with project.edit(f"Add {i}"):
+            project.add_roi(source.id, (float(i), 0.0))
+    undone = [project.undo() for _ in range(25)]
+    assert undone[:20] == [f"Add {i}" for i in range(24, 4, -1)]
+    assert undone[20:] == [None] * 5 and len(project.rois) == 5
+
+
+def test_a_replacing_run_is_one_undo_step_that_brings_the_old_rois_back_with_their_results():
+    from smappy.plugins.roi import DensityPeaks
+    from smappy.session import Session
+    session = Session(table([(0, 0), (3000, 0), (0, 3000)], per=40))
+    session.show_grouped(0, False)
+    project = session.rois
+    file_id = next(iter(project.sources))
+    drawn = project.add_roi(file_id, (1500.0, 1500.0))
+    finder = DensityPeaks()
+    settings = DensityPeakSettings(separation_nm=1000.0, min_count=20)
+    first = finder.run(session.context(), settings).data["rois"]
+    assert len(first) == 3
+    project.evaluate([Instance(plugin="ROIManager/Evaluate/Statistics")])
+    assert len(project.results()) == 4
+
+    # again without replace: nothing new, and no step for it
+    assert finder.run(session.context(), settings).data["rois"] == []
+    assert project.history.undo_label == "Density Peaks: 3 ROIs"
+
+    import dataclasses
+    again = finder.run(session.context(),
+                       dataclasses.replace(settings, replace=True)).data["rois"]
+    assert len(again) == 3 and drawn.id in project.rois
+    assert not {r.id for r in first} & set(project.rois)
+    assert project.undo() == "Density Peaks: 3 ROIs for 3"
+    assert set(project.rois) == {drawn.id} | {r.id for r in first}
+    assert len(project.results()) == 4          # the numbers came back too
+
+
 # ---------------------------------------------------------------- the GUI
 
 @pytest.fixture
@@ -263,3 +363,79 @@ def test_find_evaluate_and_analyse_through_the_session(app):
     analysis = plugins.get("ROIManager/Analyze/Histograms")()(ctx=session.context())
     assert "4 ROIs" in analysis.text
     assert analysis.plot is not None
+
+
+def test_the_manager_draws_a_preview_and_run_turns_it_into_rois(app):
+    """Preview opens the manager with the proposals dashed and no ROI added;
+    a second preview replaces the first; Run adds them and the window,
+    which used to miss a segmenter's run, lists them."""
+    from PySide6.QtCore import QEventLoop, QTimer
+    from smappy.gui.plugin_panel import PluginPanel
+    from smappy.gui.roi_tab import ROIHeader
+    from smappy.session import Session
+
+    session = Session(table([(0, 0), (3000, 0), (0, 3000), (3000, 3000)], per=40))
+    session.show_grouped(0, False)
+    header = ROIHeader(session)
+    panel = PluginPanel(plugins.get("ROIManager/Segment/Density Peaks"), session)
+    panel.form.restore({"separation_nm": 1000.0, "min_count": 20})
+
+    def wait(start):
+        loop = QEventLoop()
+        panel.ended.connect(loop.quit)
+        start()
+        QTimer.singleShot(10000, loop.quit)          # never hang the suite
+        loop.exec()
+        panel.ended.disconnect(loop.quit)
+        app.processEvents()
+
+    wait(panel.preview)
+    window = header.manager
+    assert window is not None and session.rois.rois == {}
+    xs, _ = window.file_pane.shapes["preview"].getData()
+    assert np.isnan(xs).sum() == 4                   # four outlines
+    assert window.clear_preview_button.isVisibleTo(window)
+    assert "previewing 4" in window.status.currentMessage()
+
+    panel.form.restore({"min_count": 1000})
+    wait(panel.preview)
+    assert session.rois.segment_preview["sites"] == []
+
+    panel.form.restore({"min_count": 20})
+    wait(panel.run)
+    assert len(session.rois.rois) == 4 and window.table.rowCount() == 4
+    assert session.rois.segment_preview is None
+    assert window.file_pane.shapes["preview"].getData()[0] is None or \
+        not len(window.file_pane.shapes["preview"].getData()[0])
+    assert not window.clear_preview_button.isVisibleTo(window)
+
+    wait(panel.preview)
+    window.clear_preview_button.click()
+    assert session.rois.segment_preview is None and len(session.rois.rois) == 4
+
+
+def test_the_manager_undoes_a_removal_with_its_own_undo(app):
+    from smappy.gui.roi_window import ROIManagerWindow
+    from smappy.session import Session
+
+    session = Session(table([(0, 0), (3000, 0)], per=40))
+    session.show_grouped(0, False)
+    project = session.rois
+    file_id = next(iter(project.sources))
+    first = project.add_roi(file_id, (0.0, 0.0))
+    project.add_roi(file_id, (3000.0, 0.0))
+    window = ROIManagerWindow(session)
+    assert not window.undo_button.isEnabled()
+
+    window.select(first.id)
+    window._remove()
+    assert first.id not in project.rois and window.table.rowCount() == 1
+    assert window.undo_button.toolTip() == "undo: Remove ROI 1"
+    window.undo_button.click()
+    assert first.id in project.rois and window.table.rowCount() == 2
+    assert "undid Remove ROI 1" in window.status.currentMessage()
+    assert window.redo_button.toolTip() == "redo: Remove ROI 1"
+    # the table's undo is another stack, and has nothing to undo
+    assert not session.can_undo
+    window.redo_button.click()
+    assert window.table.rowCount() == 1 and window.active is None

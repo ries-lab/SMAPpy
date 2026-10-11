@@ -361,7 +361,9 @@ class Session:
     def on_change(self, callback: Callable[[str], None]) -> None:
         """``callback(what)``: "locs" (new table), "layer" (a filter or display
         setting changed), "layers" (added/removed/visibility), "history" or
-        "results" (a tool kept something worth drawing again)."""
+        "results" (a tool kept something worth drawing again), "rois" (the
+        ROI manager's project) and "roi-preview" (a segmenter's proposals,
+        `Session.show_preview`)."""
         self._listeners.append(callback)
 
     def off_change(self, callback: Callable[[str], None]) -> None:
@@ -1307,9 +1309,31 @@ class Session:
         if (result.data or {}).get("roi_project") is not None:
             self.rois.from_dict(result.data["roi_project"])
             self.changed("rois")
+        elif (result.data or {}).get("rois") is not None:
+            # a segmenter added ROIs to the project it was handed; the
+            # manager draws them, and what a preview proposed is now either
+            # among them or was not wanted
+            self.rois.segment_preview = None
+            self.changed("rois")
         # last: a plugin that opened a file has just cleared the session, this
         # one included, and what it worked out belongs to the file it opened
         self.remember(plugin, result)
+
+    def show_preview(self, plugin: Plugin, result: Result) -> None:
+        """What a preview has to show beyond its figures, put in place here,
+        on the GUI thread, since a preview runs on a worker and changes
+        nothing.  So far one thing: a segmenter's proposed ROIs
+        (`SegmenterPlugin`), which replace the last preview's."""
+        preview = (result.data or {}).get("roi_preview")
+        if preview is not None:
+            self.rois.segment_preview = preview
+            self.changed("roi-preview")
+
+    def clear_preview(self) -> None:
+        """Drop a segmenter's proposals without adding them."""
+        if self._rois is not None and self._rois.segment_preview is not None:
+            self._rois.segment_preview = None
+            self.changed("roi-preview")
 
     def remember(self, plugin: Plugin, result: Result) -> None:
         """Keep what this tool worked out, so its figure can be drawn again.
