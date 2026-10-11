@@ -384,11 +384,9 @@ def evaluate_sites(project, plugin_cls, label: str, settings, chain: str = "",
         raise ValueError("there are no ROIs to evaluate: find or draw some first")
     steps = pipeline_module.resolve([Instance(plugin=plugin_cls.path, label=label,
                                               values=settings_values(settings))])
-    run = project.evaluate(steps=steps, roi_ids=ids, reuse=True,
+    run = project.evaluate(steps=steps, roi_ids=ids, reuse=True, chain=chain,
                            progress=(lambda i, n: progress(f"{i} of {n} sites"))
                            if progress else None)
-    if chain:
-        run["chain"] = chain
     failed: Dict[str, int] = {}
     for record in run["records"].values():
         for why in pipeline_module.errors(record).values():

@@ -401,6 +401,19 @@ Each step leaves the program working and the suite green.
 3. **Region sources and one runner**, ROIs first, then id columns, with the
    region table in columns, in the file and as a session table with its filter;
    `keep` and `restore` per region, and the switch.
+   * *3a, done*: `region_table.RegionTable`, a table per evaluation, rows set
+     whole, through plain data and HDF5 (10^5 rows of two numbers: 2.7 MB).
+   * *3b, done*: the ROI project keeps its results in `tables`, one per
+     evaluation name, the newest result of each ROI with the step that made
+     it; `runs` is a log without records.  One thing is lost: a result
+     replaced under the same name is gone, so editing a parameter back no
+     longer finds the old numbers current -- it measures again.  An older
+     file's records are read into tables (`absorb_run`).
+   * *3c*: region tables as HDF5 datasets in the localization file, not in
+     the metadata JSON; the saver may leave them out.
+   * *3d*: id-column regions and the shared runner, with percentage, rate,
+     time left and stop.
+   * *3e*: `keep` / `restore` per region and the switch.
 4. **Blocks** in chains, the nesting rules and the cycle check, write-back and
    its warning; one step-list editor, the evaluation window becoming it.
 5. **Clusters**: DBSCAN under *Regions/Find* writing `cluster_id` and

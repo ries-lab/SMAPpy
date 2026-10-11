@@ -176,14 +176,23 @@ class RegionTable:
         return out
 
     # ------------------------------------------------------------- as data
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self, region_ids=None) -> Dict[str, Any]:
         """Columnar plain data: what travels inside the ROI project's JSON
-        (a chain's scratch copy, a handoff), and what an old file can read."""
-        return {"label": self.label, "ids": list(self.ids), "steps": self.steps,
-                "step_of": list(self.step_of), "signatures": list(self.signatures),
-                "data": list(self.data), "errors": list(self.errors),
-                "values": {k: [_plain(v) for v in c] for k, c in self.values.items()},
-                "arrays": {k: [None if a is None else a.tolist() for a in c]
+        (a chain's scratch copy, a handoff).  ``region_ids`` keeps only those
+        rows, without changing the table."""
+        if region_ids is None:
+            rows = range(len(self.ids))
+        else:
+            wanted = set(map(str, region_ids))
+            rows = [i for i, r in enumerate(self.ids) if r in wanted]
+        return {"label": self.label, "ids": [self.ids[i] for i in rows],
+                "steps": self.steps,
+                "step_of": [self.step_of[i] for i in rows],
+                "signatures": [self.signatures[i] for i in rows],
+                "data": [self.data[i] for i in rows],
+                "errors": [self.errors[i] for i in rows],
+                "values": {k: [_plain(c[i]) for i in rows] for k, c in self.values.items()},
+                "arrays": {k: [None if c[i] is None else c[i].tolist() for i in rows]
                            for k, c in self.arrays.items()}}
 
     @classmethod

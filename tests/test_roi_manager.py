@@ -7,6 +7,7 @@ from smappy.io.hdf5 import save_localizations
 from smappy.locs import Localizations
 from smappy.group import GroupSettings
 from smappy.roi_manager import ROIProject, DensityPeaks, Histograms
+from smappy.roi_manager.core import json_text
 from smappy.roi_manager.pipeline import Step, errors, merged_values
 from smappy.plugins.roi import HistogramSettings, histograms
 
@@ -135,12 +136,13 @@ def test_save_reload_relink_and_changed_source_detection(tmp_path):
     path = p.save(tmp_path / 'project.h5')
     loaded = ROIProject.load(path)
     assert loaded.rois[roi.id].comment == 'NPC α'
-    assert loaded.results() == p.results()
+    same = lambda a, b: json_text(a) == json_text(b)          # NaN as NaN
+    assert same(loaded.results(), p.results())
     assert loaded.navigation == p.navigation
     renamed = tmp_path / 'renamed.h5'
     source_path.rename(renamed)
     loaded = ROIProject.load(path, {s.id: renamed})
-    assert loaded.results() == p.results()
+    assert same(loaded.results(), p.results())
     save_localizations(renamed, table([99, 10, 150]))
     with pytest.raises(ValueError, match='contents changed'):
         ROIProject.load(path, {s.id: renamed})
@@ -283,3 +285,50 @@ def test_a_pixel_precision_is_averaged_under_a_pixel_name():
     values = statistics_values(locs, statistics(locs))
     assert values['mean_precision_pix'] == pytest.approx(0.2)
     assert 'mean_precision_nm' not in values
+
+
+def test_results_live_in_a_table_per_evaluation_and_runs_are_only_a_log():
+    p = ROIProject()
+    s = p.add_source(table([0, 10, 1000]))
+    p.set_filters({})
+    a = p.add_roi(s.id, [0, 0])
+    b = p.add_roi(s.id, [1000, 0])
+    run = p.evaluate()
+    assert set(run['records']) == {a.id, b.id}           # the caller still gets them
+    assert 'records' not in p.runs[-1] and p.runs[-1]['regions'] == 2
+    kept = p.tables['Localization Statistics']
+    assert kept.ids == [a.id, b.id]
+    assert kept.columns()['n_localizations'].tolist() == [2, 1]
+    assert kept.step(a.id)['plugin'] == 'Analysis/Measure/Localization Statistics'
+
+
+def test_a_removed_roi_keeps_its_numbers_for_an_undo_but_not_in_the_file():
+    p = ROIProject()
+    s = p.add_source(table([0, 1000]))
+    p.set_filters({})
+    a = p.add_roi(s.id, [0, 0])
+    b = p.add_roi(s.id, [1000, 0])
+    p.evaluate()
+    with p.edit('Remove ROI 2'):
+        del p.rois[b.id]
+    assert len(p.results()) == 1
+    p.undo()
+    assert len(p.results()) == 2                         # back, with its numbers
+    del p.rois[b.id]
+    saved = p.tables_dict(p.rois)
+    assert [doc['ids'] for doc in saved] == [[a.id]]
+    assert b.id in p.tables['Localization Statistics']   # the live table is untouched
+
+
+def test_an_older_files_runs_with_their_records_become_tables():
+    p = ROIProject()
+    s = p.add_source(table([0, 10]))
+    p.set_filters({})
+    roi = p.add_roi(s.id, [0, 0])
+    step = {'label': 'old', 'plugin': 'X/Y', 'version': '1', 'parameters': {}}
+    p.absorb_run({'id': 'r', 'pipeline': [step],
+                  'records': {roi.id: {'signature': 'd', 'steps': {
+                      'old': {'values': {'n': 2}, 'signature': 's'}}}}})
+    assert p.runs[-1] == {'id': 'r', 'pipeline': [step], 'regions': 1}
+    assert p.tables['old'].entry(roi.id) == {'values': {'n': 2}, 'signature': 's'}
+    assert p.tables['old'].step(roi.id) == step

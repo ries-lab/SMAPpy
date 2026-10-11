@@ -22,6 +22,7 @@ import numpy as np
 from ..group import GroupSettings
 from ..io.hdf5 import load_localizations
 from ..locs import Localizations, to_nm
+from ..region_table import RegionTable
 from ..regions import Region
 from ..viewer import ViewState
 
@@ -247,6 +248,16 @@ class ROIProject:
         self.filters = dict(DEFAULT_BOUNDS)
         self.grouped = False
         self.group_settings = GroupSettings()
+        # The results, one table per evaluation by its name, a row per ROI
+        # (`RegionTable`): the newest result of each evaluation on each ROI,
+        # with the step that made it.  Kept in the order they were last
+        # written, so the newest is last.  Rows of ROIs that were removed
+        # stay until the project is saved, so an undo brings the ROI back
+        # with its numbers.
+        self.tables: Dict[str, RegionTable] = {}
+        # What was run, newest last: the pipeline, when, and whether a chain
+        # or one site's re-evaluation did it -- a log, without the results,
+        # which are in `tables`
         self.runs = []
         self.navigation = {}  # GUI state only; never used for extraction
         # The evaluation pipeline, as `workspace.Instance`s.  It travels with
@@ -521,12 +532,13 @@ class ROIProject:
         # else is not a reason to run anything again.
         by_signature: Dict[str, Dict] = {}
         by_label: Dict[str, Dict] = {}
-        for run in reversed(self.runs):
-            record = (run.get("records") or {}).get(roi_id)
-            for label, entry in ((record or {}).get("steps") or {}).items():
-                by_label.setdefault(label, entry)
-                if entry.get("signature"):
-                    by_signature.setdefault(entry["signature"], entry)
+        for label, table in self._newest_first():
+            entry = table.entry(roi_id)
+            if entry is None:
+                continue
+            by_label[label] = entry
+            if entry.get("signature"):
+                by_signature.setdefault(entry["signature"], entry)
         found = {}
         for label, signature in wanted.items():
             if signature in by_signature:
@@ -554,23 +566,19 @@ class ROIProject:
         inputs = json.loads(json_text(self.inputs(self.rois[roi_id])))
         data = digest(inputs)
         found = {}
-        for run in reversed(self.runs):
-            record = (run.get("records") or {}).get(roi_id)
-            if record is None:
+        for label, table in self._newest_first():
+            entry = table.entry(roi_id)
+            if entry is None:
                 continue
-            made_by = {s.get("label"): s for s in run.get("pipeline") or []}
-            for label, entry in (record.get("steps") or {}).items():
-                if label in found:
-                    continue
-                step = made_by.get(label) or {}
-                if entry.get("signature") and step:
-                    identity = {k: v for k, v in step.items() if k != "label"}
-                    current = entry["signature"] == digest({"inputs": inputs,
-                                                            "step": identity})
-                else:                     # written before entries were signed
-                    current = record.get("signature") == data
-                if current:
-                    found[label] = (entry, step)
+            step = table.step(roi_id)
+            if entry.get("signature") and step:
+                identity = {k: v for k, v in step.items() if k != "label"}
+                current = entry["signature"] == digest({"inputs": inputs,
+                                                        "step": identity})
+            else:                         # stored without a step to check against
+                current = table.data_signature(roi_id) == data
+            if current:
+                found[label] = (entry, step)
         return found
 
     def evaluation_steps(self, label, roi_ids=None):
@@ -615,7 +623,7 @@ class ROIProject:
 
     # -------------------------------------------------------------- running
     def evaluate(self, instances=None, roi_ids=None, progress=None, steps=None,
-                 reuse=False):
+                 reuse=False, chain=""):
         """Run a pipeline over every reviewed, included ROI.
 
         `instances` is a list of `workspace.Instance` -- the same type a tab
@@ -627,19 +635,44 @@ class ROIProject:
         forward instead of run again -- which is what "re-evaluate what
         changed" means: editing one evaluator's parameter costs that
         evaluator over the sites, not the whole pipeline over all of them.
+        ``chain`` marks the run as a chain's (`chain.evaluate_sites`).
         """
         steps = self.resolved(steps, instances)
         ids = list(self.rois) if roi_ids is None else list(roi_ids)
         ids = [i for i in ids if self.rois[i].reviewed and self.rois[i].use]
-        run = {"id": uuid4().hex, "time": datetime.now(timezone.utc).isoformat(),
-               "pipeline": [step.as_record() for step in steps], "records": {}}
+        records = {}
         for n, roi_id in enumerate(ids):
             record, _, _ = self._evaluate_record(roi_id, steps, reuse=reuse)
-            run["records"][roi_id] = record
+            records[roi_id] = record
             if progress:
                 progress(n + 1, len(ids))
+        run = self._log(steps, len(records), chain=chain)
+        self._store(records, steps)
+        # the records go back to the caller, who counts what failed; what
+        # is kept of them is in `tables`
+        return {**run, "records": records}
+
+    def _log(self, steps, regions, **marks):
+        """A run in the log: its pipeline, when, how many ROIs, and the
+        marks given (``chain``, ``scope``) when they say something."""
+        run = {"id": uuid4().hex, "time": datetime.now(timezone.utc).isoformat(),
+               "pipeline": [step.as_record() for step in steps], "regions": regions}
+        run.update({k: v for k, v in marks.items() if v})
         self.runs.append(run)
         return run
+
+    def _store(self, records, steps):
+        """Records into the tables: each step's entry the ROI's row of the
+        table named after the step, with the step's record beside it."""
+        made = {step.label: step.as_record() for step in steps}
+        for roi_id, record in records.items():
+            for label, entry in (record.get("steps") or {}).items():
+                table = self.tables.pop(label, None) or RegionTable(label)
+                table.set(roi_id, entry, made.get(label), record.get("signature", ""))
+                self.tables[label] = table          # newest last
+
+    def _newest_first(self):
+        return reversed(list(self.tables.items()))
 
     def _evaluate_record(self, roi_id, steps, reuse=False, force=(), run="stale"):
         """One ROI: a complete record, and the results of what actually ran.
@@ -721,10 +754,8 @@ class ROIProject:
         record, results, updated = self._evaluate_record(roi_id, steps, reuse=reuse,
                                                          force=force, run=run)
         if store and updated:
-            self.runs.append({"id": uuid4().hex, "scope": "site",
-                              "time": datetime.now(timezone.utc).isoformat(),
-                              "pipeline": [step.as_record() for step in steps],
-                              "records": {roi_id: record}})
+            self._log(steps, 1, scope="site")
+            self._store({roi_id: record}, steps)
         return record, results, updated
 
     def latest(self, roi_id, steps=None):
@@ -745,16 +776,16 @@ class ROIProject:
             # nothing resolves -- the evaluators that made these numbers are
             # not installed here.  Show what was stored rather than nothing,
             # and say that only the data behind it could be checked.
-            for run in reversed(self.runs):
-                record = (run.get("records") or {}).get(roi_id)
-                if record is None:
-                    continue
-                inputs = self.inputs(self.rois[roi_id])
-                state = ("unverified" if record.get("signature") == digest(inputs)
-                         else "stale")
-                return record, {label: state
-                                for label in (record.get("steps") or {})}
-            return None, {}
+            data = digest(json.loads(json_text(self.inputs(self.rois[roi_id]))))
+            record = {"file_id": self.rois[roi_id].file_id, "steps": {}}
+            states = {}
+            for label, table in self._newest_first():
+                entry = table.entry(roi_id)
+                if entry is not None:
+                    record["steps"][label] = entry
+                    states[label] = ("unverified" if table.data_signature(roi_id) == data
+                                     else "stale")
+            return (record, states) if states else (None, {})
         found = self.entries(roi_id, steps)
         # and what else has measured this ROI: a chain's evaluators, or a
         # renamed one that is no longer in the pipeline
@@ -880,6 +911,30 @@ class ROIProject:
                 proposals.append({"center": point(proposed), "use": True, "origin": {}})
         return origin, proposals
 
+    def absorb_run(self, run):
+        """A run as an older file kept it -- its records inside -- into the
+        log and the tables; a run without records is only logged."""
+        records = run.get("records") or {}
+        header = {k: v for k, v in run.items() if k != "records"}
+        header.setdefault("regions", len(records))
+        self.runs.append(header)
+        made = {s.get("label"): s for s in run.get("pipeline") or []}
+        for roi_id, record in records.items():
+            for label, entry in (record.get("steps") or {}).items():
+                table = self.tables.pop(label, None) or RegionTable(label)
+                table.set(roi_id, entry, made.get(label), record.get("signature", ""))
+                self.tables[label] = table
+
+    def tables_dict(self, roi_ids=None):
+        """The tables as plain data, keeping only the rows of ``roi_ids``
+        (all when None): what the project's JSON carries."""
+        out = []
+        for table in self.tables.values():
+            doc = table.to_dict(roi_ids)
+            if doc["ids"]:
+                out.append(doc)
+        return out
+
     def save(self, path):
         """Atomic sidecar save. In-memory sources must first be saved as localizations."""
         path = Path(path).resolve()
@@ -903,6 +958,13 @@ class ROIProject:
                 f.attrs['format'] = 'smappy-roi-project'
                 f.attrs['format_version'] = 1
                 f.create_dataset('project', data=json_text(doc), dtype=h5py.string_dtype('utf-8'))
+                tables = f.create_group('tables')
+                n = 0
+                for table in self.tables.values():
+                    table.keep_only(self.rois)
+                    if len(table):                    # by number: a label may hold "/"
+                        table.to_hdf5(tables.create_group(str(n)))
+                        n += 1
             os.replace(temporary, path)
         finally:
             if os.path.exists(temporary):
@@ -917,6 +979,8 @@ class ROIProject:
             if f.attrs.get('format') != 'smappy-roi-project' or f.attrs.get('format_version') != 1:
                 raise ValueError("Unsupported ROI project format")
             doc = json.loads(f['project'][()])
+            tables = [RegionTable.from_hdf5(f['tables'][k])
+                      for k in sorted(f.get('tables', {}), key=int)]
         project = cls()
         project.set_geometry(doc['size_nm'], doc['shape'])
         project.set_tiles(doc.get('tile_nm', 0.0))
@@ -937,7 +1001,11 @@ class ROIProject:
             if roi.file_id not in project.sources or roi.id in project.rois:
                 raise ValueError("Invalid ROI source or duplicate ROI ID")
             project.rois[roi.id] = roi
-        project.runs = doc['runs']
+        project.runs = []
+        for run in doc['runs']:
+            project.absorb_run(run)
+        for table in tables:
+            project.tables[table.label] = table
         project.navigation = doc['navigation']
         from .pipeline import from_dict as pipeline_from_dict
         project.pipeline = pipeline_from_dict(doc)

@@ -102,8 +102,8 @@ def test_re_evaluating_runs_the_stale_step_and_copies_the_rest_forward():
     project, ids = a_project()
     project.pipeline.append(Instance(plugin=STATISTICS, label="photons"))
     project.evaluate()
-    steps = project.runs[-1]["records"][ids[0]]["steps"]
-    before, photons = steps["Localization Statistics"], steps["photons"]
+    before = project.tables["Localization Statistics"].entry(ids[0])
+    photons = project.tables["photons"].entry(ids[0])
 
     project.pipeline[1].values = {"bins": 50}
     run = project.evaluate(reuse=True)

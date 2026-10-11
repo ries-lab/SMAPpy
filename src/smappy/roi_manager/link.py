@@ -22,6 +22,7 @@ from ..group import GROUP_COLUMNS, GroupSettings
 from ..locs import Localizations
 from ..render import RenderAxes
 from ..viewer import ViewState
+from ..region_table import RegionTable
 from .core import ROI, ROIProject, digest, json_text, point, polygon_vertices, rows_in
 
 FORMAT_VERSION = 1
@@ -248,6 +249,8 @@ class SessionROIs(ROIProject):
                             for s in self.sources.values()],
                 "rois": [asdict(r) for r in self.rois.values()],
                 "runs": self.runs,
+                # the results, a columnar table per evaluation (`RegionTable`)
+                "tables": self.tables_dict(self.rois),
                 # the pipeline is provenance for the columns in `runs`, so it
                 # is saved with them rather than only in the workspace
                 "pipeline": [asdict(i) for i in self.pipeline]}
@@ -256,6 +259,7 @@ class SessionROIs(ROIProject):
         """Restore ROIs, runs and navigation saved with a file."""
         self.rois = {}
         self.runs = []
+        self.tables = {}
         self.navigation = {}
         self.pipeline = []
         self.segment_preview = None
@@ -287,9 +291,14 @@ class SessionROIs(ROIProject):
             if roi.file_id in self.sources:
                 self.rois[roi.id] = roi
         for run in doc.get("runs", []):
-            records = {i: r for i, r in run.get("records", {}).items() if i in self.rois}
-            if records:
-                self.runs.append({**run, "records": records})
+            records = {i: r for i, r in (run.get("records") or {}).items()
+                       if i in self.rois}
+            self.absorb_run({**run, "records": records})
+        for saved in doc.get("tables", []):
+            table = RegionTable.from_dict(saved)
+            table.keep_only(self.rois)
+            if len(table):
+                self.tables[table.label] = table
         from .pipeline import from_dict as pipeline_from_dict
         self.pipeline = pipeline_from_dict(doc)
 
