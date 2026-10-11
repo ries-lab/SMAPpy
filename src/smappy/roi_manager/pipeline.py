@@ -83,8 +83,8 @@ def instance_for(path: str) -> Instance:
 
 # What the project's pipeline repeats over, and how (`docs/regions.md`): the
 # pipeline is the steps of one block, and these are the block's own fields.
-DEFAULT_OPTIONS = {"regions": "rois", "write_back": [], "merge": "last",
-                   "keep_figures": "auto"}
+DEFAULT_OPTIONS = {"regions": "rois", "write_back": [], "write_values": [],
+                   "merge": "last", "keep_figures": "auto"}
 BLOCK_PATH = "Chain/Block"            # an instance that is a block of its own
 
 
@@ -104,7 +104,8 @@ def block_of(instances: Sequence[Instance], options: Optional[Dict[str, Any]] = 
                                    values=dict(instance.values),
                                    enabled=instance.enabled))
     return Block(steps=steps, regions=options["regions"],
-                 write_back=list(options["write_back"]), merge=options["merge"],
+                 write_back=list(options["write_back"]),
+                 write_values=list(options["write_values"]), merge=options["merge"],
                  keep_figures=options["keep_figures"])
 
 
@@ -120,6 +121,7 @@ def from_block(block) -> Tuple[List[Instance], Dict[str, Any]]:
             instances.append(Instance(plugin=step.plugin, label=step.label,
                                       values=dict(step.values), enabled=step.enabled))
     options = {"regions": block.regions, "write_back": list(block.write_back),
+               "write_values": list(block.write_values),
                "merge": block.merge, "keep_figures": block.keep_figures}
     return instances, options
 

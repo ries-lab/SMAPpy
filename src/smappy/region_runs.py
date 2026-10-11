@@ -455,45 +455,155 @@ class WriteBack:
         for c in self.columns:
             pieces = [(rows, values[c]) for _, rows, values in self.parts if c in values]
             if c == "use":
-                pieces += [(np.setdiff1d(start, rows), np.zeros(len(np.setdiff1d(start, rows)),
-                                                                bool))
-                           for start, rows, values in self.parts]
+                for start, rows, values in self.parts:
+                    gone = np.setdiff1d(start, rows)
+                    pieces.append((gone, np.zeros(len(gone), bool)))
             if not pieces:
                 continue
-            dtype = np.result_type(*[v.dtype for _, v in pieces])
-            if c in columns:
-                out = np.array(columns[c], copy=True)
-                out = out.astype(np.result_type(out.dtype, dtype), copy=False)
-            elif dtype.kind == "f":
-                out = np.full(n, np.nan, dtype=dtype)
-            elif c == "use":
-                out = np.ones(n, dtype=bool)
-            else:
-                out = np.zeros(n, dtype=dtype)
-            if self.rule == "mean" and out.dtype.kind in "fiu":
-                total = np.zeros(n)
-                count = np.zeros(n)
-                for rows, v in pieces:
-                    np.add.at(total, rows, v.astype(float))
-                    np.add.at(count, rows, 1)
-                out = out.astype(float)
-                hit = count > 0
-                out[hit] = total[hit] / count[hit]
-            elif self.rule == "any":
-                out = out.astype(bool) if c not in locs.columns else out
-                hit = np.zeros(n, dtype=bool)
-                for rows, v in pieces:
-                    np.logical_or.at(hit, rows, v.astype(bool))
-                touched = np.zeros(n, dtype=bool)
-                for rows, _ in pieces:
-                    touched[rows] = True
-                out[touched] = hit[touched]
-            else:
-                order = pieces if self.rule == "last" else pieces[::-1]
-                for rows, v in order:
-                    out[rows] = v
-            columns[c] = out
+            columns[c] = merge_pieces(n, pieces, self.rule, existing=columns.get(c),
+                                      fill=True if c == "use" else None)
         return Localizations(columns, dict(locs.metadata))
+
+
+def merge_pieces(n: int, pieces: Sequence[Tuple[np.ndarray, np.ndarray]],
+                 rule: str = "last", existing: Optional[np.ndarray] = None,
+                 fill: Any = None) -> np.ndarray:
+    """One column of ``n`` rows from values written over some of them.
+
+    ``pieces`` are ``(rows, values)`` in the order the regions ran; a row in
+    several takes the ``rule``'s value (`WriteBack.RULES`).  A row in none
+    keeps ``existing`` where the column was there before, else ``fill`` --
+    by default NaN for numbers with a fraction and 0 for an id or a flag.
+    """
+    dtype = np.result_type(*[np.asarray(v).dtype for _, v in pieces])
+    if existing is not None:
+        out = np.array(existing, copy=True)
+        out = out.astype(np.result_type(out.dtype, dtype), copy=False)
+    elif fill is not None:
+        out = np.full(n, fill, dtype=np.result_type(dtype, np.asarray(fill).dtype))
+    elif dtype.kind == "f":
+        out = np.full(n, np.nan, dtype=dtype)
+    else:
+        out = np.zeros(n, dtype=dtype)
+    if rule == "mean" and out.dtype.kind in "fiu":
+        total = np.zeros(n)
+        count = np.zeros(n)
+        for rows, v in pieces:
+            np.add.at(total, rows, np.asarray(v, dtype=float))
+            np.add.at(count, rows, 1)
+        out = out.astype(float)
+        hit = count > 0
+        out[hit] = total[hit] / count[hit]
+    elif rule == "any":
+        out = out.astype(bool) if existing is None else out
+        hit = np.zeros(n, dtype=bool)
+        touched = np.zeros(n, dtype=bool)
+        for rows, v in pieces:
+            np.logical_or.at(hit, rows, np.asarray(v).astype(bool))
+            touched[rows] = True
+        out[touched] = hit[touched]
+    else:
+        for rows, v in (pieces if rule == "last" else pieces[::-1]):
+            out[rows] = v
+    return out
+
+
+# ----------------------------------------------- region values onto rows
+
+# the metadata entry naming the columns written from regions' results
+# (`values_onto`): only those may be written over again, so a value called
+# like a localization's own column (``photons``) never replaces it
+REGION_COLUMNS = "region_columns"
+# what a region's own number is asked for by, beside its measured values
+REGION_NUMBER = "roi_id"
+
+
+def region_members(ctx, regions: str) -> List[Tuple[str, np.ndarray]]:
+    """``(region id, rows of ctx.locs)`` of every region: the reviewed,
+    included ROIs,
+    in the order they were made, or the regions of the id column
+    ``regions``.  Membership is the region alone, as when a block runs."""
+    from .chain import BLOCK_ROIS
+    if regions == BLOCK_ROIS:
+        project = ctx.rois
+        if project is None or not project.rois:
+            raise ValueError("there are no ROIs: find or draw some first")
+        out = []
+        for roi_id, roi in project.rois.items():
+            if roi.reviewed and roi.use:
+                _, rows, _, _ = project._region_tables(roi, project.region(roi))
+                out.append((str(roi_id), np.asarray(rows, dtype=np.int64)))
+        return out
+    if regions not in ctx.locs:
+        raise ValueError(f"the table has no {regions!r}: it has "
+                         f"{', '.join(sorted(ctx.locs.keys()))}")
+    ids, rows = split_ids(ctx.locs[regions])
+    return [(str(int(i)), r) for i, r in zip(ids, rows)]
+
+
+def values_onto(n: int, members: Sequence[Tuple[str, np.ndarray]],
+                values: Dict[str, Dict[str, float]], rule: str = "last"
+                ) -> Dict[str, np.ndarray]:
+    """Each region's value written onto its rows: ``values`` is ``{column:
+    {region id: value}}``, and a row takes its region's -- the ``rule``'s
+    where regions overlap -- or NaN in none, or in a region with no value
+    (one the step failed in, or that came after the evaluation)."""
+    out = {}
+    for name, per in values.items():
+        pieces = []
+        for region_id, rows in members:
+            v = per.get(region_id)
+            if v is None or not len(rows):
+                continue
+            v = float(v)
+            if np.isfinite(v):
+                pieces.append((rows, np.full(len(rows), v)))
+        out[name] = (merge_pieces(n, pieces, rule, fill=np.nan) if pieces
+                     else np.full(n, np.nan))
+    return out
+
+
+def table_values(table: RegionTable, names: Sequence[str] = ()) -> Dict[str, Dict[str, float]]:
+    """``{column: {region id: value}}`` of a region table's numeric values --
+    ``names`` of them, or every one -- the rows where the step failed left
+    out.  A name it does not have is an error naming the ones it has."""
+    numeric = {k: v for k, v in table.values.items()
+               if all(x is None or (isinstance(x, (int, float, np.number))
+                                    and not isinstance(x, str)) for x in v)}
+    wanted = list(names) or list(numeric)
+    missing = [k for k in wanted if k not in numeric]
+    if missing:
+        raise ValueError(f"{table.label or 'the evaluation'} has no numeric "
+                         f"{', '.join(missing)}: it has {', '.join(sorted(numeric))}")
+    return {k: {r: numeric[k][i] for i, r in enumerate(table.ids)
+                if not table.errors[i] and numeric[k][i] is not None}
+            for k in wanted}
+
+
+def check_writable(locs: Localizations, names: Sequence[str]) -> None:
+    """Refuse to write over a column that was not written from regions."""
+    own = set(locs.metadata.get(REGION_COLUMNS) or {})
+    taken = [c for c in names if c in locs and c not in own]
+    if taken:
+        raise ValueError(f"the table already has {', '.join(taken)}, which was not "
+                         "written from regions: give the columns a prefix")
+
+
+def with_region_columns(locs: Localizations, columns: Dict[str, np.ndarray],
+                        origin: Dict[str, Any]) -> Localizations:
+    """The table with ``columns`` added, each remembered as written from
+    regions (`REGION_COLUMNS`: ``origin`` says from what) and with a rule for
+    grouping: a blink takes the mean of its localizations' values, the
+    highest of a region's number."""
+    from .mathparse import remember
+    check_writable(locs, list(columns))
+    out = Localizations({**locs.columns, **columns}, dict(locs.metadata))
+    own = dict(out.metadata.get(REGION_COLUMNS) or {})
+    for name in columns:
+        own[name] = dict(origin)
+        remember(out, name, "", grouped="max" if name.endswith(REGION_NUMBER) else "mean")
+    out.metadata[REGION_COLUMNS] = own
+    return out
 
 
 def changed_columns(before: Localizations, scratch: RegionScratch) -> List[str]:

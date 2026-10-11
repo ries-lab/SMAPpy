@@ -21,6 +21,11 @@ What a run of a block does:
   step added or changed that is not written back is warned about once, after
   the first region that has one.  A block that writes back changes the table,
   one undo step and one log line; one that does not changes nothing.
+* **Write values** puts numbers the steps measured onto the table, each
+  region's onto its rows (`region_runs.values_onto`; `docs/regions.md`,
+  "Region values as columns"), so a filter or a colour can use them; the
+  columns are refused when the table has one of the name that was not
+  written from regions.
 * **A step added to a block starts with its slow options off**
   (`param(slow=True)`, `plugins.fast_values`) unless its values say otherwise.
 * **A segmenter is refused** inside a block: ROIs found in each region have
@@ -47,7 +52,7 @@ from .plugins import (Context, ParamInfo, PreflightChoice, PreflightQuestion, Re
 from .region_runs import WriteBack, changed_columns
 
 # the block's own fields, before its steps', in its settings
-OWN = ("regions", "write_back", "merge", "keep_figures")
+OWN = ("regions", "write_back", "write_values", "merge", "keep_figures")
 # how a block's time is estimated (docs/regions.md, "Necessary slow work is
 # timed"): the steps run in a few regions spread over the source, at most
 # this many or this long, and the median per step is multiplied out
@@ -95,7 +100,7 @@ class BlockPlugin(ChainPlugin):
     logged = True
 
     def changes_locs_for(self, settings) -> Optional[bool]:
-        return bool(_columns(settings.write_back))
+        return bool(_columns(settings.write_back) or _columns(settings.write_values))
 
     def active(self, settings):
         """Its steps' own, and no grouping to choose: in a region every layer
@@ -219,6 +224,7 @@ class BlockPlugin(ChainPlugin):
         block = copy.deepcopy(self.block)
         block.regions = settings.regions
         block.write_back = _columns(settings.write_back)
+        block.write_values = _columns(settings.write_values)
         block.merge = settings.merge
         block.keep_figures = settings.keep_figures
         inner = {key: (step, cls) for key, step, cls in self.steps}
@@ -256,6 +262,10 @@ class BlockPlugin(ChainPlugin):
             raise ValueError("the block has no steps")
         columns = _columns(settings.write_back)
         back = WriteBack(columns, settings.merge)
+        written = _columns(settings.write_values)
+        if written:
+            from .region_runs import check_writable
+            check_writable(ctx.locs, written)
         warned: List[str] = []
         children: Dict[str, Any] = {}
 
@@ -301,12 +311,46 @@ class BlockPlugin(ChainPlugin):
                          f"{max(back.missing.values())} region(s)")
             locs = back.merge(ctx.locs)
             text += f"; wrote back {', '.join(columns)}"
+        if written and n:
+            locs = self._write_values(ctx, settings, tables, written,
+                                      locs if locs is not None else ctx.locs)
+            text += f"; wrote {', '.join(written)}"
         return Result(locs=locs, text=text, settings=settings,
                       values={"regions": n},
                       data={"tables": tables, "region_tables": {**tables, **merged},
                             "evaluations": self.evaluations(settings)
                             if not ctx.per_region else [],
                             "regions": n, "failed": failed})
+
+    def _write_values(self, ctx, settings, tables, names, locs):
+        """The steps' numbers ``names`` onto the rows of their regions
+        (`region_runs.values_onto`); a number two steps return is the later
+        step's."""
+        from .region_runs import (region_members, table_values, values_onto,
+                                  with_region_columns)
+        values: Dict[str, Dict[str, float]] = {}
+        owner: Dict[str, str] = {}
+        for label, table in tables.items():
+            for name in names:
+                try:
+                    found = table_values(table, [name])[name]
+                except ValueError:
+                    continue
+                if name in owner:
+                    ctx.warn(f"{self.block.title()}: {name} is measured by "
+                             f"{owner[name]} and {label}; {label}'s is written")
+                values[name], owner[name] = found, label
+        missing = [k for k in names if k not in values]
+        if missing:
+            raise ValueError(f"{self.block.title()}: no step measured "
+                             f"{', '.join(missing)}, which it is to write")
+        members = region_members(ctx, settings.regions)
+        rule = "mean" if settings.merge == "mean" else (
+            "first" if settings.merge == "first" else "last")
+        columns = values_onto(len(locs), members, values, rule)
+        return with_region_columns(locs, columns,
+                                   {"regions": settings.regions,
+                                    "source": f"block {self.block.title()}"})
 
     # ------------------------------------------------------------ the three
     def _run_rois(self, ctx, steps, after, writes, report):
@@ -371,6 +415,10 @@ def block_class(block: Block) -> type:
             ", ".join(block.write_back), label="write back",
             help="columns the steps make that go into the real table, comma "
                  "separated; empty: nothing changes the table")),
+        ("write_values", str, param(
+            ", ".join(block.write_values), label="write values",
+            help="numbers the steps measure, comma separated, each region's "
+                 "written onto its localizations")),
         ("merge", str, param(
             block.merge, label="overlaps", choices=WriteBack.RULES, advanced=True,
             help="a row in two regions takes the last region's value, the "

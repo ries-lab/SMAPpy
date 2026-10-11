@@ -17,7 +17,7 @@ MATH = "Analysis/Process/Math Parser"
 REMOVE = "Analysis/Process/Remove Localizations"
 REGISTER = "Analysis/Register/Calibrate transform"
 DBSCAN = "Analysis/Regions/Find/DBSCAN"
-ROI_COLUMN = "Analysis/Regions/ROI to column"
+ROI_COLUMN = "Analysis/Regions/Regions to column"
 
 
 # ---------------------------------------------------------------- the model

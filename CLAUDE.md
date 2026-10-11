@@ -107,8 +107,9 @@ shape, so read the one closest to what you are writing:
 | finds a structure by its shape and judges it, then counts it | `npc.py` (a ring filter and circle fit in the segmenter, a per-site count, and a model of whole pores in `smappy/npc.py` fitted to the site table) |
 | summarises what evaluators measured | `roi.py`'s `SiteAnalysisPlugin` (an evaluator to read, a *results from* field, a preflight that asks which when there are several; under `Analysis/Regions/Summarize`) |
 | runs the ROI manager's segment, evaluate and analyse as one | `npc_analysis.chain.yaml` (a shipped chain: a block runs NPC Corners in every ROI before the next step; `docs/batch.md`, "ROIs: segment, evaluate, analyse") |
-| finds clusters and names them in the table | `clusters.py` (DBSCAN: `cluster_id` / `n_in_cluster`, optionally ROIs; *ROI to column*) |
-| runs steps once per region, writes columns back | `blocks.py` (a `chain.Block`; `region_runs.RegionScratch`, `WriteBack`; per-cluster results in `Session.id_regions`) |
+| finds clusters and names them in the table | `clusters.py` (DBSCAN: `cluster_id` / `n_in_cluster`, optionally ROIs) |
+| writes what was measured per region onto its localizations | `region_column.py` (*Regions to column*: `region_runs.values_onto`, NaN outside, never over a column of the localizations' own; a block's *write values* does the same) |
+| runs steps once per region, writes columns back | `blocks.py` (a `chain.Block`; `region_runs.RegionScratch`, `WriteBack`, *write values*; per-cluster results in `Session.id_regions`) |
 | opens an interactive window of the GUI's | `bead_calibration.py` (`Plugin.window`: the button opens what the GUI registered in `session.window_openers`) |
 | runs an external program in its own Python | `uipsf.py` (`smappy.uipsf`: a worker script under that program's interpreter, progress read from its output, the result converted into smappy's own file) |
 | hands the session to a new instance | `smappy.handoff` (*File > Open in a new window*: the table through shared memory, the rest as JSON, `smappy-gui --handoff`) |
@@ -320,6 +321,10 @@ accident, and it survives a save.  Usually the recipe is an expression
 (`math_parser.py`); a column that was *measured* per localization and only
 needs the rule -- the `use` flag `remove_locs.py` writes -- is a recipe with
 a rule and no expression.
+
+Columns written from what was measured per region (`n_corners` on every
+localization of its pore) are listed in `metadata["region_columns"]`, and
+only those may be written over from regions again (`region_runs.check_writable`).
 
 A fitted table also carries `metadata["frame_tags"]` (the image tags that
 changed, per frame: `smappy.frametags`) and `metadata["acquisition"]` (the

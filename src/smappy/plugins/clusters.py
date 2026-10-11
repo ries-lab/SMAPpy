@@ -1,4 +1,4 @@
-"""Clusters as regions: DBSCAN, and an ROI's number written onto the table.
+"""Clusters as regions: DBSCAN.
 
 `docs/regions.md` ("Clusters") has the decisions.  A clusterer writes
 ``cluster_id`` -- 1, 2, ... by size, 0 for a localization in no cluster -- and
@@ -31,9 +31,8 @@ SMAP's:
 * on a **grouped** layer the blinks are clustered, and every localization
   takes its blink's cluster.
 
-**ROI to column** writes the number the ROI manager shows each ROI by onto
-the localizations inside it -- the later ROI where two overlap, 0 in none:
-a snapshot, after which "per ROI" is "per value of ``roi_id``".
+What was measured per cluster goes back onto its localizations with
+*Regions to column* (`region_column.py`).
 """
 from __future__ import annotations
 
@@ -315,55 +314,3 @@ def draw_clusters(figure, xy: np.ndarray, labels: np.ndarray, sizes: np.ndarray)
         right.hist(sizes, bins=min(50, max(5, len(sizes) // 5)), color="0.6")
     right.set_xlabel("localizations per cluster")
     right.set_ylabel("clusters")
-
-
-# ------------------------------------------------------------- ROI to column
-
-@dataclass
-class ROIColumnSettings:
-    field: str = param("roi_id", label="column", advanced=True,
-                       help="the column written: the ROI's number, 0 in none")
-
-
-def roi_column(n: int, members: List[Tuple[int, np.ndarray]]) -> np.ndarray:
-    """``n`` rows, each the number of the last ROI in ``members`` -- ``(number,
-    rows)`` in the order the ROIs were made -- that holds it, 0 in none."""
-    out = np.zeros(n, dtype=np.int64)
-    for number, rows in members:
-        out[np.asarray(rows, dtype=np.int64)] = number
-    return out
-
-
-@register("Analysis/Regions/ROI to column")
-class ROIToColumn(Plugin):
-    """Writes each ROI's number onto the localizations inside it."""
-
-    Settings = ROIColumnSettings
-    changes_locs = True
-    version = "1"
-
-    def run(self, ctx: Context, settings: ROIColumnSettings) -> Result:
-        from ..mathparse import remember
-        project = ctx.rois
-        if project is None or not project.rois:
-            raise ValueError("there are no ROIs: find or draw some first")
-        name = (settings.field or "").strip()
-        if not name.isidentifier():
-            raise ValueError(f"{name!r} is not usable as a column name")
-        numbers = (project.numbers() if hasattr(project, "numbers")
-                   else {r: i + 1 for i, r in enumerate(project.rois)})
-        members = []
-        for roi_id, roi in project.rois.items():
-            if not roi.use:
-                continue
-            region = project.region(roi)
-            _, rows, _, _ = project._region_tables(roi, region)
-            members.append((numbers[roi_id], np.asarray(rows)))
-        column = roi_column(len(ctx.locs), members)
-        out = Localizations({**ctx.locs.columns, name: column}, dict(ctx.locs.metadata))
-        remember(out, name, "", grouped="max")
-        inside = int((column > 0).sum())
-        return Result(locs=out, settings=settings,
-                      text=f"{name}: {len(members)} ROIs over {inside} localizations, "
-                           f"{len(column) - inside} in none",
-                      values={"rois": len(members), "inside": inside})

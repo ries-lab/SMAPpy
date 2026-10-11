@@ -203,11 +203,12 @@ block says comes back:
   naming the columns and the rule.  A block that writes nothing back changes
   nothing.
 
-The same merge, outside a chain, is *Regions/ROI to column*: `roi_id` written
-onto the table, the later ROI winning where they overlap, 0 in none.  It is a
-snapshot -- moving an ROI afterwards does not change it -- and logged.  After
-it, "per ROI" and "per cluster on `roi_id`" are the same run, without the
-overlaps and the annotations.
+Write-back carries columns the steps made per localization.  What the steps
+measured per region goes onto the table by **write values** (see "Region
+values as columns" below).  The ROIs' own numbers are one such value: *Regions
+to column* writes `roi_id`, the later ROI winning where they overlap, 0 in
+none, a snapshot, logged.  After it, "per ROI" and "per cluster on `roi_id`"
+are the same run, without the overlaps and the annotations.
 
 ### What a region keeps
 
@@ -289,14 +290,33 @@ over a list of regions; the saver offers to leave region results out, for the
 large cluster sets.  This replaces the JSON records (`runs -> records -> roi ->
 steps`) the ROI project writes now.
 
-**In the session**: a table of its own with its own filter, as the grouped
-table is (`state.sets["grouped"]`).  So the plugins that summarise regions are
-ordinary table plugins -- a histogram of any column replaces `Histograms`;
-NPC Labeling Efficiency reads `n_corners` -- *results from* keeps its job of
-choosing which evaluation's columns, and the filter UI filters regions
-(`n_corners >= 6`) as it filters localizations.  For clusters that filter can
-reach the localizations through `cluster_id`; for ROIs it is an option, "only
-the localizations in the regions that pass".
+**In the session**: not a table with a filter of its own -- that was the
+plan, and was dropped (see the next section).  The summaries read a region
+table through *results from*, which names an evaluation on the ROIs or one
+of an id column's regions.
+
+### Region values as columns
+
+To filter or colour localizations by what was measured in their region --
+the pores with six corners, the clusters with a good precision -- the
+region's number is written onto its localizations as a column: *write
+values* on a block (at the end of every run, so a chain keeps it current), or
+*Regions/Regions to column* for results already there
+(`region_runs.values_onto`).  Everything that reads a column then works on
+it: each layer's filter, *colour by*, grouping (a blink takes the mean), the
+file.
+
+Why not the region table as a session table with its filter, as first
+planned: a filter on regions would belong to no layer (membership is the
+region alone), a second kind of table would need its own UI and its own
+link to the localizations, and filtering localizations through it would be
+the column anyway.  What the column costs: its histogram counts
+localizations, not regions (a large cluster weighs more) -- the distribution
+over regions is *Summarize/Histograms* -- and it is a snapshot until written
+again.  A localization in no region, or in one without a value, is NaN; one
+in overlapping ROIs takes the block's *overlaps* rule.  The table remembers
+which columns came from regions (`metadata["region_columns"]`) and writes
+only over those, never over a column of the localizations' own.
 
 ### Clusters
 
@@ -318,7 +338,7 @@ Analysis/Measure/...            every measurement: on the view, per ROI, per clu
 Analysis/Regions/Find/...       makes regions: Density Peaks and NPC (ROIs),
                                 DBSCAN (cluster_id, ROIs, or both)
 Analysis/Regions/Summarize/...  reads a region table
-Analysis/Regions/ROI to column  roi_id onto the table
+Analysis/Regions/Regions to column  what was measured per region (or roi_id) onto the table
 ```
 
 A finder and a clusterer are one kind of thing, *find regions*, differing in
@@ -437,8 +457,8 @@ Each step leaves the program working and the suite green.
      (step 4), and so does the size warning, which needs the session the
      form's `notice` is not given.
 
-   Left for later steps: the region table as a session table with its own
-   filter in the GUI, and the summarising plugins reading it (steps 4 and 6).
+   The region table as a session table with its own filter, planned here,
+   was dropped for region values as columns (step 7).
 4. **Blocks** in chains, the nesting rules and the cycle check, write-back and
    its warning; one step-list editor, the evaluation window becoming it.
    * *4a, done*: `chain.Block` (its file form in `docs/batch.md`) and
@@ -505,9 +525,15 @@ Each step leaves the program working and the suite green.
    Efficiency, which needs the ROIs' settings and truth, stays with the
    ROIs.  Panel pages' `covers` are now checked, as plugin pages' are.
 
-   Still open: the region table as a session table with a filter of its own
-   in the GUI (filtering regions by what was measured, and the
-   localizations through them).
+7. **Region values as columns**, in place of a session region table with
+   its own filter.
+   *Done*: `region_runs.values_onto` (and `merge_pieces`, the merge
+   `WriteBack` uses too), *write values* on a block (`Block.write_values`,
+   in its file form and the project's `block_options`), and *Regions to
+   column* (`plugins/region_column.py`), which replaces *ROI to column*:
+   any numeric value of an evaluation on the ROIs or of an id column's
+   regions, or the ROIs' numbers, written onto the localizations, NaN
+   outside, with a *prefix* and the overlap rule.
 
 Every step that moves a plugin or changes what it computes brings its page
 along (`CLAUDE.md`, "The plugin's page"), and the exhaustive plugin-list tests

@@ -32,7 +32,7 @@ def test_the_region_plugins_are_registered_under_regions():
     assert set(found) == {"Analysis/Regions/Find/Density Peaks",
                           "Analysis/Regions/Find/NPC",
                           "Analysis/Regions/Find/DBSCAN",
-                          "Analysis/Regions/ROI to column",
+                          "Analysis/Regions/Regions to column",
                           "Analysis/Regions/Summarize/Histograms",
                           "Analysis/Regions/Summarize/NPC Labeling Efficiency",
                           "Analysis/Regions/Workflow/NPC Analysis"}

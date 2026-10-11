@@ -133,13 +133,16 @@ class Block:
     region the steps run on that region's tables, a table one hands back
     handed to the next, all of it thrown away afterwards but the numbers
     each step returned -- and the columns named in ``write_back``, merged
-    into the real table by ``merge`` where regions overlap.  A step may be a
+    into the real table by ``merge`` where regions overlap.  The numbers
+    named in ``write_values`` go onto the table too, each region's onto its
+    rows (`region_runs.values_onto`).  A step may be a
     block itself, or a chain.
     """
     steps: List[Any] = field(default_factory=list)   # Step or Block
     label: str = ""
     regions: str = BLOCK_ROIS
     write_back: List[str] = field(default_factory=list)
+    write_values: List[str] = field(default_factory=list)
     merge: str = "last"
     keep_figures: str = "auto"       # auto: on for ROIs, off for an id column
     enabled: bool = True
@@ -158,6 +161,8 @@ class Block:
         out: Dict[str, Any] = {"block": self.label, "regions": self.regions}
         if self.write_back:
             out["write_back"] = list(self.write_back)
+        if self.write_values:
+            out["write_values"] = list(self.write_values)
         if self.merge != "last":
             out["merge"] = self.merge
         if self.keep_figures != "auto":
@@ -181,13 +186,16 @@ class Block:
         if keep not in KEEP_FIGURES:
             raise ChainError(f"block keep_figures {keep!r} is not one of "
                              f"{', '.join(KEEP_FIGURES)}")
-        write_back = raw.get("write_back") or []
-        if isinstance(write_back, str):
-            write_back = [c.strip() for c in write_back.split(",") if c.strip()]
+        def names(key):
+            found = raw.get(key) or []
+            if isinstance(found, str):
+                found = [c.strip() for c in found.split(",") if c.strip()]
+            return [str(c) for c in found]
         return cls(steps=[step_from_dict(s) for s in steps],
                    label=str(raw.get("block") or raw.get("label") or ""),
                    regions=str(raw.get("regions") or BLOCK_ROIS),
-                   write_back=[str(c) for c in write_back], merge=merge,
+                   write_back=names("write_back"), write_values=names("write_values"),
+                   merge=merge,
                    keep_figures=keep, enabled=bool(raw.get("enabled", True)))
 
 

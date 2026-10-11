@@ -21,7 +21,9 @@ cluster has).  With them
 * a **block** of a chain, or the [region steps](plugin:Panels/Regions tab)
   set to *for each* `cluster_id`, runs any measurement once in every cluster
   -- [Localization Statistics](plugin:Analysis/Measure/Localization Statistics),
-  say -- and keeps a row of numbers per cluster;
+  say -- and keeps a row of numbers per cluster, which the block's *write
+  values* or [Regions to column](plugin:Analysis/Regions/Regions to column)
+  puts back onto the localizations, to filter or colour by;
 * *output* set to ROIs makes an ROI of each cluster, to look at, review and
   annotate in the [ROI manager](plugin:Panels/ROI manager).
 
