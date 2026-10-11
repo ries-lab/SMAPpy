@@ -26,33 +26,33 @@ class Drawing(Plugin):
     """An evaluator with a figure, which the shipped ones do not have."""
     name = "Drawing"
     path = "ROIManager/Evaluate/Drawing"
-    scope = "site"
+    per_region = True
     Settings = DrawingSettings
 
     def run(self, ctx, settings):
-        x = np.asarray(ctx.locs["x_nm"])
+        x = np.asarray(ctx.selection.apply(ctx.locs)["x_nm"])
         return Result(text=f"{len(x)} localizations",
                       plot=lambda ax: ax.hist(x, bins=settings.bins),
                       plots={"positions": lambda ax: ax.plot(x, x)},
-                      data={"n": len(x)}, settings=settings)
+                      values={"n": len(x)}, settings=settings)
 
 
 class Other(Plugin):
     """A second evaluator with a figure, to watch what the first one costs."""
     name = "Other"
     path = "ROIManager/Evaluate/Other"
-    scope = "site"
+    per_region = True
     Settings = DrawingSettings
 
     def run(self, ctx, settings):
-        n = len(ctx.locs)
-        return Result(text=f"{n}", plot=lambda ax: ax.bar([0], [n]), data={"n": n})
+        n = len(ctx.selection)
+        return Result(text=f"{n}", plot=lambda ax: ax.bar([0], [n]), values={"n": n})
 
 
 class Failing(Plugin):
     name = "Failing"
     path = "ROIManager/Evaluate/Failing"
-    scope = "site"
+    per_region = True
     Settings = DrawingSettings
 
     def run(self, ctx, settings):
@@ -112,26 +112,26 @@ def test_a_step_that_fails_costs_its_own_figure_and_no_more():
     assert pipeline_module.errors(record) == {"Failing": "ValueError: not this site"}
 
 
-def test_the_shipped_evaluator_draws_the_site_it_counted():
-    """Three numbers cannot tell a ring from a smear; the picture can."""
+def test_the_shipped_evaluator_draws_the_distributions_it_counted():
     project, rois = a_project()
     _, results, _ = project.evaluate_one(
         rois[0].id,
         steps=pipeline_module.resolve(pipeline_module.default_instances()))
-    assert results["Statistics"].plot is not None
+    figure, = results["Localization Statistics"].figures()
 
     from matplotlib.figure import Figure
-    ax = Figure().subplots()
-    results["Statistics"].plot(ax)
-    assert ax.collections and "10 localizations" in ax.get_title()
+    drawn = Figure()
+    figure.draw_into(drawn)
+    assert drawn.axes and any("10 localizations" in ax.get_title()
+                              for ax in drawn.axes)
 
 
 def test_the_pipeline_on_the_project_is_what_runs_by_default():
     project, rois = a_project()
     project.pipeline = pipeline_module.default_instances()
     record, results, _ = project.evaluate_one(rois[0].id)
-    assert "Statistics" in results
-    assert record["steps"]["Statistics"]["values"]["n_localizations"] == 10
+    assert "Localization Statistics" in results
+    assert record["steps"]["Localization Statistics"]["values"]["n_localizations"] == 10
 
 
 # ------------------------------------------------------------------ the window

@@ -34,7 +34,7 @@ def test_an_empty_context_is_usable():
     ctx = Context()
     assert len(ctx.locs) == 0 and len(ctx.selection) == 0
     assert ctx.session is None and ctx.rois is None
-    assert ctx.site is None and ctx.site_table is None
+    assert ctx.region is None and ctx.site_table is None
     ctx.report("nobody is listening")       # must not raise
     ctx.emit("block", None)
 
@@ -70,29 +70,13 @@ def test_report_and_emit_reach_their_callbacks():
     assert result.text == "100 in, 100 selected"
 
 
-def test_for_site_narrows_without_losing_the_rest():
-    locs = table()
-    said = []
-    ctx = Context(session=None, locs=locs, progress=said.append,
-                  site_table=[{"roi_id": 1}])
-    roi = Region.rect(0, 0, 500, 500)
-    mask = roi.mask(locs["x_nm"], locs["y_nm"])
-    per_site = ctx.for_site(roi, selection=Selection(mask, name="site 1"))
-    assert per_site.site is roi
-    assert per_site.locs is locs                       # the table is shared
-    assert len(per_site.selection) == mask.sum()
-    assert per_site.site_table == ctx.site_table
-    per_site.report("in a site")
-    assert said == ["in a site"]                       # the callbacks came along
+def test_per_region_says_a_plugin_hands_back_values():
+    assert Plugin.per_region is False and Echo.per_region is False
 
+    class PerRegion(Plugin):
+        per_region = True
 
-def test_scope_says_what_a_plugin_is():
-    assert Plugin.scope == "locs" and Echo.scope == "locs"
-
-    class PerSite(Plugin):
-        scope = "site"
-
-    assert PerSite.scope == "site"
+    assert PerRegion.per_region is True
 
 
 def test_calling_a_plugin_needs_no_localizations_at_all():

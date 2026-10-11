@@ -46,10 +46,16 @@ DEFAULT_TABS = (
      "seed": ("File/Load/", "File/Save/", "File/Export/", "File/Simulate/")},
     {"name": "Localize", "kind": "plugins", "header": "localize", "seed": "Localize/"},
     {"name": "Render", "kind": "render"},
-    {"name": "Analysis", "kind": "plugins", "seed": "Analysis/"},
-    # a tuple seeds in the order given: finding sites comes before summarising them
-    {"name": "ROI", "kind": "plugins", "header": "roi",
-     "seed": ("ROIManager/Segment/", "ROIManager/Analyze/", "ROIManager/Workflow/")},
+    # the regions have a tab of their own (docs/regions.md), so the Analysis
+    # tab leaves their branch out
+    {"name": "Analysis", "kind": "plugins", "seed": "Analysis/",
+     "exclude": ("Analysis/Regions/",)},
+    # a tuple seeds in the order given: finding regions comes before
+    # summarising them
+    {"name": "Regions", "kind": "plugins", "header": "roi",
+     "seed": ("Analysis/Regions/Find/", "Analysis/Regions/Column to ROIs",
+              "Analysis/Regions/Regions to column",
+              "Analysis/Regions/Summarize/", "Analysis/Regions/Workflow/")},
 )
 
 
@@ -125,14 +131,12 @@ class Workspace:
         for spec in DEFAULT_TABS:
             seed = spec.get("seed") or ()
             prefixes = (seed,) if isinstance(seed, str) else tuple(seed)
-            # scope="site" is skipped: an evaluator measures one ROI and has no
-            # meaning outside the evaluation pipeline, so a tab's Run button
-            # could only fail.
+            exclude = tuple(spec.get("exclude") or ())
             instances = [Instance(plugin=path)
                          for prefix in prefixes
                          for path, ref in sorted(refs.items())
                          if path.startswith(prefix) and ref.favorite
-                         and ref.scope == "locs"]
+                         and not (exclude and path.startswith(exclude))]
             tabs.append(Tab(name=spec["name"], kind=spec.get("kind", "plugins"),
                             header=spec.get("header", ""), instances=instances))
         return cls(tabs=tabs)

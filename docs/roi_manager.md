@@ -6,7 +6,7 @@ navigation aid; moving through the file never moves ROIs.
 
 ## Open the manager
 
-Start the GUI and open the manager from the ROI tab's **Open ROI manager**, from
+Start the GUI and open the manager from the Regions tab's **Open ROI manager**, from
 **Tools → ROI manager**, or with Ctrl+R:
 
 ```sh
@@ -48,7 +48,7 @@ and records an arrow the analysis plugins can read; it does not rotate anything.
 selected ROI, or to a draft, which then carries them when **Add** stores it.
 
 The default circle has a **300 nm diameter**.  For a square, the global size is
-its **side length**; both are set in the ROI tab and apply to every ROI at once.
+its **side length**; both are set in the Regions tab and apply to every ROI at once.
 Polygons keep their own boundaries.  **ROI view** sets what the ROI image shows
 around the ROI, independently of the analysis geometry.
 
@@ -74,7 +74,7 @@ overview's *update*.
 ## Find, review, evaluate, histogram
 
 Candidates are found by the **Density Peaks** segmenter
-(`ROIManager/Segment/Density Peaks`, pinned in the ROI tab), which operates on
+(`Analysis/Regions/Find/Density Peaks`, pinned in the Regions tab), which operates on
 the current file's filtered localizations. It
 bins coordinates into a density image, smooths it, finds local peaks, recenters
 on nearby localizations, and suppresses nearby centers. Defaults target compact
@@ -94,15 +94,16 @@ line and a direction is a magenta arrow.
 
 **Run on every ROI**, in the *Evaluation pipeline...* window, runs the
 pipeline on every included ROI across all files (**Re-evaluate what changed**
-only on those whose results are out of date or missing). The **Statistics**
-evaluator (`ROIManager/Evaluate/Statistics`) returns localization count, arithmetic mean lateral
-localization precision (`xy_err_nm`), and arithmetic mean photons.
-Nonfinite measurement values are omitted from each mean; their finite sample
-counts are saved separately. Empty selections return count zero and NaN means.
+only on those whose results are out of date or missing). **Localization
+Statistics** (`Analysis/Measure/Localization Statistics`, the same plugin as
+on the view) returns the localization count, the mean and median photons and
+`N0`, the mean and median lateral precision and, when its precision model is
+switched on, `sigma_c`.  Nonfinite values are omitted from each mean. Empty
+selections return count zero and NaN means.
 Missing required measurement columns produce a per-ROI error without stopping
 other ROIs. Select the error row to see its message.
 
-The **Histograms** analysis (`ROIManager/Analyze/Histograms`) plots the
+The **Histograms** analysis (`Analysis/Regions/Summarize/Histograms`) plots the
 current results for included ROIs.  NaN means are
 omitted, with the number of missing values shown.  A histogram is a snapshot:
 run it again after anything changes.

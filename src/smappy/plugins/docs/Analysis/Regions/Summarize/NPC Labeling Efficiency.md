@@ -26,7 +26,7 @@ efficiency at 5000 photons per blink, and far more at 500 (the study in
 `studies/npc_le` has the numbers).
 
 So the plugin fits a model of a whole pore instead.  It uses two numbers per
-pore from [NPC Corners](plugin:ROIManager/Evaluate/NPC Corners): the corners
+pore from [NPC Corners](plugin:Analysis/Measure/NPC Corners): the corners
 seen with the precise localizations, and the localizations the pore has.  The
 model knows what spills and what is lost, and the localizations tell how
 often a fluorophore blinks -- which is what it needs to work out the dim
@@ -39,7 +39,7 @@ fewer are the ones a segmentation is likely to miss, and junk rarely shows
 not bias the answer.  SMAP's analysis, the corner histogram alone, is kept as
 the *corners (SMAP)* method.
 
-The order is: find the pores with [NPC](plugin:ROIManager/Segment/NPC), add
+The order is: find the pores with [NPC](plugin:Analysis/Regions/Find/NPC), add
 NPC Corners to the evaluation pipeline and evaluate, then run this.  Use
 grouped localizations, imaged until the fluorophores have bleached.
 
@@ -175,14 +175,14 @@ smappy's links within a fixed 50 nm, which a dim frame at 500 photons misses
 still runs, and its text says so.
 
 **Which counts.**  The counts are those of an NPC Corners evaluation, made by
-the evaluation window or a chain.  With one, it is used whatever it is
+the region steps window or a chain.  With one, it is used whatever it is
 called; in a chain, the one the chain itself made.  *results from* lists
 every NPC Corners evaluation on the ROIs, after *auto*, which says which one
 it would take.  With several -- NPC Corners renamed and run with other
 settings, to compare -- and *auto* chosen, the plugin asks before it runs,
 with a button per evaluation and its settings beside it, and the answer goes
 into *results from*, so it is asked once.  The cutoffs of the model are those that evaluation counted
-with, as stored with its results, not what the evaluation window holds now.
+with, as stored with its results, not what the region steps window holds now.
 If some sites were counted with other settings than the rest under the same
 name, the plugin refuses and asks for them to be evaluated again.
 

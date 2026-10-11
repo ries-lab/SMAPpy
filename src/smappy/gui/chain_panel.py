@@ -12,19 +12,44 @@ replaced; the values in it survive, because the edited chain is made from
 `current_spec`, which carries the form's values into the steps.  Until it is
 saved, the edited chain lives in the workspace instance (`Instance.chain`),
 so a restart loses nothing.
+
+The steps are a tree: a block (`docs/regions.md`) holds steps of its own,
+indented under it.  A step is added after the selected one, or into the
+selected block; up and down move a step within its own list.  **check**, on
+a block, times it in a few of its regions and says what the whole will take
+and which columns its steps change without writing them back
+(`blocks.BlockPlugin.estimate`).
 """
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Optional
 
+from typing import List, Tuple
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QFileDialog, QHBoxLayout, QInputDialog, QLabel,
-                               QListWidget, QListWidgetItem, QMessageBox,
-                               QPushButton, QToolButton, QVBoxLayout, QWidget)
+                               QMessageBox, QPushButton, QToolButton, QTreeWidget,
+                               QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from .. import chain as chains, plugins
-from ..chain import ChainError, ChainSpec, Step
+from ..chain import Block, ChainError, ChainSpec, Step
+
+# an item's place in the chain: indices from the top list down into blocks
+PATH = Qt.UserRole
+
+
+def _steps_at(spec, path: Tuple[int, ...]) -> Tuple[list, int]:
+    """The list that holds the step at ``path``, and its index in it."""
+    holder = spec.steps
+    for i in path[:-1]:
+        holder = holder[i].steps
+    return holder, path[-1]
+
+
+def _step_at(spec, path):
+    holder, i = _steps_at(spec, path)
+    return holder[i]
 from ..session import Session
 from ..workspace import Instance
 from .plugin_panel import PluginPanel
@@ -48,8 +73,13 @@ class ChainPanel(QWidget):
 
     changed = Signal()              # the steps, or where the chain lives, changed
 
-    def __init__(self, instance: Instance, session: Session, cls: type, parent=None):
+    def __init__(self, instance: Instance, session: Session, cls: type, parent=None,
+                 root: Tuple[int, ...] = ()):
+        """``root`` opens the panel on one block of the chain: its steps are
+        the top of the tree and new steps go into it (the region steps
+        window, `region_steps.py`)."""
         super().__init__(parent)
+        self.root = tuple(root)
         self.instance = instance
         self.session = session
         self.cls = cls
@@ -75,12 +105,16 @@ class ChainPanel(QWidget):
         self.editor = QWidget()
         column = QVBoxLayout(self.editor)
         column.setContentsMargins(0, 0, 0, 0)
-        self.steps = QListWidget()
-        self.steps.setMaximumHeight(140)
+        self.steps = QTreeWidget()
+        self.steps.setHeaderHidden(True)
+        self.steps.setIndentation(14)
+        self.steps.setMaximumHeight(160)
         self.steps.itemChanged.connect(self._ticked)
+        self.steps.currentItemChanged.connect(lambda *_: self._selected())
         column.addWidget(self.steps)
         row = QHBoxLayout()
-        for label, slot in (("add...", self.add_step), ("up", lambda: self.move_step(-1)),
+        for label, slot in (("add...", self.add_step), ("block...", self.add_block),
+                            ("up", lambda: self.move_step(-1)),
                             ("down", lambda: self.move_step(1)),
                             ("rename...", self.rename_step), ("remove", self.remove_step)):
             button = QPushButton(label)
@@ -88,6 +122,20 @@ class ChainPanel(QWidget):
             row.addWidget(button)
         row.addStretch(1)
         column.addLayout(row)
+        checking = QHBoxLayout()
+        self.check_button = QPushButton("check")
+        self.check_button.setToolTip("time the selected block in a few of its "
+                                     "regions: what the whole will take, and "
+                                     "the columns it changes without writing "
+                                     "them back")
+        self.check_button.clicked.connect(self.check_block)
+        self.check_button.setEnabled(bool(self.root))
+        self.checked = QLabel("")
+        self.checked.setWordWrap(True)
+        self.checked.setStyleSheet("color: gray")
+        checking.addWidget(self.check_button)
+        checking.addWidget(self.checked, 1)
+        column.addLayout(checking)
         self.editor.setVisible(False)
         layout.addWidget(self.editor)
 
@@ -142,13 +190,58 @@ class ChainPanel(QWidget):
         blocked = self.steps.blockSignals(True)
         try:
             self.steps.clear()
-            for step in self.cls.spec.steps:
-                item = QListWidgetItem(f"{step.title()}   ({step.plugin})")
-                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-                item.setCheckState(Qt.Checked if step.enabled else Qt.Unchecked)
-                self.steps.addItem(item)
+
+            def add(parent, steps, path):
+                for i, step in enumerate(steps):
+                    if isinstance(step, Block):
+                        what = ("each ROI" if step.regions == chains.BLOCK_ROIS
+                                else f"each {step.regions}")
+                        text = (f"{step.label}   (block: {what})" if step.label
+                                else f"{step.title()}   (block)")
+                    else:
+                        text = f"{step.title()}   ({step.plugin})"
+                    item = QTreeWidgetItem(parent, [text])
+                    item.setData(0, PATH, path + (i,))
+                    item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                    item.setCheckState(0, Qt.Checked if step.enabled else Qt.Unchecked)
+                    if isinstance(step, Block):
+                        add(item, step.steps, path + (i,))
+                        item.setExpanded(True)
+            top = (self.cls.spec.steps if not self.root
+                   else _step_at(self.cls.spec, self.root).steps)
+            add(self.steps, top, self.root)
         finally:
             self.steps.blockSignals(blocked)
+
+    def current_path(self) -> Tuple[int, ...]:
+        item = self.steps.currentItem()
+        return tuple(item.data(0, PATH)) if item is not None else ()
+
+    def select(self, path: Tuple[int, ...]) -> None:
+        """Select the step at ``path`` in the tree."""
+        def find(item):
+            for k in range(item.childCount()):
+                child = item.child(k)
+                if tuple(child.data(0, PATH)) == tuple(path):
+                    return child
+                found = find(child)
+                if found is not None:
+                    return found
+            return None
+        item = find(self.steps.invisibleRootItem())
+        if item is not None:
+            self.steps.setCurrentItem(item)
+
+    def _selected(self) -> None:
+        path = self.current_path()
+        is_block = False
+        if path:
+            try:
+                is_block = isinstance(_step_at(self.cls.spec, path), Block)
+            except (IndexError, AttributeError):
+                is_block = False
+        self.check_button.setEnabled(bool(self.root) or (is_block and len(path) == 1))
+        self.checked.setText("")
 
     def _show_editor(self, on: bool) -> None:
         self.editor.setVisible(on)
@@ -173,66 +266,120 @@ class ChainPanel(QWidget):
             raw["origin"] = str(spec.origin)
         self.instance.chain = raw
         self.instance.values = {}        # the values are in the steps now
-        row = self.steps.currentRow()
+        path = self.current_path()
         self._build(cls)
-        self.steps.setCurrentRow(min(row, self.steps.count() - 1))
+        if path:
+            self.select(path)
         self.changed.emit()
         return True
 
     # ------------------------------------------------------------- editing
+    def _insert(self, step) -> None:
+        """Put ``step`` after the selected one, or into the selected block."""
+        spec = self.current_spec()
+        path = self.current_path()
+        if path and isinstance(_step_at(spec, path), Block):
+            holder, at = _step_at(spec, path).steps, len(_step_at(spec, path).steps)
+            new = path + (at,)
+        elif path:
+            holder, i = _steps_at(spec, path)
+            at, new = i + 1, path[:-1] + (i + 1,)
+        elif self.root:
+            holder = _step_at(spec, self.root).steps
+            at, new = len(holder), self.root + (len(holder),)
+        else:
+            holder, at, new = spec.steps, len(spec.steps), (len(spec.steps),)
+        holder.insert(at, step)
+        if self._apply(spec):
+            self.select(new)
+
     def add_step(self) -> None:
         from .chooser import choose_plugin
         path = choose_plugin(self.window())
         if not path:
             return
-        spec = self.current_spec()
         try:
             version = plugins.get(path).version
         except Exception:
             version = ""
-        at = self.steps.currentRow()
-        step = Step(plugin=path, version=version)
-        if 0 <= at < len(spec.steps):
-            spec.steps.insert(at + 1, step)
-        else:
-            spec.steps.append(step)
-        if self._apply(spec):
-            self.steps.setCurrentRow(at + 1 if at >= 0 else self.steps.count() - 1)
+        self._insert(Step(plugin=path, version=version))
+
+    def add_block(self) -> None:
+        """A block over the ROIs, or over an id column of the table."""
+        choices = ["each ROI"] + [f"each {name}" for name in self._id_columns()]
+        chosen, ok = QInputDialog.getItem(self, "Add a block", "Repeat its steps for:",
+                                          choices, 0, True)
+        if not ok or not chosen.strip():
+            return
+        what = chosen.strip()
+        what = what[5:] if what.startswith("each ") else what
+        regions = chains.BLOCK_ROIS if what in ("ROI", "ROIs", "rois") else what
+        self._insert(Block(regions=regions))
+
+    def _id_columns(self) -> List[str]:
+        """The integer columns of the table, the ones a block can repeat over."""
+        locs = self.session.locs
+        skip = {"frame", "filenumber", "channel", "group_id", "n_in_group"}
+        return [name for name in sorted(locs.keys())
+                if name not in skip and locs[name].dtype.kind in "iu"]
 
     def move_step(self, by: int) -> None:
-        at = self.steps.currentRow()
-        spec = self.current_spec()
-        to = at + by
-        if not (0 <= at < len(spec.steps) and 0 <= to < len(spec.steps)):
+        path = self.current_path()
+        if not path:
             return
-        spec.steps[at], spec.steps[to] = spec.steps[to], spec.steps[at]
+        spec = self.current_spec()
+        holder, at = _steps_at(spec, path)
+        to = at + by
+        if not 0 <= to < len(holder):
+            return
+        holder[at], holder[to] = holder[to], holder[at]
         if self._apply(spec):
-            self.steps.setCurrentRow(to)
+            self.select(path[:-1] + (to,))
 
     def rename_step(self) -> None:
-        at = self.steps.currentRow()
-        spec = self.current_spec()
-        if not 0 <= at < len(spec.steps):
+        path = self.current_path()
+        if not path:
             return
-        name, ok = QInputDialog.getText(self, "Rename step", "Name:",
-                                        text=spec.steps[at].title())
+        spec = self.current_spec()
+        step = _step_at(spec, path)
+        name, ok = QInputDialog.getText(self, "Rename step", "Name:", text=step.title())
         if ok and name.strip():
-            spec.steps[at].label = name.strip()
+            step.label = name.strip()
             self._apply(spec)
 
     def remove_step(self) -> None:
-        at = self.steps.currentRow()
+        path = self.current_path()
+        if not path:
+            return
         spec = self.current_spec()
-        if 0 <= at < len(spec.steps):
-            spec.steps.pop(at)
-            self._apply(spec)
+        holder, at = _steps_at(spec, path)
+        holder.pop(at)
+        self._apply(spec)
 
-    def _ticked(self, item: QListWidgetItem) -> None:
-        at = self.steps.row(item)
+    def _ticked(self, item: QTreeWidgetItem) -> None:
+        path = tuple(item.data(0, PATH))
         spec = self.current_spec()
-        if 0 <= at < len(spec.steps):
-            spec.steps[at].enabled = item.checkState() == Qt.Checked
-            self._apply(spec)
+        _step_at(spec, path).enabled = item.checkState(0) == Qt.Checked
+        self._apply(spec)
+
+    def check_block(self) -> None:
+        """Time the selected block in a few regions and say what it found."""
+        path = self.current_path() or self.root
+        if not path:
+            return
+        key = self.cls.spec.keys()[path[0]]
+        found = next(((k, cls) for k, step, cls in self.cls.steps if k == key), None)
+        if found is None:
+            self.checked.setText("the block is switched off")
+            return
+        try:
+            settings = getattr(self.panel.form.value(), key)
+            estimate = found[1]().estimate(self.session.context(), settings)
+        except Exception as error:
+            self.checked.setText(f"cannot check: {error}")
+            return
+        self.checked.setText("no regions to time" if estimate is None
+                             else estimate.text())
 
     # -------------------------------------------------------------- saving
     def save_chain(self, ask: bool = False) -> Optional[Path]:

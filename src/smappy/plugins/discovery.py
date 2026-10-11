@@ -28,8 +28,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 # attributes we read off the class body when they are plain literals
-_READ = ("name", "description", "favorite", "scope")
-_SCOPES = ("locs", "site")
+_READ = ("name", "description", "favorite", "per_region")
 
 
 @dataclass
@@ -56,7 +55,7 @@ class PluginRef:
     origin: Path                    # the file it lives in
     root: str                       # the root it came from, for the UI and errors
     attr: Optional[str] = None      # the class; None: declared, resolve on import
-    scope: str = "locs"             # "locs": run once.  "site": run per ROI
+    per_region: bool = False        # hands back Result.values: can run per region
     favorite: bool = True
     kind: str = "plugin"            # "plugin": a class in a .py.  "chain": a .chain.yaml
 
@@ -274,14 +273,13 @@ def _refs_in_file(origin: Path, path_prefix: str, root: str
         attrs = cls.attrs if cls else {}
         leaf = path.rsplit("/", 1)[-1]
         doc = (cls.doc if cls else "").strip().splitlines()
-        scope = attrs.get("scope", "locs")
         return PluginRef(
             path=path,
             name=str(attrs.get("name") or leaf or default_name),
             description=str(attrs.get("description") or (doc[0] if doc else "")),
             origin=origin, root=root,
             attr=cls.name if cls else None,
-            scope=scope if scope in _SCOPES else "locs",
+            per_region=attrs.get("per_region") is True,
             favorite=bool(attrs.get("favorite", True)),
         )
 

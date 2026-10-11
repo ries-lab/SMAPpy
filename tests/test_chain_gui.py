@@ -43,7 +43,7 @@ def test_a_new_chain_is_built_in_its_own_panel_and_kept_inline(app):
     assert panel.form.value().localization_statistics.bins == 33
     # moving keeps what the form holds
     panel.form.set_values({"localization_statistics.bins": 44})
-    panel.steps.setCurrentRow(1)
+    panel.select((1,))
     panel.move_step(-1)
     assert instance.chain["steps"][0]["values"]["bins"] == 44
     # the workspace keeps the chain being built, and reads it back
@@ -175,3 +175,45 @@ def test_a_second_run_counts_its_files_afresh(app, tmp_path, monkeypatch):
         window.handle_line(line)
     assert window.table.item(0, 4).text() == "1 skipped"
 
+
+
+def test_a_block_is_built_in_the_panel_with_its_steps_under_it(app, monkeypatch):
+    from PySide6.QtWidgets import QInputDialog
+    from smappy.chain import Block
+    from smappy.locs import Localizations
+    import numpy as np
+    rng = np.random.default_rng(0)
+    n = 300
+    locs = Localizations({"x_nm": rng.normal(0, 30, n) + np.repeat([0, 5000, 9000], 100),
+                          "y_nm": rng.normal(0, 30, n), "frame": np.arange(n),
+                          "photons": rng.gamma(4, 400, n), "xy_err_nm": rng.uniform(5, 15, n),
+                          "cluster_id": np.repeat([1, 2, 3], 100)}, {})
+    session = Session(locs)
+    session.show_grouped(0, False)
+    tab, instance, panel = new_chain_tab(app, session)
+    assert "cluster_id" in panel._id_columns() and "frame" not in panel._id_columns()
+    monkeypatch.setattr(QInputDialog, "getItem",
+                        staticmethod(lambda *a, **k: ("each cluster_id", True)))
+    panel.add_block()
+    spec = panel.current_spec()
+    assert isinstance(spec.steps[0], Block) and spec.steps[0].regions == "cluster_id"
+    # with the block selected, a new step goes into it
+    panel.select((0,))
+    from smappy.gui import chooser
+    monkeypatch.setattr(chooser, "choose_plugin",
+                        lambda *a, **k: "Analysis/Measure/Localization Statistics")
+    panel.add_step()
+    spec = panel.current_spec()
+    assert spec.steps[0].steps[0].plugin == "Analysis/Measure/Localization Statistics"
+    root = panel.steps.invisibleRootItem()
+    assert root.childCount() == 1 and root.child(0).childCount() == 1
+    # its slow option starts off in the block
+    assert panel.form.value().for_each_cluster_id.localization_statistics.fit_precision \
+        is False
+    # check times it and says what it found
+    panel.select((0,))
+    assert panel.check_button.isEnabled()
+    panel.check_block()
+    assert "over 3 regions" in panel.checked.text()
+    # and the chain's file says it as a block
+    assert instance.chain["steps"][0]["regions"] == "cluster_id"

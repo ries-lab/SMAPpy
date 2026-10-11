@@ -1,6 +1,6 @@
 ---
 version: "1"
-covers: [smappy.chain.ChainPlugin.run, smappy.chain.evaluate_sites, smappy.plugins.npc.NPCSegment.run, smappy.plugins.npc.npc_rois, smappy.roi_manager.core.ROIProject.evaluate, smappy.roi_manager.core.ROIProject.evaluations]
+covers: [smappy.chain.ChainPlugin.run, smappy.blocks.BlockPlugin.run, smappy.plugins.npc.NPCSegment.run, smappy.plugins.npc.npc_rois, smappy.roi_manager.core.ROIProject.evaluate, smappy.roi_manager.core.ROIProject.evaluations]
 ---
 
 ## What it does
@@ -13,9 +13,9 @@ window.
 
 It is a *chain* -- the plugins it runs, one after the other, each with its
 own settings in a section of this panel -- rather than a plugin of its own:
-[NPC](plugin:ROIManager/Segment/NPC),
-[NPC Corners](plugin:ROIManager/Evaluate/NPC Corners) and
-[NPC Labeling Efficiency](plugin:ROIManager/Analyze/NPC Labeling Efficiency).
+[NPC](plugin:Analysis/Regions/Find/NPC),
+[NPC Corners](plugin:Analysis/Measure/NPC Corners) and
+[NPC Labeling Efficiency](plugin:Analysis/Regions/Summarize/NPC Labeling Efficiency).
 Their pages explain the methods; this one only what running them together
 changes.  Because it is a chain, it can be edited (*edit steps*), saved
 under another name, and run over many files in a batch.
@@ -36,11 +36,11 @@ earlier pores* is ticked in the *find the pores* section), and the pores are
 found with the settings of that section.  ROIs drawn by hand, or made by
 another segmenter, are left alone.
 
-**3. Count.**  NPC Corners is run on every ROI the manager includes, with
-the settings of the *NPC Corners* section, before the next step starts:
-each pore's corners seen with the precise localizations, and its
-localizations.  The numbers are stored with the ROIs, as an evaluation in the
-ROI manager stores them.
+**3. Count.**  The *each pore* section is a block: its step, NPC Corners,
+runs once in every ROI the manager includes, with the settings of its *NPC
+Corners* section, before the next step starts: each pore's corners seen
+with the precise localizations, and its localizations.  The numbers are
+stored with the ROIs, as an evaluation in the ROI manager stores them.
 
 **4. Fit.**  The labelling efficiency and the blinks per copy are fitted to
 all the counted ROIs with the settings of the *labelling efficiency* section.
@@ -50,22 +50,22 @@ corner and localization histograms with the model).
 
 ## In detail
 
-**An evaluator in a chain.**  A plugin that measures one ROI at a time
-(NPC Corners here) runs, as a chain step, over every ROI the manager
-includes -- every one that is ticked *use*, whoever made it -- and the chain
-goes on only when all are done.  A ROI on which it fails (no localizations,
-say) loses its own row and is counted in the step's line, not the run.
+**A block in a chain.**  The steps of a block run once in each region --
+here every ROI the manager includes, every one that is ticked *use*,
+whoever made it -- and the chain goes on only when all are done.  A ROI on
+which a step fails (no localizations, say) loses its own entry and is
+counted in the block's line, not the run.
 
-**The evaluation window is left alone.**  The counts are stored with the
+**The region steps window is left alone.**  The counts are stored with the
 ROIs as an evaluation called *NPC Corners*, like any other, and the
-evaluation window's pipeline stays as it was set up -- for this work or for
+region steps window's list stays as it was set up -- for this work or for
 another.  A result belongs to its ROI, whoever ran it, so the site table
 shows the chain's counts beside the pipeline's numbers, and NPC Labeling
-Efficiency run again from the ROI tab finds them, with the cutoffs they were
+Efficiency run again from the Regions tab finds them, with the cutoffs they were
 counted with.  Running the chain again replaces its counts; to keep a second
 set beside the first -- other cutoffs, to compare -- rename the NPC Corners
 step (*edit steps*).  The chain's analysis reads the chain's own counts,
-whatever else is on the ROIs; run from the ROI tab afterwards, it asks which
+whatever else is on the ROIs; run from the Regions tab afterwards, it asks which
 evaluation to read when there are several.
 
 **Nothing changes until the end.**  The chain runs on a copy of the session,

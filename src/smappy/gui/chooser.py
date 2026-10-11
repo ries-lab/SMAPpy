@@ -24,12 +24,13 @@ class PluginTree(QTreeWidget):
 
     chosen = Signal(str)            # a leaf was double-clicked or Enter pressed
 
-    def __init__(self, scope: Optional[str] = None, parent=None):
-        """``scope`` keeps only plugins of that kind -- "site" for the ROI
-        evaluation pipeline.  It is the plugin's own declaration, not its
-        folder, which is what makes filtering work with one shared tree."""
+    def __init__(self, per_region: bool = False, parent=None):
+        """``per_region`` keeps only the plugins that can run once per
+        region (`Plugin.per_region`), for the ROI evaluation pipeline.  It is
+        the plugin's own declaration, not its folder, which is what makes
+        filtering work with one shared tree."""
         super().__init__(parent)
-        self.scope = scope
+        self.per_region = per_region
         self.setHeaderHidden(True)
         self.setUniformRowHeights(True)
         self.itemActivated.connect(self._activated)
@@ -40,7 +41,7 @@ class PluginTree(QTreeWidget):
     def reload(self) -> None:
         self.clear()
         self.refs = {p: r for p, r in plugins.refs().items()
-                     if self.scope is None or r.scope == self.scope}
+                     if not self.per_region or r.per_region}
         groups: Dict[str, QTreeWidgetItem] = {}
 
         def group_for(path: str) -> Optional[QTreeWidgetItem]:
@@ -104,7 +105,7 @@ class PluginTree(QTreeWidget):
 class PluginChooser(QDialog):
     """Pick a plugin to pin.  `path` is what was chosen, or None."""
 
-    def __init__(self, parent=None, scope: Optional[str] = None,
+    def __init__(self, parent=None, per_region: bool = False,
                  title: str = "Add a plugin"):
         super().__init__(parent)
         self.setWindowTitle(title)
@@ -113,7 +114,7 @@ class PluginChooser(QDialog):
         self.search = QLineEdit(placeholderText="find a plugin...")
         self.search.setClearButtonEnabled(True)
         layout.addWidget(self.search)
-        self.tree = PluginTree(scope=scope)
+        self.tree = PluginTree(per_region=per_region)
         layout.addWidget(self.tree, 1)
         self.about = QLabel(" ")
         self.about.setWordWrap(True)
@@ -150,8 +151,8 @@ class PluginChooser(QDialog):
         self.accept()
 
 
-def choose_plugin(parent=None, scope: Optional[str] = None,
+def choose_plugin(parent=None, per_region: bool = False,
                   title: str = "Add a plugin") -> Optional[str]:
     """Show the chooser; the plugin path picked, or None."""
-    dialog = PluginChooser(parent, scope=scope, title=title)
+    dialog = PluginChooser(parent, per_region=per_region, title=title)
     return dialog.path if dialog.exec() == QDialog.Accepted else None

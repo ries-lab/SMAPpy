@@ -22,6 +22,8 @@ import numpy as np
 from ..group import GroupSettings
 from ..io.hdf5 import load_localizations
 from ..locs import Localizations, to_nm
+from ..region_table import RegionTable
+from ..regions import Region
 from ..viewer import ViewState
 
 
@@ -66,24 +68,63 @@ def polygon_vertices(value):
     return v.tolist()
 
 
-def inside_polygon(x, y, vertices):
-    """Even-odd fill with boundary points included; no GUI dependency."""
-    v = np.asarray(vertices, dtype=float)
-    inside = np.zeros(len(x), dtype=bool)
-    boundary = inside.copy()
-    for a, b in zip(v, np.roll(v, -1, axis=0)):
-        dx, dy = b - a
-        length = np.hypot(dx, dy)
-        if length == 0:
-            continue
-        cross = (x - a[0]) * dy - (y - a[1]) * dx
-        dot = (x - a[0]) * dx + (y - a[1]) * dy
-        boundary |= ((np.abs(cross) <= 1e-7 * length) &
-                     (dot >= -1e-7 * length) & (dot <= length**2 + 1e-7 * length))
-        if dy != 0:
-            inside ^= (((a[1] > y) != (b[1] > y)) &
-                       (x < a[0] + (y - a[1]) * dx / dy))
-    return inside | boundary
+def rows_in(locs, index, region, keep=None):
+    """The rows of ``locs`` inside ``region``, sorted, through its spatial
+    index: only the rows in the region's bounding box are tested.  ``keep``,
+    over the whole table, narrows them first (a file of several)."""
+    x0, y0, x1, y1 = region.bounds
+    candidates = index.query(x0, x1, y0, y1)
+    if keep is not None:
+        candidates = candidates[keep[candidates]]
+    x = np.asarray(locs["x_nm"][candidates], dtype=float)
+    y = np.asarray(locs["y_nm"][candidates], dtype=float)
+    return np.sort(candidates[region.mask(x, y)])
+
+
+def changes_table(step) -> bool:
+    """Does this step hand back a new table (`Plugin.changes_locs_for`)?  In
+    a region's run its table is what the steps after it measure."""
+    try:
+        answer = step.plugin.changes_locs_for(step.settings)
+    except Exception:
+        answer = getattr(step.plugin, "changes_locs", None)
+    return answer is True
+
+
+def region_entry(result, plugin=None, keep: bool = False) -> Dict:
+    """What one run in one region stores: its `Result.values`, a number
+    each, and its `Result.arrays`.
+
+    A value that is not a number (or a string, a flag, None) is refused
+    rather than stored: the values are the region table's columns, and a
+    list in a column is a table nobody can histogram.  An array belongs in
+    `arrays`.  Until the region table is written in columns (step 3 of
+    `docs/regions.md`) the arrays are kept as JSON lists beside the values.
+
+    With ``keep``, what ``plugin.keep(result)`` returns -- the data its
+    figure is drawn from -- goes with the row as ``kept``, so the figure can
+    come back (`Plugin.restore`) without measuring again.
+    """
+    values = {}
+    for name, value in (result.values or {}).items():
+        if isinstance(value, np.generic):
+            value = value.item()
+        if value is not None and not isinstance(value, (bool, int, float, str)):
+            raise TypeError(f"value {name!r} is a {type(value).__name__}, not a "
+                            "number: put it in Result.arrays")
+        values[name] = value
+    entry = {"values": values}
+    if result.arrays:
+        entry["arrays"] = {name: np.asarray(a).tolist()
+                           for name, a in result.arrays.items()}
+    if keep and plugin is not None:
+        try:
+            kept = plugin.keep(result)
+        except Exception:
+            kept = None             # the numbers stand; only the replot is lost
+        if kept:
+            entry["kept"] = kept
+    return json.loads(json_text(entry))
 
 
 @dataclass
@@ -97,6 +138,13 @@ class ROI:
     use: bool = True
     comment: str = ""
     origin: dict = field(default_factory=lambda: {"method": "manual"})
+
+    def region(self, shape: str, size_nm: float) -> Region:
+        """This ROI's shape: its own polygon, or the project's ``shape`` of
+        ``size_nm`` around its centre -- which the ROI does not know, since
+        changing it is one edit for every ROI of the project.  So the shape
+        is worked out when asked for rather than held."""
+        return Region.site(self.center, shape, size_nm, self.polygon)
 
 
 # Past this nobody is walking back through a list of edits.
@@ -221,12 +269,26 @@ class ROIProject:
         self.filters = dict(DEFAULT_BOUNDS)
         self.grouped = False
         self.group_settings = GroupSettings()
+        # The results, one table per evaluation by its name, a row per ROI
+        # (`RegionTable`): the newest result of each evaluation on each ROI,
+        # with the step that made it.  Kept in the order they were last
+        # written, so the newest is last.  Rows of ROIs that were removed
+        # stay until the project is saved, so an undo brings the ROI back
+        # with its numbers.
+        self.tables: Dict[str, RegionTable] = {}
+        # What was run, newest last: the pipeline, when, and whether a chain
+        # or one site's re-evaluation did it -- a log, without the results,
+        # which are in `tables`
         self.runs = []
         self.navigation = {}  # GUI state only; never used for extraction
         # The evaluation pipeline, as `workspace.Instance`s.  It travels with
         # the project because the columns of a site table mean nothing without
         # knowing which evaluators produced them, with what parameters.
         self.pipeline = []
+        # what the pipeline repeats over and how, as a block's own fields
+        # (`pipeline.block_of`): the ROIs, or an id column; write-back
+        from .pipeline import DEFAULT_OPTIONS
+        self.block_options = dict(DEFAULT_OPTIONS)
         # What a segmenter's Preview proposed and nobody has added yet:
         # ``{"file_id", "method", "sites": [{"center", "use"}], "replaces":
         # [roi ids]}``, or None.  Drawn by the manager and never saved -- it
@@ -314,17 +376,20 @@ class ROIProject:
             state.sets.pop("grouped", None)
             state.group(self.group_settings)
             source.group_key = group_key
-            self._filter_keys.pop((file_id, True), None)
+            self._filter_keys.pop((file_id, "grouped"), None)
         state.use_grouped = self.grouped
-        effective = {k: v for k, v in self.filters.items()
-                     if k in state.locs and k not in ("filenumber", "file_id")}
-        key = (file_id, self.grouped)
-        signature = digest(effective)
-        if self._filter_keys.get(key) != signature:
-            state.filter.clear()
-            for k, bounds in effective.items():
-                state.filter.set(k, *bounds)
-            self._filter_keys[key] = signature
+        # every table gets the bounds, not only the one shown: a measurement
+        # in an ROI may ask for the other (`region_context`)
+        for kind, locset in state.sets.items():
+            effective = {k: v for k, v in self.filters.items()
+                         if k in locset.locs and k not in ("filenumber", "file_id")}
+            key = (file_id, kind)
+            signature = digest(effective)
+            if self._filter_keys.get(key) != signature:
+                locset.filter.clear()
+                for k, bounds in effective.items():
+                    locset.filter.set(k, *bounds)
+                self._filter_keys[key] = signature
         return state
 
     @contextmanager
@@ -376,30 +441,63 @@ class ROIProject:
         return {"center": roi.center, "shape": self.shape, "size_nm": self.size_nm,
                 "direction": roi.direction}
 
+    def region(self, roi) -> Region:
+        """The ROI's shape, with this project's shared shape and size."""
+        return roi.region(self.shape, self.size_nm)
+
     def indices(self, roi):
         state = self.state(roi.file_id)
-        if roi.polygon is None:
-            half = self.size_nm / 2
-            x0, y0 = np.asarray(roi.center) - half
-            x1, y1 = np.asarray(roi.center) + half
-        else:
-            vertices = np.asarray(roi.polygon)
-            x0, y0 = vertices.min(axis=0)
-            x1, y1 = vertices.max(axis=0)
-        candidates = state.index.query(x0, x1, y0, y1)
-        candidates = candidates[state.filter.mask[candidates]]
-        x = np.asarray(state.locs['x_nm'][candidates], dtype=float)
-        y = np.asarray(state.locs['y_nm'][candidates], dtype=float)
-        if roi.polygon is not None:
-            keep = inside_polygon(x, y, roi.polygon)
-        elif self.shape == "circle":
-            keep = (x - roi.center[0])**2 + (y - roi.center[1])**2 <= half**2
-        else:
-            keep = (x >= x0) & (x <= x1) & (y >= y0) & (y <= y1)
-        return np.sort(candidates[keep])
+        return rows_in(state.locs, state.index, self.region(roi),
+                       keep=np.asarray(state.filter.mask))
 
     def extract(self, roi):
+        """What the ROI shows: the shown table's filtered rows inside it."""
         return self.state(roi.file_id).locs[self.indices(roi)]
+
+    # ------------------------------------------------ measuring in an ROI
+    def region_context(self, roi, **extra):
+        """The context a plugin measuring this ROI is given.
+
+        The ordinary contract, confined to the ROI (`docs/regions.md`):
+        ``ctx.locs`` is the ROI's rows of its file, unfiltered and ungrouped;
+        ``ctx.selection`` and ``ctx.layer_selection(i)`` are each layer's
+        filter over those rows; ``ctx.table(i)`` hands out the grouped table
+        cut to the ROI as well where the layer has one; ``ctx.region`` is
+        the ROI's shape.  Which rows belong is the ROI's shape alone -- a
+        filter is applied inside it, never to decide membership -- and no
+        drawn ROI or 3D slab narrows it further: the region replaces them.
+        """
+        region = self.region(roi)
+        return self._context(region, self._region_tables(roi, region),
+                             region_id=roi.id, **extra)
+
+    def _context(self, region, tables, **extra):
+        """A context over what `_region_tables` cut: one per run, since a
+        context keeps what it was told, over tables the steps share."""
+        from ..plugins import Context
+        pinned, rows, layer, session = tables
+        locs, selection = pinned[layer]["ungrouped"]
+        return Context(session=session, locs=locs, selection=selection, layer=layer,
+                       pinned=pinned, rows=rows, region=region, rois=self, **extra)
+
+    def _region_tables(self, roi, region):
+        """``(tables, rows, layer, session)`` for `region_context`.
+
+        A project of its own files has one layer: the file, under the
+        project's bounds and grouping.  `SessionROIs` has the session's.
+        """
+        from ..plugins import Selection
+        state = self.state(roi.file_id)
+        entry = {"shows": "grouped" if state.use_grouped else "ungrouped"}
+        rows = None
+        for kind, locset in state.sets.items():
+            found = rows_in(locset.locs, locset.index, region)
+            if kind == "ungrouped":
+                rows = found
+            entry[kind] = (locset.locs[found],
+                           Selection(np.asarray(locset.filter.mask)[found], layer=0,
+                                     roi=region, name=str(region)))
+        return {0: entry}, rows, 0, None
 
     def inputs(self, roi):
         state = self.state(roi.file_id)
@@ -434,14 +532,29 @@ class ROIProject:
             instances = pipeline_module.default_instances()
         return pipeline_module.resolve(instances)
 
-    def step_signature(self, step, inputs):
+    def step_signature(self, step, inputs, before=()):
         """What this step's result depends on: the data *and* the parameters.
 
         The record used to carry one signature over the ROI's inputs alone,
         so editing an evaluator's parameter left every stored number looking
         perfectly current -- the one case where "out of date" matters most.
+        ``before`` are the identities of the steps before it that change the
+        region's table (`changes_table`): in a block what a step measures is
+        what they left, so editing one of them is editing it.
         """
-        return digest({"inputs": inputs, "step": step.identity()})
+        if not before:
+            return digest({"inputs": inputs, "step": step.identity()})
+        return digest({"inputs": inputs, "step": step.identity(),
+                       "after": list(before)})
+
+    def signatures(self, steps, inputs):
+        """`step_signature` for each step, by label, in order."""
+        out, before = {}, []
+        for step in steps:
+            out[step.label] = self.step_signature(step, inputs, before)
+            if changes_table(step):
+                before.append(step.identity())
+        return out
 
     def entries(self, roi_id, steps=None):
         """The newest stored entry for each step of this ROI, and its state.
@@ -453,19 +566,20 @@ class ROIProject:
         """
         steps = self.resolved(steps)
         inputs = json.loads(json_text(self.inputs(self.rois[roi_id])))
-        wanted = {step.label: self.step_signature(step, inputs) for step in steps}
+        wanted = self.signatures(steps, inputs)
         # by signature as well as by label: a step that was renamed, or moved
         # up the pipeline, measured the same thing and its numbers stand.  The
         # label is what the columns are called, and calling them something
         # else is not a reason to run anything again.
         by_signature: Dict[str, Dict] = {}
         by_label: Dict[str, Dict] = {}
-        for run in reversed(self.runs):
-            record = (run.get("records") or {}).get(roi_id)
-            for label, entry in ((record or {}).get("steps") or {}).items():
-                by_label.setdefault(label, entry)
-                if entry.get("signature"):
-                    by_signature.setdefault(entry["signature"], entry)
+        for label, table in self._newest_first():
+            entry = table.entry(roi_id)
+            if entry is None:
+                continue
+            by_label[label] = entry
+            if entry.get("signature"):
+                by_signature.setdefault(entry["signature"], entry)
         found = {}
         for label, signature in wanted.items():
             if signature in by_signature:
@@ -493,23 +607,19 @@ class ROIProject:
         inputs = json.loads(json_text(self.inputs(self.rois[roi_id])))
         data = digest(inputs)
         found = {}
-        for run in reversed(self.runs):
-            record = (run.get("records") or {}).get(roi_id)
-            if record is None:
+        for label, table in self._newest_first():
+            entry = table.entry(roi_id)
+            if entry is None:
                 continue
-            made_by = {s.get("label"): s for s in run.get("pipeline") or []}
-            for label, entry in (record.get("steps") or {}).items():
-                if label in found:
-                    continue
-                step = made_by.get(label) or {}
-                if entry.get("signature") and step:
-                    identity = {k: v for k, v in step.items() if k != "label"}
-                    current = entry["signature"] == digest({"inputs": inputs,
-                                                            "step": identity})
-                else:                     # written before entries were signed
-                    current = record.get("signature") == data
-                if current:
-                    found[label] = (entry, step)
+            step = table.step(roi_id)
+            if entry.get("signature") and step:
+                identity = {k: v for k, v in step.items() if k != "label"}
+                current = entry["signature"] == digest({"inputs": inputs,
+                                                        "step": identity})
+            else:                         # stored without a step to check against
+                current = table.data_signature(roi_id) == data
+            if current:
+                found[label] = (entry, step)
         return found
 
     def evaluation_steps(self, label, roi_ids=None):
@@ -554,7 +664,8 @@ class ROIProject:
 
     # -------------------------------------------------------------- running
     def evaluate(self, instances=None, roi_ids=None, progress=None, steps=None,
-                 reuse=False):
+                 reuse=False, chain="", report=None, stop=None, after=None,
+                 tag=False):
         """Run a pipeline over every reviewed, included ROI.
 
         `instances` is a list of `workspace.Instance` -- the same type a tab
@@ -566,74 +677,143 @@ class ROIProject:
         forward instead of run again -- which is what "re-evaluate what
         changed" means: editing one evaluator's parameter costs that
         evaluator over the sites, not the whole pipeline over all of them.
+        ``chain`` marks the run as a chain's (`chain.evaluate_sites`).
+        ``progress(done, total)`` is told after every ROI; ``report(text)``
+        gets the status line -- percentage, rate, time left
+        (`region_runs.Progress`); ``stop`` (an Event, or a callable such as a
+        dialog's ``wasCanceled``) ends the run between ROIs, keeping the ones
+        measured.  ``after`` and ``tag`` are a block's (`_evaluate_record`).
         """
         steps = self.resolved(steps, instances)
         ids = list(self.rois) if roi_ids is None else list(roi_ids)
         ids = [i for i in ids if self.rois[i].reviewed and self.rois[i].use]
-        run = {"id": uuid4().hex, "time": datetime.now(timezone.utc).isoformat(),
-               "pipeline": [step.as_record() for step in steps], "records": {}}
+        from ..region_runs import Progress, stopped
+        records = {}
+        status = Progress(len(ids), report, progress, what="ROIs")
         for n, roi_id in enumerate(ids):
-            record, _, _ = self._evaluate_record(roi_id, steps, reuse=reuse)
-            run["records"][roi_id] = record
-            if progress:
-                progress(n + 1, len(ids))
+            if stopped(stop):
+                break
+            record, _, _ = self._evaluate_record(roi_id, steps, reuse=reuse,
+                                                 after=after, tag=tag)
+            records[roi_id] = record
+            status(n + 1)
+        run = self._log(steps, len(records), chain=chain,
+                        stopped=len(records) < len(ids))
+        self._store(records, steps)
+        # the records go back to the caller, who counts what failed; what
+        # is kept of them is in `tables`
+        return {**run, "records": records}
+
+    def _log(self, steps, regions, **marks):
+        """A run in the log: its pipeline, when, how many ROIs, and the
+        marks given (``chain``, ``scope``) when they say something."""
+        run = {"id": uuid4().hex, "time": datetime.now(timezone.utc).isoformat(),
+               "pipeline": [step.as_record() for step in steps], "regions": regions}
+        run.update({k: v for k, v in marks.items() if v})
         self.runs.append(run)
         return run
 
-    def _evaluate_record(self, roi_id, steps, reuse=False, force=(), run="stale"):
+    def _store(self, records, steps):
+        """Records into the tables: each step's entry the ROI's row of the
+        table named after the step, with the step's record beside it."""
+        made = {step.label: step.as_record() for step in steps}
+        for roi_id, record in records.items():
+            for label, entry in (record.get("steps") or {}).items():
+                table = self.tables.pop(label, None) or RegionTable(label)
+                table.set(roi_id, entry, made.get(label), record.get("signature", ""))
+                self.tables[label] = table          # newest last
+
+    def _newest_first(self):
+        return reversed(list(self.tables.items()))
+
+    def _evaluate_record(self, roi_id, steps, reuse=False, force=(), run="stale",
+                         after=None, tag=False):
         """One ROI: a complete record, and the results of what actually ran.
 
         `force` names steps to run even when their stored result is current,
         which is how a figure is got back: the numbers are in the record but
         a plot is a closure over the data it drew, and nothing in a file can
-        bring that back.
+        bring that back -- unless the row kept what its figure is drawn from
+        (`Plugin.keep`), which is then restored instead of measuring again.
 
         `run="forced"` runs nothing else -- a stored result that is out of
         date is carried forward as it is, still signed with what made it, so
         it goes on reading as out of date.  That is the ROI manager with
         re-evaluation turned off: scrolling a list stays free, and what is
         shown is what was measured, labelled for what it is.
+
+        The steps run in one `RegionScratch`: a step that hands back a new
+        table hands it to the steps after it.  So once a step has to run,
+        every step before it that changes the table runs as well, whatever
+        is stored.  ``after(roi_id, scratch, original)`` is told the region's
+        tables at the end (a block's write-back); ``tag`` gives them the
+        rows they came from.
         """
+        from ..region_runs import RegionScratch
         roi = self.rois[roi_id]
         inputs = json.loads(json_text(self.inputs(roi)))
-        geometry = json.loads(json_text(self.geometry(roi)))
+        wanted = self.signatures(steps, inputs)
         known = self.entries(roi_id, steps) if reuse else {}
-        locs = None
+        plan = []
+        for step in steps:
+            entry, state = known.get(step.label, (None, "missing"))
+            keep = entry is not None and (state == "current" or run == "forced")
+            plan.append([step, entry, state, keep])
+        last = max((k for k, (step, _, _, keep) in enumerate(plan)
+                    if not keep or step.label in force), default=-1)
+        for k in range(last):
+            if changes_table(plan[k][0]):
+                plan[k][3] = False                   # its table is needed
+        scratch = None
         record = {"inputs": inputs, "signature": digest(inputs),
                   "file_id": roi.file_id, "steps": {}}
         results = {}
         updated = []
-        for step in steps:
-            entry, state = known.get(step.label, (None, "missing"))
-            keep = entry is not None and (state == "current" or run == "forced")
+        for step, entry, state, keep in plan:
             if keep and step.label not in force:
                 record["steps"][step.label] = dict(entry)
                 results[step.label] = None          # kept, so not drawn
                 continue
-            if locs is None:                        # only if something runs
-                locs = self.extract(roi)
+            if keep and entry.get("kept") and not changes_table(step):
+                # the figure from what the row kept: no measuring again
+                try:
+                    restored = step.plugin.restore(entry["kept"])
+                except Exception:
+                    restored = None
+                if restored is not None:
+                    record["steps"][step.label] = dict(entry)
+                    results[step.label] = restored
+                    continue
+            if scratch is None:                     # only if something runs
+                region = self.region(roi)
+                scratch = RegionScratch(self._region_tables(roi, region), region,
+                                        roi_id, tag=tag)
+                original = scratch.locs
             if state != "current":
                 # a step re-run only for its figure tells nobody anything
                 # new, and storing it again would grow the file per click
                 updated.append(step.label)
-            entry, result = self._one_step(step, roi, locs, geometry)
-            entry["signature"] = self.step_signature(step, inputs)
+            entry, result = self._one_step(step, scratch)
+            entry["signature"] = wanted[step.label]
             record["steps"][step.label] = entry
             results[step.label] = result
+        if after is not None and scratch is not None:
+            after(roi_id, scratch, original)
         return record, results, updated
 
-    def _one_step(self, step, roi, locs, geometry):
+    def _one_step(self, step, scratch):
         """One evaluator on one ROI, as (what is recorded, what it returned).
 
         The record is data and outlives the session; the result is the live
         object, with the figures the evaluator drew, and is kept by nobody
         unless the caller wants it.  A failure is recorded, not raised.
+        A new table the step hands back becomes the ROI's for the steps after
+        it (`RegionScratch.apply`).
         """
-        from ..plugins import Context
         try:
-            context = Context(locs=locs, site=geometry, rois=self)
-            result = step.plugin.run(context, step.settings)
-            return {"values": json.loads(json_text(result.data or {}))}, result
+            result = step.plugin.run(scratch.context(rois=self), step.settings)
+            scratch.apply(result, step.label)
+            return region_entry(result, step.plugin, step.keep), result
         except Exception as error:
             return {"error": f"{type(error).__name__}: {error}"}, None
 
@@ -661,10 +841,8 @@ class ROIProject:
         record, results, updated = self._evaluate_record(roi_id, steps, reuse=reuse,
                                                          force=force, run=run)
         if store and updated:
-            self.runs.append({"id": uuid4().hex, "scope": "site",
-                              "time": datetime.now(timezone.utc).isoformat(),
-                              "pipeline": [step.as_record() for step in steps],
-                              "records": {roi_id: record}})
+            self._log(steps, 1, scope="site")
+            self._store({roi_id: record}, steps)
         return record, results, updated
 
     def latest(self, roi_id, steps=None):
@@ -685,16 +863,16 @@ class ROIProject:
             # nothing resolves -- the evaluators that made these numbers are
             # not installed here.  Show what was stored rather than nothing,
             # and say that only the data behind it could be checked.
-            for run in reversed(self.runs):
-                record = (run.get("records") or {}).get(roi_id)
-                if record is None:
-                    continue
-                inputs = self.inputs(self.rois[roi_id])
-                state = ("unverified" if record.get("signature") == digest(inputs)
-                         else "stale")
-                return record, {label: state
-                                for label in (record.get("steps") or {})}
-            return None, {}
+            data = digest(json.loads(json_text(self.inputs(self.rois[roi_id]))))
+            record = {"file_id": self.rois[roi_id].file_id, "steps": {}}
+            states = {}
+            for label, table in self._newest_first():
+                entry = table.entry(roi_id)
+                if entry is not None:
+                    record["steps"][label] = entry
+                    states[label] = ("unverified" if table.data_signature(roi_id) == data
+                                     else "stale")
+            return (record, states) if states else (None, {})
         found = self.entries(roi_id, steps)
         # and what else has measured this ROI: a chain's evaluators, or a
         # renamed one that is no longer in the pipeline
@@ -820,6 +998,30 @@ class ROIProject:
                 proposals.append({"center": point(proposed), "use": True, "origin": {}})
         return origin, proposals
 
+    def absorb_run(self, run):
+        """A run as an older file kept it -- its records inside -- into the
+        log and the tables; a run without records is only logged."""
+        records = run.get("records") or {}
+        header = {k: v for k, v in run.items() if k != "records"}
+        header.setdefault("regions", len(records))
+        self.runs.append(header)
+        made = {s.get("label"): s for s in run.get("pipeline") or []}
+        for roi_id, record in records.items():
+            for label, entry in (record.get("steps") or {}).items():
+                table = self.tables.pop(label, None) or RegionTable(label)
+                table.set(roi_id, entry, made.get(label), record.get("signature", ""))
+                self.tables[label] = table
+
+    def tables_dict(self, roi_ids=None):
+        """The tables as plain data, keeping only the rows of ``roi_ids``
+        (all when None): what the project's JSON carries."""
+        out = []
+        for table in self.tables.values():
+            doc = table.to_dict(roi_ids)
+            if doc["ids"]:
+                out.append(doc)
+        return out
+
     def save(self, path):
         """Atomic sidecar save. In-memory sources must first be saved as localizations."""
         path = Path(path).resolve()
@@ -833,6 +1035,7 @@ class ROIProject:
                "grouped": self.grouped, "group_settings": asdict(self.group_settings),
                "navigation": self.navigation, "rois": [asdict(r) for r in self.rois.values()],
                "runs": self.runs, "pipeline": [asdict(i) for i in self.pipeline],
+               "block_options": self.block_options,
                "sources": [{"id": s.id, "name": s.name,
                             "path": os.path.relpath(s.path, path.parent),
                             "fingerprint": s.fingerprint} for s in self.sources.values()]}
@@ -843,6 +1046,13 @@ class ROIProject:
                 f.attrs['format'] = 'smappy-roi-project'
                 f.attrs['format_version'] = 1
                 f.create_dataset('project', data=json_text(doc), dtype=h5py.string_dtype('utf-8'))
+                tables = f.create_group('tables')
+                n = 0
+                for table in self.tables.values():
+                    table.keep_only(self.rois)
+                    if len(table):                    # by number: a label may hold "/"
+                        table.to_hdf5(tables.create_group(str(n)))
+                        n += 1
             os.replace(temporary, path)
         finally:
             if os.path.exists(temporary):
@@ -857,6 +1067,8 @@ class ROIProject:
             if f.attrs.get('format') != 'smappy-roi-project' or f.attrs.get('format_version') != 1:
                 raise ValueError("Unsupported ROI project format")
             doc = json.loads(f['project'][()])
+            tables = [RegionTable.from_hdf5(f['tables'][k])
+                      for k in sorted(f.get('tables', {}), key=int)]
         project = cls()
         project.set_geometry(doc['size_nm'], doc['shape'])
         project.set_tiles(doc.get('tile_nm', 0.0))
@@ -877,8 +1089,13 @@ class ROIProject:
             if roi.file_id not in project.sources or roi.id in project.rois:
                 raise ValueError("Invalid ROI source or duplicate ROI ID")
             project.rois[roi.id] = roi
-        project.runs = doc['runs']
+        project.runs = []
+        for run in doc['runs']:
+            project.absorb_run(run)
+        for table in tables:
+            project.tables[table.label] = table
         project.navigation = doc['navigation']
-        from .pipeline import from_dict as pipeline_from_dict
+        from .pipeline import DEFAULT_OPTIONS, from_dict as pipeline_from_dict
         project.pipeline = pipeline_from_dict(doc)
+        project.block_options = {**DEFAULT_OPTIONS, **(doc.get("block_options") or {})}
         return project

@@ -5,10 +5,13 @@ Three kinds, all ordinary plugins:
 * **Segment** proposes candidate ROIs on a whole file.  It runs once, and
   derives from `SegmenterPlugin`, which gives it a Preview: the same
   proposals, drawn in the ROI manager and not added.
-* **Evaluate** measures *one* ROI and returns that site's row.  It declares
-  ``scope = "site"``, which is the only thing that marks it as an evaluator --
-  a property of the plugin, not of its folder, so the evaluation window can
-  filter correctly with one shared plugin tree.
+* **Evaluate** measures *one* ROI and returns that site's row in
+  `Result.values`.  It declares ``per_region = True``, which is what the
+  evaluation window offers -- a property of the plugin, not of its folder, so
+  the window can filter correctly with one shared plugin tree -- and runs on
+  the view like any other plugin as well (`docs/regions.md`).  None lives
+  here any more: the statistics an ROI gets are Localization Statistics'
+  (`statistics.py`), the same plugin as on the view.
 * **Analyze** reads the table evaluation produced and summarises it.  It runs
   once, over ``ctx.site_table``.
 
@@ -182,7 +185,7 @@ class SegmenterPlugin(Plugin):
                                        "sites": sites, "replaces": list(replaced)}}
 
 
-@register("ROIManager/Segment/Density Peaks")
+@register("Analysis/Regions/Find/Density Peaks")
 class DensityPeaks(SegmenterPlugin):
     """Proposes ROIs where localizations pile up, after a Gaussian blur."""
 
@@ -220,70 +223,6 @@ def current_file(project) -> Optional[str]:
     return next(iter(project.sources), None)
 
 
-# -------------------------------------------------------------- evaluation
-
-@dataclass
-class StatisticsSettings:
-    precision_column: str = param(
-        "xy_err_nm", label="precision column",
-        help="the column averaged as the site's localization precision")
-
-
-def precision_name(column: str) -> str:
-    """The result's name for a precision column, in that column's unit: a
-    pixel table's ``xy_err_pix`` averages to pixels, not nanometres."""
-    return "mean_precision_pix" if column.endswith("_pix") else "mean_precision_nm"
-
-
-def site_statistics(locs, settings: StatisticsSettings) -> Dict[str, Any]:
-    out: Dict[str, Any] = {"n_localizations": len(locs)}
-    for column, name in ((settings.precision_column,
-                          precision_name(settings.precision_column)),
-                         ("photons", "mean_photons")):
-        if column not in locs:
-            raise ValueError(f"statistics requires {column}")
-        values = np.asarray(locs[column], dtype=float)
-        finite = values[np.isfinite(values)]
-        out[name] = float(finite.mean()) if len(finite) else float("nan")
-        out[name + "_n"] = len(finite)
-    return out
-
-
-@register("ROIManager/Evaluate/Statistics")
-class Statistics(Plugin):
-    """Counts a site's localizations and averages their precision and photons."""
-
-    Settings = StatisticsSettings
-    changes_locs = False
-    scope = "site"
-    version = "1"
-
-    def run(self, ctx: Context, settings: StatisticsSettings) -> Result:
-        values = site_statistics(ctx.locs, settings)
-
-        def plot(ax) -> None:
-            """The site itself, as the numbers' sanity check.
-
-            The ROI manager redraws this in the same window for every site, so
-            what it is for is the comparison: two hundred localizations in a
-            ring and two hundred in a smear give the same three numbers.
-            """
-            x = np.asarray(ctx.locs["x_nm"], dtype=float)
-            y = np.asarray(ctx.locs["y_nm"], dtype=float)
-            ax.scatter(x, y, s=6, c="#2f7fd0", alpha=0.6, linewidths=0)
-            ax.set_aspect("equal")
-            ax.set_xlabel("x (nm)")
-            ax.set_ylabel("y (nm)")
-            name = precision_name(settings.precision_column)
-            unit = "px" if name.endswith("_pix") else "nm"
-            ax.set_title(f"{values['n_localizations']} localizations, "
-                         f"{values[name]:.1f} {unit} precision")
-
-        return Result(text=f"{values['n_localizations']} localizations",
-                      plot=plot if len(ctx.locs) else None,
-                      data=values, settings=settings)
-
-
 # ----------------------------------------------------------------- analysis
 
 def auto_only():
@@ -301,7 +240,8 @@ class HistogramSettings:
                         help="comma separated; empty means every numeric "
                              "column but the counts behind the means")
     evaluation: str = param("", label="results from", choices=auto_only,
-                            help="the evaluation whose columns are drawn; "
+                            help="the evaluation whose columns are drawn, on "
+                                 "the ROIs or per region of an id column; "
                                  "auto: every evaluation on the ROIs")
 
 
@@ -374,6 +314,33 @@ def choose_evaluation(project, evaluator: str = "", chosen: str = "",
     raise AmbiguousEvaluation(evaluator, found)
 
 
+# *results from* naming a table of an id column's regions (`Session.id_regions`)
+# rather than an evaluation on the ROIs: "per cluster_id: Localization Statistics"
+PER = "per "
+
+
+def id_table(ctx: Context, chosen: str):
+    """``(column, table)`` when *results from* names a table of an id
+    column's regions, else None."""
+    if not chosen or not chosen.startswith(PER) or ctx.session is None:
+        return None
+    column, _, label = chosen[len(PER):].partition(": ")
+    table = (ctx.session.id_regions.get(column) or {}).get(label)
+    return None if table is None else (column, table)
+
+
+def table_rows(table) -> List[Dict[str, Any]]:
+    """A region table as the rows an analysis reads: a region's id as
+    ``roi_id``, its values beside it, the regions where the step failed left
+    out."""
+    rows = []
+    for region_id in table.ids:
+        entry = table.entry(region_id)
+        if entry and "values" in entry:
+            rows.append({"roi_id": region_id, "file_id": "", **entry["values"]})
+    return rows
+
+
 class SiteAnalysisPlugin(Plugin):
     """An ROI manager analysis: it summarises what evaluators measured.
 
@@ -389,7 +356,11 @@ class SiteAnalysisPlugin(Plugin):
     changes_locs = False
 
     def evaluation(self, ctx: Context, settings) -> Optional[str]:
-        """The evaluation this run reads, by name (`choose_evaluation`)."""
+        """The evaluation this run reads, by name (`choose_evaluation`), or
+        the table of an id column's regions it names (`id_table`)."""
+        chosen = getattr(settings, "evaluation", "")
+        if id_table(ctx, chosen) is not None:
+            return chosen
         return choose_evaluation(ctx.rois, self.evaluator,
                                  getattr(settings, "evaluation", ""),
                                  ctx.evaluations)
@@ -399,6 +370,9 @@ class SiteAnalysisPlugin(Plugin):
         brings its own table (`site_table`) is taken as it is."""
         if ctx.site_table is not None:
             return list(ctx.site_table), getattr(settings, "evaluation", "") or None
+        found = id_table(ctx, getattr(settings, "evaluation", ""))
+        if found is not None:
+            return table_rows(found[1]), settings.evaluation
         if ctx.rois is None:
             raise ValueError("evaluate some ROIs first: there is no site table")
         label = self.evaluation(ctx, settings)
@@ -425,7 +399,15 @@ class SiteAnalysisPlugin(Plugin):
                     f"auto ({self.auto_label})" if self.auto_label else "auto")
         except AmbiguousEvaluation:
             auto = "auto (asks which)"
-        return {"evaluation": [("", auto)] + [(name, name) for name in sorted(found)]}
+        per = []
+        if ctx.session is not None:
+            for column, tables in sorted(ctx.session.id_regions.items()):
+                for label, table in tables.items():
+                    made = next((table.step(r) for r in table.ids), {})
+                    if not self.evaluator or made.get("plugin") == self.evaluator:
+                        per.append(f"{PER}{column}: {label}")
+        return {"evaluation": [("", auto)] + [(name, name) for name in sorted(found)]
+                + [(name, name) for name in per]}
 
     def preflight(self, ctx: Context, settings):
         """Which evaluation, when that is not clear: a choice, not a yes."""
@@ -449,7 +431,7 @@ class SiteAnalysisPlugin(Plugin):
         return None
 
 
-@register("ROIManager/Analyze/Histograms")
+@register("Analysis/Regions/Summarize/Histograms")
 class Histograms(SiteAnalysisPlugin):
     """Distributions of the evaluation results, one histogram per column."""
 
@@ -477,7 +459,7 @@ class Histograms(SiteAnalysisPlugin):
             ax.bar(d["edges"][:-1], d["counts"], width=np.diff(d["edges"]),
                    align="edge", color="0.6", edgecolor="0.3")
             ax.set_xlabel(field.replace("_", " "))
-            ax.set_ylabel("ROIs")
+            ax.set_ylabel("regions")
             if d["missing"]:
                 ax.set_title(f"{d['missing']} missing", fontsize=8, color="0.4")
 
@@ -493,7 +475,8 @@ class Histograms(SiteAnalysisPlugin):
                                         .ravel(), data.items()):
                 one(axis, field, d)
 
-        return Result(text=f"{len(rows)} ROIs, {len(data)} columns",
+        what = "regions" if id_table(ctx, settings.evaluation) else "ROIs"
+        return Result(text=f"{len(rows)} {what}, {len(data)} columns",
                       plot=Plot(draw=plot, panels=len(data),
                                 size=(5, max(2.2 * len(data), 2.2))),
                       data={"histograms": data, "rows": rows}, settings=settings)

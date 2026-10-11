@@ -14,7 +14,7 @@ import pytest
 
 from smappy import docs
 
-PANELS = {"Panels/Render tab", "Panels/ROI tab", "Panels/ROI manager",
+PANELS = {"Panels/Render tab", "Panels/Regions tab", "Panels/ROI manager",
           "Panels/3D view", "Panels/Bead calibration", "Panels/Batch window",
           "Panels/Camera editor"}
 
@@ -62,6 +62,12 @@ def build(dotted: str):
 
 def test_every_panel_has_a_page():
     assert set(docs.panels()) == PANELS
+
+
+@pytest.mark.parametrize("path", sorted(PANELS))
+def test_what_a_panel_page_says_it_covers_exists(path):
+    for dotted in docs.page_for(docs.panels()[path]).covers:
+        docs.resolve(dotted)
 
 
 @pytest.mark.parametrize("path", sorted(PANELS))

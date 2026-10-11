@@ -1,8 +1,8 @@
 ---
-title: ROI tab
+title: Regions tab
 summary: The shape every analysis ROI shares, and the way into the ROI manager and the evaluation of the sites.
 widget: smappy.gui.roi_tab.ROIHeader
-covers: [smappy.roi_manager.core.ROIProject.set_geometry, smappy.roi_manager.core.ROIProject.indices, smappy.roi_manager.core.ROIProject.geometry, smappy.roi_manager.core.ROIProject.evaluate, smappy.roi_manager.core.ROIProject.latest, smappy.roi_manager.core.ROIProject.evaluations, smappy.roi_manager.core.inside_polygon, smappy.roi_manager.link.SessionROIs, smappy.roi_manager.pipeline.default_instances]
+covers: [smappy.roi_manager.core.ROIProject.set_geometry, smappy.roi_manager.core.ROIProject.indices, smappy.roi_manager.core.ROIProject.geometry, smappy.roi_manager.core.ROIProject.evaluate, smappy.roi_manager.core.ROIProject.latest, smappy.roi_manager.core.ROIProject.evaluations, smappy.regions.inside_polygon, smappy.roi_manager.link.SessionROIs, smappy.roi_manager.pipeline.default_instances]
 ---
 
 ## What it does
@@ -14,18 +14,18 @@ mark each copy with a small region, an **ROI** (region of interest), measure
 what is inside each one, and summarise the measurements.  A marked copy is
 called a *site*.
 
-The ROI tab is where that begins.  It holds what all ROIs share -- their shape
+The Regions tab is where that begins.  It holds what all ROIs share -- their shape
 and size -- and opens the two windows the work is done in: the
 [ROI manager](plugin:Panels/ROI manager), where sites are found, drawn,
 included or excluded, and looked at one by one, and the *evaluation* window,
 where the measurements to make on every site are chosen and run.  Below the
 tab's own controls sit the ROI plugins pinned to it.  By default these are
-the ones that find sites -- [Density Peaks](plugin:ROIManager/Segment/Density Peaks)
-for any compact structure, [NPC](plugin:ROIManager/Segment/NPC) for nuclear
+the ones that find sites -- [Density Peaks](plugin:Analysis/Regions/Find/Density Peaks)
+for any compact structure, [NPC](plugin:Analysis/Regions/Find/NPC) for nuclear
 pores -- the ones that summarise the measurements --
-[Histograms](plugin:ROIManager/Analyze/Histograms) and
-[NPC Labeling Efficiency](plugin:ROIManager/Analyze/NPC Labeling Efficiency)
--- and [NPC Analysis](plugin:ROIManager/Workflow/NPC Analysis), which finds
+[Histograms](plugin:Analysis/Regions/Summarize/Histograms) and
+[NPC Labeling Efficiency](plugin:Analysis/Regions/Summarize/NPC Labeling Efficiency)
+-- and [NPC Analysis](plugin:Analysis/Regions/Workflow/NPC Analysis), which finds
 the pores, measures them and fits their labelling efficiency in one run.
 
 An ROI sees what the image shows: the localizations of its file that pass a
@@ -125,12 +125,14 @@ show(axes[3], "drawn polygon", Polygon(outline, fill=False, lw=0.8))
 roi.polygon = None
 ```
 
-**3. Evaluation.**  *Evaluation pipeline...* opens a window with a list of
-*evaluators*: plugins that measure one site and return a row of numbers for
-it (the built-in one, *Statistics*, counts the localizations and averages
-their precision and photons).  The list is run over every included ROI of
-every file, one row per site; together the rows are the *site table*, which
-the Analyze plugins such as Histograms summarise.
+**3. Evaluation.**  *Region steps...* opens a window with a list of steps
+that run once in every included ROI of every file -- plugins that measure a
+region and return a row of numbers for it, such as Localization Statistics,
+the same plugin as on the whole view.  One row per site, the rows together
+are the *site table*, which the Analyze plugins such as Histograms
+summarise.  The list is a *block*, as in a chain: it can repeat over the
+regions of an id column instead (*for each*), write columns it makes back
+into the table, and hold a block of its own.
 
 **4. What is still true.**  Each stored measurement remembers what it was made
 from: the file's data, the ROI and its geometry, the filter, the grouping,
@@ -138,7 +140,7 @@ and the evaluator with its version and settings.  When the data an ROI sees
 change -- a new size here, a new filter bound, a drift correction -- its
 measurements are marked out of date and left out of the site table until the
 sites are evaluated again.  A measurement belongs to its ROI, whether the
-evaluation window or a chain made it, and evaluations under different names
+region steps window or a chain made it, and evaluations under different names
 stand side by side in the site table.
 
 ## In detail
@@ -227,14 +229,14 @@ the ROI manager, one line per number, marked with its state -- *(stale)*, say --
 step that produced it is not current; below it, how many sites have a complete, current
 row in the site table.
 
-### Evaluation pipeline...
-Opens the evaluation window: which evaluators run, in what order, with which
-settings, and the buttons that run them on every ROI or re-run only what
-changed.  A new pipeline starts with the general evaluators, once each;
-a specialised one, such as NPC Corners, is added here when the data call
-for it.  The
-pipeline is saved in the file with the results, because the site table's
-columns mean nothing without it.
+### Region steps...
+Opens the region steps window: which steps run, in what order, with which
+settings; *check* to time them in a few ROIs, and Run, which measures what
+is out of date and carries the rest forward.  A new list starts with the
+general evaluators, once each, their slow options off; a specialised one,
+such as NPC Corners, is added there when the data call for it.  The list is
+saved in the file with the results, because the site table's columns mean
+nothing without it, and *save as...* keeps it as a chain.
 
 ## Differences from SMAP
 

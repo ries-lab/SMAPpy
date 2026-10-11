@@ -7,6 +7,7 @@ from smappy.io.hdf5 import save_localizations
 from smappy.locs import Localizations
 from smappy.group import GroupSettings
 from smappy.roi_manager import ROIProject, DensityPeaks, Histograms
+from smappy.roi_manager.core import json_text
 from smappy.roi_manager.pipeline import Step, errors, merged_values
 from smappy.plugins.roi import HistogramSettings, histograms
 
@@ -48,7 +49,7 @@ def test_statistics_review_and_stale_results():
     run = p.evaluate()
     values = merged_values(run['records'][roi.id])
     assert values['n_localizations'] == 3
-    assert [step['label'] for step in run['pipeline']] == ['Statistics']
+    assert [step['label'] for step in run['pipeline']] == ['Localization Statistics']
     assert values['mean_precision_nm'] == 11
     assert values['mean_photons'] == 200
     assert len(p.results()) == 1
@@ -97,7 +98,6 @@ def test_empty_and_nonfinite_measurements():
     p.evaluate()
     rows = p.results()
     assert rows[0]['mean_photons'] == 200
-    assert rows[0]['mean_photons_n'] == 2
     assert rows[1]['n_localizations'] == 0
     assert np.isnan(rows[1]['mean_photons'])
     hist = histograms(rows, HistogramSettings(bins=10))
@@ -136,12 +136,13 @@ def test_save_reload_relink_and_changed_source_detection(tmp_path):
     path = p.save(tmp_path / 'project.h5')
     loaded = ROIProject.load(path)
     assert loaded.rois[roi.id].comment == 'NPC α'
-    assert loaded.results() == p.results()
+    same = lambda a, b: json_text(a) == json_text(b)          # NaN as NaN
+    assert same(loaded.results(), p.results())
     assert loaded.navigation == p.navigation
     renamed = tmp_path / 'renamed.h5'
     source_path.rename(renamed)
     loaded = ROIProject.load(path, {s.id: renamed})
-    assert loaded.results() == p.results()
+    assert same(loaded.results(), p.results())
     save_localizations(renamed, table([99, 10, 150]))
     with pytest.raises(ValueError, match='contents changed'):
         ROIProject.load(path, {s.id: renamed})
@@ -208,12 +209,13 @@ def test_a_failing_step_costs_its_columns_and_not_the_run():
 
     class Mean(Plugin):
         name, version = 'example', '1'
-        scope = 'site'
+        per_region = True
 
         def run(self, ctx, settings):
-            if not len(ctx.locs):
+            locs = ctx.selection.apply(ctx.locs)
+            if not len(locs):
                 raise ValueError('empty ROI')
-            return Result(data={'x': float(ctx.locs['x_nm'].mean())})
+            return Result(values={'x': float(locs['x_nm'].mean())})
 
     p = ROIProject()
     s = p.add_source(table([0]))
@@ -232,10 +234,10 @@ def test_two_steps_share_a_row_and_collisions_are_qualified():
     from smappy.plugins import Plugin, Result
 
     class Count(Plugin):
-        scope = 'site'
+        per_region = True
 
         def run(self, ctx, settings):
-            return Result(data={'n': len(ctx.locs), 'only_here': 1})
+            return Result(values={'n': len(ctx.selection), 'only_here': 1})
 
     p = ROIProject()
     s = p.add_source(table([0, 10]))
@@ -263,21 +265,70 @@ def test_a_script_can_trust_the_finder():
     assert len(p.results()) == 4
 
 
-def test_the_default_histograms_leave_out_the_counts_behind_the_means():
+def test_the_default_histograms_draw_every_number_the_statistics_gave():
     locs, _ = pores()
     p = ROIProject()
     s = p.add_source(locs)
     p.find(s.id, reviewed=True)
     p.evaluate()
     drawn = histograms(p.results(), HistogramSettings(bins=10))
-    assert set(drawn) == {'n_localizations', 'mean_precision_nm', 'mean_photons'}
+    assert set(drawn) == {'n_localizations', 'mean_photons', 'median_photons',
+                          'photons_n0', 'mean_precision_nm', 'median_precision_nm',
+                          'sigma_c_nm'}
 
 
 def test_a_pixel_precision_is_averaged_under_a_pixel_name():
-    from smappy.plugins.roi import StatisticsSettings, site_statistics
+    from smappy.plugins.statistics import statistics, statistics_values
     locs = Localizations({'x_pix': np.zeros(3), 'y_pix': np.zeros(3),
                           'xy_err_pix': np.array([0.1, 0.2, 0.3]),
                           'photons': np.ones(3)}, {'units': 'pixel'})
-    values = site_statistics(locs, StatisticsSettings(precision_column='xy_err_pix'))
+    values = statistics_values(locs, statistics(locs))
     assert values['mean_precision_pix'] == pytest.approx(0.2)
     assert 'mean_precision_nm' not in values
+
+
+def test_results_live_in_a_table_per_evaluation_and_runs_are_only_a_log():
+    p = ROIProject()
+    s = p.add_source(table([0, 10, 1000]))
+    p.set_filters({})
+    a = p.add_roi(s.id, [0, 0])
+    b = p.add_roi(s.id, [1000, 0])
+    run = p.evaluate()
+    assert set(run['records']) == {a.id, b.id}           # the caller still gets them
+    assert 'records' not in p.runs[-1] and p.runs[-1]['regions'] == 2
+    kept = p.tables['Localization Statistics']
+    assert kept.ids == [a.id, b.id]
+    assert kept.columns()['n_localizations'].tolist() == [2, 1]
+    assert kept.step(a.id)['plugin'] == 'Analysis/Measure/Localization Statistics'
+
+
+def test_a_removed_roi_keeps_its_numbers_for_an_undo_but_not_in_the_file():
+    p = ROIProject()
+    s = p.add_source(table([0, 1000]))
+    p.set_filters({})
+    a = p.add_roi(s.id, [0, 0])
+    b = p.add_roi(s.id, [1000, 0])
+    p.evaluate()
+    with p.edit('Remove ROI 2'):
+        del p.rois[b.id]
+    assert len(p.results()) == 1
+    p.undo()
+    assert len(p.results()) == 2                         # back, with its numbers
+    del p.rois[b.id]
+    saved = p.tables_dict(p.rois)
+    assert [doc['ids'] for doc in saved] == [[a.id]]
+    assert b.id in p.tables['Localization Statistics']   # the live table is untouched
+
+
+def test_an_older_files_runs_with_their_records_become_tables():
+    p = ROIProject()
+    s = p.add_source(table([0, 10]))
+    p.set_filters({})
+    roi = p.add_roi(s.id, [0, 0])
+    step = {'label': 'old', 'plugin': 'X/Y', 'version': '1', 'parameters': {}}
+    p.absorb_run({'id': 'r', 'pipeline': [step],
+                  'records': {roi.id: {'signature': 'd', 'steps': {
+                      'old': {'values': {'n': 2}, 'signature': 's'}}}}})
+    assert p.runs[-1] == {'id': 'r', 'pipeline': [step], 'regions': 1}
+    assert p.tables['old'].entry(roi.id) == {'values': {'n': 2}, 'signature': 's'}
+    assert p.tables['old'].step(roi.id) == step

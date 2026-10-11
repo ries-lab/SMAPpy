@@ -78,7 +78,9 @@ def test_results_of_a_table_that_never_came_from_a_file_survive_a_save(tmp_path)
     assert len(back.rois.results()) == grouped
 
     # evaluated ungrouped, then grouped and ungrouped again before saving
+    # (a new session shows its layer grouped: switch it off first)
     s = Session(_table())
+    s.show_grouped(0, False)
     project = s.rois
     project.find(next(iter(project.sources)), parameters={"min_count": 5})
     project.evaluate()
@@ -91,6 +93,7 @@ def test_results_of_a_table_that_never_came_from_a_file_survive_a_save(tmp_path)
     out = s.save(tmp_path / "ungrouped.hdf5", gui_state=False)
     back = Session()
     back.load(out)
+    back.show_grouped(0, False)
     assert len(back.rois.results()) == ungrouped
 
 
@@ -351,3 +354,31 @@ def test_dragging_a_line_roi_wider_takes_the_slab_with_it():
     session.set_slab(session.slab, follow_roi=False)     # a dragged face stops it
     session.roi_edited(Region.line((1000, 1000), (3000, 2000), 100.0))
     assert session.slab.size[1] == pytest.approx(700.0)
+
+
+def test_roi_results_are_columns_beside_the_table_and_can_be_left_out(tmp_path):
+    import h5py
+    import json
+    s = Session(_table())
+    s.show_grouped(0, False)
+    project = s.rois
+    project.find(next(iter(project.sources)), parameters={"min_count": 5})
+    project.evaluate()
+    n = len(project.results())
+    out = s.save(tmp_path / "with.hdf5", gui_state=False)
+    with h5py.File(out, "r") as f:
+        attribute = json.loads(f.attrs["metadata"])["roi_project"]
+        assert "tables" not in attribute and attribute["rois"]
+        assert "regions/0/values/n_localizations" in f
+    back = Session()
+    back.load(out)
+    back.show_grouped(0, False)
+    assert len(back.rois.results()) == n
+
+    out = s.save(tmp_path / "without.hdf5", gui_state=False, region_results=False)
+    with h5py.File(out, "r") as f:
+        assert "regions" not in f
+    back = Session()
+    back.load(out)
+    back.show_grouped(0, False)
+    assert len(back.rois.rois) == len(project.rois) and back.rois.results() == []

@@ -22,7 +22,8 @@ from ..group import GROUP_COLUMNS, GroupSettings
 from ..locs import Localizations
 from ..render import RenderAxes
 from ..viewer import ViewState
-from .core import ROI, ROIProject, digest, json_text, point, polygon_vertices
+from ..region_table import RegionTable
+from .core import ROI, ROIProject, digest, json_text, point, polygon_vertices, rows_in
 
 FORMAT_VERSION = 1
 
@@ -66,6 +67,9 @@ class SessionROIs(ROIProject):
         self.preview_nm = 0.0        # the ROI image's width; 0 = three ROI widths
         self._states: Dict[str, ViewState] = {}
         self._built = None            # what the sources were built from
+        # (id and length of a table, file number) -> that file's rows of it:
+        # computed once, not once per ROI measured
+        self._file_masks: Dict[tuple, np.ndarray] = {}
 
     # ------------------------------------------------------------- sources
     def sync(self) -> None:
@@ -163,6 +167,77 @@ class SessionROIs(ROIProject):
             self._apply(source)
         return source.state
 
+    # ------------------------------------------------ measuring in an ROI
+    def _file_mask(self, locs: Localizations, number: int) -> Optional[np.ndarray]:
+        """Which rows of ``locs`` are file ``number``'s; None when all are."""
+        if "filenumber" not in locs or len(self.sources) <= 1:
+            return None
+        key = (id(locs), len(locs), number)
+        if key not in self._file_masks:
+            if len(self._file_masks) > 16:
+                self._file_masks.clear()
+            self._file_masks[key] = np.asarray(locs["filenumber"]) == number
+        return self._file_masks[key]
+
+    def _region_tables(self, roi, region):
+        """Every localization layer of the session, cut to the ROI.
+
+        The rows are found through the file's own index (the ROI belongs to
+        one file) and are rows of the session's table; each layer's
+        selection is its own filter over them -- not the session's
+        selection, which is cut to the drawn ROI and the slab -- and its
+        grouped table is offered, cut the same way, where it has a current
+        one.  The ROI manager's own state for the file decides nothing here
+        but where to look.
+        """
+        from ..plugins import Selection
+        session = self.session
+        source = self.sources[roi.file_id]
+        ungrouped = self.state(roi.file_id).sets["ungrouped"]
+        found = rows_in(ungrouped.locs, ungrouped.index, region)
+        in_file = self._file_mask(session.locs, source.number)
+        rows = found if in_file is None else np.flatnonzero(in_file)[found]
+        locs = session.locs[rows]
+        tables = {}
+        for i, lay in enumerate(session.layers):
+            if lay.is_image:
+                continue
+            mask = np.asarray(lay.selection(i).mask, dtype=bool)
+            entry = {"ungrouped": (locs, Selection(mask[rows], layer=i, roi=region,
+                                                   name=f"{lay.name}, {region}"))}
+            locset = lay.state.sets.get("grouped")
+            if locset is not None and not lay.state.grouped_stale:
+                keep = self._file_mask(locset.locs, source.number)
+                g = rows_in(locset.locs, locset.index, region, keep)
+                entry["grouped"] = (locset.locs[g], Selection(
+                    np.asarray(locset.filter.mask, dtype=bool)[g], layer=i, roi=region,
+                    name=f"{lay.name}, grouped, {region}"))
+            tables[i] = entry
+        layer = min(self.layer, len(session.layers) - 1)
+        if session.layers[layer].is_image:
+            layer = session.first_locs_layer()
+        return tables, rows, layer, session
+
+    def inputs(self, roi):
+        """What a measurement of this ROI depends on: the ROI's own inputs and
+        every layer's filters and grouping -- a plugin in an ROI may read any
+        layer (`_region_tables`), so a filter changed on any of them makes
+        its numbers out of date."""
+        out = super().inputs(roi)
+        layers = []
+        for lay in self.session.layers:
+            if lay.is_image:
+                continue
+            # the grouped table's bounds only while it is shown: linking one
+            # and switching back leaves it behind, and that changes nothing
+            grouped = lay.state.sets.get("grouped") if lay.grouped else None
+            layers.append({"filters": lay.state.sets["ungrouped"].filter.ranges,
+                           "grouped_filters": None if grouped is None
+                           else grouped.filter.ranges,
+                           "shows": "grouped" if lay.grouped else "ungrouped"})
+        out["layers"] = layers
+        return out
+
     # --------------------------------------------------------- persistence
     def to_dict(self) -> dict:
         """The project as JSON-compatible data, for the localization file."""
@@ -174,16 +249,22 @@ class SessionROIs(ROIProject):
                             for s in self.sources.values()],
                 "rois": [asdict(r) for r in self.rois.values()],
                 "runs": self.runs,
+                # the results, a columnar table per evaluation (`RegionTable`)
+                "tables": self.tables_dict(self.rois),
                 # the pipeline is provenance for the columns in `runs`, so it
                 # is saved with them rather than only in the workspace
-                "pipeline": [asdict(i) for i in self.pipeline]}
+                "pipeline": [asdict(i) for i in self.pipeline],
+                "block_options": self.block_options}
 
     def from_dict(self, doc: Optional[dict]) -> None:
         """Restore ROIs, runs and navigation saved with a file."""
         self.rois = {}
         self.runs = []
+        self.tables = {}
         self.navigation = {}
         self.pipeline = []
+        from .pipeline import DEFAULT_OPTIONS
+        self.block_options = dict(DEFAULT_OPTIONS)
         self.segment_preview = None
         self.history.clear()        # another file's edits
         if not doc:
@@ -213,11 +294,17 @@ class SessionROIs(ROIProject):
             if roi.file_id in self.sources:
                 self.rois[roi.id] = roi
         for run in doc.get("runs", []):
-            records = {i: r for i, r in run.get("records", {}).items() if i in self.rois}
-            if records:
-                self.runs.append({**run, "records": records})
-        from .pipeline import from_dict as pipeline_from_dict
+            records = {i: r for i, r in (run.get("records") or {}).items()
+                       if i in self.rois}
+            self.absorb_run({**run, "records": records})
+        for saved in doc.get("tables", []):
+            table = RegionTable.from_dict(saved)
+            table.keep_only(self.rois)
+            if len(table):
+                self.tables[table.label] = table
+        from .pipeline import DEFAULT_OPTIONS, from_dict as pipeline_from_dict
         self.pipeline = pipeline_from_dict(doc)
+        self.block_options = {**DEFAULT_OPTIONS, **(doc.get("block_options") or {})}
 
     # ---------------------------------------------------------------- misc
     def add_roi(self, file_id, center, polygon=None, reviewed=None, origin=None):

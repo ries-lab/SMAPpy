@@ -3,7 +3,8 @@
 SMAPpy (`smappy` in code) is a Python SMLM package: TIFF -> photons -> peak finding -> MLE fit ->
 localization table -> analysis, with a Qt GUI over the same functions.  Read
 `NOTES.md` for the decisions behind the fitting pipeline and
-`docs/plugin-architecture.md` for why the plugin system is shaped as it is.
+`docs/plugin-architecture.md` for why the plugin system is shaped as it is,
+and `docs/regions.md` for ROIs, clusters and what is measured per region.
 This file is the practical part: what a session needs before it can write a
 plugin, and the traps that cost time.  It is a summary written at one moment
 and the code moves, so treat it as a starting point, not as authority -- and
@@ -94,7 +95,7 @@ shape, so read the one closest to what you are writing:
 | rewrites the table and hands it back | `assign_colors.py` (`Result.locs`, a preview) |
 | a long computation with progress | `drift_comet.py`, `drift_rcc.py` |
 | loads, saves, exports, simulates | `file.py` (a plugin per format, no input table; the simulator's model is `smappy.simulate`) |
-| finds, measures or summarises ROIs | `roi.py` (a segmenter derives from `SegmenterPlugin`, which gives it a Preview, *replace* (`replace_param()`) and a step of the ROI undo; `scope = "site"`; analyse) |
+| finds, measures or summarises ROIs | `roi.py` (a segmenter derives from `SegmenterPlugin`, which gives it a Preview, *replace* (`replace_param()`) and a step of the ROI undo; `per_region = True`; analyse; segmenters under `Analysis/Regions/Find`) |
 | parts, presets, a C++ backend | `fit.py` (nested settings dataclasses) |
 | adds a derived column, no output | `math_parser.py` (an expression, kept with the table as a recipe) |
 | removes or flags localizations | `remove_locs.py` (a region, a new table or a filtered flag) |
@@ -104,8 +105,11 @@ shape, so read the one closest to what you are writing:
 | scores a fit against a simulation | `ground_truth.py` (the truth redrawn from the recipe, matched per frame) |
 | draws what the microscope recorded per frame | `image_tags.py` (the fit's `metadata["frame_tags"]`) |
 | finds a structure by its shape and judges it, then counts it | `npc.py` (a ring filter and circle fit in the segmenter, a per-site count, and a model of whole pores in `smappy/npc.py` fitted to the site table) |
-| summarises what evaluators measured | `roi.py`'s `SiteAnalysisPlugin` (an evaluator to read, a *results from* field, a preflight that asks which when there are several) |
-| runs the ROI manager's segment, evaluate and analyse as one | `npc_analysis.chain.yaml` (a shipped chain: an evaluator step runs over every ROI before the next; `docs/batch.md`, "ROIs: segment, evaluate, analyse") |
+| summarises what evaluators measured | `roi.py`'s `SiteAnalysisPlugin` (an evaluator to read, a *results from* field, a preflight that asks which when there are several; under `Analysis/Regions/Summarize`) |
+| runs the ROI manager's segment, evaluate and analyse as one | `npc_analysis.chain.yaml` (a shipped chain: a block runs NPC Corners in every ROI before the next step; `docs/batch.md`, "ROIs: segment, evaluate, analyse") |
+| finds clusters and names them in the table | `clusters.py` (DBSCAN: `cluster_id` / `n_in_cluster`; ROIs of them are `region_column.py`'s *Column to ROIs*, for any id column) |
+| writes what was measured per region onto its localizations | `region_column.py` (*Regions to column*: `region_runs.values_onto`, NaN outside, never over a column of the localizations' own; a block's *write values* does the same) |
+| runs steps once per region, writes columns back | `blocks.py` (a `chain.Block`; `region_runs.RegionScratch`, `WriteBack`, *write values*; per-cluster results in `Session.id_regions`) |
 | opens an interactive window of the GUI's | `bead_calibration.py` (`Plugin.window`: the button opens what the GUI registered in `session.window_openers`) |
 | runs an external program in its own Python | `uipsf.py` (`smappy.uipsf`: a worker script under that program's interpreter, progress read from its output, the result converted into smappy's own file) |
 | hands the session to a new instance | `smappy.handoff` (*File > Open in a new window*: the table through shared memory, the rest as JSON, `smappy-gui --handoff`) |
@@ -148,12 +152,17 @@ class Thing(Plugin):
   plugin that imports torch costs nothing until someone opens it.  Keep heavy
   imports inside functions (`from scipy.ndimage import ...`), as the shipped
   plugins do.
-* `scope = "site"` makes it an ROI evaluator, run once per ROI with `ctx.site`
-  set; in a chain it runs over every included ROI before the next step.  Its
-  results belong to the ROI, whoever ran them, under the evaluation's name
+* `per_region = True` says `run` hands back `Result.values` (numbers, a
+  column each of the region table) and `Result.arrays`, so it can run once
+  per ROI -- in `ROIProject.region_context(roi)`: `ctx.locs` the ROI's rows,
+  each layer's filter over them, `ctx.region` its shape -- as well as on the
+  view like any other plugin.  The evaluation window offers these; in a chain
+  it runs once in each region as a step of a block (`chain.Block`,
+  `blocks.py`): over the ROIs or an id column such as `cluster_id`
+  (`docs/regions.md`).  Its results belong to
+  the ROI, whoever ran them, under the evaluation's name
   (`ROIProject.evaluations`; a renamed one is a second evaluation), so an
-  analysis reads `ROIProject.results()` and never the pipeline.  Otherwise it
-  runs once over the selection.
+  analysis reads `ROIProject.results()` and never the pipeline.
 * Override `preview` for a plugin that can show its work before committing;
   the GUI grows a button when it is overridden and nothing when it is not.
   A plugin that changes nothing needs none: Run opens its figures.
@@ -214,6 +223,8 @@ written this way; it is also what makes the tests readable.
 * `ctx.warn(text)` for what must not be missed: kept in `ctx.warnings`, shown
   as its own line that progress does not overwrite.  Put the warnings in the
   result's text if they should reach the history.
+* `ctx.region_id` / `ctx.per_region` -- set when the run is one region of
+  many (an ROI or a cluster); `ctx.region` is the shape, None for a cluster.
 * `ctx.stop` and `ctx.writer_finished` -- `threading.Event`s or None, set from
   another thread: end the run early keeping what it has, and "the live source
   is complete".  The Fit plugin honours both; a long plugin may check `stop`.
@@ -232,7 +243,7 @@ written this way; it is also what makes the tests readable.
 title=...)`, every part optional (`title` says what the figures are of, in
 the figure window's title).  `plot(ax)` is handed **one** axis; for a grid, pass
 `Plot(draw, panels=n, size=(w, h))` instead, and `draw` is handed the figure
-and lays out its own panels (`statistics.py`, `ROIManager/Analyze/Histograms`
+and lays out its own panels (`statistics.py`, `Analysis/Regions/Summarize/Histograms`
 and the fit preview all do this).  Never set the figure's size or its layout
 engine: on the window's *All* page a plot is handed a `SubFigure`, which has
 neither, and `size` is the hint the window reads instead.  Return the settings
@@ -290,6 +301,7 @@ rather than something already drawn.
 | `z_err_nm` | axial precision, when the fit produced one |
 | `n_in_group` | **on-time in frames** (for a table with a trace id, `tid`, the localizations in the trace); grouping writes it onto both tables |
 | `group_id` | which group a localization was linked into, 1-based; on the grouped table, its own row |
+| `cluster_id`, `n_in_cluster` | which cluster, 1-based, 0 for none, and the localizations in it -- written by `Analysis/Regions/Find/DBSCAN` (`plugins/clusters.py`) |
 | `sigma_nm`, `sigma_y_nm`, `logl_rel` | PSF width and fit quality |
 | `filenumber`, `channel` | which file, which channel |
 
@@ -309,6 +321,10 @@ accident, and it survives a save.  Usually the recipe is an expression
 (`math_parser.py`); a column that was *measured* per localization and only
 needs the rule -- the `use` flag `remove_locs.py` writes -- is a recipe with
 a rule and no expression.
+
+Columns written from what was measured per region (`n_corners` on every
+localization of its pore) are listed in `metadata["region_columns"]`, and
+only those may be written over from regions again (`region_runs.check_writable`).
 
 A fitted table also carries `metadata["frame_tags"]` (the image tags that
 changed, per frame: `smappy.frametags`) and `metadata["acquisition"]` (the
@@ -418,8 +434,8 @@ were -- a list that only shrinks, and a new plugin never joins it), that its
 renders with its maths and figures (the figures in the slow tier).
 
 Plugins reach the shipped workspace by themselves: the Analysis tab seeds from
-`Analysis/` and `favorite` defaults to True, so there is no registry to edit.
-For an evaluator (`scope = "site"`), `favorite` also decides whether it is in a
+`Analysis/` except `Analysis/Regions/`, which seeds the Regions tab, and `favorite` defaults to True, so there is no registry to edit.
+For a `per_region` plugin, `favorite` also decides whether it is in a
 new evaluation pipeline; a specialised one (`NPC Corners`) sets it False.
 
 ## The plugin's page
@@ -432,8 +448,8 @@ people who use the plugin -- biologists and biophysicists -- so they can
 understand the algorithm without reading the code.  The format is in
 `src/smappy/docs/__init__.py`; `Analysis/Drift/RCC.md` is the example to copy.
 
-The tabs and windows that are not plugins (the Render tab, the ROI tab and
-manager, the 3D view, the bead calibration, the batch window) have pages too,
+The tabs and windows that are not plugins (the Render tab, the Regions tab,
+the ROI manager, the region steps, the 3D view, the bead calibration, the batch window) have pages too,
 in `src/smappy/docs/panels/`, with `title`, `summary` and `widget` in the
 front matter and a *Controls* section in place of *Parameters*: one
 `### label` per control, the label exactly as the panel shows it.

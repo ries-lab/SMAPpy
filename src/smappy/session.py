@@ -338,6 +338,10 @@ class Session:
         self.layers: List[Layer] = [Layer(self.locs)]
         self.roi: Optional[Region] = None          # the drawn 2D ROI (regions.py)
         self._rois = None                          # the ROI manager's project
+        # what was measured per region of an id column (a cluster's
+        # `cluster_id`): column -> evaluation name -> `RegionTable`.  Read
+        # from the file on first use, as the ROI project is.
+        self._id_regions = None
         self.slab: Optional[Slab] = None          # the 3D view's volume
         self.slab_follows_roi = True              # the 2D ROI sets its footprint
         self.select_in_slab = False               # plugins see only the slab
@@ -503,6 +507,7 @@ class Session:
             # its own, or none, rather than the last one's
             self._take_identity(self.locs.metadata.get("session"))
             self._rois = None            # this file's own ROIs, read on first use
+            self._id_regions = None      # and its own per-cluster results
             self.changed("rois")
         else:
             merged = concat([self.locs, locs])
@@ -659,14 +664,27 @@ class Session:
         # through the file was left off
         if rois and (rois["rois"] or rois["runs"] or rois.get("tile_nm")):
             metadata["roi_project"] = rois
+        if self._id_regions is not None:
+            kept = {column: [t.to_dict() for t in tables.values() if len(t)]
+                    for column, tables in self._id_regions.items()}
+            kept = {column: tables for column, tables in kept.items() if tables}
+            if kept:
+                metadata["id_regions"] = kept
+            else:
+                metadata.pop("id_regions", None)
         return metadata
 
-    def save(self, path=None, gui_state: Optional[bool] = None) -> Path:
+    def save(self, path=None, gui_state: Optional[bool] = None,
+             region_results: bool = True, region_figures: bool = True) -> Path:
         """Write the table, its history, its ROIs and -- optionally -- the GUI.
 
         `gui_state` defaults to the `save_gui_state_in_files` preference.  What
         gets written is whatever `gui_state_provider` returns, so the session
-        stays ignorant of tabs and windows; the GUI sets it.
+        stays ignorant of tabs and windows; the GUI sets it.  Without
+        `region_results` the ROIs are saved and the numbers measured in them
+        are not -- for a project whose results are large and can be measured
+        again.  Without `region_figures` the numbers are saved and what each
+        region kept to draw its figures again (`Plugin.keep`) is not.
         """
         from .io.formats import writer_for
         from .io.hdf5 import save_gui_state, save_localizations, save_results
@@ -679,6 +697,20 @@ class Session:
         # writes -- it used to be overwritten with HDF5 under its own name
         writer_for(path)
         metadata = self.file_metadata()
+        if not region_results:
+            if isinstance(metadata.get("roi_project"), dict):
+                metadata["roi_project"] = {k: v for k, v in metadata["roi_project"].items()
+                                           if k != "tables"}
+            metadata.pop("id_regions", None)
+        elif not region_figures:
+            unkept = lambda doc: {k: v for k, v in doc.items() if k != "kept"}
+            if isinstance(metadata.get("roi_project"), dict):
+                project = dict(metadata["roi_project"])
+                project["tables"] = [unkept(t) for t in project.get("tables") or []]
+                metadata["roi_project"] = project
+            if metadata.get("id_regions"):
+                metadata["id_regions"] = {c: [unkept(t) for t in ts]
+                                          for c, ts in metadata["id_regions"].items()}
         # read before the file is started again: frames opened from it are
         # read from it a plane at a time (`StoredStack`)
         from .io.hdf5 import save_images
@@ -957,6 +989,9 @@ class Session:
             copy._rois.auto_review = self._rois.auto_review
             copy._rois.sync()
             copy._rois.from_dict(self._rois.to_dict())
+        # what was measured per cluster, so a block finds what is current
+        copy._id_regions = {column: dict(tables)
+                            for column, tables in self.id_regions.items()}
         return copy
 
     def remove_layer(self, index: int) -> None:
@@ -1183,6 +1218,35 @@ class Session:
         else:
             self._rois.sync()
         return self._rois
+
+    @property
+    def id_regions(self) -> Dict[str, Dict[str, Any]]:
+        """What was measured per region of an id column: ``{column: {name:
+        RegionTable}}`` (`evaluate_regions`), as the file left it at first."""
+        if self._id_regions is None:
+            from .region_table import RegionTable
+            self._id_regions = {}
+            for column, tables in (self.locs.metadata.get("id_regions") or {}).items():
+                self._id_regions[column] = {}
+                for doc in tables:
+                    table = RegionTable.from_dict(doc)
+                    self._id_regions[column][table.label] = table
+        return self._id_regions
+
+    def evaluate_regions(self, column: str, steps, layer: int = 0,
+                         report=None, tick=None, stop=None, reuse: bool = True,
+                         keep_figures: bool = False, after=None, tag: bool = False):
+        """Run ``steps`` once in each region of the id ``column`` and keep
+        their tables under it (`region_runs.evaluate_regions`): the
+        per-cluster counterpart of `ROIProject.evaluate`."""
+        from .region_runs import ColumnRegions, evaluate_regions
+        source = ColumnRegions(self, column, layer)
+        tables = evaluate_regions(source, steps, self.id_regions.get(column),
+                                  report=report, tick=tick, stop=stop, reuse=reuse,
+                                  keep_figures=keep_figures, after=after, tag=tag)
+        self.id_regions[column] = tables
+        self.changed("rois")
+        return tables
 
     def roi_state(self) -> Optional[dict]:
         """The ROI manager's project as data, or None if it was never opened."""
@@ -1535,6 +1599,9 @@ class Session:
         # the project that is there, which the ROI manager's window holds.
         if (result.data or {}).get("roi_project") is not None:
             self.rois.from_dict(result.data["roi_project"])
+        if (result.data or {}).get("id_regions"):
+            for column, tables in result.data["id_regions"].items():
+                self.id_regions.setdefault(column, {}).update(tables)
             self.changed("rois")
         elif (result.data or {}).get("rois") is not None:
             # a segmenter added ROIs to the project it was handed; the

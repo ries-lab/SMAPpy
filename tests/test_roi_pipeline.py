@@ -6,8 +6,8 @@ from smappy import plugins
 from smappy.locs import Localizations
 from smappy.plugins import Context, settings_from, settings_values
 from smappy.plugins.roi import (DensityPeakSettings, HistogramSettings, Histograms,
-                                Statistics, StatisticsSettings, density_peaks,
-                                histograms, site_statistics)
+                                density_peaks, histograms)
+from smappy.plugins.statistics import LocalizationStatistics, StatisticsSettings
 from smappy.roi_manager import ROIProject
 from smappy.roi_manager import pipeline as pipeline_module
 from smappy.workspace import Instance
@@ -27,22 +27,24 @@ def table(centers, per=10, seed=0):
 
 # ------------------------------------------------------------- the plugins
 
-def test_the_roi_plugins_are_registered_where_smap_puts_them():
-    found = plugins.refs("ROIManager/")
-    assert set(found) == {"ROIManager/Segment/Density Peaks",
-                          "ROIManager/Segment/NPC",
-                          "ROIManager/Evaluate/Statistics",
-                          "ROIManager/Evaluate/NPC Corners",
-                          "ROIManager/Analyze/Histograms",
-                          "ROIManager/Analyze/NPC Labeling Efficiency",
-                          "ROIManager/Workflow/NPC Analysis"}
-    # scope is what marks an evaluator, not the folder it sits in
-    assert found["ROIManager/Evaluate/Statistics"].scope == "site"
-    assert found["ROIManager/Segment/Density Peaks"].scope == "locs"
+def test_the_region_plugins_are_registered_under_regions():
+    found = plugins.refs("Analysis/Regions/")
+    assert set(found) == {"Analysis/Regions/Find/Density Peaks",
+                          "Analysis/Regions/Find/NPC",
+                          "Analysis/Regions/Find/DBSCAN",
+                          "Analysis/Regions/Column to ROIs",
+                          "Analysis/Regions/Regions to column",
+                          "Analysis/Regions/Summarize/Histograms",
+                          "Analysis/Regions/Summarize/NPC Labeling Efficiency",
+                          "Analysis/Regions/Workflow/NPC Analysis"}
+    found = {**found, **plugins.refs("Analysis/Measure/")}
+    # per_region is what marks an evaluator, not the folder it sits in
+    assert found["Analysis/Measure/NPC Corners"].per_region
+    assert not found["Analysis/Regions/Find/Density Peaks"].per_region
 
 
 def test_the_defaults_dict_became_a_typed_settings_class():
-    specs = plugins.get("ROIManager/Segment/Density Peaks").specs()
+    specs = plugins.get("Analysis/Regions/Find/Density Peaks").specs()
     assert set(specs) == {"bin_nm", "sigma_nm", "separation_nm",
                           "count_radius_nm", "min_count", "replace"}
     assert specs["bin_nm"].type is float and specs["bin_nm"].info.unit == "nm"
@@ -50,10 +52,22 @@ def test_the_defaults_dict_became_a_typed_settings_class():
 
 
 def test_statistics_measures_one_site_through_the_context():
-    locs = table([(0, 0)], per=4)
-    result = Statistics().run(Context(locs=locs), StatisticsSettings())
-    assert result.data["n_localizations"] == 4
-    assert result.data["mean_precision_nm"] == 11.0
+    project = ROIProject()
+    source = project.add_source(table([(0, 0), (5000, 0)], per=30))
+    project.set_filters({})
+    roi = project.add_roi(source.id, [0.0, 0.0], reviewed=True)
+    result = LocalizationStatistics().run(project.region_context(roi),
+                                          StatisticsSettings(fit_precision=False))
+    assert result.values["n_localizations"] == 30       # this site's, not the file's
+    assert result.values["mean_precision_nm"] == 11.0
+    assert np.isnan(result.values["sigma_c_nm"])        # the fit was switched off
+
+
+def test_the_pipeline_adds_a_plugin_with_its_slow_options_off():
+    added = pipeline_module.instance_for("Analysis/Measure/Localization Statistics")
+    assert added.values == {"fit_precision": False}
+    assert pipeline_module.default_instances()[0].values == {"fit_precision": False}
+    assert pipeline_module.instance_for("Analysis/Measure/NPC Corners").values == {}
 
 
 def test_a_bad_setting_is_refused_rather_than_silently_odd():
@@ -77,18 +91,18 @@ def test_histograms_picks_the_numeric_columns_itself():
 # ------------------------------------------------------------ the pipeline
 
 def test_a_pipeline_step_is_the_same_instance_type_a_tab_pins():
-    instance = Instance(plugin="ROIManager/Evaluate/Statistics",
-                        values={"precision_column": "xy_err_nm"})
+    instance = Instance(plugin="Analysis/Measure/Localization Statistics",
+                        values={"bins": 40})
     step, = pipeline_module.resolve([instance])
-    assert step.label == "Statistics" and step.version == "1"
-    assert step.settings.precision_column == "xy_err_nm"
-    assert step.as_record()["plugin"] == "ROIManager/Evaluate/Statistics"
+    assert step.label == "Localization Statistics" and step.version == "3"
+    assert step.settings.bins == 40
+    assert step.as_record()["plugin"] == "Analysis/Measure/Localization Statistics"
 
 
 def test_a_specialised_evaluator_is_offered_but_not_in_the_default_pipeline():
-    assert plugins.refs()["ROIManager/Evaluate/NPC Corners"].scope == "site"
+    assert plugins.refs()["Analysis/Measure/NPC Corners"].per_region
     assert [i.plugin for i in pipeline_module.default_instances()] == \
-        ["ROIManager/Evaluate/Statistics"]
+        ["Analysis/Measure/Localization Statistics"]
 
 
 def test_a_disabled_step_is_skipped():
@@ -100,14 +114,14 @@ def test_a_disabled_step_is_skipped():
 def test_a_step_whose_plugin_is_gone_costs_only_itself():
     instances = [Instance(plugin="Gone/Away")] + pipeline_module.default_instances()
     steps = pipeline_module.resolve(instances)
-    assert [s.path for s in steps] == ["ROIManager/Evaluate/Statistics"]
+    assert [s.path for s in steps] == ["Analysis/Measure/Localization Statistics"]
 
 
 def test_the_same_evaluator_twice_gets_distinct_columns():
     """SMAP's addmodule renames on collision; so does this."""
-    one = Instance(plugin="ROIManager/Evaluate/Statistics")
+    one = Instance(plugin="Analysis/Measure/Localization Statistics")
     steps = pipeline_module.resolve([one, one.copy()])
-    assert [s.label for s in steps] == ["Statistics", "Statistics 2"]
+    assert [s.label for s in steps] == ["Localization Statistics", "Localization Statistics 2"]
 
 
 def test_running_a_two_step_pipeline_over_a_project():
@@ -117,27 +131,27 @@ def test_running_a_two_step_pipeline_over_a_project():
     project.set_geometry(200)
     for center in ([0, 0], [1000, 1000]):
         project.add_roi(source.id, center)
-    one = Instance(plugin="ROIManager/Evaluate/Statistics")
+    one = Instance(plugin="Analysis/Measure/Localization Statistics")
     two = one.copy()
-    two.values = {"precision_column": "photons"}
+    two.values = {"bins": 50}
     run = project.evaluate([one, two])
-    assert [step["label"] for step in run["pipeline"]] == ["Statistics", "Statistics 2"]
+    assert [step["label"] for step in run["pipeline"]] == ["Localization Statistics", "Localization Statistics 2"]
     rows = project.results()
     assert len(rows) == 2
     # both steps produce every column, so every one is qualified
-    assert rows[0]["Statistics.mean_precision_nm"] == 11.0
-    assert rows[0]["Statistics 2.mean_precision_nm"] == 200.0
+    assert rows[0]["Localization Statistics.mean_precision_nm"] == 11.0
+    assert rows[0]["Localization Statistics 2.mean_precision_nm"] == 11.0
 
 
 def test_a_pipeline_file_round_trips(tmp_path):
     instances = pipeline_module.default_instances()
     instances[0].label = "precision only"
-    instances[0].values = {"precision_column": "photons"}
+    instances[0].values = {"bins": 50}
     path = pipeline_module.save(instances, tmp_path / "p.yaml")
     back = pipeline_module.load(path)
     assert [i.label for i in back] == ["precision only"]
-    assert back[0].values == {"precision_column": "photons"}
-    assert pipeline_module.resolve(back)[0].settings.precision_column == "photons"
+    assert back[0].values == {"bins": 50}
+    assert pipeline_module.resolve(back)[0].settings.bins == 50
 
 
 def test_a_broken_pipeline_file_gives_no_steps_rather_than_raising():
@@ -208,7 +222,7 @@ def test_propose_is_find_without_the_adding():
     settings = DensityPeakSettings(separation_nm=1000.0, min_count=20)
     origin, proposals = project.propose(source.id, settings=settings)
     assert project.rois == {} and len(proposals) == 2
-    assert origin["method"] == "ROIManager/Segment/Density Peaks"
+    assert origin["method"] == "Analysis/Regions/Find/Density Peaks"
     found = project.find(source.id, settings=settings)
     assert [r.center for r in found] == [p["center"] for p in proposals]
     # the found ROIs are what a second proposal keeps its distance from,
@@ -261,7 +275,7 @@ def test_a_replacing_run_is_one_undo_step_that_brings_the_old_rois_back_with_the
     settings = DensityPeakSettings(separation_nm=1000.0, min_count=20)
     first = finder.run(session.context(), settings).data["rois"]
     assert len(first) == 3
-    project.evaluate([Instance(plugin="ROIManager/Evaluate/Statistics")])
+    project.evaluate([Instance(plugin="Analysis/Measure/Localization Statistics")])
     assert len(project.results()) == 4
 
     # again without replace: nothing new, and no step for it
@@ -289,43 +303,53 @@ def app():
 
 def test_the_evaluation_window_offers_only_evaluators(app):
     from smappy.gui.chooser import PluginTree
-    tree = PluginTree(scope="site")
-    assert sorted(tree.refs) == ["ROIManager/Evaluate/NPC Corners",
-                                 "ROIManager/Evaluate/Statistics"]
-    assert set(PluginTree(scope="locs").refs).isdisjoint(tree.refs)
+    tree = PluginTree(per_region=True)
+    assert sorted(tree.refs) == ["Analysis/Measure/Localization Statistics",
+                                 "Analysis/Measure/NPC Corners"]
+    assert set(tree.refs) < set(PluginTree().refs)
 
 
-def test_the_window_edits_the_pipeline_and_keeps_the_values(app):
-    from smappy.gui.evaluation import EvaluationWindow
+def test_the_region_steps_window_edits_the_projects_block(app, monkeypatch):
+    from PySide6.QtCore import Qt
+    from smappy.gui import chooser
+    from smappy.gui.region_steps import RegionStepsWindow
     from smappy.session import Session
 
-    window = EvaluationWindow(Session(table([(0, 0)])))
-    assert [window.list.item(0).text()] == ["Statistics"]
-    window.forms_stack.currentWidget().restore({"precision_column": "photons"})
-    window.duplicate()
-    assert [window.list.item(i).text() for i in range(2)] == \
-        ["Statistics", "Statistics copy"]
-    window.move(-1)
-    assert window.list.item(0).text() == "Statistics copy"
-    instances = window.save_values()
-    assert instances[1].values["precision_column"] == "photons"
+    session = Session(table([(0, 0)]))
+    window = RegionStepsWindow(session)
+    project = session.rois
+    tree = window.panel.steps.invisibleRootItem()
+    assert tree.childCount() == 1                       # the block's steps, at the top
+    assert tree.child(0).text(0).startswith("Localization Statistics")
+    window.panel.form.set_values({"for_each_roi.localization_statistics.bins": 50})
+    assert project.pipeline[0].values["bins"] == 50
+    # a step added with nothing selected goes into the block
+    window.panel.steps.setCurrentItem(None)
+    monkeypatch.setattr(chooser, "choose_plugin",
+                        lambda *a, **k: "Analysis/Measure/NPC Corners")
+    window.panel.add_step()
+    assert [i.plugin for i in project.pipeline] == [
+        "Analysis/Measure/Localization Statistics", "Analysis/Measure/NPC Corners"]
+    assert project.pipeline[0].values["bins"] == 50     # what the form held survives
+    window.panel.steps.invisibleRootItem().child(1).setCheckState(0, Qt.Unchecked)
+    assert not project.pipeline[1].enabled
+    assert [s.label for s in pipeline_module.resolve(project.pipeline)] == \
+        ["Localization Statistics"]
+    # what it repeats over is the block's own field
+    window.panel.form.set_values({"for_each_roi.write_back": "n_here"})
+    assert project.block_options["write_back"] == ["n_here"]
 
-    from PySide6.QtCore import Qt
-    window.list.item(0).setCheckState(Qt.Unchecked)
-    assert not window.instances[0].enabled
-    assert [s.label for s in pipeline_module.resolve(window.instances)] == ["Statistics"]
 
-
-def test_a_tab_will_not_pin_an_evaluator(app):
-    """A scope="site" plugin has no site in a tab, so its Run could only fail."""
+def test_a_tab_pins_a_per_region_plugin_too(app):
+    """One that can run per region runs on the view as well."""
     from smappy.gui.chooser import PluginTree
-    assert "ROIManager/Evaluate/Statistics" not in PluginTree(scope="locs").refs
-    assert "ROIManager/Segment/Density Peaks" in PluginTree(scope="locs").refs
+    assert "Analysis/Measure/Localization Statistics" in PluginTree().refs
+    assert "Analysis/Regions/Find/Density Peaks" in PluginTree().refs
 
 
 def test_find_evaluate_and_analyse_through_the_session(app):
-    """Segment, pipeline, analyse -- the three kinds, on one session."""
-    from smappy.gui.evaluation import EvaluationWindow
+    """Segment, region steps, analyse -- on one session."""
+    from smappy.gui.region_steps import RegionStepsWindow
     from smappy.plugins.roi import DensityPeaks
     from smappy.session import Session
 
@@ -349,18 +373,18 @@ def test_find_evaluate_and_analyse_through_the_session(app):
     for roi in project.rois.values():
         roi.reviewed = True
 
-    window = EvaluationWindow(session)
+    window = RegionStepsWindow(session)
     window.run()
     assert "4 ROIs, 1 step(s)" in window.status.text()
-    # the session's log says what was evaluated, with each evaluator's settings
+    # the session's log says what was evaluated, with each step's settings
     entry = session.history[-1]
-    assert entry["what"] == "ROIManager/Evaluate" and "4 ROIs" in entry["text"]
-    assert entry["steps"][0]["plugin"] == "ROIManager/Evaluate/Statistics"
-    assert "precision_column" in entry["steps"][0]["values"]
+    assert entry["what"] == "Analysis/Regions/Region steps" and "4 ROIs" in entry["text"]
+    assert entry["steps"][0]["plugin"] == "Chain/Block"
+    assert entry["steps"][0]["values"]["localization_statistics.fit_precision"] is False
     rows = project.results()
     assert len(rows) == 4 and rows[0]["n_localizations"] == 100
 
-    analysis = plugins.get("ROIManager/Analyze/Histograms")()(ctx=session.context())
+    analysis = plugins.get("Analysis/Regions/Summarize/Histograms")()(ctx=session.context())
     assert "4 ROIs" in analysis.text
     assert analysis.plot is not None
 
@@ -377,7 +401,7 @@ def test_the_manager_draws_a_preview_and_run_turns_it_into_rois(app):
     session = Session(table([(0, 0), (3000, 0), (0, 3000), (3000, 3000)], per=40))
     session.show_grouped(0, False)
     header = ROIHeader(session)
-    panel = PluginPanel(plugins.get("ROIManager/Segment/Density Peaks"), session)
+    panel = PluginPanel(plugins.get("Analysis/Regions/Find/Density Peaks"), session)
     panel.form.restore({"separation_nm": 1000.0, "min_count": 20})
 
     def wait(start):

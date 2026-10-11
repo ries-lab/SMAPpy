@@ -253,7 +253,7 @@ class ControlWindow(QMainWindow):
         self.plugins_menu.aboutToShow.connect(self._fill_plugins_menu)
         tools = _add_menu(self.menuBar(), "Tools", self)
         self._action(tools, "ROI manager", "Ctrl+R", self._open_manager)
-        self._action(tools, "ROI evaluation...", None, self._open_evaluation)
+        self._action(tools, "Region steps...", None, self._open_evaluation)
         tools.addSeparator()
         # the window is also the Localize tab's Bead calibration plugin, which
         # says which mode to open in; from here it opens as it was left

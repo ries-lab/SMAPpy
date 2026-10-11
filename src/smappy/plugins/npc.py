@@ -393,7 +393,7 @@ def draw_sites(ax, xy: np.ndarray, sites: Sequence[Dict[str, Any]],
     ax.set_ylabel("y (nm)")
 
 
-SEGMENTER = "ROIManager/Segment/NPC"
+SEGMENTER = "Analysis/Regions/Find/NPC"
 
 
 def npc_rois(project, file_id) -> List[Any]:
@@ -402,7 +402,7 @@ def npc_rois(project, file_id) -> List[Any]:
             if roi.file_id == file_id and (roi.origin or {}).get("method") == SEGMENTER]
 
 
-@register("ROIManager/Segment/NPC")
+@register("Analysis/Regions/Find/NPC")
 class NPCSegment(SegmenterPlugin):
     """Finds nuclear pores with a ring filter, fits a circle to each and keeps
     those that look like a pore."""
@@ -583,31 +583,34 @@ def draw_corners(ax, x, y, values: Dict[str, Any], settings: NPCCornersSettings,
                  f"{values['n_localizations']} localizations")
 
 
-@register("ROIManager/Evaluate/NPC Corners")
+@register("Analysis/Measure/NPC Corners")
 class NPCCorners(Plugin):
     """Counts the corners a nuclear pore shows and the localizations it has."""
 
     Settings = NPCCornersSettings
     changes_locs = False
-    scope = "site"
+    per_region = True
     version = "2"
     # not in the default evaluation pipeline: added when the data are pores
     favorite = False
 
     def run(self, ctx: Context, settings: NPCCornersSettings) -> Result:
-        locs = ctx.locs
+        table, selection = ctx.table()
+        locs = selection.apply(table)
         x = np.asarray(locs["x_nm"], dtype=float)
         y = np.asarray(locs["y_nm"], dtype=float)
         if not len(x):
             raise ValueError("no localizations in this ROI")
         column = precision_column(locs)
         precision = None if column is None else np.asarray(locs[column], dtype=float)
-        center = (ctx.site or {}).get("center") or [float(np.mean(x)), float(np.mean(y))]
+        center = (ctx.region.center.tolist() if ctx.region is not None
+                  else [float(np.mean(x)), float(np.mean(y))])
         values = count_corners(x, y, center, settings, precision)
         data = {k: v for k, v in values.items() if k != "per_corner"}
         return Result(text=f"{values['n_corners']} corners, "
                            f"{values['n_localizations']} localizations",
-                      data=data,
+                      data=data, values=data,
+                      arrays={"per_corner": np.asarray(values["per_corner"])},
                       plot=lambda ax: draw_corners(ax, x, y, values, settings, precision),
                       settings=settings)
 
@@ -809,7 +812,7 @@ def simulated_efficiency(project, rows) -> Optional[float]:
     return None if value is None else float(value)
 
 
-CORNERS = "ROIManager/Evaluate/NPC Corners"
+CORNERS = "Analysis/Measure/NPC Corners"
 
 
 def column(rows, name: str, label: Optional[str] = None) -> Optional[str]:
@@ -923,7 +926,7 @@ def draw_joint(figure, fitted: Dict[str, Any], truth=None) -> None:
     right.legend(fontsize=7, frameon=False)
 
 
-@register("ROIManager/Analyze/NPC Labeling Efficiency")
+@register("Analysis/Regions/Summarize/NPC Labeling Efficiency")
 class NPCLabelingEfficiency(SiteAnalysisPlugin):
     """The labelling efficiency of nuclear pores, from the corners each shows
     and the localizations it has (NPC Corners)."""

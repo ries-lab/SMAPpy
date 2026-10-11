@@ -41,6 +41,24 @@ class ParamInfo:
     # for a part: shown folded until it is opened.  A chain's steps are, so a
     # chain of eight plugins reads as eight lines rather than eight forms
     collapsed: bool = False
+    # a bool that turns on optional work which costs time per run -- a
+    # bootstrap, a fit beside the numbers -- and that a run over many regions
+    # starts without (`fast_values`; docs/regions.md, "Slow, optional parts")
+    slow: bool = False
+
+
+def fast_values(settings_cls: type, prefix: str = "") -> Dict[str, Any]:
+    """The dotted names of the `slow` switches of a settings class, off:
+    what a plugin is set to when it is added to run once per region."""
+    def walk(specs, prefix):
+        for name, spec in specs.items():
+            if spec.children:
+                walk(spec.children, f"{prefix}{name}.")
+            elif spec.info.slow:
+                out[prefix + name] = False
+    out: Dict[str, Any] = {}
+    walk(param_specs(settings_cls), prefix)
+    return out
 
 
 def param(default: Any = MISSING, *, default_factory: Any = MISSING, **info):
@@ -271,16 +289,22 @@ class Context:
                  selection: Optional["Selection"] = None, layer: int = 0,
                  progress: Optional[Callable[[str], None]] = None,
                  stream: Optional[Callable[[str, Any], None]] = None,
-                 site=None, site_table: Optional[Sequence[Dict[str, Any]]] = None,
+                 region=None, site_table: Optional[Sequence[Dict[str, Any]]] = None,
                  rois=None, grouping: Optional[str] = None,
                  evaluations: Sequence[Tuple[str, str]] = (),
-                 stop=None, writer_finished=None, pinned=None):
+                 stop=None, writer_finished=None, pinned=None, rows=None,
+                 region_id: Optional[str] = None):
         self.session = session
         # layer -> {"ungrouped"/"grouped": (locs, selection)}, taken when the
-        # session's table was still being appended to (`Session.context`):
-        # then `table` and `layer_selection` answer from these and never
-        # read the growing table from the worker
+        # session's table was still being appended to (`Session.context`), or
+        # cut to one region (`ROIProject.region_context`): then `table` and
+        # `layer_selection` answer from these and never read the session's
+        # table.  An entry may say which of the two it ``"shows"``, for a
+        # context with no session to ask.
         self._pinned = pinned
+        # a region context's rows of the session's table, for a selection
+        # `layer_selection` has to build afresh (``without`` a filter)
+        self._rows = rows
         self.layer = layer
         # "grouped", "ungrouped", or None for each layer's own: what a chain
         # (or the plugin's own requirement) has decided `table` should hand
@@ -289,7 +313,14 @@ class Context:
         # whether `table` has handed out a grouped table: a chain refuses a
         # new table from a step that worked on one row per blink
         self.served_grouped = False
-        self.site = site                    # the ROI, for a scope="site" plugin
+        # the region this run is confined to (`regions.Region`): an ROI of
+        # the ROI manager, or None for a cluster or a run over the view.  In
+        # a region context `locs` is the region's rows, and every layer's
+        # selection is that layer's filter over them (`docs/regions.md`).
+        self.region = region
+        # which region, when this run is one of a run over many (an ROI's id,
+        # a cluster's): set for a cluster too, which has no shape
+        self.region_id = region_id
         self.site_table = site_table        # the rows evaluation produced
         # (name, evaluator path) of the evaluations a chain has made before
         # this step, oldest first: an ROI analysis in a chain reads its own
@@ -314,6 +345,13 @@ class Context:
             selection = (session.selection(layer) if session is not None
                          else Selection.all(len(locs)))
         self.selection = selection
+
+    @property
+    def per_region(self) -> bool:
+        """Whether this is one region of a run over many -- an ROI or a
+        cluster -- rather than a run on the view.  A plugin may then make an
+        empty region an answer, or leave out what only the whole field has."""
+        return self.region_id is not None
 
     @property
     def rois(self):
@@ -357,14 +395,24 @@ class Context:
 
     def _pinned_table(self, index: int) -> Tuple[Localizations, "Selection"]:
         session = self.session
-        if session.layers[index].is_image:
+        if session is not None and session.layers[index].is_image:
             index = session.first_locs_layer()
+        if index not in self._pinned:
+            raise ValueError(f"there is no layer {index + 1} here")
         tables = self._pinned[index]
-        lay = session.layers[index]
-        grouped = lay.grouped if self.grouping is None else self.grouping == "grouped"
+        if self.grouping is not None:
+            grouped = self.grouping == "grouped"
+        elif "shows" in tables:
+            grouped = tables["shows"] == "grouped"
+        else:
+            grouped = session.layers[index].grouped
         if not grouped:
             return tables["ungrouped"]
         if "grouped" not in tables:
+            if self.region is not None:
+                raise ValueError(f"layer {index + 1} has no grouped table to cut "
+                                 "to the region: show it grouped first, or run "
+                                 "this ungrouped")
             raise ValueError("no grouped table while the fit is still adding "
                              "localizations: show the layer grouped first, or "
                              "run this ungrouped")
@@ -389,7 +437,17 @@ class Context:
         index = (self.session.first_locs_layer()
                  if self.session.layers[layer].is_image else layer)
         if not without:
+            if index not in self._pinned:
+                raise ValueError(f"there is no layer {layer + 1} here")
             return self._pinned[index]["ungrouped"][1]
+        if self._rows is not None:
+            # a region: the layer's own filter without those, over its rows --
+            # not the session's selection, which is cut to the drawn ROI
+            sel = self.session.layers[index].selection(index, without)
+            sel.mask = np.asarray(sel.mask, dtype=bool)[self._rows]
+            sel.roi = self.region
+            sel.name = f"{sel.name}, {self.region or self.region_id}"
+            return sel
         sel = self.session.selection(index, without)
         sel.mask = sel.mask[:len(self.locs)]      # rows are only ever appended
         return sel
@@ -424,17 +482,6 @@ class Context:
         """
         if self._stream:
             self._stream(event, payload)
-
-    def for_site(self, site, locs: Optional[Localizations] = None,
-                 selection: Optional["Selection"] = None) -> "Context":
-        """This context aimed at one ROI, for a ``scope = "site"`` plugin."""
-        return Context(session=self.session,
-                       locs=self.locs if locs is None else locs,
-                       selection=self.selection if selection is None else selection,
-                       layer=self.layer, progress=self._progress,
-                       stream=self._stream, site=site, site_table=self.site_table,
-                       rois=self._rois, grouping=self.grouping,
-                       stop=self.stop, writer_finished=self.writer_finished)
 
 
 @dataclass
@@ -536,6 +583,13 @@ class Result:
     # than in one crowded axis
     plots: Dict[str, Any] = field(default_factory=dict)
     data: Dict[str, Any] = field(default_factory=dict)  # anything else
+    # What a run in one region stores as that region's results
+    # (`docs/regions.md`): `values` the numbers, a column each of the region
+    # table; `arrays` named arrays -- a fixed-size one (eight corner counts)
+    # or one of the region's own length.  Only these are kept per region;
+    # `data` and the figures are for the run that made them.
+    values: Dict[str, Any] = field(default_factory=dict)
+    arrays: Dict[str, Any] = field(default_factory=dict)
     settings: Any = None                    # what was actually used
     # more for the log entry, beside the path, the text and the settings: a
     # chain puts its steps here, so the history shows what each one did
@@ -590,13 +644,15 @@ class Plugin:
     name: str = ""                 # set by `register` from the path's last part
     path: str = ""                 # "Analysis/Drift/COMET"
     description: str = ""
-    favorite: bool = True          # pinned in the shipped workspace; for an
-                                   # evaluator, in the default evaluation pipeline
-    # "locs": run once over the selection.  "site": run once per ROI, with
-    # `ctx.site` set -- what makes a plugin an ROI evaluator.  It is a property
-    # of the plugin, not of its folder, which is what lets the evaluation
-    # window filter correctly when every plugin lives in one tree.
-    scope: str = "locs"
+    favorite: bool = True          # pinned in the shipped workspace; for a
+                                   # per-region plugin, in the default
+                                   # evaluation pipeline
+    # Whether `run` hands back `Result.values`, and so can be run once per
+    # region and kept as that region's row (`docs/regions.md`).  Not a kind
+    # of plugin -- such a plugin runs on the view like any other -- but what
+    # the evaluation window and a chain need to know before running it,
+    # which is why it is declared rather than found out.
+    per_region: bool = False
     Settings: type = None
     # presentation for fields that were not declared with `param`
     params: Dict[str, ParamInfo] = {}

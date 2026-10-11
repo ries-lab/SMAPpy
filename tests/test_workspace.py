@@ -16,6 +16,8 @@ TAGS = "Analysis/Process/Image Tags"
 MATH = "Analysis/Process/Math Parser"
 REMOVE = "Analysis/Process/Remove Localizations"
 REGISTER = "Analysis/Register/Calibrate transform"
+DBSCAN = "Analysis/Regions/Find/DBSCAN"
+ROI_COLUMN = "Analysis/Regions/Regions to column"
 
 
 # ---------------------------------------------------------------- the model
@@ -48,12 +50,20 @@ def test_moving_stops_at_the_ends():
 
 def test_the_default_workspace_is_seeded_from_what_is_installed():
     ws = Workspace.default()
-    assert [t.name for t in ws.tabs] == ["File", "Localize", "Render", "Analysis", "ROI"]
+    assert [t.name for t in ws.tabs] == ["File", "Localize", "Render", "Analysis", "Regions"]
     analysis = next(t for t in ws.tabs if t.name == "Analysis")
     assert sorted(i.plugin for i in analysis.instances) == [
         COMET, RCC, COLORS, TRUTH, PROFILE, PRECISION, STATS, HISTORY, TAGS, MATH, REMOVE,
         REGISTER]
     assert next(t for t in ws.tabs if t.name == "Render").kind == "render"
+    # the regions have their tab, finding before summarising
+    regions = next(t for t in ws.tabs if t.name == "Regions")
+    assert [i.plugin for i in regions.instances] == [
+        DBSCAN, "Analysis/Regions/Find/Density Peaks", "Analysis/Regions/Find/NPC",
+        "Analysis/Regions/Column to ROIs", ROI_COLUMN,
+        "Analysis/Regions/Summarize/Histograms",
+        "Analysis/Regions/Summarize/NPC Labeling Efficiency",
+        "Analysis/Regions/Workflow/NPC Analysis"]
     # a tab the *user* adds starts empty; only the shipped ones are seeded
     assert Tab(name="Mine").instances == []
 
@@ -101,7 +111,7 @@ def test_a_broken_file_gives_the_default_rather_than_no_tabs(tmp_path):
     path = tmp_path / "w.yaml"
     path.write_text("tabs: [oh dear\n")
     assert [t.name for t in load(path).tabs] == ["File", "Localize", "Render",
-                                                 "Analysis", "ROI"]
+                                                 "Analysis", "Regions"]
 
 
 def test_unrecognised_entries_are_dropped_not_raised(tmp_path):
@@ -165,7 +175,7 @@ def tab_named(window, name):
 
 def test_the_window_opens_the_shipped_tabs(window):
     assert [window.tabs.tabText(i) for i in range(window.tabs.count())] == \
-        ["File", "Localize", "Render", "Analysis", "ROI"]
+        ["File", "Localize", "Render", "Analysis", "Regions"]
     localize = tab_named(window, "Localize")
     assert [s.title for s in localize.sections] == \
         ["Bead calibration", "Gaussian 2D", "Gaussian 2D 2C", "Spline 3D",

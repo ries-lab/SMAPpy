@@ -145,6 +145,14 @@ class SaveSettings:
         True, label="save the GUI state too",
         help="the tabs, their plugins and their parameters, for File > "
              "Restore GUI state from file to put back")
+    region_results: bool = param(
+        True, label="save the ROI results",
+        help="the numbers the evaluations measured in the ROIs; off keeps "
+             "the ROIs and drops their results")
+    region_figures: bool = param(
+        True, label="save the ROI figures' data",
+        help="what each ROI kept to draw its figures again; off keeps the "
+             "numbers, and a figure is drawn by measuring again")
 
 
 @register("File/Save/smappy HDF5")
@@ -162,9 +170,20 @@ class Save(Plugin):
         if not path:
             raise ValueError("choose where to save")
         writer_for(path)                       # fail before doing the work
-        written = ctx.session.save(path, gui_state=settings.gui_state)
-        return Result(text=f"{len(ctx.session.locs)} localizations to {written}",
-                      data={"path": written}, settings=settings)
+        written = ctx.session.save(path, gui_state=settings.gui_state,
+                                   region_results=settings.region_results,
+                                   region_figures=settings.region_figures)
+        text = f"{len(ctx.session.locs)} localizations to {written}"
+        rois = ctx.session.roi_state()
+        if not settings.region_results and rois and rois.get("tables"):
+            text += "; the ROI results were left out: evaluate again to have them"
+        elif not settings.region_figures:
+            kept = sum(1 for t in (rois or {}).get("tables") or []
+                       for k in t.get("kept") or [] if k)
+            if kept:
+                text += (f"; the figure data of {kept} ROI results was not saved: "
+                         "their figures will be drawn by measuring again")
+        return Result(text=text, data={"path": written}, settings=settings)
 
 
 # ------------------------------------------------------------------- export
