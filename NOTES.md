@@ -759,6 +759,80 @@ Checked against the offline path on 300 frames of the astigmatic dataset,
 replayed frame by frame into a growing two-file series: same 28724
 localizations, every column identical.
 
+### Plugins while the fit is still appending
+
+The live table is one object that `Session.append` extends, block by block,
+and four things broke on it before any rule was written:
+
+* **A plugin's context held the growing table.**  `Context` read
+  `session.locs` once, but that is the object `extend` keeps replacing the
+  columns of, so a plugin saw a mask of 50 rows over a table of 100, or
+  `x_nm` read before a block and `y_nm` after it.  During a live fit the
+  context is now *pinned* (`Session.context`): a snapshot of the table
+  (`Localizations.snapshot`, a new dictionary over the same arrays -- `extend`
+  writes only past their end or into a new buffer) and every layer's
+  selection cut to its rows, all taken on the GUI thread.  A plugin that reads
+  several layers asks `Context.layer_selection`, not the session.
+* **A table change replaced the growing table** with one that could not take
+  the next block, and the fit's result then replaced it in turn: the view
+  stopped, the change was lost, and the log kept a line for it.
+  `Session.apply` now refuses one (`LiveTableError`) except the streaming
+  fit's own result.
+* **A copy of the session linked it.**  `Session.scratch` (a chain's copy)
+  built layers over the shared table, and linking writes `group_id` into the
+  table it is given: the next block failed on a column mismatch.
+* **A second layer took every block twice**: each set over the table
+  extended it.  The first set to take a block now extends the table and the
+  shared index, and the others only their own filter.
+
+What a user wants during an acquisition, then, comes in three kinds, and
+`Plugin.changes_locs` says before the run which one a plugin is:
+
+* **A measurement** runs on the pinned snapshot, and is simply stale by the
+  next block.
+* **A recipe** -- the Math Parser's expression, the colour assignment with
+  the modes it found -- is columns computed from the others, and follows the
+  live table (`LiveRecipe`): computed for the table so far, for every block
+  as it arrives, and once more for the finished table.  An expression with a
+  reduction is recomputed over the whole table on every append, since its
+  earlier rows move with the table.  Colours are *not* found again per block,
+  which would recolour what is on screen every few seconds; the finished
+  table gets its modes found over all of it.
+* **Anything else** -- a drift correction, a filter that removes, a loader --
+  needs the whole acquisition or a table that holds still, and is offered a
+  new window instead: *File > Open in a new window*, which `PluginPanel` asks
+  before the run (after it, for a plugin that does not declare
+  `changes_locs`), and in which the new instance runs the plugin with the
+  same settings.
+
+**Why a new instance rather than a frozen view.**  Freezing the live view --
+blocks queued, the table modified, the modification discarded on unfreeze --
+was weighed and dropped: every feature of the session would have had to know
+about the frozen state (undo and history cut back on unfreeze, the display
+carried over to the restored layers, the fit's result held back while
+frozen), and the user's work was lost by design.  A copy has none of that:
+the live path is untouched, nothing is discarded, and the copy is useful
+without a live fit too.  And a copy in a *process* of its own rather than a
+second set of windows in this one: closing or quitting the copy, or a crash
+in it, leaves the acquisition's fit alone, and a COMET run in the copy does
+not compete with the live view for the GIL.
+
+**The handoff goes through shared memory** (`smappy.handoff`): 0.36 s for 5M
+localizations x 15 columns, against 11 s to write the HDF5 file as
+`Session.save` does and 2.6 s to read it back.  The fit's own file cannot be
+read instead: HDF5 locks a file open for writing, and with locking off and no
+SWMR a reader saw torn data in 22 of 25 tries while blocks were appended.
+SWMR would need the writer to stop touching attributes until it closes, newer
+HDF5 to read our files, and a local disk -- it is not supported on network
+shares, where acquisitions are often written.  The JSON beside the block
+carries the rest; its deletion by the new instance is the signal to free the
+block, which on Windows must outlive the taker's attach.
+
+With several instances open, every window title carries the session's name
+and a coloured mark (`gui.identity`, one filter on the application, since a
+second session is a second process), and a second instance writes a log of
+its own (`diagnostics`, `smappy-<pid>.log`).
+
 ## Drift correction
 
 Estimation is not ours: COMET (vendored under `externaltools/Comet`) is called

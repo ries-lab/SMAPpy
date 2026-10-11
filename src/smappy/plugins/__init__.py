@@ -274,8 +274,13 @@ class Context:
                  site=None, site_table: Optional[Sequence[Dict[str, Any]]] = None,
                  rois=None, grouping: Optional[str] = None,
                  evaluations: Sequence[Tuple[str, str]] = (),
-                 stop=None, writer_finished=None):
+                 stop=None, writer_finished=None, pinned=None):
         self.session = session
+        # layer -> {"ungrouped"/"grouped": (locs, selection)}, taken when the
+        # session's table was still being appended to (`Session.context`):
+        # then `table` and `layer_selection` answer from these and never
+        # read the growing table from the worker
+        self._pinned = pinned
         self.layer = layer
         # "grouped", "ungrouped", or None for each layer's own: what a chain
         # (or the plugin's own requirement) has decided `table` should hand
@@ -337,6 +342,8 @@ class Context:
         with a message rather than answered with the ungrouped table.
         """
         index = self.layer if layer is None else layer
+        if self._pinned is not None:
+            return self._pinned_table(index)
         if self.session is None:
             if self.grouping == "grouped":
                 raise ValueError("a grouped table needs a session: link the "
@@ -347,6 +354,45 @@ class Context:
         if locs is not self.session.locs:
             self.served_grouped = True
         return locs, selection
+
+    def _pinned_table(self, index: int) -> Tuple[Localizations, "Selection"]:
+        session = self.session
+        if session.layers[index].is_image:
+            index = session.first_locs_layer()
+        tables = self._pinned[index]
+        lay = session.layers[index]
+        grouped = lay.grouped if self.grouping is None else self.grouping == "grouped"
+        if not grouped:
+            return tables["ungrouped"]
+        if "grouped" not in tables:
+            raise ValueError("no grouped table while the fit is still adding "
+                             "localizations: show the layer grouped first, or "
+                             "run this ungrouped")
+        self.served_grouped = True
+        return tables["grouped"]
+
+    def layer_selection(self, layer: int,
+                        without: Tuple[str, ...] = ()) -> "Selection":
+        """Layer ``layer``'s selection over `locs` (the ungrouped table).
+
+        `Session.selection`, except that it agrees with `locs` while a fit is
+        still appending: a plugin that reads several layers -- one answer per
+        layer -- asks here rather than the session, whose table has grown
+        since this context was made.
+        """
+        if self.session is None:
+            if layer != self.layer or without:
+                raise ValueError("other layers need a session")
+            return self.selection
+        if self._pinned is None:
+            return self.session.selection(layer, without)
+        index = (self.session.first_locs_layer()
+                 if self.session.layers[layer].is_image else layer)
+        if not without:
+            return self._pinned[index]["ungrouped"][1]
+        sel = self.session.selection(index, without)
+        sel.mask = sel.mask[:len(self.locs)]      # rows are only ever appended
+        return sel
 
     def report(self, text: str) -> None:
         """Say what is happening.  A no-op when nobody is listening."""
@@ -505,6 +551,39 @@ class Result:
                         if draw is not None]
 
 
+class LiveRecipe:
+    """A table change that can follow a fit while it is still appending.
+
+    A table change cannot go into a table a fit is still adding to
+    (`Session.apply`) -- unless it is a recipe: columns computed from the
+    other columns, which the session can work out for the table so far and
+    then for every block as it arrives, and once more for the finished
+    table.  A plugin that can be one puts it in its result as
+    ``data["live_recipe"]``, and says so before the run in
+    `Plugin.live_recipe_for`.  The Math Parser's expression is one, and the
+    colour assignment, with the modes it found, is another.
+
+    `columns` must work on any table with the columns it reads -- a block of
+    a hundred rows as well as the whole table -- and must not write a
+    position: the spatial index of a live table is extended, never rebuilt.
+    ``whole`` says the values of earlier rows depend on later ones (a
+    reduction, ``z_nm - median(z_nm)``): the column is then recomputed over
+    the whole table on every append, not only for the new block.
+    """
+
+    name = ""                       # the plugin's, for the log
+    whole = False
+
+    def columns(self, locs: Localizations) -> Dict[str, np.ndarray]:
+        raise NotImplementedError
+
+    def final(self, locs: Localizations) -> Localizations:
+        """The finished table with the recipe applied: `columns`, unless the
+        recipe has something better to do once the whole table is there."""
+        return Localizations({**locs.columns, **self.columns(locs)},
+                             dict(locs.metadata))
+
+
 class Plugin:
     """Base class.  Subclasses set ``Settings`` and implement ``run``."""
 
@@ -556,6 +635,15 @@ class Plugin:
     # nobody reads four lines at a time.  The Text button offers the window
     # either way.
     text_window: bool = False
+    # Whether `run` hands back a new table (`Result.locs`, or files that
+    # replace it): True for a correction, a filter, a new column, a loader or
+    # a fit; False for a measurement, an ROI tool or an export.  Known before
+    # the run, which is what lets the GUI ask first rather than after minutes
+    # of work -- while a fit is still appending, a table change cannot go
+    # into the session (`Session.apply`).  None, for a plugin that does not
+    # say, is asked about once it has run.  Where it depends on the settings,
+    # override `changes_locs_for` too.
+    changes_locs: Optional[bool] = None
     # A window of the GUI's that this plugin opens instead of running: the
     # panel's button becomes *Open* and hands the settings to whatever the
     # GUI registered under this name (`Session.window_openers`).  For a tool
@@ -613,6 +701,15 @@ class Plugin:
             return "frame" in inspect.signature(cls.preview).parameters
         except (TypeError, ValueError):
             return True
+
+    def changes_locs_for(self, settings) -> Optional[bool]:
+        """Whether a run with ``settings`` changes the table; see `changes_locs`."""
+        return self.changes_locs
+
+    def live_recipe_for(self, settings) -> bool:
+        """Whether a run with ``settings`` hands back a `LiveRecipe`, and so
+        can change a table a fit is still appending to.  False by default."""
+        return False
 
     def preflight(self, ctx: Context, settings):
         """Anything to put to the user before `run` starts, or None to start.

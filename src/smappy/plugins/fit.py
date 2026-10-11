@@ -427,6 +427,8 @@ def camera_resolution(settings):
 class _FitPlugin(Plugin):
     """What both fitters share: opening the source, streaming, saving."""
 
+    changes_locs = True
+
     preview_help = ("run one frame and draw it: the detected candidates over "
                     "the image, and the filtered image the threshold acts on. "
                     "Nothing is saved and the session is not touched.")

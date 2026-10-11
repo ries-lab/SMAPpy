@@ -1,6 +1,6 @@
 ---
 version: "1"
-covers: [smappy.mathparse.parse, smappy.mathparse.names_in, smappy.mathparse.evaluate, smappy.mathparse.as_column, smappy.mathparse.remember, smappy.mathparse.apply_recipes, smappy.group.combine, smappy.plugins.math_parser.write_column, smappy.plugins.math_parser.check_field, smappy.plugins.math_parser.remember_expression]
+covers: [smappy.mathparse.parse, smappy.mathparse.names_in, smappy.mathparse.evaluate, smappy.mathparse.as_column, smappy.mathparse.remember, smappy.mathparse.apply_recipes, smappy.group.combine, smappy.plugins.math_parser.write_column, smappy.plugins.math_parser.check_field, smappy.plugins.math_parser.remember_expression, smappy.plugins.math_parser.MathRecipe, smappy.mathparse.reduces]
 ---
 
 ## What it does
@@ -225,6 +225,15 @@ Picking an entry also restores the *grouped* rule it was used with.
 A result whose range is not what was expected -- all zeros for a flag, or
 values a thousand times too large -- is the sign of a mistake in the
 expression; *Preview* shows it before the table has it.
+
+**During a live fit** the column follows the table as it grows: it is
+computed for the localizations so far and then for every block the fit
+adds, and once more for the finished table.  An expression with a reduction
+(`median(z_nm)`) is computed again over the whole table with every block, so
+its earlier values move as data arrives.  This works only with *apply to*
+set to all localizations, and not for a field the expression itself reads or
+for a position; such a run is offered a new window instead (*File > Open in
+a new window*).  It cannot be undone while the fit runs.
 
 ## Differences from SMAP
 

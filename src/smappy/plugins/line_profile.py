@@ -1496,6 +1496,7 @@ class LineProfile(Plugin):
     """Profiles along or across a line ROI, fitted without binning them."""
 
     Settings = LineProfileSettings
+    changes_locs = False
     # 2: the two-Gaussian start tries peaks far apart; 3: z_err_nm; 4: the
     # EM starts are tried narrow as well, so a close pair is not merged; the
     # binned fit integrates over its bins; the z window is the filter's, in nm
@@ -1637,7 +1638,7 @@ def _groups(ctx: Context, settings: LineProfileSettings):
         for i, layer in enumerate(getattr(session, "layers", [])):
             if layer.is_image or not layer.visible:
                 continue
-            locs = session.selection(i).apply(ctx.locs)
+            locs = ctx.layer_selection(i).apply(ctx.locs)
             taken = [colour for _, colour, _ in found]
             found.append((layer.name,
                           layer_colour(layer.get_display(), len(found), taken),

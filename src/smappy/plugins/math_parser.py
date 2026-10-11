@@ -43,8 +43,10 @@ import numpy as np
 
 from ..locs import Localizations
 from ..mathparse import (CONSTANTS, FUNCTIONS, GROUPED_CHOICES, RECOMPUTE,
-                         ExpressionError, evaluate, names_in, recipes, remember)
-from . import Context, Plugin, Result, param, register
+                         ExpressionError, evaluate, names_in, recipes, reduces,
+                         remember)
+from ..render import LATERAL_FIELDS
+from . import Context, LiveRecipe, Plugin, Result, param, register
 
 MAX_HISTORY = 20
 
@@ -210,6 +212,7 @@ class MathParser(Plugin):
     """A new localization field from an expression in the existing ones."""
 
     Settings = MathSettings
+    changes_locs = True
     version = "1"
 
     def react(self, changed: str, settings: MathSettings):
@@ -299,5 +302,35 @@ class MathParser(Plugin):
 
         shown = values if mask is None else np.asarray(values)[mask]
         where = "" if mask is None else f" (selection of {len(ctx.locs)})"
-        return Result(locs=locs, settings=settings,
+        data = {}
+        if self.live_recipe_for(settings):
+            data["live_recipe"] = MathRecipe(field, settings.expression)
+        return Result(locs=locs, settings=settings, data=data,
                       text=f"{describe(field, shown)}{where}{note}")
+
+    def live_recipe_for(self, settings: MathSettings) -> bool:
+        """A field over the whole table, from other columns, and not a
+        position: that can follow a live fit (`MathRecipe`).  Over the
+        selection it cannot -- which rows a block adds to the selection is a
+        question about filters and an ROI that may change meanwhile -- and a
+        field that reads itself is a change made once, not a recipe."""
+        field = (settings.field or "").strip()
+        if settings.where != "all" or field in LATERAL_FIELDS:
+            return False
+        try:
+            return field not in names_in(settings.expression)
+        except ExpressionError:
+            return False
+
+
+class MathRecipe(LiveRecipe):
+    """The expression, evaluated for each block a live fit appends -- and
+    over the whole table again when it reduces a column (`reduces`), since
+    then every row's value moves with the table."""
+
+    def __init__(self, field: str, expression: str):
+        self.field, self.expression = field, expression
+        self.whole = reduces(expression)
+
+    def columns(self, locs: Localizations) -> dict:
+        return {self.field: evaluate(locs, self.expression)}

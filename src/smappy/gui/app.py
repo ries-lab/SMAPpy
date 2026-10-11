@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sys
+import traceback
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -28,6 +29,30 @@ from .render_view import RenderToolBar, RenderView
 from .widgets import CONTROL_WIDTH, apply_style, place_beside
 from .collector import collect_on_gui_thread
 from .icon import install_icon
+from . import identity
+from .identity import install_identity
+
+
+class HandoffTask(QThread):
+    """Take a session another instance handed over (`smappy.handoff`), and
+    link it, off the GUI thread -- `LoadTask` for a table that comes through
+    shared memory instead of a file."""
+
+    progress = Signal(str)
+    loaded = Signal(object, object, object)      # locs, state, grouped or None
+    failed = Signal(str)
+
+    def __init__(self, path: str, group_settings, parent=None):
+        super().__init__(parent)
+        self.path, self.group_settings = path, group_settings
+
+    def run(self) -> None:
+        from .. import handoff
+        try:
+            self.loaded.emit(*handoff.take(self.path, self.group_settings,
+                                           progress=self.progress.emit))
+        except Exception as e:
+            self.failed.emit(f"{e}")
 
 
 class LoadTask(QThread):
@@ -120,6 +145,7 @@ class ControlWindow(QMainWindow):
         super().__init__()
         self.session = session
         self.render_window = render
+        self.setProperty(identity.OWN_TITLE, True)      # names the session itself
         # the GUI last saved or loaded, or the shipped one: never one written
         # behind anybody's back (see `workspace`)
         self.workspace = workspace_module.load_startup()
@@ -159,6 +185,12 @@ class ControlWindow(QMainWindow):
         image = self._action(menu, "Open image...", None, self.open_image)
         save = self._action(menu, "Save", QKeySequence.Save, self.save)
         save_as = self._action(menu, "Save as...", QKeySequence.SaveAs, self.save_as)
+        self._action(menu, "Session name...", None, self.rename_session)
+        self.copy_action = self._action(menu, "Open in a new window", "Ctrl+Shift+N",
+                                        self.open_in_new_window)
+        self.copy_action.setToolTip("the session as it is now -- table, layers, "
+                                    "filters, ROIs -- in a new instance of the "
+                                    "program; a live fit carries on here")
         menu.addSeparator()
         self._action(menu, "Restore GUI state from file...", None,
                      self.restore_state_from_file)
@@ -184,7 +216,11 @@ class ControlWindow(QMainWindow):
         # it would take back a step of a table that window is not about
         render.addAction(self.undo_action)
         render.addAction(self.redo_action)
-        self._load_locked = [open_, add, image, save, save_as, self.undo_action,
+        self._offers: list = []            # sessions handed to new instances
+        self._offer_timer = QTimer(self, interval=500)
+        self._offer_timer.timeout.connect(self._check_offers)
+        self._load_locked = [open_, add, image, save, save_as, self.copy_action,
+                             self.undo_action,
                              self.redo_action, self.undo_menu.menuAction(),
                              self.redo_menu.menuAction()]
         edit.addSeparator()
@@ -219,6 +255,10 @@ class ControlWindow(QMainWindow):
         # the window is also the Localize tab's Bead calibration plugin, which
         # says which mode to open in; from here it opens as it was left
         self._action(tools, "Bead calibration...", None, lambda: self.open_calibration())
+        # a plugin that would change a table a fit is still appending to
+        # offers to run in a new instance instead (`PluginPanel._ask_live`)
+        session.window_openers["new window"] = \
+            lambda run=None: self.open_in_new_window(run=run)
         session.window_openers["bead calibration"] = \
             lambda settings: self.open_calibration(dual=settings.mode == "dual")
         # a fitter whose file's camera is not in the database offers this
@@ -235,6 +275,7 @@ class ControlWindow(QMainWindow):
         self._action(view, "Reset view", "Ctrl+0", render.view.reset)
         self._action(view, "Show render window", None, render.show)
         QApplication.instance().aboutToQuit.connect(self.stop_loading)
+        QApplication.instance().aboutToQuit.connect(self.release_offers)
         QApplication.instance().aboutToQuit.connect(self.save_window_state)
         session.gui_state_provider = self.plugin_state
         session.on_change(self._on_session)
@@ -479,9 +520,142 @@ class ControlWindow(QMainWindow):
         return self.workspace
 
     def _update_title(self, name: Optional[str] = None) -> None:
-        """Say whose GUI this is, so nobody saves over somebody else's."""
-        name = name or workspace_module.display_name(self.workspace.path)
-        self.setWindowTitle(f"SMAPpy \u2014 {name}")
+        """Say whose GUI this is, so nobody saves over somebody else's --
+        and, once named, which session this is (`identity`)."""
+        if name is not None:
+            self._gui_name = name
+        gui = getattr(self, "_gui_name", None) or \
+            workspace_module.display_name(self.workspace.path)
+        if self.session.name or self.session.colour:
+            text = identity.title(self.session, "SMAPpy")
+            self.setWindowTitle(f"{text} (GUI: {gui})")
+        else:
+            self.setWindowTitle(f"SMAPpy \u2014 {gui}")
+        colour = identity.colour_hex(self.session)
+        # a stripe as well as the circle: seen from across the room, and on a
+        # title font that draws the circle in black
+        self.statusBar().setStyleSheet(
+            f"QStatusBar {{ border-top: 4px solid {colour}; }}" if colour else "")
+
+    # ------------------------------------------------- a new instance
+    def open_in_new_window(self, start: bool = True, run=None) -> Optional[object]:
+        """Hand the session as it is now to a new instance (`smappy.handoff`).
+
+        The copy is named and coloured as one -- and this session gets a
+        colour too if it has none, so the two can be told apart at a glance.
+        ``start=False`` makes the offer without starting the program, for a
+        test to take.  ``run`` is ``(plugin, settings)`` for the new instance
+        to run once it has the session (`PluginPanel`, during a live fit).
+        Returns the offer, or None if there was nothing to hand.
+        """
+        from .. import handoff
+        if not len(self.session.locs):
+            QMessageBox.information(self, "Open in a new window",
+                                    "there are no localizations to hand on")
+            return None
+        if not self.session.colour:
+            self.session.rename(self.session.name, colour="blue")
+        name, colour = handoff.snapshot_identity(self.session)
+        view = self.render_window.view.view.viewRange()
+        try:
+            offer = handoff.offer(self.session, name=name, colour=colour,
+                                  gui_state=self.plugin_state(), view=view,
+                                  run=run)
+        except Exception as e:
+            QMessageBox.warning(self, "Open in a new window",
+                                f"the session could not be handed on:\n{e}")
+            return None
+        self._offers.append(offer)
+        self._offer_timer.start()
+        if start:
+            try:
+                handoff.launch(offer.path)
+            except OSError as e:
+                offer.release()
+                self._offers.remove(offer)
+                QMessageBox.warning(self, "Open in a new window",
+                                    f"the new window could not be started:\n{e}")
+                return None
+            self.statusBar().showMessage(f"opening {name} in a new window...", 8000)
+        return offer
+
+    def _check_offers(self) -> None:
+        """Free each handed-over block once it is taken, or has waited too long."""
+        try:
+            for offer in list(self._offers):
+                if offer.taken or offer.expired:
+                    if not offer.taken:
+                        self.statusBar().showMessage(
+                            "the new window did not start; nothing was handed on", 8000)
+                    offer.release()
+                    self._offers.remove(offer)
+            if not self._offers:
+                self._offer_timer.stop()
+        except Exception:                    # a timer slot must never raise
+            traceback.print_exc()
+
+    def release_offers(self) -> None:
+        for offer in self._offers:
+            offer.release()
+        self._offers.clear()
+
+    def take_handoff(self, path: str) -> None:
+        """Open a session another instance handed over: what *Open in a new
+        window* there starts this one with."""
+        self._set_loading(True)
+        self._loading_name = "the handed-over session"
+        self._task = HandoffTask(str(path), self.session.group_settings, self)
+        self._task.progress.connect(self._loading_progress)
+        self._task.loaded.connect(self._took_handoff)
+        self._task.failed.connect(self._load_failed)
+        self._task.finished.connect(self._task_finished)
+        self._elapsed.restart()
+        self._loading_progress("taking over")
+        self._task.start()
+
+    def _took_handoff(self, locs, state, grouped) -> None:
+        from .. import handoff
+        handoff.apply_state(self.session, locs, state, grouped)
+        gui = state.get("gui_state")
+        if gui:
+            self.workspace = Workspace.from_dict(gui)
+            self.workspace.prune(list(plugins.refs()))
+            self.build_tabs()
+            self._update_title("handed over")
+        view = state.get("view")
+        if view:
+            from PySide6.QtCore import QRectF
+            (x0, x1), (y0, y1) = view
+            self.render_window.view.view.setRange(QRectF(x0, y0, x1 - x0, y1 - y0),
+                                                  padding=0)
+            self.render_window.view.schedule()
+        else:
+            self.render_window.view.reset()
+        run = state.get("run")
+        if run:
+            # after the event loop has shown the session: the run's preflight
+            # may ask something, and should ask it over the right picture
+            QTimer.singleShot(0, lambda: self._run_handed_over(run))
+
+    def _run_handed_over(self, run: dict) -> None:
+        """Run what the other instance could not apply during its live fit."""
+        try:
+            from .. import plugins as registry
+            window = self.open_plugin_window(run["plugin"])
+            if window is None:
+                return
+            cls = registry.get(run["plugin"])
+            window.panel.form.set(registry.settings_from(cls.Settings,
+                                                         run.get("values") or {}))
+            window.panel.start_run()
+        except Exception:                    # a singleShot callable must not raise
+            traceback.print_exc()
+
+    def rename_session(self) -> None:
+        """Ask for the session's name and colour (`identity.NameDialog`)."""
+        answer = identity.NameDialog.ask(self, self.session)
+        if answer is not None:
+            self.session.rename(*answer)
 
     def save_gui_to(self, path) -> Path:
         """Write the GUI to ``path``, make it the loaded one and the next start."""
@@ -790,7 +964,16 @@ class ControlWindow(QMainWindow):
         n = len(self.session.locs)
         shown = self._shown_text()
         self.statusBar().showMessage(f"{name}: {n} localizations" + (f", {shown}" if shown else ""))
-        self.render_window.setWindowTitle(f"SMAPpy - {name}" + (f" - {shown}" if shown else ""))
+        if what in ("name", "locs"):
+            self._update_title()
+        if self.session.name or self.session.colour:
+            name = self.session.display_name or name
+        self.render_window.setWindowTitle(
+            f"{identity.mark(self.session)} SMAPpy - {name}".strip()
+            + (f" - {shown}" if shown else ""))
+        colour = identity.colour_hex(self.session)
+        self.render_window.toolbar.setStyleSheet(
+            f"QToolBar {{ border-bottom: 4px solid {colour}; }}" if colour else "")
 
     def _shown_text(self) -> str:
         """What the render window actually draws: kept by each visible layer.
@@ -982,7 +1165,9 @@ class RenderWindow(QMainWindow):
         super().__init__()
         self.view = RenderView(session)
         self.setCentralWidget(self.view)
-        self.addToolBar(RenderToolBar(self.view))
+        self.toolbar = RenderToolBar(self.view)
+        self.addToolBar(self.toolbar)
+        self.setProperty(identity.OWN_TITLE, True)      # names the session itself
         self.resize(900, 900)
         window_shortcuts(self)
 
@@ -1024,6 +1209,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     install_icon(app)
     _start_log()
     session = Session()
+    install_identity(app, session)
     render = RenderWindow(session)
     control = ControlWindow(session, render)
     screen = app.primaryScreen().availableGeometry()
@@ -1031,8 +1217,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     render.move(screen.left() + control.width() + 20, screen.top())
     render.show()
     control.show()
-    if len(argv) > 1:            # after the windows: a big file takes minutes,
-        control.load_paths(argv[1:], reset_view=True)   # and says so as it goes
+    args = list(argv[1:])
+    if "--handoff" in args:      # started by *Open in a new window* elsewhere
+        at = args.index("--handoff")
+        if at + 1 < len(args):
+            control.take_handoff(args[at + 1])
+        del args[at:at + 2]
+    if args:                     # after the windows: a big file takes minutes,
+        control.load_paths(args, reset_view=True)   # and says so as it goes
     return app.exec()
 
 

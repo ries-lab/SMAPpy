@@ -27,6 +27,7 @@ class BeadCalibration(Plugin):
     """An experimental spline PSF from bead z-stacks, in its own window."""
     description = ("build a spline PSF calibration for Spline 3D or Spline 3D 2C "
                    "from bead z-stacks; opens its own window")
+    changes_locs = False
     Settings = BeadCalibrationSettings
     version = "1"
     window = "bead calibration"

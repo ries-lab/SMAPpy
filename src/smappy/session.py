@@ -264,6 +264,21 @@ class Layer:
         return Selection(mask, layer=index, name=self.name)
 
 
+# The colours a session can be marked with, and the mark each puts in a
+# window title.  Coloured circles because a title bar takes no colour of its
+# own, and these are drawn in colour by every platform's title font.
+COLOURS: Dict[str, Tuple[str, str]] = {
+    "red": ("#d62728", "\U0001F534"), "orange": ("#ff7f0e", "\U0001F7E0"),
+    "yellow": ("#e8c000", "\U0001F7E1"), "green": ("#2ca02c", "\U0001F7E2"),
+    "blue": ("#1f77b4", "\U0001F535"), "purple": ("#9467bd", "\U0001F7E3"),
+    "brown": ("#8c564b", "\U0001F7E4"),
+}
+
+
+class LiveTableError(ValueError):
+    """A result that changes the localizations, while a fit still adds to them."""
+
+
 # How many log entries a file carries.  One entry is a plugin path, a line of
 # text and its settings -- a few hundred bytes -- and the whole metadata block
 # is written as a single HDF5 attribute, so the oldest are dropped rather than
@@ -346,6 +361,8 @@ class Session:
         # every table this session replaced, newest last; see `smappy.undo`
         self.undo_stack = undo_stack()
         self._live = False                 # the table is being appended to
+        # what follows the live table: `LiveRecipe`s applied while it grows
+        self._recipes: List = []
         self._listeners: List[Callable[[str], None]] = []
         # set by the GUI: what to write into the file's `gui` group.  A session
         # in a script has none, and saves only data.
@@ -356,14 +373,21 @@ class Session:
         # False in a chain's scratch copy: the chain keeps one record and one
         # undo step for all its steps, so the copy keeps neither (`scratch`)
         self.recording = True
+        # What this session is called and its colour, for telling several
+        # apart -- two instances side by side, or a snapshot of a live fit
+        # beside the fit -- in every window title (`gui.identity`).  Empty
+        # name: the file's.  The colour is a name from `COLOURS`, "" for none.
+        self.name = ""
+        self.colour = ""
 
     # ----------------------------------------------------------- observers
     def on_change(self, callback: Callable[[str], None]) -> None:
         """``callback(what)``: "locs" (new table), "layer" (a filter or display
         setting changed), "layers" (added/removed/visibility), "history" or
         "results" (a tool kept something worth drawing again), "rois" (the
-        ROI manager's project) and "roi-preview" (a segmenter's proposals,
-        `Session.show_preview`)."""
+        ROI manager's project), "roi-preview" (a segmenter's proposals,
+        `Session.show_preview`) and "name" (`rename`, or a file opened with
+        a name of its own)."""
         self._listeners.append(callback)
 
     def off_change(self, callback: Callable[[str], None]) -> None:
@@ -475,6 +499,9 @@ class Session:
             self.changed("results")
             saved = self.locs.metadata.get("roi")
             self.set_roi(Region.from_dict(saved) if saved else None)
+            # a name belongs to the dataset it was given to: a new file takes
+            # its own, or none, rather than the last one's
+            self._take_identity(self.locs.metadata.get("session"))
             self._rois = None            # this file's own ROIs, read on first use
             self.changed("rois")
         else:
@@ -494,6 +521,25 @@ class Session:
 
     def file_names(self) -> List[str]:
         return [f.name for f in self.files]
+
+    @property
+    def display_name(self) -> str:
+        """What the windows call this session: its name, else its file's."""
+        if self.name:
+            return self.name
+        names = self.file_names()
+        if len(names) == 1:
+            return names[0]
+        return f"{len(names)} files" if names else ""
+
+    def rename(self, name: str, colour: Optional[str] = None) -> None:
+        """Name the session (and colour it); "" goes back to the file's name."""
+        if colour is not None and colour and colour not in COLOURS:
+            raise ValueError(f"unknown colour {colour!r}: one of {', '.join(COLOURS)}")
+        self.name = " ".join(str(name).split())
+        if colour is not None:
+            self.colour = colour
+        self.changed("name")
 
     def remove_file(self, number: int) -> None:
         """Drop one file's localizations; the others are renumbered densely."""
@@ -592,6 +638,29 @@ class Session:
         target = Path(path).resolve()
         return any(target == Path(p).resolve() for p in self.protected)
 
+    def file_metadata(self) -> Dict[str, Any]:
+        """The table's metadata as a file carries it: with the session's log,
+        its ROI, its name and the ROI manager's project.  What `save` writes,
+        and what a new instance is handed (`smappy.handoff`)."""
+        metadata = dict(self.locs.metadata)
+        # all of it goes in one JSON attribute, so the log is capped rather
+        # than allowed to grow without limit over a file's life
+        metadata["history"] = self.history[-MAX_HISTORY:]
+        if self.roi is not None:
+            metadata["roi"] = self.roi.to_dict()
+        else:
+            metadata.pop("roi", None)
+        if self.name or self.colour:
+            metadata["session"] = {"name": self.name, "colour": self.colour}
+        else:
+            metadata.pop("session", None)
+        rois = self.roi_state()
+        # a tile grid alone is worth keeping: it is where a systematic walk
+        # through the file was left off
+        if rois and (rois["rois"] or rois["runs"] or rois.get("tile_nm")):
+            metadata["roi_project"] = rois
+        return metadata
+
     def save(self, path=None, gui_state: Optional[bool] = None) -> Path:
         """Write the table, its history, its ROIs and -- optionally -- the GUI.
 
@@ -609,17 +678,7 @@ class Session:
         # and a SMAP _sml.mat, a csv or a MINFLUX export is not a file this
         # writes -- it used to be overwritten with HDF5 under its own name
         writer_for(path)
-        metadata = dict(self.locs.metadata)
-        # all of it goes in one JSON attribute, so the log is capped rather
-        # than allowed to grow without limit over a file's life
-        metadata["history"] = self.history[-MAX_HISTORY:]
-        if self.roi is not None:
-            metadata["roi"] = self.roi.to_dict()
-        rois = self.roi_state()
-        # a tile grid alone is worth keeping: it is where a systematic walk
-        # through the file was left off
-        if rois and (rois["rois"] or rois["runs"] or rois.get("tile_nm")):
-            metadata["roi_project"] = rois
+        metadata = self.file_metadata()
         # read before the file is started again: frames opened from it are
         # read from it a plane at a time (`StoredStack`)
         from .io.hdf5 import save_images
@@ -732,8 +791,11 @@ class Session:
         template = None
         if like is not None and 0 <= like < len(self.layers) and not self.layers[like].is_image:
             template = self.layers[like]
+        # live: the table is still being appended to, so the new layer must
+        # take blocks too, and must not link it (linking writes `group_id`
+        # into the table every layer shares)
         layer = Layer(self.locs, name=f"layer {len(self.layers) + 1}",
-                      share=self._locs_layer(),
+                      share=self._locs_layer(), live=self._live,
                       defaults=template is None,
                       settings=(dataclasses.replace(template.state.settings)
                                 if template is not None else None),
@@ -831,7 +893,7 @@ class Session:
                 self.show_grouped(index, bool(config["grouped"]))
         self.changed("layer")
 
-    def scratch(self) -> "Session":
+    def scratch(self, locs: Optional[Localizations] = None) -> "Session":
         """A headless copy to run a chain on: same table, layers, filters,
         grouping, ROI and slab; no undo, no log, no listeners.
 
@@ -843,7 +905,17 @@ class Session:
         """
         copy = Session()
         copy.recording = False
-        copy.locs = self.locs
+        # A live table is one object that keeps growing, and building the
+        # copy's layers links it, which writes `group_id` onto the table it
+        # is given: shared, that broke the live view's next append on a
+        # column mismatch.  A snapshot shares the arrays and nothing else.
+        # ``locs`` is that snapshot when the caller already holds one -- a
+        # pinned context's, taken on the GUI thread, which a chain running on
+        # a worker passes rather than snapshotting a table that may be
+        # growing as it reads it.
+        if locs is None:
+            locs = self.locs.snapshot() if self._live else self.locs
+        copy.locs = locs
         copy.path = self.path
         copy.files = list(self.files)
         copy.images = list(self.images)
@@ -861,7 +933,7 @@ class Session:
             sets = layer.state.sets
             grouped = (sets["grouped"].locs if "grouped" in sets
                        and not layer.state.grouped_stale else None)
-            made = Layer(self.locs, name=layer.name, defaults=False,
+            made = Layer(copy.locs, name=layer.name, defaults=False,
                          settings=dataclasses.replace(layer.state.settings),
                          display=dataclasses.replace(layer.get_display()),
                          group_settings=layer.group_settings,
@@ -893,6 +965,11 @@ class Session:
             self.changed("layers")
 
     # ------------------------------------------------------------ streaming
+    @property
+    def live(self) -> bool:
+        """Whether a fit is still appending to the table (`begin_live`)."""
+        return self._live
+
     def begin_live(self, extent=None, path=None) -> None:
         """Start an empty table that `append` grows, for a running fit.
 
@@ -902,19 +979,99 @@ class Session:
         if len(self.locs):
             self._push_undo("live acquisition")
         self._live = True
+        self._recipes = []
         self.locs = Localizations({}, {})
         self.layers = [Layer(self.locs, live=True, extent=extent)]
         if path is not None:
             self.path = Path(path)
         self.changed("locs")
 
+    def _take_identity(self, saved) -> None:
+        name = colour = ""
+        if isinstance(saved, dict):
+            name = str(saved.get("name") or "")
+            colour = str(saved.get("colour") or "")
+            colour = colour if colour in COLOURS else ""
+        if (name, colour) != (self.name, self.colour):
+            self.name, self.colour = name, colour
+        self.changed("name")       # the file's name is the default either way
+
+    # ------------------------------------------------------- live recipes
+    def _follow(self, recipe, plugin: Plugin, result: Result) -> None:
+        """Apply a `LiveRecipe` to the live table now, and to every block.
+
+        The table is the one the fit is still appending to, so the columns go
+        into it in place -- on the table so far, which has grown since the
+        plugin's snapshot -- rather than replacing it.  No undo step: there is
+        no table before it to go back to that the fit could go on filling.
+        """
+        recipe.name = recipe.name or plugin.path.rsplit("/", 1)[-1]
+        self._set_columns(recipe.columns(self.locs))
+        derived = result.locs.metadata.get("derived") if result.locs is not None else None
+        if derived is not None:          # the math parser's recipe, for grouping
+            self.locs.metadata["derived"] = derived
+        self._recipes.append(recipe)
+        self.changed("append")
+
+    def _set_columns(self, columns: Dict[str, np.ndarray]) -> None:
+        """Put columns into the live table, every layer's filter following."""
+        for name, values in columns.items():
+            values = np.asarray(values)
+            self.locs.columns[name] = values
+            self.locs._buffers[name] = values    # `extend` grows it from here
+        for layer in self.layers:
+            if layer.is_image:
+                continue
+            ranges = layer.state.sets["ungrouped"].filter.ranges
+            for name in columns:
+                if name in ranges:               # its mask is of the old values
+                    layer.set_bound(name, *ranges[name])
+
+    def _recipe_block(self, block: Localizations) -> Localizations:
+        """A block with the recipes' columns, so it matches the live table."""
+        if not self._recipes:
+            return block
+        columns = dict(block.columns)
+        for recipe in self._recipes:
+            columns.update(recipe.columns(Localizations(columns, block.metadata)))
+        return Localizations(columns, block.metadata)
+
+    def _finish_recipes(self, locs: Localizations) -> Localizations:
+        """The fit's finished table with the live recipes applied again --
+        over all of it, once, which for a reduction or a colour histogram is
+        the answer the partial table only approximated."""
+        names = []
+        for recipe in self._recipes:
+            derived = self.locs.metadata.get("derived")
+            locs = recipe.final(locs)
+            if derived is not None:
+                locs.metadata["derived"] = derived
+            names.append(recipe.name)
+        self._recipes = []
+        self.log("live recipes", "applied to the finished table: " + ", ".join(names))
+        return locs
+
+    def end_live(self) -> None:
+        """The fit ended without a finished table -- it failed: keep what came.
+
+        What was appended stays, as an ordinary table, so the session is not
+        left refusing every table change for a fit that will never finish.
+        """
+        if self._live:
+            self.set_locs(self.locs.snapshot(), undoable=False)
+
     def append(self, block: Localizations) -> int:
-        """Add a block to the live table; every layer takes it in."""
+        """Add a block to the live table; every layer takes it in -- with the
+        columns of the recipes followed so far (`_follow`)."""
+        block = self._recipe_block(block)
         n = 0
         for layer in self.layers:
             if not layer.is_image:
                 n = layer.append(block)
         self.locs = self.layers[self.first_locs_layer()].state.sets["ungrouped"].locs
+        for recipe in self._recipes:
+            if recipe.whole and n:
+                self._set_columns(recipe.columns(self.locs))
         if n:
             self.changed("append")
         return n
@@ -1223,9 +1380,54 @@ class Session:
         Built on the caller's thread: the table and the selection are read
         here, so handing the context to a worker cannot race a live fit
         rebinding them.
+
+        While a fit is still appending, reading them here is not enough: the
+        live table is one object whose columns `append` replaces with longer
+        ones, so a plugin holding it saw it grow under it -- a mask of 50 rows
+        over a table of 100, or ``x_nm`` read before a block and ``y_nm``
+        after it.  The context is then *pinned*: a snapshot of the table
+        (`Localizations.snapshot`, no copy) and every layer's selection over
+        exactly those rows, all taken now, on this thread.
         """
+        if self._live and "locs" not in extra:
+            pinned = self._pinned_tables()
+            index = layer if not self.layers[layer].is_image else self.first_locs_layer()
+            locs, selection = pinned[index]["ungrouped"]
+            return Context(session=self, layer=layer, progress=progress,
+                           stream=stream, locs=locs, selection=selection,
+                           pinned=pinned, **extra)
         return Context(session=self, layer=layer, progress=progress,
                        stream=stream, **extra)
+
+    def _pinned_tables(self) -> Dict[int, Dict[str, Tuple[Localizations, Selection]]]:
+        """Every locs layer's ``(table, selection)``, as of now, for `context`.
+
+        The ungrouped table is one snapshot shared by all layers.  A grouped
+        table is offered only where the layer already has one: it is a table
+        of its own, never appended to, so it is safe to hand on -- but it
+        does not include what arrived since it was linked, and linking a
+        table that is still growing, on a worker, is exactly the race this
+        avoids.
+        """
+        locs = self.locs.snapshot()
+        n = len(locs)
+        out: Dict[int, Dict[str, Tuple[Localizations, Selection]]] = {}
+        for i, lay in enumerate(self.layers):
+            if lay.is_image:
+                continue
+            sel = lay.selection(i)
+            # the filter's mask may already be longer than the snapshot if a
+            # block came in between; rows are only ever added at the end, so
+            # its first n entries are the snapshot's
+            sel.mask = sel.mask[:n].copy()
+            tables = {"ungrouped": (locs, self._clip(sel, locs, i))}
+            if "grouped" in lay.state.sets:
+                locset = lay.state.sets["grouped"]
+                gsel = Selection(locset.filter.mask.copy(), layer=i,
+                                 name=f"{lay.name}, grouped")
+                tables["grouped"] = (locset.locs, self._clip(gsel, locset.locs, i))
+            out[i] = tables
+        return out
 
     def run(self, plugin: Plugin, settings=None, layer: int = 0,
             progress: Optional[Callable[[str], None]] = None,
@@ -1240,7 +1442,30 @@ class Session:
         self.apply(plugin, result)
         return result
 
-    def apply(self, plugin: Plugin, result: Result) -> None:
+    def apply(self, plugin: Plugin, result: Result, *,
+              finishes_live: bool = False) -> None:
+        """Put a result in place: its table, its files, its log line, its keep.
+
+        While a fit is still appending (`live`), a result that changes the
+        localizations is refused with `LiveTableError`, before anything is
+        touched -- except the fit's own, ``finishes_live``, which is the
+        finished form of the table it has been streaming, and one that
+        carries a `LiveRecipe`, which follows the live table (`_follow`).  Applied, a drift
+        correction replaced the growing table with one that could not take
+        the next block, and the fit's result then replaced it in turn: the
+        view stopped, the correction was lost, and the log kept a line for a
+        correction the table did not have.
+        """
+        recipe = ((result.data or {}).get("live_recipe")
+                  if self._live and not finishes_live and not result.files else None)
+        if (self._live and not finishes_live and recipe is None
+                and (result.locs is not None or result.files)):
+            name = plugin.path.rsplit("/", 1)[-1] or type(plugin).__name__
+            raise LiveTableError(
+                f"{name} changes the localizations, and the fit is still "
+                f"adding to them: not applied")
+        if finishes_live and self._recipes and result.locs is not None:
+            result.locs = self._finish_recipes(result.locs)
         settings = result.settings
         # The log is the provenance of the localizations, so what goes in it
         # is what changed them -- a measurement can be repeated from the file
@@ -1265,6 +1490,8 @@ class Session:
                                                 format=plugin.path, n=len(result.locs)))
             if not where:
                 self.path = None         # nowhere to save back to until asked
+        elif result.locs is not None and recipe is not None:
+            self._follow(recipe, plugin, result)
         elif result.locs is not None:
             # the menu says what it is about to undo, so the step is named
             # after the plugin rather than after the fact that a table changed

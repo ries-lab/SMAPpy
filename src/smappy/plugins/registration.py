@@ -103,6 +103,7 @@ class CalibrateChannelTransform(Plugin):
                    "split frame from localizations fitted over the whole "
                    "frame: no initial shift, no magnification and no split "
                    "position needed.")
+    changes_locs = False
     # 2: a table in nm is weighted by its xy_err_nm too (it was unweighted)
     version = "2"
     Settings = RegisterLocsSettings

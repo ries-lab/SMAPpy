@@ -132,6 +132,8 @@ class LiveSession:
         from .icon import install_icon
         install_icon(app)
         self.session = Session()
+        from .identity import install_identity
+        install_identity(app, self.session)
         out = self.settings.output.resolve(self.settings.source.path)
         if out is not None:
             self.session.protected.add(Path(out))

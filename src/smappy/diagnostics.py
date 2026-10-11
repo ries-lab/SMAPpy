@@ -12,6 +12,12 @@ happens and forgotten a moment later, so it is written down as it goes:
   program prints, which is where most of its own error messages still go.
   Rotated at `MAX_BYTES`, `BACKUPS` old ones kept, so it never grows without
   bound and the last few sessions are always there.
+  Several instances at once -- a session opened in a new window (`handoff`)
+  -- would share it, interleaving their lines and, on Windows, failing to
+  rotate a file another process holds open.  So the first instance takes a
+  lock (``smappy.lock``) and writes ``smappy.log``; any other running at the
+  same time writes ``smappy-<pid>.log``, which is cleaned up after
+  `PROCESS_LOG_DAYS`.
 * ``crash.log`` -- `faulthandler`'s stack of every thread when the process
   dies in native code (the C++ fitter, HDF5, Qt, a GPU driver), which no
   Python handler can catch because there is no Python left to run it.
@@ -47,6 +53,8 @@ LOG_NAME = "smappy.log"
 CRASH_NAME = "crash.log"
 MAX_BYTES = 2_000_000          # ~ a day of heavy use; the tail is what matters
 BACKUPS = 3
+LOCK_NAME = "smappy.lock"
+PROCESS_LOG_DAYS = 7           # a second instance's own log is kept this long
 # what the environment section asks after, the packages a bug usually lives near
 PACKAGES = ("numpy", "scipy", "h5py", "tifffile", "PySide6", "pyqtgraph",
             "matplotlib", "numba", "torch", "wgpu", "PyYAML")
@@ -68,7 +76,38 @@ def log_dir() -> Path:
 
 
 def log_file() -> Path:
-    return log_dir() / LOG_NAME
+    """This process's log: ``smappy.log``, or its own if another instance
+    holds that one (see the module notes)."""
+    return _state["path"] if _state else log_dir() / LOG_NAME
+
+
+def _claim(folder: Path):
+    """The lock that makes this process the one writing ``smappy.log``, held
+    for as long as the returned file is open; None if another process has it."""
+    handle = open(folder / LOCK_NAME, "a+")
+    try:
+        if os.name == "nt":
+            import msvcrt
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        handle.close()
+        return None
+    return handle
+
+
+def _tidy(folder: Path) -> None:
+    """Remove other instances' logs older than `PROCESS_LOG_DAYS`."""
+    cutoff = time.time() - PROCESS_LOG_DAYS * 86400
+    for old in folder.glob("smappy-*.log*"):
+        try:
+            if old.stat().st_mtime < cutoff:
+                old.unlink()
+        except OSError:
+            pass               # in use, or gone already: next time
 
 
 def crash_file() -> Path:
@@ -91,7 +130,10 @@ def start(program: str = "smappy", capture_output: bool = True) -> Path:
             return _state["path"]
         folder = log_dir()
         folder.mkdir(parents=True, exist_ok=True)
-        path = folder / LOG_NAME
+        claim = _claim(folder)
+        path = folder / (LOG_NAME if claim is not None
+                         else f"smappy-{os.getpid()}.log")
+        _tidy(folder)
         handler = logging.handlers.RotatingFileHandler(
             path, maxBytes=MAX_BYTES, backupCount=BACKUPS, encoding="utf-8")
         handler.setFormatter(logging.Formatter(
@@ -99,7 +141,7 @@ def start(program: str = "smappy", capture_output: bool = True) -> Path:
         logger.addHandler(handler)
         logger.setLevel(logging.INFO)
         logger.propagate = False
-        _state.update(path=path, handler=handler, program=program)
+        _state.update(path=path, handler=handler, program=program, claim=claim)
 
         # native crashes: faulthandler writes straight to the file descriptor,
         # so the file has to stay open for as long as the process lives
@@ -154,6 +196,8 @@ def stop() -> None:
         _state["crash"].close()
         logger.removeHandler(_state["handler"])
         _state["handler"].close()
+        if _state.get("claim") is not None:
+            _state["claim"].close()            # closing the file drops the lock
         _state.clear()
 
 
@@ -308,8 +352,12 @@ def bug_report(path, session=None, note: str = "") -> Path:
                    + (f"note:\n{note}\n\n" if note else "")
                    + f"environment:\n{environment()}\n\n"
                    + f"session:\n{describe_session(session)}\n")
-        for name in [LOG_NAME] + [f"{LOG_NAME}.{i}" for i in range(1, BACKUPS + 1)] \
-                + [CRASH_NAME]:
+        names = [LOG_NAME] + [f"{LOG_NAME}.{i}" for i in range(1, BACKUPS + 1)] \
+            + [CRASH_NAME]
+        own = log_file().name
+        if own not in names:               # this instance's own log, first
+            names.insert(0, own)
+        for name in names:
             if (folder / name).exists():
                 z.write(folder / name, name)
         if config_file().exists():

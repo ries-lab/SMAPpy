@@ -37,7 +37,7 @@ from typing import Dict, Optional, Sequence, Tuple
 import numpy as np
 
 from ..locs import Localizations
-from . import Context, Plugin, Result, param, register
+from . import Context, LiveRecipe, Plugin, Result, param, register
 
 # candidate column pairs, in the order they are looked for: what the paired
 # fit writes first, then the 1-based spelling a SMAP or hand-made table uses
@@ -555,6 +555,94 @@ class AssignColorSettings:
                                          "both columns or neither")
 
 
+@dataclass
+class Decision:
+    """What the assignment decided for each localization, and the columns
+    that say so."""
+
+    values: Ratios
+    channel: np.ndarray
+    probability: np.ndarray
+    sigma: np.ndarray
+    posteriors: np.ndarray
+
+    def columns(self, n_colours: int) -> Dict[str, np.ndarray]:
+        values = self.values
+        out = {"channel": self.channel,
+               "color_ratio": values.r.astype(np.float32),
+               "channel_p": self.probability.astype(np.float32),
+               "channel_sigma": self.sigma.astype(np.float32)}
+        for k in range(n_colours):
+            # P(colour k+1 | this molecule's photons), for every row: the
+            # answer itself, which a single label cannot hold
+            out[f"channel_p{k + 1}"] = np.where(
+                values.valid, self.posteriors[:, k], np.nan).astype(np.float32)
+        return out
+
+
+def decide(values: Ratios, modes: Modes, settings: "AssignColorSettings") -> Decision:
+    """Each localization's colour, given the modes: the half of the plugin
+    that does not look at the histogram, and so what a live fit's blocks are
+    assigned with once the modes are found (`ColourRecipe`)."""
+    # The result is a probability for each colour.  `channel` is the
+    # decision that follows from it -- and 0, undecided, wherever the
+    # probabilities are too close together to choose between.
+    per_colour = posteriors(values.r, values.n_eff, modes,
+                            spread=settings.spread,
+                            use_prior=settings.use_prior)
+    if settings.mode == "probabilistic":
+        channel, probability = assign_by_probability(
+            values.r, values.n_eff, modes, crosstalk=settings.crosstalk,
+            spread=settings.spread, use_prior=settings.use_prior,
+            tolerance=settings.tolerance, keep_tails=settings.keep_tails)
+    elif settings.mode == "minima":
+        channel = assign_by_minima(values.r, modes, settings.exclusion)
+        probability = np.where(channel > 0, 1.0, 0.0)
+    else:
+        raise ValueError(f"unknown method {settings.mode!r}")
+    channel[~values.valid] = 0
+    probability = np.where(channel > 0, probability, 0.0)
+
+    # how far the nearest species is, in its own sigma: the number the
+    # posterior cannot carry.  P(colour) is a *relative* statement and sits
+    # at 0 or 1 almost everywhere, so it says nothing about a localization
+    # that is no colour at all -- this does, for every row, whether or not
+    # it was assigned, and it is what the consistency test cuts on.
+    sigma = np.nanmin(deviations(values.r, values.n_eff, modes,
+                                 spread=settings.spread), axis=1)
+
+    return Decision(values, channel, probability, sigma, per_colour)
+
+
+class ColourRecipe(LiveRecipe):
+    """The colours, assigned to each block a live fit appends with the modes
+    found when the plugin ran -- not found again per block, which would
+    recolour what is already on screen every few seconds.  The finished
+    table gets its modes found again, over all of it (`final`)."""
+
+    def __init__(self, modes: Modes, settings: "AssignColorSettings"):
+        self.modes, self.settings = modes, settings
+
+    def _ratios(self, locs: Localizations) -> Ratios:
+        s = self.settings
+        return ratios(locs, s.channel1, s.channel2, use_errors=s.use_errors,
+                      min_photons=s.min_photons)
+
+    def columns(self, locs: Localizations) -> Dict[str, np.ndarray]:
+        return decide(self._ratios(locs), self.modes,
+                      self.settings).columns(len(self.modes))
+
+    def final(self, locs: Localizations) -> Localizations:
+        s = self.settings
+        values = self._ratios(locs)
+        modes = self.modes
+        if values.valid.sum() >= 50:
+            modes = find_modes(values.r[values.valid], colors=s.colors, bins=s.bins,
+                               smoothing=s.smoothing, expected=_expected_ratios(s))
+        columns = decide(values, modes, s).columns(len(modes))
+        return Localizations({**locs.columns, **columns}, dict(locs.metadata))
+
+
 def histogram_selection(ctx: Context):
     """What the histogram is read from: the selection, but never cut by colour.
 
@@ -571,7 +659,7 @@ def histogram_selection(ctx: Context):
     lay = session.layers[layer]
     if lay.is_image or "channel" not in lay.state.sets["ungrouped"].filter:
         return ctx.selection
-    return session.selection(layer, without=("channel",))
+    return ctx.layer_selection(layer, without=("channel",))
 
 
 @register("Analysis/Dual-Color/AssignColors")
@@ -584,6 +672,7 @@ class AssignColors(Plugin):
                    "probabilities, and `channel`: the colour decided on, or 0 "
                    "where the probabilities are too close to choose between "
                    "and where no colour fits at all.")
+    changes_locs = True
     preview_help = ("draw the histogram of r with the modes, the boundaries "
                     "and what would be assigned, and the same decision over "
                     "the two channels' intensities.  Nothing is saved and the "
@@ -635,43 +724,11 @@ class AssignColors(Plugin):
             given = ", ".join(f"{v:+.3f}" for v in expected)
             ctx.report(f"expected ratios given: {given}")
 
-        # The result is a probability for each colour.  `channel` is the
-        # decision that follows from it -- and 0, undecided, wherever the
-        # probabilities are too close together to choose between.
-        per_colour = posteriors(values.r, values.n_eff, modes,
-                                spread=settings.spread,
-                                use_prior=settings.use_prior)
-        if settings.mode == "probabilistic":
-            channel, probability = assign_by_probability(
-                values.r, values.n_eff, modes, crosstalk=settings.crosstalk,
-                spread=settings.spread, use_prior=settings.use_prior,
-                tolerance=settings.tolerance, keep_tails=settings.keep_tails)
-        elif settings.mode == "minima":
-            channel = assign_by_minima(values.r, modes, settings.exclusion)
-            probability = np.where(channel > 0, 1.0, 0.0)
-        else:
-            raise ValueError(f"unknown method {settings.mode!r}")
-        channel[~values.valid] = 0
-        probability = np.where(channel > 0, probability, 0.0)
-
-        # how far the nearest species is, in its own sigma: the number the
-        # posterior cannot carry.  P(colour) is a *relative* statement and sits
-        # at 0 or 1 almost everywhere, so it says nothing about a localization
-        # that is no colour at all -- this does, for every row, whether or not
-        # it was assigned, and it is what the consistency test cuts on.
-        sigma = np.nanmin(deviations(values.r, values.n_eff, modes,
-                                     spread=settings.spread), axis=1)
-
-        locs = Localizations(dict(ctx.locs.columns), dict(ctx.locs.metadata))
-        locs.columns["channel"] = channel
-        locs.columns["color_ratio"] = values.r.astype(np.float32)
-        locs.columns["channel_p"] = probability.astype(np.float32)
-        locs.columns["channel_sigma"] = sigma.astype(np.float32)
-        for k in range(len(modes)):
-            # P(colour k+1 | this molecule's photons), for every row: the
-            # answer itself, which a single label cannot hold
-            locs.columns[f"channel_p{k + 1}"] = np.where(
-                values.valid, per_colour[:, k], np.nan).astype(np.float32)
+        decided = decide(values, modes, settings)
+        channel, probability = decided.channel, decided.probability
+        sigma, per_colour = decided.sigma, decided.posteriors
+        locs = Localizations({**ctx.locs.columns, **decided.columns(len(modes))},
+                             dict(ctx.locs.metadata))
 
         text = self._summary(values, modes, channel, probability, settings, seen)
         ctx.report(text.splitlines()[0])
@@ -681,8 +738,12 @@ class AssignColors(Plugin):
                              _intensity_plotter(values, modes, settings, seen)},
                       data={"modes": modes, "ratios": values, "channel": channel,
                             "probability": probability, "sigma": sigma,
-                            "posteriors": per_colour},
+                            "posteriors": per_colour,
+                            "live_recipe": ColourRecipe(modes, settings)},
                       settings=settings)
+
+    def live_recipe_for(self, settings: AssignColorSettings) -> bool:
+        return True               # the modes, then every block (`ColourRecipe`)
 
     def _summary(self, values: Ratios, modes: Modes, channel: np.ndarray,
                  probability: np.ndarray, settings: AssignColorSettings,

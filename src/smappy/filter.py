@@ -145,6 +145,11 @@ class LocFilter:
     def __len__(self) -> int:
         return int(self.mask.sum())
 
+    @property
+    def n_rows(self) -> int:
+        """The rows of the table this filter covers -- kept or not."""
+        return self._n
+
     def __iter__(self) -> Iterator[str]:
         return iter(self._masks)
 

@@ -132,6 +132,7 @@ class SegmenterPlugin(Plugin):
     A run is one step of the project's ROI undo (`ROIProject.edit`), the
     ROIs it replaced included.
     """
+    changes_locs = False        # proposes ROIs; the table is untouched
 
     preview_help = ("propose the ROIs and draw them, grey, in the ROI manager "
                     "without adding them; Run adds them")
@@ -186,6 +187,7 @@ class DensityPeaks(SegmenterPlugin):
     """Proposes ROIs where localizations pile up, after a Gaussian blur."""
 
     Settings = DensityPeakSettings
+    changes_locs = False
     version = "1"
 
     def propose(self, locs, settings: DensityPeakSettings,
@@ -252,6 +254,7 @@ class Statistics(Plugin):
     """Counts a site's localizations and averages their precision and photons."""
 
     Settings = StatisticsSettings
+    changes_locs = False
     scope = "site"
     version = "1"
 
@@ -383,6 +386,7 @@ class SiteAnalysisPlugin(Plugin):
     evaluation, and the answer is written into the field.
     """
     evaluator: str = ""
+    changes_locs = False
 
     def evaluation(self, ctx: Context, settings) -> Optional[str]:
         """The evaluation this run reads, by name (`choose_evaluation`)."""
@@ -450,6 +454,7 @@ class Histograms(SiteAnalysisPlugin):
     """Distributions of the evaluation results, one histogram per column."""
 
     Settings = HistogramSettings
+    changes_locs = False
     version = "1"
     auto_label = "all"
 
