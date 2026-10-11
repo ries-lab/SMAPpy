@@ -13,7 +13,7 @@ to be -- and this is the first step of it.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 import numpy as np
 
@@ -28,9 +28,15 @@ class Region:
     points: np.ndarray                      # (n, 2): rect corners, vertices, or the centre
     width: float = 0.0                      # line only, in data units
     radius: float = 0.0                     # circle only, in data units
+    # the point the region was placed at, when that is not the middle of its
+    # outline: an ROI's centre, which a polygon ROI keeps wherever it was
+    # put and which a measurement may want (NPC Corners counts round it)
+    anchor: Optional[np.ndarray] = None
 
     def __post_init__(self):
         self.points = np.asarray(self.points, dtype=np.float64).reshape(-1, 2)
+        if self.anchor is not None:
+            self.anchor = np.asarray(self.anchor, dtype=np.float64).reshape(2)
 
     @classmethod
     def rect(cls, x0, y0, x1, y1) -> "Region":
@@ -65,10 +71,13 @@ class Region:
         circle of diameter ``size`` or a square of side ``size`` -- around its
         centre."""
         if polygon is not None:
-            return cls.polygon(polygon)
-        if shape == "circle":
-            return cls.circle(center, size / 2)
-        return cls.square(center, size)
+            region = cls.polygon(polygon)
+        elif shape == "circle":
+            region = cls.circle(center, size / 2)
+        else:
+            region = cls.square(center, size)
+        region.anchor = np.asarray(center, dtype=np.float64).reshape(2)
+        return region
 
     @property
     def bounds(self):
@@ -80,7 +89,10 @@ class Region:
 
     @property
     def center(self) -> np.ndarray:
-        """The centre of the bounding box -- a circle's and a square's own."""
+        """Where the region was placed (`anchor`), else the middle of its
+        bounding box -- a circle's and a square's own centre either way."""
+        if self.anchor is not None:
+            return self.anchor.copy()
         x0, y0, x1, y1 = self.bounds
         return np.array([(x0 + x1) / 2, (y0 + y1) / 2])
 
@@ -126,7 +138,9 @@ class Region:
         if self.kind == "circle":
             return abs(float(np.hypot(*(p - self.points[0]))) - self.radius)
         if self.kind == "rect":
-            q = np.abs(p - self.center) - (np.array(self.bounds[2:]) - self.bounds[:2]) / 2
+            x0, y0, x1, y1 = self.bounds
+            middle = np.array([(x0 + x1) / 2, (y0 + y1) / 2])
+            q = np.abs(p - middle) - np.array([x1 - x0, y1 - y0]) / 2
             inside = min(max(q[0], q[1]), 0.0)       # signed distance to the box
             return abs(float(np.linalg.norm(np.maximum(q, 0.0)) + inside))
         v = self.points
@@ -140,11 +154,14 @@ class Region:
         d = {"kind": self.kind, "points": self.points.tolist(), "width": self.width}
         if self.kind == "circle":
             d["radius"] = self.radius
+        if self.anchor is not None:
+            d["anchor"] = self.anchor.tolist()
         return d
 
     @classmethod
     def from_dict(cls, d: Dict) -> "Region":
-        return cls(d["kind"], d["points"], d.get("width", 0.0), d.get("radius", 0.0))
+        return cls(d["kind"], d["points"], d.get("width", 0.0), d.get("radius", 0.0),
+                   d.get("anchor"))
 
     def __str__(self) -> str:
         x0, y0, x1, y1 = self.bounds

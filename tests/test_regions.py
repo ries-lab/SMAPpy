@@ -77,3 +77,92 @@ def test_inside_polygon_only_tests_the_bounding_box_but_answers_everywhere():
     y = np.array([0.0, 1.0, 0.0])
     assert inside_polygon(x, y, [[0, 0], [2, 0], [2, 2], [0, 2]]).tolist() == \
         [False, True, False]
+
+
+# --------------------------------------------------- measuring in a region
+
+def _blobs(seed=0, n=3000, shift=0.0):
+    rng = np.random.default_rng(seed)
+    xy = np.vstack([rng.normal(c, 40, (n // 2, 2)) for c in ([1000, 1000], [4000, 4000])])
+    xy += shift
+    m = len(xy)
+    return Localizations({"x_nm": xy[:, 0].astype(np.float32),
+                          "y_nm": xy[:, 1].astype(np.float32),
+                          "frame": np.arange(m, dtype=np.int64),
+                          "photons": rng.gamma(4, 400, m).astype(np.float32),
+                          "xy_err_nm": rng.uniform(5, 15, m).astype(np.float32)}, {})
+
+
+def test_a_region_context_holds_the_roi_unfiltered_and_the_filter_as_its_selection():
+    locs = _blobs()
+    project = ROIProject()
+    source = project.add_source(locs, name="a")
+    project.set_filters({"photons": (1500, None)})
+    roi = project.add_roi(source.id, [1000.0, 1000.0], reviewed=True)
+    ctx = project.region_context(roi)
+    x, y = np.asarray(locs["x_nm"], float), np.asarray(locs["y_nm"], float)
+    inside = project.region(roi).mask(x, y)
+    assert len(ctx.locs) == inside.sum()               # membership: the shape alone
+    bright = np.asarray(locs["photons"])[inside] >= 1500
+    assert np.array_equal(ctx.selection.mask, bright)  # the filter, inside it
+    assert len(ctx.selection.apply(ctx.locs)) == len(project.extract(roi))
+    assert ctx.region.kind == "circle" and ctx.region.center.tolist() == [1000.0, 1000.0]
+    assert ctx.session is None and ctx.rois is project
+
+
+def test_a_region_context_offers_the_grouped_table_when_the_project_is_grouped():
+    project = ROIProject()
+    source = project.add_source(_blobs(), name="a")
+    project.grouped = True
+    roi = project.add_roi(source.id, [4000.0, 4000.0], reviewed=True)
+    ctx = project.region_context(roi)
+    grouped, selection = ctx.table()
+    assert ctx.served_grouped and len(grouped) == len(selection.mask)
+    assert 0 < len(grouped) <= len(ctx.locs)           # a row per blink, no more
+    ungrouped, _ = project.region_context(roi, grouping="ungrouped").table()
+    assert len(ungrouped) == len(ctx.locs)
+
+
+def test_in_the_session_every_layer_is_cut_to_the_roi_and_the_drawn_roi_is_not(tmp_path):
+    from smappy.io.hdf5 import save_localizations
+    from smappy.session import Session
+    save_localizations(tmp_path / "a.hdf5", _blobs(seed=1))
+    save_localizations(tmp_path / "b.hdf5", _blobs(seed=2))     # the same places
+    s = Session()
+    s.load(tmp_path / "a.hdf5")
+    s.load(tmp_path / "b.hdf5", append=True)
+    s.add_layer()
+    s.layers[1].set_bound("photons", 2000.0, None)
+    s.roi = Region.rect(3000, 3000, 5000, 5000)       # drawn round the other blob
+    project = s.rois
+    project.sync()
+    first = next(iter(project.sources))
+    roi = project.add_roi(first, [1000.0, 1000.0])
+    ctx = project.region_context(roi)
+    files = np.asarray(ctx.locs["filenumber"])
+    assert len(ctx.locs) > 0 and (files == files[0]).all()     # its own file only
+    x = np.asarray(ctx.locs["x_nm"])
+    assert (x < 2000).all()                                     # not the drawn ROI's
+    one, two = ctx.layer_selection(0), ctx.layer_selection(1)
+    assert len(two) < len(one) <= len(ctx.locs)
+    assert (np.asarray(ctx.locs["photons"])[two.mask] >= 2000).all()
+
+
+def test_npc_corners_counts_round_the_place_the_roi_was_put():
+    from smappy.plugins.npc import NPCCorners
+    rng = np.random.default_rng(3)
+    theta = np.repeat(np.arange(8) * np.pi / 4, 30) + rng.normal(0, 0.05, 240)
+    r = 55 + rng.normal(0, 4, 240)
+    locs = Localizations({"x_nm": (2000 + r * np.cos(theta)).astype(np.float32),
+                          "y_nm": (2000 + r * np.sin(theta)).astype(np.float32),
+                          "photons": np.full(240, 2000, np.float32),
+                          "xy_err_nm": np.full(240, 5, np.float32)}, {})
+    project = ROIProject()
+    source = project.add_source(locs, name="pore")
+    # a polygon lopsided round the pore: its box's middle is not the pore's
+    polygon = [[1900, 1900], [2300, 1900], [2300, 2100], [1900, 2100]]
+    roi = project.add_roi(source.id, [2000.0, 2000.0], polygon=polygon, reviewed=True)
+    ctx = project.region_context(roi)
+    assert ctx.region.center.tolist() == [2000.0, 2000.0]
+    result = NPCCorners().run(ctx, NPCCorners.Settings())
+    assert result.data["n_corners"] == 8

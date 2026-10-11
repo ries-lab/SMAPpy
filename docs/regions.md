@@ -101,6 +101,13 @@ Slow, optional parts of a measurement (a bootstrap, a figure that needs a
 fit) are **settings**, so a step in a block, which has its own copy of the
 plugin's settings, turns them off without any new mechanism.  A plugin does
 not need to know it is running per region, though it may (`ctx.region`).
+The plugin **declares** them -- `param(..., slow=True)`, presentation like
+`advanced=True` -- and a step added to a block **starts with them off**; the
+editor marks them, and its check warns when one is on in a block over many
+regions (with an estimate, once the step has run on the current region).
+With that default no "fast options" button is needed: ticking one back on is
+a choice.  Localization Statistics' fits are the example: about 10 ms a
+region whatever its size, 17 minutes over 10^5 clusters.
 
 ### Evaluation is a block of a chain
 
@@ -335,9 +342,23 @@ Each step leaves the program working and the suite green.
    of a drawn polygon or line now counts as inside, as it already did for a
    rect and for the ROI manager.
 2. **The context.**  `ctx.region`; a per-region context that is the session's
-   with the region in place of the drawn ROI; `SessionROIs`' own filter copies
-   go.  `Result.values` and `Result.arrays`.  `scope` goes, the two statistics
-   plugins become one, the chooser offers every plugin that can be a step.
+   with the region in place of the drawn ROI.  `Result.values` and
+   `Result.arrays`.  `scope` goes (a flag, `per_region`, says a plugin returns
+   values), the two statistics plugins become one, the chooser offers every
+   plugin that can be a step.  In three parts:
+   * *2a, done 2026-10-11*: `ROIProject.region_context(roi)`.  `ctx.locs` is
+     the ROI's rows of its file, unfiltered and ungrouped; each layer's
+     selection is its filter over them; the grouped table is offered cut the
+     same way where the layer has a current one; neither the drawn ROI nor
+     the slab narrows it.  It reuses the shape of the live fit's pinned
+     tables, so `ctx.table(i)` and `ctx.layer_selection(i)` work unchanged.
+     `ctx.site` is gone; an ROI's centre is `ctx.region.center` (the
+     `Region`'s `anchor`).  A stored ROI result is signed with every layer's
+     filters and grouping, so results saved before read as out of date once.
+     `SessionROIs`' per-file states stay for now: they draw the manager's
+     images and hold its index, and decide nothing a measurement sees.
+   * *2b*: `Result.values` / `Result.arrays`, the `per_region` flag.
+   * *2c*: one statistics plugin, with `slow=True` on its fits.
 3. **Region sources and one runner**, ROIs first, then id columns, with the
    region table in columns, in the file and as a session table with its filter;
    `keep` and `restore` per region, and the switch.

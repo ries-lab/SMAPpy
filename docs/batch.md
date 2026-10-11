@@ -139,10 +139,10 @@ Decided 2026-10-05.  A chain can do what the ROI manager does by hand:
   afterwards -- reads them without knowing who ran them.  The name is the
   identity: the same evaluator under its name again replaces its numbers,
   renamed it adds a second set to compare;
-* an evaluator sees what the ROI manager shows -- the filter and grouping of
-  the layer it follows, the first unless changed -- so its step's grouping
-  choice is greyed out; a `Chain/Layers` step before it is how a chain sets
-  that up.
+* an evaluator sees the ROI with every layer's filter and grouping
+  (`ROIProject.region_context`; the layer the ROI manager follows, the first
+  unless changed, is its default), so its step's grouping choice is greyed
+  out; a `Chain/Layers` step before it is how a chain sets that up.
 
 The scratch session carries a copy of the ROI project as it is
 (`Session.scratch`), and the chain hands the copy back as

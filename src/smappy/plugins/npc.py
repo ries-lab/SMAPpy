@@ -595,14 +595,16 @@ class NPCCorners(Plugin):
     favorite = False
 
     def run(self, ctx: Context, settings: NPCCornersSettings) -> Result:
-        locs = ctx.locs
+        table, selection = ctx.table()
+        locs = selection.apply(table)
         x = np.asarray(locs["x_nm"], dtype=float)
         y = np.asarray(locs["y_nm"], dtype=float)
         if not len(x):
             raise ValueError("no localizations in this ROI")
         column = precision_column(locs)
         precision = None if column is None else np.asarray(locs[column], dtype=float)
-        center = (ctx.site or {}).get("center") or [float(np.mean(x)), float(np.mean(y))]
+        center = (ctx.region.center.tolist() if ctx.region is not None
+                  else [float(np.mean(x)), float(np.mean(y))])
         values = count_corners(x, y, center, settings, precision)
         data = {k: v for k, v in values.items() if k != "per_corner"}
         return Result(text=f"{values['n_corners']} corners, "

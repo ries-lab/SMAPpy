@@ -31,7 +31,6 @@ from smappy.simulate import simulate
 from smappy.simulate.settings import (SimulationSettings, StructureSettings,
                                       LabellingSettings)
 from smappy.roi_manager import ROIProject
-from smappy.plugins import Context
 from smappy.plugins.roi import Statistics, StatisticsSettings
 sim = SimulationSettings(n_frames=3000, seed=3,
                          structure=StructureSettings(preset="npc"),
@@ -63,9 +62,7 @@ the same size; the picture can.
 order = sorted(rois, key=lambda r: rows[r.id]["n_localizations"])
 fig.set_size_inches(7, 3.4)
 for ax, roi in zip(fig.subplots(1, 2), (order[-1], order[0])):
-    result = Statistics().run(Context(locs=project.extract(roi),
-                                      site=project.geometry(roi)),
-                              StatisticsSettings())
+    result = Statistics().run(project.region_context(roi), StatisticsSettings())
     result.plot(ax)
     ax.title.set_fontsize(9)
     ax.tick_params(labelsize=7)

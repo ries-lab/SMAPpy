@@ -259,7 +259,9 @@ class Statistics(Plugin):
     version = "1"
 
     def run(self, ctx: Context, settings: StatisticsSettings) -> Result:
-        values = site_statistics(ctx.locs, settings)
+        table, selection = ctx.table()
+        locs = selection.apply(table)
+        values = site_statistics(locs, settings)
 
         def plot(ax) -> None:
             """The site itself, as the numbers' sanity check.
@@ -268,8 +270,8 @@ class Statistics(Plugin):
             what it is for is the comparison: two hundred localizations in a
             ring and two hundred in a smear give the same three numbers.
             """
-            x = np.asarray(ctx.locs["x_nm"], dtype=float)
-            y = np.asarray(ctx.locs["y_nm"], dtype=float)
+            x = np.asarray(locs["x_nm"], dtype=float)
+            y = np.asarray(locs["y_nm"], dtype=float)
             ax.scatter(x, y, s=6, c="#2f7fd0", alpha=0.6, linewidths=0)
             ax.set_aspect("equal")
             ax.set_xlabel("x (nm)")
@@ -280,7 +282,7 @@ class Statistics(Plugin):
                          f"{values[name]:.1f} {unit} precision")
 
         return Result(text=f"{values['n_localizations']} localizations",
-                      plot=plot if len(ctx.locs) else None,
+                      plot=plot if len(locs) else None,
                       data=values, settings=settings)
 
 

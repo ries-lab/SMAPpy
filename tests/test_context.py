@@ -34,7 +34,7 @@ def test_an_empty_context_is_usable():
     ctx = Context()
     assert len(ctx.locs) == 0 and len(ctx.selection) == 0
     assert ctx.session is None and ctx.rois is None
-    assert ctx.site is None and ctx.site_table is None
+    assert ctx.region is None and ctx.site_table is None
     ctx.report("nobody is listening")       # must not raise
     ctx.emit("block", None)
 
@@ -68,22 +68,6 @@ def test_report_and_emit_reach_their_callbacks():
     result = Echo()(ctx=ctx)
     assert said == ["working"] and streamed[0][0] == "block"
     assert result.text == "100 in, 100 selected"
-
-
-def test_for_site_narrows_without_losing_the_rest():
-    locs = table()
-    said = []
-    ctx = Context(session=None, locs=locs, progress=said.append,
-                  site_table=[{"roi_id": 1}])
-    roi = Region.rect(0, 0, 500, 500)
-    mask = roi.mask(locs["x_nm"], locs["y_nm"])
-    per_site = ctx.for_site(roi, selection=Selection(mask, name="site 1"))
-    assert per_site.site is roi
-    assert per_site.locs is locs                       # the table is shared
-    assert len(per_site.selection) == mask.sum()
-    assert per_site.site_table == ctx.site_table
-    per_site.report("in a site")
-    assert said == ["in a site"]                       # the callbacks came along
 
 
 def test_scope_says_what_a_plugin_is():

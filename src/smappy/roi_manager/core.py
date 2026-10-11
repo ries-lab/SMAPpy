@@ -67,6 +67,19 @@ def polygon_vertices(value):
     return v.tolist()
 
 
+def rows_in(locs, index, region, keep=None):
+    """The rows of ``locs`` inside ``region``, sorted, through its spatial
+    index: only the rows in the region's bounding box are tested.  ``keep``,
+    over the whole table, narrows them first (a file of several)."""
+    x0, y0, x1, y1 = region.bounds
+    candidates = index.query(x0, x1, y0, y1)
+    if keep is not None:
+        candidates = candidates[keep[candidates]]
+    x = np.asarray(locs["x_nm"][candidates], dtype=float)
+    y = np.asarray(locs["y_nm"][candidates], dtype=float)
+    return np.sort(candidates[region.mask(x, y)])
+
+
 @dataclass
 class ROI:
     file_id: str
@@ -302,17 +315,20 @@ class ROIProject:
             state.sets.pop("grouped", None)
             state.group(self.group_settings)
             source.group_key = group_key
-            self._filter_keys.pop((file_id, True), None)
+            self._filter_keys.pop((file_id, "grouped"), None)
         state.use_grouped = self.grouped
-        effective = {k: v for k, v in self.filters.items()
-                     if k in state.locs and k not in ("filenumber", "file_id")}
-        key = (file_id, self.grouped)
-        signature = digest(effective)
-        if self._filter_keys.get(key) != signature:
-            state.filter.clear()
-            for k, bounds in effective.items():
-                state.filter.set(k, *bounds)
-            self._filter_keys[key] = signature
+        # every table gets the bounds, not only the one shown: a measurement
+        # in an ROI may ask for the other (`region_context`)
+        for kind, locset in state.sets.items():
+            effective = {k: v for k, v in self.filters.items()
+                         if k in locset.locs and k not in ("filenumber", "file_id")}
+            key = (file_id, kind)
+            signature = digest(effective)
+            if self._filter_keys.get(key) != signature:
+                locset.filter.clear()
+                for k, bounds in effective.items():
+                    locset.filter.set(k, *bounds)
+                self._filter_keys[key] = signature
         return state
 
     @contextmanager
@@ -370,16 +386,56 @@ class ROIProject:
 
     def indices(self, roi):
         state = self.state(roi.file_id)
-        region = self.region(roi)
-        x0, y0, x1, y1 = region.bounds
-        candidates = state.index.query(x0, x1, y0, y1)
-        candidates = candidates[state.filter.mask[candidates]]
-        x = np.asarray(state.locs['x_nm'][candidates], dtype=float)
-        y = np.asarray(state.locs['y_nm'][candidates], dtype=float)
-        return np.sort(candidates[region.mask(x, y)])
+        return rows_in(state.locs, state.index, self.region(roi),
+                       keep=np.asarray(state.filter.mask))
 
     def extract(self, roi):
+        """What the ROI shows: the shown table's filtered rows inside it."""
         return self.state(roi.file_id).locs[self.indices(roi)]
+
+    # ------------------------------------------------ measuring in an ROI
+    def region_context(self, roi, **extra):
+        """The context a plugin measuring this ROI is given.
+
+        The ordinary contract, confined to the ROI (`docs/regions.md`):
+        ``ctx.locs`` is the ROI's rows of its file, unfiltered and ungrouped;
+        ``ctx.selection`` and ``ctx.layer_selection(i)`` are each layer's
+        filter over those rows; ``ctx.table(i)`` hands out the grouped table
+        cut to the ROI as well where the layer has one; ``ctx.region`` is
+        the ROI's shape.  Which rows belong is the ROI's shape alone -- a
+        filter is applied inside it, never to decide membership -- and no
+        drawn ROI or 3D slab narrows it further: the region replaces them.
+        """
+        region = self.region(roi)
+        return self._context(region, self._region_tables(roi, region), **extra)
+
+    def _context(self, region, tables, **extra):
+        """A context over what `_region_tables` cut: one per run, since a
+        context keeps what it was told, over tables the steps share."""
+        from ..plugins import Context
+        pinned, rows, layer, session = tables
+        locs, selection = pinned[layer]["ungrouped"]
+        return Context(session=session, locs=locs, selection=selection, layer=layer,
+                       pinned=pinned, rows=rows, region=region, rois=self, **extra)
+
+    def _region_tables(self, roi, region):
+        """``(tables, rows, layer, session)`` for `region_context`.
+
+        A project of its own files has one layer: the file, under the
+        project's bounds and grouping.  `SessionROIs` has the session's.
+        """
+        from ..plugins import Selection
+        state = self.state(roi.file_id)
+        entry = {"shows": "grouped" if state.use_grouped else "ungrouped"}
+        rows = None
+        for kind, locset in state.sets.items():
+            found = rows_in(locset.locs, locset.index, region)
+            if kind == "ungrouped":
+                rows = found
+            entry[kind] = (locset.locs[found],
+                           Selection(np.asarray(locset.filter.mask)[found], layer=0,
+                                     roi=region, name=str(region)))
+        return {0: entry}, rows, 0, None
 
     def inputs(self, roi):
         state = self.state(roi.file_id)
@@ -576,9 +632,8 @@ class ROIProject:
         """
         roi = self.rois[roi_id]
         inputs = json.loads(json_text(self.inputs(roi)))
-        geometry = json.loads(json_text(self.geometry(roi)))
         known = self.entries(roi_id, steps) if reuse else {}
-        locs = None
+        tables = region = None
         record = {"inputs": inputs, "signature": digest(inputs),
                   "file_id": roi.file_id, "steps": {}}
         results = {}
@@ -590,29 +645,29 @@ class ROIProject:
                 record["steps"][step.label] = dict(entry)
                 results[step.label] = None          # kept, so not drawn
                 continue
-            if locs is None:                        # only if something runs
-                locs = self.extract(roi)
+            if tables is None:                      # only if something runs
+                region = self.region(roi)
+                tables = self._region_tables(roi, region)
             if state != "current":
                 # a step re-run only for its figure tells nobody anything
                 # new, and storing it again would grow the file per click
                 updated.append(step.label)
-            entry, result = self._one_step(step, roi, locs, geometry)
+            entry, result = self._one_step(step, region, tables)
             entry["signature"] = self.step_signature(step, inputs)
             record["steps"][step.label] = entry
             results[step.label] = result
         return record, results, updated
 
-    def _one_step(self, step, roi, locs, geometry):
+    def _one_step(self, step, region, tables):
         """One evaluator on one ROI, as (what is recorded, what it returned).
 
         The record is data and outlives the session; the result is the live
         object, with the figures the evaluator drew, and is kept by nobody
         unless the caller wants it.  A failure is recorded, not raised.
+        ``tables`` is what `_region_tables` cut, shared by the steps.
         """
-        from ..plugins import Context
         try:
-            context = Context(locs=locs, site=geometry, rois=self)
-            result = step.plugin.run(context, step.settings)
+            result = step.plugin.run(self._context(region, tables), step.settings)
             return {"values": json.loads(json_text(result.data or {}))}, result
         except Exception as error:
             return {"error": f"{type(error).__name__}: {error}"}, None

@@ -78,7 +78,9 @@ def test_results_of_a_table_that_never_came_from_a_file_survive_a_save(tmp_path)
     assert len(back.rois.results()) == grouped
 
     # evaluated ungrouped, then grouped and ungrouped again before saving
+    # (a new session shows its layer grouped: switch it off first)
     s = Session(_table())
+    s.show_grouped(0, False)
     project = s.rois
     project.find(next(iter(project.sources)), parameters={"min_count": 5})
     project.evaluate()
@@ -91,6 +93,7 @@ def test_results_of_a_table_that_never_came_from_a_file_survive_a_save(tmp_path)
     out = s.save(tmp_path / "ungrouped.hdf5", gui_state=False)
     back = Session()
     back.load(out)
+    back.show_grouped(0, False)
     assert len(back.rois.results()) == ungrouped
 
 
