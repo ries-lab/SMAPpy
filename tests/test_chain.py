@@ -267,7 +267,7 @@ def four_sites():
     return session
 
 
-SEGMENT = {"plugin": "ROIManager/Segment/Density Peaks", "label": "find",
+SEGMENT = {"plugin": "Analysis/Regions/Find/Density Peaks", "label": "find",
            "values": {"sigma_nm": 60.0, "separation_nm": 1000.0, "min_count": 20}}
 
 
@@ -281,7 +281,7 @@ def test_an_evaluator_step_runs_on_every_site_before_the_next_step():
     drawn = session.rois.add_roi(next(iter(session.rois.sources)), (9000.0, 9000.0))
     drawn.use = False                                   # excluded: not evaluated
     cls = chain_class(spec(SEGMENT, each_roi({"plugin": "Analysis/Measure/Localization Statistics", "label": "stats"}),
-                           {"plugin": "ROIManager/Analyze/Histograms"}))
+                           {"plugin": "Analysis/Regions/Summarize/Histograms"}))
     result = session.run(cls(), cls.Settings())
     steps = result.data["results"]
     assert steps["sites"].text == "4 ROIs, 1 step(s)"
@@ -298,8 +298,8 @@ def test_an_evaluator_step_runs_on_every_site_before_the_next_step():
     assert project.labels() == ["stats"]
     # and the log says so, step by step
     assert [s["plugin"] for s in session.history[-1]["steps"]] == [
-        "ROIManager/Segment/Density Peaks", "Chain/Block",
-        "ROIManager/Analyze/Histograms"]
+        "Analysis/Regions/Find/Density Peaks", "Chain/Block",
+        "Analysis/Regions/Summarize/Histograms"]
     assert session.history[-1]["steps"][1]["grouping"] == "layer"
 
 
@@ -379,7 +379,7 @@ def test_histograms_of_every_evaluation_need_no_choice():
     project.evaluate([Instance(plugin="Analysis/Measure/Localization Statistics", label="a")])
     project.evaluate([Instance(plugin="Analysis/Measure/Localization Statistics", label="b",
                                values={"bins": 50})])
-    cls = chain_class(spec({"plugin": "ROIManager/Analyze/Histograms", "label": "h",
+    cls = chain_class(spec({"plugin": "Analysis/Regions/Summarize/Histograms", "label": "h",
                             "values": {"evaluation": ""}}))
     # Histograms draws every evaluation unless one is named: nothing to ask
     assert cls().preflight(session.context(), cls.Settings()) is None

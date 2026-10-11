@@ -18,7 +18,7 @@ localization in no cluster) and `n_in_cluster` (how many localizations its
 cluster has).  With them
 
 * a filter on `n_in_cluster` keeps the large clusters and drops the specks;
-* a **block** of a chain, or the [region steps](plugin:Panels/ROI tab)
+* a **block** of a chain, or the [region steps](plugin:Panels/Regions tab)
   set to *for each* `cluster_id`, runs any measurement once in every cluster
   -- [Localization Statistics](plugin:Analysis/Measure/Localization Statistics),
   say -- and keeps a row of numbers per cluster;

@@ -13,9 +13,9 @@ window.
 
 It is a *chain* -- the plugins it runs, one after the other, each with its
 own settings in a section of this panel -- rather than a plugin of its own:
-[NPC](plugin:ROIManager/Segment/NPC),
-[NPC Corners](plugin:ROIManager/Evaluate/NPC Corners) and
-[NPC Labeling Efficiency](plugin:ROIManager/Analyze/NPC Labeling Efficiency).
+[NPC](plugin:Analysis/Regions/Find/NPC),
+[NPC Corners](plugin:Analysis/Measure/NPC Corners) and
+[NPC Labeling Efficiency](plugin:Analysis/Regions/Summarize/NPC Labeling Efficiency).
 Their pages explain the methods; this one only what running them together
 changes.  Because it is a chain, it can be edited (*edit steps*), saved
 under another name, and run over many files in a batch.
@@ -61,11 +61,11 @@ ROIs as an evaluation called *NPC Corners*, like any other, and the
 region steps window's list stays as it was set up -- for this work or for
 another.  A result belongs to its ROI, whoever ran it, so the site table
 shows the chain's counts beside the pipeline's numbers, and NPC Labeling
-Efficiency run again from the ROI tab finds them, with the cutoffs they were
+Efficiency run again from the Regions tab finds them, with the cutoffs they were
 counted with.  Running the chain again replaces its counts; to keep a second
 set beside the first -- other cutoffs, to compare -- rename the NPC Corners
 step (*edit steps*).  The chain's analysis reads the chain's own counts,
-whatever else is on the ROIs; run from the ROI tab afterwards, it asks which
+whatever else is on the ROIs; run from the Regions tab afterwards, it asks which
 evaluation to read when there are several.
 
 **Nothing changes until the end.**  The chain runs on a copy of the session,

@@ -6,14 +6,17 @@ covers: [smappy.plugins.roi.histograms, smappy.roi_manager.core.ROIProject.resul
 ## What it does
 
 The ROI manager works in three steps: sites are found
-([Density Peaks](plugin:ROIManager/Segment/Density Peaks), or by hand), each
+([Density Peaks](plugin:Analysis/Regions/Find/Density Peaks), or by hand), each
 site is evaluated by plugins that run once per ROI (such as
 [Localization Statistics](plugin:Analysis/Measure/Localization Statistics)), and the collection of
 results is analysed.  Evaluation leaves a *site table*: one row per site, one
 column per number an evaluator returned.
 
 Histograms is the simplest analysis of that table.  It draws, for each
-column, how the values are distributed over the sites.  That is where a
+column, how the values are distributed over the sites.  The table may as
+well be one of clusters: a block of a chain over `cluster_id` -- the
+clusters [DBSCAN](plugin:Analysis/Regions/Find/DBSCAN) found -- leaves a row
+per cluster, and *results from* offers it as *per cluster_id: ...*.  That is where a
 population shows itself: the typical number of localizations of a nuclear
 pore, how much it varies, and which sites are outliers -- empty, doubled, on
 background -- and deserve a look before they go into an average.

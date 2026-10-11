@@ -158,7 +158,7 @@ being a special case.
 
 Tabs are free: add, rename, reorder, remove.  A tab the user creates starts
 empty.  A "special" tab is an ordinary tab with a header widget above the list
--- the ROI tab's *open ROI manager* button and site count, the Localize tab's
+-- the Regions tab's *open ROI manager* button and site count, the Localize tab's
 calibration buttons -- so File and Analysis are nothing but ordinary tabs, and a
 special one costs a header, not a class.
 
@@ -192,8 +192,10 @@ installed becomes a section with a message in it rather than an exception during
 startup, and a workspace naming plugins that have gone is pruned with a line
 saying which.
 
-The ROI tab is one of these, holding `ROIManager/Segment/*` and
-`ROIManager/Analyze/*` pins -- ordinary run-once plugins -- plus its header,
+The Regions tab -- *Regions* since 2026-10-11, `docs/regions.md` -- is one of
+these, holding `Analysis/Regions/Find/*` and `Analysis/Regions/Summarize/*`
+pins (`ROIManager/Segment/*` and `ROIManager/Analyze/*` until then) --
+ordinary run-once plugins -- plus its header,
 which carries the geometry every ROI shares and the ways into the two windows.
 
 The chooser opened from a tab offers every plugin, from any branch of the
@@ -209,7 +211,7 @@ describes the code as it still is.
 Evaluators are the one thing that does not fit a tab.  A tab's pins are run
 individually on demand; an evaluation is an *ordered pipeline* run over every
 site at once, each instance contributing columns to that site's row.  Putting
-thirty evaluators in the ROI tab would also bury the two or three plugins
+thirty evaluators in the Regions tab would also bury the two or three plugins
 actually used to find and analyse sites.
 
 So the ROI manager opens an **Evaluation** window, laid out like SMAP's

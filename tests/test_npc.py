@@ -137,7 +137,7 @@ def test_rejected_candidates_become_unused_rois_only_when_asked():
                              settings=NPCSegmentSettings(keep_rejected=keep))
         assert len(found) >= expected and found[0].use
         assert np.hypot(*(np.asarray(found[0].center) - 1000)) < 3
-        assert found[0].origin["method"] == "ROIManager/Segment/NPC"
+        assert found[0].origin["method"] == "Analysis/Regions/Find/NPC"
         assert abs(found[0].origin["radius_nm"] - R) < 3
         assert all(not roi.use for roi in found[1:])
     assert all(roi.origin["failed"] for roi in found[1:])
@@ -270,17 +270,17 @@ def test_segment_evaluate_and_analyse_through_the_session():
     from smappy.workspace import Instance
     session = Session(pores(0.5, seed=2))
     session.show_grouped(0, True)
-    found = plugins.get("ROIManager/Segment/NPC")()(ctx=session.context())
+    found = plugins.get("Analysis/Regions/Find/NPC")()(ctx=session.context())
     assert "pores of" in found.text and found.plots["checks"].panels == 3
     project = session.rois
     assert len(project.rois) == len(found.data["centers"]) > 140
 
-    project.evaluate([Instance(plugin="ROIManager/Evaluate/NPC Corners")])
+    project.evaluate([Instance(plugin="Analysis/Measure/NPC Corners")])
     rows = project.results()
     assert len(rows) == len(project.rois)
     assert {"n_corners", "n_localizations", "n_corners_smap"} <= set(rows[0])
 
-    analyze = plugins.get("ROIManager/Analyze/NPC Labeling Efficiency")
+    analyze = plugins.get("Analysis/Regions/Summarize/NPC Labeling Efficiency")
     result = analyze()(ctx=session.context())
     data = result.data
     assert data["simulated_efficiency"] == 0.5
@@ -298,7 +298,7 @@ def test_segment_evaluate_and_analyse_through_the_session():
 def test_the_analysis_asks_for_the_corner_counter_when_it_is_missing():
     from smappy.plugins import Context
     with pytest.raises(ValueError, match="NPC Corners"):
-        plugins.get("ROIManager/Analyze/NPC Labeling Efficiency")().run(
+        plugins.get("Analysis/Regions/Summarize/NPC Labeling Efficiency")().run(
             Context(site_table=[{"roi_id": "a", "n_localizations": 3}]),
             LabelingEfficiencySettings())
 
@@ -315,7 +315,7 @@ def test_the_npc_chain_gives_what_the_three_steps_give_and_leaves_the_pipeline_a
     project.pipeline = [Instance(plugin="Analysis/Measure/Localization Statistics")]
     file_id = next(iter(project.sources))
     drawn = project.add_roi(file_id, (100.0, 100.0))       # by hand, and empty
-    chain = plugins.get("ROIManager/Workflow/NPC Analysis")
+    chain = plugins.get("Analysis/Regions/Workflow/NPC Analysis")
     result = session.run(chain(), chain.Settings())
     assert session.layers[0].grouped                       # the chain's first step
     steps = result.data["results"]
@@ -336,7 +336,7 @@ def test_the_npc_chain_gives_what_the_three_steps_give_and_leaves_the_pipeline_a
     assert project.runs[-1]["chain"] == "block each pore"
 
     # the analysis run from the GUI afterwards finds the chain's counts
-    analysis = plugins.get("ROIManager/Analyze/NPC Labeling Efficiency")
+    analysis = plugins.get("Analysis/Regions/Summarize/NPC Labeling Efficiency")
     again = analysis()(ctx=session.context())
     assert abs(again.data["efficiency"] - fitted["efficiency"]) < 1e-6
     # and so does the analysis by hand, of the same rows
@@ -359,9 +359,9 @@ def two_corner_counts():
     session = Session(pores(0.5, seed=2))
     session.show_grouped(0, True)
     project = session.rois
-    plugins.get("ROIManager/Segment/NPC")()(ctx=session.context())
-    project.evaluate([Instance(plugin="ROIManager/Evaluate/NPC Corners")])
-    project.evaluate([Instance(plugin="ROIManager/Evaluate/NPC Corners", label="strict",
+    plugins.get("Analysis/Regions/Find/NPC")()(ctx=session.context())
+    project.evaluate([Instance(plugin="Analysis/Measure/NPC Corners")])
+    project.evaluate([Instance(plugin="Analysis/Measure/NPC Corners", label="strict",
                                values={"precision_nm": 12.0})])
     return session
 
@@ -374,7 +374,7 @@ def test_a_renamed_corner_count_stands_beside_the_first_and_is_chosen_by_name():
     rows = project.results()
     assert "NPC Corners.n_corners" in rows[0] and "strict.n_corners" in rows[0]
     assert all(r["strict.n_corners"] <= r["NPC Corners.n_corners"] for r in rows)
-    analysis = plugins.get("ROIManager/Analyze/NPC Labeling Efficiency")
+    analysis = plugins.get("Analysis/Regions/Summarize/NPC Labeling Efficiency")
     # nothing says which: a script is told, the GUI is asked (a choice, no
     # plain run), and each choice carries the settings it would run with
     with pytest.raises(ValueError, match="2 NPC Corners evaluations"):
@@ -404,9 +404,9 @@ def test_running_an_evaluation_again_under_its_name_replaces_it():
     from smappy.workspace import Instance
     session = two_corner_counts()
     project = session.rois
-    project.evaluate([Instance(plugin="ROIManager/Evaluate/NPC Corners",
+    project.evaluate([Instance(plugin="Analysis/Measure/NPC Corners",
                                values={"precision_nm": 25.0})])
-    assert sorted(project.labels("ROIManager/Evaluate/NPC Corners")) == [
+    assert sorted(project.labels("Analysis/Measure/NPC Corners")) == [
         "NPC Corners", "strict"]
     rows = project.results(labels=["NPC Corners"])
     assert "n_corners" in rows[0] and "strict.n_corners" not in rows[0]
@@ -417,7 +417,7 @@ def test_the_npc_chain_reads_its_own_counts_without_asking():
     """With two corner counts already on the ROIs, the chain's analysis takes
     the one the chain itself makes."""
     session = two_corner_counts()
-    chain = plugins.get("ROIManager/Workflow/NPC Analysis")
+    chain = plugins.get("Analysis/Regions/Workflow/NPC Analysis")
     settings = chain.Settings()
     settings.each_pore.npc_corners.precision_nm = 15.0
     assert chain().preflight(session.context(), settings) is None
@@ -435,7 +435,7 @@ def test_the_segmenter_replaces_only_its_own_pores_when_asked():
     project = session.rois
     file_id = next(iter(project.sources))
     drawn = project.add_roi(file_id, (100.0, 100.0))
-    segment = plugins.get("ROIManager/Segment/NPC")
+    segment = plugins.get("Analysis/Regions/Find/NPC")
     first = len(segment()(ctx=session.context()).data["rois"])
     assert len(segment()(ctx=session.context()).data["rois"]) == 0   # all suppressed
     again = segment()(ctx=session.context(), settings=NPCSegmentSettings(replace=True))
@@ -452,7 +452,7 @@ def test_a_replacing_preview_proposes_what_the_run_adds_and_changes_nothing():
     project = session.rois
     file_id = next(iter(project.sources))
     drawn = project.add_roi(file_id, (100.0, 100.0))
-    segment = plugins.get("ROIManager/Segment/NPC")()
+    segment = plugins.get("Analysis/Regions/Find/NPC")()
     first = segment(ctx=session.context()).data["rois"]
     before = set(project.rois)
     settings = NPCSegmentSettings(replace=True)
@@ -474,9 +474,9 @@ def test_the_analysis_says_when_the_layer_is_not_grouped():
     session = Session(pores(0.5, seed=4))
     session.show_grouped(0, False)
     project = session.rois
-    plugins.get("ROIManager/Segment/NPC")()(ctx=session.context())
-    project.evaluate([Instance(plugin="ROIManager/Evaluate/NPC Corners")])
-    result = plugins.get("ROIManager/Analyze/NPC Labeling Efficiency")()(
+    plugins.get("Analysis/Regions/Find/NPC")()(ctx=session.context())
+    project.evaluate([Instance(plugin="Analysis/Measure/NPC Corners")])
+    result = plugins.get("Analysis/Regions/Summarize/NPC Labeling Efficiency")()(
         ctx=session.context())
     assert "not grouped" in result.text
 
@@ -500,18 +500,18 @@ def test_results_from_offers_the_evaluations_on_the_rois():
 
     session = Session(pores(0.5, seed=2))
     session.show_grouped(0, True)
-    panel = PluginPanel(plugins.get("ROIManager/Analyze/NPC Labeling Efficiency"),
+    panel = PluginPanel(plugins.get("Analysis/Regions/Summarize/NPC Labeling Efficiency"),
                         session)
     field = panel.form.fields["evaluation"]
     assert entries(field) == [("", "auto")]                  # nothing yet
 
     project = session.rois
-    plugins.get("ROIManager/Segment/NPC")()(ctx=session.context())
-    project.evaluate([Instance(plugin="ROIManager/Evaluate/NPC Corners")])
+    plugins.get("Analysis/Regions/Find/NPC")()(ctx=session.context())
+    project.evaluate([Instance(plugin="Analysis/Measure/NPC Corners")])
     session.changed("rois")
     assert entries(field) == [("", "auto (NPC Corners)"), ("NPC Corners", "NPC Corners")]
 
-    project.evaluate([Instance(plugin="ROIManager/Evaluate/NPC Corners", label="strict",
+    project.evaluate([Instance(plugin="Analysis/Measure/NPC Corners", label="strict",
                                values={"precision_nm": 12.0})])
     session.changed("rois")
     assert entries(field) == [("", "auto (asks which)"), ("NPC Corners", "NPC Corners"),
@@ -531,7 +531,7 @@ def test_the_npc_chains_analysis_offers_the_chains_own_counts_before_it_has_run(
     from smappy.gui.plugin_panel import PluginPanel
     from smappy.session import Session
 
-    panel = PluginPanel(plugins.get("ROIManager/Workflow/NPC Analysis"),
+    panel = PluginPanel(plugins.get("Analysis/Regions/Workflow/NPC Analysis"),
                         Session(pores(0.5, seed=2)))
     field = panel.form.fields["labelling_efficiency"].fields["evaluation"]
     assert entries(field) == [("", "auto (NPC Corners)"), ("NPC Corners", "NPC Corners")]

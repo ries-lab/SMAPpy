@@ -27,7 +27,7 @@ from ..roi_manager import pipeline as pipeline_module
 from ..workspace import Instance
 from .chain_panel import ChainPanel
 
-PATH = "ROIManager/Region steps"
+PATH = "Analysis/Regions/Region steps"
 
 
 class RegionStepsWindow(QWidget):

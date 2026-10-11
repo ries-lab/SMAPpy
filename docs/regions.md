@@ -331,7 +331,7 @@ The chain panel's list and the evaluation window become one editor, in which
 a block is a step with a list of its own (and any step may be a chain).  The
 evaluation window is that editor opened on a block, renamed to say so, with
 the region source -- ROIs, `cluster_id`, any id column -- chosen at its top.
-The ROI manager keeps a button that opens it on its block.  The ROI tab
+The ROI manager keeps a button that opens it on its block.  The Regions tab
 becomes *Regions*, to match the tree.
 
 ## How fast the runner is, and what is slow
@@ -475,8 +475,8 @@ Each step leaves the program working and the suite green.
      an instance of `Chain/Block`), its own fields `ROIProject.block_options`,
      both saved with the project; `pipeline.block_of` / `from_block`
      convert.  Run measures what is out of date and carries the rest; there
-     is no separate "run everything" any more.  The ROI tab, the ROI manager
-     and the Tools menu open it as *Region steps...*; the ROI tab itself is
+     is no separate "run everything" any more.  The Regions tab, the ROI manager
+     and the Tools menu open it as *Region steps...*; the Regions tab itself is
      renamed with step 6.
 5. **Clusters**: DBSCAN under *Regions/Find* writing `cluster_id` and
    `n_in_cluster`, clusters to ROIs, *ROI to column*.
@@ -494,6 +494,20 @@ Each step leaves the program working and the suite green.
 6. **The tree** moved to `Analysis/Measure` and `Analysis/Regions`, the tab
    renamed, the summarising plugins turned into table plugins, the shipped
    `npc_analysis.chain.yaml` rewritten as a block.
+   *Done*: `Analysis/Regions/Find/{Density Peaks, NPC, DBSCAN}`,
+   `Analysis/Regions/ROI to column`, `Analysis/Regions/Summarize/{Histograms,
+   NPC Labeling Efficiency}`, `Analysis/Regions/Workflow/NPC Analysis`,
+   `Analysis/Measure/NPC Corners`; their pages moved with them.  The ROI
+   tab is the *Regions* tab, seeded from `Analysis/Regions/`, which the
+   Analysis tab leaves out (`exclude` in `DEFAULT_TABS`); its page is
+   *Regions tab*.  The summaries read a table of an id column's regions as
+   well as the ROIs' (*results from*: "per cluster_id: ..."); NPC Labeling
+   Efficiency, which needs the ROIs' settings and truth, stays with the
+   ROIs.  Panel pages' `covers` are now checked, as plugin pages' are.
+
+   Still open: the region table as a session table with a filter of its own
+   in the GUI (filtering regions by what was measured, and the
+   localizations through them).
 
 Every step that moves a plugin or changes what it computes brings its page
 along (`CLAUDE.md`, "The plugin's page"), and the exhaustive plugin-list tests

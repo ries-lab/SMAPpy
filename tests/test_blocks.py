@@ -119,7 +119,7 @@ def test_a_block_without_a_label_says_what_it_repeats_over():
 
 def test_a_segmenter_cannot_run_in_a_block():
     with pytest.raises(ChainError, match="finds ROIs"):
-        chain_class(ChainSpec(steps=[block({"plugin": "ROIManager/Segment/Density Peaks"})]))
+        chain_class(ChainSpec(steps=[block({"plugin": "Analysis/Regions/Find/Density Peaks"})]))
 
 
 def test_a_step_added_to_a_block_starts_with_its_slow_options_off():

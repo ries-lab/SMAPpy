@@ -26,7 +26,7 @@ efficiency at 5000 photons per blink, and far more at 500 (the study in
 `studies/npc_le` has the numbers).
 
 So the plugin fits a model of a whole pore instead.  It uses two numbers per
-pore from [NPC Corners](plugin:ROIManager/Evaluate/NPC Corners): the corners
+pore from [NPC Corners](plugin:Analysis/Measure/NPC Corners): the corners
 seen with the precise localizations, and the localizations the pore has.  The
 model knows what spills and what is lost, and the localizations tell how
 often a fluorophore blinks -- which is what it needs to work out the dim
@@ -39,7 +39,7 @@ fewer are the ones a segmentation is likely to miss, and junk rarely shows
 not bias the answer.  SMAP's analysis, the corner histogram alone, is kept as
 the *corners (SMAP)* method.
 
-The order is: find the pores with [NPC](plugin:ROIManager/Segment/NPC), add
+The order is: find the pores with [NPC](plugin:Analysis/Regions/Find/NPC), add
 NPC Corners to the evaluation pipeline and evaluate, then run this.  Use
 grouped localizations, imaged until the fluorophores have bleached.
 

@@ -393,7 +393,7 @@ def draw_sites(ax, xy: np.ndarray, sites: Sequence[Dict[str, Any]],
     ax.set_ylabel("y (nm)")
 
 
-SEGMENTER = "ROIManager/Segment/NPC"
+SEGMENTER = "Analysis/Regions/Find/NPC"
 
 
 def npc_rois(project, file_id) -> List[Any]:
@@ -402,7 +402,7 @@ def npc_rois(project, file_id) -> List[Any]:
             if roi.file_id == file_id and (roi.origin or {}).get("method") == SEGMENTER]
 
 
-@register("ROIManager/Segment/NPC")
+@register("Analysis/Regions/Find/NPC")
 class NPCSegment(SegmenterPlugin):
     """Finds nuclear pores with a ring filter, fits a circle to each and keeps
     those that look like a pore."""
@@ -583,7 +583,7 @@ def draw_corners(ax, x, y, values: Dict[str, Any], settings: NPCCornersSettings,
                  f"{values['n_localizations']} localizations")
 
 
-@register("ROIManager/Evaluate/NPC Corners")
+@register("Analysis/Measure/NPC Corners")
 class NPCCorners(Plugin):
     """Counts the corners a nuclear pore shows and the localizations it has."""
 
@@ -812,7 +812,7 @@ def simulated_efficiency(project, rows) -> Optional[float]:
     return None if value is None else float(value)
 
 
-CORNERS = "ROIManager/Evaluate/NPC Corners"
+CORNERS = "Analysis/Measure/NPC Corners"
 
 
 def column(rows, name: str, label: Optional[str] = None) -> Optional[str]:
@@ -926,7 +926,7 @@ def draw_joint(figure, fitted: Dict[str, Any], truth=None) -> None:
     right.legend(fontsize=7, frameon=False)
 
 
-@register("ROIManager/Analyze/NPC Labeling Efficiency")
+@register("Analysis/Regions/Summarize/NPC Labeling Efficiency")
 class NPCLabelingEfficiency(SiteAnalysisPlugin):
     """The labelling efficiency of nuclear pores, from the corners each shows
     and the localizations it has (NPC Corners)."""

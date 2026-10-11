@@ -4,7 +4,7 @@ Upper left the whole file, upper right the zoom, lower right the ROI, and at
 the lower left the files and the ROIs.  A click in the file picks where to
 zoom, a click in the zoom drafts an ROI, and *Add* stores it.  The controls
 that decide what an ROI *is* -- its geometry, the finder, the evaluation --
-live in the control window's ROI tab; this window is for choosing and
+live in the control window's Regions tab; this window is for choosing and
 judging.
 """
 from __future__ import annotations
@@ -176,7 +176,7 @@ class ImagePane(QWidget):
 
 class ROIManagerWindow(QMainWindow):
     changed = Signal()          # ROIs added, removed or toggled
-    evaluation_requested = Signal()   # the pipeline window, opened by the ROI tab
+    evaluation_requested = Signal()   # the pipeline window, opened by the Regions tab
 
     def __init__(self, session: Session, parent=None):
         super().__init__(parent)
@@ -291,7 +291,7 @@ class ROIManagerWindow(QMainWindow):
         self.clear_preview_button.clicked.connect(self.session.clear_preview)
         self.clear_preview_button.setVisible(False)
         llayout.addWidget(self.clear_preview_button)
-        # the pipeline is set up in the control window's ROI tab, but it is
+        # the pipeline is set up in the control window's Regions tab, but it is
         # here that its results are looked at, one site after another; the
         # same window, opened from where the eye already is
         self.evaluation_button = QPushButton("Region steps...")
@@ -842,7 +842,7 @@ class ROIManagerWindow(QMainWindow):
             return
         if self.active not in self.project.rois:
             self.active = None
-        # the ROI tab counts them too, and its listener is the session's
+        # the Regions tab counts them too, and its listener is the session's
         self.session.changed("rois")
         self.status.showMessage(f"{verb} {label}")
 
@@ -1037,7 +1037,7 @@ class ROIManagerWindow(QMainWindow):
                 window.show_plots(step.label, result.figures(), f"ROI {number}")
             elif result is not None:
                 window.show_message(step.label, "this evaluator draws nothing; "
-                                                "its numbers are in the ROI tab")
+                                                "its numbers are in the Regions tab")
         # the table first: it writes the ROI counts into the status bar, and
         # what just happened to this site is the more useful of the two
         self._fill_table()

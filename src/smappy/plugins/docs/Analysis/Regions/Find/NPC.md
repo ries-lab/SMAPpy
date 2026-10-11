@@ -17,8 +17,8 @@ This plugin finds the pores in a file and puts an ROI on each.  It looks for
 rings of the pore's radius, fits a circle to every candidate, and keeps those
 that look like a ring: the right radius, and few localizations far from it.
 The ROIs are centred on the fitted circle, which is what
-[NPC Corners](plugin:ROIManager/Evaluate/NPC Corners) and
-[NPC Labeling Efficiency](plugin:ROIManager/Analyze/NPC Labeling Efficiency)
+[NPC Corners](plugin:Analysis/Measure/NPC Corners) and
+[NPC Labeling Efficiency](plugin:Analysis/Regions/Summarize/NPC Labeling Efficiency)
 need.
 
 The checks are made to keep sparse pores.  A pore with only a few corners
@@ -27,7 +27,7 @@ is measured from; what has to go is what is not a ring at all -- blobs,
 filled clumps, pieces of filament.  Use it on a 2D view of the nuclear
 envelope at the bottom of the nucleus, where the pores are seen face on, on
 grouped localizations (one per blink).  For structures that are not rings,
-[Density Peaks](plugin:ROIManager/Segment/Density Peaks) finds sites by
+[Density Peaks](plugin:Analysis/Regions/Find/Density Peaks) finds sites by
 density alone.
 
 ## How it works

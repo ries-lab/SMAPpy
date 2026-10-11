@@ -1,7 +1,8 @@
-"""The ROI tab's header: what an analysis ROI *is*, and the way in.
+"""The Regions tab's header: what an analysis ROI *is*, and the way in.
 
-The tab itself is an ordinary `PluginTab` over whatever the user pinned from
-`ROIManager/*` -- the segmenters and the analyses, ordinary run-once plugins.
+The tab itself (*Regions*) is an ordinary `PluginTab` over whatever the user
+pinned from `Analysis/Regions/*` -- the finders and the summaries, ordinary
+run-once plugins.
 What cannot be a pinned plugin sits above them, in this header: the geometry
 every ROI shares, the way into the ROI manager window where sites are chosen
 and judged, and the way into the region steps window, whose block of steps
@@ -27,7 +28,7 @@ class ROIHeader(QWidget):
     def __init__(self, session: Session, view=None, parent=None):
         super().__init__(parent)
         from .help_window import attach_help
-        attach_help(self, 'Panels/ROI tab', within=True)
+        attach_help(self, 'Panels/Regions tab', within=True)
         self.session = session
         self.view = view
         self.manager: Optional[QWidget] = None     # not `window`: that is a QWidget method

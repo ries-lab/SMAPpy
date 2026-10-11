@@ -2,7 +2,7 @@
 title: ROI manager
 summary: The window where sites are found, looked at one by one, kept or excluded, and evaluated.
 widget: smappy.gui.roi_window.ROIManagerWindow
-covers: [smappy.gui.roi_window.ROIManagerWindow.evaluate_active, smappy.gui.roi_window.rim_distance, smappy.gui.roi_window.outline, smappy.roi_manager.core.ROIProject.tiles, smappy.roi_manager.core.ROIProject.indices, smappy.roi_manager.core.ROIProject.inputs, smappy.roi_manager.core.ROIProject.entries, smappy.roi_manager.core.ROIProject.needs_evaluation, smappy.roi_manager.core.ROIProject.results, smappy.roi_manager.core.ROIProject.evaluate_one, smappy.roi_manager.link.SessionROIs.sync, smappy.roi_manager.link.SessionROIs._fingerprint, smappy.roi_manager.core.ROIProject.propose, smappy.plugins.roi.SegmenterPlugin.found, smappy.roi_manager.core.ROIHistory, smappy.roi_manager.core.ROIProject.edit]
+covers: [smappy.gui.roi_window.ROIManagerWindow.evaluate_active, smappy.regions.Region.rim_distance, smappy.regions.Region.outline, smappy.roi_manager.core.ROIProject.tiles, smappy.roi_manager.core.ROIProject.indices, smappy.roi_manager.core.ROIProject.inputs, smappy.roi_manager.core.ROIProject.entries, smappy.roi_manager.core.ROIProject.needs_evaluation, smappy.roi_manager.core.ROIProject.results, smappy.roi_manager.core.ROIProject.evaluate_one, smappy.roi_manager.link.SessionROIs.sync, smappy.roi_manager.link.SessionROIs._fingerprint, smappy.roi_manager.core.ROIProject.propose, smappy.plugins.roi.SegmenterPlugin.found, smappy.roi_manager.core.ROIHistory, smappy.roi_manager.core.ROIProject.edit]
 ---
 
 ## What it does
@@ -18,8 +18,8 @@ each one.
 The work goes in four steps:
 
 1. **Find** candidate sites, with a segmentation plugin in the
-   [ROI tab](plugin:Panels/ROI tab) such as
-   [Density Peaks](plugin:ROIManager/Segment/Density Peaks), or by clicking
+   [Regions tab](plugin:Panels/Regions tab) such as
+   [Density Peaks](plugin:Analysis/Regions/Find/Density Peaks), or by clicking
    them in the zoom.
 2. **Review** them: step through the list, look at each site, and untick
    *use* for the ones that are not what they should be.
@@ -28,9 +28,9 @@ The work goes in four steps:
    whole view, run once in each ROI.  Each evaluator adds columns to the
    site's row.
 4. **Analyse** the table, for example with
-   [Histograms](plugin:ROIManager/Analyze/Histograms) in the ROI tab.
+   [Histograms](plugin:Analysis/Regions/Summarize/Histograms) in the Regions tab.
 
-What the ROI tab holds is what an ROI *is*: its shape and size, shared by all
+What the Regions tab holds is what an ROI *is*: its shape and size, shared by all
 ROIs, and the plugins that find and summarise.  This window is for choosing
 and judging.
 
@@ -81,7 +81,7 @@ left is the whole file, at the top right a zoom, at the bottom right the ROI
 being looked at, and at the bottom left the files and the ROIs.  A click in
 the file moves the zoom there.  Moving around never moves an ROI.
 
-**2. Finding sites.**  A segmentation plugin run from the ROI tab adds its
+**2. Finding sites.**  A segmentation plugin run from the Regions tab adds its
 candidates to the file shown here.  Its *Preview* button proposes them
 without adding them: they are drawn grey and dashed (the ones the finder
 rejected dotted), each preview replaces the last, and *Run* adds them.  That
@@ -138,7 +138,7 @@ and is left out of the evaluation and the results.  An ROI counts as reviewed
 from the moment it is made: there is no separate review flag in the window,
 and *use* is the decision.
 
-**5. Shapes.**  All ROIs share the circle or square set in the ROI tab.  One
+**5. Shapes.**  All ROIs share the circle or square set in the Regions tab.  One
 ROI can have its own outline instead (*Polygon*), and a direction (*Direction*),
 an arrow that evaluators can read, for example as the axis of an elongated
 structure.
@@ -273,7 +273,7 @@ click drafts an ROI or, on an outline, selects one.  An ROI is drawn amber
 when included, grey when excluded and green when selected.
 
 ### ROI
-The selected ROI or the draft, as wide as the ROI tab's *ROI view* (three ROI
+The selected ROI or the draft, as wide as the Regions tab's *ROI view* (three ROI
 sizes by default); the wheel here changes that width for all ROIs.  A click
 moves a draft.  It is also where *Polygon* and *Direction* are drawn.
 
@@ -320,13 +320,13 @@ Two clicks, the start and then the end.  The arrow is stored with the ROI
 and handed to the evaluators; it does not turn the image or the ROI.
 
 ### Clear shape
-Back to the circle or square of the ROI tab.
+Back to the circle or square of the Regions tab.
 
 ### Clear line
 Removes the direction.
 
 ### Region steps...
-The same window as the ROI tab's button of that name.  Run there measures
+The same window as the Regions tab's button of that name.  Run there measures
 only what is out of date, which after one edited parameter is one step over
 the sites rather than all of them.
 

@@ -20,7 +20,7 @@ manager's three steps:
 2. **Evaluate**: measure every site, with plugins that run once per ROI,
    such as [Localization Statistics](plugin:Analysis/Measure/Localization Statistics).
 3. **Analyze**: summarise the collection of sites, for example as
-   [Histograms](plugin:ROIManager/Analyze/Histograms).
+   [Histograms](plugin:Analysis/Regions/Summarize/Histograms).
 
 Use it for compact, well separated structures of roughly 50 to 200 nm, on a
 low background.  It looks only at how dense the localizations are, not at
@@ -234,7 +234,7 @@ This plugin replaces the generic part of `ROIManager/Segment/segmentCME` and
   are suppressed.
 * There is no ring filter: a blur of about the structure's radius already
   gives a pore a single peak.  For nuclear pores,
-  [NPC](plugin:ROIManager/Segment/NPC) keeps SMAP's ring filter and judges
+  [NPC](plugin:Analysis/Regions/Find/NPC) keeps SMAP's ring filter and judges
   each candidate's shape as well.
 
 ## References

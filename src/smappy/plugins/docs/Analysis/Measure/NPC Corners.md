@@ -18,13 +18,13 @@ This evaluator measures both, one pore (one ROI) at a time:
 * and **SMAP's corner count**, for SMAP's way of analysing them.
 
 The numbers go into the site table, and
-[NPC Labeling Efficiency](plugin:ROIManager/Analyze/NPC Labeling Efficiency)
+[NPC Labeling Efficiency](plugin:Analysis/Regions/Summarize/NPC Labeling Efficiency)
 turns them into the labelling efficiency.  Its page explains why the counts
 are taken this way.
 
 It is not in a new evaluation pipeline by itself: add it in the evaluation
 window when the sites are pores.  It needs ROIs centred roughly on the pores,
-such as those of [NPC](plugin:ROIManager/Segment/NPC), pores seen face on,
+such as those of [NPC](plugin:Analysis/Regions/Find/NPC), pores seen face on,
 grouped localizations, and the localization precision (`xy_err_nm`).
 
 ## How it works
@@ -86,7 +86,7 @@ for ax, copy in zip(axes.ravel(), range(6, 12)):
 **The centre** minimises $\sum_i \rho(d_i - R)$ over the precise
 localizations, $d_i$ the distance of localization $i$ from the centre, $R$
 the *radius*, and $\rho$ the soft-L1 loss with the *ring width* as its scale
-(see [NPC](plugin:ROIManager/Segment/NPC)); then twice more over those within
+(see [NPC](plugin:Analysis/Regions/Find/NPC)); then twice more over those within
 $R + 2\Delta R$ of the answer, $\Delta R$ the *ring width*.  With fewer than 3
 precise localizations, all of them are used.
 
@@ -174,7 +174,7 @@ kept as `n_corners_smap`.
   mean is the answer.
 * **Left out**: SMAP's split of the count by time and its counts on the
   simulation's true positions; the truth is compared in
-  [NPC Labeling Efficiency](plugin:ROIManager/Analyze/NPC Labeling Efficiency)
+  [NPC Labeling Efficiency](plugin:Analysis/Regions/Summarize/NPC Labeling Efficiency)
   instead.
 
 ## References

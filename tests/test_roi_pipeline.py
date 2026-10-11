@@ -27,21 +27,23 @@ def table(centers, per=10, seed=0):
 
 # ------------------------------------------------------------- the plugins
 
-def test_the_roi_plugins_are_registered_where_smap_puts_them():
-    found = plugins.refs("ROIManager/")
-    assert set(found) == {"ROIManager/Segment/Density Peaks",
-                          "ROIManager/Segment/NPC",
-                          "ROIManager/Evaluate/NPC Corners",
-                          "ROIManager/Analyze/Histograms",
-                          "ROIManager/Analyze/NPC Labeling Efficiency",
-                          "ROIManager/Workflow/NPC Analysis"}
+def test_the_region_plugins_are_registered_under_regions():
+    found = plugins.refs("Analysis/Regions/")
+    assert set(found) == {"Analysis/Regions/Find/Density Peaks",
+                          "Analysis/Regions/Find/NPC",
+                          "Analysis/Regions/Find/DBSCAN",
+                          "Analysis/Regions/ROI to column",
+                          "Analysis/Regions/Summarize/Histograms",
+                          "Analysis/Regions/Summarize/NPC Labeling Efficiency",
+                          "Analysis/Regions/Workflow/NPC Analysis"}
+    found = {**found, **plugins.refs("Analysis/Measure/")}
     # per_region is what marks an evaluator, not the folder it sits in
-    assert found["ROIManager/Evaluate/NPC Corners"].per_region
-    assert not found["ROIManager/Segment/Density Peaks"].per_region
+    assert found["Analysis/Measure/NPC Corners"].per_region
+    assert not found["Analysis/Regions/Find/Density Peaks"].per_region
 
 
 def test_the_defaults_dict_became_a_typed_settings_class():
-    specs = plugins.get("ROIManager/Segment/Density Peaks").specs()
+    specs = plugins.get("Analysis/Regions/Find/Density Peaks").specs()
     assert set(specs) == {"bin_nm", "sigma_nm", "separation_nm",
                           "count_radius_nm", "min_count", "replace"}
     assert specs["bin_nm"].type is float and specs["bin_nm"].info.unit == "nm"
@@ -64,7 +66,7 @@ def test_the_pipeline_adds_a_plugin_with_its_slow_options_off():
     added = pipeline_module.instance_for("Analysis/Measure/Localization Statistics")
     assert added.values == {"fit_precision": False}
     assert pipeline_module.default_instances()[0].values == {"fit_precision": False}
-    assert pipeline_module.instance_for("ROIManager/Evaluate/NPC Corners").values == {}
+    assert pipeline_module.instance_for("Analysis/Measure/NPC Corners").values == {}
 
 
 def test_a_bad_setting_is_refused_rather_than_silently_odd():
@@ -97,7 +99,7 @@ def test_a_pipeline_step_is_the_same_instance_type_a_tab_pins():
 
 
 def test_a_specialised_evaluator_is_offered_but_not_in_the_default_pipeline():
-    assert plugins.refs()["ROIManager/Evaluate/NPC Corners"].per_region
+    assert plugins.refs()["Analysis/Measure/NPC Corners"].per_region
     assert [i.plugin for i in pipeline_module.default_instances()] == \
         ["Analysis/Measure/Localization Statistics"]
 
@@ -219,7 +221,7 @@ def test_propose_is_find_without_the_adding():
     settings = DensityPeakSettings(separation_nm=1000.0, min_count=20)
     origin, proposals = project.propose(source.id, settings=settings)
     assert project.rois == {} and len(proposals) == 2
-    assert origin["method"] == "ROIManager/Segment/Density Peaks"
+    assert origin["method"] == "Analysis/Regions/Find/Density Peaks"
     found = project.find(source.id, settings=settings)
     assert [r.center for r in found] == [p["center"] for p in proposals]
     # the found ROIs are what a second proposal keeps its distance from,
@@ -302,7 +304,7 @@ def test_the_evaluation_window_offers_only_evaluators(app):
     from smappy.gui.chooser import PluginTree
     tree = PluginTree(per_region=True)
     assert sorted(tree.refs) == ["Analysis/Measure/Localization Statistics",
-                                 "ROIManager/Evaluate/NPC Corners"]
+                                 "Analysis/Measure/NPC Corners"]
     assert set(tree.refs) < set(PluginTree().refs)
 
 
@@ -323,10 +325,10 @@ def test_the_region_steps_window_edits_the_projects_block(app, monkeypatch):
     # a step added with nothing selected goes into the block
     window.panel.steps.setCurrentItem(None)
     monkeypatch.setattr(chooser, "choose_plugin",
-                        lambda *a, **k: "ROIManager/Evaluate/NPC Corners")
+                        lambda *a, **k: "Analysis/Measure/NPC Corners")
     window.panel.add_step()
     assert [i.plugin for i in project.pipeline] == [
-        "Analysis/Measure/Localization Statistics", "ROIManager/Evaluate/NPC Corners"]
+        "Analysis/Measure/Localization Statistics", "Analysis/Measure/NPC Corners"]
     assert project.pipeline[0].values["bins"] == 50     # what the form held survives
     window.panel.steps.invisibleRootItem().child(1).setCheckState(0, Qt.Unchecked)
     assert not project.pipeline[1].enabled
@@ -341,7 +343,7 @@ def test_a_tab_pins_a_per_region_plugin_too(app):
     """One that can run per region runs on the view as well."""
     from smappy.gui.chooser import PluginTree
     assert "Analysis/Measure/Localization Statistics" in PluginTree().refs
-    assert "ROIManager/Segment/Density Peaks" in PluginTree().refs
+    assert "Analysis/Regions/Find/Density Peaks" in PluginTree().refs
 
 
 def test_find_evaluate_and_analyse_through_the_session(app):
@@ -375,13 +377,13 @@ def test_find_evaluate_and_analyse_through_the_session(app):
     assert "4 ROIs, 1 step(s)" in window.status.text()
     # the session's log says what was evaluated, with each step's settings
     entry = session.history[-1]
-    assert entry["what"] == "ROIManager/Region steps" and "4 ROIs" in entry["text"]
+    assert entry["what"] == "Analysis/Regions/Region steps" and "4 ROIs" in entry["text"]
     assert entry["steps"][0]["plugin"] == "Chain/Block"
     assert entry["steps"][0]["values"]["localization_statistics.fit_precision"] is False
     rows = project.results()
     assert len(rows) == 4 and rows[0]["n_localizations"] == 100
 
-    analysis = plugins.get("ROIManager/Analyze/Histograms")()(ctx=session.context())
+    analysis = plugins.get("Analysis/Regions/Summarize/Histograms")()(ctx=session.context())
     assert "4 ROIs" in analysis.text
     assert analysis.plot is not None
 
@@ -398,7 +400,7 @@ def test_the_manager_draws_a_preview_and_run_turns_it_into_rois(app):
     session = Session(table([(0, 0), (3000, 0), (0, 3000), (3000, 3000)], per=40))
     session.show_grouped(0, False)
     header = ROIHeader(session)
-    panel = PluginPanel(plugins.get("ROIManager/Segment/Density Peaks"), session)
+    panel = PluginPanel(plugins.get("Analysis/Regions/Find/Density Peaks"), session)
     panel.form.restore({"separation_nm": 1000.0, "min_count": 20})
 
     def wait(start):

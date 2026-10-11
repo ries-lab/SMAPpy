@@ -241,10 +241,14 @@ def test_refs_and_tree_do_not_import_but_available_does():
         "Analysis/Dual-Color/AssignColors",
         "Analysis/Measure/Ground Truth", "Analysis/Measure/Line Profile",
         "Analysis/Measure/Localization Precision",
-        "Analysis/Measure/Localization Statistics",
+        "Analysis/Measure/Localization Statistics", "Analysis/Measure/NPC Corners",
         "Analysis/Process/History", "Analysis/Process/Image Tags",
         "Analysis/Process/Math Parser", "Analysis/Process/Remove Localizations",
-        "Analysis/Regions/Find/DBSCAN", "Analysis/Regions/ROI to column",
+        "Analysis/Regions/Find/DBSCAN", "Analysis/Regions/Find/Density Peaks",
+        "Analysis/Regions/Find/NPC", "Analysis/Regions/ROI to column",
+        "Analysis/Regions/Summarize/Histograms",
+        "Analysis/Regions/Summarize/NPC Labeling Efficiency",
+        "Analysis/Regions/Workflow/NPC Analysis",
         "Analysis/Register/Calibrate transform"}
     assert isinstance(plugins.tree()["Analysis"]["Drift"]["COMET"], PluginRef)
     classes = plugins.available("Analysis/")

@@ -172,3 +172,21 @@ def test_roi_to_column_writes_the_later_roi_where_two_overlap():
     assert (ids[(truth == 1) & ~in_second] == numbers[first.id]).all()
     assert (ids[truth == 2] == 0).all()                 # its ROI is excluded
     assert {r["field"]: r["grouped"] for r in recipes(session.locs)}["roi_id"] == "max"
+
+
+def test_histograms_summarise_the_clusters_too():
+    from smappy import plugins
+    from smappy.chain import Block, ChainSpec, Step, chain_class
+    xy, truth = blobs()
+    session = Session(table(xy, cluster_id=truth))
+    session.show_grouped(0, False)
+    cls = chain_class(ChainSpec(steps=[Block(regions="cluster_id", steps=[
+        Step(plugin="Analysis/Measure/Localization Statistics")])]))
+    session.run(cls(), cls.Settings())
+    histograms = plugins.get("Analysis/Regions/Summarize/Histograms")
+    offered = histograms().choices(session.context(), histograms.Settings())["evaluation"]
+    name = "per cluster_id: Localization Statistics"
+    assert (name, name) in offered
+    result = histograms()(ctx=session.context(), evaluation=name)
+    assert result.text.startswith("3 regions")
+    assert sorted(result.data["histograms"]["n_localizations"]["values"]) == sorted(SIZES)

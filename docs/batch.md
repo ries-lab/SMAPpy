@@ -81,7 +81,7 @@ steps:
     merge: last                 # optional: last | first | mean | any
     keep_figures: auto          # optional: auto | yes | no
     steps:
-      - plugin: ROIManager/Evaluate/NPC Corners
+      - plugin: Analysis/Measure/NPC Corners
         values: {}
   ```
 
@@ -134,7 +134,7 @@ default `skip`: the file is skipped and the report says why).
 Decided 2026-10-05, and since 2026-10-11 through blocks (`docs/regions.md`).
 A chain can do what the ROI manager does by hand:
 
-* a **segmenter** (`ROIManager/Segment/...`) is an ordinary step; the ROIs it
+* a **segmenter** (`Analysis/Regions/Find/...`) is an ordinary step; the ROIs it
   finds go into the scratch session's ROI project;
 * a **block over the ROIs** runs its steps in *every* ROI the project
   includes -- reviewed and ticked *use*, whoever made it -- with
@@ -170,7 +170,7 @@ into the session's project, the object the ROI manager's window holds.  So,
 as for the table, nothing reaches the ROI manager until the whole chain has
 succeeded.  Undo does not take the ROIs back: the ROI manager has no undo.
 
-The shipped `ROIManager/Workflow/NPC Analysis` is such a chain
+The shipped `Analysis/Regions/Workflow/NPC Analysis` is such a chain
 (`src/smappy/plugins/npc_analysis.chain.yaml`): group, NPC segmenter, NPC
 Corners, NPC Labeling Efficiency, which takes the counts by the plugin that
 made them and its cutoffs from their settings.
