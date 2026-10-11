@@ -95,7 +95,7 @@ shape, so read the one closest to what you are writing:
 | rewrites the table and hands it back | `assign_colors.py` (`Result.locs`, a preview) |
 | a long computation with progress | `drift_comet.py`, `drift_rcc.py` |
 | loads, saves, exports, simulates | `file.py` (a plugin per format, no input table; the simulator's model is `smappy.simulate`) |
-| finds, measures or summarises ROIs | `roi.py` (a segmenter derives from `SegmenterPlugin`, which gives it a Preview, *replace* (`replace_param()`) and a step of the ROI undo; `per_region = True`; analyse) -- moving to `Analysis/Regions/Find`, measurements to `Analysis/Measure` (`docs/regions.md`) |
+| finds, measures or summarises ROIs | `roi.py` (a segmenter derives from `SegmenterPlugin`, which gives it a Preview, *replace* (`replace_param()`) and a step of the ROI undo; `per_region = True`; analyse; segmenters under `Analysis/Regions/Find`) |
 | parts, presets, a C++ backend | `fit.py` (nested settings dataclasses) |
 | adds a derived column, no output | `math_parser.py` (an expression, kept with the table as a recipe) |
 | removes or flags localizations | `remove_locs.py` (a region, a new table or a filtered flag) |
@@ -105,8 +105,9 @@ shape, so read the one closest to what you are writing:
 | scores a fit against a simulation | `ground_truth.py` (the truth redrawn from the recipe, matched per frame) |
 | draws what the microscope recorded per frame | `image_tags.py` (the fit's `metadata["frame_tags"]`) |
 | finds a structure by its shape and judges it, then counts it | `npc.py` (a ring filter and circle fit in the segmenter, a per-site count, and a model of whole pores in `smappy/npc.py` fitted to the site table) |
-| summarises what evaluators measured | `roi.py`'s `SiteAnalysisPlugin` (an evaluator to read, a *results from* field, a preflight that asks which when there are several) -- becoming table plugins on the region table, under `Analysis/Regions/Summarize` (`docs/regions.md`) |
+| summarises what evaluators measured | `roi.py`'s `SiteAnalysisPlugin` (an evaluator to read, a *results from* field, a preflight that asks which when there are several; under `Analysis/Regions/Summarize`) |
 | runs the ROI manager's segment, evaluate and analyse as one | `npc_analysis.chain.yaml` (a shipped chain: a block runs NPC Corners in every ROI before the next step; `docs/batch.md`, "ROIs: segment, evaluate, analyse") |
+| finds clusters and names them in the table | `clusters.py` (DBSCAN: `cluster_id` / `n_in_cluster`, optionally ROIs; *ROI to column*) |
 | runs steps once per region, writes columns back | `blocks.py` (a `chain.Block`; `region_runs.RegionScratch`, `WriteBack`; per-cluster results in `Session.id_regions`) |
 | opens an interactive window of the GUI's | `bead_calibration.py` (`Plugin.window`: the button opens what the GUI registered in `session.window_openers`) |
 | runs an external program in its own Python | `uipsf.py` (`smappy.uipsf`: a worker script under that program's interpreter, progress read from its output, the result converted into smappy's own file) |
@@ -241,7 +242,7 @@ written this way; it is also what makes the tests readable.
 title=...)`, every part optional (`title` says what the figures are of, in
 the figure window's title).  `plot(ax)` is handed **one** axis; for a grid, pass
 `Plot(draw, panels=n, size=(w, h))` instead, and `draw` is handed the figure
-and lays out its own panels (`statistics.py`, `ROIManager/Analyze/Histograms`
+and lays out its own panels (`statistics.py`, `Analysis/Regions/Summarize/Histograms`
 and the fit preview all do this).  Never set the figure's size or its layout
 engine: on the window's *All* page a plot is handed a `SubFigure`, which has
 neither, and `size` is the hint the window reads instead.  Return the settings
@@ -299,7 +300,7 @@ rather than something already drawn.
 | `z_err_nm` | axial precision, when the fit produced one |
 | `n_in_group` | **on-time in frames** (for a table with a trace id, `tid`, the localizations in the trace); grouping writes it onto both tables |
 | `group_id` | which group a localization was linked into, 1-based; on the grouped table, its own row |
-| `cluster_id`, `n_in_cluster` | which cluster, 1-based, 0 for none, and the localizations in it -- planned (`docs/regions.md`), nothing writes them yet |
+| `cluster_id`, `n_in_cluster` | which cluster, 1-based, 0 for none, and the localizations in it -- written by `Analysis/Regions/Find/DBSCAN` (`plugins/clusters.py`) |
 | `sigma_nm`, `sigma_y_nm`, `logl_rel` | PSF width and fit quality |
 | `filenumber`, `channel` | which file, which channel |
 
@@ -428,7 +429,7 @@ were -- a list that only shrinks, and a new plugin never joins it), that its
 renders with its maths and figures (the figures in the slow tier).
 
 Plugins reach the shipped workspace by themselves: the Analysis tab seeds from
-`Analysis/` and `favorite` defaults to True, so there is no registry to edit.
+`Analysis/` except `Analysis/Regions/`, which seeds the Regions tab, and `favorite` defaults to True, so there is no registry to edit.
 For a `per_region` plugin, `favorite` also decides whether it is in a
 new evaluation pipeline; a specialised one (`NPC Corners`) sets it False.
 
@@ -442,8 +443,8 @@ people who use the plugin -- biologists and biophysicists -- so they can
 understand the algorithm without reading the code.  The format is in
 `src/smappy/docs/__init__.py`; `Analysis/Drift/RCC.md` is the example to copy.
 
-The tabs and windows that are not plugins (the Render tab, the ROI tab and
-manager, the 3D view, the bead calibration, the batch window) have pages too,
+The tabs and windows that are not plugins (the Render tab, the Regions tab,
+the ROI manager, the region steps, the 3D view, the bead calibration, the batch window) have pages too,
 in `src/smappy/docs/panels/`, with `title`, `summary` and `widget` in the
 front matter and a *Controls* section in place of *Parameters*: one
 `### label` per control, the label exactly as the panel shows it.
