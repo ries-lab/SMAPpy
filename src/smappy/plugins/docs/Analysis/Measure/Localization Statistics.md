@@ -218,7 +218,9 @@ site of a few dozen localizations has too few for a meaningful fit anyway.
   `z_` (`median_z_precision_nm`, ...); and where the site's table carries
   `n_in_group`, `on_time_frames` ($\tau$) and `n_blinks`.  The on-time of a
   site comes from its own rows only: the session's grouped table, which the
-  view falls back on, is the whole field's.
+  view falls back on, is the whole field's.  Each ROI also keeps its
+  histograms and fitted numbers (about 2 kB), so its figure is drawn again
+  without measuring again; the curves are recomputed from the numbers.
 
 What to expect: $N_0$ of a few thousand photons for a good organic dye in a
 good buffer, fewer for fluorescent proteins; a lateral $\sigma_c$ of about

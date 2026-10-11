@@ -137,6 +137,13 @@ and what was measured in them is not; the ROI manager shows them as not
 evaluated when the file is opened again.  Worth it only when the results
 are large, many evaluations over many ROIs, and can be measured again.
 
+### region_figures
+What an ROI keeps for its figures is binned -- a few kB per ROI and
+evaluation (Localization Statistics' histograms: about 2 kB) -- so it is
+usually worth keeping.  Off, every number is saved, and an ROI's figure is
+drawn by running its evaluator again, which for most plugins takes
+milliseconds and for a slow one is the reason to keep it.
+
 ## Output
 
 The file.  The text says how many localizations went where.  The save is

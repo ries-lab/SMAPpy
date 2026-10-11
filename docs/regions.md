@@ -425,7 +425,20 @@ Each step leaves the program working and the suite green.
      0.1 ms a cluster of runner, 1.3 ms a cluster for Localization
      Statistics with its fit off.  No GUI runs a column's regions yet: that
      is the block (step 4).
-   * *3e*: `keep` / `restore` per region and the switch.
+   * *3e, done*: a region keeps what `Plugin.keep` returns (`kept`, beside
+     its values; in HDF5 a JSON string per row) when its step's `keep` is
+     on -- on for ROIs, off for an id column's regions unless
+     `keep_figures`; a forced figure of a current ROI comes back through
+     `Plugin.restore` without measuring.  Localization Statistics keeps its
+     histograms (equal bins as their range) and fitted numbers, ~2 kB, and
+     draws its curves again from the numbers (`model_curve`).  The saver's
+     *save the ROI figures' data* leaves it out and says so.  The switch per
+     step is in the model (`Step.keep`); its checkbox comes with the editor
+     (step 4), and so does the size warning, which needs the session the
+     form's `notice` is not given.
+
+   Left for later steps: the region table as a session table with its own
+   filter in the GUI, and the summarising plugins reading it (steps 4 and 6).
 4. **Blocks** in chains, the nesting rules and the cycle check, write-back and
    its warning; one step-list editor, the evaluation window becoming it.
 5. **Clusters**: DBSCAN under *Regions/Find* writing `cluster_id` and

@@ -55,6 +55,9 @@ class RegionTable:
         self.errors: List[str] = []              # per row: "" or why it failed
         self.values: Dict[str, List[Any]] = {}   # per column: a value per row or None
         self.arrays: Dict[str, List[Optional[np.ndarray]]] = {}
+        # per row: what the step kept to draw its figure again (plain data),
+        # or None (`Plugin.keep`)
+        self.kept: List[Optional[Dict[str, Any]]] = []
 
     # ---------------------------------------------------------------- rows
     def __len__(self) -> int:
@@ -75,6 +78,7 @@ class RegionTable:
         self.signatures.append("")
         self.data.append("")
         self.errors.append("")
+        self.kept.append(None)
         for column in self.values.values():
             column.append(None)
         for column in self.arrays.values():
@@ -100,6 +104,7 @@ class RegionTable:
         self.signatures[i] = str(entry.get("signature") or "")
         self.data[i] = str(data or "")
         self.errors[i] = str(entry.get("error") or "")
+        self.kept[i] = entry.get("kept") or None
         values = entry.get("values") or {}
         for name in values:
             if name not in self.values:
@@ -129,6 +134,8 @@ class RegionTable:
                       if column[i] is not None}
             if arrays:
                 out["arrays"] = arrays
+            if self.kept[i] is not None:
+                out["kept"] = self.kept[i]
         if self.signatures[i]:
             out["signature"] = self.signatures[i]
         return out
@@ -151,7 +158,7 @@ class RegionTable:
             return
         self.ids = [self.ids[i] for i in keep]
         self._index = {r: n for n, r in enumerate(self.ids)}
-        for name in ("step_of", "signatures", "data", "errors"):
+        for name in ("step_of", "signatures", "data", "errors", "kept"):
             setattr(self, name, [getattr(self, name)[i] for i in keep])
         self.values = {k: [c[i] for i in keep] for k, c in self.values.items()}
         self.arrays = {k: [c[i] for i in keep] for k, c in self.arrays.items()}
@@ -191,6 +198,7 @@ class RegionTable:
                 "signatures": [self.signatures[i] for i in rows],
                 "data": [self.data[i] for i in rows],
                 "errors": [self.errors[i] for i in rows],
+                "kept": [self.kept[i] for i in rows],
                 "values": {k: [_plain(c[i]) for i in rows] for k, c in self.values.items()},
                 "arrays": {k: [None if c[i] is None else c[i].tolist() for i in rows]
                            for k, c in self.arrays.items()}}
@@ -210,6 +218,7 @@ class RegionTable:
         table.signatures = [str(s or "") for s in column("signatures", "")]
         table.data = [str(s or "") for s in column("data", "")]
         table.errors = [str(s or "") for s in column("errors", "")]
+        table.kept = [k or None for k in column("kept", None)]
         table.values = {k: list(c) for k, c in (doc.get("values") or {}).items()
                         if len(c) == n}
         table.arrays = {k: [None if a is None else np.asarray(a) for a in c]
@@ -237,6 +246,10 @@ class RegionTable:
             if any(column):
                 group.create_dataset(name, data=np.array(column, dtype=object),
                                      dtype=text)
+        if any(k is not None for k in self.kept):
+            group.create_dataset("kept", data=np.array(
+                ["" if k is None else json.dumps(k, default=_plain) for k in self.kept],
+                dtype=object), dtype=text)
         values = group.create_group("values")
         # which rows have no value, where any has none: a dataset, since an
         # attribute is bounded by the object header (~64 kB)
@@ -285,6 +298,9 @@ class RegionTable:
         for name in ("signatures", "data", "errors"):
             got = strings(name)
             setattr(table, name, got if len(got) == n else [""] * n)
+        kept = strings("kept")
+        table.kept = ([json.loads(k) if k else None for k in kept] if len(kept) == n
+                      else [None] * n)
         for name, ds in group.get("values", {}).items():
             kind = str(ds.attrs.get("kind", "float"))
             missing = (group["missing"][name][()] if "missing" in group

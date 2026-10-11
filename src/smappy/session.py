@@ -675,7 +675,7 @@ class Session:
         return metadata
 
     def save(self, path=None, gui_state: Optional[bool] = None,
-             region_results: bool = True) -> Path:
+             region_results: bool = True, region_figures: bool = True) -> Path:
         """Write the table, its history, its ROIs and -- optionally -- the GUI.
 
         `gui_state` defaults to the `save_gui_state_in_files` preference.  What
@@ -683,7 +683,8 @@ class Session:
         stays ignorant of tabs and windows; the GUI sets it.  Without
         `region_results` the ROIs are saved and the numbers measured in them
         are not -- for a project whose results are large and can be measured
-        again.
+        again.  Without `region_figures` the numbers are saved and what each
+        region kept to draw its figures again (`Plugin.keep`) is not.
         """
         from .io.formats import writer_for
         from .io.hdf5 import save_gui_state, save_localizations, save_results
@@ -701,6 +702,15 @@ class Session:
                 metadata["roi_project"] = {k: v for k, v in metadata["roi_project"].items()
                                            if k != "tables"}
             metadata.pop("id_regions", None)
+        elif not region_figures:
+            unkept = lambda doc: {k: v for k, v in doc.items() if k != "kept"}
+            if isinstance(metadata.get("roi_project"), dict):
+                project = dict(metadata["roi_project"])
+                project["tables"] = [unkept(t) for t in project.get("tables") or []]
+                metadata["roi_project"] = project
+            if metadata.get("id_regions"):
+                metadata["id_regions"] = {c: [unkept(t) for t in ts]
+                                          for c, ts in metadata["id_regions"].items()}
         # read before the file is started again: frames opened from it are
         # read from it a plane at a time (`StoredStack`)
         from .io.hdf5 import save_images
@@ -1221,14 +1231,16 @@ class Session:
         return self._id_regions
 
     def evaluate_regions(self, column: str, steps, layer: int = 0,
-                         report=None, tick=None, stop=None, reuse: bool = True):
+                         report=None, tick=None, stop=None, reuse: bool = True,
+                         keep_figures: bool = False):
         """Run ``steps`` once in each region of the id ``column`` and keep
         their tables under it (`region_runs.evaluate_regions`): the
         per-cluster counterpart of `ROIProject.evaluate`."""
         from .region_runs import ColumnRegions, evaluate_regions
         source = ColumnRegions(self, column, layer)
         tables = evaluate_regions(source, steps, self.id_regions.get(column),
-                                  report=report, tick=tick, stop=stop, reuse=reuse)
+                                  report=report, tick=tick, stop=stop, reuse=reuse,
+                                  keep_figures=keep_figures)
         self.id_regions[column] = tables
         self.changed("rois")
         return tables

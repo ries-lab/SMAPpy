@@ -223,7 +223,7 @@ def _layer_inputs(lay) -> Dict[str, Any]:
 def evaluate_regions(source: ColumnRegions, steps: Sequence, tables: Optional[
         Dict[str, RegionTable]] = None, report: Optional[Callable[[str], None]] = None,
         tick: Optional[Callable[[int, int], None]] = None, stop=None,
-        reuse: bool = True) -> Dict[str, RegionTable]:
+        reuse: bool = True, keep_figures: bool = False) -> Dict[str, RegionTable]:
     """Run ``steps`` (`roi_manager.pipeline.Step`s) once in each region of
     ``source``, a table per step by its label.
 
@@ -232,6 +232,8 @@ def evaluate_regions(source: ColumnRegions, steps: Sequence, tables: Optional[
     kept as it is, and only the others run.  A step that raises costs its
     own entry in that region, as for an ROI.  ``stop`` ends the run between
     regions, keeping what was measured; the regions not reached have no row.
+    ``keep_figures`` keeps each region's figure data (`Plugin.keep`) -- off
+    by default, since to look at clusters one makes ROIs of them.
     """
     import json
     from .roi_manager.core import digest, json_text
@@ -256,14 +258,14 @@ def evaluate_regions(source: ColumnRegions, steps: Sequence, tables: Optional[
             break
         cut = source.tables(k)
         for step, signature in todo:
-            entry = _run_one(step, cut, region_id)
+            entry = _run_one(step, cut, region_id, keep_figures)
             entry["signature"] = signature
             tables[step.label].set(region_id, entry, step.as_record(), data)
         progress(k + 1)
     return tables
 
 
-def _run_one(step, cut, region_id) -> Dict[str, Any]:
+def _run_one(step, cut, region_id, keep: bool = False) -> Dict[str, Any]:
     from .plugins import Context
     from .roi_manager.core import region_entry
     pinned, rows, layer, session = cut
@@ -271,6 +273,6 @@ def _run_one(step, cut, region_id) -> Dict[str, Any]:
     try:
         ctx = Context(session=session, locs=locs, selection=selection, layer=layer,
                       pinned=pinned, rows=rows, region_id=region_id)
-        return region_entry(step.plugin.run(ctx, step.settings))
+        return region_entry(step.plugin.run(ctx, step.settings), step.plugin, keep)
     except Exception as error:
         return {"error": f"{type(error).__name__}: {error}"}

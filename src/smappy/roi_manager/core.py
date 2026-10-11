@@ -81,7 +81,7 @@ def rows_in(locs, index, region, keep=None):
     return np.sort(candidates[region.mask(x, y)])
 
 
-def region_entry(result) -> Dict:
+def region_entry(result, plugin=None, keep: bool = False) -> Dict:
     """What one run in one region stores: its `Result.values`, a number
     each, and its `Result.arrays`.
 
@@ -90,6 +90,10 @@ def region_entry(result) -> Dict:
     list in a column is a table nobody can histogram.  An array belongs in
     `arrays`.  Until the region table is written in columns (step 3 of
     `docs/regions.md`) the arrays are kept as JSON lists beside the values.
+
+    With ``keep``, what ``plugin.keep(result)`` returns -- the data its
+    figure is drawn from -- goes with the row as ``kept``, so the figure can
+    come back (`Plugin.restore`) without measuring again.
     """
     values = {}
     for name, value in (result.values or {}).items():
@@ -103,6 +107,13 @@ def region_entry(result) -> Dict:
     if result.arrays:
         entry["arrays"] = {name: np.asarray(a).tolist()
                            for name, a in result.arrays.items()}
+    if keep and plugin is not None:
+        try:
+            kept = plugin.keep(result)
+        except Exception:
+            kept = None             # the numbers stand; only the replot is lost
+        if kept:
+            entry["kept"] = kept
     return json.loads(json_text(entry))
 
 
@@ -713,6 +724,16 @@ class ROIProject:
                 record["steps"][step.label] = dict(entry)
                 results[step.label] = None          # kept, so not drawn
                 continue
+            if keep and entry.get("kept"):
+                # the figure from what the row kept: no measuring again
+                try:
+                    restored = step.plugin.restore(entry["kept"])
+                except Exception:
+                    restored = None
+                if restored is not None:
+                    record["steps"][step.label] = dict(entry)
+                    results[step.label] = restored
+                    continue
             if tables is None:                      # only if something runs
                 region = self.region(roi)
                 tables = self._region_tables(roi, region)
@@ -737,7 +758,7 @@ class ROIProject:
         try:
             result = step.plugin.run(self._context(region, tables, region_id=roi_id),
                                      step.settings)
-            return region_entry(result), result
+            return region_entry(result, step.plugin, step.keep), result
         except Exception as error:
             return {"error": f"{type(error).__name__}: {error}"}, None
 

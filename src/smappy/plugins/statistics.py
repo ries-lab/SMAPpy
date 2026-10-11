@@ -418,16 +418,10 @@ def photon_distribution(photons, bins: int = 100, start: float = 0.0
         start = landmarks["max"] if np.isfinite(landmarks["max"]) else 0.0
     stats = photon_decay(values, start)
     stats["histogram_max"] = landmarks["max"]
-    curve = None
     n0 = stats["n0"]
-    if np.isfinite(n0) and n0 > 0:
-        x = np.linspace(start, edges[-1], 200)
-        width = edges[1] - edges[0]
-        scale = stats["n_fitted"] * width / n0
-        curve = (x, scale * np.exp(-(x - start) / n0))
     return Distribution(
         key="photons", label="photons", counts=counts, edges=edges, stats=stats,
-        curve=curve,
+        curve=model_curve("photons", stats, edges),
         summary=(f"N0 = {n0:.0f} photons above {start:.0f} "
                  f"(mean {stats['mean']:.0f}, median {stats['median']:.0f}, "
                  f"{stats['n']} localizations)"))
@@ -444,20 +438,9 @@ def precision_distribution(precision, bins: int = 100, key: str = "precision",
     landmarks = histogram_landmarks(counts, edges)
     stats["histogram_max"] = landmarks["max"]
     stats["histogram_rising"] = landmarks["rising"]
-    curve = None
-    a = stats.get("a", float("nan"))
-    if np.isfinite(a) and a > 0:
-        x = np.linspace(edges[0] + 1e-6, edges[-1], 400)
-        width = edges[1] - edges[0]
-        # the binned fit carries its own amplitude: the counts it describes are
-        # the ones in the picture, which is fewer than n when a tail was cut
-        scale = stats.get("amplitude", stats["n"])
-        if not np.isfinite(scale):
-            scale = stats["n"]
-        curve = (x, scale * width * precision_density(x, a))
     return Distribution(
         key=key, label=label, unit=unit, counts=counts, edges=edges, stats=stats,
-        curve=curve,
+        curve=model_curve(key, stats, edges),
         summary=(f"max at {stats['histogram_max']:.1f} {unit} "
                  f"(model {stats['max']:.1f}), rising edge "
                  f"{stats['histogram_rising']:.1f} {unit} "
@@ -473,17 +456,50 @@ def ontime_distribution(frames, exposure_ms: float = 0.0) -> Distribution:
     high = max(int(np.percentile(t, 99.9)) if len(t) else 1, 2)
     edges = np.arange(0.5, high + 1.5)
     counts, edges = np.histogram(t, bins=edges)
-    curve = None
-    q, tau = stats["q"], stats["tau"]
-    if np.isfinite(q) and 0 < q < 1:
-        x = np.arange(1, high + 1, dtype=float)
-        curve = (x, stats["n"] * (1 - q) * q ** (x - 1))
+    tau = stats["tau"]
+    curve = model_curve("on_time", stats, edges)
     time = f", {tau * exposure_ms:.0f} ms" if exposure_ms > 0 and np.isfinite(tau) else ""
     return Distribution(
         key="on_time", label="on-time", unit="frames", counts=counts, edges=edges,
         stats=stats, curve=curve, log_y=True,
         summary=(f"tau = {tau:.2f} frames{time} "
                  f"(mean {stats['mean']:.2f}, {stats['n']} blinks)"))
+
+
+def model_curve(key: str, stats: Dict[str, float], edges: np.ndarray
+                ) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+    """The fitted law over a histogram, in counts per bin, from the fit's
+    numbers alone -- so a figure kept as its histogram and numbers
+    (`LocalizationStatistics.keep`) draws its curve again.  None when the
+    law was not fitted."""
+    edges = np.asarray(edges, dtype=float)
+    if len(edges) < 2:
+        return None
+    width = edges[1] - edges[0]
+    if key == "photons":
+        n0, start = stats.get("n0", np.nan), stats.get("start", 0.0)
+        if not (np.isfinite(n0) and n0 > 0):
+            return None
+        x = np.linspace(start, edges[-1], 200)
+        return x, stats["n_fitted"] * width / n0 * np.exp(-(x - start) / n0)
+    if key.startswith("precision"):
+        a = stats.get("a", float("nan"))
+        if not (np.isfinite(a) and a > 0):
+            return None
+        x = np.linspace(edges[0] + 1e-6, edges[-1], 400)
+        # the binned fit carries its own amplitude: the counts it describes are
+        # the ones in the picture, which is fewer than n when a tail was cut
+        scale = stats.get("amplitude", stats["n"])
+        if not np.isfinite(scale):
+            scale = stats["n"]
+        return x, scale * width * precision_density(x, a)
+    if key == "on_time":
+        q = stats.get("q", np.nan)
+        if not (np.isfinite(q) and 0 < q < 1):
+            return None
+        x = np.arange(1, int(round(edges[-1] - 0.5)) + 1, dtype=float)
+        return x, stats["n"] * (1 - q) * q ** (x - 1)
+    return None
 
 
 def statistics(locs: Localizations, bins: int = 100, photon_start: float = 0.0,
@@ -765,3 +781,56 @@ class LocalizationStatistics(Plugin):
                       values=statistics_values(locs, found),
                       plot=Plot(draw=plot, panels=len(found),
                                 size=(5.5, max(2.1 * len(found), 2.1))))
+
+    def keep(self, result: Result):
+        """The histograms and their fits, binned: what the figure is drawn
+        from, a few kB whatever the number of localizations -- what a region
+        keeps so its figure comes back without measuring again
+        (`docs/regions.md`, "Figures")."""
+        found = (result.data or {}).get("distributions") or {}
+        if not found:
+            return None
+        return {"distributions": [distribution_data(d) for d in found.values()]}
+
+    def restore(self, saved):
+        try:
+            found = [distribution_from(d) for d in saved["distributions"]]
+        except (KeyError, TypeError, ValueError):
+            return None
+        if not found:
+            return None
+        return Result(plot=Plot(draw=lambda figure: draw_all(figure, found),
+                                panels=len(found),
+                                size=(5.5, max(2.1 * len(found), 2.1))))
+
+
+def distribution_data(d: Distribution) -> Dict:
+    """A distribution as plain data (`LocalizationStatistics.keep`): equal
+    bins as their range and number rather than every edge, which is most of
+    what a region would otherwise keep."""
+    edges = np.asarray(d.edges, dtype=float)
+    steps = np.diff(edges)
+    equal = len(edges) > 1 and np.allclose(steps, steps[0], rtol=1e-9, atol=0)
+    return {"key": d.key, "label": d.label, "unit": d.unit,
+            "counts": np.asarray(d.counts).astype(int).tolist(),
+            **({"bins": [float(edges[0]), float(edges[-1]), len(edges) - 1]} if equal
+               else {"edges": edges.tolist()}),
+            "stats": {k: (v.item() if isinstance(v, np.generic) else v)
+                      for k, v in d.stats.items()},
+            "log_y": d.log_y, "summary": d.summary, "note": d.note}
+
+
+def distribution_from(doc: Dict) -> Distribution:
+    """A distribution from `distribution_data`, its curve drawn again from
+    the fit's numbers (`model_curve`) rather than kept."""
+    if "bins" in doc:
+        lo, hi, n = doc["bins"]
+        edges = np.linspace(lo, hi, int(n) + 1)
+    else:
+        edges = np.asarray(doc["edges"], dtype=float)
+    stats = dict(doc.get("stats") or {})
+    return Distribution(key=doc["key"], label=doc["label"], unit=doc.get("unit", ""),
+                        counts=np.asarray(doc["counts"]), edges=edges, stats=stats,
+                        curve=model_curve(doc["key"], stats, edges),
+                        log_y=bool(doc.get("log_y")), summary=doc.get("summary", ""),
+                        note=doc.get("note", ""))
