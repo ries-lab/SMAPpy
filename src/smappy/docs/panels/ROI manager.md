@@ -47,7 +47,7 @@ from smappy.simulate.settings import (SimulationSettings, StructureSettings,
 from smappy.roi_manager import ROI, ROIProject
 from smappy.render import FieldOfView
 from smappy.workspace import Instance
-from smappy.gui.roi_window import (outline, arrow, OTHER_PEN, EXCLUDED_PEN, ROI_PEN,
+from smappy.gui.roi_window import (arrow, OTHER_PEN, EXCLUDED_PEN, ROI_PEN,
                                    DRAFT_PEN, TILE_PEN, TILE_HERE_PEN, DIRECTION_PEN,
                                    STALE_COLOUR)
 sim = SimulationSettings(n_frames=3000, seed=3,
@@ -71,7 +71,7 @@ def image(ax, x0, x1, y0, y1, n=400):
     ax.set_xticks([]); ax.set_yticks([])
 
 def ring(ax, roi, colour, lw=1.0, ls="-"):
-    ox, oy = outline(roi.center, project.shape, project.size_nm, roi.polygon)
+    ox, oy = project.region(roi).outline()
     ax.plot(ox, oy, color=colour, lw=lw, ls=ls)
 ```
 

@@ -72,10 +72,15 @@ not evaluated.
 ### One region type
 
 `Region` grows what the ROI manager needs -- a circle, a fixed-size shape
-around a centre, a line with a direction -- and an ROI manager entry becomes a
-`Region` plus its file and annotations.  One point-in-polygon test, one
-`ctx.region` for a plugin to read whether the region was drawn, found, or is
-None (a cluster).
+around a centre -- and an ROI manager entry gives its shape as a `Region`
+(`ROI.region(shape, size_nm)`, `ROIProject.region(roi)`).  It works it out
+rather than holding it: the circle or square around the centre is the
+project's, and changing it is one edit for every ROI.  An ROI's *direction*
+stays an annotation beside the shape -- an arrow inside it, not its outline.
+One point-in-polygon test (`regions.inside_polygon`, the outline counted as
+inside), one outline and one rim distance for the ROI manager to draw and
+pick by, and one `ctx.region` for a plugin to read whether the region was
+drawn, found, or is None (a cluster).
 
 ### A measurement runs anywhere: no evaluators
 
@@ -324,8 +329,11 @@ closures.
 
 Each step leaves the program working and the suite green.
 
-1. **One region type.**  `Region` takes the ROI manager's shapes; `ROI` holds
-   one; one point-in-polygon test.  Nothing a user sees changes.
+1. **One region type.**  `Region` takes the ROI manager's shapes; `ROI` gives
+   one; one point-in-polygon test.  Nothing a user sees changes.  *Done
+   2026-10-11*; the one difference is that a localization exactly on the edge
+   of a drawn polygon or line now counts as inside, as it already did for a
+   rect and for the ROI manager.
 2. **The context.**  `ctx.region`; a per-region context that is the session's
    with the region in place of the drawn ROI; `SessionROIs`' own filter copies
    go.  `Result.values` and `Result.arrays`.  `scope` goes, the two statistics

@@ -203,12 +203,7 @@ class ROIHeader(QWidget):
                                     "the 2D view shows custom axes; switch them off to "
                                     "draw a region that can become an ROI")
             return
-        points = np.asarray(region.points, float)
-        if region.kind == "rect":
-            x0, y0, x1, y1 = region.bounds
-            polygon = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]
-        else:
-            polygon = points.tolist()
+        polygon = region.vertices().tolist()
         center = np.asarray(polygon, float).mean(axis=0)
         try:
             with self.project.edit(f"Add the drawn {region.kind}"):

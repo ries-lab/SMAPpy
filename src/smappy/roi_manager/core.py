@@ -22,6 +22,7 @@ import numpy as np
 from ..group import GroupSettings
 from ..io.hdf5 import load_localizations
 from ..locs import Localizations, to_nm
+from ..regions import Region
 from ..viewer import ViewState
 
 
@@ -66,26 +67,6 @@ def polygon_vertices(value):
     return v.tolist()
 
 
-def inside_polygon(x, y, vertices):
-    """Even-odd fill with boundary points included; no GUI dependency."""
-    v = np.asarray(vertices, dtype=float)
-    inside = np.zeros(len(x), dtype=bool)
-    boundary = inside.copy()
-    for a, b in zip(v, np.roll(v, -1, axis=0)):
-        dx, dy = b - a
-        length = np.hypot(dx, dy)
-        if length == 0:
-            continue
-        cross = (x - a[0]) * dy - (y - a[1]) * dx
-        dot = (x - a[0]) * dx + (y - a[1]) * dy
-        boundary |= ((np.abs(cross) <= 1e-7 * length) &
-                     (dot >= -1e-7 * length) & (dot <= length**2 + 1e-7 * length))
-        if dy != 0:
-            inside ^= (((a[1] > y) != (b[1] > y)) &
-                       (x < a[0] + (y - a[1]) * dx / dy))
-    return inside | boundary
-
-
 @dataclass
 class ROI:
     file_id: str
@@ -97,6 +78,13 @@ class ROI:
     use: bool = True
     comment: str = ""
     origin: dict = field(default_factory=lambda: {"method": "manual"})
+
+    def region(self, shape: str, size_nm: float) -> Region:
+        """This ROI's shape: its own polygon, or the project's ``shape`` of
+        ``size_nm`` around its centre -- which the ROI does not know, since
+        changing it is one edit for every ROI of the project.  So the shape
+        is worked out when asked for rather than held."""
+        return Region.site(self.center, shape, size_nm, self.polygon)
 
 
 # Past this nobody is walking back through a list of edits.
@@ -376,27 +364,19 @@ class ROIProject:
         return {"center": roi.center, "shape": self.shape, "size_nm": self.size_nm,
                 "direction": roi.direction}
 
+    def region(self, roi) -> Region:
+        """The ROI's shape, with this project's shared shape and size."""
+        return roi.region(self.shape, self.size_nm)
+
     def indices(self, roi):
         state = self.state(roi.file_id)
-        if roi.polygon is None:
-            half = self.size_nm / 2
-            x0, y0 = np.asarray(roi.center) - half
-            x1, y1 = np.asarray(roi.center) + half
-        else:
-            vertices = np.asarray(roi.polygon)
-            x0, y0 = vertices.min(axis=0)
-            x1, y1 = vertices.max(axis=0)
+        region = self.region(roi)
+        x0, y0, x1, y1 = region.bounds
         candidates = state.index.query(x0, x1, y0, y1)
         candidates = candidates[state.filter.mask[candidates]]
         x = np.asarray(state.locs['x_nm'][candidates], dtype=float)
         y = np.asarray(state.locs['y_nm'][candidates], dtype=float)
-        if roi.polygon is not None:
-            keep = inside_polygon(x, y, roi.polygon)
-        elif self.shape == "circle":
-            keep = (x - roi.center[0])**2 + (y - roi.center[1])**2 <= half**2
-        else:
-            keep = (x >= x0) & (x <= x1) & (y >= y0) & (y <= y1)
-        return np.sort(candidates[keep])
+        return np.sort(candidates[region.mask(x, y)])
 
     def extract(self, roi):
         return self.state(roi.file_id).locs[self.indices(roi)]

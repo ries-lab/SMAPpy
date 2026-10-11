@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QDoub
                                QSplitter, QTableWidget, QTableWidgetItem,
                                QVBoxLayout, QWidget)
 
+from ..regions import Region
 from ..render import FieldOfView
 from ..session import Session
 
@@ -57,41 +58,6 @@ def arrow(direction):
     xs = [x0, x1, np.nan, left[0], x1, right[0]]
     ys = [y0, y1, np.nan, left[1], y1, right[1]]
     return xs, ys
-
-
-def rim_distance(x: float, y: float, center, shape: str, size: float, polygon=None) -> float:
-    """Distance from a point to an ROI's outline, in data units.
-
-    Selection asks for this rather than for "inside", so that a click in the
-    middle of an ROI is free to start a new, overlapping one.
-    """
-    p = np.array([x, y], float)
-    if polygon is not None:
-        v = np.asarray(polygon, float)
-        a, b = v, np.roll(v, -1, axis=0)
-        ab = b - a
-        t = np.clip(np.einsum("ij,ij->i", p - a, ab) / np.maximum((ab ** 2).sum(1), 1e-12), 0, 1)
-        return float(np.min(np.linalg.norm(a + t[:, None] * ab - p, axis=1)))
-    d = p - np.asarray(center, float)
-    if shape == "circle":
-        return abs(float(np.hypot(*d)) - size / 2)
-    q = np.abs(d) - size / 2                     # signed distance to the square
-    inside = min(max(q[0], q[1]), 0.0)
-    return abs(float(np.linalg.norm(np.maximum(q, 0.0)) + inside))
-
-
-def outline(center, shape: str, size: float, polygon=None):
-    """The closed outline of an ROI, in data coordinates."""
-    if polygon is not None:
-        v = np.asarray(polygon, float)
-        return np.r_[v[:, 0], v[0, 0]], np.r_[v[:, 1], v[0, 1]]
-    cx, cy = center
-    if shape == "circle":
-        t = np.linspace(0, 2 * np.pi, 65)
-        return cx + size / 2 * np.cos(t), cy + size / 2 * np.sin(t)
-    h = size / 2
-    return (np.array([cx - h, cx + h, cx + h, cx - h, cx - h]),
-            np.array([cy - h, cy - h, cy + h, cy + h, cy - h]))
 
 
 class ImagePane(QWidget):
@@ -556,7 +522,7 @@ class ROIManagerWindow(QMainWindow):
                               centre[1] - half, centre[1] + half)
         self._draw_outlines(self.zoom_pane, rois, preview)
         self.zoom_pane.draw("draft", *([[], []] if self.draft is None else
-                                       outline(self.draft, project.shape, project.size_nm)))
+                                       Region.site(self.draft, project.shape, project.size_nm).outline()))
         # the frame the zoom covers, on the file image
         self.file_pane.draw("frame",
                             [centre[0] - half, centre[0] + half, centre[0] + half,
@@ -643,7 +609,7 @@ class ROIManagerWindow(QMainWindow):
             xs, ys = [], []
             for site in (preview or {}).get("sites", ()):
                 if bool(site.get("use", True)) == use:
-                    ox, oy = outline(site["center"], project.shape, project.size_nm)
+                    ox, oy = Region.site(site["center"], project.shape, project.size_nm).outline()
                     xs.extend(list(ox) + [np.nan])
                     ys.extend(list(oy) + [np.nan])
             pane.draw(name, xs, ys)
@@ -656,7 +622,7 @@ class ROIManagerWindow(QMainWindow):
         for name, chosen in groups.items():
             xs, ys = [], []
             for roi in chosen:
-                ox, oy = outline(roi.center, project.shape, project.size_nm, roi.polygon)
+                ox, oy = project.region(roi).outline()
                 xs.extend(list(ox) + [np.nan])
                 ys.extend(list(oy) + [np.nan])
             pane.draw(name, xs, ys)
@@ -683,7 +649,7 @@ class ROIManagerWindow(QMainWindow):
         drafted = self.draft is not None
         polygon = self.draft_polygon if drafted else (roi.polygon if roi is not None else None)
         direction = self.draft_direction if drafted else (roi.direction if roi is not None else None)
-        xs, ys = outline(centre, project.shape, project.size_nm, polygon)
+        xs, ys = Region.site(centre, project.shape, project.size_nm, polygon).outline()
         used = drafted or roi is None or roi.use
         for name in ("draft", "roi", "excluded_active"):
             self.roi_pane.draw(name)
@@ -945,7 +911,7 @@ class ROIManagerWindow(QMainWindow):
         tolerance = RIM_PIXELS * (pane.fov.pixelsize if pane.fov is not None else 1.0)
         best, best_d = None, np.inf
         for roi in project.rois_of(self.current_file()):
-            d = rim_distance(x, y, roi.center, project.shape, project.size_nm, roi.polygon)
+            d = project.region(roi).rim_distance(x, y)
             if d <= tolerance and d < best_d:
                 best, best_d = roi, d
         return best
