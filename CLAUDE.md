@@ -95,7 +95,7 @@ shape, so read the one closest to what you are writing:
 | rewrites the table and hands it back | `assign_colors.py` (`Result.locs`, a preview) |
 | a long computation with progress | `drift_comet.py`, `drift_rcc.py` |
 | loads, saves, exports, simulates | `file.py` (a plugin per format, no input table; the simulator's model is `smappy.simulate`) |
-| finds, measures or summarises ROIs | `roi.py` (a segmenter derives from `SegmenterPlugin`, which gives it a Preview, *replace* (`replace_param()`) and a step of the ROI undo; `scope = "site"`; analyse) -- moving to `Analysis/Regions/Find`, measurements to `Analysis/Measure` (`docs/regions.md`) |
+| finds, measures or summarises ROIs | `roi.py` (a segmenter derives from `SegmenterPlugin`, which gives it a Preview, *replace* (`replace_param()`) and a step of the ROI undo; `per_region = True`; analyse) -- moving to `Analysis/Regions/Find`, measurements to `Analysis/Measure` (`docs/regions.md`) |
 | parts, presets, a C++ backend | `fit.py` (nested settings dataclasses) |
 | adds a derived column, no output | `math_parser.py` (an expression, kept with the table as a recipe) |
 | removes or flags localizations | `remove_locs.py` (a region, a new table or a filtered flag) |
@@ -149,17 +149,17 @@ class Thing(Plugin):
   plugin that imports torch costs nothing until someone opens it.  Keep heavy
   imports inside functions (`from scipy.ndimage import ...`), as the shipped
   plugins do.
-* **Being replaced** (`docs/regions.md`, not built yet): a plugin that
-  returns `Result.values` / `Result.arrays` can be a step in a block, run once
-  per region (an ROI, or an id such as `cluster_id`) with `ctx.region` set;
-  `scope` goes.  Until that lands, the code is still: `scope = "site"` makes
-  it an ROI evaluator, run once per ROI in `ROIProject.region_context(roi)`
-  -- `ctx.locs` the ROI's rows, each layer's filter over them, `ctx.region`
-  its shape; in a chain it runs over every included ROI before the next step.  Its results belong to
+* `per_region = True` says `run` hands back `Result.values` (numbers, a
+  column each of the region table) and `Result.arrays`, so it can run once
+  per ROI -- in `ROIProject.region_context(roi)`: `ctx.locs` the ROI's rows,
+  each layer's filter over them, `ctx.region` its shape -- as well as on the
+  view like any other plugin.  The evaluation window offers these; a chain
+  step of one says `regions: rois` to run in each ROI before the next step,
+  until blocks replace that and bring ids such as `cluster_id`
+  (`docs/regions.md`).  Its results belong to
   the ROI, whoever ran them, under the evaluation's name
   (`ROIProject.evaluations`; a renamed one is a second evaluation), so an
-  analysis reads `ROIProject.results()` and never the pipeline.  Otherwise it
-  runs once over the selection.
+  analysis reads `ROIProject.results()` and never the pipeline.
 * Override `preview` for a plugin that can show its work before committing;
   the GUI grows a button when it is overridden and nothing when it is not.
   A plugin that changes nothing needs none: Run opens its figures.
@@ -426,7 +426,7 @@ renders with its maths and figures (the figures in the slow tier).
 
 Plugins reach the shipped workspace by themselves: the Analysis tab seeds from
 `Analysis/` and `favorite` defaults to True, so there is no registry to edit.
-For an evaluator (`scope = "site"`), `favorite` also decides whether it is in a
+For a `per_region` plugin, `favorite` also decides whether it is in a
 new evaluation pipeline; a specialised one (`NPC Corners`) sets it False.
 
 ## The plugin's page
