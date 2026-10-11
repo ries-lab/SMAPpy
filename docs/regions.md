@@ -480,6 +480,17 @@ Each step leaves the program working and the suite green.
      renamed with step 6.
 5. **Clusters**: DBSCAN under *Regions/Find* writing `cluster_id` and
    `n_in_cluster`, clusters to ROIs, *ROI to column*.
+   *Done*: `plugins/clusters.py`.  DBSCAN (SMAP's definition of core and
+   border; a border point joins its nearest core point; clusters numbered
+   by size; each file alone; on a grouped layer the blinks, mapped back
+   through `group_id`) writes `cluster_id` and `n_in_cluster` as recipes
+   with the rule `max`, and with *output* ROIs makes a convex-hull ROI of
+   each cluster (*replace*, *ROIs from*), refused inside a block.  Its
+   radius defaults to 50 nm: SMAP's automatic one is the density of the
+   whole field and merges everything in a sparse cell.  *ROI to column*
+   writes `roi_id` (the ROI's number; the later ROI where two overlap; 0 in
+   none; ROIs ticked *use*), membership the shape alone.  Both are under
+   `Analysis/Regions/`, where step 6 moves the rest.
 6. **The tree** moved to `Analysis/Measure` and `Analysis/Regions`, the tab
    renamed, the summarising plugins turned into table plugins, the shipped
    `npc_analysis.chain.yaml` rewritten as a block.
