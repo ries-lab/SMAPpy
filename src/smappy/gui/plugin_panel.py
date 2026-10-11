@@ -100,6 +100,21 @@ class PluginPanel(QWidget):
             if hasattr(leaf, "take_from_session"):
                 leaf.session = session
                 leaf.refresh()
+        # what the plugin says about the settings as they stand
+        # (`Plugin.notice`): a camera the database does not know, with the
+        # button that adds it.  Hidden while there is nothing to say.
+        self.notice = QLabel("")
+        self.notice.setWordWrap(True)
+        self.notice.setStyleSheet(WARNING_STYLE)
+        self.notice_button = QPushButton("")
+        self.notice_button.clicked.connect(self._on_notice)
+        notice_row = QHBoxLayout()
+        notice_row.addWidget(self.notice, 1)
+        notice_row.addWidget(self.notice_button, 0, Qt.AlignTop)
+        layout.addLayout(notice_row)
+        self.notice.hide()
+        self.notice_button.hide()
+        self._notice_window: Optional[str] = None
 
         buttons = QHBoxLayout()
         self.run_button = QPushButton("Run")
@@ -269,7 +284,46 @@ class PluginPanel(QWidget):
         if updates:
             self.form.set_values(updates)
         self._hints()
+        self._show_notice()
         self._active()
+
+    def refresh_derived(self) -> None:
+        """Read again what the plugin works out from outside the form -- the
+        lists, the hints, the notice -- after something it reads changed: a
+        camera added to the database, say."""
+        self._choices()
+        self._hints()
+        self._show_notice()
+
+    def _show_notice(self) -> None:
+        """The plugin's line about the settings (`Plugin.notice`), with its
+        button when the GUI has the window it names.  Best effort, like the
+        hints."""
+        try:
+            notice = self.plugin.notice(self.form.value())
+        except Exception:
+            notice = None
+        self.notice.setVisible(notice is not None)
+        if notice is None:
+            self.notice_button.hide()
+            return
+        self.notice.setText(notice.text)
+        self._notice_window = notice.window
+        offered = bool(notice.action and notice.window
+                       and notice.window in self.session.window_openers)
+        self.notice_button.setText(notice.action)
+        self.notice_button.setVisible(offered)
+
+    def _on_notice(self) -> None:
+        opener = self.session.window_openers.get(self._notice_window)
+        if opener is None:
+            return
+        try:
+            settings = self.form.value()
+        except ValueError as e:
+            self.status.setText(str(e))
+            return
+        opener(settings)
 
     def _hints(self) -> None:
         """Refresh what the fields left on *auto* say they will resolve to.
