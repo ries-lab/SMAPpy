@@ -177,7 +177,9 @@ class Thing(Plugin):
   any run -- a line under the form, and optionally a button that opens a GUI
   window by name (`Notice(text, action, window)`, the same
   `session.window_openers` as `Plugin.window`).  The fitters use it for a file
-  whose camera is not in the database, opening the camera editor.
+  whose camera is not in the database, opening the camera editor.  When
+  what it says depends on the session, override `notice_for(ctx, settings)`
+  instead -- the saver says which region results its settings leave out.
 * `changes_locs` -- True if `run` hands back a new table (or files), False
   if not; every shipped plugin declares it (`tests/test_changes_locs.py`),
   and `changes_locs_for(settings)` refines it where it depends on the

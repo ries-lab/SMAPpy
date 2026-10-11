@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (QComboBox, QDoubleSpinBox, QFormLayout,
 from ..roi_manager import pipeline as pipeline_module
 from ..session import Session
 from .widgets import CONTROL_WIDTH, CollapsibleSection, ColumnScroll
+from .roi_window import COUNT_LIMIT
 
 
 class ROIHeader(QWidget):
@@ -173,6 +174,14 @@ class ROIHeader(QWidget):
         used = sum(1 for r in rois if r.use)
         name = f"{source.number + 1}. {source.name}" if source else "no file"
         self.file_count.setText(f"{name} - {len(rois)} ROIs, {used} used")
+        if len(project.rois) > COUNT_LIMIT:
+            # whether each result is current means cutting out every ROI's
+            # data, a second per 20000 ROIs: count what is stored instead
+            stored = sum(1 for roi_id in project.rois
+                         if any(str(roi_id) in t for t in project.tables.values()))
+            self.summary.setText(f"{stored} ROIs with results over all files"
+                                 if stored else "no results")
+            return
         rows = project.results()
         self.summary.setText(f"{len(rows)} current results over all files"
                              if rows else "no current results")

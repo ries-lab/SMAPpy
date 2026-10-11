@@ -19,12 +19,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from ..io.formats import (FileInfo, name_filter, reader_for, reader_named,
                           save_filter, writer_for)
 from ..simulate.settings import SimulationSettings
-from . import Context, Plugin, Result, param, register
+from . import Context, Notice, Plugin, Result, param, register
 
 LOCS_FILTER = "Localizations (*.hdf5 *.h5 *.mat *.csv *.npy *.zip *.json)"
 
@@ -155,6 +155,41 @@ class SaveSettings:
              "numbers, and a figure is drawn by measuring again")
 
 
+def region_counts(session) -> Dict[str, int]:
+    """What a save could leave out: the ROIs with results, the regions of id
+    columns with results (clusters), and the results that kept their
+    figures' data."""
+    rois = list(session.rois.tables.values())
+    per_column = [list(tables.values()) for tables in session.id_regions.values()]
+    return {"rois": len({r for t in rois for r in t.ids}),
+            "regions": sum(max((len(t) for t in tables), default=0)
+                           for tables in per_column),
+            "kept": sum(1 for t in rois + [t for ts in per_column for t in ts]
+                        for k in t.kept if k)}
+
+
+def left_out(session, settings: SaveSettings, done: bool = False) -> Optional[str]:
+    """The sentence saying what ``settings`` leave out of the file that the
+    session has, before the save (``done`` False) or after it; None when
+    nothing is."""
+    if settings.region_results and settings.region_figures:
+        return None
+    counts = region_counts(session)
+    parts = [f"{n} {what}" for n, what in ((counts["rois"], "ROIs"),
+                                           (counts["regions"], "regions of id columns"))
+             if n]
+    if not settings.region_results and parts:
+        return (f"The results measured in {' and '.join(parts)} "
+                + ("were not saved: they are" if done else "will not be saved: they are")
+                + " measured again after opening.")
+    if not settings.region_figures and counts["kept"]:
+        return (f"The figure data of {counts['kept']} region results "
+                + ("was" if done else "will") + " not "
+                + ("saved" if done else "be saved")
+                + ": their figures are drawn by measuring again.")
+    return None
+
+
 @register("File/Save/smappy HDF5")
 class Save(Plugin):
     """Write the current table, its history and its ROIs."""
@@ -162,6 +197,14 @@ class Save(Plugin):
     Settings = SaveSettings
     changes_locs = False
     logged = True          # where a file went is not visible in the file
+
+    def notice_for(self, ctx: Context, settings: SaveSettings) -> Optional[Notice]:
+        """Results there are that these settings would not save, said before
+        the save rather than found missing when the file is opened again."""
+        if ctx is None or ctx.session is None:
+            return None
+        text = left_out(ctx.session, settings)
+        return None if text is None else Notice(text)
 
     def run(self, ctx: Context, settings: SaveSettings) -> Result:
         if ctx.session is None:
@@ -174,15 +217,9 @@ class Save(Plugin):
                                    region_results=settings.region_results,
                                    region_figures=settings.region_figures)
         text = f"{len(ctx.session.locs)} localizations to {written}"
-        rois = ctx.session.roi_state()
-        if not settings.region_results and rois and rois.get("tables"):
-            text += "; the ROI results were left out: evaluate again to have them"
-        elif not settings.region_figures:
-            kept = sum(1 for t in (rois or {}).get("tables") or []
-                       for k in t.get("kept") or [] if k)
-            if kept:
-                text += (f"; the figure data of {kept} ROI results was not saved: "
-                         "their figures will be drawn by measuring again")
+        missing = left_out(ctx.session, settings, done=True)
+        if missing:                       # said before, and kept in the log
+            text += "; " + missing[0].lower() + missing[1:]
         return Result(text=text, data={"path": written}, settings=settings)
 
 

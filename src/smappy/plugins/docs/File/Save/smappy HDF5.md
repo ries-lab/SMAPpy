@@ -1,6 +1,6 @@
 ---
 version: "1"
-covers: [smappy.session.Session.save, smappy.io.hdf5.save_localizations, smappy.io.hdf5.save_results, smappy.io.hdf5.save_gui_state, smappy.region_table.RegionTable.to_hdf5]
+covers: [smappy.session.Session.save, smappy.io.hdf5.save_localizations, smappy.io.hdf5.save_results, smappy.io.hdf5.save_gui_state, smappy.region_table.RegionTable.to_hdf5, smappy.plugins.file.left_out, smappy.plugins.file.region_counts]
 ---
 
 ## What it does
@@ -146,7 +146,14 @@ milliseconds and for a slow one is the reason to keep it.
 
 ## Output
 
-The file.  The text says how many localizations went where.  The save is
+The file.  The text says how many localizations went where.
+
+With *save the ROI results* or *save the ROI figures' data* off, a line
+under the settings says what the session has that the save will leave out
+-- "The results measured in 40 ROIs and 2000 regions of id columns will not
+be saved" -- as soon as there is any, and the text after the save says it
+again, so it reaches the history.  The regions of id columns are the
+clusters a block measured in.  The save is
 written into the session's history, so that the log says where the table
 went.
 

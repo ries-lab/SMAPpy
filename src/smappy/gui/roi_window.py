@@ -6,6 +6,14 @@ zoom, a click in the zoom drafts an ROI, and *Add* stores it.  The controls
 that decide what an ROI *is* -- its geometry, the finder, the evaluation --
 live in the control window's Regions tab; this window is for choosing and
 judging.
+
+**Many ROIs** -- the clusters of a whole cell made into ROIs, tens of
+thousands -- cost what is on screen, not what is in the project: the list
+makes a row (and checks whether its ROI is out of date) only when it is
+shown, a pane draws the outlines of the ROIs in its view only, and past
+`OUTLINE_LIMIT` of them a dot at each centre instead, with the selected ROI
+still outlined.  Measured before: 7 s for every refresh of 20000 ROIs, the
+list two thirds of it.
 """
 from __future__ import annotations
 
@@ -13,13 +21,12 @@ from typing import Optional
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import QRectF, Qt, Signal
+from PySide6.QtCore import QAbstractTableModel, QModelIndex, QRectF, Qt, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QDoubleSpinBox,
                                QHBoxLayout, QHeaderView, QLabel, QListWidget,
                                QListWidgetItem, QMainWindow, QPushButton,
-                               QSplitter, QTableWidget, QTableWidgetItem,
-                               QVBoxLayout, QWidget)
+                               QSplitter, QTableView, QVBoxLayout, QWidget)
 
 from ..regions import Region
 from ..render import FieldOfView
@@ -43,6 +50,12 @@ STALE_COLOUR = "#c07000"        # an ROI whose evaluation is out of date
 DETAIL_NM = 3000.0            # the zoom's width to start with
 DEFAULT_TILE_NM = 5000.0      # a tile to start from
 RIM_PIXELS = 6.0              # how near the outline a click must be to select
+# a pane with more ROIs than this in view draws a dot at each centre instead
+# of its outline: past it the outlines are a tangle and cost a second a redraw
+OUTLINE_LIMIT = 1000
+# the status line counts the ROIs waiting on the evaluation only up to this
+# many: counting means checking every one, the cost the list no longer pays
+COUNT_LIMIT = 2000
 
 
 def arrow(direction):
@@ -91,9 +104,14 @@ class ImagePane(QWidget):
                                          ("direction", DIRECTION_PEN),
                                          ("drawing", DRAWING_PEN), ("frame", FRAME_PEN),
                                          ("tiles", TILE_PEN), ("tile", TILE_HERE_PEN))}
+        for name, colour in (("centres", OTHER_PEN.color()),
+                             ("centres_excluded", EXCLUDED_PEN.color())):
+            self.shapes[name] = pg.PlotDataItem(pen=None, symbol="o", symbolSize=3,
+                                                symbolPen=None, symbolBrush=colour)
         for item in self.shapes.values():
             self.view.addItem(item)
         layout.addWidget(self.graphics)
+        self.title = title
         self.width_nm = DETAIL_NM
         self.zoomable = zoomable
         self.pannable = pannable
@@ -173,6 +191,107 @@ class ImagePane(QWidget):
         else:
             item.setData(np.asarray(xs, float), np.asarray(ys, float), connect="finite")
 
+    def note(self, text: str = "") -> None:
+        """A word after the pane's title: why it shows dots, say."""
+        self.label.setText(f"{self.title} - {text}" if text else self.title)
+
+
+class ROIList(QAbstractTableModel):
+    """The ROIs as the list shows them, a row made only when it is shown.
+
+    Whether an ROI waits on the evaluation is a signature of its data and
+    the steps, about 0.15 ms an ROI: checked as a row is drawn and kept
+    until the next `reset`, rather than for every ROI on every refresh.
+    """
+
+    HEADERS = ("ROI", "file", "use")
+
+    def __init__(self, window):
+        super().__init__()
+        self.window = window
+        self.ids: list = []
+        self.row_of: dict = {}
+        self.numbers: dict = {}
+        self._steps = None
+        self._waiting: dict = {}
+
+    def reset(self, project) -> None:
+        self.beginResetModel()
+        self.ids = list(project.rois)
+        self.row_of = {roi_id: i for i, roi_id in enumerate(self.ids)}
+        self.numbers = project.numbers()
+        self._waiting = {}
+        try:
+            self._steps = project.resolved()
+        except Exception:
+            self._steps = None
+        self.endResetModel()
+
+    def waiting(self, roi_id) -> bool:
+        """Whether this ROI's numbers are older than its data or the steps:
+        a list that does not say so invites reading last week's answer."""
+        found = self._waiting.get(roi_id)
+        if found is None:
+            project = self.window.project
+            roi = project.rois.get(roi_id)
+            found = False
+            if roi is not None and roi.reviewed and roi.use and self._steps:
+                try:
+                    found = bool(project.stale_steps(roi_id, self._steps))
+                except Exception:
+                    found = False
+            self._waiting[roi_id] = found
+        return found
+
+    def rowCount(self, parent=QModelIndex()) -> int:          # noqa: N802 (Qt's)
+        return 0 if parent.isValid() else len(self.ids)
+
+    def columnCount(self, parent=QModelIndex()) -> int:       # noqa: N802 (Qt's)
+        return 0 if parent.isValid() else len(self.HEADERS)
+
+    def headerData(self, section, orientation, role=Qt.DisplayRole):  # noqa: N802
+        if orientation == Qt.Horizontal and role == Qt.DisplayRole:
+            return self.HEADERS[section]
+        return None
+
+    def flags(self, index):
+        out = Qt.ItemIsEnabled | Qt.ItemIsSelectable
+        return out | Qt.ItemIsUserCheckable if index.column() == 2 else out
+
+    def data(self, index, role=Qt.DisplayRole):
+        if not index.isValid() or index.row() >= len(self.ids):
+            return None
+        roi_id = self.ids[index.row()]
+        project = self.window.project
+        roi = project.rois.get(roi_id)
+        if roi is None:
+            return None
+        column = index.column()
+        if column == 2:
+            if role == Qt.CheckStateRole:
+                return Qt.Checked if roi.use else Qt.Unchecked
+            if role == Qt.ToolTipRole:
+                return "include this ROI in the evaluation (space toggles it)"
+            return None
+        if role == Qt.DisplayRole:
+            return str(self.numbers.get(roi_id, "")) if column == 0 else str(
+                project.file_number(roi.file_id))
+        if role == Qt.ForegroundRole:
+            if not roi.use:
+                return pg.mkColor("#8a8a8a")
+            if self.waiting(roi_id):
+                return pg.mkColor(STALE_COLOUR)
+        if role == Qt.ToolTipRole and roi.use and self.waiting(roi_id):
+            return ("the data or the evaluators' parameters have changed since "
+                    "this ROI was evaluated")
+        return None
+
+    def setData(self, index, value, role=Qt.EditRole) -> bool:  # noqa: N802
+        if role != Qt.CheckStateRole or index.column() != 2:
+            return False
+        self.window._set_use(self.ids[index.row()], Qt.CheckState(value) == Qt.Checked)
+        return True
+
 
 class ROIManagerWindow(QMainWindow):
     changed = Signal()          # ROIs added, removed or toggled
@@ -199,6 +318,7 @@ class ROIManagerWindow(QMainWindow):
         # screen; made on first use
         self._site = None
         self._evaluating = False
+        self._reaches: dict = {}     # ROI id -> (its polygon, how far it reaches)
 
         self.file_pane = ImagePane("file")
         self.zoom_pane = ImagePane("zoom", zoomable=True, pannable=True)
@@ -252,18 +372,21 @@ class ROIManagerWindow(QMainWindow):
         roi_side_list = QVBoxLayout()
         roi_side_list.setSpacing(1)
         roi_side_list.addWidget(QLabel("<b>ROIs</b>"))
-        self.table = QTableWidget(0, 3)
-        self.table.setHorizontalHeaderLabels(["ROI", "file", "use"])
+        self.table = QTableView()
+        self.rows = ROIList(self)
+        self.table.setModel(self.rows)
         self.table.verticalHeader().setVisible(False)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         header = self.table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.ResizeToContents)
+        # sized once, not to the contents: that would read every row
+        header.setSectionResizeMode(QHeaderView.Fixed)
         header.setStretchLastSection(False)
+        for column, width in enumerate((60, 40, 40)):
+            header.resizeSection(column, width)
         self.table.verticalHeader().setDefaultSectionSize(20)
-        self.table.itemSelectionChanged.connect(self._on_select)
-        self.table.itemChanged.connect(self._on_item)
+        self.table.selectionModel().selectionChanged.connect(lambda *_: self._on_select())
         self.table.setMaximumWidth(190)          # the numbers need no more
         roi_side_list.addWidget(self.table, 1)
         side.addLayout(roi_side_list, 0)
@@ -449,42 +572,21 @@ class ROIManagerWindow(QMainWindow):
     def _fill_table(self) -> None:
         project = self.project
         was_loading, self._loading = self._loading, True
-        numbers = project.numbers()
-        self._rows = list(project.rois)
-        # which ROIs are waiting on the evaluation: the numbers a site shows
-        # are only as good as the parameters they were made with, and a list
-        # that does not say so invites reading last week's answer
-        try:
-            waiting = set(project.needs_evaluation())
-        except Exception:
-            waiting = set()
-        self.table.setRowCount(len(self._rows))
-        for row, roi_id in enumerate(self._rows):
-            roi = project.rois[roi_id]
-            for column, text in ((0, str(numbers[roi_id])),
-                                 (1, str(project.file_number(roi.file_id)))):
-                item = QTableWidgetItem(text)
-                if not roi.use:
-                    item.setForeground(pg.mkColor("#8a8a8a"))
-                elif roi_id in waiting:
-                    item.setForeground(pg.mkColor(STALE_COLOUR))
-                    item.setToolTip("the data or the evaluators' parameters have "
-                                    "changed since this ROI was evaluated")
-                self.table.setItem(row, column, item)
-            use = QTableWidgetItem()
-            use.setFlags((use.flags() | Qt.ItemIsUserCheckable) & ~Qt.ItemIsEditable)
-            use.setCheckState(Qt.Checked if roi.use else Qt.Unchecked)
-            use.setToolTip("include this ROI in the evaluation (space toggles it)")
-            self.table.setItem(row, 2, use)
-            if roi_id == self.active:
-                self.table.selectRow(row)
+        self.rows.reset(project)
+        row = self.rows.row_of.get(self.active)
+        if row is not None:
+            self.table.selectRow(row)
+            self.table.scrollTo(self.rows.index(row, 0))
         self._loading = was_loading
         used = sum(1 for r in project.rois.values() if r.use)
+        waiting = []
+        if len(self.rows.ids) <= COUNT_LIMIT:
+            waiting = [i for i in self.rows.ids if self.rows.waiting(i)]
         preview = project.segment_preview
         self.clear_preview_button.setVisible(preview is not None)
         proposed = (f"; previewing {len(preview['sites'])} (grey): Run adds them"
                     if preview is not None else "")
-        self.status.showMessage(f"{len(self._rows)} ROIs, {used} used"
+        self.status.showMessage(f"{len(self.rows.ids)} ROIs, {used} used"
                                 + (f", {len(waiting)} to evaluate" if waiting else "")
                                 + proposed)
 
@@ -613,6 +715,19 @@ class ROIManagerWindow(QMainWindow):
                     xs.extend(list(ox) + [np.nan])
                     ys.extend(list(oy) + [np.nan])
             pane.draw(name, xs, ys)
+        rois = self._in_view(pane, rois)
+        if len(rois) > OUTLINE_LIMIT:
+            # a dot at each centre; the selected ROI keeps its outline
+            pane.note(f"{len(rois)} ROIs in view: their centres; zoom in for outlines")
+            for name, use in (("centres", True), ("centres_excluded", False)):
+                centres = np.array([roi.center for roi in rois if bool(roi.use) == use
+                                    and roi.id != self.active], float).reshape(-1, 2)
+                pane.draw(name, centres[:, 0], centres[:, 1])
+            rois = [roi for roi in rois if roi.id == self.active]
+        else:
+            pane.note()
+            pane.draw("centres")
+            pane.draw("centres_excluded")
         groups = {"others": [], "excluded": [], "excluded_active": [], "roi": []}
         for roi in rois:
             active = roi.id == self.active
@@ -633,6 +748,35 @@ class ROIManagerWindow(QMainWindow):
                 dx.extend(list(ax) + [np.nan])
                 dy.extend(list(ay) + [np.nan])
         pane.draw("direction", dx, dy)
+
+    def _reach(self, roi) -> float:
+        """How far an ROI's outline reaches from its centre: the project's
+        size, or its polygon's -- kept until the polygon is replaced."""
+        if roi.polygon is None:
+            return float(self.project.size_nm)
+        cache = self._reaches
+        found = cache.get(roi.id)
+        if found is None or found[0] is not roi.polygon:
+            v = np.asarray(roi.polygon, float)
+            found = (roi.polygon, float(np.hypot(*(np.abs(v - roi.center).max(axis=0)))))
+            cache[roi.id] = found
+        return found[1]
+
+    def _near(self, rois, x0: float, x1: float, y0: float, y1: float) -> list:
+        """The ROIs whose outline may reach into the box."""
+        if not rois:
+            return []
+        centres = np.array([roi.center for roi in rois], float).reshape(-1, 2)
+        reach = np.array([self._reach(roi) for roi in rois])
+        hit = ((centres[:, 0] + reach >= x0) & (centres[:, 0] - reach <= x1)
+               & (centres[:, 1] + reach >= y0) & (centres[:, 1] - reach <= y1))
+        return [roi for roi, h in zip(rois, hit) if h]
+
+    def _in_view(self, pane, rois) -> list:
+        fov = pane.fov
+        if fov is None:
+            return list(rois)
+        return self._near(list(rois), fov.x0, fov.x1, fov.y0, fov.y1)
 
     def _draw_roi_pane(self, state) -> None:
         project = self.project
@@ -910,18 +1054,19 @@ class ROIManagerWindow(QMainWindow):
         pane = pane or self.zoom_pane
         tolerance = RIM_PIXELS * (pane.fov.pixelsize if pane.fov is not None else 1.0)
         best, best_d = None, np.inf
-        for roi in project.rois_of(self.current_file()):
+        near = self._near(project.rois_of(self.current_file()), x - tolerance,
+                          x + tolerance, y - tolerance, y + tolerance)
+        for roi in near:
             d = project.region(roi).rim_distance(x, y)
             if d <= tolerance and d < best_d:
                 best, best_d = roi, d
         return best
 
-    def _on_item(self, item) -> None:
+    def _set_use(self, roi_id, use: bool) -> None:
         """The use box in the table."""
-        if self._loading or item.column() != 2 or item.row() >= len(self._rows):
+        roi = self.project.rois.get(roi_id)
+        if self._loading or roi is None:
             return
-        roi = self.project.rois[self._rows[item.row()]]
-        use = item.checkState() == Qt.Checked
         number = self.project.numbers().get(roi.id)
         with self.project.edit(f"{'Include' if use else 'Exclude'} ROI {number}"):
             roi.use = use
@@ -933,9 +1078,9 @@ class ROIManagerWindow(QMainWindow):
         if self._loading:
             return
         rows = self.table.selectionModel().selectedRows()
-        if not rows:
+        if not rows or rows[0].row() >= len(self.rows.ids):
             return
-        self.select(self._rows[rows[0].row()], from_table=True)
+        self.select(self.rows.ids[rows[0].row()], from_table=True)
 
     def select(self, roi_id: str, from_table: bool = False) -> None:
         """Show an ROI: its file, the zoom around it, and the ROI image."""

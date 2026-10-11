@@ -604,6 +604,9 @@ class ROIProject:
         not matter: a result belongs to the ROI, and says itself how it was
         made.
         """
+        stored = str(roi_id)
+        if not any(stored in table for table in self.tables.values()):
+            return {}          # its data is not cut out for nothing: 60 us an ROI
         inputs = json.loads(json_text(self.inputs(self.rois[roi_id])))
         data = digest(inputs)
         found = {}

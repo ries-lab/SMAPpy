@@ -848,6 +848,14 @@ class Plugin:
         """
         return None
 
+    def notice_for(self, ctx: "Context", settings) -> Optional[Notice]:
+        """`notice`, with the session in reach: what a plugin overrides when
+        what it has to say depends on the session rather than the settings
+        alone -- the results a save would leave out.  The panel asks this;
+        by default it is `notice`, so a plugin that needs no session keeps
+        the simpler signature."""
+        return self.notice(settings)
+
     def react(self, changed: str, settings) -> Optional[Dict[str, Any]]:
         """A parameter was edited: ``changed`` is its dotted name.
 

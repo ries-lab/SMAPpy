@@ -327,9 +327,10 @@ localization table.  Filtering clusters by size is then an ordinary filter on
 comment on clusters, *Regions/Column to ROIs* makes ROIs of them -- of any id
 column, so every clusterer gets it and none makes ROIs itself (a convex hull
 around each, or the project's ROI shape on its centre; `origin` the column
-and the id).  Opening the ROI manager stays optional,
-and past some number of ROIs it lists them without drawing their boxes on the
-picture.
+and the id).  Opening the ROI manager stays optional, and it costs what it
+shows: a pane outlines the ROIs in its view, a dot at each centre past 1000 of
+them, and the list makes a row when it is scrolled to (20000 ROIs: 0.4 s a
+refresh, from 7 s).
 
 ### The plugin tree
 
@@ -457,8 +458,8 @@ Each step leaves the program working and the suite green.
      draws its curves again from the numbers (`model_curve`).  The saver's
      *save the ROI figures' data* leaves it out and says so.  The switch per
      step is in the model (`Step.keep`); its checkbox comes with the editor
-     (step 4), and so does the size warning, which needs the session the
-     form's `notice` is not given.
+     (step 4).  The warning came later: `Plugin.notice_for` hands a notice
+     the session, and the saver says what its settings would leave out.
 
    The region table as a session table with its own filter, planned here,
    was dropped for region values as columns (step 7).
