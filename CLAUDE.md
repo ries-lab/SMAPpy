@@ -153,8 +153,9 @@ class Thing(Plugin):
   returns `Result.values` / `Result.arrays` can be a step in a block, run once
   per region (an ROI, or an id such as `cluster_id`) with `ctx.region` set;
   `scope` goes.  Until that lands, the code is still: `scope = "site"` makes
-  it an ROI evaluator, run once per ROI with `ctx.site` set; in a chain it
-  runs over every included ROI before the next step.  Its results belong to
+  it an ROI evaluator, run once per ROI in `ROIProject.region_context(roi)`
+  -- `ctx.locs` the ROI's rows, each layer's filter over them, `ctx.region`
+  its shape; in a chain it runs over every included ROI before the next step.  Its results belong to
   the ROI, whoever ran them, under the evaluation's name
   (`ROIProject.evaluations`; a renamed one is a second evaluation), so an
   analysis reads `ROIProject.results()` and never the pipeline.  Otherwise it

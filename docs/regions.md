@@ -109,6 +109,30 @@ With that default no "fast options" button is needed: ticking one back on is
 a choice.  Localization Statistics' fits are the example: about 10 ms a
 region whatever its size, 17 minutes over 10^5 clusters.
 
+**Necessary slow work is timed, not declared.**  A step that is slow because
+the measurement *is* slow (the fit is the result) has nothing to switch off
+and gets no flag.  Instead the block is timed:
+
+* **Before a run.**  The editor shows each step's estimated time and the
+  block's total, and a *Check* button brings it up to date: it runs the block
+  on the current region (as the write-back check does anyway), times each
+  step, and multiplies by the regions the source holds -- "NPC fit: ~40 ms a
+  region, ~1 h over 10^5 clusters".  One region is a noisy sample, so the
+  check times a few (up to five, or a second's worth) and reports the median.
+  The block's preflight asks with the same estimate when it is long, the way
+  COMET asks before an afternoon, and offers "run with slow options off" as a
+  choice when the block has any.
+* **During a run.**  A status line with the percentage of regions done, the
+  regions per second and the time left, from the regions so far; the step
+  being run when a block has several.  It goes through `ctx.report`, so the
+  plugin panel, the chain panel, the batch window and a script all see it.
+  Today's runner already reports "i of n sites"; this adds the rate and the
+  estimate.  A run can be stopped (`ctx.stop`) and keeps the regions it has.
+
+Timing covers every plugin, including one nobody marked, and measures the
+cost on the user's own data; `slow=True` remains only for what timing cannot
+tell -- which part of a step could be dropped.
+
 ### Evaluation is a block of a chain
 
 A chain step can be a **block**: a list of steps run once per region of a
