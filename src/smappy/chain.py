@@ -711,7 +711,7 @@ class ChainPlugin(Plugin):
                 sub = getattr(settings, key)
                 plugin = by_key[key][1]
                 if isinstance(step, Block):
-                    step = plugin.block_from(sub)
+                    step = plugin().block_from(sub)
                 else:
                     step.values = settings_values(plugin_settings(plugin, sub))
                     step.grouping = ("auto" if plugin.grouping

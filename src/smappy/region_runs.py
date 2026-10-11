@@ -58,6 +58,8 @@ def progress_text(done: int, total: int, elapsed: float, what: str = "regions") 
 
 
 def _duration(seconds: float) -> str:
+    if seconds < 1:
+        return "under a second"
     if seconds < 90:
         return f"{max(1, round(seconds))} s"
     if seconds < 5400:

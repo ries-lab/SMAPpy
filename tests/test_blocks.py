@@ -324,7 +324,7 @@ def test_a_long_block_asks_first_and_offers_its_slow_options_off(monkeypatch):
                                               "values": {"thorough": True}})]))
     settings = cls.Settings()
     asked = cls().preflight(session.context(), settings)
-    assert "each will take about" in asked.text and "over 20 regions" in asked.text
+    assert "each will take" in asked.text and "over 20 regions" in asked.text
     choice, = asked.choices
     assert choice.label == "Slow options off"
     assert choice.settings.each.slow.thorough is False

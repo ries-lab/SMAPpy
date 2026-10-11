@@ -63,6 +63,9 @@ class Estimate:
     regions: int
     per_region: Dict[str, float]          # step label -> seconds, the median
     sampled: int
+    # columns the steps added or changed in the sampled regions that the
+    # block does not write back: what the editor's check warns about
+    unwritten: List[str] = dataclasses.field(default_factory=list)
 
     @property
     def total(self) -> float:
@@ -71,8 +74,14 @@ class Estimate:
     def text(self) -> str:
         from .region_runs import _duration
         steps = ", ".join(f"{label} {_ms(t)}" for label, t in self.per_region.items())
-        return (f"about {_duration(self.total)} over {self.regions} regions "
+        total = _duration(self.total)
+        text = (f"{'' if total.startswith('under') else 'about '}{total} "
+                f"over {self.regions} regions "
                 f"({steps} a region, timed on {self.sampled})")
+        if self.unwritten:
+            text += (f"; the steps change {', '.join(self.unwritten)}, which the "
+                     "block does not write back")
+        return text
 
 
 def _ms(seconds: float) -> str:
@@ -112,10 +121,12 @@ class BlockPlugin(ChainPlugin):
         """Time the block's steps in a few of its regions, nothing kept
         (`SAMPLE_REGIONS`, `SAMPLE_SECONDS`), and multiply out.  None when
         there is nothing to time -- no regions, or inside another block."""
-        from .region_runs import ColumnRegions, RegionScratch
+        from .region_runs import ColumnRegions, RegionScratch, changed_columns
         if ctx.per_region:
             return None
         steps = self.pipeline(settings)
+        written = set(_columns(settings.write_back))
+        unwritten: List[str] = []
         if settings.regions == BLOCK_ROIS:
             project = ctx.rois
             if project is None:
@@ -125,7 +136,8 @@ class BlockPlugin(ChainPlugin):
             def cut(k):
                 roi = project.rois[ids[k]]
                 region = project.region(roi)
-                return RegionScratch(project._region_tables(roi, region), region, roi.id)
+                return RegionScratch(project._region_tables(roi, region), region, roi.id,
+                                     tag=True)
             n = len(ids)
         else:
             if settings.regions not in ctx.locs:
@@ -135,7 +147,8 @@ class BlockPlugin(ChainPlugin):
             n = len(source)
 
             def cut(k):
-                return RegionScratch(source.tables(k), None, source.region_ids()[k])
+                return RegionScratch(source.tables(k), None, source.region_ids()[k],
+                                     tag=True)
         if not n or not steps:
             return None
         picks = np.unique(np.linspace(0, n - 1, min(n, SAMPLE_REGIONS)).astype(int))
@@ -144,6 +157,7 @@ class BlockPlugin(ChainPlugin):
         sampled = 0
         for k in picks:
             scratch = cut(int(k))
+            original = scratch.locs
             for step in steps:
                 t0 = time.perf_counter()
                 try:
@@ -152,11 +166,13 @@ class BlockPlugin(ChainPlugin):
                 except Exception:
                     pass                  # a failure costs what it cost
                 times[step.label].append(time.perf_counter() - t0)
+            unwritten += [c for c in changed_columns(original, scratch)
+                          if c not in written and c not in unwritten]
             sampled += 1
             if time.perf_counter() - started > SAMPLE_SECONDS:
                 break
         return Estimate(n, {label: float(np.median(t)) for label, t in times.items()},
-                        sampled)
+                        sampled, unwritten)
 
     def preflight(self, ctx: Context, settings):
         """Its steps' own questions, and the time it will take when that is
