@@ -65,6 +65,8 @@ class LocalizationWriter:
             # the attribute (`_write_regions`)
             small["roi_project"] = {k: v for k, v in rois.items() if k != "tables"}
             _write_regions(self._file, rois.get("tables") or [])
+        if "id_regions" in small:
+            _write_regions(self._file, small.pop("id_regions") or {}, ID_REGIONS)
         self._file.attrs["metadata"] = json.dumps(small,
                                                   default=_json_default, indent=1)
         for key in LARGE:
@@ -163,35 +165,48 @@ def _write_large(f, key: str, value) -> None:
 # thousand ROIs cost what their numbers do rather than a megabyte of JSON in
 # the metadata attribute.
 REGIONS = "regions"
+# what was measured per region of an id column (`Session.id_regions`): the
+# same tables, each with the column it is of in an attribute
+ID_REGIONS = "id_regions"
 
 
-def _write_regions(f, tables) -> None:
+def _write_regions(f, tables, name: str = REGIONS) -> None:
+    """``tables``: a list of tables, or ``{column: [tables]}`` for the
+    per-column ones."""
     from ..region_table import RegionTable
-    if REGIONS in f:
-        del f[REGIONS]
-    if not tables:
+    if name in f:
+        del f[name]
+    pairs = ([(column, t) for column, ts in tables.items() for t in ts]
+             if isinstance(tables, dict) else [("", t) for t in tables])
+    if not pairs:
         return
-    group = f.create_group(REGIONS)
-    for n, table in enumerate(tables):
+    group = f.create_group(name)
+    for n, (column, table) in enumerate(pairs):
         if not isinstance(table, RegionTable):
             table = RegionTable.from_dict(table)
-        table.to_hdf5(group.create_group(str(n)))
+        sub = group.create_group(str(n))
+        table.to_hdf5(sub)
+        if column:
+            sub.attrs["column"] = column
 
 
-def _read_regions(f) -> list:
+def _read_regions(f, name: str = REGIONS):
     """The region tables as plain data, the form the ROI project's JSON
-    carries them in -- so the table's metadata stays JSON throughout."""
+    carries them in -- so the table's metadata stays JSON throughout: a list,
+    or ``{column: [tables]}`` for the per-column ones."""
     from ..region_table import RegionTable
-    group = f.get(REGIONS)
+    group = f.get(name)
     if not isinstance(group, h5py.Group):
-        return []
-    out = []
+        return {} if name == ID_REGIONS else []
+    out, by_column = [], {}
     for key in sorted(group, key=lambda k: int(k) if k.isdigit() else 1e9):
         try:
-            out.append(RegionTable.from_hdf5(group[key]).to_dict())
+            doc = RegionTable.from_hdf5(group[key]).to_dict()
         except (KeyError, ValueError, TypeError, OSError):
             continue                # a damaged table costs itself, not the file
-    return out
+        out.append(doc)
+        by_column.setdefault(str(group[key].attrs.get("column", "")), []).append(doc)
+    return by_column if name == ID_REGIONS else out
 
 
 def _read_large(f) -> Dict[str, object]:
@@ -434,6 +449,9 @@ def load_localizations(path) -> Localizations:
             tables = _read_regions(f)
             if tables:
                 metadata["roi_project"]["tables"] = tables
+        by_column = _read_regions(f, ID_REGIONS)
+        if by_column:
+            metadata["id_regions"] = by_column
     return Localizations(columns, metadata)
 
 

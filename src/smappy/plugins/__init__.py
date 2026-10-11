@@ -292,7 +292,8 @@ class Context:
                  region=None, site_table: Optional[Sequence[Dict[str, Any]]] = None,
                  rois=None, grouping: Optional[str] = None,
                  evaluations: Sequence[Tuple[str, str]] = (),
-                 stop=None, writer_finished=None, pinned=None, rows=None):
+                 stop=None, writer_finished=None, pinned=None, rows=None,
+                 region_id: Optional[str] = None):
         self.session = session
         # layer -> {"ungrouped"/"grouped": (locs, selection)}, taken when the
         # session's table was still being appended to (`Session.context`), or
@@ -317,6 +318,9 @@ class Context:
         # a region context `locs` is the region's rows, and every layer's
         # selection is that layer's filter over them (`docs/regions.md`).
         self.region = region
+        # which region, when this run is one of a run over many (an ROI's id,
+        # a cluster's): set for a cluster too, which has no shape
+        self.region_id = region_id
         self.site_table = site_table        # the rows evaluation produced
         # (name, evaluator path) of the evaluations a chain has made before
         # this step, oldest first: an ROI analysis in a chain reads its own
@@ -341,6 +345,13 @@ class Context:
             selection = (session.selection(layer) if session is not None
                          else Selection.all(len(locs)))
         self.selection = selection
+
+    @property
+    def per_region(self) -> bool:
+        """Whether this is one region of a run over many -- an ROI or a
+        cluster -- rather than a run on the view.  A plugin may then make an
+        empty region an answer, or leave out what only the whole field has."""
+        return self.region_id is not None
 
     @property
     def rois(self):
@@ -434,7 +445,8 @@ class Context:
             # not the session's selection, which is cut to the drawn ROI
             sel = self.session.layers[index].selection(index, without)
             sel.mask = np.asarray(sel.mask, dtype=bool)[self._rows]
-            sel.roi, sel.name = self.region, f"{sel.name}, {self.region}"
+            sel.roi = self.region
+            sel.name = f"{sel.name}, {self.region or self.region_id}"
             return sel
         sel = self.session.selection(index, without)
         sel.mask = sel.mask[:len(self.locs)]      # rows are only ever appended

@@ -443,7 +443,8 @@ class ROIProject:
         drawn ROI or 3D slab narrows it further: the region replaces them.
         """
         region = self.region(roi)
-        return self._context(region, self._region_tables(roi, region), **extra)
+        return self._context(region, self._region_tables(roi, region),
+                             region_id=roi.id, **extra)
 
     def _context(self, region, tables, **extra):
         """A context over what `_region_tables` cut: one per run, since a
@@ -623,7 +624,7 @@ class ROIProject:
 
     # -------------------------------------------------------------- running
     def evaluate(self, instances=None, roi_ids=None, progress=None, steps=None,
-                 reuse=False, chain=""):
+                 reuse=False, chain="", report=None, stop=None):
         """Run a pipeline over every reviewed, included ROI.
 
         `instances` is a list of `workspace.Instance` -- the same type a tab
@@ -636,17 +637,26 @@ class ROIProject:
         changed" means: editing one evaluator's parameter costs that
         evaluator over the sites, not the whole pipeline over all of them.
         ``chain`` marks the run as a chain's (`chain.evaluate_sites`).
+        ``progress(done, total)`` is told after every ROI; ``report(text)``
+        gets the status line -- percentage, rate, time left
+        (`region_runs.Progress`); ``stop`` (an Event, or a callable such as a
+        dialog's ``wasCanceled``) ends the run between ROIs, keeping the ones
+        measured.
         """
         steps = self.resolved(steps, instances)
         ids = list(self.rois) if roi_ids is None else list(roi_ids)
         ids = [i for i in ids if self.rois[i].reviewed and self.rois[i].use]
+        from ..region_runs import Progress, stopped
         records = {}
+        status = Progress(len(ids), report, progress, what="ROIs")
         for n, roi_id in enumerate(ids):
+            if stopped(stop):
+                break
             record, _, _ = self._evaluate_record(roi_id, steps, reuse=reuse)
             records[roi_id] = record
-            if progress:
-                progress(n + 1, len(ids))
-        run = self._log(steps, len(records), chain=chain)
+            status(n + 1)
+        run = self._log(steps, len(records), chain=chain,
+                        stopped=len(records) < len(ids))
         self._store(records, steps)
         # the records go back to the caller, who counts what failed; what
         # is kept of them is in `tables`
@@ -710,13 +720,13 @@ class ROIProject:
                 # a step re-run only for its figure tells nobody anything
                 # new, and storing it again would grow the file per click
                 updated.append(step.label)
-            entry, result = self._one_step(step, region, tables)
+            entry, result = self._one_step(step, region, tables, roi_id)
             entry["signature"] = self.step_signature(step, inputs)
             record["steps"][step.label] = entry
             results[step.label] = result
         return record, results, updated
 
-    def _one_step(self, step, region, tables):
+    def _one_step(self, step, region, tables, roi_id=None):
         """One evaluator on one ROI, as (what is recorded, what it returned).
 
         The record is data and outlives the session; the result is the live
@@ -725,7 +735,8 @@ class ROIProject:
         ``tables`` is what `_region_tables` cut, shared by the steps.
         """
         try:
-            result = step.plugin.run(self._context(region, tables), step.settings)
+            result = step.plugin.run(self._context(region, tables, region_id=roi_id),
+                                     step.settings)
             return region_entry(result), result
         except Exception as error:
             return {"error": f"{type(error).__name__}: {error}"}, None

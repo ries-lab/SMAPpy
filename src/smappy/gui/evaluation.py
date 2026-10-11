@@ -244,12 +244,16 @@ class EvaluationWindow(QWidget):
         progress = QProgressDialog("evaluating ROIs...", "stop", 0, len(ids), self)
         progress.setWindowModality(Qt.WindowModal)
         run = project.evaluate(steps=steps, reuse=reuse,
-                               progress=lambda done, total: progress.setValue(done))
+                               progress=lambda done, total: progress.setValue(done),
+                               report=progress.setLabelText,
+                               stop=progress.wasCanceled)
         progress.setValue(len(ids))
         failed = sum(1 for record in run["records"].values()
                      if pipeline_module.errors(record))
         text = (f"{len(run['records'])} ROIs, {len(steps)} step(s)"
                 + (f", {waiting} of them out of date" if reuse else "")
+                + (f" -- stopped, {len(ids) - len(run['records'])} not reached"
+                   if run.get("stopped") else "")
                 + (f"; {failed} with a failing step" if failed else ""))
         self.status.setText(text)
         # into the session's log, each evaluator with its settings: the

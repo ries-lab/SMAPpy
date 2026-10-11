@@ -413,8 +413,18 @@ Each step leaves the program working and the suite green.
      localization file, not in the metadata attribute (read back into the
      ROI project's JSON as columns); *save the ROI results* on the saver
      leaves them out.
-   * *3d*: id-column regions and the shared runner, with percentage, rate,
-     time left and stop.
+   * *3d, done*: `region_runs`: `ColumnRegions` (an id column's regions,
+     one sort; each layer cut to them, the grouped table through
+     `group_id`), `evaluate_regions` (one signature per step and table),
+     `Session.evaluate_regions` and `Session.id_regions`, saved under
+     `/id_regions`.  `ctx.region_id` and `ctx.per_region` say a run is one
+     region of many, a cluster included, which has no `ctx.region`.  The ROI
+     runner and a chain's evaluator step report percentage, rate and time
+     left and stop when asked; the evaluation window's *stop* button now
+     works.  Measured on 10^5 clusters of 20 localizations: 0.3 s to split,
+     0.1 ms a cluster of runner, 1.3 ms a cluster for Localization
+     Statistics with its fit off.  No GUI runs a column's regions yet: that
+     is the block (step 4).
    * *3e*: `keep` / `restore` per region and the switch.
 4. **Blocks** in chains, the nesting rules and the cycle check, write-back and
    its warning; one step-list editor, the evaluation window becoming it.

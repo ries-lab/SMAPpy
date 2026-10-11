@@ -715,7 +715,7 @@ class LocalizationStatistics(Plugin):
             locs = table
             where = "all localizations"
         else:
-            if ctx.region is None:
+            if not ctx.per_region:
                 # in a region an empty one is an answer -- no localizations
                 # here -- and a row that says so, not a failure
                 selection.require(MIN_FOR_FIT, ctx.report, "a distribution")
@@ -723,12 +723,12 @@ class LocalizationStatistics(Plugin):
             where = str(selection)
         if grouped:
             where += " (grouped)"
-        if not len(locs) and ctx.region is None:
+        if not len(locs) and not ctx.per_region:
             raise ValueError("no localizations to describe")
         on_time, why = None, ""
         if "n_in_group" in locs:
             on_time = blink_on_times(locs)
-        elif ctx.region is None:
+        elif not ctx.per_region:
             on_time, why = grouped_on_time(ctx.session, ctx.layer,
                                            settings.source != "all")
         # in a region the session's grouped table is the whole field's, not

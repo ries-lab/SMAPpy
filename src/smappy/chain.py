@@ -364,7 +364,7 @@ def per_roi(plugin_cls, step_settings) -> bool:
 
 
 def evaluate_sites(project, plugin_cls, label: str, settings, chain: str = "",
-                   progress=None) -> Result:
+                   progress=None, stop=None) -> Result:
     """An evaluator as a chain step: run over every included ROI.
 
     Stored as an evaluation run of its own, marked with the chain that made
@@ -385,19 +385,21 @@ def evaluate_sites(project, plugin_cls, label: str, settings, chain: str = "",
     steps = pipeline_module.resolve([Instance(plugin=plugin_cls.path, label=label,
                                               values=settings_values(settings))])
     run = project.evaluate(steps=steps, roi_ids=ids, reuse=True, chain=chain,
-                           progress=(lambda i, n: progress(f"{i} of {n} sites"))
-                           if progress else None)
+                           report=progress, stop=stop)
     failed: Dict[str, int] = {}
     for record in run["records"].values():
         for why in pipeline_module.errors(record).values():
             failed[why] = failed.get(why, 0) + 1
-    text = f"{len(ids)} sites evaluated"
+    done = len(run["records"])
+    text = f"{done} sites evaluated"
+    if done < len(ids):
+        text += f", stopped before the other {len(ids) - done}"
     if failed:
         text += (f", failed on {sum(failed.values())}: " +
                  "; ".join(f"{why} ({n})" for why, n in
                            sorted(failed.items(), key=lambda kv: -kv[1])[:3]))
     return Result(text=text, settings=settings,
-                  data={"sites": len(ids), "failed": sum(failed.values()),
+                  data={"sites": done, "failed": sum(failed.values()),
                         "run": run["id"], "label": steps[0].label})
 
 
@@ -530,7 +532,8 @@ class ChainPlugin(Plugin):
                 if per_roi(cls, sub):
                     result = evaluate_sites(
                         session.rois, cls, step.label, own, chain=self.path,
-                        progress=lambda text, l=label: ctx.report(f"{l}: {text}"))
+                        progress=lambda text, l=label: ctx.report(f"{l}: {text}"),
+                        stop=ctx.stop)
                 else:
                     result = plugin.run(sctx, own)
             except Exception as error:
