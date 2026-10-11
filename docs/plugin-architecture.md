@@ -202,6 +202,10 @@ tab, so pinning one there could only produce a Run button that fails.  Any
 
 ### The ROI evaluation pipeline is a separate window
 
+*To be replaced* -- `docs/regions.md` (2026-10-11) folds evaluators into
+ordinary plugins and the pipeline into a block of a chain.  What follows
+describes the code as it still is.
+
 Evaluators are the one thing that does not fit a tab.  A tab's pins are run
 individually on demand; an evaluation is an *ordered pipeline* run over every
 site at once, each instance contributing columns to that site's row.  Putting

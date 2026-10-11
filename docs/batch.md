@@ -114,6 +114,9 @@ default `skip`: the file is skipped and the report says why).
 
 ### ROIs: segment, evaluate, analyse
 
+*To be replaced* -- `docs/regions.md` (2026-10-11): an evaluator step becomes
+a block run once per region.  What follows describes the code as it still is.
+
 Decided 2026-10-05.  A chain can do what the ROI manager does by hand:
 
 * a **segmenter** (`ROIManager/Segment/...`) is an ordinary step; the ROIs it
