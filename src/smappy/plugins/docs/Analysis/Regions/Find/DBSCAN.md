@@ -1,6 +1,6 @@
 ---
 version: "1"
-covers: [smappy.plugins.clusters.dbscan, smappy.plugins.clusters.auto_eps, smappy.plugins.clusters.with_clusters, smappy.plugins.clusters.hull, smappy.plugins.clusters.DBSCAN.run]
+covers: [smappy.plugins.clusters.dbscan, smappy.plugins.clusters.auto_eps, smappy.plugins.clusters.with_clusters, smappy.plugins.clusters.DBSCAN.run]
 ---
 
 ## What it does
@@ -24,8 +24,9 @@ cluster has).  With them
   say -- and keeps a row of numbers per cluster, which the block's *write
   values* or [Regions to column](plugin:Analysis/Regions/Regions to column)
   puts back onto the localizations, to filter or colour by;
-* *output* set to ROIs makes an ROI of each cluster, to look at, review and
-  annotate in the [ROI manager](plugin:Panels/ROI manager).
+* [Column to ROIs](plugin:Analysis/Regions/Column to ROIs) makes an ROI of
+  each cluster, to look at, review and annotate in the
+  [ROI manager](plugin:Panels/ROI manager).
 
 It clusters the localizations of the layer as it is shown: its filter, its
 ROI and, on a grouped layer, its blinks.  Use it on structures that are
@@ -39,7 +40,7 @@ and it joins everything into one.
 from smappy.simulate import simulate
 from smappy.simulate.settings import (SimulationSettings, StructureSettings,
                                       LabellingSettings)
-from smappy.plugins.clusters import dbscan, sizes_of, hull
+from smappy.plugins.clusters import dbscan, sizes_of
 locs = simulate(SimulationSettings(n_frames=3000, seed=3,
                                    structure=StructureSettings(preset="npc"),
                                    labelling=LabellingSettings(efficiency=0.6)))
@@ -108,12 +109,6 @@ $\varepsilon$ of each other -- a hundred thousand localizations take about
 a second.  Each file of the session is clustered on its own, and the
 numbers of the second file's clusters follow the first's.
 
-**ROIs.**  An ROI's outline is the convex hull of its cluster, its centre the
-mean position, and it remembers the cluster's number and size (`origin`).
-A cluster whose localizations lie on a line, or that has fewer than three,
-gets no ROI.  ROIs cannot be made inside a block, where clusters are found
-per region.
-
 ## Parameters
 
 ### radius_nm
@@ -131,22 +126,9 @@ usual.
 Off clusters by x and y only, which joins structures that are above each
 other.
 
-### output
-The column is what a block repeats over; the ROIs are for looking.  Both
-write the column and make the ROIs.
-
-### min_size
-Keeps the ROI manager to the clusters worth looking at; the column holds all
-of them either way.
-
-### replace
-Without it, running again adds a second set of ROIs over the first.
-
 ## Output
 
-* **The table**, with `cluster_id` and `n_in_cluster` (unless *output* is
-  ROIs alone).
-* **ROIs** in the ROI manager, with *output* ROIs or both.
+* **The table**, with `cluster_id` and `n_in_cluster`.
 * **Text**: how many clusters, how many localizations are in one, the
   radius used.
 * **Figure**: the clusters in colour, the rest grey; and how large they
@@ -167,7 +149,8 @@ MIiSR version of DBSCAN ([Caetano et al. 2015](https://doi.org/10.1371/journal.p
   which in a sparse field merges everything.  A radius of 0 still gives it.
 * **The output** is `cluster_id` 0 for noise (SMAP: `clusterindex` -1) and
   `n_in_cluster`; SMAP writes `clustertype` (core, border, noise) instead.
-  Clusters are numbered by size.  ROIs can be made of them.
+  Clusters are numbered by size.  ROIs are made of them by a plugin of
+  their own, for any clusterer's ids.
 * **Files** are clustered one at a time, and on a grouped layer the blinks.
 
 ## References

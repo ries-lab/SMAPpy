@@ -53,7 +53,8 @@ DEFAULT_TABS = (
     # a tuple seeds in the order given: finding regions comes before
     # summarising them
     {"name": "Regions", "kind": "plugins", "header": "roi",
-     "seed": ("Analysis/Regions/Find/", "Analysis/Regions/Regions to column",
+     "seed": ("Analysis/Regions/Find/", "Analysis/Regions/Column to ROIs",
+              "Analysis/Regions/Regions to column",
               "Analysis/Regions/Summarize/", "Analysis/Regions/Workflow/")},
 )
 

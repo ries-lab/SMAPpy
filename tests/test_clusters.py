@@ -5,8 +5,9 @@ import pytest
 
 from smappy.locs import Localizations
 from smappy.mathparse import recipes
-from smappy.plugins.clusters import DBSCAN, auto_eps, dbscan, hull, sizes_of
-from smappy.plugins.region_column import RegionsToColumn, roi_numbers
+from smappy.plugins.clusters import DBSCAN, auto_eps, dbscan, sizes_of
+from smappy.plugins.region_column import (ColumnToROIs, RegionsToColumn, column_regions,
+                                          hull, roi_numbers)
 from smappy.region_runs import values_onto
 from smappy.session import Session
 
@@ -105,18 +106,39 @@ def test_an_roi_per_cluster_outlines_it_and_replace_makes_them_again():
     xy, truth = blobs()
     session = Session(table(xy))
     session.show_grouped(0, False)
-    settings = DBSCAN.Settings(radius_nm=40, neighbours=5, output="rois", min_size=30)
-    result = session.run(DBSCAN(), settings)
-    assert "cluster_id" not in session.locs             # ROIs only
+    session.run(DBSCAN(), DBSCAN.Settings(radius_nm=40, neighbours=5))
+    result = session.run(ColumnToROIs(), ColumnToROIs.Settings(min_size=30))
     project = session.rois
     assert len(project.rois) == 2 and result.data["rois"] == 2   # 25 < 30
     for roi in project.rois.values():
         inside = project.region(roi).mask(xy[:, 0], xy[:, 1])
         k = roi.origin["cluster"]
         assert inside[truth == k].all()                 # the hull holds its cluster
-    session.run(DBSCAN(), DBSCAN.Settings(radius_nm=40, neighbours=5, output="both",
-                                          replace=True))
-    assert len(project.rois) == 3 and "cluster_id" in session.locs
+    session.run(ColumnToROIs(), ColumnToROIs.Settings(min_size=1, replace=True))
+    assert len(project.rois) == 3
+    session.run(ColumnToROIs(), ColumnToROIs.Settings(min_size=1))
+    assert len(project.rois) == 6                       # without replace, beside them
+
+
+def test_any_id_column_makes_rois_and_a_box_takes_the_projects_shape():
+    xy, truth = blobs()
+    session = Session(table(xy, mine=truth * 7))
+    session.show_grouped(0, False)
+    session.rois.set_geometry(400)
+    session.run(ColumnToROIs(), ColumnToROIs.Settings(column="mine", shape="box"))
+    rois = list(session.rois.rois.values())
+    assert sorted(r.origin["cluster"] for r in rois) == [7, 14, 21]
+    assert all(r.polygon is None for r in rois)
+    first = next(r for r in rois if r.origin["cluster"] == 7)
+    assert np.allclose(first.center, xy[truth == 1].mean(axis=0))
+
+
+def test_column_regions_refuses_a_column_that_is_not_an_id():
+    xy, truth = blobs()
+    with pytest.raises(ValueError, match="not an id column"):
+        column_regions(table(xy), "photons")
+    with pytest.raises(ValueError, match="has no 'cluster_id'"):
+        column_regions(table(xy), "cluster_id")
 
 
 def test_rois_cannot_be_made_inside_a_block():
@@ -125,9 +147,9 @@ def test_rois_cannot_be_made_inside_a_block():
     session = Session(table(xy, cluster_id=truth))
     session.show_grouped(0, False)
     cls = chain_class(ChainSpec(steps=[Block(regions="cluster_id", steps=[
-        Step(plugin="Analysis/Regions/Find/DBSCAN", values={"output": "rois"})])]))
+        Step(plugin="Analysis/Regions/Column to ROIs")])]))
     result = session.run(cls(), cls.Settings())
-    table_ = session.id_regions["cluster_id"]["DBSCAN"]
+    table_ = session.id_regions["cluster_id"]["Column to ROIs"]
     assert all("cannot be made inside a block" in e for e in table_.errors)
 
 

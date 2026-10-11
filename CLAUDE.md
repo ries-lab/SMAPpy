@@ -107,7 +107,7 @@ shape, so read the one closest to what you are writing:
 | finds a structure by its shape and judges it, then counts it | `npc.py` (a ring filter and circle fit in the segmenter, a per-site count, and a model of whole pores in `smappy/npc.py` fitted to the site table) |
 | summarises what evaluators measured | `roi.py`'s `SiteAnalysisPlugin` (an evaluator to read, a *results from* field, a preflight that asks which when there are several; under `Analysis/Regions/Summarize`) |
 | runs the ROI manager's segment, evaluate and analyse as one | `npc_analysis.chain.yaml` (a shipped chain: a block runs NPC Corners in every ROI before the next step; `docs/batch.md`, "ROIs: segment, evaluate, analyse") |
-| finds clusters and names them in the table | `clusters.py` (DBSCAN: `cluster_id` / `n_in_cluster`, optionally ROIs) |
+| finds clusters and names them in the table | `clusters.py` (DBSCAN: `cluster_id` / `n_in_cluster`; ROIs of them are `region_column.py`'s *Column to ROIs*, for any id column) |
 | writes what was measured per region onto its localizations | `region_column.py` (*Regions to column*: `region_runs.values_onto`, NaN outside, never over a column of the localizations' own; a block's *write values* does the same) |
 | runs steps once per region, writes columns back | `blocks.py` (a `chain.Block`; `region_runs.RegionScratch`, `WriteBack`, *write values*; per-cluster results in `Session.id_regions`) |
 | opens an interactive window of the GUI's | `bead_calibration.py` (`Plugin.window`: the button opens what the GUI registered in `session.window_openers`) |

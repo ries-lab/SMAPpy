@@ -1,4 +1,5 @@
-"""What was measured per region, written onto the localizations in it.
+"""Between regions and columns: what was measured per region written onto
+its localizations, and an ROI made of each region an id column names.
 
 `docs/regions.md` ("Region values as columns") has the decision: rather than
 a second table with a filter of its own, a region's results go onto its rows
@@ -15,16 +16,23 @@ current; this plugin is for results already there.
 
 The ROIs' own numbers (`roi_id`, what *ROI to column* used to write) are one
 of the values: of the ROIs, with or without an evaluation.
+
+**Column to ROIs** is the other direction: an ROI of the ROI manager for every
+id of a column (a cluster, whoever found it) with enough localizations, to
+look at, review and annotate.  It used to be part of DBSCAN; on its own, any
+clusterer -- a plugin dropped in, or ids read from a file -- gets it.  Its
+outline is the convex hull of the cluster, or the project's ROI shape around
+the cluster's centre for clusters that should be measured alike.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 
 from . import Context, Plugin, Result, param, register
-from .roi import PER, auto_only, id_table, table_rows
+from .roi import PER, auto_only, id_table, replace_param, table_rows
 
 # what *results from* is when it is empty: the ROIs, without an evaluation
 NUMBERS = "the ROIs' numbers"
@@ -144,3 +152,117 @@ def roi_numbers(n: int, members, numbers: Dict[Any, int], rule: str = "last") ->
     pieces = [(rows, np.full(len(rows), numbers[r], dtype=np.int64))
               for r, rows in members if len(rows)]
     return merge_pieces(n, pieces, rule) if pieces else np.zeros(n, dtype=np.int64)
+
+
+# ------------------------------------------------------------ column to ROIs
+
+SHAPES = (("hull", "the cluster's outline"), ("box", "the project's ROI shape"))
+
+
+@dataclass
+class ColumnROIsSettings:
+    column: str = param("cluster_id", label="column",
+                        help="an id column of the table; 0 and below is in no region")
+    min_size: int = param(10, label="at least", unit="locs", min=1,
+                          help="the localizations an id needs to become an ROI")
+    shape: str = param("hull", label="outline", choices=SHAPES,
+                       help="the convex hull of the cluster, or the ROI manager's "
+                            "own shape and size centred on it")
+    replace: bool = replace_param()
+
+
+def hull(xy: np.ndarray) -> Optional[List[List[float]]]:
+    """The convex hull of a cluster's positions, as polygon vertices; None
+    when there are fewer than three points or they lie on a line."""
+    from scipy.spatial import ConvexHull, QhullError
+    xy = np.asarray(xy, dtype=float)
+    if len(xy) < 3:
+        return None
+    try:
+        h = ConvexHull(xy)
+    except (QhullError, ValueError):
+        return None
+    return xy[h.vertices].tolist()
+
+
+def column_regions(locs, column: str, min_size: int = 1, outline: bool = True
+                   ) -> List[Dict[str, Any]]:
+    """One entry per id of ``column`` with at least ``min_size`` rows:
+    ``{"id", "rows", "center", "polygon", "file"}`` -- the centre the mean
+    position, the polygon the convex hull (None when ``outline`` is off, or
+    the points are fewer than three or on a line), the file that of its
+    first row."""
+    from ..region_runs import split_ids
+    if column not in locs:
+        raise ValueError(f"the table has no {column!r}: it has "
+                         f"{', '.join(sorted(locs.keys()))}")
+    values = np.asarray(locs[column])
+    if values.dtype.kind not in "iub" and not (
+            values.dtype.kind == "f" and np.all(np.mod(values[np.isfinite(values)], 1) == 0)):
+        raise ValueError(f"{column} is not an id column: its values are not whole numbers")
+    x = np.asarray(locs["x_nm"], dtype=float)
+    y = np.asarray(locs["y_nm"], dtype=float)
+    files = (np.asarray(locs["filenumber"]) if "filenumber" in locs
+             else np.zeros(len(locs), dtype=np.int64))
+    out = []
+    ids, rows = split_ids(values)
+    for k, members in zip(ids, rows):
+        if len(members) < min_size:
+            continue
+        xy = np.column_stack((x[members], y[members]))
+        out.append({"id": int(k), "rows": members,
+                    "center": [float(xy[:, 0].mean()), float(xy[:, 1].mean())],
+                    "polygon": hull(xy) if outline else None,
+                    "file": int(files[members[0]])})
+    return out
+
+
+@register("Analysis/Regions/Column to ROIs")
+class ColumnToROIs(Plugin):
+    """Makes an ROI of every region an id column names, such as each cluster."""
+
+    Settings = ColumnROIsSettings
+    changes_locs = False
+    version = "1"
+
+    def run(self, ctx: Context, settings: ColumnROIsSettings) -> Result:
+        if ctx.per_region:
+            raise ValueError("ROIs cannot be made inside a block: make them of "
+                             "the column after it")
+        project = ctx.rois
+        if project is None:
+            raise ValueError("there is no ROI manager project to add ROIs to")
+        sources = {getattr(s, "number", 0): s.id for s in project.sources.values()}
+        if not sources:
+            raise ValueError("the ROI manager has no file to add ROIs to")
+        column = settings.column.strip()
+        outline = settings.shape == "hull"
+        found = column_regions(ctx.locs, column, settings.min_size, outline)
+        made, flat = 0, 0
+        with project.edit(f"{self.name}: ROIs") as step:
+            replaced = []
+            if settings.replace:
+                replaced = [r.id for r in project.rois.values()
+                            if (r.origin or {}).get("method") == self.path
+                            and (r.origin or {}).get("column") == column]
+                for roi_id in replaced:
+                    project.rois.pop(roi_id, None)
+            for region in found:
+                if outline and region["polygon"] is None:
+                    flat += 1
+                    continue
+                file_id = sources.get(region["file"], next(iter(sources.values())))
+                project.add_roi(file_id, region["center"], polygon=region["polygon"],
+                                origin={"method": self.path, "column": column,
+                                        "cluster": region["id"],
+                                        "localizations": int(len(region["rows"]))})
+                made += 1
+            step.label = f"{self.name}: {made} ROIs" + (
+                f" for {len(replaced)}" if replaced else "")
+        text = f"{made} ROIs of {column}, from {settings.min_size} localizations"
+        if replaced:
+            text += f", replacing {len(replaced)}"
+        if flat:
+            text += f"; {flat} on a line have no outline and no ROI"
+        return Result(text=text, settings=settings, data={"rois": made},
+                      values={"rois": made})

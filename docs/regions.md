@@ -324,8 +324,10 @@ A clusterer always writes **`cluster_id`** and **`n_in_cluster`** (the
 localizations in the cluster, the analogue of `n_in_group`) onto the
 localization table.  Filtering clusters by size is then an ordinary filter on
 `n_in_cluster`.  A cluster carries no annotations of its own: to review or
-comment on clusters, a *Regions/Find* plugin makes ROIs of them (a polygon
-around each, `origin` the clusterer).  Opening the ROI manager stays optional,
+comment on clusters, *Regions/Column to ROIs* makes ROIs of them -- of any id
+column, so every clusterer gets it and none makes ROIs itself (a convex hull
+around each, or the project's ROI shape on its centre; `origin` the column
+and the id).  Opening the ROI manager stays optional,
 and past some number of ROIs it lists them without drawing their boxes on the
 picture.
 
@@ -336,8 +338,9 @@ Paths change, and nothing old is kept for compatibility: SMAPpy has one user.
 ```
 Analysis/Measure/...            every measurement: on the view, per ROI, per cluster
 Analysis/Regions/Find/...       makes regions: Density Peaks and NPC (ROIs),
-                                DBSCAN (cluster_id, ROIs, or both)
+                                DBSCAN (cluster_id)
 Analysis/Regions/Summarize/...  reads a region table
+Analysis/Regions/Column to ROIs     an ROI per id of a column (a cluster)
 Analysis/Regions/Regions to column  what was measured per region (or roi_id) onto the table
 ```
 
@@ -533,7 +536,9 @@ Each step leaves the program working and the suite green.
    column* (`plugins/region_column.py`), which replaces *ROI to column*:
    any numeric value of an evaluation on the ROIs or of an id column's
    regions, or the ROIs' numbers, written onto the localizations, NaN
-   outside, with a *prefix* and the overlap rule.
+   outside, with a *prefix* and the overlap rule.  ROIs of clusters moved
+   out of DBSCAN into *Column to ROIs*, which takes any id column, a
+   minimum size (10 localizations) and the hull or the project's shape.
 
 Every step that moves a plugin or changes what it computes brings its page
 along (`CLAUDE.md`, "The plugin's page"), and the exhaustive plugin-list tests

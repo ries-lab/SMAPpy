@@ -60,7 +60,8 @@ def test_the_default_workspace_is_seeded_from_what_is_installed():
     regions = next(t for t in ws.tabs if t.name == "Regions")
     assert [i.plugin for i in regions.instances] == [
         DBSCAN, "Analysis/Regions/Find/Density Peaks", "Analysis/Regions/Find/NPC",
-        ROI_COLUMN, "Analysis/Regions/Summarize/Histograms",
+        "Analysis/Regions/Column to ROIs", ROI_COLUMN,
+        "Analysis/Regions/Summarize/Histograms",
         "Analysis/Regions/Summarize/NPC Labeling Efficiency",
         "Analysis/Regions/Workflow/NPC Analysis"]
     # a tab the *user* adds starts empty; only the shipped ones are seeded

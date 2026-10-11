@@ -4,9 +4,11 @@
 ``cluster_id`` -- 1, 2, ... by size, 0 for a localization in no cluster -- and
 ``n_in_cluster``, the localizations of its cluster, onto every row; the table
 then names its regions, and a block repeats over them (`blocks.py`), a filter
-on ``n_in_cluster`` keeps the large ones, and *ROIs* makes an ROI of each to
-review and annotate.  Both columns are recipes with the rule ``max`` for the
-grouped table (`mathparse.remember`), so a blink keeps its cluster.
+on ``n_in_cluster`` keeps the large ones, and *Column to ROIs*
+(`region_column.py`) makes an ROI of each to review and annotate -- of any
+clusterer's id, not only this one's.  Both columns are recipes with the rule
+``max`` for the grouped table (`mathparse.remember`), so a blink keeps its
+cluster.
 
 **DBSCAN** (Ester et al. 1996), as SMAP's ``Cluster DBSCAN`` (the MIiSR
 version, Caetano et al. 2015) defines it: a localization is a *core* point
@@ -37,7 +39,7 @@ What was measured per cluster goes back onto its localizations with
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict
 
 import numpy as np
 
@@ -116,20 +118,6 @@ def sizes_of(labels: np.ndarray) -> np.ndarray:
     return out
 
 
-def hull(xy: np.ndarray) -> Optional[List[List[float]]]:
-    """The convex hull of a cluster's positions, as polygon vertices; None
-    when there are fewer than three points or they lie on a line."""
-    from scipy.spatial import ConvexHull, QhullError
-    xy = np.asarray(xy, dtype=float)
-    if len(xy) < 3:
-        return None
-    try:
-        h = ConvexHull(xy)
-    except (QhullError, ValueError):
-        return None
-    return xy[h.vertices].tolist()
-
-
 def with_clusters(locs: Localizations, labels: np.ndarray, name: str = "cluster_id"
                   ) -> Localizations:
     """The table with ``name`` and ``n_in_cluster``, both recipes that keep
@@ -155,39 +143,17 @@ class DBSCANSettings:
                                  "a core point")
     use_z: bool = param(True, label="in 3D", help="cluster in x, y and z when the "
                                                   "table has z_nm")
-    output: str = param("column", label="output",
-                        choices=(("column", "cluster_id on the table"),
-                                 ("rois", "an ROI per cluster"),
-                                 ("both", "both")),
-                        help="the regions as a column of the table, as ROIs of "
-                             "the ROI manager, or both")
-    min_size: int = param(0, label="ROIs from", min=0, advanced=True,
-                          help="the localizations a cluster needs to become an "
-                               "ROI; 0: every cluster")
-    replace: bool = param(False, label="replace earlier ROIs",
-                          help="remove the ROIs an earlier run made before "
-                               "making new ones")
 
 
 @register("Analysis/Regions/Find/DBSCAN")
 class DBSCAN(Plugin):
-    """Finds clusters by density and names them: cluster_id, and ROIs."""
+    """Finds clusters by density and names them: cluster_id and n_in_cluster."""
 
     Settings = DBSCANSettings
     changes_locs = True
     version = "1"
 
-    def changes_locs_for(self, settings) -> Optional[bool]:
-        return settings.output != "rois"
-
-    def active(self, settings: DBSCANSettings):
-        rois = settings.output != "column"
-        return {"min_size": rois, "replace": rois}
-
     def run(self, ctx: Context, settings: DBSCANSettings) -> Result:
-        if settings.output != "column" and ctx.per_region:
-            raise ValueError("ROIs cannot be made inside a block: write the "
-                             "column there, and make ROIs of it afterwards")
         table, selection = ctx.table()
         grouped = table is not ctx.locs
         # the localizations get their blink's cluster through group_id, so
@@ -223,14 +189,8 @@ class DBSCAN(Plugin):
                 f"{int(len(labels) - clustered)} in none; radius "
                 + ", ".join(f"{e:.1f}" for e in eps_used) + f" nm, {settings.neighbours} "
                 "neighbours" + (" (blinks)" if grouped else ""))
-        locs = None
+        locs = with_clusters(ctx.locs, labels)
         data: Dict[str, Any] = {"clusters": n_clusters, "radius_nm": eps_used}
-        if settings.output != "rois":
-            locs = with_clusters(ctx.locs, labels)
-        if settings.output != "column":
-            made = self._make_rois(ctx, labels, settings)
-            text += f"; {made} ROIs"
-            data["rois"] = made
         sizes = np.bincount(labels)[1:] if n_clusters else np.zeros(0, int)
         xy = np.column_stack([np.asarray(ctx.locs["x_nm"], float),
                               np.asarray(ctx.locs["y_nm"], float)])
@@ -238,40 +198,6 @@ class DBSCAN(Plugin):
                       values={"clusters": n_clusters, "clustered": clustered},
                       plot=Plot(lambda figure: draw_clusters(figure, xy, labels, sizes),
                                 panels=2, size=(8, 3.6)))
-
-    def _make_rois(self, ctx, labels, settings) -> int:
-        project = ctx.rois
-        if project is None:
-            raise ValueError("there is no ROI manager project to add ROIs to")
-        locs = ctx.locs
-        files = (np.asarray(locs["filenumber"]) if "filenumber" in locs
-                 else np.zeros(len(locs), dtype=np.int64))
-        x = np.asarray(locs["x_nm"], dtype=float)
-        y = np.asarray(locs["y_nm"], dtype=float)
-        sources = {getattr(s, "number", 0): s.id for s in project.sources.values()}
-        if not sources:
-            raise ValueError("the ROI manager has no file to add ROIs to")
-        made = 0
-        with project.edit(f"{self.name}: ROIs") as step:
-            if settings.replace:
-                for roi_id in [r.id for r in project.rois.values()
-                               if (r.origin or {}).get("method") == self.path]:
-                    project.rois.pop(roi_id, None)
-            ids, rows = _groups(labels)
-            for k, members in zip(ids, rows):
-                if len(members) < settings.min_size:
-                    continue
-                file_id = sources.get(int(files[members[0]]), next(iter(sources.values())))
-                outline = hull(np.column_stack((x[members], y[members])))
-                if outline is None:
-                    continue
-                center = [float(x[members].mean()), float(y[members].mean())]
-                project.add_roi(file_id, center, polygon=outline,
-                                origin={"method": self.path, "cluster": int(k),
-                                        "localizations": int(len(members))})
-                made += 1
-            step.label = f"{self.name}: {made} ROIs"
-        return made
 
 
 def _per_localization(locs: Localizations, grouped: Localizations,
@@ -288,11 +214,6 @@ def _per_localization(locs: Localizations, grouped: Localizations,
     out = np.zeros(len(locs), dtype=np.int64)
     out[hit] = labels[order[at[hit]]]
     return out
-
-
-def _groups(labels: np.ndarray):
-    from ..region_runs import split_ids
-    return split_ids(labels)
 
 
 def draw_clusters(figure, xy: np.ndarray, labels: np.ndarray, sizes: np.ndarray) -> None:
