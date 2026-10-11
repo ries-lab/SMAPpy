@@ -15,7 +15,7 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QRectF, Qt, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
-from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QDoubleSpinBox,
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QDoubleSpinBox,
                                QHBoxLayout, QHeaderView, QLabel, QListWidget,
                                QListWidgetItem, QMainWindow, QPushButton,
                                QSplitter, QTableWidget, QTableWidgetItem,
@@ -188,6 +188,11 @@ class ImagePane(QWidget):
         self.image.setRect(QRectF(fov.x0, fov.y0, fov.x1 - fov.x0, fov.y1 - fov.y0))
         self.view.setRange(QRectF(fov.x0, fov.y0, fov.x1 - fov.x0, fov.y1 - fov.y0), padding=0)
         self.fov = fov
+
+    def clipboard_image(self):
+        """The pane as it is on screen, outlines and all: the outlines are
+        what this window is for, and the plain picture is the render's."""
+        return self.graphics.grab().toImage() if self.fov is not None else None
 
     def clear(self) -> None:
         self.image.clear()
@@ -832,6 +837,17 @@ class ROIManagerWindow(QMainWindow):
         if self.drawing == "polygon" and len(v) > 2:
             v = np.vstack([v, v[0]])               # show how it would close
         self.roi_pane.draw("drawing", v[:, 0], v[:, 1])
+
+    # ---------------------------------------------------------------- copy
+    def clipboard_image(self):
+        """What Edit > Copy takes from here: the pane under the mouse, else
+        the ROI's own -- from the menu, the mouse is in another window."""
+        from PySide6.QtGui import QCursor
+        panes = (self.roi_pane, self.zoom_pane, self.file_pane)
+        under = QApplication.widgetAt(QCursor.pos())
+        pane = next((p for p in panes if under is not None
+                     and (under is p or p.isAncestorOf(under))), self.roi_pane)
+        return pane.clipboard_image()
 
     # ---------------------------------------------------------------- undo
     def _update_undo(self) -> None:

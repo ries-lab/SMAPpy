@@ -190,8 +190,8 @@ class ControlWindow(QMainWindow):
         edit.addSeparator()
         self.copy_action = self._action(edit, "Copy", QKeySequence.Copy, self.copy)
         self.copy_action.setToolTip("the selected text, else the picture of the "
-                                    "window in front: the render, the 3D view or "
-                                    "a result's figure")
+                                    "window in front: the render, the 3D view, "
+                                    "the ROI manager or a figure")
         # application-wide, so Ctrl+C in a figure window copies the figure.  A
         # text field still copies its own text: Qt offers it the key first
         self.copy_action.setShortcutContext(Qt.ApplicationShortcut)

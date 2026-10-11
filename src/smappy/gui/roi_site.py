@@ -123,6 +123,13 @@ class SiteWindow(QMainWindow):
         if 0 <= index < len(self._labels):
             self.shown.emit(self._labels[index])
 
+    def clipboard_image(self):
+        """The figure of the evaluator being looked at, for Edit > Copy."""
+        figures = self.figures.get(self.current)
+        if figures is None or self.pages[self.current].currentWidget() is not figures:
+            return None                    # a message, not a figure
+        return figures.clipboard_image()
+
     def closeEvent(self, event) -> None:           # noqa: N802 (Qt's name)
         for figures in self.figures.values():
             figures.close_detached()
