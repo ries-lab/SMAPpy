@@ -106,7 +106,8 @@ shape, so read the one closest to what you are writing:
 | draws what the microscope recorded per frame | `image_tags.py` (the fit's `metadata["frame_tags"]`) |
 | finds a structure by its shape and judges it, then counts it | `npc.py` (a ring filter and circle fit in the segmenter, a per-site count, and a model of whole pores in `smappy/npc.py` fitted to the site table) |
 | summarises what evaluators measured | `roi.py`'s `SiteAnalysisPlugin` (an evaluator to read, a *results from* field, a preflight that asks which when there are several) -- becoming table plugins on the region table, under `Analysis/Regions/Summarize` (`docs/regions.md`) |
-| runs the ROI manager's segment, evaluate and analyse as one | `npc_analysis.chain.yaml` (a shipped chain: an evaluator step runs over every ROI before the next; `docs/batch.md`, "ROIs: segment, evaluate, analyse") -- to become a chain with a block run once per region (`docs/regions.md`) |
+| runs the ROI manager's segment, evaluate and analyse as one | `npc_analysis.chain.yaml` (a shipped chain: a block runs NPC Corners in every ROI before the next step; `docs/batch.md`, "ROIs: segment, evaluate, analyse") |
+| runs steps once per region, writes columns back | `blocks.py` (a `chain.Block`; `region_runs.RegionScratch`, `WriteBack`; per-cluster results in `Session.id_regions`) |
 | opens an interactive window of the GUI's | `bead_calibration.py` (`Plugin.window`: the button opens what the GUI registered in `session.window_openers`) |
 | runs an external program in its own Python | `uipsf.py` (`smappy.uipsf`: a worker script under that program's interpreter, progress read from its output, the result converted into smappy's own file) |
 | hands the session to a new instance | `smappy.handoff` (*File > Open in a new window*: the table through shared memory, the rest as JSON, `smappy-gui --handoff`) |
@@ -153,9 +154,9 @@ class Thing(Plugin):
   column each of the region table) and `Result.arrays`, so it can run once
   per ROI -- in `ROIProject.region_context(roi)`: `ctx.locs` the ROI's rows,
   each layer's filter over them, `ctx.region` its shape -- as well as on the
-  view like any other plugin.  The evaluation window offers these; a chain
-  step of one says `regions: rois` to run in each ROI before the next step,
-  until blocks replace that and bring ids such as `cluster_id`
+  view like any other plugin.  The evaluation window offers these; in a chain
+  it runs once in each region as a step of a block (`chain.Block`,
+  `blocks.py`): over the ROIs or an id column such as `cluster_id`
   (`docs/regions.md`).  Its results belong to
   the ROI, whoever ran them, under the evaluation's name
   (`ROIProject.evaluations`; a renamed one is a second evaluation), so an
@@ -220,6 +221,8 @@ written this way; it is also what makes the tests readable.
 * `ctx.warn(text)` for what must not be missed: kept in `ctx.warnings`, shown
   as its own line that progress does not overwrite.  Put the warnings in the
   result's text if they should reach the history.
+* `ctx.region_id` / `ctx.per_region` -- set when the run is one region of
+  many (an ROI or a cluster); `ctx.region` is the shape, None for a cluster.
 * `ctx.stop` and `ctx.writer_finished` -- `threading.Event`s or None, set from
   another thread: end the run early keeping what it has, and "the live source
   is complete".  The Fit plugin honours both; a long plugin may check `stop`.
