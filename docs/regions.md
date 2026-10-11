@@ -467,7 +467,17 @@ Each step leaves the program working and the suite green.
      off* (`without_slow`); a chain keeps a step's choices in its own
      question now, rather than only its text.  The *Check* button that
      shows the estimate is the editor's (4c).
-   * *4c*: the one editor.
+   * *4c, done*: one editor.  The chain panel's steps are a tree (a block's
+     steps under it; *block...*, add into the selected block, *check* with
+     the estimate and the unwritten columns).  The evaluation window is gone:
+     *Region steps* (`gui/region_steps.py`) is the chain panel opened on the
+     ROI project's block -- its steps `ROIProject.pipeline` (a nested block
+     an instance of `Chain/Block`), its own fields `ROIProject.block_options`,
+     both saved with the project; `pipeline.block_of` / `from_block`
+     convert.  Run measures what is out of date and carries the rest; there
+     is no separate "run everything" any more.  The ROI tab, the ROI manager
+     and the Tools menu open it as *Region steps...*; the ROI tab itself is
+     renamed with step 6.
 5. **Clusters**: DBSCAN under *Regions/Find* writing `cluster_id` and
    `n_in_cluster`, clusters to ROIs, *ROI to column*.
 6. **The tree** moved to `Analysis/Measure` and `Analysis/Regions`, the tab

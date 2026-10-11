@@ -294,9 +294,9 @@ class ROIManagerWindow(QMainWindow):
         # the pipeline is set up in the control window's ROI tab, but it is
         # here that its results are looked at, one site after another; the
         # same window, opened from where the eye already is
-        self.evaluation_button = QPushButton("Evaluation pipeline...")
-        self.evaluation_button.setToolTip("choose the evaluators to run on the ROIs, "
-                                          "order them and set them up")
+        self.evaluation_button = QPushButton("Region steps...")
+        self.evaluation_button.setToolTip("the steps run once in every ROI: choose "
+                                          "them, order them and set them up")
         self.evaluation_button.clicked.connect(self.evaluation_requested.emit)
         llayout.addWidget(self.evaluation_button)
         self.evaluate_live = QCheckBox("plot the evaluation")

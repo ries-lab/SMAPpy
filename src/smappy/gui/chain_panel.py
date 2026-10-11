@@ -73,8 +73,13 @@ class ChainPanel(QWidget):
 
     changed = Signal()              # the steps, or where the chain lives, changed
 
-    def __init__(self, instance: Instance, session: Session, cls: type, parent=None):
+    def __init__(self, instance: Instance, session: Session, cls: type, parent=None,
+                 root: Tuple[int, ...] = ()):
+        """``root`` opens the panel on one block of the chain: its steps are
+        the top of the tree and new steps go into it (the region steps
+        window, `region_steps.py`)."""
         super().__init__(parent)
+        self.root = tuple(root)
         self.instance = instance
         self.session = session
         self.cls = cls
@@ -124,7 +129,7 @@ class ChainPanel(QWidget):
                                      "the columns it changes without writing "
                                      "them back")
         self.check_button.clicked.connect(self.check_block)
-        self.check_button.setEnabled(False)
+        self.check_button.setEnabled(bool(self.root))
         self.checked = QLabel("")
         self.checked.setWordWrap(True)
         self.checked.setStyleSheet("color: gray")
@@ -202,7 +207,9 @@ class ChainPanel(QWidget):
                     if isinstance(step, Block):
                         add(item, step.steps, path + (i,))
                         item.setExpanded(True)
-            add(self.steps, self.cls.spec.steps, ())
+            top = (self.cls.spec.steps if not self.root
+                   else _step_at(self.cls.spec, self.root).steps)
+            add(self.steps, top, self.root)
         finally:
             self.steps.blockSignals(blocked)
 
@@ -233,7 +240,7 @@ class ChainPanel(QWidget):
                 is_block = isinstance(_step_at(self.cls.spec, path), Block)
             except (IndexError, AttributeError):
                 is_block = False
-        self.check_button.setEnabled(is_block and len(path) == 1)
+        self.check_button.setEnabled(bool(self.root) or (is_block and len(path) == 1))
         self.checked.setText("")
 
     def _show_editor(self, on: bool) -> None:
@@ -277,6 +284,9 @@ class ChainPanel(QWidget):
         elif path:
             holder, i = _steps_at(spec, path)
             at, new = i + 1, path[:-1] + (i + 1,)
+        elif self.root:
+            holder = _step_at(spec, self.root).steps
+            at, new = len(holder), self.root + (len(holder),)
         else:
             holder, at, new = spec.steps, len(spec.steps), (len(spec.steps),)
         holder.insert(at, step)
@@ -354,8 +364,8 @@ class ChainPanel(QWidget):
 
     def check_block(self) -> None:
         """Time the selected block in a few regions and say what it found."""
-        path = self.current_path()
-        if len(path) != 1:
+        path = self.current_path() or self.root
+        if not path:
             return
         key = self.cls.spec.keys()[path[0]]
         found = next(((k, cls) for k, step, cls in self.cls.steps if k == key), None)

@@ -253,7 +253,8 @@ class SessionROIs(ROIProject):
                 "tables": self.tables_dict(self.rois),
                 # the pipeline is provenance for the columns in `runs`, so it
                 # is saved with them rather than only in the workspace
-                "pipeline": [asdict(i) for i in self.pipeline]}
+                "pipeline": [asdict(i) for i in self.pipeline],
+                "block_options": self.block_options}
 
     def from_dict(self, doc: Optional[dict]) -> None:
         """Restore ROIs, runs and navigation saved with a file."""
@@ -262,6 +263,8 @@ class SessionROIs(ROIProject):
         self.tables = {}
         self.navigation = {}
         self.pipeline = []
+        from .pipeline import DEFAULT_OPTIONS
+        self.block_options = dict(DEFAULT_OPTIONS)
         self.segment_preview = None
         self.history.clear()        # another file's edits
         if not doc:
@@ -299,8 +302,9 @@ class SessionROIs(ROIProject):
             table.keep_only(self.rois)
             if len(table):
                 self.tables[table.label] = table
-        from .pipeline import from_dict as pipeline_from_dict
+        from .pipeline import DEFAULT_OPTIONS, from_dict as pipeline_from_dict
         self.pipeline = pipeline_from_dict(doc)
+        self.block_options = {**DEFAULT_OPTIONS, **(doc.get("block_options") or {})}
 
     # ---------------------------------------------------------------- misc
     def add_roi(self, file_id, center, polygon=None, reviewed=None, origin=None):

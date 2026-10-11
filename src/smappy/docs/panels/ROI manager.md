@@ -143,8 +143,8 @@ ROI can have its own outline instead (*Polygon*), and a direction (*Direction*),
 an arrow that evaluators can read, for example as the axis of an elongated
 structure.
 
-**6. Evaluating.**  *Evaluation pipeline...* opens the window where the
-evaluators are chosen, ordered and set up, and run over every ROI.  With
+**6. Evaluating.**  *Region steps...* opens the window where the steps run
+in every ROI are chosen, ordered and set up, and run.  With
 *plot the evaluation* ticked, a second window shows what the evaluators draw
 for the selected ROI, one tab per evaluator.  Stepping down the list redraws
 it in place, so that sites are compared like with like.
@@ -325,11 +325,10 @@ Back to the circle or square of the ROI tab.
 ### Clear line
 Removes the direction.
 
-### Evaluation pipeline...
-The same window as the ROI tab's button of that name.  *Re-evaluate what
-changed* there runs only the steps that are out of date, which after one
-edited parameter is one evaluator over the sites rather than the whole
-pipeline.
+### Region steps...
+The same window as the ROI tab's button of that name.  Run there measures
+only what is out of date, which after one edited parameter is one step over
+the sites rather than all of them.
 
 ### plot the evaluation
 Opens the evaluation window beside this one.  Closing that window unticks

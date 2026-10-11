@@ -56,9 +56,9 @@ whoever made it -- and the chain goes on only when all are done.  A ROI on
 which a step fails (no localizations, say) loses its own entry and is
 counted in the block's line, not the run.
 
-**The evaluation window is left alone.**  The counts are stored with the
+**The region steps window is left alone.**  The counts are stored with the
 ROIs as an evaluation called *NPC Corners*, like any other, and the
-evaluation window's pipeline stays as it was set up -- for this work or for
+region steps window's list stays as it was set up -- for this work or for
 another.  A result belongs to its ROI, whoever ran it, so the site table
 shows the chain's counts beside the pipeline's numbers, and NPC Labeling
 Efficiency run again from the ROI tab finds them, with the cutoffs they were

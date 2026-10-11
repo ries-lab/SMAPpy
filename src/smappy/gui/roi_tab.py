@@ -4,8 +4,8 @@ The tab itself is an ordinary `PluginTab` over whatever the user pinned from
 `ROIManager/*` -- the segmenters and the analyses, ordinary run-once plugins.
 What cannot be a pinned plugin sits above them, in this header: the geometry
 every ROI shares, the way into the ROI manager window where sites are chosen
-and judged, and the way into the evaluation window, whose ordered pipeline is a
-different object from a tab's list of pins.
+and judged, and the way into the region steps window, whose block of steps
+run once per ROI is a different object from a tab's list of pins.
 """
 from __future__ import annotations
 
@@ -84,8 +84,8 @@ class ROIHeader(QWidget):
         evaluate = QWidget()
         elayout = QVBoxLayout(evaluate)
         elayout.setContentsMargins(0, 0, 0, 0)
-        self.evaluate_button = QPushButton("Evaluation pipeline...")
-        self.evaluate_button.setToolTip("choose the evaluators to run on every ROI, "
+        self.evaluate_button = QPushButton("Region steps...")
+        self.evaluate_button.setToolTip("the steps run once in every ROI: choose them, "
                                         "order them and set them up; opens its own window")
         self.evaluate_button.clicked.connect(self.open_evaluation)
         elayout.addWidget(self.evaluate_button)
@@ -218,30 +218,25 @@ class ROIHeader(QWidget):
 
     # --------------------------------------------------------------- work
     def open_evaluation(self) -> None:
-        """The pipeline window, one per session, reusing what it was left with.
+        """The region steps window, one per session, reusing what it was left
+        with.
 
-        The pipeline itself lives on the project, not on the window: closing
-        the window must not lose the steps, and the project is what gets saved
+        The block itself lives on the project, not on the window: closing the
+        window must not lose the steps, and the project is what gets saved
         into the localization file beside the results they produce.
         """
-        from .evaluation import EvaluationWindow
-        project = self.project
-        if not project.pipeline:
-            project.pipeline = pipeline_module.default_instances()
+        from .region_steps import RegionStepsWindow
         if self.evaluation is None:
-            self.evaluation = EvaluationWindow(self.session, project.pipeline, self)
+            self.evaluation = RegionStepsWindow(self.session, self)
             self.evaluation.ran.connect(self._evaluated)
         self.evaluation.show()
         self.evaluation.raise_()
 
-    def _evaluated(self, run) -> None:
-        failed = sum(1 for record in run["records"].values()
-                     if pipeline_module.errors(record))
-        self.project.pipeline = self.evaluation.save_values()
+    def _evaluated(self, result) -> None:
         self._update_counts()
         self._show_result()
-        self.summary.setText(f"{len(run['records'])} evaluated"
-                             + (f", {failed} with a failing step" if failed else ""))
+        self.summary.setText(result.text.splitlines()[0].split(": ", 1)[-1]
+                             if result.text else "evaluated")
         self._notify()
 
     def _show_result(self) -> None:

@@ -306,25 +306,35 @@ def test_the_evaluation_window_offers_only_evaluators(app):
     assert set(tree.refs) < set(PluginTree().refs)
 
 
-def test_the_window_edits_the_pipeline_and_keeps_the_values(app):
-    from smappy.gui.evaluation import EvaluationWindow
+def test_the_region_steps_window_edits_the_projects_block(app, monkeypatch):
+    from PySide6.QtCore import Qt
+    from smappy.gui import chooser
+    from smappy.gui.region_steps import RegionStepsWindow
     from smappy.session import Session
 
-    window = EvaluationWindow(Session(table([(0, 0)])))
-    assert [window.list.item(0).text()] == ["Localization Statistics"]
-    window.forms_stack.currentWidget().restore({"bins": 50})
-    window.duplicate()
-    assert [window.list.item(i).text() for i in range(2)] == \
-        ["Localization Statistics", "Localization Statistics copy"]
-    window.move(-1)
-    assert window.list.item(0).text() == "Localization Statistics copy"
-    instances = window.save_values()
-    assert instances[1].values["bins"] == 50
-
-    from PySide6.QtCore import Qt
-    window.list.item(0).setCheckState(Qt.Unchecked)
-    assert not window.instances[0].enabled
-    assert [s.label for s in pipeline_module.resolve(window.instances)] == ["Localization Statistics"]
+    session = Session(table([(0, 0)]))
+    window = RegionStepsWindow(session)
+    project = session.rois
+    tree = window.panel.steps.invisibleRootItem()
+    assert tree.childCount() == 1                       # the block's steps, at the top
+    assert tree.child(0).text(0).startswith("Localization Statistics")
+    window.panel.form.set_values({"for_each_roi.localization_statistics.bins": 50})
+    assert project.pipeline[0].values["bins"] == 50
+    # a step added with nothing selected goes into the block
+    window.panel.steps.setCurrentItem(None)
+    monkeypatch.setattr(chooser, "choose_plugin",
+                        lambda *a, **k: "ROIManager/Evaluate/NPC Corners")
+    window.panel.add_step()
+    assert [i.plugin for i in project.pipeline] == [
+        "Analysis/Measure/Localization Statistics", "ROIManager/Evaluate/NPC Corners"]
+    assert project.pipeline[0].values["bins"] == 50     # what the form held survives
+    window.panel.steps.invisibleRootItem().child(1).setCheckState(0, Qt.Unchecked)
+    assert not project.pipeline[1].enabled
+    assert [s.label for s in pipeline_module.resolve(project.pipeline)] == \
+        ["Localization Statistics"]
+    # what it repeats over is the block's own field
+    window.panel.form.set_values({"for_each_roi.write_back": "n_here"})
+    assert project.block_options["write_back"] == ["n_here"]
 
 
 def test_a_tab_pins_a_per_region_plugin_too(app):
@@ -335,8 +345,8 @@ def test_a_tab_pins_a_per_region_plugin_too(app):
 
 
 def test_find_evaluate_and_analyse_through_the_session(app):
-    """Segment, pipeline, analyse -- the three kinds, on one session."""
-    from smappy.gui.evaluation import EvaluationWindow
+    """Segment, region steps, analyse -- on one session."""
+    from smappy.gui.region_steps import RegionStepsWindow
     from smappy.plugins.roi import DensityPeaks
     from smappy.session import Session
 
@@ -360,14 +370,14 @@ def test_find_evaluate_and_analyse_through_the_session(app):
     for roi in project.rois.values():
         roi.reviewed = True
 
-    window = EvaluationWindow(session)
+    window = RegionStepsWindow(session)
     window.run()
     assert "4 ROIs, 1 step(s)" in window.status.text()
-    # the session's log says what was evaluated, with each evaluator's settings
+    # the session's log says what was evaluated, with each step's settings
     entry = session.history[-1]
-    assert entry["what"] == "ROIManager/Evaluate" and "4 ROIs" in entry["text"]
-    assert entry["steps"][0]["plugin"] == "Analysis/Measure/Localization Statistics"
-    assert entry["steps"][0]["values"]["fit_precision"] is False
+    assert entry["what"] == "ROIManager/Region steps" and "4 ROIs" in entry["text"]
+    assert entry["steps"][0]["plugin"] == "Chain/Block"
+    assert entry["steps"][0]["values"]["localization_statistics.fit_precision"] is False
     rows = project.results()
     assert len(rows) == 4 and rows[0]["n_localizations"] == 100
 

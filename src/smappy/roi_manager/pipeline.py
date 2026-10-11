@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import yaml
 
@@ -81,6 +81,49 @@ def instance_for(path: str) -> Instance:
     return Instance(plugin=path, values=fast_values(cls.Settings))
 
 
+# What the project's pipeline repeats over, and how (`docs/regions.md`): the
+# pipeline is the steps of one block, and these are the block's own fields.
+DEFAULT_OPTIONS = {"regions": "rois", "write_back": [], "merge": "last",
+                   "keep_figures": "auto"}
+BLOCK_PATH = "Chain/Block"            # an instance that is a block of its own
+
+
+def block_of(instances: Sequence[Instance], options: Optional[Dict[str, Any]] = None):
+    """The pipeline as a `chain.Block`: what the region steps window edits."""
+    from ..chain import Block, Step as ChainStep
+    options = {**DEFAULT_OPTIONS, **(options or {})}
+    steps = []
+    for instance in instances:
+        if instance.plugin == BLOCK_PATH and instance.chain:
+            inner = Block.from_dict(instance.chain)
+            inner.label = instance.label or inner.label
+            inner.enabled = instance.enabled
+            steps.append(inner)
+        else:
+            steps.append(ChainStep(plugin=instance.plugin, label=instance.label,
+                                   values=dict(instance.values),
+                                   enabled=instance.enabled))
+    return Block(steps=steps, regions=options["regions"],
+                 write_back=list(options["write_back"]), merge=options["merge"],
+                 keep_figures=options["keep_figures"])
+
+
+def from_block(block) -> Tuple[List[Instance], Dict[str, Any]]:
+    """A block back as the project's pipeline and its options."""
+    from ..chain import Block
+    instances = []
+    for step in block.steps:
+        if isinstance(step, Block):
+            instances.append(Instance(plugin=BLOCK_PATH, label=step.label,
+                                      enabled=step.enabled, chain=step.to_dict()))
+        else:
+            instances.append(Instance(plugin=step.plugin, label=step.label,
+                                      values=dict(step.values), enabled=step.enabled))
+    options = {"regions": block.regions, "write_back": list(block.write_back),
+               "merge": block.merge, "keep_figures": block.keep_figures}
+    return instances, options
+
+
 def instances_from_run(recorded: Sequence[Dict[str, Any]]) -> List[Instance]:
     """The instances a recorded run's pipeline describes.
 
@@ -114,8 +157,13 @@ def resolve(instances: Sequence[Instance], skip_disabled: bool = True) -> List[S
         if skip_disabled and not instance.enabled:
             continue
         try:
-            cls = plugins.get(instance.plugin)
-        except (KeyError, ImportError):
+            if instance.plugin == BLOCK_PATH and instance.chain:
+                from ..blocks import block_class
+                from ..chain import Block
+                cls = block_class(Block.from_dict(instance.chain))
+            else:
+                cls = plugins.get(instance.plugin)
+        except (KeyError, ImportError, ValueError):
             continue
         label = instance.title(getattr(cls, "name", ""))
         # two steps must not write into one another's columns
@@ -173,7 +221,9 @@ def from_dict(doc: Optional[Dict[str, Any]]) -> List[Instance]:
         out.append(Instance(plugin=str(raw["plugin"]), id=str(raw.get("id") or ""),
                             label=str(raw.get("label") or ""),
                             values=values if isinstance(values, dict) else {},
-                            enabled=bool(raw.get("enabled", True))))
+                            enabled=bool(raw.get("enabled", True)),
+                            chain=raw.get("chain") if isinstance(raw.get("chain"), dict)
+                            else None))
     return out
 
 

@@ -285,6 +285,10 @@ class ROIProject:
         # the project because the columns of a site table mean nothing without
         # knowing which evaluators produced them, with what parameters.
         self.pipeline = []
+        # what the pipeline repeats over and how, as a block's own fields
+        # (`pipeline.block_of`): the ROIs, or an id column; write-back
+        from .pipeline import DEFAULT_OPTIONS
+        self.block_options = dict(DEFAULT_OPTIONS)
         # What a segmenter's Preview proposed and nobody has added yet:
         # ``{"file_id", "method", "sites": [{"center", "use"}], "replaces":
         # [roi ids]}``, or None.  Drawn by the manager and never saved -- it
@@ -1031,6 +1035,7 @@ class ROIProject:
                "grouped": self.grouped, "group_settings": asdict(self.group_settings),
                "navigation": self.navigation, "rois": [asdict(r) for r in self.rois.values()],
                "runs": self.runs, "pipeline": [asdict(i) for i in self.pipeline],
+               "block_options": self.block_options,
                "sources": [{"id": s.id, "name": s.name,
                             "path": os.path.relpath(s.path, path.parent),
                             "fingerprint": s.fingerprint} for s in self.sources.values()]}
@@ -1090,6 +1095,7 @@ class ROIProject:
         for table in tables:
             project.tables[table.label] = table
         project.navigation = doc['navigation']
-        from .pipeline import from_dict as pipeline_from_dict
+        from .pipeline import DEFAULT_OPTIONS, from_dict as pipeline_from_dict
         project.pipeline = pipeline_from_dict(doc)
+        project.block_options = {**DEFAULT_OPTIONS, **(doc.get("block_options") or {})}
         return project

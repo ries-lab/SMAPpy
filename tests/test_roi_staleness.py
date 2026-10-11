@@ -162,10 +162,10 @@ def test_a_pipeline_nobody_stored_is_read_back_from_the_run():
     assert states(project, ids[0]) == {"Localization Statistics": "current"}
 
 
-def test_the_evaluation_window_re_runs_only_what_changed(tmp_path):
+def test_the_region_steps_window_re_runs_only_what_changed(tmp_path):
     pytest.importorskip("PySide6")
     from PySide6.QtWidgets import QApplication
-    from smappy.gui.evaluation import EvaluationWindow
+    from smappy.gui.region_steps import RegionStepsWindow
     from smappy.session import Session
     QApplication.instance() or QApplication([])
 
@@ -176,18 +176,18 @@ def test_the_evaluation_window_re_runs_only_what_changed(tmp_path):
     file_id = next(iter(project.sources))
     for center in (0, 1000):
         project.add_roi(file_id, [center, 0])
+    project.pipeline = [Instance(plugin=STATISTICS)]
 
-    window = EvaluationWindow(session, [Instance(plugin=STATISTICS)])
+    window = RegionStepsWindow(session)
+    assert "2 ROI(s) to measure" in window.status.text()
     window.run()
     assert not project.needs_evaluation()
-
-    window.run(reuse=True)
+    window.refresh_counts()
     assert "every ROI is up to date" in window.status.text()
 
-    window.instances[0].values = {"bins": 50}
-    window.forms.clear()                           # the value, not a stale form
-    window.refresh_counts()
-    assert "(2)" in window.changed_button.text()
-    window.run(reuse=True)
-    assert "2 of them out of date" in window.status.text()
+    # an edited parameter reaches the project as it is typed
+    window.panel.form.set_values({"for_each_roi.localization_statistics.bins": 50})
+    assert project.pipeline[0].values["bins"] == 50
+    assert "2 ROI(s) to measure" in window.status.text()
+    window.run()
     assert not project.needs_evaluation()
