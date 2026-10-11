@@ -120,12 +120,12 @@ def test_an_roi_per_cluster_outlines_it_and_replace_makes_them_again():
     assert len(project.rois) == 6                       # without replace, beside them
 
 
-def test_any_id_column_makes_rois_and_a_box_takes_the_projects_shape():
+def test_any_id_column_makes_rois_and_without_outline_only_the_centre():
     xy, truth = blobs()
     session = Session(table(xy, mine=truth * 7))
     session.show_grouped(0, False)
     session.rois.set_geometry(400)
-    session.run(ColumnToROIs(), ColumnToROIs.Settings(column="mine", shape="box"))
+    session.run(ColumnToROIs(), ColumnToROIs.Settings(column="mine", outline=False))
     rois = list(session.rois.rois.values())
     assert sorted(r.origin["cluster"] for r in rois) == [7, 14, 21]
     assert all(r.polygon is None for r in rois)
@@ -312,3 +312,13 @@ def test_an_roi_evaluation_goes_onto_the_localizations_in_each_roi():
     assert (column[truth == 1] == SIZES[0]).all() and (column[truth == 2] == SIZES[1]).all()
     assert np.isnan(column[truth == 3]).all()
     assert set(np.asarray(session.locs["roi_id"])[truth == 2]) == {2}
+
+
+def test_a_cluster_with_no_hull_still_gets_an_roi_at_its_centre():
+    xy = np.column_stack((np.arange(12.0) * 10, np.arange(12.0) * 10))   # a line
+    session = Session(table(xy, cluster_id=np.ones(12, dtype=np.int64)))
+    session.show_grouped(0, False)
+    result = session.run(ColumnToROIs(), ColumnToROIs.Settings())
+    (roi,) = session.rois.rois.values()
+    assert roi.polygon is None and np.allclose(roi.center, [55, 55])
+    assert "1 with no outline" in result.text

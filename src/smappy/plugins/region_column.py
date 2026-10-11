@@ -20,9 +20,13 @@ of the values: of the ROIs, with or without an evaluation.
 **Column to ROIs** is the other direction: an ROI of the ROI manager for every
 id of a column (a cluster, whoever found it) with enough localizations, to
 look at, review and annotate.  It used to be part of DBSCAN; on its own, any
-clusterer -- a plugin dropped in, or ids read from a file -- gets it.  Its
-outline is the convex hull of the cluster, or the project's ROI shape around
-the cluster's centre for clusters that should be measured alike.
+clusterer -- a plugin dropped in, or ids read from a file -- gets it.  By
+default each ROI is the cluster's own outline, its convex hull; without it,
+only the cluster's centre is placed and the ROI is the ROI manager's circle or
+square, so clusters meant to be measured alike are measured in the same
+window, and the shape can still be switched there afterwards.  A cluster with
+no hull (its localizations on one line) gets the centre too, rather than no
+ROI.
 """
 from __future__ import annotations
 
@@ -156,18 +160,15 @@ def roi_numbers(n: int, members, numbers: Dict[Any, int], rule: str = "last") ->
 
 # ------------------------------------------------------------ column to ROIs
 
-SHAPES = (("hull", "the cluster's outline"), ("box", "the project's ROI shape"))
-
-
 @dataclass
 class ColumnROIsSettings:
     column: str = param("cluster_id", label="column",
                         help="an id column of the table; 0 and below is in no region")
     min_size: int = param(10, label="at least", unit="locs", min=1,
                           help="the localizations an id needs to become an ROI")
-    shape: str = param("hull", label="outline", choices=SHAPES,
-                       help="the convex hull of the cluster, or the ROI manager's "
-                            "own shape and size centred on it")
+    outline: bool = param(True, label="the cluster's own outline",
+                          help="each ROI the convex hull of its cluster; off: only "
+                               "the centre, with the ROI manager's circle or square")
     replace: bool = replace_param()
 
 
@@ -236,7 +237,7 @@ class ColumnToROIs(Plugin):
         if not sources:
             raise ValueError("the ROI manager has no file to add ROIs to")
         column = settings.column.strip()
-        outline = settings.shape == "hull"
+        outline = settings.outline
         found = column_regions(ctx.locs, column, settings.min_size, outline)
         made, flat = 0, 0
         with project.edit(f"{self.name}: ROIs") as step:
@@ -249,8 +250,7 @@ class ColumnToROIs(Plugin):
                     project.rois.pop(roi_id, None)
             for region in found:
                 if outline and region["polygon"] is None:
-                    flat += 1
-                    continue
+                    flat += 1                   # no hull: the centre, as without
                 file_id = sources.get(region["file"], next(iter(sources.values())))
                 project.add_roi(file_id, region["center"], polygon=region["polygon"],
                                 origin={"method": self.path, "column": column,
@@ -263,6 +263,6 @@ class ColumnToROIs(Plugin):
         if replaced:
             text += f", replacing {len(replaced)}"
         if flat:
-            text += f"; {flat} on a line have no outline and no ROI"
+            text += f"; {flat} with no outline (on a line) got the ROI manager's shape"
         return Result(text=text, settings=settings, data={"rois": made},
                       values={"rois": made})

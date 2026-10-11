@@ -23,20 +23,23 @@ ROIs, and is much faster for thousands of clusters.
 0 with enough localizations is one region.  Membership is the column alone:
 the layers' filters do not decide which localizations a cluster has.
 
-**The outline.**  With *outline* the cluster's outline, the ROI is the
-convex hull of the cluster's positions -- the smallest shape with no dents
-that holds them all -- so it fits a cluster of any shape and size.  A
-cluster whose localizations all lie on a line has no hull and gets no ROI;
-the text says how many.  With the project's ROI shape, every ROI is the ROI
-manager's circle or square, of its size, centred on the cluster: the right
-choice when the clusters are alike (pores, say) and every ROI should be
-measured in the same window.
+**The outline.**  With *the cluster's own outline* ticked (the default), the
+ROI is the convex hull of the cluster's positions -- the smallest shape with
+no dents that holds them all -- so it fits a cluster of any shape and size.
+A localization exactly on the hull's edge or at a corner counts as inside.
+Unticked, only the cluster's centre is placed, and the ROI is the circle or
+square of the Regions tab, at its size: the right choice when the clusters
+are alike (pores, say) and every ROI should be measured in the same window.
+Such ROIs follow the Regions tab's shape and size when they are changed
+later, and *Clear shape* in the ROI manager turns a hull ROI into one.  A
+cluster whose localizations all lie on one line has no hull; it gets the
+centre and the Regions tab's shape even with the outline ticked, and the
+text says how many did.
 
 **The ROI.**  Its centre is the mean position of the cluster's
 localizations, its file the one its localizations came from, and it
-remembers the column, the id and the number of localizations (`origin`),
-which the ROI manager shows.  All the ROIs of a run are one step of the ROI
-manager's undo.
+remembers the column, the id and the number of localizations (`origin`).
+All the ROIs of a run are one step of the ROI manager's undo.
 
 ## Parameters
 
@@ -50,9 +53,10 @@ a few times the localizations one fluorophore gives.  The column keeps every
 cluster either way, and a filter on `n_in_cluster` does the same on the
 table.
 
-### shape
-The hull follows each cluster but makes ROIs of different sizes; the box
-makes them all alike, cutting off any cluster larger than it.
+### outline
+The hull follows each cluster but makes ROIs of different sizes; the circle
+or square makes them all alike, cutting off any cluster larger than it, and
+taking in the localizations around a smaller one.
 
 ### replace
 Removes only the ROIs this plugin made of the same column, so ROIs drawn by
@@ -61,6 +65,6 @@ over the first.
 
 ## Output
 
-The ROIs in the ROI manager; the text says how many were made, from how many
-localizations each, and how many clusters had no outline.  It cannot run
+The ROIs in the ROI manager; the text says how many were made, the smallest
+cluster that became one, and how many clusters had no outline.  It cannot run
 inside a block, which repeats over regions: make the ROIs after it.

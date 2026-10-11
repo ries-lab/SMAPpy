@@ -538,7 +538,9 @@ Each step leaves the program working and the suite green.
    regions, or the ROIs' numbers, written onto the localizations, NaN
    outside, with a *prefix* and the overlap rule.  ROIs of clusters moved
    out of DBSCAN into *Column to ROIs*, which takes any id column, a
-   minimum size (10 localizations) and the hull or the project's shape.
+   minimum size (10 localizations) and, by default, the cluster's own
+   outline (its hull); unticked, only the centre with the project's circle
+   or square, which a cluster with no hull also gets.
 
 Every step that moves a plugin or changes what it computes brings its page
 along (`CLAUDE.md`, "The plugin's page"), and the exhaustive plugin-list tests
