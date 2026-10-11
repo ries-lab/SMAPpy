@@ -12,7 +12,7 @@ build-backend = "setuptools.build_meta"
 # package (a Smappee energy-monitor wrapper, last released in 2018).  The import
 # name is unaffected: `pip install smappy-smlm`, then `import smappy`.
 name = "smappy-smlm"
-version = "0.2.0"
+version = "0.3.1"
 description = "Single-molecule localization fitting pipeline (Python port of the SMAP fast-simple workflow)"
 readme = "README.md"
 license = "BSD-3-Clause"
@@ -47,6 +47,10 @@ dependencies = [
     # The PySide6 meta-package additionally pulls PySide6-Addons (QtWebEngine,
     # Qt3D, Multimedia, ...), which measures 800 MB installed for nothing.
     # 6.11 dropped to cp310-abi3 wheels, so Python 3.9 resolves to 6.10.3.
+    # 6.9 and 6.10 crashed until two PySide bugs were worked around: the
+    # collector deleting the QScreen (`gui/collector.keep_screens`) and an
+    # exception from matplotlib's queued redraw left pending in processEvents
+    # (`gui/canvas.py`).  Tested on 6.8.3, 6.9.3 and 6.10.3.
     "PySide6-Essentials>=6.6",
     "pyqtgraph>=0.13",
     "matplotlib>=3.4",  # the render LUTs, and the plugins' result plots
@@ -86,6 +90,21 @@ gpu = ["wgpu>=0.19"]
 # --voice: Piper, an offline neural voice; the voice model is a download of
 # its own (see smappy.tutorial.voice).
 tutorial = ["playwright>=1.40", "piper-tts>=1.2"]
+# What the test suite needs beyond the package: `pip install -e .[test]`.
+# pytest-xdist is for the whole suite before a PR: `pytest tests --slow -n auto`.
+test = ["pytest>=7", "pytest-timeout>=2.1", "pytest-xdist>=3"]
+
+[tool.pytest.ini_options]
+# Every test has a limit, so a hung one fails with its name and a traceback
+# instead of a suite that never ends -- a modal dialog nobody answers is the
+# usual cause in a GUI test.  The slowest test takes about 130 s with eight
+# running in parallel (`--durations`), so 300 s is not a limit a healthy
+# test meets.  `timeout` is pytest-timeout's (`.[test]`); without it
+# conftest.py declares the key so that it is not a warning, and only the
+# faulthandler stays: at 240 s it prints every thread's stack, which shows
+# where a hang inside Qt is, and lets the test go on.
+timeout = 300
+faulthandler_timeout = 240
 
 [project.scripts]
 smappy-fit = "smappy.cli.fit:main"
@@ -106,11 +125,12 @@ where = ["src"]
 "smappy._comet" = ["LICENSE.txt"]
 # the camera database: a file that is read at run time, so it has to be in the
 # wheel and not only in the checkout
-# and the simulator's built-in structures, likewise
-"smappy" = ["data/*.json", "data/structures/*.yaml"]
+# and the simulator's built-in structures, likewise, and the window icon
+"smappy" = ["data/*.json", "data/structures/*.yaml", "data/microscopes/*.yaml",
+            "data/icons/*.svg", "data/icons/*.png"]
 # the plugins' pages, read by the Help window (`smappy.docs`), one folder per
 # level of the menu tree
-"smappy.plugins" = ["docs/*.md", "docs/*/*.md", "docs/*/*/*.md", "docs/*/*/*/*.md"]
+"smappy.plugins" = ["*.chain.yaml", "docs/*.md", "docs/*/*.md", "docs/*/*/*.md", "docs/*/*/*/*.md"]
 # and the pages of the tabs and windows that are not plugins
 "smappy.docs" = ["panels/*.md"]
 

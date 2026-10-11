@@ -139,18 +139,14 @@ def close_groups(x, y, frame, distance: float) -> np.ndarray:
     n = len(frame)
     if n == 0 or distance <= 0:
         return np.arange(n)
-    pairs = []
-    edges = np.flatnonzero(np.diff(frame) != 0) + 1          # frame is sorted
-    for block in np.split(np.arange(n), edges):
-        if block.size < 2:
-            continue
-        p = cKDTree(np.column_stack([x[block], y[block]])).query_pairs(
-            distance, output_type="ndarray")
-        if p.size:
-            pairs.append(block[p])
-    if not pairs:
+    # One tree, with the frame as a third coordinate spaced wider than the
+    # distance, finds exactly the pairs within a frame: a tree per frame did
+    # the same in a Python loop over every frame, most of the run's time.
+    spacing = 2.0 * distance + 1.0
+    p = cKDTree(np.column_stack([x, y, np.asarray(frame, float) * spacing])
+                ).query_pairs(distance, output_type="ndarray")
+    if not len(p):
         return np.arange(n)
-    p = np.vstack(pairs)
     graph = coo_matrix((np.ones(len(p)), (p[:, 0], p[:, 1])), shape=(n, n))
     return connected_components(graph, directed=False)[1]
 

@@ -190,11 +190,23 @@ background.  Look at how many localizations a real site has (Statistics
 reports it) and set it well below that, and well above what a patch of
 background of the same size holds.
 
+### replace
+For a chain or a batch, which has no *Preview*: run again on a file it has
+segmented before, it would otherwise find nothing, every peak lying within
+*separation* of an ROI the last run made.  On, the ROIs an earlier run of
+Density Peaks made on the file go first (their origin says which); ROIs
+drawn by hand or made by another segmenter stay.  In the GUI, *Preview* and
+the ROI manager's *Undo* usually make it unnecessary.
+
 ## Output
 
 * **ROIs**, one per site found, added to the current file in the ROI
   manager, brightest first.  They are included (*use*) from the start.
 * **The text** says how many candidates were found.
+
+*Preview* finds the same sites and adds none: they are drawn grey and
+dashed in the ROI manager, and the next preview replaces them.  Try
+settings with it until the sites sit on the structures, then *Run*.
 
 A good result has one site on each structure and none on the background.
 Sites on empty background: raise *minimum count*.  Faint structures missed:

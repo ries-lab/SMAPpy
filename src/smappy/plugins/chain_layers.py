@@ -128,9 +128,13 @@ def _describe(bounds: Dict[str, Tuple]) -> str:
 class ChainLayers(Plugin):
     """The layers' bounds and grouping, as the Render tab would set them."""
     Settings = LayersSettings
+    changes_locs = True            # only with *remove*: see changes_locs_for
     favorite = False
     # 2: 'defaults' includes the bounds the table carries (a hide flag)
     version = "2"
+
+    def changes_locs_for(self, settings: LayersSettings) -> bool:
+        return bool(settings.remove)
 
     def run(self, ctx: Context, settings: LayersSettings) -> Result:
         locs = ctx.locs

@@ -229,7 +229,19 @@ figure shows real pores rejected for *far*.
 
 ### keep_rejected
 Tick it while choosing the settings: each rejected candidate becomes an ROI
-that is not used, and its origin lists the checks it failed.
+that is not used, and its origin lists the checks it failed.  *Preview*
+shows them too, dotted, without making them ROIs.
+
+### replace
+On, a second run with other settings gives a fresh answer: the ROIs an
+earlier run of this segmenter made on the file go first (their origin says
+which).  Off, to add the pores of a second region or a second pass to those
+already found -- a candidate near an existing ROI is suppressed.  ROIs drawn
+by hand or made by another segmenter stay either way.  It matters most in a
+chain or a batch, which has no *Preview*: the shipped NPC chain turns it on,
+so that running it again gives a fresh answer instead of none.  A replacing
+run is one step of the ROI manager's *Undo*, which brings the earlier pores
+back.
 
 ## Output
 
@@ -240,6 +252,11 @@ that is not used, and its origin lists the checks it failed.
   often each check failed.
 * **The main figure** shows the localizations with every candidate's fitted
   circle: kept in blue, rejected in grey.
+* **A preview** (the *Preview* button) finds the same pores, writes the
+  same text and figures, and adds nothing: the pores are drawn grey and
+  dashed in the ROI manager (with *keep rejected*, the rejected candidates
+  dotted), and with *replace* the earlier pores it would remove are hidden.
+  The next preview replaces it; *Run* adds it.
 * **The *checks* figure** has the fitted radius, the fraction far from the
   ring and the precise localizations per candidate, kept and rejected
   stacked, the radius limits in red.

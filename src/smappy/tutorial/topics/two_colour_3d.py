@@ -20,7 +20,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .common import field, menu, menu_item, open_section, section_of, show_tab, type_into
+from .common import field, open_section, section_of, show_tab, type_into
 from .fitting_3d import _wait, _z_slope
 from .two_colour import after_the_fit, colours_and_layers
 
@@ -76,13 +76,14 @@ def make(d) -> None:
                "measured on beads, now one for each half.")
 
     d.chapter("Dual-colour calibration")
-    tools = menu(d, "Tools")
-    item = menu_item(d, tools, "Dual-colour calibration")
-    d.shot("Tools, Dual-colour calibration opens the bead calibration in its "
-           "two-colour mode.",
-           spot=[item], point=item, click=True, zoom=d.around(tools, 700))
-    tools.close()
-    control.open_calibration(dual=True)
+    localize = show_tab(d, "Localize")
+    _, panel = open_section(d, localize, "Bead calibration")
+    type_into(panel, "mode", "dual")
+    d.shot("The Bead calibration section of the Localize tab opens the "
+           "calibration window. Set the mode to dual colour, then Open.",
+           spot=[field(panel, "mode"), panel.run_button], point=panel.run_button,
+           click=True, zoom=d.around(panel, 700))
+    panel.run_button.click()
     window = control.calibration_window
     assert window.is_dual, "the calibration window is not in dual-colour mode"
     window.resize(1540, 860)

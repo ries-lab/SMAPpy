@@ -50,9 +50,9 @@ What it needs:
   the calibration is *ROI-local* and only applies to data of exactly the same
   image size (a warning says so).
 
-It opens from **Tools > Bead calibration...** (or *Dual-colour
-calibration...*, which starts in the dual-colour mode), from the button of
-the same name on the Localize tab, or on its own as `smappy-calibrate`.
+It opens from **Tools > Bead calibration...**, from the *Bead calibration*
+section of the Localize tab (whose *mode* it opens in), or on its own as
+`smappy-calibrate`.
 
 ## How it works
 

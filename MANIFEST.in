@@ -5,6 +5,7 @@ include csrc/*.hpp
 include ci/*.py
 include examples/*.yaml
 include src/smappy/data/*.json
+recursive-include src/smappy/data/icons *.svg *.png
 recursive-include src/smappy/plugins/docs *.md
 recursive-include src/smappy/docs/panels *.md
 recursive-include tests *.py

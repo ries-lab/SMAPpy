@@ -79,7 +79,7 @@ it was about.  Say who asked and when, so a later reader can weigh it.
 
 * (none yet)
 
-### plugins -- Plugins: running, previewing, plotting
+### plugins -- Plugins: running, plotting, live
 
 * (none yet)
 

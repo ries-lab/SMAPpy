@@ -69,3 +69,22 @@ def test_the_overview_draws_itself_when_a_file_is_loaded(app):
     app.processEvents()                           # the render is deferred a beat
     drawn = tab.overview.image.image
     assert drawn is not None and drawn.shape[2] == 3 and drawn.max() > 0
+
+
+def test_a_table_the_overview_cannot_draw_is_reported_not_raised(app, capfd):
+    """Without a precision column the overview's render raises.  It is called
+    from a timer, and PySide leaves what a singleShot callable raises pending
+    inside processEvents, where the next pyqtgraph override segfaulted
+    (PySide6 6.10) -- so it is printed and the overview stays blank."""
+    from smappy.gui.render_tab import RenderTab
+    from smappy.gui.render_view import RenderView
+
+    session = Session()
+    view = RenderView(session)
+    tab = RenderTab(session, view)
+    bare = block(2000)
+    del bare.columns["xy_err_nm"]
+    session.add_file(bare, FileInfo("t.hdf5", "/t.hdf5", "smappy"))
+    app.processEvents()
+    assert tab.overview.image.image is None
+    assert "no localization precision column" in capfd.readouterr().err

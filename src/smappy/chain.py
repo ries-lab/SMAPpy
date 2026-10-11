@@ -19,6 +19,16 @@ the ones that shape this module:
   result does: one undo step, one log entry, and a chain that can run in the
   GUI's worker thread like any plugin.
 
+* **An evaluator is a step over every site.**  A plugin with
+  ``scope = "site"`` measures one ROI; as a step it is run over every
+  included ROI of the ROI manager's project (`ROIProject.evaluate`) before
+  the next step starts, so a chain can segment, evaluate and analyse the
+  site table as a person does in the ROI manager.  Its results are stored
+  with the ROIs like any evaluation's, under the step's name, and the
+  evaluation window's pipeline is left as the user set it up: a result
+  belongs to the ROI and says how it was made (`ROIProject.evaluations`),
+  so nothing downstream needs to know which pipeline ran it.
+
 * **Linear.**  SMAP's workflows were graphs; `NOTES.md` ("No module chain")
   records why the fitting pipeline is not, and the same reasons hold here --
   a chain does what a person clicking through the tabs would do, in order.
@@ -39,8 +49,8 @@ from dataclasses import dataclass, field, fields, make_dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from .plugins import (Context, ParamInfo, Plugin, PreflightQuestion, Result,
-                      _hint_from_text, param, settings_from, settings_values)
+from .plugins import (Context, ParamInfo, Plugin, PreflightChoice, PreflightQuestion,
+                      Result, _hint_from_text, param, settings_from, settings_values)
 
 SCHEMA = "smappy-chain-v1"
 SUFFIX = ".chain.yaml"
@@ -280,12 +290,17 @@ def step_settings_class(key: str, plugin_cls, step: Step) -> type:
                 made = field(default=value, metadata=f.metadata)
             columns.append((f.name, hints.get(f.name, Any), made))
     required = getattr(plugin_cls, "grouping", None)
+    if is_evaluator(plugin_cls):
+        help = ("an evaluator sees what the ROI manager shows: the filter "
+                "and grouping of the layer it follows")
+    elif required:
+        help = f"this plugin only works {required}"
+    else:
+        help = ("which table this step reads: auto takes the chain's choice, "
+                "or each layer's own")
     columns.append((GROUPING_FIELD, str, param(
         required or step.grouping, label="grouping", choices=STEP_GROUPINGS,
-        advanced=True,
-        help=(f"this plugin only works {required}" if required else
-              "which table this step reads: auto takes the chain's choice, "
-              "or each layer's own"))))
+        advanced=True, help=help)))
     name = "".join(w.capitalize() for w in key.split("_")) + "Step"
     return make_dataclass(name, columns, namespace={"__module__": __name__})
 
@@ -320,6 +335,67 @@ def is_source(plugin_cls) -> bool:
     return plugin_cls.path.startswith(("Localize/", "File/Load/", "File/Simulate/"))
 
 
+def is_evaluator(plugin_cls) -> bool:
+    """Does this plugin measure one ROI at a time (``scope = "site"``)?"""
+    return getattr(plugin_cls, "scope", "locs") == "site"
+
+
+def evaluate_sites(project, plugin_cls, label: str, settings, chain: str = "",
+                   progress=None) -> Result:
+    """An evaluator as a chain step: run over every included ROI.
+
+    Stored as an evaluation run of its own, marked with the chain that made
+    it, under ``label`` (the plugin's name when empty) -- so it replaces what
+    an evaluation of that name measured before, and stands beside one of
+    another name.  The project's pipeline is not touched: it is the
+    evaluation window's, set up by the user for their own work.  Results
+    still current from an earlier run with the same data and settings are
+    carried forward rather than measured again.
+    """
+    from .roi_manager import pipeline as pipeline_module
+    from .workspace import Instance
+    if project is None:
+        raise ValueError("there is no ROI manager project to evaluate")
+    ids = [i for i, roi in project.rois.items() if roi.reviewed and roi.use]
+    if not ids:
+        raise ValueError("there are no ROIs to evaluate: find or draw some first")
+    steps = pipeline_module.resolve([Instance(plugin=plugin_cls.path, label=label,
+                                              values=settings_values(settings))])
+    run = project.evaluate(steps=steps, roi_ids=ids, reuse=True,
+                           progress=(lambda i, n: progress(f"{i} of {n} sites"))
+                           if progress else None)
+    if chain:
+        run["chain"] = chain
+    failed: Dict[str, int] = {}
+    for record in run["records"].values():
+        for why in pipeline_module.errors(record).values():
+            failed[why] = failed.get(why, 0) + 1
+    text = f"{len(ids)} sites evaluated"
+    if failed:
+        text += (f", failed on {sum(failed.values())}: " +
+                 "; ".join(f"{why} ({n})" for why, n in
+                           sorted(failed.items(), key=lambda kv: -kv[1])[:3]))
+    return Result(text=text, settings=settings,
+                  data={"sites": len(ids), "failed": sum(failed.values()),
+                        "run": run["id"], "label": steps[0].label})
+
+
+def _with_step(settings, key: str, plugin_cls, own):
+    """The chain's settings with one step's replaced by ``own``, the plugin's
+    own settings: what a step's preflight choice runs the chain with."""
+    sub = getattr(settings, key)
+    sub = dataclasses.replace(sub, **{f.name: copy.deepcopy(getattr(own, f.name))
+                                      for f in fields(plugin_cls.Settings) if f.init})
+    return dataclasses.replace(settings, **{key: sub})
+
+
+def _roi_signature(session) -> Optional[str]:
+    """The ROI project as text, to tell whether a chain changed it."""
+    from .roi_manager.core import json_text
+    state = session.roi_state()
+    return None if state is None else json_text(state)
+
+
 # ------------------------------------------------------------- the plugin
 
 class ChainPlugin(Plugin):
@@ -341,28 +417,65 @@ class ChainPlugin(Plugin):
             return "images"
         return "localizations"
 
+    def changes_locs_for(self, settings) -> Optional[bool]:
+        """Whether any step changes the table: True if one does, None if one
+        does not say and none does, else False."""
+        answers = []
+        for key, step, cls in self.steps:
+            try:
+                answers.append(cls().changes_locs_for(
+                    plugin_settings(cls, getattr(settings, key))))
+            except Exception:
+                answers.append(cls.changes_locs)
+        if any(a is True for a in answers):
+            return True
+        return None if any(a is None for a in answers) else False
+
     def preflight(self, ctx: Context, settings):
         """Every step's question, asked once, before any of them runs.
 
         Asked of the table as it is now, so a step late in the chain is asked
         about a table its predecessors have not changed yet -- the cost of
-        asking once instead of stopping in the middle for an answer.
+        asking once instead of stopping in the middle for an answer.  A step
+        is told which evaluations the steps before it will have made, so an
+        ROI analysis after the chain's own evaluator does not ask which.
+
+        A step that asks to *choose* (a `PreflightQuestion` without a plain
+        run, such as which of several evaluations to analyse) is put first,
+        with its choices as the chain's: taking one sets that step's field,
+        and the GUI asks again until nothing is left to choose.
         """
         questions = []
+        made: List[Tuple[str, str]] = []
         for key, step, cls in self.steps:
             sub = getattr(settings, key)
+            own = plugin_settings(cls, sub)
+            sctx = copy.copy(ctx)
+            sctx.evaluations = list(made)
+            if is_evaluator(cls):
+                made.append((step.label or cls.name, cls.path))
             try:
-                asked = cls().preflight(ctx, plugin_settings(cls, sub))
+                asked = cls().preflight(sctx, own)
             except Exception:
                 asked = None           # an estimate is a courtesy (see PluginPanel)
-            if asked:
-                text = asked.text if isinstance(asked, PreflightQuestion) else str(asked)
-                questions.append(f"{step.title()}: {text}")
+            if not asked:
+                continue
+            if isinstance(asked, PreflightQuestion) and asked.choices \
+                    and not asked.run_label:
+                choices = [PreflightChoice(
+                    label=c.label, help=c.help,
+                    settings=None if c.settings is None
+                    else _with_step(settings, key, cls, c.settings))
+                    for c in asked.choices]
+                return PreflightQuestion(text=f"{step.title()}: {asked.text}",
+                                         choices=choices, run_label="")
+            text = asked.text if isinstance(asked, PreflightQuestion) else str(asked)
+            questions.append(f"{step.title()}: {text}")
         return "\n\n".join(questions) or None
 
     def run(self, ctx: Context, settings) -> Result:
         from .session import Session
-        session = (ctx.session.scratch() if ctx.session is not None
+        session = (ctx.session.scratch(ctx.locs) if ctx.session is not None
                    else Session(ctx.locs).scratch())
         records: List[Dict[str, Any]] = []
         results: Dict[str, Result] = {}
@@ -372,16 +485,18 @@ class ChainPlugin(Plugin):
         layers = None
         path = None
         images = None
+        rois_before = _roi_signature(session)
+        made: List[Tuple[str, str]] = []  # (name, evaluator) of the chain's evaluations
         for key, step, cls in self.steps:
             label = step.title()
             sub = getattr(settings, key)
             plugin = cls()
             own = plugin_settings(cls, sub)
-            grouping = effective_grouping(cls.grouping, getattr(sub, GROUPING_FIELD),
-                                          settings.grouping)
+            grouping = None if is_evaluator(cls) else effective_grouping(
+                cls.grouping, getattr(sub, GROUPING_FIELD), settings.grouping)
             sctx = session.context(min(ctx.layer, len(session.layers) - 1),
                                    progress=lambda text, l=label: ctx.report(f"{l}: {text}"),
-                                   grouping=grouping)
+                                   grouping=grouping, evaluations=list(made))
             if self.preflight_policy != "proceed":
                 asked = plugin.preflight(sctx, own)
                 if asked:
@@ -391,7 +506,12 @@ class ChainPlugin(Plugin):
             ctx.report(f"{label}: starting")
             started = time.perf_counter()
             try:
-                result = plugin.run(sctx, own)
+                if is_evaluator(cls):
+                    result = evaluate_sites(
+                        session.rois, cls, step.label, own, chain=self.path,
+                        progress=lambda text, l=label: ctx.report(f"{l}: {text}"))
+                else:
+                    result = plugin.run(sctx, own)
             except Exception as error:
                 raise ChainError(f"step {label!r} ({cls.path}) failed -- "
                                  f"{type(error).__name__}: {error}") from error
@@ -401,6 +521,8 @@ class ChainPlugin(Plugin):
                     "new table: there is no way from one row per blink back to "
                     "the localizations, so run it ungrouped")
             session.apply(plugin, result)
+            if is_evaluator(cls):
+                made.append((result.data["label"], cls.path))
             seconds = time.perf_counter() - started
             changed = result.locs is not None or bool(result.files)
             records.append({"key": key, "label": label, "plugin": cls.path,
@@ -433,6 +555,10 @@ class ChainPlugin(Plugin):
             data["path"] = path
         if images:
             data["images"] = images
+        # the ROIs a segmenter found and the runs an evaluator made, which
+        # `Session.apply` puts into the session's project
+        if _roi_signature(session) != rois_before:
+            data["roi_project"] = session.roi_state()
         return Result(locs=session.locs if changed else None,
                       text="\n".join(lines) or "no steps", plots=plots, data=data,
                       settings=settings,
@@ -486,6 +612,23 @@ class ChainPlugin(Plugin):
             out.update({f"{key}.{k}": v for k, v in (found or {}).items()})
         return out or None
 
+    def choices(self, ctx: Context, settings):
+        """Each step's session-dependent choices, told -- as in `preflight` --
+        which evaluations the steps before it will have made."""
+        out = {}
+        made: List[Tuple[str, str]] = []
+        for key, step, cls in self.steps:
+            sctx = copy.copy(ctx)
+            sctx.evaluations = list(made)
+            if is_evaluator(cls):
+                made.append((step.label or cls.name, cls.path))
+            try:
+                found = cls().choices(sctx, plugin_settings(cls, getattr(settings, key)))
+            except Exception:
+                found = None
+            out.update({f"{key}.{k}": v for k, v in (found or {}).items()})
+        return out or None
+
     def active(self, settings):
         out = {}
         for key, step, cls in self.steps:
@@ -494,7 +637,7 @@ class ChainPlugin(Plugin):
             except Exception:
                 found = None
             out.update({f"{key}.{k}": v for k, v in (found or {}).items()})
-            if cls.grouping:
+            if cls.grouping or is_evaluator(cls):
                 out[f"{key}.{GROUPING_FIELD}"] = False
         return out or None
 
@@ -546,9 +689,6 @@ def chain_class(spec: ChainSpec, path: Optional[str] = None) -> type:
         except KeyError:
             raise ChainError(f"step {step.title()!r} needs the plugin "
                              f"{step.plugin!r}, which is not installed") from None
-        if getattr(cls, "scope", "locs") == "site":
-            raise ChainError(f"step {step.title()!r}: {step.plugin} runs once per "
-                             "ROI and belongs in the ROI manager's pipeline")
         step_cls = step_settings_class(key, cls, step)
         columns.append((key, step_cls, param(
             default_factory=step_cls, label=step.title(), collapsed=True,

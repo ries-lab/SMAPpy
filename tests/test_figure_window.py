@@ -131,3 +131,21 @@ def test_nothing_is_drawn_while_the_window_is_hidden(app):
     assert drawn == []
     made.show()
     assert drawn == [""]
+
+
+def test_a_canvas_deleted_with_a_redraw_queued_leaves_the_event_loop_alone(app):
+    """matplotlib queues a redraw with no context object, so it ran after the
+    canvas had gone and raised inside `processEvents`, where the next Python
+    override Qt called -- pyqtgraph's -- segfaulted (PySide6 6.10) or hung."""
+    import shiboken6
+    from matplotlib.figure import Figure
+    from PySide6.QtWidgets import QMainWindow
+
+    from smappy.gui.canvas import canvas_class
+    made = QMainWindow()
+    canvas = canvas_class()(Figure())
+    made.setCentralWidget(canvas)
+    canvas.draw_idle()
+    del made                                   # and the canvas with it
+    assert not shiboken6.isValid(canvas)
+    app.processEvents()                        # raised RuntimeError

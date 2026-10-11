@@ -2,6 +2,8 @@
 build/
 *.so
 *.png
+# the icon PNGs ship in the wheel (package-data); scripts/make_icon.py draws them
+!src/smappy/data/icons/*.png
 __pycache__/
 *.egg-info/
 .DS_Store

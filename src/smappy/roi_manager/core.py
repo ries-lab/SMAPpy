@@ -5,14 +5,15 @@ uses the same ViewState filter as rendering, never the visible field of view.
 """
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from contextlib import contextmanager
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 import hashlib
 import json
 import os
 from pathlib import Path
 import tempfile
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 from uuid import uuid4
 
 import h5py
@@ -98,6 +99,87 @@ class ROI:
     origin: dict = field(default_factory=lambda: {"method": "manual"})
 
 
+# Past this nobody is walking back through a list of edits.
+MAX_ROI_STEPS = 20
+
+
+@dataclass
+class ROIStep:
+    """One edit of the ROIs, and the ROIs as they were before it."""
+    label: str
+    rois: Dict[str, "ROI"]
+
+
+def copy_rois(rois: Dict[str, "ROI"]) -> Dict[str, "ROI"]:
+    """A copy that later edits cannot reach.  Shallow per ROI, which is
+    enough because an ROI is only ever edited by assigning its fields --
+    ``roi.use = ...``, ``roi.polygon = [...]``, never ``roi.center[0] = ...``
+    -- so the lists and the origin dict can be shared."""
+    return {roi_id: replace(roi) for roi_id, roi in rois.items()}
+
+
+class ROIHistory:
+    """Undo and redo for the set of ROIs, apart from the session's undo.
+
+    The session's undo is for tables (`smappy.undo` says why only tables);
+    this one is for the ROI manager's edits: a segmenter's run, an ROI
+    added, removed, excluded or reshaped.  Not for evaluations, which can be
+    run again, and whose results stay with the ROI's id -- so an ROI brought
+    back by an undo brings its numbers back with it.  Whole copies of the
+    ROIs rather than diffs: an ROI is a few small fields, and a step of a
+    few thousand costs less than a millisecond's worth of thinking about
+    what a diff would have to cover.
+    """
+
+    def __init__(self, max_steps: int = MAX_ROI_STEPS):
+        self.max_steps = max_steps
+        self._undo: List[ROIStep] = []
+        self._redo: List[ROIStep] = []
+
+    @property
+    def can_undo(self) -> bool:
+        return bool(self._undo)
+
+    @property
+    def can_redo(self) -> bool:
+        return bool(self._redo)
+
+    @property
+    def undo_label(self) -> Optional[str]:
+        return self._undo[-1].label if self._undo else None
+
+    @property
+    def redo_label(self) -> Optional[str]:
+        return self._redo[-1].label if self._redo else None
+
+    def push(self, step: ROIStep) -> None:
+        self._undo.append(step)
+        del self._undo[:-self.max_steps]
+        self._redo.clear()
+
+    def undo(self, rois: Dict[str, "ROI"]) -> Optional[ROIStep]:
+        """Put the ROIs before the last edit into `rois`; the edit undone."""
+        return self._travel(rois, self._undo, self._redo)
+
+    def redo(self, rois: Dict[str, "ROI"]) -> Optional[ROIStep]:
+        return self._travel(rois, self._redo, self._undo)
+
+    @staticmethod
+    def _travel(rois, source, target) -> Optional[ROIStep]:
+        if not source:
+            return None
+        step = source.pop()
+        target.append(ROIStep(step.label, copy_rois(rois)))
+        # in place: whoever holds the project's dict keeps holding the ROIs
+        rois.clear()
+        rois.update(copy_rois(step.rois))
+        return step
+
+    def clear(self) -> None:
+        self._undo.clear()
+        self._redo.clear()
+
+
 class Source:
     def __init__(self, locs, path=None, name=None, source_id=None):
         if "x_nm" not in locs or "y_nm" not in locs:
@@ -145,6 +227,13 @@ class ROIProject:
         # the project because the columns of a site table mean nothing without
         # knowing which evaluators produced them, with what parameters.
         self.pipeline = []
+        # What a segmenter's Preview proposed and nobody has added yet:
+        # ``{"file_id", "method", "sites": [{"center", "use"}], "replaces":
+        # [roi ids]}``, or None.  Drawn by the manager and never saved -- it
+        # exists so that a finder's settings can be tried without each try
+        # leaving ROIs behind to be removed by hand.
+        self.segment_preview = None
+        self.history = ROIHistory()
         self._filter_keys = {}
 
     def add_file(self, path):
@@ -238,6 +327,28 @@ class ROIProject:
             self._filter_keys[key] = signature
         return state
 
+    @contextmanager
+    def edit(self, label: str):
+        """An undoable edit of the ROIs: ``with project.edit("Remove ROI 3"):``.
+
+        Yields the step, whose label may be finished once the edit knows
+        what it did; nothing is recorded when the ROIs come out unchanged,
+        so a run that found nothing leaves no step to undo.
+        """
+        step = ROIStep(label, copy_rois(self.rois))
+        yield step
+        if step.rois != self.rois:
+            self.history.push(step)
+
+    def undo(self) -> Optional[str]:
+        """Undo the last edit of the ROIs; what it was, or None."""
+        step = self.history.undo(self.rois)
+        return step.label if step else None
+
+    def redo(self) -> Optional[str]:
+        step = self.history.redo(self.rois)
+        return step.label if step else None
+
     def add_roi(self, file_id, center, polygon=None, reviewed=True, origin=None):
         if file_id not in self.sources:
             raise KeyError(file_id)
@@ -314,6 +425,8 @@ class ROIProject:
             instances = self.pipeline
         if not instances:
             for run in reversed(self.runs):
+                if run.get("chain"):
+                    continue        # a chain's evaluators are its own, not the window's
                 instances = pipeline_module.instances_from_run(run.get("pipeline") or [])
                 if instances:
                     break
@@ -362,6 +475,68 @@ class ROIProject:
             else:
                 found[label] = (None, "missing")
         return found
+
+    def evaluations(self, roi_id):
+        """Every evaluation this ROI has had that still describes it.
+
+        ``{label: (entry, step)}``: under each name, the newest stored result
+        that was computed from the ROI's data as it is now (place, file,
+        filter, grouping), and the step that made it -- plugin, version,
+        parameters -- as its run recorded it.  The name is what makes two
+        evaluations different: the same evaluator renamed and run with other
+        settings is a second evaluation beside the first, so the two can be
+        compared, and running it again under its old name replaces the old
+        numbers.  Whether the GUI's pipeline, a chain or a script ran it does
+        not matter: a result belongs to the ROI, and says itself how it was
+        made.
+        """
+        inputs = json.loads(json_text(self.inputs(self.rois[roi_id])))
+        data = digest(inputs)
+        found = {}
+        for run in reversed(self.runs):
+            record = (run.get("records") or {}).get(roi_id)
+            if record is None:
+                continue
+            made_by = {s.get("label"): s for s in run.get("pipeline") or []}
+            for label, entry in (record.get("steps") or {}).items():
+                if label in found:
+                    continue
+                step = made_by.get(label) or {}
+                if entry.get("signature") and step:
+                    identity = {k: v for k, v in step.items() if k != "label"}
+                    current = entry["signature"] == digest({"inputs": inputs,
+                                                            "step": identity})
+                else:                     # written before entries were signed
+                    current = record.get("signature") == data
+                if current:
+                    found[label] = (entry, step)
+        return found
+
+    def evaluation_steps(self, label, roi_ids=None):
+        """The distinct steps that made the evaluation called ``label`` on these
+        ROIs (all included ones by default): one, unless some ROIs were
+        evaluated again with other settings and some not."""
+        ids = self._included() if roi_ids is None else list(roi_ids)
+        out = []
+        for roi_id in ids:
+            entry, step = self.evaluations(roi_id).get(label, (None, None))
+            if step and step not in out:
+                out.append(step)
+        return out
+
+    def labels(self, plugin=None, roi_ids=None):
+        """The names of the current evaluations on these ROIs, newest
+        evaluator first, optionally only those made by ``plugin``."""
+        ids = self._included() if roi_ids is None else list(roi_ids)
+        out = []
+        for roi_id in ids:
+            for label, (entry, step) in self.evaluations(roi_id).items():
+                if label not in out and (plugin is None or step.get("plugin") == plugin):
+                    out.append(label)
+        return out
+
+    def _included(self):
+        return [i for i, roi in self.rois.items() if roi.reviewed and roi.use]
 
     def stale_steps(self, roi_id, steps=None):
         """The steps of this ROI that would have to run to be sure."""
@@ -521,6 +696,10 @@ class ROIProject:
                                 for label in (record.get("steps") or {})}
             return None, {}
         found = self.entries(roi_id, steps)
+        # and what else has measured this ROI: a chain's evaluators, or a
+        # renamed one that is no longer in the pipeline
+        for label, (entry, _) in self.evaluations(roi_id).items():
+            found.setdefault(label, (entry, "current"))
         if all(entry is None for entry, _ in found.values()):
             return None, {label: state for label, (_, state) in found.items()}
         record = {"file_id": self.rois[roi_id].file_id,
@@ -528,17 +707,46 @@ class ROIProject:
                             if entry is not None}}
         return record, {label: state for label, (_, state) in found.items()}
 
-    def results(self, steps=None):
-        """Current successful rows for reviewed, included ROIs only.
+    def results(self, steps=None, labels=None):
+        """The site table: a row per reviewed, included ROI that has results.
 
-        A row is left out while any of its steps is out of date or missing:
-        half a row of this pipeline's numbers and half of the last one's is
-        worse than no row, and `needs_evaluation` says how many are waiting.
-        A step that cannot be checked -- produced by an evaluator that is not
-        installed here -- is trusted and reported: it was true when it was
-        written, and dropping it would lose the file's results on opening it
-        on another machine.
+        A row holds every evaluation the ROI has that still describes it
+        (`evaluations`), whoever ran it -- the evaluation window's pipeline,
+        a chain, a script -- the pipeline's first, then the rest by name.  A
+        column keeps its plain name while one evaluation writes it, and is
+        qualified with the evaluation's name when two do
+        (`pipeline.merged_values`), so two settings of one evaluator run
+        under two names read side by side.
+
+        With ``labels`` only those evaluations are in it, so a column is
+        called as its evaluator calls it: what an analysis of one evaluation
+        reads (`plugins.roi.SiteAnalysisPlugin`).
+
+        With ``steps`` the row is instead those steps only, and is left out
+        while any of them is out of date or missing: what a pipeline would
+        report, for a caller that wants exactly that.
         """
+        from . import pipeline as pipeline_module
+        if steps is not None:
+            return self._pipeline_results(steps)
+        order = {}
+        try:
+            order = {step.label: n for n, step in enumerate(self.resolved())}
+        except Exception:
+            pass
+        rows = []
+        for roi_id in self._included():
+            found = self.evaluations(roi_id)
+            names = sorted((l for l in found if labels is None or l in labels),
+                           key=lambda l: (order.get(l, len(order)), l))
+            values = pipeline_module.merged_values(
+                {"steps": {label: found[label][0] for label in names}})
+            if values:
+                roi = self.rois[roi_id]
+                rows.append({"roi_id": roi.id, "file_id": roi.file_id, **values})
+        return rows
+
+    def _pipeline_results(self, steps):
         from . import pipeline as pipeline_module
         steps = self.resolved(steps)
         rows = []
@@ -546,9 +754,11 @@ class ROIProject:
             if not roi.reviewed or not roi.use:
                 continue
             record, states = self.latest(roi.id, steps)
-            if record is None or any(state in ("stale", "missing")
-                                     for state in states.values()):
+            if record is None or any(states.get(step.label) in ("stale", "missing", None)
+                                     for step in steps):
                 continue
+            record = {**record, "steps": {step.label: record["steps"][step.label]
+                                          for step in steps}}
             values = pipeline_module.merged_values(record)
             if values:
                 rows.append({"roi_id": roi.id, "file_id": roi.file_id, **values})
@@ -563,6 +773,25 @@ class ROIProject:
         looked at them.  A script that trusts the finder says
         ``reviewed=True``; the GUI's `SessionROIs` reviews automatically.
         """
+        origin, proposals = self.propose(file_id, plugin, settings, parameters)
+        found = []
+        for proposed in proposals:
+            roi = self.add_roi(file_id, proposed["center"], reviewed=reviewed,
+                               origin={**origin, **proposed["origin"]})
+            roi.use = proposed["use"]
+            found.append(roi)
+        return found
+
+    def propose(self, file_id, plugin=None, settings=None, parameters=None,
+                exclude=()):
+        """``(origin, proposals)``: what `find` would add, adding nothing.
+
+        Each proposal is ``{"center", "use", "origin"}``, the last what the
+        finder measured, to go into the ROI's origin beside the provenance.
+        The ROIs in `exclude` are left out of the ones the finder keeps its
+        distance from -- the ones a run would remove first, so that a
+        preview of a replacing run proposes what the run will add.
+        """
         from ..plugins import settings_from, settings_values
         from ..plugins.roi import DensityPeaks
         if plugin is None:
@@ -575,20 +804,21 @@ class ROIProject:
                   "parameters": settings_values(settings),
                   "filters": state.filter.ranges, "grouped": self.grouped,
                   "group_settings": asdict(self.group_settings) if self.grouped else None}
-        existing = [roi.center for roi in self.rois.values() if roi.file_id == file_id]
-        found = []
+        exclude = set(exclude)
+        existing = [roi.center for roi in self.rois.values()
+                    if roi.file_id == file_id and roi.id not in exclude]
+        proposals = []
         for proposed in plugin.propose(state.locs[state.filter.indices], settings,
                                        existing):
             # a centre, or a dict for a finder that also judges what it found:
             # its "use", and what it measured, kept with the ROI's origin
             if isinstance(proposed, dict):
-                roi = self.add_roi(file_id, proposed["center"], reviewed=reviewed,
-                                   origin={**origin, **proposed.get("origin", {})})
-                roi.use = bool(proposed.get("use", True))
+                proposals.append({"center": point(proposed["center"]),
+                                  "use": bool(proposed.get("use", True)),
+                                  "origin": dict(proposed.get("origin", {}))})
             else:
-                roi = self.add_roi(file_id, proposed, reviewed=reviewed, origin=origin)
-            found.append(roi)
-        return found
+                proposals.append({"center": point(proposed), "use": True, "origin": {}})
+        return origin, proposals
 
     def save(self, path):
         """Atomic sidecar save. In-memory sources must first be saved as localizations."""

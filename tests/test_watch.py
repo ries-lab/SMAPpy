@@ -186,3 +186,26 @@ def test_a_growing_stack_can_be_opened_for_its_metadata(tmp_path):
     assert source.shape == (16, 24)
     assert source.dtype == np.uint16
     assert source.n_frames >= 1        # only what was there when it opened
+
+
+def test_a_pause_longer_than_the_timeout_does_not_end_a_watch_given_finished(tmp_path):
+    """The TIFF path honours the writer's word as the NDTiff path does.
+
+    The last page is held back while frames are coming; setting ``finished``
+    makes the final pass read it too.
+    """
+    scope = Microscope(tmp_path)
+    scope.write(3)
+    finished = threading.Event()
+
+    def microscope():
+        time.sleep(4 * FAST.timeout)           # four timeouts of silence
+        scope.write(4)
+        finished.set()
+
+    thread = threading.Thread(target=microscope, daemon=True)
+    thread.start()
+    seen = _collect(watch_stack(tmp_path, chunk=100, settings=FAST,
+                                finished=finished))
+    thread.join()
+    assert [n for _, n in seen] == list(range(7))

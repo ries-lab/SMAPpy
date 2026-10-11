@@ -529,6 +529,10 @@ def main(argv=None) -> int:
         apply_style(app)
     except Exception:
         pass
+    from .collector import collect_on_gui_thread
+    collect_on_gui_thread(app)
+    from .icon import install_icon
+    install_icon(app)
     window = BatchWindow()
     args = (argv if argv is not None else sys.argv)[1:]
     if args:

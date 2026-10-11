@@ -105,3 +105,45 @@ def test_the_bug_report_has_the_logs_and_the_session_but_not_the_localizations(l
     assert "localizations: 500" in report and "photons (float64)" in report
     assert "Analysis/Drift/RCC" in report
     assert len(report) < 5000                      # a description, not the table
+
+
+def test_a_second_instance_writes_a_log_of_its_own(tmp_path, monkeypatch):
+    """Two instances at once -- a session opened in a new window -- must not
+    share one rotating file: the second writes smappy-<pid>.log."""
+    import os
+    monkeypatch.setenv("SMAPPY_CONFIG_DIR", str(tmp_path))
+    folder = diagnostics.log_dir()
+    folder.mkdir(parents=True)
+    other = diagnostics._claim(folder)          # the instance already running
+    try:
+        path = diagnostics.start("second")
+        try:
+            assert path.name == f"smappy-{os.getpid()}.log"
+            assert diagnostics.log_file() == path
+            report = diagnostics.bug_report(tmp_path / "report.zip")
+            assert path.name in zipfile.ZipFile(report).namelist()
+        finally:
+            diagnostics.stop()
+    finally:
+        other.close()
+    path = diagnostics.start("first again")
+    try:
+        assert path.name == "smappy.log"
+    finally:
+        diagnostics.stop()
+
+
+def test_old_logs_of_other_instances_are_cleaned_up(tmp_path, monkeypatch):
+    import os
+    import time
+    monkeypatch.setenv("SMAPPY_CONFIG_DIR", str(tmp_path))
+    folder = diagnostics.log_dir()
+    folder.mkdir(parents=True)
+    old, recent = folder / "smappy-1.log", folder / "smappy-2.log"
+    old.write_text("old")
+    recent.write_text("recent")
+    week_ago = time.time() - (diagnostics.PROCESS_LOG_DAYS + 1) * 86400
+    os.utime(old, (week_ago, week_ago))
+    diagnostics.start("test")
+    diagnostics.stop()
+    assert not old.exists() and recent.exists()

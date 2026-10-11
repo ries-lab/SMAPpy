@@ -15,8 +15,15 @@ The Render tab decides what goes into that picture and how it is drawn.
 The picture is made of **layers**.  Each layer shows the localizations its own
 filter keeps, drawn its own way -- one layer per channel or per file, say, or
 the same data twice with different filters.  The visible layers are added up
-into the image in the main window, as in SMAP.  Every control below the layer
-strip edits one layer, the one selected in the strip.
+into the image in the main window, as in SMAP.  *Layers* on the picture's
+toolbar shows them *side by side* instead, a panel per layer, or *side by side
++ overlay* with the added-up picture after them (SMAP's *split* and *comp*).
+The panels go across or one above another, whichever shows the data larger in
+the window, and move and zoom together; the ROI is drawn and edited on the
+first and its outline is on all of them.  Beside it, *pixel* says what one
+screen pixel is: the zoom, as a number.  Type a size to zoom to it, or press
+*pixel* to go to 10 nm.  Every control below the layer strip edits one layer,
+the one selected in the strip.
 
 What a layer shows is also what the rest of the program works on.  A plugin
 measures the localizations the layer's filter keeps (inside the drawn ROI, if

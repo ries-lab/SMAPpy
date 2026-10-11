@@ -31,7 +31,13 @@ from pathlib import Path
 from typing import Callable, List, Optional, Sequence, Tuple, Union
 
 SIZE = (1600, 900)          # the virtual desktop, in logical pixels (16:9)
-SCALE = 2                   # device pixels per logical pixel in the screenshots
+# SMAPPY_TUTORIAL_DRAFT=1 is for the test, which needs the storyboard to run
+# and not the pictures to be good: at 1x a shot is a quarter of the pixels to
+# paint, and JPEG encodes one in 120 ms where WebP takes 550 -- together about
+# a third of a tutorial's time.
+DRAFT = bool(os.environ.get("SMAPPY_TUTORIAL_DRAFT"))
+SCALE = 1 if DRAFT else 2   # device pixels per logical pixel in the screenshots
+SHOT_FORMAT = ("jpg", 85) if DRAFT else ("webp", 92)
 TITLE = 26                  # the height of a drawn title bar
 MARGIN = 14
 
@@ -91,6 +97,10 @@ class Director:
         from ..gui.widgets import CONTROL_WIDTH, apply_style
         from ..session import Session
         apply_style(self.app)
+        from ..gui.collector import collect_on_gui_thread
+        collect_on_gui_thread(self.app)
+        from ..gui.icon import install_icon
+        install_icon(self.app)
         self.session = Session()
         self.render = RenderWindow(self.session)
         self.control = ControlWindow(self.session, self.render)
@@ -293,8 +303,8 @@ class Director:
         """
         self.settle() if wait else self.settle_picture()
         n = len(self.steps) + 1
-        name = f"{n:03d}.webp"
-        self.composite().save(str(self.out / name), "webp", 92)
+        name = f"{n:03d}.{SHOT_FORMAT[0]}"
+        self.composite().save(str(self.out / name), *SHOT_FORMAT)
         step = Step(say=say, image=name,
                     spot=[self._as_rect(s, pad) for s in spot],
                     point=self.centre(point) if point is not None else None,
@@ -362,7 +372,11 @@ class Director:
         Short and plain, because it is on screen: a file field shows the path,
         and a temporary directory's name is noise to whoever watches.
         """
-        path = Path(tempfile.gettempdir()) / "SMAPpy demo"
+        # SMAPPY_TUTORIAL_DATA moves it, for the test: tutorials run side by
+        # side there, and two that fit the same demo acquisition into one
+        # file found it locked by the other
+        path = Path(os.environ.get("SMAPPY_TUTORIAL_DATA")
+                    or Path(tempfile.gettempdir()) / "SMAPpy demo")
         path.mkdir(parents=True, exist_ok=True)
         return path
 

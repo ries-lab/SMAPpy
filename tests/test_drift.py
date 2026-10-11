@@ -340,6 +340,7 @@ def _pairs_reported(lines):
 
 
 @pytest.mark.parametrize("group", [False, True])
+@pytest.mark.slow
 def test_the_cost_estimate_predicts_the_pairs_that_get_built(group):
     """The estimate is the whole point: it has to be right before the run.
 

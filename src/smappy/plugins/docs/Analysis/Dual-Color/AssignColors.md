@@ -1,6 +1,6 @@
 ---
 version: "2"
-covers: [smappy.plugins.assign_colors.ratios, smappy.plugins.assign_colors.find_modes, smappy.plugins.assign_colors.unclaimed_modes, smappy.plugins.assign_colors.assign_by_minima, smappy.plugins.assign_colors.log_likelihoods, smappy.plugins.assign_colors.variances, smappy.plugins.assign_colors.deviations, smappy.plugins.assign_colors.posteriors, smappy.plugins.assign_colors.assign_by_probability, smappy.plugins.assign_colors.region_polygons, smappy.plugins.assign_colors._mode_width, smappy.plugins.assign_colors.AssignColors]
+covers: [smappy.plugins.assign_colors.ratios, smappy.plugins.assign_colors.find_modes, smappy.plugins.assign_colors.unclaimed_modes, smappy.plugins.assign_colors.assign_by_minima, smappy.plugins.assign_colors.log_likelihoods, smappy.plugins.assign_colors.variances, smappy.plugins.assign_colors.deviations, smappy.plugins.assign_colors.posteriors, smappy.plugins.assign_colors.assign_by_probability, smappy.plugins.assign_colors.region_polygons, smappy.plugins.assign_colors._mode_width, smappy.plugins.assign_colors.AssignColors, smappy.plugins.assign_colors.decide, smappy.plugins.assign_colors.ColourRecipe]
 ---
 
 ## What it does
@@ -462,6 +462,13 @@ and the run is logged in the file's history:
 * `channel_sigma` -- how many standard deviations the nearest dye is from
   this localization's $r$.  This is the column that tells a localization on a
   peak from one between the peaks, and a useful filter.
+
+**During a live fit** the colours follow the table as it grows: each block
+the fit adds is assigned with the peaks found when the plugin ran, which are
+not looked for again, so nothing already on screen changes colour.  When the
+fit has finished, the peaks are found again over the whole table and every
+localization is assigned again with them.  This cannot be undone while the
+fit runs.
 
 Beside the table:
 

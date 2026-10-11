@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import Optional
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QAbstractItemView, QHeaderView, QLabel,
+from PySide6.QtWidgets import (QAbstractItemView, QHBoxLayout, QHeaderView, QLabel,
                                QPushButton, QTableWidget, QTableWidgetItem,
                                QVBoxLayout, QWidget)
 
@@ -57,7 +57,23 @@ class CameraParameters(QWidget):
         refresh.setToolTip("read the file again: the camera, its readout mode "
                            "and every value the fit will use")
         refresh.clicked.connect(self.refresh)
-        layout.addWidget(refresh)
+        buttons = QHBoxLayout()
+        buttons.addWidget(refresh)
+        # offered when the database does not know the camera or its mode
+        self.add_button = QPushButton("Add to camera database...")
+        self.add_button.setToolTip("open the camera editor on this file, to add "
+                                   "its camera or its readout mode once and "
+                                   "for every file after it")
+        self.add_button.clicked.connect(self.edit)
+        self.add_button.hide()
+        buttons.addWidget(self.add_button)
+        buttons.addStretch(1)
+        layout.addLayout(buttons)
+        # what opens the editor: the main window's, which tells the fitters
+        # when a camera is added; a view on its own opens its own
+        self.open_editor = None
+        self._resolved = None
+        self._editor = None
         self.resize(620, 420)
 
     # ------------------------------------------------------------------ data
@@ -70,7 +86,9 @@ class CameraParameters(QWidget):
 
     def refresh(self) -> None:
         resolved = self._resolve()
+        self._resolved = resolved
         self.table.setRowCount(0)
+        self.add_button.hide()
         if resolved is None:
             self.summary.setText("<b>no acquisition</b>")
             self.note.setText("choose a file in the Localize tab; its camera is "
@@ -100,13 +118,17 @@ class CameraParameters(QWidget):
             self.summary.setText(
                 "<b>camera not recognised</b><br>Nothing in this file matches a "
                 "camera in the database, so only what the file itself says is "
-                "known.  Pick one under <i>camera</i> in the Localize tab, or "
-                "state the values there.")
+                "known.  Pick one under <i>camera</i> in the Localize tab, state "
+                "the values there, or add the camera to the database.")
+            self.add_button.show()
         else:
             state = (f"<br>readout mode: {resolved.state_name}"
                      if resolved.state_name else
                      "<br><b>readout mode not recognised</b>: what depends on it "
                      "is missing below")
+            if not resolved.state_name and any(
+                    p.state for p in resolved.camera.parameters.values()):
+                self.add_button.show()
             self.summary.setText(
                 f"<b>{resolved.camera_name}</b>"
                 f"<br>identified by {resolved.camera.identified_by(resolved.metadata)}"
@@ -132,14 +154,30 @@ class CameraParameters(QWidget):
         if missing:
             self.note.setText(
                 "The fit cannot run without " + ", ".join(missing) +
-                ".  State them in the Localize tab, or add this camera to "
-                "cameras.json.")
+                ".  State them in the Localize tab, or add this camera to the "
+                "database (Add to camera database).")
             self.note.setStyleSheet(f"color: {MISSING_COLOUR}")
         else:
             self.note.setText("Every value the fit needs is known.  Greyed rows "
                               "are parameters the database carries and the fit "
                               "does not read.")
             self.note.setStyleSheet("color: gray")
+
+
+    def edit(self) -> None:
+        """The camera editor on the file this view is showing."""
+        resolved = self._resolved
+        if resolved is None:
+            return
+        if self.open_editor is not None:
+            self.open_editor(resolved.metadata, resolved.camera)
+            return
+        from .camera_editor import open_editor
+        first = self._editor is None
+        self._editor = open_editor(resolved.metadata, resolved.camera, self,
+                                   self._editor)
+        if first:
+            self._editor.saved.connect(lambda name: self.refresh())
 
 
 def _text(value) -> str:

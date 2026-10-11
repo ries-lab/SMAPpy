@@ -1,5 +1,7 @@
 """A chain of plugins runs as one plugin: its file, its settings, its run,
 its record, and the rules that decide which table each step reads."""
+from dataclasses import dataclass
+
 import numpy as np
 import pytest
 
@@ -244,3 +246,161 @@ def test_start_from_defaults_keeps_what_the_file_hides():
                           "use": np.array([1.0, 0.0, 1.0])},
                          {KEPT_BOUNDS: {"use": [0.5, None]}})
     assert default_bounds(locs)["use"] == (0.5, None)
+
+
+# ------------------------------------------------------------ evaluators
+
+def four_sites():
+    """Four clusters of 100, far apart, ungrouped: one ROI each."""
+    rng = np.random.default_rng(3)
+    centers = [(2000, 2000), (6000, 2000), (2000, 6000), (6000, 6000)]
+    x = np.concatenate([rng.normal(cx, 20, 100) for cx, _ in centers])
+    y = np.concatenate([rng.normal(cy, 20, 100) for _, cy in centers])
+    n = len(x)
+    session = Session(Localizations({
+        "x_nm": x, "y_nm": y, "frame": np.arange(n),
+        "photons": np.full(n, 300.0), "xy_err_nm": np.full(n, 9.0)}))
+    session.show_grouped(0, False)
+    session.rois.set_geometry(400)
+    return session
+
+
+SEGMENT = {"plugin": "ROIManager/Segment/Density Peaks", "label": "find",
+           "values": {"sigma_nm": 60.0, "separation_nm": 1000.0, "min_count": 20}}
+
+
+def test_an_evaluator_step_runs_on_every_site_before_the_next_step():
+    session = four_sites()
+    drawn = session.rois.add_roi(next(iter(session.rois.sources)), (9000.0, 9000.0))
+    drawn.use = False                                   # excluded: not evaluated
+    cls = chain_class(spec(SEGMENT,
+                           {"plugin": "ROIManager/Evaluate/Statistics", "label": "stats"},
+                           {"plugin": "ROIManager/Analyze/Histograms"}))
+    result = session.run(cls(), cls.Settings())
+    steps = result.data["results"]
+    assert steps["stats"].text == "4 sites evaluated"
+    assert steps["stats"].data["sites"] == 4
+    # the analysis after it read the four rows the evaluator had just made
+    assert "4 ROIs" in steps["histograms"].text
+    # the ROIs and the run are the session's now; the window's pipeline is
+    # still the user's, and the rows are there without it
+    project = session.rois
+    assert len(project.rois) == 5 and drawn.id in project.rois
+    rows = project.results()
+    assert len(rows) == 4 and {r["n_localizations"] for r in rows} == {100}
+    assert project.pipeline == [] and project.runs[-1]["chain"] == cls.path
+    assert project.labels() == ["stats"]
+    # and the log says so, step by step
+    assert [s["plugin"] for s in session.history[-1]["steps"]] == [
+        "ROIManager/Segment/Density Peaks", "ROIManager/Evaluate/Statistics",
+        "ROIManager/Analyze/Histograms"]
+    assert session.history[-1]["steps"][1]["grouping"] == "layer"
+
+
+def test_a_chain_changes_the_roi_project_only_through_its_result():
+    session = four_sites()
+    cls = chain_class(spec(SEGMENT, {"plugin": "ROIManager/Evaluate/Statistics"}))
+    result = cls().run(session.context(), cls.Settings())
+    assert len(session.rois.rois) == 0 and session.rois.runs == []
+    assert len(result.data["roi_project"]["rois"]) == 4
+    session.apply(cls(), result)
+    assert len(session.rois.rois) == 4 and len(session.rois.runs) == 1
+
+
+def test_a_chain_that_leaves_the_rois_alone_hands_none_back():
+    session = four_sites()
+    cls = chain_class(spec({"plugin": "Test/Chain/Count"}))
+    assert "roi_project" not in cls().run(session.context(), cls.Settings()).data
+
+
+def test_an_evaluator_with_no_sites_to_measure_stops_the_chain():
+    session = four_sites()
+    cls = chain_class(spec({"plugin": "ROIManager/Evaluate/Statistics", "label": "stats"}))
+    with pytest.raises(ChainError, match="'stats'.*no ROIs to evaluate"):
+        session.run(cls(), cls.Settings())
+
+
+def test_one_evaluator_under_two_names_gives_two_sets_of_columns():
+    session = four_sites()
+    cls = chain_class(spec(SEGMENT,
+                           {"plugin": "ROIManager/Evaluate/Statistics", "label": "a"},
+                           {"plugin": "ROIManager/Evaluate/Statistics", "label": "b"}))
+    session.run(cls(), cls.Settings())
+    assert set(session.rois.labels()) == {"a", "b"}
+    rows = session.rois.results()
+    assert len(rows) == 4 and "a.n_localizations" in rows[0] \
+        and "b.n_localizations" in rows[0]
+
+
+def test_an_evaluators_grouping_is_the_roi_managers_and_cannot_be_chosen():
+    cls = chain_class(spec({"plugin": "ROIManager/Evaluate/Statistics", "label": "stats"}))
+    assert cls().active(cls.Settings())["stats.use_grouping"] is False
+
+
+def test_a_chains_evaluation_and_the_windows_stand_side_by_side():
+    """The window's pipeline runs after a chain: both evaluations are on the
+    ROIs, and the chain's run is not taken for the window's pipeline."""
+    from smappy.workspace import Instance
+    session = four_sites()
+    cls = chain_class(spec(SEGMENT, {"plugin": "ROIManager/Evaluate/Statistics",
+                                     "label": "chain stats"}))
+    session.run(cls(), cls.Settings())
+    project = session.rois
+    assert [s.label for s in project.resolved()] != ["chain stats"]
+    project.evaluate([Instance(plugin="ROIManager/Evaluate/Statistics")])
+    assert set(project.labels()) == {"chain stats", "Statistics"}
+    row = project.results()[0]
+    assert row["chain stats.n_localizations"] == row["Statistics.n_localizations"] == 100
+
+
+def test_histograms_of_every_evaluation_need_no_choice():
+    """Two evaluations on the ROIs: Histograms draws both unless one is named."""
+    from smappy.workspace import Instance
+    session = four_sites()
+    cls = chain_class(spec(SEGMENT))
+    session.run(cls(), cls.Settings())
+    project = session.rois
+    project.evaluate([Instance(plugin="ROIManager/Evaluate/Statistics", label="a")])
+    project.evaluate([Instance(plugin="ROIManager/Evaluate/Statistics", label="b",
+                               values={"precision_column": "photons"})])
+    cls = chain_class(spec({"plugin": "ROIManager/Analyze/Histograms", "label": "h",
+                            "values": {"evaluation": ""}}))
+    # Histograms draws every evaluation unless one is named: nothing to ask
+    assert cls().preflight(session.context(), cls.Settings()) is None
+    result = session.run(cls(), cls.Settings())
+    assert {"a.n_localizations", "b.n_localizations"} <= set(
+        result.data["results"]["h"].data["histograms"])
+
+
+@dataclass
+class WhichSettings:
+    pick: str = ""
+
+
+@register("Test/Chain/Which")
+class Which(Plugin):
+    """Asks which, until told."""
+    Settings = WhichSettings
+
+    def preflight(self, ctx, settings):
+        from dataclasses import replace
+        from smappy.plugins import PreflightChoice, PreflightQuestion
+        if settings.pick:
+            return None
+        return PreflightQuestion("which?", run_label="", choices=[
+            PreflightChoice(label=x, settings=replace(settings, pick=x))
+            for x in ("left", "right")])
+
+    def run(self, ctx, settings):
+        return Result(text=settings.pick)
+
+
+def test_a_chain_puts_a_steps_choice_as_its_own_before_running():
+    cls = chain_class(spec({"plugin": "Test/Chain/Count"},
+                           {"plugin": "Test/Chain/Which", "label": "w"}))
+    session = Session(with_sigma(blinks()))
+    asked = cls().preflight(session.context(), cls.Settings())
+    assert asked.run_label == "" and asked.text == "w: which?"
+    right = next(c for c in asked.choices if c.label == "right").settings
+    assert right.w.pick == "right" and cls().preflight(session.context(), right) is None
+    assert session.run(cls(), right).data["results"]["w"].text == "right"

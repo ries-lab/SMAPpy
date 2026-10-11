@@ -52,8 +52,14 @@ def test_an_edited_parameter_makes_the_stored_numbers_out_of_date():
 
     project.pipeline[0].values = {"precision_column": "photons"}
     assert states(project, ids[0]) == {"Statistics": "stale"}
-    assert project.results() == []                 # not silently reused
     assert set(project.needs_evaluation()) == set(ids)
+    # the numbers stay in the site table until they are replaced: still true
+    # of the ROIs, and saying which settings made them
+    assert len(project.results()) == 2
+    made = project.evaluation_steps("Statistics")
+    assert len(made) == 1 and "photons" not in str(made[0]["parameters"])
+    project.evaluate()
+    assert "photons" in str(project.evaluation_steps("Statistics")[0]["parameters"])
 
 
 def test_renaming_a_step_does_not_invalidate_anything():

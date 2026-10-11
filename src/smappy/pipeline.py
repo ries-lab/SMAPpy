@@ -262,12 +262,19 @@ def fit_stack(frames: Iterable[Tuple[int, np.ndarray]], camera: CameraMetadata,
 def drive(engine, frames: Iterable[Tuple[int, np.ndarray]],
           sink: Optional[Callable[[Localizations], None]] = None,
           progress: Optional[Callable[[object], None]] = None,
-          read_ahead: int = 2) -> Localizations:
+          read_ahead: int = 2,
+          flush_seconds: Optional[float] = None) -> Localizations:
     """Push blocks through anything with ``push`` and ``flush``.
 
     Split out of `fit_stack` so that the dual-channel engine
     (`smappy.dualfit.DualChannelEngine`), which buffers pairs of ROIs rather
     than single ones, is driven by the same loop.
+
+    ``flush_seconds`` fits what is buffered at least that often, for a live
+    source: the buffer holds thousands of ROIs, and a sparse acquisition would
+    otherwise show nothing for minutes (`smappy.live.LiveFit` does the same).
+    It is checked once per block, so a source that pauses should send empty
+    blocks while it waits (`watch_stack(idle_blocks=True)`).
     """
     collected = Localizations()
 
@@ -279,8 +286,15 @@ def drive(engine, frames: Iterable[Tuple[int, np.ndarray]],
         else:
             collected.extend(locs)
 
+    last_flush = time.monotonic()
     for first_frame, block in prefetch(frames, read_ahead):
-        emit(engine.push(block, first_frame))
+        # an empty block is a live source saying nothing has arrived
+        # (`watch_stack(idle_blocks=True)`): only the clock below has work
+        if len(block):
+            emit(engine.push(block, first_frame))
+        if flush_seconds is not None and time.monotonic() - last_flush >= flush_seconds:
+            emit(engine.flush())
+            last_flush = time.monotonic()
         if progress is not None:
             progress(engine)
     emit(engine.flush())

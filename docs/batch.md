@@ -112,6 +112,58 @@ chain asks all of them once, up front, and runs without asking again; in a
 batch the job says what an answer is (`preflight: skip | proceed | abort`,
 default `skip`: the file is skipped and the report says why).
 
+### ROIs: segment, evaluate, analyse
+
+Decided 2026-10-05.  A chain can do what the ROI manager does by hand:
+
+* a **segmenter** (`ROIManager/Segment/...`) is an ordinary step; the ROIs it
+  finds go into the scratch session's ROI project;
+* an **evaluator** (`scope = "site"`) is run over *every* ROI the project
+  includes -- reviewed and ticked *use*, whoever made it -- with
+  `ROIProject.evaluate`, and the chain goes on only when all of them are
+  done.  A ROI on which it fails loses its row and is counted in the step's
+  line; no ROI at all fails the step.  Results still current (same ROI, data
+  and settings) are carried forward;
+* its results are **stored with the ROIs** as an evaluation run of their own,
+  marked with the chain (`run["chain"]`), under the step's name -- the
+  plugin's when the step is not renamed.  The evaluation window's pipeline
+  is not touched: it is the user's, set up for whatever they do next.  A
+  result belongs to its ROI and says how it was made
+  (`ROIProject.evaluations`: the newest result under each name that is
+  still true of the ROI's data, with its plugin, version and parameters),
+  so the site table (`ROIProject.results`) holds the chain's columns beside
+  the pipeline's, and an analysis step -- in the chain, or run from the GUI
+  afterwards -- reads them without knowing who ran them.  The name is the
+  identity: the same evaluator under its name again replaces its numbers,
+  renamed it adds a second set to compare;
+* an evaluator sees what the ROI manager shows -- the filter and grouping of
+  the layer it follows, the first unless changed -- so its step's grouping
+  choice is greyed out; a `Chain/Layers` step before it is how a chain sets
+  that up.
+
+The scratch session carries a copy of the ROI project as it is
+(`Session.scratch`), and the chain hands the copy back as
+`Result.data["roi_project"]` when a step changed it; `Session.apply` loads it
+into the session's project, the object the ROI manager's window holds.  So,
+as for the table, nothing reaches the ROI manager until the whole chain has
+succeeded.  Undo does not take the ROIs back: the ROI manager has no undo.
+
+The shipped `ROIManager/Workflow/NPC Analysis` is such a chain
+(`src/smappy/plugins/npc_analysis.chain.yaml`): group, NPC segmenter, NPC
+Corners, NPC Labeling Efficiency, which takes the counts by the plugin that
+made them and its cutoffs from their settings.
+
+An ROI analysis (`plugins.roi.SiteAnalysisPlugin`: `evaluator`, the path of
+what it reads, and a *results from* field) reads the evaluation the chain
+made, told by `Context.evaluations` -- the chain's evaluations so far,
+planned ones included when the chain asks its questions up front.  Without
+one, the only evaluation on the ROIs; with several and none named, its
+`preflight` asks *which* -- a `PreflightQuestion` with no plain run -- and
+the chain puts that question as its own before running, the choice setting
+the step's field (the GUI asks again until nothing is left to choose).  In
+a batch nobody is there to answer, so such a file is skipped, saying why:
+name the evaluation in the chain.
+
 ### Building a chain in the GUI
 
 A chain is always a single collapsed plugin panel.  **New chain** in a tab's
@@ -308,15 +360,6 @@ the batch and never the GUI -- and reads its progress lines.
 * **Inputs of more than one file.**
 * **Parallel files** (`jobs: N`), for analysis-only chains on many cores.
 * **Branching chains.**  Deliberately linear; see above.
-* **Evaluators in a chain.**  A step with `scope = "site"` is refused
-  (`chain.py`: it runs once per ROI and belongs in the ROI manager's
-  pipeline), so a chain cannot yet segment, evaluate every ROI and analyse
-  the site table.  How best to allow it is open -- a step that runs a list
-  of evaluators over the ROIs a segmenter step made, the ROI manager's
-  pipeline as a step, or something else -- and so is what the scratch
-  session does with the ROIs and their runs.  Until then a plugin does it
-  by hand: `ROIManager/Workflow/NPC Analysis` calls `ROIProject.find` and
-  `ROIProject.evaluate` itself.
 
 ## For agents
 

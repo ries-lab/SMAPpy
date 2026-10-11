@@ -400,6 +400,7 @@ def test_a_ring_and_a_disk_give_back_the_radius_they_were_made_with():
         assert abs(fit.values()["centre"]) < 4.0
 
 
+@pytest.mark.slow
 def test_a_ring_is_told_from_a_disk_and_from_two_points():
     """What the comparison is for: three models that all have two humps."""
     window = (-150.0, 150.0)
@@ -424,6 +425,7 @@ def test_the_round_shapes_are_normalized_over_the_window():
 
 # ------------------------------------------------------------- bootstrap
 
+@pytest.mark.slow
 def test_the_bootstrap_interval_covers_the_truth_about_as_often_as_it_claims():
     """The only test a confidence interval really has: count how often it is
     right.  Twelve samples of forty localizations, a nominal 95% -- the
@@ -458,6 +460,7 @@ def test_the_bootstrap_is_wider_than_the_curvature_on_a_small_sample():
     assert fit.replicates.shape == (200, 3)  # centre, sigma, background
 
 
+@pytest.mark.slow
 def test_the_bootstrap_and_the_curvature_agree_when_there_is_enough_data():
     """The asymptotic error bar is asymptotically right; this is the check."""
     from smappy.plugins.line_profile import bootstrap

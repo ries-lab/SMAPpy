@@ -1,6 +1,6 @@
 ---
 version: "2"
-covers: [smappy.npc.localization_classes, smappy.npc.joint_pmf, smappy.npc.fit, smappy.plugins.npc.joint_efficiency, smappy.plugins.npc.labeling_efficiency, smappy.plugins.npc.fit_likelihood, smappy.plugins.npc.fit_sqrt_lsq, smappy.plugins.npc.true_corners]
+covers: [smappy.npc.localization_classes, smappy.npc.joint_pmf, smappy.npc.fit, smappy.plugins.npc.joint_efficiency, smappy.plugins.npc.labeling_efficiency, smappy.plugins.npc.fit_likelihood, smappy.plugins.npc.fit_sqrt_lsq, smappy.plugins.npc.true_corners, smappy.plugins.npc.corner_settings, smappy.plugins.roi.choose_evaluation]
 ---
 
 ## What it does
@@ -171,7 +171,20 @@ its own; the same ELE and blinking in every pore; a geometric number of
 blinks; a blink's brightness independent of its fluorophore; and one grouped
 localization per blink.  A grouping that leaves a blink in several rows --
 smappy's links within a fixed 50 nm, which a dim frame at 500 photons misses
--- reads as more blinks.
+-- reads as more blinks.  On a layer that is not grouped at all the plugin
+still runs, and its text says so.
+
+**Which counts.**  The counts are those of an NPC Corners evaluation, made by
+the evaluation window or a chain.  With one, it is used whatever it is
+called; in a chain, the one the chain itself made.  *results from* lists
+every NPC Corners evaluation on the ROIs, after *auto*, which says which one
+it would take.  With several -- NPC Corners renamed and run with other
+settings, to compare -- and *auto* chosen, the plugin asks before it runs,
+with a button per evaluation and its settings beside it, and the answer goes
+into *results from*, so it is asked once.  The cutoffs of the model are those that evaluation counted
+with, as stored with its results, not what the evaluation window holds now.
+If some sites were counted with other settings than the rest under the same
+name, the plugin refuses and asks for them to be evaluated again.
 
 **Simulated data.**  When the sites come from a simulated table, the plugin
 also reports the efficiency it was simulated with, and fits the labelled
@@ -221,7 +234,8 @@ SMAP's method only.  100 gives the error to two digits.
 
 * **The text**: the ELE and the blinks per copy with their errors, and the
   pores fitted of all.  On a simulation also the simulated efficiency and the
-  ELE of the same pores' labelled corners.
+  ELE of the same pores' labelled corners.  A note when the layer is not
+  grouped.
 * **The figure**: the corners seen and the localizations per pore of the
   pores fitted (grey), and the model at the fitted values (red).  A good fit
   follows both.  More pores at either end of the localization histogram than

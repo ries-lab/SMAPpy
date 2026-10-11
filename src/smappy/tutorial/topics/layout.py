@@ -133,7 +133,7 @@ def make(d) -> None:
     d.shot("The File tab has the same, and more: saving, exporting an image, "
            "and simulating data.",
            spot=[_tab_button(d, "File")], point=_tab_button(d, "File"), click=True)
-    section, panel = _open(d, file_tab, "Blinking Structure")
+    section, panel = _open(d, file_tab, "Simulate structure")
     d.shot("To practise, Simulate makes a dataset with a known structure: "
            "a ring and two crossing lines.",
            spot=[d.rect(section)], zoom=d.around(section, 760))
@@ -350,12 +350,19 @@ def make(d) -> None:
            spot=[d.rect(menu)], zoom=d.around(menu, 700))
     menu.close()
 
-    d.chapter("Undo and saving")
-    menu = _menu(d, "File")
+    d.chapter("Undo, copy and saving")
+    menu = _menu(d, "Edit")
     d.shot("What changes the table, like a drift correction, can be undone. "
            "Grey here: filters and layers never change it.",
            spot=[_menu_item(d, menu, "Undo"), _menu_item(d, menu, "Undo steps")],
            zoom=d.around(menu, 700))
+    d.shot("Copy, Ctrl+C, copies the picture in front: the render, the 3D "
+           "view or a plugin's figure, ready to paste into a slide.",
+           spot=[_menu_item(d, menu, "Copy"), _menu_item(d, menu, "Copy rendered image")],
+           zoom=d.around(menu, 700))
+    menu.close()
+    d.settle()
+    menu = _menu(d, "File")
     d.shot("Save, or Ctrl+S, keeps the localizations, their history and your "
            "ROIs in one file.",
            spot=[_menu_item(d, menu, "Save"), _menu_item(d, menu, "Save as")],

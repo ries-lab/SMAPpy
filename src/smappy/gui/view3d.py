@@ -864,17 +864,24 @@ class View3DWindow(QMainWindow):
     def _preset(self, name: str) -> None:
         self.panel._preset(name)
 
-    def _save(self) -> None:
+    def clipboard_image(self) -> Optional[QImage]:
+        """What Edit > Copy puts on the clipboard: the projection as displayed."""
         rgb = self.view.image_rgb()
         if rgb is None:
+            return None
+        data = (np.ascontiguousarray(rgb) * 255).astype(np.uint8)
+        h, w, _ = data.shape
+        return QImage(data.data, w, h, 3 * w, QImage.Format_RGB888).copy()
+
+    def _save(self) -> None:
+        image = self.clipboard_image()
+        if image is None:
             return
         path, _ = QFileDialog.getSaveFileName(self, "Save 3D image", folders.start(),
                                               "PNG (*.png)")
         if path:
             folders.remember(path)
-            data = (np.ascontiguousarray(rgb) * 255).astype(np.uint8)
-            h, w, _ = data.shape
-            QImage(data.data, w, h, 3 * w, QImage.Format_RGB888).save(path)
+            image.save(path)
 
     def _tiff(self, what: str) -> None:
         pixelsize, ok = QInputDialog.getDouble(self, "Pixel size", "nm per pixel:",

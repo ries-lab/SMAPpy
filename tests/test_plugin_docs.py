@@ -19,8 +19,10 @@ UNDOCUMENTED: set = set()
 
 
 def shipped():
+    """The plugins and chains that ship: a shipped chain is a plugin to the
+    person who opens it, and has a page like one."""
     return {path: ref for path, ref in plugins.refs().items()
-            if ref.root == "builtin" and ref.kind == "plugin"}
+            if ref.root == "builtin"}
 
 
 def documented():
@@ -78,6 +80,7 @@ def test_every_setting_of_a_documented_plugin_is_explained(path):
 
 
 @pytest.mark.parametrize("path", documented())
+@pytest.mark.slow
 def test_a_written_page_renders_with_its_maths_and_figures(path):
     """Figures and formulas are the page's choice -- a loader has little to
     draw -- but those it has must render."""

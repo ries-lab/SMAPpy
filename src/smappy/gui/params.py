@@ -35,6 +35,9 @@ class _Field(QWidget):
         super().__init__()
         self.spec = spec
         self._hint = ""
+        # a list the plugin worked out from the session (`Plugin.choices`),
+        # which replaces what the field's own callable offers
+        self._supplied: Optional[list] = None
         info = spec.info
         row = QHBoxLayout(self)
         # the macOS style paints a check box wider than its size hint and
@@ -143,10 +146,20 @@ class _Field(QWidget):
         choices = self.spec.info.choices
         if not callable(choices) or not isinstance(self.widget, QComboBox):
             return
+        self._refill(self._supplied if self._supplied is not None else choices())
+
+    def set_choices(self, choices) -> None:
+        """The list the plugin works out from the session; see `Plugin.choices`."""
+        if not isinstance(self.widget, QComboBox):
+            return
+        self._supplied = list(choices)
+        self._refill(self._supplied)
+
+    def _refill(self, choices) -> None:
         current = self.value()
         blocked = self.widget.blockSignals(True)
         try:
-            self._fill(choices())
+            self._fill(choices)
             self.set(current)
         finally:
             self.widget.blockSignals(blocked)
@@ -208,6 +221,12 @@ class _Field(QWidget):
                 return
         w = self.widget
         if isinstance(w, QComboBox):
+            if value not in self._values and self._supplied is not None \
+                    and value not in (None, ""):
+                # a name the session does not have (yet): kept, and said so,
+                # rather than quietly becoming the first entry
+                w.addItem(f"{value} (not available)", value)
+                self._values.append(value)
             w.setCurrentIndex(self._values.index(value) if value in self._values else 0)
         elif isinstance(w, QCheckBox):
             if w.isTristate():
@@ -615,6 +634,22 @@ class SettingsForm(QWidget):
                 continue
             if hasattr(field, "set_hint"):
                 field.set_hint(value)
+
+    def set_choices(self, lists: Dict[str, Any]) -> None:
+        """Replace, by dotted name, the lists of fields whose choices the
+        session decides (`Plugin.choices`).  Unknown names are ignored, as
+        for hints."""
+        for path, choices in lists.items():
+            target = self
+            parts = path.split(".")
+            try:
+                for part in parts[:-1]:
+                    target = target.fields[part]
+                field = target.fields[parts[-1]]
+            except (KeyError, AttributeError):
+                continue
+            if hasattr(field, "set_choices"):
+                field.set_choices(choices)
 
     def set_active(self, flags: Dict[str, bool]) -> None:
         """Grey out the fields the current settings do not read.

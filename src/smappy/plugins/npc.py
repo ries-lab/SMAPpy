@@ -13,6 +13,10 @@ Three plugins, one for each step of the ROI manager, ported from SMAP's
 * **Analyze/NPC Labeling Efficiency** fits the two jointly over all pores
   with the model of `smappy.npc`, or SMAP's corner histogram alone.
 
+*Workflow/NPC Analysis*, which runs the three in one go, is not a plugin but
+a chain of them, ``npc_analysis.chain.yaml`` beside this file: a chain runs an
+evaluator over every ROI before its next step (`smappy.chain`).
+
 Why it is not SMAP's corner counting, and why the settings are what they are,
 is measured in ``studies/npc_le`` (its README has the numbers):
 
@@ -60,8 +64,10 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
-from . import Context, Plot, Plugin, Result, param, register
-from .roi import MAX_FINDER_PIXELS, current_file
+from . import Context, Plot, Plugin, Result, param, register, settings_from
+from .roi import (EVALUATION_HELP, MAX_FINDER_PIXELS, SegmenterPlugin,
+                  SiteAnalysisPlugin, replace_param,
+                  auto_only, current_file)
 
 # SMAP's NPCLabelingQuantify counts a localization towards a corner only when
 # its precision is below 0.4 of the arc between two corners (15.7 nm at 50 nm)
@@ -163,6 +169,7 @@ class NPCSegmentSettings:
     keep_rejected: bool = param(False, label="keep rejected",
                                 help="add candidates that fail the checks as ROIs "
                                      "that are not used, to look at them")
+    replace: bool = replace_param("pores")
     radial_alpha: float = param(0.05, label="far test level", min=1e-6, max=0.5,
                                 advanced=True,
                                 help="a candidate fails when its far ones are this "
@@ -386,12 +393,22 @@ def draw_sites(ax, xy: np.ndarray, sites: Sequence[Dict[str, Any]],
     ax.set_ylabel("y (nm)")
 
 
+SEGMENTER = "ROIManager/Segment/NPC"
+
+
+def npc_rois(project, file_id) -> List[Any]:
+    """The ROIs the NPC segmenter made in this file."""
+    return [roi for roi in project.rois.values()
+            if roi.file_id == file_id and (roi.origin or {}).get("method") == SEGMENTER]
+
+
 @register("ROIManager/Segment/NPC")
-class NPCSegment(Plugin):
+class NPCSegment(SegmenterPlugin):
     """Finds nuclear pores with a ring filter, fits a circle to each and keeps
     those that look like a pore."""
 
     Settings = NPCSegmentSettings
+    changes_locs = False
     version = "2"
 
     def propose(self, locs, settings: NPCSegmentSettings,
@@ -408,7 +425,8 @@ class NPCSegment(Plugin):
                                               "far_fraction", "failed")}}
                 for s in keep]
 
-    def run(self, ctx: Context, settings: NPCSegmentSettings) -> Result:
+    def segment(self, ctx: Context, settings: NPCSegmentSettings,
+                commit: bool) -> Result:
         project = ctx.rois
         if project is None:
             locs = ctx.locs
@@ -422,10 +440,10 @@ class NPCSegment(Plugin):
             state = project.state(file_id)
             locs = state.locs[state.filter.indices]
             self.last = []
-            found = project.find(file_id, plugin=self, settings=settings)
+            proposed, data = self.found(project, file_id, settings, commit)
             sites = self.last
-            data = {"sites": sites, "rois": found,
-                    "centers": [r.center for r in found if r.use]}
+            data = {**data, "sites": sites,
+                    "centers": [p["center"] for p in proposed if p["use"]]}
         kept = sum(s["use"] for s in sites)
         text = f"{kept} pores of {len(sites)} candidates"
         if precision_column(locs) is None:
@@ -437,6 +455,8 @@ class NPCSegment(Plugin):
                     reasons[f] = reasons.get(f, 0) + 1
             text += "; rejected for " + ", ".join(f"{k} ({v})" for k, v in
                                                   sorted(reasons.items()))
+        if not commit:
+            text = "preview: " + text
         xy = np.column_stack((np.asarray(locs["x_nm"], dtype=float),
                               np.asarray(locs["y_nm"], dtype=float)))
         return Result(text=text, settings=settings, data=data,
@@ -568,6 +588,7 @@ class NPCCorners(Plugin):
     """Counts the corners a nuclear pore shows and the localizations it has."""
 
     Settings = NPCCornersSettings
+    changes_locs = False
     scope = "site"
     version = "2"
     # not in the default evaluation pipeline: added when the data are pores
@@ -649,6 +670,8 @@ class LabelingEfficiencySettings:
                              "SMAP's corner histogram alone")
     fit_min: int = param(5, label="fit from", min=0,
                          help="only pores with at least this many corners")
+    evaluation: str = param("", label="results from", choices=auto_only,
+                            help=EVALUATION_HELP)
     corners: int = param(8, label="corners", min=2, advanced=True,
                          help="corners of a pore")
     per_corner: int = param(4, label="proteins per corner", min=1, advanced=True,
@@ -786,28 +809,40 @@ def simulated_efficiency(project, rows) -> Optional[float]:
     return None if value is None else float(value)
 
 
-def column(rows, name: str) -> Optional[str]:
-    """`name`, or the qualified name a pipeline with two such steps gives it."""
-    keys = list(rows[0]) if rows else []
-    return next((k for k in keys if k == name),
-                next((k for k in keys if k.endswith("." + name)), None))
+CORNERS = "ROIManager/Evaluate/NPC Corners"
+
+
+def column(rows, name: str, label: Optional[str] = None) -> Optional[str]:
+    """`name` as the site table spells it: plain while one evaluation writes
+    it, ``"<label>.<name>"`` when two do -- NPC Corners and Statistics both
+    write `n_localizations`, two NPC Corners under two names write all."""
+    keys = set().union(*(r.keys() for r in rows)) if rows else set()
+    if label and f"{label}.{name}" in keys:
+        return f"{label}.{name}"
+    if name in keys:
+        return name
+    if label:
+        return None
+    return next((k for k in sorted(keys) if k.endswith("." + name)), None)
 
 
 def corner_column(rows) -> Optional[str]:
     return column(rows, "n_corners")
 
 
-def corner_settings(project) -> NPCCornersSettings:
-    """The settings NPC Corners ran with in this project's pipeline -- the
-    cutoffs the counts mean something with -- or its defaults."""
-    if project is not None:
-        try:
-            for step in project.resolved():
-                if step.path == "ROIManager/Evaluate/NPC Corners":
-                    return step.settings
-        except Exception:
-            pass
-    return NPCCornersSettings()
+def corner_settings(project, label: Optional[str], rows=()) -> NPCCornersSettings:
+    """The settings the NPC Corners evaluation called ``label`` counted these
+    sites with -- the cutoffs the counts mean something with -- as its run
+    recorded them, not whatever the evaluation window holds now."""
+    if project is None or not label:
+        return NPCCornersSettings()
+    ids = [r["roi_id"] for r in rows if r.get("roi_id") in project.rois] or None
+    made = project.evaluation_steps(label, ids)
+    if len(made) > 1:
+        raise ValueError(f"the sites were counted with different settings under "
+                         f"{label!r}: evaluate them all again")
+    values = (made[0].get("parameters") if made else None) or {}
+    return settings_from(NPCCornersSettings, values)
 
 
 def field_precisions(project, rows) -> np.ndarray:
@@ -889,26 +924,36 @@ def draw_joint(figure, fitted: Dict[str, Any], truth=None) -> None:
 
 
 @register("ROIManager/Analyze/NPC Labeling Efficiency")
-class NPCLabelingEfficiency(Plugin):
+class NPCLabelingEfficiency(SiteAnalysisPlugin):
     """The labelling efficiency of nuclear pores, from the corners each shows
     and the localizations it has (NPC Corners)."""
 
     Settings = LabelingEfficiencySettings
+    changes_locs = False
     version = "2"
 
+    evaluator = CORNERS
+
     def run(self, ctx: Context, settings: LabelingEfficiencySettings) -> Result:
-        rows = ctx.site_table
-        if rows is None and ctx.rois is not None:
-            rows = ctx.rois.results()
+        rows, label = self.rows(ctx, settings)
         if not rows:
-            raise ValueError("evaluate some ROIs first: there is no site table")
-        return self.analyse(ctx.rois, rows, settings, corner_settings(ctx.rois))
+            raise ValueError("the ROIs have no corner counts: evaluate them with "
+                             "NPC Corners first")
+        count = corner_settings(ctx.rois, label, rows)
+        result = self.analyse(ctx.rois, rows, settings, count, label)
+        if label and label != CORNERS.rsplit("/", 1)[-1]:
+            result.text += f"; counted by {label!r}"
+        if settings.method != "smap" and getattr(ctx.rois, "grouped", True) is False:
+            result.text += ("; the layer is not grouped: the model expects one "
+                            "localization per blink")
+        return result
 
     def analyse(self, project, rows, settings: LabelingEfficiencySettings,
-                count: NPCCornersSettings) -> Result:
-        """The analysis of these site rows, counted with `count` -- what the
-        workflow calls with its own settings rather than the pipeline's."""
-        name = column(rows, "n_corners_smap" if settings.method == "smap" else "n_corners")
+                count: NPCCornersSettings, label: Optional[str] = None) -> Result:
+        """The analysis of these site rows, counted with `count` by the NPC
+        Corners evaluation called `label` (None: whichever the rows have)."""
+        name = column(rows, "n_corners_smap" if settings.method == "smap" else "n_corners",
+                      label)
         if name is None:
             raise ValueError("the site table has no corner counts: add NPC Corners "
                              "to the evaluation and evaluate")
@@ -927,7 +972,7 @@ class NPCLabelingEfficiency(Plugin):
         if settings.method == "smap":
             result = self._smap(k, settings, truth)
         else:
-            result = self._joint(project, rows, k, settings, truth, count)
+            result = self._joint(project, rows, k, settings, truth, count, label)
         simulated = simulated_efficiency(project, rows) if project is not None else None
         if simulated is not None:
             result.data["simulated_efficiency"] = simulated
@@ -939,14 +984,14 @@ class NPCLabelingEfficiency(Plugin):
                             f"{100 * truth['efficiency']:.1f} %")
         return result
 
-    def _joint(self, project, rows, k, settings, truth, count) -> Result:
-        n_name = column(rows, "n_localizations")
+    def _joint(self, project, rows, k, settings, truth, count, label=None) -> Result:
+        n_name = column(rows, "n_localizations", label)
         if n_name is None:
             raise ValueError("the site table has no n_localizations: evaluate again "
                              "with this version of NPC Corners")
         n = np.array([r.get(n_name, np.nan) for r in rows], dtype=float)
         ok = np.isfinite(k) & np.isfinite(n)
-        radius_name = column(rows, "ring_radius_nm")
+        radius_name = column(rows, "ring_radius_nm", label)
         radii = np.array([r.get(radius_name, np.nan) for r in rows], float) \
             if radius_name else np.array([np.nan])
         ring_radius = float(np.nanmedian(radii)) if np.isfinite(radii).any() else 53.7
@@ -980,99 +1025,3 @@ class NPCLabelingEfficiency(Plugin):
                 "corner_probability": fitted["corner_probability"]}
         return Result(text=text, data=data, settings=settings,
                       plot=lambda ax: draw_histogram(ax, fitted, settings, truth))
-
-
-# ------------------------------------------------------------------ workflow
-
-SEGMENTER = "ROIManager/Segment/NPC"
-
-
-@dataclass
-class NPCWorkflowSettings:
-    segment: NPCSegmentSettings = param(default_factory=NPCSegmentSettings,
-                                        label="find the pores")
-    count: NPCCornersSettings = param(default_factory=NPCCornersSettings,
-                                      label="count corners", collapsed=True)
-    analysis: LabelingEfficiencySettings = param(default_factory=LabelingEfficiencySettings,
-                                                 label="labelling efficiency",
-                                                 collapsed=True)
-    replace: bool = param(True, label="replace earlier pores",
-                          help="remove the ROIs an earlier run put on this file's "
-                               "pores before finding them again")
-
-
-def npc_rois(project, file_id) -> List[Any]:
-    """The ROIs the NPC segmenter made in this file."""
-    return [roi for roi in project.rois.values()
-            if roi.file_id == file_id and (roi.origin or {}).get("method") == SEGMENTER]
-
-
-def rows_of(run) -> List[Dict[str, Any]]:
-    """The site rows an evaluation run produced, as `ROIProject.results` gives
-    them, without the steps that failed on a site."""
-    from ..roi_manager import pipeline as pipeline_module
-    out = []
-    for roi_id, record in (run.get("records") or {}).items():
-        values = pipeline_module.merged_values(record)
-        if values:
-            out.append({"roi_id": roi_id, "file_id": record.get("file_id"), **values})
-    return out
-
-
-@register("ROIManager/Workflow/NPC Analysis")
-class NPCWorkflow(Plugin):
-    """Finds the nuclear pores of the file, counts their corners and
-    localizations, and fits the labelling efficiency, in one run."""
-
-    Settings = NPCWorkflowSettings
-    version = "1"
-
-    def run(self, ctx: Context, settings: NPCWorkflowSettings) -> Result:
-        from ..workspace import Instance
-        from . import settings_values
-        project = ctx.rois
-        if project is None:
-            raise ValueError("the workflow works in the ROI manager: load "
-                             "localizations first")
-        file_id = current_file(project)
-        if file_id is None:
-            raise ValueError("no file to search: load localizations first")
-        if settings.replace:
-            for roi in npc_rois(project, file_id):
-                del project.rois[roi.id]
-
-        ctx.report("finding the pores")
-        segmenter = NPCSegment()
-        segmenter.last = []
-        state = project.state(file_id)
-        locs = state.locs[state.filter.indices]
-        found = project.find(file_id, plugin=segmenter, settings=settings.segment)
-        sites = segmenter.last
-        ids = [roi.id for roi in npc_rois(project, file_id) if roi.use]
-        if not ids:
-            raise ValueError("no pores found: see the segmenter's checks")
-
-        ctx.report(f"counting the corners of {len(ids)} pores")
-        step = Instance(plugin="ROIManager/Evaluate/NPC Corners",
-                        values=settings_values(settings.count))
-        run = project.evaluate([step], roi_ids=ids,
-                               progress=lambda i, n: ctx.report(f"counting {i} of {n}"))
-        rows = rows_of(run)
-
-        ctx.report("fitting the labelling efficiency")
-        result = NPCLabelingEfficiency().analyse(project, rows, settings.analysis,
-                                                 settings.count)
-        text = (f"{len(found)} pores found ({sum(s['use'] for s in sites)} of "
-                f"{len(sites)} candidates passed), {len(rows)} counted; " + result.text)
-        if getattr(project, "grouped", True) is False:
-            text += ("; the layer is not grouped: the model expects one "
-                     "localization per blink")
-        xy = np.column_stack((np.asarray(locs["x_nm"], dtype=float),
-                              np.asarray(locs["y_nm"], dtype=float)))
-        plots = {"pores": lambda ax: draw_sites(ax, xy, sites, settings.segment),
-                 "checks": Plot(lambda f: draw_quality(f, sites, settings.segment),
-                                panels=3, size=(8, 2.8))}
-        data = {**result.data, "pores_found": len(found), "candidates": len(sites),
-                "pores_counted": len(rows), "rois": found}
-        return Result(text=text, data=data, settings=settings, plot=result.plot,
-                      plots=plots)

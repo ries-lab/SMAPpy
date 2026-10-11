@@ -105,6 +105,12 @@ Names as in the site table, for example
 `n_localizations, mean_photons`.  A name no row has gives an empty panel,
 with every site counted as missing.
 
+### evaluation
+*auto* for an overview of everything measured.  The list offers every
+evaluation on the ROIs; pick one to see only its columns, under their own
+names -- one of two settings of the same evaluator, say, when both are on
+the ROIs.
+
 ## Output
 
 * **The figure**: one histogram per column, stacked, the number of sites on

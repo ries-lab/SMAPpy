@@ -16,9 +16,17 @@ from PySide6.QtWidgets import (QCheckBox, QHBoxLayout, QLabel, QMainWindow,
                                QWidget)
 
 from ..plugins import Plugin, Result
-from ..session import Session
+from ..session import LiveTableError, Session
 from .params import SettingsForm
 from .widgets import ColumnScroll
+
+# questions of *which* asked in a row before a run: one per step of a chain
+# that has to choose, and a bound so a preflight that never settles cannot
+# keep the dialog coming back
+MAX_CHOICES = 8
+
+# the status of a run that warned: what was said is in the output box
+WARNING_STYLE = "color: #c06000; font-weight: bold;"
 
 
 
@@ -40,7 +48,8 @@ class _Worker(QObject):
         except Exception:                   # a File plugin has no table yet
             n = None
         try:
-            work = getattr(plugin, self.job)
+            # a live step is a run nobody keeps (`PluginPanel._live_step`)
+            work = getattr(plugin, "run" if self.job == "live" else self.job)
             # into the diagnostic log: what ran, with what, and the traceback
             # if it failed -- the first thing a bug report is asked for
             with running(plugin, self.job, settings, n):
@@ -57,6 +66,10 @@ class PluginPanel(QWidget):
     # is what keeps `_on_progress` and `_on_stream` off that thread.
     progressed = Signal(str)
     streamed = Signal(str, object)
+    # ("done", Result) or ("failed", traceback) once a run or preview is over
+    # and the panel has dealt with it: what a caller that started the run
+    # itself (`gui.live_session`) waits for
+    ended = Signal(str, object)
 
     def __init__(self, plugin_cls: Type[Plugin], session: Session, parent=None):
         super().__init__(parent)
@@ -87,6 +100,21 @@ class PluginPanel(QWidget):
             if hasattr(leaf, "take_from_session"):
                 leaf.session = session
                 leaf.refresh()
+        # what the plugin says about the settings as they stand
+        # (`Plugin.notice`): a camera the database does not know, with the
+        # button that adds it.  Hidden while there is nothing to say.
+        self.notice = QLabel("")
+        self.notice.setWordWrap(True)
+        self.notice.setStyleSheet(WARNING_STYLE)
+        self.notice_button = QPushButton("")
+        self.notice_button.clicked.connect(self._on_notice)
+        notice_row = QHBoxLayout()
+        notice_row.addWidget(self.notice, 1)
+        notice_row.addWidget(self.notice_button, 0, Qt.AlignTop)
+        layout.addLayout(notice_row)
+        self.notice.hide()
+        self.notice_button.hide()
+        self._notice_window: Optional[str] = None
 
         buttons = QHBoxLayout()
         self.run_button = QPushButton("Run")
@@ -122,9 +150,9 @@ class PluginPanel(QWidget):
         self.text_button.setEnabled(False)
         # a measurement one aims with rather than one asked for afterwards:
         # the plugin says it is cheap enough (`Plugin.live`) and the tick
-        # re-previews while the ROI is dragged
+        # re-measures while the ROI is dragged
         self.live: Optional[QCheckBox] = None
-        if plugin_cls.live and plugin_cls.has_preview():
+        if plugin_cls.live:
             self.live = QCheckBox("live")
             self.live.setToolTip("redraw while the ROI is moved, without "
                                  "touching the session")
@@ -155,16 +183,35 @@ class PluginPanel(QWidget):
         shortcut = QShortcut(QKeySequence.HelpContents, self, self.show_help)
         shortcut.setContext(Qt.WidgetWithChildrenShortcut)
 
-        self.run_button.clicked.connect(self.run)
-        self.plot_button.clicked.connect(self.plot)
+        if self.plugin.window:
+            # a launcher (`Plugin.window`): nothing runs here, so nothing to
+            # plot or read; the window it opens is the result
+            self.run_button.setText("Open")
+            self.run_button.setToolTip("open the window, set up as above")
+            self.plot_button.hide()
+            self.text_button.hide()
+            self.output.hide()
+            self.run_button.clicked.connect(self.open_window)
+        else:
+            self.run_button.clicked.connect(self.run)
+        # not `self.plot`: `clicked` hands on `checked` (False), which PySide
+        # puts in the bool `raise_window` and the window stays behind
+        self.plot_button.clicked.connect(lambda: self.plot())
         self.text_button.clicked.connect(self.show_text)
         self._live_running = False
+        # this panel's run started the session's live table (the "start" it
+        # streamed): its result is that table's finished form, the one
+        # table change `Session.apply` takes while a fit is appending
+        self._owns_live = False
+        self._show_figures = True
+        self._warnings = 0
         self._live_timer = QTimer(self, singleShot=True, interval=120)
         self._live_timer.timeout.connect(self._live_step)
         self.form.field_changed.connect(self._react)
         self.progressed.connect(self._on_progress)
         self.streamed.connect(self._on_stream)
         self._active()
+        self._choices()
         session.on_change(self._on_session)
         self._take_saved()
 
@@ -174,6 +221,8 @@ class PluginPanel(QWidget):
         self.session.off_change(self._on_session)
 
     def _on_session(self, what: str) -> None:
+        if what in ("locs", "rois"):
+            self._choices()
         if what in ("locs", "results"):
             self._take_saved()
         elif what in ("roi", "roi-edited") and self.live is not None \
@@ -199,7 +248,13 @@ class PluginPanel(QWidget):
             self._live_timer.start()          # try again once it is free
             return
         self._live_running = True
-        self.preview()
+        # its preview where it has one; otherwise the run itself, which is
+        # then looked at and not applied -- a measurement that only draws
+        # needs no Preview button to be aimed
+        if self.plugin.has_preview():
+            self.preview()
+        else:
+            self._start("live", "measuring...")
 
     def _take_saved(self) -> None:
         """Offer the figure of a run that is over: this file carries its result.
@@ -235,7 +290,46 @@ class PluginPanel(QWidget):
         if updates:
             self.form.set_values(updates)
         self._hints()
+        self._show_notice()
         self._active()
+
+    def refresh_derived(self) -> None:
+        """Read again what the plugin works out from outside the form -- the
+        lists, the hints, the notice -- after something it reads changed: a
+        camera added to the database, say."""
+        self._choices()
+        self._hints()
+        self._show_notice()
+
+    def _show_notice(self) -> None:
+        """The plugin's line about the settings (`Plugin.notice`), with its
+        button when the GUI has the window it names.  Best effort, like the
+        hints."""
+        try:
+            notice = self.plugin.notice(self.form.value())
+        except Exception:
+            notice = None
+        self.notice.setVisible(notice is not None)
+        if notice is None:
+            self.notice_button.hide()
+            return
+        self.notice.setText(notice.text)
+        self._notice_window = notice.window
+        offered = bool(notice.action and notice.window
+                       and notice.window in self.session.window_openers)
+        self.notice_button.setText(notice.action)
+        self.notice_button.setVisible(offered)
+
+    def _on_notice(self) -> None:
+        opener = self.session.window_openers.get(self._notice_window)
+        if opener is None:
+            return
+        try:
+            settings = self.form.value()
+        except ValueError as e:
+            self.status.setText(str(e))
+            return
+        opener(settings)
 
     def _hints(self) -> None:
         """Refresh what the fields left on *auto* say they will resolve to.
@@ -251,6 +345,17 @@ class PluginPanel(QWidget):
         if hints:
             self.form.set_hints(hints)
 
+    def _choices(self) -> None:
+        """Re-read the lists the session decides (`Plugin.choices`): the
+        evaluations on the ROIs, for an ROI analysis.  Best effort, like the
+        hints: a list that cannot be worked out leaves the one there is."""
+        try:
+            lists = self.plugin.choices(self.session.context(), self.form.value())
+        except Exception:
+            return
+        if lists:
+            self.form.set_choices(lists)
+
     def _active(self) -> None:
         """Grey out the fields the current settings do not read."""
         try:
@@ -261,8 +366,20 @@ class PluginPanel(QWidget):
             self.form.set_active(flags)
 
     def _on_stream(self, event: str, payload) -> None:
-        if event == "start":
+        if event == "warning":
+            if self._live_running:
+                return            # a live step says nothing (`_on_progress`)
+            # a line of its own that progress does not overwrite: the next
+            # progress line goes below it
+            self._warnings += 1
+            self.output.appendPlainText(f"warning: {payload}")
+            self._progress_lines = 0
+            self.status.setText(f"running... ({self._warnings} warning"
+                                f"{'s' if self._warnings > 1 else ''})")
+            self.status.setStyleSheet(WARNING_STYLE)
+        elif event == "start":
             self.session.begin_live(payload.get("extent"), payload.get("path"))
+            self._owns_live = True
         elif event == "block":
             self.session.append(payload)
 
@@ -275,16 +392,54 @@ class PluginPanel(QWidget):
     def run(self) -> None:
         self._start("run", "running...")
 
-    def _start(self, job: str, message: str, **kwargs) -> None:
+    def open_window(self) -> None:
+        """Hand the settings to the window the plugin names (`Plugin.window`)."""
+        try:
+            settings = self.form.value()
+        except ValueError as e:
+            self.status.setText(str(e))
+            return
+        opener = self.session.window_openers.get(self.plugin.window)
+        if opener is None:
+            self.status.setText(f"no {self.plugin.window} window in this program")
+            return
+        self.status.setText("")
+        opener(settings)
+
+    def start_run(self, ask: bool = True, **context) -> bool:
+        """Run with the form's settings; whether the run started.
+
+        ``context`` goes into the run's `Context` -- `stop` and
+        `writer_finished` for a run something else controls -- and ``ask=False``
+        skips the preflight question, for a run nobody is there to answer.
+        Nor are its figures opened: they wait for Plot.
+        """
+        return self._start("run", "running...", context=context, ask=ask)
+
+    def _start(self, job: str, message: str, context=None, ask: bool = True,
+               **kwargs) -> bool:
         try:
             settings = self.form.value()
         except ValueError as e:
             self.status.setText(f"bad value: {e}")
-            return
-        if job == "run":
+            return False
+        if (job == "run" and self.session.live and not self._owns_live
+                and self.plugin.changes_locs_for(settings)
+                and not self.plugin.live_recipe_for(settings)):
+            # (a recipe -- an expression, a colour assignment -- follows the
+            # live table instead: `Session._follow`)
+            # known before the run: say so now, not after minutes of work
+            name = self.plugin.name or self.plugin.path
+            self._offer_new_window(
+                settings, f"The fit is still adding localizations, and {name} "
+                          "changes them, so it cannot run on this session now.\n\n"
+                          "It can run in a new window instead, on the "
+                          "localizations so far; the fit carries on here.")
+            return False
+        if job == "run" and ask:
             go, chosen = self._preflight(settings)
             if not go:
-                return
+                return False
             if chosen is not settings:
                 # a preflight choice may hand back other settings than the
                 # form's; showing them is what keeps the run from being a
@@ -295,11 +450,17 @@ class PluginPanel(QWidget):
         # selection now, so the worker cannot race a live fit rebinding them
         context = self.session.context(progress=self.progressed.emit,
                                        stream=self.streamed.emit,
-                                       grouping=self.plugin.grouping)
+                                       grouping=self.plugin.grouping,
+                                       **(context or {}))
         self._job = job
+        # a run somebody asked for shows its figures when it is done; one
+        # that nobody is there to answer (`start_run(ask=False)`) does not
+        self._show_figures = ask
         for button in self._buttons():
             button.setEnabled(False)
         self.status.setText(message)
+        self.status.setStyleSheet("")
+        self._warnings = 0
         self._progress_lines = 0
         self._thread = QThread()
         # Qt's default thread stack (512 kB on macOS) is too small for HDF5 and
@@ -313,6 +474,7 @@ class PluginPanel(QWidget):
         for sig in (self._worker.done, self._worker.failed):
             sig.connect(self._thread.quit)
         self._thread.start()
+        return True
 
     def _preflight(self, settings):
         """Ask the plugin whether this run wants agreeing to first.
@@ -329,6 +491,23 @@ class PluginPanel(QWidget):
         """
         from ..plugins import PreflightQuestion
 
+        # a question that asks *which* (no plain run) is answered by a choice,
+        # and the settings it carries may raise the next one -- a chain with
+        # two such steps -- so those are asked until none is left
+        for _ in range(MAX_CHOICES):
+            go, chosen, question = self._ask(settings)
+            if not go:
+                return go, chosen
+            if chosen is settings or not (isinstance(question, PreflightQuestion)
+                                          and not question.run_label):
+                return go, chosen
+            settings = chosen
+        return True, settings
+
+    def _ask(self, settings):
+        """One preflight question: ``(go, settings, question)``."""
+        from ..plugins import PreflightQuestion
+
         try:
             context = self.session.context(progress=self.output.appendPlainText,
                                            grouping=self.plugin.grouping)
@@ -340,9 +519,9 @@ class PluginPanel(QWidget):
             # says so rather than vanishing, so that a broken preflight is
             # visible as one.
             self.output.appendPlainText(f"(no estimate: {type(e).__name__}: {e})")
-            return True, settings
+            return True, settings, None
         if not question:
-            return True, settings
+            return True, settings, None
         title = f"{self.plugin.name}: before running"
         if not isinstance(question, PreflightQuestion):
             answer = QMessageBox.question(
@@ -350,20 +529,45 @@ class PluginPanel(QWidget):
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No)
             if answer == QMessageBox.StandardButton.Yes:
-                return True, settings
-            return self._not_run()
+                return True, settings, question
+            return (*self._not_run(), question)
         chosen = self.ask_choice(title, question)
         if chosen is None:
-            return self._not_run()
+            return (*self._not_run(), question)
         if chosen.settings is not None:
             self.output.appendPlainText(f"chose: {chosen.label}")
-            return True, chosen.settings
-        return True, settings
+            return True, chosen.settings, question
+        return True, settings, question
 
     def _not_run(self):
         self.output.appendPlainText("not run")
         self.status.setText("cancelled")
         return False, None
+
+    def _offer_new_window(self, settings, text: str) -> bool:
+        """Ask whether to run in a new instance; start it if so (`handoff`)."""
+        if not self.ask_new_window(text):
+            self.status.setText("not run: the fit is still running")
+            return False
+        opener = self.session.window_openers.get("new window")
+        if opener is None:
+            self.status.setText("no new window in this program")
+            return False
+        if opener(run=(self.plugin, settings)) is None:
+            return False
+        self.status.setText("running in a new window")
+        return True
+
+    def ask_new_window(self, text: str) -> bool:
+        """Run in a new window, or cancel: a dialog, which a test replaces."""
+        box = QMessageBox(self)
+        box.setWindowTitle(f"{self.plugin.name}: the fit is still running")
+        box.setText(text)
+        new = box.addButton("Run in a new window", QMessageBox.ButtonRole.AcceptRole)
+        box.addButton(QMessageBox.StandardButton.Cancel)
+        box.setDefaultButton(new)
+        box.exec()
+        return box.clickedButton() is new
 
     def ask_choice(self, title: str, question):
         """Put a question with alternatives; the choice, or None to cancel.
@@ -387,7 +591,8 @@ class PluginPanel(QWidget):
                 button.setToolTip(choice.help)
             buttons.append((button, choice))
         plain = PreflightChoice(label=question.run_label)
-        run = box.addButton(question.run_label, QMessageBox.ButtonRole.AcceptRole)
+        run = (box.addButton(question.run_label, QMessageBox.ButtonRole.AcceptRole)
+               if question.run_label else None)
         cancel = box.addButton(QMessageBox.StandardButton.Cancel)
         box.setDefaultButton(buttons[0][0] if buttons else cancel)
         detail = "\n\n".join(f"{c.label}\n{c.help}" for c in question.choices if c.help)
@@ -428,33 +633,68 @@ class PluginPanel(QWidget):
         live, self._live_running = self._live_running, False
         self.result = result
         # a preview is looked at, never applied: it exists so that the session
-        # is not changed before the settings are right
-        if self._job != "preview":
-            self.session.apply(self.plugin, result)
+        # is not changed before the settings are right; nor is a live step
+        held_back = None
+        if self._job not in ("preview", "live"):
+            owns, self._owns_live = self._owns_live, False
+            try:
+                self.session.apply(self.plugin, result, finishes_live=owns)
+            except LiveTableError as e:
+                held_back = str(e)
+        else:
+            self.session.show_preview(self.plugin, result)
         # A live step happens ten times a second while the ROI is dragged, so
         # it writes no line, opens no window and takes no focus: the figure
         # redrawing where it already is *is* the output.
         if not live:
             self.output.appendPlainText(result.text)
         self._progress_lines = 0
-        self.status.setText("live" if live else "done")
+        if held_back is not None:
+            # a plugin that did not say beforehand (`Plugin.changes_locs`)
+            self.output.appendPlainText(held_back + " (its figures are shown)")
+            self.status.setText("not applied: the fit is still running")
+            self.status.setStyleSheet(WARNING_STYLE)
+            QTimer.singleShot(0, lambda: self._held_back(held_back))
+        elif self._warnings and not live:
+            self.status.setText(f"done, {self._warnings} warning"
+                                f"{'s' if self._warnings > 1 else ''}")
+        else:
+            self.status.setText("live" if live else "done")
         self.text_button.setEnabled(bool(result.text))
         if not live and self.plugin.text_window and result.text:
             self.show_text()          # a log: not something to scroll through
                                       # a four-line slot (`Plugin.text_window`)
         # a run may have added to a list the form offers -- the expressions
-        # the math parser has been given, say
+        # the math parser has been given, the evaluations a chain made
         self.form.refresh()
+        self._choices()
         for button in self._buttons():
             button.setEnabled(True)
         self.plot_button.setEnabled(bool(result.figures()))
         self.plot_button.setToolTip(
             "show the plugin's result figure (the drift curves, say)")
-        if self._job == "preview" and result.figures():
+        # The figures are what most runs are for: a measurement is read off
+        # them, so the window opens without a second click on Plot.
+        if result.figures() and (live or self._show_figures):
             self.plot(raise_window=not live)
+        self.ended.emit("done", result)
+
+    def _held_back(self, text: str) -> None:
+        try:
+            self._offer_new_window(self.result.settings,
+                                   f"{text}.\n\nIt can run again in a new window, "
+                                   "on the localizations so far; the fit carries "
+                                   "on here.")
+        except Exception:                    # a singleShot callable must not raise
+            traceback.print_exc()
 
     def _on_failed(self, text: str) -> None:
         live, self._live_running = self._live_running, False
+        if self._owns_live:
+            # the fit that was streaming failed: what it streamed stays, as
+            # an ordinary table (`Session.end_live`)
+            self._owns_live = False
+            self.session.end_live()
         self._progress_lines = 0
         print(text)
         for button in self._buttons():
@@ -464,9 +704,11 @@ class PluginPanel(QWidget):
             # few localizations in it, which is not a failure to report: the
             # next position will ask again
             self.status.setText("live: " + text.strip().splitlines()[-1][:60])
+            self.ended.emit("failed", text)
             return
         self.output.appendPlainText(text.strip().splitlines()[-1])
         self.status.setText("failed")
+        self.ended.emit("failed", text)
 
     def show_text(self) -> None:
         """What the run reported, in a window that can hold it."""
@@ -491,7 +733,7 @@ class PluginPanel(QWidget):
         if self._window is None:
             self._window = ResultWindow(self.plugin.name, self)
         self._window.show()
-        self._window.show_plots(self.result.figures())
+        self._window.show_plots(self.result.figures(), self.result.title)
         if raise_window:
             self._window.raise_()
 

@@ -61,7 +61,10 @@ class LiveFit:
     The loop is `fit_stack`'s with one addition: the engine is flushed on a
     timer as well as when its ROI buffer fills.  Without that, a sparse
     acquisition would show nothing for minutes -- the buffer holds 15000 ROIs
-    and a quiet sample does not produce them quickly.
+    and a quiet sample does not produce them quickly.  The timer is checked
+    once per block, so ``frames`` should send empty blocks while it waits
+    (``watch(..., idle_blocks=True)``, as `live_view` asks for); otherwise what
+    was buffered before a pause is fitted only once the pause is over.
     """
 
     def __init__(self, frames: Iterable[Tuple[int, np.ndarray]],
@@ -97,7 +100,10 @@ class LiveFit:
                                                self.live.read_ahead):
                 if self.stop_event.is_set():
                     break
-                self._emit(self.engine.push(block, first_frame))
+                # an empty block is the watch saying nothing has arrived:
+                # only the clock below has work
+                if len(block):
+                    self._emit(self.engine.push(block, first_frame))
                 if time.monotonic() - last_flush >= self.live.flush_seconds:
                     self._emit(self.engine.flush())
                     last_flush = time.monotonic()
@@ -217,7 +223,8 @@ def live_view(data, camera: CameraMetadata, finder, model,
     source = data
     if isinstance(data, (str, Path)):
         source = open_growing_stack(data, live.watch, stop_event=stop)
-    frames = source.watch(chunk=live.chunk, settings=live.watch, stop_event=stop)
+    frames = source.watch(chunk=live.chunk, settings=live.watch, stop_event=stop,
+                          idle_blocks=True)
 
     writer = None
     if output is not None:

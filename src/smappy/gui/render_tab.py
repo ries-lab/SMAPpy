@@ -8,6 +8,7 @@ layer strip at the top.
 from __future__ import annotations
 
 import dataclasses
+import traceback
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -530,7 +531,24 @@ class Overview(QWidget):
     def _on_session(self, what: str) -> None:
         if what == "locs":
             self.image.clear()
-            QTimer.singleShot(0, self.update_image)
+            # with the overview as context, so Qt drops the call if it is
+            # deleted first
+            QTimer.singleShot(0, self, self._update_deferred)
+
+    def _update_deferred(self) -> None:
+        """`update_image`, for a timer: what it raises is printed, not raised.
+
+        An exception from a singleShot callable is left pending inside
+        `processEvents` by PySide, and the next Python override Qt calls --
+        a pyqtgraph item's -- segfaults (6.10) or hangs (see gui/canvas.py).
+        A table with no precision column raised here when it was opened.
+        The main view prints and moves on too (`_RenderWorker.render`).
+        """
+        try:
+            self.update_image()
+        except Exception:
+            traceback.print_exc()
+            self.image.clear()
 
     def update_image(self) -> None:
         if self.view is None or not (len(self.session.locs)

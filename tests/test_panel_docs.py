@@ -15,7 +15,8 @@ import pytest
 from smappy import docs
 
 PANELS = {"Panels/Render tab", "Panels/ROI tab", "Panels/ROI manager",
-          "Panels/3D view", "Panels/Bead calibration", "Panels/Batch window"}
+          "Panels/3D view", "Panels/Bead calibration", "Panels/Batch window",
+          "Panels/Camera editor"}
 
 
 def controls(page_text: str):
@@ -64,6 +65,7 @@ def test_every_panel_has_a_page():
 
 
 @pytest.mark.parametrize("path", sorted(PANELS))
+@pytest.mark.slow
 def test_a_panel_page_renders_with_its_figures(path):
     panel = docs.panels()[path]
     rendered = docs.render(panel)

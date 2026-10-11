@@ -1496,6 +1496,7 @@ class LineProfile(Plugin):
     """Profiles along or across a line ROI, fitted without binning them."""
 
     Settings = LineProfileSettings
+    changes_locs = False
     # 2: the two-Gaussian start tries peaks far apart; 3: z_err_nm; 4: the
     # EM starts are tried narrow as well, so a close pair is not merged; the
     # binned fit integrates over its bins; the z window is the filter's, in nm
@@ -1563,17 +1564,10 @@ class LineProfile(Plugin):
                   "n": sum(len(l.profile.values) for l in layers)},
             plot=profile_plot, plots=plots)
 
-    # cheap enough to redo while the line is dragged; see `Plugin.live`
+    # cheap enough to redo while the line is dragged; see `Plugin.live`.  No
+    # preview: `run` changes nothing, so a preview would be the same as Run,
+    # and Run draws the figures.
     live = True
-
-    def preview(self, ctx: Context, settings: LineProfileSettings) -> Result:
-        """The same measurement, not applied to anything.
-
-        `run` changes no localizations either, so this is `run` -- what the
-        preview is for here is the *live* tick, which wants a result without a
-        line in the history for every position the line was dragged through.
-        """
-        return self.run(ctx, settings)
 
 
 def fit_layers(ctx: Context, settings: LineProfileSettings,
@@ -1644,7 +1638,7 @@ def _groups(ctx: Context, settings: LineProfileSettings):
         for i, layer in enumerate(getattr(session, "layers", [])):
             if layer.is_image or not layer.visible:
                 continue
-            locs = session.selection(i).apply(ctx.locs)
+            locs = ctx.layer_selection(i).apply(ctx.locs)
             taken = [colour for _, colour, _ in found]
             found.append((layer.name,
                           layer_colour(layer.get_display(), len(found), taken),

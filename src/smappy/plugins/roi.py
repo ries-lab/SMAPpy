@@ -2,7 +2,9 @@
 
 Three kinds, all ordinary plugins:
 
-* **Segment** proposes candidate ROIs on a whole file.  It runs once.
+* **Segment** proposes candidate ROIs on a whole file.  It runs once, and
+  derives from `SegmenterPlugin`, which gives it a Preview: the same
+  proposals, drawn in the ROI manager and not added.
 * **Evaluate** measures *one* ROI and returns that site's row.  It declares
   ``scope = "site"``, which is the only thing that marks it as an evaluator --
   a property of the plugin, not of its folder, so the evaluation window can
@@ -16,13 +18,27 @@ plugin, a session or a project.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
-from . import Context, Plot, Plugin, Result, param, register
+from . import (Context, Plot, Plugin, PreflightChoice, PreflightQuestion, Result,
+               param, register)
 
 MAX_FINDER_PIXELS = 16_000_000
+
+
+def replace_param(what: str = "ROIs"):
+    """The *replace* setting every segmenter's settings end with.
+
+    A chain or a batch has no Preview, and running one again on a file it
+    has segmented before would otherwise find nothing: every candidate is
+    within the separation of an ROI the last run made.  So a segmenter's
+    settings carry this field, and `SegmenterPlugin.replaced` reads it.
+    """
+    return param(False, label=f"replace earlier {what}",
+                 help="remove the ROIs this segmenter made on the file "
+                      "before finding them again")
 
 
 # ------------------------------------------------------------ segmentation
@@ -40,6 +56,7 @@ class DensityPeakSettings:
                                         "the minimum count")
     min_count: int = param(10, label="minimum count", min=1,
                            help="a peak with fewer localizations is not a site")
+    replace: bool = replace_param()
 
 
 def density_peaks(locs, settings: DensityPeakSettings,
@@ -97,11 +114,80 @@ def density_peaks(locs, settings: DensityPeakSettings,
     return found
 
 
+class SegmenterPlugin(Plugin):
+    """A finder: proposes ROIs on the file the manager is showing.
+
+    Its Preview runs the same finder and adds nothing: the proposals go to
+    the manager as `ROIProject.segment_preview`, drawn in grey, each preview
+    replacing the last, and only Run adds them.  The undo stack cannot do
+    this job -- it holds tables, and ROIs are not one -- and removing the
+    last try's ROIs by hand after every change of a setting is how a finder
+    stops being tuned.
+
+    A subclass implements `propose` (what `ROIProject.find` calls) and
+    `segment`, which does the work of `run` and `preview` both and goes
+    through `found` for the one place they differ.  Its settings end with
+    ``replace: bool = replace_param()``; see `replace_param` for why.
+
+    A run is one step of the project's ROI undo (`ROIProject.edit`), the
+    ROIs it replaced included.
+    """
+    changes_locs = False        # proposes ROIs; the table is untouched
+
+    preview_help = ("propose the ROIs and draw them, grey, in the ROI manager "
+                    "without adding them; Run adds them")
+
+    def propose(self, locs, settings, existing: Sequence = ()) -> List[Any]:
+        """Centres, or ``{"center", "use", "origin"}`` dicts; see `ROIProject.find`."""
+        raise NotImplementedError
+
+    def segment(self, ctx: Context, settings, commit: bool) -> Result:
+        raise NotImplementedError
+
+    def replaced(self, project, file_id, settings) -> List[str]:
+        """The ROIs a run removes before it adds its own: with *replace*,
+        those this segmenter made on the file (their origin names it)."""
+        if not getattr(settings, "replace", False):
+            return []
+        return [roi.id for roi in project.rois.values() if roi.file_id == file_id
+                and (roi.origin or {}).get("method") == self.path]
+
+    def run(self, ctx: Context, settings) -> Result:
+        return self.segment(ctx, settings, commit=True)
+
+    def preview(self, ctx: Context, settings) -> Result:
+        return self.segment(ctx, settings, commit=False)
+
+    def found(self, project, file_id, settings, commit: bool
+              ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+        """``(sites, data)``: each site ``{"center", "use"}``, and the result's
+        data -- the ROIs a run added, or the preview for the manager.
+
+        Previewing changes nothing in the project, not even the preview
+        itself: this runs on a worker thread, and the session puts the
+        preview in place on the GUI thread (`Session.show_preview`).
+        """
+        replaced = self.replaced(project, file_id, settings)
+        if commit:
+            with project.edit(self.name) as step:
+                for roi_id in replaced:
+                    project.rois.pop(roi_id, None)
+                rois = project.find(file_id, plugin=self, settings=settings)
+                step.label = f"{self.name}: {len(rois)} ROIs" + (
+                    f" for {len(replaced)}" if replaced else "")
+            return [{"center": r.center, "use": r.use} for r in rois], {"rois": rois}
+        _, proposals = project.propose(file_id, self, settings, exclude=replaced)
+        sites = [{"center": p["center"], "use": p["use"]} for p in proposals]
+        return sites, {"roi_preview": {"file_id": file_id, "method": self.path,
+                                       "sites": sites, "replaces": list(replaced)}}
+
+
 @register("ROIManager/Segment/Density Peaks")
-class DensityPeaks(Plugin):
+class DensityPeaks(SegmenterPlugin):
     """Proposes ROIs where localizations pile up, after a Gaussian blur."""
 
     Settings = DensityPeakSettings
+    changes_locs = False
     version = "1"
 
     def propose(self, locs, settings: DensityPeakSettings,
@@ -110,7 +196,8 @@ class DensityPeaks(Plugin):
         provenance, so `run` can go through the project without recursing."""
         return density_peaks(locs, settings, existing)
 
-    def run(self, ctx: Context, settings: DensityPeakSettings) -> Result:
+    def segment(self, ctx: Context, settings: DensityPeakSettings,
+                commit: bool) -> Result:
         project = ctx.rois
         if project is None:                 # no session: just report the centres
             centers = density_peaks(ctx.locs, settings)
@@ -119,9 +206,10 @@ class DensityPeaks(Plugin):
         file_id = current_file(project)
         if file_id is None:
             raise ValueError("no file to search: load localizations first")
-        found = project.find(file_id, plugin=self, settings=settings)
-        return Result(text=f"{len(found)} candidates found", settings=settings,
-                      data={"rois": found, "centers": [r.center for r in found]})
+        sites, data = self.found(project, file_id, settings, commit)
+        text = f"{len(sites)} candidates " + ("found" if commit else "previewed")
+        return Result(text=text, settings=settings,
+                      data={**data, "centers": [s["center"] for s in sites]})
 
 
 def current_file(project) -> Optional[str]:
@@ -166,6 +254,7 @@ class Statistics(Plugin):
     """Counts a site's localizations and averages their precision and photons."""
 
     Settings = StatisticsSettings
+    changes_locs = False
     scope = "site"
     version = "1"
 
@@ -197,6 +286,12 @@ class Statistics(Plugin):
 
 # ----------------------------------------------------------------- analysis
 
+def auto_only():
+    """*results from* without a session: only *auto*.  The plugin's
+    `choices` puts the evaluations on the ROIs beside it."""
+    return [("", "auto")]
+
+
 @dataclass
 class HistogramSettings:
     bins: int = param(20, label="bins", min=1,
@@ -205,6 +300,9 @@ class HistogramSettings:
     fields: str = param("", label="columns",
                         help="comma separated; empty means every numeric "
                              "column but the counts behind the means")
+    evaluation: str = param("", label="results from", choices=auto_only,
+                            help="the evaluation whose columns are drawn; "
+                                 "auto: every evaluation on the ROIs")
 
 
 def histograms(rows: Sequence[Dict[str, Any]], settings: HistogramSettings
@@ -232,17 +330,143 @@ def histograms(rows: Sequence[Dict[str, Any]], settings: HistogramSettings
     return out
 
 
+# ---------------------------------------------------------------- analysis
+
+EVALUATION_HELP = ("the evaluation whose results are analysed; auto: the only "
+                   "one there is, or the chain's own -- asked when there are "
+                   "several")
+
+
+class AmbiguousEvaluation(ValueError):
+    """More than one evaluation could be meant, and nothing says which."""
+
+    def __init__(self, evaluator: str, labels: Sequence[str]):
+        self.labels = list(labels)
+        name = evaluator.rsplit("/", 1)[-1] if evaluator else "evaluator"
+        super().__init__(f"the ROIs have {len(labels)} {name} evaluations "
+                         f"({', '.join(labels)}): name one in *results from*")
+
+
+def choose_evaluation(project, evaluator: str = "", chosen: str = "",
+                      made: Sequence = (), roi_ids=None) -> Optional[str]:
+    """The name of the evaluation an ROI analysis reads.
+
+    ``chosen`` when the user named one; else, in a chain that has made an
+    evaluation by ``evaluator`` (``made``: its ``(name, path)`` so far), the
+    chain's own, newest; else the only one on the ROIs.  None when there is
+    none -- the analysis says what is missing.  Several, and nothing saying
+    which, is `AmbiguousEvaluation`: a guess between two settings of the same
+    evaluator would be a result nobody chose.  ``evaluator`` empty means any.
+    """
+    found = project.labels(evaluator or None, roi_ids) if project is not None else []
+    own = [name for name, path in made if not evaluator or path == evaluator]
+    if chosen:
+        if chosen not in found and chosen not in own:
+            raise ValueError(f"no evaluation on the ROIs is called {chosen!r}"
+                             + (f"; there is {', '.join(found)}" if found else ""))
+        return chosen
+    if own:
+        return own[-1]
+    if len(found) == 1:
+        return found[0]
+    if not found:
+        return None
+    raise AmbiguousEvaluation(evaluator, found)
+
+
+class SiteAnalysisPlugin(Plugin):
+    """An ROI manager analysis: it summarises what evaluators measured.
+
+    ``evaluator`` is the path of the evaluator whose results it reads (empty:
+    any).  Its settings have a field ``evaluation`` (*results from*) naming
+    which evaluation, by its name: the same evaluator renamed and run with
+    other settings is a second evaluation, to compare, and the analysis must
+    know which one it is about.  Empty takes the only one, or the chain's
+    own; when that leaves several, `preflight` asks, once, with a button per
+    evaluation, and the answer is written into the field.
+    """
+    evaluator: str = ""
+    changes_locs = False
+
+    def evaluation(self, ctx: Context, settings) -> Optional[str]:
+        """The evaluation this run reads, by name (`choose_evaluation`)."""
+        return choose_evaluation(ctx.rois, self.evaluator,
+                                 getattr(settings, "evaluation", ""),
+                                 ctx.evaluations)
+
+    def rows(self, ctx: Context, settings) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+        """The site table of that evaluation, and its name.  A context that
+        brings its own table (`site_table`) is taken as it is."""
+        if ctx.site_table is not None:
+            return list(ctx.site_table), getattr(settings, "evaluation", "") or None
+        if ctx.rois is None:
+            raise ValueError("evaluate some ROIs first: there is no site table")
+        label = self.evaluation(ctx, settings)
+        if label is None and self.evaluator:
+            return [], None
+        return ctx.rois.results(labels=None if label is None else [label]), label
+
+    # what *auto* is called when it means every evaluation (Histograms)
+    auto_label = ""
+
+    def choices(self, ctx: Context, settings):
+        """*results from*: *auto*, saying what it resolves to, then every
+        evaluation by `evaluator` on the ROIs -- a chain's own included,
+        before it has run."""
+        from dataclasses import replace
+        project = ctx.rois
+        found = project.labels(self.evaluator or None) if project is not None else []
+        for name, path in ctx.evaluations:
+            if (not self.evaluator or path == self.evaluator) and name not in found:
+                found.append(name)
+        try:
+            meant = self.evaluation(ctx, replace(settings, evaluation=""))
+            auto = (f"auto ({meant})" if meant else
+                    f"auto ({self.auto_label})" if self.auto_label else "auto")
+        except AmbiguousEvaluation:
+            auto = "auto (asks which)"
+        return {"evaluation": [("", auto)] + [(name, name) for name in sorted(found)]}
+
+    def preflight(self, ctx: Context, settings):
+        """Which evaluation, when that is not clear: a choice, not a yes."""
+        try:
+            self.evaluation(ctx, settings)
+        except AmbiguousEvaluation as unclear:
+            from dataclasses import replace
+            project = ctx.rois
+            choices = []
+            for label in unclear.labels:
+                made = project.evaluation_steps(label) if project is not None else []
+                values = (made[0].get("parameters") if made else None) or {}
+                choices.append(PreflightChoice(
+                    label=label, settings=replace(settings, evaluation=label),
+                    help=", ".join(f"{k} {v}" for k, v in values.items())))
+            name = self.evaluator.rsplit("/", 1)[-1] or "evaluator"
+            return PreflightQuestion(
+                text=f"The ROIs have {len(unclear.labels)} {name} evaluations. "
+                     f"Which should {self.name or 'the analysis'} read?",
+                choices=choices, run_label="")
+        return None
+
+
 @register("ROIManager/Analyze/Histograms")
-class Histograms(Plugin):
+class Histograms(SiteAnalysisPlugin):
     """Distributions of the evaluation results, one histogram per column."""
 
     Settings = HistogramSettings
+    changes_locs = False
     version = "1"
+    auto_label = "all"
+
+    def evaluation(self, ctx: Context, settings) -> Optional[str]:
+        # every column of every evaluation unless one is named: a histogram
+        # of each is the overview, and nothing here can be ambiguous
+        if settings.evaluation:
+            return choose_evaluation(ctx.rois, "", settings.evaluation)
+        return None
 
     def run(self, ctx: Context, settings: HistogramSettings) -> Result:
-        rows = ctx.site_table
-        if rows is None and ctx.rois is not None:
-            rows = ctx.rois.results()
+        rows, _ = self.rows(ctx, settings)
         if not rows:
             raise ValueError("evaluate some ROIs first: there is no site table")
         data = histograms(rows, settings)

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sys
+import traceback
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -10,7 +11,7 @@ from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (QApplication, QCheckBox, QDialog, QFileDialog, QHBoxLayout,
                                QMessageBox, QPushButton,
                                QLabel, QLineEdit,
-                               QMainWindow, QScrollArea, QTabWidget, QVBoxLayout,
+                               QMainWindow, QMenu, QScrollArea, QTabWidget, QVBoxLayout,
                                QWidget)
 
 from .. import plugins, workspace as workspace_module
@@ -26,6 +27,32 @@ from .render_tab import RenderTab
 from .roi_tab import ROIHeader
 from .render_view import RenderToolBar, RenderView
 from .widgets import CONTROL_WIDTH, apply_style, place_beside
+from .collector import collect_on_gui_thread
+from .icon import install_icon
+from . import identity
+from .identity import install_identity
+
+
+class HandoffTask(QThread):
+    """Take a session another instance handed over (`smappy.handoff`), and
+    link it, off the GUI thread -- `LoadTask` for a table that comes through
+    shared memory instead of a file."""
+
+    progress = Signal(str)
+    loaded = Signal(object, object, object)      # locs, state, grouped or None
+    failed = Signal(str)
+
+    def __init__(self, path: str, group_settings, parent=None):
+        super().__init__(parent)
+        self.path, self.group_settings = path, group_settings
+
+    def run(self) -> None:
+        from .. import handoff
+        try:
+            self.loaded.emit(*handoff.take(self.path, self.group_settings,
+                                           progress=self.progress.emit))
+        except Exception as e:
+            self.failed.emit(f"{e}")
 
 
 class LoadTask(QThread):
@@ -71,6 +98,34 @@ def _keys(standard, fallback: str):
     return unique
 
 
+def _add_menu(parent, title: str, owner: QWidget) -> QMenu:
+    """``parent.addMenu(title)``, but with a menu that Qt owns.
+
+    PySide6 6.10 hands the menu that ``addMenu(str)`` makes to Python, so it
+    is deleted with the last reference to it: the File and Tools menus died
+    when ``__init__`` returned, and the Plugins submenus with
+    ``_fill_plugins_menu``.  A parent keeps it for as long as the window.
+    """
+    menu = QMenu(title, owner)
+    parent.addMenu(menu)
+    return menu
+
+
+def _copy_selected_text(widget) -> bool:
+    """Let a text widget with something selected copy it itself."""
+    if widget is None or not hasattr(widget, "copy"):
+        return False
+    if hasattr(widget, "hasSelectedText"):            # line edits, labels
+        selected = widget.hasSelectedText()
+    elif hasattr(widget, "textCursor"):               # text edits and browsers
+        selected = widget.textCursor().hasSelection()
+    else:
+        return False
+    if selected:
+        widget.copy()
+    return selected
+
+
 def window_shortcuts(window: QWidget, with_quit: bool = True) -> None:
     """Cmd/Ctrl+W closes this window, Cmd/Ctrl+Q quits: on every window."""
     close = QAction("Close window", window, triggered=window.close)
@@ -90,6 +145,7 @@ class ControlWindow(QMainWindow):
         super().__init__()
         self.session = session
         self.render_window = render
+        self.setProperty(identity.OWN_TITLE, True)      # names the session itself
         # the GUI last saved or loaded, or the shipped one: never one written
         # behind anybody's back (see `workspace`)
         self.workspace = workspace_module.load_startup()
@@ -123,22 +179,21 @@ class ControlWindow(QMainWindow):
         self._ticker = QTimer(self)
         self._ticker.timeout.connect(self._tick)
 
-        menu = self.menuBar().addMenu("File")
+        menu = _add_menu(self.menuBar(), "File", self)
         open_ = self._action(menu, "Open...", QKeySequence.Open, self.open)
         add = self._action(menu, "Add file...", "Ctrl+Shift+O", lambda: self.open(append=True))
         image = self._action(menu, "Open image...", None, self.open_image)
         save = self._action(menu, "Save", QKeySequence.Save, self.save)
         save_as = self._action(menu, "Save as...", QKeySequence.SaveAs, self.save_as)
-        menu.addSeparator()
-        self.undo_action = self._action(menu, "Undo", QKeySequence.Undo,
-                                        lambda: self.session.undo())
-        self.undo_menu = menu.addMenu("Undo steps")
-        self.redo_action = self._action(menu, "Redo", None, lambda: self.session.redo())
-        self.redo_action.setShortcuts(_keys(QKeySequence.Redo, "Ctrl+Shift+Z"))
-        self.redo_menu = menu.addMenu("Redo steps")
-        self._load_locked = [open_, add, image, save, save_as, self.undo_action,
-                             self.redo_action, self.undo_menu.menuAction(),
-                             self.redo_menu.menuAction()]
+        self._action(menu, "Session name...", None, self.rename_session)
+        # a lambda: `triggered` hands on `checked` (False), which would land
+        # in `start` and make the offer without starting anything to take it
+        self.new_window_action = self._action(menu, "Open in a new window",
+                                              "Ctrl+Shift+N",
+                                              lambda: self.open_in_new_window())
+        self.new_window_action.setToolTip("the session as it is now -- table, layers, "
+                                    "filters, ROIs -- in a new instance of the "
+                                    "program; a live fit carries on here")
         menu.addSeparator()
         self._action(menu, "Restore GUI state from file...", None,
                      self.restore_state_from_file)
@@ -152,27 +207,70 @@ class ControlWindow(QMainWindow):
         quit_ = self._action(menu, "Quit", None, lambda: QApplication.instance().quit())
         quit_.setShortcuts(_keys(QKeySequence.Quit, "Ctrl+Q"))
         window_shortcuts(self, with_quit=False)
-        view = self.menuBar().addMenu("View")
+        edit = _add_menu(self.menuBar(), "Edit", self)
+        self.undo_action = self._action(edit, "Undo", QKeySequence.Undo,
+                                        lambda: self.session.undo())
+        self.undo_menu = _add_menu(edit, "Undo steps", edit)
+        self.redo_action = self._action(edit, "Redo", None, lambda: self.session.redo())
+        self.redo_action.setShortcuts(_keys(QKeySequence.Redo, "Ctrl+Shift+Z"))
+        self.redo_menu = _add_menu(edit, "Redo steps", edit)
+        # Ctrl+Z undoes from the picture too, which is where one sees what to
+        # undo; not from every window -- in the batch or calibration window
+        # it would take back a step of a table that window is not about
+        render.addAction(self.undo_action)
+        render.addAction(self.redo_action)
+        self._offers: list = []            # sessions handed to new instances
+        self._offer_timer = QTimer(self, interval=500)
+        self._offer_timer.timeout.connect(self._check_offers)
+        self._load_locked = [open_, add, image, save, save_as, self.new_window_action,
+                             self.undo_action,
+                             self.redo_action, self.undo_menu.menuAction(),
+                             self.redo_menu.menuAction()]
+        edit.addSeparator()
+        self.copy_action = self._action(edit, "Copy", QKeySequence.Copy, self.copy)
+        self.copy_action.setToolTip("the selected text, else the picture of the "
+                                    "window in front: the render, the 3D view, "
+                                    "the ROI manager or a figure")
+        # application-wide, so Ctrl+C in a figure window copies the figure.  A
+        # text field still copies its own text: Qt offers it the key first
+        self.copy_action.setShortcutContext(Qt.ApplicationShortcut)
+        self._action(edit, "Copy rendered image", None,
+                     lambda: self.copy(self.render_window))
+        edit.setToolTipsVisible(True)
+        # the window Copy means when it is chosen from this menu, which makes
+        # the control window the active one: the last picture that was
+        self._picture_window: Optional[QWidget] = None
+        QApplication.instance().focusWindowChanged.connect(self._on_focus_window)
+        view = _add_menu(self.menuBar(), "View", self)
         self.view3d_window = None
         self.calibration_window = None
         self._action(view, "3D view", "Ctrl+3", self.show_3d)
-        self.plugins_menu = self.menuBar().addMenu("Plugins")
+        self.plugins_menu = _add_menu(self.menuBar(), "Plugins", self)
         self._plugin_windows: dict = {}
         # filled when it is opened, from the scan rather than from imports, so
         # the menu costs nothing at start and a plugin dropped into the folder
         # is in it without a restart
         self.plugins_menu.aboutToShow.connect(self._fill_plugins_menu)
-        tools = self.menuBar().addMenu("Tools")
+        tools = _add_menu(self.menuBar(), "Tools", self)
         self._action(tools, "ROI manager", "Ctrl+R", self._open_manager)
         self._action(tools, "ROI evaluation...", None, self._open_evaluation)
         tools.addSeparator()
-        self._action(tools, "Bead calibration...", None, self.open_calibration)
-        self._action(tools, "Dual-colour calibration...", None,
-                     lambda: self.open_calibration(dual=True))
+        # the window is also the Localize tab's Bead calibration plugin, which
+        # says which mode to open in; from here it opens as it was left
+        self._action(tools, "Bead calibration...", None, lambda: self.open_calibration())
+        # a plugin that would change a table a fit is still appending to
+        # offers to run in a new instance instead (`PluginPanel._ask_live`)
+        session.window_openers["new window"] = \
+            lambda run=None: self.open_in_new_window(run=run)
+        session.window_openers["bead calibration"] = \
+            lambda settings: self.open_calibration(dual=settings.mode == "dual")
+        # a fitter whose file's camera is not in the database offers this
+        # (`Plugin.notice`), opened on the file that fitter is set to
+        session.window_openers["camera editor"] = self.open_camera_editor
         tools.addSeparator()
         self.batch_window = None
         self._action(tools, "Batch...", None, self.open_batch)
-        help_ = self.menuBar().addMenu("Help")
+        help_ = _add_menu(self.menuBar(), "Help", self)
         self._action(help_, "Plugin documentation", None, self.show_plugin_docs)
         help_.addSeparator()
         self._action(help_, "Save a bug report...", None, self.save_bug_report)
@@ -180,6 +278,7 @@ class ControlWindow(QMainWindow):
         self._action(view, "Reset view", "Ctrl+0", render.view.reset)
         self._action(view, "Show render window", None, render.show)
         QApplication.instance().aboutToQuit.connect(self.stop_loading)
+        QApplication.instance().aboutToQuit.connect(self.release_offers)
         QApplication.instance().aboutToQuit.connect(self.save_window_state)
         session.gui_state_provider = self.plugin_state
         session.on_change(self._on_session)
@@ -219,17 +318,17 @@ class ControlWindow(QMainWindow):
         box = QWidget()
         row = QHBoxLayout(box)
         row.setContentsMargins(0, 0, 0, 0)
-        button = QPushButton("Bead calibration...")
-        button.setToolTip("build an experimental spline PSF calibration from "
-                          "bead z-stacks; opens its own window")
-        button.clicked.connect(self.open_calibration)
-        row.addWidget(button)
         camera = QPushButton("Camera parameters...")
         camera.setToolTip("what the fit thinks the camera is, and where every "
                           "value came from: this file's tags, the readout mode "
                           "the database recognised, or what you set here")
         camera.clicked.connect(self.open_camera_parameters)
         row.addWidget(camera)
+        editor = QPushButton("Camera editor...")
+        editor.setToolTip("add the camera of the file being fitted to your camera "
+                          "database, or give a known camera another readout mode")
+        editor.clicked.connect(lambda: self.open_camera_editor())
+        row.addWidget(editor)
         row.addStretch(1)
         return box
 
@@ -258,6 +357,47 @@ class ControlWindow(QMainWindow):
             return
         self._camera_window = open_for(panel.plugin, settings, self,
                                        getattr(self, "_camera_window", None))
+        self._camera_window.open_editor = self.edit_camera
+
+    def open_camera_editor(self, settings=None) -> None:
+        """The camera editor, on the file a fitter is set to.
+
+        `settings` are the fitter's that asked (`Plugin.notice`); without them
+        the first open fitter's are used, and without a fitter the editor
+        opens on no file at all, for typing an entry in by hand.
+        """
+        if settings is None:
+            panel = self._fitting_panel()
+            if panel is not None:
+                try:
+                    settings = panel.form.value()
+                except ValueError:
+                    settings = None
+        resolved = None
+        if settings is not None:
+            from ..plugins.fit import camera_resolution
+            resolved = camera_resolution(settings)
+        if resolved is None:
+            self.edit_camera({}, None)
+        else:
+            self.edit_camera(resolved.metadata, resolved.camera)
+
+    def edit_camera(self, metadata, camera=None) -> None:
+        """Show the camera editor on these tags, starting from `camera`."""
+        from .camera_editor import open_editor
+        window = getattr(self, "_camera_editor", None)
+        self._camera_editor = open_editor(metadata, camera, self, window)
+        if window is None:
+            self._camera_editor.saved.connect(self._camera_saved)
+
+    def _camera_saved(self, name: str) -> None:
+        """A camera went into the database: what read the old one reads again."""
+        for tab in self.plugin_tabs:
+            for panel in tab.panels():
+                panel.refresh_derived()
+        window = getattr(self, "_camera_window", None)
+        if window is not None and window.isVisible():
+            window.refresh()
 
     def _fitting_panel(self):
         """The first open panel that knows how to resolve a camera."""
@@ -383,9 +523,142 @@ class ControlWindow(QMainWindow):
         return self.workspace
 
     def _update_title(self, name: Optional[str] = None) -> None:
-        """Say whose GUI this is, so nobody saves over somebody else's."""
-        name = name or workspace_module.display_name(self.workspace.path)
-        self.setWindowTitle(f"SMAPpy \u2014 {name}")
+        """Say whose GUI this is, so nobody saves over somebody else's --
+        and, once named, which session this is (`identity`)."""
+        if name is not None:
+            self._gui_name = name
+        gui = getattr(self, "_gui_name", None) or \
+            workspace_module.display_name(self.workspace.path)
+        if self.session.name or self.session.colour:
+            text = identity.title(self.session, "SMAPpy")
+            self.setWindowTitle(f"{text} (GUI: {gui})")
+        else:
+            self.setWindowTitle(f"SMAPpy \u2014 {gui}")
+        colour = identity.colour_hex(self.session)
+        # a stripe as well as the circle: seen from across the room, and on a
+        # title font that draws the circle in black
+        self.statusBar().setStyleSheet(
+            f"QStatusBar {{ border-top: 4px solid {colour}; }}" if colour else "")
+
+    # ------------------------------------------------- a new instance
+    def open_in_new_window(self, start: bool = True, run=None) -> Optional[object]:
+        """Hand the session as it is now to a new instance (`smappy.handoff`).
+
+        The copy is named and coloured as one -- and this session gets a
+        colour too if it has none, so the two can be told apart at a glance.
+        ``start=False`` makes the offer without starting the program, for a
+        test to take.  ``run`` is ``(plugin, settings)`` for the new instance
+        to run once it has the session (`PluginPanel`, during a live fit).
+        Returns the offer, or None if there was nothing to hand.
+        """
+        from .. import handoff
+        if not len(self.session.locs):
+            QMessageBox.information(self, "Open in a new window",
+                                    "there are no localizations to hand on")
+            return None
+        if not self.session.colour:
+            self.session.rename(self.session.name, colour="blue")
+        name, colour = handoff.snapshot_identity(self.session)
+        view = self.render_window.view.view.viewRange()
+        try:
+            offer = handoff.offer(self.session, name=name, colour=colour,
+                                  gui_state=self.plugin_state(), view=view,
+                                  run=run)
+        except Exception as e:
+            QMessageBox.warning(self, "Open in a new window",
+                                f"the session could not be handed on:\n{e}")
+            return None
+        self._offers.append(offer)
+        self._offer_timer.start()
+        if start:
+            try:
+                handoff.launch(offer.path)
+            except OSError as e:
+                offer.release()
+                self._offers.remove(offer)
+                QMessageBox.warning(self, "Open in a new window",
+                                    f"the new window could not be started:\n{e}")
+                return None
+            self.statusBar().showMessage(f"opening {name} in a new window...", 8000)
+        return offer
+
+    def _check_offers(self) -> None:
+        """Free each handed-over block once it is taken, or has waited too long."""
+        try:
+            for offer in list(self._offers):
+                if offer.taken or offer.expired:
+                    if not offer.taken:
+                        self.statusBar().showMessage(
+                            "the new window did not start; nothing was handed on", 8000)
+                    offer.release()
+                    self._offers.remove(offer)
+            if not self._offers:
+                self._offer_timer.stop()
+        except Exception:                    # a timer slot must never raise
+            traceback.print_exc()
+
+    def release_offers(self) -> None:
+        for offer in self._offers:
+            offer.release()
+        self._offers.clear()
+
+    def take_handoff(self, path: str) -> None:
+        """Open a session another instance handed over: what *Open in a new
+        window* there starts this one with."""
+        self._set_loading(True)
+        self._loading_name = "the handed-over session"
+        self._task = HandoffTask(str(path), self.session.group_settings, self)
+        self._task.progress.connect(self._loading_progress)
+        self._task.loaded.connect(self._took_handoff)
+        self._task.failed.connect(self._load_failed)
+        self._task.finished.connect(self._task_finished)
+        self._elapsed.restart()
+        self._loading_progress("taking over")
+        self._task.start()
+
+    def _took_handoff(self, locs, state, grouped) -> None:
+        from .. import handoff
+        handoff.apply_state(self.session, locs, state, grouped)
+        gui = state.get("gui_state")
+        if gui:
+            self.workspace = Workspace.from_dict(gui)
+            self.workspace.prune(list(plugins.refs()))
+            self.build_tabs()
+            self._update_title("handed over")
+        view = state.get("view")
+        if view:
+            from PySide6.QtCore import QRectF
+            (x0, x1), (y0, y1) = view
+            self.render_window.view.view.setRange(QRectF(x0, y0, x1 - x0, y1 - y0),
+                                                  padding=0)
+            self.render_window.view.schedule()
+        else:
+            self.render_window.view.reset()
+        run = state.get("run")
+        if run:
+            # after the event loop has shown the session: the run's preflight
+            # may ask something, and should ask it over the right picture
+            QTimer.singleShot(0, lambda: self._run_handed_over(run))
+
+    def _run_handed_over(self, run: dict) -> None:
+        """Run what the other instance could not apply during its live fit."""
+        try:
+            from .. import plugins as registry
+            window = self.open_plugin_window(run["plugin"])
+            if window is None:
+                return
+            cls = registry.get(run["plugin"])
+            window.panel.form.set(registry.settings_from(cls.Settings,
+                                                         run.get("values") or {}))
+            window.panel.start_run()
+        except Exception:                    # a singleShot callable must not raise
+            traceback.print_exc()
+
+    def rename_session(self) -> None:
+        """Ask for the session's name and colour (`identity.NameDialog`)."""
+        answer = identity.NameDialog.ask(self, self.session)
+        if answer is not None:
+            self.session.rename(*answer)
 
     def save_gui_to(self, path) -> Path:
         """Write the GUI to ``path``, make it the loaded one and the next start."""
@@ -487,6 +760,10 @@ class ControlWindow(QMainWindow):
         from .. import plugins as registry
 
         menu = self.plugins_menu
+        # clear() leaves the submenus, which the menu owns: the last show's
+        # would pile up, one tree per opening
+        for old in menu.findChildren(QMenu, options=Qt.FindDirectChildrenOnly):
+            old.deleteLater()
         menu.clear()
         self._action(menu, "Find a plugin...", "Ctrl+Shift+P", self.choose_plugin_window)
         menu.addSeparator()
@@ -496,7 +773,8 @@ class ControlWindow(QMainWindow):
             if path in groups:
                 return groups[path]
             head, _, leaf = path.rpartition("/")
-            groups[path] = group_for(head).addMenu(leaf)
+            parent = group_for(head)
+            groups[path] = _add_menu(parent, leaf, parent)
             return groups[path]
 
         for path, ref in sorted(registry.refs().items()):
@@ -541,6 +819,53 @@ class ControlWindow(QMainWindow):
         menu.addAction(action)
         return action
 
+    # ---------------------------------------------------------------- copy
+    def _on_focus_window(self, window) -> None:
+        """Remember the last window that has a picture to copy."""
+        widget = next((w for w in QApplication.topLevelWidgets()
+                       if window is not None and w.windowHandle() == window), None)
+        if widget is not None and hasattr(widget, "clipboard_image"):
+            self._picture_window = widget
+
+    def _copy_window(self) -> QWidget:
+        """The window Copy is about: the one in front if it has a picture,
+        else the last one that did, else the render window."""
+        active = QApplication.activeWindow()
+        if active is not None and active is not self:
+            return active
+        last = self._picture_window
+        try:
+            if last is not None and last.isVisible():
+                return last
+        except RuntimeError:                      # closed and deleted since
+            self._picture_window = None
+        return self.render_window
+
+    def copy(self, window: Optional[QWidget] = None) -> bool:
+        """Copy what is in front: selected text, else that window's picture.
+
+        Any window can take part by having a ``clipboard_image()`` that
+        returns a QImage, or None when it has nothing to show.  The picture
+        is put on the clipboard as an image, to paste into a slide or a
+        notebook; saving it at a chosen pixel size is the Save menus' job.
+        Returns whether anything was copied.
+        """
+        if window is None:
+            focus = QApplication.focusWidget()
+            if _copy_selected_text(focus):
+                return True
+            window = self._copy_window()
+        grab = getattr(window, "clipboard_image", None)
+        image = grab() if grab is not None else None
+        if image is None or image.isNull():
+            self.statusBar().showMessage("Nothing to copy here", 3000)
+            return False
+        QApplication.clipboard().setImage(image)
+        self.statusBar().showMessage(
+            f"Copied {window.windowTitle() or 'the picture'} "
+            f"({image.width()} x {image.height()} pixels)", 3000)
+        return True
+
     def _refresh_undo(self) -> None:
         """The menu says what it would undo, and lists the steps behind it.
 
@@ -571,18 +896,20 @@ class ControlWindow(QMainWindow):
                 # whichever entry was picked
                 entry.triggered.connect(lambda checked=False, count=n, run=go: run(count))
 
-    def open_calibration(self, dual: bool = False) -> None:
+    def open_calibration(self, dual: Optional[bool] = None) -> None:
         """The calibration window: bead stacks in, a spline calibration out.
 
         A window of its own, like the 3D viewer, but in this process, so a
-        saved calibration can go straight into the Spline 3D fitter.
+        saved calibration can go straight into the Spline 3D fitter.  ``dual``
+        sets the mode; None leaves it as it was.
         """
         from ..calibrate.qt_gui import CalibrationWindow
         if self.calibration_window is None:
             self.calibration_window = CalibrationWindow(parent=self)
             self.calibration_window.calibrated.connect(self.use_calibration)
-        if dual:
-            self.calibration_window.mode_box.setCurrentText("Dual colour")
+        if dual is not None:
+            self.calibration_window.mode_box.setCurrentText(
+                "Dual colour" if dual else "Single channel")
         self.calibration_window.show()
         self.calibration_window.raise_()
 
@@ -640,7 +967,16 @@ class ControlWindow(QMainWindow):
         n = len(self.session.locs)
         shown = self._shown_text()
         self.statusBar().showMessage(f"{name}: {n} localizations" + (f", {shown}" if shown else ""))
-        self.render_window.setWindowTitle(f"SMAPpy - {name}" + (f" - {shown}" if shown else ""))
+        if what in ("name", "locs"):
+            self._update_title()
+        if self.session.name or self.session.colour:
+            name = self.session.display_name or name
+        self.render_window.setWindowTitle(
+            f"{identity.mark(self.session)} SMAPpy - {name}".strip()
+            + (f" - {shown}" if shown else ""))
+        colour = identity.colour_hex(self.session)
+        self.render_window.toolbar.setStyleSheet(
+            f"QToolBar {{ border-bottom: 4px solid {colour}; }}" if colour else "")
 
     def _shown_text(self) -> str:
         """What the render window actually draws: kept by each visible layer.
@@ -799,7 +1135,7 @@ class ControlWindow(QMainWindow):
 
     def save(self) -> None:
         from ..io.formats import writer_for
-        if self.session.path is None:
+        if self.session.path is None or self.session.is_protected(self.session.path):
             return self.save_as()
         try:
             writer_for(self.session.path)
@@ -812,11 +1148,18 @@ class ControlWindow(QMainWindow):
 
     def save_as(self) -> None:
         start = str(self.session.path) if self.session.path else folders.start()
+        if self.session.is_protected(start):
+            here = Path(start)          # offer a new name beside the kept file
+            start = str(here.with_name(f"{here.stem}_edited{here.suffix}"))
         path, _ = QFileDialog.getSaveFileName(self, "Save localizations", start,
                                               "HDF5 (*.h5 *.hdf5)")
         if path:
             folders.remember(path)
-            self.session.save(path)
+            try:
+                self.session.save(path)
+            except ValueError as error:
+                QMessageBox.warning(self, "Not saved", str(error))
+                return
             self._on_session("locs")
 
 
@@ -825,9 +1168,15 @@ class RenderWindow(QMainWindow):
         super().__init__()
         self.view = RenderView(session)
         self.setCentralWidget(self.view)
-        self.addToolBar(RenderToolBar(self.view))
+        self.toolbar = RenderToolBar(self.view)
+        self.addToolBar(self.toolbar)
+        self.setProperty(identity.OWN_TITLE, True)      # names the session itself
         self.resize(900, 900)
         window_shortcuts(self)
+
+    def clipboard_image(self):
+        """What Edit > Copy puts on the clipboard: the view as displayed."""
+        return self.view.qimage()
 
 
 def _start_log() -> None:
@@ -859,8 +1208,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     argv = sys.argv if argv is None else argv
     app = QApplication.instance() or QApplication(argv)
     apply_style(app)
+    collect_on_gui_thread(app)
+    install_icon(app)
     _start_log()
     session = Session()
+    install_identity(app, session)
     render = RenderWindow(session)
     control = ControlWindow(session, render)
     screen = app.primaryScreen().availableGeometry()
@@ -868,8 +1220,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     render.move(screen.left() + control.width() + 20, screen.top())
     render.show()
     control.show()
-    if len(argv) > 1:            # after the windows: a big file takes minutes,
-        control.load_paths(argv[1:], reset_view=True)   # and says so as it goes
+    args = list(argv[1:])
+    if "--handoff" in args:      # started by *Open in a new window* elsewhere
+        at = args.index("--handoff")
+        if at + 1 < len(args):
+            control.take_handoff(args[at + 1])
+        del args[at:at + 2]
+    if args:                     # after the windows: a big file takes minutes,
+        control.load_paths(args, reset_view=True)   # and says so as it goes
     return app.exec()
 
 

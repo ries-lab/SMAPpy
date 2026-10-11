@@ -657,6 +657,7 @@ class LocalizationStatistics(Plugin):
     """Photons, localization precision and on-time, each with its law fitted."""
 
     Settings = StatisticsSettings
+    changes_locs = False
     # 2: the table the layer shows rather than always the ungrouped one, and
     # the on-time counted once per blink rather than once per frame
     version = "3"        # 3: finds a SMAPpy 3D fit's z precision, z_err_nm

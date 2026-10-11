@@ -184,6 +184,8 @@ class SessionROIs(ROIProject):
         self.runs = []
         self.navigation = {}
         self.pipeline = []
+        self.segment_preview = None
+        self.history.clear()        # another file's edits
         if not doc:
             return
         doc = json.loads(json_text(doc)) if not isinstance(doc, dict) else doc
@@ -192,7 +194,7 @@ class SessionROIs(ROIProject):
         self.set_geometry(doc.get("size_nm", self.size_nm), doc.get("shape", self.shape))
         self.preview_nm = float(doc.get("preview_nm", 0.0) or 0.0)
         self.set_tiles(doc.get("tile_nm", 0.0) or 0.0)
-        self.navigation = doc.get("navigation", {})
+        self.navigation = dict(doc.get("navigation", {}))
         # ids the file used, mapped onto the files this session has
         by_number = {s.number: s for s in self.sources.values()}
         remap = {}
@@ -200,6 +202,8 @@ class SessionROIs(ROIProject):
             source = by_number.get(saved.get("number"))
             if source is not None:
                 remap[saved["id"]] = source.id     # the name stays the session's
+        if self.navigation.get("file") in remap:
+            self.navigation["file"] = remap[self.navigation["file"]]
         for saved in doc.get("rois", []):
             roi = ROI(**saved)
             point(roi.center)

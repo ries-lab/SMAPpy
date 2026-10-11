@@ -1,0 +1,21 @@
+# An example microscope profile for Localize > uiPSF calibration.
+#
+# Copy it to <smappy config dir>/microscopes/<name>.yaml (or to a shared folder
+# named in $SMAPPY_MICROSCOPES), change the values to your instrument's, and it
+# appears in the plugin's "microscope" list.  The numbers here are those of
+# uiPSF's own example system "M2" (config/systemtype/M2.yaml): a 1.43 NA oil
+# objective with an astigmatic lens and a mirrored two-colour splitter.
+name: Example (uiPSF's M2)
+NA: 1.43
+refractive_index: {immersion: 1.516, medium: 1.335, coverslip: 1.516}
+emission_wavelength_nm: 680
+# pixelsize_um: [0.127, 0.116]   # x, y; leave out to take it from the camera
+roi_size_px: 25
+dual:
+  layout: up-down mirrored
+  main_channel: upper
+  split_position: null
+insitu:
+  zernike_index: [5]
+  zernike_coeff: [0.5]
+uipsf: {}

@@ -182,7 +182,7 @@ class ChainPanel(QWidget):
     # ------------------------------------------------------------- editing
     def add_step(self) -> None:
         from .chooser import choose_plugin
-        path = choose_plugin(self.window(), scope="locs")
+        path = choose_plugin(self.window())
         if not path:
             return
         spec = self.current_spec()

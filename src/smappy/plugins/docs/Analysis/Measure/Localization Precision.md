@@ -1,5 +1,5 @@
 ---
-version: "3"
+version: "4"
 covers: [smappy.plugins.precision.measure, smappy.plugins.precision.displacement_pairs, smappy.plugins.precision.fit_radial, smappy.plugins.precision.fit_axis, smappy.plugins.precision.radial_density, smappy.plugins.precision.axis_density, smappy.plugins.precision.drift_free_sigma, smappy.plugins.precision.sigma_at_photons, smappy.plugins.precision.crlb_statistics, smappy.plugins.precision.summary, smappy.plugins.precision.draw_radial, smappy.plugins.precision.draw_gaps, smappy.plugins.precision.draw_crlb, smappy.plugins.precision.draw_frc, smappy.frc.frc_resolution, smappy.frc.blur_envelope, smappy.frc.envelope_resolution]
 ---
 
@@ -32,9 +32,13 @@ meant to disagree -- the way they disagree is the diagnosis:
   the two images still agree.  This folds in the labelling density, the drift
   and the number of localizations as well as the precision.
 
-By default it measures twice: the localizations as they are shown (the
-layer's filter and the ROI) and all of them, side by side (*localizations*).
-If nothing is filtered, it measures once.
+It measures the localizations as they are shown: the layer's filter, the ROI
+and, while the 3D view's slab is used by plugins, the slab.  To measure all of
+them, clear the filter and the ROI.  A filter on precision or photons does not
+bias the pairwise fit, but it does select: both partners of a pair must
+survive it, and the first and last frames of a blink are the dim ones, so a
+hard cut removes true pairs preferentially.  The fitted signal fraction shows
+it, and $\kappa$ survives a cut better than the plain $\sigma$.
 
 **What it needs.**  A `frame` column and positions for the pairwise
 displacement; a precision column (`xy_err_nm`, and `z_err_nm` for 3D) for the
@@ -141,13 +145,14 @@ ax.set_xlabel("photons"); ax.set_ylabel("precision (nm)")
 ax.legend(fontsize=7, frameon=False)
 ```
 
-**4. Per axis.**  The same mixture is fitted to the signed displacements in
+**4. Per axis** (a figure with *diagnostic plots*).  The same mixture is fitted to the signed displacements in
 x, in y and, for 3D data, in z, each on its own.  This is how the axial
 precision is measured: the z fit needs no model of how the PSF changes with
 depth.  The mean of each displacement is printed as well: it is the drift
 over one frame.
 
-**5. Frame gap.**  The whole fit is repeated for localizations 2, 3, ... up to
+**5. Frame gap** (a figure with *diagnostic plots*; the numbers are always
+in the text).  The whole fit is repeated for localizations 2, 3, ... up to
 *frame gaps to* frames apart.  If nothing moves, a molecule is placed just as
 well two frames later and $\sigma$ stays flat.  If the sample drifts or
 vibrates, the displacement grows with the time between the two
@@ -334,13 +339,6 @@ with the fixed threshold of 1/7, and departs in three places:
 
 ## Parameters
 
-### source
-*as plotted* answers "how well is what I am looking at placed", *all* "how
-good is this sample".  A filter on precision or photons does not bias the
-pairwise fit, it selects: both partners of a pair must survive it, and the
-first and last frames of a blink are the dim ones, so a hard cut removes
-true pairs preferentially.  The fitted signal fraction shows it; $\kappa$ survives a cut better than the plain $\sigma$.
-
 ### pairwise
 It is the only one of the three methods that sees drift, vibration and a
 wrong calibration, and the only one that needs molecules on in consecutive
@@ -372,6 +370,11 @@ displacements and $\sigma_z$ reads low; the text warns.
 The volume is transformed tile by tile, each tile the full depth of the data,
 so a whole field of view is many tiles and a long run.
 
+### diagnostics
+Tick it when $\kappa$ is far from 1 or the *gap -> 0* line reports motion:
+the per-axis histograms show a PSF that is wider in one direction or a shift
+over one frame, and the frame-gap curve shows how fast the sample moves.
+
 ### frc_blocks
 More blocks mix the two halves more evenly over the acquisition, which
 matters when the sample changes over time; fewer keep more blinks whole.
@@ -390,7 +393,8 @@ Only a speed limit: the default covers most acquisitions whole.
 
 ## Output
 
-The **text** has one block per set of localizations, a line per number:
+The **text** names what was measured and how many localizations, then a
+line per number:
 
 * *CRLB*: $\sigma_c$ and the median of the precision column, lateral and
   axial.
@@ -415,9 +419,13 @@ A table in pixels (`x_pix`, `xy_err_pix`) is measured and reported in pixels.
 
 Besides the text:
 
-* **Figures**: the distance histogram with the fit (the main one), one panel
-  per axis, $\sigma$ against the frame gap (when *frame gaps to* is above 1),
-  FRC, FRC per axis, and the CRLB histograms.
+* **Figures**, a tab per method, each named after it: *NeNA*, the distance
+  histogram with the fit; *CRLB*, the histograms of the precision column;
+  *FRC*; *FRC per axis* (with *FRC per axis (3D)*); and, with *diagnostic
+  plots*, *NeNA per axis* and *NeNA vs frame gap* (when *frame gaps to* is
+  above 1).  Each panel's title says first which method it shows and what is
+  plotted, then the numbers; the window's title says which methods were run,
+  on what, and on how many localizations.
 * The numbers (not the pairs) are kept with the result.
 
 **Reading them.**  Pairwise $\sigma$ close to the CRLB median and $\kappa$

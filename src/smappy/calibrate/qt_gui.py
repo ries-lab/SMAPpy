@@ -115,10 +115,11 @@ class CalibrationWindow(QMainWindow):
         self.tabs = QTabWidget()
         self.pages = []
         for title in PAGES:
-            from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
             from matplotlib.figure import Figure
+
+            from ..gui.canvas import canvas_class
             figure = Figure(figsize=(9, 6), constrained_layout=True)
-            canvas = FigureCanvasQTAgg(figure)
+            canvas = canvas_class()(figure)
             canvas.mpl_connect("pick_event", self.pick_pair)
             self.tabs.addTab(canvas, title)
             self.pages.append((figure, canvas))
@@ -636,6 +637,10 @@ def show_calibration_qt(paths=(), settings=None):
         app = QApplication([])
     from ..gui.widgets import apply_style
     apply_style(app)                 # the same editable fields as the main GUI
+    from ..gui.collector import collect_on_gui_thread
+    collect_on_gui_thread(app)
+    from ..gui.icon import install_icon
+    install_icon(app)
     window = CalibrationWindow(paths, settings)
     window.show()
     if standalone:

@@ -29,11 +29,42 @@ moved.
 A fresh container has **no numpy**.  Before anything else:
 
     pip install -e .                    # builds the C++ extensions too
-    pip install pytest                  # not a dependency, and not in the container
+    pip install -e .[test]              # pytest, pytest-timeout (a 300 s limit per test), pytest-xdist
 
-Running the tests:
+Running the tests -- two tiers:
 
-    python -m pytest tests -q           # `tests`, not `.`
+    python -m pytest tests -q -n auto           # after each change: ~1 min, the slow tier skipped
+    python -m pytest tests -q -n auto --slow    # before a PR or a push of major work: everything, ~4 min
+
+* **Run the slow tier before you open a PR, and before you call major work
+  done** -- a new plugin, a change to the GUI, a tutorial, a page or what an
+  algorithm computes.  It is about 60 tests marked `@pytest.mark.slow` (the
+  tutorials, the pages' figures, the large numerical checks) that are two
+  thirds of the suite's time, and they are where a GUI or docs change breaks.
+  The summary's "skipped" count includes them, so a run without `--slow` has
+  not checked them; say so if you stop short of it.  No CI runs the tests.
+* **A PR description states the `--slow` run's result** on a line of its own
+  -- "`--slow -n auto`: 1321 passed, 4 skipped" -- or says plainly that it was
+  not run and why, so a reviewer can see from the PR whether it was done.
+* Mark a new test `slow` when it takes more than about 4 s.
+* `-n auto` needs pytest-xdist (the `test` extra).  `conftest.py` gives each
+  worker one BLAS thread (without it four workers are barely faster than one),
+  makes work stealing the default (xdist's own piles the tutorials onto one
+  worker) and runs the slow tests first.
+* **Automatic garbage collection is off, in the tests and in the app.**  The
+  collector otherwise runs in whichever thread allocates, and a Qt widget
+  left in a reference cycle, destroyed on a fit's reader thread, deadlocked
+  a test worker.  `conftest.py` collects on the main thread every 100 tests;
+  the GUI's entry points call `gui/collector.collect_on_gui_thread`, a timer
+  on the GUI thread.  A test that needs an object gone calls `gc.collect()`
+  itself; a new entry point that makes a QApplication installs the collector,
+  the icon (`gui/icon.install_icon`) and the session's identity
+  (`gui/identity.install_identity`: its name and colour in every window title).
+* **A `QTimer.singleShot` callable must never raise.**  PySide leaves its
+  exception pending inside `processEvents`, and the next Python override Qt
+  calls segfaults (6.10) or hangs.  Catch and print inside it, or connect a
+  `QTimer`'s `timeout` signal instead.  Make matplotlib canvases with
+  `gui/canvas.canvas_class()`, whose queued redraw survives a deleted canvas.
 
 * Plain `pytest` collects `externaltools/Comet`, which imports numba and errors
   out.  Always name `tests`.
@@ -48,6 +79,9 @@ Running the tests:
   `test_roi_session`), which is the environment and not your change.
 * `SMAPPY_TEST_CAL=/path/to/_3dcal.mat` enables the tests that want real
   calibration data; without it they skip.
+* `SMAPPY_UIPSF_PYTHON=/path/to/python` (of an environment with uiPSF, as the
+  page of `Localize/uiPSF calibration` installs it) enables the slow test that
+  runs uiPSF itself, a few minutes on a CPU; without it it skips.
 
 ## Writing a plugin
 
@@ -60,7 +94,7 @@ shape, so read the one closest to what you are writing:
 | rewrites the table and hands it back | `assign_colors.py` (`Result.locs`, a preview) |
 | a long computation with progress | `drift_comet.py`, `drift_rcc.py` |
 | loads, saves, exports, simulates | `file.py` (a plugin per format, no input table; the simulator's model is `smappy.simulate`) |
-| finds, measures or summarises ROIs | `roi.py` (segment, `scope = "site"`, analyse) |
+| finds, measures or summarises ROIs | `roi.py` (a segmenter derives from `SegmenterPlugin`, which gives it a Preview, *replace* (`replace_param()`) and a step of the ROI undo; `scope = "site"`; analyse) |
 | parts, presets, a C++ backend | `fit.py` (nested settings dataclasses) |
 | adds a derived column, no output | `math_parser.py` (an expression, kept with the table as a recipe) |
 | removes or flags localizations | `remove_locs.py` (a region, a new table or a filtered flag) |
@@ -70,7 +104,12 @@ shape, so read the one closest to what you are writing:
 | scores a fit against a simulation | `ground_truth.py` (the truth redrawn from the recipe, matched per frame) |
 | draws what the microscope recorded per frame | `image_tags.py` (the fit's `metadata["frame_tags"]`) |
 | finds a structure by its shape and judges it, then counts it | `npc.py` (a ring filter and circle fit in the segmenter, a per-site count, and a model of whole pores in `smappy/npc.py` fitted to the site table) |
-| runs the ROI manager's segment, evaluate and analyse as one | `npc.py`'s `NPCWorkflow` (the three plugins' settings as parts, `ROIProject.find` and `ROIProject.evaluate` on the pores it found) |
+| summarises what evaluators measured | `roi.py`'s `SiteAnalysisPlugin` (an evaluator to read, a *results from* field, a preflight that asks which when there are several) |
+| runs the ROI manager's segment, evaluate and analyse as one | `npc_analysis.chain.yaml` (a shipped chain: an evaluator step runs over every ROI before the next; `docs/batch.md`, "ROIs: segment, evaluate, analyse") |
+| opens an interactive window of the GUI's | `bead_calibration.py` (`Plugin.window`: the button opens what the GUI registered in `session.window_openers`) |
+| runs an external program in its own Python | `uipsf.py` (`smappy.uipsf`: a worker script under that program's interpreter, progress read from its output, the result converted into smappy's own file) |
+| hands the session to a new instance | `smappy.handoff` (*File > Open in a new window*: the table through shared memory, the rest as JSON, `smappy-gui --handoff`) |
+| is run by MicroClaw during an acquisition | `gui/live_session.py` (the GUI on a fit another program controls through `Context.stop` and `writer_finished`; the package and its protocol runner are `ries-lab/smappy-microclaw`) |
 
 A chain of plugins that runs as one, and running one over many files
 (`smappy-batch`, the batch window): `docs/batch.md`.
@@ -110,9 +149,14 @@ class Thing(Plugin):
   imports inside functions (`from scipy.ndimage import ...`), as the shipped
   plugins do.
 * `scope = "site"` makes it an ROI evaluator, run once per ROI with `ctx.site`
-  set.  Otherwise it runs once over the selection.
+  set; in a chain it runs over every included ROI before the next step.  Its
+  results belong to the ROI, whoever ran them, under the evaluation's name
+  (`ROIProject.evaluations`; a renamed one is a second evaluation), so an
+  analysis reads `ROIProject.results()` and never the pipeline.  Otherwise it
+  runs once over the selection.
 * Override `preview` for a plugin that can show its work before committing;
   the GUI grows a button when it is overridden and nothing when it is not.
+  A plugin that changes nothing needs none: Run opens its figures.
 * Override `preflight` to put a question before a run whose cost you can know
   in a fraction of a second -- `drift_comet.py` does, rather than letting
   someone find out over the next twenty minutes.  Returning a
@@ -120,14 +164,30 @@ class Thing(Plugin):
   plain yes, each carrying the settings it would run with: COMET offers an RCC
   prepass, because "no" is not a useful answer to "this will take an
   afternoon".
-* Set `live = True` on a plugin whose work is tens of milliseconds and which
-  overrides `preview`: the GUI grows a *live* tick and re-previews while the
-  ROI is dragged, silently (no log line, no window, no focus).  It turns a
-  measurement one asks for into one that can be aimed.
+* Override `notice` to say something about the settings as they stand, before
+  any run -- a line under the form, and optionally a button that opens a GUI
+  window by name (`Notice(text, action, window)`, the same
+  `session.window_openers` as `Plugin.window`).  The fitters use it for a file
+  whose camera is not in the database, opening the camera editor.
+* `changes_locs` -- True if `run` hands back a new table (or files), False
+  if not; every shipped plugin declares it (`tests/test_changes_locs.py`),
+  and `changes_locs_for(settings)` refines it where it depends on the
+  settings.  While a fit is still appending, `Session.apply` refuses a table
+  change and the GUI asks before such a run, offering a new window.  A change
+  that is a column computed from the others can return a `LiveRecipe`
+  instead (`data["live_recipe"]`, with `live_recipe_for`), which follows the
+  live table: `math_parser.py`, `assign_colors.py`.
+* Set `live = True` on a plugin whose work is tens of milliseconds: the GUI
+  grows a *live* tick and measures again while the ROI is dragged (its
+  `preview` if it has one, else `run`, never applied), silently (no log line,
+  no window, no focus).  It turns a measurement one asks for into one that
+  can be aimed.
 * **A plugin that measures usually wants one answer per layer**, not one over
   the selection: a line is drawn over two channels and the measurement is how
-  they differ.  `session.selection(i)` is layer `i`'s, and `line_profile.py`'s
-  `_groups` is the shape to copy.
+  they differ.  `ctx.layer_selection(i)` is layer `i`'s (not
+  `session.selection(i)`: during a live fit the session's table has grown
+  since the context was made), and `line_profile.py`'s `_groups` is the
+  shape to copy.
 
 **Put the algorithm in module-level functions that take arrays** and let `run`
 be the thin wrapper.  A script, a test and a notebook should be able to get the
@@ -136,7 +196,8 @@ written this way; it is also what makes the tests readable.
 
 ### The context
 
-* `ctx.locs` -- the whole table, **always the ungrouped one**.
+* `ctx.locs` -- the whole table, **always the ungrouped one**; during a live
+  fit, a snapshot taken when the run started.
 * `ctx.table(layer)` -- `(locs, selection)`, grouped or not as the layer, a
   chain and `Plugin.grouping` decide.  Read this, not `ctx.locs`, in a plugin
   that should honour a chain's grouping; `Session.table` links the grouped
@@ -150,6 +211,12 @@ written this way; it is also what makes the tests readable.
   never assume a session exists.
 * `ctx.report(text)` for progress, `ctx.emit(event, payload)` to hand partial
   results on.  Both are no-ops when nobody is listening.
+* `ctx.warn(text)` for what must not be missed: kept in `ctx.warnings`, shown
+  as its own line that progress does not overwrite.  Put the warnings in the
+  result's text if they should reach the history.
+* `ctx.stop` and `ctx.writer_finished` -- `threading.Event`s or None, set from
+  another thread: end the run early keeping what it has, and "the live source
+  is complete".  The Fit plugin honours both; a long plugin may check `stop`.
 * The **grouped** table (one row per blink) is a table of its own, with its own
   filter, at `session.layers[i].state.sets["grouped"]`; it exists only once the
   user has switched that layer to grouped, and `state.grouped_stale` says it no
@@ -161,8 +228,9 @@ written this way; it is also what makes the tests readable.
 
 ### The result
 
-`Result(locs=..., text=..., plot=..., plots={...}, data={...}, settings=...)`,
-every part optional.  `plot(ax)` is handed **one** axis; for a grid, pass
+`Result(locs=..., text=..., plot=..., plots={...}, data={...}, settings=...,
+title=...)`, every part optional (`title` says what the figures are of, in
+the figure window's title).  `plot(ax)` is handed **one** axis; for a grid, pass
 `Plot(draw, panels=n, size=(w, h))` instead, and `draw` is handed the figure
 and lays out its own panels (`statistics.py`, `ROIManager/Analyze/Histograms`
 and the fit preview all do this).  Never set the figure's size or its layout
@@ -280,8 +348,8 @@ way and what was left out of SMAP's `VersatileRenderer`.
 ## Simulated data
 
 `smappy.simulate` is one model with two outputs, and the `File/Simulate/
-Blinking Structure` plugin is its form: structure -> labelling -> blinking ->
-localizations or camera frames.  NOTES.md, "The simulation model", has the
+Blinking Structure` plugin (shown as *Simulate structure*) is its form:
+structure -> labelling -> blinking -> localizations or camera frames.  NOTES.md, "The simulation model", has the
 assumptions.  What a session needs:
 
 * Structures are YAML (the syntax is in `simulate/structure.py`); the
@@ -326,13 +394,16 @@ a new plugin there fails four tests until it is listed in both (the workspace
 ones name the seeded Analysis tab, including the order its titles come back
 in).  `tests/test_file_plugins.py::test_the_file_tab_ships_with_the_four_it_needs`
 asserts the File tab's exact contents, so a new File plugin needs a line there
-too (it is a Qt test and skips without PySide6).
+too (it is a Qt test and skips without PySide6).  Likewise
+`tests/test_workspace.py::test_the_window_opens_the_shipped_tabs` lists the
+Localize tab's titles, so a new Localize plugin needs a line there.
 
 `tests/test_control_width.py` builds every shipped plugin's panel and fails if
 it is wider than the control column (`CONTROL_WIDTH`): a new plugin with a long
 label, a long choice or a wide row of widgets fails there.
 
 `tests/test_tutorial.py` runs every tutorial storyboard against the real GUI
+(slow tier: `--slow`)
 (`python -m smappy.tutorial`, see `src/smappy/tutorial/__init__.py`), so a GUI
 change that breaks a tutorial fails there: fix the storyboard in
 `src/smappy/tutorial/topics/`, which usually means a widget that was renamed
@@ -344,7 +415,7 @@ speak.
 exists or the plugin is in `UNDOCUMENTED` (the plugins written before pages
 were -- a list that only shrinks, and a new plugin never joins it), that its
 `version` is the plugin's, that every setting is explained, and that it
-renders with its maths and figures.
+renders with its maths and figures (the figures in the slow tier).
 
 Plugins reach the shipped workspace by themselves: the Analysis tab seeds from
 `Analysis/` and `favorite` defaults to True, so there is no registry to edit.

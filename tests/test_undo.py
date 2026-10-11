@@ -218,7 +218,7 @@ def test_the_memory_probe_answers_on_this_machine():
 
 # ---------------------------------------------------------------- the menu
 
-def test_the_file_menu_lists_the_steps_and_undoes_as_many_as_are_picked():
+def test_the_edit_menu_lists_the_steps_and_undoes_as_many_as_are_picked():
     pytest.importorskip("PySide6")
     matplotlib = pytest.importorskip("matplotlib")
     matplotlib.use("Agg")
@@ -242,3 +242,25 @@ def test_the_file_menu_lists_the_steps_and_undoes_as_many_as_are_picked():
     assert session.locs is first
     assert not control.undo_action.isEnabled()
     assert control.redo_action.text() == "Redo double"
+
+
+def test_undo_and_copy_are_in_the_edit_menu_and_undo_works_from_the_picture():
+    pytest.importorskip("PySide6")
+    matplotlib = pytest.importorskip("matplotlib")
+    matplotlib.use("Agg")
+    from PySide6.QtWidgets import QApplication
+    from smappy.gui.app import ControlWindow, RenderWindow
+
+    QApplication.instance() or QApplication([])
+    session = Session(table())
+    render = RenderWindow(session)
+    control = ControlWindow(session, render)
+
+    menus = {a.text(): a.menu() for a in control.menuBar().actions()}
+    assert list(menus)[:3] == ["File", "Edit", "View"]
+    edit = [a.text() for a in menus["Edit"].actions() if not a.isSeparator()]
+    assert edit[:4] == ["Undo", "Undo steps", "Redo", "Redo steps"]
+    assert "Copy" in edit and "Copy rendered image" in edit
+    assert not any("Undo" in a.text() for a in menus["File"].actions())
+    # Ctrl+Z from the render window reaches the same action
+    assert control.undo_action in render.actions()

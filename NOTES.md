@@ -748,13 +748,110 @@ mid-write raises instead of returning half an image -- and the file list is
 re-globbed on each poll, so the `_1.ome.tif` that appears when the current file
 fills up is picked up without reopening anything.
 
+**Unless somebody says when it ended.**  A program that drives the microscope
+(MicroClaw) knows when the writer has finished, and then a pause -- a refocus,
+a laser change, a time-lapse interval -- must not end the fit: `finished`, an
+event handed to the watch, replaces the timeout altogether, and once it is set
+one more pass reads everything and the stream ends.  A longer timeout would
+only move the pause that ends the fit too early, which is why MicroClaw's
+protocol (its `design/84`) asks for the event and not for a number.  The
+Fit plugin takes it from `Context.writer_finished`, and `Context.stop` ends a
+run early with its file closed and nothing finished (no drift correction of
+half an acquisition; the caller allows ten seconds).
+`smappy.gui.live_session` is the GUI opened on such a run: the same session
+and windows, the run started without its preflight question, and the fit's
+file added to `Session.protected`, because the caller hands it on with a
+digest while the window stays open and a Ctrl+S would change what that digest
+vouches for.
+
 **The engine is flushed on a timer as well as when its ROI buffer fills.**  The
 buffer holds 15000 ROIs; a sparse sample would take minutes to fill it, and
-nothing would appear in the meantime.
+nothing would appear in the meantime.  The timer is checked once per block, so
+during a pause the watch sends empty blocks (`idle_blocks`) for it to be checked
+on -- without them, what was buffered before a pause stayed off the screen
+until the pause was over.  The GUI's live fit flushes every 5 s
+(`LIVE_FLUSH_SECONDS`), and `smappy-live` every `LiveSettings.flush_seconds`
+(5 s, `--flush`): `live_view` asks its source for idle blocks too (a
+`QueueSource` sends them as the file watchers do), and `LiveFit`, which keeps
+its own loop for its stop event, skips them as `drive` does.
 
 Checked against the offline path on 300 frames of the astigmatic dataset,
 replayed frame by frame into a growing two-file series: same 28724
 localizations, every column identical.
+
+### Plugins while the fit is still appending
+
+The live table is one object that `Session.append` extends, block by block,
+and four things broke on it before any rule was written:
+
+* **A plugin's context held the growing table.**  `Context` read
+  `session.locs` once, but that is the object `extend` keeps replacing the
+  columns of, so a plugin saw a mask of 50 rows over a table of 100, or
+  `x_nm` read before a block and `y_nm` after it.  During a live fit the
+  context is now *pinned* (`Session.context`): a snapshot of the table
+  (`Localizations.snapshot`, a new dictionary over the same arrays -- `extend`
+  writes only past their end or into a new buffer) and every layer's
+  selection cut to its rows, all taken on the GUI thread.  A plugin that reads
+  several layers asks `Context.layer_selection`, not the session.
+* **A table change replaced the growing table** with one that could not take
+  the next block, and the fit's result then replaced it in turn: the view
+  stopped, the change was lost, and the log kept a line for it.
+  `Session.apply` now refuses one (`LiveTableError`) except the streaming
+  fit's own result.
+* **A copy of the session linked it.**  `Session.scratch` (a chain's copy)
+  built layers over the shared table, and linking writes `group_id` into the
+  table it is given: the next block failed on a column mismatch.
+* **A second layer took every block twice**: each set over the table
+  extended it.  The first set to take a block now extends the table and the
+  shared index, and the others only their own filter.
+
+What a user wants during an acquisition, then, comes in three kinds, and
+`Plugin.changes_locs` says before the run which one a plugin is:
+
+* **A measurement** runs on the pinned snapshot, and is simply stale by the
+  next block.
+* **A recipe** -- the Math Parser's expression, the colour assignment with
+  the modes it found -- is columns computed from the others, and follows the
+  live table (`LiveRecipe`): computed for the table so far, for every block
+  as it arrives, and once more for the finished table.  An expression with a
+  reduction is recomputed over the whole table on every append, since its
+  earlier rows move with the table.  Colours are *not* found again per block,
+  which would recolour what is on screen every few seconds; the finished
+  table gets its modes found over all of it.
+* **Anything else** -- a drift correction, a filter that removes, a loader --
+  needs the whole acquisition or a table that holds still, and is offered a
+  new window instead: *File > Open in a new window*, which `PluginPanel` asks
+  before the run (after it, for a plugin that does not declare
+  `changes_locs`), and in which the new instance runs the plugin with the
+  same settings.
+
+**Why a new instance rather than a frozen view.**  Freezing the live view --
+blocks queued, the table modified, the modification discarded on unfreeze --
+was weighed and dropped: every feature of the session would have had to know
+about the frozen state (undo and history cut back on unfreeze, the display
+carried over to the restored layers, the fit's result held back while
+frozen), and the user's work was lost by design.  A copy has none of that:
+the live path is untouched, nothing is discarded, and the copy is useful
+without a live fit too.  And a copy in a *process* of its own rather than a
+second set of windows in this one: closing or quitting the copy, or a crash
+in it, leaves the acquisition's fit alone, and a COMET run in the copy does
+not compete with the live view for the GIL.
+
+**The handoff goes through shared memory** (`smappy.handoff`): 0.36 s for 5M
+localizations x 15 columns, against 11 s to write the HDF5 file as
+`Session.save` does and 2.6 s to read it back.  The fit's own file cannot be
+read instead: HDF5 locks a file open for writing, and with locking off and no
+SWMR a reader saw torn data in 22 of 25 tries while blocks were appended.
+SWMR would need the writer to stop touching attributes until it closes, newer
+HDF5 to read our files, and a local disk -- it is not supported on network
+shares, where acquisitions are often written.  The JSON beside the block
+carries the rest; its deletion by the new instance is the signal to free the
+block, which on Windows must outlive the taker's attach.
+
+With several instances open, every window title carries the session's name
+and a coloured mark (`gui.identity`, one filter on the application, since a
+second session is a second process), and a second instance writes a log of
+its own (`diagnostics`, `smappy-<pid>.log`).
 
 ## Drift correction
 
@@ -1375,6 +1472,19 @@ shows, and the reason it exists: a conversion that is wrong by a factor of two
 looks exactly like a conversion that is right until something says where it
 came from.
 
+A camera is added from a file it took (`gui/camera_editor.py`, over
+`camera_db.draft`, `with_mode` and `save_camera`).  The fitters say a file's
+camera or readout mode is unknown as soon as the file is chosen
+(`Plugin.notice`), not when the run fails for want of a conversion, and offer
+the editor there.  The draft fills in everything the tags say -- the device as
+the prefix, the serial number, which tag is the EM gain, which tags set the
+mode -- and leaves the conversion and offset empty, by the same rule as
+above.  Modes are added one file at a time: saving replaces only the mode this
+file is in and keeps the others, each of which was measured on its own.  What
+is saved goes into the user's `cameras.json`, never the shipped list an
+update replaces; a shipped camera edited there is saved as the user's copy
+under its own name, which `joined_with` puts in its place.
+
 A pixel size is one number or two.  Almost every microscope has square pixels;
 where x and y differ the database keeps both, `to_nm` scales each axis by its
 own, and a width or a precision -- which is neither x nor y -- by the mean.
@@ -1740,6 +1850,82 @@ random source draws a new position for every frame of a blink.
 Left out for now: a non-flat background, the precision from a spline PSF's
 CRLB (SMAP has it) rather than Mortensen's, and using a loaded table as the
 structure.
+
+## uiPSF calibrations
+
+`Localize/uiPSF calibration` (`smappy.uipsf`) has uiPSF learn a PSF model
+from bead stacks or blinking molecules and saves it as an ordinary spline
+calibration.  It is a plugin of its own, not a mode of the bead calibration
+window: uiPSF is optional and external, and the duplication (reading stacks,
+saving) is the price of keeping it out of that window.
+
+* **A process of its own.**  uiPSF pins its own TensorFlow, so it runs under
+  the interpreter of its own environment (`runner.find_python`: the
+  plugin's setting, `uipsf_python` in the config, `$SMAPPY_UIPSF_PYTHON`,
+  else this Python if it has `psflearning`), as `uipsf/worker.py`, which
+  imports nothing of smappy's.  The two talk through a job folder
+  (`images.npy`, `job.json`) and tagged lines on stdout; uiPSF's tqdm bars
+  are passed on, thinned to one per stage or five seconds.  Nothing in
+  smappy imports TensorFlow.
+* **smappy reads the data, not uiPSF.**  Camera to photons, the stacks' z
+  from Micro-Manager, the split of a two-channel camera
+  (`prepare.Split`): all as smappy's own calibration and fitter do them,
+  and uiPSF's `prep_data` gets arrays.  This is also what makes the channel
+  transformation recoverable: the cut is known exactly, so uiPSF's `T`
+  (main (y, x, 1) - imgcenter, right-multiplied, into the secondary's
+  flipped array) can be taken back to chip pixels and refitted as the
+  projective secondary -> main map `dualfit` reads.
+* **Two things smappy does for uiPSF's bead finder.**  It subtracts each
+  stack's median: uiPSF's threshold is relative to the brightest maximum
+  with the background in, and simulated two-colour beads (a background a
+  fifth of the peak) lost 15 of 18 beads to spurious maxima.  And it
+  measures the shift between the channels by cross-correlating their
+  projections (`prepare.channel_shift`), which `worker.py` sets as the
+  multi-channel data's `shiftxy` before uiPSF pairs the beads: uiPSF's own
+  guess, from bead coordinates, took the neighbour on a 30 px grid of beads
+  and paired one bead.  It is set from the worker, on uiPSF's class, rather
+  than by a new uiPSF parameter, so that uiPSF's main stays as it is.
+* **Voxels, not uiPSF's spline.**  uiPSF's `locres/coeff` is normalised to
+  the median plane sum after subtracting the minimum; the fitter's photons
+  assume the brightest plane sums to one.  `res/I_model` is clipped,
+  normalised and splined exactly as `_single_model` /
+  `positive_pair_models` do (two channels jointly, the split from uiPSF's
+  per-channel intensities), so a fit cannot tell the calibrations apart.
+* **z.**  A bead model is uiPSF's `Zrange`, centred on the pupil focus, in
+  stack order: smappy's convention as is (checked: smappy's own calibration
+  of the same simulated beads has the same astigmatism against index).  An
+  in situ model's planes are heights above the coverslip, the other way up
+  (uiPSF itself seeds an in situ run from a bead file's `I_model_reverse`):
+  reversed, with z = 0 at `stagepos * n_med / n_imm`.
+* **Measured** on simulated astigmatic beads (2 stacks, 41 planes, 18 beads,
+  4 CPU cores, uiPSF 100 iterations): 3 minutes; Spline 3D with the result
+  fits simulated frames with z slope 1.03, intercept 2 nm (smappy's own
+  calibration: 1.00).  Frames drawn with that uiPSF model and fitted with
+  it: slope 1.00, photons 1.00.
+* **In situ is not validated.**  On frames drawn with a physical (uiPSF
+  bead) PSF, 3000 frames, two rounds (12 minutes), the in situ model had
+  the right sign and zero but its z ran 0.76 of the truth, with photons 10%
+  high; plane by plane it matches the true PSF at about 1.3 times the
+  height.  Started from Noll 6 instead of 5 it converged to a model whose z
+  ran backwards.  The conversion is not the cause (a hand-written in situ
+  file converts exactly, tests/test_uipsf.py); whether this is uiPSF on
+  real data or the simulation (a demo structure only +-300 nm deep) needs
+  real data with a bead calibration beside it.
+* **uiPSF on current numpy and TensorFlow.**  uiPSF's main pinned
+  TensorFlow 2.9 / Python 3.7, which has no Apple-silicon build.
+  ries-lab/uiPSF#17 makes it run on numpy 2 and TensorFlow
+  2.21 (hdfdict replaced, tkinter dropped, NEP 50 dtype casts), tried with
+  Python 3.12 on Linux, and is meant to leave main's users where they were:
+  its `setup.py` still installs TensorFlow 2.9.1 / tensorflow-probability
+  0.17 on Python 3.7 and keeps native Windows on Python 3.8-3.10 below
+  TensorFlow 2.11 (the last with its GPU support) and numpy below 1.24;
+  only elsewhere does it allow current TensorFlow.  On the old stack
+  (TensorFlow 2.9.1, tensorflow-probability 0.17, numpy 1.23.5; Python 3.9,
+  as no 3.7 could be installed here) main and #17's branch learnt the same
+  jobs -- one-channel beads, two-channel beads, in situ, 15 iterations each,
+  driven by `worker.py` -- with every array of the result bit-identical, and
+  `io.h5.load` (hdfdict on main, h5py on the branch) read them back alike.
+  The worker drives uiPSF from before #17 as well.
 
 ## Open questions
 

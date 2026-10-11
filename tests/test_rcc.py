@@ -3,7 +3,7 @@ import numpy as np
 import pytest
 
 from smappy.rcc import RCCSettings, estimate_drift_rcc, _solve
-from tests.test_drift import simulate
+from test_drift import simulate
 
 
 def test_recovers_known_drift():

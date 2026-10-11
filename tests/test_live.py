@@ -222,3 +222,39 @@ def test_live_view_wires_the_whole_thing_up(tmp_path):
     written = load_localizations(out)
     assert len(written) == len(viewer.state.locs) == viewer.fit.n_emitted
     assert written.metadata["fit"]["roisize"] == 9
+
+
+def test_what_was_buffered_before_a_pause_is_shown_during_it(tmp_path):
+    """The timed flush runs while no frames arrive, not at the next frame.
+
+    The watch sends empty blocks while it waits (`idle_blocks`); without them
+    the flush timer was checked only when a block came, so a pause in the
+    acquisition kept everything buffered before it off the screen.
+    """
+    import matplotlib.pyplot as plt
+
+    from smappy.live import live_view
+
+    scope = Blinking(tmp_path)
+    scope.write(4)                       # then nothing: a pause
+    live = LiveSettings(chunk=100, update_seconds=60.0, flush_seconds=1.0,
+                        watch=WatchSettings(poll=0.02, timeout=30.0,
+                                            appear_timeout=2.0))
+    finder, model = _pipeline()
+    viewer = live_view(tmp_path, CAMERA, finder, model,
+                       FitSettings(roisize=9, output_unit="nm"),
+                       live=live, block=False)
+    fit = viewer.fit
+    try:
+        deadline = time.monotonic() + 10.0
+        while fit.results.empty() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert fit.error is None
+        assert fit.running                       # still inside the pause
+        assert scope.written == 4                # and nothing more was written
+        assert fit.n_emitted > 0
+        assert fit.engine.stats["frames"] == 3   # the last page is held back
+    finally:
+        viewer.close()
+        fit.stop()
+        plt.close(viewer.figure)

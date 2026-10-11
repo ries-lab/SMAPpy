@@ -130,7 +130,9 @@ def label(labels: Labels, settings: LabellingSettings, rng) -> Fluorophores:
 def expected_blinks(off_time: float, on_time: float, bleaching: float,
                     n_frames: float) -> float:
     """The mean number of blinks a fluorophore shows within ``n_frames``."""
-    from scipy.stats import poisson
+    # pdtrc is poisson.sf without importing scipy.stats, which took longer
+    # than the whole simulation the first time it ran
+    from scipy.special import pdtrc
     mu = n_frames / (off_time + on_time)
     q = 1.0 - bleaching
     # enough terms for both the bleaching and the Poisson tail to vanish
@@ -138,7 +140,7 @@ def expected_blinks(off_time: float, on_time: float, bleaching: float,
     if 0 < q < 1:
         k_max = min(k_max, int(np.log(1e-12) / np.log(q)) + 2)
     k = np.arange(1, k_max + 1)
-    return float(np.sum(q ** (k - 1) * poisson.sf(k - 1, mu)))
+    return float(np.sum(q ** (k - 1) * pdtrc(k - 1, mu)))
 
 
 def off_time_for(blinks: float, on_time: float, bleaching: float,

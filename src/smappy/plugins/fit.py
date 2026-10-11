@@ -31,7 +31,7 @@ from ..calibrate.transform import RegisterSettings
 from ..pipeline import FitSettings, fit_stack, provenance
 from ..psf import GaussianPSF, SplinePSF
 from ..rcc import RCCSettings
-from . import Context, ParamInfo, Plot, Plugin, Result, param, register
+from . import Context, Notice, ParamInfo, Plot, Plugin, Result, param, register
 from .assign_colors import AssignColorSettings
 
 # a simulation's recipe opens as an acquisition too (`smappy.simulate.source`)
@@ -402,9 +402,32 @@ def _preset_choices() -> List:
     return choices
 
 
+def camera_resolution(settings):
+    """The camera behind a fitter's settings: the database, the file, the
+    user's fields -- or None when the source cannot be opened.
+
+    A function of the settings alone, so that the camera editor can be opened
+    on what a fitter is set to fit without the fitter that is set to fit it.
+    """
+    try:
+        from ..io.tiff import resolve_camera
+        source = _open(settings.source, watch=False)
+        overrides = settings.camera.overrides()
+        if settings.camera.preset:
+            preset = asdict(CameraMetadata.from_yaml(settings.camera.preset))
+            overrides = {**{k: v for k, v in preset.items() if v is not None},
+                         **overrides}
+        return resolve_camera(source, camera=settings.camera.camera,
+                              overrides=overrides)
+    except Exception:
+        return None
+
+
 # -------------------------------------------------------------------- wrappers
 class _FitPlugin(Plugin):
     """What both fitters share: opening the source, streaming, saving."""
+
+    changes_locs = True
 
     preview_help = ("run one frame and draw it: the detected candidates over "
                     "the image, and the filtered image the threshold acts on. "
@@ -419,14 +442,15 @@ class _FitPlugin(Plugin):
         Loading a calibration can warn -- the beads were taken with EM gain
         and the data without, say, so the model may be mirrored against the
         data -- and a Python warning goes to a console a GUI user never sees.
-        It goes to the run's report as well, which the panel shows.
+        It goes to the run as a warning as well (`Context.warn`), which the
+        panel keeps in view and the run puts in its text and its file.
         """
         import warnings
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             model = self.model(settings, camera)
         for warning in caught:
-            ctx.report(f"warning: {warning.message}")
+            ctx.warn(str(warning.message))
             warnings.warn_explicit(warning.message, warning.category,
                                    warning.filename, warning.lineno)
         return model
@@ -464,31 +488,70 @@ class _FitPlugin(Plugin):
         the hints below and the parameter view read, so that what the view
         shows is what the fit will use and not a second opinion.
 
-        Cached on the source path and the camera settings, because this opens
-        the acquisition and the GUI asks after every keystroke.
+        Cached on the source path, the camera settings and the database's
+        revision (a camera added in the editor is seen at once), because this
+        opens the acquisition and the GUI asks after every keystroke.
         """
+        from ..camera_db import revision
         path = settings.source.path
         if not path:
             return None
         key = (path, settings.camera.preset, settings.camera.camera, tuple(
             getattr(settings.camera, name) for name in self.CAMERA_FIELDS),
-            settings.camera.pixelsize_y_um)
+            settings.camera.pixelsize_y_um, revision())
         if getattr(self, "_camera_key", None) == key:
             return self._camera_value
-        try:
-            from ..io.tiff import resolve_camera
-            source = _open(settings.source, watch=False)
-            overrides = settings.camera.overrides()
-            if settings.camera.preset:
-                preset = asdict(CameraMetadata.from_yaml(settings.camera.preset))
-                overrides = {**{k: v for k, v in preset.items() if v is not None},
-                             **overrides}
-            resolved = resolve_camera(source, camera=settings.camera.camera,
-                                      overrides=overrides)
-        except Exception:
+        resolved = camera_resolution(settings)
+        if resolved is None:
             return None
         self._camera_key, self._camera_value = key, resolved
         return resolved
+
+    def notice(self, settings) -> Optional[Notice]:
+        """A file whose camera the database does not know, said while it is
+        chosen, with the way to add it.
+
+        Said even when the fields are all typed in, for a file that names its
+        camera: the numbers are then right for this file, and the next file
+        from the same camera will need them typed again.  Not for a
+        simulation, which says exactly what its camera is, nor for a bare
+        TIFF whose numbers are typed in, which has nothing to be recognised
+        by.
+        """
+        from ..io.tiff import SIMULATED
+        resolved = self.resolution(settings)
+        if resolved is None:
+            return None
+        origin = (resolved.sources or {}).get("camera_name")
+        if origin is not None and (origin.kind, origin.detail) == SIMULATED:
+            return None
+        missing = [{"pixelsize_um": "pixel size"}.get(name, name)
+                   for name in resolved.missing]           # as the form says
+        if resolved.camera is None:
+            if settings.camera.camera:
+                return None            # a name the database no longer has
+            device = resolved.values.get("camera_name")
+            if not device and not missing:
+                return None            # a bare TIFF, its numbers typed in
+            text = (f"camera {device!r} is not in the camera database"
+                    if device else "this file names no camera")
+            text += (f": {', '.join(missing)} must be typed in below."
+                     if missing else ".")
+            return Notice(text, "Add camera...", "camera editor")
+        modal = [name for name, parameter in resolved.camera.parameters.items()
+                 if parameter.state]
+        if resolved.state is None and modal:
+            unknown = [name for name in modal if name in missing]
+            text = f"{resolved.camera_name}: this readout mode is not in the camera database"
+            text += (f", so {', '.join(unknown)} "
+                     f"{'is' if len(unknown) == 1 else 'are'} not known." if unknown
+                     else "; the values typed below are used.")
+            return Notice(text, "Add readout mode...", "camera editor")
+        return None
+
+    def choices(self, ctx: Context, settings) -> Optional[Dict[str, Any]]:
+        """The database's cameras, read again: one may have been added."""
+        return {"camera.camera": _camera_choices()}
 
     def _camera(self, settings) -> Optional[CameraMetadata]:
         """The camera as it stands: the file's metadata under the user's values.
@@ -602,6 +665,8 @@ class _FitPlugin(Plugin):
                 # pixels, then: a preview is about detection and shape, and
                 # nm coordinates would only fail on the missing pixel size
                 engine.settings = replace(engine.settings, output_unit="pixel")
+                ctx.warn("no pixel size: the preview is in pixels, and a run "
+                         "will refuse to start without one")
             engine.push(raw[None], first_frame=index)
             locs = engine.flush()
         except Exception as error:
@@ -690,7 +755,7 @@ class _FitPlugin(Plugin):
         src = settings.source
         if not src.path:
             raise ValueError("choose a source file")
-        source = _open(src, watch=src.live)
+        source = _open(src, watch=src.live, stop_event=ctx.stop)
         camera = settings.camera.resolve(source)
         fit = settings.fit
         finder = self.finder(settings, camera)
@@ -702,14 +767,18 @@ class _FitPlugin(Plugin):
         tags = FrameTags()
         if src.live:
             from ..io.watch import WatchSettings, watch_stack
+            # given `ctx.writer_finished`, the writer's word ends the watch
+            # and *stop after* is never consulted (`smappy.io.watch`)
             blocks = watch_stack(src.path, chunk=src.chunk, start=src.start, stop=src.stop,
                                  settings=WatchSettings(timeout=src.live_timeout),
-                                 tags=tags)
+                                 tags=tags, stop_event=ctx.stop,
+                                 finished=ctx.writer_finished, idle_blocks=True)
             total = None                 # a growing stack has no end to count to
         else:
             stop = min(src.stop, source.n_frames) if src.stop else None
             source.tags = tags
-            blocks = source.frames(chunk=src.chunk, start=src.start, stop=stop)
+            blocks = _until(source.frames(chunk=src.chunk, start=src.start, stop=stop),
+                            ctx.stop)
             total = max((stop if stop is not None else source.n_frames) - src.start, 0)
         # the frames kept with the table: counted as they go past, so the
         # stack is read once, for the fit
@@ -759,27 +828,39 @@ class _FitPlugin(Plugin):
         try:
             from ..pipeline import drive
             engine = self.engine(settings, camera, finder, model)
-            drive(engine, blocks, sink=sink, progress=report, read_ahead=2)
+            drive(engine, blocks, sink=sink, progress=report, read_ahead=2,
+                  flush_seconds=LIVE_FLUSH_SECONDS if src.live else None)
             record["frame_tags"] = tags.table()
+            # kept with the localizations, so a file that was fitted against
+            # a mismatched calibration says so whoever opens it
+            record["warnings"] = list(ctx.warnings)
             if writer is not None:
                 writer.set_metadata({"stats": dict(engine.stats),
                                      "frame_tags": record["frame_tags"],
-                                     "acquisition": record["acquisition"]})
+                                     "acquisition": record["acquisition"]}
+                                    | ({"warnings": record["warnings"]}
+                                       if record["warnings"] else {}))
         finally:
             if writer is not None:
                 writer.close()
         stats = dict(engine.stats)
         collected.metadata["stats"] = stats
-        for key in ("frame_tags", "acquisition"):
+        for key in ("frame_tags", "acquisition", "warnings"):
             if record[key]:
                 collected.metadata[key] = record[key]
         seconds = time.perf_counter() - started
         rate = stats["frames"] / seconds if seconds > 0 else 0.0
+        stopped = ctx.stop is not None and ctx.stop.is_set()
         text = (f"{stats['localizations']} localizations from {stats['frames']} frames"
                 f" in {seconds:.1f} s ({rate:,.1f} frames/s)"
+                + (", stopped early" if stopped else "")
                 + (f", saved to {out}" if out else ""))
 
-        finished = self.finish(ctx, settings, collected.compact())
+        # A stopped run keeps the raw fit and finishes nothing: whoever asked
+        # wants the file now (MicroClaw allows ten seconds), and a drift
+        # correction of part of an acquisition is not one anybody asked for.
+        finished = (Finished(collected.compact()) if stopped
+                    else self.finish(ctx, settings, collected.compact()))
         # the table in hand says what it was fitted from, as its file does: a
         # comparison with a simulation's truth finds the recipe by it
         finished.locs.metadata.setdefault("source", str(src.path))
@@ -807,6 +888,10 @@ class _FitPlugin(Plugin):
             save_images(out, [raw])
         if finished.notes:
             text = "\n".join([text] + finished.notes)
+        # in the text, so they are in the session's history and the file's
+        # with it, beside the run they belong to
+        if ctx.warnings:
+            text = "\n".join([text] + [f"warning: {w}" for w in ctx.warnings])
         plots = dict(finished.plots)
         if record["frame_tags"] and settings.output.show_tags:
             from .image_tags import names, plots as tag_plots, summary
@@ -816,15 +901,29 @@ class _FitPlugin(Plugin):
             if shown:
                 text = "\n".join([text, summary(record["frame_tags"], shown)])
         return Result(locs=finished.locs, text=text, plots=plots,
-                      data={"stats": stats, "path": out,
+                      data={"stats": stats, "path": out, "stopped": stopped,
                             "images": [raw] if raw is not None else []},
                       settings=settings)
 
 
-def _open(src: SourceSettings, watch: bool):
+# how often a live fit fits what it has buffered, whether or not the buffer is
+# full: the interval at which a sparse acquisition appears on screen
+LIVE_FLUSH_SECONDS = 5.0
+
+
+def _until(blocks, stop_event):
+    """``blocks`` until ``stop_event`` is set; all of them without one."""
+    for item in blocks:
+        if stop_event is not None and stop_event.is_set():
+            return
+        yield item
+
+
+def _open(src: SourceSettings, watch: bool, stop_event=None):
     if watch:
         from ..io.watch import WatchSettings, open_growing_stack
-        return open_growing_stack(src.path, WatchSettings(timeout=src.live_timeout))
+        return open_growing_stack(src.path, WatchSettings(timeout=src.live_timeout),
+                                  stop_event=stop_event)
     from ..io.tiff import open_stack
     return open_stack(src.path)
 

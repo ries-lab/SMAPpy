@@ -168,6 +168,7 @@ class RemoveLocalizations(Plugin):
     """Remove, or hide, the localizations inside or outside the ROI."""
 
     Settings = RemoveSettings
+    changes_locs = True
     version = "1"
 
     def active(self, settings: RemoveSettings):

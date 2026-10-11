@@ -87,8 +87,8 @@ class QueueSource(ImageSource):
 
     # ---------------------------------------------------------------- reading
     def watch(self, chunk: int = 100, settings=None, start: int = 0,
-              stop: Optional[int] = None, stop_event=None, on_wait=None
-              ) -> Iterator[Tuple[int, np.ndarray]]:
+              stop: Optional[int] = None, stop_event=None, on_wait=None,
+              idle_blocks: bool = False) -> Iterator[Tuple[int, np.ndarray]]:
         """Yield ``(first_frame, block)`` as frames are pushed.
 
         Blocks are up to ``chunk`` frames, and whatever has accumulated is handed
@@ -98,7 +98,9 @@ class QueueSource(ImageSource):
         It ends when `close` has been called and everything pushed has been
         yielded, when ``stop_event`` is set, or when nothing has arrived for
         ``settings.timeout`` seconds, which is the same rule the file-backed
-        sources use for an acquisition that simply stopped.
+        sources use for an acquisition that simply stopped.  ``idle_blocks``
+        yields an empty block on each idle poll, as `smappy.io.watch.watch_stack`
+        does, so that a fit can flush its buffer while nothing arrives.
         """
         from .watch import WatchSettings
 
@@ -131,6 +133,9 @@ class QueueSource(ImageSource):
                     break
                 if on_wait is not None:
                     on_wait(time.monotonic() - last_new)
+                if idle_blocks and self.shape is not None:
+                    yield (start if next_number is None else next_number,
+                           np.empty((0, *self.shape), self.dtype))
                 continue
 
             if item is _CLOSED:

@@ -44,6 +44,7 @@ class _Load(Plugin):
     """Read a localization file into the session."""
 
     Settings = LoadSettings
+    changes_locs = True
     format: str = ""            # "" is by extension; else a reader's name
 
     def reader_args(self, path: Path, settings) -> Dict[str, Any]:
@@ -151,6 +152,7 @@ class Save(Plugin):
     """Write the current table, its history and its ROIs."""
 
     Settings = SaveSettings
+    changes_locs = False
     logged = True          # where a file went is not visible in the file
 
     def run(self, ctx: Context, settings: SaveSettings) -> Result:
@@ -181,6 +183,7 @@ class ExportImage(Plugin):
     """Render the localizations to a picture file, with no window."""
 
     Settings = ExportImageSettings
+    changes_locs = False
     logged = True          # which picture came from this table, and how
     # 2: the colours scaled to 8 bits (the file was black); the layer's
     #    grouped table when it shows blinks; an empty selection refused
@@ -225,7 +228,12 @@ class SimulateBlinks(Plugin):
     """A labelled structure, blinking: localizations to try, or camera frames
     to fit (`smappy.simulate`)."""
 
+    # the path keeps the old name, so the GUIs and chains saved with it still
+    # find the plugin; the name is what the panel says, and "Blinking
+    # Structure" did not say that it simulates
+    name = "Simulate structure"
     Settings = SimulationSettings
+    changes_locs = True
     # 3: localizations down to 10 photons; free linkage, poses.  4: the
     # precision is Mortensen's maximum-likelihood one, not least squares'
     version = "4"

@@ -10,6 +10,7 @@ from .drift_result import KeepsDrift
 class RCCDrift(KeepsDrift, Plugin):
     description = ("Estimate drift by cross-correlating rendered time windows "
                    "(RCC) and subtract it from all localizations.")
+    changes_locs = True
     Settings = RCCSettings
     main = ("n_timepoints", "pixelsize_nm", "max_drift_nm", "use_z", "group")
     params = {

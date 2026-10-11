@@ -2,7 +2,7 @@
 title: ROI tab
 summary: The shape every analysis ROI shares, and the way into the ROI manager and the evaluation of the sites.
 widget: smappy.gui.roi_tab.ROIHeader
-covers: [smappy.roi_manager.core.ROIProject.set_geometry, smappy.roi_manager.core.ROIProject.indices, smappy.roi_manager.core.ROIProject.geometry, smappy.roi_manager.core.ROIProject.evaluate, smappy.roi_manager.core.ROIProject.latest, smappy.roi_manager.core.inside_polygon, smappy.roi_manager.link.SessionROIs, smappy.roi_manager.pipeline.default_instances]
+covers: [smappy.roi_manager.core.ROIProject.set_geometry, smappy.roi_manager.core.ROIProject.indices, smappy.roi_manager.core.ROIProject.geometry, smappy.roi_manager.core.ROIProject.evaluate, smappy.roi_manager.core.ROIProject.latest, smappy.roi_manager.core.ROIProject.evaluations, smappy.roi_manager.core.inside_polygon, smappy.roi_manager.link.SessionROIs, smappy.roi_manager.pipeline.default_instances]
 ---
 
 ## What it does
@@ -134,10 +134,12 @@ the Analyze plugins such as Histograms summarise.
 
 **4. What is still true.**  Each stored measurement remembers what it was made
 from: the file's data, the ROI and its geometry, the filter, the grouping,
-and the evaluator with its version and settings.  When any of these changes
--- a new size here, a new filter bound, a drift correction -- the measurements
-it affects are marked out of date and left out of the site table until the
-sites are evaluated again.
+and the evaluator with its version and settings.  When the data an ROI sees
+change -- a new size here, a new filter bound, a drift correction -- its
+measurements are marked out of date and left out of the site table until the
+sites are evaluated again.  A measurement belongs to its ROI, whether the
+evaluation window or a chain made it, and evaluations under different names
+stand side by side in the site table.
 
 ## In detail
 
@@ -170,9 +172,12 @@ ROI keeps its outline when the shape or size is changed here.
 inputs -- the data's fingerprint (row count, columns and a sample of the
 positions), the ROI's geometry, the filter bounds, the grouping and its
 parameters -- together with the evaluator, its version and its settings, but
-not its name.  A step is *current* when that signature matches what it would
-be now, and *stale* when not; the check is per step, so changing one
-evaluator's settings leaves the others' numbers standing.  Changing the size
+not its name.  A step of the pipeline is *current* when that signature
+matches what it would be now, and *stale* when not; the check is per step,
+so changing one evaluator's settings leaves the others' numbers standing.
+The site table is looser: it holds every measurement still true of the ROI's
+data, the newest under each evaluation's name, with the settings it was made
+with.  Changing the size
 or shape here makes the measurements of every circle and square ROI stale,
 but not those of polygon ROIs.
 
