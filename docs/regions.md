@@ -459,7 +459,14 @@ Each step leaves the program working and the suite green.
      field is gone; the shipped NPC chain is a block (`each pore`).
      Per-cluster results come back from a chain's scratch session as
      `data["id_regions"]`.
-   * *4b*: timing, *Check*, the preflight estimate.
+   * *4b, done*: `BlockPlugin.estimate` runs the steps in up to five
+     regions spread over the source (or a second's worth), nothing kept,
+     and multiplies the median per step out (`Estimate.text`: "about 1 h
+     over 100000 regions (NPC fit 40 ms ... a region, timed on 5)").  A
+     block estimated at over a minute asks first, offering *Slow options
+     off* (`without_slow`); a chain keeps a step's choices in its own
+     question now, rather than only its text.  The *Check* button that
+     shows the estimate is the editor's (4c).
    * *4c*: the one editor.
 5. **Clusters**: DBSCAN under *Regions/Find* writing `cluster_id` and
    `n_in_cluster`, clusters to ROIs, *ROI to column*.

@@ -429,6 +429,8 @@ def _with_step(settings, key: str, plugin_cls, own):
     """The chain's settings with one step's replaced by ``own``, the plugin's
     own settings: what a step's preflight choice runs the chain with."""
     sub = getattr(settings, key)
+    if type(own) is type(sub):            # a block: its settings are the step's
+        return dataclasses.replace(settings, **{key: copy.deepcopy(own)})
     sub = dataclasses.replace(sub, **{f.name: copy.deepcopy(getattr(own, f.name))
                                       for f in fields(plugin_cls.Settings) if f.init})
     return dataclasses.replace(settings, **{key: sub})
@@ -491,6 +493,7 @@ class ChainPlugin(Plugin):
         and the GUI asks again until nothing is left to choose.
         """
         questions = []
+        offered: List[PreflightChoice] = []   # a step's other ways to run
         made: List[Tuple[str, str]] = []
         for key, step, cls in self.steps:
             sub = getattr(settings, key)
@@ -515,6 +518,14 @@ class ChainPlugin(Plugin):
                                          choices=choices, run_label="")
             text = asked.text if isinstance(asked, PreflightQuestion) else str(asked)
             questions.append(f"{step.title()}: {text}")
+            if isinstance(asked, PreflightQuestion) and not offered:
+                offered = [PreflightChoice(
+                    label=c.label, help=c.help,
+                    settings=None if c.settings is None
+                    else _with_step(settings, key, cls, c.settings))
+                    for c in asked.choices]
+        if offered:
+            return PreflightQuestion(text="\n\n".join(questions), choices=offered)
         return "\n\n".join(questions) or None
 
     def run(self, ctx: Context, settings) -> Result:

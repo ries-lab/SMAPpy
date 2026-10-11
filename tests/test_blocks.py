@@ -282,3 +282,52 @@ def test_a_chain_can_be_a_step_in_a_block():
     finally:
         target.unlink()
         plugins.discover(force=True)
+
+
+# ------------------------------------------------------------------ timing
+
+@register("Test/Block/Slow")
+class Slow(Plugin):
+    """Takes its time, more of it with its slow option on."""
+    per_region = True
+    changes_locs = False
+
+    from dataclasses import dataclass as _dc
+
+    @_dc
+    class Settings:
+        from smappy.plugins import param as _p
+        thorough: bool = _p(True, label="thorough", slow=True, help="slower")
+
+    def run(self, ctx, settings):
+        import time
+        time.sleep(0.02 if settings.thorough else 0.002)
+        return Result(values={"n": len(ctx.locs)})
+
+
+def test_a_blocks_time_is_estimated_from_a_few_of_its_regions():
+    from smappy.blocks import block_class
+    session = a_session(sizes=(10,) * 40, noise=0)
+    cls = block_class(block({"plugin": "Test/Block/Slow", "values": {"thorough": True}}))
+    estimate = cls().estimate(session.context(), cls.Settings())
+    assert estimate.regions == 40 and estimate.sampled == 5
+    assert 0.015 < estimate.per_region["Slow"] < 0.1
+    assert 0.6 < estimate.total < 4
+    assert "over 40 regions" in estimate.text() and "timed on 5" in estimate.text()
+
+
+def test_a_long_block_asks_first_and_offers_its_slow_options_off(monkeypatch):
+    import smappy.blocks as blocks
+    monkeypatch.setattr(blocks, "ASK_ABOVE_SECONDS", 0.1)
+    session = a_session(sizes=(10,) * 20, noise=0)
+    cls = chain_class(ChainSpec(steps=[block({"plugin": "Test/Block/Slow",
+                                              "values": {"thorough": True}})]))
+    settings = cls.Settings()
+    asked = cls().preflight(session.context(), settings)
+    assert "each will take about" in asked.text and "over 20 regions" in asked.text
+    choice, = asked.choices
+    assert choice.label == "Slow options off"
+    assert choice.settings.each.slow.thorough is False
+    assert settings.each.slow.thorough is True          # the form is untouched
+    monkeypatch.setattr(blocks, "ASK_ABOVE_SECONDS", 1e9)
+    assert cls().preflight(session.context(), settings) is None

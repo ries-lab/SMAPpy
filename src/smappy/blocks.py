@@ -33,17 +33,50 @@ from __future__ import annotations
 
 import copy
 import dataclasses
-from dataclasses import make_dataclass
+import time
+from dataclasses import dataclass, make_dataclass
 from typing import Any, Dict, List, Optional, Tuple
+
+import numpy as np
 
 from .chain import (BLOCK_ROIS, DEFAULT_GROUP, KEEP_FIGURES, Block, ChainError,
                     ChainPlugin, Step, _flat_infos, plugin_settings, step_plugin,
                     step_settings_class)
-from .plugins import Context, ParamInfo, Result, fast_values, param, settings_values
+from .plugins import (Context, ParamInfo, PreflightChoice, PreflightQuestion, Result,
+                      fast_values, param, settings_values)
 from .region_runs import WriteBack, changed_columns
 
 # the block's own fields, before its steps', in its settings
 OWN = ("regions", "write_back", "merge", "keep_figures")
+# how a block's time is estimated (docs/regions.md, "Necessary slow work is
+# timed"): the steps run in a few regions spread over the source, at most
+# this many or this long, and the median per step is multiplied out
+SAMPLE_REGIONS = 5
+SAMPLE_SECONDS = 1.0
+# a run estimated to take longer than this asks before it starts
+ASK_ABOVE_SECONDS = 60.0
+
+
+@dataclass
+class Estimate:
+    """What a block will cost: per step and region, and over all of them."""
+    regions: int
+    per_region: Dict[str, float]          # step label -> seconds, the median
+    sampled: int
+
+    @property
+    def total(self) -> float:
+        return self.regions * sum(self.per_region.values())
+
+    def text(self) -> str:
+        from .region_runs import _duration
+        steps = ", ".join(f"{label} {_ms(t)}" for label, t in self.per_region.items())
+        return (f"about {_duration(self.total)} over {self.regions} regions "
+                f"({steps} a region, timed on {self.sampled})")
+
+
+def _ms(seconds: float) -> str:
+    return f"{seconds * 1e3:.2g} ms" if seconds < 1 else f"{seconds:.2g} s"
 
 
 class BlockPlugin(ChainPlugin):
@@ -73,6 +106,97 @@ class BlockPlugin(ChainPlugin):
             return []
         return [(step.title(), step_cls.path) for key, step, step_cls in cls.steps
                 if not isinstance(step, Block)]
+
+    # ------------------------------------------------------------- timing
+    def estimate(self, ctx: Context, settings) -> Optional[Estimate]:
+        """Time the block's steps in a few of its regions, nothing kept
+        (`SAMPLE_REGIONS`, `SAMPLE_SECONDS`), and multiply out.  None when
+        there is nothing to time -- no regions, or inside another block."""
+        from .region_runs import ColumnRegions, RegionScratch
+        if ctx.per_region:
+            return None
+        steps = self.pipeline(settings)
+        if settings.regions == BLOCK_ROIS:
+            project = ctx.rois
+            if project is None:
+                return None
+            ids = [i for i, roi in project.rois.items() if roi.reviewed and roi.use]
+
+            def cut(k):
+                roi = project.rois[ids[k]]
+                region = project.region(roi)
+                return RegionScratch(project._region_tables(roi, region), region, roi.id)
+            n = len(ids)
+        else:
+            if settings.regions not in ctx.locs:
+                return None
+            source = ColumnRegions(ctx.session, settings.regions, ctx.layer,
+                                   locs=ctx.locs)
+            n = len(source)
+
+            def cut(k):
+                return RegionScratch(source.tables(k), None, source.region_ids()[k])
+        if not n or not steps:
+            return None
+        picks = np.unique(np.linspace(0, n - 1, min(n, SAMPLE_REGIONS)).astype(int))
+        times: Dict[str, list] = {s.label: [] for s in steps}
+        started = time.perf_counter()
+        sampled = 0
+        for k in picks:
+            scratch = cut(int(k))
+            for step in steps:
+                t0 = time.perf_counter()
+                try:
+                    result = step.plugin.run(scratch.context(), step.settings)
+                    scratch.apply(result, step.label)
+                except Exception:
+                    pass                  # a failure costs what it cost
+                times[step.label].append(time.perf_counter() - t0)
+            sampled += 1
+            if time.perf_counter() - started > SAMPLE_SECONDS:
+                break
+        return Estimate(n, {label: float(np.median(t)) for label, t in times.items()},
+                        sampled)
+
+    def preflight(self, ctx: Context, settings):
+        """Its steps' own questions, and the time it will take when that is
+        long -- offering to run with the slow options off when there are any."""
+        asked = super().preflight(ctx, settings)
+        try:
+            estimate = self.estimate(ctx, settings)
+        except Exception:
+            estimate = None               # an estimate is a courtesy
+        if estimate is None or estimate.total < ASK_ABOVE_SECONDS:
+            return asked
+        text = f"{self.block.title()} will take {estimate.text()}."
+        if asked:
+            text += "\n\n" + (asked.text if isinstance(asked, PreflightQuestion)
+                               else str(asked))
+        fast = self.without_slow(settings)
+        choices = ([PreflightChoice(label="Slow options off", settings=fast,
+                                    help="run every step without the options "
+                                         "marked slow")]
+                   if fast is not None else [])
+        return PreflightQuestion(text=text, choices=choices)
+
+    def without_slow(self, settings):
+        """These settings with every slow option of its steps off, or None
+        when none is on."""
+        out = copy.deepcopy(settings)
+        changed = False
+        for key, step, cls in self.steps:
+            sub = getattr(out, key)
+            if isinstance(step, Block):
+                inner = cls().without_slow(sub)
+                if inner is not None:
+                    setattr(out, key, inner)
+                    changed = True
+                continue
+            for name in fast_values(cls.Settings):
+                if "." not in name and getattr(sub, name, False):
+                    setattr(sub, name, False)
+                    changed = True
+        return out if changed else None
 
     def block_from(self, settings) -> Block:
         """The block as its file would say it, with ``settings``."""
