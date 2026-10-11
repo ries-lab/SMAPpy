@@ -186,7 +186,8 @@ columns, so 10^5 clusters cost what one array of 10^5 does:
 | a variable-length array (a profile over the region's own extent) | ragged: the values end to end, and offsets |
 | a value per localization | not a region result: a write-back column |
 | anything else (a dict of fits, an object) | JSON per region, optional in the saver, off by default past a few thousand regions |
-| figures | never: drawn again on request |
+| the data behind its figures | optional, a switch per step (*Figures*, below) |
+| the figures themselves | only as files, when a step asks (*Figures*, below) |
 
 What is not declared is there in the session for the region being looked at,
 and not saved.  Nothing is lost by not saving it: a stored row is signed with
@@ -195,6 +196,52 @@ structure and the figure exactly.  Most of what SMAP's evaluators kept per
 site is arrays -- profiles, corner counts, fit parameters -- and falls in the
 first three rows; this should be checked against SMAP's `ROIManager/Evaluate`
 plugins before the storage is written.
+
+#### Figures
+
+A per-region figure comes back in one of three ways, and the step chooses
+which it pays for.  The mechanism is the one a drift correction's curve
+already uses to outlive its session: `Plugin.keep(result)` returns the plain
+data behind the figure, `Plugin.restore(saved)` draws it again
+(`plugins/__init__.py`).  It is used per region rather than a second
+mechanism invented beside it.
+
+1. **Numbers**, `Result.values` and `Result.arrays`: always stored -- the
+   region table.
+2. **Figure data**, what `keep` returns: a switch on each step of a block,
+   *keep figure data*.  On, any region's figure is back at once through
+   `restore`.  Off, it is back by running the step on that region again,
+   which gives the same figure, since the row is signed with what made it --
+   milliseconds for most plugins, so the switch matters only for the slow
+   ones.  A plugin with no `keep` has the switch greyed out and is always
+   re-run.
+3. **Figure files**: a step setting, *save figures to folder*, written as the
+   run goes -- for a plugin slow enough to run overnight, where re-running to
+   look is not an option.  The batch runner already writes each plugin's
+   figures per file; this is the same per region.
+
+The default of *keep figure data* follows the **region source, not the
+plugin**: on for ROIs (hundreds, looked at one by one), off for an id column
+(to look at clusters, make ROIs of them).  The same Statistics plugin is cheap
+on 300 ROIs and too much on 10^5 clusters, so the plugin cannot decide it.
+What the plugin does decide is what `keep` holds, and the rule is **binned
+data, never per-localization arrays**: a histogram of 100 bins is 800 bytes
+a region, 80 MB for 10^5; the photons themselves would be the table again.
+
+It follows that a plugin's figures are drawn from the data it keeps, not from
+closures over the table -- `keep` is "the arrays the plot function takes",
+`restore` "call the plot function on them".  That is the house rule for
+algorithms already; the ROI `Statistics` and NPC Corners draw from closures
+today and change.
+
+**Saving.**  Kept figure data is saved with the region table by default.  A
+save past a threshold (to be measured; of the order of 100 MB) says so in the
+save dialog, with the size, and offers to leave the figure data out; figure
+data present and not saved is one line in the dialog -- "figure data of N
+regions not saved: their figures will be redrawn by running the step again"
+-- not a warning to dismiss, since nothing is lost but time.  The one real
+loss is a slow plugin's figure data left out, which is what figure files are
+for.
 
 ### The region table is a table
 
@@ -284,7 +331,8 @@ Each step leaves the program working and the suite green.
    go.  `Result.values` and `Result.arrays`.  `scope` goes, the two statistics
    plugins become one, the chooser offers every plugin that can be a step.
 3. **Region sources and one runner**, ROIs first, then id columns, with the
-   region table in columns, in the file and as a session table with its filter.
+   region table in columns, in the file and as a session table with its filter;
+   `keep` and `restore` per region, and the switch.
 4. **Blocks** in chains, the nesting rules and the cycle check, write-back and
    its warning; one step-list editor, the evaluation window becoming it.
 5. **Clusters**: DBSCAN under *Regions/Find* writing `cluster_id` and
@@ -301,6 +349,6 @@ with it.
 
 * Whether a cluster should ever carry annotations without becoming an ROI.
   For now, no: filter by `n_in_cluster`, or make ROIs.
-* The threshold past which the saver leaves JSON region results out by
-  default, and past which the ROI manager stops drawing boxes: to be set by
-  measuring, not guessed.
+* The thresholds past which the saver leaves JSON region results out by
+  default, past which it offers to leave figure data out, and past which the
+  ROI manager stops drawing boxes: to be set by measuring, not guessed.
