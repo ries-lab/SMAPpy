@@ -383,6 +383,11 @@ class Session:
         # name: the file's.  The colour is a name from `COLOURS`, "" for none.
         self.name = ""
         self.colour = ""
+        # Whether the table changed since it was last saved or opened: a
+        # change that went into the table (`apply`, undo, redo, a fit), not
+        # a filter, a layer or an ROI, which are views of it.  The windows put
+        # a `*` in their titles, and quitting can ask (`set_unsaved`).
+        self.unsaved = False
 
     # ----------------------------------------------------------- observers
     def on_change(self, callback: Callable[[str], None]) -> None:
@@ -390,8 +395,8 @@ class Session:
         setting changed), "layers" (added/removed/visibility), "history" or
         "results" (a tool kept something worth drawing again), "rois" (the
         ROI manager's project), "roi-preview" (a segmenter's proposals,
-        `Session.show_preview`) and "name" (`rename`, or a file opened with
-        a name of its own)."""
+        `Session.show_preview`), "name" (`rename`, or a file opened with
+        a name of its own) and "unsaved" (`set_unsaved`)."""
         self._listeners.append(callback)
 
     def off_change(self, callback: Callable[[str], None]) -> None:
@@ -402,6 +407,14 @@ class Session:
     def changed(self, what: str) -> None:
         for cb in self._listeners:
             cb(what)
+
+    def set_unsaved(self, on: bool) -> None:
+        """Say whether the table differs from the file; "unsaved" when that
+        changes, for the titles."""
+        on = bool(on)
+        if on != self.unsaved:
+            self.unsaved = on
+            self.changed("unsaved")
 
     # ---------------------------------------------------------------- data
     def load(self, path, append: bool = False, progress=None, **reader_args) -> FileInfo:
@@ -522,6 +535,9 @@ class Session:
                           label=f"add {info.name}", text=str(info.path))
         self.locs.metadata["files"] = [f.to_dict() for f in self.files]
         self.log("load", str(info.path), append=append)
+        # a file opened is the table as saved; one added to it makes a table
+        # no file holds yet
+        self.set_unsaved(number > 0)
         return info
 
     def file_names(self) -> List[str]:
@@ -725,6 +741,7 @@ class Session:
                 # reported failure.
                 self.log("save", f"the GUI state was not saved: {e}")
         self.path = path
+        self.set_unsaved(False)
         return path
 
     def set_locs(self, locs: Localizations, undoable: bool = True,
@@ -1007,6 +1024,7 @@ class Session:
         if path is not None:
             self.path = Path(path)
         self.changed("locs")
+        self.set_unsaved(True)
 
     def _take_identity(self, saved) -> None:
         name = colour = ""
@@ -1185,6 +1203,7 @@ class Session:
         if done:
             self.log(direction, ", ".join(done), changed=True)
             self.changed("locs")
+            self.set_unsaved(True)
 
     # -------------------------------------------------------- ROI manager
     @property
@@ -1548,6 +1567,8 @@ class Session:
             # after the plugin rather than after the fact that a table changed
             self.set_locs(result.locs, label=plugin.path.rsplit("/", 1)[-1],
                           text=result.text or "")
+        if result.locs is not None:      # a fit or a correction: not in a file yet
+            self.set_unsaved(True)
         # The camera frames a fit kept (`smappy.rawframes`), with the table it
         # has just set.  A fit replaces the whole table, so these are all the
         # raw frames there are now -- including any just read back from the

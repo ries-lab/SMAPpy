@@ -532,11 +532,12 @@ class ControlWindow(QMainWindow):
             self._gui_name = name
         gui = getattr(self, "_gui_name", None) or \
             workspace_module.display_name(self.workspace.path)
+        app = f"{identity.unsaved(self.session)}SMAPpy"
         if self.session.name or self.session.colour:
-            text = identity.title(self.session, "SMAPpy")
+            text = identity.title(self.session, app)
             self.setWindowTitle(f"{text} (GUI: {gui})")
         else:
-            self.setWindowTitle(f"SMAPpy \u2014 {gui}")
+            self.setWindowTitle(f"{app} \u2014 {gui}")
         colour = identity.colour_hex(self.session)
         # a stripe as well as the circle: seen from across the room, and on a
         # title font that draws the circle in black
@@ -975,12 +976,13 @@ class ControlWindow(QMainWindow):
                    if meta.get("pixelsize_assumed") else "")
         self.statusBar().showMessage(f"{name}: {n} localizations"
                                      + (f", {shown}" if shown else "") + assumed)
-        if what in ("name", "locs"):
+        if what in ("name", "locs", "unsaved"):
             self._update_title()
         if self.session.name or self.session.colour:
             name = self.session.display_name or name
         self.render_window.setWindowTitle(
-            f"{identity.mark(self.session)} SMAPpy - {name}".strip()
+            f"{identity.mark(self.session)} {identity.unsaved(self.session)}"
+            f"SMAPpy - {name}".strip()
             + (f" - {shown}" if shown else ""))
         colour = identity.colour_hex(self.session)
         self.render_window.toolbar.setStyleSheet(
@@ -1282,6 +1284,49 @@ class ControlWindow(QMainWindow):
                 QMessageBox.warning(self, "Not saved", str(error))
                 return
             self._on_session("locs")
+
+    # ------------------------------------------------------------ quitting
+    def closeEvent(self, event) -> None:              # noqa: N802 (Qt's name)
+        """Closing this window, and quitting -- Qt 6's `quit` closes every
+        window first and is called off when one refuses -- asks about a
+        changed table, when the preference says to."""
+        try:
+            leave = self.may_close()
+        except Exception:                 # a question that fails must not
+            traceback.print_exc()         # keep the window open for good
+            leave = True
+        if not leave:
+            event.ignore()
+            return
+        super().closeEvent(event)
+
+    def may_close(self) -> bool:
+        """Whether to go: always, unless the table has changed since it was
+        saved or opened and the preference asks (`config.ask_before_quit`);
+        then Save (and go only if it was saved), Discard, or Cancel."""
+        from .. import config
+        if not self.session.unsaved or not config.ask_before_quit():
+            return True
+        answer = self._ask_unsaved()
+        if answer == "save":
+            self.save()
+            return not self.session.unsaved      # a cancelled Save as stays
+        return answer == "discard"
+
+    def _ask_unsaved(self) -> str:
+        """"save", "discard" or "cancel"."""
+        name = self.session.display_name or "the localizations"
+        box = QMessageBox(QMessageBox.Warning, "Unsaved changes",
+                          f"{name} changed since it was saved or opened.",
+                          QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
+                          self)
+        box.setInformativeText("Save the table before quitting?")
+        box.setDefaultButton(QMessageBox.Save)
+        box.exec()
+        chosen = box.standardButton(box.clickedButton()) if box.clickedButton() else None
+        if chosen == QMessageBox.Save:
+            return "save"
+        return "discard" if chosen == QMessageBox.Discard else "cancel"
 
 
 class RenderWindow(QMainWindow):

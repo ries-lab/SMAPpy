@@ -34,6 +34,12 @@ def mark(session: Session) -> str:
     return COLOURS[session.colour][1] if session.colour in COLOURS else ""
 
 
+def unsaved(session: Session) -> str:
+    """"*" while the table has changed since it was saved or opened, the mark
+    every editor puts in its title, for the main windows' titles."""
+    return "*" if getattr(session, "unsaved", False) else ""
+
+
 def colour_hex(session: Session) -> str:
     return COLOURS[session.colour][0] if session.colour in COLOURS else ""
 
