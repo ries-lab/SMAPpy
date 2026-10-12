@@ -336,7 +336,9 @@ and the run refuses the combination.
 ## Output
 
 * **The table**, with the drift subtracted from the position columns of every
-  localization.  The run is recorded in the file's history.
+  localization.  The run is recorded in the file's history.  *Stop* ends the
+  fit at its next step and leaves the table as it was: a curve refined half
+  way is not one to subtract.
 * **The drift curve**, x, y and z against frame (the *Plot* button); an axis
   with no drift at all is not drawn.  It is saved with the file and drawn
   again when it is reopened.

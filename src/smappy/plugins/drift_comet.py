@@ -72,6 +72,6 @@ class CometDrift(KeepsDrift, Plugin):
         ctx.report(f"estimating drift from {ctx.selection}")
         corrected, drift = correct_drift(ctx.locs, settings,
                                          select=ctx.selection.mask,
-                                         progress=ctx.report)
+                                         progress=ctx.report, stop=ctx.stop)
         return Result(locs=corrected, text=str(drift), plot=drift.plot,
                       data={"drift": drift}, settings=settings)

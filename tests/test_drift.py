@@ -435,3 +435,35 @@ def test_a_subset_per_window_is_the_same_on_every_run():
     first = estimate_drift(locs, settings).drift
     np.random.seed(123)                      # whatever else has drawn numbers
     np.testing.assert_array_equal(first, estimate_drift(locs, settings).drift)
+
+
+class _StopsAfter:
+    """A stop that is set once it has been asked ``n`` times."""
+
+    def __init__(self, n):
+        self.n, self.asked = n, 0
+
+    def is_set(self):
+        self.asked += 1
+        return self.asked > self.n
+
+
+def test_comet_stopped_mid_fit_raises_stopped_and_corrects_nothing():
+    """The spline fit is one optimisation: half refined is not a curve to
+    subtract, so a stop leaves the table as it was."""
+    import threading
+
+    from smappy.plugins import Context, Stopped
+    from smappy.plugins.drift_comet import CometDrift
+    from dataclasses import replace
+    spline = replace(SETTINGS, spline=True, spline_knot_frames=10)
+    locs, _, _ = simulate()
+    with pytest.raises(Stopped, match="COMET stopped at sigma"):
+        estimate_drift(locs, spline, stop=_StopsAfter(5))
+    stop = threading.Event()
+    stop.set()
+    with pytest.raises(Stopped, match="nothing was corrected"):
+        CometDrift().run(Context(locs=locs, stop=stop), spline)
+    # a stop never set changes nothing
+    assert np.array_equal(estimate_drift(locs, spline).drift,
+                          estimate_drift(locs, spline, stop=_StopsAfter(10**6)).drift)

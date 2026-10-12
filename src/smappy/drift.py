@@ -622,13 +622,19 @@ def _duration(seconds: float) -> str:
 def estimate_drift(locs: Localizations, settings: Optional[DriftSettings] = None,
                    select=None, pixelsize_nm: Optional[float] = None,
                    display: bool = False,
-                   progress: Optional[Progress] = None) -> Drift:
+                   progress: Optional[Progress] = None, stop=None) -> Drift:
     """Estimate drift from the selected localizations.
 
     ``select`` is what to estimate *from*: a `LocFilter`, a boolean mask, an
     index array, or None for everything.  The result covers every frame of the
     input table, not only the selected ones.
+
+    ``stop`` (a `threading.Event`, the plugin's `Context.stop`) ends the
+    spline fit at its next cost evaluation by raising `plugins.Stopped`: a
+    curve refined half way is not one to correct a table with.  The legacy
+    time-window fit only looks before it starts.
     """
+    _check_stop(stop, "before it started")
     from ._comet import best_backend, comet_run_kd   # vendored; see _comet/
     from ._comet.core import drift_optimizer
     from ._comet.core.qc_utils import flag_flawed_segments_by_lift
@@ -645,12 +651,14 @@ def estimate_drift(locs: Localizations, settings: Optional[DriftSettings] = None
     # and "two stage" were skipped without a word, and the slow-run dialogue's
     # "RCC first, then COMET within 50 nm" ran one fit over 50 nm and no RCC.
     if settings.rcc_prepass:
-        return _rcc_prepass(locs, settings, select, pixelsize_nm, display, progress)
+        return _rcc_prepass(locs, settings, select, pixelsize_nm, display,
+                            progress, stop)
     if settings.two_stage:
-        return _two_stage(locs, settings, select, pixelsize_nm, display, progress)
+        return _two_stage(locs, settings, select, pixelsize_nm, display,
+                          progress, stop)
     if settings.spline:
         return _estimate_spline(locs, settings, select, pixelsize_nm, display,
-                                progress)
+                                progress, stop)
 
     # Opt in to the two changes made to the vendored COMET (see NOTES.md); its
     # own defaults are untouched for anyone importing it directly.
@@ -728,7 +736,7 @@ def _spline_basis(x, n_coefficients: int, lo: float, hi: float, degree: int = 3)
 
 def _estimate_spline(locs: Localizations, settings: DriftSettings, select,
                      pixelsize_nm: Optional[float], display: bool,
-                     progress: Optional[Progress] = None) -> "Drift":
+                     progress: Optional[Progress] = None, stop=None) -> "Drift":
     """Fit drift as a spline in time, with no segmentation at all.
 
     The optimizer's variables are the spline's coefficients; the cost and its
@@ -781,6 +789,8 @@ def _estimate_spline(locs: Localizations, settings: DriftSettings, select,
     expected = _sigma_levels(settings) * _EVALUATIONS_PER_SIGMA_LEVEL
 
     def objective(flat, sigma, factor):
+        # raising here is how the optimizer is left: it has no stop of its own
+        _check_stop(stop, f"at sigma {sigma:.0f} nm")
         c = flat.reshape(n_coefficients, 3)
         mu = np.ascontiguousarray(basis @ c)
         value, gradient = cpu_wrapper_chunked_approx(
@@ -820,6 +830,13 @@ def _estimate_spline(locs: Localizations, settings: DriftSettings, select,
 Progress = Callable[[str], None]
 
 
+def _check_stop(stop, where: str) -> None:
+    """Raise `plugins.Stopped` if ``stop`` is set."""
+    if stop is not None and stop.is_set():
+        from .plugins import Stopped
+        raise Stopped(f"COMET stopped {where}: nothing was corrected")
+
+
 def _log(enabled: bool, message: str, progress: Optional[Progress] = None) -> None:
     if progress is not None:
         progress(message)
@@ -829,18 +846,18 @@ def _log(enabled: bool, message: str, progress: Optional[Progress] = None) -> No
 
 def _two_stage(locs: Localizations, settings: DriftSettings, select,
                pixelsize_nm: Optional[float], display: bool,
-               progress: Optional[Progress] = None) -> "Drift":
+               progress: Optional[Progress] = None, stop=None) -> "Drift":
     """A grouped pass to get close, then an ungrouped one over a small radius."""
     _log(display, "pass 1 of 2: grouped, over the full search radius", progress)
     coarse = estimate_drift(locs, replace(settings, two_stage=False, group=True),
-                            select, pixelsize_nm, display, progress)
+                            select, pixelsize_nm, display, progress, stop)
     radius = settings.two_stage_radius_nm
     _log(display, f"pass 2 of 2: ungrouped, within {radius:g} nm", progress)
     fine = estimate_drift(
         coarse.apply(locs, pixelsize_nm),
         replace(settings, two_stage=False, group=False, max_drift_nm=radius,
                 initial_sigma_nm=radius / 3.0, target_sigma_nm=radius / 5.0),
-        select, pixelsize_nm, display, progress)
+        select, pixelsize_nm, display, progress, stop)
     # the two are drift of the same sample measured in sequence, so they add
     return Drift(coarse.drift + fine.drift, settings, n_used=fine.n_used,
                  flagged_windows=fine.flagged_windows)
@@ -848,7 +865,7 @@ def _two_stage(locs: Localizations, settings: DriftSettings, select,
 
 def _rcc_prepass(locs: Localizations, settings: DriftSettings, select,
                  pixelsize_nm: Optional[float], display: bool,
-                 progress: Optional[Progress] = None) -> "Drift":
+                 progress: Optional[Progress] = None, stop=None) -> "Drift":
     """RCC for the bulk of the drift, then COMET for what is left of it.
 
     The two are drift of the same sample measured one after the other, so they
@@ -863,21 +880,24 @@ def _rcc_prepass(locs: Localizations, settings: DriftSettings, select,
         rcc = replace(rcc, max_drift_nm=float(settings.rcc_prepass_max_drift_nm))
     _log(display, f"pass 1 of 2: RCC over {rcc.n_timepoints} time windows, "
                   f"within {rcc.max_drift_nm:g} nm", progress)
-    coarse = estimate_drift_rcc(locs, rcc, select, pixelsize_nm, display)
+    coarse = estimate_drift_rcc(locs, rcc, select, pixelsize_nm, display,
+                                stop=stop)
     _log(display, f"pass 2 of 2: COMET within {settings.max_drift_nm:g} nm of "
                   "what RCC left", progress)
     fine = estimate_drift(coarse.apply(locs, pixelsize_nm),
                           replace(settings, rcc_prepass=False),
-                          select, pixelsize_nm, display, progress)
+                          select, pixelsize_nm, display, progress, stop)
     return Drift(coarse.drift + fine.drift, settings, n_used=fine.n_used,
                  flagged_windows=fine.flagged_windows, method="rcc+comet")
 
 
 def correct_drift(locs: Localizations, settings: Optional[DriftSettings] = None,
                   select=None, pixelsize_nm: Optional[float] = None,
-                  display: bool = False, progress: Optional[Progress] = None):
+                  display: bool = False, progress: Optional[Progress] = None,
+                  stop=None):
     """Estimate from the selection, correct everything.  Returns (locs, drift)."""
-    drift = estimate_drift(locs, settings, select, pixelsize_nm, display, progress)
+    drift = estimate_drift(locs, settings, select, pixelsize_nm, display,
+                           progress, stop)
     _log(display, f"applying the drift to {len(locs):,} localizations", progress)
     return drift.apply(locs, pixelsize_nm), drift
 
