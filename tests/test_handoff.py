@@ -203,3 +203,36 @@ def test_a_run_handed_over_is_run_by_the_new_instance(app, tmp_path, monkeypatch
         for w in windows:
             w.close()
         uninstall_identity(app)
+
+
+def test_show_hands_a_table_to_a_gui_of_its_own_and_frees_it_once_taken(monkeypatch):
+    """`smappy.show` from a script: the table arrives as it was, and the
+    shared block is gone once the GUI has it."""
+    import threading
+    from multiprocessing import shared_memory
+
+    from smappy import api
+    taken = {}
+
+    class Process:
+        def poll(self):
+            return None
+
+    def launch(path):                  # the GUI's side, without starting one
+        def take():
+            time.sleep(0.2)
+            taken["locs"], taken["state"] = handoff.receive(path)
+        threading.Thread(target=take).start()
+        return Process()
+
+    monkeypatch.setattr(handoff, "launch", launch)
+    sent = block(1)
+    made = []
+    real = handoff._shared_memory
+    monkeypatch.setattr(handoff, "_shared_memory",
+                        lambda *a, **k: made.append(real(*a, **k)) or made[-1])
+    assert isinstance(api.show(sent, name="from a script", wait=True), Process)
+    assert np.array_equal(taken["locs"]["x_nm"], sent["x_nm"])
+    assert taken["state"]["identity"]["name"] == "from a script"
+    with pytest.raises(FileNotFoundError):         # released: unlinked
+        shared_memory.SharedMemory(name=made[0].name)

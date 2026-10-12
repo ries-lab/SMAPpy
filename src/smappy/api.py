@@ -219,3 +219,55 @@ def _source_name(data, source):
         return data
     files = getattr(source, "files", None)
     return files[0] if files else None
+
+
+# ------------------------------------------------------------------ the GUI
+def show(data, *, name: str = "", wait: bool = False):
+    """Open the GUI on a table, a session or a file, from a script or a notebook.
+
+    ``data`` is a `Localizations`, a `Session` (its layers, filters and ROIs
+    come along) or a path to anything *File > Open* reads.  The GUI runs in a
+    process of its own -- no Qt, event loop or main thread is needed here, so
+    this works the same from a plain script, a notebook or a server -- and
+    the call returns at once with the `subprocess.Popen`.
+
+    An in-memory table goes the way *File > Open in a new window* sends one
+    (`smappy.handoff`): through shared memory, which this process frees once
+    the GUI has taken it.  ``wait`` blocks until then; without it a thread
+    does that, and a script that ends sooner waits for it at exit -- up to
+    `handoff.Offer.timeout` -- rather than taking the table with it.
+    """
+    import atexit
+    import subprocess
+    import sys
+    import threading
+    import time
+
+    from . import handoff
+
+    if isinstance(data, (str, Path)):
+        command = [sys.executable, "-m", "smappy.cli.gui", str(data)]
+        return subprocess.Popen(command, start_new_session=(sys.platform != "win32"))
+
+    from .session import Session
+    if isinstance(data, Session):
+        session = data
+    else:
+        from .io.formats import FileInfo
+        session = Session()
+        session.add_file(_localizations(data),
+                         FileInfo(name or "table", "", "memory"))
+    offer = handoff.offer(session, name=name)
+    process = handoff.launch(offer.path)
+
+    def release() -> None:
+        while not (offer.taken or offer.expired) and process.poll() is None:
+            time.sleep(0.1)
+        offer.release()
+
+    if wait:
+        release()
+    else:
+        threading.Thread(target=release, daemon=True).start()
+        atexit.register(release)
+    return process
