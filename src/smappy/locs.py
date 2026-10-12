@@ -121,7 +121,7 @@ def fit_to_localizations(result: FitResult, rois: ROIStack, model: PSFModel,
     excess = cam.excess_noise
     roi_x, roi_y = cam.roi_offset
 
-    # ROI pixel -> image pixel (this undoes the mirror, if one was applied)
+    # ROI pixel -> image pixel
     # -> chip pixel, by adding the offset of the acquisition ROI
     x_pix = rois.to_image_x(p["x_roi"]) + roi_x
     y_pix = rois.to_image_y(p["y_roi"]) + roi_y

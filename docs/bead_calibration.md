@@ -4,9 +4,9 @@ Build one single-channel PSF from all selected bead stacks. Lateral coordinates
 are pixels; axial coordinates are objective nanometres. Camera pixel size is
 not required. No EM mirroring, spatial subdivision, or field ROI is applied.
 
-Generated calibrations explicitly store `em_mirror=False`; the fitter therefore
-uses unmirrored image ROIs too. Imported MATLAB calibrations retain their mirror
-flag for compatibility. Identical acquisition settings for beads and data are
+Generated calibrations are in the camera's orientation, and so is every
+calibration the fitter sees: a MATLAB calibration that SMAP built from x-mirrored
+beads is converted when it is loaded (`load_spline_calibration`). Identical acquisition settings for beads and data are
 assumed for the native workflow.
 
 ## Interactive use

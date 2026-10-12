@@ -791,7 +791,7 @@ def load_dual_color_calibration(path):
             g = f[name]
             model = SplineCalibration(np.ascontiguousarray(g['coeff'][...]), float(g.attrs['dz']),
                     float(g.attrs['z0']), x0=float(g.attrs['x0']), psf=g['psf'][...],
-                    em_mirror=False, source=Path(path), parameters=json.loads(g['parameters_json'][()]),
+                    source=Path(path), parameters=json.loads(g['parameters_json'][()]),
                     em_on=bool(g.attrs['em_on']) if 'em_on' in g.attrs else None)
             _validate_native_calibration(model)
             models.append(model)

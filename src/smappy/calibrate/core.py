@@ -855,7 +855,7 @@ def _single_model(raw, dz_nm, s):
     raw /= norm
     cal = SplineCalibration(spline_coefficients(psf), dz_nm,
                             (psf.shape[0]-1)/2, x0=(s.roi_size-1)/2,
-                            psf=psf, em_mirror=False,
+                            psf=psf,
                             parameters={'method': 'smappy_bead_spline_v4',
                                         'settings': asdict(s),
                                         'background': 'one median of lateral border pixels across all z planes per bead stack',
@@ -963,7 +963,7 @@ def positive_pair_models(raw, dz_nm, settings):
     if not np.isfinite(norm) or norm <= 0 or min(light) <= 0:
         raise ValueError('invalid paired PSF normalization')
     models = [SplineCalibration(spline_coefficients(psf/norm), dz_nm,
-              (psf.shape[0]-1)/2, x0=(s.roi_size-1)/2, psf=psf/norm, em_mirror=False,
+              (psf.shape[0]-1)/2, x0=(s.roi_size-1)/2, psf=psf/norm,
               parameters={'method': 'smappy_dual_bead_v4', 'settings': asdict(s),
                           'common_normalization': norm,
                           'normalization': 'joint: both channels\' light around '

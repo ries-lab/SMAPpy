@@ -1,7 +1,8 @@
 """Fit real ROIs with the spline PSF and report whether the fit is sane.
 
-Also fits the same ROIs with and without the x-flip demanded by a mirrored
-calibration: the correct orientation must give the better log-likelihood.
+Also fits the same ROIs flipped in x, as a control: the orientation the
+calibration is loaded in (a SMAP spline of mirrored beads is converted on load)
+must give the better log-likelihood.
 """
 import argparse, sys, time
 from pathlib import Path
@@ -29,23 +30,26 @@ cam = camera_from_args(src, a)
 cal = load_spline_calibration(a.cal)
 warn_on_em_mismatch(cal, cam.em_on)
 model = SplinePSF(cal)
-print(f"{cam}\n{model}\ncalibration mirrored: {model.mirror}\n")
+print(f"{cam}\n{model}\nconverted on load: "
+      f"{cal.parameters.get('smappy_conversion', 'no')}\n")
 
 start, block = next(src.frames(chunk=nframes))
 photons = to_photons(block, cam) / cam.excess_noise
 finder = PeakFinder(DoGFilter(1.2), DynamicCutoff(1.7))
 cands, _ = finder(photons, first_frame=start)
 
-for mirror in (False, True):
-    rois = cut_rois(photons, cands, roisize, first_frame=start, mirror=mirror)
+rois = cut_rois(photons, cands, roisize, first_frame=start)
+for flip in (False, True):
+    images = np.ascontiguousarray(rois.images[:, :, ::-1]) if flip else rois.images
     t = time.time()
-    res = model.fit(rois.images, iterations=50)
+    res = model.fit(images, iterations=50)
     dt = time.time() - t
     p = model.unpack(res)
-    x = rois.to_image_x(p["x_roi"]); y = rois.to_image_y(p["y_roi"])
+    x_roi = (roisize - 1) - p["x_roi"] if flip else p["x_roi"]
+    x = rois.to_image_x(x_roi); y = rois.to_image_y(p["y_roi"])
     dx = x - rois.candidates.x; dy = y - rois.candidates.y
     ok = np.isfinite(p["z_nm"]) & (np.abs(dx) < 3) & (np.abs(dy) < 3)
-    tag = "MIRRORED (x-flipped)" if mirror else "as acquired"
+    tag = "control: ROIs x-flipped" if flip else "as loaded"
     print(f"--- {tag}: {len(rois)} ROIs in {dt:.2f} s "
           f"({len(rois)/dt:,.0f} fits/s)")
     print(f"    logL           : median {np.median(res.logl):9.1f}   "

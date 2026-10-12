@@ -161,7 +161,7 @@ def single_calibration(path, em_on: Optional[bool] = None):
     psf = (psf / norm).astype(np.float32)
     return SplineCalibration(spline_coefficients(psf).astype(np.float32),
                              1000 * float(params["pixel_size"]["z"]), z0,
-                             x0=(psf.shape[1] - 1) / 2, psf=psf, em_mirror=False,
+                             x0=(psf.shape[1] - 1) / 2, psf=psf,
                              source=Path(path), em_on=em_on,
                              parameters=_record(params, res, path))
 
@@ -212,7 +212,7 @@ def dual_calibration(path, split, sources=(), em_on: Optional[bool] = None):
         psf = np.ascontiguousarray(psf, np.float32)
         out.append(SplineCalibration(
             spline_coefficients(psf).astype(np.float32), 1000 * float(params["pixel_size"]["z"]),
-            z0, x0=(psf.shape[1] - 1) / 2, psf=psf, em_mirror=False, source=Path(path),
+            z0, x0=(psf.shape[1] - 1) / 2, psf=psf, source=Path(path),
             em_on=em_on, parameters=_record(
                 params, res[f"channel{k}"], path,
                 normalization="joint: both channels' light around focus sums to 1",

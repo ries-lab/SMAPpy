@@ -1,5 +1,5 @@
 ---
-version: "2"
+version: "3"
 covers: [smappy.psf.SplinePSF, smappy.io.calibration.load_spline_calibration, smappy.io.calibration.SplineCalibration, smappy.io.calibration.evaluate_spline, smappy.io.calibration.warn_on_em_mismatch, smappy.roi.cut_rois, smappy.calibrate.core.build_calibration]
 ---
 
@@ -29,7 +29,11 @@ What it needs:
   fluorescent beads on a coverslip, turned into a model with
   **Tools > Bead calibration...** (the *Bead calibration* section of the
   Localize tab opens it too; saving the calibration puts it into this
-  plugin's *calibration* field).  A SMAP `_3dcal.mat` works as well.  Take
+  plugin's *calibration* field).  A SMAP `_3dcal.mat` works as well, and
+  can be kept as an `.h5` by loading and saving it:
+  `save_spline_calibration("beads.h5", load_spline_calibration("beads_3dcal.mat"))`,
+  both from `smappy.io.calibration` (SMAP's averaged bead stack is not
+  carried over; the spline is, turned round if it was mirrored).  Take
   the beads with the same objective, lens, filters, camera and camera
   settings as the data; a calibration from another day is fine as long as
   none of these changed.
@@ -228,11 +232,27 @@ calibration's depth (at least two planes) at first, and the cap is halved whenev
 z is held inside the calibration: a fit that tries to leave it stops at an
 end.  During the fit $N \geq 1$ and $b \geq 0.01$; x and y are not held.
 
-**Mirroring.**  A SMAP calibration made from mirrored bead images
-(`emmirror`, for beads read out through the other port of an EMCCD) records
-that; each ROI is then flipped in x before it is fitted and the fitted x
-flipped back, so the table is in the orientation of the data.  Calibrations
-from the Bead calibration tool are never mirrored.
+**Mirroring.**  SMAP flips bead images in x before it builds the spline when
+they were read out through the EM register of an EMCCD, which mirrors them,
+and flips data from that register the same way when it loads them.  Here the
+data are never flipped, so such a calibration is turned round once, when it
+is loaded, and is from then on a calibration like any other.  The spline is
+reflected about the middle of its grid, $\mathrm{PSF}'(u) =
+\mathrm{PSF}(n_x - u)$ along x: the boxes are taken in reverse order, and
+since each is now crossed the other way ($u \to 1 - u$), its polynomial is
+rewritten in powers of the new offset,
+
+$$a'_{pqs} = (-1)^s \sum_{r=s}^{3} \binom{r}{s}\, a_{pqr} ,$$
+
+with the z and y powers untouched.  An odd $n_x$ gains one box, a copy of the
+new last one, which keeps the ROI where the fitter centres it in the grid.
+Fitting the data as they are with the turned spline gives the positions, z
+and photons that fitting the flipped data with the original gives, to within
+the rounding of single precision (checked on simulated splines).  Whether
+SMAP flipped the beads is read from its own record of it, `EMon`, not from
+its setting `emmirror`, whose "no mirror" (2) was once taken here for a flip;
+a file with no `EMon` is taken as flipped if `emmirror` is 1 or 3.
+Calibrations from the Bead calibration tool are never mirrored.
 
 **EM gain.**  A calibration records whether the beads were taken with EM
 gain -- the Bead calibration tool reads it from the bead files' metadata, a
@@ -317,8 +337,9 @@ z instead of the PSF width:
 | `logl`, `logl_rel` | the log-likelihood, and per pixel |
 | `peak_x_pix`, `peak_y_pix`, `iterations` | the candidate, and the steps taken |
 
-The file also records the calibration used: its path, $dz$, $k_0$, the grid
-and whether it was mirrored.
+The file also records the calibration used: its path, $dz$, $k_0$, the grid,
+whether its beads were taken with EM gain, and, for a SMAP calibration of
+mirrored beads, that it was turned round on load.
 
 What to check:
 

@@ -16,7 +16,6 @@ class ROIStack:
     images: np.ndarray  # (n, roisize, roisize) float32, C-contiguous
     candidates: Candidates  # the candidate each ROI belongs to
     roisize: int
-    mirrored: bool = False  # ROIs were flipped in x to match the PSF model
 
     def __len__(self) -> int:
         return self.images.shape[0]
@@ -27,17 +26,14 @@ class ROIStack:
 
     def to_image_x(self, x_in_roi: np.ndarray) -> np.ndarray:
         """Map a fitted x inside the ROI back to image coordinates."""
-        x = np.asarray(x_in_roi, dtype=np.float64)
-        if self.mirrored:
-            x = (self.roisize - 1) - x
-        return x - self.half + self.candidates.x
+        return np.asarray(x_in_roi, dtype=np.float64) - self.half + self.candidates.x
 
     def to_image_y(self, y_in_roi: np.ndarray) -> np.ndarray:
         return np.asarray(y_in_roi, dtype=np.float64) - self.half + self.candidates.y
 
 
 def cut_rois(photons: np.ndarray, candidates: Candidates, roisize: int,
-             first_frame: int = 0, mirror: bool = False) -> ROIStack:
+             first_frame: int = 0) -> ROIStack:
     """Cut ``roisize`` x ``roisize`` ROIs centred on each candidate.
 
     Candidates whose ROI would extend past the image border are dropped -- as
@@ -48,11 +44,6 @@ def cut_rois(photons: np.ndarray, candidates: Candidates, roisize: int,
     ``first_frame`` is the absolute frame number of ``photons[0]``, so that the
     absolute frame numbers carried by the candidates can be mapped onto this
     block.
-
-    ``mirror`` flips the ROIs in x.  It is needed for calibrations that were
-    computed from mirrored bead images (``parameters.emmirror`` in the
-    ``_3Dcal.mat``); the flip is undone when the fitted position is mapped back
-    to image coordinates, so the fitter itself never deals with mirroring.
     """
     if roisize % 2 == 0:
         raise ValueError(f"roisize must be odd, got {roisize}")
@@ -68,8 +59,7 @@ def cut_rois(photons: np.ndarray, candidates: Candidates, roisize: int,
               & (y >= half) & (y < height - half))
     kept = candidates[inside]
     if len(kept) == 0:
-        return ROIStack(np.empty((0, roisize, roisize), np.float32), kept,
-                        roisize, mirror)
+        return ROIStack(np.empty((0, roisize, roisize), np.float32), kept, roisize)
 
     span = np.arange(-half, half + 1)
     rows = kept.y[:, None] + span  # (n, roisize)
@@ -77,10 +67,7 @@ def cut_rois(photons: np.ndarray, candidates: Candidates, roisize: int,
     frame_index = _block_index(kept.frame, first_frame, n_frames)
 
     images = photons[frame_index[:, None, None], rows[:, :, None], cols[:, None, :]]
-    if mirror:
-        images = images[:, :, ::-1]
-    return ROIStack(np.ascontiguousarray(images, dtype=np.float32), kept,
-                    roisize, mirror)
+    return ROIStack(np.ascontiguousarray(images, dtype=np.float32), kept, roisize)
 
 
 def _block_index(frame: np.ndarray, first_frame: int, n_frames: int) -> np.ndarray:

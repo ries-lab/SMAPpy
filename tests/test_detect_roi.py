@@ -77,17 +77,6 @@ def test_rois_are_centred_on_the_candidate():
     assert np.allclose(x_back, rois.candidates.x)
 
 
-def test_mirror_flips_and_maps_back():
-    img = _spots([(30, 30)])
-    finder = PeakFinder(DoGFilter(1.2), AbsoluteCutoff(10.0))
-    cands, _ = finder(img[None])
-    plain = cut_rois(img[None], cands, roisize=13)
-    flipped = cut_rois(img[None], cands, roisize=13, mirror=True)
-    assert np.allclose(flipped.images, plain.images[:, :, ::-1])
-    # a fit at ROI column 4 in the flipped stack is column 8 in the image
-    assert np.allclose(flipped.to_image_x([4.0]), plain.to_image_x([8.0]))
-
-
 def test_frames_are_indexed_absolutely():
     img = np.stack([_spots([(20, 20)]), _spots([(35, 25)])])
     finder = PeakFinder(DoGFilter(1.2), AbsoluteCutoff(10.0))

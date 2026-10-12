@@ -68,7 +68,6 @@ class LocalizationEngine:
     finder: PeakFinder
     model: PSFModel
     settings: FitSettings = field(default_factory=FitSettings)
-    mirror: Optional[bool] = None  # default: ask the PSF model
 
     _rois: List[np.ndarray] = field(default_factory=list, init=False)
     _candidates: List[Candidates] = field(default_factory=list, init=False)
@@ -76,8 +75,6 @@ class LocalizationEngine:
     stats: dict = field(default_factory=dict, init=False)
 
     def __post_init__(self):
-        if self.mirror is None:
-            self.mirror = bool(getattr(self.model, "mirror", False))
         self.stats = {"frames": 0, "candidates": 0, "rois": 0, "localizations": 0,
                       "dropped_at_border": 0, "rejected": 0,
                       "detect_seconds": 0.0, "fit_seconds": 0.0}
@@ -91,7 +88,7 @@ class LocalizationEngine:
         candidates, _ = self.finder(photons, first_frame=first_frame,
                                     n_threads=self.settings.n_threads)
         rois = cut_rois(photons, candidates, self.settings.roisize,
-                        first_frame=first_frame, mirror=self.mirror)
+                        first_frame=first_frame)
         self.stats["detect_seconds"] += time.perf_counter() - t0
         self.stats["frames"] += len(photons)
         self.stats["candidates"] += len(candidates)
@@ -115,7 +112,7 @@ class LocalizationEngine:
         candidates = _concat_candidates(self._candidates)
         self._rois, self._candidates, self._buffered = [], [], 0
 
-        stack = ROIStack(images, candidates, self.settings.roisize, self.mirror)
+        stack = ROIStack(images, candidates, self.settings.roisize)
         t0 = time.perf_counter()
         variance = self.camera.readout_variance
         result = self.model.fit(with_readout(stack.images, variance),
@@ -327,9 +324,11 @@ def provenance(camera: CameraMetadata, finder: PeakFinder, model: PSFModel,
             "file": str(calibration.source),
             "dz_nm": calibration.dz, "z0": calibration.z0,
             "grid": list(calibration.shape),
-            "mirrored": bool(calibration.em_mirror),
             "em_on": calibration.em_on,
         }
+        conversion = calibration.parameters.get("smappy_conversion")
+        if conversion:  # a SMAP spline of x-mirrored beads, flipped on load
+            info["calibration"]["conversion"] = conversion
     return info
 
 

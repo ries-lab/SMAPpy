@@ -34,7 +34,7 @@ def psf_volume(nz=41, size=17, astigmatism=0.6):
 def spline(astigmatism=0.6):
     volume = psf_volume(astigmatism=astigmatism)
     return SplineCalibration(spline_coefficients(volume), 10., 20., x0=8.0,
-                             psf=volume, em_mirror=False, parameters={})
+                             psf=volume, parameters={})
 
 
 def dual_calibration(dx=0.37, dy=-0.21, ratio=0.45):
@@ -405,7 +405,7 @@ def _mirrored_calibration(dx=0.37, dy=-0.21, ratio=0.3):
                                [0., 0., 1.]])
     volume = np.flip(psf_volume(astigmatism=-0.6), axis=1).copy()
     secondary = SplineCalibration(spline_coefficients(volume), 10., 20., x0=8.0,
-                                  psf=volume, em_mirror=False, parameters={})
+                                  psf=volume, parameters={})
     geometry = {"layout": "up-down mirrored", "main_channel": "upper",
                 "split_position": SPLIT, "image_shape": list(SHAPE),
                 "coordinate_system": "camera-chip", "mirror_axis_xy": 1}

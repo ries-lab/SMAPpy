@@ -30,7 +30,7 @@ def psf_volume(nz=41, size=17, astigmatism=0.6):
 def calibration(astigmatism=0.6):
     volume = psf_volume(astigmatism=astigmatism)
     return SplineCalibration(spline_coefficients(volume), 10., 20., psf=volume,
-                             em_mirror=False, parameters={})
+                             parameters={})
 
 
 def render(cal, x, y, z_index, photons, background, sz, rng):

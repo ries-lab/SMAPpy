@@ -981,7 +981,9 @@ class SplineFit(_FitPlugin):
                    "calibration: adds z.")
     Settings = SplineFitSettings
     # 2: the camera's read noise in the likelihood (1 e- without EM gain)
-    version = "2"
+    # 3: a SMAP calibration is x-flipped only if SMAP flipped its beads
+    #    (`EMon`), no longer for any non-zero `emmirror` ("no mirror" is 2)
+    version = "3"
 
     def model(self, settings, camera):
         return settings.model.model(camera, roisize=settings.fit.roisize)

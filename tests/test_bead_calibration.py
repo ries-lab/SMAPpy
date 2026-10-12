@@ -114,7 +114,7 @@ def test_z_groups_are_sorted_and_repeats_not_concatenated():
 def test_native_roundtrip_and_fitter_knot_convention(tmp_path):
     a = psf()
     cal = SplineCalibration(spline_coefficients(a), 10., 20., psf=a,
-                            em_mirror=False, parameters={'settings': {'smooth_z_nm': 20}})
+                            parameters={'settings': {'smooth_z_nm': 20}})
     path = tmp_path/'cal.h5'
     save_spline_calibration(path, cal)
     loaded = load_spline_calibration(path)

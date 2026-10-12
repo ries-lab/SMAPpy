@@ -65,9 +65,19 @@ in 2D" and the dual-colour calibration in `docs/dual_color_calibration.md`).
   photons per pixel stuck at no background -- see "A fit that starts at no
   background".  The maximum is the same, and at ordinary backgrounds so are the
   fits.
-* **No mirroring in the fitter.**  A calibration built from mirrored bead images
-  (`parameters.emmirror` in the `_3Dcal.mat`) is handled by flipping the ROI in x
-  and flipping the fitted x back; the fitter itself is orientation-free.
+* **No mirroring outside the loader.**  SMAP flips bead images taken with EM
+  gain before it builds the spline, and flips the data the same way; here the
+  data are never flipped, so a `_3Dcal.mat` of flipped beads is turned into the
+  camera's orientation when it is loaded (`io/calibration._unmirror_x`:
+  S'(u) = S(nx - u), the x cells reversed and each cubic re-expanded in 1 - t,
+  an odd nx one cell wider), and the ROIs, the fitter and the simulator know
+  nothing of mirroring.  It used to flip every ROI instead; the converted model
+  equals that to float32 rounding, and fits agree to the size of a one-ulp
+  change in the coefficients (`tests/test_unmirror.py`).  Whether SMAP flipped
+  is read from `SXY.EMon`, its `isem`, not from `parameters.emmirror`, which is
+  a popup (1 from metadata, 2 no mirror, 3 mirror) and was once read as a bool,
+  flipping files saved with "no mirror".  That reading is from SMAP's code and
+  waits for a real file (`SMAPPY_TEST_CAL`, `tests/test_calibration.py`).
 
 ## Rendering
 
@@ -344,7 +354,9 @@ layout:
 * the Gaussian models are checked against independently simulated data: unbiased
   to <0.01 px, scatter matches the returned CRLB
 * the mirror flip was confirmed on real data: the flipped orientation has the
-  better log-likelihood for 65.8% of ROIs (median dlogL +2.82)
+  better log-likelihood for 65.8% of ROIs (median dlogL +2.82).  That was the
+  ROI flip; the conversion on load that replaced it is the same model, and
+  `scripts/check_fit.py` keeps the x-flipped fit as a control
 * threaded output is bit-identical to serial, at every stage
 * the render kernel's second moment is `sigma^2 + 1/12`, the variance the pixel
   itself contributes -- a point-sampled kernel would give `sigma^2`
