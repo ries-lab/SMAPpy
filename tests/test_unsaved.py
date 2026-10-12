@@ -67,8 +67,25 @@ def test_the_table_is_unsaved_after_a_change_an_undo_or_a_fit_and_saved_after_sa
                      append=True)
     assert session.unsaved                           # two files in one table
     session.load(tmp_path / "cells.hdf5")
-    session.begin_live()                             # a fit
+    session.begin_live()                             # a fit, while it runs
     assert session.unsaved
+
+
+class WritesItsFile(Plugin):
+    """As a fitter does: the table it hands back is the file it wrote."""
+    path = "Test/Writes"
+
+    def run(self, ctx, settings=None):
+        return Result(locs=table(seed=2), data={"path": "/fit_locs.hdf5",
+                                                "saved": True})
+
+
+def test_a_fit_that_wrote_its_own_file_leaves_nothing_unsaved(tmp_path):
+    session = opened(tmp_path)
+    session.run(Brighter())
+    assert session.unsaved
+    session.run(WritesItsFile())
+    assert not session.unsaved
 
 
 @pytest.fixture

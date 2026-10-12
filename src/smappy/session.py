@@ -1567,8 +1567,9 @@ class Session:
             # after the plugin rather than after the fact that a table changed
             self.set_locs(result.locs, label=plugin.path.rsplit("/", 1)[-1],
                           text=result.text or "")
-        if result.locs is not None:      # a fit or a correction: not in a file yet
-            self.set_unsaved(True)
+        if result.locs is not None:
+            # a correction is in no file yet; a fit that wrote its table is
+            self.set_unsaved(not (result.data or {}).get("saved"))
         # The camera frames a fit kept (`smappy.rawframes`), with the table it
         # has just set.  A fit replaces the whole table, so these are all the
         # raw frames there are now -- including any just read back from the

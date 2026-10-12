@@ -862,7 +862,10 @@ class _FitPlugin(Plugin):
             if shown:
                 text = "\n".join([text, summary(record["frame_tags"], shown)])
         return Result(locs=finished.locs, text=text, plots=plots,
-                      data={"stats": stats, "path": out, "stopped": stopped,
+                      # the file holds this very table: written as it came,
+                      # and again after the finishing steps if they changed it
+                      data={"stats": stats, "path": out, "saved": out is not None,
+                            "stopped": stopped,
                             "images": [raw] if raw is not None else []},
                       settings=settings)
 

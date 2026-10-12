@@ -20,6 +20,10 @@ def message_of(error: BaseException) -> str:
     """What the error says, without its class: the text a plugin wrote for
     the reader ("no ROI: draw a line").  An error with nothing to say is
     named by its class instead, which is then all there is."""
+    if isinstance(error, KeyError) and len(error.args) == 1 \
+            and not str(error.args[0]).count(" "):
+        # a bare key is no sentence: "'x_nm'" says less than "missing x_nm"
+        return f"missing {error.args[0]}"
     text = str(error).strip()
     return text or type(error).__name__
 

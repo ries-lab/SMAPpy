@@ -51,6 +51,9 @@ def test_the_message_is_what_the_error_says_or_its_class_when_it_says_nothing():
     from smappy.gui.errors import message_of
     assert message_of(ValueError("no ROI: draw a line")) == "no ROI: draw a line"
     assert message_of(RuntimeError()) == "RuntimeError"
+    # a bare key is said as what is missing, not as "'x_nm'"
+    assert message_of(KeyError("x_nm")) == "missing x_nm"
+    assert "no position column" in message_of(KeyError("no position column"))
 
 
 def test_a_failed_run_says_its_message_in_red_beside_run_and_the_traceback_on_request(
