@@ -21,6 +21,7 @@ def table(n=200, seed=0):
 class Brighter(Plugin):
     """Changes the table."""
     path = "Test/Brighter"
+    grouping = "ungrouped"
 
     def run(self, ctx, settings=None):
         columns = dict(ctx.locs.columns)
@@ -74,6 +75,7 @@ def test_the_table_is_unsaved_after_a_change_an_undo_or_a_fit_and_saved_after_sa
 class WritesItsFile(Plugin):
     """As a fitter does: the table it hands back is the file it wrote."""
     path = "Test/Writes"
+    grouping = "ungrouped"
 
     def run(self, ctx, settings=None):
         return Result(locs=table(seed=2), data={"path": "/fit_locs.hdf5",
