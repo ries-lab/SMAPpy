@@ -1599,6 +1599,7 @@ class Session:
         # the project that is there, which the ROI manager's window holds.
         if (result.data or {}).get("roi_project") is not None:
             self.rois.from_dict(result.data["roi_project"])
+            self.changed("rois")
         if (result.data or {}).get("id_regions"):
             for column, tables in result.data["id_regions"].items():
                 self.id_regions.setdefault(column, {}).update(tables)

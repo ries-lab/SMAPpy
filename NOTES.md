@@ -855,7 +855,7 @@ its own (`diagnostics`, `smappy-<pid>.log`).
 
 ## Drift correction
 
-Estimation is not ours: COMET (vendored under `externaltools/Comet`) is called
+Estimation is not ours: COMET (vendored, trimmed, under `src/smappy/_comet`) is called
 as a library. `drift.py` is the seam between it and the rest of the package,
 and it is deliberately thin -- an array in, a per-frame drift table out.
 

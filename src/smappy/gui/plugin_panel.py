@@ -618,8 +618,11 @@ class PluginPanel(QWidget):
             return
         cursor = self.output.textCursor()
         if self._progress_lines:
+            # the whole paragraph: `LineUnderCursor` is one *visual* line,
+            # and a progress line long enough to wrap left its first part
             cursor.movePosition(QTextCursor.MoveOperation.End)
-            cursor.select(QTextCursor.SelectionType.LineUnderCursor)
+            cursor.movePosition(QTextCursor.MoveOperation.StartOfBlock,
+                                QTextCursor.MoveMode.KeepAnchor)
             cursor.removeSelectedText()
             cursor.insertText(text)
         else:

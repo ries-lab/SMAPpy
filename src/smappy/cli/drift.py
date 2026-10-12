@@ -7,7 +7,7 @@ same limits you would use in the viewer -- and then subtracted from *all* of
 them.  The result is written next to the input as ``..._driftc.hdf5``, with the
 drift curve stored in the file.
 
-Needs COMET:  pip install -e externaltools/Comet/Python_interface
+COMET is vendored, trimmed, in ``smappy._comet``.
 """
 import argparse
 

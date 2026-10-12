@@ -6,16 +6,7 @@ from smappy.workspace import Instance, Tab, Workspace, load
 
 COMET = "Analysis/Drift/COMET"
 RCC = "Analysis/Drift/RCC"
-COLORS = "Analysis/Dual-Color/AssignColors"
-TRUTH = "Analysis/Measure/Ground Truth"
-PROFILE = "Analysis/Measure/Line Profile"
-PRECISION = "Analysis/Measure/Localization Precision"
 STATS = "Analysis/Measure/Localization Statistics"
-HISTORY = "Analysis/Process/History"
-TAGS = "Analysis/Process/Image Tags"
-MATH = "Analysis/Process/Math Parser"
-REMOVE = "Analysis/Process/Remove Localizations"
-REGISTER = "Analysis/Register/Calibrate transform"
 DBSCAN = "Analysis/Regions/Find/DBSCAN"
 ROI_COLUMN = "Analysis/Regions/Regions to column"
 
@@ -49,21 +40,28 @@ def test_moving_stops_at_the_ends():
 
 
 def test_the_default_workspace_is_seeded_from_what_is_installed():
+    """By rule, not by list: a new plugin lands in its tab without a line here."""
     ws = Workspace.default()
     assert [t.name for t in ws.tabs] == ["File", "Localize", "Render", "Analysis", "Regions"]
+    refs = plugins.refs()
+    favourites = {path for path, ref in refs.items() if ref.favorite}
+    # the Analysis tab is every favourite under Analysis/ but the regions
     analysis = next(t for t in ws.tabs if t.name == "Analysis")
-    assert sorted(i.plugin for i in analysis.instances) == [
-        COMET, RCC, COLORS, TRUTH, PROFILE, PRECISION, STATS, HISTORY, TAGS, MATH, REMOVE,
-        REGISTER]
+    assert {i.plugin for i in analysis.instances} == {
+        path for path in favourites
+        if path.startswith("Analysis/") and not path.startswith("Analysis/Regions/")}
+    assert {COMET, RCC, STATS} <= {i.plugin for i in analysis.instances}
     assert next(t for t in ws.tabs if t.name == "Render").kind == "render"
     # the regions have their tab, finding before summarising
     regions = next(t for t in ws.tabs if t.name == "Regions")
-    assert [i.plugin for i in regions.instances] == [
-        DBSCAN, "Analysis/Regions/Find/Density Peaks", "Analysis/Regions/Find/NPC",
-        "Analysis/Regions/Column to ROIs", ROI_COLUMN,
-        "Analysis/Regions/Summarize/Histograms",
-        "Analysis/Regions/Summarize/NPC Labeling Efficiency",
-        "Analysis/Regions/Workflow/NPC Analysis"]
+    pinned = [i.plugin for i in regions.instances]
+    assert DBSCAN in pinned and ROI_COLUMN in pinned
+    stage = ("Analysis/Regions/Find/", "Analysis/Regions/Column to ROIs",
+             "Analysis/Regions/Regions to column", "Analysis/Regions/Summarize/",
+             "Analysis/Regions/Workflow/")
+    ranks = [next(k for k, prefix in enumerate(stage) if path.startswith(prefix))
+             for path in pinned]
+    assert ranks == sorted(ranks)
     # a tab the *user* adds starts empty; only the shipped ones are seeded
     assert Tab(name="Mine").instances == []
 
@@ -84,16 +82,14 @@ def test_a_round_trip_keeps_order_labels_and_values(tmp_path):
     analysis.instances[0].label = "COMET (coarse)"
     analysis.instances[0].values = {"segmentation_var": 12}
     analysis.instances.append(analysis.instances[0].copy())
+    titles = [i.title() for i in analysis.instances]
+    assert titles[0] == titles[-1] == "COMET (coarse)"
     ws.layout = {"active_tab": "Analysis", "open": {"Analysis": analysis.instances[0].id}}
     path = ws.save(tmp_path / "w.yaml")
 
     back = load(path)
     tab = next(t for t in back.tabs if t.name == "Analysis")
-    assert [i.title() for i in tab.instances] == [
-        "COMET (coarse)", "RCC", "AssignColors", "Ground Truth", "Line Profile",
-        "Localization Precision", "Localization Statistics", "History",
-        "Image Tags", "Math Parser", "Remove Localizations", "Calibrate transform",
-        "COMET (coarse)"]
+    assert [i.title() for i in tab.instances] == titles
     assert tab.instances[0].values == {"segmentation_var": 12}
     assert back.layout["active_tab"] == "Analysis"
 
@@ -135,12 +131,11 @@ tabs:
 def test_pruning_reports_what_it_dropped():
     ws = Workspace.default()
     tab = next(t for t in ws.tabs if t.name == "Analysis")
+    before = [i.plugin for i in tab.instances]
     tab.instances.append(Instance(plugin="Gone/Away"))
     gone = ws.prune(list(plugins.refs()))
     assert gone == ["Gone/Away"]
-    assert [i.plugin for i in tab.instances] == [
-        COMET, RCC, COLORS, TRUTH, PROFILE, PRECISION, STATS, HISTORY, TAGS, MATH, REMOVE,
-        REGISTER]
+    assert [i.plugin for i in tab.instances] == before
 
 
 # ------------------------------------------------------------------ the GUI
@@ -177,9 +172,8 @@ def test_the_window_opens_the_shipped_tabs(window):
     assert [window.tabs.tabText(i) for i in range(window.tabs.count())] == \
         ["File", "Localize", "Render", "Analysis", "Regions"]
     localize = tab_named(window, "Localize")
-    assert [s.title for s in localize.sections] == \
-        ["Bead calibration", "Gaussian 2D", "Gaussian 2D 2C", "Spline 3D",
-         "Spline 3D 2C", "uiPSF calibration"]
+    assert {"Bead calibration", "Gaussian 2D", "Spline 3D"} <= \
+        {s.title for s in localize.sections}
 
 
 def test_the_bead_calibration_section_opens_the_window_in_its_mode(window):

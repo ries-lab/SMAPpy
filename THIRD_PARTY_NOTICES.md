@@ -34,7 +34,8 @@ changed.  Each file says all of this in its header.
 **COMET is a published method, and smappy is not its author.**  Drift-corrected
 files record it in the `/drift` group's attributes, so a result can be traced
 back to the method that produced it.  If you publish work that used it, cite it
-as `externaltools/Comet/CITATION.cff` asks.
+as `src/smappy/_comet/CITATION.cff` asks (Reinkensmeier and Bates,
+bioRxiv 2026, [doi:10.64898/2026.03.27.714864](https://doi.org/10.64898/2026.03.27.714864)).
 
 ## Dependencies
 

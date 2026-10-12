@@ -104,6 +104,7 @@ test = ["pytest>=7", "pytest-timeout>=2.1", "pytest-xdist>=3"]
 # faulthandler stays: at 240 s it prints every thread's stack, which shows
 # where a hang inside Qt is, and lets the test go on.
 timeout = 300
+testpaths = ["tests"]
 faulthandler_timeout = 240
 
 [project.scripts]

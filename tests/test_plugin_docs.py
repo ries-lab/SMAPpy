@@ -11,13 +11,6 @@ import pytest
 from smappy import docs, plugins
 from smappy.docs import markup
 
-# Plugins still waiting for a written page.  It may only shrink: a new plugin
-# gets a page (docs/<path>.md beside the plugins) or a line here, and a page
-# that is written takes its plugin off.  Until then the Help window shows the
-# summary and the settings table, generated.
-UNDOCUMENTED: set = set()
-
-
 def shipped():
     """The plugins and chains that ship: a shipped chain is a plugin to the
     person who opens it, and has a page like one."""
@@ -31,11 +24,10 @@ def documented():
 
 
 # ------------------------------------------------------------------ coverage
-def test_every_shipped_plugin_has_a_page_or_is_listed_as_waiting_for_one():
+def test_every_shipped_plugin_has_a_page():
     missing = {path for path, ref in shipped().items()
                if docs.page_file(path, ref.origin) is None}
-    assert missing - UNDOCUMENTED == set(), "write a page, or list it above"
-    assert UNDOCUMENTED - missing == set(), "it has a page now: take it off the list"
+    assert missing == set(), "write a page: docs/<path>.md beside the plugins"
 
 
 def test_every_page_belongs_to_a_plugin():
