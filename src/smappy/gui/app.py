@@ -171,6 +171,7 @@ class ControlWindow(QMainWindow):
         # Loading runs in a LoadTask; these hold its state.  `_load_locked` is
         # everything that would change the table under a running one.
         self._queue: List[tuple] = []
+        self._pending_images: List[Path] = []     # dropped, opened once loading ends
         self._task: Optional[LoadTask] = None
         self._loading_name = ""
         self._loading = False
@@ -1041,6 +1042,7 @@ class ControlWindow(QMainWindow):
         if not self._queue:
             self._set_loading(False)
             self._on_session("locs")          # back to "name: N localizations"
+            self._open_pending_images()
             return
         path, args, append, reset_view = self._queue.pop(0)
         self._set_loading(True)
@@ -1139,14 +1141,16 @@ class ControlWindow(QMainWindow):
 
         Localization files go to `load_paths` together, which is *File >
         Open* with all of them chosen at once: the first replaces the table,
-        the rest are added to it.  An image stack goes into a fitter's *file*
-        (`fit_file`); only one can, so the first.  Anything else is refused in
+        the rest are added to it.  A short TIFF (`drops.MAX_IMAGE_FRAMES`
+        frames or fewer) or a PNG is an image layer, as *Open image* makes.  A
+        long stack goes into a fitter's *file* (`fit_file`); only one can, so
+        the first.  Anything else is refused in
         the status bar -- a dialog for a stray file would be out of proportion.
         """
-        tables, stacks, refused = [], [], []
+        tables, images, stacks, refused = [], [], [], []
         for path in map(Path, paths):
             kind = drops.kind_of(path)
-            (tables if kind == drops.LOCS else
+            (tables if kind == drops.LOCS else images if kind == drops.IMAGE else
              stacks if kind == drops.STACK else refused).append(path)
         if stacks:
             self.fit_file(stacks[0])
@@ -1158,6 +1162,11 @@ class ControlWindow(QMainWindow):
                     f"{tables[0].name} again when it is done", 8000)
             else:
                 self.load_paths([str(p) for p in tables])
+        # after the tables, which load on a thread: a table opened after the
+        # image would replace the session the image was added to
+        self._pending_images.extend(images)
+        if not self._loading:
+            self._open_pending_images()
         if refused:
             more = f" (and {len(refused) - 1} more)" if len(refused) > 1 else ""
             self.statusBar().showMessage(
@@ -1227,13 +1236,23 @@ class ControlWindow(QMainWindow):
         if not path:
             return
         folders.remember(path)
+        self.open_image_path(path)
+
+    def _open_pending_images(self) -> None:
+        images, self._pending_images = self._pending_images, []
+        for path in images:
+            self.open_image_path(path)
+
+    def open_image_path(self, path) -> None:
+        """An image as a layer of its own, asking its pixel size if the file
+        does not say it."""
         try:
-            self.session.open_image(path)
+            self.session.open_image(str(path))
         except ValueError:                                  # no pixel size in the file
             dialog = PixelSizeDialog(Path(path).name, parent=self)
             if dialog.exec() == QDialog.Accepted:
                 px, x0, y0 = dialog.values()
-                self.session.open_image(path, px, x0, y0)
+                self.session.open_image(str(path), px, x0, y0)
 
     def save(self) -> None:
         from ..io.formats import writer_for

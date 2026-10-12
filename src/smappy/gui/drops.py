@@ -12,6 +12,13 @@ from typing import List, Optional
 
 LOCS = "locs"              # a localization table: `io.formats.reader_for` takes it
 STACK = "stack"            # an acquisition a fitter takes: `io.tiff.is_image_stack`
+IMAGE = "image"            # a picture to render with the localizations: an image layer
+
+#: More frames than this and a TIFF is taken for raw data to fit; this many
+#: or fewer, for an image to show beside the localizations -- a widefield
+#: snapshot, a few colour channels, a z-stack of a structure.  Raw SMLM data
+#: runs to thousands of frames, so the line is not a fine one.
+MAX_IMAGE_FRAMES = 50
 
 
 def accepts(mime) -> bool:
@@ -39,14 +46,15 @@ def local_paths(mime) -> List[Path]:
 
 
 def kind_of(path) -> Optional[str]:
-    """`LOCS`, `STACK`, or None for something neither File > Open nor a
-    fitter could take.
+    """`LOCS`, `IMAGE`, `STACK`, or None for something neither File > Open,
+    *Open image* nor a fitter could take.
 
     A file is asked of the localization readers first, by the same
     `reader_for` that *Load/Auto* uses -- the extension, then a look inside
     where two formats share one (`.h5`) -- so a table saved beside an
     acquisition, even inside an NDTiff folder, opens as a table.  A folder is
-    only ever an acquisition: no reader takes one.
+    only ever an acquisition: no reader takes one.  A single TIFF (or PNG) of
+    at most `MAX_IMAGE_FRAMES` frames is an image to show, not data to fit.
     """
     from ..io.formats import reader_for
     from ..io.tiff import is_image_stack
@@ -58,4 +66,29 @@ def kind_of(path) -> Optional[str]:
             return LOCS
         except Exception:             # no reader, or one whose look inside failed
             pass
-    return STACK if is_image_stack(path) else None
+        if path.suffix.lower() == ".png":
+            return IMAGE
+    if not is_image_stack(path):
+        return None
+    if path.is_file() and path.suffix.lower() in (".tif", ".tiff"):
+        frames = frame_count(path)
+        if frames is not None and frames <= MAX_IMAGE_FRAMES:
+            return IMAGE
+    return STACK
+
+
+def frame_count(path) -> Optional[int]:
+    """The frames in a TIFF, from its first series' shape -- the header and,
+    for an OME file, its metadata, not the pixels.  None if it cannot be read."""
+    import tifffile
+    try:
+        with tifffile.TiffFile(path) as tf:
+            series = tf.series[0]
+            shape, axes = series.shape, series.axes
+    except Exception:
+        return None
+    count = 1
+    for size, axis in zip(shape, axes):
+        if axis not in "YXS":               # rows, columns, samples (RGB)
+            count *= int(size)
+    return count

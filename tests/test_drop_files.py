@@ -104,9 +104,10 @@ def test_two_tables_dropped_together_are_the_first_replaced_and_the_second_added
     assert session.file_names() == ["a.hdf5", "b.hdf5"]
 
 
-def _write_tif(path):
+def _write_tif(path, frames=60):
     import tifffile
-    tifffile.imwrite(path, np.full((3, 32, 32), 100, np.uint16), photometric="minisblack")
+    tifffile.imwrite(path, np.full((frames, 32, 32), 100, np.uint16),
+                     photometric="minisblack")
     return path
 
 
@@ -153,6 +154,35 @@ def test_a_stack_goes_to_the_fitter_open_on_the_localize_tab(app, windows, tmp_p
 
     assert tab.open_instance() == spline.id
     assert tab.slots[spline.id].panel.form.values()["source.path"] == str(path)
+
+
+def test_a_short_tiff_is_an_image_to_show_and_a_long_one_data_to_fit(tmp_path):
+    """Raw SMLM data runs to thousands of frames; a few frames are a
+    widefield picture or some channels to render with the localizations."""
+    from smappy.gui import drops
+    assert drops.kind_of(_write_tif(tmp_path / "wf.tif", frames=1)) == drops.IMAGE
+    assert drops.kind_of(_write_tif(tmp_path / "ch.tif",
+                                    frames=drops.MAX_IMAGE_FRAMES)) == drops.IMAGE
+    assert drops.kind_of(_write_tif(tmp_path / "raw.tif",
+                                    frames=drops.MAX_IMAGE_FRAMES + 1)) == drops.STACK
+
+
+def test_a_dropped_image_is_opened_as_a_layer_after_the_tables(app, windows,
+                                                                 tmp_path):
+    session, control, _ = windows
+    opened = []
+    control.open_image_path = lambda path: opened.append(
+        (path.name, list(session.file_names())))
+    from smappy.io.formats import save
+    from smappy.simulate import simulate
+    table = save(simulate(n_frames=300, seed=3), tmp_path / "a.hdf5")
+    image = _write_tif(tmp_path / "wf.tif", frames=1)
+
+    assert drop(app, control, image, table)
+    wait_for_loads(app, control)
+
+    # opened once the table was in, so the table did not replace it
+    assert opened == [("wf.tif", ["a.hdf5"])]
 
 
 def test_an_unknown_file_is_refused_in_the_status_bar(app, windows, tmp_path):
