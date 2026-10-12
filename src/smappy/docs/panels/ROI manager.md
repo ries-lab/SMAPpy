@@ -2,7 +2,7 @@
 title: ROI manager
 summary: The window where sites are found, looked at one by one, kept or excluded, and evaluated.
 widget: smappy.gui.roi_window.ROIManagerWindow
-covers: [smappy.gui.roi_window.ROIManagerWindow.evaluate_active, smappy.regions.Region.rim_distance, smappy.regions.Region.outline, smappy.roi_manager.core.ROIProject.tiles, smappy.roi_manager.core.ROIProject.indices, smappy.roi_manager.core.ROIProject.inputs, smappy.roi_manager.core.ROIProject.entries, smappy.roi_manager.core.ROIProject.needs_evaluation, smappy.roi_manager.core.ROIProject.results, smappy.roi_manager.core.ROIProject.evaluate_one, smappy.roi_manager.link.SessionROIs.sync, smappy.roi_manager.link.SessionROIs._fingerprint, smappy.roi_manager.core.ROIProject.propose, smappy.plugins.roi.SegmenterPlugin.found, smappy.roi_manager.core.ROIHistory, smappy.roi_manager.core.ROIProject.edit]
+covers: [smappy.gui.roi_window.ROIManagerWindow.evaluate_active, smappy.gui.roi_window.ROIList, smappy.gui.roi_window.ROIManagerWindow._in_view, smappy.regions.Region.rim_distance, smappy.regions.Region.outline, smappy.roi_manager.core.ROIProject.tiles, smappy.roi_manager.core.ROIProject.indices, smappy.roi_manager.core.ROIProject.inputs, smappy.roi_manager.core.ROIProject.entries, smappy.roi_manager.core.ROIProject.needs_evaluation, smappy.roi_manager.core.ROIProject.results, smappy.roi_manager.core.ROIProject.evaluate_one, smappy.roi_manager.link.SessionROIs.sync, smappy.roi_manager.link.SessionROIs._fingerprint, smappy.roi_manager.core.ROIProject.propose, smappy.plugins.roi.SegmenterPlugin.found, smappy.roi_manager.core.ROIHistory, smappy.roi_manager.core.ROIProject.edit]
 ---
 
 ## What it does
@@ -209,6 +209,17 @@ square and a polygon the distance to the nearest edge.  A click on a tile's
 edge in the file image (also within 6 pixels) jumps to that tile; a click
 inside a tile just centres the zoom.
 
+**Many ROIs.**  Thousands of ROIs -- every cluster of a cell, made by
+[Column to ROIs](plugin:Analysis/Regions/Column to ROIs) -- cost what is on
+screen, not what is in the project.  A pane draws only the ROIs that reach
+into its view, and when more than 1000 do, a dot at each centre instead of
+the outlines, with the selected ROI still outlined; the pane's title says
+so, and zooming in brings the outlines back.  The list makes a row only when
+it is scrolled to, and checks then whether that ROI is out of date; past
+2000 ROIs the status line stops counting the ones waiting, which would mean
+checking them all, and the Regions tab counts the ROIs with results rather
+than checking each is current.  A click tests only the ROIs near it.
+
 **Tiles.**  The grid starts at the lower corner of the file's extent and has
 $\lceil (x_1 - x_0)/t \rceil$ by $\lceil (y_1 - y_0)/t \rceil$ squares of
 side $t$, numbered row by row.  It is not stored: it follows the file and
@@ -264,7 +275,8 @@ the error in it.
 ## Controls
 
 ### file
-The whole file, with every ROI and, with *Tiles* on, the grid.  The yellow
+The whole file, with every ROI (past 1000, their centres) and, with *Tiles*
+on, the grid.  The yellow
 frame is what the zoom shows.  Click to centre the zoom there.
 
 ### zoom

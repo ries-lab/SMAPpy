@@ -223,6 +223,7 @@ class PluginPanel(QWidget):
     def _on_session(self, what: str) -> None:
         if what in ("locs", "rois"):
             self._choices()
+            self._show_notice()        # a save says what it would leave out
         if what in ("locs", "results"):
             self._take_saved()
         elif what in ("roi", "roi-edited") and self.live is not None \
@@ -306,7 +307,7 @@ class PluginPanel(QWidget):
         button when the GUI has the window it names.  Best effort, like the
         hints."""
         try:
-            notice = self.plugin.notice(self.form.value())
+            notice = self.plugin.notice_for(self.session.context(), self.form.value())
         except Exception:
             notice = None
         self.notice.setVisible(notice is not None)

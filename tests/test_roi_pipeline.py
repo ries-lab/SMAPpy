@@ -427,7 +427,7 @@ def test_the_manager_draws_a_preview_and_run_turns_it_into_rois(app):
 
     panel.form.restore({"min_count": 20})
     wait(panel.run)
-    assert len(session.rois.rois) == 4 and window.table.rowCount() == 4
+    assert len(session.rois.rois) == 4 and window.table.model().rowCount() == 4
     assert session.rois.segment_preview is None
     assert window.file_pane.shapes["preview"].getData()[0] is None or \
         not len(window.file_pane.shapes["preview"].getData()[0])
@@ -453,13 +453,13 @@ def test_the_manager_undoes_a_removal_with_its_own_undo(app):
 
     window.select(first.id)
     window._remove()
-    assert first.id not in project.rois and window.table.rowCount() == 1
+    assert first.id not in project.rois and window.table.model().rowCount() == 1
     assert window.undo_button.toolTip() == "undo: Remove ROI 1"
     window.undo_button.click()
-    assert first.id in project.rois and window.table.rowCount() == 2
+    assert first.id in project.rois and window.table.model().rowCount() == 2
     assert "undid Remove ROI 1" in window.status.currentMessage()
     assert window.redo_button.toolTip() == "redo: Remove ROI 1"
     # the table's undo is another stack, and has nothing to undo
     assert not session.can_undo
     window.redo_button.click()
-    assert window.table.rowCount() == 1 and window.active is None
+    assert window.table.model().rowCount() == 1 and window.active is None
