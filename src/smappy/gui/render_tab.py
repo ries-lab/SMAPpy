@@ -24,7 +24,7 @@ from .. import lut as luts
 from ..render import FieldOfView, RenderAxes, axis_unit, is_position
 from ..filter import histogram_range
 from ..session import Layer, Session
-from ..viewer import FIELD_LUT, INTENSITY_LUT
+from ..lut import FIELD_LUT, INTENSITY_LUT
 from . import folders
 from .render_view import nice_below
 from .widgets import CollapsibleSection, ColumnScroll, detach_to_window

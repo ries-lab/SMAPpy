@@ -65,11 +65,8 @@ Homepage = "https://github.com/ries-lab/SMAPpy"
 Source = "https://github.com/ries-lab/SMAPpy"
 
 [project.optional-dependencies]
-# matplotlib is a base dependency now, so `viewer` and `drift` are satisfied by
-# a plain install.  They stay because they are named in the docs and in other
-# people's scripts, and an extra that has gone quiet is kinder than one that
-# errors.
-viewer = ["matplotlib>=3.4"]   # RangeSlider
+# matplotlib is a base dependency now, so `drift` is satisfied by a plain
+# install; it stays because the docs name it.
 image = ["pillow>=9.0"]        # save_image, for a picture without a window
 # Drift correction itself needs nothing: COMET is vendored and its cost function
 # is compiled with the package.  This extra is only COMET's diagnostic plots,
@@ -109,8 +106,6 @@ faulthandler_timeout = 240
 
 [project.scripts]
 smappy-fit = "smappy.cli.fit:main"
-smappy-live = "smappy.cli.live:main"
-smappy-view = "smappy.cli.view:main"
 smappy-drift = "smappy.cli.drift:main"
 smappy-gui = "smappy.cli.gui:main"
 smappy-calibrate = "smappy.cli.calibrate:main"

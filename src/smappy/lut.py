@@ -188,6 +188,9 @@ def invert_sum(table: np.ndarray) -> np.ndarray:
 INVERSIONS = {"sum": invert_sum, "complement": complement}
 DEFAULT_INVERSION = "sum"
 
+INTENSITY_LUT = "hot"    # an intensity ramp: brightness is the only dimension
+FIELD_LUT = "turbo"      # a full-hue ramp, which is what a coded field needs
+
 
 def on_white(rgb: np.ndarray) -> np.ndarray:
     """The same colour at the opposite brightness: the picture on white paper.

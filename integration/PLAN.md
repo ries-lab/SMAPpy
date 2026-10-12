@@ -1,5 +1,10 @@
 # Making smappy callable from microclaw
 
+*Historical (2026-09): the plan as it was made.  Since then `smappy-view`,
+`live_view` and the *units* setting are gone -- the GUI (`smappy.show`,
+`gui/live_session.py`) and `LiveFit` took their places; see the skill in
+`microclaw/skills/smappy/SKILL.md` for what is current.*
+
 The pipeline itself is in good shape; what is missing is the packaging around it
 and two adapters.  Steps are ordered so each one is independently testable and
 useful on its own.

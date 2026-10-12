@@ -1,8 +1,7 @@
-"""The join between a running fit and an open viewer.
+"""A fit following an acquisition while it is written: `LiveFit`.
 
-The end-to-end test is the point: a fake microscope writes a stack frame by
-frame, the fitter follows it, and the view is checked to hold everything -- and
-to hold nothing the user set, which is the property that is easy to break.
+A fake microscope writes a stack frame by frame, the fitter follows it, and
+what it queued is checked against the file it wrote.
 """
 import threading
 import time
@@ -10,19 +9,15 @@ import time
 import numpy as np
 import pytest
 
-matplotlib = pytest.importorskip("matplotlib")
-matplotlib.use("Agg")
-
 from smappy.detect import AbsoluteCutoff, DoGFilter, PeakFinder  # noqa: E402
 from smappy.io.hdf5 import load_localizations                    # noqa: E402
 from smappy.io.watch import WatchSettings                        # noqa: E402
-from smappy.live import (LiveFit, LiveSettings, LiveViewer,      # noqa: E402
-                          camera_extent, expected_filter_fields)
+from smappy.live import LiveFit, LiveSettings, camera_extent      # noqa: E402
 from smappy.locs import Localizations                            # noqa: E402
 from smappy.metadata import CameraMetadata                       # noqa: E402
 from smappy.pipeline import FitSettings                          # noqa: E402
 from smappy.psf import GaussianPSF                               # noqa: E402
-from smappy.viewer import ViewState                              # noqa: E402
+from smappy.layer_state import ViewState                         # noqa: E402
 
 from test_watch import Microscope                                 # noqa: E402
 
@@ -92,36 +87,6 @@ def test_blocks_are_flushed_on_a_timer_so_sparse_data_still_shows(tmp_path):
     assert fit.engine.stats["rois"] < fit.engine.settings.block_rois()
 
 
-def test_the_viewer_takes_in_new_data_without_changing_a_setting(tmp_path):
-    scope = Blinking(tmp_path)
-    scope.write(6)
-    fit = _run(tmp_path).start()
-    fit.finished.wait(timeout=10)
-    assert fit.error is None
-
-    extent = camera_extent(CAMERA, SHAPE)
-    state = ViewState(Localizations(), live=True, extent=extent)
-    viewer = LiveViewer(state, fit, FAST,
-                        filter_fields=expected_filter_fields())
-    try:
-        assert viewer.update() > 0                  # the first block frames it
-        view = viewer.axes.get_xlim(), viewer.axes.get_ylim()
-        viewer.state.set_bound("xy_err_nm", None, 40.0)
-        viewer.state.display.gamma = 0.5
-        before = len(state.locs)
-
-        state.append(_more_locs(state.locs, 500))
-        viewer.take_new_data([])                    # nothing queued: a no-op tick
-
-        assert len(state.locs) == before + 500
-        assert (viewer.axes.get_xlim(), viewer.axes.get_ylim()) == view
-        assert state.filter.ranges["xy_err_nm"] == (None, 40.0)
-        assert state.display.gamma == 0.5
-        assert "fitting" in viewer.status or "ended" in viewer.status
-    finally:
-        viewer.close()
-
-
 def _more_locs(like: Localizations, n: int) -> Localizations:
     rng = np.random.default_rng(7)
     return Localizations({name: rng.choice(np.asarray(like[name]), n)
@@ -178,83 +143,3 @@ def test_stopping_ends_the_fit(tmp_path):
     assert not fit.running
 
 
-def test_live_view_wires_the_whole_thing_up(tmp_path):
-    """The entry point itself: an empty window, then a fit filling it in."""
-    import matplotlib.pyplot as plt
-
-    from smappy.live import live_view
-
-    data = tmp_path / "acq"
-    data.mkdir()
-    scope = Blinking(data)
-    scope.write(2)
-    scope.run(10, interval=0.02, delay=0.05)
-
-    out = tmp_path / "live.h5"
-    finder, model = _pipeline()
-    viewer = live_view(data, CAMERA, finder, model,
-                       FitSettings(roisize=9),
-                       output=out, live=FAST, block=False)
-    try:
-        assert len(viewer.state.locs) == 0          # the window opens empty
-        assert viewer.axes.get_xlim()[1] > SHAPE[1] * 100.0 * 0.9   # framed already
-        # the first draw settles the axes box (equal aspect in a new window),
-        # so re-frame once against it before recording what must not move
-        viewer.figure.canvas.draw()
-        viewer._render_now()
-        framed = viewer.axes.get_xlim(), viewer.axes.get_ylim()
-
-        deadline = time.monotonic() + 20
-        while viewer.fit.running and time.monotonic() < deadline:
-            viewer.update()
-            time.sleep(0.05)
-        viewer.update()
-
-        assert viewer.fit.error is None
-        assert len(viewer.state.locs) > 0
-        assert (viewer.axes.get_xlim(), viewer.axes.get_ylim()) == framed
-        assert "xy_err_nm" in viewer.bounds   # the rows are up from the start
-    finally:
-        viewer.close()
-        viewer.fit.stop()
-        plt.close(viewer.figure)
-
-    written = load_localizations(out)
-    assert len(written) == len(viewer.state.locs) == viewer.fit.n_emitted
-    assert written.metadata["fit"]["roisize"] == 9
-
-
-def test_what_was_buffered_before_a_pause_is_shown_during_it(tmp_path):
-    """The timed flush runs while no frames arrive, not at the next frame.
-
-    The watch sends empty blocks while it waits (`idle_blocks`); without them
-    the flush timer was checked only when a block came, so a pause in the
-    acquisition kept everything buffered before it off the screen.
-    """
-    import matplotlib.pyplot as plt
-
-    from smappy.live import live_view
-
-    scope = Blinking(tmp_path)
-    scope.write(4)                       # then nothing: a pause
-    live = LiveSettings(chunk=100, update_seconds=60.0, flush_seconds=1.0,
-                        watch=WatchSettings(poll=0.02, timeout=30.0,
-                                            appear_timeout=2.0))
-    finder, model = _pipeline()
-    viewer = live_view(tmp_path, CAMERA, finder, model,
-                       FitSettings(roisize=9),
-                       live=live, block=False)
-    fit = viewer.fit
-    try:
-        deadline = time.monotonic() + 10.0
-        while fit.results.empty() and time.monotonic() < deadline:
-            time.sleep(0.05)
-        assert fit.error is None
-        assert fit.running                       # still inside the pause
-        assert scope.written == 4                # and nothing more was written
-        assert fit.n_emitted > 0
-        assert fit.engine.stats["frames"] == 3   # the last page is held back
-    finally:
-        viewer.close()
-        fit.stop()
-        plt.close(viewer.figure)

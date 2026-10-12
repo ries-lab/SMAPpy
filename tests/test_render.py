@@ -49,23 +49,6 @@ def test_zoom_keeps_the_cursor_fixed():
     assert (zoomed.x1 - zoomed.x0) == 0.5 * (fov.x1 - fov.x0)
 
 
-def test_hue_and_sum_composites_agree_below_saturation():
-    """The two field-colour composites differ only where a pixel saturates."""
-    fov = FieldOfView.from_range((0, 4), (0, 4), 1.0)
-    x = np.array([0.5, 0.5, 2.5])
-    y = np.array([0.5, 0.5, 0.5])
-    colors = luts.colors([0.0, 1.0, 0.5], "jet", 0.0, 1.0)
-    img = render_histogram(x, y, fov, colors=colors)
-
-    imax = float(img.weight.max())                     # nothing clips
-    hue = to_rgb(img, imax=imax, color_mode="hue")
-    total = to_rgb(img, imax=imax, color_mode="sum")
-    assert np.allclose(hue, total, atol=1e-6)
-
-    # the mixed pixel is the mean of the two colours it holds
-    assert np.allclose(img.color[0, 0] / img.weight[0, 0], colors[:2].mean(axis=0))
-
-
 def test_intensity_lut_is_applied_after_normalization():
     fov = FieldOfView.from_range((0, 2), (0, 1), 1.0)
     img = render_histogram([0.5], [0.5], fov)
@@ -217,29 +200,6 @@ def test_an_explicit_imax_overrides_the_contrast():
     image = np.linspace(0, 10, 100, dtype=np.float32).reshape(10, 10)
     norm, imax = normalize(image, imax=5.0, contrast=2.0)
     assert imax == 5.0 and norm.max() == 1.0 and (norm >= 1.0).sum() == 50
-
-
-def test_the_two_composites_differ_only_where_a_pixel_saturates():
-    """Red over cyan: SMAP's composite adds to white, the hue one stays grey.
-
-    Below saturation the two are algebraically identical -- hue divides by the
-    weight and multiplies it back in -- so this is the whole of the difference.
-    """
-    fov = FieldOfView.from_range((0, 3), (0, 1), 1.0)
-    red, cyan = [1.0, 0.0, 0.0], [0.0, 1.0, 1.0]
-    img = render_histogram([0.5, 1.5, 1.5, 2.5], [0.5] * 4, fov,
-                           colors=np.array([red, red, cyan, cyan], np.float32))
-    assert img.weight[0].tolist() == [1.0, 2.0, 1.0]
-
-    below = [to_rgb(img, imax=2.0, color_mode=m) for m in ("hue", "sum")]
-    assert np.allclose(below[0], below[1])
-
-    hue = to_rgb(img, imax=1.0, color_mode="hue")
-    total = to_rgb(img, imax=1.0, color_mode="sum")
-    assert np.allclose(total[0, 1], [1, 1, 1])       # additive: white
-    assert np.allclose(hue[0, 1], [0.5, 0.5, 0.5])   # hue: grey at full brightness
-    for rgb in (hue, total):                          # the single colours agree
-        assert np.allclose(rgb[0, 0], red) and np.allclose(rgb[0, 2], cyan)
 
 
 def test_the_default_inversion_is_smaps_lutinvert():

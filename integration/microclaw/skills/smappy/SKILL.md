@@ -45,7 +45,7 @@ import smappy
 locs = smappy.fit(tiff_path, out=out_h5,
                   camera={"conversion": 0.49, "offset": 100.0,
                           "pixelsize_um": 0.106},
-                  calibration=cal_3dcal_mat, units="nm")
+                  calibration=cal_3dcal_mat)
 print(len(locs), locs.metadata["stats"])
 ```
 
@@ -76,8 +76,9 @@ Raw images carry no metadata, so coordinates are relative to the image unless
 `roi=(x, y, w, h)` says where on the chip it sat — pass it when the localizations
 have to line up with anything else.
 
-`camera.require()` raises a `ValueError` naming what is missing rather than
-producing silently wrong nm coordinates, so a camera is never half-specified.
+`camera.require()` raises a `ValueError` naming a missing conversion or offset
+rather than producing silently wrong photon counts; a missing pixel size is
+fitted on an assumed 100 nm and flagged in the table, so state it.
 Get the pixel size from `get_pixel_size()`; the conversion (e-/ADU) and offset
 (ADU) come from the rig profile or the camera datasheet, never from a guess.
 
@@ -105,30 +106,37 @@ to know whether the acquisition is still running.
 
 ### 3. Fitting while the acquisition writes, with the image building up
 
-```python
-from smappy.live import LiveSettings, live_view
+**With the GUI** -- the image building up while the user watches -- start
+`smappy-gui` and run a fitter on the Localize tab with its source set to the
+dataset being written and *live* ticked, or drive that same GUI fit from a
+program through `smappy.gui.live_session.LiveSession` (what the
+`ries-lab/smappy-microclaw` package does: it stops the fit and says when the
+source is complete). The GUI is a process of its own. **Do not call it from
+the microclaw server process** -- start it as a separate process.
 
-live_view(directory, camera, finder, model, FitSettings(output_unit="nm"),
-          output=out_h5, live=LiveSettings(update_seconds=3.0))
+**Headless**, inside the microclaw process, use `LiveFit`: the same fit in a
+thread, handing finished blocks over a queue to whatever wants them, with no
+window:
+
+```python
+from smappy.io.watch import watch_stack
+from smappy.live import LiveFit, LiveSettings
+
+frames = watch_stack(directory, idle_blocks=True)   # waits for the first frame
+fit = LiveFit(frames, camera, finder, model,
+              live=LiveSettings(flush_seconds=5.0)).start()
+...
+for block in fit.drain():                        # whenever the session looks
+    log(len(block))
 ```
 
 `directory` is the NDTiff dataset or Micro-Manager TIFF being written, and it
-does not have to exist yet — the call waits for it, so it can be made before the
-acquisition starts. For NDTiff this follows the index, which gains a record only
-once an image is complete. The HDF5 is written throughout and **is**
-the result — the window is a look at it. Zoom, pan, filter bounds and contrast
-survive every update untouched.
+does not have to exist yet. For NDTiff this follows the index, which gains a
+record only once an image is complete.
 
-Two constraints that matter inside microclaw:
-
-- `live_view` opens a matplotlib window and, with `block=True` (the default),
-  does not return until it is closed. It must run on the main thread of its own
-  process. **Do not call it from the microclaw server process** — launch it as a
-  separate process, or use `LiveFit`, which is the same fit with no window: it
-  runs in a thread and queues finished blocks for whatever front end wants them.
-- Frames that never reach a file — a pycro-manager `analyze_frame` hook, a
-  camera buffer — go through a `QueueSource`, which `live_view` and `LiveFit`
-  take exactly as they take a path:
+- Frames that never reach a file -- a pycro-manager `analyze_frame` hook, a
+  camera buffer -- go through a `QueueSource`, which `LiveFit` takes exactly
+  as it takes a path:
 
   ```python
   source = smappy.queue_source(shape=(512, 512))
@@ -182,23 +190,24 @@ save_localizations(path, locs)          # complete table in one go
 locs = load_localizations(path)         # symmetric read
 ```
 
-Columns depend on `FitSettings.output_unit`: `"pixel"` gives `x_pix`, `y_pix`,
-…; `"nm"` gives `x_nm`, `y_nm`, `z_nm`, `xy_err_nm`, `logl_rel`,
-`photons`, `background`, `frame`; `"pixel+nm"` gives both. **Use `"nm"`** for
-anything a user will look at. The column set must not change between blocks —
-the writer refuses a block whose columns differ.
+Every fit writes positions in nm (`x_nm`, `y_nm`, `z_nm`, `xy_err_nm`) beside
+the camera-pixel ones it measured (`x_pix`, `y_pix`, ...), with `logl_rel`,
+`photons`, `background` and `frame`. Without a pixel size the nm columns use
+an assumed 100 nm and the table says so (`metadata["pixelsize_assumed"]`), so
+state the pixel size. The column set must not change between blocks — the
+writer refuses a block whose columns differ.
 
 ---
 
 ## Viewing
 
 ```python
-smappy.view(out_h5)          # a path or a table; blocks until the window closes
+smappy.show(out_h5)          # a path, a table or a session: the GUI, its own process
 ```
 
-From a shell: `smappy-view OUT.h5`. The viewer needs matplotlib and, like
-`live_view`, blocks and wants the main thread — launch it as a separate process
-from microclaw, never inline.
+From a shell: `smappy-gui OUT.h5`. `smappy.show` starts the GUI as a process of
+its own and returns at once -- it needs no Qt or main thread here -- and hands
+an in-memory table over through shared memory.
 
 For an image without a window (a PNG for the session record, a tile in the web
 GUI):
@@ -269,8 +278,8 @@ Starting filter values for AF647 dSTORM are in `load_skill(name="smlm")`
 | Symptom | Cause | Fix |
 |---|---|---|
 | Fewer frames than acquired | acquisition stopped mid-write; the index lists images that were never written | expected — those records are dropped; check `source.n_frames` |
-| `ValueError: missing camera metadata` | conversion/offset/pixelsize unset | pass them in `overrides`; never default them |
-| Coordinates in pixels, viewer rows empty | `output_unit="pixel"` (the default) | set `FitSettings(output_unit="nm")` |
-| Microclaw server hangs | `show`/`live_view` called inline | separate process, or `LiveFit` headless |
+| `ValueError: missing camera metadata` | conversion/offset unset | pass them in `overrides`; never default them |
+| `pixelsize_assumed` in the table, nm off by a factor | no pixel size given | pass `pixelsize_um`; the `x_pix` columns are exact |
+| Microclaw server hangs | the GUI started inline | `smappy.show` (its own process), or `LiveFit` headless |
 | Almost no localizations | cutoff too high, or wrong offset | check `engine.stats["candidates"]` first |
 | z looks compressed or mirrored | EM mode mismatch with the calibration | `warn_on_em_mismatch(cal, camera.em_on)` |

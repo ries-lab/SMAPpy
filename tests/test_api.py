@@ -84,16 +84,17 @@ def test_an_incomplete_camera_names_what_is_missing():
         smappy.fit(frames(2), camera={"pixelsize_um": 0.1}, sigma=1.2, cutoff=40.0)
 
 
-def test_view_accepts_a_saved_file(tmp_path, monkeypatch):
-    pytest.importorskip("matplotlib")
-    out = tmp_path / "locs.h5"
-    smappy.fit(frames(), out=out, **FIT)
-
-    seen = {}
-    monkeypatch.setattr("smappy.viewer.show",
-                        lambda locs, *a, **k: seen.setdefault("n", len(locs)))
-    smappy.view(out)
-    assert seen["n"] == 8
+def test_show_opens_a_saved_file_in_the_gui_of_its_own(tmp_path, monkeypatch):
+    """`smappy.show` (and the old name, `view`) starts the GUI on a path."""
+    import subprocess
+    import sys
+    started = []
+    monkeypatch.setattr(subprocess, "Popen",
+                        lambda command, **kwargs: started.append(command))
+    smappy.show(tmp_path / "locs.h5")
+    smappy.view(tmp_path / "locs.h5")
+    assert started == [[sys.executable, "-m", "smappy.cli.gui",
+                        str(tmp_path / "locs.h5")]] * 2
 
 
 def test_importing_smappy_does_not_import_the_world():
@@ -104,25 +105,6 @@ def test_importing_smappy_does_not_import_the_world():
     out = subprocess.run([sys.executable, "-c", code], capture_output=True,
                          text=True, check=True)
     assert out.stdout.strip() == "0"
-
-
-def test_the_viewer_opens_on_a_file_as_well_as_a_table(tmp_path, monkeypatch):
-    """`show` loads a path itself, so a saved file is one call away."""
-    pytest.importorskip("matplotlib")
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
-    from smappy.viewer import show
-
-    out = tmp_path / "locs.h5"
-    locs = smappy.fit(frames(), out=out, **FIT)
-    monkeypatch.setattr(plt, "show", lambda *a, **k: None)
-    viewer = show(out, block=False)
-    try:
-        assert len(viewer.state.locs) == len(locs)
-    finally:
-        plt.close("all")
 
 
 def test_blocks_reach_the_caller_as_they_are_fitted():

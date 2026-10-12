@@ -686,32 +686,9 @@ fixed unit get one, since 25 nm means nothing in pixels.
 
 ## Interaction latency
 
-Two things made a drag feel like it started a second late, neither of them the
-render (35 ms for 211k localizations at this canvas size):
-
-**Every `TextBox` redraws the whole figure when a click lands anywhere else**,
-to take its cursor away -- with `canvas.draw()`, which blocks.  A window with a
-dozen boxes therefore paid a dozen full draws before the first motion event of
-a drag was delivered: 212 ms measured here, close to a second on a retina
-canvas.  `viewer._patched_text_box` swaps `draw` for `draw_idle` around
-`stop_typing`, collapsing all of them into the one draw that was going to
-happen anyway; the press went from 212 ms to 0.9 ms.  It is swapped in around
-the call rather than reimplementing `stop_typing`, whose body reaches into
-private state that changes between matplotlib versions.
-
-**A queued render could land in the middle of the gesture.**  The press now
-stops the timer.
-
-With those gone, deferring the render to the end of a gesture is no longer
-worth it when the render is cheap: `_refresh` renders inside the gesture when
-the last one took under `LIVE_RENDER_SECONDS` (0.12 s), throttled by the
-render's own cost so a gesture never queues up renders it cannot keep up with,
-and falls back to moving the image and deferring when it is slower -- a slow
-render inside a gesture would make it lurch, which is worse than a blank edge.
-Panning and zooming therefore fill in what they expose as they go.  `fit`
-keeps the centre and is idempotent, so re-rendering repeatedly inside a drag
-cannot make the view creep: measured drift over a twelve-event drag is 7e-12
-nm.
+The matplotlib viewer's notes on drag latency (a deferred re-render, a patched
+`TextBox`) went with it in 2026-10: the Qt GUI renders on its own thread and
+never had either problem.
 
 ## Online analysis
 
@@ -809,10 +786,9 @@ nothing would appear in the meantime.  The timer is checked once per block, so
 during a pause the watch sends empty blocks (`idle_blocks`) for it to be checked
 on -- without them, what was buffered before a pause stayed off the screen
 until the pause was over.  The GUI's live fit flushes every 5 s
-(`LIVE_FLUSH_SECONDS`), and `smappy-live` every `LiveSettings.flush_seconds`
-(5 s, `--flush`): `live_view` asks its source for idle blocks too (a
-`QueueSource` sends them as the file watchers do), and `LiveFit`, which keeps
-its own loop for its stop event, skips them as `drive` does.
+(`LIVE_FLUSH_SECONDS`); `LiveFit`, which keeps its own loop for its stop
+event, flushes every `LiveSettings.flush_seconds` and skips the idle blocks
+(a `QueueSource` sends them as the file watchers do) as `drive` does.
 
 Checked against the offline path on 300 frames of the astigmatic dataset,
 replayed frame by frame into a growing two-file series: same 28724

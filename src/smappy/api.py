@@ -130,14 +130,6 @@ def _acquisition(source) -> dict:
     return {k: v for k, v in out.items() if v}
 
 
-def view(locs, settings=None, display=None, block: bool = True,
-         group_settings=None):
-    """Open the viewer on a table or on a saved HDF5 file."""
-    from .viewer import show
-    return show(_localizations(locs), settings, display, block=block,
-                group_settings=group_settings)
-
-
 def load(path) -> Localizations:
     """Read a localization file written by smappy."""
     from .io.hdf5 import load_localizations
@@ -271,3 +263,7 @@ def show(data, *, name: str = "", wait: bool = False):
         threading.Thread(target=release, daemon=True).start()
         atexit.register(release)
     return process
+
+
+#: the name the matplotlib viewer had; the GUI took its place in 2026-10
+view = show

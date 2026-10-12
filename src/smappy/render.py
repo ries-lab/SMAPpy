@@ -16,15 +16,11 @@ Colour: an intensity image is recoloured at display time, one lookup per output
 pixel.  Colouring by a field (z, frame, ...) cannot work that way, because two
 localizations of different colour in one pixel have to mix, so each one
 contributes its own colour during accumulation.  We keep **four** planes then --
-the three colour-weighted ones plus the plain weight -- which allows both
-composites at display time from a single render:
-
-``"hue"``    ``colour_sum / weight_sum`` gives the hue, ``weight_sum`` the
-             brightness.  Saturation and gamma then act on brightness only and
-             leave the hue alone.
-``"sum"``    SMAP's composite: display ``colour_sum`` directly.  Identical to
-             ``"hue"`` wherever the pixel is below saturation and gamma is 1;
-             above it, per-channel clipping pulls dense regions towards white.
+the three colour-weighted ones plus the plain weight: ``colour_sum /
+weight_sum`` gives the hue, ``weight_sum`` the brightness, so saturation and
+gamma act on brightness only and leave the hue alone.  (SMAP displays
+``colour_sum`` directly, which per-channel clipping pulls towards white in
+dense regions; that composite went with the matplotlib viewer in 2026-10.)
 
 What the two axes *are* is `RenderAxes`: normally the table's positions, but
 any column against any other, each divided by a scale of its own.  The division
@@ -217,13 +213,12 @@ def normalize(image: np.ndarray, imax: Optional[float] = None,
 
 def to_rgb(rendered: RenderedImage, lut: luts.LUT = "hot", invert=False,
            imax: Optional[float] = None, contrast: float = DEFAULT_CONTRAST,
-           gamma: float = 1.0, color_mode: str = "hue",
-           white_background: bool = False) -> np.ndarray:
+           gamma: float = 1.0, white_background: bool = False) -> np.ndarray:
     """Turn accumulated planes into a float32 ``(ny, nx, 3)`` RGB image in [0, 1].
 
     For an intensity image ``lut`` recolours the normalised weight plane.  For a
-    field-coloured one the LUT was already applied per localization, and
-    ``color_mode`` selects the composite (see the module docstring).
+    field-coloured one the LUT was already applied per localization (see the
+    module docstring).
 
     ``white_background`` turns the finished image over (`smappy.lut.on_white`):
     the empty ground goes white and the colours keep their hue.  It is done to
@@ -232,12 +227,12 @@ def to_rgb(rendered: RenderedImage, lut: luts.LUT = "hot", invert=False,
     several layers are summed, so that it can be done once to the sum instead
     of once per layer, which would wash the picture out.
     """
-    rgb = _to_rgb(rendered, lut, invert, imax, contrast, gamma, color_mode)
+    rgb = _to_rgb(rendered, lut, invert, imax, contrast, gamma)
     return luts.on_white(rgb) if white_background else rgb
 
 
-def _to_rgb(rendered: RenderedImage, lut, invert, imax, contrast, gamma,
-            color_mode) -> np.ndarray:
+def _to_rgb(rendered: RenderedImage, lut, invert, imax, contrast, gamma
+            ) -> np.ndarray:
     if rendered.color is None:
         norm, _ = normalize(rendered.weight, imax, contrast)
         if gamma != 1.0:
@@ -245,12 +240,6 @@ def _to_rgb(rendered: RenderedImage, lut, invert, imax, contrast, gamma,
         table = luts.get(lut, invert)
         index = np.clip((norm * len(table)).astype(np.int32), 0, len(table) - 1)
         return table[index]
-
-    if color_mode == "sum":
-        rgb, _ = normalize(rendered.color, imax, contrast)
-        return rgb ** gamma if gamma != 1.0 else rgb
-    if color_mode != "hue":
-        raise ValueError(f"unknown color_mode {color_mode!r}; use 'hue' or 'sum'")
 
     brightness, _ = normalize(rendered.weight, imax, contrast)
     if gamma != 1.0:
@@ -606,7 +595,6 @@ class DisplaySettings:
     contrast: float = DEFAULT_CONTRAST   # saturate 10^-contrast of the pixels
     imax: Optional[float] = None         # an absolute scale, overriding contrast
     gamma: float = 1.0
-    color_mode: str = "hue"
     # the picture on white paper, whatever the LUT.  A property of the picture
     # rather than of one layer -- what sums several of them turns the sum over
     # once, with `white_background=False` per layer -- but it is kept here so
@@ -617,7 +605,7 @@ class DisplaySettings:
               white_background: Optional[bool] = None) -> np.ndarray:
         white = self.white_background if white_background is None else white_background
         return to_rgb(rendered, self.lut, self.invert, self.imax, self.contrast,
-                      self.gamma, self.color_mode, white)
+                      self.gamma, white)
 
 
 def explicit_sigmas(locs: Localizations, settings: "RenderSettings") -> Tuple[float, float]:

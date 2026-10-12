@@ -11,7 +11,7 @@ from smappy.filter import LocFilter
 from smappy.locs import Localizations
 from smappy.render import FieldOfView, RenderSettings, render_locs
 from smappy.spatial import GrowingIndex, SpatialIndex
-from smappy.viewer import ViewState
+from smappy.layer_state import ViewState
 
 
 def _table(n=20000, seed=0, first_frame=0):
