@@ -1,6 +1,6 @@
 ---
 version: "1"
-covers: [smappy.plugins.roi.histograms, smappy.roi_manager.core.ROIProject.results]
+covers: [smappy.plugins.roi.histograms, smappy.roi_manager.core.ROIProject.results, smappy.region_results.rows, smappy.region_results.is_current]
 ---
 
 ## What it does
@@ -51,6 +51,14 @@ evaluated again.  A site where an evaluator failed has no values for that
 evaluator's columns, and no row at all if nothing else ran.  Nothing is
 evaluated here: the histograms show what the table holds when the plugin is
 run, and are a snapshot.
+
+A table of clusters goes out of date as a whole, since the clusters change
+together: when the table, its `cluster_id` or a layer's filter is no longer
+what the clusters were measured on -- three clusters relabelled as one, say
+-- the plugin says the results are out of date instead of drawing clusters
+that are not there any more, and *results from* stops offering them.  Run the
+block again.  A column written from the results themselves (*Regions to
+column*, a block's *write values*) does not count as a change.
 
 **2. The columns.**  With *columns* empty, every column that holds a number
 in every row is drawn, except the site and file identifiers.  Otherwise the

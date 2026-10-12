@@ -72,9 +72,12 @@ evaluated again.
 ## Parameters
 
 ### source
-Lists every evaluation on the ROIs by its name, then every evaluation of an
-id column's regions as *per cluster_id: ...*.  Left empty it writes only the
-ROIs' numbers.
+Lists every current evaluation on the ROIs by its name, then every current
+evaluation of an id column's regions as *per cluster_id: ...*.  Left empty it
+writes only the ROIs' numbers.  Results that no longer describe their regions
+-- re-clustered, the table or a filter changed -- are refused with a message
+saying so; a column written by this plugin is not such a change, so a second
+value can be written from the same results.
 
 ### values
 The names are those of the evaluation's columns, as *Summarize/Histograms*

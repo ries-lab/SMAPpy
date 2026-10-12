@@ -696,21 +696,8 @@ class Session:
         # and a SMAP _sml.mat, a csv or a MINFLUX export is not a file this
         # writes -- it used to be overwritten with HDF5 under its own name
         writer_for(path)
-        metadata = self.file_metadata()
-        if not region_results:
-            if isinstance(metadata.get("roi_project"), dict):
-                metadata["roi_project"] = {k: v for k, v in metadata["roi_project"].items()
-                                           if k != "tables"}
-            metadata.pop("id_regions", None)
-        elif not region_figures:
-            unkept = lambda doc: {k: v for k, v in doc.items() if k != "kept"}
-            if isinstance(metadata.get("roi_project"), dict):
-                project = dict(metadata["roi_project"])
-                project["tables"] = [unkept(t) for t in project.get("tables") or []]
-                metadata["roi_project"] = project
-            if metadata.get("id_regions"):
-                metadata["id_regions"] = {c: [unkept(t) for t in ts]
-                                          for c, ts in metadata["id_regions"].items()}
+        from .region_results import without_results
+        metadata = without_results(self.file_metadata(), region_results, region_figures)
         # read before the file is started again: frames opened from it are
         # read from it a plane at a time (`StoredStack`)
         from .io.hdf5 import save_images

@@ -148,18 +148,7 @@ class ColumnRegions:
 
     def inputs(self) -> Dict[str, Any]:
         """What every region's results depend on (see the module docstring)."""
-        locs = self.locs
-        n = len(locs)
-        sample = np.arange(n)[:: max(1, n // 512)][:512]
-        positions = [np.round(np.asarray(locs[c])[sample].astype(float), 3).tolist()
-                     for c in ("x_nm", "y_nm") if c in locs]
-        ids = np.ascontiguousarray(np.asarray(locs[self.column]))
-        out = {"rows": n, "columns": sorted(locs.keys()), "positions": positions,
-               "column": self.column, "ids": _hash(ids), "layer": self.layer}
-        if self.session is not None:
-            out["layers"] = [_layer_inputs(lay) for lay in self.session.layers
-                             if not lay.is_image]
-        return out
+        return column_inputs(self.locs, self.column, self.layer, self.session)
 
     def tables(self, k: int):
         """``(pinned, rows, layer, session)`` for region ``k``: every layer cut
@@ -245,6 +234,33 @@ class ContextRegions(ColumnRegions):
             pinned[self.layer] = {"ungrouped": (locs, Selection.all(len(rows))),
                                   "shows": "ungrouped"}
         return pinned, rows, self.layer, self.ctx.session
+
+
+def column_inputs(locs: Localizations, column: str, layer: int = 0,
+                  session=None) -> Dict[str, Any]:
+    """What the results of ``column``'s regions depend on: the table (its
+    length, columns, a sample of positions, the id column itself), every
+    layer's filters and grouping, and the layer a run followed.
+
+    A function rather than only `ColumnRegions.inputs` so that a reader can
+    check a table for staleness (`region_results.is_current`) without the
+    sort that splits the regions.  The columns written from regions' own
+    results (`REGION_COLUMNS`) are left out of the list: writing a cluster's
+    number onto its localizations does not change what was measured in it,
+    and counting it would make the results it was written from out of date.
+    """
+    n = len(locs)
+    sample = np.arange(n)[:: max(1, n // 512)][:512]
+    positions = [np.round(np.asarray(locs[c])[sample].astype(float), 3).tolist()
+                 for c in ("x_nm", "y_nm") if c in locs]
+    ids = np.ascontiguousarray(np.asarray(locs[column]))
+    written = set(locs.metadata.get(REGION_COLUMNS) or {})
+    out = {"rows": n, "columns": sorted(c for c in locs.keys() if c not in written),
+           "positions": positions, "column": column, "ids": _hash(ids), "layer": layer}
+    if session is not None:
+        out["layers"] = [_layer_inputs(lay) for lay in session.layers
+                         if not lay.is_image]
+    return out
 
 
 def _hash(a: np.ndarray) -> str:

@@ -410,7 +410,7 @@ def test_running_an_evaluation_again_under_its_name_replaces_it():
         "NPC Corners", "strict"]
     rows = project.results(labels=["NPC Corners"])
     assert "n_corners" in rows[0] and "strict.n_corners" not in rows[0]
-    assert corner_settings(project, "NPC Corners", rows).precision_nm == 25.0
+    assert corner_settings(session.context(), "NPC Corners", rows).precision_nm == 25.0
 
 
 def test_the_npc_chain_reads_its_own_counts_without_asking():
@@ -425,7 +425,7 @@ def test_the_npc_chain_reads_its_own_counts_without_asking():
     efficiency = result.data["results"]["labelling_efficiency"]
     assert abs(efficiency.data["efficiency"] - 0.5) < 0.05
     from smappy.plugins.npc import corner_settings
-    assert corner_settings(session.rois, "NPC Corners").precision_nm == 15.0
+    assert corner_settings(session.context(), "NPC Corners").precision_nm == 15.0
 
 
 def test_the_segmenter_replaces_only_its_own_pores_when_asked():

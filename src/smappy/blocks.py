@@ -114,12 +114,13 @@ class BlockPlugin(ChainPlugin):
 
     @classmethod
     def evaluations(cls, settings) -> List[Tuple[str, str]]:
-        """``(name, plugin path)`` of what it leaves on the ROIs: its steps',
-        when it runs over the ROIs."""
-        if settings.regions != BLOCK_ROIS:
-            return []
-        return [(step.title(), step_cls.path) for key, step, step_cls in cls.steps
-                if not isinstance(step, Block)]
+        """``(name, plugin path)`` of what it leaves, a pair per step: on the
+        ROIs, or per region of its id column -- the name then in the form
+        *results from* reads (`region_results.Evaluation`), so an analysis
+        after the block takes the block's own without asking."""
+        from .region_results import Evaluation
+        return [(str(Evaluation(settings.regions, step.title())), step_cls.path)
+                for key, step, step_cls in cls.steps if not isinstance(step, Block)]
 
     # ------------------------------------------------------------- timing
     def estimate(self, ctx: Context, settings) -> Optional[Estimate]:

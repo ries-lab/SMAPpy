@@ -288,8 +288,10 @@ class Context:
         self.region_id = region_id
         self.site_table = site_table        # the rows evaluation produced
         # (name, evaluator path) of the evaluations a chain has made before
-        # this step, oldest first: an ROI analysis in a chain reads its own
-        # chain's results unless told otherwise (`roi.choose_evaluation`)
+        # this step, oldest first, each name as *results from* spells it
+        # (`region_results.Evaluation`): an analysis of regions in a chain
+        # reads its own chain's results unless told otherwise
+        # (`roi.choose_evaluation`)
         self.evaluations = list(evaluations)
         self._rois = rois                   # a project without a session
         # Two `threading.Event`s for a run that lasts as long as an

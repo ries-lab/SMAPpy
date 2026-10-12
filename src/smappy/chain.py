@@ -425,8 +425,9 @@ def is_evaluator(plugin_cls) -> bool:
 
 
 def made_by(plugin_cls, step_settings) -> List[Tuple[str, str]]:
-    """The evaluations a step leaves on the ROIs, as ``(name, plugin path)``:
-    a block over the ROIs leaves one per step; anything else none."""
+    """The evaluations a step leaves, as ``(name, plugin path)``: a block
+    leaves one per step, on the ROIs or per region of its id column
+    (`BlockPlugin.evaluations`); anything else none."""
     from .blocks import BlockPlugin
     if isinstance(plugin_cls, type) and issubclass(plugin_cls, BlockPlugin):
         return plugin_cls.evaluations(step_settings)

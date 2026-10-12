@@ -177,14 +177,24 @@ still runs, and its text says so.
 **Which counts.**  The counts are those of an NPC Corners evaluation, made by
 the region steps window or a chain.  With one, it is used whatever it is
 called; in a chain, the one the chain itself made.  *results from* lists
-every NPC Corners evaluation on the ROIs, after *auto*, which says which one
-it would take.  With several -- NPC Corners renamed and run with other
+every current NPC Corners evaluation, on the ROIs and then per region of an id
+column (*per cluster_id: NPC Corners*, from a block over the clusters), after
+*auto*, which says which one it would take.  With several -- NPC Corners renamed and run with other
 settings, to compare -- and *auto* chosen, the plugin asks before it runs,
 with a button per evaluation and its settings beside it, and the answer goes
 into *results from*, so it is asked once.  The cutoffs of the model are those that evaluation counted
 with, as stored with its results, not what the region steps window holds now.
 If some sites were counted with other settings than the rest under the same
 name, the plugin refuses and asks for them to be evaluated again.
+
+**Per cluster.**  Corners counted once per cluster -- each pore a cluster, a
+block over `cluster_id` -- are read like those of the ROIs, with SMAP's
+method.  The joint model needs the precisions of every localization of the
+files the pores are in, and a cluster has no file of its own in the ROI
+manager: it refuses, and says so.  Neither is a cluster's pore found in the
+simulation's truth.  For either, make ROIs of the clusters
+([Column to ROIs](plugin:Analysis/Regions/Column to ROIs)) and count their
+corners there.
 
 **Simulated data.**  When the sites come from a simulated table, the plugin
 also reports the efficiency it was simulated with, and fits the labelled

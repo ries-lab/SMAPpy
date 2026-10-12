@@ -118,10 +118,16 @@ class SessionROIs(ROIProject):
         notice a corrected or refitted table, cheap enough to recompute on
         every staleness check, and unchanged by a rename or a "save as" --
         or by a save and reopen, which adds `filenumber` to a table that
-        never came from a file (see `BOOKKEEPING`).
+        never came from a file (see `BOOKKEEPING`).  The columns written from
+        regions' results (`region_runs.REGION_COLUMNS`) are not counted either:
+        an ROI's number or its measured value written onto its localizations
+        changes nothing it was measured on, and used to make the very
+        evaluation it came from out of date.
         """
+        from ..region_runs import REGION_COLUMNS
         locs = self.session.locs
-        names = sorted(set(locs.columns) | set(BOOKKEEPING))
+        written = set(locs.metadata.get(REGION_COLUMNS) or {})
+        names = sorted((set(locs.columns) - written) | set(BOOKKEEPING))
         if not len(locs):
             return digest([0, names])
         rows = np.arange(len(locs))

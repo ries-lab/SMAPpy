@@ -525,9 +525,14 @@ Each step leaves the program working and the suite green.
    tab is the *Regions* tab, seeded from `Analysis/Regions/`, which the
    Analysis tab leaves out (`exclude` in `DEFAULT_TABS`); its page is
    *Regions tab*.  The summaries read a table of an id column's regions as
-   well as the ROIs' (*results from*: "per cluster_id: ..."); NPC Labeling
-   Efficiency, which needs the ROIs' settings and truth, stays with the
-   ROIs.  Panel pages' `covers` are now checked, as plugin pages' are.
+   well as the ROIs' (*results from*: "per cluster_id: ..."), through one
+   module, `region_results` (`Evaluation(source, label)`, `available`,
+   `rows`, `steps`, `is_current`), which reads a column's table only while
+   it is current; NPC Labeling Efficiency reads per-cluster corner counts
+   with SMAP's method, and its joint model, which needs the ROIs' files,
+   says so.  A column written from regions' results is left out of both
+   stores' data signatures, so writing it does not make its results out of
+   date.  Panel pages' `covers` are now checked, as plugin pages' are.
 
 7. **Region values as columns**, in place of a session region table with
    its own filter.

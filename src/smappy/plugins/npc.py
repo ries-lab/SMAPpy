@@ -833,17 +833,22 @@ def corner_column(rows) -> Optional[str]:
     return column(rows, "n_corners")
 
 
-def corner_settings(project, label: Optional[str], rows=()) -> NPCCornersSettings:
-    """The settings the NPC Corners evaluation called ``label`` counted these
-    sites with -- the cutoffs the counts mean something with -- as its run
-    recorded them, not whatever the evaluation window holds now."""
-    if project is None or not label:
+def corner_settings(ctx: Context, evaluation, rows=()) -> NPCCornersSettings:
+    """The settings the NPC Corners evaluation ``evaluation`` (an
+    `region_results.Evaluation`, or its name) counted these sites with -- the
+    cutoffs the counts mean something with -- as its run recorded them, not
+    whatever the evaluation window holds now; on the ROIs or per cluster."""
+    from ..region_results import Evaluation, steps
+    if not evaluation:
         return NPCCornersSettings()
-    ids = [r["roi_id"] for r in rows if r.get("roi_id") in project.rois] or None
-    made = project.evaluation_steps(label, ids)
+    ev = evaluation if isinstance(evaluation, Evaluation) else Evaluation.parse(evaluation)
+    ids = [r["roi_id"] for r in rows if "roi_id" in r]
+    if ev.on_rois:
+        ids = [i for i in ids if ctx.rois is not None and i in ctx.rois.rois]
+    made = steps(ctx, ev, ids or None)
     if len(made) > 1:
         raise ValueError(f"the sites were counted with different settings under "
-                         f"{label!r}: evaluate them all again")
+                         f"{str(ev)!r}: evaluate them all again")
     values = (made[0].get("parameters") if made else None) or {}
     return settings_from(NPCCornersSettings, values)
 
@@ -938,14 +943,29 @@ class NPCLabelingEfficiency(SiteAnalysisPlugin):
     evaluator = CORNERS
 
     def run(self, ctx: Context, settings: LabelingEfficiencySettings) -> Result:
-        rows, label = self.rows(ctx, settings)
+        rows, ev = self.rows(ctx, settings)
         if not rows:
             raise ValueError("the ROIs have no corner counts: evaluate them with "
                              "NPC Corners first")
-        count = corner_settings(ctx.rois, label, rows)
-        result = self.analyse(ctx.rois, rows, settings, count, label)
-        if label and label != CORNERS.rsplit("/", 1)[-1]:
-            result.text += f"; counted by {label!r}"
+        count = corner_settings(ctx, ev, rows)
+        label = None if ev is None else ev.label
+        # per cluster there are no ROIs: no files whose field the precisions
+        # come from (`field_precisions`), no shapes to find a pore's truth in
+        # (`site_truth`) -- said here rather than as a missing ROI further down
+        per_cluster = ev is not None and not ev.on_rois
+        project = None if per_cluster else ctx.rois
+        if per_cluster and settings.method != "smap":
+            raise ValueError(
+                f"the joint model needs the ROIs' files, for the precisions of the "
+                f"whole field, and {str(ev)!r} was counted per region of "
+                f"{ev.source}, not in ROIs: use the corners (SMAP) method, or make "
+                f"ROIs of the clusters (Column to ROIs) and count their corners there")
+        result = self.analyse(project, rows, settings, count, label)
+        if per_cluster and ctx.locs.metadata.get("simulation_settings"):
+            result.text += ("; not compared with the simulation's labelled corners, "
+                            "which are found through ROIs")
+        if ev is not None and str(ev) != CORNERS.rsplit("/", 1)[-1]:
+            result.text += f"; counted by {str(ev)!r}"
         if settings.method != "smap" and getattr(ctx.rois, "grouped", True) is False:
             result.text += ("; the layer is not grouped: the model expects one "
                             "localization per blink")

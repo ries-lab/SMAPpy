@@ -36,7 +36,7 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 
 from . import Context, Plugin, Result, param, register
-from .roi import PER, auto_only, id_table, replace_param, table_rows
+from .roi import auto_only, replace_param
 
 # what *results from* is when it is empty: the ROIs, without an evaluation
 NUMBERS = "the ROIs' numbers"
@@ -82,42 +82,36 @@ class RegionsToColumn(Plugin):
     version = "1"
 
     def choices(self, ctx: Context, settings):
-        out = [("", NUMBERS)]
-        if ctx.rois is not None:
-            out += [(name, name) for name in sorted(ctx.rois.labels())]
-        if ctx.session is not None:
-            for column, tables in sorted(ctx.session.id_regions.items()):
-                out += [(f"{PER}{column}: {label}",) * 2 for label in tables]
-        return {"source": out}
+        from ..region_results import available
+        return {"source": [("", NUMBERS)]
+                + [(str(ev), str(ev)) for ev in available(ctx)]}
 
     def run(self, ctx: Context, settings: RegionColumnSettings) -> Result:
+        from .. import region_results
         from ..chain import BLOCK_ROIS
         from ..region_runs import (REGION_NUMBER, region_members, values_onto,
                                    with_region_columns)
         names = [v.strip() for v in settings.values.split(",") if v.strip()]
         source = settings.source
-        found = id_table(ctx, source)
-        if found is not None:
-            regions, table = found
+        ev = region_results.Evaluation.parse(source)
+        regions = ev.source
+        if source and not region_results.is_current(ctx, ev):
+            raise ValueError(region_results.missing(ctx, ev))
+        if not ev.on_rois:
             numbers = False
             if REGION_NUMBER in names:
                 raise ValueError(f"the regions of {regions} have no ROI numbers: "
                                  f"{regions} itself is theirs")
-            values = rows_values(table_rows(table), names)
-        elif source.startswith(PER):
-            raise ValueError(f"there are no results {source!r} (any more)")
+            values = rows_values(region_results.rows(ctx, ev), names)
         else:
-            regions = BLOCK_ROIS
             if ctx.rois is None:
                 raise ValueError("there are no ROIs: find or draw some first")
             numbers = not source or REGION_NUMBER in names
             measured = [n for n in names if n != REGION_NUMBER]
             values = {}
             if source:
-                if source not in ctx.rois.labels():
-                    raise ValueError(f"no evaluation on the ROIs is called {source!r}")
                 if measured or not names:
-                    values = rows_values(ctx.rois.results(labels=[source]), measured)
+                    values = rows_values(region_results.rows(ctx, ev), measured)
             elif measured:
                 raise ValueError(f"{', '.join(measured)}: name the evaluation that "
                                  "measured them in *results from*")

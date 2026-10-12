@@ -172,7 +172,8 @@ ROI keeps its outline when the shape or size is changed here.
 
 **What is out of date.**  A stored measurement is signed with a digest of its
 inputs -- the data's fingerprint (row count, columns and a sample of the
-positions), the ROI's geometry, the filter bounds, the grouping and its
+positions; not the columns written from regions' results, such as those of
+*Regions to column*), the ROI's geometry, the filter bounds, the grouping and its
 parameters -- together with the evaluator, its version and its settings, but
 not its name.  A step of the pipeline is *current* when that signature
 matches what it would be now, and *stale* when not; the check is per step,

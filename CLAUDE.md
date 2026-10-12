@@ -158,8 +158,10 @@ class Thing(Plugin):
   `smappy/blocks.py`): over the ROIs or an id column such as `cluster_id`
   (`docs/regions.md`).  Its results belong to
   the ROI, whoever ran them, under the evaluation's name
-  (`ROIProject.evaluations`; a renamed one is a second evaluation), so an
-  analysis reads `ROIProject.results()` and never the pipeline.
+  (`ROIProject.evaluations`; a renamed one is a second evaluation), or to
+  the id column (`Session.id_regions`), so an analysis reads them through
+  `region_results` (`rows`, the current ones of either) and never the
+  pipeline.
 * Override `preview` for a plugin that can show its work before committing;
   the GUI grows a button when it is overridden and nothing when it is not.
   A plugin that changes nothing needs none: Run opens its figures.
