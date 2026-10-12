@@ -120,7 +120,10 @@ Every precision is `<quantity>_err_<unit>` -- `x_err_nm`, `z_err_nm`,
 Read positions and precisions in nm (`render.positions`, `xy_err_nm`): a fit
 writes them and a loader gives a pixel-only file nm columns
 (`io.formats.with_nm`).  Raise a message naming the columns the table *does*
-have when something is missing.
+have when something is missing.  The panel shows a raised error's message
+alone -- `str(error)`, without its class -- in red beside Run, with the
+traceback behind *details…* (`gui/errors.py`), so write the message for the
+reader: `ValueError("no ROI: draw a line")`.
 
 A column that needs a **rule for grouping** is a recipe rather than data:
 `mathparse` keeps it in `metadata["derived"]`, and the recipe says what the

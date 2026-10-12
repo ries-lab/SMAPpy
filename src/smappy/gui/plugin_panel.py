@@ -16,11 +16,12 @@ from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QKeySequence, QShortcut, QTextCursor
 from PySide6.QtWidgets import (QCheckBox, QHBoxLayout, QLabel, QMainWindow,
                                QMessageBox, QPlainTextEdit, QPushButton,
-                               QSpinBox, QToolButton, QVBoxLayout,
+                               QSizePolicy, QSpinBox, QToolButton, QVBoxLayout,
                                QWidget)
 
 from ..plugins import Plugin, Result, Stopped
 from ..session import LiveTableError, Session
+from .errors import ERROR_STYLE, details_window, message_of
 from .params import SettingsForm
 from .widgets import ColumnScroll
 
@@ -36,7 +37,7 @@ WARNING_STYLE = "color: #c06000; font-weight: bold;"
 
 class _Worker(QObject):
     done = Signal(object)
-    failed = Signal(str)
+    failed = Signal(str, str)       # the message, without its class; the traceback
     stopped = Signal(str)           # `Stopped`: nothing kept, nothing broken
 
     def __init__(self, plugin, context, settings, job="run", **kwargs):
@@ -62,8 +63,8 @@ class _Worker(QObject):
             self.done.emit(result)
         except Stopped as e:
             self.stopped.emit(str(e))
-        except Exception:
-            self.failed.emit(traceback.format_exc())
+        except Exception as error:
+            self.failed.emit(message_of(error), traceback.format_exc())
 
 
 class PluginPanel(QWidget):
@@ -168,12 +169,25 @@ class PluginPanel(QWidget):
             self.live.setToolTip("redraw while the ROI is moved, without "
                                  "touching the session")
             self.live.toggled.connect(self._on_live)
+        # the status is where a failure is said, in red (`_on_failed`): it
+        # wraps rather than widening the row, since a message may be long
         self.status = QLabel("")
+        self.status.setWordWrap(True)
+        self.status.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        # ... and the traceback behind it, one click away, only after one
+        self.details_button = QToolButton()
+        self.details_button.setText("details\u2026")
+        self.details_button.setToolTip("the whole error, and a bug report")
+        self.details_button.clicked.connect(self.show_details)
+        self.details_button.hide()
+        self._failure: Optional[tuple] = None
+        self._details_window = None
         buttons.addWidget(self.plot_button)
         buttons.addWidget(self.text_button)
         if self.live is not None:
             buttons.addWidget(self.live)
         buttons.addWidget(self.status, 1)
+        buttons.addWidget(self.details_button)
         # Five controls at the style's minimum button width (80 px in Fusion)
         # are wider than the control column, and a fitter has all five: the
         # section then scrolled sideways and took its title bar -- the ? and
@@ -507,6 +521,8 @@ class PluginPanel(QWidget):
             self.run_button.setEnabled(True)
         self.status.setText(message)
         self.status.setStyleSheet("")
+        self.status.setToolTip("")
+        self.details_button.hide()
         self._warnings = 0
         self._progress_lines = 0
         self._thread = QThread()
@@ -753,7 +769,9 @@ class PluginPanel(QWidget):
         except Exception:                    # a singleShot callable must not raise
             traceback.print_exc()
 
-    def _on_failed(self, text: str) -> None:
+    def _on_failed(self, message: str, text: str) -> None:
+        """``message`` what the error says, ``text`` its traceback: the one
+        in red beside Run, the other behind *details…* (and in the log)."""
         live, self._live_running = self._live_running, False
         if self._owns_live:
             # the fit that was streaming failed: what it streamed stays, as
@@ -767,12 +785,26 @@ class PluginPanel(QWidget):
             # the ROI is being dragged and has passed over a position with too
             # few localizations in it, which is not a failure to report: the
             # next position will ask again
-            self.status.setText("live: " + text.strip().splitlines()[-1][:60])
+            self.status.setText("live: " + message[:60])
             self.ended.emit("failed", text)
             return
-        self.output.appendPlainText(text.strip().splitlines()[-1])
-        self.status.setText("failed")
+        self.output.appendPlainText(f"failed: {message}")
+        self.status.setText(message)
+        self.status.setToolTip(message)
+        self.status.setStyleSheet(ERROR_STYLE)
+        self._failure = (message, text)
+        self.details_button.show()
         self.ended.emit("failed", text)
+
+    def show_details(self) -> None:
+        """The last failure's traceback, with *Save a bug report…*."""
+        if self._failure is None:
+            return
+        message, text = self._failure
+        if self._details_window is not None:
+            self._details_window.close()
+        self._details_window = details_window(
+            self, f"{self.plugin.name}: failed", message, text, self.session)
 
     def _on_stopped(self, text: str) -> None:
         """A run that stopped with nothing worth keeping (`Stopped`): the

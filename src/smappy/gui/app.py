@@ -11,8 +11,8 @@ from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (QApplication, QCheckBox, QDialog, QFileDialog, QHBoxLayout,
                                QMessageBox, QPushButton,
                                QLabel, QLineEdit,
-                               QMainWindow, QMenu, QScrollArea, QTabWidget, QVBoxLayout,
-                               QWidget)
+                               QMainWindow, QMenu, QScrollArea, QSizePolicy, QTabWidget,
+                               QToolButton, QVBoxLayout, QWidget)
 
 from .. import plugins, workspace as workspace_module
 from ..io.formats import (csv_columns, guess_csv_mapping, load as load_any,
@@ -28,6 +28,7 @@ from .roi_tab import ROIHeader
 from .render_view import RenderToolBar, RenderView
 from .widgets import CONTROL_WIDTH, apply_style, place_beside
 from .collector import collect_on_gui_thread
+from .errors import ERROR_STYLE, details_window, message_of
 from .icon import install_icon
 from . import identity
 from .identity import install_identity
@@ -40,7 +41,7 @@ class HandoffTask(QThread):
 
     progress = Signal(str)
     loaded = Signal(object, object, object)      # locs, state, grouped or None
-    failed = Signal(str)
+    failed = Signal(str, str)                    # the message; the traceback
 
     def __init__(self, path: str, group_settings, parent=None):
         super().__init__(parent)
@@ -52,7 +53,7 @@ class HandoffTask(QThread):
             self.loaded.emit(*handoff.take(self.path, self.group_settings,
                                            progress=self.progress.emit))
         except Exception as e:
-            self.failed.emit(f"{e}")
+            self.failed.emit(message_of(e), traceback.format_exc())
 
 
 class LoadTask(QThread):
@@ -69,7 +70,7 @@ class LoadTask(QThread):
 
     progress = Signal(str)
     loaded = Signal(object, object, object)      # locs, info, grouped or None
-    failed = Signal(str)
+    failed = Signal(str, str)                    # the message; the traceback
 
     def __init__(self, path: str, args: dict, append: bool,
                  group_settings, parent=None):
@@ -83,7 +84,7 @@ class LoadTask(QThread):
                                              append=self.append,
                                              progress=self.progress.emit, **self.args))
         except Exception as e:                   # a bad file is not a crash
-            self.failed.emit(f"{e}")
+            self.failed.emit(message_of(e), traceback.format_exc())
 
 
 def _keys(standard, fallback: str):
@@ -159,7 +160,37 @@ class ControlWindow(QMainWindow):
         self.roi_tab: Optional[ROIHeader] = None
         self.build_tabs()
         self._update_title()
-        self.setCentralWidget(self.tabs)
+        # under the tabs, shown only after a file failed to open: what went
+        # wrong in red, and the traceback behind *details…* -- as a plugin's
+        # panel says a failed run, rather than a box to click away
+        central = QWidget()
+        column = QVBoxLayout(central)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(0)
+        column.addWidget(self.tabs, 1)
+        self.load_error = QWidget()
+        row = QHBoxLayout(self.load_error)
+        row.setContentsMargins(6, 2, 6, 2)
+        self.load_error_text = QLabel("")
+        self.load_error_text.setWordWrap(True)
+        self.load_error_text.setStyleSheet(ERROR_STYLE)
+        self.load_error_text.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.load_error_details = QToolButton()
+        self.load_error_details.setText("details\u2026")
+        self.load_error_details.setToolTip("the whole error, and a bug report")
+        self.load_error_details.clicked.connect(self.show_load_error)
+        dismiss = QToolButton()
+        dismiss.setText("\u00d7")
+        dismiss.setToolTip("hide this message")
+        dismiss.clicked.connect(self.load_error.hide)
+        row.addWidget(self.load_error_text, 1)
+        row.addWidget(self.load_error_details)
+        row.addWidget(dismiss)
+        column.addWidget(self.load_error)
+        self.load_error.hide()
+        self._load_failure: Optional[tuple] = None
+        self._load_error_window = None
+        self.setCentralWidget(central)
         self.setAcceptDrops(True)          # a file dropped here: `open_dropped`
         # tall on purpose: with a file open the Render tab's own content wants
         # some 700 px, and scrolling for the display settings every time is
@@ -442,24 +473,8 @@ class ControlWindow(QMainWindow):
 
     def save_bug_report(self) -> None:
         """The log, the crash stacks and what is open, zipped for an issue."""
-        from datetime import datetime
-        from PySide6.QtWidgets import QInputDialog, QMessageBox
-        from .. import diagnostics
-        note, ok = QInputDialog.getMultiLineText(
-            self, "Bug report", "What happened, and what did you expect?  (optional)")
-        if not ok:
-            return
-        default = str(Path.home() / f"smappy-bug-{datetime.now():%Y%m%d-%H%M}.zip")
-        path, _ = QFileDialog.getSaveFileName(self, "Save bug report", default,
-                                              "Zip (*.zip)")
-        if not path:
-            return
-        written = diagnostics.bug_report(path, self.session, note)
-        QMessageBox.information(
-            self, "Bug report",
-            f"Written to\n{written}\n\nIt has the log, the environment and a "
-            "description of the open table (its columns, files and history), "
-            "not the localizations.  File names and folders are in it.")
+        from .errors import save_bug_report
+        save_bug_report(self, self.session)
 
     def show_log_folder(self) -> None:
         from PySide6.QtCore import QUrl
@@ -1027,6 +1042,8 @@ class ControlWindow(QMainWindow):
         """Queue files for the loader.  ``reset_view`` frames the first one,
         which is what starting with a file on the command line wants."""
         folders.remember(paths)      # however it came: dialog, drop, command line
+        if paths:
+            self.load_error.hide()   # the last failure is old news
         for i, path in enumerate(paths):
             args = {}
             if self._needs_mapping(path):
@@ -1100,8 +1117,24 @@ class ControlWindow(QMainWindow):
         if reset_view:
             self.render_window.view.reset()
 
-    def _load_failed(self, message: str) -> None:
-        QMessageBox.warning(self, "could not open", f"{self._loading_name}:\n{message}")
+    def _load_failed(self, message: str, details: str = "") -> None:
+        """Say it under the tabs, in red, with the traceback behind
+        *details…*; a modal box here held up every file queued after it."""
+        print(details or message)
+        name = self._loading_name
+        self._load_failure = (f"could not open {name}: {message}", details or message)
+        self.load_error_text.setText(self._load_failure[0])
+        self.load_error_text.setToolTip(self._load_failure[0])
+        self.load_error.show()
+
+    def show_load_error(self) -> None:
+        if self._load_failure is None:
+            return
+        message, details = self._load_failure
+        if self._load_error_window is not None:
+            self._load_error_window.close()
+        self._load_error_window = details_window(self, "could not open", message,
+                                                 details, self.session)
 
     def _task_finished(self) -> None:
         self._task = None
