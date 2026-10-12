@@ -57,7 +57,7 @@ def _run(directory, out=None, frames=12, live=FAST):
     finder, model = _pipeline()
     stream = watch_stack(directory, chunk=live.chunk, settings=live.watch)
     fit = LiveFit(stream, CAMERA, finder, model,
-                  FitSettings(roisize=9, output_unit="nm"), live)
+                  FitSettings(roisize=9), live)
     return fit
 
 
@@ -99,10 +99,10 @@ def test_the_viewer_takes_in_new_data_without_changing_a_setting(tmp_path):
     fit.finished.wait(timeout=10)
     assert fit.error is None
 
-    extent = camera_extent(CAMERA, SHAPE, "nm")
+    extent = camera_extent(CAMERA, SHAPE)
     state = ViewState(Localizations(), live=True, extent=extent)
     viewer = LiveViewer(state, fit, FAST,
-                        filter_fields=expected_filter_fields("nm"))
+                        filter_fields=expected_filter_fields())
     try:
         assert viewer.update() > 0                  # the first block frames it
         view = viewer.axes.get_xlim(), viewer.axes.get_ylim()
@@ -129,7 +129,7 @@ def _more_locs(like: Localizations, n: int) -> Localizations:
 
 
 def test_the_view_is_framed_by_the_camera_before_any_data_arrives(tmp_path):
-    extent = camera_extent(CAMERA, SHAPE, "nm")
+    extent = camera_extent(CAMERA, SHAPE)
     state = ViewState(Localizations(), live=True, extent=extent)
     empty = state.full_view()
     assert empty[0][0] < 0.0 and empty[0][1] > SHAPE[1] * 100.0 * 0.9
@@ -193,7 +193,7 @@ def test_live_view_wires_the_whole_thing_up(tmp_path):
     out = tmp_path / "live.h5"
     finder, model = _pipeline()
     viewer = live_view(data, CAMERA, finder, model,
-                       FitSettings(roisize=9, output_unit="nm"),
+                       FitSettings(roisize=9),
                        output=out, live=FAST, block=False)
     try:
         assert len(viewer.state.locs) == 0          # the window opens empty
@@ -242,7 +242,7 @@ def test_what_was_buffered_before_a_pause_is_shown_during_it(tmp_path):
                                             appear_timeout=2.0))
     finder, model = _pipeline()
     viewer = live_view(tmp_path, CAMERA, finder, model,
-                       FitSettings(roisize=9, output_unit="nm"),
+                       FitSettings(roisize=9),
                        live=live, block=False)
     fit = viewer.fit
     try:

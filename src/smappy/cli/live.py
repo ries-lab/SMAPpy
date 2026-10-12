@@ -42,7 +42,6 @@ def main() -> None:
     ap.add_argument("--cutoff", type=float, default=1.7)
     ap.add_argument("--filter", choices=["dog", "gauss"], default="dog")
     ap.add_argument("--max-fit-distance", type=float, default=None)
-    ap.add_argument("--units", choices=["pixel", "nm", "pixel+nm"], default="nm")
     ap.add_argument("--threads", type=int, default=0, help="0 = one per core")
     ap.add_argument("--mode", choices=["hist", "gauss", "precision", "dl"], default="precision")
     add_camera_arguments(ap)
@@ -65,7 +64,7 @@ def main() -> None:
     cut = DynamicCutoff(a.cutoff) if a.cutoff < 20 else AbsoluteCutoff(a.cutoff)
     finder = PeakFinder(flt, cut)
     settings = FitSettings(roisize=a.roisize, max_fit_distance=a.max_fit_distance,
-                           output_unit=a.units, n_threads=a.threads)
+                           n_threads=a.threads)
 
     print(f"{cam}\n{model}\n{finder}\n{src.n_frames} frames so far in "
           f"{len(src.files)} file(s); writing {a.out}\n"

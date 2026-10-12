@@ -25,7 +25,7 @@ CameraLike = Union[CameraMetadata, dict, str, Path, None]
 
 
 def fit(data, out=None, camera: CameraLike = None, calibration=None, *,
-        units: str = "nm", presets=None, sigma: float = 1.2,
+        presets=None, sigma: float = 1.2,
         cutoff: float = 1.7, filter: str = "dog", roisize: int = 13,
         max_fit_distance: Optional[float] = None, threads: int = 0,
         chunk: int = 200, frames: Optional[int] = None,
@@ -77,7 +77,7 @@ def fit(data, out=None, camera: CameraLike = None, calibration=None, *,
     model = _model(calibration, sigma, cam)
     finder = PeakFinder(DoGFilter(sigma) if filter == "dog" else GaussFilter(sigma),
                         DynamicCutoff(cutoff) if cutoff < 20 else AbsoluteCutoff(cutoff))
-    settings = settings or FitSettings(roisize=roisize, output_unit=units,
+    settings = settings or FitSettings(roisize=roisize,
                                        max_fit_distance=max_fit_distance,
                                        n_threads=threads)
 
@@ -109,7 +109,7 @@ def fit(data, out=None, camera: CameraLike = None, calibration=None, *,
     finally:
         if writer is not None:
             writer.close()
-    raw = keeper.image(cam, settings.output_unit, source=_source_name(data, source),
+    raw = keeper.image(cam, source=_source_name(data, source),
                        name="raw frames")
     if raw is not None:
         from .io.hdf5 import save_images

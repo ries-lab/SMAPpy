@@ -67,7 +67,7 @@ from ..locs import Localizations
 from . import Context, Plot, Plugin, Result, param, register
 
 # the precision columns, in the order they are looked for
-PRECISION_FIELDS = ("xy_err_nm", "xy_err_pix")
+PRECISION_FIELDS = ("xy_err_nm",)
 PRECISION_Z_FIELDS = ("z_err_nm",)
 # the tails dropped before a precision is fitted.  A row with a precision of
 # 0.1 nm is not a good localization, it is a bad fit, and the estimator below
@@ -559,7 +559,7 @@ def statistics_values(locs: Localizations, found: Sequence[Distribution]
         if key not in by_key:
             continue
         column = next(n for n in column_names if n in locs)
-        unit = "pix" if column.endswith("_pix") else "nm"
+        unit = "nm"
         values = np.asarray(locs[column], dtype=float)
         values = values[np.isfinite(values)]
         stats = by_key[key].stats

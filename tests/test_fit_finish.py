@@ -154,7 +154,7 @@ def test_the_2c_fit_saves_the_table_with_its_colours_on_it(tmp_path):
         detection=DetectionSettings(cutoff_mode="absolute", cutoff=25.0),
         model=DualGaussianModelSettings(sigma=1.2),
         transform=ChannelTransformSettings(path=str(given)),
-        fit=FitSettings(roisize=13, output_unit="nm"),
+        fit=FitSettings(roisize=13),
         output=OutputSettings(path=str(out)))
 
     said = []

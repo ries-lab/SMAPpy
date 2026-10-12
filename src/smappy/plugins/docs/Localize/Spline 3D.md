@@ -164,8 +164,8 @@ right.legend(frameon=False, fontsize=8)
 ```
 
 **5. The table.**  Positions are converted to nanometres with the *pixel
-size* (the default *units* here are nm), fits that failed or whose z is not a
-number are dropped, and the table is saved as `<acquisition>_locs.hdf5`.
+size* (the pixel columns, `x_pix` and the rest, are kept beside them), fits
+that failed or whose z is not a number are dropped, and the table is saved as `<acquisition>_locs.hdf5`.
 
 ## In detail
 

@@ -51,10 +51,14 @@ in 2D" and the dual-colour calibration in `docs/dual_color_calibration.md`).
 * **EM excess noise lives outside the fitter.**  Photons are divided by 2 before
   fitting and photons/background scaled back afterwards, so the fitter assumes
   pure Poisson statistics and knows nothing about cameras.
-* **Pixels are primary.**  The fit measures pixels; nm is derived at the very end
-  via `to_nm()` / `FitSettings.output_unit`, because the pixel size is a separate
-  calibration that may be corrected later.  `z_nm` is the exception: it comes
-  from the calibration's `dz` and has no pixel equivalent.
+* **Pixels are primary, nm is always there.**  The fit measures pixels; nm is
+  derived at the very end by `to_nm()`, which keeps the pixel columns beside
+  the nm ones, because the pixel size is a separate calibration that may be
+  corrected later.  Everything downstream reads nm only.  Without a pixel size
+  the nm columns use `DEFAULT_PIXELSIZE_NM` and the table records
+  `pixelsize_assumed` (2026-10: the *units* setting, and a fit refusing a
+  stack with no pixel size, are gone).  `z_nm` is the exception: it comes from
+  the calibration's `dz` and has no pixel equivalent.
 * **The background starts at the ROI's border, and the Hessian is the expected
   information.**  SMAP starts from the ROI's minimum and uses the observed
   information `d / mu^2`; together they left a spline fit at a few background

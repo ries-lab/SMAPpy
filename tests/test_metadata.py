@@ -43,9 +43,12 @@ def test_overrides_win_when_set():
     assert merged.excess_noise == 1.0
 
 
-def test_missing_values_are_reported():
-    with pytest.raises(ValueError, match="pixelsize_um"):
-        CameraMetadata(conversion=6.7, offset=400.0).require()
+def test_missing_values_are_reported_but_a_pixel_size_is_not_required():
+    """Without a pixel size a fit still runs, on an assumed one
+    (`DEFAULT_PIXELSIZE_NM`); without a conversion it cannot."""
+    CameraMetadata(conversion=6.7, offset=400.0).require()
+    with pytest.raises(ValueError, match="conversion"):
+        CameraMetadata(offset=400.0, pixelsize_um=0.1).require()
 
 
 def test_shipped_camera_presets_are_complete():

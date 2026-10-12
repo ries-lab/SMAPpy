@@ -122,7 +122,7 @@ from ..regions import Region
 from ..render import positions
 from . import Context, Plot, Plugin, Result, param, register
 
-PRECISION_FIELDS = ("xy_err_nm", "xy_err_pix")
+PRECISION_FIELDS = ("xy_err_nm",)
 PRECISION_Z_FIELDS = ("z_err_nm",)
 MIN_FOR_FIT = 8             # below this the maximum is not where the data is
 THIN = 30                   # below this the error bars are worth a warning

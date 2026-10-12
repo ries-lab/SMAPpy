@@ -152,7 +152,7 @@ def test_the_joint_fit_recovers_position_z_and_the_photon_ratio():
     rng = np.random.default_rng(2)
     cal = dual_calibration(ratio=0.35)
     model = GlobalSplinePSF((cal.main, cal.secondary), LINK_XYZ)
-    settings = FitSettings(roisize=13, output_unit="pixel")
+    settings = FitSettings(roisize=13)
     engine = DualChannelEngine(camera(), finder(), model, cal, settings)
 
     truth, z_index, total = (25.0, 15.0), 26.0, 12000.
@@ -177,7 +177,7 @@ def test_the_two_colours_come_apart_in_the_ratio():
     cal = dual_calibration()
     model = GlobalSplinePSF((cal.main, cal.secondary), LINK_XYZ)
     engine = DualChannelEngine(camera(), finder(), model, cal,
-                              FitSettings(roisize=13, output_unit="pixel"))
+                              FitSettings(roisize=13))
 
     ratios = []
     for fraction in (0.2, 0.8):
@@ -203,7 +203,7 @@ def test_linking_the_photons_makes_the_ratio_meaningless_but_z_tighter():
     for name, shared in (("xyz", LINK_XYZ), ("all", (True,) * 5)):
         engine = DualChannelEngine(
             camera(), finder(), GlobalSplinePSF((cal.main, cal.secondary), shared),
-            cal, FitSettings(roisize=13, output_unit="pixel"))
+            cal, FitSettings(roisize=13))
         engine.push(frames, 0)
         locs = engine.flush()
         spread[name] = np.std(locs["z_nm"])
@@ -221,7 +221,7 @@ def test_an_unlinked_fit_keeps_how_far_the_partner_is_in_x_y_and_z():
                        for _ in range(60)])
     engine = DualChannelEngine(
         camera(), finder(), GlobalSplinePSF((cal.main, cal.secondary), (False,) * 5),
-        cal, FitSettings(roisize=13, output_unit="pixel"))
+        cal, FitSettings(roisize=13))
     engine.push(frames, 0)
     locs = engine.flush()
     for name in ("dx_pix_ch1", "dy_pix_ch1", "dz_nm_ch1"):
@@ -257,7 +257,7 @@ def test_a_split_frame_runs_through_fit_stack_style_blocks():
     cal = dual_calibration()
     engine = DualChannelEngine(
         camera(), finder(), GlobalSplinePSF((cal.main, cal.secondary), LINK_XYZ),
-        cal, FitSettings(roisize=13, output_unit="pixel+nm"))
+        cal, FitSettings(roisize=13))
 
     total = 0
     for block in range(3):
@@ -305,7 +305,7 @@ def test_the_3d_2c_workflow_runs_from_a_tiff_and_a_saved_calibration(tmp_path):
         camera=CameraSettings(conversion=1.0, offset=100.0, pixelsize_um=0.1),
         detection=DetectionSettings(cutoff_mode="absolute", cutoff=20.0),
         model=DualModelSettings(calibration=str(calibration_file)),
-        fit=PipelineFitSettings(roisize=13, output_unit="nm"),
+        fit=PipelineFitSettings(roisize=13),
         output=OutputSettings(path=str(tmp_path / "out.hdf5")))
 
     result = DualSplineFit().run(Context(), settings)
@@ -430,7 +430,7 @@ def test_a_mirrored_splitter_keeps_its_colour(mirrored):
                        for _ in range(30)])
     model = GlobalSplinePSF((cal.main, cal.secondary), LINK_XYZ)
     engine = DualChannelEngine(camera(), finder(), model, cal,
-                               FitSettings(roisize=13, output_unit="pixel"))
+                               FitSettings(roisize=13))
     engine.push(frames)
     locs = engine.flush()
 

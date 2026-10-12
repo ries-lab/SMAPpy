@@ -33,7 +33,6 @@ def main() -> None:
     ap.add_argument("--cutoff", type=float, default=1.7)
     ap.add_argument("--filter", choices=["dog", "gauss"], default="dog")
     ap.add_argument("--max-fit-distance", type=float, default=None)
-    ap.add_argument("--units", choices=["pixel", "nm", "pixel+nm"], default="pixel")
     ap.add_argument("--threads", type=int, default=0, help="0 = one per core")
     ap.add_argument("--read-ahead", type=int, default=2)
     ap.add_argument("--raw-frames", type=int, default=50,
@@ -53,7 +52,7 @@ def main() -> None:
     cut = DynamicCutoff(a.cutoff) if a.cutoff < 20 else AbsoluteCutoff(a.cutoff)
     finder = PeakFinder(flt, cut)
     settings = FitSettings(roisize=a.roisize, max_fit_distance=a.max_fit_distance,
-                           output_unit=a.units, n_threads=a.threads)
+                           n_threads=a.threads)
 
     n_frames = min(a.frames, src.n_frames) if a.frames else src.n_frames
     print(f"{cam}\n{model}\n{finder}\nfitting {n_frames} of {src.n_frames} frames, "
@@ -83,7 +82,7 @@ def main() -> None:
         writer.set_metadata({"frame_tags": src.tags.table(),
                              "acquisition": acquisition(src)})
         n_written = len(writer)
-    raw = keeper.image(cam, settings.output_unit, source=str(a.data), name="raw frames")
+    raw = keeper.image(cam, source=str(a.data), name="raw frames")
     if raw is not None:
         save_images(a.out, [raw])
     elapsed = time.time() - t0

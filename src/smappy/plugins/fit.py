@@ -26,7 +26,7 @@ import numpy as np
 from ..detect import AbsoluteCutoff, DoGFilter, DynamicCutoff, GaussFilter, PeakFinder
 from ..drift import DriftSettings
 from ..locs import Localizations
-from ..metadata import CameraMetadata
+from ..metadata import DEFAULT_PIXELSIZE_NM, CameraMetadata
 from ..calibrate.transform import RegisterSettings
 from ..pipeline import FitSettings, fit_stack, provenance
 from ..psf import GaussianPSF, SplinePSF
@@ -506,6 +506,9 @@ class _FitPlugin(Plugin):
                     if device else "this file names no camera")
             text += (f": {', '.join(missing)} must be typed in below."
                      if missing else ".")
+            if "pixel size" in missing:
+                text += (f" Without a pixel size the nm positions use an "
+                         f"assumed {DEFAULT_PIXELSIZE_NM:g} nm.")
             return Notice(text, "Add camera...", "camera editor")
         modal = [name for name, parameter in resolved.camera.parameters.items()
                  if parameter.state]
@@ -627,12 +630,6 @@ class _FitPlugin(Plugin):
         try:
             model = self._model_telling(ctx, settings, camera)
             engine = self.engine(settings, camera, finder, model)
-            if camera.pixelsize_um is None:
-                # pixels, then: a preview is about detection and shape, and
-                # nm coordinates would only fail on the missing pixel size
-                engine.settings = replace(engine.settings, output_unit="pixel")
-                ctx.warn("no pixel size: the preview is in pixels, and a run "
-                         "will refuse to start without one")
             engine.push(raw[None], first_frame=index)
             locs = engine.flush()
         except Exception as error:
@@ -646,20 +643,14 @@ class _FitPlugin(Plugin):
             lines.append("not fitted -- " + trouble)
         text = "; ".join(lines)
 
-        unit = "nm" if (locs is not None and "x_nm" in locs.columns) else "pix"
         fitted = None
         if locs is not None and len(locs):
-            scale = (1000.0*float(camera.pixelsize_um)
-                     if unit == "nm" and camera.pixelsize_um else 1.0)
-            names = ("x_nm", "y_nm") if unit == "nm" else ("x_pix", "y_pix")
-            # both columns are chip coordinates -- x_pix has the camera ROI
-            # offset added when it is made, x_nm inherits it -- while the image
-            # drawn is the ROI, so the offset comes off in either unit.  Taking
-            # it off only for nm put every fit of a pixel-unit preview one ROI
-            # offset away, onto the other half of a split frame.
+            # drawn over the frame, so in its pixels: `x_pix` is a chip
+            # coordinate (the camera ROI offset added when it is made) while
+            # the image drawn is the ROI, so the offset comes off
             offset = camera.roi_offset
-            fitted = (np.asarray(locs[names[0]])/scale-offset[0],
-                      np.asarray(locs[names[1]])/scale-offset[1])
+            fitted = (np.asarray(locs["x_pix"]) - offset[0],
+                      np.asarray(locs["y_pix"]) - offset[1])
 
         def plot(figure) -> None:
             """Detection on the left, the fit on the right.
@@ -753,7 +744,11 @@ class _FitPlugin(Plugin):
                                 None if src.live else src.start + total)
         blocks = keeper.watch(blocks)
 
-        ctx.emit("start", {"extent": camera_extent(camera, source.shape, fit.output_unit),
+        if camera.pixelsize_um is None:
+            ctx.warn(f"no pixel size: x_nm and y_nm use an assumed "
+                     f"{DEFAULT_PIXELSIZE_NM:g} nm per pixel; x_pix and y_pix "
+                     f"are the measured positions")
+        ctx.emit("start", {"extent": camera_extent(camera, source.shape),
                            "path": out})
         record = provenance(camera, finder, model, fit, source=src.path)
         record["acquisition"] = acquisition(source)
@@ -846,7 +841,7 @@ class _FitPlugin(Plugin):
             record["history"] = finished.locs.metadata.get("history") or []
             from ..io.hdf5 import save_localizations
             save_localizations(out, finished.locs, record)
-        raw = keeper.image(camera, fit.output_unit, source=str(src.path),
+        raw = keeper.image(camera, source=str(src.path),
                            name=f"{Path(str(src.path)).name}: raw frames")
         if raw is not None and out is not None:
             # last, after any rewrite above: that one starts the file again
@@ -900,7 +895,7 @@ class GaussianFitSettings:
     camera: CameraSettings = field(default_factory=CameraSettings)
     detection: DetectionSettings = field(default_factory=DetectionSettings)
     model: GaussianModelSettings = field(default_factory=GaussianModelSettings)
-    fit: FitSettings = field(default_factory=lambda: FitSettings(output_unit="nm"))
+    fit: FitSettings = field(default_factory=FitSettings)
     output: OutputSettings = field(default_factory=OutputSettings)
 
 
@@ -910,7 +905,7 @@ class SplineFitSettings:
     camera: CameraSettings = field(default_factory=CameraSettings)
     detection: DetectionSettings = field(default_factory=DetectionSettings)
     model: SplineModelSettings = field(default_factory=SplineModelSettings)
-    fit: FitSettings = field(default_factory=lambda: FitSettings(output_unit="nm"))
+    fit: FitSettings = field(default_factory=FitSettings)
     output: OutputSettings = field(default_factory=OutputSettings)
 
 
@@ -963,7 +958,7 @@ class DualSplineFitSettings:
     camera: CameraSettings = field(default_factory=CameraSettings)
     detection: DetectionSettings = field(default_factory=DetectionSettings)
     model: DualModelSettings = field(default_factory=DualModelSettings)
-    fit: FitSettings = field(default_factory=lambda: FitSettings(output_unit="nm"))
+    fit: FitSettings = field(default_factory=FitSettings)
     output: OutputSettings = field(default_factory=OutputSettings)
     finish: FinishSettings = param(default_factory=FinishSettings,
                                    label="after the fit")
@@ -1262,7 +1257,7 @@ class DualGaussianFitSettings:
     detection: DetectionSettings = field(default_factory=DetectionSettings)
     model: DualGaussianModelSettings = field(default_factory=DualGaussianModelSettings)
     transform: ChannelTransformSettings = field(default_factory=ChannelTransformSettings)
-    fit: FitSettings = field(default_factory=lambda: FitSettings(output_unit="nm"))
+    fit: FitSettings = field(default_factory=FitSettings)
     output: OutputSettings = field(default_factory=OutputSettings)
     finish: FinishSettings = param(default_factory=FinishSettings,
                                    label="after the fit")
@@ -1399,9 +1394,9 @@ class DualGaussianFit(_FitPlugin):
                 source=replace(src, start=start, stop=stop, live=False),
                 camera=settings.camera, detection=settings.detection,
                 model=GaussianModelSettings(sigma=settings.model.sigma),
-                # pixels as well as nm: a transformation is a statement about
-                # the camera, and is fitted in chip pixels
-                fit=replace(settings.fit, output_unit="pixel+nm"),
+                # a transformation is a statement about the camera, and is
+                # fitted in the chip pixels every fit writes beside nm
+                fit=settings.fit,
                 output=OutputSettings(save=False, raw_frames=0))
             # the provisional split only decides which half a localization is
             # in, for the threshold and for the count; the seam the fit will

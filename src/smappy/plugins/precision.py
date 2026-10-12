@@ -715,8 +715,6 @@ def measure(locs: Localizations, name: str = "", reach: float = 0.0,
     """
     bounds = bounds or {}
     out = Measurement(name=name, n_locs=len(locs))
-    if "x_nm" not in locs and "x_pix" in locs:
-        out.unit = "pixels"
     lateral = median_precision(locs)
     axial = median_precision(locs, PRECISION_Z_FIELDS)
 
@@ -741,8 +739,8 @@ def measure(locs: Localizations, name: str = "", reach: float = 0.0,
     if "frame" not in locs:
         raise ValueError("the pairwise displacement needs a frame column; the "
                          f"table has {', '.join(sorted(locs.keys()))}")
-    x_name = first_present(locs, ("x_nm", "x_pix"))
-    y_name = first_present(locs, ("y_nm", "y_pix"))
+    x_name = first_present(locs, ("x_nm",))
+    y_name = first_present(locs, ("y_nm",))
     if x_name is None or y_name is None:
         raise ValueError("the pairwise displacement needs positions; the table "
                          f"has {', '.join(sorted(locs.keys()))}")
@@ -844,8 +842,8 @@ def sigma_at_photons(fit: Optional[Fit], photons: float) -> float:
 def _frc_of(locs: Localizations, pixel: float, blocks: int, repeats: int,
             seed: int, report) -> Optional[FRC]:
     """The FRC of this table, or None when it has nothing to render."""
-    x_name = first_present(locs, ("x_nm", "x_pix"))
-    y_name = first_present(locs, ("y_nm", "y_pix"))
+    x_name = first_present(locs, ("x_nm",))
+    y_name = first_present(locs, ("y_nm",))
     if x_name is None or y_name is None or "frame" not in locs:
         return None
     return frc_resolution(np.asarray(locs[x_name], dtype=float),
@@ -858,8 +856,8 @@ def _frc_of(locs: Localizations, pixel: float, blocks: int, repeats: int,
 def _fpc_of(locs: Localizations, pixel: float, blocks: int, repeats: int,
             seed: int, report) -> Optional[FPC]:
     """The per-axis resolution of this table, or None when it is not 3D."""
-    x_name = first_present(locs, ("x_nm", "x_pix"))
-    y_name = first_present(locs, ("y_nm", "y_pix"))
+    x_name = first_present(locs, ("x_nm",))
+    y_name = first_present(locs, ("y_nm",))
     if x_name is None or y_name is None or "frame" not in locs or "z_nm" not in locs:
         return None
     z = np.asarray(locs["z_nm"], dtype=float)
@@ -945,7 +943,7 @@ def summary(found: Sequence[Measurement]) -> str:
     """The numbers, side by side, in the order someone reads them."""
     lines: List[str] = []
     for measurement in found:
-        u = measurement.unit                   # "pixels" for a pixel table
+        u = measurement.unit
         lines.append(f"{measurement.name}: {measurement.n_locs} localizations")
         crlb = measurement.crlb.get("lateral")
         if crlb and np.isfinite(crlb.get("sigma_c", np.nan)):

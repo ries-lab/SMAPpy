@@ -541,11 +541,7 @@ class DualChannelEngine:
         locs = locs[keep]
         self.stats["localizations"] += len(locs)
 
-        if self.settings.output_unit != "pixel":
-            self.camera.require("pixelsize_um")
-            locs = to_nm(locs, self.camera.pixelsize_nm_xy,
-                         keep_pixels=self.settings.output_unit == "pixel+nm")
-        return locs
+        return to_nm(locs, *self.camera.pixelsize_nm_or_default)
 
     def __str__(self) -> str:
         s = self.stats

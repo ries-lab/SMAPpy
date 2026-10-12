@@ -31,7 +31,7 @@ def stack(tmp_path):
 def test_parts_show_up_as_children():
     specs = GaussianFit.specs()
     assert set(specs) == {"source", "camera", "detection", "model", "fit", "output"}
-    assert specs["fit"].children["roisize"].info.label == "ROI size"   # via dotted extra
+    assert specs["fit"].children["roisize"].info.label == "ROI size"
     assert specs["source"].children["path"].info.kind == "open_file"
     assert "Localize/Spline 3D" in plugins.available("Localize/")
 
@@ -175,3 +175,23 @@ def test_a_fit_without_warnings_writes_none(stack, tmp_path):
     assert "warning:" not in result.text
     from smappy.io.hdf5 import load_localizations
     assert "warnings" not in load_localizations(out).metadata
+
+
+def test_a_stack_with_no_pixel_size_is_fitted_on_an_assumed_one(stack, tmp_path):
+    """It used to be refused.  The pixel columns are the measurement; the nm
+    ones use the default size, and the table and the run both say so."""
+    from smappy.io.hdf5 import load_localizations
+    from smappy.metadata import DEFAULT_PIXELSIZE_NM
+    settings = GaussianFitSettings(
+        source=SourceSettings(path=str(stack)),
+        camera=CameraSettings(conversion=1.0, offset=100.0),
+        detection=DetectionSettings(cutoff_mode="absolute", cutoff=40.0),
+        output=OutputSettings(path=str(tmp_path / "out.hdf5")))
+    ctx = Context()
+    result = GaussianFit().run(ctx, settings)
+    assert any("assumed" in w for w in ctx.warnings)
+    locs = result.locs
+    assert len(locs) and np.allclose(locs["x_nm"], locs["x_pix"] * DEFAULT_PIXELSIZE_NM)
+    saved = load_localizations(tmp_path / "out.hdf5")
+    assert saved.metadata.get("pixelsize_assumed") is True
+    assert "x_pix" in saved and "x_nm" in saved

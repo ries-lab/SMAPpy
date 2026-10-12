@@ -239,7 +239,7 @@ def live_view(data, camera: CameraMetadata, finder, model,
                   stop_event=stop)
 
     if extent is None:
-        extent = camera_extent(camera, source.shape, settings.output_unit)
+        extent = camera_extent(camera, source.shape)
     state = ViewState(Localizations(), render_settings, display,
                       live=True, extent=extent)
 
@@ -250,8 +250,8 @@ def live_view(data, camera: CameraMetadata, finder, model,
             writer.close()
 
     viewer = LiveViewer(state, fit, live, on_close=on_close,
-                        filter_fields=expected_filter_fields(settings.output_unit),
-                        color_fields=expected_color_fields(settings.output_unit),
+                        filter_fields=expected_filter_fields(),
+                        color_fields=expected_color_fields(),
                         group_settings=group_settings)
     fit.start()
     plt.show(block=block)
@@ -265,15 +265,15 @@ def live_view(data, camera: CameraMetadata, finder, model,
     return viewer
 
 
-def expected_filter_fields(output_unit: str) -> List[str]:
+def expected_filter_fields() -> List[str]:
     """The filter rows to put up before the first block says what the columns are.
 
     A live window opens on an empty table, so the fields cannot be read off it;
-    they follow from the unit the fit will write.  A row for a column this fit
+    they follow from what a fit writes, in nm.  A row for a column this fit
     does not produce -- z without a 3D calibration -- says so beside itself
     rather than being guessed away.
     """
-    suffix = "_pix" if output_unit == "pixel" else "_nm"
+    suffix = "_nm"
     fields = []
     for group in FILTER_FIELDS:
         match = [name for name in group if name.endswith(suffix)]
@@ -281,14 +281,14 @@ def expected_filter_fields(output_unit: str) -> List[str]:
     return fields
 
 
-def expected_color_fields(output_unit: str) -> List[Tuple[str, Optional[str]]]:
+def expected_color_fields() -> List[Tuple[str, Optional[str]]]:
     """The "colour by" choices to offer before the first block has arrived.
 
     Same reasoning as `expected_filter_fields`: a live window opens on an empty
-    table, so the columns have to follow from the unit the fit will write.
+    table, so the columns have to follow from what a fit writes.
     Choosing one the fit does not produce says so and moves back.
     """
-    suffix = "_pix" if output_unit == "pixel" else "_nm"
+    suffix = "_nm"
     choices: List[Tuple[str, Optional[str]]] = [("intensity", None)]
     for label, names in COLOR_FIELDS:
         match = [name for name in names if name.endswith(suffix)]
@@ -296,9 +296,9 @@ def expected_color_fields(output_unit: str) -> List[Tuple[str, Optional[str]]]:
     return choices
 
 
-def camera_extent(camera: CameraMetadata, shape, output_unit: str = "nm"
+def camera_extent(camera: CameraMetadata, shape
                   ) -> Optional[Tuple[float, float, float, float]]:
-    """The rectangle the camera can see, in the units the table will use.
+    """The rectangle the camera can see, in nm, as the table's positions are.
 
     Fixing the view to this instead of to the data means the image is framed
     the same way from the first localization to the last.
@@ -307,9 +307,5 @@ def camera_extent(camera: CameraMetadata, shape, output_unit: str = "nm"
     x0, y0 = camera.roi_offset
     if camera.roi is not None and len(camera.roi) >= 4:
         width, height = int(camera.roi[2]), int(camera.roi[3])
-    scale = 1.0
-    if output_unit != "pixel":
-        if not camera.pixelsize_um:
-            return None
-        scale = float(camera.pixelsize_um) * 1000.0
-    return (x0 * scale, y0 * scale, (x0 + width) * scale, (y0 + height) * scale)
+    (sx, sy), _ = camera.pixelsize_nm_or_default
+    return (x0 * sx, y0 * sy, (x0 + width) * sx, (y0 + height) * sy)

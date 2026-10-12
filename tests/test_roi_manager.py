@@ -277,16 +277,6 @@ def test_the_default_histograms_draw_every_number_the_statistics_gave():
                           'sigma_c_nm'}
 
 
-def test_a_pixel_precision_is_averaged_under_a_pixel_name():
-    from smappy.plugins.statistics import statistics, statistics_values
-    locs = Localizations({'x_pix': np.zeros(3), 'y_pix': np.zeros(3),
-                          'xy_err_pix': np.array([0.1, 0.2, 0.3]),
-                          'photons': np.ones(3)}, {'units': 'pixel'})
-    values = statistics_values(locs, statistics(locs))
-    assert values['mean_precision_pix'] == pytest.approx(0.2)
-    assert 'mean_precision_nm' not in values
-
-
 def test_results_live_in_a_table_per_evaluation_and_runs_are_only_a_log():
     p = ROIProject()
     s = p.add_source(table([0, 10, 1000]))

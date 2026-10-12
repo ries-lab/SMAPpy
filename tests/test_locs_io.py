@@ -19,28 +19,46 @@ def _table(n=100, seed=0):
     }, {"units": "pixel"})
 
 
-def test_pixels_are_primary_and_nm_is_derived():
+def test_pixels_are_primary_and_nm_is_derived_beside_them():
     locs = _table()
     nm = to_nm(locs, 127.0)
-    assert "x_nm" in nm and "x_pix" not in nm
+    assert "x_nm" in nm and np.array_equal(nm["x_pix"], locs["x_pix"])
     assert np.allclose(nm["x_nm"], locs["x_pix"] * 127.0)
     assert np.allclose(nm["x_err_nm"], locs["x_err_pix"] * 127.0)
     # z is already nm and must not be scaled again
     assert np.array_equal(nm["z_nm"], locs["z_nm"])
     # photons are not a length
     assert np.array_equal(nm["photons"], locs["photons"])
-    assert nm.metadata["units"] == "nm" and nm.metadata["pixelsize_nm"] == 127.0
+    assert nm.metadata["units"] == "pixel+nm" and nm.metadata["pixelsize_nm"] == 127.0
+    assert "pixelsize_assumed" not in nm.metadata
 
 
-def test_keep_pixels_gives_both():
-    both = to_nm(_table(), 100.0, keep_pixels=True)
-    assert "x_pix" in both and "x_nm" in both
-    assert both.metadata["units"] == "pixel+nm"
+def test_an_assumed_pixel_size_is_recorded_with_the_table():
+    """A file with no pixel size is still fitted; its nm columns are on an
+    assumed scale, and the table says so."""
+    from smappy.metadata import DEFAULT_PIXELSIZE_NM, CameraMetadata
+    sizes, assumed = CameraMetadata(conversion=1.0, offset=0.0).pixelsize_nm_or_default
+    assert assumed and sizes == (DEFAULT_PIXELSIZE_NM, DEFAULT_PIXELSIZE_NM)
+    nm = to_nm(_table(), sizes, assumed=assumed)
+    assert nm.metadata["pixelsize_assumed"] is True
+    assert np.allclose(nm["x_nm"], nm["x_pix"] * DEFAULT_PIXELSIZE_NM)
 
 
-def test_converting_twice_is_a_no_op():
+def test_converting_twice_changes_nothing():
     once = to_nm(_table(), 127.0)
-    assert to_nm(once, 127.0) is once
+    twice = to_nm(once, 127.0)
+    assert twice.keys() == once.keys()
+    assert all(np.array_equal(twice[k], once[k]) for k in once.keys())
+
+
+def test_a_table_loaded_in_pixels_only_gets_nm_columns(tmp_path):
+    from smappy.io.formats import with_nm
+    table = _table()
+    assert "x_nm" in with_nm(table, 110.0)
+    assert np.allclose(with_nm(table, 110.0)["x_nm"], table["x_pix"] * 110.0)
+    assert with_nm(table).metadata["pixelsize_assumed"] is True
+    done = to_nm(table, 110.0)
+    assert with_nm(done) is done
 
 
 def test_hdf5_round_trip(tmp_path):

@@ -150,11 +150,11 @@ def _from_specs(settings_cls: type, specs: Dict[str, "ParamSpec"],
                 values: Optional[Dict[str, Any]]):
     """`settings_from` over specs whose defaults are already resolved.
 
-    A part's defaults are its *parent's* -- `GaussianFitSettings` declares
-    ``fit = FitSettings(output_unit="nm")`` -- and `param_specs` carries them
-    down; building a part from its own class instead quietly reset them, so
-    the form and a script made different settings from the same values (a
-    fit from `settings_from` came out in pixels).
+    A part's defaults are its *parent's* -- a settings class may declare
+    ``part: PartSettings = field(default_factory=lambda: PartSettings(n=3))``
+    -- and `param_specs` carries them down; building a part from its own
+    class instead quietly reset them, so the form and a script made
+    different settings from the same values.
     """
     nested: Dict[str, Dict[str, Any]] = {}
     flat: Dict[str, Any] = {}

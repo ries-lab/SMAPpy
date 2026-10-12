@@ -648,18 +648,6 @@ def test_chunked_linking_by_precision_stays_within_a_hair_of_the_control():
         assert stats["rejoined"] > 0
 
 
-def test_linking_by_precision_reads_the_precision_in_the_unit_of_the_positions():
-    locs, _ = _neighbours_and_dim_blinks()
-    pix = Localizations({"x_pix": locs["x_nm"] / 100, "y_pix": locs["y_nm"] / 100,
-                         "frame": locs["frame"], "xy_err_pix": locs["xy_err_nm"] / 100,
-                         "xy_err_nm": np.full(len(locs), 1e6, np.float32)}, {})
-    settings = GroupSettings(link="precision", dx_min=0.1, dx_max=1.5, link_chunks=1)
-    _, a = group(locs, GroupSettings(link="precision", link_chunks=1),
-                 attach_columns=False)
-    _, b = group(pix, settings, attach_columns=False)
-    assert np.array_equal(a, b)
-
-
 def test_linking_by_precision_without_a_precision_falls_back_to_the_box():
     x, y, f = _blinking(n_emitters=300, frames=100)
     locs = Localizations({"x_nm": x, "y_nm": y, "frame": f}, {"units": "nm"})

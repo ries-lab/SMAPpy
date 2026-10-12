@@ -83,7 +83,7 @@ def test_the_paired_gaussian_fit_finds_the_position_and_the_colour():
     finder = PeakFinder(DoGFilter(1.2), AbsoluteCutoff(25.0))
     model = GlobalGaussianPSF(sigma=1.2)
     engine = DualChannelEngine(camera(), finder, model, t,
-                               FitSettings(roisize=13, output_unit="pixel"))
+                               FitSettings(roisize=13))
     engine.push(raw, first_frame=0)
     locs = engine.flush()
 
@@ -103,8 +103,8 @@ def test_the_paired_gaussian_fit_finds_the_position_and_the_colour():
 
 
 def test_the_table_has_no_half_converted_widths():
-    """`sigma_pix_ch1` has to become nm when `sigma_pix` does, or the table
-    would carry two units under one name."""
+    """`sigma_pix_ch1` gets its nm column when `sigma_pix` does, or the nm
+    columns would be incomplete."""
     from smappy.locs import Localizations, to_nm
 
     table = Localizations({"x_pix": np.zeros(3), "y_pix": np.zeros(3),
@@ -112,7 +112,7 @@ def test_the_table_has_no_half_converted_widths():
                            "sigma_pix_ch1": np.full(3, 2.0),
                            "photons_ch1": np.ones(3)}, {})
     nm = to_nm(table, 100.0)
-    assert "sigma_nm_ch1" in nm and "sigma_pix_ch1" not in nm
+    assert "sigma_nm_ch1" in nm and "sigma_pix_ch1" in nm
     np.testing.assert_allclose(nm["sigma_nm_ch1"], 200.0)
     assert "photons_ch1" in nm          # not a length, left alone
 
@@ -131,7 +131,7 @@ def test_an_unlinked_fit_keeps_how_far_the_partner_is_from_the_link():
     def fit(t, shared):
         model = GlobalGaussianPSF(sigma=1.2, shared=shared)
         engine = DualChannelEngine(camera(), finder, model, t,
-                                   FitSettings(roisize=13, output_unit="nm"))
+                                   FitSettings(roisize=13))
         engine.push(raw, first_frame=0)
         return engine.flush()
 
@@ -147,8 +147,9 @@ def test_an_unlinked_fit_keeps_how_far_the_partner_is_from_the_link():
     assert abs(np.median(wrong["dy_nm_ch1"])) < 5
     # linked, there is nothing to compare
     assert "dx_nm_ch1" not in fit(transform(), (True, True, False, False, False))
-    # and every width and its error is in nm in an nm table
-    assert not [name for name in right.keys() if "_pix" in name]
+    # and every width and its error has its nm column beside the pixel one
+    assert all(name.replace("_pix", "_nm") in right
+               for name in right.keys() if "_pix" in name)
 
 
 def test_linked_photons_are_the_emitters_total():
@@ -162,7 +163,7 @@ def test_linked_photons_are_the_emitters_total():
     engine = DualChannelEngine(
         camera(), PeakFinder(DoGFilter(1.2), AbsoluteCutoff(25.0)),
         GlobalGaussianPSF(sigma=1.2, shared=(True, True, True, False, False)),
-        transform(), FitSettings(roisize=13, output_unit="pixel"),
+        transform(), FitSettings(roisize=13),
         photon_ratio=0.35 / 0.65)
     engine.push((frames + 100).astype(np.uint16), first_frame=0)
     locs = engine.flush()
@@ -179,7 +180,7 @@ def test_frames_from_another_camera_roi_are_refused():
     t.geometry["coordinate_system"] = "roi-local"
     engine = DualChannelEngine(camera(), PeakFinder(DoGFilter(1.2), AbsoluteCutoff(25.0)),
                                GlobalGaussianPSF(sigma=1.2), t,
-                               FitSettings(roisize=13, output_unit="pixel"))
+                               FitSettings(roisize=13))
     with pytest.raises(ValueError, match="original bead image"):
         engine.push(np.zeros((2, SHAPE[0] + 8, SHAPE[1]), np.uint16) + 100)
 
@@ -207,7 +208,7 @@ def test_the_2c2d_plugin_calibrates_on_the_movie_and_then_fits_it(tmp_path):
         detection=DetectionSettings(cutoff_mode="absolute", cutoff=25.0),
         model=DualGaussianModelSettings(sigma=1.2),
         transform=ChannelTransformSettings(calibrate=True, calibrate_frames=150),
-        fit=FitSettings(roisize=13, output_unit="pixel+nm"),
+        fit=FitSettings(roisize=13),
         output=OutputSettings(path=str(tmp_path / "out.hdf5")))
 
     said = []
@@ -253,7 +254,7 @@ def test_a_saved_transformation_is_used_when_one_is_given(tmp_path):
         detection=DetectionSettings(cutoff_mode="absolute", cutoff=25.0),
         model=DualGaussianModelSettings(sigma=1.2),
         transform=ChannelTransformSettings(path=str(path)),
-        fit=FitSettings(roisize=13, output_unit="pixel"),
+        fit=FitSettings(roisize=13),
         output=OutputSettings(save=False))
 
     plugin = DualGaussianFit()

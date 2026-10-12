@@ -966,7 +966,12 @@ class ControlWindow(QMainWindow):
         name = (names[0] if len(names) == 1 else f"{len(names)} files") if names else "no file"
         n = len(self.session.locs)
         shown = self._shown_text()
-        self.statusBar().showMessage(f"{name}: {n} localizations" + (f", {shown}" if shown else ""))
+        meta = self.session.locs.metadata
+        # x_nm on a scale nobody gave: worth seeing whenever the table is
+        assumed = (f"; nm on an assumed {meta.get('pixelsize_nm', 0):g} nm pixel"
+                   if meta.get("pixelsize_assumed") else "")
+        self.statusBar().showMessage(f"{name}: {n} localizations"
+                                     + (f", {shown}" if shown else "") + assumed)
         if what in ("name", "locs"):
             self._update_title()
         if self.session.name or self.session.colour:

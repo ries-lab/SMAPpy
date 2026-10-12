@@ -98,10 +98,11 @@ rather than something already drawn.
 
 | column | meaning |
 | --- | --- |
-| `x_nm`, `y_nm`, `z_nm` | position (a pixel-unit table has `x_pix`, ...) |
+| `x_nm`, `y_nm`, `z_nm` | position; what everything reads |
+| `x_pix`, `y_pix`, ... | a fit's positions in camera pixels, kept beside the nm ones (`metadata["pixelsize_assumed"]` when the nm ones are on the default scale) |
 | `frame` | camera frame, int64 |
 | `photons`, `background` | per localization |
-| `xy_err_nm` | lateral precision, the RMS of `x_err_nm` and `y_err_nm`; `xy_err_pix` in a pixel table |
+| `xy_err_nm` | lateral precision, the RMS of `x_err_nm` and `y_err_nm` |
 | `z_err_nm` | axial precision, when the fit produced one |
 | `n_in_group` | **on-time in frames** (for a table with a trace id, `tid`, the localizations in the trace); grouping writes it onto both tables |
 | `group_id` | which group a localization was linked into, 1-based; on the grouped table, its own row |
@@ -112,9 +113,10 @@ rather than something already drawn.
 Every precision is `<quantity>_err_<unit>` -- `x_err_nm`, `z_err_nm`,
 `photons_err` (no unit, nothing after `_err`).
 
-Prefer `next((n for n in ("xy_err_nm", "xy_err_pix") if n in locs), None)`
-over assuming one spelling, and raise a message naming the columns the table
-*does* have when something is missing.
+Read positions and precisions in nm (`render.positions`, `xy_err_nm`): a fit
+writes them and a loader gives a pixel-only file nm columns
+(`io.formats.with_nm`).  Raise a message naming the columns the table *does*
+have when something is missing.
 
 A column that needs a **rule for grouping** is a recipe rather than data:
 `mathparse` keeps it in `metadata["derived"]`, and the recipe says what the

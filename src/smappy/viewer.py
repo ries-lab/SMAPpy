@@ -52,9 +52,9 @@ from .spatial import GrowingIndex, SpatialIndex
 # The fields worth a filter control, best alternative first.  Everything else
 # stays available through `LocFilter` without cluttering the window.
 FILTER_FIELDS: Sequence[Tuple[str, ...]] = (
-    ("xy_err_nm", "xy_err_pix"),
+    ("xy_err_nm",),
     ("z_nm",),
-    ("sigma_nm", "sigma_pix"),
+    ("sigma_nm",),
     ("logl_rel",),
     ("frame",),
     ("channel",),
@@ -67,7 +67,7 @@ FILTER_FIELDS: Sequence[Tuple[str, ...]] = (
 COLOR_FIELDS: Sequence[Tuple[str, Tuple[str, ...]]] = (
     ("z", ("z_nm",)),
     ("frame", ("frame",)),
-    ("precision", ("xy_err_nm", "xy_err_pix")),
+    ("precision", ("xy_err_nm",)),
     ("photons", ("photons",)),
     ("colour", ("channel",)),
 )
@@ -104,11 +104,8 @@ class LocSet:
         building the index is what a new layer would otherwise spend on."""
         self.locs = locs
         self.filter = filter if filter is not None else LocFilter(locs)
-        self._precision_field: Optional[str] = None
-        for name in ("xy_err_nm", "xy_err_pix"):
-            if name in locs:
-                self._precision_field = name
-                break
+        self._precision_field: Optional[str] = \
+            "xy_err_nm" if "xy_err_nm" in locs else None
         # the extent on custom render axes, cached; set before the shared
         # branch returns, because a shared set answers `axis_bounds` too -- it
         # is the second layer, and without this it raised on any picture that

@@ -31,12 +31,12 @@ from .widgets import CollapsibleSection, ColumnScroll, detach_to_window
 
 # the fields with a quick button, best-named alternative first
 QUICK_FIELDS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
-    ("prec", ("xy_err_nm", "xy_err_pix")),
+    ("prec", ("xy_err_nm",)),
     ("LL", ("logl_rel",)),
     ("frame", ("frame",)),
     ("z", ("z_nm",)),
     ("phot", ("photons",)),
-    ("PSF", ("sigma_nm", "sigma_pix")),
+    ("PSF", ("sigma_nm",)),
     ("ch", ("channel",)),
     ("file", ("filenumber",)),
 )

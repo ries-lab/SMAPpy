@@ -465,19 +465,6 @@ def test_a_cleared_default_stays_cleared():
     assert "xy_err_nm" not in viewer.state.filter
 
 
-def test_a_pixel_table_gets_only_the_bounds_whose_unit_is_fixed():
-    """25 nm means nothing in pixels, so that default does not apply there."""
-    from smappy.viewer import Viewer
-
-    locs = _table()
-    locs.columns["xy_err_pix"] = locs.columns.pop("xy_err_nm")
-    locs.columns["x_pix"] = locs.columns.pop("x_nm")
-    locs.columns["y_pix"] = locs.columns.pop("y_nm")
-    viewer = Viewer(ViewState(locs))
-    assert "xy_err_pix" not in viewer.state.filter
-    assert viewer.state.filter.ranges["logl_rel"] == (-1.5, None)
-
-
 def test_the_image_and_the_controls_are_separate_windows():
     from smappy.viewer import Viewer
 

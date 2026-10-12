@@ -300,9 +300,6 @@ Seven parameters instead of five.  Useful for looking at astigmatism, not for
 Large enough to hold the spot and some background around it: about 7 PSF
 widths.  Larger ROIs catch more neighbours.
 
-### fit.output_unit
-*pixel+nm* keeps both, which some other programs want.
-
 ### output.raw_frames
 50 is enough to see what the camera saw at the start, the end and a few
 points between.  Each kept frame costs its size in the file: for a

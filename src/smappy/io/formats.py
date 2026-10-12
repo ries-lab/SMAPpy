@@ -75,7 +75,24 @@ def load(path, reader: Optional[Reader] = None, **kwargs) -> Tuple[Localizations
     reader = reader or reader_for(path)
     locs, info = reader.load(Path(path), **kwargs)
     info.n = len(locs)
-    return locs, info
+    return with_nm(locs, info.pixelsize_nm), info
+
+
+def with_nm(locs: Localizations, pixelsize_nm: Optional[float] = None
+            ) -> Localizations:
+    """A table in pixels only, given nm columns as a fit's output has them.
+
+    Everything downstream reads nm, so a file that has only `x_pix` / `y_pix`
+    -- a SMAP file without ``xnm``, a csv in pixels -- is converted on the
+    way in, with the file's pixel size or, failing that, the default one,
+    which the table then records as assumed.
+    """
+    if "x_nm" in locs or "x_pix" not in locs:
+        return locs
+    from ..locs import to_nm
+    from ..metadata import DEFAULT_PIXELSIZE_NM
+    size = pixelsize_nm or locs.metadata.get("pixelsize_nm")
+    return to_nm(locs, size or DEFAULT_PIXELSIZE_NM, assumed=not size)
 
 
 @dataclass

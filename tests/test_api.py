@@ -33,7 +33,7 @@ def test_fitting_frames_from_memory_needs_no_file():
     locs = smappy.fit(frames(), **FIT)
     assert len(locs) == 8
     assert set(("x_nm", "y_nm", "photons")) <= set(locs.keys())
-    assert locs.metadata["units"] == "nm"
+    assert locs.metadata["units"] == "pixel+nm"
 
 
 def test_the_returned_table_is_the_one_that_was_written(tmp_path):

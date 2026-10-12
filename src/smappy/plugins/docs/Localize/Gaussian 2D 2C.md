@@ -68,7 +68,7 @@ camera = CameraMetadata(conversion=0.5, offset=100.0, pixelsize_um=0.1,
                         em_on=False, roi=(0, 0, 100, 200))
 finder = replace(DetectionSettings().finder(), split=(0, 100.0))
 engine = DualChannelEngine(camera, finder, DualGaussianModelSettings().model(),
-                           transform, FitSettings(roisize=13, output_unit="nm"))
+                           transform, FitSettings(roisize=13))
 engine.push(frames, 0)
 locs = engine.flush()
 # each localization's dye: the nearest true molecule in its frame

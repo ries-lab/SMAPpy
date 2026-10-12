@@ -168,7 +168,7 @@ def test_the_live_fit_reads_it_like_a_growing_file():
                   CameraMetadata(conversion=1.0, offset=100.0, pixelsize_um=0.1),
                   PeakFinder(DoGFilter(1.2), AbsoluteCutoff(40.0)),
                   GaussianPSF(sigma=1.2),
-                  FitSettings(roisize=9, output_unit="nm"), live)
+                  FitSettings(roisize=9), live)
     thread = threading.Thread(target=acquire)
     thread.start()
     fit.start()
@@ -215,7 +215,7 @@ def test_live_view_takes_a_queue_source(tmp_path):
                                               pixelsize_um=0.1),
                        PeakFinder(DoGFilter(1.2), AbsoluteCutoff(40.0)),
                        GaussianPSF(sigma=1.2),
-                       FitSettings(roisize=9, output_unit="nm"),
+                       FitSettings(roisize=9),
                        output=out, live=live, block=False)
     try:
         deadline = time.monotonic() + 20

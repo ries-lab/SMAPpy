@@ -49,9 +49,6 @@ class FitSettings:
                                               unit="pix", advanced=True,
                                               help="reject fits that ran "
                                                    "off; auto: keep all")
-    output_unit: str = param("pixel", label="units",
-                             choices=("nm", "pixel", "pixel+nm"),
-                             help="the unit of the positions in the table")
 
     def block_rois(self) -> int:
         """SMAP scales the block with the ROI area; keep that behaviour."""
@@ -134,11 +131,7 @@ class LocalizationEngine:
         locs = locs[keep]
         self.stats["localizations"] += len(locs)
 
-        if self.settings.output_unit != "pixel":
-            self.camera.require("pixelsize_um")
-            locs = to_nm(locs, self.camera.pixelsize_nm_xy,
-                         keep_pixels=self.settings.output_unit == "pixel+nm")
-        return locs
+        return to_nm(locs, *self.camera.pixelsize_nm_or_default)
 
     def __str__(self) -> str:
         s = self.stats
@@ -325,8 +318,7 @@ def provenance(camera: CameraMetadata, finder: PeakFinder, model: PSFModel,
         "psf_model": str(model),
         "fit": {"roisize": settings.roisize, "iterations": settings.iterations,
                 "rois_per_block": settings.block_rois(),
-                "max_fit_distance": settings.max_fit_distance,
-                "output_unit": settings.output_unit},
+                "max_fit_distance": settings.max_fit_distance},
         "smappy_version": _version(),
     }
     calibration = getattr(model, "calibration", None)

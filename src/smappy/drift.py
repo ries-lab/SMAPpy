@@ -1015,15 +1015,11 @@ def _pixelsize_nm(locs: Localizations, pixelsize_nm: Optional[float]) -> float:
 def _positions_nm(locs: Localizations, pixelsize_nm: Optional[float],
                   use_z: Optional[bool]):
     """x, y, z of the whole table in nm; z is zero for a 2D table."""
-    if "x_nm" in locs and "y_nm" in locs:
-        x = np.asarray(locs["x_nm"], dtype=np.float64)
-        y = np.asarray(locs["y_nm"], dtype=np.float64)
-    elif "x_pix" in locs and "y_pix" in locs:
-        scale = _pixelsize_nm(locs, pixelsize_nm)
-        x = np.asarray(locs["x_pix"], dtype=np.float64) * scale
-        y = np.asarray(locs["y_pix"], dtype=np.float64) * scale
-    else:
-        raise ValueError("no position columns (x_nm/y_nm or x_pix/y_pix)")
+    if "x_nm" not in locs or "y_nm" not in locs:
+        raise ValueError("no position columns x_nm, y_nm; the table has "
+                         + ", ".join(sorted(locs.keys())))
+    x = np.asarray(locs["x_nm"], dtype=np.float64)
+    y = np.asarray(locs["y_nm"], dtype=np.float64)
 
     has_z = "z_nm" in locs
     if use_z is None:

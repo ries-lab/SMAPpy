@@ -54,13 +54,10 @@ class Declared:
 
 
 def test_a_part_keeps_the_default_its_parent_declares_for_it():
-    """`GaussianFitSettings` declares ``FitSettings(output_unit="nm")``; built
-    from a map that did not name the unit, the fit came out in pixels."""
+    """A part built from a map that does not name a field takes the
+    default its parent declares, not its own class's."""
     assert settings_from(Declared, {}).fit.method == "slow"
     assert settings_from(Declared, {"fit.roisize": 9}).fit == Inner(9, "slow")
-    from smappy.plugins.fit import GaussianFitSettings
-    assert settings_from(GaussianFitSettings,
-                         {"camera.conversion": 0.5}).fit.output_unit == "nm"
 
 
 def test_a_plugin_has_a_version_and_no_grouping_requirement_unless_it_says():
