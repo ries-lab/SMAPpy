@@ -254,6 +254,7 @@ class SessionROIs(ROIProject):
                 "sources": [{"id": s.id, "number": s.number, "name": s.name}
                             for s in self.sources.values()],
                 "rois": [asdict(r) for r in self.rois.values()],
+                "next_number": self.next_number,
                 "runs": self.runs,
                 # the results, a columnar table per evaluation (`RegionTable`)
                 "tables": self.tables_dict(self.rois),
@@ -265,6 +266,7 @@ class SessionROIs(ROIProject):
     def from_dict(self, doc: Optional[dict]) -> None:
         """Restore ROIs, runs and navigation saved with a file."""
         self.rois = {}
+        self.next_number = 1
         self.runs = []
         self.tables = {}
         self.navigation = {}
@@ -299,6 +301,7 @@ class SessionROIs(ROIProject):
             roi.file_id = remap.get(roi.file_id, roi.file_id)
             if roi.file_id in self.sources:
                 self.rois[roi.id] = roi
+        self.number_rois(doc.get("next_number"))
         for run in doc.get("runs", []):
             records = {i: r for i, r in (run.get("records") or {}).items()
                        if i in self.rois}
@@ -326,10 +329,6 @@ class SessionROIs(ROIProject):
 
     def rois_of(self, file_id) -> List[ROI]:
         return [r for r in self.rois.values() if r.file_id == file_id]
-
-    def numbers(self) -> Dict[str, int]:
-        """A 1-based number per ROI, in the order they were made."""
-        return {roi_id: i + 1 for i, roi_id in enumerate(self.rois)}
 
     def file_number(self, file_id) -> int:
         source = self.sources.get(file_id)

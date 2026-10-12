@@ -781,7 +781,7 @@ def site_truth(project, rows, corners: int) -> Optional[np.ndarray]:
     tables = {}
     out = []
     for row in rows:
-        roi = project.rois.get(row["roi_id"])
+        roi = project.roi_numbered(row["roi_id"])
         if roi is None:
             return None
         locs = project.extract(roi)
@@ -804,7 +804,7 @@ def site_truth(project, rows, corners: int) -> Optional[np.ndarray]:
 
 def simulated_efficiency(project, rows) -> Optional[float]:
     """The labelling efficiency the sites' file was simulated with, if it was."""
-    roi = project.rois.get(rows[0]["roi_id"]) if rows else None
+    roi = project.roi_numbered(rows[0]["roi_id"]) if rows else None
     if roi is None:
         return None
     recipe = project.state(roi.file_id).locs.metadata.get("simulation_settings") or {}
@@ -843,8 +843,10 @@ def corner_settings(ctx: Context, evaluation, rows=()) -> NPCCornersSettings:
         return NPCCornersSettings()
     ev = evaluation if isinstance(evaluation, Evaluation) else Evaluation.parse(evaluation)
     ids = [r["roi_id"] for r in rows if "roi_id" in r]
-    if ev.on_rois:
-        ids = [i for i in ids if ctx.rois is not None and i in ctx.rois.rois]
+    if ev.on_rois:            # a row names its ROI by number, the store by id
+        found = [ctx.rois.roi_numbered(i) if ctx.rois is not None else None
+                 for i in ids]
+        ids = [roi.id for roi in found if roi is not None]
     made = steps(ctx, ev, ids or None)
     if len(made) > 1:
         raise ValueError(f"the sites were counted with different settings under "
@@ -857,8 +859,8 @@ def field_precisions(project, rows) -> np.ndarray:
     """The precision of every localization of the files the sites are in, as
     the layer filters them -- what a cutoff's pass fraction is measured on."""
     out = []
-    for file_id in {project.rois[r["roi_id"]].file_id for r in rows
-                    if r["roi_id"] in project.rois}:
+    found = (project.roi_numbered(r["roi_id"]) for r in rows)
+    for file_id in {roi.file_id for roi in found if roi is not None}:
         state = project.state(file_id)
         locs = state.locs[state.filter.indices]
         name = precision_column(locs)

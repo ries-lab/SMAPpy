@@ -301,7 +301,11 @@ Enter does the same.
 
 ### Remove
 Deletes the selected ROI.  To keep an ROI out of the analysis without
-losing it, untick *use* instead.
+losing it, untick *use* instead.  The other ROIs keep their numbers: an ROI
+is given its number when it is made and keeps it, and a number is never given
+again, so ROI 5 is ROI 5 in the list, in the results and in the `roi_id`
+column of *Regions to column*, whatever was removed before it.  *Undo*
+brings a removed ROI back under its own number.
 
 ### Undo
 Takes back the last edit of the ROIs: a segmenter's run (all the ROIs it

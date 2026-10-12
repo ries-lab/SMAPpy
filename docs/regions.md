@@ -512,7 +512,8 @@ Each step leaves the program working and the suite green.
    each cluster (*replace*, *ROIs from*), refused inside a block.  Its
    radius defaults to 50 nm: SMAP's automatic one is the density of the
    whole field and merges everything in a sparse cell.  *ROI to column*
-   writes `roi_id` (the ROI's number; the later ROI where two overlap; 0 in
+   writes `roi_id` (the ROI's number, `ROI.number`, given once and never
+   reused, which is also a result row's `roi_id`; the later ROI where two overlap; 0 in
    none; ROIs ticked *use*), membership the shape alone.  Both are under
    `Analysis/Regions/`, where step 6 moves the rest.
 6. **The tree** moved to `Analysis/Measure` and `Analysis/Regions`, the tab

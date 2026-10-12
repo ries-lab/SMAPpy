@@ -132,6 +132,11 @@ class ROI:
     file_id: str
     center: list
     id: str = field(default_factory=lambda: uuid4().hex)
+    # what the user sees and a column carries (`roi_id`): given once, from the
+    # project's counter, and never reused, so removing ROI 3 leaves ROI 5 as
+    # 5 -- in the list, on the localizations and in the results alike.  The
+    # uuid stays the key the results are stored under.
+    number: int = 0
     polygon: Optional[list] = None
     direction: Optional[list] = None  # two absolute xy endpoints
     reviewed: bool = False
@@ -297,6 +302,10 @@ class ROIProject:
         self.segment_preview = None
         self.history = ROIHistory()
         self._filter_keys = {}
+        # the number the next ROI is given (`ROI.number`): it only counts up
+        # and is saved with the ROIs, so an undone ROI's number is not handed
+        # to the next one, and its redo brings it back unchanged
+        self.next_number = 1
 
     def add_file(self, path):
         return self.add_source(load_localizations(path), path=path)
@@ -421,8 +430,36 @@ class ROIProject:
                   polygon_vertices(polygon)), reviewed=reviewed)
         if origin is not None:
             roi.origin = json.loads(json_text(origin))
+        roi.number = self.next_number
+        self.next_number += 1
         self.rois[roi.id] = roi
         return roi
+
+    def numbers(self) -> Dict[str, int]:
+        """Each ROI's number (`ROI.number`), by its id."""
+        return {roi_id: roi.number for roi_id, roi in self.rois.items()}
+
+    def roi_numbered(self, number) -> Optional[ROI]:
+        """The ROI with this number -- a result row's ``roi_id`` -- or None."""
+        try:
+            number = int(number)
+        except (TypeError, ValueError):
+            return None
+        return next((r for r in self.rois.values() if r.number == number), None)
+
+    def number_rois(self, next_number=None) -> None:
+        """Numbers for the ROIs that have none (a file from before they were
+        kept), in the order the ROIs were made and after the highest in use,
+        and a counter past all of them."""
+        start = max([int(next_number or 1)]
+                    + [r.number + 1 for r in self.rois.values() if r.number > 0])
+        seen = set()
+        for roi in self.rois.values():
+            if roi.number <= 0 or roi.number in seen:
+                roi.number = start
+                start += 1
+            seen.add(roi.number)
+        self.next_number = start
 
     def move_roi(self, roi_id, center):
         """Translate the entire ROI, including its polygon and direction line."""
@@ -924,7 +961,7 @@ class ROIProject:
                 {"steps": {label: found[label][0] for label in names}})
             if values:
                 roi = self.rois[roi_id]
-                rows.append({"roi_id": roi.id, "file_id": roi.file_id, **values})
+                rows.append({"roi_id": roi.number, "file_id": roi.file_id, **values})
         return rows
 
     def _pipeline_results(self, steps):
@@ -942,7 +979,7 @@ class ROIProject:
                                           for step in steps}}
             values = pipeline_module.merged_values(record)
             if values:
-                rows.append({"roi_id": roi.id, "file_id": roi.file_id, **values})
+                rows.append({"roi_id": roi.number, "file_id": roi.file_id, **values})
         return rows
 
     def find(self, file_id, plugin=None, settings=None, parameters=None,
@@ -1037,6 +1074,7 @@ class ROIProject:
                "filters": self.filters,
                "grouped": self.grouped, "group_settings": asdict(self.group_settings),
                "navigation": self.navigation, "rois": [asdict(r) for r in self.rois.values()],
+               "next_number": self.next_number,
                "runs": self.runs, "pipeline": [asdict(i) for i in self.pipeline],
                "block_options": self.block_options,
                "sources": [{"id": s.id, "name": s.name,
@@ -1092,6 +1130,7 @@ class ROIProject:
             if roi.file_id not in project.sources or roi.id in project.rois:
                 raise ValueError("Invalid ROI source or duplicate ROI ID")
             project.rois[roi.id] = roi
+        project.number_rois(doc.get("next_number"))
         project.runs = []
         for run in doc['runs']:
             project.absorb_run(run)

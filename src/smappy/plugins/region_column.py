@@ -79,7 +79,7 @@ class RegionsToColumn(Plugin):
 
     Settings = RegionColumnSettings
     changes_locs = True
-    version = "1"
+    version = "2"         # 2: roi_id is the ROI's own number, kept when others go
 
     def choices(self, ctx: Context, settings):
         from ..region_results import available
@@ -116,12 +116,16 @@ class RegionsToColumn(Plugin):
                 raise ValueError(f"{', '.join(measured)}: name the evaluation that "
                                  "measured them in *results from*")
         members = region_members(ctx, regions)
+        if regions == BLOCK_ROIS:
+            # an ROI by its number, as the results' rows name it
+            by_id = ctx.rois.numbers()
+            members = [(str(by_id[r]), rows) for r, rows in members]
         n = len(ctx.locs)
         columns = {settings.prefix + k: v for k, v in
                    values_onto(n, members, values, settings.merge).items()}
         if regions == BLOCK_ROIS and numbers:
             columns[settings.prefix + REGION_NUMBER] = roi_numbers(
-                n, members, ctx.rois.numbers(),
+                n, members, {r: int(r) for r, _ in members},
                 "first" if settings.merge == "first" else "last")
         if not columns:
             raise ValueError("there is nothing to write")
@@ -142,9 +146,9 @@ class RegionsToColumn(Plugin):
 
 
 def roi_numbers(n: int, members, numbers: Dict[Any, int], rule: str = "last") -> np.ndarray:
-    """``n`` rows, each the number of the last ROI in ``members`` -- in the
-    order they were made -- that holds it (the first, with ``rule``), 0 in
-    none."""
+    """``n`` rows, each the number (``numbers`` of its id in ``members``) of
+    the last ROI in ``members`` -- in the order they were made -- that holds
+    it (the first, with ``rule``), 0 in none."""
     from ..region_runs import merge_pieces
     numbers = {str(k): v for k, v in numbers.items()}
     pieces = [(rows, np.full(len(rows), numbers[r], dtype=np.int64))

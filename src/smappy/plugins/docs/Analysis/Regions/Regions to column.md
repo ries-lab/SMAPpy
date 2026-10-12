@@ -1,5 +1,5 @@
 ---
-version: "1"
+version: "2"
 covers: [smappy.plugins.region_column.RegionsToColumn.run, smappy.plugins.region_column.rows_values, smappy.plugins.region_column.roi_numbers, smappy.region_runs.region_members, smappy.region_runs.values_onto, smappy.region_runs.merge_pieces, smappy.region_runs.with_region_columns]
 ---
 
@@ -23,7 +23,10 @@ With the region's result on its localizations
 It can also write each ROI's own number, as the
 [ROI manager](plugin:Panels/ROI manager) shows it (`roi_id`): the ROIs then
 live in the table itself, and a block set to *for each* `roi_id` repeats
-over them like over clusters.
+over them like over clusters.  An ROI's number is given when the ROI is made
+and kept when others are removed, and the results' rows name the ROI by the
+same number, so ROI 5 in the list, in the column and in a site table is the
+same ROI.
 
 The results must be there first: an evaluation of the ROIs (the
 [region steps](plugin:Panels/Regions tab), or a block of a chain over the

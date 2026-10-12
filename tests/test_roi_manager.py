@@ -226,7 +226,7 @@ def test_a_failing_step_costs_its_columns_and_not_the_run():
     assert list(errors(run['records'][empty.id])) == ['Mean']
     assert not errors(run['records'][good.id])
     rows = p.results()
-    assert [row['roi_id'] for row in rows] == [good.id]
+    assert [row['roi_id'] for row in rows] == [good.number]
     assert rows[0]['x'] == 0.0
 
 
