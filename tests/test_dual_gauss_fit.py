@@ -271,6 +271,21 @@ def test_it_says_so_when_there_is_no_transformation_at_all(tmp_path):
     from smappy.plugins.fit import (DualGaussianFit, DualGaussianFitSettings,
                                     SourceSettings)
     settings = DualGaussianFitSettings(source=SourceSettings(path=str(tmp_path / "x.tif")))
-    assert "calibrate from this movie" in DualGaussianFit().preflight(Context(), settings)
+    assert "this movie" in DualGaussianFit().preflight(Context(), settings).text
     with pytest.raises(ValueError, match="needs a transformation"):
         settings.transform.load()
+
+
+def test_without_a_transformation_the_question_offers_calibrating_not_a_doomed_run():
+    """"Start anyway" always failed: the channels cannot be paired without a
+    transformation.  The one way on is to measure it from the movie."""
+    from smappy.plugins import PreflightQuestion
+    from smappy.plugins.fit import DualGaussianFit, DualGaussianFitSettings
+    settings = DualGaussianFitSettings()
+    question = DualGaussianFit().preflight(None, settings)
+    assert isinstance(question, PreflightQuestion) and question.run_label == ""
+    (choice,) = question.choices
+    assert choice.settings.transform.calibrate
+    assert not settings.transform.calibrate                  # the form's own untouched
+    settings.transform.calibrate = True
+    assert DualGaussianFit().preflight(None, settings) is None

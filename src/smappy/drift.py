@@ -19,6 +19,16 @@ reference structure.  Its result is a per-frame drift table
 whose row index *is* the frame number, so applying it is one fancy-index per
 coordinate.
 
+**To simplify (2026-10 review, kept for now on purpose).**  Only the spline
+fit is the default and the one users run; the time-window fit (`spline=False`)
+is kept as legacy so that GPU and CPU can be benchmarked against it -- it is
+the only path with a CUDA backend.  Once that is measured: if the GPU is not
+much faster, keep the spline fit alone, move its two kernels
+(`cpu_wrapper_chunked_approx`, `pair_indices_kdtree`) into this module, and
+delete the rest of `smappy._comet` with the ~13 settings that only the
+time-window fit reads; if it is, give the spline fit a GPU path instead.
+`two_stage` goes either way: the RCC prepass does that job more cheaply.
+
 Not wrapped: COMET's own file I/O, plotting and molecule-set output.  We hand it
 an array and get an array back; reading and writing stays with `io.hdf5`, so the
 corrected file is an ordinary smappy file that the viewer opens unchanged.
@@ -86,7 +96,7 @@ class DriftSettings:
     # the same as `optimizer_ftol`: measured, loosening the coarse steps is a
     # bad trade -- 2.3x faster for tens of nm on individual windows.  See NOTES.
     optimizer_ftol_coarse: Optional[float] = None
-    backend: Optional[str] = None    # "cuda", "torch", "cpu"; None = fastest
+    backend: Optional[str] = None    # "cuda", "cpu"; None = fastest
     # Estimate from *grouped* localizations: one entry per emitter blink rather
     # than one per frame.  20-35x faster (it removes exactly the dense, very
     # short-range pairs, which is where the pair count grows fastest) and, on

@@ -1431,7 +1431,7 @@ class LocalizationPrecision(Plugin):
         # user had not asked, and doubled every figure.
         filtered = len(ctx.selection) != len(ctx.locs)
         name = ctx.selection.name or "selection"
-        ctx.selection.require(MIN_FOR_FIT, ctx.report, "a precision")
+        ctx.selection.require(MIN_FOR_FIT, ctx.warn, "a precision")
         locs = ctx.selection.apply(ctx.locs)
         if not len(locs):
             raise ValueError(f"no localizations in {name}")

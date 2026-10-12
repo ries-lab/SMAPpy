@@ -102,7 +102,7 @@ class CometDrift(KeepsDrift, Plugin):
                                     help="extra penalty on the curve's bending; "
                                          "0 is none"),
         "use_z": ParamInfo(label="correct z", help="auto: if the table has z"),
-        "backend": ParamInfo(choices=("cuda", "torch", "cpu"),
+        "backend": ParamInfo(choices=("cuda", "cpu"),
                              help="where the cost is computed; auto: the "
                                   "fastest available; time-window fit only"),
     }
@@ -154,7 +154,7 @@ class CometDrift(KeepsDrift, Plugin):
                      f"{settings.max_drift_nm:g}.  Then: {after}")])
 
     def run(self, ctx: Context, settings: DriftSettings) -> Result:
-        ctx.selection.require(5000, ctx.report, "a drift estimate")
+        ctx.selection.require(5000, ctx.warn, "a drift estimate")
         ctx.report(f"estimating drift from {ctx.selection}")
         corrected, drift = correct_drift(ctx.locs, settings,
                                          select=ctx.selection.mask,

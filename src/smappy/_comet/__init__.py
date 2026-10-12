@@ -16,6 +16,10 @@ not.  Upstream's layout is kept so this copy can be diffed against a newer
 release; the only edits are relative imports, two lazy ones, and the two
 cost-function fast paths in `core.cpu_wrapper` that smappy opts into.
 
+Most of this copy is reached only by the time-window fit, which is kept as
+legacy until GPU and CPU are benchmarked; see "To simplify" in
+`smappy.drift` for what goes then.
+
 It is vendored rather than depended on because COMET publishes no distribution
 on PyPI, and drift correction that only works from a git checkout is drift
 correction most people never run.

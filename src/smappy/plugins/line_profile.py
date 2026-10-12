@@ -1647,7 +1647,7 @@ def _groups(ctx: Context, settings: LineProfileSettings):
             return found
         if getattr(session, "layers", None):
             ctx.report("no visible localization layer: the selection is used instead")
-    ctx.selection.require(MIN_FOR_FIT, ctx.report, "a profile fit")
+    ctx.selection.require(MIN_FOR_FIT, ctx.warn, "a profile fit")
     return [(ctx.selection.name or "selection", FALLBACK_COLOURS[0],
              ctx.selection.apply(ctx.locs))]
 

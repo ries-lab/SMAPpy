@@ -55,7 +55,7 @@ class RCCDrift(KeepsDrift, Plugin):
     }
 
     def run(self, ctx: Context, settings: RCCSettings) -> Result:
-        ctx.selection.require(5000, ctx.report, "a drift estimate")
+        ctx.selection.require(5000, ctx.warn, "a drift estimate")
         ctx.report(f"correlating {ctx.selection}")
         drift = estimate_drift_rcc(ctx.locs, settings, select=ctx.selection.mask)
         return Result(locs=drift.apply(ctx.locs), text=str(drift), plot=drift.plot,

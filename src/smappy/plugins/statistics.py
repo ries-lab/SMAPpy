@@ -729,16 +729,14 @@ class LocalizationStatistics(Plugin):
         grouped = table is not ctx.locs
         if settings.source == "all":
             locs = table
-            where = "all localizations"
+            where = "all localizations" + (" (grouped)" if grouped else "")
         else:
             if not ctx.per_region:
                 # in a region an empty one is an answer -- no localizations
                 # here -- and a row that says so, not a failure
-                selection.require(MIN_FOR_FIT, ctx.report, "a distribution")
+                selection.require(MIN_FOR_FIT, ctx.warn, "a distribution")
             locs = selection.apply(table)
-            where = str(selection)
-        if grouped:
-            where += " (grouped)"
+            where = str(selection)          # names the grouping itself
         if not len(locs) and not ctx.per_region:
             raise ValueError("no localizations to describe")
         on_time, why = None, ""

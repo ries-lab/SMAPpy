@@ -254,16 +254,20 @@ class Selection:
     def apply(self, locs: Localizations) -> Localizations:
         return locs[self.mask]
 
-    def require(self, minimum: int, progress=None, what: str = "this") -> None:
-        """Refuse an empty selection; warn about a thin one through ``progress``."""
+    def require(self, minimum: int, warn=None, what: str = "this") -> None:
+        """Refuse an empty selection; warn about a thin one through ``warn``.
+
+        Pass `Context.warn`, not `Context.report`: a progress line is
+        overwritten by the next one, and this one was, before anyone read it.
+        """
         n = len(self)
         where = f" in the {self.roi}" if self.roi is not None else ""
         if n == 0:
             raise ValueError(f"no localizations selected{where}: loosen the filter"
                              + (" or clear the ROI" if self.roi is not None else ""))
-        if n < minimum and progress:
-            progress(f"warning: only {n} localizations{where}; {what} wants "
-                     f"at least ~{minimum}")
+        if n < minimum and warn:
+            warn(f"only {n} localizations{where}; {what} wants "
+                 f"at least ~{minimum}")
 
     def __str__(self) -> str:
         return f"{len(self)} localizations ({self.name or 'selection'})"

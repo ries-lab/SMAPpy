@@ -704,7 +704,7 @@ class AssignColors(Plugin):
     def _work(self, ctx: Context, settings: AssignColorSettings,
               apply: bool) -> Result:
         selection = histogram_selection(ctx)
-        selection.require(50, ctx.report, "a colour histogram")
+        selection.require(50, ctx.warn, "a colour histogram")
         values = ratios(ctx.locs, settings.channel1, settings.channel2,
                         use_errors=settings.use_errors,
                         min_photons=settings.min_photons)

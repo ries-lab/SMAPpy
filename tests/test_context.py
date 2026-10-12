@@ -549,3 +549,13 @@ def test_a_plugin_that_is_not_live_gets_no_tick():
 
     from smappy.gui.plugin_panel import PluginPanel
     assert PluginPanel(Slow, Session(table())).live is None
+
+
+def test_a_thin_selection_is_a_warning_that_progress_cannot_overwrite():
+    """It went through `report`, and the next progress line replaced it."""
+    heard = []
+    ctx = Context(locs=Localizations({"x_nm": np.zeros(10), "y_nm": np.zeros(10)}, {}),
+                  stream=lambda event, payload: heard.append((event, payload)))
+    ctx.selection.require(100, ctx.warn, "a fit")
+    assert ctx.warnings == ["only 10 localizations; a fit wants at least ~100"]
+    assert ("warning", ctx.warnings[0]) in heard

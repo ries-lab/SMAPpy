@@ -241,7 +241,7 @@ class MathParser(Plugin):
                 f"{', '.join(sorted(locs.keys()))}{hint}")
         mask = None
         if settings.where == "selection":
-            ctx.selection.require(1, ctx.report, "this")
+            ctx.selection.require(1, ctx.warn, "this")
             mask = np.asarray(ctx.selection.mask, bool)
             # evaluated on the selected rows only, so that a reduction --
             # median(z_nm) -- is the selection's, as in SMAP, and not the

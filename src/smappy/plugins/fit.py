@@ -31,7 +31,8 @@ from ..calibrate.transform import RegisterSettings
 from ..pipeline import FitSettings, fit_stack, provenance
 from ..psf import GaussianPSF, SplinePSF
 from ..rcc import RCCSettings
-from . import Context, Notice, ParamInfo, Plot, Plugin, Result, param, register
+from . import (Context, Notice, ParamInfo, Plot, Plugin, PreflightChoice,
+               PreflightQuestion, Result, param, register)
 from .assign_colors import AssignColorSettings
 
 # a simulation's recipe opens as an acquisition too (`smappy.simulate.source`)
@@ -1407,11 +1408,20 @@ class DualGaussianFit(_FitPlugin):
                                  settings.fit, settings.model.photon_ratio)
 
     def preflight(self, ctx: Context, settings):
+        """No plain "start anyway": without a transformation the fit cannot
+        pair the channels and fails at once, so the one useful answer besides
+        cancelling (and choosing a file) is to measure it from the movie."""
         if settings.transform.calibrate or settings.transform.path:
             return None
-        return ("No transformation chosen.  Tick 'calibrate from this movie' to "
-                "measure one from the first frames, or choose a file.  Start "
-                "anyway?")
+        from dataclasses import replace as _replace
+        calibrated = _replace(settings, transform=_replace(settings.transform,
+                                                           calibrate=True))
+        return PreflightQuestion(
+            "No transformation chosen: the two channels cannot be paired "
+            "without one.  Measure it from the first frames of this movie, or "
+            "cancel and choose a file.",
+            choices=(PreflightChoice("Calibrate from this movie", calibrated),),
+            run_label="")
 
     def run(self, ctx: Context, settings) -> Result:
         self._measured = None
