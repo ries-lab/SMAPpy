@@ -298,9 +298,14 @@ def running(plugin, job: str = "run", settings: Any = None,
     t0 = time.perf_counter()
     try:
         yield
-    except Exception:
-        logger.error("%s %s failed after %.2f s\n%s", job, path,
-                     time.perf_counter() - t0, traceback.format_exc())
+    except Exception as error:
+        from .plugins import Stopped
+        if isinstance(error, Stopped):      # asked to, not broken
+            logger.info("%s %s stopped after %.2f s", job, path,
+                        time.perf_counter() - t0)
+        else:
+            logger.error("%s %s failed after %.2f s\n%s", job, path,
+                         time.perf_counter() - t0, traceback.format_exc())
         raise
     logger.info("%s %s done in %.2f s", job, path, time.perf_counter() - t0)
 

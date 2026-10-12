@@ -31,7 +31,11 @@ and `smappy/simulate` are the record, and the code wins where they differ.
   many (an ROI or a cluster); `ctx.region` is the shape, None for a cluster.
 * `ctx.stop` and `ctx.writer_finished` -- `threading.Event`s or None, set from
   another thread: end the run early keeping what it has, and "the live source
-  is complete".  The Fit plugin honours both; a long plugin may check `stop`.
+  is complete".  The panel's Run is Stop while a run goes, and sets `stop`.
+  A long plugin checks `ctx.stopped` between steps of its own and returns
+  what it has with `data["stopped"] = True`, or raises `Stopped` when a part
+  is worth nothing (RCC); the panel then says "stopped".  The fitters, COMET,
+  RCC, blocks over regions and chains (between steps) honour it.
 * The **grouped** table (one row per blink) is a table of its own, with its own
   filter, at `session.layers[i].state.sets["grouped"]`; it exists only once the
   user has switched that layer to grouped, and `state.grouped_stale` says it no

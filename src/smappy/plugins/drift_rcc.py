@@ -16,6 +16,9 @@ class RCCDrift(KeepsDrift, Plugin):
     def run(self, ctx: Context, settings: RCCSettings) -> Result:
         ctx.selection.require(5000, ctx.warn, "a drift estimate")
         ctx.report(f"correlating {ctx.selection}")
-        drift = estimate_drift_rcc(ctx.locs, settings, select=ctx.selection.mask)
+        # Stop ends it between time windows with `Stopped`: half the pairs
+        # make no drift curve, so the table is left as it was
+        drift = estimate_drift_rcc(ctx.locs, settings, select=ctx.selection.mask,
+                                   stop=ctx.stop)
         return Result(locs=drift.apply(ctx.locs), text=str(drift), plot=drift.plot,
                       data={"drift": drift}, settings=settings)

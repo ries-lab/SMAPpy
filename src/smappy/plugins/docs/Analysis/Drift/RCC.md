@@ -251,6 +251,10 @@ changes) is a good sign.  A curve that jumps between windows means the
 correlations had too little to work with: fewer windows, more
 localizations, or a larger *pixel size*.
 
+*Stop* ends the correlations after the time window being worked on.  The
+table is then left as it was: the drift is solved from every pair of windows
+at once, so the pairs measured so far give no curve worth subtracting.
+
 ## Differences from SMAP
 
 Based on SMAP's `Drift/driftcorrectionXYZ`

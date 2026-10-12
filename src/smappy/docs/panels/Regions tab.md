@@ -233,7 +233,9 @@ row in the site table.
 ### Region steps...
 Opens the region steps window: which steps run, in what order, with which
 settings; *check* to time them in a few ROIs, and Run, which measures what
-is out of date and carries the rest forward.  A new list starts with the
+is out of date and carries the rest forward.  While it measures, Run is
+Stop: the ROI being measured is finished, the ones measured so far are kept,
+and the rest wait for the next Run.  A new list starts with the
 general evaluators, once each, their slow options off; a specialised one,
 such as NPC Corners, is added there when the data call for it.  The list is
 saved in the file with the results, because the site table's columns mean

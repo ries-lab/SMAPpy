@@ -33,6 +33,11 @@ What a run of a block does:
 * **A block inside a block** makes a table per region, not a row: its tables
   are kept beside the outer step's, a row per inner region named
   ``outer:inner``.
+* **Stop** (`Context.stop`) ends the run between regions, and what the
+  regions so far measured and wrote back is the result, which says
+  ``stopped`` (``data["stopped"]``).  A region that has begun finishes: its
+  steps are not told to stop, since half a region's numbers would be kept as
+  if they were all of them.
 """
 from __future__ import annotations
 
@@ -287,12 +292,14 @@ class BlockPlugin(ChainPlugin):
 
         report = ctx.report
         if ctx.per_region:
-            tables, n, where = self._run_within(ctx, settings, steps, after)
+            tables, n, total, where = self._run_within(ctx, settings, steps, after)
         elif settings.regions == BLOCK_ROIS:
-            tables, n, where = self._run_rois(ctx, steps, after, bool(back), report)
+            tables, n, total, where = self._run_rois(ctx, steps, after, bool(back),
+                                                     report)
         else:
-            tables, n, where = self._run_column(ctx, settings, steps, after,
-                                                bool(back), report)
+            tables, n, total, where = self._run_column(ctx, settings, steps, after,
+                                                       bool(back), report)
+        stopped = ctx.stopped and n < total
         merged = _children(children)
         if merged and not ctx.per_region:
             # the inner blocks' tables, beside the steps' own
@@ -301,7 +308,8 @@ class BlockPlugin(ChainPlugin):
             elif ctx.session is not None:
                 ctx.session.id_regions.setdefault(settings.regions, {}).update(merged)
         failed = sum(1 for t in tables.values() for e in t.errors if e)
-        text = f"{n} {where}, {len(steps)} step(s)"
+        text = (f"stopped after {n} of {total} {where}" if stopped else f"{n} {where}"
+                ) + f", {len(steps)} step(s)"
         if failed:
             text += f", {failed} failed"
         locs = None
@@ -321,7 +329,7 @@ class BlockPlugin(ChainPlugin):
                       data={"tables": tables, "region_tables": {**tables, **merged},
                             "evaluations": self.evaluations(settings)
                             if not ctx.per_region else [],
-                            "regions": n, "failed": failed})
+                            "regions": n, "failed": failed, "stopped": stopped})
 
     def _write_values(self, ctx, settings, tables, names, locs):
         """The steps' numbers ``names`` onto the rows of their regions
@@ -366,9 +374,10 @@ class BlockPlugin(ChainPlugin):
                                stop=ctx.stop, after=after, tag=writes)
         tables = {s.label: project.tables[s.label] for s in steps
                   if s.label in project.tables}
-        return tables, len(run["records"]), "ROIs"
+        return tables, len(run["records"]), len(ids), "ROIs"
 
     def _run_column(self, ctx, settings, steps, after, writes, report):
+        from .region_runs import split_ids
         session = ctx.session
         if session is None:
             from .region_runs import ColumnRegions, evaluate_regions
@@ -382,7 +391,10 @@ class BlockPlugin(ChainPlugin):
                 stop=ctx.stop, reuse=not writes, keep_figures=steps[0].keep,
                 after=after, tag=writes)
         n = max((len(t) for t in tables.values()), default=0)
-        return {s.label: tables[s.label] for s in steps}, n, f"{settings.regions} regions"
+        total = len(split_ids((session.locs if session is not None else ctx.locs)
+                              [settings.regions])[0])
+        return ({s.label: tables[s.label] for s in steps}, n, total,
+                f"{settings.regions} regions")
 
     def _run_within(self, ctx, settings, steps, after):
         """Inside another block's region: the regions of this region's table."""
@@ -394,7 +406,7 @@ class BlockPlugin(ChainPlugin):
         tables = evaluate_regions(source, steps, stop=ctx.stop, after=after,
                                   tag=False, keep_figures=False, reuse=False)
         n = max((len(t) for t in tables.values()), default=0)
-        return tables, n, f"{settings.regions} regions"
+        return tables, n, len(source), f"{settings.regions} regions"
 
 
 def block_class(block: Block) -> type:

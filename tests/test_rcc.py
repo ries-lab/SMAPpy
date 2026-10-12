@@ -52,3 +52,38 @@ def test_a_table_corrected_by_rcc_says_it_was_rcc(tmp_path):
     prepass = Drift(np.zeros((10, 3)), method="rcc+comet")
     path = save_drift_corrected(tmp_path / "p.hdf5", prepass.apply(table), prepass)
     assert load_drift(path).method == "rcc+comet"
+
+
+class _StopsAfter:
+    """A stop that is set once it has been asked ``n`` times: one ask per
+    time window, so the estimate stops after ``n`` of them."""
+
+    def __init__(self, n):
+        self.n, self.asked = n, 0
+
+    def is_set(self):
+        self.asked += 1
+        return self.asked > self.n
+
+
+def test_rcc_stopped_between_time_windows_raises_stopped_saying_how_far_it_got():
+    from smappy.plugins import Stopped
+    locs, _, _ = simulate(n_points=300, n_frames=200, per_frame=50)
+    with pytest.raises(Stopped, match=r"RCC stopped after 3 of 10 time windows"):
+        estimate_drift_rcc(locs, RCCSettings(n_timepoints=10), stop=_StopsAfter(3))
+    # a stop never set changes nothing
+    a = estimate_drift_rcc(locs, RCCSettings(n_timepoints=10))
+    b = estimate_drift_rcc(locs, RCCSettings(n_timepoints=10), stop=_StopsAfter(10**6))
+    assert np.array_equal(a.drift, b.drift)
+
+
+def test_the_rcc_plugin_stopped_hands_back_no_table():
+    import threading
+
+    from smappy.plugins import Context, Stopped
+    from smappy.plugins.drift_rcc import RCCDrift
+    locs, _, _ = simulate(n_points=300, n_frames=200, per_frame=40)
+    stop = threading.Event()
+    stop.set()
+    with pytest.raises(Stopped, match="nothing was corrected"):
+        RCCDrift().run(Context(locs=locs, stop=stop), RCCSettings(n_timepoints=10))

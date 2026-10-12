@@ -297,7 +297,8 @@ class Context:
         # Two `threading.Event`s for a run that lasts as long as an
         # acquisition, set from another thread; None when nobody can.
         # `stop` asks it to end early and keep what it has -- a fit then
-        # closes its file and returns the table so far.  `writer_finished`
+        # closes its file and returns the table so far; the panel's Stop
+        # button sets it (`stopped`, `Stopped`).  `writer_finished`
         # says a live source is complete, which ends the watch on it after
         # one more read instead of after an idle timeout (`smappy.io.watch`).
         self.stop = stop
@@ -319,6 +320,18 @@ class Context:
         cluster -- rather than a run on the view.  A plugin may then make an
         empty region an answer, or leave out what only the whole field has."""
         return self.region_id is not None
+
+    @property
+    def stopped(self) -> bool:
+        """Whether the run has been asked to stop (`stop`).
+
+        A plugin checks it between steps of its own -- time windows,
+        regions, blocks of frames -- and then either returns what it has,
+        with ``data["stopped"] = True`` so the panel says "stopped", or
+        raises `Stopped` when a part of the work is worth nothing (half a
+        drift estimate).  One that never checks simply runs to the end.
+        """
+        return self.stop is not None and self.stop.is_set()
 
     @property
     def rois(self):
@@ -485,6 +498,13 @@ def _as_plot(plot, name: str = "") -> Plot:
     if isinstance(plot, Plot):
         return plot if plot.name == name or not name else replace(plot, name=name)
     return Plot(draw=plot, name=name)
+
+
+class Stopped(Exception):
+    """A run that was asked to stop (`Context.stop`) and has nothing worth
+    keeping: the session is left as it was, and the panel says "stopped"
+    rather than "failed".  A run that has something -- the frames fitted, the
+    regions measured -- returns it instead, with ``data["stopped"] = True``."""
 
 
 @dataclass

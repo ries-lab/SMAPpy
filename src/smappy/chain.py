@@ -30,6 +30,12 @@ the ones that shape this module:
   belongs to the ROI and says how it was made (`ROIProject.evaluations`),
   so nothing downstream needs to know which pipeline ran it.
 
+* **Stop ends it between steps.**  A step is handed the chain's
+  `Context.stop`; once it is set, no further step starts, and the steps
+  done -- the one that was running, if it kept a part (a fit's frames so
+  far) -- are the chain's result, which says ``stopped``.  A step that
+  raises `Stopped` keeps nothing and the chain ends before it.
+
 * **Linear.**  SMAP's workflows were graphs; `NOTES.md` ("No module chain")
   records why the fitting pipeline is not, and the same reasons hold here --
   a chain does what a person clicking through the tabs would do, in order.
@@ -51,7 +57,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from .plugins import (Context, ParamInfo, Plugin, PreflightChoice, PreflightQuestion,
-                      Result, _hint_from_text, param, settings_from, settings_values)
+                      Result, Stopped, _hint_from_text, param, settings_from,
+                      settings_values)
 
 SCHEMA = "smappy-chain-v1"
 SUFFIX = ".chain.yaml"
@@ -551,8 +558,13 @@ class ChainPlugin(Plugin):
         images = None
         rois_before = _roi_signature(session)
         made: List[Tuple[str, str]] = []  # (name, evaluator) of the chain's evaluations
+        stopped = False
         for key, step, cls in self.steps:
             label = step.title()
+            if ctx.stopped:
+                lines.append(f"stopped before {label}")
+                stopped = True
+                break
             sub = getattr(settings, key)
             plugin = cls()
             own = plugin_settings(cls, sub)
@@ -572,6 +584,10 @@ class ChainPlugin(Plugin):
             sctx.stop = ctx.stop
             try:
                 result = plugin.run(sctx, own)
+            except Stopped as error:
+                lines.append(f"{label}: {error}")
+                stopped = True
+                break
             except Exception as error:
                 raise ChainError(f"step {label!r} ({cls.path}) failed -- "
                                  f"{type(error).__name__}: {error}") from error
@@ -608,8 +624,11 @@ class ChainPlugin(Plugin):
             images = (result.data or {}).get("images") or images
             first = result.text.splitlines()[0] if result.text else "done"
             lines.append(f"{label}: {first}")
+            stopped = stopped or bool((result.data or {}).get("stopped"))
         changed = any(r["changed"] for r in records)
         data: Dict[str, Any] = {"steps": records, "results": results, "kept": kept}
+        if stopped:
+            data["stopped"] = True
         if layers is not None:
             data["layers"] = layers
         if path:

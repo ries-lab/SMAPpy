@@ -12,7 +12,7 @@ hand-started fit does not need:
   keyboard, so the plugin's preflight is skipped; the caller checks what it
   would have asked before calling.
 * **It is controlled from another thread.**  `stop` ends the fit early and
-  keeps the file; `writer_finished` says the acquisition is complete, after
+  keeps the file (the panel's Stop button sets the same event); `writer_finished` says the acquisition is complete, after
   which the watch reads what is left and the fit ends -- not after an idle
   timeout, because a pause in an acquisition is not its end
   (`smappy.io.watch`).  Both are `threading.Event`s, so a reader thread can set
@@ -228,11 +228,12 @@ class LiveSession:
     def _ended(self, kind: str, payload) -> None:
         if self.outcome is not None:
             return                       # a later run the user started by hand
-        if kind == "failed":
+        if kind in ("failed", "stopped"):
             lines = str(payload).strip().splitlines()
             # stopped before it had a file -- while the dataset was still
             # being waited for, say -- is still a stop, not a broken fit
-            state = "cancelled" if self.stop.is_set() else "failed"
+            state = ("cancelled" if kind == "stopped" or self.stop.is_set()
+                     else "failed")
             self._finish(LiveOutcome(state, False,
                                      error=lines[-1] if lines else "failed",
                                      traceback=str(payload)))

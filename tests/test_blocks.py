@@ -251,6 +251,98 @@ def test_the_rois_block_reports_its_status_and_stops_when_asked():
     assert sub.data["regions"] == 1 and any("(1 of 5 ROIs)" in t for t in said)
 
 
+# what Test/Block/PressesStop presses, and after how many regions: the Stop
+# button of a run, standing in for a person (a region's own context has no
+# `stop`, so the plugin is handed the run's here)
+PRESS = {"stop": None, "after": 0, "seen": 0}
+
+
+@register("Test/Block/PressesStop")
+class PressesStop(Plugin):
+    """Tags its region as Tag does, and presses Stop after ``PRESS["after"]``."""
+    per_region = True
+    changes_locs = True
+
+    def run(self, ctx, settings):
+        PRESS["seen"] += 1
+        if PRESS["seen"] >= PRESS["after"] and PRESS["stop"] is not None:
+            PRESS["stop"].set()
+        n = len(ctx.locs)
+        return Result(locs=Localizations({**ctx.locs.columns,
+                                          "n_here": np.full(n, float(n))},
+                                         dict(ctx.locs.metadata)),
+                      values={"tagged": n})
+
+
+def test_a_block_stopped_halfway_keeps_and_writes_back_the_regions_it_finished():
+    import threading
+    session = a_session(sizes=(30, 50, 20, 40), noise=5)
+    stop = threading.Event()
+    PRESS.update(stop=stop, after=2, seen=0)
+    cls = chain_class(ChainSpec(steps=[block({"plugin": "Test/Block/PressesStop",
+                                              "label": "tag"}, write_back=["n_here"])]))
+    ctx = session.context()
+    ctx.stop = stop
+    result = cls().run(ctx, cls.Settings())
+    session.apply(cls(), result)
+
+    sub = result.data["results"]["each"]
+    assert sub.data["stopped"] and result.data["stopped"]
+    assert sub.text.startswith("stopped after 2 of 4 cluster_id regions")
+    assert session.id_regions["cluster_id"]["tag"].columns()["tagged"].tolist() == [30, 50]
+    n_here = np.asarray(session.locs["n_here"])
+    ids = np.asarray(session.locs["cluster_id"])
+    assert (n_here[ids == 1] == 30).all() and (n_here[ids == 2] == 50).all()
+    assert np.isnan(n_here[(ids == 3) | (ids == 4)]).all()    # never reached
+    assert session.can_undo                                   # applied, as one step
+
+
+def test_a_chain_stopped_in_a_step_runs_no_step_after_it():
+    import threading
+    session = a_session(sizes=(30, 50), noise=0)
+    stop = threading.Event()
+    PRESS.update(stop=stop, after=1, seen=0)
+    cls = chain_class(ChainSpec(steps=[
+        block({"plugin": "Test/Block/PressesStop"}, label="tag", write_back=["n_here"]),
+        Step(plugin="Test/Block/Count", label="count")]))
+    ctx = session.context()
+    ctx.stop = stop
+    result = cls().run(ctx, cls.Settings())
+    assert result.data["stopped"]
+    assert [r["label"] for r in result.data["steps"]] == ["tag"]
+    assert result.text.splitlines()[-1] == "stopped before count"
+    assert "n_here" in result.locs                    # the block's part is kept
+
+
+def test_a_step_that_keeps_nothing_when_stopped_ends_the_chain_there():
+    from test_drift import simulate
+    from test_rcc import _StopsAfter
+    locs, _, _ = simulate(n_points=300, n_frames=200, per_frame=40)
+    session = Session(locs)
+    cls = chain_class(ChainSpec(steps=[Step(plugin="Analysis/Drift/RCC", label="rcc"),
+                                       Step(plugin="Test/Block/Count", label="count")]))
+    ctx = session.context()
+    # not yet when the chain starts RCC; set when RCC first looks
+    ctx.stop = _StopsAfter(1)
+    result = cls().run(ctx, cls.Settings())
+    assert result.data["stopped"] and result.locs is None
+    assert result.data["steps"] == []                 # RCC kept nothing
+    assert result.text.startswith("rcc: RCC stopped after 0 of")
+
+
+def test_a_stop_set_before_a_chain_starts_runs_none_of_it():
+    import threading
+    session = a_session()
+    stop = threading.Event()
+    stop.set()
+    cls = chain_class(ChainSpec(steps=[Step(plugin="Test/Block/Count", label="count")]))
+    ctx = session.context()
+    ctx.stop = stop
+    result = cls().run(ctx, cls.Settings())
+    assert result.data["stopped"] and result.locs is None
+    assert result.text == "stopped before count"
+
+
 # --------------------------------------------------------------- the loops
 
 def test_a_chain_that_contains_itself_is_refused_naming_the_loop():
