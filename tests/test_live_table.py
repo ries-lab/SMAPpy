@@ -74,9 +74,8 @@ def test_every_layers_selection_agrees_with_the_pinned_table():
 
 
 def test_a_grouped_table_is_refused_during_a_live_fit_when_the_layer_has_none():
-    ctx = live_session().context(grouping="grouped")
     with pytest.raises(ValueError, match="grouped"):
-        ctx.table()
+        live_session().context(grouping="grouped")
 
 
 def test_a_table_change_is_refused_while_the_fit_appends_and_the_view_keeps_growing():

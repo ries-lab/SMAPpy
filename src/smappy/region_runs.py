@@ -344,7 +344,8 @@ def evaluate_regions(source: ColumnRegions, steps: Sequence, tables: Optional[
 def _run_one(step, scratch, keep: bool = False) -> Dict[str, Any]:
     from .roi_manager.core import region_entry
     try:
-        result = step.plugin.run(scratch.context(), step.settings)
+        result = step.plugin.run(scratch.context(grouping=step.plugin.grouping),
+                                 step.settings)
         scratch.apply(result, step.label)
         return region_entry(result, step.plugin, keep)
     except Exception as error:

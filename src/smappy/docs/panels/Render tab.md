@@ -499,8 +499,10 @@ brightness.
 
 ### grouped
 Draws one localization per blink.  The first switch links the table, which
-takes seconds to minutes on a large one; after that it is free.  Plugins get
-the ungrouped table unless they ask for the grouped one.
+takes seconds to minutes on a large one; after that it is free.  A plugin
+measures what the layer shows -- blinks, when it is grouped -- except one that
+needs the single localizations (a drift correction, Localization Precision,
+anything that changes the table), which says so on its page.
 
 ### link settings...
 The linking parameters of grouping, the session's, for every layer at

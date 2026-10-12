@@ -261,11 +261,11 @@ decided, lowest priority first, by:
 
 A plugin reads the result through `ctx.table(layer)`, which returns
 `(locs, selection)` for that layer with the grouping resolved -- the
-equivalent of SMAP's `getloc(..., 'grouping', ...)`.  `ctx.locs` stays the
-ungrouped table, so a plugin that never calls `ctx.table` behaves as it always
-did.  A step that runs on the grouped table and hands back a new table is
-refused: a grouped run is for measuring, and there is no way back from one row
-per blink to the localizations it came from.
+equivalent of SMAP's `getloc(..., 'grouping', ...)`; for the step's own
+layer that is `ctx.locs` and `ctx.selection`.  A step that runs on the grouped
+table and hands back a new table is refused: a grouped run is for measuring,
+and there is no way back from one row per blink to the localizations it came
+from -- which is why a plugin that changes the table requires *ungrouped*.
 
 ## The batch job
 

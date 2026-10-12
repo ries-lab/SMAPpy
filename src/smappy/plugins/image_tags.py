@@ -131,6 +131,8 @@ class ImageTags(Plugin):
 
     Settings = ImageTagsSettings
     changes_locs = False
+    # a rate of localizations per frame
+    grouping = "ungrouped"
     version = "1"
 
     def run(self, ctx: Context, settings: ImageTagsSettings) -> Result:

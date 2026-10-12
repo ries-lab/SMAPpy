@@ -80,7 +80,9 @@ def test_a_chain_is_a_plugin_whose_settings_are_its_steps():
     settings = cls.Settings()
     assert settings.flag.field == "good" and settings.flag.expression == "photons > 10"
     assert settings.localization_statistics.bins == 40
-    assert settings.flag.use_grouping == "auto" and settings.grouping == "layer"
+    # the math parser writes a column per localization: ungrouped, required
+    assert settings.flag.use_grouping == "ungrouped" and settings.grouping == "layer"
+    assert settings.localization_statistics.use_grouping == "auto"
     specs = cls.specs()
     assert specs["flag"].info.collapsed and specs["flag"].children["expression"].info.kind == "text"
     # what Save chain writes is what the form holds

@@ -482,11 +482,12 @@ class ROIProject:
         """The context a plugin measuring this ROI is given.
 
         The ordinary contract, confined to the ROI (`docs/regions.md`):
-        ``ctx.locs`` is the ROI's rows of its file, unfiltered and ungrouped;
-        ``ctx.selection`` and ``ctx.layer_selection(i)`` are each layer's
-        filter over those rows; ``ctx.table(i)`` hands out the grouped table
-        cut to the ROI as well where the layer has one; ``ctx.region`` is
-        the ROI's shape.  Which rows belong is the ROI's shape alone -- a
+        ``ctx.locs`` is the ROI's rows of its file, unfiltered, of the table
+        the layer shows (the grouped one cut to the ROI where there is one);
+        ``ctx.ungrouped()`` the localizations among them, and
+        ``ctx.layer_selection(i)`` each layer's filter over those;
+        ``ctx.table(i)`` hands out each layer's table cut the same way;
+        ``ctx.region`` is the ROI's shape.  Which rows belong is the ROI's shape alone -- a
         filter is applied inside it, never to decide membership -- and no
         drawn ROI or 3D slab narrows it further: the region replaces them.
         """
@@ -840,7 +841,8 @@ class ROIProject:
         it (`RegionScratch.apply`).
         """
         try:
-            result = step.plugin.run(scratch.context(rois=self), step.settings)
+            result = step.plugin.run(scratch.context(
+                rois=self, grouping=step.plugin.grouping), step.settings)
             scratch.apply(result, step.label)
             return region_entry(result, step.plugin, step.keep), result
         except Exception as error:

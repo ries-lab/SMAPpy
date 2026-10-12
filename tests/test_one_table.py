@@ -76,6 +76,7 @@ def test_the_grouped_table_is_linked_again_when_the_table_changes(links):
 
     class Shift(Plugin):
         path = "Test/Shift"
+        grouping = "ungrouped"
 
         def run(self, ctx, settings=None):
             columns = {k: np.asarray(v).copy() for k, v in ctx.locs.columns.items()}

@@ -726,7 +726,7 @@ class LocalizationStatistics(Plugin):
 
     def run(self, ctx: Context, settings: StatisticsSettings) -> Result:
         table, selection = ctx.table()
-        grouped = table is not ctx.locs
+        grouped = table is not ctx.ungrouped()[0]
         if settings.source == "all":
             locs = table
             where = "all localizations" + (" (grouped)" if grouped else "")

@@ -41,6 +41,12 @@ localizations, its file the one its localizations came from, and it
 remembers the column, the id and the number of localizations (`origin`).
 All the ROIs of a run are one step of the ROI manager's undo.
 
+## In detail
+
+**Which table.**  The localizations, whatever the layer shows: the id
+column is theirs, and a region's outline is drawn round all of its
+localizations.
+
 ## Parameters
 
 ### column

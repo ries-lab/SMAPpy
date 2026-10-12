@@ -248,6 +248,11 @@ for ax in (left, right):
 
 ## In detail
 
+**Which table.**  The localizations, whatever the layer shows: the
+truth is a spot per frame, so the fit is matched to it frame by frame, and
+a blink grouped over several frames would have nothing to be matched with.
+The selection is the layer's bounds applied to each localization.
+
 **The truth table.**  The simulation settings come from the file named in
 *simulation*, else from the `*.sim.yaml` in the table's `source`, else from
 the `simulation_settings` a simulated table carries.  From them the ground

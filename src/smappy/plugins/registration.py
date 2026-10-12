@@ -104,6 +104,8 @@ class CalibrateChannelTransform(Plugin):
                    "frame: no initial shift, no magnification and no split "
                    "position needed.")
     changes_locs = False
+    # bead pairs are matched frame by frame
+    grouping = "ungrouped"
     # 2: a table in nm is weighted by its xy_err_nm too (it was unweighted)
     version = "2"
     Settings = RegisterLocsSettings

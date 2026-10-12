@@ -118,9 +118,11 @@ def test_a_region_context_offers_the_grouped_table_when_the_project_is_grouped()
     ctx = project.region_context(roi)
     grouped, selection = ctx.table()
     assert ctx.served_grouped and len(grouped) == len(selection.mask)
-    assert 0 < len(grouped) <= len(ctx.locs)           # a row per blink, no more
+    assert ctx.locs is grouped                         # what the project shows
+    whole, _ = ctx.ungrouped()
+    assert 0 < len(grouped) <= len(whole)              # a row per blink, no more
     ungrouped, _ = project.region_context(roi, grouping="ungrouped").table()
-    assert len(ungrouped) == len(ctx.locs)
+    assert len(ungrouped) == len(whole)
 
 
 def test_in_the_session_every_layer_is_cut_to_the_roi_and_the_drawn_roi_is_not(tmp_path):
@@ -139,13 +141,15 @@ def test_in_the_session_every_layer_is_cut_to_the_roi_and_the_drawn_roi_is_not(t
     first = next(iter(project.sources))
     roi = project.add_roi(first, [1000.0, 1000.0])
     ctx = project.region_context(roi)
-    files = np.asarray(ctx.locs["filenumber"])
-    assert len(ctx.locs) > 0 and (files == files[0]).all()     # its own file only
-    x = np.asarray(ctx.locs["x_nm"])
+    whole, _ = ctx.ungrouped()
+    assert len(ctx.locs) < len(whole)                           # the layer's blinks
+    files = np.asarray(whole["filenumber"])
+    assert len(whole) > 0 and (files == files[0]).all()       # its own file only
+    x = np.asarray(whole["x_nm"])
     assert (x < 2000).all()                                     # not the drawn ROI's
     one, two = ctx.layer_selection(0), ctx.layer_selection(1)
-    assert len(two) < len(one) <= len(ctx.locs)
-    assert (np.asarray(ctx.locs["photons"])[two.mask] >= 2000).all()
+    assert len(two) < len(one) <= len(whole)
+    assert (np.asarray(whole["photons"])[two.mask] >= 2000).all()
 
 
 def test_npc_corners_counts_round_the_place_the_roi_was_put():

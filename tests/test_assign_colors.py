@@ -175,9 +175,9 @@ def test_a_layer_filtered_to_one_colour_still_shows_both_to_the_histogram():
     lay = session.layers[0]
     lay.set_bound("channel", 1, 1)
     lay.set_bound("photons", 1500, None)           # other bounds still count
-    ctx = session.context()
-    assert set(np.unique(ctx.selection.apply(session.locs)["channel"])) == {1}
     plugin = plugins.get("Analysis/Dual-Color/AssignColors")()
+    ctx = session.context(grouping=plugin.grouping)
+    assert set(np.unique(ctx.selection.apply(session.locs)["channel"])) == {1}
     result = plugin.run(ctx, AssignColorSettings(mode="minima"))
     channel = result.locs["channel"]
     assert (channel == truth).mean() > 0.95

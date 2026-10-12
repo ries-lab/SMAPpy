@@ -103,7 +103,9 @@ polygon's bounding box are tested, so a small ROI on a large table is quick.
 **The whole table.**  Both actions work on the whole ungrouped table, not on
 the selection of one layer: a localization inside the drawn ROI goes (or is
 hidden) whatever layer or file it is in.  To act on one file only, set
-*region* to *the selection* with the layer showing that file.
+*region* to *the selection* with the layer showing that file.  The selection
+is then the layer's bounds applied to each localization, also when the
+layer shows blinks.
 
 **A hidden flag and grouping.**  Once the localizations are linked into
 blinks, a blink is kept only if **all** of its localizations are.  The flag

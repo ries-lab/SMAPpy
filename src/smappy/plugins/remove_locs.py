@@ -169,6 +169,8 @@ class RemoveLocalizations(Plugin):
 
     Settings = RemoveSettings
     changes_locs = True
+    # it removes or flags localizations, not blinks
+    grouping = "ungrouped"
     version = "1"
 
     def active(self, settings: RemoveSettings):

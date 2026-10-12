@@ -88,6 +88,10 @@ what the next plugins are given.
 
 ## In detail
 
+**Which table.**  The localizations: the quantile limits are of the
+whole ungrouped table (below), and *remove filtered* drops localizations,
+whatever a layer shows.
+
 **The defaults.**  `defaults` starts from the bounds a freshly opened table
 gets: `xy_err_nm` at most 25 nm, `logl_rel` at least -2, `z_nm` between -500
 and 500 nm, and, for a 2D table (no `z_nm`), `sigma_nm` at most 180 nm -- each

@@ -103,6 +103,11 @@ for ax in (left, right):
 
 ## In detail
 
+**Which table.**  The localizations, whatever the layer shows: the
+column is computed for each localization, and *the selection* is the
+layer's bounds applied to each localization.  The grouped table takes the
+column by the *grouped* rule (below) when it is linked again.
+
 **What an expression may contain.**  Column names are the table's own
 (`x_nm`, `photons`, `xy_err_nm`, ...; the *new field* of an earlier run
 counts as one).  Everything else:

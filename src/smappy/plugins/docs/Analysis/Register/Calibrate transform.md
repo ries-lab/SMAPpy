@@ -148,6 +148,10 @@ the two-colour fit's *transformation* reads.
 
 ## In detail
 
+**Which table.**  The localizations, whatever the layer shows: the
+pairs are one molecule seen in both halves of the same frame, and the
+selection is the layer's bounds applied to each localization.
+
 **The vote.**  For each frame, every ordered pair $(i, j)$ of its
 localizations gives a feature vector: $(x_j - x_i,\, y_j - y_i)$ for an
 unmirrored layout, or with the sum $x_j + x_i$ (or $y_j + y_i$) on the

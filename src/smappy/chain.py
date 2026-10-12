@@ -58,7 +58,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .plugins import (Context, ParamInfo, Plugin, PreflightChoice, PreflightQuestion,
                       Result, Stopped, _hint_from_text, param, settings_from,
-                      settings_values)
+                      SOURCES, refuse_grouped_table, settings_values)
 
 SCHEMA = "smappy-chain-v1"
 SUFFIX = ".chain.yaml"
@@ -423,7 +423,7 @@ def is_source(plugin_cls) -> bool:
     What decides a batch's input kind: a chain whose first step is a fit reads
     images, and anything else is handed localization files.
     """
-    return plugin_cls.path.startswith(("Localize/", "File/Load/", "File/Simulate/"))
+    return plugin_cls.path.startswith(SOURCES)
 
 
 def is_evaluator(plugin_cls) -> bool:
@@ -546,8 +546,12 @@ class ChainPlugin(Plugin):
 
     def run(self, ctx: Context, settings) -> Result:
         from .session import Session
-        session = (ctx.session.scratch(ctx.locs) if ctx.session is not None
-                   else Session(ctx.locs).scratch())
+        # the whole table, whatever the chain's own context shows: each step
+        # gets the table its grouping says, from the copy
+        locs, _ = ctx.ungrouped()
+        ctx.served_grouped = False
+        session = (ctx.session.scratch(locs) if ctx.session is not None
+                   else Session(locs).scratch())
         records: List[Dict[str, Any]] = []
         results: Dict[str, Result] = {}
         plots: Dict[str, Any] = {}
@@ -591,11 +595,10 @@ class ChainPlugin(Plugin):
             except Exception as error:
                 raise ChainError(f"step {label!r} ({cls.path}) failed -- "
                                  f"{type(error).__name__}: {error}") from error
-            if result.locs is not None and sctx.served_grouped:
-                raise ChainError(
-                    f"step {label!r} ran on the grouped table and handed back a "
-                    "new table: there is no way from one row per blink back to "
-                    "the localizations, so run it ungrouped")
+            try:
+                refuse_grouped_table(sctx, result, plugin, f"step {label!r}")
+            except ValueError as error:
+                raise ChainError(str(error)) from None
             session.apply(plugin, result)
             made.extend((result.data or {}).get("evaluations") or [])
             for warning in sctx.warnings:

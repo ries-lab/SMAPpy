@@ -87,8 +87,9 @@ drawn, found, or is None (a cluster).
 `scope = "site"` goes, and with it the distinction between evaluation and
 analysis plugins.  Running on a region means **the normal context with that
 region where the drawn ROI goes**, in every layer: `ctx.selection` is already
-the layer's filter and the ROI and the slab, so `ctx.layer_selection(i)` is
-layer *i* inside the region.  Whether a plugin measures per layer, several
+the layer's filter and the ROI and the slab, so `ctx.table(i)` is
+layer *i* inside the region, as the layer shows it -- its blinks, cut to the
+region, on a grouped layer (since B3 of `docs/simplification-plan.md`).  Whether a plugin measures per layer, several
 layers together or the current one stays the plugin's business, exactly as on
 the whole view (`line_profile._groups` is the shape).  The ROI manager's own
 `ViewState` copies go.

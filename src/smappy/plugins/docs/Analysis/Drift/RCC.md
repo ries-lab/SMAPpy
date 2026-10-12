@@ -149,6 +149,14 @@ ax.legend(frameon=False, fontsize=8)
 
 ## In detail
 
+**Which table.**  The localizations, whatever the layer shows.  The
+images are made from those the layer's filter and the ROI select -- the
+bounds applied to each localization, also on a grouped layer -- and the
+correction is applied to every localization of the table, selected or not.
+The blinks it links before the images are made (*group blinks*) are linked
+with its own *group radius* and *group gap*, not the session's, and are
+thrown away afterwards.
+
 **The pair equations.**  With $s_{kl}$ the measured shift of window $k$
 against window $l$, the drifts $d_1, \ldots, d_T$ solve, in the least-squares
 sense,

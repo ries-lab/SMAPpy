@@ -103,6 +103,9 @@ class BlockPlugin(ChainPlugin):
     block: Block = None
     per_region = False
     logged = True
+    # its regions are an id column of the localizations, and what it writes
+    # back goes onto them; each region's steps see the layers as shown
+    grouping = "ungrouped"
 
     def changes_locs_for(self, settings) -> Optional[bool]:
         return bool(_columns(settings.write_back) or _columns(settings.write_values))
@@ -172,7 +175,8 @@ class BlockPlugin(ChainPlugin):
             for step in steps:
                 t0 = time.perf_counter()
                 try:
-                    result = step.plugin.run(scratch.context(), step.settings)
+                    result = step.plugin.run(
+                        scratch.context(grouping=step.plugin.grouping), step.settings)
                     scratch.apply(result, step.label)
                 except Exception:
                     pass                  # a failure costs what it cost

@@ -16,7 +16,7 @@ from .filter import LocFilter
 from .group import GROUP_COLUMNS, GroupSettings
 from .images import ImageData, load_image
 from .locs import KEPT_BOUNDS, Localizations, concat
-from .plugins import Context, Plugin, Result, Selection
+from .plugins import Context, Plugin, Result, Selection, refuse_grouped_table
 from .io.formats import FileInfo, load as load_any
 from .regions import Region
 from .view3d import Projection, Slab
@@ -1456,8 +1456,9 @@ class Session:
         The plugin runs on whatever thread calls this; only `apply` touches
         the session, so a GUI can run the plugin in a worker and apply here.
         """
-        result = plugin.run(self.context(layer, progress, stream,
-                                         grouping=plugin.grouping), settings)
+        ctx = self.context(layer, progress, stream, grouping=plugin.grouping)
+        result = plugin.run(ctx, settings)
+        refuse_grouped_table(ctx, result, plugin, plugin.path.rsplit("/", 1)[-1])
         self.apply(plugin, result)
         return result
 

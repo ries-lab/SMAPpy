@@ -231,6 +231,12 @@ fig.subplots_adjust(wspace=0.35)
 
 ## In detail
 
+**Which table.**  The localizations, whatever the layer shows: a colour
+is decided for each localization and written onto it, and the ratio
+histogram is of the localizations the layer's bounds keep, frame by frame.
+The grouped table is linked again from the coloured table, and linking
+never joins two colours.
+
 **The split and its precision.**  With $N = N_1 + N_2$, a localization is
 used if both counts are finite and $N > 0$ (and $N \geq$ *minimum photons*
 when that is set); $r$ is clipped to $[-1, 1]$, because a fit can put a

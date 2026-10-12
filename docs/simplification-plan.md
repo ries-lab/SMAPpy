@@ -7,8 +7,9 @@ re-reads its page.  Sizes are rough.  Steps marked *depends* need the one
 named first.
 
 **Status.**  Done on `claude/trusting-cray-bhwh1n`: A1-A4, B1, C1, E1, E2
-(`--slow -n auto`: 1628 passed, 5 skipped).  Next proposed: B2 -> B3 -> D1,
-with D2, C2, E3-E5 alongside.
+(`--slow -n auto`: 1628 passed, 5 skipped).  B2 and B3 done on `b2-one-table`
+(`--slow -n auto`: 1648 passed, 5 skipped).  Next proposed: D1, with D2, C2,
+E3-E5 alongside.
 
 ## A. Small and independent
 

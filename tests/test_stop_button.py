@@ -37,6 +37,7 @@ class Loops(Plugin):
     path = "Test/Stop/Loops"
     name = "Loops"
     changes_locs = True
+    grouping = "ungrouped"
 
     def run(self, ctx, settings):
         STARTED.set()
@@ -56,6 +57,7 @@ class GivesUp(Plugin):
     path = "Test/Stop/GivesUp"
     name = "GivesUp"
     changes_locs = True
+    grouping = "ungrouped"
 
     def run(self, ctx, settings):
         if ctx.stopped:

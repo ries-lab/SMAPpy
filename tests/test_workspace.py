@@ -405,6 +405,7 @@ class Settings:
 class CountNeighbours(Plugin):
     """Counts each localization's neighbours within a radius."""
     Settings = Settings
+    grouping = "ungrouped"        # it writes a column onto the localizations
 
     def run(self, ctx, settings):
         x = np.asarray(ctx.locs["x_nm"])

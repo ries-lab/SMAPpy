@@ -194,10 +194,10 @@ class Thing(Plugin):
   can be aimed.
 * **A plugin that measures usually wants one answer per layer**, not one over
   the selection: a line is drawn over two channels and the measurement is how
-  they differ.  `ctx.layer_selection(i)` is layer `i`'s (not
-  `session.selection(i)`: during a live fit the session's table has grown
-  since the context was made), and `line_profile.py`'s `_groups` is the
-  shape to copy.
+  they differ.  `ctx.table(i)` is layer `i`'s table and selection, as the
+  layer shows it (not `session.table(i)`: during a live fit the session's
+  table has grown since the context was made), and `line_profile.py`'s
+  `_groups` is the shape to copy.
 
 **Put the algorithm in module-level functions that take arrays** and let `run`
 be the thin wrapper.  A script, a test and a notebook should be able to get the
@@ -210,10 +210,15 @@ The full reference -- every field of the context and the result, the column
 vocabulary, the picture's axes, simulated data -- is `docs/plugin-reference.md`.
 What a plugin gets wrong without it:
 
-* `ctx.locs` is the whole table and **always the ungrouped one**;
-  `ctx.selection` is what the user is looking at (filter, ROI, slab) as a mask
-  over it.  `ctx.table(layer)` is the table grouped or not as the layer
-  decides -- read that in a plugin that should honour grouping.
+* `ctx.locs` is **the table the layer shows** -- one row per blink on a
+  grouped layer -- and `ctx.selection` is what the user is looking at
+  (filter, ROI, slab) as a mask over it.  A plugin that needs the
+  localizations (it hands back a new table, or pairs frames as NeNA does)
+  declares `grouping = "ungrouped"` and gets them whatever the layer shows;
+  a new table made from the grouped one is refused.  `ctx.ungrouped()` is
+  the localizations for a plugin that measures blinks and writes onto them
+  (`clusters.py`), and `ctx.table(layer)` another layer's table.  Say on the
+  plugin's page which table it reads.
 * `ctx.session` may be `None`: a script says `Context(locs=locs)`.
 * `ctx.report` for progress, `ctx.warn` for what must not be missed (progress
   overwrites the one, not the other).

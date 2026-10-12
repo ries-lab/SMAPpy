@@ -60,6 +60,9 @@ class _Worker(QObject):
             # if it failed -- the first thing a bug report is asked for
             with running(plugin, self.job, settings, n):
                 result = work(context, settings, **self.kwargs)
+            if self.job == "run":
+                from ..plugins import refuse_grouped_table
+                refuse_grouped_table(context, result, plugin)
             self.done.emit(result)
         except Stopped as e:
             self.stopped.emit(str(e))
@@ -332,7 +335,8 @@ class PluginPanel(QWidget):
         button when the GUI has the window it names.  Best effort, like the
         hints."""
         try:
-            notice = self.plugin.notice_for(self.session.context(), self.form.value())
+            notice = self.plugin.notice_for(
+                self.session.context(grouping=self.plugin.grouping), self.form.value())
         except Exception:
             notice = None
         self.notice.setVisible(notice is not None)
@@ -376,7 +380,8 @@ class PluginPanel(QWidget):
         evaluations on the ROIs, for an ROI analysis.  Best effort, like the
         hints: a list that cannot be worked out leaves the one there is."""
         try:
-            lists = self.plugin.choices(self.session.context(), self.form.value())
+            lists = self.plugin.choices(
+                self.session.context(grouping=self.plugin.grouping), self.form.value())
         except Exception:
             return
         if lists:

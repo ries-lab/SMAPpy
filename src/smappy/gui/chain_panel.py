@@ -374,7 +374,8 @@ class ChainPanel(QWidget):
             return
         try:
             settings = getattr(self.panel.form.value(), key)
-            estimate = found[1]().estimate(self.session.context(), settings)
+            estimate = found[1]().estimate(
+                self.session.context(grouping=found[1].grouping), settings)
         except Exception as error:
             self.checked.setText(f"cannot check: {error}")
             return

@@ -79,6 +79,8 @@ class RegionsToColumn(Plugin):
 
     Settings = RegionColumnSettings
     changes_locs = True
+    # the values go onto the localizations
+    grouping = "ungrouped"
     version = "2"         # 2: roi_id is the ROI's own number, kept when others go
 
     def choices(self, ctx: Context, settings):
@@ -222,6 +224,8 @@ class ColumnToROIs(Plugin):
 
     Settings = ColumnROIsSettings
     changes_locs = False
+    # an id column is the localizations', and so is a region's outline
+    grouping = "ungrouped"
     version = "1"
 
     def run(self, ctx: Context, settings: ColumnROIsSettings) -> Result:

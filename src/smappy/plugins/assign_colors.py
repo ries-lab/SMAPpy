@@ -692,6 +692,8 @@ class AssignColors(Plugin):
                    "where the probabilities are too close to choose between "
                    "and where no colour fits at all.")
     changes_locs = True
+    # a colour per localization, written onto the table
+    grouping = "ungrouped"
     preview_help = ("draw the histogram of r with the modes, the boundaries "
                     "and what would be assigned, and the same decision over "
                     "the two channels' intensities.  Nothing is saved and the "

@@ -61,6 +61,10 @@ blink crosses two regions), and the highest ROI number.
 
 ## In detail
 
+**Which table.**  The localizations, whatever the layer shows: the
+values are written onto every localization of a region, and a grouped
+table takes them when it is linked again (*Grouping*, above).
+
 **What may be written over.**  The table remembers which columns were
 written from regions (`metadata["region_columns"]`, with where each came
 from).  Running again writes over those, but never over a column the

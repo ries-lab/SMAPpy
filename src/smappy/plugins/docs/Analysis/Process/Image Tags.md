@@ -78,6 +78,10 @@ fig.tight_layout()
 
 ## In detail
 
+**Which table.**  The localizations, whatever the layer shows: the
+count beside the tags is of localizations per frame, and a blink grouped
+over several frames would be counted once, in its first.
+
 **What is compared.**  The metadata of a frame is flattened to
 `Device-Property` keys first.  User data that Micro-Manager wraps as
 `{"type": ..., "scalar": value}` is unwrapped and keeps its own name, which

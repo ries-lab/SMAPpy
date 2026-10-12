@@ -213,6 +213,8 @@ class MathParser(Plugin):
 
     Settings = MathSettings
     changes_locs = True
+    # a column per localization; the grouped table takes it by the recipe's rule
+    grouping = "ungrouped"
     version = "1"
 
     def react(self, changed: str, settings: MathSettings):

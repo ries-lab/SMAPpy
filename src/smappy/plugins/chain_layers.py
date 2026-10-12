@@ -129,6 +129,8 @@ class ChainLayers(Plugin):
     """The layers' bounds and grouping, as the Render tab would set them."""
     Settings = LayersSettings
     changes_locs = True            # only with *remove*: see changes_locs_for
+    # quantile bounds are of the localizations; *remove* drops rows
+    grouping = "ungrouped"
     favorite = False
     # 2: 'defaults' includes the bounds the table carries (a hide flag)
     version = "2"

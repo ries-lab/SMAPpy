@@ -9,13 +9,28 @@ and `smappy/simulate` are the record, and the code wins where they differ.
 
 ## The context
 
-* `ctx.locs` -- the whole table, **always the ungrouped one**; during a live
-  fit, a snapshot taken when the run started.
-* `ctx.table(layer)` -- `(locs, selection)`, grouped or not as the layer, a
-  chain and `Plugin.grouping` decide.  Read this, not `ctx.locs`, in a plugin
-  that should honour a chain's grouping; `Session.table` links the grouped
-  table on request.
-* `ctx.selection` -- what the user is looking at: the layer's filter *and* the
+* `ctx.locs` -- the whole table **the layer shows**: one row per blink on a
+  grouped layer, one per localization on an ungrouped one -- unless
+  `grouping` says which, lowest priority first: the layer, the chain, the
+  chain step, the plugin (`Plugin.grouping`).  During a live fit, a snapshot
+  taken when the run started.  In a region (an ROI, a cluster) it is the
+  region's rows of that table; where no grouped table can be cut to the
+  region, the ungrouped one stands in.
+* `Plugin.grouping = "ungrouped"` -- for a plugin that needs the
+  localizations whatever the layer shows: one that hands back a new table
+  (drift, Remove Localizations, Math Parser, Assign colours, ...) or measures
+  something of single frames (Localization Precision: NeNA pairs consecutive
+  frames).  A new table made from the grouped one is refused
+  (`refuse_grouped_table`): there is no way back from one row per blink to
+  the localizations.  `"grouped"` is the other requirement; None follows the
+  layer.
+* `ctx.ungrouped()` -- `(locs, selection)` of the localizations, whatever
+  `ctx.locs` is: for a plugin that measures blinks and writes onto the
+  localizations (DBSCAN maps each blink's cluster back through `group_id`).
+* `ctx.table(layer)` -- `(locs, selection)` of any layer, by the same rule:
+  `ctx.locs` and `ctx.selection` for the context's own.  `Session.table`
+  links the grouped table on request.
+* `ctx.selection` -- over `ctx.locs`, what the user is looking at: the layer's filter *and* the
   ROI *and*, while the 3D window is open with "plugins use the slab" ticked,
   the slab (`session.selects_slab`), as a boolean mask.  `.apply(locs)` cuts the table,
   `.require(n, ctx.report, "what")` refuses an empty one and warns about a thin

@@ -48,6 +48,7 @@ def test_locs_alone_selects_everything():
 def test_a_session_context_snapshots_the_table_and_the_selection():
     locs = table()
     session = Session(locs)
+    session.show_grouped(0, False)        # the localizations themselves
     session.set_roi(Region.rect(0, 0, 500, 500))
     ctx = session.context()
     assert ctx.session is session and ctx.locs is session.locs
@@ -92,6 +93,7 @@ def test_session_run_applies_and_logs_through_the_context():
     class Halve(Plugin):
         path = "Test/Halve"
         name = "Halve"
+        grouping = "ungrouped"            # it hands back a new table
 
         def run(self, ctx, settings):
             ctx.report(f"halving {len(ctx.locs)}")
@@ -121,6 +123,7 @@ def test_the_panel_builds_the_context_on_the_gui_thread_and_streams_back():
     class Slow(Plugin):
         path = "Test/Slow"
         name = "Slow"
+        grouping = "ungrouped"            # it hands back a new table
 
         def run(self, ctx, settings):
             seen["ran_on"] = threading.get_ident()

@@ -305,6 +305,18 @@ keeps different localizations on the two tables (on the grouped one,
 `xy_err_nm <= 25` is the combined precision), which is intended: it is the
 user's statement of what is good enough, applied to what is shown.
 
+**A plugin measures what the layer shows** (October 2026, B3).  Until then
+`ctx.locs` was always the ungrouped table and only Statistics, DBSCAN, NPC
+and the image export read the grouped one, so a measurement on a grouped
+layer -- the default -- silently disagreed with the picture.  Now the
+context hands out the shown table, and a plugin that needs the
+localizations says so (`Plugin.grouping = "ungrouped"`): every one that
+changes the table, since no table can be made back from blinks (such a
+result is refused, `refuse_grouped_table`, rather than allowed to replace
+the localizations), and the few that measure frames -- NeNA, the ground
+truth match, the bead pairs of the channel registration, the per-frame
+count of Image Tags.  Of the shipped measurements only Line Profile moved.
+
 **Linking writes back.**  `group.attach` puts `group_id` and `n_in_group` onto
 the ungrouped table as well.  The on-time is a property of a localization --
 SMAP's `numberInGroup` is a field of the ungrouped table and its plugins filter

@@ -1,5 +1,5 @@
 ---
-version: "4"
+version: "5"
 covers: [smappy.plugins.line_profile.project, smappy.plugins.line_profile.profiles, smappy.plugins.line_profile.fit_profile, smappy.plugins.line_profile.fit_models, smappy.plugins.line_profile.em_two_gaussians, smappy.plugins.line_profile.bootstrap, smappy.plugins.line_profile.gauss_density, smappy.plugins.line_profile.step_density, smappy.plugins.line_profile.arc_density, smappy.plugins.line_profile.smoothed_profile, smappy.plugins.line_profile.fit_layers, smappy.plugins.line_profile.draw_profile]
 ---
 
@@ -29,6 +29,13 @@ that matter when there are few localizations:
 A line is usually drawn over two channels, and what is wanted is how they
 differ, so each visible layer is fitted on its own and drawn in its own
 colour.
+
+**Which table.**  Each layer as it is shown.  On a *grouped* layer that is
+its blinks: a molecule that was on for three frames counts once, at its
+combined position and with its combined precision, rather than three times.
+On an ungrouped layer it is the localizations, frame by frame.  The layer's
+filters apply to what is shown -- on a grouped layer, to the blinks' values.
+(Before version 5 every layer was measured ungrouped, whatever it showed.)
 
 **What it needs.**  A line ROI, drawn in the render window, with a width
 wide enough to take in the structure.  At least 8 localizations per layer (a

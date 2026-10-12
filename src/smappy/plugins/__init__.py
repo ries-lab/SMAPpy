@@ -248,6 +248,14 @@ class Context:
     session is given, `locs` and `selection` are read from it *once, now*: the
     GUI builds the context on its own thread and hands it to a worker, so
     reading them later would race with a live fit rebinding the table.
+
+    `locs` and `selection` are the table the layer *shows* -- grouped or not
+    -- unless `grouping` says which (the plugin's requirement, `Plugin.grouping`,
+    or a chain's choice): a measurement measures what is on screen.  A plugin
+    that hands back a new table declares ``grouping = "ungrouped"``, since
+    there is no way from one row per blink back to the localizations; one
+    that measures blinks and writes onto the localizations reads both, the
+    second through `ungrouped` (DBSCAN).
     """
 
     def __init__(self, session=None, locs: Optional[Localizations] = None,
@@ -306,13 +314,47 @@ class Context:
         self._progress = progress
         self._stream = stream
         self.warnings: List[str] = []       # what `warn` was told, in order
+        given = locs is not None
         if locs is None:
             locs = session.locs if session is not None else Localizations({}, {})
-        self.locs = locs
         if selection is None:
             selection = (session.selection(layer) if session is not None
                          else Selection.all(len(locs)))
-        self.selection = selection
+        # the ungrouped table and its selection, whatever `locs` is
+        self._ungrouped = (locs, selection)
+        self.locs, self.selection = locs, selection
+        if grouping != "ungrouped" and (pinned is not None
+                                        or (session is not None and not given)):
+            self.locs, self.selection = self._shown()
+
+    def _shown(self) -> Tuple[Localizations, "Selection"]:
+        """The table this run works on, by the rule of `table`, for `locs`.
+
+        Where the layer's own choice is grouped but no grouped table can be
+        had -- one cut to a region while the fit is still adding to it, or
+        a cluster of a table linked before the cluster column was -- the
+        ungrouped table is the answer rather than a refusal: every
+        measurement would otherwise fail in such a region.  Asked for
+        explicitly (a chain step set to grouped), `table` refuses.
+        """
+        try:
+            return self.table()
+        except ValueError:
+            if self.grouping == "grouped":
+                raise
+            self.served_grouped = False
+            return self._ungrouped
+
+    def ungrouped(self) -> Tuple[Localizations, "Selection"]:
+        """The ungrouped table and the layer's selection over it.
+
+        `locs` when the plugin asks for it (``grouping = "ungrouped"``).  For
+        a plugin that follows the layer and still writes onto the
+        localizations: it measures `locs` -- blinks, on a grouped layer --
+        and hands back a new table made from this one (DBSCAN maps each
+        blink's cluster onto its localizations through `group_id`).
+        """
+        return self._ungrouped
 
     @property
     def per_region(self) -> bool:
@@ -352,8 +394,8 @@ class Context:
         own grouping, the chain's, the chain step's, and the plugin's
         requirement (`Plugin.grouping`); `grouping` here is the outcome of all
         but the first, None leaving it to the layer.  This is SMAP's
-        ``getloc(..., 'grouping', ...)``.  `locs` and `selection` stay the
-        ungrouped table, so a plugin that never asks behaves as it always did.
+        ``getloc(..., 'grouping', ...)``.  For the context's own layer it is
+        `locs` and `selection`; this is how a plugin reads another layer.
 
         Without a session there is no grouped table to hand out, and linking
         one here with settings nobody chose would be a guess; that is refused
@@ -401,7 +443,7 @@ class Context:
 
     def layer_selection(self, layer: int,
                         without: Tuple[str, ...] = ()) -> "Selection":
-        """Layer ``layer``'s selection over `locs` (the ungrouped table).
+        """Layer ``layer``'s selection over the ungrouped table (`ungrouped`).
 
         `Session.selection`, except that it agrees with `locs` while a fit is
         still appending: a plugin that reads several layers -- one answer per
@@ -498,6 +540,34 @@ def _as_plot(plot, name: str = "") -> Plot:
     if isinstance(plot, Plot):
         return plot if plot.name == name or not name else replace(plot, name=name)
     return Plot(draw=plot, name=name)
+
+
+# Where the plugins that make a table of their own sit -- from a file, from
+# images or from nothing: they never read the one there is.
+SOURCES = ("Localize/", "File/Load/", "File/Simulate/")
+
+
+def refuse_grouped_table(ctx: "Context", result: "Result", plugin: "Plugin",
+                         name: str = "") -> None:
+    """Refuse a new table made from the grouped one.
+
+    A plugin that follows the layer reads blinks on a grouped layer, and a
+    table it hands back made from them would replace the localizations with
+    one row per blink -- the data gone, with an undo step as the only way
+    back.  A plugin that changes the table declares ``grouping =
+    "ungrouped"``; one written before plugins followed the layer is told so
+    here rather than allowed to do that.  A fit or a loader makes its own
+    table and is not asked.
+    """
+    if (result is None or result.locs is None or not ctx.served_grouped
+            or str(getattr(plugin, "path", "")).startswith(SOURCES)):
+        return
+    name = name or getattr(plugin, "name", "") or type(plugin).__name__
+    raise ValueError(
+        f"{name} ran on the grouped table and handed back a new table: "
+        "there is no way from one row per blink back to the localizations, "
+        "so run it ungrouped (a plugin that changes the table declares "
+        "grouping = \"ungrouped\")")
 
 
 class Stopped(Exception):

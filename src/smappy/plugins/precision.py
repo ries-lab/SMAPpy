@@ -1413,6 +1413,8 @@ class LocalizationPrecision(Plugin):
 
     Settings = PrecisionSettings
     changes_locs = False
+    # NeNA pairs a localization with the next frame's: the repeats grouping merges
+    grouping = "ungrouped"
     version = "4"        # 2: finds a SMAPpy 3D fit's z precision, z_err_nm
     #                      3: a filter cut honoured by the CRLB fit; the FRC's
     #                         automatic pixel on a large field; motion only

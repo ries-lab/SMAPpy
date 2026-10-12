@@ -152,6 +152,13 @@ drift in seconds, then COMET within 50 nm of what is left.
 
 ## In detail
 
+**Which table.**  The localizations, whatever the layer shows.  The
+estimate is made from those the layer's filter and the ROI select -- the
+bounds applied to each localization, also on a grouped layer -- and the
+correction is applied to every localization of the table, selected or not.
+The blinks the estimate links for itself are linked with its own settings,
+not the session's, and are thrown away afterwards.
+
 **The cost.**  With $\mathbf{r}_i$ the position of localization $i$ (x, y
 and z, with z zero for a 2D table), $t_i$ its frame and $\mathbf{d}(t)$ the
 drift, the overlap is

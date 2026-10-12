@@ -81,6 +81,9 @@ for panel, name in zip(panels, ("n_localizations", "mean_precision_nm", "mean_ph
 
 ## In detail
 
+**Which table.**  None of its own: it reads what the evaluators measured
+in each region, and those measured the table each layer showed.
+
 **Which columns.**  A column is taken by default when the first row has it
 and every row holds an integer or a floating-point number there (a `NaN`
 counts as a number; `True`/`False` and text do not).  `roi_id` and

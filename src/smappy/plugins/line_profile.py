@@ -1499,8 +1499,9 @@ class LineProfile(Plugin):
     changes_locs = False
     # 2: the two-Gaussian start tries peaks far apart; 3: z_err_nm; 4: the
     # EM starts are tried narrow as well, so a close pair is not merged; the
-    # binned fit integrates over its bins; the z window is the filter's, in nm
-    version = "4"
+    # binned fit integrates over its bins; the z window is the filter's, in nm;
+    # 5: each layer as it is shown -- its blinks, when it is grouped
+    version = "5"
 
     def run(self, ctx: Context, settings: LineProfileSettings) -> Result:
         region = _line_roi(ctx)
@@ -1638,7 +1639,8 @@ def _groups(ctx: Context, settings: LineProfileSettings):
         for i, layer in enumerate(getattr(session, "layers", [])):
             if layer.is_image or not layer.visible:
                 continue
-            locs = ctx.layer_selection(i).apply(ctx.locs)
+            table, selection = ctx.table(i)       # as the layer shows it
+            locs = selection.apply(table)
             taken = [colour for _, colour, _ in found]
             found.append((layer.name,
                           layer_colour(layer.get_display(), len(found), taken),

@@ -11,6 +11,8 @@ class RCCDrift(KeepsDrift, Plugin):
     description = ("Estimate drift by cross-correlating rendered time windows "
                    "(RCC) and subtract it from all localizations.")
     changes_locs = True
+    # the correction moves every localization, and the estimate reads frames
+    grouping = "ungrouped"
     Settings = RCCSettings
 
     def run(self, ctx: Context, settings: RCCSettings) -> Result:

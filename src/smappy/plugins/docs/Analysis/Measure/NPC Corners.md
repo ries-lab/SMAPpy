@@ -83,6 +83,10 @@ for ax, copy in zip(axes.ravel(), range(6, 12)):
 
 ## In detail
 
+**Which table.**  The one the layer shows, cut to the ROI: on a grouped
+layer, the blinks -- which is what the corner count assumes, one
+localization per blink.
+
 **The centre** minimises $\sum_i \rho(d_i - R)$ over the precise
 localizations, $d_i$ the distance of localization $i$ from the centre, $R$
 the *radius*, and $\rho$ the soft-L1 loss with the *ring width* as its scale

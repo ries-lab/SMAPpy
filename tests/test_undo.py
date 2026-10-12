@@ -113,6 +113,7 @@ def test_a_plugin_run_is_named_after_the_plugin_in_the_menu():
     @register("Analysis/Measure/Undo test")
     class Doubler(Plugin):
         version = "1"
+        grouping = "ungrouped"
 
         def run(self, ctx, settings):
             return Result(locs=scale_photons(2)(ctx.locs), text="doubled")
