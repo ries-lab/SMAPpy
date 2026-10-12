@@ -153,6 +153,28 @@ def open_stack(path) -> ImageSource:
     )
 
 
+STACK_SUFFIXES = (".tif", ".tiff")      # ".ome.tif" ends in one of them
+
+
+def is_image_stack(path) -> bool:
+    """Whether `open_stack` would take ``path``, judged without opening it.
+
+    By name for a file -- a TIFF or a simulation recipe -- and by what is in
+    it for a folder: an NDTiff dataset (or any file of one), or TIFFs.  Cheap
+    on purpose: a file dropped on a window is sorted with it before anything
+    is read.
+    """
+    from .ndtiff import is_ndtiff
+    from ..simulate.source import is_simulation
+
+    path = Path(path)
+    if path.is_dir():
+        return is_ndtiff(path) or any(next(path.glob(f"*{s}"), None) is not None
+                                      for s in STACK_SUFFIXES)
+    return (path.name.lower().endswith(STACK_SUFFIXES) or is_simulation(path)
+            or is_ndtiff(path))
+
+
 def _first_of_series(paths: List[Path]) -> Path:
     """Pick the base file of an MM series (the one without a ``_<n>`` suffix)."""
     base = [p for p in paths if not re.search(r"_\d+\.ome\.tiff?$", p.name)]

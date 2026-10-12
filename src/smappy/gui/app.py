@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QDialog, QFileDialog, QH
 from .. import plugins, workspace as workspace_module
 from ..io.formats import (csv_columns, guess_csv_mapping, load as load_any,
                           name_filter, reader_for)
-from . import folders
+from . import drops, folders
 from .dialogs import CsvMappingDialog, PixelSizeDialog
 from ..session import Session, read_and_group
 from ..workspace import Workspace
@@ -160,6 +160,7 @@ class ControlWindow(QMainWindow):
         self.build_tabs()
         self._update_title()
         self.setCentralWidget(self.tabs)
+        self.setAcceptDrops(True)          # a file dropped here: `open_dropped`
         # tall on purpose: with a file open the Render tab's own content wants
         # some 700 px, and scrolling for the display settings every time is
         # what one notices.  Capped so it still fits a laptop screen.
@@ -219,6 +220,7 @@ class ControlWindow(QMainWindow):
         # it would take back a step of a table that window is not about
         render.addAction(self.undo_action)
         render.addAction(self.redo_action)
+        render.dropped = self.open_dropped      # the picture takes files too
         self._offers: list = []            # sessions handed to new instances
         self._offer_timer = QTimer(self, interval=500)
         self._offer_timer.timeout.connect(self._check_offers)
@@ -1124,6 +1126,101 @@ class ControlWindow(QMainWindow):
         guessed = set(guess_csv_mapping(csv_columns(Path(path))[0]).values())
         return not {"x_nm", "y_nm"} <= guessed
 
+    # ---------------------------------------------------------------- drops
+    def dragEnterEvent(self, event) -> None:
+        if drops.accepts(event.mimeData()):
+            event.acceptProposedAction()
+
+    def dropEvent(self, event) -> None:
+        _drop(event, self.open_dropped)
+
+    def open_dropped(self, paths) -> None:
+        """Files dropped on either main window, sorted by `drops.kind_of`.
+
+        Localization files go to `load_paths` together, which is *File >
+        Open* with all of them chosen at once: the first replaces the table,
+        the rest are added to it.  An image stack goes into a fitter's *file*
+        (`fit_file`); only one can, so the first.  Anything else is refused in
+        the status bar -- a dialog for a stray file would be out of proportion.
+        """
+        tables, stacks, refused = [], [], []
+        for path in map(Path, paths):
+            kind = drops.kind_of(path)
+            (tables if kind == drops.LOCS else
+             stacks if kind == drops.STACK else refused).append(path)
+        if stacks:
+            self.fit_file(stacks[0])
+        if tables:
+            if self._loading:
+                # what File > Open says by being disabled: one load at a time
+                self.statusBar().showMessage(
+                    f"still loading {self._loading_name}; drop "
+                    f"{tables[0].name} again when it is done", 8000)
+            else:
+                self.load_paths([str(p) for p in tables])
+        if refused:
+            more = f" (and {len(refused) - 1} more)" if len(refused) > 1 else ""
+            self.statusBar().showMessage(
+                f"cannot open {refused[0].name}: not a localization file or an "
+                f"image stack{more}", 8000)
+
+    def _fitter_for_file(self):
+        """``(tab index, tab, instance)`` of the fitter a dropped stack goes to.
+
+        The fitter open on the Localize tab, if one is -- which is the one
+        last used, since the open section is kept with the GUI -- else the
+        Gaussian 2D fitter, on whichever tab it is pinned to.  None if
+        neither is there.
+        """
+        tabs = [(i, w) for i, w in enumerate(self._tab_widgets())
+                if isinstance(w, PluginTab)]
+        # the Localize tab by its header, so a renamed one is still found
+        tabs.sort(key=lambda item: item[1].tab.header != "localize")
+        if tabs and tabs[0][1].tab.header == "localize":
+            index, tab = tabs[0]
+            opened = tab.open_instance()
+            slot = tab.slots.get(opened) if opened else None
+            if slot is not None and _takes_a_stack(slot.panel):
+                instance = tab.tab.instances[tab.tab.index_of(opened)]
+                return index, tab, instance
+        for index, tab in tabs:
+            for instance in tab.tab.instances:
+                if instance.plugin == DROP_FITTER:
+                    return index, tab, instance
+        return None
+
+    def fit_file(self, path) -> bool:
+        """Set a fitter's *file* to ``path`` as if it had been picked with the
+        field's own button: the fitter hears of it (`react` fills the camera
+        and the output, the hints follow), and nothing is fitted.
+
+        Returns whether a fitter took it.
+        """
+        path = Path(path)
+        found = self._fitter_for_file()
+        panel = None
+        if found is not None:
+            index, tab, instance = found
+            panel = tab.slots[instance.id].ensure()      # imports the plugin
+        if not _takes_a_stack(panel):
+            self.statusBar().showMessage(
+                f"{path.name} is an image stack, but no fitter is pinned to a "
+                "tab - add one to the Localize tab with +", 12000)
+            return False
+        self.tabs.setCurrentIndex(index)
+        tab.open_section(instance.id)
+        field = panel.form.fields["source"].fields["path"]
+        field.set(str(path))
+        folders.remember(path, stack=True)
+        field.changed.emit()                  # -> PluginPanel._react
+        edit = getattr(field, "widget", None)
+        if hasattr(edit, "setCursorPosition"):
+            edit.setCursorPosition(len(edit.text()))   # show the file's name
+        self.statusBar().showMessage(
+            f"{instance.title(panel.plugin.name)}: file set to {path.name}; "
+            "Run fits it", 8000)
+        return True
+
     def open_image(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Open image", folders.start(),
                                               "Images (*.tif *.tiff *.png)")
@@ -1178,10 +1275,59 @@ class RenderWindow(QMainWindow):
         self.setProperty(identity.OWN_TITLE, True)      # names the session itself
         self.resize(900, 900)
         window_shortcuts(self)
+        # Files dropped on the picture go where those dropped on the control
+        # window go (`ControlWindow.open_dropped`), which sets this.  The
+        # graphics view accepts drops by default and its scene then refuses
+        # them, which would make the picture -- most of this window -- a
+        # place the cursor says nothing can be dropped; so it does not take
+        # them and they come up to the window.
+        self.dropped = None
+        self.setAcceptDrops(True)
+        for widget in (self.view.graphics, self.view.graphics.viewport()):
+            widget.setAcceptDrops(False)
+
+    def dragEnterEvent(self, event) -> None:
+        if self.dropped is not None and drops.accepts(event.mimeData()):
+            event.acceptProposedAction()
+
+    def dropEvent(self, event) -> None:
+        if self.dropped is not None:
+            _drop(event, self.dropped)
 
     def clipboard_image(self):
         """What Edit > Copy puts on the clipboard: the view as displayed."""
         return self.view.qimage()
+
+
+DROP_FITTER = "Localize/Gaussian 2D"      # a dropped stack's fitter, by default
+
+
+def _takes_a_stack(panel) -> bool:
+    """A built panel with a fitter's *file* in it (`plugins.fit.SourceSettings`)."""
+    fields = getattr(getattr(panel, "form", None), "fields", {})
+    return (hasattr(getattr(panel, "plugin", None), "resolution")
+            and "source" in fields and "path" in getattr(fields["source"], "fields", {}))
+
+
+def _drop(event, handler) -> None:
+    """Take a drop, and open what it carried once the drop is over.
+
+    Not inside the event: opening may ask something (a csv's columns), and a
+    dialog during a drop holds the program it was dragged from until it is
+    answered.  The deferred call must never raise (a `QTimer.singleShot`
+    callable that does crashes PySide), so it prints instead.
+    """
+    paths = drops.local_paths(event.mimeData())
+    event.acceptProposedAction()
+
+    def open_them():
+        try:
+            handler(paths)
+        except Exception:
+            traceback.print_exc()
+
+    if paths:
+        QTimer.singleShot(0, open_them)
 
 
 def _start_log() -> None:

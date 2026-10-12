@@ -32,7 +32,7 @@ from ..batch import Input, Job, Output
 from ..chain import ChainSpec
 from ..session import Session
 from ..workspace import Instance
-from . import folders
+from . import drops, folders
 from .chain_panel import ChainPanel
 
 COLUMNS = ("use", "input", "pattern", "overrides", "status")
@@ -268,19 +268,18 @@ class BatchWindow(QMainWindow):
             self.table.removeRow(r)
 
     def dragEnterEvent(self, event) -> None:
-        if event.mimeData().hasUrls():
+        if drops.accepts(event.mimeData()):
             event.acceptProposedAction()
 
     def dropEvent(self, event) -> None:
-        for url in event.mimeData().urls():
-            path = Path(url.toLocalFile())
+        for path in drops.local_paths(event.mimeData()):
             if path.is_dir():
                 self.add_input(Input(folder=str(path)))
             elif path.name.endswith(chains.SUFFIX):
                 self.set_chain(chains.read(path))
             elif path.name.endswith((".batch.yaml", ".batch.json")):
                 self.load_job(path)
-            elif path.exists():
+            else:
                 self.add_input(Input(file=str(path)))
 
     # ----------------------------------------------------------------- chain

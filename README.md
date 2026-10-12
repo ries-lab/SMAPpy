@@ -34,6 +34,10 @@ or, to open a localization file directly:
 
     smappy-gui FILE.hdf5
 
+Files can also be dropped onto either window: a localization file opens as
+with *File → Open*, and an image stack (TIFF, an NDTiff folder, `*.sim.yaml`)
+becomes the *file* of the fitter on the Localize tab, ready to fit.
+
 From a checkout, activate the venv first or run `.venv/bin/smappy-gui`.
 
 ## Tutorials and documentation
