@@ -545,7 +545,7 @@ class _FitPlugin(Plugin):
             text = f"{resolved.camera_name}: this readout mode is not in the camera database"
             text += (f", so {', '.join(unknown)} "
                      f"{'is' if len(unknown) == 1 else 'are'} not known." if unknown
-                     else "; the values typed below are used.")
+                     else "; the values below are used.")
             return Notice(text, "Add readout mode...", "camera editor")
         return None
 
@@ -584,15 +584,12 @@ class _FitPlugin(Plugin):
             if settings.output.path in ("", getattr(self, "_default_output", None)):
                 updates["output.path"] = default
                 self._default_output = default
-            try:
-                source = _open(settings.source, watch=False)
-                from ..io.tiff import camera_metadata
-                cam = camera_metadata(source, require=False)
-            except Exception:
-                return updates or None
-            updates.update({f"camera.{k}": v for k, v in asdict(cam).items()
-                            if k in self.CAMERA_FIELDS and v is not None})
-            return updates
+            # The camera is *not* copied in: a field on auto shows the file's
+            # value as a grey hint (`hints`) and stays auto, so the run reads
+            # the file it is given.  Copying turned the file's numbers into the
+            # user's -- they then overrode a later *camera* choice, and the
+            # next file inherited the last one's values.
+            return updates or None
         if changed == "camera.preset" and settings.camera.preset:
             cam = CameraMetadata.from_yaml(settings.camera.preset)
             return {f"camera.{k}": v for k, v in asdict(cam).items()

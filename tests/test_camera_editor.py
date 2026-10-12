@@ -345,3 +345,29 @@ def test_the_main_window_opens_the_editor_on_the_fitters_file(
     editor.save()
     assert camera_db.database().identify(PRIME).name == "Prime95B"
     window.close()
+
+
+def test_choosing_a_file_shows_its_camera_but_leaves_the_fields_on_auto(
+        app, config, tmp_path):
+    """The file's numbers are shown, greyed, and stay the file's: copied in,
+    they overrode a later *camera* choice and outlived the file."""
+    from smappy.gui.plugin_panel import PluginPanel
+    from smappy.plugins.fit import GaussianFit
+    from smappy.session import Session
+
+    panel = PluginPanel(GaussianFit, Session())
+    panel.form.set_values({"source.path": a_tiff(tmp_path / "p_MMStack.ome.tif",
+                                                 PRIME)})
+    panel._react("source.path")
+    panel.refresh_derived()
+    assert panel.form.value().camera.pixelsize_um is None          # still auto
+    shown = panel.form.fields["camera"].fields["pixelsize_um"]
+    assert shown.widget.text() == "0.11"                           # the hint
+
+    other = tmp_path / "bare.tif"
+    import tifffile
+    tifffile.imwrite(other, np.zeros((2, 32, 32), np.uint16))
+    panel.form.set_values({"source.path": str(other)})
+    panel._react("source.path")
+    panel.refresh_derived()
+    assert panel.form.value().camera.pixelsize_um is None          # nothing inherited

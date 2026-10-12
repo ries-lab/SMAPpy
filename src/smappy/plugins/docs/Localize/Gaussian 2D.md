@@ -23,7 +23,8 @@ The camera matters: the fit works in **photons**, so the conversion from the
 camera's counts (ADU) to photons must be right, or every photon count and every
 precision is off by the same factor.  These values come from the file's
 metadata or the camera database where possible; check them in the *camera*
-section.  **Preview** runs detection on one frame and shows it, which is the
+section, where a field left on *auto* shows in grey what it was read as, and a
+number typed in replaces it.  **Preview** runs detection on one frame and shows it, which is the
 way to set the detection threshold.
 
 ## How it works
