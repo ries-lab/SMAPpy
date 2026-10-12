@@ -57,7 +57,7 @@ def test_a_live_session_is_handed_over_as_it_was_and_carries_on_growing(tmp_path
     assert copy.locs["photons"].dtype == np.float32
     assert (copy.name, copy.colour) == (name, "orange")
     assert [l.name for l in copy.layers] == ["layer 1", "bright"]
-    assert copy.layers[1].state.sets["ungrouped"].filter.ranges["photons"] == (1000, 2000)
+    assert copy.layers[1].ranges["photons"] == (1000, 2000)
     assert copy.path is None and copy.history[-1]["what"] == "copy"
     assert not copy.live
 

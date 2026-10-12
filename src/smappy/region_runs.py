@@ -180,15 +180,16 @@ class ColumnRegions:
 
     def _grouped_rows(self, i, lay, rows):
         """The grouped table's rows for these localizations, via ``group_id``."""
-        locset = lay.state.sets.get("grouped")
-        if locset is None or lay.state.grouped_stale or "group_id" not in self.locs \
+        tables = self.session.tables
+        locset = tables.peek_grouped()
+        if locset is None or not tables.is_current or "group_id" not in self.locs \
                 or "group_id" not in locset.locs:
             return None
         if i not in self._grouped:
             gid = np.asarray(locset.locs["group_id"])
             order = np.argsort(gid, kind="stable")
-            self._grouped[i] = (locset.locs, np.asarray(locset.filter.mask, dtype=bool),
-                                (gid[order], order))
+            mask = np.asarray(lay.state.filter_for(locset).mask, dtype=bool)
+            self._grouped[i] = (locset.locs, mask, (gid[order], order))
         table, mask, (sorted_ids, order) = self._grouped[i]
         wanted = np.unique(np.asarray(self.locs["group_id"])[rows])
         at = np.searchsorted(sorted_ids, wanted)
@@ -269,9 +270,13 @@ def _hash(a: np.ndarray) -> str:
 
 
 def _layer_inputs(lay) -> Dict[str, Any]:
-    grouped = lay.state.sets.get("grouped") if lay.grouped else None
-    return {"filters": lay.state.sets["ungrouped"].filter.ranges,
-            "grouped_filters": None if grouped is None else grouped.filter.ranges,
+    """A layer's part of what a region's results depend on: its bounds, and
+    -- while it shows the grouped table -- the bounds that table can take."""
+    ranges = lay.ranges
+    grouped = lay.state.tables.peek_grouped() if lay.grouped else None
+    return {"filters": {f: b for f, b in ranges.items() if f in lay.state.tables.locs},
+            "grouped_filters": None if grouped is None else
+            {f: b for f, b in ranges.items() if f in grouped.locs},
             "shows": "grouped" if lay.grouped else "ungrouped"}
 
 
@@ -410,7 +415,7 @@ class RegionScratch:
         for i, entry in self.pinned.items():
             mask = np.ones(len(new), dtype=bool)
             if self.session is not None and i < len(self.session.layers):
-                ranges = self.session.layers[i].state.sets["ungrouped"].filter.ranges
+                ranges = self.session.layers[i].ranges
                 f = LocFilter(new)
                 for name, (lo, hi) in ranges.items():
                     if name in new:

@@ -106,7 +106,7 @@ def test_the_viewer_takes_in_new_data_without_changing_a_setting(tmp_path):
     try:
         assert viewer.update() > 0                  # the first block frames it
         view = viewer.axes.get_xlim(), viewer.axes.get_ylim()
-        viewer.state.filter.set("xy_err_nm", None, 40.0)
+        viewer.state.set_bound("xy_err_nm", None, 40.0)
         viewer.state.display.gamma = 0.5
         before = len(state.locs)
 

@@ -24,7 +24,7 @@ from ..io.hdf5 import load_localizations
 from ..locs import Localizations, to_nm
 from ..region_table import RegionTable
 from ..regions import Region
-from ..viewer import ViewState
+from ..layer_state import ViewState
 
 
 def json_text(value):
@@ -259,7 +259,6 @@ class Source:
         self.path = str(Path(path).resolve()) if path else None
         self.name = name or (Path(path).name if path else "Untitled")
         self.state = ViewState(Localizations(columns, dict(locs.metadata)))
-        self.group_key = None
 
 
 class ROIProject:
@@ -301,7 +300,6 @@ class ROIProject:
         # leaving ROIs behind to be removed by hand.
         self.segment_preview = None
         self.history = ROIHistory()
-        self._filter_keys = {}
         # the number the next ROI is given (`ROI.number`): it only counts up
         # and is saved with the ROIs, so an undone ROI's number is not handed
         # to the next one, and its redo brings it back unchanged
@@ -378,27 +376,15 @@ class ROIProject:
         self.filters = normalized
 
     def state(self, file_id):
+        """The file's view under the project's bounds and grouping.  The
+        grouped table is its `Tables`' cache, keyed by the link settings, so
+        a change of them links again when it is next asked for."""
         source = self.sources[file_id]
         state = source.state
-        group_key = digest(asdict(self.group_settings))
-        if self.grouped and source.group_key != group_key:
-            state.sets.pop("grouped", None)
-            state.group(self.group_settings)
-            source.group_key = group_key
-            self._filter_keys.pop((file_id, "grouped"), None)
-        state.use_grouped = self.grouped
-        # every table gets the bounds, not only the one shown: a measurement
-        # in an ROI may ask for the other (`region_context`)
-        for kind, locset in state.sets.items():
-            effective = {k: v for k, v in self.filters.items()
-                         if k in locset.locs and k not in ("filenumber", "file_id")}
-            key = (file_id, kind)
-            signature = digest(effective)
-            if self._filter_keys.get(key) != signature:
-                locset.filter.clear()
-                for k, bounds in effective.items():
-                    locset.filter.set(k, *bounds)
-                self._filter_keys[key] = signature
+        state.tables.settings = self.group_settings
+        state.show_grouped(self.grouped)
+        state.set_ranges({k: v for k, v in self.filters.items()
+                          if k not in ("filenumber", "file_id")})
         return state
 
     @contextmanager
@@ -527,13 +513,16 @@ class ROIProject:
         state = self.state(roi.file_id)
         entry = {"shows": "grouped" if state.use_grouped else "ungrouped"}
         rows = None
-        for kind, locset in state.sets.items():
+        sets = {"ungrouped": state.tables.ungrouped}
+        if state.tables.is_current:
+            sets["grouped"] = state.tables.peek_grouped()
+        for kind, locset in sets.items():
             found = rows_in(locset.locs, locset.index, region)
             if kind == "ungrouped":
                 rows = found
             entry[kind] = (locset.locs[found],
-                           Selection(np.asarray(locset.filter.mask)[found], layer=0,
-                                     roi=region, name=str(region)))
+                           Selection(np.asarray(state.filter_for(locset).mask)[found],
+                                     layer=0, roi=region, name=str(region)))
         return {0: entry}, rows, 0, None
 
     def inputs(self, roi):

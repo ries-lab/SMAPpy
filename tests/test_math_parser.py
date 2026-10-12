@@ -338,7 +338,7 @@ def test_an_expression_that_reads_its_own_field_is_applied_once():
                         MathSettings(field="photons", expression="photons * 2"))
     session.apply(plugin, result)
     assert np.median(np.asarray(session.locs["photons"], float) / before) == pytest.approx(2.0)
-    assert "photons" in session.layers[0].state.sets["grouped"].locs
+    assert "photons" in session.tables.grouped().locs
     assert "applied once" in result.text
 
 

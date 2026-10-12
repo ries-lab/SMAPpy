@@ -72,7 +72,7 @@ lines += ["", f"derived: {recipe['field']} = {recipe['expression']}"
           "ROI: {}, x {:g} to {:g}, y {:g} to {:g} nm".format(
               after.roi.kind, *np.asarray(after.roi.bounds)[[0, 2, 1, 3]]),
           f"{len(after.locs)} localizations, "
-          f"{len(after.layers[0].state.sets['grouped'].locs)} after linking"]
+          f"{len(after.tables.grouped().locs)} after linking"]
 ax.text(0, 0, "\n".join(lines), fontsize=7.5, family="monospace", va="top",
         linespacing=1.4)
 ```

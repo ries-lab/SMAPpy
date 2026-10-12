@@ -676,7 +676,7 @@ def histogram_selection(ctx: Context):
     if session is None or not 0 <= layer < len(session.layers):
         return ctx.selection
     lay = session.layers[layer]
-    if lay.is_image or "channel" not in lay.state.sets["ungrouped"].filter:
+    if lay.is_image or "channel" not in lay.ranges:
         return ctx.selection
     return ctx.layer_selection(layer, without=("channel",))
 

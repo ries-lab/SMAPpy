@@ -36,11 +36,17 @@ and `smappy/simulate` are the record, and the code wins where they differ.
   what it has with `data["stopped"] = True`, or raises `Stopped` when a part
   is worth nothing (RCC); the panel then says "stopped".  The fitters, COMET,
   RCC, blocks over regions and chains (between steps) honour it.
-* The **grouped** table (one row per blink) is a table of its own, with its own
-  filter, at `session.layers[i].state.sets["grouped"]`; it exists only once the
-  user has switched that layer to grouped, and `state.grouped_stale` says it no
-  longer matches the current table.  Linking costs seconds to minutes -- say
-  what is missing instead of doing it behind the user's back.  Once it has been
+* The **grouped** table (one row per blink) is the session's, one for every
+  layer: `session.tables` holds the ungrouped table and its grouped form, a
+  cache keyed by the rows and `session.group_settings`.
+  `session.tables.peek_grouped()` is what was linked last (None if nothing
+  was), `session.tables.is_current` whether it still matches, and
+  `session.tables.grouped()` links it if it does not.  A layer has one set of
+  bounds (`layer.ranges`), applied to the table it shows --
+  `layer.state.filter_for(locset)` is its filter over either -- so on the
+  grouped table a bound on `xy_err_nm` is a bound on the combined precision.
+  Linking costs seconds to minutes -- say what is missing instead of doing it
+  behind the user's back.  Once it has been
   built once, `group_id` and `n_in_group` are on the *ungrouped* table too
   (`group.attach`), so a column computed afterwards can be reduced per blink
   with a `bincount` and no relinking.

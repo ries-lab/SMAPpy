@@ -46,8 +46,9 @@ def test_a_ready_made_grouped_table_gives_what_linking_here_would():
     worker = Session()
     worker.add_file(locs, info, grouped=grouped)
 
-    a = here.layers[0].state.sets["grouped"].locs
-    b = worker.layers[0].state.sets["grouped"].locs
+    a = here.tables.grouped().locs
+    b = worker.tables.peek_grouped().locs
+    assert worker.tables.is_current                      # taken, not linked again
     assert len(a) == len(b) and set(a.keys()) == set(b.keys())
     for name in a.keys():
         assert np.allclose(np.asarray(a[name]), np.asarray(b[name]), equal_nan=True), name

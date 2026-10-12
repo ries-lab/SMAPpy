@@ -42,10 +42,10 @@ against any other.
 ```figure-setup
 import dataclasses
 from smappy.simulate import simulate
-from smappy.session import Layer
+from smappy.session import Session
 from smappy.render import FieldOfView, RenderAxes, render_locs
 locs = simulate(n_frames=10000, seed=1)
-layer = Layer(locs)             # what the tab edits: default bounds, grouped
+layer = Session(locs).layers[0]  # what the tab edits: default bounds, grouped
 zoom = FieldOfView.from_range((4700, 5500), (4400, 5200), 4.0)
 whole = FieldOfView.from_range((0, 10000), (0, 10000), 20.0)
 
@@ -302,9 +302,11 @@ the intersection of all bounds and of the file choice.  A new layer starts
 with `xy_err_nm` at most 25 nm, `logl_rel` at least -2 and `z_nm`
 between -500 and 500 nm, plus `sigma_nm` at most 180 nm on a 2D table (in 3D the PSF width changes with z by design), each only if the
 table has that column, and any bounds the file carries from
-[Remove Localizations](plugin:Analysis/Process/Remove Localizations).  A bound
-applies to the grouped and the ungrouped table alike, so what is drawn and
-what a plugin gets never disagree.  The histogram spans the bulk of the
+[Remove Localizations](plugin:Analysis/Process/Remove Localizations).  A
+layer has one set of bounds, applied to the table it shows: on a *grouped*
+layer a bound on `xy_err_nm` or `photons` is a bound on a blink's combined
+precision or summed photons, so the same bound keeps more blinks than it
+keeps frames.  The histogram spans the bulk of the
 column in 120 bins (of a random sample of two million, for a larger table):
 the 1st to 99th percentile, cut to three interquartile ranges beyond the
 quartiles, so that the long tail of a precision column -- a few faint spots
@@ -501,16 +503,18 @@ takes seconds to minutes on a large one; after that it is free.  Plugins get
 the ungrouped table unless they ask for the grouped one.
 
 ### link settings...
-The linking parameters of grouping, for every layer at once: *link by* --
+The linking parameters of grouping, the session's, for every layer at
+once: *link by* --
 *fixed distance*, a box of half-width *link within* (nm), or *precision*, a
 radius of *k* times the two localizations' combined precision, held between
 *at least* and *at most* (nm) -- and *gap* (frames).  A fixed box wide
 enough to keep the dim localizations of a blink together also merges bright
 neighbours that their precision could tell apart; linking by precision
 avoids both, at the price of cutting the 4% of links that fall beyond 2.5
-sigma (raise *k* to keep more).  OK groups all the layers again and records the new
-parameters in the file's history, since the grouped table cannot tell which
-ones produced it.
+sigma (raise *k* to keep more).  OK links the table again -- once, since
+every layer shows the same grouped table -- and records the new parameters
+in the file's history, since the grouped table cannot tell which ones
+produced it.
 
 ### more
 The rendering widths, gamma and the white background.

@@ -1684,7 +1684,7 @@ def _z_window(ctx: Context) -> Optional[Tuple[Optional[float], Optional[float]]]
         return None
     try:
         layer = session._locs_layer()
-        ranges = layer.state.sets["ungrouped"].filter.ranges
+        ranges = layer.ranges
     except Exception:
         return None
     low, high = ranges.get("z_nm", (None, None))

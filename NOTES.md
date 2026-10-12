@@ -290,10 +290,20 @@ dark frames) and combines each run into one row using the per-column rules from
   localization precision, so it is not cosmetic.
 
 Grouped and ungrouped are **two tables kept side by side**, each with its own
-filter and spatial index (`LocSet`), because a precision cut that makes sense
-for single localizations is the wrong one for groups, and because rebuilding the
-filter caches on every switch would throw away the work.  The viewer's switch is
-then a single assignment; only the first switch pays for the linking.
+spatial index (`layer_state.LocSet`), so that a switch is a single assignment
+and only the first one pays for the linking.  There is one of each per
+session (`layer_state.Tables`), shared by every layer; the grouped table is a
+cache keyed by the rows it was linked from and the link settings, which are
+the session's, so it is linked again when either moves and there is no
+"stale" flag to keep.  A layer has **one** set of bounds, applied to the
+table it shows (October 2026, review section 4.2).  Each table used to carry
+a filter of its own, on the argument that a precision cut for single
+localizations is the wrong one for groups -- but the bounds were then copied
+between the two filters in five places, and each was a place to forget: a
+grouped table came out of a correction unfiltered.  So the same bound now
+keeps different localizations on the two tables (on the grouped one,
+`xy_err_nm <= 25` is the combined precision), which is intended: it is the
+user's statement of what is good enough, applied to what is shown.
 
 **Linking writes back.**  `group.attach` puts `group_id` and `n_in_group` onto
 the ungrouped table as well.  The on-time is a property of a localization --
@@ -658,7 +668,7 @@ and an unfiltered first view is not what anyone wants to look at.  Every one of
 them throws localizations away, so each is written into its box: the earlier
 rule that opening a file must never *silently* drop localizations still holds,
 it is the silence that mattered, not the absence of a default.  They apply once
-per table (the grouped table gets its own), a bound already set is never
+per layer (the grouped table shares them), a bound already set is never
 overridden, and a bound the user clears stays cleared.  Only fields with a
 fixed unit get one, since 25 nm means nothing in pixels.
 
@@ -750,8 +760,9 @@ number.  The LUT follows the choice (`hot` for intensity, `turbo` for a field),
 because a coded field cannot be read off a brightness ramp.
 
 **Grouping is the one thing that cannot be extended.**  It links localizations
-across frames, so an append marks the grouped table stale and it is rebuilt the
-next time it is asked for, keeping the bounds set on it.  The title says
+across frames, so after an append the grouped table no longer matches the
+rows it was linked from (`Tables.is_current`) and it is linked again the next
+time it is asked for; the bounds are the layer's and stay.  The title says
 "(stale)" rather than the view quietly lagging.
 
 **Knowing when the acquisition ended.**  Micro-Manager does not say, and the
@@ -818,8 +829,9 @@ and four things broke on it before any rule was written:
   built layers over the shared table, and linking writes `group_id` into the
   table it is given: the next block failed on a column mismatch.
 * **A second layer took every block twice**: each set over the table
-  extended it.  The first set to take a block now extends the table and the
-  shared index, and the others only their own filter.
+  extended it.  Now there is one table per session (`layer_state.Tables`):
+  it takes the block once, and each layer's filter catches up with the new
+  rows.
 
 What a user wants during an acquisition, then, comes in three kinds, and
 `Plugin.changes_locs` says before the run which one a plugin is:

@@ -931,8 +931,7 @@ def filter_bounds(session, layer: int = 0) -> Dict[str, Tuple]:
     """
     try:
         layers = session.layers
-        state = layers[layer if 0 <= layer < len(layers) else 0].state
-        return dict(state.sets["ungrouped"].filter.ranges)
+        return dict(layers[layer if 0 <= layer < len(layers) else 0].ranges)
     except (AttributeError, IndexError, KeyError, TypeError):
         return {}
 

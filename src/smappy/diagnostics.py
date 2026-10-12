@@ -323,7 +323,7 @@ def describe_session(session) -> str:
     lines.append("files: " + ", ".join(getattr(f, "name", str(f)) for f in session.files))
     for i, layer in enumerate(session.layers):
         try:
-            ranges = layer.filter.ranges
+            ranges = layer.ranges
         except Exception:
             ranges = {}
         lines.append(f"layer {i}: visible={getattr(layer, 'visible', '?')} "

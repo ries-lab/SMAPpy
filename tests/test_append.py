@@ -136,7 +136,7 @@ def test_an_appended_view_renders_what_the_whole_table_would(mode):
                       extent=(0.0, 0.0, 10000.0, 8000.0))
     for block in _blocks(whole, [4000, 1, 5999, 10000]):
         state.append(block)
-    state.filter.set("xy_err_nm", None, 15.0)
+    state.set_bound("xy_err_nm", None, 15.0)
 
     assert len(state.locs) == len(whole)
     for fov in (FieldOfView.from_range((0, 10000), (0, 8000), 20.0),
@@ -150,7 +150,7 @@ def test_an_appended_view_renders_what_the_whole_table_would(mode):
 def test_appending_does_not_move_the_full_view_or_the_filter():
     state = ViewState(_table(3000), live=True,
                       extent=(0.0, 0.0, 10000.0, 8000.0))
-    state.filter.set("z_nm", -150.0, 150.0)
+    state.set_bound("z_nm", -150.0, 150.0)
     before_view = state.full_view()
     before_ranges = state.filter.ranges
     display, settings = state.display, state.settings
@@ -163,21 +163,22 @@ def test_appending_does_not_move_the_full_view_or_the_filter():
     assert len(state.filter) > 0
 
 
-def test_the_grouped_table_goes_stale_rather_than_lagging_silently():
+def test_the_grouped_table_of_a_growing_table_is_kept_until_asked_for_again():
     state = ViewState(_table(2000), live=True)
     state.show_grouped(True)
-    state.filter.set("xy_err_nm", None, 12.0)   # the grouped filter
+    state.set_bound("xy_err_nm", None, 12.0)
     grouped_before = state.locs
-    assert not state.grouped_stale
+    assert state.tables.is_current
 
     state.append(_table(2000, seed=3, first_frame=2000))
-    assert state.grouped_stale
+    assert not state.tables.is_current               # it says so, from its key
     assert state.locs is grouped_before                # the view does not jump
 
     rebuilt = state.group()
-    assert not state.grouped_stale
+    assert state.tables.is_current
     assert rebuilt.locs is not grouped_before
-    assert rebuilt.filter.ranges["xy_err_nm"] == (None, 12.0)
+    assert state.locs is rebuilt.locs
+    assert state.filter.ranges["xy_err_nm"] == (None, 12.0)   # the bound stands
 
 
 def test_appending_to_a_table_not_opened_for_it_is_refused():

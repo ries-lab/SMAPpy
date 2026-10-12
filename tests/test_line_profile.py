@@ -643,10 +643,10 @@ def test_the_z_window_comes_from_the_filter_in_nm_and_is_open_where_it_is():
                           "frame": np.arange(500)}, {"units": "nm"})
     session = Session(locs)
     ctx = Context(locs=locs, session=session)
-    z_filter = session._locs_layer().state.sets["ungrouped"].filter
-    z_filter.set("z_nm", -100.0, None)
+    layer = session._locs_layer()
+    layer.set_bound("z_nm", -100.0, None)
     assert _z_window(ctx) == (-100.0, None)         # open above: widened data
-    z_filter.set("z_nm", None, None)
+    layer.set_bound("z_nm", None, None)
     assert _z_window(ctx) is None
     profile = profiles(locs, Region.line((0, 500), (1000, 500), 400.0),
                        z_window=(-100.0, None))["z"]

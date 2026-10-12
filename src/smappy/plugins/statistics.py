@@ -671,9 +671,9 @@ def grouped_on_time(session, layer: int = 0, selected: bool = True
                     ) -> Tuple[Optional[np.ndarray], str]:
     """``n_in_group`` from the session's grouped table, and why not if not.
 
-    The grouped table is a table of its own with a filter of its own, so the
-    selection is rebuilt here rather than carried over: the same bounds and the
-    same ROI, applied to blinks instead of to frames.  Nothing is linked -- a
+    The grouped table is a table of its own, so the selection is rebuilt here
+    rather than carried over: the layer's bounds and the same ROI, applied to
+    blinks instead of to frames.  Nothing is linked -- a
     session that has never been switched to grouped has no on-time to show, and
     saying so is better than spending a minute of someone's time on it.
     """
@@ -686,21 +686,21 @@ def grouped_on_time(session, layer: int = 0, selected: bool = True
     if getattr(layers[index], "is_image", False):
         index = session.first_locs_layer()
     state = getattr(layers[index], "state", None)
-    sets = getattr(state, "sets", {}) or {}
-    if "grouped" not in sets:
+    tables = getattr(session, "tables", None)
+    locset = tables.peek_grouped() if tables is not None else None
+    if state is None or locset is None:
         return None, ("no on-time: switch the layer to grouped once, so the "
                       "localizations are linked into blinks")
-    if getattr(state, "grouped_stale", False):
+    if not tables.is_current:
         return None, ("no on-time: the grouped table is out of date; switch the "
                       "layer to grouped to link it again")
-    locset = sets["grouped"]
     locs = locset.locs
     if "n_in_group" not in locs or not len(locs):
         return None, "no on-time: the grouped table has no n_in_group"
     if not selected:
         return np.asarray(locs["n_in_group"]), ""
     from ..render import positions
-    mask = np.asarray(locset.filter.mask, dtype=bool)
+    mask = np.asarray(state.filter_for(locset).mask, dtype=bool)
     roi = getattr(session, "roi", None)
     in_slab = bool(getattr(session, "selects_slab", False))
     if roi is not None or in_slab:

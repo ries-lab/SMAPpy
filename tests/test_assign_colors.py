@@ -172,9 +172,9 @@ def test_a_layer_filtered_to_one_colour_still_shows_both_to_the_histogram():
     columns = dict(locs.columns)
     columns["channel"] = truth.astype(np.int32)
     session = Session(Localizations(columns, dict(locs.metadata)))
-    lay = session.layers[0].state.sets["ungrouped"].filter
-    lay.set("channel", 1, 1)
-    lay.set("photons", 1500, None)                 # other bounds still count
+    lay = session.layers[0]
+    lay.set_bound("channel", 1, 1)
+    lay.set_bound("photons", 1500, None)           # other bounds still count
     ctx = session.context()
     assert set(np.unique(ctx.selection.apply(session.locs)["channel"])) == {1}
     plugin = plugins.get("Analysis/Dual-Color/AssignColors")()

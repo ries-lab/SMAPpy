@@ -200,7 +200,7 @@ class FilterWidget(QWidget):
         """
         if self.layer is None:
             return
-        ranges = self.layer.filter.ranges
+        ranges = self.layer.ranges
         bounded = {n for n, r in ranges.items() if r != (None, None)}
         plain, bold = QFont(self.field.font()), QFont(self.field.font())
         bold.setBold(True)
@@ -248,7 +248,7 @@ class FilterWidget(QWidget):
             return
         counts, edges = self._histogram(name)
         self.bars.setData(edges, counts.astype(np.float64))
-        lo, hi = self.layer.filter.ranges.get(name, (None, None))
+        lo, hi = self.layer.ranges.get(name, (None, None))
         self.lo.set(lo)
         self.hi.set(hi)
         # the region stands in for an open bound at the histogram's edge
@@ -263,7 +263,7 @@ class FilterWidget(QWidget):
 
     def _show_files(self) -> None:
         """One tickable row per file, plus 'all'."""
-        chosen = self.layer.filter._masks.get("files")
+        chosen = self.layer.files
         present = {int(n) for n in np.unique(self.layer.locs["filenumber"])}  # float once grouped
         self.files.blockSignals(True)
         self.files.clear()
@@ -273,7 +273,7 @@ class FilterWidget(QWidget):
             item = QListWidgetItem(name)
             item.setData(Qt.UserRole, number)
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-            on = chosen is None or bool(chosen[self.layer.locs["filenumber"] == number].any())
+            on = chosen is None or number in chosen
             item.setCheckState(Qt.Checked if on else Qt.Unchecked)
             self.files.addItem(item)
         self.files.blockSignals(False)
@@ -326,7 +326,7 @@ class FilterWidget(QWidget):
         # not cut off; anywhere else it is the number.  Only the end that was
         # dragged: the other keeps its bound, which may lie beyond the
         # histogram (the 25 nm precision bound over a sharp simulation).
-        old_lo, old_hi = self.layer.filter.ranges.get(name, (None, None))
+        old_lo, old_hi = self.layer.ranges.get(name, (None, None))
         shown_lo, shown_hi = self._shown_region
         if lo != shown_lo:
             old_lo = None if lo <= edges[0] else float(lo)
@@ -1326,5 +1326,5 @@ class RenderTab(QWidget):
 
     def _on_grouped(self, on: bool) -> None:
         self.session.show_grouped(self.strip.current, on)   # links once per table
-        self.filter.bind(self.layer)     # the grouped table has its own filter
+        self.filter.bind(self.layer)     # the same bounds, over the other table
         self.session.changed("layer")

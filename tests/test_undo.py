@@ -94,8 +94,8 @@ def test_undoing_a_change_brings_back_the_filters_and_the_grouped_view():
     assert session.locs is before
     layer = session.layers[0]
     assert layer.grouped                              # linked again, as it was
-    assert layer.state.sets["ungrouped"].filter.ranges["photons"] == (50.0, None)
-    assert "photons" in layer.state.sets["grouped"].filter.ranges
+    assert layer.ranges["photons"] == (50.0, None)
+    assert layer.filter.ranges["photons"] == (50.0, None)    # on the grouped table
 
 
 def test_the_log_keeps_every_step_and_says_what_was_undone():

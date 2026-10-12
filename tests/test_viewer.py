@@ -34,7 +34,7 @@ def test_the_index_does_not_change_the_image(mode):
     """
     locs = _table()
     state = ViewState(locs, RenderSettings(mode=mode))
-    state.filter.set("xy_err_nm", None, 15.0)
+    state.set_bound("xy_err_nm", None, 15.0)
     for fov in (FieldOfView.from_range((0, 10000), (0, 8000), 20.0),
                 FieldOfView.from_range((2000, 3000), (2000, 3000), 2.0),
                 FieldOfView.from_range((-5000, -4000), (0, 1000), 2.0)):
@@ -50,7 +50,7 @@ def test_a_filter_change_is_visible_without_rebuilding_the_index():
     index = state.index
     fov = FieldOfView.from_range((0, 10000), (0, 8000), 20.0)
     before = state.render(fov).n_locs
-    state.filter.set("xy_err_nm", None, 12.0)
+    state.set_bound("xy_err_nm", None, 12.0)
     assert state.render(fov).n_locs < before
     assert state.index is index          # positions did not change, so it stands
 
@@ -90,7 +90,7 @@ def test_typed_bounds_filter_and_an_empty_box_means_no_bound():
     assert viewer.state.filter.ranges[field] == (None, 12.0)
     viewer._on_bound(field, 1, "  ")               # both cleared: no filter
     assert field not in viewer.state.filter
-    viewer.state.filter.clear()                    # and with the defaults gone too
+    viewer.state.set_ranges({})                    # and with the defaults gone too
     assert viewer.state.filter.mask.all()
 
 
@@ -139,29 +139,31 @@ def _groupable_table(n=3000, seed=5):
     }, {"units": "nm"})
 
 
-def test_grouped_and_ungrouped_keep_separate_filters():
+def test_one_bound_holds_on_both_tables_and_keeps_different_rows():
+    """The bounds are the layer's: switching to the grouped table keeps them,
+    and there they apply to the combined precision, which is smaller."""
     state = ViewState(_groupable_table())
-    state.filter.set("xy_err_nm", None, 20.0)
+    state.set_bound("xy_err_nm", None, 8.0)
+    ungrouped_kept = state.filter.mask.mean()
 
     state.show_grouped(True)
     assert state.has_grouped
-    assert len(state.locs) < len(state.sets["ungrouped"].locs)
-    assert state.filter.ranges == {}                 # its own, untouched filter
-    state.filter.set("xy_err_nm", None, 8.0)
+    assert len(state.locs) < len(state.tables.locs)
+    assert state.filter.ranges == {"xy_err_nm": (None, 8.0)}
+    assert state.filter.mask.mean() > ungrouped_kept  # a blink beats its frames
 
     state.show_grouped(False)
-    assert state.filter.ranges == {"xy_err_nm": (None, 20.0)}
-    state.show_grouped(True)
     assert state.filter.ranges == {"xy_err_nm": (None, 8.0)}
+    assert state.filter.mask.mean() == ungrouped_kept
 
 
 def test_switching_does_not_regroup():
     state = ViewState(_groupable_table())
     state.show_grouped(True)
-    grouped = state.sets["grouped"]
+    grouped = state.tables.peek_grouped()
     state.show_grouped(False)
     state.show_grouped(True)
-    assert state.sets["grouped"] is grouped          # built once, then reused
+    assert state.tables.peek_grouped() is grouped    # built once, then reused
 
 
 def test_each_set_has_its_own_index_and_renders():
@@ -169,7 +171,7 @@ def test_each_set_has_its_own_index_and_renders():
     fov = FieldOfView.from_range((0, 5000), (0, 5000), 20.0)
     ungrouped = state.render(fov).n_locs
     state.show_grouped(True)
-    assert state.index is not state.sets["ungrouped"].index
+    assert state.index is not state.tables.ungrouped.index
     assert state.render(fov).n_locs < ungrouped
 
 
@@ -181,9 +183,9 @@ def test_the_viewer_switch_restores_the_boxes_silently():
 
     viewer.grouped.set_active(0)                     # -> grouped
     assert viewer.state.use_grouped
-    # its own filter: the typed bound is not carried across, the defaults apply
-    assert viewer.state.filter.ranges[field] == DEFAULT_BOUNDS[field]
-    assert viewer.bounds[field][1].text == "25"
+    # the layer's bound, carried across: it applies to the grouped values
+    assert viewer.state.filter.ranges[field] == (None, 20.0)
+    assert viewer.bounds[field][1].text == "20"
     assert viewer._hints[field].get_text() != hint   # the ranges follow the table
 
     viewer.grouped.set_active(0)                     # -> back

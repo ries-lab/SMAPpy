@@ -42,12 +42,11 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
-from .filter import LocFilter, quantile_range
-from .group import GroupSettings, group
+from .filter import quantile_range
+from .group import GroupSettings
+from .layer_state import LocSet, ViewState  # noqa: F401  (moved; kept importable here)
 from .locs import Localizations
-from .render import (DisplaySettings, FieldOfView, RenderSettings, RenderedImage,
-                     camera_pixelsize_nm, positions, render_locs)
-from .spatial import GrowingIndex, SpatialIndex
+from .render import DisplaySettings, FieldOfView, RenderSettings, RenderedImage
 
 # The fields worth a filter control, best alternative first.  Everything else
 # stays available through `LocFilter` without cluttering the window.
@@ -85,282 +84,6 @@ DEFAULT_BOUNDS: Dict[str, Tuple[Optional[float], Optional[float]]] = {
 
 INTENSITY_LUT = "hot"    # an intensity ramp: brightness is the only dimension
 FIELD_LUT = "turbo"      # a full-hue ramp, which is what a coded field needs
-
-
-class LocSet:
-    """One table with the things that are derived from it and nothing else.
-
-    Grouped and ungrouped localizations are different tables, so each needs its
-    own filter and its own spatial index.  Keeping both alive is the point:
-    linking costs a third of a second and the filter caches would have to be
-    rebuilt on every switch otherwise.
-    """
-
-    def __init__(self, locs: Localizations, filter: Optional[LocFilter] = None,
-                 extent: Optional[Sequence[float]] = None,
-                 growable: bool = False, share: Optional["LocSet"] = None):
-        """``share`` is another set over the *same* table: its index and its
-        median precision are reused, since both depend on the table alone and
-        building the index is what a new layer would otherwise spend on."""
-        self.locs = locs
-        self.filter = filter if filter is not None else LocFilter(locs)
-        self._precision_field: Optional[str] = \
-            "xy_err_nm" if "xy_err_nm" in locs else None
-        # the extent on custom render axes, cached; set before the shared
-        # branch returns, because a shared set answers `axis_bounds` too -- it
-        # is the second layer, and without this it raised on any picture that
-        # was not the ordinary one, which is a 3D window that stays empty
-        self._bounds_key = None
-        self._bounds = (0.0, 0.0, 1.0, 1.0)
-        if share is not None and share.locs is locs:
-            self.index = share.index
-            self.median_precision = share.median_precision
-            self._precision_n = share._precision_n
-            return
-        # a live view is opened before the first block has been fitted, so an
-        # empty table is a normal starting point, not an error
-        empty = np.empty(0, np.float32)
-        x, y = positions(locs) if locs.columns else (empty, empty)
-        self.index = (GrowingIndex(x, y, extent=extent) if growable
-                      else SpatialIndex(x, y, extent=extent))
-
-        # for the query margin: how far the widest blob reaches beyond the view
-        self.median_precision = 0.0
-        self._precision_n = 0
-        self._update_precision()
-
-    def _update_precision(self, force: bool = True) -> None:
-        """Recompute the median localization precision.
-
-        It only sets the cap on the rendering sigma and it hardly moves when a
-        few percent more localizations arrive, so while data is streaming in it
-        is recomputed once the table has grown by a fifth rather than on every
-        block -- a median over millions of values is not free.
-        """
-        if self._precision_field is None:
-            return
-        if not force and len(self.locs) < self._precision_n * 1.2:
-            return
-        values = np.asarray(self.locs[self._precision_field], np.float64)
-        values = values[np.isfinite(values)]
-        if values.size:
-            self.median_precision = float(np.median(values))
-        self._precision_n = len(self.locs)
-
-    def append(self, new: Localizations) -> int:
-        """Add localizations to the end of the table.  Returns how many.
-
-        The table, the filter and the index are all extended rather than
-        rebuilt, and nothing that was set -- a filter bound, the grid the index
-        is on -- is re-derived from the larger table.
-        """
-        n = len(new)
-        if n == 0:
-            return 0
-        if not isinstance(self.index, GrowingIndex):
-            raise TypeError("this table was not opened for appending; "
-                            "build the ViewState with live=True")
-        x, y = positions(new)
-        # Several sets can be over one table -- a second layer during a live
-        # fit -- and share its index.  The first to take a block extends the
-        # table and the index; the others extend only their own filter.  Each
-        # used to extend the table, so a second layer doubled every block.
-        before = self.filter.n_rows
-        if len(self.locs) == before:
-            self.locs.extend(new)
-        elif len(self.locs) != before + n:
-            raise ValueError(f"the table has {len(self.locs)} rows, this set "
-                             f"{before}: it cannot take a block of {n}")
-        self.filter.append(n)
-        if self.index.n_localizations < len(self.locs):
-            self.index.append(x, y)
-        self._update_precision(force=False)
-        return n
-
-    def axis_bounds(self, axes) -> Tuple[float, float, float, float]:
-        """``(x0, y0, x1, y1)`` of the table on non-default render axes.
-
-        The spatial index stays in the table's own coordinates -- that is what
-        an ROI and a neighbour query mean -- so a picture of photons against
-        frame has nowhere to read its extent from but the columns.  Cached
-        against the axes and the length, because the overview asks for it on
-        every redraw.
-        """
-        key = (axes, len(self.locs))
-        if self._bounds_key != key:
-            if not len(self.locs):
-                self._bounds = (0.0, 0.0, 1.0, 1.0)
-            else:
-                x, y = axes.coordinates(self.locs)
-                self._bounds = (float(np.nanmin(x)), float(np.nanmin(y)),
-                                float(np.nanmax(x)), float(np.nanmax(y)))
-            self._bounds_key = key
-        return self._bounds
-
-    def __len__(self) -> int:
-        return len(self.locs)
-
-
-class ViewState:
-    """Everything needed to render a view, without a window around it."""
-
-    def __init__(self, locs: Localizations,
-                 settings: Optional[RenderSettings] = None,
-                 display: Optional[DisplaySettings] = None,
-                 filter: Optional[LocFilter] = None,
-                 grouped: Optional[Localizations] = None,
-                 live: bool = False,
-                 extent: Optional[Sequence[float]] = None,
-                 share: Optional["ViewState"] = None):
-        """``live`` prepares the table for `append`; ``extent`` fixes the area
-        the index covers, so the full view does not move as data arrives.
-        ``share`` is another state over the same table, whose indices (and
-        grouped table, if built) are reused instead of rebuilt."""
-        self.settings = settings or RenderSettings()
-        self.display = display or DisplaySettings()
-        self.n_threads = 0
-        shared = share.sets.get("ungrouped") if share is not None else None
-        self.sets: Dict[str, LocSet] = {
-            "ungrouped": LocSet(locs, filter, extent=extent, growable=live, share=shared)}
-        if grouped is None and share is not None and "grouped" in share.sets \
-                and shared is not None and shared.locs is locs and not share.grouped_stale:
-            other = share.sets["grouped"]
-            self.sets["grouped"] = LocSet(other.locs, share=other)
-        elif grouped is not None:
-            self.sets["grouped"] = LocSet(grouped)
-        self.use_grouped = False
-        self.grouped_stale = False
-
-    # The active table.  Everything downstream goes through these, so switching
-    # is a single assignment and no cached mask is thrown away.
-    @property
-    def current(self) -> LocSet:
-        return self.sets["grouped" if self.use_grouped else "ungrouped"]
-
-    @property
-    def locs(self) -> Localizations:
-        return self.current.locs
-
-    @property
-    def filter(self) -> LocFilter:
-        return self.current.filter
-
-    @property
-    def index(self) -> SpatialIndex:
-        return self.current.index
-
-    @property
-    def has_grouped(self) -> bool:
-        return "grouped" in self.sets
-
-    def group(self, settings: Optional[GroupSettings] = None,
-              share: Optional["ViewState"] = None) -> LocSet:
-        """Build the grouped table, once.  This is the slow part.
-
-        Grouping links localizations across frames and has no incremental form,
-        so an append cannot extend it: the table is marked stale instead and
-        rebuilt the next time it is asked for.  ``share`` is a state over the
-        same table that already has it: then nothing is rebuilt.
-        """
-        if "grouped" not in self.sets or self.grouped_stale:
-            keep = self.sets.get("grouped")
-            other = share.sets.get("grouped") if share is not None else None
-            if other is not None and not share.grouped_stale \
-                    and share.sets["ungrouped"].locs is self.sets["ungrouped"].locs:
-                grouped = other.locs
-                self.sets["grouped"] = LocSet(grouped, share=other)
-            else:
-                # `group` writes `group_id` and `n_in_group` back onto the
-                # ungrouped table (see `group.attach`) -- but not while the
-                # table is still growing: a block arriving from the fitter
-                # would not carry those columns and `extend` refuses a table
-                # whose columns do not match.
-                table = self.sets["ungrouped"].locs
-                live = isinstance(self.sets["ungrouped"].index, GrowingIndex)
-                grouped, _ = group(table, settings, attach_columns=not live)
-                self.sets["grouped"] = LocSet(grouped)
-            if keep is not None:      # a rebuild: the bounds the user set stand
-                for field, (lo, hi) in keep.filter.ranges.items():
-                    if field in grouped:
-                        self.sets["grouped"].filter.set(field, lo, hi)
-            self.grouped_stale = False
-        return self.sets["grouped"]
-
-    def append(self, new: Localizations) -> int:
-        """Add localizations to the ungrouped table.  Returns how many.
-
-        Called from whichever thread owns the view -- the GUI one -- so that
-        nothing here has to be thread-safe; a fitter running in the background
-        hands blocks over through a queue.
-        """
-        n = self.sets["ungrouped"].append(new)
-        if n and "grouped" in self.sets:
-            self.grouped_stale = True
-        return n
-
-    def show_grouped(self, on: bool,
-                     settings: Optional[GroupSettings] = None,
-                     share: Optional["ViewState"] = None) -> None:
-        if on:
-            self.group(settings, share)
-        self.use_grouped = bool(on)
-
-    @property
-    def cull_index(self):
-        """The index to narrow a view with, or None when it cannot be used.
-
-        On non-default render axes the index answers questions about the
-        table's positions, which is not where the picture is looking, so the
-        whole filtered table is rendered instead.  A versatile render is one
-        picture of everything rather than a pan over a field, so the pass it
-        costs is what SMAP pays too.
-        """
-        return None if not self.settings.axes.is_default else self.index
-
-    def bounds(self) -> Tuple[float, float, float, float]:
-        """``(x0, y0, x1, y1)`` of the whole table, in render coordinates."""
-        if self.settings.axes.is_default:
-            return self.index.bounds
-        return self.current.axis_bounds(self.settings.axes)
-
-    def full_view(self, margin_fraction: float = 0.01) -> Tuple[tuple, tuple]:
-        """The coordinate ranges covering every localization."""
-        x0, y0, x1, y1 = self.bounds()
-        mx, my = (x1 - x0) * margin_fraction, (y1 - y0) * margin_fraction
-        return (x0 - mx, x1 + mx), (y0 - my, y1 + my)
-
-    def max_sigma(self, pixelsize: float) -> float:
-        """The largest rendering sigma at this zoom, in data units."""
-        if self.settings.mode == "hist":
-            return 0.0
-        if self.settings.mode == "gauss":
-            return self.settings.sigma
-        if self.settings.mode == "dl":
-            # a PSF on whole camera pixels: about one pixel wide in focus,
-            # up to three out of focus on an astigmatic one
-            return 3 * camera_pixelsize_nm(self.locs)
-        s = self.settings.sigma_settings
-        floor = max(s.min_sigma, s.min_sigma_pixels * pixelsize)
-        return max(floor, s.max_factor * self.current.median_precision * s.factor)
-
-    def select(self, fov: FieldOfView) -> np.ndarray:
-        """The localizations that can contribute to this view, after filtering."""
-        if self.cull_index is None:
-            return self.filter.indices
-        margin = self.settings.roi_sigma * self.max_sigma(fov.pixelsize)
-        candidates = self.index.query(fov.x0, fov.x1, fov.y0, fov.y1, margin)
-        if candidates.size == self.index.n_localizations:
-            return self.filter.indices          # nothing to narrow: skip the gather
-        return candidates[self.filter.mask[candidates]]
-
-    def render(self, fov: FieldOfView) -> RenderedImage:
-        return render_locs(self.locs, fov, self.settings, self.display,
-                           select=self.select(fov), n_threads=self.n_threads)
-
-    def image(self, fov: FieldOfView, white_background=None
-              ) -> Tuple[np.ndarray, RenderedImage]:
-        rendered = self.render(fov)
-        return self.display.apply(rendered, white_background), rendered
 
 
 def _nice_length(span: float) -> float:
@@ -655,13 +378,13 @@ class Viewer:
         Once per table: a bound the user cleared must stay cleared, including
         across a switch to the grouped table and back.
         """
-        current = self.state.current
-        if getattr(current, "defaults_applied", False):
+        state = self.state
+        if not len(state.locs) or getattr(state, "defaults_applied", False):
             return
         for field, (lo, hi) in DEFAULT_BOUNDS.items():
-            if field in current.locs and field not in current.filter.ranges:
-                current.filter.set(field, lo, hi)
-        current.defaults_applied = True
+            if field in state.locs and field not in state.ranges:
+                state.set_bound(field, lo, hi)
+        state.defaults_applied = True
         self._restore_bounds()
 
     def reset(self) -> None:
@@ -739,7 +462,7 @@ class Viewer:
     def _update_title(self, note: str = "") -> None:
         shown = self._rendered.n_locs if self._rendered else 0
         kind = "grouped" if self.state.use_grouped else "localizations"
-        if self.state.use_grouped and self.state.grouped_stale:
+        if self.state.use_grouped and not self.state.tables.is_current:
             kind += " (stale)"     # data has arrived since these were grouped
         title = note or (f"{shown:,} of {len(self.state.locs):,} {kind}   ·   "
                          f"{self.fov.pixelsize:.3g} per pixel   ·   "
@@ -826,16 +549,15 @@ class Viewer:
         except ValueError:
             self._restore_bounds()          # put the previous value back
             return
-        lo, hi = self.state.filter.ranges.get(field, (None, None))
+        lo, hi = self.state.ranges.get(field, (None, None))
         lo, hi = (value, hi) if which == 0 else (lo, value)
         if lo is None and hi is None:
-            self.state.filter.remove(field)
+            self.state.remove_bound(field)
+        elif field not in self.state.locs:  # no such column (yet): a live view with no data
+            self._restore_bounds()
+            return
         else:
-            try:
-                self.state.filter.set(field, lo, hi)
-            except KeyError:        # no such column (yet): a live view with no data
-                self._restore_bounds()
-                return
+            self.state.set_bound(field, lo, hi)
         self._schedule()
 
     def take_new_data(self, blocks: Sequence[Localizations]) -> int:
@@ -990,9 +712,9 @@ class Viewer:
     def _on_grouped(self) -> None:
         """Switch between the grouped and ungrouped tables.
 
-        Each keeps its own filter, so the boxes are restored to what that table
-        was last set to rather than carried across -- a precision cut that makes
-        sense for single localizations is the wrong one for groups.
+        The bounds are the layer's and stay as typed; on the grouped table they
+        apply to the combined values (`layer_state`), and the hints beside the
+        boxes follow the table.
         """
         on = bool(self.switches.get_status()[0])
         if on and not self.state.has_grouped:      # the one slow path
@@ -1042,7 +764,7 @@ class Viewer:
         """Show the active table's own filter in the boxes, silently."""
         self._update_hints()
         self._update_color_row()
-        ranges = self.state.filter.ranges
+        ranges = self.state.ranges
         for field, boxes in self.bounds.items():
             for box, value in zip(boxes, ranges.get(field, (None, None))):
                 events, box.eventson = box.eventson, False

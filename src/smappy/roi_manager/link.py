@@ -21,7 +21,7 @@ import numpy as np
 from ..group import GROUP_COLUMNS, GroupSettings
 from ..locs import Localizations
 from ..render import RenderAxes
-from ..viewer import ViewState
+from ..layer_state import Tables, ViewState
 from ..region_table import RegionTable
 from .core import ROI, ROIProject, digest, json_text, point, polygon_vertices, rows_in
 
@@ -46,7 +46,6 @@ class SessionSource:
         self.number = number          # the table's `filenumber`
         self.state: Optional[ViewState] = None
         self.fingerprint = ""
-        self.group_key = None
 
 
 class SessionROIs(ROIProject):
@@ -83,10 +82,8 @@ class SessionROIs(ROIProject):
         layer = self.session.layers[min(self.layer, len(self.session.layers) - 1)]
         if layer.is_image:
             layer = self.session.layers[self.session.first_locs_layer()]
-        ranges = {f: b for f, b in layer.state.sets["ungrouped"].filter.ranges.items()}
-        self.filters = ranges
+        self.filters = layer.ranges
         self.grouped = layer.grouped
-        self.group_settings = layer.group_settings
         # so the manager's images look like the main view -- except for the
         # axes, which stay the positions: a site is a place, and a versatile
         # render is a picture of two columns rather than of anywhere
@@ -144,6 +141,16 @@ class SessionROIs(ROIProject):
             return locs
         return locs[np.asarray(locs["filenumber"]) == source.number]
 
+    @property
+    def group_settings(self) -> GroupSettings:
+        """The session's: there is one grouped table, and the ROIs see it."""
+        return self.session.group_settings
+
+    @group_settings.setter
+    def group_settings(self, settings: GroupSettings) -> None:
+        # `ROIProject.__init__` sets a default; the session's stands
+        pass
+
     def _apply(self, source: SessionSource) -> None:
         """Put the layer's bounds, grouping and look on this source's state."""
         state = source.state
@@ -152,24 +159,33 @@ class SessionROIs(ROIProject):
         settings, display = getattr(self, "render", None), getattr(self, "display", None)
         if settings is not None:
             state.settings, state.display = settings, display
-        key = digest(asdict(self.group_settings))
-        if self.grouped and (source.group_key != key or "grouped" not in state.sets):
-            state.sets.pop("grouped", None)
-            state.group(self.group_settings)
-            source.group_key = key
-        state.use_grouped = self.grouped and "grouped" in state.sets
-        for locset in state.sets.values():
-            locset.filter.clear()
-            for field, (lo, hi) in self.filters.items():
-                if field in locset.locs:
-                    locset.filter.set(field, lo, hi)
+        state.tables.settings = self.session.group_settings
+        state.use_grouped = self.grouped
+        state.set_ranges(self.filters)
+
+    def _tables(self, source: SessionSource) -> Tables:
+        """The tables an ROI of this file looks at.  One file: the session's
+        own, grouped table and all.  One of several: its rows of the session's
+        table, and of the session's grouped table -- linking never joins two
+        files (`GroupSettings.block_fields`), so those rows are what linking
+        the file alone would give, without linking anything again."""
+        session = self.session
+        if "filenumber" not in session.locs or len(self.sources) <= 1:
+            return session.tables
+
+        def link(settings, attach_columns, number=source.number):
+            grouped = session.tables.grouped().locs
+            if "filenumber" not in grouped:
+                return grouped
+            return grouped[np.asarray(grouped["filenumber"]) == number]
+        return Tables(self._slice(source), session.group_settings, link=link)
 
     def state(self, file_id) -> ViewState:
         """The data an ROI of this file sees: the session's rows for that file,
         under the layer's filter and grouping."""
         source = self.sources[file_id]
         if source.state is None:
-            source.state = ViewState(self._slice(source))
+            source.state = ViewState(tables=self._tables(source))
             self._apply(source)
         return source.state
 
@@ -199,7 +215,7 @@ class SessionROIs(ROIProject):
         from ..plugins import Selection
         session = self.session
         source = self.sources[roi.file_id]
-        ungrouped = self.state(roi.file_id).sets["ungrouped"]
+        ungrouped = self.state(roi.file_id).tables.ungrouped
         found = rows_in(ungrouped.locs, ungrouped.index, region)
         in_file = self._file_mask(session.locs, source.number)
         rows = found if in_file is None else np.flatnonzero(in_file)[found]
@@ -211,13 +227,13 @@ class SessionROIs(ROIProject):
             mask = np.asarray(lay.selection(i).mask, dtype=bool)
             entry = {"ungrouped": (locs, Selection(mask[rows], layer=i, roi=region,
                                                    name=f"{lay.name}, {region}"))}
-            locset = lay.state.sets.get("grouped")
-            if locset is not None and not lay.state.grouped_stale:
+            locset = session.tables.peek_grouped()
+            if locset is not None and session.tables.is_current:
                 keep = self._file_mask(locset.locs, source.number)
                 g = rows_in(locset.locs, locset.index, region, keep)
                 entry["grouped"] = (locset.locs[g], Selection(
-                    np.asarray(locset.filter.mask, dtype=bool)[g], layer=i, roi=region,
-                    name=f"{lay.name}, grouped, {region}"))
+                    np.asarray(lay.state.filter_for(locset).mask, dtype=bool)[g],
+                    layer=i, roi=region, name=f"{lay.name}, grouped, {region}"))
             tables[i] = entry
         layer = min(self.layer, len(session.layers) - 1)
         if session.layers[layer].is_image:
@@ -230,18 +246,9 @@ class SessionROIs(ROIProject):
         layer (`_region_tables`), so a filter changed on any of them makes
         its numbers out of date."""
         out = super().inputs(roi)
-        layers = []
-        for lay in self.session.layers:
-            if lay.is_image:
-                continue
-            # the grouped table's bounds only while it is shown: linking one
-            # and switching back leaves it behind, and that changes nothing
-            grouped = lay.state.sets.get("grouped") if lay.grouped else None
-            layers.append({"filters": lay.state.sets["ungrouped"].filter.ranges,
-                           "grouped_filters": None if grouped is None
-                           else grouped.filter.ranges,
-                           "shows": "grouped" if lay.grouped else "ungrouped"})
-        out["layers"] = layers
+        from ..region_runs import _layer_inputs
+        out["layers"] = [_layer_inputs(lay) for lay in self.session.layers
+                         if not lay.is_image]
         return out
 
     # --------------------------------------------------------- persistence
