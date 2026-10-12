@@ -56,3 +56,52 @@ def test_dragging_one_end_keeps_a_bound_beyond_the_histogram_at_the_other(app):
     widget.region.setRegion((edges[0] - 1, widget.region.getRegion()[1]))
     widget._on_region()                            # dragged to the edge: no bound
     assert layer.filter.ranges["xy_err_nm"] == (None, 25.0)
+
+
+def test_every_bound_of_the_layer_is_listed_and_its_cross_removes_it(app):
+    """A bound on a field that is not on show was a dot in a drop-down; a
+    sparse picture should say why without a hunt."""
+    from smappy.gui.render_tab import FilterWidget
+    from smappy.session import Session
+    rng = np.random.default_rng(1)
+    n = 2000
+    session = Session(Localizations({
+        "x_nm": rng.uniform(0, 1e4, n), "y_nm": rng.uniform(0, 1e4, n),
+        "frame": np.arange(n), "photons": rng.uniform(100, 900, n),
+        "xy_err_nm": rng.uniform(2, 40, n)}, {"units": "nm"}))
+    layer = session.layers[0]
+    layer.set_bound("xy_err_nm", None, 25.0)
+    layer.set_bound("photons", 200.0, None)
+    widget = FilterWidget(session)
+    widget.bind(layer)
+    widget._select("frame")
+    text = widget.bounds_line.text()
+    assert "xy_err_nm ≤ 25" in text and "photons ≥ 200" in text
+
+    widget._on_bound_link("edit:photons")
+    assert widget.current_field() == "photons"
+    widget._on_bound_link("remove:xy_err_nm")
+    assert "xy_err_nm" not in layer.ranges or layer.ranges["xy_err_nm"] == (None, None)
+    assert "xy_err_nm" not in widget.bounds_line.text()
+
+
+def test_the_status_says_how_much_the_filters_hide(app):
+    from smappy.gui.app import ControlWindow, RenderWindow
+    from smappy.session import Session
+    rng = np.random.default_rng(2)
+    n = 1000
+    session = Session(Localizations({
+        "x_nm": rng.uniform(0, 1e4, n), "y_nm": rng.uniform(0, 1e4, n),
+        "frame": np.arange(n),
+        "xy_err_nm": np.r_[np.full(750, 10.0), np.full(250, 50.0)]}, {"units": "nm"}))
+    render = RenderWindow(session)
+    control = ControlWindow(session, render)
+    try:
+        layer = session.layers[0]
+        layer.set_bound("xy_err_nm", None, 25.0)
+        assert "filters hide" in control._shown_text()
+        layer.remove_bound("xy_err_nm")
+        assert "filters hide" not in control._shown_text()
+    finally:
+        control.close()
+        render.close()

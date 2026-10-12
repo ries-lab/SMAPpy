@@ -112,7 +112,10 @@ def make(d) -> None:
     dialog.show()
     d.settle()
     x, y, w, h = d.rect(tab.grouping_button)
-    d.place(dialog, x + w + 20, y - 40)
+    from ..director import SIZE as SCREEN, TITLE as TITLE_BAR
+    # beside the button, but kept on the screen however low the button sits
+    d.place(dialog, x + w + 20,
+            min(y - 40, SCREEN[1] - dialog.height() - TITLE_BAR - 20))
     d.shot("Link settings, beside grouped, sets how far a molecule may move "
            "between frames, and how many dark frames a blink may have.",
            spot=[tab.grouping_button, d.window_rect(dialog)],

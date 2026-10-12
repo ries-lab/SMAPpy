@@ -408,9 +408,11 @@ two.
 ### filter
 The quick buttons (*prec*, *LL*, *frame*, *z*, *phot*, *PSF*, *ch*, *file*)
 pick the usual columns; the drop-down has every numeric column.  A column
-with a bound on it is bold and marked with a dot, so a bound on a column not
-on show is not forgotten.  The count reads *shown / all*, and how many are in
-the ROI when one is drawn.  For `filenumber` the histogram is replaced by a
+with a bound on it is bold and marked with a dot, and the line under the
+quick buttons lists every bound of the layer (`xy_err_nm ≤ 25`): click one to
+edit it, × to remove it, so a bound on a column not on show is not
+forgotten.  The status bar says how much the filters hide.  The count reads
+*shown / all*, and how many are in the ROI when one is drawn.  For `filenumber` the histogram is replaced by a
 list of the files to tick; right-click a file to remove it from the session.
 
 ### min

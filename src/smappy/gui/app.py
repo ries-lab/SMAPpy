@@ -1018,7 +1018,10 @@ class ControlWindow(QMainWindow):
 
         def one(layer) -> str:
             kept, of = len(layer.filter), len(layer.locs)
-            return f"{kept:,} of {of:,}" + (" grouped" if layer.grouped else "") + " shown"
+            text = f"{kept:,} of {of:,}" + (" grouped" if layer.grouped else "") + " shown"
+            hidden = 1.0 - kept / of if of else 0.0
+            # said in so many words: a bound set long ago hides data silently
+            return text + (f", filters hide {hidden:.0%}" if hidden >= 0.005 else "")
 
         if len(layers) == 1:
             return one(layers[0])

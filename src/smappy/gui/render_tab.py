@@ -58,6 +58,25 @@ class _Bound(QLineEdit):
         self.setText("" if value is None else f"{value:g}")
 
 
+def bounds_text(bounds: Dict[str, Tuple[Optional[float], Optional[float]]]) -> str:
+    """The bounds as one line of links: ``xy_err_nm <= 25 x``, ``-500 <= z_nm
+    <= 500 x``; each name edits its bound, each cross removes it."""
+    if not bounds:
+        return "<span style='color: gray'>no filter</span>"
+    parts = []
+    for name, (lo, hi) in bounds.items():
+        if lo is not None and hi is not None:
+            text = f"{lo:g} \u2264 {name} \u2264 {hi:g}"
+        elif hi is not None:
+            text = f"{name} \u2264 {hi:g}"
+        else:
+            text = f"{name} \u2265 {lo:g}"
+        parts.append(f"<a href='edit:{name}' style='text-decoration: none'>{text}</a>"
+                     f"&nbsp;<a href='remove:{name}' style='text-decoration: none; "
+                     f"color: gray'>\u00d7</a>")
+    return "&nbsp;&nbsp; ".join(parts)
+
+
 class FilterWidget(QWidget):
     """One field of one layer's filter: histogram, range, numbers."""
 
@@ -84,6 +103,16 @@ class FilterWidget(QWidget):
         self.quick_row = row
         row.addStretch(1)
         layout.addLayout(row)
+        # Every bound of the layer, whichever field is on show: a picture
+        # that comes out sparse should say why without a hunt through the
+        # drop-down.  A bound is a link to its field; the cross removes it.
+        self.bounds_line = QLabel("")
+        self.bounds_line.setWordWrap(True)
+        self.bounds_line.setTextFormat(Qt.RichText)
+        self.bounds_line.setToolTip("the bounds on this layer: click one to edit "
+                                    "it, x to remove it")
+        self.bounds_line.linkActivated.connect(self._on_bound_link)
+        layout.addWidget(self.bounds_line)
         field_row = QHBoxLayout()
         self.field = QComboBox()
         self.field.setMinimumWidth(110)
@@ -202,6 +231,8 @@ class FilterWidget(QWidget):
             return
         ranges = self.layer.ranges
         bounded = {n for n, r in ranges.items() if r != (None, None)}
+        self.bounds_line.setText(bounds_text(
+            {n: ranges[n] for n in sorted(bounded)}))
         plain, bold = QFont(self.field.font()), QFont(self.field.font())
         bold.setBold(True)
         for i in range(self.field.count()):
@@ -342,6 +373,15 @@ class FilterWidget(QWidget):
 
     def _on_clear(self) -> None:
         self._apply(None, None)
+
+    def _on_bound_link(self, link: str) -> None:
+        action, _, name = link.partition(":")
+        if action == "remove":
+            self.layer.remove_bound(name)
+            self._show_field()
+            self.changed.emit()
+        else:
+            self._select(name)
 
     def _all_files(self) -> None:
         self.layer.set_files(None)
