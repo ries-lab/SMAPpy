@@ -36,35 +36,6 @@ PAGES = ("Overview", "Transformation", "Fit quality", "Field diagnostics", "Bead
 COLUMNS = ("bead", "stack", "x, y (px)", "brightness", "dz (nm)", "correlation",
            "residual", "state")
 
-SETTING_INFO = {
-    "roi_size": ParamInfo(label="ROI size", unit="px", min=7),
-    "padding": ParamInfo(unit="px", min=1, advanced=True),
-    "dz_nm": ParamInfo(label="z step", unit="nm", help="auto: from the acquisition"),
-    "detection_sigma_px": ParamInfo(label="detection sigma", unit="px", advanced=True),
-    "detection_threshold_sigma": ParamInfo(label="threshold", unit="sigma"),
-    "min_distance_px": ParamInfo(label="min distance", unit="px"),
-    "max_xy_shift_px": ParamInfo(label="max xy shift", unit="px", advanced=True),
-    "max_z_shift_nm": ParamInfo(label="max z shift", unit="nm", advanced=True),
-    "alignment_range_nm": ParamInfo(label="alignment range", unit="nm", advanced=True),
-    "registration_iterations": ParamInfo(label="iterations", min=1, advanced=True),
-    "rejection_mad": ParamInfo(label="rejection (MAD)", advanced=True),
-    "smooth_z_nm": ParamInfo(label="smoothing z", unit="nm"),
-    "smooth_xy_px": ParamInfo(label="smoothing xy", unit="px", advanced=True),
-    "min_beads": ParamInfo(label="min beads", min=1, advanced=True),
-    "brightness_range": ParamInfo(label="brightness range", advanced=True,
-                                  help="largest accepted max/min; auto disables it"),
-    "saturation_adu": ParamInfo(label="saturation", unit="ADU", advanced=True,
-                                help="auto: the integer type's maximum"),
-    "layout": ParamInfo(choices=LAYOUTS),
-    "main_channel": ParamInfo(label="main channel",
-                              choices=("left", "right", "upper", "lower")),
-    "split_position": ParamInfo(label="split position", unit="px",
-                                help="auto: the midpoint"),
-    "min_pairs": ParamInfo(label="min pairs", min=1),
-    "reprojection_threshold_px": ParamInfo(label="RANSAC radius", unit="px"),
-    "transform_axis_limit_px": ParamInfo(label="dx/dy limit", unit="px"),
-}
-
 
 class _Worker(QObject):
     done = Signal(str, object)
@@ -210,7 +181,7 @@ class CalibrationWindow(QMainWindow):
         self.settings_layout.setContentsMargins(0, 0, 0, 0)
         self.forms = {}
         for cls in (CalibrationSettings, DualColorSettings):
-            form = SettingsForm(cls, param_specs(cls, SETTING_INFO))
+            form = SettingsForm(cls, param_specs(cls))
             self.settings_layout.addWidget(form)
             self.forms[cls] = form
         if settings is not None:

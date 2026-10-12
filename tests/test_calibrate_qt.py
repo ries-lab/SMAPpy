@@ -18,12 +18,12 @@ def app():
 
 def test_settings_forms_cover_both_dataclasses_on_this_python():
     """`int | None` cannot be evaluated before 3.10; the form must not care."""
-    from smappy.calibrate.qt_gui import SETTING_INFO
-    single = param_specs(CalibrationSettings, SETTING_INFO)
-    dual = param_specs(DualColorSettings, SETTING_INFO)
+    single = param_specs(CalibrationSettings)
+    dual = param_specs(DualColorSettings)
     assert set(single) == {f.name for f in CalibrationSettings.__dataclass_fields__.values()}
     assert dual["split_position"].optional and dual["split_position"].type is int
     assert dual["layout"].info.choices
+    assert dual["roi_size"].info.label == "ROI size"     # inherited, labelled
 
 
 def test_window_draws_a_real_result_and_offers_it(app, tmp_path):

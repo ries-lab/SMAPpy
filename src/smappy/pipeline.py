@@ -26,18 +26,32 @@ from .locs import Localizations, fit_to_localizations, to_nm, valid
 from .metadata import CameraMetadata
 from .psf import PSFModel
 from .roi import ROIStack, cut_rois
+from .params import param
 
 
 @dataclass
 class FitSettings:
     """Everything about the fit that is not the camera or the PSF model."""
 
-    roisize: int = 13
-    iterations: int = 50
-    max_block_rois: int = 15000  # ROIs accumulated before a fit is run
-    n_threads: int = 0  # 0 = one per core, for detection and fitting alike
-    max_fit_distance: Optional[float] = None  # reject runaway fits, in pixels
-    output_unit: str = "pixel"  # "pixel", "nm", or "pixel+nm"
+    roisize: int = param(13, label="ROI size", unit="pix", min=5,
+                         help="the square cut around each candidate and "
+                              "fitted")
+    iterations: int = param(50, min=1, advanced=True,
+                            help="the most steps a fit may take")
+    max_block_rois: int = param(15000, label="ROIs per fit", min=100,
+                                advanced=True,
+                                help="how many are collected before they "
+                                     "are fitted together; speed and memory "
+                                     "only")
+    n_threads: int = param(0, label="threads", min=0, help="0: one per core",
+                           advanced=True)
+    max_fit_distance: Optional[float] = param(None, label="max fit distance",
+                                              unit="pix", advanced=True,
+                                              help="reject fits that ran "
+                                                   "off; auto: keep all")
+    output_unit: str = param("pixel", label="units",
+                             choices=("nm", "pixel", "pixel+nm"),
+                             help="the unit of the positions in the table")
 
     def block_rois(self) -> int:
         """SMAP scales the block with the ROI area; keep that behaviour."""

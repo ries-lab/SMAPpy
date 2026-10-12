@@ -18,9 +18,11 @@ reasoning is here so that it does not have to be re-derived.
   `smappy.plugins` or `smappy.session` imports Qt.
 * **Parameters are a dataclass.**  A plugin's `Settings` is the same object a
   script passes to it.  GUI information (label, unit, bounds, choices, which
-  fields are shown by default) lives in `field(metadata=...)` via `param()`, or
-  -- for a settings class that already exists, like `DriftSettings` -- in the
-  plugin's `params` dict, so the settings class stays plain.
+  fields are shown by default) lives in `field(metadata=...)` via `param()`
+  (`smappy.params`), on the field itself -- also for a settings class of an
+  algorithm module such as `DriftSettings`, so that every plugin showing it
+  shows it the same.  (A separate `params` dict per plugin was dropped in
+  2026-10.)
 * **Plugins receive a `Selection`**, not pre-filtered data: many plugins work
   on the filtered set but write back to all localizations (drift: estimate on
   the good ones, correct everything).  `Selection` is a boolean mask plus the

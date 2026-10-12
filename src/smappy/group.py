@@ -86,6 +86,7 @@ from .columns import xy_err
 from .locs import Localizations
 from .mathparse import (COMBINE_RULES, RECOMPUTE, apply_recipes,
                         derived_names, recipes)
+from .params import param
 
 # ``progress(text, fraction)``: what stage this is in, and how far through the
 # table it is.  Both are advisory -- the fraction is coarse and the text is for
@@ -632,20 +633,33 @@ class GroupSettings:
     """
 
     # in the order the grouping dialog shows them
-    link: str = "fixed"
-    dx: float = 50.0
-    k: float = 2.5
-    dx_min: float = 10.0
-    dx_max: float = 150.0
-    dt: int = 1
-    block_fields: Sequence[str] = ("filenumber", "channel")
+    link: str = param("fixed", label="link by",
+                      choices=[("fixed", "fixed distance"),
+                               ("precision", "precision")],
+                      help="a fixed box, or a distance scaled by the "
+                           "localization precisions (SMAP's locprec)")
+    dx: float = param(50.0, label="link within", unit="nm", min=0,
+                      help="half-width of the box a localization may move "
+                           "per frame")
+    k: float = param(2.5, label="k", unit="sigma", min=0.1, step=0.1,
+                     help="link if r^2 < k^2 (s1^2 + s2^2), s the "
+                          "precisions")
+    dx_min: float = param(10.0, label="at least", unit="nm", min=0,
+                          help="the distance always allowed, however "
+                               "precise")
+    dx_max: float = param(150.0, label="at most", unit="nm", min=0,
+                          help="the distance never exceeded, however "
+                               "imprecise")
+    dt: int = param(1, label="gap", unit="frames", min=0,
+                    help="frames a blink may be dark and still continue")
+    block_fields: Sequence[str] = param(("filenumber", "channel"), hidden=True)
     # How many pieces the frame axis is cut into for the linking, which runs
     # one thread per piece.  Not a free choice: a cut trace is repaired at the
     # seam but the repair is not exact (see `smappy._group_chunked`), so the
     # grouping depends on this number.  It is a setting rather than a thread
     # count for that reason -- the same file groups the same way on any
     # machine, whatever it has to run on.  1 is the sequential walk.
-    link_chunks: int = 8
+    link_chunks: int = param(8, hidden=True)
 
 
 def attach(locs: Localizations, grouped: Localizations,

@@ -48,24 +48,49 @@ import numpy as np
 
 from .drift import Drift, _grouped, _positions_nm, _selection
 from .locs import Localizations
+from .params import param
 
 
 @dataclass
 class RCCSettings:
     """How finely to bin, render and search."""
 
-    n_timepoints: int = 20           # time windows to correlate
-    pixelsize_nm: float = 15.0       # rendering pixel size, lateral
-    z_pixelsize_nm: float = 5.0      # z histogram bin width
-    max_drift_nm: float = 500.0      # how far from zero shift the peak is sought
-    fit_window: int = 3              # half-width of the sub-pixel fit, in pixels
-    max_pixels: int = 2048           # cap on a rendered image, per axis
-    use_z: Optional[bool] = None     # None: whenever the table has z_nm
+    n_timepoints: int = param(20, label="time windows", min=2,
+                              help="how many windows the acquisition is cut "
+                                   "into: more follow faster drift, fewer "
+                                   "are less noisy")
+    pixelsize_nm: float = param(15.0, label="pixel size", unit="nm", min=1,
+                                help="the pixel of the images that are "
+                                     "correlated; about the localization "
+                                     "precision")
+    z_pixelsize_nm: float = param(5.0, label="z bin", unit="nm", min=0.1,
+                                  help="the bin width of the z histograms",
+                                  advanced=True)
+    max_drift_nm: float = param(500.0, label="max drift", unit="nm", min=1,
+                                help="the largest drift between any two "
+                                     "windows that can be found")
+    fit_window: int = param(3, label="peak fit half-width", unit="pix", min=1,
+                            help="the patch the correlation peak is fitted "
+                                 "over, for its sub-pixel position",
+                            advanced=True)
+    max_pixels: int = param(2048, label="max image size", unit="pix", min=64,
+                            help="a wider field of view is folded back onto "
+                                 "itself, to keep the correlation fast",
+                            advanced=True)
+    use_z: Optional[bool] = param(None, label="correct z",
+                                  help="auto: if the table has z")
     # Estimate from grouped localizations, as `DriftSettings` does by default,
     # so that the two estimators can be compared on the same footing.
-    group: bool = True
-    group_dx_nm: float = 50.0
-    group_dt: int = 1
+    group: bool = param(True, label="group blinks",
+                        help="link the localizations of one blink into one "
+                             "before measuring")
+    group_dx_nm: float = param(50.0, label="group radius", unit="nm", min=0,
+                               help="how close localizations in consecutive "
+                                    "frames must be to be one blink",
+                               advanced=True)
+    group_dt: int = param(1, label="group gap", unit="frames", min=0,
+                          help="how many dark frames a blink may skip",
+                          advanced=True)
     # Axial: z histograms are correlated within tiles of the field of view and
     # the correlations summed, so that each one sees a *local* z profile.  The
     # tiles must be small in both directions -- with slices spanning y (SMAP's
@@ -74,17 +99,29 @@ class RCCSettings:
     # lock onto: measured on the clathrin data, the pairwise shifts came out
     # *uncorrelated* with the overlap estimator's (-0.09), against +0.96 with
     # 200 nm square tiles (SMAP's `finddisplacementZ2` tiles in y as well).
-    tile_nm: float = 200.0
-    tile_y_nm: Optional[float] = None    # None: square tiles, `tile_nm` in both
+    tile_nm: float = param(200.0, label="tile", unit="nm", min=1,
+                           help="the axial pass correlates z histograms in "
+                                "tiles of the field of view this size",
+                           advanced=True)
+    tile_y_nm: Optional[float] = param(None, label="tile y", unit="nm", min=1,
+                                       help="auto: square tiles",
+                                       advanced=True)
     # The axial peak is broad -- a z profile is far less structured than an
     # image -- so its search range is kept separate from, and smaller than, the
     # lateral one; a wide range lets the maximum wander hundreds of nm.
-    axial_max_drift_nm: float = 200.0
+    axial_max_drift_nm: float = param(200.0, label="max axial drift",
+                                      unit="nm", min=1,
+                                      help="how far from zero the axial "
+                                           "correlation peak is looked for",
+                                      advanced=True)
     # Leave the zero-lag sample of the axial correlation out of the peak search
     # and the fit.  It carries anything that sits at the same z in both windows
     # regardless of drift -- a molecule on in both, or localizations pinned to a
     # particular z by the fit -- which pulls the estimate towards zero drift.
-    exclude_zero_lag: bool = True
+    exclude_zero_lag: bool = param(True, label="skip zero shift",
+                                   help="leave the zero-shift sample out of "
+                                        "the axial peak search",
+                                   advanced=True)
 
 
 def estimate_drift_rcc(locs: Localizations, settings: Optional[RCCSettings] = None,

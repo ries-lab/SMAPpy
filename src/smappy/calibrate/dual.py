@@ -18,6 +18,7 @@ from .core import (shift_volume, CalibrationSettings, BeadCollection, collect_be
                    build_calibration, spline_coefficients, robust_shape_error)
 from .input import BeadStack, discover_acquisitions, read_bead_stacks
 from ..io.calibration import SplineCalibration, _validate_native_calibration
+from ..params import param
 
 LAYOUTS = ('right-left', 'right-left mirrored', 'up-down', 'up-down mirrored')
 # Smallest soft-L1 transition used in the geometric refinement, in main-channel
@@ -28,12 +29,15 @@ MIN_LOSS_SCALE_PX = 1e-3
 
 @dataclass
 class DualColorSettings(CalibrationSettings):
-    layout: str = 'up-down mirrored'
-    main_channel: str = 'upper'
-    split_position: Optional[int] = None
-    min_pairs: int = 8
-    reprojection_threshold_px: float = 2.
-    transform_axis_limit_px: float = .15
+    layout: str = param('up-down mirrored', choices=LAYOUTS)
+    main_channel: str = param('upper', label="main channel",
+                              choices=("left", "right", "upper", "lower"))
+    split_position: Optional[int] = param(None, label="split position",
+                                          unit="px", help="auto: the midpoint")
+    min_pairs: int = param(8, label="min pairs", min=1)
+    reprojection_threshold_px: float = param(2., label="RANSAC radius",
+                                             unit="px")
+    transform_axis_limit_px: float = param(.15, label="dx/dy limit", unit="px")
 
     def validate(self):
         super().validate()

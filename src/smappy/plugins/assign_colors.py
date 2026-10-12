@@ -493,66 +493,85 @@ class AssignColorSettings:
     colors: int = param(2, label="colours", min=1, max=MAX_COLORS,
                         help="how many species the histogram of r holds")
     exclusion: float = param(0.05, label="exclusion dr", min=0.0,
-                             help="minima: leave this much of r on either side "
-                                  "of a boundary unassigned")
+                             help="minima: leave this much of r on either "
+                                  "side of a boundary unassigned")
     tolerance: float = param(3.0, label="sigma", min=0.0,
-                             help="probabilistic: a colour is given only within "
-                                  "this many sigma of its expected split, the "
-                                  "sigma being that localization's own photon "
-                                  "statistics plus any extra spread. 0: assign "
-                                  "to the nearest colour however far away")
+                             help="probabilistic: a colour is given only "
+                                  "within this many sigma of its expected "
+                                  "split, the sigma being that "
+                                  "localization's own photon statistics "
+                                  "plus any extra spread. 0: assign to the "
+                                  "nearest colour however far away")
     keep_tails: bool = param(False, label="keep the tails",
                              help="probabilistic: apply the sigma test only "
                                   "between the outermost colours, so a "
-                                  "localization more extreme than the first or "
-                                  "the last mode is kept rather than refused")
-    crosstalk: float = param(0.05, label="allowed crosstalk", min=1e-6, max=0.5,
-                             help="probabilistic: refuse what is too close to "
-                                  "call as well -- the largest expected "
-                                  "fraction of wrongly assigned localizations. "
-                                  "Narrow beside the sigma test, and what "
-                                  "matters where two colours overlap")
+                                  "localization more extreme than the first "
+                                  "or the last mode is kept rather than "
+                                  "refused")
+    crosstalk: float = param(0.05, label="allowed crosstalk", min=1e-6,
+                             max=0.5,
+                             help="probabilistic: refuse what is too close "
+                                  "to call as well -- the largest expected "
+                                  "fraction of wrongly assigned "
+                                  "localizations. Narrow beside the sigma "
+                                  "test, and what matters where two colours "
+                                  "overlap")
     spread: float = param(0.0, label="extra spread", min=0.0,
-                          help="probabilistic: a species' own width in r, added "
-                               "in quadrature to the shot noise, for a dye whose "
-                               "splitting ratio varies across the field or "
-                               "between molecules. 0: shot noise alone (the "
-                               "summary prints what the modes suggest)")
+                          help="probabilistic: a species' own width in r, "
+                               "added in quadrature to the shot noise, for "
+                               "a dye whose splitting ratio varies across "
+                               "the field or between molecules. 0: shot "
+                               "noise alone (the summary prints what the "
+                               "modes suggest)")
     use_errors: bool = param(True, label="use fitted errors",
-                             help="take the photon errors from the fit where "
-                                  "the table has them; otherwise sqrt(photons)")
-    use_prior: bool = param(True, label="use abundances", advanced=True,
-                            help="probabilistic: weight each species by how much "
-                                 "of the sample sits under its mode")
+                             help="take the photon errors from the fit "
+                                  "where the table has them; otherwise "
+                                  "sqrt(photons)")
+    use_prior: bool = param(True, label="use abundances",
+                            help="probabilistic: weight each species by how "
+                                 "much of the sample sits under its mode",
+                            advanced=True)
     min_photons: float = param(0.0, label="minimum photons", min=0.0,
-                               advanced=True,
-                               help="localizations with fewer photons in total "
-                                    "are ignored and left unassigned")
-    cmap: str = param("viridis", label="intensity LUT", advanced=True,
-                      choices=("viridis", "cividis", "turbo", "magma", "inferno",
-                               "Greys", "Greys_r"),
-                      help="the colour map of the intensity plot's 2D histogram")
+                               help="localizations with fewer photons in "
+                                    "total are ignored and left unassigned",
+                               advanced=True)
+    cmap: str = param("viridis", label="intensity LUT",
+                      choices=("viridis",
+                               "cividis",
+                               "turbo",
+                               "magma",
+                               "inferno",
+                               "Greys",
+                               "Greys_r"),
+                      help="the colour map of the intensity plot's 2D "
+                           "histogram",
+                      advanced=True)
     bins: int = param(200, label="histogram bins", min=10, max=2000,
-                      advanced=True,
                       help="how many bins the histogram of r has over its "
-                           "whole range, -1 to 1")
+                           "whole range, -1 to 1",
+                      advanced=True)
     smoothing: float = param(2.0, label="smoothing", unit="bins", min=0.0,
-                             advanced=True,
                              help="the histogram is smoothed by this much "
-                                  "before its maxima are looked for; it also "
-                                  "sets how far apart two modes must be")
-    expected: Optional[str] = param(None, label="expected r", advanced=True,
-                                    help="the species' ratios, comma separated "
-                                         "(\"-0.65, 0.96\"), measured on "
-                                         "single-label samples or computed from "
-                                         "the spectra. auto: the histogram's "
-                                         "own maxima")
-    channel1: Optional[str] = param(None, label="channel 1 column", advanced=True,
-                                    help="auto: photons_ch0, or the first pair "
-                                         "of per-channel columns in the table")
-    channel2: Optional[str] = param(None, label="channel 2 column", advanced=True,
-                                    help="the column r counts negative; name "
-                                         "both columns or neither")
+                                  "before its maxima are looked for; it "
+                                  "also sets how far apart two modes must "
+                                  "be",
+                             advanced=True)
+    expected: Optional[str] = param(None, label="expected r",
+                                    help="the species' ratios, comma "
+                                         'separated ("-0.65, 0.96"), '
+                                         "measured on single-label samples "
+                                         "or computed from the spectra. "
+                                         "auto: the histogram's own maxima",
+                                    advanced=True)
+    channel1: Optional[str] = param(None, label="channel 1 column",
+                                    help="auto: photons_ch0, or the first "
+                                         "pair of per-channel columns in "
+                                         "the table",
+                                    advanced=True)
+    channel2: Optional[str] = param(None, label="channel 2 column",
+                                    help="the column r counts negative; "
+                                         "name both columns or neither",
+                                    advanced=True)
 
 
 @dataclass
@@ -679,8 +698,6 @@ class AssignColors(Plugin):
                     "session is not touched.")
     Settings = AssignColorSettings
     version = "2"
-    main = ("mode", "colors", "exclusion", "tolerance", "keep_tails",
-            "crosstalk", "spread", "use_errors")
     # which fields each method actually reads; the GUI greys out the rest, so
     # that a number that does nothing does not look like a number that does
     USED = {"minima": ("exclusion",),

@@ -18,26 +18,43 @@ from scipy.spatial import cKDTree
 
 from ..io.calibration import SplineCalibration
 from .input import BeadStack, discover_acquisitions, read_bead_stacks
+from ..params import param
 
 
 @dataclass
 class CalibrationSettings:
-    roi_size: int = 27
-    padding: int = 5                 # extra pixels for registration, then discarded
-    dz_nm: Optional[float] = None    # None: use acquisition metadata
-    detection_sigma_px: float = 2.
-    detection_threshold_sigma: float = 6.
-    min_distance_px: float = 25.
-    max_xy_shift_px: float = 3.
-    max_z_shift_nm: float = 250.
-    alignment_range_nm: float = 500.
-    registration_iterations: int = 2
-    rejection_mad: float = 1.5
-    smooth_z_nm: float = 20.         # Gaussian sigma; deliberately not MATLAB lambda
-    smooth_xy_px: float = 0.
-    min_beads: int = 1
-    brightness_range: Optional[float] = 6.  # full accepted max/min range; None disables
-    saturation_adu: Optional[float] = None  # None: integer dtype maximum when available
+    roi_size: int = param(27, label="ROI size", unit="px", min=7)
+    padding: int = param(5, unit="px", min=1, advanced=True)
+    dz_nm: Optional[float] = param(None, label="z step", unit="nm",
+                                   help="auto: from the acquisition")
+    detection_sigma_px: float = param(2., label="detection sigma", unit="px",
+                                      advanced=True)
+    detection_threshold_sigma: float = param(6., label="threshold",
+                                             unit="sigma")
+    min_distance_px: float = param(25., label="min distance", unit="px")
+    max_xy_shift_px: float = param(3., label="max xy shift", unit="px",
+                                   advanced=True)
+    max_z_shift_nm: float = param(250., label="max z shift", unit="nm",
+                                  advanced=True)
+    alignment_range_nm: float = param(500., label="alignment range", unit="nm",
+                                      advanced=True)
+    registration_iterations: int = param(2, label="iterations", min=1,
+                                         advanced=True)
+    rejection_mad: float = param(1.5, label="rejection (MAD)", advanced=True)
+    # a Gaussian sigma; deliberately not the MATLAB smoothing lambda
+    smooth_z_nm: float = param(20., label="smoothing z", unit="nm")
+    smooth_xy_px: float = param(0., label="smoothing xy", unit="px",
+                                advanced=True)
+    min_beads: int = param(1, label="min beads", min=1, advanced=True)
+    brightness_range: Optional[float] = param(6., label="brightness range",
+                                              advanced=True,
+                                              help="largest accepted "
+                                                   "max/min; auto disables "
+                                                   "it")
+    saturation_adu: Optional[float] = param(None, label="saturation",
+                                            unit="ADU", advanced=True,
+                                            help="auto: the integer type's "
+                                                 "maximum")
 
     def validate(self):
         for name in ('roi_size', 'padding', 'registration_iterations', 'min_beads'):

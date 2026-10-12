@@ -16,36 +16,8 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Type
 import numpy as np
 
 from ..locs import Localizations
+from ..params import _META, ParamInfo, param  # noqa: F401  (re-exported)
 from .discovery import Diagnostic, PluginRef, scan
-
-_META = "smappy"
-
-
-@dataclass
-class ParamInfo:
-    """How a settings field is presented.  Everything is optional."""
-    label: Optional[str] = None
-    unit: Optional[str] = None
-    help: Optional[str] = None
-    min: Optional[float] = None
-    max: Optional[float] = None
-    step: Optional[float] = None
-    choices: Optional[Sequence] = None   # values, or (value, label) pairs; may be a callable
-    advanced: bool = False      # hidden behind "more" unless the plugin lists it
-    hidden: bool = False        # scripting only
-    # "open_file", "save_file", "dir": a path with a browse button.
-    # "text": a line that is given the width of the form, for something
-    # written rather than dialled -- an expression, a list of names
-    kind: Optional[str] = None
-    file_filter: str = ""       # a Qt-style name filter for those, "TIFF (*.tif)"
-    # for a part: shown folded until it is opened.  A chain's steps are, so a
-    # chain of eight plugins reads as eight lines rather than eight forms
-    collapsed: bool = False
-    # a bool that turns on optional work which costs time per run -- a
-    # bootstrap, a fit beside the numbers -- and that a run over many regions
-    # starts without (`fast_values`; docs/regions.md, "Slow, optional parts")
-    slow: bool = False
-
 
 def fast_values(settings_cls: type, prefix: str = "") -> Dict[str, Any]:
     """The dotted names of the `slow` switches of a settings class, off:
@@ -59,14 +31,6 @@ def fast_values(settings_cls: type, prefix: str = "") -> Dict[str, Any]:
     out: Dict[str, Any] = {}
     walk(param_specs(settings_cls), prefix)
     return out
-
-
-def param(default: Any = MISSING, *, default_factory: Any = MISSING, **info):
-    """A dataclass ``field`` carrying :class:`ParamInfo` for the GUI."""
-    metadata = {_META: ParamInfo(**info)}
-    if default_factory is not MISSING:
-        return field(default_factory=default_factory, metadata=metadata)
-    return field(default=default, metadata=metadata)
 
 
 _TEXT_TYPES = {"int": int, "float": float, "str": str, "bool": bool}
@@ -107,17 +71,17 @@ class ParamSpec:
     children: Optional[Dict[str, "ParamSpec"]] = None
 
 
-def param_specs(settings_cls: type, extra: Optional[Dict[str, ParamInfo]] = None
-                ) -> Dict[str, ParamSpec]:
+def param_specs(settings_cls: type) -> Dict[str, ParamSpec]:
     """Every field of a settings dataclass with its presentation.
 
     A plugin need not have settings at all, so ``None`` and anything that is
     not a dataclass come back empty rather than raising.
 
-    ``extra`` supplies infos for fields that were not declared with `param`,
-    so a plain dataclass such as `DriftSettings` needs no changes.  A field
+    How a field is shown is declared on the field, with `param` -- the one
+    way, so a settings class shown by two plugins (`DriftSettings` in COMET
+    and in a fitter's *after the fit*) is shown the same in both.  A field
     that is itself a dataclass is a part; its own fields come back under
-    ``children``, and ``extra`` reaches them with dotted keys, ``"fit.roisize"``.
+    ``children``.
     """
     if settings_cls is None or not dataclasses.is_dataclass(settings_cls):
         return {}
@@ -127,7 +91,6 @@ def param_specs(settings_cls: type, extra: Optional[Dict[str, ParamInfo]] = None
         # a `X | None` annotation under `from __future__ import annotations`
         # cannot be evaluated before Python 3.10; read what we can from text
         hints = {f.name: _hint_from_text(f.type) for f in fields(settings_cls)}
-    extra = extra or {}
     specs = {}
     for f in fields(settings_cls):
         if not f.init:
@@ -136,12 +99,10 @@ def param_specs(settings_cls: type, extra: Optional[Dict[str, ParamInfo]] = None
         default = (f.default if f.default is not MISSING
                    else f.default_factory() if f.default_factory is not MISSING
                    else None)
-        info = extra.get(f.name) or f.metadata.get(_META) or ParamInfo()
+        info = f.metadata.get(_META) or ParamInfo()
         spec = ParamSpec(f.name, tp, optional, default, info)
         if dataclasses.is_dataclass(tp) and isinstance(tp, type):
-            prefix = f.name + "."
-            below = {k[len(prefix):]: v for k, v in extra.items() if k.startswith(prefix)}
-            spec.children = param_specs(tp, below)
+            spec.children = param_specs(tp)
             if default is not None:        # the parent's default instance wins
                 for child in spec.children.values():
                     child.default = getattr(default, child.name)
@@ -658,11 +619,6 @@ class Plugin:
     # which is why it is declared rather than found out.
     per_region: bool = False
     Settings: type = None
-    # presentation for fields that were not declared with `param`
-    params: Dict[str, ParamInfo] = {}
-    # fields shown by default; everything else goes under "more".  None: all
-    # fields not marked advanced.
-    main: Optional[Sequence[str]] = None
     # what the Preview button's tooltip says, when the generic sentence is
     # not enough; empty means the generic one
     preview_help: str = ""
@@ -890,11 +846,7 @@ class Plugin:
     def specs(cls) -> Dict[str, ParamSpec]:
         if cls.Settings is None:
             return {}
-        specs = param_specs(cls.Settings, cls.params)
-        if cls.main is not None:
-            for name, spec in specs.items():
-                spec.info.advanced = name not in cls.main
-        return specs
+        return param_specs(cls.Settings)
 
 
 # ------------------------------------------------------------------ registry

@@ -86,24 +86,7 @@ class GroupingDialog(QDialog):
         note.setWordWrap(True)
         note.setStyleSheet("color: gray")
         layout.addWidget(note)
-        infos = {"link": ParamInfo(label="link by",
-                                   choices=[("fixed", "fixed distance"),
-                                            ("precision", "precision")],
-                                   help="a fixed box, or a distance scaled by the "
-                                        "localization precisions (SMAP's locprec)"),
-                 "dx": ParamInfo(label="link within", unit="nm", min=0,
-                                 help="half-width of the box a localization may move per frame"),
-                 "k": ParamInfo(label="k", unit="sigma", min=0.1, step=0.1,
-                                help="link if r^2 < k^2 (s1^2 + s2^2), s the precisions"),
-                 "dx_min": ParamInfo(label="at least", unit="nm", min=0,
-                                     help="the distance always allowed, however precise"),
-                 "dx_max": ParamInfo(label="at most", unit="nm", min=0,
-                                     help="the distance never exceeded, however imprecise"),
-                 "dt": ParamInfo(label="gap", unit="frames", min=0,
-                                 help="frames a blink may be dark and still continue"),
-                 "block_fields": ParamInfo(hidden=True),
-                 "link_chunks": ParamInfo(hidden=True)}
-        self.form = SettingsForm(GroupSettings, param_specs(GroupSettings, infos))
+        self.form = SettingsForm(GroupSettings, param_specs(GroupSettings))
         self.form.set(session.group_settings)
         self.form.field_changed.connect(self._show_mode)
         self._show_mode("link")

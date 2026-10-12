@@ -296,22 +296,6 @@ class FinishSettings:
         return out
 
 
-def finish_params() -> Dict[str, ParamInfo]:
-    """The finishing plugins' own labels, under ``finish``.
-
-    Read off the plugins rather than copied out: the fields are the same
-    numbers with the same meaning, and a second vocabulary for them -- "time
-    windows" here, ``n_timepoints`` in the Analysis tab -- would be a way of
-    getting one of the two wrong.  `AssignColorSettings` declares its own with
-    `param` and needs nothing.
-    """
-    from .drift_comet import CometDrift
-    from .drift_rcc import RCCDrift
-    out = {f"finish.comet.{name}": info for name, info in CometDrift.params.items()}
-    out.update({f"finish.rcc.{name}": info for name, info in RCCDrift.params.items()})
-    return out
-
-
 @dataclass
 class Finished:
     """The outcome of the finishing steps: what to save, and what to say."""
@@ -361,22 +345,6 @@ def finish_localizations(locs: Localizations, settings: FinishSettings,
         finished.notes.append(f"{label}: {result.text.splitlines()[0]}"
                               if result.text else label)
     return finished
-
-
-FIT_PARAMS = {
-    "roisize": ParamInfo(label="ROI size", unit="pix", min=5,
-                         help="the square cut around each candidate and fitted"),
-    "iterations": ParamInfo(min=1, advanced=True,
-                            help="the most steps a fit may take"),
-    "max_block_rois": ParamInfo(label="ROIs per fit", min=100, advanced=True,
-                                help="how many are collected before they are "
-                                     "fitted together; speed and memory only"),
-    "n_threads": ParamInfo(label="threads", min=0, help="0: one per core", advanced=True),
-    "max_fit_distance": ParamInfo(label="max fit distance", unit="pix", advanced=True,
-                                  help="reject fits that ran off; auto: keep all"),
-    "output_unit": ParamInfo(label="units", choices=("nm", "pixel", "pixel+nm"),
-                             help="the unit of the positions in the table"),
-}
 
 
 def _camera_choices() -> List:
@@ -1007,7 +975,6 @@ class GaussianFit(_FitPlugin):
     Settings = GaussianFitSettings
     # 2: the camera's read noise in the likelihood (1 e- without EM gain)
     version = "2"
-    params = {f"fit.{k}": v for k, v in FIT_PARAMS.items()}
 
     def model(self, settings, camera):
         return settings.model.model()
@@ -1020,7 +987,6 @@ class SplineFit(_FitPlugin):
     Settings = SplineFitSettings
     # 2: the camera's read noise in the likelihood (1 e- without EM gain)
     version = "2"
-    params = GaussianFit.params
 
     def model(self, settings, camera):
         return settings.model.model(camera, roisize=settings.fit.roisize)
@@ -1049,7 +1015,6 @@ class DualSplineFit(_FitPlugin):
     #    shares from the light before clipping
     version = "5"
     Settings = DualSplineFitSettings
-    params = {**GaussianFit.params, **finish_params()}
 
     def model(self, settings, camera):
         return settings.model.model(settings.model.load(), camera)
@@ -1078,7 +1043,6 @@ class DualSplineFit(_FitPlugin):
         from ..dualfit import DualChannelEngine
         return DualChannelEngine(camera, finder, model, settings.model.load(),
                                  settings.fit, settings.model.photon_ratio)
-
 
 
 # ----------------------------------------------------- two channels, no model
@@ -1304,36 +1268,6 @@ class DualGaussianFitSettings:
                                    label="after the fit")
 
 
-# `RegisterSettings` is a plain dataclass; its tooltips, under the 2C fit's
-# "transform.registration" part.  Help only: labels and widgets stay as they were.
-REGISTRATION_PARAMS = {f"transform.registration.{name}": ParamInfo(help=text)
-                       for name, text in {
-    "layout": "how the chip is split: auto (detected from the pairs), "
-              "right-left, up-down, or either mirrored",
-    "main_channel": "the reference half: auto, left, right, upper or lower",
-    "model": "projective (8 coefficients), or polynomial (third order, 20) "
-             "for a distorted field the pairs cover",
-    "split_position": "the seam between the halves, in chip pixels; auto: "
-                      "measured from the pairs",
-    "vote_bin_px": "the bin, in pixels, of the histogram of pair vectors "
-                   "the channel offset is voted in",
-    "vote_smooth_px": "the width of the difference-of-Gaussians filter the "
-                      "vote is scored with, in pixels",
-    "coarse_tolerance_px": "first round: how far apart, in pixels, the "
-                           "partners may be after the voted offset",
-    "fine_tolerance_px": "second round: how far apart the partners may be "
-                         "through the first round's map; 0 skips it",
-    "adapt_fine_tolerance": "widen the second round's tolerance to the first "
-                            "round's misfit, when its pairs are clean",
-    "min_pairs": "fewer pairs than this and the registration refuses",
-    "max_pairs": "at most this many pairs, drawn at random, go into each fit",
-    "reprojection_threshold_px": "the robust (RANSAC) fit's inlier radius, "
-                                 "at least; it widens with the tolerance",
-    "transform_axis_limit_px": "the largest |dx| or |dy| a pair may keep "
-                               "after the first fit, at least",
-}.items()}
-
-
 @register("Localize/Gaussian 2D 2C")
 class DualGaussianFit(_FitPlugin):
     """The 2D two-channel workflow: one emitter, both halves, no PSF model.
@@ -1359,7 +1293,6 @@ class DualGaussianFit(_FitPlugin):
     # 3: the camera's read noise in the likelihood (1 e- without EM gain)
     version = "3"
     Settings = DualGaussianFitSettings
-    params = {**GaussianFit.params, **finish_params(), **REGISTRATION_PARAMS}
 
     def model(self, settings, camera):
         return settings.model.model()
