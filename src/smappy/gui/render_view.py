@@ -9,6 +9,7 @@ from __future__ import annotations
 import traceback
 
 import atexit
+from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -20,7 +21,7 @@ from PySide6.QtWidgets import (QDoubleSpinBox, QFileDialog, QGraphicsPathItem,
                                QInputDialog, QLabel, QMenu, QToolBar, QToolButton,
                                QVBoxLayout, QWidget)
 
-from .. import lut as luts
+from ..layer_state import LayerSnapshot, render_panels, snapshot_layers
 from ..regions import Region
 from ..render import FieldOfView, axis_unit
 from ..session import Session
@@ -63,11 +64,25 @@ DRAW_PEN = pg.mkPen((255, 255, 0), width=2, style=Qt.DashLine)
 DRAW_HALO_PEN = pg.mkPen((0, 0, 0, 200), width=5)
 
 
-class _Renderer(QObject):
-    """Renders on its own thread; the view keeps answering to the mouse."""
+class RenderWorker(QObject):
+    """Renders on its own thread; the view keeps answering to the mouse.
 
-    done = Signal(object, object, int)      # rgb, fov, generation
+    It is handed jobs (`PanelJob`, `gui.view3d.Job3D`): plain objects holding
+    a snapshot of the layers taken on the GUI thread (`LayerSnapshot`) and
+    whatever else the picture needs, never a widget, a layer or the session.
+    So the GUI thread may change a filter, swap the table or append a block
+    while a render runs, and the render still sees one consistent state; and
+    no Qt object is ever referenced from this thread, which is how one's
+    last reference could otherwise be dropped here (`gui.collector`).
+
+    One class for the 2D and the 3D view; each view has its own, so the two
+    windows render side by side.  What lives on the thread itself -- the GPU
+    engine, the preview budgets -- is made here on first use.
+    """
+
+    done = Signal(object, int)              # what the job made, generation
     failed = Signal(str, int)               # what went wrong, generation
+    engine_ready = Signal(str)              # the GPU's name, or "" if there is none
 
     def __init__(self):
         super().__init__()
@@ -76,23 +91,54 @@ class _Renderer(QObject):
         self.moveToThread(self.thread)
         self.thread.start()
         _LIVE_THREADS.append(self.thread)
+        self._gpu = None
+        self._gpu_tried = False
+        # one per engine: a drag frame costs an order of magnitude more on the
+        # CPU than on the GPU, so a rate learned under one says nothing about
+        # the next.  Keyed by the engine that was actually used, not asked for.
+        self.budgets: dict = {}
 
-    def render(self, view: "RenderView", fov: FieldOfView, generation: int) -> None:
+    def gpu(self):
+        """The GPU engine, made on this thread on first use; None without one."""
+        if not self._gpu_tried:
+            self._gpu_tried = True
+            try:
+                from ..gpu import GPUEngine
+                self._gpu = GPUEngine()
+                self.engine_ready.emit(self._gpu.name)
+            except Exception as e:
+                print(f"no GPU engine: {e}")
+                self.engine_ready.emit("")
+        return self._gpu
+
+    def render(self, job, generation: int) -> None:
         try:
-            rgb = view.panel_images(fov)
+            result = job.run(self)
         except Exception as e:
             # Always answer.  Returning in silence left the view waiting for
             # this render forever, so it never asked for another: one failure
-            # -- a table swapped mid-render, a layer that cannot be drawn --
-            # and the image stayed black for good.
+            # -- a layer that cannot be drawn -- and the image stayed black
+            # for good.
             traceback.print_exc()
             self.failed.emit(f"{type(e).__name__}: {e}", generation)
             return
-        self.done.emit(rgb, fov, generation)
+        self.done.emit(result, generation)
+
+
+@dataclass(frozen=True)
+class PanelJob:
+    """The 2D view's render: every panel of a tile, from a snapshot."""
+
+    layers: Tuple[LayerSnapshot, ...]
+    fov: FieldOfView
+    panels: Tuple = ("overlay",)
+
+    def run(self, worker=None) -> List[np.ndarray]:
+        return render_panels(self.layers, self.fov, self.panels)[0]
 
 
 class RenderView(QWidget):
-    render_requested = Signal(object, object, int)
+    render_requested = Signal(object, int)  # a `PanelJob`, generation
     render_failed = Signal(str)             # shown by the window, not swallowed
 
     def __init__(self, session: Session, parent=None):
@@ -129,8 +175,9 @@ class RenderView(QWidget):
         self._generation = 0             # the newest request; older results are dropped
         self._busy = False
         self._pending = False
+        self._job: Optional[PanelJob] = None   # the one in flight
         self.last_error = ""
-        self._renderer = _Renderer()
+        self._renderer = RenderWorker()
         self.render_requested.connect(self._renderer.render)
         self._renderer.done.connect(self._on_rendered)
         self._renderer.failed.connect(self._on_render_failed)
@@ -268,30 +315,20 @@ class RenderView(QWidget):
         except IndexError:
             return ""
 
-    def panel_images(self, fov: FieldOfView) -> List[np.ndarray]:
-        """An RGB image per panel on ``fov``; one for the overlay alone.
+    def snapshot(self) -> Tuple[LayerSnapshot, ...]:
+        """The layers as a render needs them, frozen (`LayerSnapshot`)."""
+        return snapshot_layers(self.session.layers)
 
-        Each layer is rendered once: the overlay of the side-by-side panels
-        is their sum, as `composite` makes it.
-        """
-        specs = list(self.panels)
-        if specs == ["overlay"]:
-            return [self.composite(fov)[0]]
-        images, white_any = {}, False
-        total = np.zeros((fov.ny, fov.nx, 3), np.float32)
-        for i, layer in enumerate(self.session.layers):
-            if not layer.visible:
-                continue
-            white = layer.get_display().white_background
-            white_any = white_any or white
-            image, _ = layer.render(fov, white_background=False)
-            total += image
-            image = np.clip(image, 0, 1)
-            images[i] = luts.on_white(image) if white else image
-        total = np.clip(total, 0, 1)
-        images["overlay"] = luts.on_white(total) if white_any else total
-        blank = np.zeros((fov.ny, fov.nx, 3), np.float32)
-        return [images.get(spec, blank) for spec in specs]
+    def panel_images(self, fov: FieldOfView, panels=None) -> List[np.ndarray]:
+        """An RGB image per panel on ``fov`` -- the view's own panels unless
+        ``panels`` says which; ``["overlay"]`` is every visible layer added
+        up, as SMAP does.  Synchronous, from a snapshot like the render
+        thread's (`render_panels`)."""
+        job = PanelJob(self.snapshot(), fov,
+                       tuple(self.panels if panels is None else panels))
+        images = job.run()
+        self._keep_indices(job)
+        return images
 
     def schedule(self) -> None:
         self._timer.start()
@@ -325,25 +362,6 @@ class RenderView(QWidget):
             return True
         state = self.session.layers[0].state
         return state is not None and bool(getattr(state.index, "extent", None))
-
-    def composite(self, fov: FieldOfView) -> Tuple[np.ndarray, np.ndarray]:
-        """Every visible layer rendered on ``fov`` and added up, as SMAP does.
-
-        Returns the RGB image in [0, 1] and the summed intensity planes.
-        """
-        rgb = np.zeros((fov.ny, fov.nx, 3), np.float32)
-        weight = np.zeros((fov.ny, fov.nx), np.float32)
-        white = False
-        for layer in self.session.layers:
-            if layer.visible:
-                white = white or layer.get_display().white_background
-                image, rendered = layer.render(fov, white_background=False)
-                rgb += image
-                weight += rendered.weight
-        rgb = np.clip(rgb, 0, 1)
-        # once, to the sum: a white ground added to a white ground is still
-        # white and would swallow everything drawn on either of them
-        return (luts.on_white(rgb) if white else rgb), weight
 
     def _screen_size(self) -> Tuple[int, int]:
         """The main panel's size in screen pixels: the whole widget unless
@@ -418,11 +436,16 @@ class RenderView(QWidget):
                                int(view.nx * TILE), int(view.ny * TILE))
         self._generation += 1
         self._busy = True
-        self.render_requested.emit(self, tile, self._generation)
+        # frozen here, on the GUI thread: the worker sees nothing else
+        self._job = PanelJob(self.snapshot(), tile, tuple(self.panels))
+        self.render_requested.emit(self._job, self._generation)
 
-    def _on_rendered(self, rgb, fov: FieldOfView, generation: int) -> None:
+    def _on_rendered(self, rgb, generation: int) -> None:
         self._busy = False
-        if generation != self._generation:      # superseded while it ran
+        job, self._job = self._job, None
+        fov = job.fov if job is not None else None
+        self._keep_indices(job)
+        if generation != self._generation or job is None:    # superseded while it ran
             self._pending = True
         elif len(rgb) != 1 + len(self.mirrors):  # the panels changed meanwhile
             self._pending = True
@@ -439,6 +462,15 @@ class RenderView(QWidget):
             self._pending = False
             self.render()
 
+    def _keep_indices(self, job: Optional[PanelJob]) -> None:
+        """Hand the filters what the render thread compacted from their masks,
+        so the next render does not do it again (`LocFilter.keep_indices`)."""
+        if job is None or len(job.layers) != len(self.session.layers):
+            return
+        for layer, snap in zip(self.session.layers, job.layers):
+            if not layer.is_image and snap.mask is not None:
+                layer.state.keep_indices(snap)
+
     def _on_render_failed(self, message: str, generation: int) -> None:
         """Free the view for the next render, and say why this one is missing.
 
@@ -446,6 +478,7 @@ class RenderView(QWidget):
         re-running the one that just failed would fail the same way, in a loop.
         """
         self._busy = False
+        self._job = None
         self.last_error = message
         self.render_failed.emit(message)
         if self._pending:
@@ -455,8 +488,7 @@ class RenderView(QWidget):
     def render_now(self) -> np.ndarray:
         """Synchronous: the exact current view, for saving and tests."""
         fov = self.current_fov()
-        rgb, _ = self.composite(fov)
-        return np.ascontiguousarray(rgb)
+        return np.ascontiguousarray(self.panel_images(fov, ["overlay"])[0])
 
     def _update_guides(self, fov: FieldOfView) -> None:
         """Which way up the picture hangs, and what its bars say.
@@ -669,7 +701,7 @@ class RenderView(QWidget):
         rect = self.view.viewRect()
         fov = FieldOfView.from_range((rect.left(), rect.right()),
                                      (rect.top(), rect.bottom()), pixelsize)
-        rgb, weight = self.composite(fov)
+        (rgb,), weight = render_panels(self.snapshot(), fov)
         data = ((rgb * 255).astype(np.uint8) if what == "rgb"
                 else weight.astype(np.float32))
         px_um = pixelsize / 1000.0

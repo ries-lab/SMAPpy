@@ -33,11 +33,13 @@ and the one that goes first.
 """
 from __future__ import annotations
 
-from dataclasses import asdict
+import copy
+from dataclasses import asdict, dataclass, field as dataclass_field
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
+from . import lut as luts
 from .filter import LocFilter
 from .group import GroupSettings, group
 from .locs import Localizations
@@ -450,40 +452,198 @@ class ViewState:
 
     def max_sigma(self, pixelsize: float) -> float:
         """The largest rendering sigma at this zoom, in data units."""
-        if self.settings.mode == "hist":
-            return 0.0
-        if self.settings.mode == "gauss":
-            return self.settings.sigma
-        if self.settings.mode == "dl":
-            # a PSF on whole camera pixels: about one pixel wide in focus,
-            # up to three out of focus on an astigmatic one
-            return 3 * camera_pixelsize_nm(self.locs)
-        s = self.settings.sigma_settings
-        floor = max(s.min_sigma, s.min_sigma_pixels * pixelsize)
-        return max(floor, s.max_factor * self.current.median_precision * s.factor)
+        return max_sigma(self.settings, self.locs, self.current.median_precision, pixelsize)
 
-    def select(self, fov: FieldOfView, current: Optional[LocSet] = None) -> np.ndarray:
+    def select(self, fov: FieldOfView) -> np.ndarray:
         """The localizations that can contribute to this view, after filtering."""
-        current = current if current is not None else self.current
+        return self.snapshot().select(fov)
+
+    def snapshot(self, name: str = "", visible: bool = True) -> "LayerSnapshot":
+        """Everything a render of this view needs, frozen, for another thread.
+
+        Taken on the thread that owns the view (the GUI's), and cheap: the
+        columns, the mask and the index are references, never copies -- each
+        is only ever replaced, never written -- and only the settings are
+        copied, because the panels edit those in place.  What a live fit
+        appends afterwards goes into the view's own table, filter and index,
+        and the snapshot keeps the rows it was taken with
+        (`Localizations.snapshot`, `GrowingIndex.snapshot`).
+        """
+        current = self.current        # once: the table and its selection agree
         f = self.filter_for(current)
-        if self.cull_index is None:
-            return f.indices
+        index = self.cull_index
+        return LayerSnapshot(
+            name=name, visible=visible, locs=current.locs.snapshot(), mask=f.mask,
+            known_indices=f.cached_indices,
+            index=None if index is None else index.snapshot(),
+            median_precision=current.median_precision,
+            settings=copy.deepcopy(self.settings), display=copy.deepcopy(self.display),
+            n_threads=self.n_threads)
+
+    def keep_indices(self, snapshot: "LayerSnapshot") -> None:
+        """Keep the rows a render thread compacted from a snapshot of this
+        view, if its mask is still the filter's (`LocFilter.keep_indices`).
+        On the GUI thread, once the render is back."""
+        found = snapshot.memo.get("indices")
+        if found is not None:
+            for _locset, f in self._filters.values():
+                f.keep_indices(snapshot.mask, found)
+
+    def render(self, fov: FieldOfView) -> RenderedImage:
+        return self.snapshot().render(fov)
+
+    def image(self, fov: FieldOfView, white_background=None
+              ) -> Tuple[np.ndarray, RenderedImage]:
+        return self.snapshot().image(fov, white_background)
+
+
+def max_sigma(settings: RenderSettings, locs: Localizations, median_precision: float,
+              pixelsize: float) -> float:
+    """The largest rendering sigma at this zoom, in data units: how far
+    beyond the view a localization can still reach into it."""
+    if settings.mode == "hist":
+        return 0.0
+    if settings.mode == "gauss":
+        return settings.sigma
+    if settings.mode == "dl":
+        # a PSF on whole camera pixels: about one pixel wide in focus,
+        # up to three out of focus on an astigmatic one
+        return 3 * camera_pixelsize_nm(locs)
+    s = settings.sigma_settings
+    floor = max(s.min_sigma, s.min_sigma_pixels * pixelsize)
+    return max(floor, s.max_factor * median_precision * s.factor)
+
+
+@dataclass(frozen=True)
+class LayerSnapshot:
+    """One layer as a render needs it, frozen on the GUI thread.
+
+    The render threads (`gui.render_view`, `gui.view3d`) are handed these and
+    nothing else: no layer, no session, no widget.  They used to be handed the
+    view widget or the session and walk the live layers from their own
+    thread, so a filter changed, a table swapped or a block appended on the
+    GUI thread meanwhile was read half-way -- and a widget referenced from a
+    worker is how a Qt object's last reference ends up dropped off the GUI
+    thread, the deadlock behind `gui.collector`.
+
+    A localization layer carries its table (a `Localizations.snapshot`), the
+    filter's mask, the spatial index to cull with (None on custom axes),
+    the median precision and copies of its settings; an image layer carries
+    a copy of its `ImageData` (the pixels shared) and its plane.  An
+    invisible layer carries only its name.
+    """
+
+    name: str = ""
+    visible: bool = True
+    locs: Optional[Localizations] = None
+    mask: Optional[np.ndarray] = None
+    known_indices: Optional[np.ndarray] = None   # the mask's rows, if the filter had them
+    index: object = None
+    median_precision: float = 0.0
+    settings: Optional[RenderSettings] = None
+    display: DisplaySettings = dataclass_field(default_factory=DisplaySettings)
+    n_threads: int = 0
+    image_data: object = None                    # an `ImageData`, for an image layer
+    frame: int = 0
+    # what the render thread computed and the GUI thread may keep (`indices`)
+    memo: dict = dataclass_field(default_factory=dict, compare=False, repr=False)
+
+    @property
+    def is_image(self) -> bool:
+        return self.image_data is not None
+
+    @property
+    def indices(self) -> np.ndarray:
+        """The rows the filter keeps.  Compacted here, on the render thread,
+        when the filter had not done it yet; `memo` hands them back to it."""
+        if self.known_indices is not None:
+            return self.known_indices
+        found = self.memo.get("indices")
+        if found is None:
+            found = self.memo["indices"] = np.flatnonzero(self.mask)
+        return found
+
+    def max_sigma(self, pixelsize: float) -> float:
+        return max_sigma(self.settings, self.locs, self.median_precision, pixelsize)
+
+    def select(self, fov: FieldOfView) -> np.ndarray:
+        """The localizations that can contribute to this view, after filtering."""
+        if self.index is None:
+            return self.indices
         margin = self.settings.roi_sigma * self.max_sigma(fov.pixelsize)
-        candidates = current.index.query(fov.x0, fov.x1, fov.y0, fov.y1, margin)
-        if candidates.size == current.index.n_localizations:
-            return f.indices          # nothing to narrow: skip the gather
+        candidates = self.index.query(fov.x0, fov.x1, fov.y0, fov.y1, margin)
+        if candidates.size == self.index.n_localizations:
+            return self.indices       # nothing to narrow: skip the gather
         # while a fit appends, the index takes a block before the filters
         # have caught up with it (`catch_up`): those rows wait for the next
-        mask = f.mask
+        mask = self.mask
         candidates = candidates[candidates < len(mask)]
         return candidates[mask[candidates]]
 
     def render(self, fov: FieldOfView) -> RenderedImage:
-        current = self.current        # once: the table and its selection agree
-        return render_locs(current.locs, fov, self.settings, self.display,
-                           select=self.select(fov, current), n_threads=self.n_threads)
+        """The planes on ``fov``: accumulated, or an image resampled."""
+        if self.is_image:
+            return self.image_data.resample(fov, self.frame)
+        return render_locs(self.locs, fov, self.settings, self.display,
+                           select=self.select(fov), n_threads=self.n_threads)
 
     def image(self, fov: FieldOfView, white_background=None
               ) -> Tuple[np.ndarray, RenderedImage]:
+        """RGB in [0, 1] and the planes; ``white_background`` overrides the
+        display's own, as `Layer.render` does."""
         rendered = self.render(fov)
         return self.display.apply(rendered, white_background), rendered
+
+
+def snapshot_layer(layer) -> LayerSnapshot:
+    """A session `Layer`'s snapshot, of either kind."""
+    if not layer.visible:
+        return LayerSnapshot(name=layer.name, visible=False)
+    if layer.is_image:
+        # a copy of the record, so that a plane chosen or a registration
+        # moved meanwhile is not seen half-way; the pixels are shared, and
+        # are replaced rather than written when they change
+        return LayerSnapshot(name=layer.name, image_data=copy.copy(layer.image),
+                             frame=int(layer.frame),
+                             display=copy.deepcopy(layer.display))
+    return layer.state.snapshot(name=layer.name)
+
+
+def snapshot_layers(layers) -> Tuple[LayerSnapshot, ...]:
+    """Every layer of a session, in order, as `snapshot_layer` takes it."""
+    return tuple(snapshot_layer(layer) for layer in layers)
+
+
+def render_panels(layers: Sequence[LayerSnapshot], fov: FieldOfView,
+                  panels: Sequence = ("overlay",)
+                  ) -> Tuple[List[np.ndarray], np.ndarray]:
+    """An RGB image per panel on ``fov``, and the summed intensity planes.
+
+    A panel is a layer's position in ``layers``, or ``"overlay"``: every
+    visible layer added up, as SMAP does.  Each layer is rendered once
+    whatever the panels, so the overlay of side-by-side panels is exactly
+    their sum.  A panel of a layer that is not there, or not visible, is
+    black.  This is the whole render, and runs on any thread.
+    """
+    images = {}
+    total = np.zeros((fov.ny, fov.nx, 3), np.float32)
+    weight = np.zeros((fov.ny, fov.nx), np.float32)
+    white_any = False
+    wanted = set(panels)
+    for i, layer in enumerate(layers):
+        if not layer.visible:
+            continue
+        white = layer.display.white_background
+        white_any = white_any or white
+        image, rendered = layer.image(fov, white_background=False)
+        total += image
+        weight += rendered.weight
+        if i in wanted:
+            image = np.clip(image, 0, 1)
+            images[i] = luts.on_white(image) if white else image
+    total = np.clip(total, 0, 1)
+    # once, to the sum: a white ground added to a white ground is still
+    # white and would swallow everything drawn on either of them
+    images["overlay"] = luts.on_white(total) if white_any else total
+    return [images[spec] if spec in images else np.zeros((fov.ny, fov.nx, 3), np.float32)
+            for spec in panels], weight

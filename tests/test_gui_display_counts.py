@@ -41,7 +41,8 @@ def settle(app, rounds=40):
         time.sleep(0.01)
 
 
-def test_a_failed_render_does_not_leave_the_view_black(app):
+def test_a_failed_render_does_not_leave_the_view_black(app, monkeypatch):
+    from smappy.gui import render_view
     from smappy.gui.render_view import RenderView
     session = Session()
     session.add_file(table(), FileInfo("a.hdf5", "/a.hdf5", "smappy"))
@@ -49,16 +50,17 @@ def test_a_failed_render_does_not_leave_the_view_black(app):
     view.resize(400, 400)
     view.show()
 
-    real = view.composite
+    real = render_view.render_panels
     calls = {"n": 0}
 
-    def once_broken(fov):
+    def once_broken(*args, **kwargs):
         calls["n"] += 1
         if calls["n"] == 1:
             raise ValueError("table swapped mid-render")
-        return real(fov)
+        return real(*args, **kwargs)
 
-    view.composite = once_broken
+    # what the render thread runs: `PanelJob.run` looks it up in the module
+    monkeypatch.setattr(render_view, "render_panels", once_broken)
     view.tile_valid = False
     view.render()
     settle(app)

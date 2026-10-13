@@ -535,6 +535,68 @@ The spatial index over 5M localizations builds in 100 ms and answers in
 narrow integer keys and falls back to a comparison sort for wide ones, so the
 obvious `argsort` on a combined cell id costs 1.5 s instead of 60 ms.
 
+**The render threads draw a snapshot** (`LayerSnapshot`, 2026-10).  The 2D
+worker used to be handed the view widget and the 3D worker the session, and
+both walked the live layers from their own thread: a filter changed, a table
+swapped or a block appended on the GUI thread meanwhile was read half-way
+(the 3D worker caught "the table changed under us" and dropped the frame,
+leaving the view waiting for good), a filter or a grouped table could be
+*built* on the worker, and a widget referenced from a worker is how a Qt
+object's last reference can be dropped off the GUI thread -- one route to the
+deadlock behind `gui/collector.py`.  Now the GUI thread freezes what a render
+needs and the worker gets that and nothing else (`PanelJob`, `Job3D`, one
+`RenderWorker` class for both views):
+
+* the shown table as `Localizations.snapshot()` -- a new dict over the same
+  column arrays.  `extend` writes only past the end of a buffer or into a new
+  one, and a live recipe replaces a column rather than writing into it, so
+  nothing the snapshot holds is ever written;
+* the filter's combined mask, by reference: `LocFilter` replaces its masks,
+  never writes them.  Its compacted rows (`indices`, 10-20 ms at 5 M) are
+  taken when the filter has them; when it has not, the worker compacts and
+  the GUI thread hands them back on completion (`LocFilter.keep_indices`,
+  kept only if the mask is still the filter's), so the next render does not;
+* the spatial index: a `SpatialIndex` is immutable once built and is shared;
+  a `GrowingIndex` is copied as new segment and offset lists over the same
+  segments, because `append` and `_merge` change those lists one after the
+  other and a query between the two paired a segment with another's offset;
+* the median precision, a copy of `RenderSettings` and `DisplaySettings`
+  (the panels edit them in place), an image layer's `ImageData` record (the
+  pixels shared) and plane;
+* for the 3D view, the table's `_gpu_token` is set on the session's table
+  first (`table_token`), so every frame's snapshot shares the row cache and
+  the GPU's buffers instead of uploading the table again.
+
+`render_panels` is the whole 2D render over the snapshots (the old
+`composite` merged into it), `render_3d` the 3D one; both are module-level
+and run on any thread.
+
+Measured on a shared 4-core container (load 4-12 throughout, so absolute times
+swing by 30% between runs), 5 M localizations (a simulation tiled 30 x 30),
+a 1000 x 800 canvas rendered as a 1.5x tile, 3D preview at 900 x 700.  Old
+and new path alternated in one process, 15 rounds each, medians:
+
+| | snapshot (GUI thread) | render wall, before -> after | render CPU, before -> after |
+| --- | --- | --- | --- |
+| 2D whole field, grouped (1.9 M kept) | 0.21 ms | 280 -> 293 ms | 596 -> 579 ms |
+| 2D 3x zoom, grouped | 0.21 ms | 148 -> 155 ms | 225 -> 237 ms |
+| 2D 30x zoom, grouped | 0.21 ms | 65 -> 67 ms | 58 -> 62 ms |
+| 2D whole field, ungrouped (4.6 M kept) | 0.19 ms | 1962 -> 1880 ms | 1784 -> 1826 ms |
+| 2D 3x zoom, ungrouped | 0.17 ms | 489 -> 487 ms | 640 -> 665 ms |
+| 2D 30x zoom, ungrouped | 0.18 ms | 80 -> 79 ms | 80 -> 80 ms |
+| 3D preview whole field, grouped | 0.22 ms | 378 -> 379 ms | 578 -> 586 ms |
+| 3D preview 10 um crop, grouped | 0.21 ms | 19.7 -> 20.3 ms | 21.4 -> 21.6 ms |
+| 3D preview whole field, ungrouped | 0.17 ms | 613 -> 632 ms | 778 -> 790 ms |
+| 3D preview 10 um crop, ungrouped | 0.15 ms | 33.1 -> 31.1 ms | 32.6 -> 33.9 ms |
+
+Before and after draw identical pictures (the planes compared exactly), and
+the differences in the last two columns change sign between rows and between
+runs (+-10%): they are the machine, not the snapshot, whose own cost is
+0.03 ms on an idle moment and at most 0.25 ms under load -- under 0.5% of
+the cheapest render in the table.  The one cost that moved threads is the mask's AND after a filter
+change, 3 ms at 5 M, now on the GUI thread; the filter panel's count already
+computed it there, so in the app it is not new.
+
 ### The 3D view queries the same index
 
 The 3D view did not, and every frame walked the whole table to find the slab's

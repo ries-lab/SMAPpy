@@ -108,6 +108,11 @@ class SpatialIndex:
     def n_localizations(self) -> int:
         return self.x.size
 
+    def snapshot(self) -> "SpatialIndex":
+        """The index as it is now, for another thread: itself, since nothing
+        changes it once it is built."""
+        return self
+
     @property
     def bounds(self) -> Tuple[float, float, float, float]:
         """The rectangle covered: the localizations, and any ``extent`` given."""
@@ -207,6 +212,22 @@ class GrowingIndex:
         self._offsets[start:] = [self._offsets[start]]
         self._segments[start:] = [SpatialIndex(x, y, self.target_per_cell,
                                                extent=self.extent)]
+
+    def snapshot(self) -> "GrowingIndex":
+        """The index as it is now, untouched by any later `append`.
+
+        A render thread queries the index while the GUI thread appends to it,
+        and `append` and `_merge` change the segment and offset lists one
+        after the other: a query between the two would pair a segment with
+        another's offset.  The segments themselves never change once built,
+        so the snapshot is new lists over the same ones -- a few dozen
+        references, whatever the table's size.
+        """
+        frozen = GrowingIndex.__new__(GrowingIndex)
+        frozen.__dict__.update(self.__dict__)
+        frozen._x, frozen._y = list(self._x), list(self._y)
+        frozen._segments, frozen._offsets = list(self._segments), list(self._offsets)
+        return frozen
 
     # ------------------------------------------------------------------ reading
     @property

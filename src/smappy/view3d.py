@@ -15,6 +15,7 @@ from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
 
+from .layer_state import LayerSnapshot, snapshot_layers
 from .locs import Localizations
 from .regions import Region
 from .render import (DisplaySettings, FieldOfView, RenderAxes, RenderSettings,
@@ -732,13 +733,26 @@ def _depth_front_and_range(projection: Projection, slab: Optional[Slab],
     return float(d.max()), (float(d.min()), float(d.max()))
 
 
-def _table_key(locs: Localizations, *extra):
-    """A key that dies with the table: an object stored on it, not a bare id."""
+def table_token(locs: Localizations) -> object:
+    """An object that stands for the table as long as it lives.
+
+    Kept in the metadata, so that a `Localizations.snapshot` -- which copies
+    the metadata dict -- carries the same one: every frame of a drag renders
+    a new snapshot, and the caches below (and the GPU's table and selection
+    buffers) must still see one table.  `snapshot_3d` sets it on the
+    session's table before taking the snapshots; one first set on a snapshot
+    would die with it, and every frame would upload the table anew.
+    """
     token = locs.metadata.get("_gpu_token")
     if token is None:
         token = object()
         locs.metadata["_gpu_token"] = token
-    return (id(token), len(locs)) + extra
+    return token
+
+
+def _table_key(locs: Localizations, *extra):
+    """A key that dies with the table: an object stored on it, not a bare id."""
+    return (id(table_token(locs)), len(locs)) + extra
 
 
 _median_cache: dict = {}
@@ -882,21 +896,38 @@ def render_layer_gpu(engine, locs: Localizations, select: np.ndarray, projection
     return display.apply(whole, white_background=False), whole
 
 
+def snapshot_3d(layers) -> Tuple[LayerSnapshot, ...]:
+    """Session layers as `render_3d` takes them, frozen on the calling thread.
+
+    `snapshot_layers`, after giving each shown table its `table_token`, so
+    that the snapshots of one table share the caches and the GPU buffers.
+    """
+    for layer in layers:
+        if layer.visible and not layer.is_image:
+            table_token(layer.state.locs)
+    return snapshot_layers(layers)
+
+
 def render_3d(layers, projection: Projection, slab: Optional[Slab], fov: FieldOfView,
               preview: bool = False, engine=None,
               budget: Optional[PreviewBudget] = None) -> Tuple[np.ndarray, np.ndarray]:
     """Every visible localization layer, added up; also the depth histogram.
 
-    ``layers`` are session layers.  ``engine`` is a `smappy.gpu.GPUEngine`
-    for ``projection.engine`` "gpu" or "points"; None means the CPU.
-    Returns the RGB image and a (64, 2) array of depth-bin centres and
-    counts over the slab's points.
+    ``layers`` are `LayerSnapshot`s (`snapshot_3d`), which is what a render
+    thread is handed; session layers are snapshotted here first, for a
+    script or a synchronous render on the thread that owns them.
+    ``engine`` is a `smappy.gpu.GPUEngine` for ``projection.engine`` "gpu"
+    or "points"; None means the CPU.  Returns the RGB image and a (64, 2)
+    array of depth-bin centres and counts over the slab's points.
 
     ``budget`` bounds a *preview* frame and is timed by it, so a drag settles
     at `TARGET_FPS` on whatever machine it is running on; None draws every row
     the slab holds.  A final frame is never budgeted -- the image you measure
     or export is the whole table, and only the drag is a sample.
     """
+    if not all(isinstance(layer, LayerSnapshot) for layer in layers):
+        layers = snapshot_3d(layers)
+    shown = [layer for layer in layers if layer.visible and not layer.is_image]
     rgb = np.zeros((fov.ny, fov.nx, 3), np.float32)
     depths: List[np.ndarray] = []
     limit = budget.points(fov) if (preview and budget is not None) else None
@@ -907,41 +938,35 @@ def render_3d(layers, projection: Projection, slab: Optional[Slab], fov: FieldOf
     # rate it reports is pessimistic -- the safe direction to be wrong in.
     if engine is not None and projection.engine == "spheres":
         draws, shade_params = [], None
-        for layer in layers:
-            if layer.visible and not layer.is_image:
-                st = layer.state
-                draw, shade_params = sphere_draw(engine, st.locs, st.filter.mask, projection, slab,
-                                                 fov, st.settings, st.display,
-                                                 index=getattr(st, "cull_index", None))  # opaque: no budget
-                draws.append(draw)
+        for layer in shown:
+            draw, shade_params = sphere_draw(engine, layer.locs, layer.mask, projection, slab,
+                                             fov, layer.settings, layer.display,
+                                             index=layer.index)  # opaque: no budget
+            draws.append(draw)
         if draws:
             rgb = engine.render_spheres(draws, fov, shade_params)
-    for layer in layers:
-        if not layer.visible or layer.is_image:
-            continue
-        state = layer.state
+    for layer in shown:
         # None on custom axes: the index is in the table's own coordinates
-        index = getattr(state, "cull_index", None)
+        index = layer.index
         # memoised, so this is the count the engines are about to work on
-        drawn += min(selection_rows(state.locs, state.filter.mask, slab, index).size,
+        drawn += min(selection_rows(layer.locs, layer.mask, slab, index).size,
                      limit if limit is not None else np.iinfo(np.int64).max)
         if engine is not None and projection.engine == "spheres":
             image = 0.0
         elif engine is not None and projection.engine in ("gpu", "points"):
-            image, _ = render_layer_gpu(engine, state.locs, state.filter.mask, projection, slab,
-                                        fov, state.settings, state.display,
-                                        state.current.median_precision, preview, index=index,
+            image, _ = render_layer_gpu(engine, layer.locs, layer.mask, projection, slab,
+                                        fov, layer.settings, layer.display,
+                                        layer.median_precision, preview, index=index,
                                         budget=limit)
         else:
-            image, _ = render_layer_3d(state.locs, state.filter.mask, projection, slab, fov,
-                                       state.settings, state.display, preview,
-                                       n_threads=state.n_threads, index=index, budget=limit)
+            image, _ = render_layer_3d(layer.locs, layer.mask, projection, slab, fov,
+                                       layer.settings, layer.display, preview,
+                                       n_threads=layer.n_threads, index=index, budget=limit)
         rgb += image
-        depths.append(depth_sample(state.locs, state.filter.mask, projection, slab, index,
-                                   axes=state.settings.axes))
+        depths.append(depth_sample(layer.locs, layer.mask, projection, slab, index,
+                                   axes=layer.settings.axes))
     rgb = np.clip(rgb, 0, 1)
-    if any(l.visible and not l.is_image and l.get_display().white_background
-           for l in layers):
+    if any(layer.display.white_background for layer in shown):
         from .lut import on_white       # once, to the sum, as the 2D view does
         rgb = on_white(rgb)
     out = rgb, depth_histogram(depths)

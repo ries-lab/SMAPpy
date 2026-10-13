@@ -127,12 +127,12 @@ def test_white_background_turns_the_picture_over_once(app):
     session.add_layer(like=0)
     fov = view.current_fov(200, 160)
 
-    dark, _ = view.composite(fov)
+    dark = view.panel_images(fov, ["overlay"])[0]
     assert dark[0, 0].max() < 0.05                      # the ground is black
 
     tab.white.setChecked(True)
     assert all(l.get_display().white_background for l in session.layers)
-    light, _ = view.composite(fov)
+    light = view.panel_images(fov, ["overlay"])[0]
     assert light[0, 0].min() > 0.95                     # ...and now white
     assert (light.min(axis=2) < 0.6).sum() > 100        # with the ink still on it
     # the same picture, turned over: brightness flipped, hue kept

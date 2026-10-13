@@ -582,7 +582,7 @@ class Overview(QWidget):
         `processEvents` by PySide, and the next Python override Qt calls --
         a pyqtgraph item's -- segfaults (6.10) or hangs (see gui/canvas.py).
         A table with no precision column raised here when it was opened.
-        The main view prints and moves on too (`_RenderWorker.render`).
+        The main view prints and moves on too (`RenderWorker.render`).
         """
         try:
             self.update_image()
@@ -599,7 +599,7 @@ class Overview(QWidget):
         self.box.invertY(self.session.axes().is_default)
         (x0, x1), (y0, y1) = self.session.full_view()
         fov = FieldOfView.fit((x0, x1), (y0, y1), 300, 200)
-        rgb, _ = self.view.composite(fov)
+        rgb = self.view.panel_images(fov, ["overlay"])[0]
         self.image.setImage(np.ascontiguousarray(rgb), levels=[0, 1], autoLevels=False)
         self.image.setRect(QRectF(fov.x0, fov.y0, fov.x1 - fov.x0, fov.y1 - fov.y0))
         self.box.setRange(QRectF(fov.x0, fov.y0, fov.x1 - fov.x0, fov.y1 - fov.y0),
