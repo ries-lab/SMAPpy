@@ -302,3 +302,4 @@ def test_the_window_hands_the_fits_progress_on_as_numbers(tmp_path, frames):
     assert fitted[-1]["frames"] == len(frames)
     assert fitted[-1]["localizations"] == sum(len(b) for b in blocks) == len(live.session.locs)
     assert [f["frames"] for f in fitted] == sorted(f["frames"] for f in fitted)
+    assert fitted[-1]["behind"] == 0        # caught up: nothing written is unread

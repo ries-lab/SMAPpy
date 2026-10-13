@@ -336,6 +336,8 @@ class NDTiffSource(ImageSource):
                 yield index, self._block(index, last)
                 index = last
                 last_new = time.monotonic()
+                if on_behind is not None:
+                    on_behind(available - index)
             if ending or (stop is not None and index >= stop):
                 break
             if index > before:
