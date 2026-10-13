@@ -4,7 +4,7 @@ Where `docs/review-2026-10.md` stands on `claude/trusting-cray-bhwh1n`
 (PR ries-lab/SMAPpy#19): the simplification plan
 (`docs/simplification-plan.md`, sections A–F) and a second round from this
 document's open list.  83 commits, 378 files, about 7,100 lines fewer
-(+15,230 / −22,340).  `--slow -n 3`: 1670 passed, 6 skipped; CI green on
+(+15,230 / −22,340).  `--slow -n 3`: 1676 passed, 6 skipped; CI green on
 all platforms.
 
 ## Done: the plan
@@ -39,27 +39,21 @@ all platforms.
 | forms (§7.3) | notices by kind (info grey); optional bools as *auto / on / off*; *boxes per fit* and *threads* scripting-only; the camera part folded under a summary, and at Run a camera nobody entered asks *Open camera editor* / *Cancel*; *cutoff value* resets when *cutoff* changes mode; `cutoff_mode` in `smappy.fit` and `smappy-fit` (a bare cutoff ≥ 20 warns) |
 | Line Profile | units and ±; an undetermined parameter says so and leaves the comparison; the winner drawn on top; *Draw line* when there is no line |
 | layout (§7.2) | one loader (*Auto* with *format*); the File tab holds Export and Simulate; one *Show result*; "+ chain" in the + chooser; Tools without the duplicate ROI manager / per-region steps / bead calibration entries; the Regions tab header folded; bead calibration asks single/dual once |
+| merged blinks wait | while a large file's blinks merge, the view says so (stage and clock) instead of drawing unmerged localizations, and every run that reads the localizations -- plugins, chains, follow ROI, the ROI manager -- waits and then runs on the merged blinks; chains share the session's merge; no `group_id` written from a worker thread |
+| regions, follow-ups | `ROIProject` is one class (`SessionROIs` and `link.py` gone); a nested block whose changes to the table would be discarded warns in the editor and when the chain runs |
 
 ## Open
 
 1. **Garbage collection back on** -- an experiment is running (the test
    suite repeatedly with collection on, and with it forced constantly).
    Turn it on only on clean evidence; the CLAUDE.md rule changes with it.
-2. **Merged blinks: analysis waits for the merge** (decided, in progress).
-   While a large file's blinks merge in the background, the view shows that
-   they are being merged (with a percentage) instead of unmerged
-   localizations, and an analysis run, a chain or a follow-ROI measurement
-   started meanwhile waits and then runs on the merged blinks.  This removes
-   the three edge cases: a never-merged layer without `n_in_group`, a run
-   measuring single localizations during the merge, and a chain merging
-   again in its scratch copy (and writing `group_id` from its thread).
-3. **`cutoff` ≥ 20 without a mode** still means photons, with a warning;
+2. **A percentage while merging blinks** needs a counter inside the C++
+   linker (one call today); the view shows the stage and a clock.
+3. **`test_handoff.py::test_a_run_handed_over_is_run_by_the_new_instance`**
+   failed three times in full fast-tier runs and never alone (32 runs); its
+   error was not captured yet.  Catch it with the output kept, then fix.
+4. **`cutoff` ≥ 20 without a mode** still means photons, with a warning;
    make the mode required in a later release.
-4. **Regions** (decided, in progress): `ROIProject` and `SessionROIs`
-   become one class; write back inside a nested block stays unsupported,
-   but a nested block whose changes to the table would be discarded
-   (*write values* / *write back* on it, or a table-changing last step)
-   warns in the editor and when the chain runs.
 5. **Deferred by the owner**: the Analysis tab (a lean GUI users add to),
    the 3D view redesign with picture settings on the session and the slab as
    a 3D ROI (§4.6), COMET's GPU path (benchmark on Windows, then keep only
