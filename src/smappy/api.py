@@ -25,7 +25,7 @@ CameraLike = Union[CameraMetadata, dict, str, Path, None]
 
 
 def fit(data, out=None, camera: CameraLike = None, calibration=None, *,
-        presets=None, sigma: float = 1.2,
+        sigma: float = 1.2,
         cutoff: float = 1.7, filter: str = "dog", roisize: int = 13,
         max_fit_distance: Optional[float] = None, threads: int = 0,
         chunk: int = 200, frames: Optional[int] = None,
@@ -40,9 +40,8 @@ def fit(data, out=None, camera: CameraLike = None, calibration=None, *,
     no file.
 
     ``camera`` is a :class:`~smappy.metadata.CameraMetadata`, a dict of its
-    fields, or the path of a YAML config, and overrides whatever the image
-    metadata says.  ``presets`` is an optional SMAP ``*_cameras.mat``.  Images
-    passed directly carry no metadata at all, so the camera must be complete --
+    fields, or the path of a YAML file of them, and overrides whatever the
+    camera database and the image metadata say.  Images passed directly carry no metadata at all, so the camera must be complete --
     and coordinates are then relative to the image, unless ``roi`` says where on
     the chip it sat.
 
@@ -73,7 +72,7 @@ def fit(data, out=None, camera: CameraLike = None, calibration=None, *,
     keeper = RawFrameKeeper(raw_frames if out is not None else 0, 0,
                             _n_frames(data, source, frames))
     blocks = keeper.watch(blocks)
-    cam = _camera(camera, source, presets)
+    cam = _camera(camera, source)
     model = _model(calibration, sigma, cam)
     finder = PeakFinder(DoGFilter(sigma) if filter == "dog" else GaussFilter(sigma),
                         DynamicCutoff(cutoff) if cutoff < 20 else AbsoluteCutoff(cutoff))
@@ -166,10 +165,10 @@ def _n_frames(data, source, frames: Optional[int]) -> Optional[int]:
     return None                                      # an iterable: live
 
 
-def _camera(camera: CameraLike, source, presets) -> CameraMetadata:
+def _camera(camera: CameraLike, source) -> CameraMetadata:
     if source is not None:
         from .io.tiff import camera_metadata
-        return camera_metadata(source, presets, camera)
+        return camera_metadata(source, camera)
     if camera is None:
         raise ValueError(
             "images passed directly carry no metadata, so the camera has to be "

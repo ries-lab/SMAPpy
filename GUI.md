@@ -104,9 +104,10 @@ reasoning is here so that it does not have to be re-derived.
   turns that into `Session.begin_live` / `Session.append`, so the image builds
   up during the fit; a script ignores it.
 * **Plugins may react to edits.**  `react(changed, settings)` returns values
-  to set: choosing a source fills the camera from its metadata, choosing a
-  preset fills it from the YAML.  Presets are `*.yaml` in `~/.smappy/cameras`,
-  `$SMAPPY_CAMERAS`, or the checkout's `examples/`.
+  to set: choosing a source fills the output path beside it.  The camera
+  is not copied in: a field on *auto* shows, greyed, what the camera database
+  and the file say (`hints`), and a camera the database does not know is
+  added with the camera editor.
 
 * **Several files, one table.**  Loading more files (File -> Add file, or
   several at once) concatenates them, as SMAP does, with a ``filenumber``

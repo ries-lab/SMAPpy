@@ -1,11 +1,11 @@
 """Camera metadata needed to turn raw camera counts into photons.
 
 Only what the fitting pipeline actually needs is kept.  Values can come from
-three places, in increasing priority:
+three places, in increasing priority (`smappy.io.tiff.resolve_camera`):
 
-1. the image file itself (Micro-Manager / OME tags)
-2. a camera preset (:mod:`smappy.io.cameras_mat`, SMAP's ``*_cameras.mat``)
-3. explicit user input -- a dict or a YAML file
+1. the camera database (`smappy.camera_db`), for the camera the file names
+2. the image file itself (Micro-Manager / OME tags)
+3. explicit user input -- the fitter's fields, a dict or a YAML file
 
 Missing required values raise a clear error rather than silently defaulting.
 """

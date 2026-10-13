@@ -1563,6 +1563,15 @@ is saved goes into the user's `cameras.json`, never the shipped list an
 update replaces; a shipped camera edited there is saved as the user's copy
 under its own name, which `joined_with` puts in its place.
 
+One camera path: the database, the file, and the fitter's typed fields, met
+in one place (`io.tiff.resolve_camera`, which `CameraSettings.resolution`
+calls for every fitter, its parameter view, the camera editor and the uiPSF
+calibration).  The camera YAML presets -- a second database of a camera per
+file, merged in three places -- and the reading of SMAP's `*_cameras.mat`
+went with it.  A plain YAML file of the typed fields stays for scripts
+(`smappy-fit --camera CONFIG.yaml`, `smappy.fit(camera="cam.yaml")`): it is
+the fields written down, not another source of cameras.
+
 A pixel size is one number or two.  Almost every microscope has square pixels;
 where x and y differ the database keeps both, `to_nm` scales each axis by its
 own, and a width or a precision -- which is neither x nor y -- by the mean.

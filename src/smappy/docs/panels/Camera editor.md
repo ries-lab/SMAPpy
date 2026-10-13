@@ -38,9 +38,10 @@ adds that mode to the camera and keeps the others.
 
 The entries are saved in **your own** `cameras.json`, in smappy's settings
 folder (the window shows where), never in the list that comes with smappy,
-which an update replaces.  A lab that already has its cameras in SMAP's
-`settings/*_cameras.mat` converts that file once instead, with
-`python -m smappy.io.cameras_mat lab_cameras.mat`.
+which an update replaces.  The database and the fitter's own camera fields
+are the only two places a camera's numbers come from: smappy reads neither
+camera YAML presets nor SMAP's `settings/*_cameras.mat`.  The cameras of the
+Ries lab's SMAP file are in the list that comes with smappy.
 
 ## How it works
 

@@ -18,7 +18,8 @@ from.  Three sources:
 
 SMAP keeps the same model in ``settings/*_cameras.mat``; this is that concept
 in JSON, so that adding a camera is editing a file rather than a MATLAB
-struct.  `from_mat` ports one.
+struct.  The Ries lab's file was ported once, into the shipped
+``data/cameras.json``; smappy does not read SMAP's files.
 
 **Nothing here overrides the file.**  A value the metadata gives is the value
 used; the database supplies what the metadata does not carry, and what it

@@ -21,6 +21,8 @@ from typing import Optional, Sequence
 
 import numpy as np
 
+from ..camera import to_photons
+
 
 @dataclass
 class Split:
@@ -137,26 +139,13 @@ def channel_shift(channels: np.ndarray) -> list:
     return [[0.0, 0.0], [float(dy), float(dx)]]
 
 
-def to_photons(adu: np.ndarray, camera) -> np.ndarray:
-    """Camera counts -> photons, as the fitter converts them."""
-    return ((np.asarray(adu, np.float32) - float(camera.offset))
-            * float(camera.adu_to_photons)).astype(np.float32)
-
-
 def resolve_camera(camera_settings, source, profile):
-    """The camera, with the profile's pixel size where nothing else gave one."""
-    from ..io.tiff import camera_metadata
-    from ..metadata import CameraMetadata
-    overrides = camera_settings.overrides() if camera_settings is not None else {}
-    if camera_settings is not None and camera_settings.preset:
-        from dataclasses import asdict
-        preset = asdict(CameraMetadata.from_yaml(camera_settings.preset))
-        overrides = {**{k: v for k, v in preset.items() if v is not None}, **overrides}
-    name = camera_settings.camera if camera_settings is not None else ""
-    if source is not None:
-        meta = camera_metadata(source, overrides=overrides, camera=name, require=False)
-    else:
-        meta = CameraMetadata.from_dict(overrides)
+    """The camera as a fitter resolves it (`CameraSettings.resolve`), with the
+    profile's pixel size where nothing else gave one."""
+    if camera_settings is None:
+        from ..plugins.fit import CameraSettings
+        camera_settings = CameraSettings()
+    meta = camera_settings.resolve(source, require=False)
     if meta.pixelsize_um is None and profile.pixelsize_xy_um is not None:
         meta.pixelsize_um = list(profile.pixelsize_xy_um)
     meta.require()

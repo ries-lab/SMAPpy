@@ -2,9 +2,11 @@
 
 Most acquisitions need none of these: the camera database recognises the
 camera from the file's own tags and supplies what the metadata does not carry.
-They are for the rest -- a camera nobody has entered, or one whose file has no
-tag to recognise it by.  The layers override in this order, each winning over
-the ones before it:
+They are for the rest -- a camera nobody has entered (the camera editor adds
+one), or one whose file has no tag to recognise it by (``--camera-name``).
+``--camera`` takes a plain YAML file of the same fields as the options, for a
+script that fits many files from one camera.  The layers override in this
+order, each winning over the ones before it:
 
     camera database  <  image metadata  <  --camera config  <  options
 """
@@ -29,9 +31,6 @@ def add_camera_arguments(ap: argparse.ArgumentParser) -> None:
     g.add_argument("--emgain", type=float, default=None)
     g.add_argument("--em", dest="em_on", action=argparse.BooleanOptionalAction,
                    default=None, help="EM amplification was used")
-    g.add_argument("--cameras", metavar="CAMERAS", default=None,
-                   help="a camera database to use besides the shipped one: a "
-                        "JSON file, or a SMAP *_cameras.mat")
     g.add_argument("--camera-name", metavar="NAME", default=None,
                    help="use this camera from the database instead of "
                         "identifying one from the file's tags")
@@ -45,5 +44,5 @@ def camera_from_args(source, a, require: bool = True) -> CameraMetadata:
     overrides = overrides.merged_with(CameraMetadata(
         conversion=a.conversion, offset=a.offset, pixelsize_um=a.pixelsize,
         emgain=a.emgain, em_on=a.em_on))
-    return camera_metadata(source, a.cameras, overrides, require=require,
+    return camera_metadata(source, overrides, require=require,
                            camera=getattr(a, "camera_name", None) or "")

@@ -355,7 +355,7 @@ def _summary(path: Path) -> dict:
 def _image_metadata(source: NDTiffSource, index: NDTiffIndex) -> dict:
     """The first image's metadata, flattened into Micro-Manager's key space.
 
-    `metadata_from_stack` reads plane metadata keys like ``Core-Camera`` and
+    `camera_metadata` reads plane metadata keys like ``Core-Camera`` and
     ``<device>-Offset``, so an NDTiff dataset has to present the same flat
     dictionary a Micro-Manager TIFF does.  The summary fills in behind it.
     """

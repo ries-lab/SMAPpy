@@ -14,7 +14,6 @@ expandable section.
 """
 from __future__ import annotations
 
-import os
 import time
 from dataclasses import asdict, dataclass, field, is_dataclass, replace
 from datetime import datetime
@@ -71,8 +70,6 @@ class CameraSettings:
     # the file whose camera carries no tag to recognise it by
     camera: str = param("", label="camera", choices=lambda: _camera_choices(),
                         help="auto: identified from the file's metadata")
-    preset: str = param("", label="preset", choices=lambda: _preset_choices(),
-                        help="a camera YAML; fills the fields below")
     conversion: Optional[float] = param(None, unit="e-/ADU", min=0,
                                         help="photoelectrons per count; auto: "
                                              "from the file or the camera "
@@ -100,22 +97,30 @@ class CameraSettings:
     def overrides(self) -> Dict[str, Any]:
         """What the user set, to win over the file's metadata."""
         out = {k: v for k, v in asdict(self).items()
-               if k not in ("preset", "camera", "pixelsize_y_um") and v is not None}
+               if k not in ("camera", "pixelsize_y_um") and v is not None}
         if self.pixelsize_y_um and self.pixelsize_um:
             out["pixelsize_um"] = [self.pixelsize_um, self.pixelsize_y_um]
         return out
 
-    def resolve(self, source) -> CameraMetadata:
-        """The complete camera: the file's metadata under the user's values."""
-        overrides = self.overrides()
-        if self.preset:
-            preset = asdict(CameraMetadata.from_yaml(self.preset))
-            overrides = {**{k: v for k, v in preset.items() if v is not None}, **overrides}
-        if source is not None:
-            from ..io.tiff import camera_metadata
-            return camera_metadata(source, overrides=overrides, camera=self.camera)
-        cam = CameraMetadata.from_dict(overrides)
-        cam.require()
+    def resolution(self, source):
+        """Everything known about the camera behind ``source``, and from where.
+
+        The one place these fields meet a file: the camera database, the
+        file's own metadata, then the fields set here, each winning over the
+        one before (`io.tiff.resolve_camera`).  The fitters, their parameter
+        view, the camera editor and the uiPSF calibration all come through
+        here, so that none of them can disagree with the fit about a camera.
+        """
+        from ..io.tiff import resolve_camera
+        return resolve_camera(source, camera=self.camera, overrides=self.overrides())
+
+    def resolve(self, source, require: bool = True) -> CameraMetadata:
+        """The camera the fit uses: `resolution`'s values, or with no file
+        these fields alone.  Complete unless ``require`` is False."""
+        cam = (CameraMetadata.from_dict(self.overrides()) if source is None
+               else self.resolution(source).camera_metadata())
+        if require:
+            cam.require()
         return cam
 
 
@@ -357,20 +362,6 @@ def _camera_choices() -> List:
     return [("", "auto")] + [(name, name) for name in names]
 
 
-def _preset_choices() -> List:
-    """Camera YAMLs: ``~/.smappy/cameras`` and the checkout's ``examples``."""
-    dirs = [Path.home() / ".smappy" / "cameras",
-            Path(__file__).resolve().parents[3] / "examples"]
-    extra = os.environ.get("SMAPPY_CAMERAS")
-    if extra:
-        dirs.insert(0, Path(extra))
-    choices = [("", "-")]
-    for d in dirs:
-        if d.is_dir():
-            choices += [(str(p), p.stem) for p in sorted(d.glob("*.yaml"))]
-    return choices
-
-
 def camera_resolution(settings):
     """The camera behind a fitter's settings: the database, the file, the
     user's fields -- or None when the source cannot be opened.
@@ -379,15 +370,7 @@ def camera_resolution(settings):
     on what a fitter is set to fit without the fitter that is set to fit it.
     """
     try:
-        from ..io.tiff import resolve_camera
-        source = _open(settings.source, watch=False)
-        overrides = settings.camera.overrides()
-        if settings.camera.preset:
-            preset = asdict(CameraMetadata.from_yaml(settings.camera.preset))
-            overrides = {**{k: v for k, v in preset.items() if v is not None},
-                         **overrides}
-        return resolve_camera(source, camera=settings.camera.camera,
-                              overrides=overrides)
+        return settings.camera.resolution(_open(settings.source, watch=False))
     except Exception:
         return None
 
@@ -468,7 +451,7 @@ class _FitPlugin(Plugin):
         path = settings.source.path
         if not path:
             return None
-        key = (path, settings.camera.preset, settings.camera.camera, tuple(
+        key = (path, settings.camera.camera, tuple(
             getattr(settings.camera, name) for name in self.CAMERA_FIELDS),
             settings.camera.pixelsize_y_um, revision())
         if getattr(self, "_camera_key", None) == key:
@@ -565,10 +548,6 @@ class _FitPlugin(Plugin):
             # user's -- they then overrode a later *camera* choice, and the
             # next file inherited the last one's values.
             return updates or None
-        if changed == "camera.preset" and settings.camera.preset:
-            cam = CameraMetadata.from_yaml(settings.camera.preset)
-            return {f"camera.{k}": v for k, v in asdict(cam).items()
-                    if k in self.CAMERA_FIELDS and v is not None}
         return None
 
     def finish(self, ctx: Context, settings, locs: Localizations) -> Finished:

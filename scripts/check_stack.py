@@ -3,7 +3,7 @@ import argparse, sys, time
 from pathlib import Path
 import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from smappy.io.tiff import open_stack, metadata_from_stack
+from smappy.io.tiff import camera_metadata, open_stack
 from smappy.cli.camera_args import add_camera_arguments, camera_from_args
 
 ap = argparse.ArgumentParser(description=__doc__)
@@ -12,15 +12,10 @@ add_camera_arguments(ap)
 a = ap.parse_args()
 
 src = open_stack(a.data)
-presets = a.cameras
 print(f"files      : {[f.name for f in src.files]}")
 print(f"frames     : {src.n_frames} written, {src.n_frames_declared} declared by MM")
 print(f"frame      : {src.shape} {src.dtype}")
-if presets:
-    from smappy.io.cameras_mat import CameraPresets
-    presets = CameraPresets.load(presets)
-    print(f"presets    : {presets.describe(src.mm_metadata)}")
-cam = metadata_from_stack(src, presets)
+cam = camera_metadata(src, require=False)
 print(f"metadata   : {cam}")
 print(f"             exposure={cam.exposure_ms} ms  excess_noise={cam.excess_noise}")
 try:

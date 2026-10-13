@@ -93,7 +93,7 @@ shape, so read the one closest to what you are writing:
 | a long computation with progress | `drift_comet.py`, `drift_rcc.py` |
 | loads, saves, exports, simulates | `file.py` (a plugin per format, no input table; the simulator's model is `smappy.simulate`) |
 | finds, measures or summarises ROIs | `roi.py` (a segmenter derives from `SegmenterPlugin`, which gives it a Preview, *replace* (`replace_param()`) and a step of the ROI undo; `per_region = True`; analyse; segmenters under `Analysis/Regions/Find`) |
-| parts, presets, a C++ backend | `fit.py` (nested settings dataclasses) |
+| parts, a C++ backend | `fit.py` (nested settings dataclasses; four fitters, thin subclasses of `_FitPlugin`) |
 | adds a derived column, no output | `math_parser.py` (an expression, kept with the table as a recipe) |
 | removes or flags localizations | `remove_locs.py` (a region, a new table or a filtered flag) |
 | fits a model to what is in a ROI | `line_profile.py` (unbinned likelihood, models compared by AIC; one fit per layer, and `live`) |

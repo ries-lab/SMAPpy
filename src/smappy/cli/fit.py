@@ -4,8 +4,9 @@
              [--frames N] [--roisize N] [--sigma S]
              [--cutoff F] [--filter dog|gauss] [--raw-frames N]
 
-The camera is stated in --camera or with --pixelsize/--conversion/--offset;
---cameras CAMERAS.mat is an optional shortcut where a SMAP settings file exists.
+The camera comes from the camera database and the file's metadata; what they
+do not say is stated in --camera CONFIG.yaml or with
+--pixelsize/--conversion/--offset.
 """
 import argparse
 import time

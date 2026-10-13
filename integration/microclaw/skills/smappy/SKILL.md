@@ -82,14 +82,15 @@ fitted on an assumed 100 nm and flagged in the table, so state it.
 Get the pixel size from `get_pixel_size()`; the conversion (e-/ADU) and offset
 (ADU) come from the rig profile or the camera datasheet, never from a guess.
 
-**The camera is stated as parameters, not as a file.** `overrides` takes a
-`CameraMetadata`, a dict, or the path of a YAML config, and wins over both the
-image metadata and any preset. A SMAP `*_cameras.mat` is optional — pass its
-path as `camera_metadata(source, presets, overrides)` only where a lab keeps
-one. On the command line the same three layers are `--camera CONFIG.yaml`,
-`--pixelsize/--conversion/--offset`, and `--cameras CAMERAS.mat`. **Store the
-rig's camera parameters in a microclaw rig profile and pass them as a dict**;
-do not require the user to produce a MATLAB settings file.
+**The camera is stated as parameters, not as a file.** smappy's camera
+database recognises a known camera from the file's own tags;
+`camera_metadata(source, overrides)` puts `overrides` -- a `CameraMetadata`, a
+dict, or the path of a YAML file of the same fields -- over both the database
+and the image metadata. On the command line the same layers are
+`--camera CONFIG.yaml` and `--pixelsize/--conversion/--offset`, and
+`--camera-name` picks a database entry for a file whose tags name none. smappy
+reads no SMAP `*_cameras.mat`. **Store the rig's camera parameters in a
+microclaw rig profile and pass them as a dict.**
 
 To feed frames as they arrive rather than all at once, push them into a
 `QueueSource` (route 3 below), or drive the engine directly:
@@ -264,8 +265,8 @@ Starting filter values for AF647 dSTORM are in `load_skill(name="smlm")`
    one the fit falls back to a Gaussian PSF and there is no z.
 3. Camera conversion (e-/ADU) and offset (ADU) — from the rig profile if it
    records them, otherwise ask. Not guessable, and wrong values give wrong
-   photon counts and therefore wrong precisions. A SMAP `*_cameras.mat` can
-   supply them where one exists, but is never required.
+   photon counts and therefore wrong precisions. smappy's camera database
+   supplies them for a camera it recognises.
 4. Effective pixel size in nm, if `get_pixel_size()` does not report a
    calibrated one.
 5. Where the HDF5 should go.
