@@ -8,9 +8,11 @@ covers: [smappy.camera_db.draft, smappy.camera_db.with_mode, smappy.camera_db.pr
 ## What it does
 
 A fit needs three numbers about the camera before it can turn a movie into
-photons and nanometres: the *conversion* (photoelectrons per count), the
-*offset* (the count of a pixel that saw no light) and the *pixel size* in the
-sample.  Micro-Manager records the pixel size if it was calibrated, and never
+photons and nanometres: the [conversion](plugin:Panels/Glossary) (also
+called sensitivity or gain: photoelectrons per count), the
+[offset](plugin:Panels/Glossary) (also called baseline or bias: the count of
+a pixel that saw no light) and the *pixel size* in the sample.  A count is
+the camera's raw pixel value, in ADU (analog-to-digital units).  Micro-Manager records the pixel size if it was calibrated, and never
 the other two.  They depend on the camera's readout mode -- the readout rate,
 the pre-amp gain, the amplifier -- and that the file *does* record.  So
 smappy keeps a **camera database**: for each camera, the tag that recognises
@@ -27,8 +29,11 @@ also opens from *Camera editor...* at the top of the Localize tab, and from
 *Add to camera database...* in the *Camera parameters* window.
 
 The window starts from **the file the fitter is set to**: its tags already
-say which device took it, its serial number, which tags carry the EM gain,
-the exposure and the camera ROI, and which ones set the readout mode.  All of
+say which device took it, its serial number, which tags carry the
+[EM gain](plugin:Panels/Glossary) (electron multiplication: how much an EMCCD
+amplifies the signal before reading it out), the exposure and the
+[camera ROI](plugin:Panels/Glossary) (also called the readout region: the
+part of the chip that was read out), and which ones set the readout mode.  All of
 that is filled in.  What is left is the conversion and the offset of this
 file's readout mode, from the camera's data sheet or a calibration (the mean
 of a dark movie is the offset).  Save, and every later file from that camera

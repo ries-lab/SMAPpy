@@ -38,6 +38,25 @@ def test_every_page_belongs_to_a_plugin():
     assert pages - set(shipped()) == set()
 
 
+def test_every_link_between_pages_leads_to_a_page():
+    """A link to a renamed plugin, or written with a scheme the Help window
+    does not follow (`panel:`), goes nowhere without a word -- and the
+    glossary links are on every page."""
+    from urllib.parse import unquote
+    root = plugins.BUILTIN_ROOT / docs.DOCS_DIR
+    files = list(root.rglob("*.md")) + list(docs.PANELS.glob("*.md"))
+    known = set(shipped()) | set(docs.panels())
+    broken = []
+    for file in files:
+        for url in re.findall(r"\]\(([^)]+)\)", file.read_text(encoding="utf-8")):
+            if url.startswith(("http://", "https://", "mailto:")):
+                continue
+            target = unquote(url[len("plugin:"):]) if url.startswith("plugin:") else None
+            if target not in known:
+                broken.append(f"{file.name}: {url}")
+    assert broken == []
+
+
 @pytest.mark.parametrize("path", documented())
 def test_a_page_describes_the_version_its_plugin_is_at(path):
     """A version is bumped when the numbers move -- which is when the page's

@@ -8,7 +8,8 @@ covers: [smappy.npc.localization_classes, smappy.npc.joint_pmf, smappy.npc.fit, 
 Not every copy of a protein in an SMLM image is seen.  Some are never
 labelled; some are labelled with a dye that never switches on, or never
 brightly enough.  The fraction that is labelled and seen is the *effective
-labelling efficiency* (ELE).  It limits what can be counted and what can be
+labelling efficiency* (ELE; also called the
+[labelling efficiency](plugin:Panels/Glossary) or degree of labelling).  It limits what can be counted and what can be
 resolved, and it is the direct test of a labelling protocol.
 
 Nuclear pores make it measurable (Thevathasan et al. 2019,
@@ -20,7 +21,10 @@ depends on the ELE, and this plugin finds the ELE that explains it.
 Counting corners naively is biased, in both directions.  A localization
 imprecise enough lands in the neighbouring corner's segment and opens a
 corner that is empty; the more often a fluorophore blinks, the more often.
-And a filter on precision, which stops that, loses the corners whose
+And a filter on precision -- keeping only localizations whose
+[localization precision](plugin:Panels/Glossary) (also called the CRLB:
+how far the fitted position is expected to lie from the true one) is good
+enough -- stops that, but loses the corners whose
 blinks were all dim.  On simulations both are large: up to 10 points of
 efficiency at 5000 photons per blink, and far more at 500 (the study in
 `studies/npc_le` has the numbers).
@@ -40,8 +44,11 @@ not bias the answer.  SMAP's analysis, the corner histogram alone, is kept as
 the *corners (SMAP)* method.
 
 The order is: find the pores with [NPC](plugin:Analysis/Regions/Find/NPC), add
-NPC Corners to the evaluation pipeline and evaluate, then run this.  Use
-grouped localizations, imaged until the fluorophores have bleached.
+NPC Corners to the per-region steps (*Per-region steps...* in the Regions tab)
+and run them, then run this.  Use data imaged until the fluorophores have
+bleached, with blinks merged -- [merge blinks](plugin:Panels/Glossary), also
+called grouping or linking, combines the localizations in consecutive frames
+that come from one blinking event into one.
 
 ## How it works
 
@@ -168,24 +175,27 @@ corners.  Without the junk the fit is within 1.5 points at 5000 photons.
 
 **What it assumes.**  Every pore has 32 copies, and all its localizations are
 its own; the same ELE and blinking in every pore; a geometric number of
-blinks; a blink's brightness independent of its fluorophore; and one grouped
-localization per blink.  A grouping that leaves a blink in several rows --
-smappy's links within a fixed 50 nm, which a dim frame at 500 photons misses
--- reads as more blinks.  On a layer that is not grouped at all the plugin
-still runs, and its text says so.
+blinks; a blink's brightness independent of its fluorophore; and one merged
+localization per blink.  Merging that leaves a blink in several rows --
+smappy's merges within a fixed 50 nm, which a dim frame at 500 photons misses
+-- reads as more blinks.  On a layer that does not merge blinks at all the
+plugin still runs, and its text says so.
 
-**Which counts.**  The counts are those of an NPC Corners evaluation, made by
-the region steps window or a chain.  With one, it is used whatever it is
-called; in a chain, the one the chain itself made.  *results from* lists
-every current NPC Corners evaluation, on the ROIs and then per region of an id
-column (*per cluster_id: NPC Corners*, from a block over the clusters), after
-*auto*, which says which one it would take.  With several -- NPC Corners renamed and run with other
-settings, to compare -- and *auto* chosen, the plugin asks before it runs,
-with a button per evaluation and its settings beside it, and the answer goes
-into *results from*, so it is asked once.  The cutoffs of the model are those that evaluation counted
-with, as stored with its results, not what the region steps window holds now.
-If some sites were counted with other settings than the rest under the same
-name, the plugin refuses and asks for them to be evaluated again.
+**Which counts.**  The counts are those of NPC Corners run once per region,
+by the per-region steps window or a [chain](plugin:Panels/Glossary)
+(plugins run one after another as one).  With one set of NPC Corners
+results, it is used whatever its step is called; in a chain, the one the
+chain itself made.  *results from* lists every current set of NPC Corners
+results, on the ROIs and then per region of an id column (*per cluster_id:
+NPC Corners*, from a block over the clusters), after *auto*, which says
+which one it would take.  With several -- NPC Corners renamed and run with
+other settings, to compare -- and *auto* chosen, the plugin asks before it
+runs, with a button per set of results and its settings beside it, and the
+answer goes into *results from*, so it is asked once.  The cutoffs of the
+model are those those results were counted with, as stored with them, not
+what the per-region steps window holds now.  If some pores were counted with
+other settings than the rest under the same name, the plugin refuses and
+asks for them to be measured again.
 
 **Per cluster.**  Corners counted once per cluster -- each pore a cluster, a
 block over `cluster_id` -- are read like those of the ROIs, with SMAP's
@@ -196,10 +206,10 @@ simulation's truth.  For either, make ROIs of the clusters
 ([Column to ROIs](plugin:Analysis/Regions/Column to ROIs)) and count their
 corners there.
 
-**Simulated data.**  When the sites come from a simulated table, the plugin
+**Simulated data.**  When the pores come from a simulated table, the plugin
 also reports the efficiency it was simulated with, and fits the labelled
 corners of the same pores (drawn again from the recipe, as
-[Ground Truth](plugin:Analysis/Measure/Ground Truth) does; a site's pore is
+[Ground Truth](plugin:Analysis/Measure/Ground Truth) does; an ROI's pore is
 the `copy` most of its localizations belong to).
 
 **SMAP's method** fits the histogram of SMAP's corner count
@@ -244,8 +254,8 @@ SMAP's method only.  100 gives the error to two digits.
 
 * **The text**: the ELE and the blinks per copy with their errors, and the
   pores fitted of all.  On a simulation also the simulated efficiency and the
-  ELE of the same pores' labelled corners.  A note when the layer is not
-  grouped.
+  ELE of the same pores' labelled corners.  A note when the layer does not
+  merge blinks.
 * **The figure**: the corners seen and the localizations per pore of the
   pores fitted (grey), and the model at the fitted values (red).  A good fit
   follows both.  More pores at either end of the localization histogram than

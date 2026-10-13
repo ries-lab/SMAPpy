@@ -501,7 +501,8 @@ Each step leaves the program working and the suite green.
      both saved with the project; `pipeline.block_of` / `from_block`
      convert.  Run measures what is out of date and carries the rest; there
      is no separate "run everything" any more.  The Regions tab, the ROI manager
-     and the Tools menu open it as *Region steps...*; the Regions tab itself is
+     and the Tools menu open it as *Region steps...* (*Per-region steps...*
+     since F4 of `docs/simplification-plan.md`); the Regions tab itself is
      renamed with step 6.
 5. **Clusters**: DBSCAN under *Regions/Find* writing `cluster_id` and
    `n_in_cluster`, clusters to ROIs, *ROI to column*.

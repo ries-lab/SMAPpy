@@ -130,7 +130,7 @@ chain asks all of them once, up front, and runs without asking again; in a
 batch the job says what an answer is (`preflight: skip | proceed | abort`,
 default `skip`: the file is skipped and the report says why).
 
-### ROIs: segment, evaluate, analyse
+### ROIs: segment, measure, analyse
 
 Decided 2026-10-05, and since 2026-10-11 through blocks (`docs/regions.md`).
 A chain can do what the ROI manager does by hand:
@@ -147,15 +147,15 @@ A chain can do what the ROI manager does by hand:
 * its results are **stored with the ROIs** as an evaluation run of their own,
   marked with the block (`run["chain"]`, ``block <label>``), under each
   step's name -- the
-  plugin's when the step is not renamed.  The evaluation window's pipeline
+  plugin's when the step is not renamed.  The per-region steps window's list
   is not touched: it is the user's, set up for whatever they do next.  A
   result belongs to its ROI and says how it was made
   (`ROIProject.evaluations`: the newest result under each name that is
   still true of the ROI's data, with its plugin, version and parameters),
-  so the site table (`ROIProject.results`) holds the chain's columns beside
-  the pipeline's, and an analysis step -- in the chain, or run from the GUI
+  so the results table (`ROIProject.results`) holds the chain's columns beside
+  the per-region steps', and an analysis step -- in the chain, or run from the GUI
   afterwards -- reads them without knowing who ran them.  The name is the
-  identity: the same evaluator under its name again replaces its numbers,
+  identity: the same plugin under its name again replaces its numbers,
   renamed it adds a second set to compare;
 * a step in a block sees the ROI with every layer's filter and grouping
   (`ROIProject.region_context`; the layer the ROI manager follows, the first
@@ -248,10 +248,15 @@ which `Session.apply` honours, the same way `Result.bounds` works.
 
 ### Grouping
 
+Grouping is what the GUI calls *merge blinks* (also called linking): the
+localizations in consecutive frames that come from one blinking event are
+combined into one row.  The chain files keep the word `grouping`, with the
+values `grouped` (the GUI's *merged*) and `ungrouped` (*not merged*).
+
 Which table a step reads -- one row per localization, or one per blink -- is
 decided, lowest priority first, by:
 
-1. **the layer** -- its own grouping, as in Render.  The default.
+1. **the layer** -- its own *merge blinks* tick, as in Render.  The default.
 2. **the chain** -- `grouping: grouped | ungrouped` overrides every layer.
 3. **the step** -- `grouping:` in the chain file, the user's choice for that
    plugin, on every layer.

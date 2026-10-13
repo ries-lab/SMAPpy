@@ -1,6 +1,8 @@
 # ROI manager
 
-The ROI manager organizes **files → ROIs**.  Its window has four quadrants: the
+The ROI manager organizes **files → ROIs**.  An ROI (region of interest) is a
+shape -- a circle, a square or a polygon -- around one copy of a structure,
+inside which it is measured.  Its window has four quadrants: the
 whole file, a zoom, the ROI itself, and the file and ROI lists.  The zoom is a
 navigation aid; moving through the file never moves ROIs.
 
@@ -55,23 +57,26 @@ around the ROI, independently of the analysis geometry.
 The boundary is inclusive for circles, squares and polygon edges. Overlapping
 ROIs are independent: a localization in their overlap contributes to both.
 
-## Filters and grouping
+## Filters and merged blinks
 
-Filters and grouping come from the render layer, so what an ROI measures is what
-the image shows; there is no separate filter panel.  Change them in the Render
-tab and the ROIs follow.
+Filters (also called bounds: the lowest and highest values of columns a
+localization must lie between) and *merge blinks* (also called grouping or
+linking: the localizations in consecutive frames that come from one blinking
+event combined into one) come from the render layer, so what an ROI measures
+is what the image shows; there is no separate filter panel.  Change them in
+the Render tab and the ROIs follow.
 
 A field absent from a source is not filtered; absent fields are named above the
 views. The Python API supports additional range filters. File-selection filters
 (`filenumber`, `file_id`) are ignored: each ROI is always extracted from its own
 source file. The detail view and preview limits never restrict analysis.
 
-The layer's **grouped** switch applies to the ROIs as well: the localization
-count then counts groups, and photons are the photon sums of those groups.  The
-linking parameters are session-wide, under *parameters...* next to the
-overview's *update*.
+The layer's **merge blinks** switch applies to the ROIs as well: the
+localization count then counts blinks, and photons are the photon sums of those
+blinks.  The merge settings are session-wide, under *merge settings...* beside
+*merge blinks*.
 
-## Find, review, evaluate, histogram
+## Find, review, measure, histogram
 
 Candidates are found by the **Density Peaks** segmenter
 (`Analysis/Regions/Find/Density Peaks`, pinned in the Regions tab), which operates on
@@ -92,9 +97,9 @@ These are detection settings, separate from the analysis ROI size. Outlines are 
 and a draft is blue and dashed; a drawing in progress is a dashed cyan rubber
 line and a direction is a magenta arrow.
 
-**Run on every ROI**, in the *Evaluation pipeline...* window, runs the
-pipeline on every included ROI across all files (**Re-evaluate what changed**
-only on those whose results are out of date or missing). **Localization
+**Run**, in the *Per-region steps...* window, runs the steps on every
+included ROI across all files, measuring only what is out of date or
+missing. **Localization
 Statistics** (`Analysis/Measure/Localization Statistics`, the same plugin as
 on the view) returns the localization count, the mean and median photons and
 `N0`, the mean and median lateral precision and, when its precision model is
@@ -118,7 +123,7 @@ exceeds that limit.
 
 ROIs are part of the session: **File → Save** writes them into the localization
 file's metadata, together with the geometry, the use flags, the finder
-provenance, the evaluation runs and which ROI was selected.  Opening that file
+provenance, the runs of the per-region steps and which ROI was selected.  Opening that file
 brings all of it back.  Draft ROIs are not saved until added.
 
 `ROIProject.save` and `ROIProject.load` still write and read the versioned HDF5
@@ -127,10 +132,10 @@ GUI does not use it.  That sidecar holds source references, geometry, flags,
 comments, provenance, settings and run history, with source paths relative to
 the project.
 
-Every evaluation records its plugin name/version, parameters, timestamp, source
-fingerprint, effective filters, grouping settings, and geometry. A changed
+Every measurement records its plugin name/version, parameters, timestamp, source
+fingerprint, effective filters, merge settings, and geometry. A changed
 analysis input makes the latest result outdated; it is excluded from current
-histograms until evaluated again. Global size/shape changes do not invalidate
+histograms until measured again. Global size/shape changes do not invalidate
 polygon ROIs. Comments, review flags, contrast, and navigation do not change the
 numerical results. Old runs remain available in `project.runs`.
 
@@ -159,7 +164,7 @@ project.save("experiment.rois.h5")
 ```
 
 In the GUI the project is a `SessionROIs`, the same model with the session's
-files as its sources and the layer's filters and grouping instead of its own.
+files as its sources and the layer's filters and merge settings instead of its own.
 The GUI uses the built-in plugins. Scripts can pass another plugin object to
 `project.find(..., plugin=...)` or `project.evaluate(plugin=...)`. Plugins declare
 stable `name` and `version` strings and use these interfaces:
@@ -170,8 +175,8 @@ per_roi.evaluate(selected_localizations, geometry, parameters)     # dictionary 
 population.analyze(result_rows, parameters)                       # analysis data
 ```
 
-No plugin needs a window. Evaluators receive absolute nm coordinates and an
-explicit geometry dictionary, so an evaluator can derive local/rotated
+No plugin needs a window. Per-region plugins receive absolute nm coordinates and an
+explicit geometry dictionary, so such a plugin can derive local/rotated
 coordinates when required. Return JSON-compatible values, numeric arrays or
 NumPy scalars; saved runs contain data rather than plotting handles. Custom
 plugin result rows are available with `project.results(plugin.name)`.

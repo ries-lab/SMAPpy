@@ -75,8 +75,8 @@ def make(d) -> None:
     section_of(sim, "labelling").set_expanded(True)
     type_into(sim, "labelling.efficiency", 0.6)
     d.settle()
-    d.shot("Not every site carries a dye: a labelling efficiency near 60 % is "
-           "typical for the pores. Each label gets one fluorophore.",
+    d.shot("Not every copy of the protein carries a dye: a labelling "
+           "efficiency near 60 % is typical for the pores. Each label gets one fluorophore.",
            spot=[efficiency], point=efficiency, click=True,
            zoom=d.around(efficiency, 760))
     blinking = section_of(sim, "blinking")

@@ -5,17 +5,22 @@ covers: [smappy.plugins.registration.chip_pixels, smappy.plugins.registration.de
 
 ## What it does
 
-A two-colour splitter images the sample twice, side by side on one camera:
+A two-colour [splitter](plugin:Panels/Glossary) (also called a dual-view or
+image splitter) images the sample twice, side by side on one camera:
 each half of the chip sees the same field through a different filter.  The
 two images never lie exactly on top of each other.  The second is shifted,
 slightly turned and slightly magnified, and at the corners of the field the
 difference is several pixels.  To combine the two halves -- to fit each
 molecule in both, as [Gaussian 2D 2C](plugin:Localize/Gaussian 2D 2C) does --
 the program needs the **transformation** that maps a position in one half
-onto the same position in the other.
+onto the same position in the other -- the
+[registration](plugin:Panels/Glossary) of the two channels, also called
+channel alignment, mapping or chromatic correction.
 
 This plugin measures that transformation from localizations, without beads.
-In a ratiometric experiment every molecule is imaged in both halves at once.
+In a [ratiometric](plugin:Panels/Glossary) experiment -- dyes told apart by
+how their light divides between the halves -- every molecule is imaged in
+both halves at once.
 Fit the whole frame with a plain [Gaussian 2D](plugin:Localize/Gaussian 2D)
 fit, ignoring the split, and each molecule shows up twice in the same frame.
 The plugin finds those pairs, and fits the map that takes one partner onto
@@ -65,7 +70,9 @@ with warnings.catch_warnings():
 **1. Positions in camera pixels.**  A transformation is a property of the
 camera, so it is measured in chip pixels.  A table in nanometres is converted
 back with the pixel size the fit recorded.  Only the localizations of the
-current selection are used -- the layer's filter and the ROI.
+current [selection](plugin:Panels/Glossary) are used -- those that pass the
+layer's filter (the lowest and highest values of columns, set in the Render
+tab), inside the drawn ROI (region of interest).
 
 **2. The vote.**  For every two localizations in the same frame, the vector
 from one to the other is collected.  Most of these vectors connect unrelated
@@ -220,7 +227,8 @@ The outlier threshold and the dx/dy limit widen with the round's tolerance,
 to at least a half and a quarter of it: 10 and 5 pixels in the first round,
 the set values in a tight second round.
 
-**Weights.**  If the table has a precision -- `xy_err_pix`, or `xy_err_nm`
+**Weights.**  If the table has a [localization
+precision](plugin:Panels/Glossary) (also called the CRLB) -- `xy_err_pix`, or `xy_err_nm`
 converted with the pixel size it records -- a pair's weight is the inverse
 variance of its separation,
 

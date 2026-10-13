@@ -16,7 +16,9 @@ from smappy import docs
 
 PANELS = {"Panels/Render tab", "Panels/Regions tab", "Panels/ROI manager",
           "Panels/3D view", "Panels/Bead calibration", "Panels/Batch window",
-          "Panels/Camera editor"}
+          "Panels/Camera editor", "Panels/Glossary"}
+# pages beside the panels that belong to no widget, so name no controls
+WIDGETLESS = {"Panels/Glossary"}
 
 
 def controls(page_text: str):
@@ -80,7 +82,7 @@ def test_a_panel_page_renders_with_its_figures(path):
     assert "## Parameters" not in rendered.html and "setting</th>" not in rendered.html
 
 
-@pytest.mark.parametrize("path", sorted(PANELS))
+@pytest.mark.parametrize("path", sorted(PANELS - WIDGETLESS))
 def test_every_control_a_page_names_is_on_the_panel(app, path):
     panel = docs.panels()[path]
     assert panel.widget, f"{path}: the front matter names no widget"

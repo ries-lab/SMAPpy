@@ -13,14 +13,23 @@ width is fitted too -- by maximum likelihood
 Levenberg-Marquardt fitter of
 [Li et al. 2018](https://doi.org/10.1038/nmeth.4661), to get its position
 with a precision far below the size of a pixel.  The result is one row per fluorophore per frame: `x`, `y`,
-photons, background, the PSF width, and how precisely each is known.
+photons, background, the width of the [PSF](plugin:Panels/Glossary) (point
+spread function: the image one molecule makes on the camera), and how
+precisely each is known -- the [localization
+precision](plugin:Panels/Glossary), also called the CRLB or localization
+uncertainty.
 
 Use it for **2D** data.  For 3D data from an astigmatic or otherwise
-engineered PSF use [Spline 3D](plugin:Localize/Spline 3D) with a bead
-calibration; for two channels on one camera, the *2C* fitters.
+engineered PSF -- a cylindrical lens makes the spot wider in x on one side of
+the focus and in y on the other ([astigmatism](plugin:Panels/Glossary)) --
+use [Spline 3D](plugin:Localize/Spline 3D) with a
+[bead calibration](plugin:Panels/Glossary) (also called a spline calibration
+or experimental PSF model); for two channels on one camera, the *2C*
+fitters.
 
 The camera matters: the fit works in **photons**, so the conversion from the
-camera's counts (ADU) to photons must be right, or every photon count and every
+camera's counts (ADU, analog-to-digital units, also called grey values) to
+photons must be right, or every photon count and every
 precision is off by the same factor.  These values come from the file's
 metadata or the camera database where possible; check them in the *camera*
 section, where a field left on *auto* shows in grey what it was read as, and a
@@ -52,8 +61,10 @@ here = candidates[candidates.frame == shown]
 The work is done in five steps, each a part of the settings.
 
 **1. Counts to photons.**  A camera reports counts (ADU), which are photons
-after subtracting the *offset* and multiplying by the *conversion* (electrons
-per count; for an EMCCD, also dividing by the EM gain):
+after subtracting the *offset* (also called baseline or bias: what a pixel
+reads with no light) and multiplying by the *conversion* (also called
+sensitivity or gain: electrons per count; for an EMCCD, also dividing by the
+EM gain, its electron multiplication):
 
 $$n = (\mathrm{ADU} - \mathrm{offset}) \times \mathrm{conversion} .$$
 
@@ -89,11 +100,12 @@ maximum" whatever the background.  The **absolute** cutoff is a fixed
 number, in photons of the filtered image.  Lower values find dimmer
 molecules and more noise.
 
-**3. Cutting ROIs.**  A small square (*ROI size*, 13 pixels) is cut around
-each candidate.  A candidate too close to the edge of the image for its ROI
+**3. Cutting fit boxes.**  A small square, the [fit box](plugin:Panels/Glossary)
+(also called ROI size or fitting window; *fit box*, 13 pixels), is cut around
+each candidate.  A candidate too close to the edge of the image for its box
 to fit is dropped rather than fitted off centre.
 
-**4. The fit.**  Each ROI is compared with a model of what a single emitter
+**4. The fit.**  Each box is compared with a model of what a single emitter
 looks like: a Gaussian of width $\sigma$, integrated over each pixel, with
 $N$ photons, at position $(x, y)$, on a flat background $b$ per pixel,
 
@@ -105,7 +117,7 @@ distributed around $\mu_i$ -- the **maximum likelihood** estimate.  This is
 the best that can be done with the data: it makes use of every photon, and
 weighs each pixel by how noisy it really is.
 
-```figure One ROI from the frame above: the data, the fitted model, and what is left over.  A good fit leaves only noise.
+```figure One fit box from the frame above: the data, the fitted model, and what is left over.  A good fit leaves only noise.
 roi = cut_rois(photons, here, 13)
 fit = GaussianPSF(sigma=1.2).fit(roi.images, iterations=50)
 theta = fit.theta[0]
@@ -129,7 +141,7 @@ axes[1].plot(x, y, "+", color="#d62728", ms=12)
 ```
 
 The likelihood is maximised iteratively, with the Levenberg-Marquardt method
-(details below), from a start at the ROI's centre of mass.
+(details below), from a start at the box's centre of mass.
 
 **5. Precision, and the table.**  The fit also says how well it could
 possibly have done.  From the model, the **Cramér-Rao lower bound** (CRLB) is
@@ -201,11 +213,11 @@ is also capped (one pixel for the position, at first), and the cap is halved
 whenever the step reverses direction.  The fit stops when the deviance
 changes by less than one part in a million, or after *iterations* steps.
 
-**The start.**  Position: the centre of mass of the ROI.  Background: the
+**The start.**  Position: the centre of mass of the box.  Background: the
 mean of its border pixels.  Photons: the brightest pixel above background,
 times $2\pi\sigma_0^2$.  Width: *start sigma*, $\sigma_0$.  During the fit
-$N \geq 1$, $b \geq 0.01$ and $0 \leq \sigma \leq$ half the ROI.  The position
-is not held inside the ROI: a fit that runs away is visible, and *max fit
+$N \geq 1$, $b \geq 0.01$ and $0 \leq \sigma \leq$ half the box.  The position
+is not held inside the box: a fit that runs away is visible, and *max fit
 distance* rejects those that end further than that from their candidate.
 
 **The CRLB.**  The Fisher information is the matrix $H$ above at the fitted
@@ -242,13 +254,13 @@ one number for the whole chip; an sCMOS's varies from pixel to pixel (0.7 to
 1.4 electrons), which a variance map would capture and this does not.
 
 **Quality of the fit.**  `logl` is the log-likelihood of the fit and
-`logl_rel` the same per pixel of the ROI, so that it can be compared between
-ROI sizes.  A spot that is not one emitter (two overlapping, or a bright
+`logl_rel` the same per pixel of the fit box, so that it can be compared between
+box sizes.  A spot that is not one emitter (two overlapping, or a bright
 speck of something else) fits badly, and filtering on `logl_rel` removes
 most of them.
 
-**Speed.**  Detection runs on blocks of frames; ROIs are collected and fitted
-in batches (*ROIs per fit*), on all cores, in C++.  Reading the file runs in
+**Speed.**  Detection runs on blocks of frames; fit boxes are collected and fitted
+in batches (*boxes per fit*), on all cores, in C++.  Reading the file runs in
 the background while the previous block is processed.
 
 **Compared with the papers.**  The fit and its CRLB are those of
@@ -298,12 +310,12 @@ Seven parameters instead of five.  Useful for looking at astigmatism, not for
 
 ### fit.roisize
 Large enough to hold the spot and some background around it: about 7 PSF
-widths.  Larger ROIs catch more neighbours.
+widths.  Larger boxes catch more neighbours.
 
 ### output.raw_frames
 50 is enough to see what the camera saw at the start, the end and a few
 points between.  Each kept frame costs its size in the file: for a
-256 x 256 ROI about a quarter of a megabyte, for a full 2048 x 2048 sCMOS
+256 x 256 camera ROI about a quarter of a megabyte, for a full 2048 x 2048 sCMOS
 chip 16 MB, so fifty of those are 800 MB -- set fewer there.
 
 ### output.show_tags
@@ -325,7 +337,7 @@ The table, with one row per fitted spot:
 | `photons_err`, `background_err` | their CRLB |
 | `sigma_nm` | the fitted PSF width (`sigma_x_nm`, `sigma_y_nm` if elliptical) |
 | `logl`, `logl_rel` | the log-likelihood, and per pixel |
-| `peak_x_pix`, `peak_y_pix` | the candidate the ROI was cut around |
+| `peak_x_pix`, `peak_y_pix` | the candidate the fit box was cut around |
 | `iterations` | how many steps the fit took |
 
 The file also records the camera, the settings and the software version, so
@@ -348,11 +360,11 @@ Based on SMAP's `fit_fastsimple` workflow and its `MLE_GPU_Yiming` fitter
 ([Ries 2020](https://doi.org/10.1038/s41592-020-0938-1)).  The main changes:
 
 * The curvature used for the steps is the expected (Fisher) information
-  rather than the observed one, and the background starts at the ROI's
+  rather than the observed one, and the background starts at the box's
   border rather than its minimum.  Both have the same answer; together they
   let a fit at very low background converge instead of sticking at zero
   background.
-* The position is not clamped to the centre of the ROI; runaway fits are
+* The position is not clamped to the centre of the box; runaway fits are
   removed by *max fit distance* instead.
 * **Read noise** is one variance for the whole chip, added to data and model
   (1 electron by default without EM gain); SMAP's sCMOS mode reads a

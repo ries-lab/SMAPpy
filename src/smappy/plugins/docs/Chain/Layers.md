@@ -5,25 +5,31 @@ covers: [smappy.plugins.chain_layers.default_layers, smappy.plugins.chain_layers
 
 ## What it does
 
-In the Render tab a person sets up the layers by hand: which layer is
-grouped, and which localizations each one keeps -- a precision better than
-20 nm, a relative log-likelihood above -2, at least a few hundred photons.
-Every plugin downstream reads the localizations through those filters.
+In the Render tab a person sets up the [layers](plugin:Panels/Glossary) (the
+pictures of the localizations, each with its own filter and colours) by hand:
+which layer merges blinks, and which localizations each one keeps -- a
+precision better than 20 nm, a relative log-likelihood above -2, at least a
+few hundred photons.  Every plugin downstream reads the localizations through
+those [filters](plugin:Panels/Glossary) (also called bounds).  [Merge
+blinks](plugin:Panels/Glossary) (also called grouping or linking) combines
+the localizations in consecutive frames that come from one blinking event
+into one.
 
-A chain has no hands on the Render tab, and a batch job has no Render tab at
-all.  This step does the same work from settings, so that a chain filters
+A [chain](plugin:Panels/Glossary) (plugins run one after another as one) has
+no hands on the Render tab, and a batch job -- a chain run over many files --
+has no Render tab at all.  This step does the same work from settings, so that a chain filters
 every file the same way and says in its log what the filters were.  Put it
 first in a chain (`docs/batch.md` describes chains and batch jobs).
 
 Without it, a chain filters each file as a freshly opened file is filtered:
-the default bounds and the default grouping.  That is a sensible default, but
+the default bounds, with blinks merged.  That is a sensible default, but
 an implicit one; this step makes it explicit.
 
 ## How it works
 
 **One block per layer.**  Each block says three things:
 
-* *grouping* -- grouped, ungrouped, or as the layer already is;
+* *merge blinks* -- merged, not merged, or as the layer already is;
 * *start from* -- `defaults` (the bounds a new layer starts with, then the
   rows), `empty` (only the rows), or `keep` (the layer's current bounds, then
   the rows);
@@ -75,7 +81,7 @@ axes[0].set_ylabel("localizations", fontsize=8)
 ```
 
 **Setting the layers.**  The resolved bounds replace each layer's filter
-entirely; a layer's grouping is switched if the block asks for it.  A block
+entirely; a layer's *merge blinks* is switched if the block asks for it.  A block
 for a layer the session does not have yet makes one, as a copy of the first.
 Layers beyond the blocks are left as they are.  In the GUI the step acts on
 the session's own layers, so the Render tab shows afterwards what the chain
@@ -89,7 +95,7 @@ what the next plugins are given.
 ## In detail
 
 **Which table.**  The localizations: the quantile limits are of the
-whole ungrouped table (below), and *remove filtered* drops localizations,
+whole table of single localizations (below), and *remove filtered* drops localizations,
 whatever a layer shows.
 
 **The defaults.**  `defaults` starts from the bounds a freshly opened table
@@ -98,7 +104,7 @@ and 500 nm, and, for a 2D table (no `z_nm`), `sigma_nm` at most 180 nm -- each
 only where the table has the column -- and then the bounds the table carries
 with it, such as the `use` flag Remove Localizations writes when it hides
 localizations, so what the file hides stays hidden.  (Before version 2 the
-carried bounds were left out.)  A new layer is grouped by default.
+carried bounds were left out.)  A new layer merges blinks by default.
 
 **Quantiles.**  A quantile row's limits are fractions $q_{\mathrm{lo}}$ and
 $q_{\mathrm{hi}}$ between 0 and 1.  They become the bound
@@ -106,22 +112,23 @@ $q_{\mathrm{hi}}$ between 0 and 1.  They become the bound
 $$Q(q_{\mathrm{lo}}) \leq v \leq Q(q_{\mathrm{hi}}) ,$$
 
 with $v$ the column's value and $Q$ its empirical quantile function over the
-whole, ungrouped table -- not over what another bound or the ROI keeps, and
+whole table of single localizations -- not over what another bound or the
+drawn [ROI](plugin:Panels/Glossary) (region of interest) keeps, and
 ignoring values that are not finite.  An empty limit stays open.
 
-**Grouped layers.**  A layer's bounds apply to its grouped and its ungrouped
-table alike.  A bound on a column that means something else per blink --
-`photons`, which is summed over the blink, or `n_in_group` -- is the same
-number on both, so on a grouped layer it cuts at a different point of the
-distribution.
+**Merged blinks.**  A layer's bounds apply to its merged blinks and to its
+single localizations alike.  A bound on a column that means something else
+per blink -- `photons`, which is summed over the blink, or `n_in_group` -- is
+the same number on both, so on a layer that merges blinks it cuts at a
+different point of the distribution.
 
-**What is removed.**  *remove filtered* judges every localization of the
-ungrouped table by the bounds of each layer and keeps those that pass the
+**What is removed.**  *remove filtered* judges every single localization by
+the bounds of each layer and keeps those that pass the
 bounds of at least one.  The ROI and a layer's choice of files do not enter
 into it.
 
-**The record.**  The step's report -- one line per layer with its grouping
-and bounds, the rows that were skipped, and how many localizations were
+**The record.**  The step's report -- one line per layer with whether it
+merges blinks and its bounds, the rows that were skipped, and how many localizations were
 removed -- goes into the chain's log entry, together with its settings.  Run
 on its own, it is logged when it removes localizations; otherwise it changes
 only the layers, and it is the chain's entry that records it.
@@ -141,7 +148,7 @@ back.
 
 ## Output
 
-* **The text**: one line per layer, as `layer 1, grouped: xy_err_nm <= 20,
+* **The text**: one line per layer, as `layer 1, blinks merged: xy_err_nm <= 20,
   photons >= 139`, with the rows that were skipped, and the number of
   localizations removed.
 * **The layers**, set in the session.

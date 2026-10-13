@@ -6,8 +6,9 @@ covers: [smappy.plugins.clusters.dbscan, smappy.plugins.clusters.auto_eps, smapp
 ## What it does
 
 Finds clusters -- places where localizations lie closer together than
-elsewhere -- and names them.  It uses DBSCAN
-(Ester et al. 1996): a
+elsewhere -- and names them.  It uses [DBSCAN](plugin:Panels/Glossary)
+(density-based spatial clustering of applications with noise,
+Ester et al. 1996): a
 cluster is a run of crowded localizations, however it is shaped, and what is
 not crowded belongs to none.  Nothing has to be said about how many clusters
 there are or how large they are.
@@ -18,18 +19,23 @@ localization in no cluster) and `n_in_cluster` (how many localizations its
 cluster has).  With them
 
 * a filter on `n_in_cluster` keeps the large clusters and drops the specks;
-* a **block** of a chain, or the [region steps](plugin:Panels/Regions tab)
+* a **block** of a [chain](plugin:Panels/Glossary) (plugins run one after
+  another as one), or the [per-region steps](plugin:Panels/Regions tab)
   set to *for each* `cluster_id`, runs any measurement once in every cluster
   -- [Localization Statistics](plugin:Analysis/Measure/Localization Statistics),
   say -- and keeps a row of numbers per cluster, which the block's *write
   values* or [Regions to column](plugin:Analysis/Regions/Regions to column)
   puts back onto the localizations, to filter or colour by;
-* [Column to ROIs](plugin:Analysis/Regions/Column to ROIs) makes an ROI of
-  each cluster, to look at, review and annotate in the
+* [Column to ROIs](plugin:Analysis/Regions/Column to ROIs) makes an
+  [ROI](plugin:Panels/Glossary) (region of interest) of each cluster, to look at, review and annotate in the
   [ROI manager](plugin:Panels/ROI manager).
 
-It clusters the localizations of the layer as it is shown: its filter, its
-ROI and, on a grouped layer, its blinks.  Use it on structures that are
+It clusters the localizations of the layer as it is shown: its
+[filter](plugin:Panels/Glossary) (the lowest and highest values of columns a
+localization must lie between), its ROI and, on a layer that merges blinks,
+its blinks -- [merge blinks](plugin:Panels/Glossary), also called grouping or
+linking, combines the localizations in consecutive frames that come from one
+blinking event into one.  Use it on structures that are
 separate from each other -- pores, clusters of a receptor, vesicles.  On a
 continuous structure (a filament network) every localization is crowded
 and it joins everything into one.
@@ -65,8 +71,8 @@ joins the cluster of the nearest core point.  The rest are **noise**:
 `cluster_id` 0.
 
 **4. Names.**  The clusters are numbered by size, the largest 1.
-`n_in_cluster` is written beside `cluster_id`; both are kept when the
-localizations are grouped, a blink taking its cluster.
+`n_in_cluster` is written beside `cluster_id`; both are kept when blinks
+are merged, a blink taking its cluster.
 
 ```figure 141 simulated nuclear pores (left; a colour per pore) and the clusters DBSCAN finds with a 50 nm radius and 10 neighbours (right; a colour per cluster, noise grey): every cluster holds one pore, and one pore came out as two clusters.
 fig.set_size_inches(8, 4)
@@ -113,7 +119,9 @@ numbers of the second file's clusters follow the first's.
 
 ### radius_nm
 About the distance between neighbouring localizations inside a structure,
-not its size: a few times the localization precision, 30 to 80 nm for
+not its size: a few times the [localization precision](plugin:Panels/Glossary)
+(also called the CRLB: how far a fitted position may lie from the true one),
+30 to 80 nm for
 typical data.  Too small and clusters break into pieces; too large and
 neighbouring structures merge.
 
@@ -151,7 +159,8 @@ MIiSR version of DBSCAN ([Caetano et al. 2015](https://doi.org/10.1371/journal.p
   `n_in_cluster`; SMAP writes `clustertype` (core, border, noise) instead.
   Clusters are numbered by size.  ROIs are made of them by a plugin of
   their own, for any clusterer's ids.
-* **Files** are clustered one at a time, and on a grouped layer the blinks.
+* **Files** are clustered one at a time, and on a layer that merges blinks
+  the blinks.
 
 ## References
 

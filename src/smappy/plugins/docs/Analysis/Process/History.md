@@ -31,9 +31,11 @@ files.  A run that only measures is not: it can be repeated on the file at
 any time, so logging it would only record that somebody looked.  A few
 plugins are logged although they change no localization, because what they
 did is not visible in the table: saving a file and exporting a picture.  The
-session adds its own lines -- a file being loaded, removed or regrouped, an
-undo or a redo -- and a chain is logged as one entry with each of its steps
-under it.
+session adds its own lines -- a file being loaded or removed, new *merge
+settings* (how the localizations of one blink are merged into one), an undo
+or a redo -- and a [chain](plugin:Panels/Glossary) (also called a pipeline or
+workflow: plugins run one after another as one) is logged as one entry with
+each of its steps under it.
 
 **What an entry holds.**  The time, the plugin's path in the menus
 (`Analysis/Drift/RCC`), its report, its settings, and whether it changed the
@@ -96,7 +98,7 @@ save of the same session carries it.
 file's own, then logs the load as a plain `load` line with the file's path.
 *File > Open* gives only that line.  A loader plugin of the *File* tab
 (*File/Load/...*) adds a second, starred one with its report and settings --
-which reader was used and how the table was linked.
+which reader was used and how its blinks were merged.
 
 **Reading an old file.**  A log written by another version of the program is
 read tolerantly: an entry that is not a record of the expected kind is

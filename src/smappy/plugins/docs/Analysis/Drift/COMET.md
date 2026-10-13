@@ -21,8 +21,11 @@ as much as possible**, and moves every localization by that curve.
 Use it on **fixed** samples: anything that moves by itself is taken for
 drift.  It needs a few thousand localizations in the selection at the least
 (it warns below 5000), and does better with many more.  The drift is
-estimated from the **selection** -- the filtered localizations, in the ROI
-if there is one -- and subtracted from **every** localization of the table,
+estimated from the [selection](plugin:Panels/Glossary) -- the localizations
+that pass the layer's filter (the lowest and highest values of columns such
+as precision, set in the Render tab), inside the drawn
+[ROI](plugin:Panels/Glossary) (region of interest) if there is one -- and
+subtracted from **every** localization of the table,
 so a clean filter (bright, well-fitted localizations) helps the estimate and
 costs the corrected table nothing.
 
@@ -48,8 +51,11 @@ frame = np.asarray(grouped["frame"])
 ```
 
 **1. Blinks become molecules.**  A fluorophore that is on for five frames
-gives five localizations of the same molecule.  They are first linked into
-one, at their precision-weighted mean position (*merge blinks*).  This
+gives five localizations of the same molecule.  They are first merged into
+one, at their precision-weighted mean position (*merge blinks*): [merge
+blinks](plugin:Panels/Glossary), also called grouping or linking, combines
+the localizations in consecutive frames that come from one blinking event
+into one localization.  This
 removes the densest, shortest-range pairs of localizations, which makes the
 estimate much faster, and stops one bright molecule from counting as five
 independent measurements.
@@ -154,7 +160,7 @@ drift in seconds, then COMET within 50 nm of what is left.
 
 **Which table.**  The localizations, whatever the layer shows.  The
 estimate is made from those the layer's filter and the ROI select -- the
-bounds applied to each localization, also on a grouped layer -- and the
+bounds applied to each localization, also on a layer that merges blinks -- and the
 correction is applied to every localization of the table, selected or not.
 The blinks the estimate merges for itself (*merge blinks*) are merged with
 the session's merge settings -- the distance and dark frames of the Render
@@ -229,11 +235,11 @@ drift, $Q_\mathrm{obs}$, and with none, $Q_\mathrm{null}$, both per pair.  A
 window whose lift $Q_\mathrm{obs}/Q_\mathrm{null} - 1$ is at most *min lift*
 is discarded, and the curve through the remaining windows bridges it.
 
-**Two passes.**  *Two stage* runs the estimate on grouped localizations,
-subtracts it, and then runs it again ungrouped with *max drift* set to
+**Two passes.**  *Two stage* runs the estimate on merged blinks,
+subtracts it, and then runs it again on every localization with *max drift* set to
 *fine radius* $r$, starting at $\sigma = r/3$ and ending at $r/5$; the two
 drifts add.  *RCC first* runs [RCC](plugin:Analysis/Drift/RCC) over *RCC
-windows* windows (grouping as set here), subtracts it, and runs COMET on
+windows* windows (merging blinks as set here), subtracts it, and runs COMET on
 what is left; again the two add.  In both, the second pass searches a small
 radius, which is what makes it fast.  The fit in each pass is the one
 asked for, the spline or the time windows.
@@ -250,8 +256,8 @@ SMAP* lists the other changes.
 
 **The cost estimate.**  The pairs within $R$ are counted with a KD-tree on a
 fixed random sample of at most 60 000 of the selected localizations and
-scaled by $(N/n)^2$.  With grouping on, a stretch of frames from the middle of
-the acquisition is grouped first, and the fraction it keeps is the fraction
+scaled by $(N/n)^2$.  With *merge blinks* on, a stretch of frames from the middle of
+the acquisition is merged first, and the fraction it keeps is the fraction
 the whole table is expected to keep.  From the pair count $P$, the time is
 $P\,(16\ \mathrm{ns} + E \times 2.1\ \mathrm{ns})$, plus 0.3 µs per
 localization of the table, with $E = 23$ cost evaluations per width in the
@@ -270,7 +276,7 @@ The setting that decides the running time.  Set it to what the stage
 actually drifts over the whole acquisition, not a safe-looking round number:
 the pair count, and with it the time and memory, grows steeply with it.  Too
 small, and the drift beyond it cannot be found at all.  RCC, or a first run
-with grouping, is a quick way to find out how large the drift is.
+with blinks merged, is a quick way to find out how large the drift is.
 
 ### target_sigma_nm
 Smaller sharpens the last step, but the overlap then has more small maxima
@@ -299,14 +305,15 @@ tens of windows.  With *window unit* set to localizations, windows get longer
 as the sample bleaches.
 
 ### group
-Grouping made a real estimate 20 to 35 times faster.  On real data it also
+Merging blinks made a real estimate 20 to 35 times faster.  On real data it also
 gave a less noisy drift curve, because the repeated localizations of one
 molecule are not independent measurements.
 
 ### two_stage
 It suits a large dataset where a
-single ungrouped pass is slow: the grouped pass gets within a few
-nanometres, and the ungrouped pass refines that over a small radius.
+single pass over every localization is slow: the pass over merged blinks
+gets within a few nanometres, and the pass over every localization refines
+that over a small radius.
 
 ### two_stage_radius_nm
 Well above what the first pass leaves, which is a few nanometres.
@@ -360,7 +367,7 @@ A good result is a smooth curve of plausible size, a few hundred nanometres
 at most, and an image that is visibly sharper after correction.  A curve
 that sits flat at twice *max drift* has run into the optimiser's bound, and
 *max drift* was too small.  Sharp excursions that come straight back usually
-mean the data at that time had too little to go on: group blinks, filter
+mean the data at that time had too little to go on: merge blinks, filter
 more cleanly, or compare with RCC.
 
 ## Differences from COMET and SMAP
@@ -374,9 +381,9 @@ COMET in these ways:
 
 * **The spline is the default.**  Upstream COMET fits one drift per time
   window and interpolates.  Here the drift is fitted directly as a B-spline
-  in time, with COMET's cost.  On a real dataset, both grouped, its noise
+  in time, with COMET's cost.  On a real dataset, both with blinks merged, its noise
   was 0.8-1.0 nm against the time-window fit's 1.3-1.7 nm.
-* **Grouping first**, by default, which COMET does not do.
+* **Merging blinks first**, by default, which COMET does not do.
 * **Quality control** has a different criterion: upstream discards a
   window whose overlap does not beat its no-drift overlap by at least the
   standard deviation of the no-drift overlap *across windows*.  On a

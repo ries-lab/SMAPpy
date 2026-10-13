@@ -55,8 +55,10 @@ first file's `info`, and in a `-v7.3` file also the frame count, the
 conversion, the offset and the EM gain.  They are kept in the table's
 metadata under `smap`.
 
-**4. Linking.**  As with every loader, the blinks are then linked (see
-[Auto](plugin:File/Load/Auto)).
+**4. Merging blinks.**  As with every loader, the blinks are then merged
+-- [merge blinks](plugin:Panels/Glossary), also called grouping or linking,
+combines the localizations in consecutive frames that come from one blinking
+event into one (see [Auto](plugin:File/Load/Auto)).
 
 ```figure What happened to the columns of a file shaped like SMAP's, as this plugin read it: renamed where this program has a name for the quantity, kept as they are where it has none, and dropped where nothing here reads them.
 def mapping(ax, pairs):
@@ -98,7 +100,7 @@ mapping(fig.subplots(), pairs)
 `frame`, `channel` and `iterations` keep their names.  Every other field --
 `numberInGroup`, a column SMAP's own plugins added, a derived field --
 comes across under its SMAP name.  In particular SMAP's `numberInGroup` is
-not this program's `n_in_group`: that is written by the linking here.
+not this program's `n_in_group`: that is written by merging blinks here.
 
 **Types.**  The frame is
 
@@ -121,7 +123,7 @@ among the columns left behind.
 
 The table, added to the session as a file of its own (or appended, with
 *add to the open files*).  The text says how many localizations were read
-and, if they were linked, how many blinks they make.  The load is written
+and, if their blinks were merged, how many blinks they make.  The load is written
 into the session's history with its settings.
 
 ## Differences from SMAP

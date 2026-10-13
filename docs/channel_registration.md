@@ -1,10 +1,13 @@
 # Registering two channels from localizations
 
 The 2D two-colour workflow (`Localize/Gaussian 2D 2C`) has no PSF model to
-calibrate.  What it needs instead is a **registration**: where on the chip the
-second channel puts the same molecule.  In a ratiometric experiment that can be
-read off the data itself, because every molecule is already imaged twice in the
-same frame.
+calibrate.  What it needs instead is a **registration** (also called channel
+alignment, mapping or chromatic correction): where on the chip the second
+channel puts the same molecule.  In a ratiometric experiment -- the dyes told
+apart by how each molecule's light divides between the two halves of a
+splitter, the optics that put two channels side by side on one camera -- that
+can be read off the data itself, because every molecule is already imaged
+twice in the same frame.
 
     Localize/Gaussian 2D          fit the whole frame, ignoring the split
     Analysis/Register/Calibrate transform   pair those localizations, fit the map
@@ -278,7 +281,7 @@ reason said out loud.  The projective fit is written to the file either way, so
 a reader that knows nothing of polynomials still gets a usable transformation.
 
 A polynomial has no closed-form inverse, and both directions are needed:
-`to_reference` pairs the peaks, `to_secondary` places the partner ROI.  A cubic
+`to_reference` pairs the peaks, `to_secondary` places the partner fit box.  A cubic
 is fitted in the reverse direction too -- and is stored -- but it is only the
 seed, because a cubic is not the inverse of a cubic: the round-trip error is
 0.02 px at 1% distortion and 0.53 px at 5%.  Half a pixel is not affordable
@@ -290,8 +293,8 @@ over, far outside the pairs -- the step is dropped and the fitted seed stands.
 ## The fit it feeds
 
 `Localize/Gaussian 2D 2C` is `Spline 3D 2C` with the PSF model removed.
-Candidates are found over the whole frame and combined, each gets a ROI in both
-halves, and the pair goes to `fit_gauss_global` with x and y shared through the
+Candidates are found over the whole frame and combined, each gets a fit box
+(the square of pixels fitted; also called ROI size) in both halves, and the pair goes to `fit_gauss_global` with x and y shared through the
 registration -- so the two photon numbers that come back belong to one molecule
 and their ratio is its colour, ready for `Analysis/Dual-colour/Assign colours`.
 
@@ -300,7 +303,7 @@ ratiometric splitter see different wavelengths and rarely share a focus, and
 forcing one width on both would bias the photon split, which is the very thing
 being measured.
 
-Beyond that the two workflows share everything: `combine_peaks`, the ROI
+Beyond that the two workflows share everything: `combine_peaks`, the fit box
 cutting and the link array are the same code, because the Gaussian's fifth
 parameter (sigma) sits in the same slot as the spline's (z) and the link leaves
 that slot alone in both cases.  See `docs/dual_color_calibration.md` for the

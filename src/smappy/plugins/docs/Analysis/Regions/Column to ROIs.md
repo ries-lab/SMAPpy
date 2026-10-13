@@ -5,16 +5,20 @@ covers: [smappy.plugins.region_column.ColumnToROIs.run, smappy.plugins.region_co
 
 ## What it does
 
-Makes an ROI in the [ROI manager](plugin:Panels/ROI manager) for every
-region an id column of the table names -- usually every cluster a clusterer
-found (`cluster_id`, from [DBSCAN](plugin:Analysis/Regions/Find/DBSCAN) or
-any other) -- so the clusters can be looked at one by one, reviewed, excluded
-and annotated.
+Makes an [ROI](plugin:Panels/Glossary) (region of interest: a shape kept in
+the ROI manager, inside which things are measured) in the
+[ROI manager](plugin:Panels/ROI manager) for every
+[region](plugin:Panels/Glossary) an id column of the table names -- usually
+every [cluster](plugin:Panels/Glossary) (localizations lying closer to each
+other than to the rest) a clusterer found (`cluster_id`, from
+[DBSCAN](plugin:Analysis/Regions/Find/DBSCAN) or any other) -- so the
+clusters can be looked at one by one, reviewed, excluded and annotated.
 
 It works on any column of whole numbers: an id of 0 or below means "in no
 region" and gets no ROI, and so does an id with fewer than *at least*
 localizations.  Use it when the clusters need a person's eye or a note; to
-measure every cluster, a block repeating over `cluster_id` does it without
+measure every cluster, a block of a [chain](plugin:Panels/Glossary) (plugins
+run one after another as one) repeating over `cluster_id` does it without
 ROIs, and is much faster for thousands of clusters.
 
 ## How it works

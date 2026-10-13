@@ -181,8 +181,12 @@ that is not saved or has changes is written into the job itself.
 Writes the chain to a new file.
 
 ### merge blinks
-Whether a step reads every localization or the blinks merged (one row per
-blink): per step, and for the whole chain under *more*.  The rules are in
+Whether a step reads every localization or the blinks merged -- [merge
+blinks](plugin:Panels/Glossary) (also called grouping or linking) combines
+the localizations in consecutive frames that come from one blinking event
+into one row: per step, and for the whole chain under *more*.  The choices
+are *merged*, *not merged* and *auto* (the chain's) or, for the chain, *as
+each layer* (as the Render tab has it).  The rules are in
 `docs/batch.md` ("Grouping"): the plugin's own requirement wins, then the
 step's choice, then the chain's, then each layer's.
 

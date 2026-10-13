@@ -8,8 +8,10 @@ covers: [smappy.psf.GlobalSplinePSF, smappy.dualfit.combine_peaks, smappy.dualfi
 This is the fitter for **two halves of one camera in 3D**, and it serves two
 experiments:
 
-* **Two colours.**  A dichroic sends each molecule's light to both halves,
-  in a proportion that depends on the dye.  The photons of each half are
+* **Two colours.**  A dichroic -- a [splitter](plugin:Panels/Glossary), also
+  called a dual-view or image splitter -- sends each molecule's light to both
+  halves, in a proportion that depends on the dye
+  ([ratiometric](plugin:Panels/Glossary) imaging).  The photons of each half are
   fitted separately, and their split tells the dyes apart.
 * **Biplane.**  A beam splitter sends the light to both halves with the two
   halves focused at different heights.  The split is the same for every
@@ -19,7 +21,9 @@ experiments:
 For two colours it combines two things other pages explain: the split camera of
 [Gaussian 2D 2C](plugin:Localize/Gaussian 2D 2C) -- a dichroic sends each
 molecule's light to both halves of the chip, and the proportion in each half
-tells the dyes apart -- and the measured, z-dependent PSF of
+tells the dyes apart -- and the measured, z-dependent
+[PSF](plugin:Panels/Glossary) (point spread function: the image one molecule
+makes on the camera) of
 [Spline 3D](plugin:Localize/Spline 3D)
 ([Li et al. 2018](https://doi.org/10.1038/nmeth.4661)), which gives every
 localization a height.
@@ -37,15 +41,19 @@ the drift is corrected ([RCC](plugin:Analysis/Drift/RCC) or
 
 What it needs:
 
-* **A dual-colour bead calibration** of this microscope, made with
+* **A dual-colour [bead calibration](plugin:Panels/Glossary)** (also called a
+  spline calibration or experimental PSF model) of this microscope, made with
   **Tools > Dual-colour calibration** (the Bead calibration window in its
   *Dual colour* mode): z-stacks of beads that are seen in both halves.  It
   holds everything the fit needs about the two halves -- which half is which,
-  the transformation between them, and a PSF model for each.  A
+  the transformation between them (the [registration](plugin:Panels/Glossary),
+  also called channel alignment), and a PSF model for each.  A
   single-channel calibration or a SMAP `_3dcal.mat` will not do.
 * **The camera**, as for any fit.
 * **Sparse data**, as for [Spline 3D](plugin:Localize/Spline 3D): a
-  neighbour inside the ROI pulls z towards focus.
+  neighbour inside the [fit box](plugin:Panels/Glossary) (also called ROI
+  size or fitting window: the square of pixels fitted) pulls z towards
+  focus.
 
 For 2D data, use [Gaussian 2D 2C](plugin:Localize/Gaussian 2D 2C), which
 needs no bead calibration at all.
@@ -102,13 +110,13 @@ both = DualModelSettings().model(cal)
 linked = both.unpack(both.fit(images, link))
 ```
 
-The detection, the pairing of the two halves' peaks, the ROIs and the global
+The detection, the pairing of the two halves' peaks, the fit boxes and the global
 fit are those of [Gaussian 2D 2C](plugin:Localize/Gaussian 2D 2C), which
 explains them step by step: each half is thresholded on its own, the
 secondary peaks are mapped onto the main half, peaks within 4 pixels are
-merged into one candidate and peaks without a partner are kept, and a ROI is
+merged into one candidate and peaks without a partner are kept, and a fit box is
 cut in each half and both are fitted at once by maximum likelihood.  What is
-new here is the model in each ROI, where it comes from, and z.
+new here is the model in each fit box, where it comes from, and z.
 
 **1. The calibration.**  The Dual-colour calibration steps the objective
 through focus over beads, which appear in both halves.  From the stacks it
@@ -197,7 +205,7 @@ ax.tick_params(labelsize=7)
 fig.colorbar(shown, ax=ax, fraction=0.046, label="px").ax.tick_params(labelsize=7)
 ```
 
-**3. The model in each half.**  Each ROI is compared with its own half's
+**3. The model in each half.**  Each fit box is compared with its own half's
 PSF: for half $c$, the calibrated PSF of that half at the molecule's position
 and height, scaled to $N_c$ photons, on a background $b_c$.  x and y reach the
 secondary half through the transformation, exactly as in
@@ -267,14 +275,14 @@ output, and the table is saved regardless.
 
 ## In detail
 
-**The model.**  For pixel $i$ of the ROI of half $c$,
+**The model.**  For pixel $i$ of the fit box of half $c$,
 
 $$\mu_{c,i} = b_c + N_c\, \mathrm{PSF}_c(x_i - x_c,\; y_i - y_c,\; z) ,$$
 
 with $\mathrm{PSF}_c$ the cubic spline of half $c$, $(x_0, y_0) = (x, y)$
-the linked position in the main ROI, and $(x_1, y_1)$ the same position seen
+the linked position in the main fit box, and $(x_1, y_1)$ the same position seen
 through the link: $x_1 = f_x\, x + o_x$, with $f_x$ the local scale of the
-transformation and $o_x$ the sub-pixel remainder of cutting the partner ROI at
+transformation and $o_x$ the sub-pixel remainder of cutting the partner fit box at
 a whole pixel (and the same for y).  z has factor 1 and offset 0 in both
 halves; the calibration's two PSFs are checked on loading to have the same
 grid, plane spacing and focal plane, and the fit refuses them otherwise.  By
@@ -282,12 +290,12 @@ default the fitted vector is $(x, y, N_0, N_1, b_0, b_1, z)$, seven numbers
 for the ten of two separate fits.  The likelihood, the Levenberg-Marquardt
 steps and the Cramér-Rao bound are those of
 [Gaussian 2D 2C](plugin:Localize/Gaussian 2D 2C), summed over the pixels of
-both ROIs, with the spline's derivatives of
+both fit boxes, with the spline's derivatives of
 [Spline 3D](plugin:Localize/Spline 3D).  z starts at the calibration's focal
 plane (there is no *start z* setting here), and is held inside the
 calibration's range.
 
-**Why $\sqrt{2}$.**  The information about z is summed over both ROIs:
+**Why $\sqrt{2}$.**  The information about z is summed over both fit boxes:
 
 $$I_{zz} = \sum_{c} \sum_i \frac{1}{\mu_{c,i}} \left( N_c\, \frac{\partial\,\mathrm{PSF}_c}{\partial z} \right)^2 .$$
 
@@ -303,7 +311,7 @@ smoothed and clipped at zero: the tails of an average of a few beads scatter
 about zero, and a PSF has no negative light.  The light is counted before
 clipping, where that scatter averages out.  Half $c$'s signal is
 
-$$S_c = \left\langle \sum_{\mathrm{ROI}} \mathrm{PSF}_c(z) \right\rangle_{|z| \leq 2\,\Delta z} ,$$
+$$S_c = \left\langle \sum_{\mathrm{box}} \mathrm{PSF}_c(z) \right\rangle_{|z| \leq 2\,\Delta z} ,$$
 
 the plane sum averaged over the focal plane and the two planes either side
 of it ($\Delta z$ the calibration's step).  Both PSFs are divided by
@@ -353,7 +361,7 @@ fit reported the main half's share rather than the total.)
 
 **Mirrored splitters.**  A splitter that mirrors one half is handled by the
 link: the local scale of the transformation along the mirrored axis is
-$-1$, and the partner ROI is evaluated about its centre.  The calibration
+$-1$, and the partner fit box is evaluated about its centre.  The calibration
 stores the secondary PSF in the camera's own orientation, so no image is
 flipped.
 
@@ -363,8 +371,8 @@ departs from the publication:
 
 * **The link.**  In the paper a shared parameter reaches a channel through a
   scale and a translation, the translation being the sub-pixel remainder of
-  rounding the partner ROI to whole pixels.  Here the scale for x and y is
-  the transformation's local derivative, applied about the ROI's centre, which
+  rounding the partner fit box to whole pixels.  Here the scale for x and y is
+  the transformation's local derivative, applied about the fit box's centre, which
   is what lets a mirrored splitter be a factor of $-1$ rather than a flipped
   image.
 * **The bead positions.**  The paper fits each channel's beads with that
@@ -415,7 +423,7 @@ dye).  Give it only when the molecules split differently from the beads --
 a narrow-band dye behind a splitter whose transmission depends on colour.
 
 ### fit.roisize
-Both ROIs have this size.  As for [Spline 3D](plugin:Localize/Spline 3D) it
+Both fit boxes have this size.  As for [Spline 3D](plugin:Localize/Spline 3D) it
 should hold the widest, most defocused spot, and stay inside the
 calibration's lateral size.
 
@@ -426,7 +434,7 @@ With z in the table, both RCC and COMET correct z as well unless their
 ### output.raw_frames
 50 is enough to see what the camera saw at the start, the end and a few
 points between.  Each kept frame costs its size in the file: for a
-256 x 256 ROI about a quarter of a megabyte, for a full 2048 x 2048 sCMOS
+256 x 256 camera ROI about a quarter of a megabyte, for a full 2048 x 2048 sCMOS
 chip 16 MB, so fifty of those are 800 MB -- set fewer there.
 
 ### output.show_tags
@@ -449,7 +457,7 @@ photons of each half beside the totals:
 | `ratio` | $N_1 / (N_0 + N_1)$, the colour |
 | `background_ch0`, `background_ch1` | the background per pixel of each half (`background` is the main half's) |
 | `channel` | the colour Assign colours gave it: 1, 2, or 0 for none |
-| `logl`, `logl_rel` | the log-likelihood, and per pixel of both ROIs |
+| `logl`, `logl_rel` | the log-likelihood, and per pixel of both fit boxes |
 | `peak_x_nm`, `peak_y_nm`, `iterations` | the candidate in the main half, and the steps taken |
 | `dx_nm_ch1`, `dy_nm_ch1`, `dz_nm_ch1` | unlinked only: the secondary half's position against the calibration's |
 

@@ -103,7 +103,7 @@ shape, so read the one closest to what you are writing:
 | draws what the microscope recorded per frame | `image_tags.py` (the fit's `metadata["frame_tags"]`) |
 | finds a structure by its shape and judges it, then counts it | `npc.py` (a ring filter and circle fit in the segmenter, a per-site count, and a model of whole pores in `smappy/npc.py` fitted to the site table) |
 | summarises what evaluators measured | `roi.py`'s `SiteAnalysisPlugin` (an evaluator to read, a *results from* field, a preflight that asks which when there are several; under `Analysis/Regions/Summarize`) |
-| runs the ROI manager's segment, evaluate and analyse as one | `npc_analysis.chain.yaml` (a shipped chain: a block runs NPC Corners in every ROI before the next step; `docs/batch.md`, "ROIs: segment, evaluate, analyse") |
+| runs the ROI manager's segment, measure and analyse as one | `npc_analysis.chain.yaml` (a shipped chain: a block runs NPC Corners in every ROI before the next step; `docs/batch.md`, "ROIs: segment, measure, analyse") |
 | finds clusters and names them in the table | `clusters.py` (DBSCAN: `cluster_id` / `n_in_cluster`; ROIs of them are `region_column.py`'s *Column to ROIs*, for any id column) |
 | writes what was measured per region onto its localizations | `region_column.py` (*Regions to column*: `region_runs.values_onto`, NaN outside, never over a column of the localizations' own; a block's *write values* does the same) |
 | runs steps once per region, writes columns back | `smappy/blocks.py` (a `chain.Block`; `region_runs.RegionScratch`, `WriteBack`, *write values*; per-cluster results in `Session.id_regions`) |
@@ -290,7 +290,11 @@ front matter and a *Controls* section in place of *Parameters*: one
 `### label` per control, the label exactly as the panel shows it.
 `tests/test_panel_docs.py` builds each panel and fails on a label it does not
 show, so a session that renames a control or adds one updates the panel's
-page too.
+page too.  Beside them is `Glossary.md`, which has no widget (`WIDGETLESS`
+in that test): the field's words with the other names they go by, which a
+page links (`plugin:Panels/Glossary`) where it first explains one.
+`tests/test_plugin_docs.py` checks that every link between pages leads to a
+page.
 
 **Writing it is part of the work, and it is yours.**  A session that adds a
 plugin writes its page in the same change.  A session that changes what a

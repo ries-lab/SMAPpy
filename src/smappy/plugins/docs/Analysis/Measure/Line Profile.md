@@ -9,7 +9,9 @@ Many questions about a super-resolved image come down to a line drawn over
 it: how far apart are the two membranes of the nuclear envelope, how wide is
 this filament, where does this labelled region end, how large is this
 vesicle.  Line Profile answers them.  It takes the localizations inside a
-**line ROI**, lays them out along the line (or across it, or in z), and fits
+**line ROI** -- an [ROI](plugin:Panels/Glossary) (region of interest) that is
+a line with a width, drawn over the picture -- lays them out along the line
+(or across it, or in z), and fits
 a model of the structure to them: one peak, two peaks a distance apart, an
 edge, a filled disk or a ring.  The numbers that come back -- a distance, a
 width, a radius -- come with error bars and with a score that says which
@@ -20,22 +22,27 @@ that matter when there are few localizations:
 
 * It fits **the localizations themselves**, not a histogram of them.  No
   number it reports depends on a bin width.
-* It knows **how precisely each localization was measured**, and takes that
-  blur out, so a width is the width of the structure rather than of its
+* It knows **how precisely each localization was measured** -- its
+  [localization precision](plugin:Panels/Glossary), also called the CRLB or
+  localization uncertainty -- and takes that blur out, so a width is the width of the structure rather than of its
   blurred picture.
 * A **flat background** of unspecific localizations is part of every model,
   so a few stray points do not widen a peak.
 
 A line is usually drawn over two channels, and what is wanted is how they
-differ, so each visible layer is fitted on its own and drawn in its own
-colour.
+differ, so each visible [layer](plugin:Panels/Glossary) (one picture of the
+localizations, with its own filter and colour) is fitted on its own and drawn
+in its own colour.
 
-**Which table.**  Each layer as it is shown.  On a *grouped* layer that is
-its blinks: a molecule that was on for three frames counts once, at its
-combined position and with its combined precision, rather than three times.
-On an ungrouped layer it is the localizations, frame by frame.  The layer's
-filters apply to what is shown -- on a grouped layer, to the blinks' values.
-(Before version 5 every layer was measured ungrouped, whatever it showed.)
+**Which table.**  Each layer as it is shown.  On a layer that merges blinks
+-- [merge blinks](plugin:Panels/Glossary), also called grouping or linking,
+combines the localizations in consecutive frames that come from one blinking
+event into one -- that is its blinks: a molecule that was on for three frames
+counts once, at its combined position and with its combined precision, rather
+than three times.  On a layer that does not, it is the localizations, frame
+by frame.  The layer's filters apply to what is shown -- with blinks merged,
+to the blinks' values.  (Before version 5 every layer was measured on its
+single localizations, whatever it showed.)
 
 **What it needs.**  A line ROI, drawn in the render window, with a width
 wide enough to take in the structure.  At least 8 localizations per layer (a

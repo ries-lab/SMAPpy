@@ -9,7 +9,8 @@ Opens an HDF5 file written by this program: a table saved with
 [Save › smappy HDF5](plugin:File/Save/smappy HDF5), or the result of a
 fitter.  Everything the file carries about the table comes back with it,
 so that the analysis goes on where it was left: the history, the derived
-columns' recipes, the bounds kept with the table, the ROI.
+columns' recipes, the bounds kept with the table, the drawn
+[ROI](plugin:Panels/Glossary) (region of interest).
 
 Only this program's HDF5 files are read: one from another program --
 Picasso's, for instance -- does not open.
@@ -46,7 +47,7 @@ they were saved with.
   took;
 * the **derived columns' recipes**, so that a column made with
   [Math Parser](plugin:Analysis/Process/Math Parser) is still recomputed
-  or reduced by its rule when the localizations are grouped;
+  or reduced by its rule when blinks are merged;
 * the **kept bounds**, which open on every layer -- the filter that hides
   what [Remove Localizations](plugin:Analysis/Process/Remove Localizations)
   flagged, for instance;
@@ -55,8 +56,10 @@ they were saved with.
 * the rest as it was: the camera, the fit settings, a drift correction's
   summary, a simulation's settings.
 
-**3. Linking.**  The grouped table is not in the file; it is made again by
-linking (see [Auto](plugin:File/Load/Auto)).
+**3. Merging blinks.**  The merged blinks are not in the file; they are
+made again -- [merge blinks](plugin:Panels/Glossary), also called grouping
+or linking, combines the localizations in consecutive frames that come from
+one blinking event into one (see [Auto](plugin:File/Load/Auto)).
 
 ```figure A simulated table, one Math Parser run and a drawn ROI, saved and opened again with this plugin: what the new session starts from.
 fig.set_size_inches(7.5, 1.7)
@@ -68,11 +71,11 @@ def said(entry):
     return Path(text).name if entry["what"] == "load" else text.split(",")[0]
 lines = ["history:"] + [f"  {entry['what']:<32} {said(entry)}" for entry in after.history]
 lines += ["", f"derived: {recipe['field']} = {recipe['expression']}"
-              f"   (grouped: {recipe['grouped']})",
+              f"   (merged blinks: {recipe['grouped']})",
           "ROI: {}, x {:g} to {:g}, y {:g} to {:g} nm".format(
               after.roi.kind, *np.asarray(after.roi.bounds)[[0, 2, 1, 3]]),
           f"{len(after.locs)} localizations, "
-          f"{len(after.tables.grouped().locs)} after linking"]
+          f"{len(after.tables.grouped().locs)} after merging blinks"]
 ax.text(0, 0, "\n".join(lines), fontsize=7.5, family="monospace", va="top",
         linespacing=1.4)
 ```
@@ -86,8 +89,8 @@ it, goes into the session's list of files.
 
 **Memory.**  The whole table is read into memory: $N \sum_c b_c$ bytes for
 $N$ localizations, $b_c$ the bytes per value of column $c$ (4 for most, 8
-for `frame`) -- about as much as the file before compression.  The grouped
-table, one row per blink, comes on top.
+for `frame`) -- about as much as the file before compression.  The merged
+blinks, one row per blink, come on top.
 
 **The history** is read tolerantly: an entry that is not what this version
 of the program writes is dropped rather than stopping the file from
@@ -104,6 +107,6 @@ File > Restore GUI state from file puts it back on request.
 ## Output
 
 The table, added to the session as a file of its own.  The text says how
-many localizations were read and, if they were linked, how many blinks
+many localizations were read and, if their blinks were merged, how many blinks
 they make.  The load goes into the history, after the entries the file
 brought with it.

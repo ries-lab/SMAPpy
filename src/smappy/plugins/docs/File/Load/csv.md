@@ -96,7 +96,9 @@ in a spreadsheet.  (The reader can do it when it is called from a script,
 with `units="px"` and `pixelsize_nm`.)
 
 **Frames are read as written.**  ThunderSTORM counts frames from 1, and
-its frames keep those numbers here; nothing is shifted.  Only the linking of blinks looks
+its frames keep those numbers here; nothing is shifted.  Only merging blinks
+-- [merge blinks](plugin:Panels/Glossary), also called grouping or linking,
+which combines the localizations of one blink in consecutive frames -- looks
 at the frame, and for it an offset of one does not matter.
 
 **Separators.**  Commas and semicolons are recognised.  A tab-separated

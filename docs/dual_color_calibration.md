@@ -1,7 +1,10 @@
 # Split-frame dual-color bead calibration
 
-The first version generates two spline PSFs with one common axial reference,
-a strictly two-dimensional projective transformation, and pair diagnostics.
+The first version generates two spline PSFs (a spline calibration, also
+called a cspline or experimental PSF model: the measured image of one emitter
+at every height) with one common axial reference, a strictly two-dimensional
+projective transformation -- the registration of the two halves, also called
+channel alignment or chromatic correction -- and pair diagnostics.
 The calibration is what `Localize/Spline 3D 2C` fits with (and, for its
 transformation alone, `Localize/Gaussian 2D 2C`): both halves of the split
 frame in one global fit, pages under Help > Plugin documentation.

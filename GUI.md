@@ -79,13 +79,13 @@ reasoning is here so that it does not have to be re-derived.
   menu is the whole tree as nested submenus and opens any of them in a window
   of its own -- pinning is a decision, and this is the way in for a plugin
   used once; *Find a plugin...* (Ctrl+Shift+P) is the same chooser.
-* **Defaults**: grouped on, precision <= 25 nm, log-likelihood >= -2,
+* **Defaults**: *merge blinks* on, precision <= 25 nm, log-likelihood >= -2,
   z within +-500 nm, PSF size <= 180 nm for a 2D table, rendering sigma =
   0.5 x precision.  Bounds apply to the grouped and ungrouped table alike.
-  Grouping links within 50 nm and 1 dark frame in xy, as SMAP, and looks at
+  Merging blinks (grouping) links within 50 nm and 1 dark frame in xy, as SMAP, and looks at
   x and y only: emitters that close in consecutive frames overlap in the raw
   data and were fitted as one anyway, so the z window that used to be offered
-  only split real blinks whose fitted z scatters.  The *parameters...* button next to the overview's *update* opens
+  only split real blinks whose fitted z scatters.  The *merge settings...* button beside *merge blinks* opens
   the dialog for these session-wide settings; OK regroups every layer.
 
 * **Fitters are plugins assembled from parts.**  Source, camera, detection,
@@ -149,20 +149,21 @@ reasoning is here so that it does not have to be re-derived.
   in the ROI image.  The ROI tab keeps what applies to every ROI -- geometry, the
   finder, the evaluation.  There is no review step: an ROI counts from the
   moment it is made, and *use* is what excludes one.  Below the ROI list,
-  *Evaluation pipeline...* opens the same window the ROI tab does (there is
-  one per session), and *plot the evaluation* opens the site window: what the
-  evaluators drew for the selected ROI, a tab per evaluator and their figures
+  *Per-region steps...* opens the same window the Regions tab does (there is
+  one per session), and *plot the ROI's figures* opens the *ROI results*
+  window: what the steps drew for the selected ROI, a tab per step and their
+  figures
   as tabs inside it, redrawn in place by the next ROI so that stepping down
   the list compares like with like.  Only the evaluator whose tab is open is
   run for its figures, and only the figure whose tab is open is drawn.  The
   numbers come from the stored records, so scrolling costs nothing; a step
   whose result is out of date is measured again and kept, unless
-  *re-evaluate when out of date* is off, in which case it is shown as it was
+  *measure again when out of date* is off, in which case it is shown as it was
   stored and labelled.  *Statistics* draws the site's localizations, which is
   what its three numbers cannot say: two hundred in a ring and two hundred in
   a smear count the same.  An ROI whose numbers were measured with data or
-  parameters that have since changed is listed in amber, and *Re-evaluate
-  what changed* in the pipeline window runs only the steps that are out of
+  parameters that have since changed is listed in amber, and Run in the
+  per-region steps window runs only the steps that are out of
   date -- editing one evaluator's parameter costs that evaluator over the
   sites, not the whole pipeline over all of them.
 * **The camera is recognised, not typed in.**  On opening an acquisition the
@@ -233,7 +234,7 @@ reasoning is here so that it does not have to be re-derived.
     smappy/gui/render_tab.py     filter ranges, colour, contrast, gamma
     smappy/gui/plugin_panel.py   a plugin as a section: form, Run, result
     smappy/gui/figures.py        a result's figures: one window, a tab each
-    smappy/gui/roi_site.py       the site window: a tab per evaluator
+    smappy/gui/roi_site.py       the ROI results window: a tab per step
     smappy/camera_db.py          the camera database: identify, state, resolve
     smappy/gui/camera_view.py    every camera value, and where it came from
     smappy/plugins/drift_result.py  what a drift plugin keeps in the file

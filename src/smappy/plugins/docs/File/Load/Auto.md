@@ -18,7 +18,10 @@ of its own for when the choice should be made by hand:
 * [csv](plugin:File/Load/csv) -- `.csv`, `.txt`, `.tsv`, with the columns
   guessed from the header.
 
-After reading, the blinks are linked, the same whichever reader was used.
+After reading, the blinks are merged, the same whichever reader was used:
+[merge blinks](plugin:Panels/Glossary) (also called grouping or linking)
+combines the localizations in consecutive frames that come from one blinking
+event into one localization.
 
 ## How it works
 
@@ -70,15 +73,15 @@ not matter.
 The first candidate that passes is used.  A file that none will take is
 refused with the list of formats that are known.
 
-**3. Linking.**  The localizations of the same blink in consecutive frames
-are linked into one, with the session's linking settings (within 50 nm and
-a gap of 1 frame by default; the *parameters* dialog of the Render tab).
-The linked table is what a layer shows when it is *grouped*, which is how
-it opens.  An added file is not linked here: it is linked together with the
-files already open.  A table with a trace id (`tid`, as a MINFLUX export
-has) is grouped by trace instead, one row per trace.  To look at every
-localization, untick *grouped* on the layer: the ungrouped table is always
-kept.
+**3. Merging blinks.**  The localizations of the same blink in consecutive
+frames are merged into one, with the session's merge settings (within 50 nm
+and 1 dark frame by default; *merge settings...* in the Render tab).  The
+merged blinks are what a layer shows when *merge blinks* is ticked, which is
+how it opens.  An added file is not merged here: it is merged together with
+the files already open.  A table with a trace id (`tid`, as a MINFLUX export
+has) is merged by trace instead, one row per trace.  To look at every
+localization, untick *merge blinks* on the layer: the single localizations
+are always kept.
 
 ```figure Which reader Auto chose for a set of files: by the ending, and by what is inside where the ending is ambiguous.  Grey: refused.
 fig.set_size_inches(5.2, 2.6)
@@ -112,7 +115,7 @@ asks in a dialog.
 **What opening costs.**  Every reader holds the whole table in memory:
 $N \sum_c b_c$ bytes for $N$ localizations, $b_c$ the bytes per value of
 column $c$ -- 4 for most columns, 8 for `frame` -- so some 60 bytes per
-localization for a fitted 3D table, plus the grouped table.  Linking a
+localization for a fitted 3D table, plus the merged blinks.  Merging the blinks of a
 table of tens of millions of localizations takes minutes.  Here it is done while the file is read, off
 the window's thread, so the window stays usable and says what it is doing.
 
@@ -121,5 +124,5 @@ the window's thread, so the window stays usable and says what it is doing.
 The table, added to the session as a file of its own, or joined to the open
 ones with *add to the open files* (a `filenumber` column tells them apart).
 The text says how many localizations were read, in which format, and how
-many there are after linking.  The load is written into the history with
+many there are after merging blinks.  The load is written into the history with
 its settings.

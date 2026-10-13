@@ -121,14 +121,16 @@ localizations with fewer than 36 photons are hidden when the file opens.
 | `efo`, `cfr`, `dcr`, `efc`, `ecc`, `fbg` | the same, where the export has them |
 | `iteration` | `itr`, the number of the last iteration |
 
-**Grouping by trace.**  The instrument has already said which localizations
-belong to one molecule: those of one trace, `tid`.  So the grouped table has
+**Merging by trace.**  [Merge blinks](plugin:Panels/Glossary) (also called
+grouping or linking) combines the localizations that come from one blinking
+event into one.  Here the instrument has already said which localizations
+belong to one molecule: those of one trace, `tid`.  So the merged table has
 one row per trace -- its mean position, its summed photons, its first
 `frame`, and in `n_in_group` how many localizations it had -- rather than
-the distance-and-frame linking of a camera file, which would cut a trace
+the distance-and-frame merging of a camera file, which would cut a trace
 wherever it wandered 50 nm between two localizations.  Before version 2 it
-was linked like a camera file.  To look at every localization, untick
-*grouped* on the layer.
+was merged like a camera file.  To look at every localization, untick
+*merge blinks* on the layer.
 
 **Positions** are kept as the instrument gives them; they are not shifted to
 start at zero.  The file's entry in the session (`metadata["files"]`)

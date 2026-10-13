@@ -5,11 +5,12 @@ covers: [smappy.plugins.assign_colors.ratios, smappy.plugins.assign_colors.find_
 
 ## What it does
 
-In a **ratiometric** two-colour experiment
+In a [ratiometric](plugin:Panels/Glossary) two-colour experiment
 ([Bossi et al. 2008](https://doi.org/10.1021/nl801471d)) the two dyes are not
 imaged one after the other or through different filters.  Both are imaged at once, and a
 dichroic mirror splits the light of every molecule between two halves of the
-camera.  The dyes emit at slightly different wavelengths, so they split their
+camera -- a [splitter](plugin:Panels/Glossary), also called a dual-view or
+image splitter.  The dyes emit at slightly different wavelengths, so they split their
 light differently: one might send three quarters of its photons to the first
 half, the other only a third.  Which dye a molecule is shows only in *how its
 photons divide* between the two halves.
@@ -46,7 +47,9 @@ Analysis tab to see how it decided, or to decide differently.
 and `photons_ch1`, as the two-colour fitters write them, or another pair (see
 *channel 1 column*).  The fit's errors on them, `photons_err_ch0` and
 `photons_err_ch1`, are used when they are there.  The peaks are looked for in
-the **current selection** -- the layer's filter and the ROI -- and the colours
+the **current [selection](plugin:Panels/Glossary)** -- what passes the
+layer's filter (the lowest and highest values of columns, set in the Render
+tab), inside the drawn ROI (region of interest) -- and the colours
 are then given to every localization of the table.  A filter on `channel`
 itself is left out of that selection: after a first run the layers are
 usually set to one colour each, and the histogram still has to see both
@@ -234,7 +237,7 @@ fig.subplots_adjust(wspace=0.35)
 **Which table.**  The localizations, whatever the layer shows: a colour
 is decided for each localization and written onto it, and the ratio
 histogram is of the localizations the layer's bounds keep, frame by frame.
-The grouped table is linked again from the coloured table, and linking
+The merged blinks are merged again from the coloured table, and merging
 never joins two colours.
 
 **The split and its precision.**  With $N = N_1 + N_2$, a localization is

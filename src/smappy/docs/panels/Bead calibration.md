@@ -17,8 +17,10 @@ This window measures it from **beads**: sub-diffraction fluorescent beads
 stuck to a coverslip, imaged while the objective is stepped through focus.
 Each bead gives a small 3D image of the PSF (a *bead stack*).  The window
 finds the beads, cuts them out, aligns them onto one another, averages
-them, smooths the average and turns it into a cubic-spline model -- the
-experimental-PSF method of [Li et al. 2018](https://doi.org/10.1038/nmeth.4661).
+them, smooths the average and turns it into a cubic-spline model -- a
+[spline calibration](plugin:Panels/Glossary) (also called a bead calibration,
+cspline or experimental PSF model), the method of
+[Li et al. 2018](https://doi.org/10.1038/nmeth.4661).
 The model is saved as an `.h5` file, which the
 [Spline 3D](plugin:Localize/Spline 3D) fitter reads; how the fit uses it is
 explained on that page.
@@ -31,7 +33,8 @@ It has two modes (*mode*):
   (biplane).  The window then makes **two** PSF models, one per half,
   normalised together so that they keep the beads' split of the light, and
   measures the **transformation** that says where a point in one half
-  appears in the other.  This is what
+  appears in the other -- the [registration](plugin:Panels/Glossary) (also
+  called channel alignment or chromatic correction) of the two halves.  This is what
   [Spline 3D 2C](plugin:Localize/Spline 3D 2C) fits with; its transformation
   alone also serves [Gaussian 2D 2C](plugin:Localize/Gaussian 2D 2C).
 
@@ -47,8 +50,9 @@ What it needs:
 * **For dual colour**, broadband beads that are visible in both halves.  How
   the chip is split -- left and right or up and down, mirrored or not -- is
   found from the beads; it can also be chosen (*layout*, *main channel*).
-  With the camera ROI in
-  the file's metadata the transformation is in chip coordinates; without it
+  With the [camera ROI](plugin:Panels/Glossary) (the part of the chip that
+  was read out) in the file's metadata the transformation is in chip
+  coordinates; without it
   the calibration is *ROI-local* and only applies to data of exactly the same
   image size (a warning says so).
 
@@ -91,7 +95,7 @@ the background noise (*threshold*, in multiples of the noise) is a bead.  A
 bead too close to the image edge is dropped, and so are **both** beads of a
 pair closer than *min distance*: two overlapping PSFs are not one PSF.
 
-**2. Cut them out.**  Around each bead a box of *ROI size* pixels (plus a
+**2. Cut them out.**  Around each bead a box of *bead box* pixels (plus a
 margin, *padding*, for the alignment to shift into) is cut from every plane.
 One background value is subtracted from the whole box -- the median of its
 border pixels over all planes, so that the PSF's faint tails, which change
@@ -101,7 +105,7 @@ is far from the others' (*brightness range*) or that reaches the camera's
 maximum (*saturation*) is set aside: it is either two beads, a clump, or
 clipped.
 
-```figure Left: the maximum projection of a simulated bead stack, with the beads that were found (boxes, the size of the ROI).  Right: one bead's box at three heights of the objective -- the astigmatic spot is stretched one way below focus and the other way above.
+```figure Left: the maximum projection of a simulated bead stack, with the beads that were found (boxes, the size of the bead box).  Right: one bead's box at three heights of the objective -- the astigmatic spot is stretched one way below focus and the other way above.
 fig.set_size_inches(7.5, 2.7)
 grid = fig.add_gridspec(1, 4, width_ratios=[1.5, 1, 1, 1])
 ax = fig.add_subplot(grid[0])
@@ -279,7 +283,7 @@ $t$ the *threshold*: 1.4826 times the median absolute deviation estimates the
 noise's standard deviation without being pulled up by the beads.  The bead's
 position is the centre of mass of its maximum, rounded to a pixel.
 
-**Extraction.**  A box of $n + 2p$ pixels ($n$ the *ROI size*, $p$ the
+**Extraction.**  A box of $n + 2p$ pixels ($n$ the *bead box*, $p$ the
 *padding*) is cut from every plane; $b$, the median of its outermost pixels
 over all planes, is subtracted, and the box $V$ is divided by its brightness
 $B = \max_k \sum_{x,y} V_k(x, y)$, the light of its brightest plane $k$.
@@ -420,7 +424,7 @@ padding is kept for the transformation but not the PSF.  The secondary model
 is mirrored back to the camera's orientation before it is saved.
 
 **Fit quality.**  Single channel: every fifth plane of each accepted bead
-(ROI of *ROI size* minus 4 pixels, the camera values restored) and of the
+(a fit box of the *bead box* minus 4 pixels, the camera values restored) and of the
 average stack, fitted with the spline fitter from five z starts, keeping the
 best likelihood.  Dual colour: the pairs fitted with the two-channel global
 fit, x, y and z shared, one z per pair
@@ -491,7 +495,7 @@ Too little leaves noise ripples that become stripes in z; too much blurs
 the PSF's change with z and costs z precision.
 
 ### padding
-Extra pixels around the ROI for the alignment to shift into; must exceed
+Extra pixels around the bead box for the alignment to shift into; must exceed
 *max xy shift* by more than one pixel.
 
 ### detection sigma

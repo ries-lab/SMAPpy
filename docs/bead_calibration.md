@@ -1,6 +1,9 @@
 # Bead spline calibration
 
-Build one single-channel PSF from all selected bead stacks. Lateral coordinates
+Build one single-channel PSF (point spread function: the image one emitter
+makes on the camera, at every height) from all selected bead stacks, as a
+spline calibration (also called a bead calibration, cspline or experimental
+PSF model). Lateral coordinates
 are pixels; axial coordinates are objective nanometres. Camera pixel size is
 not required. No EM mirroring, spatial subdivision, or field ROI is applied.
 
@@ -33,8 +36,8 @@ be applied before saving. Brightness range and shape rejection remain visible
 because they directly decide which beads enter the average. Less frequently
 changed detection, alignment, smoothing, and minimum-bead controls are collapsed
 under **Show optional parameters**. Alignment padding is the temporary border around the
-requested PSF ROI: it permits subpixel xy shifts without losing edge samples and
-is discarded after alignment. A 27-pixel ROI with 5-pixel padding is therefore
+requested *bead box*: it permits subpixel xy shifts without losing edge samples and
+is discarded after alignment. A 27-pixel bead box with 5-pixel padding is therefore
 extracted as 37 by 37 pixels and returned to 27 by 27 pixels after alignment.
 
 The Bead diagnostics tab shows brightness versus applied xy-shift magnitude

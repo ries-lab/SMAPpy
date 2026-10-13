@@ -14,14 +14,16 @@ pore lie on top of each other when seen from above, and a microtubule seen
 from above does not show whether it is hollow.
 
 The 3D view shows a box of the data, the **slab**, from any angle.  You cut
-out a small volume around what you want to see, with an ROI in the 2D view,
-and turn it with the mouse.  The picture is drawn the same way as the 2D
+out a small volume around what you want to see, with an
+[ROI](plugin:Panels/Glossary) (region of interest: a rectangle, line or
+polygon drawn) in the 2D view, and turn it with the mouse.  The picture is drawn the same way as the 2D
 image: the layers, filters, look-up tables and colour fields of the
 [Render tab](plugin:Panels/Render tab) all apply.  Only the direction you
 look from is new.
 
-The slab can also be the selection for plugins (*plugins use the slab (while
-open)*).  A measurement then sees only what is inside the box, for example
+The slab can also be the [selection](plugin:Panels/Glossary) for plugins --
+what a plugin measures: the localizations that pass the layer's filter, inside
+the drawn ROI (*plugins use the slab (while open)*).  A measurement then sees only what is inside the box, for example
 one ring of a pore picked out by its depth.
 
 Use it on tables with a `z_nm` column.  A 2D table can be opened too, but it
@@ -294,7 +296,8 @@ The controls an engine does not use are greyed out.
 
 ### point size
 For *GPU points* and *GPU spheres*: the radius in nm.  0 uses the median
-localization precision of what is shown.
+[localization precision](plugin:Panels/Glossary) (also called the CRLB) of
+what is shown.
 
 ### point alpha
 For *GPU points*: how opaque one sprite is.  Many sprites pile up on one
