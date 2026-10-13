@@ -149,7 +149,7 @@ def test_the_block_travels_with_the_project():
 
 
 def test_a_file_from_before_the_block_reads_its_steps_and_options():
-    from smappy.roi_manager.link import block_from
+    from smappy.roi_manager.core import block_from
     block = block_from({
         "pipeline": [{"plugin": "Analysis/Measure/Localization Statistics",
                       "label": "stats", "values": {"bins": 50}},

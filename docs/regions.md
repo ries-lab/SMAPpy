@@ -12,8 +12,8 @@ annotates and organises ROIs; it is not the only place they can be measured.
 
 ## A region
 
-* **An ROI** (`roi_manager.core.ROI`, kept by an `ROIProject`; in the GUI a
-  `link.SessionROIs`, which takes its data, filters and grouping from the
+* **An ROI** (`roi_manager.core.ROI`, kept by the session's `ROIProject`,
+  `Session.rois`, which takes its data, filters and grouping from the
   session).  Its shape is a `regions.Region` (rect, polygon, line, circle):
   its own polygon, or the project's circle or square of `size_nm` round its
   centre, worked out when asked for (`ROI.region`) so that changing the
