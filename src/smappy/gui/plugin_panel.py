@@ -32,6 +32,8 @@ MAX_CHOICES = 8
 
 # the status of a run that warned: what was said is in the output box
 WARNING_STYLE = "color: #c06000; font-weight: bold;"
+# a notice that is only worth knowing (`Notice.kind` "info")
+INFO_STYLE = "color: gray;"
 
 
 
@@ -358,6 +360,8 @@ class PluginPanel(QWidget):
             self.notice_button.hide()
             return
         self.notice.setText(notice.text)
+        self.notice.setStyleSheet(INFO_STYLE if notice.kind == "info"
+                                  else WARNING_STYLE)
         self._notice_window = notice.window
         self._notice_settings = notice.settings
         offered = bool(notice.action and notice.window
@@ -575,13 +579,9 @@ class PluginPanel(QWidget):
             return True, settings, None
         title = f"{self.plugin.name}: before running"
         if not isinstance(question, PreflightQuestion):
-            answer = QMessageBox.question(
-                self, title, str(question),
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No)
-            if answer == QMessageBox.StandardButton.Yes:
-                return True, settings, question
-            return (*self._not_run(), question)
+            # the plain yes-or-no is the same dialog with no alternatives, so
+            # that every question before a run has the same default (Cancel)
+            question = PreflightQuestion(text=str(question), run_label="Run")
         chosen = self.ask_choice(title, question)
         if chosen is None:
             return (*self._not_run(), question)
@@ -624,37 +624,52 @@ class PluginPanel(QWidget):
         """Put a question with alternatives; the choice, or None to cancel.
 
         Its own method because it is the one part of the preflight that opens
-        a modal dialog: a test drives the decision by replacing this, as it
-        replaces `QMessageBox.question` for the plain yes-or-no.
+        a modal dialog: a test drives the decision by replacing this.
+        """
+        box, answers = self.choice_box(title, question)
+        box.exec()
+        return answers.get(box.clickedButton())
+
+    def choice_box(self, title: str, question):
+        """The dialog `ask_choice` shows, and what each of its buttons answers.
+
+        The default -- what Return presses -- is the first alternative when
+        there is one (the cheaper way: COMET's RCC prepass), and otherwise
+        Cancel, never the run that was asked about: the question is put
+        because the run costs more than one would guess, and someone who has
+        just been told so rarely wants it after all.  Escape cancels.
         """
         from ..plugins import PreflightChoice
 
         box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
         box.setWindowTitle(title)
         box.setText(question.text)
+        answers = {}
         # each alternative is a button of its own rather than a second dialog:
         # the choice is between ways of doing the same thing, and they should
         # be readable side by side
-        buttons = []
+        first = None
         for choice in question.choices:
             button = box.addButton(choice.label, QMessageBox.ButtonRole.AcceptRole)
             if choice.help:
                 button.setToolTip(choice.help)
-            buttons.append((button, choice))
-        plain = PreflightChoice(label=question.run_label)
-        run = (box.addButton(question.run_label, QMessageBox.ButtonRole.AcceptRole)
-               if question.run_label else None)
+            answers[button] = choice
+            first = first or button
+        if question.run_label:
+            run = box.addButton(question.run_label, QMessageBox.ButtonRole.AcceptRole)
+            answers[run] = PreflightChoice(label=question.run_label)
         cancel = box.addButton(QMessageBox.StandardButton.Cancel)
-        box.setDefaultButton(buttons[0][0] if buttons else cancel)
+        # explicit, and on every button: a button's own auto-default would
+        # otherwise take Return on some styles
+        for button in box.buttons():
+            button.setAutoDefault(False)
+        box.setDefaultButton(first or cancel)
+        box.setEscapeButton(cancel)
         detail = "\n\n".join(f"{c.label}\n{c.help}" for c in question.choices if c.help)
         if detail:
             box.setDetailedText(detail)
-        box.exec()
-        clicked = box.clickedButton()
-        for button, choice in buttons:
-            if clicked is button:
-                return choice
-        return plain if clicked is run else None
+        return box, answers
 
     def _on_progress(self, text: str) -> None:
         """Progress replaces the last line while it is a progress line, so a

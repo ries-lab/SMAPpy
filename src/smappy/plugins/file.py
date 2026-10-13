@@ -204,7 +204,7 @@ class Save(Plugin):
         if ctx is None or ctx.session is None:
             return FormState()
         text = left_out(ctx.session, settings)
-        return FormState(notice=None if text is None else Notice(text))
+        return FormState(notice=None if text is None else Notice(text, kind="info"))
 
     def run(self, ctx: Context, settings: SaveSettings) -> Result:
         if ctx.session is None:
@@ -307,7 +307,8 @@ class SimulateBlinks(Plugin):
             return FormState()
         return FormState(notice=Notice(
             f"{path.name} is written: fit it in the Localize tab",
-            action="Fit this", window="fit file", settings=str(path)))
+            action="Fit this", window="fit file", settings=str(path),
+            kind="info"))
 
     def run(self, ctx: Context, settings: SimulationSettings) -> Result:
         from ..simulate import camera_truth, ground_truth, localizations

@@ -130,6 +130,25 @@ tab is drawn when it is looked at and not before -- so a plugin with six
 figures costs what one costs, and a plot must be a closure over its data
 rather than something already drawn.
 
+## What the form says before a run
+
+`Plugin.describe(ctx, settings)` returns a `FormState`: `hints` (what fields
+on *auto* resolve to), `active` (the fields the settings read; the rest are
+greyed), `choices` (lists the session decides) and a `notice`.  A
+`Notice(text, action, window, settings, kind)` is a line under the form and,
+when the GUI has the window named in `window` (`session.window_openers`), a
+button `action` that opens it.  `kind` is `"warning"` (the default, orange and
+bold) for what goes wrong or is guessed if left as it is -- a camera the
+database does not know -- and `"info"` (grey) for what is only worth
+knowing: what a save leaves out, a simulation that can be fitted now.
+
+`Plugin.preflight(ctx, settings)` is asked at Run, before the worker starts:
+a string is a yes-or-no, a `PreflightQuestion` offers alternatives
+(`PreflightChoice`, each with the settings it runs with) beside its
+`run_label`.  The dialog's default is the first alternative when there is
+one, otherwise Cancel -- never the run the question is about -- and Escape
+cancels.
+
 ## The table
 
 `Localizations` is a dataclass of `columns: Dict[str, np.ndarray]` plus

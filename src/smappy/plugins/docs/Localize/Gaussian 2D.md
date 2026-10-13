@@ -260,7 +260,8 @@ speck of something else) fits badly, and filtering on `logl_rel` removes
 most of them.
 
 **Speed.**  Detection runs on blocks of frames; fit boxes are collected and fitted
-in batches (*boxes per fit*), on all cores, in C++.  Reading the file runs in
+in batches of about 15 000 boxes (a script can set `max_block_rois` and
+`n_threads`), on all cores, in C++.  Reading the file runs in
 the background while the previous block is processed.
 
 **Compared with the papers.**  The fit and its CRLB are those of

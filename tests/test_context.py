@@ -178,7 +178,7 @@ def test_a_declined_preflight_question_does_not_run_the_plugin(monkeypatch):
     """The preflight runs before the worker exists, so 'no' means no work at
     all -- not a thread started and abandoned."""
     pytest.importorskip("PySide6")
-    from PySide6.QtWidgets import QApplication, QMessageBox
+    from PySide6.QtWidgets import QApplication
 
     app = QApplication.instance() or QApplication([])
     seen = {"ran": False}
@@ -199,10 +199,13 @@ def test_a_declined_preflight_question_does_not_run_the_plugin(monkeypatch):
     from smappy.gui.plugin_panel import PluginPanel
     panel = PluginPanel(Expensive, Session(table()))
 
-    answer = {"button": QMessageBox.StandardButton.No}
-    monkeypatch.setattr(QMessageBox, "question",
-                        lambda *a, **k: answer["button"], raising=False)
+    from smappy.plugins import PreflightChoice
+    answer = {"run": False}
 
+    def ask(self, title, question):
+        return PreflightChoice(question.run_label) if answer["run"] else None
+
+    monkeypatch.setattr(PluginPanel, "ask_choice", ask)
     panel.run()
     app.processEvents()
     assert seen["ran"] is False
@@ -210,8 +213,42 @@ def test_a_declined_preflight_question_does_not_run_the_plugin(monkeypatch):
     # what it would have cost is in the log either way, so a 'no' is informed
     assert "this will take 3 hours" in panel.output.toPlainText()
 
-    answer["button"] = QMessageBox.StandardButton.Yes
+    answer["run"] = True
     assert panel._preflight(None)[0] is True      # and 'yes' lets the run start
+
+
+def test_a_cost_question_defaults_to_the_cheaper_way_or_else_to_cancel():
+    """Return never starts the run that was just said to be expensive: it
+    takes the first alternative when there is one, Cancel when not, and
+    Escape always cancels -- the same for a plain question and a choice."""
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication
+
+    from smappy.gui.plugin_panel import PluginPanel
+    from smappy.plugins import PreflightChoice, PreflightQuestion
+
+    QApplication.instance() or QApplication([])
+
+    class Costly(Plugin):
+        changes_locs = False
+        path = "Test/Costly"
+        name = "Costly"
+
+        def run(self, ctx, settings):
+            return Result()
+
+    panel = PluginPanel(Costly, Session(table()))
+    plain = PreflightQuestion("3 hours. Run it?", run_label="Run")
+    box, answers = panel.choice_box("t", plain)
+    assert box.defaultButton() is box.escapeButton()
+    assert box.defaultButton() not in answers          # Cancel: no answer
+    assert {a.label for a in answers.values()} == {"Run"}
+
+    cheaper = PreflightQuestion("3 hours.", choices=[
+        PreflightChoice("RCC prepass", settings="fast")])
+    box, answers = panel.choice_box("t", cheaper)
+    assert answers[box.defaultButton()].label == "RCC prepass"
+    assert box.escapeButton() not in answers
 
 
 def test_a_preflight_choice_runs_with_the_settings_it_carries(monkeypatch):
@@ -586,3 +623,58 @@ def test_a_thin_selection_is_a_warning_that_progress_cannot_overwrite():
     ctx.selection.require(100, ctx.warn, "a fit")
     assert ctx.warnings == ["only 10 localizations; a fit wants at least ~100"]
     assert ("warning", ctx.warnings[0]) in heard
+
+
+def test_an_info_notice_is_drawn_quietly_and_a_warning_loudly():
+    """Only what will go wrong is orange and bold: a save's note of what it
+    leaves out is grey, so the warnings keep being read."""
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication
+
+    from smappy.gui.plugin_panel import INFO_STYLE, WARNING_STYLE, PluginPanel
+    from smappy.plugins import Notice
+
+    QApplication.instance() or QApplication([])
+
+    class Quiet(Plugin):
+        changes_locs = False
+        path = "Test/Quiet"
+        name = "Quiet"
+
+        def run(self, ctx, settings):
+            return Result()
+
+    panel = PluginPanel(Quiet, Session(table()))
+    panel._show_notice(Notice("worth knowing", kind="info"))
+    assert panel.notice.styleSheet() == INFO_STYLE
+    panel._show_notice(Notice("this camera is a guess"))
+    assert panel.notice.styleSheet() == WARNING_STYLE
+
+
+def test_an_optional_bool_is_a_choice_of_auto_on_and_off():
+    """Not a tri-state tick box, whose third state nobody reads as auto:
+    the words, and auto saying what it resolves to."""
+    pytest.importorskip("PySide6")
+    from dataclasses import dataclass
+    from typing import Optional
+    from PySide6.QtWidgets import QApplication, QComboBox
+
+    from smappy.gui.params import SettingsForm
+    from smappy.plugins import param
+
+    QApplication.instance() or QApplication([])
+
+    @dataclass
+    class Cam:
+        em_on: Optional[bool] = param(None, label="EM gain on")
+
+    form = SettingsForm(Cam)
+    box = form.fields["em_on"].widget
+    assert isinstance(box, QComboBox)
+    assert [box.itemText(i) for i in range(box.count())] == ["auto", "on", "off"]
+    assert form.value().em_on is None
+    form.set_hints({"em_on": True})
+    assert box.itemText(0) == "auto (on)" and form.value().em_on is None
+    for value in (True, False, None):
+        form.set_values({"em_on": value})
+        assert form.value().em_on is value

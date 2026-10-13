@@ -595,6 +595,12 @@ class Notice:
     with the form's settings, as `Plugin.window` does -- so the plugin says
     what is wrong and where it is put right without importing Qt.  A GUI with
     no such window shows the line and no button.
+
+    ``kind`` is how loudly: "warning" (orange, bold) for something that will
+    go wrong or be guessed if left as it is -- a camera the database does not
+    know -- and "info" (grey) for something worth knowing that is not a
+    fault, such as what a save leaves out by choice.  Drawing every line as
+    a warning taught people to stop reading them.
     """
     text: str
     action: str = ""                 # the button's text
@@ -603,6 +609,7 @@ class Notice:
     # step says its own here, since the window wants a fitter's settings and
     # the form holds the chain's.
     settings: Any = None
+    kind: str = "warning"            # or "info"
 
 
 @dataclass

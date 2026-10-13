@@ -38,13 +38,14 @@ class FitSettings:
                               "fitted")
     iterations: int = param(50, min=1, advanced=True,
                             help="the most steps a fit may take")
+    # speed and memory only, never the result: for scripts, not the form
     max_block_rois: int = param(15000, label="boxes per fit", min=100,
-                                advanced=True,
+                                hidden=True,
                                 help="how many are collected before they "
                                      "are fitted together; speed and memory "
                                      "only")
     n_threads: int = param(0, label="threads", min=0, help="0: one per core",
-                           advanced=True)
+                           hidden=True)
     max_fit_distance: Optional[float] = param(None, label="max fit distance",
                                               unit="px", advanced=True,
                                               help="reject fits that ran "

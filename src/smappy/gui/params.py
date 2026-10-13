@@ -30,6 +30,8 @@ class _Field(QWidget):
     """
 
     changed = Signal()
+    # an optional bool: "auto" goes in front, as for any optional choice
+    ON_OFF = ((True, "on"), (False, "off"))
 
     def __init__(self, spec: ParamSpec):
         super().__init__()
@@ -45,6 +47,10 @@ class _Field(QWidget):
         row.setContentsMargins(2, 0, 6, 0)
         self.auto: Optional[QCheckBox] = None
         choices = info.choices() if callable(info.choices) else info.choices
+        if choices is None and spec.type is bool and spec.optional:
+            # three states as words: a tri-state tick box's third state is a
+            # dash nobody reads as "auto", and it says nothing of what auto is
+            choices = self.ON_OFF
         if choices is not None:
             self.widget = QComboBox()
             self._values = []
@@ -65,9 +71,6 @@ class _Field(QWidget):
             browse.clicked.connect(self._browse)
             row.addWidget(self.widget, 1)
             row.addWidget(browse)
-        elif spec.type is bool and spec.optional:   # three states: on, off, auto
-            self.widget = QCheckBox(tristate=True)
-            self.widget.stateChanged.connect(self.changed)
         elif spec.type is bool:
             self.widget = QCheckBox()
             self.widget.toggled.connect(self.changed)
@@ -183,6 +186,14 @@ class _Field(QWidget):
         on, so nothing here can turn a read-from-the-file number into one the
         user is taken to have set.
         """
+        if isinstance(self.widget, QComboBox) and self.spec.optional \
+                and self._values and self._values[0] is None:
+            # a choice on auto says what auto is: "auto (on)"
+            labels = dict(zip(self._values, (self.widget.itemText(i)
+                                             for i in range(self.widget.count()))))
+            shown = labels.get(value, None if value is None else str(value))
+            self.widget.setItemText(0, f"auto ({shown})" if shown else "auto")
+            return
         if self.auto is None or not isinstance(self.widget, QLineEdit):
             return
         self._hint = ("" if value is None else f"{value:g}"
@@ -227,11 +238,7 @@ class _Field(QWidget):
                 self._values.append(value)
             w.setCurrentIndex(self._values.index(value) if value in self._values else 0)
         elif isinstance(w, QCheckBox):
-            if w.isTristate():
-                w.setCheckState(Qt.PartiallyChecked if value is None
-                                else Qt.Checked if value else Qt.Unchecked)
-            else:
-                w.setChecked(bool(value))
+            w.setChecked(bool(value))
         elif isinstance(w, QSpinBox):
             w.setValue(int(value))
         else:
@@ -245,9 +252,6 @@ class _Field(QWidget):
         if isinstance(w, QComboBox):
             return w.currentData()
         if isinstance(w, QCheckBox):
-            if w.isTristate():
-                state = w.checkState()
-                return None if state == Qt.PartiallyChecked else state == Qt.Checked
             return w.isChecked()
         if isinstance(w, QSpinBox):
             return w.value()
