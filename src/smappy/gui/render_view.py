@@ -167,8 +167,8 @@ class RenderView(QWidget):
         self.empty_hint.setAlignment(Qt.AlignCenter)
         self.empty_hint.setStyleSheet("color: rgb(150, 150, 150); font-size: 15px;")
         self.empty_hint.setAttribute(Qt.WA_TransparentForMouseEvents)
-        # what the colours mean, when a layer is coloured by a column
-        self.colour_bar = ColourBar(self)
+        # what the colours mean, when layers are coloured by a column
+        self.colour_bars = ColourBars(self)
 
         # pan/zoom fires many range changes; render once they settle
         self._timer = QTimer(singleShot=True, interval=40)
@@ -239,7 +239,7 @@ class RenderView(QWidget):
     def _on_session(self, what: str) -> None:
         self._show_hint()
         if what in ("locs", "layer", "layers", "regrouped"):
-            self.colour_bar.show_for(self.session.layers)
+            self.colour_bars.show_for(self.session.layers)
         if what == "locs":
             self.tile_valid = False
             self._arrange()
@@ -303,7 +303,7 @@ class RenderView(QWidget):
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self.empty_hint.setGeometry(self.rect())
-        self.colour_bar.place()
+        self.colour_bars.place()
         if len(self.panels) > 1:
             self._arrange()
 
@@ -999,66 +999,35 @@ class RenderToolBar(QToolBar):
 
 
 class ColourBar(QWidget):
-    """The colour scale of a layer coloured by a column: its LUT from the
-    bottom of the colour range to the top, the two ends in the column's unit.
+    """One colour scale: a LUT from the bottom of a colour range to the top,
+    the two ends in the column's unit, and whose it is above it."""
 
-    A widget over the picture's top right corner rather than an item in it:
-    it is read, not panned, and it stays out of what Save and Copy take,
-    which are the picture alone.  One bar, for the first visible layer
-    coloured by a column -- two layers coloured by two columns are rare, and
-    two bars would take more of the picture than they are worth.  Plain
-    intensity has no bar: its LUT is brightness, which the picture shows.
-    """
-
-    WIDTH, HEIGHT, BAR = 74, 150, 12          # px: the widget, and the bar in it
+    WIDTH, HEIGHT, BAR = 120, 120, 12         # px: the widget, and the bar in it
 
     def __init__(self, parent: QWidget):
         super().__init__(parent)
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
         self.resize(self.WIDTH, self.HEIGHT)
+        self.layers: List[str] = []
         self.field = ""
         self.range: Tuple[float, float] = (0.0, 1.0)
         self.table = np.zeros((2, 3), np.float32)
-        self.hide()
 
-    def show_for(self, layers) -> None:
-        """Show the scale of the first visible layer coloured by a column."""
-        from .. import lut as luts
-        for layer in layers:
-            if layer.is_image or not layer.visible or layer.state is None:
-                continue
-            settings, display = layer.state.settings, layer.state.display
-            field = settings.color_field
-            if field is None or field not in layer.locs:
-                continue
-            lo, hi = settings.color_range or _finite_range(layer.locs[field])
-            try:
-                table = luts.get(display.lut, display.invert)
-            except (KeyError, ValueError):
-                continue
-            if display.white_background:
-                table = luts.on_white(table)
-            self.field, self.range, self.table = field, (lo, hi), table
-            self.setToolTip(f"{field}: colour range {lo:g} to {hi:g}")
-            self.place()
-            self.show()
-            self.raise_()
-            self.update()
-            return
-        self.field = ""
-        self.hide()
-
-    def place(self) -> None:
-        parent = self.parentWidget()
-        if parent is not None:
-            self.move(parent.width() - self.WIDTH - 8, 8)
+    def set(self, layers: List[str], field: str, range_: Tuple[float, float],
+            table: np.ndarray) -> None:
+        self.layers, self.field, self.range, self.table = list(layers), field, range_, table
+        lo, hi = range_
+        self.setToolTip(f"{', '.join(layers)}: {field} from {lo:g} to {hi:g}")
+        self.update()
 
     def labels(self) -> Tuple[str, str, str]:
-        """The title, the top and the bottom label: "z_nm", "300 nm", "-300 nm"."""
+        """The title, the top and the bottom label: "layer 1: z_nm", "300 nm",
+        "-300 nm"."""
         unit = axis_unit(self.field)
         unit = "" if unit == self.field else f" {unit}"
         lo, hi = self.range
-        return self.field, f"{hi:.4g}{unit}", f"{lo:.4g}{unit}"
+        return (f"{', '.join(self.layers)}: {self.field}",
+                f"{_bar_number(hi)}{unit}", f"{_bar_number(lo)}{unit}")
 
     def paintEvent(self, event) -> None:          # noqa: N802 (Qt's name)
         title, top, bottom = self.labels()
@@ -1083,6 +1052,87 @@ class ColourBar(QWidget):
             text = metrics.elidedText(text, Qt.ElideRight, int(rect.width()))
             painter.drawText(rect, align, text)
         painter.end()
+
+
+class ColourBars(QWidget):
+    """The colour scales of the layers coloured by a column, stacked in the
+    picture's top right corner.
+
+    A bar per scale, not per picture: two layers coloured by two columns, or
+    by one column through two LUTs or over two ranges, read differently and
+    need a key each; layers that agree on the column, the colours and the
+    range share one bar, labelled with all of them.  Widgets over the
+    picture rather than items in it: they are read, not panned, and they stay
+    out of what Save and Copy take, which are the picture alone.  Plain
+    intensity has no bar: its LUT is brightness, which the picture shows.
+    """
+
+    GAP = 4                                    # px between two bars
+
+    def __init__(self, parent: QWidget):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.bars: List[ColourBar] = []
+        self.hide()
+
+    @staticmethod
+    def scales(layers) -> List[tuple]:
+        """``(layer names, column, (lo, hi), LUT table)`` per distinct scale,
+        in the layers' order."""
+        from .. import lut as luts
+        found: dict = {}
+        for layer in layers:
+            if layer.is_image or not layer.visible or layer.state is None:
+                continue
+            settings, display = layer.state.settings, layer.state.display
+            field = settings.color_field
+            if field is None or field not in layer.locs:
+                continue
+            lo, hi = settings.color_range or _finite_range(layer.locs[field])
+            try:
+                table = luts.get(display.lut, display.invert)
+            except (KeyError, ValueError):
+                continue
+            if display.white_background:
+                table = luts.on_white(table)
+            # the colours themselves, not the LUT's name: an inverted LUT and
+            # its plain one share a name and not a scale
+            key = (field, float(lo), float(hi), table.tobytes())
+            if key in found:
+                found[key][0].append(layer.name)
+            else:
+                found[key] = ([layer.name], field, (float(lo), float(hi)), table)
+        return list(found.values())
+
+    def show_for(self, layers) -> None:
+        scales = self.scales(layers)
+        while len(self.bars) < len(scales):
+            self.bars.append(ColourBar(self))
+        for bar in self.bars[len(scales):]:
+            bar.hide()
+        del self.bars[len(scales):]
+        if not scales:
+            self.hide()
+            return
+        step = ColourBar.HEIGHT + self.GAP
+        for i, (bar, scale) in enumerate(zip(self.bars, scales)):
+            bar.set(*scale)
+            bar.move(0, i * step)
+            bar.show()
+        self.resize(ColourBar.WIDTH, len(scales) * step - self.GAP)
+        self.place()
+        self.show()
+        self.raise_()
+
+    def place(self) -> None:
+        parent = self.parentWidget()
+        if parent is not None:
+            self.move(parent.width() - self.width() - 8, 8)
+
+
+def _bar_number(value: float) -> str:
+    """Four digits, but a frame number of 20000 as itself, not 2e+04."""
+    return f"{value:.0f}" if 1e4 <= abs(value) < 1e9 else f"{value:.4g}"
 
 
 def _finite_range(values) -> Tuple[float, float]:

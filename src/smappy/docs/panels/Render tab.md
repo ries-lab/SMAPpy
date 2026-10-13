@@ -484,10 +484,13 @@ the fit found what was there.
 
 ### colour by
 *intensity* colours by brightness through the LUT; *field* colours by the
-column chosen beside it.  A layer coloured by a column puts a colour bar in
-the render window's top right corner: the LUT over the *colour range*, its
-ends in the column's unit.  With several such layers it is the first
-visible one's.  The bar is not part of a saved or copied picture.
+column chosen beside it.  A visible layer coloured by a column puts a
+colour bar in the render window's top right corner: the LUT over the
+*colour range*, its ends in the column's unit, and above it the layer and
+the column (*layer 2: z_nm*).  Each scale has its own bar, stacked one
+under the other; layers with the same column, LUT, inversion and range
+share one, labelled with all of them.  The bars are not part of a saved or
+copied picture.
 
 ### colour range
 The values that get the two ends of the LUT.  Narrow it to spread the
