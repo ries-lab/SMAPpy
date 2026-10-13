@@ -68,7 +68,8 @@ things that took a 57 M localization open from 134 s to 56 s (see the
 `smappy.group` docstring).  The chunk count is a setting rather than a thread
 count because the cut changes the answer: the cut points come from the data,
 so the same file groups the same way on any machine.
-``scripts/check_chunked_grouping.py`` measures both against the sequential walk.
+``scripts/check_chunked_grouping.py`` measured both against the sequential walk
+(removed; ``git show ec09f06:scripts/check_chunked_grouping.py``).
 
 Linking by precision (``precision=``, see `smappy.group.connect`) adds one
 more piece of state to the walk -- the running position's variance -- and a

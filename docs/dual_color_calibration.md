@@ -274,10 +274,12 @@ an explicit instruction to use `load_dual_color_calibration()`.
 Focused tests cover all four layouts, selectable reference halves, unequal regions,
 shared z shifts, retention of relative channel axial offsets and intensity ratios,
 PSFs clipped at zero and normalised together, projective outliers/degeneracy, coordinate fallback,
-exclusion/rebuild, and save/load compatibility. To reproduce the real-data check:
+exclusion/rebuild, and save/load compatibility. The real-data check was made with
+`scripts/check_dual_calibration.py`, since removed from the tree; to reproduce it:
 
 ```sh
-python scripts/check_dual_calibration.py /path/to/beads --out /path/to/new-results
+git show ec09f06:scripts/check_dual_calibration.py > check_dual_calibration.py
+python check_dual_calibration.py /path/to/beads --out /path/to/new-results
 ```
 
 The script fits both channels, excludes the last acquisition, rebuilds, refits its

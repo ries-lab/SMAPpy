@@ -372,13 +372,15 @@ layout:
 
 * the loaded spline coefficients reproduce the bead stack stored beside them in
   the same file (correlation 0.9999, vs 0.82/0.82/0.83 for transposed,
-  x-mirrored and z-flipped controls) -- `scripts/check_calibration.py`
+  x-mirrored and z-flipped controls) -- `scripts/check_calibration.py`, since
+  removed (`git show ec09f06:scripts/check_calibration.py`)
 * the Gaussian models are checked against independently simulated data: unbiased
   to <0.01 px, scatter matches the returned CRLB
 * the mirror flip was confirmed on real data: the flipped orientation has the
   better log-likelihood for 65.8% of ROIs (median dlogL +2.82).  That was the
   ROI flip; the conversion on load that replaced it is the same model, and
-  `scripts/check_fit.py` keeps the x-flipped fit as a control
+  `scripts/check_fit.py` (removed; `git show ec09f06:scripts/check_fit.py`) kept
+  the x-flipped fit as a control
 * threaded output is bit-identical to serial, at every stage
 * the render kernel's second moment is `sigma^2 + 1/12`, the variance the pixel
   itself contributes -- a point-sampled kernel would give `sigma^2`

@@ -110,7 +110,7 @@ def _dog_radius(sigma: float) -> int:
 # Below this radius a single 2-D convolution beats the separable passes: it
 # does more arithmetic per pixel ((2r+1)^2 vs 4(2r+1)) but in one traversal
 # with no temporaries, and for small kernels the traversal is what costs.
-# Measured crossover on an M1 Pro; see scripts/benchmark.py.
+# Measured crossover on an M1 Pro.
 _SEPARABLE_FROM_RADIUS = 4
 
 
