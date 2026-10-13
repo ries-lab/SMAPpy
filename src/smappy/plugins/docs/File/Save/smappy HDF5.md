@@ -71,7 +71,7 @@ into `/results/saved`.
 **4. The GUI, optionally.**  With *save the GUI state too*, the tabs, their
 plugins and their settings are written into `/gui/state`, without the
 window's size and position.  They are not put back when the file is opened;
-File > Restore GUI state from file does that.
+File > Workspace > From data file does that.
 
 ```figure What a saved file holds: a simulated table after one Math Parser run, with an ROI drawn.
 fig.set_size_inches(7.5, 3.3)

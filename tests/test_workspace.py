@@ -344,6 +344,19 @@ def test_loading_a_gui_replaces_the_values_and_is_remembered(window, tmp_path):
     assert make_window().workspace.path == path.resolve()
 
 
+def test_the_workspace_is_a_submenu_of_file_and_reset_gives_the_default(window, tmp_path):
+    file_menu = next(a.menu() for a in window.menuBar().actions() if a.text() == "File")
+    entries = [a.text() for a in file_menu.actions()]
+    assert "Workspace" in entries and not any("GUI" in e for e in entries)
+    actions = {a.text(): a for a in window.workspace_menu.actions() if a.text()}
+    assert list(actions) == ["Save", "Save as...", "Open...", "Reset",
+                             "From data file..."]
+    set_comet_value(window, 31)
+    window.save_gui_to(tmp_path / "mine.gui.yaml")
+    actions["Reset"].trigger()
+    assert window.workspace.path is None and comet_value(window) is None
+
+
 def test_a_remembered_gui_that_has_gone_gives_the_default(window, tmp_path):
     path = window.save_gui_to(tmp_path / "gone.gui.yaml")
     path.unlink()

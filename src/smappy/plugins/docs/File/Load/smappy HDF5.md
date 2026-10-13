@@ -102,7 +102,7 @@ opened, so its *Plot* works again, and the next save writes it back.
 
 **What is not restored.**  The GUI state that may be in the file (`/gui`)
 is left alone: opening a colleague's file does not rearrange your tabs.
-File > Restore GUI state from file puts it back on request.
+File > Workspace > From data file puts it back on request.
 
 ## Output
 

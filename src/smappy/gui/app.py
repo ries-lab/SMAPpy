@@ -227,12 +227,26 @@ class ControlWindow(QMainWindow):
                                     "filters, ROIs -- in a new instance of the "
                                     "program; a live fit carries on here")
         menu.addSeparator()
-        self._action(menu, "Restore GUI state from file...", None,
-                     self.restore_state_from_file)
-        self._action(menu, "Save GUI", None, self.save_gui)
-        self._action(menu, "Save GUI as...", None, self.save_gui_as)
-        self._action(menu, "Load GUI...", None, self.load_gui)
-        self._action(menu, "Load default GUI", None, self.load_default_gui)
+        # the tabs, their plugins and their values (`smappy.workspace`), in a
+        # submenu of their own: a "Save GUI" beside Save left one guessing
+        # which of the two kept the data
+        self.workspace_menu = _add_menu(menu, "Workspace", self)
+        self.workspace_menu.setToolTipsVisible(True)
+        for text, slot, tip in (
+                ("Save", self.save_gui, "overwrite the workspace file that is loaded"),
+                ("Save as...", self.save_gui_as,
+                 "the tabs, their plugins and their values, to a new file"),
+                ("Open...", self.load_gui,
+                 "a saved workspace: its tabs and values replace these"),
+                ("Reset", self.load_default_gui,
+                 "the shipped workspace, now and at the next start"),
+                (None, None, None),
+                ("From data file...", self.restore_state_from_file,
+                 "the workspace a localization file was saved with")):
+            if text is None:
+                self.workspace_menu.addSeparator()
+            else:
+                self._action(self.workspace_menu, text, None, slot).setToolTip(tip)
         self._action(menu, "Preferences...", QKeySequence.Preferences,
                      self.open_preferences)
         menu.addSeparator()
@@ -500,18 +514,18 @@ class ControlWindow(QMainWindow):
 
         Not done automatically on open: rearranging someone's tabs because they
         looked at a colleague's dataset would be a surprise.  What is restored
-        has no GUI file of its own, so *Save GUI* asks where to put it.
+        has no file of its own, so *Workspace > Save* asks where to put it.
         """
         from ..io.hdf5 import load_gui_state
         start = str(self.session.path) if self.session.path else folders.start()
-        path, _ = QFileDialog.getOpenFileName(self, "Restore GUI state from",
+        path, _ = QFileDialog.getOpenFileName(self, "Workspace from data file",
                                               start, name_filter())
         if not path:
             return
         state = load_gui_state(path)
         if not state:
-            QMessageBox.information(self, "Restore GUI state",
-                                    "that file carries no GUI state")
+            QMessageBox.information(self, "Workspace from data file",
+                                    "that file carries no workspace")
             return
         self.workspace = Workspace.from_dict(state)
         missing = self.workspace.prune(list(plugins.refs()))
@@ -519,7 +533,7 @@ class ControlWindow(QMainWindow):
         self._update_title(f"from {Path(path).name}")
         if missing:
             QMessageBox.information(
-                self, "Restore GUI state",
+                self, "Workspace from data file",
                 "restored, without plugins that are not installed here:\n"
                 + "\n".join(sorted(set(missing))))
 
@@ -700,8 +714,8 @@ class ControlWindow(QMainWindow):
         start = self.workspace.path or (workspace_module.guis_dir()
                                         / f"my{workspace_module.GUI_SUFFIX}")
         start.parent.mkdir(parents=True, exist_ok=True)
-        path, _ = QFileDialog.getSaveFileName(self, "Save GUI", str(start),
-                                              "GUI (*.yaml)")
+        path, _ = QFileDialog.getSaveFileName(self, "Save workspace", str(start),
+                                              "Workspace (*.yaml)")
         if path:
             self._write_gui(path)
 
@@ -709,13 +723,13 @@ class ControlWindow(QMainWindow):
         try:
             self.save_gui_to(path)
         except OSError as e:
-            QMessageBox.warning(self, "Save GUI", f"could not write {path}:\n{e}")
+            QMessageBox.warning(self, "Save workspace", f"could not write {path}:\n{e}")
 
     def load_gui(self) -> None:
         start = self.workspace.path.parent if self.workspace.path else \
             workspace_module.guis_dir()
-        path, _ = QFileDialog.getOpenFileName(self, "Load GUI", str(start),
-                                              "GUI (*.yaml)")
+        path, _ = QFileDialog.getOpenFileName(self, "Open workspace", str(start),
+                                              "Workspace (*.yaml)")
         if path:
             self.load_gui_from(path)
 
@@ -732,11 +746,11 @@ class ControlWindow(QMainWindow):
         workspace_module.remember(self.workspace.path)
         self._update_title()
         if path and self.workspace.path is None:
-            QMessageBox.information(self, "Load GUI",
-                                    f"{path} is not a GUI file; the default is loaded")
+            QMessageBox.information(self, "Open workspace",
+                                    f"{path} is not a workspace file; the default is loaded")
         elif missing:
             QMessageBox.information(
-                self, "Load GUI",
+                self, "Open workspace",
                 "loaded, without plugins that are not installed here:\n"
                 + "\n".join(sorted(set(missing))))
 

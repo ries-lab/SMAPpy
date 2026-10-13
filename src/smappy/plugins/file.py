@@ -144,7 +144,7 @@ class SaveSettings:
     gui_state: bool = param(
         True, label="save the GUI state too",
         help="the tabs, their plugins and their parameters, for File > "
-             "Restore GUI state from file to put back")
+             "Workspace > From data file to put back")
     region_results: bool = param(
         True, label="save the ROI results",
         help="the numbers measured in the ROIs; off keeps "

@@ -15,8 +15,8 @@ without a GUI, and window geometry is carried as opaque text the GUI encodes.
 
 **Nothing is saved behind the user's back.**  One installation is shared by a
 lab, so a value one person typed and the program remembered would silently
-become everyone's default.  A GUI file is written only by *Save GUI* or *Save
-GUI as*, and read at start only because someone saved or loaded it last
+become everyone's default.  A GUI file is written only by *File > Workspace >
+Save* or *Save as*, and read at start only because someone saved or loaded it last
 (`remember`); with none, the shipped default is built afresh.  The one thing
 kept automatically is where the window was (`window_state`), which moves no
 number.
@@ -223,7 +223,7 @@ def display_name(path: Optional[Path]) -> str:
 
 
 def guis_dir() -> Path:
-    """Where *Save GUI as* offers to put a GUI first; any folder will do."""
+    """Where *Workspace > Save as* offers to put a GUI first; any folder will do."""
     return config.config_dir() / "guis"
 
 
@@ -231,7 +231,7 @@ def load(path=None) -> Workspace:
     """The workspace at ``path``, or the shipped default.
 
     A file that is missing, unreadable or has no tabs also gives the default,
-    with no path: *Save GUI* then asks where to write rather than overwriting
+    with no path: *Workspace > Save* then asks where to write rather than overwriting
     the broken file.
     """
     if not path:
