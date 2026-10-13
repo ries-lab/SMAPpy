@@ -565,7 +565,7 @@ class ControlWindow(QMainWindow):
         return self.workspace
 
     def _update_title(self, name: Optional[str] = None) -> None:
-        """Say whose GUI this is, so nobody saves over somebody else's --
+        """Say whose workspace this is, so nobody saves over somebody else's --
         and, once named, which session this is (`identity`)."""
         if name is not None:
             self._gui_name = name
@@ -574,7 +574,7 @@ class ControlWindow(QMainWindow):
         app = f"{identity.unsaved(self.session)}SMAPpy"
         if self.session.name or self.session.colour:
             text = identity.title(self.session, app)
-            self.setWindowTitle(f"{text} (GUI: {gui})")
+            self.setWindowTitle(f"{text} (workspace: {gui})")
         else:
             self.setWindowTitle(f"{app} \u2014 {gui}")
         colour = identity.colour_hex(self.session)

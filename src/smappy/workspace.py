@@ -213,9 +213,9 @@ class Workspace:
 
 
 def display_name(path: Optional[Path]) -> str:
-    """What the title bar calls a GUI: its file name without the suffix."""
+    """What the title bar calls a workspace: its file name without the suffix."""
     if path is None:
-        return "default GUI"
+        return "default workspace"
     name = Path(path).name
     for suffix in (GUI_SUFFIX, ".yaml", ".yml"):
         if name.endswith(suffix) and len(name) > len(suffix):

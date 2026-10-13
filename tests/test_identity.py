@@ -74,7 +74,7 @@ def test_the_control_and_render_windows_carry_the_name_and_a_stripe(app):
     render = RenderWindow(session)
     control = ControlWindow(session, render)
     session.rename("NPC", colour="red")
-    assert control.windowTitle().startswith("\U0001F534 SMAPpy — NPC (GUI:")
+    assert control.windowTitle().startswith("\U0001F534 SMAPpy — NPC (workspace:")
     assert "NPC" in render.windowTitle()
     assert "#d62728" in control.statusBar().styleSheet()
     control.close()

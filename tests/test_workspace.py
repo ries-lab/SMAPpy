@@ -299,7 +299,7 @@ def test_nothing_typed_survives_a_restart_unless_it_was_saved(window, tmp_path):
     assert comet_value(again) is None
     assert again.tabs.tabText(again.tabs.currentIndex()) == "File"
     assert again.workspace.path is None
-    assert "default GUI" in again.windowTitle()
+    assert "default workspace" in again.windowTitle()
 
 
 def test_a_saved_gui_is_what_the_next_start_opens(window, tmp_path):
