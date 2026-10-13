@@ -29,7 +29,8 @@ from ..plugins import ParamInfo, param_specs
 from . import plots
 from .core import (CalibrationSettings, build_calibration, calibration_save_defaults,
                    calibration_save_path, collect_beads)
-from .dual import LAYOUTS, DualColorSettings, collect_dual_beads, build_dual_calibration
+from .dual import (BEAD_HELP, BEAD_UNUSED, DualColorSettings, build_dual_calibration,
+                   collect_dual_beads)
 from .input import discover_acquisitions
 
 PAGES = ("Overview", "Transformation", "Fit quality", "Field diagnostics", "Bead diagnostics")
@@ -50,6 +51,25 @@ class _Worker(QObject):
             self.done.emit(self.kind, self.function())
         except Exception as error:                       # shown, never fatal
             self.done.emit("error", error)
+
+
+def _bead_specs(cls):
+    """The form of a calibration's settings, as a bead calibration reads them.
+
+    Dual colour's *registration* is the movie registration's settings
+    (`RegisterSettings`); the fields a bead calibration does not read are
+    left off, and those it reads differently say so in their tooltips.
+    """
+    from dataclasses import replace
+    specs = param_specs(cls)
+    registration = specs.get('registration')
+    if registration is not None:
+        for name, spec in registration.children.items():
+            if name in BEAD_UNUSED:
+                spec.info = replace(spec.info, hidden=True)
+            elif name in BEAD_HELP:
+                spec.info = replace(spec.info, help=BEAD_HELP[name])
+    return specs
 
 
 class CalibrationWindow(QMainWindow):
@@ -181,7 +201,7 @@ class CalibrationWindow(QMainWindow):
         self.settings_layout.setContentsMargins(0, 0, 0, 0)
         self.forms = {}
         for cls in (CalibrationSettings, DualColorSettings):
-            form = SettingsForm(cls, param_specs(cls))
+            form = SettingsForm(cls, _bead_specs(cls))
             self.settings_layout.addWidget(form)
             self.forms[cls] = form
         if settings is not None:
@@ -523,7 +543,7 @@ class CalibrationWindow(QMainWindow):
             hints['saturation_adu'] = first.get('saturation_adu')
         geometry = getattr(result.calibration, 'geometry', None)
         if isinstance(geometry, dict):
-            hints['split_position'] = geometry.get('split_position')
+            hints['registration.split_position'] = geometry.get('split_position')
         self.form.set_hints({k: v for k, v in hints.items() if v is not None})
 
     # -------------------------------------------------------- stack viewer

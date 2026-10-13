@@ -21,8 +21,9 @@ def test_settings_forms_cover_both_dataclasses_on_this_python():
     single = param_specs(CalibrationSettings)
     dual = param_specs(DualColorSettings)
     assert set(single) == {f.name for f in CalibrationSettings.__dataclass_fields__.values()}
-    assert dual["split_position"].optional and dual["split_position"].type is int
-    assert dual["layout"].info.choices
+    geometry = dual["registration"].children
+    assert geometry["split_position"].optional and geometry["split_position"].type is int
+    assert geometry["layout"].info.choices
     assert dual["roi_size"].info.label == "ROI size"     # inherited, labelled
 
 
@@ -77,6 +78,24 @@ def test_a_dual_calibration_is_offered_to_the_two_channel_fitter(app, tmp_path):
     assert window.use_button.text() == "Use in the Spline 3D 2C fitter"
     window.mode_box.setCurrentText("Single channel")
     assert window.use_button.text() == "Use in the Spline 3D fitter"
+
+
+def test_the_dual_form_is_the_movie_registrations_with_a_bead_slides_defaults(app):
+    """One geometry (`RegisterSettings`): the layout detected unless chosen,
+    and only the fields a bead calibration reads."""
+    from smappy.calibrate.dual import BEAD_UNUSED, bead_registration
+    from smappy.calibrate.qt_gui import CalibrationWindow
+    window = CalibrationWindow()
+    window.mode_box.setCurrentText("Dual colour")
+    geometry = window.form.fields["registration"]
+    assert not set(BEAD_UNUSED) & set(geometry.fields)
+    assert {"layout", "main_channel", "split_position", "min_pairs"} <= set(geometry.fields)
+    settings = window.settings()
+    assert settings.registration == bead_registration()
+    assert settings.registration.layout == "auto"
+    assert settings.registration.min_pairs == 8
+    geometry.fields["layout"].set("right-left")
+    assert window.settings().registration.layout == "right-left"
 
 
 def test_mode_switch_keeps_the_shared_settings(app):

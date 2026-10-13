@@ -219,8 +219,8 @@ def draw_pairs(figure, result, selected=(), excluded=()):
                 xlabel="Main x (pixels)", ylabel="Main y (pixels)")
     h, w = r.beads.geometry["image_shape"]
     split = r.beads.geometry["split_position"]
-    last = r.beads.settings.main_channel in ("right", "lower")
-    horizontal = "right-left" in r.beads.settings.layout
+    last = r.beads.settings.registration.main_channel in ("right", "lower")
+    horizontal = "right-left" in r.beads.settings.registration.layout
     xlim = (split if last else 0, w if last else split) if horizontal else (0, w)
     ylim = (0, h) if horizontal else (split if last else 0, h if last else split)
     origins = np.array([origin(r, i) for i in range(len(r.beads.sources))])
@@ -271,7 +271,7 @@ def draw_transformation(figure, result, selected=(), excluded=()):
     delta1 = r.transform_fit.round1_dxdy
     artist = axes[1].scatter(*delta1[ids].T, c=np.where(good, "green", "red"), picker=5)
     artist.pair_ids = ids
-    limit = r.beads.settings.transform_axis_limit_px
+    limit = r.beads.settings.registration.transform_axis_limit_px
     axes[1].plot([-limit, limit, limit, -limit, -limit],
                  [-limit, -limit, limit, limit, -limit], "k--", lw=.8)
     axes[1].axhline(0, color="gray", lw=.5)

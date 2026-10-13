@@ -1610,6 +1610,25 @@ That matters because an initial shift, a magnification guess and a wrongly
 assumed image centre are between them the usual cause of a registration that
 fails without saying so.
 
+**One geometry for beads and movies.**  The bead calibration's split used to
+be settings of its own, with a fixed `up-down mirrored` default that a
+left-right splitter failed on.  It is now the movie registration's
+`RegisterSettings` as a part of `DualColorSettings`, its defaults set by
+`bead_registration` rather than by a second class: 8 pairs, not 20 (a slide
+gives tens); a 2 px RANSAC radius and a 0.15 px dx/dy screen, not 1 and 0.5
+(beads are all bright, and that screen is where a bead calibration's accuracy
+comes from); and pairing within 12 px, not 20 -- the numbers the bead
+calibration had, so a calibration with its layout chosen is what it was.  On
+*auto* the layout is found by the same vote, taken on the beads with each
+stack as one frame, and the beads are then paired as before.  Two things did
+not merge.  `ChannelTransform` and `DualColorCalibration` stay two classes:
+the second is the first plus two PSFs, they share the mapping and the
+geometry check already (`_Mapping`, `check_geometry`), and one class would
+mean PSF fields that are None for a transformation, or a new constructor
+for every caller and reader.  And a regular bead grid centred in its half is
+its own mirror image, so positions alone cannot say whether it is mirrored:
+a simulated grid needs its layout chosen, a slide does not.
+
 Two stages of pair-and-refit, as in SMAP, and measurably: the tight second round
 is worth a factor of three to seven in accuracy over the coarse one alone, and a
 third intermediate round is worth exactly nothing (identical transformations,

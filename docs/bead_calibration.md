@@ -47,8 +47,10 @@ own maximum; turn it off to retain one fixed contrast scale while scrolling.
 The upper-limit factor adjusts display contrast without modifying data: a factor
 of 0.5 saturates brighter pixels to reveal dimmer structure. The same calibration
 window now offers a Single channel / Dual color mode selector; switching retains
-the acquisitions and common settings and requires recalculation. Dual-color
-diagnostics add Transformation and Field diagnostics tabs; see
+the acquisitions and common settings and requires recalculation. Dual color
+adds a *registration* section -- the movie registration's `RegisterSettings`
+with a bead slide's defaults, the layout detected from the beads unless one is
+chosen -- and Transformation and Field diagnostics tabs; see
 [dual-color calibration](dual_color_calibration.md).
 
 **Calculate fit quality** runs the production fitter on bead planes within the model's

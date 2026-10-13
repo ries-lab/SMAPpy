@@ -2,7 +2,7 @@
 title: Bead calibration
 summary: Turns z-stacks of fluorescent beads into the measured 3D PSF model the Spline 3D fitters use, and for a split camera into two models and the transformation between the halves.
 widget: smappy.calibrate.qt_gui.CalibrationWindow
-covers: [smappy.calibrate.core.detect_beads, smappy.calibrate.core.collect_beads, smappy.calibrate.core.estimate_shift, smappy.calibrate.core.subvoxel_peak, smappy.calibrate.core.shift_volume, smappy.calibrate.core.robust_shape_error, smappy.calibrate.core.build_calibration, smappy.calibrate.core._single_model, smappy.calibrate.core.spline_coefficients, smappy.calibrate.core.positive_pair_models, smappy.calibrate.core.FOCAL_PLANES, smappy.calibrate.dual.collect_dual_beads, smappy.calibrate.dual.fit_dual_transform, smappy.calibrate.dual.robust_projective, smappy.calibrate.dual.refine_projective, smappy.calibrate.dual.build_dual_calibration, smappy.calibrate.validation.fit_bead_diagnostics, smappy.calibrate.validation.fit_paired_bead_diagnostics, smappy.calibrate.qt_gui.CalibrationWindow]
+covers: [smappy.calibrate.core.detect_beads, smappy.calibrate.dual.detect_bead_layout, smappy.calibrate.dual.bead_registration, smappy.calibrate.transform.detect_layout, smappy.calibrate.core.collect_beads, smappy.calibrate.core.estimate_shift, smappy.calibrate.core.subvoxel_peak, smappy.calibrate.core.shift_volume, smappy.calibrate.core.robust_shape_error, smappy.calibrate.core.build_calibration, smappy.calibrate.core._single_model, smappy.calibrate.core.spline_coefficients, smappy.calibrate.core.positive_pair_models, smappy.calibrate.core.FOCAL_PLANES, smappy.calibrate.dual.collect_dual_beads, smappy.calibrate.dual.fit_dual_transform, smappy.calibrate.dual.robust_projective, smappy.calibrate.dual.refine_projective, smappy.calibrate.dual.build_dual_calibration, smappy.calibrate.validation.fit_bead_diagnostics, smappy.calibrate.validation.fit_paired_bead_diagnostics, smappy.calibrate.qt_gui.CalibrationWindow]
 ---
 
 ## What it does
@@ -44,8 +44,10 @@ What it needs:
   saturated.
 * **A known z step.**  It is read from the acquisition's metadata; if the
   file does not say, type it into *z step*.
-* **For dual colour**, broadband beads that are visible in both halves, and
-  the layout of the split (*layout*, *main channel*).  With the camera ROI in
+* **For dual colour**, broadband beads that are visible in both halves.  How
+  the chip is split -- left and right or up and down, mirrored or not -- is
+  found from the beads; it can also be chosen (*layout*, *main channel*).
+  With the camera ROI in
   the file's metadata the transformation is in chip coordinates; without it
   the calibration is *ROI-local* and only applies to data of exactly the same
   image size (a warning says so).
@@ -60,7 +62,8 @@ section of the Localize tab (whose *mode* it opens in), or on its own as
 import warnings
 from smappy.calibrate.core import (CalibrationSettings, build_calibration, collect_beads,
                                    detect_beads, FOCAL_PLANES)
-from smappy.calibrate.dual import DualColorSettings, calibrate_dual
+from dataclasses import replace
+from smappy.calibrate.dual import DualColorSettings, bead_registration, calibrate_dual
 from smappy.calibrate.input import BeadStack
 from smappy.calibrate.validation import fit_bead_diagnostics
 from smappy.simulate import bead_stacks, dual_bead_stacks
@@ -77,8 +80,9 @@ dstacks, dz_objective = dual_bead_stacks(1, seed=0, dz_nm=70.0, z_range_nm=(-700
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")        # no camera ROI in a simulation: ROI-local
     dual = calibrate_dual([BeadStack(dstacks[0].astype(np.float32), dz_objective)],
-                          DualColorSettings(layout="up-down", main_channel="upper", dz_nm=70.0,
-                                            roi_size=17, smooth_z_nm=40.0))
+                          DualColorSettings(registration=replace(bead_registration(),
+                                                                 layout="up-down"),
+                                            dz_nm=70.0, roi_size=17, smooth_z_nm=40.0))
 ```
 
 **1. Find the beads.**  The stack is collapsed to its brightest value per
@@ -206,6 +210,14 @@ for ax in (left, right):
 *split position* into the main half (*main channel*) and the other, the
 secondary.  Steps 1 and 2 run in each half on its own.  Then:
 
+* **The layout**, unless it was chosen.  The beads are found over the whole
+  frame, as in step 1, and the layout is read from where they are, the way
+  [Calibrate transform](plugin:Analysis/Register/Calibrate transform) reads it
+  from localizations: a bead and its partner in the other half are always
+  the same distance apart (or, for a mirrored half, always add up to the
+  same position along the mirrored axis), so among every pair of beads in a
+  stack that one value comes up once per bead, and the layout it belongs to
+  wins.  The status bar says which layout was found.
 * **Pairs.**  Each bead is located precisely by a 2D Gaussian fit to its
   eleven central planes.  After undoing the declared layout (the split, and
   a mirror if the layout says *mirrored*), the most common offset between
@@ -243,7 +255,7 @@ left.legend(fontsize=7, frameon=False, loc="center right")
 fig.subplots_adjust(wspace=0.35)
 used = dual.transform_accepted
 delta = dual.transform_fit.dxdy
-limit = dual.beads.settings.transform_axis_limit_px
+limit = dual.beads.settings.registration.transform_axis_limit_px
 right.scatter(*delta[used].T, s=14, color="#2ca02c")
 right.plot([-limit, limit, limit, -limit, -limit], [-limit, -limit, limit, limit, -limit],
            "k--", lw=0.7)
@@ -359,8 +371,23 @@ that fails or lands more than 4 pixels off rejects the bead.  The offset
 between the halves is voted for in a histogram of 2-pixel bins of every
 difference between a main-half and a secondary-half bead of the same stack,
 smoothed; pairs are mutual nearest neighbours within 12 pixels of each other
-after that offset, and never cross stacks.  Fewer than *min pairs* stops the
-calibration.
+after that offset (*coarse matching*, 12 pixels by default), and never cross
+stacks.  Fewer than *minimum pairs* stops the calibration.
+
+**Dual colour: the layout.**  On *detect*, the beads of every stack are found
+over the whole frame (step 1, both halves at once) and handed to the vote of
+the movie registration (`transform.detect_layout`), each stack standing for
+one frame.  Every ordered pair of beads in a stack gives a vector, taken
+three ways: the plain difference, and the difference with the x or the y
+coordinate summed instead -- the sum is what is constant for a pair mirrored
+along that axis.  Each is histogrammed in *vote bin* pixels and scored by a
+difference of Gaussians *vote smoothing* wide, and the sharpest peak names
+the mirror (if any); the split runs across the axis the partners lie
+furthest apart along.  The main channel on auto is then the left or the
+upper half.  Detection needs the beads where a slide puts them: a regular
+grid of beads centred in its half is its own mirror image, so from positions
+alone it looks mirrored and not mirrored alike -- choose the layout for such
+a sample.
 
 **Dual colour: the transformation.**  In homogeneous coordinates the map is
 $\mathbf{x}_m \propto H\, \mathbf{x}_s$ ($H$ a $3\times3$ matrix, secondary to
@@ -368,7 +395,7 @@ main, in chip pixels).  Round one: RANSAC
 ([Fischler & Bolles 1981](https://doi.org/10.1145/358669.358692)) -- 500
 draws of four pairs (a fixed seed, so it is reproducible), each solved by the
 normalised direct linear transform, keeping the draw with the most pairs
-within *RANSAC radius*; the inlier set is refitted until it stops changing,
+within *outlier threshold*; the inlier set is refitted until it stops changing,
 and then refined by least squares on the reprojection error in the main half
 with the robust soft-L1 loss
 
@@ -504,25 +531,52 @@ centred on the median; auto disables the check.
 The camera value at which a bead counts as saturated; auto takes the file's
 integer maximum (65535 for 16-bit).
 
+### registration
+The split between the halves and how the beads are paired: the same
+settings as a movie registration's
+([Calibrate transform](plugin:Analysis/Register/Calibrate transform)), with a
+bead slide's defaults -- tens of bright pairs rather than thousands of
+localizations, so fewer pairs are enough and the screen is tighter.  The
+settings a bead calibration does not use (the second matching round, the
+polynomial) are not shown.
+
 ### layout
 How the camera chip is split: *right-left* or *up-down*, and whether the
 secondary half is mirrored along the split (an image splitter with an odd
-number of mirrors in one path).  Look at a bead frame: if the pattern of
+number of mirrors in one path).  *detect* finds it from the beads, and the
+status bar says what it found.  Choose it by hand if the beads lie on a
+regular grid, or to be sure: look at a bead frame, and if the pattern of
 beads in one half is the other's mirror image, choose a *mirrored* layout.
 
 ### main channel
 Which half is the reference that positions are reported in.  It must match
-the layout: *left*/*right* for right-left, *upper*/*lower* for up-down.
+the layout: *left*/*right* for right-left, *upper*/*lower* for up-down;
+auto is the left or the upper half.
 
 ### split position
-The first pixel of the second half; auto is the middle of the image.
+The first pixel of the second half, in the bead images' own pixels; auto is
+the middle of the image.
 
-### min pairs
+### coarse matching
+How far a bead may lie from where the most common offset between the halves
+puts its partner.  It has to cover the rotation and scale between the
+halves across the field; beads are at least *min distance* apart, so it can
+be generous without pairing the wrong ones.
+
+### vote bin
+Only used to detect the layout.  Bead positions are known to a pixel or so;
+the default suits them.
+
+### vote smoothing
+Only used to detect the layout; the width over which the vote's peak is
+told apart from its background.
+
+### minimum pairs
 The fewest bead pairs the transformation may be fitted from; at least 4,
 which is what a projective map needs.  More pairs, spread over the field,
 make the map reliable towards the edges.
 
-### RANSAC radius
+### outlier threshold
 The first round's tolerance, in pixels.  It only has to separate right
 pairings from wrong ones, so it can be generous.
 

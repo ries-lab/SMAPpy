@@ -94,11 +94,16 @@ class Split:
 
 def make_split(shape, dual: dict, origin=(0, 0)) -> Split:
     """The `Split` of a frame of ``shape`` for a profile's ``dual`` section."""
-    from ..calibrate.dual import DualColorSettings
-    settings = DualColorSettings(layout=dual.get("layout", "up-down mirrored"),
-                                 main_channel=dual.get("main_channel", "upper"),
-                                 split_position=dual.get("split_position"))
+    from ..calibrate.dual import LAYOUTS, RegisterSettings
+    settings = RegisterSettings(layout=dual.get("layout", "up-down mirrored"),
+                                main_channel=dual.get("main_channel", "upper"),
+                                split_position=dual.get("split_position"))
     settings.validate()
+    # uiPSF is handed the halves already cut, so the profile has to say how
+    if settings.layout not in LAYOUTS:
+        raise ValueError(f"a microscope profile names its layout, one of {LAYOUTS}")
+    if settings.main_channel == "auto":
+        settings.main_channel = "left" if "right-left" in settings.layout else "upper"
     shape = tuple(int(n) for n in shape[-2:])
     axis = 1 if "right-left" in settings.layout else 0
     split = settings.split_position or shape[axis] // 2

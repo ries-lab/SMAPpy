@@ -55,7 +55,8 @@ needs no bead calibration at all.
 ```figure-setup
 import warnings
 from scipy.special import erf
-from smappy.calibrate.dual import DualColorSettings, calibrate_dual
+from dataclasses import replace
+from smappy.calibrate.dual import DualColorSettings, bead_registration, calibrate_dual
 from smappy.calibrate.input import BeadStack
 from smappy.io.calibration import evaluate_spline
 from smappy.plugins.fit import DualModelSettings
@@ -67,8 +68,10 @@ stacks, z_objective = dual_bead_stacks(1, seed=0, dz_nm=50.0, z_range_nm=(-700.0
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")        # no camera ROI in a simulation: ROI-local
     cal = calibrate_dual([BeadStack(stacks[0].astype(np.float32), z_objective)],
-                         DualColorSettings(layout="up-down", main_channel="upper", dz_nm=50.0,
-                                           roi_size=17, smooth_z_nm=40.0)).calibration
+                         DualColorSettings(registration=replace(bead_registration(),
+                                                                layout="up-down"),
+                                           dz_nm=50.0, roi_size=17,
+                                           smooth_z_nm=40.0)).calibration
 rng = np.random.default_rng(1)
 
 def true_psf(z_nm, x0, y0, sigma_nm, size=13):

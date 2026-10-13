@@ -1,5 +1,6 @@
 """Validate split-frame calibration and an acquisition holdout without editing raw data."""
 import argparse
+from dataclasses import replace
 import json
 from pathlib import Path
 import sys
@@ -7,7 +8,8 @@ import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'src'))
 import numpy as np
-from smappy.calibrate.dual import (DualColorSettings, collect_dual_beads, build_dual_calibration,
+from smappy.calibrate.dual import (DualColorSettings, bead_registration, collect_dual_beads,
+                                   build_dual_calibration,
                                    channel_result, load_dual_color_calibration, map_points,
                                    fit_dual_transform)
 from smappy.calibrate.validation import fit_bead_diagnostics
@@ -32,7 +34,8 @@ def transformation_holdouts(beads):
             train = eligible & ~test
             fold = {'label': int(label), 'heldout_pair_ids': np.flatnonzero(test).tolist()}
             try:
-                fitted = fit_dual_transform(beads.secondary_points[train], beads.main_points[train], beads.settings)
+                fitted = fit_dual_transform(beads.secondary_points[train], beads.main_points[train],
+                                            beads.settings.registration)
                 delta = map_points(fitted.transformation, beads.secondary_points[test])-beads.main_points[test]
                 errors = np.linalg.norm(delta, axis=1)
                 fold.update(training_pairs=int(fitted.accepted.sum()), dxdy_px=delta.tolist(),
@@ -58,7 +61,8 @@ def main():
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
-    beads = collect_dual_beads(args.path, DualColorSettings(layout=args.layout, main_channel=args.main_channel))
+    beads = collect_dual_beads(args.path, DualColorSettings(registration=replace(
+        bead_registration(), layout=args.layout, main_channel=args.main_channel)))
     def progress(message):
         if 'pass' in message or 'Transformation:' in message:
             print(message, flush=True)

@@ -5,7 +5,7 @@ import pytest
 
 from smappy.calibrate.dual import (DualColorSettings, LAYOUTS, map_points, fit_projective,
     robust_projective, calibrate_dual, build_dual_calibration, load_dual_color_calibration,
-    fit_dual_transform, collect_dual_beads)
+    fit_dual_transform, collect_dual_beads, bead_registration)
 from smappy.calibrate.input import BeadStack
 from smappy.calibrate.core import positive_pair_models, estimate_pair_shift
 from smappy.io.calibration import load_spline_calibration, evaluate_spline
@@ -23,7 +23,8 @@ def test_projective_recovery_outliers_and_degeneracy():
     with pytest.raises(ValueError, match='collinear'):
         fit_projective(np.c_[np.arange(8), np.arange(8)], np.c_[np.arange(8), np.arange(8)])
     with pytest.raises(ValueError):
-        DualColorSettings(min_pairs=3).validate()
+        DualColorSettings(registration=replace(bead_registration(),
+                                               min_pairs=3)).validate()
 
 
 def test_two_round_componentwise_screen_and_geometric_weights():
@@ -32,7 +33,7 @@ def test_two_round_componentwise_screen_and_geometric_weights():
     truth = np.array([[1.01, .02, 17], [-.01, -.98, 430], [.0001, -.0001, 1.]])
     target = map_points(truth, source)+rng.normal(0, .005, source.shape)
     target[-3:] += [[.4, 0], [0, -.4], [.13, .13]]
-    s = DualColorSettings()
+    s = bead_registration()
     fitted = fit_dual_transform(source, target, s)
     assert fitted.round1_inliers.all()  # inside the coarse 2-pixel radius
     assert not fitted.accepted[-3:-1].any()
@@ -66,7 +67,7 @@ def test_shape_outliers_do_not_refit_or_reduce_transformation_support(tmp_path):
     result = build_dual_calibration(beads)
     assert result.transform_accepted.all()
     assert not result.accepted[[0, 8]].any()
-    assert result.accepted.sum() < settings.min_pairs  # PSF minimum is independent
+    assert result.accepted.sum() < settings.registration.min_pairs  # PSF minimum is independent
     np.testing.assert_array_equal(result.calibration.transformation, baseline.calibration.transformation)
     coverage = result.calibration.parameters['coverage_area_px2']
     assert coverage['eligible'] == coverage['transformation']
@@ -123,10 +124,77 @@ def synthetic(layout, main):
                 else:
                     py = 439-cy if mirrored else cy+220
             images[:, py-11:py+12, px-11:px+12] += volume.astype(np.float32)
-    s = DualColorSettings(layout=layout, main_channel=main, roi_size=15, padding=4,
+    s = DualColorSettings(registration=replace(bead_registration(), layout=layout,
+                                               main_channel=main), roi_size=15, padding=4,
             max_xy_shift_px=2, max_z_shift_nm=100, smooth_z_nm=0,
             rejection_mad=10, registration_iterations=1, brightness_range=None)
     return BeadStack(images, np.arange(41)*20., roi=(91, 0, shape[1], shape[0])), s
+
+
+def scattered(layout, main, n=12, seed=0):
+    """`synthetic`, with the beads where a slide puts them: anywhere.
+
+    A grid is no test of finding the layout.  Three beads a row at 42, 108
+    and 175 px in a 220 px half sit within two pixels of their own mirror
+    image, so from where the beads are, the halves look mirrored and not
+    mirrored alike -- which a slide never does.
+    """
+    rng = np.random.default_rng(seed)
+    horizontal = 'right-left' in layout
+    mirrored = 'mirrored' in layout
+    shape = (200, 400) if horizontal else (400, 200)
+    images = np.full((41, *shape), 50., dtype=np.float32)
+    z, y, x = np.mgrid[:41, -11:12, -11:12]
+    centres = []
+    while len(centres) < n:
+        here = rng.uniform(20, 180, 2)
+        if all(np.hypot(*(here - c)) > 30 for c in centres):
+            centres.append(here)
+    for cx, cy in np.rint(centres).astype(int):
+        for ch in range(2):
+            sigma_x = 1.4+.002*(z-20-3*ch)**2
+            sigma_y = 1.6+.001*(z-18-3*ch)**2
+            volume = 1200*np.exp(-.5*((x/sigma_x)**2+(y/sigma_y)**2)) / (sigma_x*sigma_y)
+            px, py = cx, cy
+            if ch:
+                # the second half sees the field one pixel further on, as no
+                # splitter is aligned to the pixel
+                if horizontal:
+                    px, py = (399-cx if mirrored else cx+200), cy+1
+                else:
+                    px, py = cx+1, (399-cy if mirrored else cy+200)
+            images[:, py-11:py+12, px-11:px+12] += volume.astype(np.float32)
+    s = DualColorSettings(registration=replace(bead_registration(), layout=layout,
+                                               main_channel=main), roi_size=15, padding=4,
+            max_xy_shift_px=2, max_z_shift_nm=100, smooth_z_nm=0,
+            rejection_mad=10, registration_iterations=1, brightness_range=None)
+    return BeadStack(images, np.arange(41)*20., roi=(0, 0, shape[1], shape[0])), s
+
+
+@pytest.mark.parametrize('layout', LAYOUTS)
+def test_the_layout_is_found_from_the_beads_and_calibrates_as_if_it_were_chosen(layout):
+    """*auto* votes on the beads as a movie registration votes on its
+    localizations, so a left-right splitter needs nothing chosen by hand --
+    and the calibration is the one the layout chosen by hand gives."""
+    main = 'right' if 'right-left' in layout else 'lower'
+    stack, given = scattered(layout, main)
+    auto = replace(given, registration=replace(given.registration, layout='auto',
+                                               main_channel='auto'))
+    said = []
+    detected = calibrate_dual([stack], auto, progress=said.append)
+    assert detected.calibration.geometry['layout'] == layout
+    assert any(f'Layout: {layout}, detected' in line for line in said)
+    # main channel auto: the left or upper half
+    assert detected.calibration.geometry['main_channel'] == (
+        'left' if 'right-left' in layout else 'upper')
+    chosen = calibrate_dual([stack], replace(given, registration=replace(
+        given.registration, main_channel=detected.calibration.geometry['main_channel'])))
+    np.testing.assert_array_equal(detected.calibration.transformation,
+                                  chosen.calibration.transformation)
+    np.testing.assert_array_equal(detected.calibration.main.coeff,
+                                  chosen.calibration.main.coeff)
+    # what was detected is what the beads carry, for a rebuild and the pages
+    assert detected.beads.settings.registration.layout == layout
 
 
 @pytest.mark.parametrize('layout', LAYOUTS)
@@ -171,7 +239,8 @@ def test_all_layouts_shared_z_ratio_rebuild_and_roundtrip(layout, tmp_path):
 def test_roi_fallback_warning_shape_error_and_unequal_split():
     stack, settings = synthetic('up-down', 'upper')
     stack = replace(stack, roi=None)
-    settings = replace(settings, split_position=219)
+    settings = replace(settings, registration=replace(settings.registration,
+                                                      split_position=219))
     with pytest.warns(UserWarning, match='Missing camera ROI'):
         result = calibrate_dual([stack], settings)
     assert result.calibration.geometry['coordinate_system'] == 'roi-local'
@@ -215,7 +284,7 @@ def test_a_tiny_axis_limit_is_reported_as_such_not_as_an_optimizer_failure():
     source = rng.uniform(0, 400, (60, 2))
     truth = np.array([[1.0, .01, 5], [-.01, 1.0, -3], [0, 0, 1.]])
     target = map_points(truth, source) + rng.normal(0, .004, source.shape)
-    settings = DualColorSettings()
+    settings = bead_registration()
     for limit in (1e-7, 1e-5, 1e-4):
         with pytest.raises(ValueError, match='dx/dy limit'):
             fit_dual_transform(source, target, replace(settings,
@@ -267,7 +336,9 @@ def dim_secondary():
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")            # ROI-local: no camera ROI
         return calibrate_dual([BeadStack(stacks[0].astype(np.float32), z)],
-                              DualColorSettings(layout="up-down", main_channel="upper",
+                              DualColorSettings(registration=replace(
+                                                    bead_registration(), layout="up-down",
+                                                    main_channel="upper"),
                                                 dz_nm=50.0, roi_size=17,
                                                 smooth_z_nm=40.0)).calibration
 

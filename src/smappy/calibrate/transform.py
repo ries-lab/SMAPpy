@@ -52,10 +52,9 @@ import numpy as np
 from scipy import ndimage
 from scipy.spatial import cKDTree
 
-from .dual import (LAYOUTS, ChannelTransform, Polynomial, fit_dual_transform,
-                   map_points, n_polynomial_terms, point_coverage_area,
-                   polynomial_terms)
-from ..params import param
+from .dual import (ChannelTransform, Polynomial, RegisterSettings,
+                   fit_dual_transform, map_points, n_polynomial_terms,
+                   point_coverage_area, polynomial_terms)
 
 FORMAT = 'smappy-channel-transform'
 VERSION = 2
@@ -103,152 +102,6 @@ MIN_POLYNOMIAL_COVERAGE = 0.5
 # cleanly: a distorted field keeps nearly all of them, a contaminated one a
 # third.
 MIN_CLEAN_FRACTION = 0.6
-
-
-@dataclass
-class RegisterSettings:
-    """How hard to look, and what is already known.
-
-    Everything has a default that works on a ratiometric splitter; ``layout``
-    and ``split_position`` are the two worth setting by hand, and only when
-    the automatic answer is wrong.
-    """
-    layout: str = param('auto', label="layout",
-                        choices=(("auto", "detect"),
-                                 "right-left",
-                                 "right-left mirrored",
-                                 "up-down",
-                                 "up-down mirrored"),
-                        help="how the chip is split; detect votes for all "
-                             "of them and keeps the sharpest")
-    main_channel: str = param('auto', label="main channel",
-                              choices=(("auto", "the left or upper half"),
-                                       "left",
-                                       "right",
-                                       "upper",
-                                       "lower"),
-                              help="the half the other is mapped onto, the "
-                                   "reference")
-    # 'projective' is eight coefficients and extrapolates gracefully;
-    # 'polynomial' is twenty and describes a distorted field far better where
-    # the pairs reach, and not at all where they do not.  See `Polynomial`.
-    model: str = param('projective', label="transformation",
-                       choices=(("projective", "projective (8 coefficients)"),
-                                ("polynomial", "polynomial, order 3 (20)")),
-                       help="projective extrapolates gracefully; the "
-                            "polynomial describes a distorted field far "
-                            "better where the pairs reach, and is refused "
-                            "when they do not reach far enough")
-    split_position: Optional[int] = param(None, label="split position",
-                                          unit="px", min=1,
-                                          help="auto: measured from the "
-                                               "pairs, in chip coordinates")
-    # the vote
-    vote_bin_px: float = param(2.0, label="vote bin", unit="px", min=0.1,
-                               advanced=True,
-                               help="the bin of the histogram of pair "
-                                    "vectors the offset is voted in")
-    vote_smooth_px: float = param(4.0, label="vote smoothing", unit="px",
-                                  min=0.1, advanced=True,
-                                  help="the width of the "
-                                       "difference-of-Gaussians filter the "
-                                       "vote is scored with")
-    # Pair and refit twice, as in SMAP's ``RegisterLocs2``: coarse, then over
-    # clean matches only.  The coarse tolerance has to cover the rotation the
-    # vote cannot see -- 3 degrees over 512 px is 27 px -- and the fine one is
-    # the registration accuracy being claimed.  A third, intermediate stage
-    # was measured and changes nothing: once the coarse round has the
-    # transformation to a fifth of a pixel, the tight round keeps the same
-    # pairs whether or not it was approached gradually.  Dropping the tight
-    # round costs a factor of three to seven, so 0 -- which skips it -- is for
-    # comparison and not for use.
-    coarse_tolerance_px: float = param(20.0, label="coarse matching",
-                                       unit="px", min=0.1,
-                                       help="first pass; must cover the "
-                                            "rotation between the channels "
-                                            "-- 3 degrees over 512 px is 27 "
-                                            "px")
-    # How close a pair must be, in the reference channel, once the coarse
-    # round has placed the two channels on top of each other.  One pixel is
-    # roughly seven times the residual a healthy registration achieves
-    # (~0.13 px measured), so it is loose enough not to shave the edges of
-    # the field and tight enough to keep chance partners out at SMLM
-    # densities.  It is a floor rather than a fixed value: the tight round
-    # widens to whatever the coarse round's own misfit says it must be, and
-    # tightening past that is what silently strips the periphery.
-    fine_tolerance_px: float = param(1.0, label="fine matching", unit="px",
-                                     min=0,
-                                     help="second pass over clean matches "
-                                          "only, which is where the "
-                                          "accuracy comes from; 0 skips it")
-    # On, but guarded: see MIN_CLEAN_FRACTION.  It protects the edges of a
-    # distorted field, where the projective fit misses by more than any fixed
-    # tolerance allows; the guard is what stops it misfiring on a dense
-    # dataset, where the coarse round's large residual means contamination
-    # rather than distortion.
-    adapt_fine_tolerance: bool = param(True, label="adapt fine matching",
-                                       advanced=True,
-                                       help="widen the fine matching to "
-                                            "what the coarse fit misses its "
-                                            "own pairs by, when those pairs "
-                                            "are clean")
-
-    @property
-    def tolerances(self) -> Tuple[float, ...]:
-        if self.fine_tolerance_px <= 0:
-            return (self.coarse_tolerance_px,)
-        return (self.coarse_tolerance_px, self.fine_tolerance_px)
-    min_pairs: int = param(20, label="minimum pairs", min=4, advanced=True,
-                           help="fewer pairs than this and the registration "
-                                "refuses")
-    max_pairs: int = param(20000, label="pairs used in the fit", min=4,
-                           advanced=True,
-                           help="at most this many pairs, drawn at random, "
-                                "go into each fit")
-    reprojection_threshold_px: float = param(1.0, label="outlier threshold",
-                                             unit="px", min=0.01,
-                                             advanced=True,
-                                             help="the robust (RANSAC) "
-                                                  "fit's inlier radius, at "
-                                                  "least; it widens with "
-                                                  "the matching tolerance")
-    transform_axis_limit_px: float = param(0.5, label="dx/dy limit", unit="px",
-                                           min=0.01, advanced=True,
-                                           help="the largest |dx| or |dy| a "
-                                                "pair may keep after the "
-                                                "first fit, at least; it "
-                                                "widens with the matching "
-                                                "tolerance")
-
-    def validate(self):
-        if self.layout != 'auto' and self.layout not in LAYOUTS:
-            raise ValueError(f'layout must be auto or one of {LAYOUTS}')
-        if self.model not in ('projective', 'polynomial'):
-            raise ValueError("model must be 'projective' or 'polynomial'")
-        if self.main_channel != 'auto':
-            # with the layout still to be detected, any of the four names is
-            # allowed here and the one that turns out not to fit the detected
-            # split axis is refused later, by name
-            halves = (('left', 'right', 'upper', 'lower') if self.layout == 'auto'
-                      else ('left', 'right') if 'right-left' in self.layout
-                      else ('upper', 'lower'))
-            if self.main_channel not in halves:
-                raise ValueError('main channel must match the split layout')
-        if self.split_position is not None and self.split_position < 1:
-            raise ValueError('split_position must be a positive integer or None')
-        if self.vote_bin_px <= 0 or self.vote_smooth_px <= 0:
-            raise ValueError('the vote bin and smoothing must be positive')
-        if self.coarse_tolerance_px <= 0:
-            raise ValueError('the coarse matching tolerance must be positive')
-        if self.fine_tolerance_px > self.coarse_tolerance_px:
-            raise ValueError('the fine matching tolerance must not exceed the '
-                             'coarse one; the second round tightens the first')
-        if self.min_pairs < 4:
-            raise ValueError('min_pairs must be at least four')
-        if self.max_pairs < self.min_pairs:
-            raise ValueError('max_pairs cannot be below min_pairs')
-        if self.reprojection_threshold_px <= 0 or self.transform_axis_limit_px <= 0:
-            raise ValueError('the reprojection and dx/dy limits must be positive')
 
 
 @dataclass
@@ -564,9 +417,36 @@ def _split_estimate(x, y, frame, vote: Vote, forward, coord: int, tolerance: flo
     return (below + above) / 2, below, above, 'measured from the pairs'
 
 
+def _layout_name(vote: Vote, coord: int) -> str:
+    return (('right-left' if coord == 0 else 'up-down')
+            + (' mirrored' if vote.mirrored else ''))
+
+
+def detect_layout(x, y, frame, settings: RegisterSettings = None):
+    """How the chip is split, from where things are: ``(layout, vote)``.
+
+    The first step of `register_channels` on its own, for a caller that pairs
+    its points in its own way afterwards -- a bead calibration, whose beads
+    are paired by `dual.collect_dual_beads` once the layout is known.  Every
+    feature space is voted in and the sharpest peak names the mirror, if any;
+    the axis the channels lie apart along names the split.
+
+    It needs the points to be where a sample puts them.  A regular array
+    centred in its half -- a simulated bead grid -- is its own mirror image,
+    and then from positions alone the halves look mirrored and not mirrored
+    alike; only the PSFs, which this does not look at, could tell.
+    """
+    s = replace(settings or RegisterSettings(), layout='auto')
+    x, y, frame = (np.asarray(v) for v in (x, y, frame))
+    order = np.argsort(frame, kind='stable')
+    x, y, frame = x[order].astype(float), y[order].astype(float), frame[order]
+    vote = find_alignment(x, y, frame, s)
+    extent = np.array([x.max() - x.min(), y.max() - y.min()])
+    return _layout_name(vote, _split_axis_from(vote, extent)), vote
+
+
 def _geometry(vote, coord, split, main_channel, image_shape, roi) -> dict:
-    layout = ('right-left' if coord == 0 else 'up-down') + \
-             (' mirrored' if vote.mirrored else '')
+    layout = _layout_name(vote, coord)
     halves = ('left', 'right') if coord == 0 else ('upper', 'lower')
     if main_channel == 'auto':
         main_channel = halves[0]
