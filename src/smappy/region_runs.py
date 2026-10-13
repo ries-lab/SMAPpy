@@ -143,12 +143,57 @@ class ColumnRegions:
     def __len__(self) -> int:
         return len(self.ids)
 
+    @property
+    def where(self) -> str:
+        """What the regions are called in a run's line."""
+        return f"{self.column} regions"
+
     def region_ids(self) -> List[str]:
         return [str(int(i)) for i in self.ids]
 
-    def inputs(self) -> Dict[str, Any]:
-        """What every region's results depend on (see the module docstring)."""
+    def region(self, k: int):
+        """A region of an id column has no shape: its rows are its id's."""
+        return None
+
+    def inputs(self, k: Optional[int] = None) -> Dict[str, Any]:
+        """What every region's results depend on (see the module docstring):
+        the same for all of them, so ``k`` is not read."""
         return column_inputs(self.locs, self.column, self.layer, self.session)
+
+    def signature(self, k: Optional[int] = None) -> str:
+        """The digest of `inputs`, shared by every region: one digest for
+        10^5 regions rather than 10^5."""
+        if getattr(self, "_signature", None) is None:
+            import json
+            from .roi_manager.core import digest, json_text
+            self._signature = digest(json.loads(json_text(self.inputs())))
+        return self._signature
+
+    def members(self) -> List[Tuple[str, np.ndarray]]:
+        """``(region id, rows)`` of every region (`region_members`)."""
+        return list(zip(self.region_ids(), self.rows))
+
+    def evaluate(self, steps: Sequence, report=None, stop=None, after=None,
+                 tag: bool = False, reuse: bool = True, chain: str = ""
+                 ) -> Tuple[Dict[str, RegionTable], int]:
+        """``steps`` once in each region (`evaluate_regions`), and how many
+        regions ran: what a block runs.  With a session the tables are kept
+        under the column (`Session.id_regions`), and what is there already
+        is what ``reuse`` reuses."""
+        before = (self.session.id_regions.get(self.column)
+                  if self.session is not None else None)
+        tables = evaluate_regions(self, steps, before, report=report, stop=stop,
+                                  reuse=reuse, after=after, tag=tag)
+        if self.session is not None:
+            self.session.id_regions[self.column] = tables
+            self.session.changed("rois")
+        return tables, max((len(t) for t in tables.values()), default=0)
+
+    def keep(self, tables: Dict[str, RegionTable]) -> None:
+        """Tables of regions inside these (a block in a block), kept beside
+        the steps' own."""
+        if self.session is not None:
+            self.session.id_regions.setdefault(self.column, {}).update(tables)
 
     def tables(self, k: int):
         """``(pinned, rows, layer, session)`` for region ``k``: every layer cut
@@ -215,9 +260,22 @@ class ContextRegions(ColumnRegions):
         self.ids, self.rows = split_ids(self.locs[column])
         self._grouped = {}
 
-    def inputs(self) -> Dict[str, Any]:
+    def inputs(self, k: Optional[int] = None) -> Dict[str, Any]:
         return {"rows": len(self.locs), "column": self.column,
                 "ids": _hash(np.ascontiguousarray(np.asarray(self.locs[self.column])))}
+
+    def evaluate(self, steps: Sequence, report=None, stop=None, after=None,
+                 tag: bool = False, reuse: bool = True, chain: str = ""
+                 ) -> Tuple[Dict[str, RegionTable], int]:
+        """Inside a region nothing is stored to reuse, the outer block's
+        progress is the one reported, and the rows are the region's table's,
+        not the real table's: so no reuse, no report and no tag."""
+        tables = evaluate_regions(self, steps, stop=stop, after=after, tag=False,
+                                  reuse=False)
+        return tables, max((len(t) for t in tables.values()), default=0)
+
+    def keep(self, tables: Dict[str, RegionTable]) -> None:
+        """Nothing: the outer block keeps its regions' tables."""
 
     def tables(self, k: int):
         from .plugins import Selection
@@ -235,6 +293,85 @@ class ContextRegions(ColumnRegions):
             pinned[self.layer] = {"ungrouped": (locs, Selection.all(len(rows))),
                                   "shows": "ungrouped"}
         return pinned, rows, self.layer, self.ctx.session
+
+
+class ROIRegions:
+    """The included ROIs of the ROI manager's project, as a block's regions:
+    `ColumnRegions`' interface, with each region's shape and a signature of
+    its own, since an ROI is moved, reshaped or excluded alone.  A run over
+    them is the project's (`ROIProject.evaluate`), which reuses what is
+    current ROI by ROI."""
+
+    where = "ROIs"
+
+    def __init__(self, project):
+        self.project = project
+        # in the order they were made, as the list shows them
+        self.ids = [i for i, roi in project.rois.items() if roi.use]
+
+    def __len__(self) -> int:
+        return len(self.ids)
+
+    def region_ids(self) -> List[str]:
+        return list(self.ids)
+
+    def region(self, k: int):
+        return self.project.region(self.project.rois[self.ids[k]])
+
+    def inputs(self, k: int) -> Dict[str, Any]:
+        return self.project.inputs(self.project.rois[self.ids[k]])
+
+    def signature(self, k: int) -> str:
+        import json
+        from .roi_manager.core import digest, json_text
+        return digest(json.loads(json_text(self.inputs(k))))
+
+    def tables(self, k: int):
+        """``(pinned, rows, layer, session)``: every layer cut to the ROI."""
+        roi = self.project.rois[self.ids[k]]
+        return self.project._region_tables(roi, self.region(k))
+
+    def members(self) -> List[Tuple[str, np.ndarray]]:
+        if not self.project.rois:
+            raise ValueError("there are no ROIs: find or draw some first")
+        return [(str(roi_id), np.asarray(self.tables(k)[1], dtype=np.int64))
+                for k, roi_id in enumerate(self.ids)]
+
+    def evaluate(self, steps: Sequence, report=None, stop=None, after=None,
+                 tag: bool = False, reuse: bool = True, chain: str = ""
+                 ) -> Tuple[Dict[str, RegionTable], int]:
+        if not self.ids:
+            raise ValueError("there are no ROIs to measure: find or draw some first")
+        project = self.project
+        run = project.evaluate(steps=steps, roi_ids=self.ids, reuse=reuse, chain=chain,
+                               report=report, stop=stop, after=after, tag=tag)
+        return ({s.label: project.tables[s.label] for s in steps
+                 if s.label in project.tables}, len(run["records"]))
+
+    def keep(self, tables: Dict[str, RegionTable]) -> None:
+        self.project.tables.update(tables)
+
+
+def regions_of(ctx, regions: str):
+    """What a block over ``regions`` repeats over, seen from ``ctx``: the
+    included ROIs (`ROIRegions`), the regions of an id column of the table
+    (`ColumnRegions`), or -- inside another block's region -- of the
+    region's table (`ContextRegions`).  Every caller that runs, times or
+    writes per region goes through this, so the three are told apart once."""
+    from .chain import BLOCK_ROIS
+    if regions == BLOCK_ROIS:
+        if ctx.per_region:
+            raise ValueError("a block over the ROIs cannot run inside another "
+                             "block's region: repeat over an id column there")
+        if ctx.rois is None:
+            raise ValueError("there is no ROI manager project to repeat over")
+        return ROIRegions(ctx.rois)
+    if ctx.per_region:
+        return ContextRegions(ctx, regions)
+    # the session's table, which is what a column's results are checked
+    # against (`region_results.is_current`); a script's context has only its own
+    return ColumnRegions(ctx.session, regions, ctx.layer,
+                         locs=ctx.locs if ctx.session is None else None)
 
 
 def column_inputs(locs: Localizations, column: str, layer: int = 0,
@@ -285,8 +422,7 @@ def _layer_inputs(lay) -> Dict[str, Any]:
 def evaluate_regions(source: ColumnRegions, steps: Sequence, tables: Optional[
         Dict[str, RegionTable]] = None, report: Optional[Callable[[str], None]] = None,
         tick: Optional[Callable[[int, int], None]] = None, stop=None,
-        reuse: bool = True, keep_figures: bool = False, after=None,
-        tag: bool = False) -> Dict[str, RegionTable]:
+        reuse: bool = True, after=None, tag: bool = False) -> Dict[str, RegionTable]:
     """Run ``steps`` (`roi_manager.pipeline.Step`s) once in each region of
     ``source``, a table per step by its label.
 
@@ -295,8 +431,8 @@ def evaluate_regions(source: ColumnRegions, steps: Sequence, tables: Optional[
     kept as it is, and only the others run.  A step that raises costs its
     own entry in that region, as for an ROI.  ``stop`` ends the run between
     regions, keeping what was measured; the regions not reached have no row.
-    ``keep_figures`` keeps each region's figure data (`Plugin.keep`) -- off
-    by default, since to look at clusters one makes ROIs of them.
+    No region keeps its figure data (`Plugin.keep`): an ROI is looked at one
+    by one and keeps it, but to look at clusters one makes ROIs of them.
 
     The steps of a region run in one `RegionScratch`, a new table handed on;
     so when one step must run, they all do -- a stored result of a step
@@ -304,11 +440,10 @@ def evaluate_regions(source: ColumnRegions, steps: Sequence, tables: Optional[
     scratch, original)`` is told each region's tables at the end, and
     ``tag`` gives them their rows (a block's write-back).
     """
-    import json
-    from .roi_manager.core import changes_table, digest, json_text
+    from .roi_manager.core import changes_table, digest
     tables = dict(tables or {})
-    inputs = json.loads(json_text(source.inputs()))
-    data = digest(inputs)
+    inputs = source.inputs()
+    data = source.signature()
     ids = source.region_ids()
     signatures, before = {}, []
     for step in steps:
@@ -332,7 +467,7 @@ def evaluate_regions(source: ColumnRegions, steps: Sequence, tables: Optional[
         scratch = RegionScratch(source.tables(k), None, region_id, tag=tag)
         original = scratch.locs
         for step in steps:
-            entry = _run_one(step, scratch, keep_figures)
+            entry = _run_one(step, scratch)
             entry["signature"] = signatures[step.label]
             tables[step.label].set(region_id, entry, step.as_record(), data)
         if after is not None:
@@ -341,13 +476,13 @@ def evaluate_regions(source: ColumnRegions, steps: Sequence, tables: Optional[
     return tables
 
 
-def _run_one(step, scratch, keep: bool = False) -> Dict[str, Any]:
+def _run_one(step, scratch) -> Dict[str, Any]:
     from .roi_manager.core import region_entry
     try:
         result = step.plugin.run(scratch.context(grouping=step.plugin.grouping),
                                  step.settings)
         scratch.apply(result, step.label)
-        return region_entry(result, step.plugin, keep)
+        return region_entry(result, step.plugin)
     except Exception as error:
         return {"error": f"{type(error).__name__}: {error}"}
 
@@ -360,7 +495,7 @@ ROW = "_row"        # the hidden column: which row of the real table a row is
 class RegionScratch:
     """One region's tables while the steps of a block run in it.
 
-    Starts as what `ROIProject._region_tables` or `ColumnRegions.tables` cut;
+    Starts as what a region source's ``tables(k)`` cut (`regions_of`);
     a step that hands back a new table (`Result.locs`) replaces the region's
     table for the steps after it -- each layer's filter applied to it again,
     the grouped table dropped, since a new table has not been linked.  With
@@ -547,23 +682,9 @@ VALUE_RULES = ("last", "first", "mean")
 def region_members(ctx, regions: str) -> List[Tuple[str, np.ndarray]]:
     """``(region id, rows of ctx.locs)`` of every region: the included ROIs,
     in the order they were made, or the regions of the id column
-    ``regions``.  Membership is the region alone, as when a block runs."""
-    from .chain import BLOCK_ROIS
-    if regions == BLOCK_ROIS:
-        project = ctx.rois
-        if project is None or not project.rois:
-            raise ValueError("there are no ROIs: find or draw some first")
-        out = []
-        for roi_id, roi in project.rois.items():
-            if roi.use:
-                _, rows, _, _ = project._region_tables(roi, project.region(roi))
-                out.append((str(roi_id), np.asarray(rows, dtype=np.int64)))
-        return out
-    if regions not in ctx.locs:
-        raise ValueError(f"the table has no {regions!r}: it has "
-                         f"{', '.join(sorted(ctx.locs.keys()))}")
-    ids, rows = split_ids(ctx.locs[regions])
-    return [(str(int(i)), r) for i, r in zip(ids, rows)]
+    ``regions`` (`regions_of`).  Membership is the region alone, as when a
+    block runs."""
+    return regions_of(ctx, regions).members()
 
 
 def values_onto(n: int, members: Sequence[Tuple[str, np.ndarray]],

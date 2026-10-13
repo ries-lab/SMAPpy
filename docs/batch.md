@@ -79,8 +79,7 @@ steps:
     regions: rois               # rois, or an id column such as cluster_id
     write_back: [corner]        # optional: columns merged into the table
     write_values: [n_corners]   # optional: numbers, each region's onto its rows
-    merge: last                 # optional: last | first | mean | any
-    keep_figures: auto          # optional: auto | yes | no
+    merge: last                 # optional: last | first | mean | any (any: write_back only)
     steps:
       - plugin: Analysis/Measure/NPC Corners
         values: {}

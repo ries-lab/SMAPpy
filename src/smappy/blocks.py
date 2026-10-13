@@ -8,9 +8,10 @@ holding its steps and a chain runs it as a step like any other.
 What a run of a block does:
 
 * **The regions** are the included ROIs of the ROI manager, or the regions an
-  id column names (`region_runs.ColumnRegions`).  Inside another block's
-  region they are the regions of that region's table: blocks nest, and a
-  region narrows.
+  id column names; inside another block's region they are the regions of
+  that region's table: blocks nest, and a region narrows.  One adapter each
+  (`region_runs.regions_of`), with one interface, so running, timing and
+  writing per region are written once.
 * **In each region the steps run in one `region_runs.RegionScratch`**: a table
   a step hands back is the next step's table, and all of it is thrown away
   afterwards.  What stays is each step's numbers -- with the ROIs
@@ -47,15 +48,13 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from .chain import (BLOCK_ROIS, DEFAULT_GROUP, KEEP_FIGURES, Block, ChainError,
+from .chain import (BLOCK_ROIS, DEFAULT_GROUP, Block, ChainError,
                     ChainPlugin, Step, _flat_infos, plugin_settings, step_plugin,
                     step_settings_class)
 from .plugins import (Context, FormState, ParamInfo, PreflightQuestion,
                       Result, param, settings_values)
 from .region_runs import WriteBack, changed_columns
 
-# the block's own fields, before its steps', in its settings
-OWN = ("regions", "write_back", "write_values", "merge", "keep_figures")
 # how a block's time is estimated (docs/regions.md, "Necessary slow work is
 # timed"): the steps run in a few regions spread over the source, at most
 # this many or this long, and the median per step is multiplied out
@@ -161,34 +160,21 @@ class BlockPlugin(ChainPlugin):
         """Time the block's steps in a few of its regions, nothing kept
         (`SAMPLE_REGIONS`, `SAMPLE_SECONDS`), and multiply out.  None when
         there is nothing to time -- no regions, or inside another block."""
-        from .region_runs import ColumnRegions, RegionScratch, changed_columns
+        from .region_runs import RegionScratch, changed_columns, regions_of
         if ctx.per_region:
             return None
         steps = self.pipeline(settings)
         written = set(_columns(settings.write_back))
         unwritten: List[str] = []
-        if settings.regions == BLOCK_ROIS:
-            project = ctx.rois
-            if project is None:
-                return None
-            ids = [i for i, roi in project.rois.items() if roi.use]
+        try:
+            source = regions_of(ctx, settings.regions)
+        except ValueError:
+            return None                   # no ROI project, or no such column
+        n = len(source)
 
-            def cut(k):
-                roi = project.rois[ids[k]]
-                region = project.region(roi)
-                return RegionScratch(project._region_tables(roi, region), region, roi.id,
-                                     tag=True)
-            n = len(ids)
-        else:
-            if settings.regions not in ctx.locs:
-                return None
-            source = ColumnRegions(ctx.session, settings.regions, ctx.layer,
-                                   locs=ctx.locs)
-            n = len(source)
-
-            def cut(k):
-                return RegionScratch(source.tables(k), None, source.region_ids()[k],
-                                     tag=True)
+        def cut(k):
+            return RegionScratch(source.tables(k), source.region(k),
+                                 source.region_ids()[k], tag=True)
         if not n or not steps:
             return None
         picks = np.unique(np.linspace(0, n - 1, min(n, SAMPLE_REGIONS)).astype(int))
@@ -238,7 +224,6 @@ class BlockPlugin(ChainPlugin):
         block.write_back = _columns(settings.write_back)
         block.write_values = _columns(settings.write_values)
         block.merge = settings.merge
-        block.keep_figures = settings.keep_figures
         inner = {key: (step, cls) for key, step, cls in self.steps}
         steps = []
         for key, step in zip(self.block.keys(), self.block.steps):
@@ -258,14 +243,12 @@ class BlockPlugin(ChainPlugin):
     def pipeline(self, settings) -> list:
         """The steps as `roi_manager.pipeline.Step`s, ready to run."""
         from .roi_manager.pipeline import Step as Run
-        keep = {"yes": True, "no": False}.get(settings.keep_figures,
-                                              settings.regions == BLOCK_ROIS)
         out = []
         for label, (key, step, cls) in zip(self.labels(), self.steps):
             sub = getattr(settings, key)
             own = sub if isinstance(step, Block) else plugin_settings(cls, sub)
             out.append(Run(label=label, path=cls.path, plugin=cls(),
-                           settings=own, version=str(cls.version), keep=keep))
+                           settings=own, version=str(cls.version)))
         return out
 
     def run(self, ctx: Context, settings) -> Result:
@@ -298,23 +281,17 @@ class BlockPlugin(ChainPlugin):
                 for name, table in tables.items():
                     children.setdefault(f"{label}/{name}", []).append((region_id, table))
 
-        report = ctx.report
-        if ctx.per_region:
-            tables, n, total, where = self._run_within(ctx, settings, steps, after)
-        elif settings.regions == BLOCK_ROIS:
-            tables, n, total, where = self._run_rois(ctx, steps, after, bool(back),
-                                                     report)
-        else:
-            tables, n, total, where = self._run_column(ctx, settings, steps, after,
-                                                       bool(back), report)
+        from .region_runs import regions_of
+        source = regions_of(ctx, settings.regions)
+        tables, n = source.evaluate(steps, report=ctx.report, stop=ctx.stop,
+                                    after=after, tag=bool(back), reuse=not back,
+                                    chain=f"block {self.block.title()}")
+        tables = {s.label: tables[s.label] for s in steps if s.label in tables}
+        total, where = len(source), source.where
         stopped = ctx.stopped and n < total
         merged = _children(children)
-        if merged and not ctx.per_region:
-            # the inner blocks' tables, beside the steps' own
-            if settings.regions == BLOCK_ROIS and ctx.rois is not None:
-                ctx.rois.tables.update(merged)
-            elif ctx.session is not None:
-                ctx.session.id_regions.setdefault(settings.regions, {}).update(merged)
+        if merged:
+            source.keep(merged)       # the inner blocks' tables, beside the steps' own
         failed = sum(1 for t in tables.values() for e in t.errors if e)
         text = (f"stopped after {n} of {total} {where}" if stopped else f"{n} {where}"
                 ) + f", {len(steps)} step(s)"
@@ -371,52 +348,6 @@ class BlockPlugin(ChainPlugin):
                               {"source": f"block {self.block.title()}"})
         return out
 
-    # ------------------------------------------------------------ the three
-    def _run_rois(self, ctx, steps, after, writes, report):
-        project = ctx.rois
-        if project is None:
-            raise ValueError("there is no ROI manager project to repeat over")
-        ids = [i for i, roi in project.rois.items() if roi.use]
-        if not ids:
-            raise ValueError("there are no ROIs to measure: find or draw some first")
-        run = project.evaluate(steps=steps, roi_ids=ids, reuse=not writes,
-                               chain=f"block {self.block.title()}", report=report,
-                               stop=ctx.stop, after=after, tag=writes)
-        tables = {s.label: project.tables[s.label] for s in steps
-                  if s.label in project.tables}
-        return tables, len(run["records"]), len(ids), "ROIs"
-
-    def _run_column(self, ctx, settings, steps, after, writes, report):
-        from .region_runs import split_ids
-        session = ctx.session
-        if session is None:
-            from .region_runs import ColumnRegions, evaluate_regions
-            source = ColumnRegions(locs=ctx.locs, column=settings.regions)
-            tables = evaluate_regions(source, steps, report=report, stop=ctx.stop,
-                                      after=after, tag=writes,
-                                      keep_figures=steps[0].keep, reuse=not writes)
-        else:
-            tables = session.evaluate_regions(
-                settings.regions, steps, layer=ctx.layer, report=report,
-                stop=ctx.stop, reuse=not writes, keep_figures=steps[0].keep,
-                after=after, tag=writes)
-        n = max((len(t) for t in tables.values()), default=0)
-        total = len(split_ids((session.locs if session is not None else ctx.locs)
-                              [settings.regions])[0])
-        return ({s.label: tables[s.label] for s in steps}, n, total,
-                f"{settings.regions} regions")
-
-    def _run_within(self, ctx, settings, steps, after):
-        """Inside another block's region: the regions of this region's table."""
-        from .region_runs import ContextRegions, evaluate_regions
-        if settings.regions == BLOCK_ROIS:
-            raise ValueError("a block over the ROIs cannot run inside another "
-                             "block's region: repeat over an id column there")
-        source = ContextRegions(ctx, settings.regions)
-        tables = evaluate_regions(source, steps, stop=ctx.stop, after=after,
-                                  tag=False, keep_figures=False, reuse=False)
-        n = max((len(t) for t in tables.values()), default=0)
-        return tables, n, len(source), f"{settings.regions} regions"
 
 
 def block_class(block: Block) -> type:
@@ -446,11 +377,6 @@ def block_class(block: Block) -> type:
             block.merge, label="overlaps", choices=WriteBack.RULES, advanced=True,
             help="a row in two regions takes the last region's value, the "
                  "first's, their mean, or any (a flag written back)")),
-        ("keep_figures", str, param(
-            block.keep_figures, label="keep figure data", choices=KEEP_FIGURES,
-            advanced=True,
-            help="what each region keeps to draw its figures again; auto: "
-                 "for ROIs, not for an id column")),
     ]
     extras: Dict[str, ParamInfo] = {}
     for key, step in zip(keys, block.steps):

@@ -1196,18 +1196,14 @@ class Session:
         return self._id_regions
 
     def evaluate_regions(self, column: str, steps, layer: int = 0,
-                         report=None, tick=None, stop=None, reuse: bool = True,
-                         keep_figures: bool = False, after=None, tag: bool = False):
+                         report=None, stop=None, reuse: bool = True,
+                         after=None, tag: bool = False):
         """Run ``steps`` once in each region of the id ``column`` and keep
-        their tables under it (`region_runs.evaluate_regions`): the
+        their tables under it (`region_runs.ColumnRegions.evaluate`): the
         per-cluster counterpart of `ROIProject.evaluate`."""
-        from .region_runs import ColumnRegions, evaluate_regions
-        source = ColumnRegions(self, column, layer)
-        tables = evaluate_regions(source, steps, self.id_regions.get(column),
-                                  report=report, tick=tick, stop=stop, reuse=reuse,
-                                  keep_figures=keep_figures, after=after, tag=tag)
-        self.id_regions[column] = tables
-        self.changed("rois")
+        from .region_runs import ColumnRegions
+        tables, _ = ColumnRegions(self, column, layer).evaluate(
+            steps, report=report, stop=stop, reuse=reuse, after=after, tag=tag)
         return tables
 
     def roi_state(self) -> Optional[dict]:

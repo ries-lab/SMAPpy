@@ -99,16 +99,22 @@ def test_a_block_reads_back_from_its_file_as_it_was_written(tmp_path):
         Step(plugin="Test/Block/Count", label="first"),
         block({"plugin": "Test/Block/Tag"},
               block({"plugin": "Test/Block/Count"}, label="inner"),
-              write_back=["n_here"], merge="mean", keep_figures="no")])
+              write_back=["n_here"], merge="mean")])
     path = chain.write(written, tmp_path / "b.chain.yaml")
     back = chain.read(path)
     outer = back.steps[1]
     assert isinstance(outer, Block) and outer.title() == "each"
     assert outer.write_back == ["n_here"] and outer.merge == "mean"
-    assert outer.keep_figures == "no" and outer.regions == "cluster_id"
+    assert outer.regions == "cluster_id"
     assert isinstance(outer.steps[1], Block) and outer.steps[1].steps[0].plugin == \
         "Test/Block/Count"
     assert back.to_dict() == written.to_dict()
+
+
+def test_a_block_file_from_when_figures_were_a_choice_still_reads():
+    old = Block.from_dict({"block": "", "regions": "rois", "keep_figures": "yes",
+                           "steps": []})
+    assert old.regions == "rois" and "keep_figures" not in old.to_dict()
 
 
 def test_a_block_without_a_label_says_what_it_repeats_over():

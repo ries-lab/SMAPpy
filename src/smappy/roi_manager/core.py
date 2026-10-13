@@ -570,21 +570,13 @@ class ROIProject:
                     break
         if not block.steps:
             block = pipeline_module.default_block()
-        return self._for_rois(pipeline_module.block_steps(block))
+        return pipeline_module.block_steps(block)
 
     def block_steps(self):
         """The project's own block's steps, with no fallback: what the ROI
         manager measures the ROI being looked at with."""
         from . import pipeline as pipeline_module
-        return self._for_rois(pipeline_module.block_steps(self.block))
-
-    @staticmethod
-    def _for_rois(steps):
-        # an ROI is looked at one by one, so it keeps what its figures are
-        # drawn from, whatever the block says it repeats over
-        for step in steps:
-            step.keep = True
-        return steps
+        return pipeline_module.block_steps(self.block)
 
     def step_signature(self, step, inputs, before=()):
         """What this step's result depends on: the data *and* the parameters.
@@ -871,7 +863,9 @@ class ROIProject:
             result = step.plugin.run(scratch.context(
                 rois=self, grouping=step.plugin.grouping), step.settings)
             scratch.apply(result, step.label)
-            return region_entry(result, step.plugin, step.keep), result
+            # an ROI is looked at one by one: it keeps what its figures are
+            # drawn from (an id column's regions do not, `evaluate_regions`)
+            return region_entry(result, step.plugin, keep=True), result
         except Exception as error:
             return {"error": f"{type(error).__name__}: {error}"}, None
 

@@ -361,8 +361,8 @@ def block_from(doc: dict):
         steps.append(Step(plugin=str(raw["plugin"]), label=str(raw.get("label") or ""),
                           values=dict(values) if isinstance(values, dict) else {},
                           enabled=enabled))
-    own = {k: options[k] for k in ("regions", "write_back", "write_values", "merge",
-                                   "keep_figures") if k in options}
+    own = {k: options[k] for k in ("regions", "write_back", "write_values", "merge")
+           if k in options}
     try:
         block = Block.from_dict({**own, "steps": []})
     except ChainError:

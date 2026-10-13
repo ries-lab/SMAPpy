@@ -73,7 +73,6 @@ MERGED = {"auto": "auto", "layer": "as each layer", "grouped": "merged",
 GROUPING_FIELD = "use_grouping"
 # a block's choices: what it repeats over, and how it merges overlaps
 BLOCK_ROIS = "rois"
-KEEP_FIGURES = ("auto", "yes", "no")
 # where a chain lands in the tree when its file does not say
 DEFAULT_GROUP = "Analysis/Chains"
 
@@ -154,7 +153,6 @@ class Block:
     write_back: List[str] = field(default_factory=list)
     write_values: List[str] = field(default_factory=list)
     merge: str = "last"
-    keep_figures: str = "auto"       # auto: on for ROIs, off for an id column
     enabled: bool = True
     plugin: str = ""                 # a step's field, empty: a block has none
     grouping: str = "auto"
@@ -175,8 +173,6 @@ class Block:
             out["write_values"] = list(self.write_values)
         if self.merge != "last":
             out["merge"] = self.merge
-        if self.keep_figures != "auto":
-            out["keep_figures"] = self.keep_figures
         if not self.enabled:
             out["enabled"] = False
         out["steps"] = [s.to_dict() for s in self.steps]
@@ -192,10 +188,8 @@ class Block:
         if merge not in WriteBack.RULES:
             raise ChainError(f"block merge {merge!r} is not one of "
                              f"{', '.join(WriteBack.RULES)}")
-        keep = str(raw.get("keep_figures", "auto"))
-        if keep not in KEEP_FIGURES:
-            raise ChainError(f"block keep_figures {keep!r} is not one of "
-                             f"{', '.join(KEEP_FIGURES)}")
+        # ``keep_figures``, which older files may hold, is no choice any more:
+        # an ROI keeps its figure data, a region of an id column does not
         def names(key):
             found = raw.get(key) or []
             if isinstance(found, str):
@@ -205,8 +199,7 @@ class Block:
                    label=str(raw.get("block") or raw.get("label") or ""),
                    regions=str(raw.get("regions") or BLOCK_ROIS),
                    write_back=names("write_back"), write_values=names("write_values"),
-                   merge=merge,
-                   keep_figures=keep, enabled=bool(raw.get("enabled", True)))
+                   merge=merge, enabled=bool(raw.get("enabled", True)))
 
 
 def step_from_dict(raw: Dict[str, Any]):

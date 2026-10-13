@@ -57,6 +57,30 @@ def test_an_id_column_names_its_regions_and_zero_is_none():
     assert ids.tolist() == [3.0] and rows[0].tolist() == [2]
 
 
+def test_rois_and_an_id_column_are_regions_of_one_interface():
+    """`regions_of` hands a block either kind; each region's rows are the
+    same whichever names it, and only an ROI has a signature of its own."""
+    from smappy.region_runs import ColumnRegions, ROIRegions, regions_of
+    session = Session(clusters(noise=0))
+    session.show_grouped(0, False)
+    project = session.rois
+    project.set_geometry(400)
+    for k in (1, 2, 3):
+        project.add_roi(next(iter(project.sources)), [k * 5000.0, k * 5000.0])
+    ctx = session.context()
+    rois, column = regions_of(ctx, "rois"), regions_of(ctx, "cluster_id")
+    assert isinstance(rois, ROIRegions) and isinstance(column, ColumnRegions)
+    assert len(rois) == len(column) == 3
+    for k in range(3):
+        assert rois.tables(k)[1].tolist() == column.tables(k)[1].tolist()
+        assert rois.region(k) is not None and column.region(k) is None
+    assert len({column.signature(k) for k in range(3)}) == 1
+    assert len({rois.signature(k) for k in range(3)}) == 3
+    before = [rois.signature(k) for k in range(3)]
+    project.move_roi(rois.region_ids()[0], [5010.0, 5000.0])
+    assert [rois.signature(k) == before[k] for k in range(3)] == [False, True, True]
+
+
 def test_the_status_says_how_far_how_fast_and_how_long():
     assert progress_text(0, 1000, 0.0) == "0% (0 of 1000 regions)"
     assert progress_text(370, 1000, 3.7) == \
@@ -221,13 +245,12 @@ def test_a_rois_figure_comes_back_from_what_it_kept_without_measuring_again():
     assert results["drawn"].data == {"n": 30} and results["drawn"].figures()
 
 
-def test_a_columns_regions_keep_no_figure_data_unless_asked():
+def test_a_columns_regions_keep_no_figure_data():
+    """To look at clusters one makes ROIs of them, which keep theirs."""
     source = ColumnRegions(locs=clusters(), column="cluster_id")
     steps = [Step("drawn", Drawn.path, Drawn(), None)]
     table = evaluate_regions(source, steps)["drawn"]
     assert "kept" not in table.entry("1")
-    table = evaluate_regions(source, steps, keep_figures=True, reuse=False)["drawn"]
-    assert table.entry("1")["kept"] == {"n": 30}
 
 
 def test_the_statistics_keep_their_histograms_and_draw_the_same_curves_again():

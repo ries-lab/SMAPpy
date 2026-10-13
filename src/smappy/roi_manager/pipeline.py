@@ -23,11 +23,6 @@ class Step:
     plugin: Any
     settings: Any
     version: str = "1"
-    # whether a region keeps the data its figure is drawn from (`Plugin.keep`)
-    # beside its numbers: on for ROIs, which are looked at one by one, off
-    # for the regions of an id column (docs/regions.md, "Figures").  Not part
-    # of the step's identity: it changes what is kept, not what is measured.
-    keep: bool = True
 
     def as_record(self) -> Dict[str, Any]:
         """What goes into the run's provenance."""

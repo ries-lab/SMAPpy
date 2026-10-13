@@ -22,10 +22,10 @@ def clusters(n, per=12, spread=20.0, seed=0, field=2e5):
     return session
 
 
-def measured_per_cluster(session, keep_figures="no"):
+def measured_per_cluster(session, regions="cluster_id"):
     from smappy.chain import Block, ChainSpec, Step, chain_class
     cls = chain_class(ChainSpec(steps=[Block(
-        regions="cluster_id", keep_figures=keep_figures,
+        regions=regions,
         steps=[Step(plugin="Analysis/Measure/Localization Statistics")])]))
     session.run(cls(), cls.Settings())
 
@@ -46,13 +46,15 @@ def test_a_save_says_it_leaves_out_the_region_results_before_and_after(tmp_path)
 
 
 def test_a_save_without_figure_data_counts_the_results_that_kept_some():
+    from smappy.plugins.region_column import ColumnToROIs
     session = clusters(3)
-    measured_per_cluster(session, keep_figures="yes")
     settings = Save.Settings(region_figures=False)
+    measured_per_cluster(session)            # an id column's regions keep none
+    assert left_out(session, settings) is None
+    session.run(ColumnToROIs(), ColumnToROIs.Settings())
+    measured_per_cluster(session, regions="rois")       # an ROI keeps its own
     assert left_out(session, settings).startswith(
         "The figure data of 3 region results will not be saved")
-    measured_per_cluster(session)            # measured again, nothing kept
-    assert left_out(session, settings) is None
 
 
 # -------------------------------------------------------------- the manager
