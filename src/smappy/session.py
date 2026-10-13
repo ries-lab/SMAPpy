@@ -775,7 +775,7 @@ class Session:
         self.tables.settings = settings
         if self.tables.peek_grouped() is not None:
             self.tables.grouped()
-        self.log("merge settings", f"within {settings.dx:g}, {settings.dt} dark frames",
+        self.log("merge settings", f"within {settings.dx:g}, dark frames {settings.dt}",
                  settings=asdict(settings), changed=True)
         self.changed("regrouped")
 

@@ -135,6 +135,11 @@ def test_the_drift_plugins_merge_blinks_as_the_session_does_unless_told_otherwis
     for plugin, settings in ((CometDrift(), DriftSettings()), (RCCDrift(), RCCSettings())):
         hints = plugin.describe(session.context(), settings).hints
         assert hints == {"group_dx_nm": 30.0, "group_dt": 3}
+    # and in a two-colour fit's own drift step, which runs after the fit
+    from smappy import plugins
+    fit = plugins.get("Localize/Gaussian 2D 2C")()
+    hints = fit.describe(session.context(), fit.Settings()).hints
+    assert hints["finish.comet.group_dx_nm"] == 30.0 and hints["finish.rcc.group_dt"] == 3
     # by precision, the widest distance that mode allows
     session.set_group_settings(GroupSettings(link="precision", dx_max=120.0, dt=2))
     used = merge_from_session(DriftSettings(), session)

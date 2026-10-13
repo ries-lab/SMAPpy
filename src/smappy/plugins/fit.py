@@ -477,6 +477,12 @@ class _FitPlugin(Plugin):
             state.notice = self._notice(settings)
         except Exception:
             pass
+        if getattr(settings, "finish", None) is not None:
+            from ..drift import merge_values
+            dx, dt = merge_values(ctx.session if ctx is not None else None)
+            for part in ("rcc", "comet"):
+                state.hints[f"finish.{part}.group_dx_nm"] = dx
+                state.hints[f"finish.{part}.group_dt"] = dt
         return state
 
     def _notice(self, settings) -> Optional[Notice]:
@@ -572,6 +578,11 @@ class _FitPlugin(Plugin):
         wanted = getattr(settings, "finish", None)
         if wanted is None:
             return Finished(locs)
+        # the drift steps merge blinks as the session does, as they would
+        # when run from the Analysis tab (`drift.merge_from_session`)
+        from ..drift import merge_from_session
+        wanted = replace(wanted, rcc=merge_from_session(wanted.rcc, ctx.session),
+                         comet=merge_from_session(wanted.comet, ctx.session))
         return finish_localizations(locs, wanted, ctx.report)
 
     def back_projected(self, settings, camera: CameraMetadata, candidates):
