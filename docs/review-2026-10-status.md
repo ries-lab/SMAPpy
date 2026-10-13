@@ -41,12 +41,14 @@ all platforms.
 | layout (§7.2) | one loader (*Auto* with *format*); the File tab holds Export and Simulate; one *Show result*; "+ chain" in the + chooser; Tools without the duplicate ROI manager / per-region steps / bead calibration entries; the Regions tab header folded; bead calibration asks single/dual once |
 | merged blinks wait | while a large file's blinks merge, the view says so (stage and clock) instead of drawing unmerged localizations, and every run that reads the localizations -- plugins, chains, follow ROI, the ROI manager -- waits and then runs on the merged blinks; chains share the session's merge; no `group_id` written from a worker thread |
 | regions, follow-ups | `ROIProject` is one class (`SessionROIs` and `link.py` gone); a nested block whose changes to the table would be discarded warns in the editor and when the chain runs |
+| garbage collection (§4.5) | tried on again and refused on evidence: with automatic collection on, `--slow` lost a worker to a segfault in 9 runs of 9 -- the collector runs in whichever thread allocates (a fit's TIFF reader, a linking pool) and frees Qt widgets left by earlier tests, and PySide sends only plain `QWidget`s, not subclasses, back to the main thread.  Collection stays off with `collect_on_gui_thread`; `gui/collector.py` says why |
 
 ## Open
 
-1. **Garbage collection back on** -- an experiment is running (the test
-   suite repeatedly with collection on, and with it forced constantly).
-   Turn it on only on clean evidence; the CLAUDE.md rule changes with it.
+1. **A `QThread` collected while still running** ("QThread: Destroyed
+   while thread is still running"): seen rarely, once with collection off as
+   it is, inside conftest's collection on the main thread.  Find which
+   thread object is left in a cycle and keep a reference until it finishes.
 2. **A percentage while merging blinks** needs a counter inside the C++
    linker (one call today); the view shows the stage and a clock.
 3. **`test_handoff.py::test_a_run_handed_over_is_run_by_the_new_instance`**
