@@ -1363,7 +1363,7 @@ class PrecisionSettings:
                        help="what the fitter expected, from the photons")
     frc: bool = param(True, label="FRC resolution",
                       help="what the picture resolves: the localization error, "
-                           "the labeling density and the drift together")
+                           "the labelling density and the drift together")
     max_gap: int = param(5, label="frame gaps to", min=1, max=50,
                          help="the fit is repeated at every gap up to this: "
                               "flat means nothing moved between frames")

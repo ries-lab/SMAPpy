@@ -258,7 +258,7 @@ running it renamed, with other settings, puts a second set beside the first,
 so the two can be compared.  A column keeps its plain name while only one
 evaluation writes it, and is called `<name>.<column>` when two do.  Each
 result keeps the settings it was made with, which is what an analysis such
-as NPC Labeling Efficiency reads its cutoffs from.
+as NPC labelling efficiency reads its cutoffs from.
 
 **What runs when a site is selected.**  With *plot the evaluation* on, the
 evaluator whose tab is open is always run on the selected ROI, because a

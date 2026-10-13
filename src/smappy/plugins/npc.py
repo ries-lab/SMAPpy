@@ -10,7 +10,7 @@ Three plugins, one for each step of the ROI manager, ported from SMAP's
 * **Evaluate/NPC Corners** counts, per pore, the corners seen with the
   precise localizations and the localizations it has -- and SMAP's corner
   count beside them.
-* **Analyze/NPC Labeling Efficiency** fits the two jointly over all pores
+* **Analyze/NPC labelling efficiency** fits the two jointly over all pores
   with the model of `smappy.npc`, or SMAP's corner histogram alone.
 
 *Workflow/NPC Analysis*, which runs the three in one go, is not a plugin but
@@ -934,7 +934,7 @@ def draw_joint(figure, fitted: Dict[str, Any], truth=None) -> None:
     right.legend(fontsize=7, frameon=False)
 
 
-@register("Analysis/Regions/Summarize/NPC Labeling Efficiency")
+@register("Analysis/Regions/Summarize/NPC labelling efficiency")
 class NPCLabelingEfficiency(SiteAnalysisPlugin):
     """The labelling efficiency of nuclear pores, from the corners each shows
     and the localizations it has (NPC Corners)."""

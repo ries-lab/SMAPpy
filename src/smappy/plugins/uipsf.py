@@ -54,10 +54,10 @@ class BeadPart:
 @dataclass
 class BlinkingPart:
     """Single molecules in the sample (in situ)."""
-    depth_um: float = param(1.0, label="depth", unit="um", min=0,
+    depth_um: float = param(1.0, label="depth", unit="µm", min=0,
                             help="how far the objective's focus was moved into "
                                  "the sample from the coverslip; uiPSF refines it")
-    z_range_um: float = param(2.0, label="z range", unit="um", min=0.2,
+    z_range_um: float = param(2.0, label="z range", unit="µm", min=0.2,
                               help="the depth of the model, around focus")
     z_step_nm: float = param(50.0, label="z step", unit="nm", min=5,
                              help="the model's plane spacing")

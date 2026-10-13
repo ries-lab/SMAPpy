@@ -24,7 +24,7 @@ the ones that find sites -- [Density Peaks](plugin:Analysis/Regions/Find/Density
 for any compact structure, [NPC](plugin:Analysis/Regions/Find/NPC) for nuclear
 pores -- the ones that summarise the measurements --
 [Histograms](plugin:Analysis/Regions/Summarize/Histograms) and
-[NPC Labeling Efficiency](plugin:Analysis/Regions/Summarize/NPC Labeling Efficiency)
+[NPC labelling efficiency](plugin:Analysis/Regions/Summarize/NPC labelling efficiency)
 -- and [NPC Analysis](plugin:Analysis/Regions/Workflow/NPC Analysis), which finds
 the pores, measures them and fits their labelling efficiency in one run.
 

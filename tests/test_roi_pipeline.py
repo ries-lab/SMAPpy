@@ -35,7 +35,7 @@ def test_the_region_plugins_are_registered_under_regions():
                           "Analysis/Regions/Column to ROIs",
                           "Analysis/Regions/Regions to column",
                           "Analysis/Regions/Summarize/Histograms",
-                          "Analysis/Regions/Summarize/NPC Labeling Efficiency",
+                          "Analysis/Regions/Summarize/NPC labelling efficiency",
                           "Analysis/Regions/Workflow/NPC Analysis"}
     found = {**found, **plugins.refs("Analysis/Measure/")}
     # per_region is what marks an evaluator, not the folder it sits in

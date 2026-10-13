@@ -19,7 +19,7 @@ global fit of [Li et al. 2022](https://doi.org/10.1038/s41467-022-30719-4): one
 position for both halves, and a photon number for each.  The position is then
 as precise as all the photons allow, and the photon split comes out of the
 same fit.  At the end of the run it assigns the colours from that split
-([Assign colours](plugin:Analysis/Dual-Color/AssignColors)) and, if asked,
+([Assign colours](plugin:Analysis/Dual-colour/Assign colours)) and, if asked,
 corrects the drift ([RCC](plugin:Analysis/Drift/RCC) or
 [COMET](plugin:Analysis/Drift/COMET)).  The detection, the camera settings and
 the Gaussian PSF are those of [Gaussian 2D](plugin:Localize/Gaussian 2D),
@@ -241,7 +241,7 @@ whole table, in this order (*after the fit*):
   whose size the form cannot know; COMET's question before a long run is not
   asked here, since choosing it is the agreement.
 * **Colour assignment**, on by default:
-  [Assign colours](plugin:Analysis/Dual-Color/AssignColors) reads
+  [Assign colours](plugin:Analysis/Dual-colour/Assign colours) reads
   `photons_ch0` and `photons_ch1`, finds the peaks of their ratio and writes
   a `channel` column -- 1 and 2 for the two colours, 0 for what it will not
   assign.  Its settings are under *colour assignment*.

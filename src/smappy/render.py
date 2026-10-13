@@ -335,7 +335,7 @@ def render(x, y, fov: FieldOfView, sigma=None, sigma_y=None, weights=None,
     c = np.zeros((0, 3), np.float32) if colors is None else \
         np.ascontiguousarray(colors, dtype=np.float32).reshape(-1, 3)
     if c.size and c.shape[0] != x.size:
-        raise ValueError("colors must have one row per localization")
+        raise ValueError("colours must have one row per localization")
 
     if use_extension and _render is not None:
         weight, color, n = _render.render(

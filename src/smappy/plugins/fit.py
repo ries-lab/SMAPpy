@@ -76,10 +76,10 @@ class CameraSettings:
                                              "database")
     offset: Optional[float] = param(None, unit="ADU",
                                     help="the count of a pixel that saw no light")
-    pixelsize_um: Optional[float] = param(None, label="pixel size", unit="um", min=0,
+    pixelsize_um: Optional[float] = param(None, label="pixel size", unit="µm", min=0,
                                           help="the pixel's size in the sample, "
                                                "after the magnification")
-    pixelsize_y_um: Optional[float] = param(None, label="pixel size y", unit="um",
+    pixelsize_y_um: Optional[float] = param(None, label="pixel size y", unit="µm",
                                             min=0, advanced=True,
                                             help="auto: square pixels, the same "
                                                  "as in x")
@@ -132,7 +132,7 @@ class DetectionSettings:
                         help="what the frame is smoothed with before maxima are "
                              "looked for; the difference of Gaussians also "
                              "removes a smooth background")
-    sigma: float = param(1.2, label="filter sigma", unit="pix", min=0.1,
+    sigma: float = param(1.2, label="filter sigma", unit="px", min=0.1,
                          help="the width of the smoothing: about the PSF's")
     cutoff_mode: str = param("dynamic", label="cutoff",
                              choices=(("dynamic", "dynamic (x noise)"),
@@ -153,7 +153,7 @@ class DetectionSettings:
 @dataclass
 class GaussianModelSettings:
     """A free-width Gaussian: x, y, photons, background and sigma."""
-    sigma: float = param(1.2, label="start sigma", unit="pix", min=0.1,
+    sigma: float = param(1.2, label="start sigma", unit="px", min=0.1,
                          help="the PSF width the fit starts from; it is fitted")
     elliptical: bool = param(False, help="fit sigma_x and sigma_y separately")
 
@@ -266,7 +266,7 @@ class FinishSettings:
     assign_colors: bool = param(True, label="assign colours",
                                 help="split the localizations by their photon "
                                      "ratio and write `channel` "
-                                     "(Analysis/Dual-Color/AssignColors)")
+                                     "(Analysis/Dual-colour/Assign colours)")
     drift: str = param("none", label="drift correction",
                        choices=(("none", "none"), ("rcc", "RCC"),
                                 ("comet", "COMET")),
@@ -1344,7 +1344,7 @@ class ChannelTransformSettings:
 class DualGaussianModelSettings(_LinkedChannels):
     """A free-width Gaussian per channel, and which parameters they share."""
     FIFTH_LINK = "link_sigma"
-    sigma: float = param(1.2, label="start sigma", unit="pix", min=0.1,
+    sigma: float = param(1.2, label="start sigma", unit="px", min=0.1,
                          help="the PSF width both halves' fits start from; "
                               "each is fitted")
     link_xy: bool = _link_xy()

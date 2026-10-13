@@ -161,7 +161,7 @@ for ax, (volume, title) in zip(axes[:3], panels):
     ax.imshow(section, cmap="magma", aspect="auto", vmin=0,
               extent=(-(psf.shape[2] // 2) - 0.5, psf.shape[2] // 2 + 0.5, *extent_z))
     ax.set_title(title, fontsize=9)
-    ax.set_xlabel("x (pixels)", fontsize=8)
+    ax.set_xlabel("x (px)", fontsize=8)
     ax.tick_params(labelsize=7)
 axes[0].set_ylabel("emitter z (nm)", fontsize=8)
 for ax in axes[1:3]:
@@ -262,7 +262,7 @@ right.plot([-limit, limit, limit, -limit, -limit], [-limit, -limit, limit, limit
 right.axhline(0, color="0.7", lw=0.5); right.axvline(0, color="0.7", lw=0.5)
 right.set_xlim(-1.3 * limit, 1.3 * limit); right.set_ylim(-1.3 * limit, 1.3 * limit)
 right.set_aspect("equal")
-right.set_xlabel("dx (pixels)", fontsize=8); right.set_ylabel("dy (pixels)", fontsize=8)
+right.set_xlabel("dx (px)", fontsize=8); right.set_ylabel("dy (px)", fontsize=8)
 for ax in (left, right):
     ax.tick_params(labelsize=7)
 ```

@@ -138,7 +138,7 @@ data sheet, or measured from the mean and variance of a flat illumination.
 The count of a pixel that saw no light: the mean of a dark movie in this
 readout mode.
 
-### pixel size (um)
+### pixel size (µm)
 The size of a camera pixel in the sample: the physical pixel divided by the
 total magnification.
 

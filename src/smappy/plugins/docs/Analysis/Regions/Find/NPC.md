@@ -18,7 +18,7 @@ rings of the pore's radius, fits a circle to every candidate, and keeps those
 that look like a ring: the right radius, and few localizations far from it.
 The ROIs are centred on the fitted circle, which is what
 [NPC Corners](plugin:Analysis/Measure/NPC Corners) and
-[NPC Labeling Efficiency](plugin:Analysis/Regions/Summarize/NPC Labeling Efficiency)
+[NPC labelling efficiency](plugin:Analysis/Regions/Summarize/NPC labelling efficiency)
 need.
 
 The checks are made to keep sparse pores.  A pore with only a few corners

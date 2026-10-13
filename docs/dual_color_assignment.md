@@ -1,6 +1,6 @@
 # Assigning colours from channel intensities
 
-How `Analysis/Dual-Color/AssignColors` turns two photon counts into a species
+How `Analysis/Dual-colour/Assign colours` turns two photon counts into a species
 label.  The first half is the histogram-and-minimum rule everybody uses; the
 second half is the probabilistic rule, which is what the *allowed crosstalk*
 parameter needs to mean something.  Decisions taken 2026-09-14.

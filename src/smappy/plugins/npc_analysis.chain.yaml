@@ -29,7 +29,7 @@ steps:
       - plugin: Analysis/Measure/NPC Corners    # not renamed: replaces an earlier
         version: "2"                                # "NPC Corners", stands beside a renamed one
         values: {}
-  - plugin: Analysis/Regions/Summarize/NPC Labeling Efficiency
+  - plugin: Analysis/Regions/Summarize/NPC labelling efficiency
     label: labelling efficiency
     version: "2"
     values: {}

@@ -75,11 +75,11 @@ class RCCSettings:
     max_drift_nm: float = param(500.0, label="max drift", unit="nm", min=1,
                                 help="the largest drift between any two "
                                      "windows that can be found")
-    fit_window: int = param(3, label="peak fit half-width", unit="pix", min=1,
+    fit_window: int = param(3, label="peak fit half-width", unit="px", min=1,
                             help="the patch the correlation peak is fitted "
                                  "over, for its sub-pixel position",
                             advanced=True)
-    max_pixels: int = param(2048, label="max image size", unit="pix", min=64,
+    max_pixels: int = param(2048, label="max image size", unit="px", min=64,
                             help="a wider field of view is folded back onto "
                                  "itself, to keep the correlation fast",
                             advanced=True)

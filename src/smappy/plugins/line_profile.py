@@ -1235,7 +1235,7 @@ def profiles(locs: Localizations, region: Region,
 
     lateral = column(kept, PRECISION_FIELDS)
     precision = np.asarray(kept[lateral], float) if lateral else None
-    unit = "nm" if "x_nm" in kept else "pix"
+    unit = "nm" if "x_nm" in kept else "px"
     missing = "" if lateral else ("no localization precision in the table: one "
                                   "width is fitted for every localization")
 

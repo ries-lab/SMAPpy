@@ -280,7 +280,7 @@ def test_segment_evaluate_and_analyse_through_the_session():
     assert len(rows) == len(project.rois)
     assert {"n_corners", "n_localizations", "n_corners_smap"} <= set(rows[0])
 
-    analyze = plugins.get("Analysis/Regions/Summarize/NPC Labeling Efficiency")
+    analyze = plugins.get("Analysis/Regions/Summarize/NPC labelling efficiency")
     result = analyze()(ctx=session.context())
     data = result.data
     assert data["simulated_efficiency"] == 0.5
@@ -298,7 +298,7 @@ def test_segment_evaluate_and_analyse_through_the_session():
 def test_the_analysis_asks_for_the_corner_counter_when_it_is_missing():
     from smappy.plugins import Context
     with pytest.raises(ValueError, match="NPC Corners"):
-        plugins.get("Analysis/Regions/Summarize/NPC Labeling Efficiency")().run(
+        plugins.get("Analysis/Regions/Summarize/NPC labelling efficiency")().run(
             Context(site_table=[{"roi_id": "a", "n_localizations": 3}]),
             LabelingEfficiencySettings())
 
@@ -336,7 +336,7 @@ def test_the_npc_chain_gives_what_the_three_steps_give_and_leaves_the_pipeline_a
     assert project.runs[-1]["chain"] == "block each pore"
 
     # the analysis run from the GUI afterwards finds the chain's counts
-    analysis = plugins.get("Analysis/Regions/Summarize/NPC Labeling Efficiency")
+    analysis = plugins.get("Analysis/Regions/Summarize/NPC labelling efficiency")
     again = analysis()(ctx=session.context())
     assert abs(again.data["efficiency"] - fitted["efficiency"]) < 1e-6
     # and so does the analysis by hand, of the same rows
@@ -374,7 +374,7 @@ def test_a_renamed_corner_count_stands_beside_the_first_and_is_chosen_by_name():
     rows = project.results()
     assert "NPC Corners.n_corners" in rows[0] and "strict.n_corners" in rows[0]
     assert all(r["strict.n_corners"] <= r["NPC Corners.n_corners"] for r in rows)
-    analysis = plugins.get("Analysis/Regions/Summarize/NPC Labeling Efficiency")
+    analysis = plugins.get("Analysis/Regions/Summarize/NPC labelling efficiency")
     # nothing says which: a script is told, the GUI is asked (a choice, no
     # plain run), and each choice carries the settings it would run with
     with pytest.raises(ValueError, match="2 sets of results by NPC Corners"):
@@ -476,7 +476,7 @@ def test_the_analysis_says_when_the_layer_is_not_grouped():
     project = session.rois
     plugins.get("Analysis/Regions/Find/NPC")()(ctx=session.context())
     project.evaluate([Instance(plugin="Analysis/Measure/NPC Corners")])
-    result = plugins.get("Analysis/Regions/Summarize/NPC Labeling Efficiency")()(
+    result = plugins.get("Analysis/Regions/Summarize/NPC labelling efficiency")()(
         ctx=session.context())
     assert "does not merge blinks" in result.text
 
@@ -500,7 +500,7 @@ def test_results_from_offers_the_evaluations_on_the_rois():
 
     session = Session(pores(0.5, seed=2))
     session.show_grouped(0, True)
-    panel = PluginPanel(plugins.get("Analysis/Regions/Summarize/NPC Labeling Efficiency"),
+    panel = PluginPanel(plugins.get("Analysis/Regions/Summarize/NPC labelling efficiency"),
                         session)
     field = panel.form.fields["evaluation"]
     assert entries(field) == [("", "auto")]                  # nothing yet

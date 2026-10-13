@@ -31,7 +31,7 @@ is the main gain.  The two spots are two independent looks at the same
 height, so z comes out up to $\sqrt{2}$ times more precise than from one half
 alone, while the photon split between the halves -- the colour -- is left
 free.  At the end of the run the colours are assigned from that split
-([Assign colours](plugin:Analysis/Dual-Color/AssignColors)) and, if asked,
+([Assign colours](plugin:Analysis/Dual-colour/Assign colours)) and, if asked,
 the drift is corrected ([RCC](plugin:Analysis/Drift/RCC) or
 [COMET](plugin:Analysis/Drift/COMET)).
 

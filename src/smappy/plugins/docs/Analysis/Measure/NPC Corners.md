@@ -18,7 +18,7 @@ This evaluator measures both, one pore (one ROI) at a time:
 * and **SMAP's corner count**, for SMAP's way of analysing them.
 
 The numbers go into the site table, and
-[NPC Labeling Efficiency](plugin:Analysis/Regions/Summarize/NPC Labeling Efficiency)
+[NPC labelling efficiency](plugin:Analysis/Regions/Summarize/NPC labelling efficiency)
 turns them into the labelling efficiency.  Its page explains why the counts
 are taken this way.
 
@@ -178,7 +178,7 @@ kept as `n_corners_smap`.
   mean is the answer.
 * **Left out**: SMAP's split of the count by time and its counts on the
   simulation's true positions; the truth is compared in
-  [NPC Labeling Efficiency](plugin:Analysis/Regions/Summarize/NPC Labeling Efficiency)
+  [NPC labelling efficiency](plugin:Analysis/Regions/Summarize/NPC labelling efficiency)
   instead.
 
 ## References

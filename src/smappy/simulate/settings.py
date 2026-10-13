@@ -157,7 +157,7 @@ class CameraOutputSettings:
     tiff: bool = param(False, label="also write a TIFF",
                        help="the frames themselves, beside the recipe, for other "
                             "software")
-    size_px: int = param(100, label="size", unit="pixels", min=8,
+    size_px: int = param(100, label="size", unit="px", min=8,
                          help="the side of the square frame, which covers x and y "
                               "from 0 to this times the pixel size")
     conversion: float = param(0.5, unit="e-/ADU", min=1e-6,
@@ -184,7 +184,7 @@ class SimulationSettings:
                              "for a fitter to fit")
     n_frames: int = param(20000, label="frames", min=1,
                           help="the length of the measurement")
-    background: float = param(20.0, label="background", unit="photons/pixel", min=0,
+    background: float = param(20.0, label="background", unit="photons/px", min=0,
                               help="per pixel and frame: in the precision, or "
                                    "drawn into the frames")
     background_std: float = param(0.0, label="background std", min=0,

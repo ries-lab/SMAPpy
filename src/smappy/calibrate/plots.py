@@ -90,7 +90,7 @@ def draw_overview(figure, result, selected=(), excluded=()):
     xy_shift = np.hypot(r.shifts[:, 1], r.shifts[:, 2])
     brightness = np.array([rec["brightness_adu"] for rec in r.beads.records])
     axes[0, 1].scatter(xy_shift, brightness, c=colors)
-    axes[0, 1].set(xlabel="Applied XY shift magnitude (pixels)", ylabel="Brightness (ADU)",
+    axes[0, 1].set(xlabel="Applied XY shift magnitude (px)", ylabel="Brightness (ADU)",
                    title="Brightness vs XY shift", yscale="log")
     if r.beads.records:
         lower = r.beads.records[0].get("brightness_lower_adu")
@@ -100,7 +100,7 @@ def draw_overview(figure, result, selected=(), excluded=()):
     zmin, zmax = r.calibration.z_index_to_nm(np.array([psf.shape[0]-1, 0]))
     axes[1, 0].imshow(psf[:, psf.shape[1]//2, :], cmap="inferno", aspect="auto",
                       extent=(0, psf.shape[2]-1, zmin, zmax))
-    axes[1, 0].set(xlabel="x (pixels)", ylabel="Emitter z (nm)", title="PSF xz")
+    axes[1, 0].set(xlabel="x (px)", ylabel="Emitter z (nm)", title="PSF xz")
     quality_ax = axes[1, 1]
     z_shift = r.shifts[:, 0]*r.calibration.dz
     quality_ax.scatter(z_shift, r.residuals, c=colors)
@@ -152,7 +152,7 @@ def draw_fit_quality(figure, diagnostics, profiles, selected=()):
                    title="In-sample bead refits")
     axes[0, 0].legend(loc="best", fontsize=7)
     axes[0, 1].set(xlabel="Expected emitter z (nm)",
-                   ylabel="Error after bead offset removal (nm)", title="Centered fit error")
+                   ylabel="Error after bead offset removal (nm)", title="Centred fit error")
     profile_colors = {bead_id: color for bead_id, color in zip(bead_ids, colors)}
     for row, bead_id in enumerate(profiles["bead_id"]):
         color = profile_colors[int(bead_id)]
@@ -166,7 +166,7 @@ def draw_fit_quality(figure, diagnostics, profiles, selected=()):
                     label="average bead stack")
     axes[1, 1].plot(profiles["z_nm"], profiles["average_z"], color="black", linewidth=3)
     ylabel = "Intensity (calibration scale)"
-    axes[1, 0].set(xlabel="x from center (pixels)", ylabel=ylabel,
+    axes[1, 0].set(xlabel="x from centre (px)", ylabel=ylabel,
                    title="Aligned bead lateral midlines")
     axes[1, 1].set(xlabel="Emitter z (nm)", ylabel=ylabel,
                    title="Aligned bead axial midlines")
@@ -176,7 +176,7 @@ def draw_fit_quality(figure, diagnostics, profiles, selected=()):
         ax.autoscale_view()
         ax.margins(x=.02, y=.05)
     individual = d["bead_id"] >= 0
-    return (f"In-sample refit median absolute centered error: "
+    return (f"In-sample refit median absolute centred error: "
             f"{np.nanmedian(abs(d['centered_error_nm'][individual])):.1f} nm; "
             f"{np.count_nonzero(~d['fit_valid'][individual])} failed, "
             f"{np.count_nonzero(d['at_z_boundary'][individual])} at z boundary. "
@@ -216,7 +216,7 @@ def draw_pairs(figure, result, selected=(), excluded=()):
     axes[0].set_title(f"Acquisition {si+1}: paired / unpaired (cyan)")
     axes[1].set(title="Main FoV: PSF + transform (green), transform only (orange)\n"
                       "Rejected (red), unpaired (+)",
-                xlabel="Main x (pixels)", ylabel="Main y (pixels)")
+                xlabel="Main x (px)", ylabel="Main y (px)")
     h, w = r.beads.geometry["image_shape"]
     split = r.beads.geometry["split_position"]           # on the chip
     last = r.beads.settings.registration.main_channel in ("right", "lower")
@@ -266,7 +266,7 @@ def draw_transformation(figure, result, selected=(), excluded=()):
     axes[0].legend(fontsize=8)
     spread = np.std(delta[ids[good]], axis=0, ddof=1) if good.sum() > 1 else [np.nan, np.nan]
     axes[0].set(title=f"Round 2 residuals\nσx={spread[0]:.3f}, σy={spread[1]:.3f} px",
-                xlabel="dx (pixels)", ylabel="dy (pixels)")
+                xlabel="dx (px)", ylabel="dy (px)")
     chosen = sorted(i for i in selected if 0 <= i < len(ids))
     if chosen:
         axes[0].scatter(*delta[chosen].T, s=110, facecolors="none", edgecolors="gold", lw=2)
@@ -279,7 +279,7 @@ def draw_transformation(figure, result, selected=(), excluded=()):
     axes[1].axhline(0, color="gray", lw=.5)
     axes[1].axvline(0, color="gray", lw=.5)
     axes[1].set(title=f"Round 1 screening\n|dx|, |dy| ≤ {limit:g} px",
-                xlabel="dx (pixels)", ylabel="dy (pixels)")
+                xlabel="dx (px)", ylabel="dy (px)")
     if chosen:
         axes[1].scatter(*delta1[chosen].T, s=110, facecolors="none", edgecolors="gold", lw=2)
     # A physical display floor avoids autoscaling numerical roundoff to a
@@ -312,7 +312,7 @@ def draw_field(figure, result, selected=(), excluded=()):
                 xy = map_points(r.calibration.transformation, xy[None])[0]
             axes[0].plot(*xy, "x", color="magenta" if ch else "dodgerblue")
     axes[0].set(title="Overlay; unpaired ×\nMain (blue), secondary (magenta)",
-                xlabel="Main x (pixels)", ylabel="Main y (pixels)")
+                xlabel="Main x (px)", ylabel="Main y (px)")
     axes[0].legend(fontsize=7)
     valid = ids[np.isfinite(r.residuals[ids]) & np.array([
         r.beads.records[i]["brightness_accepted"] and i not in excluded for i in ids],
@@ -329,7 +329,7 @@ def draw_field(figure, result, selected=(), excluded=()):
     coverage = r.calibration.parameters["coverage_area_px2"]
     axes[1].set(title=f"Shape across FoV\nPooled hull (px²): transform "
                       f"{coverage['transformation']:.0f}\nPSF {coverage['psf']:.0f}",
-                xlabel="Main x (pixels)", ylabel="Main y (pixels)")
+                xlabel="Main x (px)", ylabel="Main y (px)")
     chosen = sorted(i for i in selected if 0 <= i < len(ids))
     for ax in axes:
         if chosen:
@@ -358,7 +358,7 @@ def draw_paired_fit_quality(figure, result, diagnostics, profiles, selected=()):
     axes[0, 0].set(title="two-channel fit: z", xlabel="expected z (nm)",
                    ylabel="fitted z (nm)")
     axes[0, 1].axhline(0, color="gray", lw=0.5)
-    axes[0, 1].set(title="centered z error", xlabel="expected z (nm)", ylabel="error (nm)")
+    axes[0, 1].set(title="centred z error", xlabel="expected z (nm)", ylabel="error (nm)")
     if result.calibration.parameters.get("secondary_main_brightness_ratio"):
         # the splitter's ratio is divided out in the link, so a correctly
         # fitted pair sits at one half, not at the raw brightness ratio
@@ -373,7 +373,7 @@ def draw_paired_fit_quality(figure, result, diagnostics, profiles, selected=()):
         axes[0, 3].hist(error, bins=min(40, max(8, len(error)//10)), color="steelblue")
         axes[0, 3].axvline(0, color="gray", lw=0.5)
         axes[0, 3].set(title=f"z error: {np.std(error):.1f} nm rms",
-                       xlabel="centered z error (nm)", ylabel="bead planes")
+                       xlabel="centred z error (nm)", ylabel="bead planes")
     else:
         axes[0, 3].set_axis_off()
 
@@ -393,7 +393,7 @@ def draw_paired_fit_quality(figure, result, diagnostics, profiles, selected=()):
             ax.plot(coord, channel["average_"+axis], "k", lw=2, label="average")
             ax.plot(coord, model, "--", color="royalblue", lw=2, label="spline")
             ax.set(title=f"{name} {axis} profile",
-                   xlabel=axis+(" (pixels)" if axis == "x" else " (nm)"),
+                   xlabel=axis+(" (px)" if axis == "x" else " (nm)"),
                    ylabel="intensity (calibration scale)")
             ax.legend(fontsize=7)
             ax.margins(x=0.02, y=0.05)
@@ -438,7 +438,7 @@ def draw_beads(figure, result, selected=(), excluded=(), dual=False):
                 axes[ch].axhspan(lower, upper, color="green", alpha=.08)
         name = ("Main" if ch == 0 else "Secondary")+" brightness" if dual else "Brightness"
         axes[ch].set(title=name+" vs XY shift", ylabel="Brightness (ADU)",
-                     xlabel=("Shared" if dual else "Applied")+" XY shift (pixels)")
+                     xlabel=("Shared" if dual else "Applied")+" XY shift (px)")
     ax = axes[2 if dual else 1]
     scatter(ax, r.shifts[:, 0]*r.calibration.dz, r.residuals)
     ax.set(title="Bead alignment", xlabel="Applied z shift (nm)",

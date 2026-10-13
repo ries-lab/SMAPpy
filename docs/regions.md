@@ -145,7 +145,7 @@ for each ROI:                       a block
     Remove outliers                 may change the region's table
     Localization Statistics         sees what the step before did
     NPC Corners                     a row per ROI
-NPC Labeling Efficiency             once, on the region table
+NPC labelling efficiency             once, on the region table
 ```
 
 Against the present loop (each evaluator step runs over every ROI on its own)
@@ -522,7 +522,7 @@ Each step leaves the program working and the suite green.
    `npc_analysis.chain.yaml` rewritten as a block.
    *Done*: `Analysis/Regions/Find/{Density Peaks, NPC, DBSCAN}`,
    `Analysis/Regions/ROI to column`, `Analysis/Regions/Summarize/{Histograms,
-   NPC Labeling Efficiency}`, `Analysis/Regions/Workflow/NPC Analysis`,
+   NPC labelling efficiency}`, `Analysis/Regions/Workflow/NPC Analysis`,
    `Analysis/Measure/NPC Corners`; their pages moved with them.  The ROI
    tab is the *Regions* tab, seeded from `Analysis/Regions/`, which the
    Analysis tab leaves out (`exclude` in `DEFAULT_TABS`); its page is
@@ -530,7 +530,7 @@ Each step leaves the program working and the suite green.
    well as the ROIs' (*results from*: "per cluster_id: ..."), through one
    module, `region_results` (`Evaluation(source, label)`, `available`,
    `rows`, `steps`, `is_current`), which reads a column's table only while
-   it is current; NPC Labeling Efficiency reads per-cluster corner counts
+   it is current; NPC labelling efficiency reads per-cluster corner counts
    with SMAP's method, and its joint model, which needs the ROIs' files,
    says so.  A column written from regions' results is left out of both
    stores' data signatures, so writing it does not make its results out of

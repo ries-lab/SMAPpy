@@ -71,7 +71,7 @@ def chip_pixels(locs, report=None):
                          "so it cannot be put back into chip pixels; re-run the "
                          "fit with units 'pixel+nm'")
     if report is not None:
-        report(f"converting nm back to pixels at {pixelsize:g} nm/pixel")
+        report(f"converting nm back to pixels at {pixelsize:g} nm/px")
     return (np.asarray(locs["x_nm"], float) / pixelsize,
             np.asarray(locs["y_nm"], float) / pixelsize)
 

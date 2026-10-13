@@ -15,7 +15,7 @@ It is a *chain* -- the plugins it runs, one after the other, each with its
 own settings in a section of this panel -- rather than a plugin of its own:
 [NPC](plugin:Analysis/Regions/Find/NPC),
 [NPC Corners](plugin:Analysis/Measure/NPC Corners) and
-[NPC Labeling Efficiency](plugin:Analysis/Regions/Summarize/NPC Labeling Efficiency).
+[NPC labelling efficiency](plugin:Analysis/Regions/Summarize/NPC labelling efficiency).
 Their pages explain the methods; this one only what running them together
 changes.  Because it is a chain, it can be edited (*edit steps*), saved
 under another name, and run over many files in a batch.
@@ -83,7 +83,7 @@ measured again.
 
 * **The text**: one line per step -- the grouping, the pores found among the
   candidates, the ROIs counted, then the labelling efficiency and the
-  blinks per copy with their errors, as NPC Labeling Efficiency gives them;
+  blinks per copy with their errors, as NPC labelling efficiency gives them;
   on a simulation also the simulated efficiency and the truth.
 * **The figures**: the pores found (fitted circles, kept in blue, rejected in
   grey), the segmenter's checks, and the fit.

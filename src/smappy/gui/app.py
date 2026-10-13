@@ -882,7 +882,7 @@ class ControlWindow(QMainWindow):
         QApplication.clipboard().setImage(image)
         self.statusBar().showMessage(
             f"Copied {window.windowTitle() or 'the picture'} "
-            f"({image.width()} x {image.height()} pixels)", 3000)
+            f"({image.width()} x {image.height()} px)", 3000)
         return True
 
     def _refresh_undo(self) -> None:

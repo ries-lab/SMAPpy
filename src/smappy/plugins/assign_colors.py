@@ -681,7 +681,7 @@ def histogram_selection(ctx: Context):
     return ctx.layer_selection(layer, without=("channel",))
 
 
-@register("Analysis/Dual-Color/AssignColors")
+@register("Analysis/Dual-colour/Assign colours")
 class AssignColors(Plugin):
     name = "Assign colours"
     description = ("Colour two-channel localizations by their photon split, "

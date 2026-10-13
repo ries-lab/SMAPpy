@@ -140,7 +140,7 @@ def test_npc_labeling_efficiency_reads_corners_counted_per_cluster():
     model, which needs the ROIs' files for the field's precisions, says so."""
     from smappy.plugins.npc import LabelingEfficiencySettings
     session = counted_pores()
-    analysis = plugins.get("Analysis/Regions/Summarize/NPC Labeling Efficiency")
+    analysis = plugins.get("Analysis/Regions/Summarize/NPC labelling efficiency")
     name = "per cluster_id: NPC Corners"
     offered = analysis().describe(session.context(), analysis.Settings()).choices["evaluation"]
     assert (name, name) in offered
@@ -162,7 +162,7 @@ def test_a_chain_analyses_the_corners_its_own_block_counted_per_cluster():
     session.show_grouped(0, True)
     cls = chain_class(ChainSpec(steps=[
         Block(regions="cluster_id", steps=[Step(plugin="Analysis/Measure/NPC Corners")]),
-        Step(plugin="Analysis/Regions/Summarize/NPC Labeling Efficiency",
+        Step(plugin="Analysis/Regions/Summarize/NPC labelling efficiency",
              values={"method": "smap"})]))
     assert cls().preflight(session.context(), cls.Settings()) is None
     result = session.run(cls(), cls.Settings())
