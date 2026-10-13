@@ -886,6 +886,11 @@ class _FitPlugin(Plugin):
                              f"slows or ends")
             ctx.report(f"{where}  {rate:,.1f} frames/s{left}  "
                        f"{s['localizations']:,} localizations{lag}")
+            # the same as numbers, for a program following the fit
+            # (smappy-microclaw's metrics): frames are counted from frame 0
+            ctx.emit("fitted", {"frames": src.start + s["frames"],
+                                "localizations": s["localizations"],
+                                "behind": behind[0]})
 
         try:
             from ..pipeline import drive

@@ -274,3 +274,31 @@ def test_a_fit_that_falls_behind_the_camera_says_so(tmp_path, frames, monkeypatc
     thread.join(30)
     assert len(seen["warnings"]) == 1
     assert "cannot keep up" in seen["warnings"][0]
+
+
+def test_the_window_hands_the_fits_progress_on_as_numbers(tmp_path, frames):
+    """`on_stream` gets the fitted blocks and a ``fitted`` count per block:
+    what a program following the fit (smappy-microclaw) turns into metrics."""
+    pytest.importorskip("PySide6")
+    from smappy.gui.live_session import LiveSession
+
+    data = GrowingNDTiff(tmp_path / "ds", frames.shape[1:])
+    data.write(frames)
+    streamed = []
+    ended = []
+    live = LiveSession(PLUGIN, settings_for(data.folder, tmp_path / "locs.hdf5"),
+                       on_finished=ended.append,
+                       on_stream=lambda event, payload: streamed.append((event, payload)))
+    live.open()
+    try:
+        live.writer_finished.set()
+        assert pump(lambda: ended)
+    finally:
+        close(live)
+        live.wait()
+    fitted = [p for e, p in streamed if e == "fitted"]
+    blocks = [p for e, p in streamed if e == "block"]
+    assert fitted and blocks
+    assert fitted[-1]["frames"] == len(frames)
+    assert fitted[-1]["localizations"] == sum(len(b) for b in blocks) == len(live.session.locs)
+    assert [f["frames"] for f in fitted] == sorted(f["frames"] for f in fitted)
