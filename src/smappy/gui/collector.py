@@ -17,6 +17,20 @@ only cycles wait, at most `INTERVAL_MS`.
 
 Before each collection the screens are held (`keep_screens`): collecting
 widgets can otherwise delete Qt's own `QScreen`.
+
+It does not matter what a worker holds.  Whichever thread allocates past the
+threshold collects every cycle in the process, a window it never saw
+included.  PySide hands a plain `QWidget` or `QWindow` collected off the main
+thread back to it (`Py_AddPendingCall`, 6.6 to 6.12), but not a Python
+subclass of one -- and every widget here is a subclass: a `PluginPanel` left
+in a cycle, then a worker that only allocated dicts, segfaulted while the
+GUI thread ran its events and hung while it waited for the worker.  So the
+render threads drawing a snapshot (`layer_state.LayerSnapshot`) did not make
+it safe to switch automatic collection back on.  Tried in 2026-10 (PySide
+6.12.0, Python 3.13): `--slow -n auto` lost a worker to a segfault in each
+of 9 runs, in `test_camera_frames` (the fit's TIFF reader collecting while
+the test waited on it) or `test_stop_button` (the linking pool); the
+GUI-heavy files alone, 5 of 20 runs.
 """
 from __future__ import annotations
 
