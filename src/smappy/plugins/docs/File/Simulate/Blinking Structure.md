@@ -208,7 +208,9 @@ or crowded: sorting that out is the fitter's job.
 The frames are not written out as images.  The plugin saves the
 *simulation file*, `*.sim.yaml`, which is the recipe -- these settings and
 the seed -- a few hundred bytes instead of hundreds of megabytes.  Open it in
-a fitter as its file, as you would open a TIFF: the frames are drawn as the
+a fitter as its file, as you would open a TIFF -- once it is written, *Fit
+this* under the form does that, in the Localize tab's open fitter (or
+Gaussian 2D), without running it: the frames are drawn as the
 fitter reads them, identically every time, and the fitter takes the camera's
 pixel size, conversion and offset from it.  Tick *also write a TIFF* for
 other software.

@@ -294,6 +294,21 @@ class SimulateBlinks(Plugin):
     # precision is Mortensen's maximum-likelihood one, not least squares'
     version = "4"
 
+    def describe(self, ctx: Optional[Context], settings: SimulationSettings) -> FormState:
+        """Once the simulation file exists, offer to fit it: the GUI puts it
+        into the Localize tab's fitter (the window ``"fit file"``, which is
+        what a stack dropped on the window goes through), so nobody retypes
+        a path the plugin has just written."""
+        from ..simulate.source import recipe_path
+        if settings.output != "camera" or not settings.camera.path:
+            return FormState()
+        path = recipe_path(settings.camera.path)
+        if not path.is_file():
+            return FormState()
+        return FormState(notice=Notice(
+            f"{path.name} is written: fit it in the Localize tab",
+            action="Fit this", window="fit file", settings=str(path)))
+
     def run(self, ctx: Context, settings: SimulationSettings) -> Result:
         from ..simulate import camera_truth, ground_truth, localizations
         ctx.report(f"simulating {settings.n_frames} frames...")

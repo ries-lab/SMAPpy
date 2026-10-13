@@ -314,6 +314,9 @@ class ControlWindow(QMainWindow):
         # a fitter whose file's camera is not in the database offers this
         # (`Plugin.describe`), opened on the file that fitter is set to
         session.window_openers["camera editor"] = self.open_camera_editor
+        # a written simulation offers this (`SimulateBlinks.describe`), with the
+        # file's path: into a fitter as a dropped stack goes
+        session.window_openers["fit file"] = self.fit_file
         tools.addSeparator()
         self.batch_window = None
         self._action(tools, "Batch...", None, self.open_batch)

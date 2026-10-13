@@ -123,11 +123,17 @@ def make(d) -> None:
            spot=[sim.output], zoom=d.around(sim.output, 760))
 
     d.chapter("Fitting them")
+    fit_this = sim.notice_button
+    assert fit_this.isVisible() and fit_this.text() == "Fit this"
+    d.shot("Fit this gives the recipe to a fitter as its file.",
+           spot=[fit_this], point=fit_this, click=True,
+           zoom=d.around(fit_this, 760))
+    fit_this.click()
+    d.settle()
     localize = show_tab(d, "Localize")
     _, fit = open_section(d, localize, "Gaussian 2D")
-    type_into(fit, "source.path", str(path))
-    d.settle()
-    d.shot("Give the fitter the recipe as its file.",
+    assert fit.form.values()["source.path"] == str(path)
+    d.shot("The Localize tab opens on the fitter, with the recipe as its file.",
            spot=[field(fit, "source.path")], point=field(fit, "source.path"),
            zoom=d.around(field(fit, "source.path"), 760))
     button = next(b for b in control.findChildren(type(fit.run_button))

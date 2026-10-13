@@ -208,3 +208,37 @@ def test_only_local_files_are_taken_from_a_drag():
     assert drops.accepts(mime_for(__file__))
     assert not drops.accepts(web)
     assert not drops.accepts(text)
+
+
+def test_a_written_simulation_offers_fit_this_which_fills_the_fitters_file(
+        app, windows, tmp_path):
+    session, control, _ = windows
+    tab = next(control.tabs.widget(i) for i in range(control.tabs.count())
+               if control.tabs.tabText(i) == "File")
+    simulate = next(i for i in tab.tab.instances
+                    if i.plugin == "File/Simulate/Blinking Structure")
+    tab.open_section(simulate.id)
+    panel = tab.slots[simulate.id].panel
+    path = tmp_path / "run.sim.yaml"
+    panel.form.set_values({"output": "camera", "n_frames": 20,
+                           "camera.path": str(path)})
+    panel.refresh_derived()
+    assert not panel.notice_button.isVisibleTo(panel)     # nothing written yet
+
+    ended = []
+    panel.ended.connect(lambda *args: ended.append(args))
+    panel.run_button.click()
+    deadline = time.monotonic() + 60
+    while not ended and time.monotonic() < deadline:
+        app.processEvents()
+        time.sleep(0.01)
+    assert ended and ended[0][0] == "done" and path.is_file()
+    assert panel.notice_button.isVisibleTo(panel)
+    assert panel.notice_button.text() == "Fit this"
+
+    panel.notice_button.click()                 # the fitter's file, as a drop sets it
+    assert control.tabs.tabText(control.tabs.currentIndex()) == "Localize"
+    localize = control.tabs.currentWidget()
+    opened = localize.tab.instances[localize.tab.index_of(localize.open_instance())]
+    assert localize.slots[opened.id].panel.form.values()["source.path"] == str(path)
+    assert not len(session.locs)                            # set, not fitted

@@ -29,13 +29,20 @@ def is_simulation(path) -> bool:
     return str(path).lower().endswith(SUFFIXES)
 
 
+def recipe_path(path) -> Path:
+    """Where `write_recipe` writes when asked for ``path``: the path itself if
+    it is a simulation file's, else its stem with ``.sim.yaml``."""
+    path = Path(path)
+    if is_simulation(path):
+        return path
+    return path.with_name(path.name.split(".")[0] + ".sim.yaml")
+
+
 def write_recipe(settings: SimulationSettings, path) -> Path:
     """Save ``settings`` as a simulation file; a structure file's path is made
     absolute so the recipe still finds it from wherever it is opened."""
     import yaml
-    path = Path(path)
-    if not is_simulation(path):
-        path = path.with_name(path.name.split(".")[0] + ".sim.yaml")
+    path = recipe_path(path)
     values = asdict(settings)
     if values["structure"]["file"]:
         values["structure"]["file"] = str(Path(values["structure"]["file"]).resolve())
