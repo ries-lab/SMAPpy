@@ -260,11 +260,7 @@ dark frames) and combines each run into one row using the per-column rules from
   keeps 95.6% of a blink's links -- and cuts the other 4.4%, which a fixed box
   wide enough does not.  A localization with no precision (NaN) links to
   `dx_max`; a table with no precision column falls back to the box, with a
-  warning, because every file is grouped as it opens.  The chunked linker
-  carries the precision across its seams too, but a head re-seeded past a
-  seam starts with its own precision rather than the trace's running one, so
-  it is a little less exact there than for the box (0.996 against 0.999 on
-  the all-seam test table).
+  warning, because every layer merges blinks by default.
 * **The error of a summed quantity adds in quadrature.**  This is the rule that
   keeps shot noise consistent: with `e_i = sqrt(N_i)`, `sqrt(sum(e_i^2))` is
   `sqrt(sum(N_i))` exactly -- the shot noise of the summed photons.  SMAP

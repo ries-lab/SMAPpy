@@ -266,12 +266,7 @@ def test_sorted_order_handles_negative_and_far_apart_frames():
     assert _orders_match(x, (rng.integers(0, 4, 2000) * 10 ** 7).astype(np.int64))
 
 
-# ----------------------------------------------------- chunked linking ------
-# `smappy._group_chunked` links slices of the frame axis in parallel and repairs
-# the seams.  It is an approximation, and `group()` uses it by default
-# (`GroupSettings.link_chunks`); these pin the two things that make it usable
-# at all -- that one chunk is the sequential walk exactly, and that more chunks
-# stay within a hair of it.
+# ------------------------------------------------------------- linking ------
 
 def _blinking(n_emitters=3000, frames=400, mean_on=3.0, seed=0):
     rng = np.random.default_rng(seed)
@@ -298,36 +293,6 @@ def _same_partition(a, b):
                   & (count[inv] == np.bincount(b)[b])).sum()) / len(a)
 
 
-def test_one_chunk_is_the_sequential_walk():
-    from smappy._group_chunked import connect_chunked
-    x, y, f = _blinking()
-    assert np.array_equal(connect_chunked(x, y, f, 50.0, 1, n_chunks=1),
-                          connect(x, y, f, 50.0, 1))
-
-
-def test_chunked_linking_stays_within_a_hair_of_the_control():
-    from smappy._group_chunked import connect_chunked
-    x, y, f = _blinking()
-    control = connect(x, y, f, 50.0, 1)
-    for n_chunks in (2, 4, 8):
-        stats = {}
-        ids = connect_chunked(x, y, f, 50.0, 1, n_chunks=n_chunks, stats=stats)
-        assert ids.min() == 1 and len(np.unique(ids)) == ids.max()   # no gaps
-        assert _same_partition(control, ids) > 0.999
-        assert stats["rejoined"] > 0            # seams were found and repaired
-
-
-def test_chunked_linking_keeps_blocks_apart():
-    """Localizations of different channels may not be linked, however the
-    frame axis is cut."""
-    from smappy._group_chunked import connect_chunked
-    x, y, f = _blinking(n_emitters=800, frames=200)
-    channel = (np.arange(len(x)) % 2).astype(np.int64)
-    ids = connect_chunked(x, y, f, 50.0, 1, channel[:, None], n_chunks=4)
-    for g in np.unique(ids):
-        assert len(np.unique(channel[ids == g])) == 1
-
-
 def test_the_sort_assumes_nothing_about_the_order_it_is_given():
     """The radix partitions on a key every localization carries, not on where
     it sits, so a table straight out of a plugin that reordered everything
@@ -335,7 +300,7 @@ def test_the_sort_assumes_nothing_about_the_order_it_is_given():
     rng = np.random.default_rng(11)
     n = 50_000
     x = rng.random(n) * 40_000
-    frame = rng.integers(0, 90_000, n).astype(np.int64)      # spans two chunks
+    frame = rng.integers(0, 90_000, n).astype(np.int64)      # beyond 16 bits
     channel = rng.integers(0, 3, n).astype(np.int64)
     filenumber = rng.integers(0, 2, n).astype(np.int64)
     keys = (filenumber, channel)
@@ -363,31 +328,19 @@ def test_frames_that_do_not_start_at_zero_or_run_in_order():
 
 
 # ------------------------------------------------ threaded, and repeatable ---
-# `combine` runs its columns across threads and `group()` links across chunks.
-# Neither may make the answer depend on what the machine happened to do.
+# `combine` runs its columns across threads; that may not make the answer
+# depend on what the machine happened to do.
 
-def test_group_ids_do_not_depend_on_the_thread_count():
-    """`link_chunks` is a setting, not a thread count: the cut points come
-    from the data, so the same file groups the same way on any machine."""
-    from smappy._group_chunked import connect_chunked
-    x, y, f = _blinking(n_emitters=4000, frames=600, seed=2)
-    first = connect_chunked(x, y, f, 50.0, 1, n_chunks=8, workers=1)
-    for workers in (2, 4, 16):
-        assert np.array_equal(connect_chunked(x, y, f, 50.0, 1, n_chunks=8,
-                                              workers=workers), first)
-
-
-def test_grouping_uses_the_chunked_linker_and_can_be_told_not_to():
+def test_grouping_is_the_sequential_walk():
+    """`group()` links with `connect` as it is, with no shortcut that could
+    put a localization in another group than the walk does."""
     x, y, f = _blinking(n_emitters=4000, frames=600, seed=3)
     locs = Localizations({"x_nm": x.astype(np.float32), "y_nm": y.astype(np.float32),
                           "frame": f, "photons": np.ones(len(x), np.float32),
                           "xy_err_nm": np.full(len(x), 10.0, np.float32)},
                          {"units": "nm"})
-    assert GroupSettings().link_chunks == 8
-    chunked, _ = group(locs, GroupSettings())
-    exact, index = group(locs, GroupSettings(link_chunks=1))
-    assert np.array_equal(index, connect(x, y, f, 50.0, 1))   # 1 chunk is the walk
-    assert abs(len(chunked) - len(exact)) / len(exact) < 1e-3
+    _, index = group(locs, GroupSettings())
+    assert np.array_equal(index, connect(x, y, f, 50.0, 1))
 
 
 def test_combine_reduces_each_column_by_its_own_rule():
@@ -605,11 +558,8 @@ def _neighbours_and_dim_blinks(seed=0):
 
 def test_linking_by_precision_separates_bright_neighbours_and_keeps_dim_blinks():
     locs, truth = _neighbours_and_dim_blinks()
-    # one chunk: the table is 8 frames long, and eight chunks would be all seam
-    _, fixed = group(locs, GroupSettings(dx=50.0, dt=1, link_chunks=1),
-                     attach_columns=False)
-    _, prec = group(locs, GroupSettings(link="precision", dt=1, link_chunks=1),
-                    attach_columns=False)
+    _, fixed = group(locs, GroupSettings(dx=50.0, dt=1), attach_columns=False)
+    _, prec = group(locs, GroupSettings(link="precision", dt=1), attach_columns=False)
     bright = np.isin(truth, truth[locs["xy_err_nm"] == 3.0])
     dim = ~bright
 
@@ -627,25 +577,6 @@ def test_linking_by_precision_separates_bright_neighbours_and_keeps_dim_blinks()
     # about a quarter of 8-frame blinks lose one -- against all of them
     assert split(fixed, dim) > 140
     assert split(prec, dim) < 60
-
-
-def test_chunked_linking_by_precision_stays_within_a_hair_of_the_control():
-    from smappy._group_chunked import connect_chunked
-    x, y, f = _blinking()
-    s = np.random.default_rng(1).uniform(4, 30, len(x))
-    args = dict(precision=s, k=2.5, dx_min=10.0)
-    control = connect(x, y, f, 150.0, 1, **args)
-    assert np.array_equal(connect_chunked(x, y, f, 150.0, 1, n_chunks=1, **args),
-                          control)
-    for n_chunks in (2, 8):
-        stats = {}
-        ids = connect_chunked(x, y, f, 150.0, 1, n_chunks=n_chunks, stats=stats, **args)
-        assert len(np.unique(ids)) == ids.max()
-        # looser than the box's 0.999: the running precision is state a head
-        # re-seeded past the seam does not have, so its next links can differ.
-        # This table is all seams -- 300 of 3300 traces cross one at 8 chunks
-        assert _same_partition(control, ids) > 0.995
-        assert stats["rejoined"] > 0
 
 
 def test_linking_by_precision_without_a_precision_falls_back_to_the_box():

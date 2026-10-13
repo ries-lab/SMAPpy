@@ -246,15 +246,13 @@ Not taken: numpy's own stable sorts LSD-style over x, frame, block (exact,
 threaded lexsorts of x inside each bucket (exact, 5.1 s); discretizing x to
 one 16-bit digit (0.4 s faster, 0.19% of localizations change places).
 
-The linking runs in chunks now (`GroupSettings.link_chunks`, default 8):
-13 s to 6 s.  It is not exact -- a trace cut at a seam is put back together
-by `smappy._group_chunked._stitch`, but the sequential walk *claims*
-localizations as it goes and a chunk cannot know about the claims reaching
-into it, so about 1 in 20,000 localizations lands in a different group.
-Different, not worse: the walk claims the first match in x order rather than
-the nearest, so which of two candidates wins was never meaningful.  The cut
-points come from the data and not from the core count, so a file groups the
-same way on any machine; `link_chunks=1` is the sequential walk exactly.
+The linking ran in chunks for a while (`GroupSettings.link_chunks`,
+`smappy._group_chunked`): 13 s to 6 s on this file, and not exact -- about 1
+localization in 20,000 landed in another group, because the sequential walk
+claims localizations as it goes and a chunk cannot know about the claims
+reaching into it.  It is gone, since opening no longer waits for the merge
+(see "Merging blinks in the background", below), and the walk is the exact
+one again.
 
 **`combine` does not parallelize, and that was worth finding out.**  The
 columns are independent and numpy drops the GIL, but a column in flight holds
@@ -278,5 +276,28 @@ nothing to coordinate.  All six modes (mean, sum, precision, quad, min, max)
 and the per-coordinate weighting are unchanged -- C++ accumulates, Python
 finishes, and the numpy path stays as the reference the tests compare to.
 
-What is left of the 56 s: 32 s read, 9 s `combine`, 6 s linking, 2 s sort,
-6 s indices and filters.
+What was left of the 56 s: 32 s read, 9 s `combine`, 6 s linking, 2 s sort,
+6 s indices and filters.  The file now opens after the read and the indices;
+the merge -- about 24 s with the exact walk -- follows in the background.
+
+## Merging blinks in the background
+
+Every file was merged before it opened, so that its layer could open on
+blinks, and that is what the chunked linker was for.  A layer still shows
+merged blinks by default, but in the GUI the file opens at once on its
+single localizations and the merge runs in a worker (`gui.merging`) with
+the stage and a clock in the status bar; the layer switches to blinks when
+they are there.  The worker gets the table read-only (`Tables.link_job`, a
+snapshot of a live one) and hands the answer back to be kept on the GUI
+thread (`Tables.take_grouped`), which writes `group_id` and `n_in_group`
+back.  Below 300,000 localizations it merges in place, on first read.
+Headless (a script, a chain, a batch) a layer merges on first read.
+
+Measured on simulated tables (`smappy.simulate`, tiled side by side; a
+4-core machine shared with other jobs, so the spread is wide), the whole
+`group()` with the exact walk against the chunked one: 2 M at 5 a frame,
+0.75-0.8 s against 0.6-0.8 s; 5 M at 50 a frame, 2.5-3.2 s against
+2.8-3.4 s; 5 M at 500 a frame, 4.5-6.2 s (the walk 4.3-6.3 s, chunked
+3.3-4.0 s); 20 M at 200 a frame, 21.8 s for both.  Done once, in the
+background, a second or two of difference does not pay for an approximate
+grouping and 360 lines.
