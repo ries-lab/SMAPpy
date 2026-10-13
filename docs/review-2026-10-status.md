@@ -45,17 +45,21 @@ all platforms.
 1. **Garbage collection back on** -- an experiment is running (the test
    suite repeatedly with collection on, and with it forced constantly).
    Turn it on only on clean evidence; the CLAUDE.md rule changes with it.
-2. **Merged blinks, edge cases**: a never-merged layer has no
-   `n_in_group`/`group_id` (no on-time in per-region Statistics there); a
-   plugin run during a background merge measures what is on screen; a chain
-   step set to merged blinks merges again in its scratch copy and does not
-   hand the result back.  Recommend: adopt the scratch copy's merge when it
-   matches the session's table and settings.
+2. **Merged blinks: analysis waits for the merge** (decided, in progress).
+   While a large file's blinks merge in the background, the view shows that
+   they are being merged (with a percentage) instead of unmerged
+   localizations, and an analysis run, a chain or a follow-ROI measurement
+   started meanwhile waits and then runs on the merged blinks.  This removes
+   the three edge cases: a never-merged layer without `n_in_group`, a run
+   measuring single localizations during the merge, and a chain merging
+   again in its scratch copy (and writing `group_id` from its thread).
 3. **`cutoff` ≥ 20 without a mode** still means photons, with a warning;
    make the mode required in a later release.
-4. **Regions**: `ROIProject` is now a base with one implementation
-   (`SessionROIs`) -- merge the two; write back inside a nested block is
-   still unsupported.
+4. **Regions** (decided, in progress): `ROIProject` and `SessionROIs`
+   become one class; write back inside a nested block stays unsupported,
+   but a nested block whose changes to the table would be discarded
+   (*write values* / *write back* on it, or a table-changing last step)
+   warns in the editor and when the chain runs.
 5. **Deferred by the owner**: the Analysis tab (a lean GUI users add to),
    the 3D view redesign with picture settings on the session and the slab as
    a 3D ROI (§4.6), COMET's GPU path (benchmark on Windows, then keep only
