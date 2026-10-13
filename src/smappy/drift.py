@@ -129,7 +129,7 @@ class DriftSettings:
     # Skip pairs beyond 6 sigma, where each contributes less than e^-9 of a
     # coincident pair: 1.3x faster.  The Gaussian itself is exact -- the table
     # and polynomial this once used went with the numba kernel -- so the name
-    # is historical.  The spline fit always uses the cutoff.  See NOTES.
+    # is historical.  The spline fit always uses the cutoff.  See docs/drift.md.
     approximate_kernel: bool = param(True, label="approximate kernel",
                                      help="skip pairs more than 6 sigma "
                                           "apart; the spline fit always "
@@ -137,7 +137,8 @@ class DriftSettings:
                                      advanced=True)
     # A looser tolerance for the coarse sigma steps.  None (the default) means
     # the same as `optimizer_ftol`: measured, loosening the coarse steps is a
-    # bad trade -- 2.3x faster for tens of nm on individual windows.  See NOTES.
+    # bad trade -- 2.3x faster for tens of nm on individual windows.  See
+    # docs/drift.md.
     optimizer_ftol_coarse: Optional[float] = param(None, label="ftol coarse",
                                                    help="ftol for the steps "
                                                         "above the target "
@@ -391,8 +392,8 @@ class Drift:
 # Both the time and the memory of a drift estimate are set by one number: how
 # many neighbour pairs there are within `max_drift_nm`.  Every cost evaluation
 # is one `exp()` per pair, and the KD-tree search has to hold all of them at
-# once.  The constants below are measured on an M1 Max (see NOTES.md, "Where
-# the time goes"); they are the right order on any CPU and are only ever used
+# once.  The constants below are measured on an M1 Max (see docs/drift.md,
+# "Where the time goes"); they are the right order on any CPU and are only ever used
 # to decide whether to warn, never to change what is computed.
 _SECONDS_PER_PAIR_EVALUATION = 2.1e-9   # the compiled kernel, across the cores
 _SECONDS_PER_PAIR_SEARCH = 16e-9        # cKDTree.query_pairs
@@ -666,7 +667,7 @@ def estimate_drift(locs: Localizations, settings: Optional[DriftSettings] = None
         return _estimate_spline(locs, settings, select, pixelsize_nm, display,
                                 progress, stop)
 
-    # Opt in to the two changes made to the vendored COMET (see NOTES.md); its
+    # Opt in to the two changes made to the vendored COMET (docs/drift.md); its
     # own defaults are untouched for anyone importing it directly.
     drift_optimizer.CPU_WRAPPER = (cpu_wrapper_chunked_approx
                                    if settings.approximate_kernel

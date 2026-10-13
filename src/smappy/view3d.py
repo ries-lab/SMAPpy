@@ -486,7 +486,7 @@ def thinned(rows: np.ndarray, budget: Optional[int]) -> np.ndarray:
     Thinning is unbiased: every pixel keeps the same fraction, so a preview is
     what a shorter acquisition would have looked like -- noisier, never
     rearranged.  Merging neighbours instead would hold the total but move it,
-    which can make a sparse filament look continuous; see NOTES.md.
+    which can make a sparse filament look continuous; see docs/performance.md.
     """
     if budget is None or rows.size <= budget or budget < 1:
         return rows
