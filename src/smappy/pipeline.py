@@ -25,7 +25,7 @@ from .detect import Candidates, PeakFinder
 from .locs import Localizations, fit_to_localizations, to_nm, valid
 from .metadata import CameraMetadata
 from .psf import PSFModel
-from .roi import ROIStack, cut_rois
+from .fit_rois import ROIStack, cut_rois
 from .params import param
 
 

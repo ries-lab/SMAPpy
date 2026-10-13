@@ -332,7 +332,7 @@ def cut_paired_rois(photons: np.ndarray, reference: Candidates, secondary: Candi
     No resampling: each ROI is taken at its own integer pixel and the
     remainder rides along in the link.
     """
-    from .roi import _block_index
+    from .fit_rois import _block_index
 
     photons = np.asarray(photons, np.float32)
     if photons.ndim == 2:

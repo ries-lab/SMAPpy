@@ -1,4 +1,5 @@
-"""Cutting fit ROIs around candidate positions."""
+"""Cutting fit ROIs around candidate positions: the boxes a fitter fits, not
+the analysis ROIs of the ROI manager (`roi_manager`)."""
 
 from __future__ import annotations
 

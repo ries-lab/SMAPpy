@@ -44,7 +44,7 @@ from smappy.camera import to_photons
 from smappy.metadata import CameraMetadata
 from smappy.plugins.fit import DetectionSettings
 from smappy.psf import GaussianPSF
-from smappy.roi import cut_rois
+from smappy.fit_rois import cut_rois
 from smappy.simulate import camera_frames
 from smappy.simulate.settings import LabellingSettings
 frames, truth = camera_frames(n_frames=200, seed=4, size_px=64,

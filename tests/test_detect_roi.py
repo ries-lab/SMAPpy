@@ -4,7 +4,7 @@ import pytest
 
 from smappy.detect import (AbsoluteCutoff, DoGFilter, DynamicCutoff, GaussFilter,
                             PeakFinder, find_candidates, local_maxima)
-from smappy.roi import cut_rois
+from smappy.fit_rois import cut_rois
 
 
 def _spots(positions, shape=(64, 60), amplitude=100.0, sigma=1.2, background=10.0):

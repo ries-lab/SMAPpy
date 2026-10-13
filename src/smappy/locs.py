@@ -24,7 +24,7 @@ import numpy as np
 from .columns import add_xy_err
 from .metadata import CameraMetadata, pixel_sizes
 from .psf import FitResult, PSFModel
-from .roi import ROIStack
+from .fit_rois import ROIStack
 
 
 @dataclass
