@@ -316,6 +316,9 @@ def test_a_failed_3d_render_frees_the_view_for_the_next(app, monkeypatch):
     view = View3D(session)
     view.resize(300, 300)
     view.show()
+    # showing it renders once already: let that finish before breaking one
+    settle(app, lambda: not view._busy)
+    view._fov = None
     real = view3d.render_3d
     calls = {"n": 0}
 
@@ -327,8 +330,8 @@ def test_a_failed_3d_render_frees_the_view_for_the_next(app, monkeypatch):
 
     monkeypatch.setattr(view3d, "render_3d", once_broken)
     view.render()
-    settle(app, lambda: not view._busy)
-    assert not view._busy and view._fov is None
+    settle(app, lambda: calls["n"] >= 1 and not view._busy)
+    assert calls["n"] >= 1 and not view._busy and view._fov is None
     view.render()
     settle(app, lambda: not view._busy and view._fov is not None)
     assert view._fov is not None
