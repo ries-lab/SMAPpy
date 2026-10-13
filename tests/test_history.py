@@ -99,7 +99,7 @@ def test_the_plugin_exports_when_it_is_given_a_path(tmp_path, config_dir):
     session = session_with_a_run(config_dir)
     path = tmp_path / "provenance.csv"
     result = session.run(History(), HistorySettings(path=str(path)))
-    assert result.data["path"] == path and path.exists()
+    assert result.written == str(path) and path.exists()
     assert "written to" in result.text
     assert "photons * 2" in path.read_text()
 

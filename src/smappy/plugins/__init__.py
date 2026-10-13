@@ -369,7 +369,7 @@ class Context:
 
         A plugin checks it between steps of its own -- time windows,
         regions, blocks of frames -- and then either returns what it has,
-        with ``data["stopped"] = True`` so the panel says "stopped", or
+        with ``Result(stopped=True)`` so the panel says "stopped", or
         raises `Stopped` when a part of the work is worth nothing (half a
         drift estimate).  One that never checks simply runs to the end.
         """
@@ -574,7 +574,7 @@ class Stopped(Exception):
     """A run that was asked to stop (`Context.stop`) and has nothing worth
     keeping: the session is left as it was, and the panel says "stopped"
     rather than "failed".  A run that has something -- the frames fitted, the
-    regions measured -- returns it instead, with ``data["stopped"] = True``."""
+    regions measured -- returns it instead, with ``Result(stopped=True)``."""
 
 
 @dataclass
@@ -683,7 +683,17 @@ class FormState:
 
 @dataclass
 class Result:
-    """What a plugin hands back.  Every part is optional."""
+    """What a plugin hands back.  Every part is optional.
+
+    Two kinds of part.  What the run found -- its text, its figures, its
+    numbers (`data`, `values`, `arrays`) -- is looked at and kept.  What it
+    asks the session to do beyond replacing the table -- open files, set
+    filter bounds, add ROIs, keep camera frames -- is a typed field each,
+    below the line, which `Session.apply` (or a chain, a block, the batch)
+    reads.  They were string keys of `data` once, and a key misspelt or
+    renamed on one side did nothing at all; a misspelt keyword now raises a
+    `TypeError` where the result is made.
+    """
     locs: Optional[Localizations] = None    # replaces the session's table
     # loaded files, as (locs, info, grouped): a loader runs in a worker thread
     # and must not touch the session, so it hands them back and `Session.apply`
@@ -696,7 +706,9 @@ class Result:
     # show, and two views of the same decision belong in two tabs rather
     # than in one crowded axis
     plots: Dict[str, Any] = field(default_factory=dict)
-    data: Dict[str, Any] = field(default_factory=dict)  # anything else
+    # the plugin's own numbers and payload, for a script or a test: nothing
+    # reads a key of it to decide what to do
+    data: Dict[str, Any] = field(default_factory=dict)
     # What a run in one region stores as that region's results
     # (`docs/regions.md`): `values` the numbers, a column each of the region
     # table; `arrays` named arrays -- a fixed-size one (eight corner counts)
@@ -711,6 +723,56 @@ class Result:
     # what the figures are of, for the window's title beside the plugin's
     # name: "NeNA, CRLB, FRC of layer 1, 30000 localizations"
     title: str = ""
+
+    # ---------------------------------------------- what the session is asked
+    # The `files` join the session's rather than replacing them (a loader's
+    # *append*); the second and later files always join.
+    append: bool = False
+    # The file this run wrote -- a saved table, an exported picture, a
+    # simulation's recipe, a fit's output.  A table made from nothing is
+    # named after it, a chain passes it on, and the batch records it.
+    written: Optional[str] = None
+    # The table handed back is the one in `written`, so the session is not
+    # "unsaved" after it: a fit that wrote its own output.
+    saved: bool = False
+    # Camera frames a fit kept (`smappy.rawframes`): they replace the
+    # session's raw frames, as the fit's table replaces its table.
+    images: Sequence = ()
+    # Filter bounds ``{column: (lo, hi)}`` set on every localization layer:
+    # for a column the plugin wrote to be filtered on.  It cannot set them
+    # itself, since a filter belongs to the table, and the table is the one
+    # `apply` has just put in place.
+    bounds: Dict[str, Tuple[float, float]] = field(default_factory=dict)
+    # Layer set-ups, bounds and grouping per layer
+    # (`Session.set_layer_configs`): the Render tab's work done by a plugin
+    # (`Chain/Layers`).
+    layers: Optional[List[Dict[str, Any]]] = None
+    # The ROIs this run added to the ROI manager's project (a segmenter, or
+    # *Column to ROIs*), an empty list when it found none; None for a run
+    # that adds no ROIs.  The manager redraws, and a preview is dropped.
+    rois: Optional[List[Any]] = None
+    # A segmenter's preview: the ROIs it would add, shown grey in the
+    # manager and not added (`Session.show_preview`).
+    roi_preview: Optional[Dict[str, Any]] = None
+    # The whole ROI project as a chain left it (`ROIProject.to_dict`): the
+    # ROIs its segmenters found and the runs its evaluators made, put into
+    # the project the session has.
+    roi_project: Optional[Dict[str, Any]] = None
+    # What was measured per region of an id column, ``{column: {name:
+    # table}}``, added to `Session.id_regions`.
+    id_regions: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    # A block's tables per region, which a block around it keeps as the
+    # children of its own region (`region_runs.RegionScratch`).
+    region_tables: Dict[str, Any] = field(default_factory=dict)
+    # ``(name, plugin path)`` of the evaluations this run left on the
+    # regions, so that a later step of a chain reads them without asking.
+    evaluations: Sequence[Tuple[str, str]] = ()
+    # The table change as a recipe (`LiveRecipe`), which can follow a table
+    # a fit is still appending to; `locs` is then the recipe applied.
+    recipe: Optional["LiveRecipe"] = None
+    # The run was asked to stop (`Context.stop`) and this is what it had:
+    # the panel says "stopped" rather than "done".
+    stopped: bool = False
 
     def figures(self) -> List[Plot]:
         """Everything there is to draw, as `Plot`s, the main one first."""
@@ -727,7 +789,7 @@ class LiveRecipe:
     other columns, which the session can work out for the table so far and
     then for every block as it arrives, and once more for the finished
     table.  A plugin that can be one puts it in its result as
-    ``data["live_recipe"]``, and says so before the run in
+    ``Result.recipe``, and says so before the run in
     `Plugin.live_recipe_for`.  The Math Parser's expression is one, and the
     colour assignment, with the modes it found, is another.
 

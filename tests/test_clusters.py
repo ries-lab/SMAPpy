@@ -109,7 +109,7 @@ def test_an_roi_per_cluster_outlines_it_and_replace_makes_them_again():
     session.run(DBSCAN(), DBSCAN.Settings(radius_nm=40, neighbours=5))
     result = session.run(ColumnToROIs(), ColumnToROIs.Settings(min_size=30))
     project = session.rois
-    assert len(project.rois) == 2 and result.data["rois"] == 2   # 25 < 30
+    assert len(project.rois) == 2 and len(result.rois) == 2   # 25 < 30
     for roi in project.rois.values():
         inside = project.region(roi).mask(xy[:, 0], xy[:, 1])
         k = roi.origin["cluster"]

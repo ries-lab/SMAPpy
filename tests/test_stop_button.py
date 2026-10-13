@@ -49,7 +49,7 @@ class Loops(Plugin):
             if ctx.stopped or time.monotonic() > deadline:
                 break
         return Result(locs=ctx.locs[:rounds], text=f"{rounds} rounds",
-                      data={"stopped": ctx.stopped})
+                      stopped=ctx.stopped)
 
 
 class GivesUp(Plugin):
@@ -110,7 +110,7 @@ def test_pressing_stop_ends_the_run_keeps_its_part_and_says_stopped(app):
     app.processEvents()
 
     kind, result = said[0]
-    assert kind == "done" and result.data["stopped"]
+    assert kind == "done" and result.stopped
     assert panel.status.text() == "stopped"
     assert 0 < len(session.locs) < 1000          # the rounds it did, applied
     assert len(session.locs) == int(result.text.split()[0])

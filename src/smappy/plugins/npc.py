@@ -428,6 +428,7 @@ class NPCSegment(SegmenterPlugin):
     def segment(self, ctx: Context, settings: NPCSegmentSettings,
                 commit: bool) -> Result:
         project = ctx.rois
+        effect: Dict[str, Any] = {}
         if project is None:
             locs = ctx.locs
             sites = segment_npcs(locs, settings)
@@ -440,9 +441,9 @@ class NPCSegment(SegmenterPlugin):
             state = project.state(file_id)
             locs = state.locs[state.filter.indices]
             self.last = []
-            proposed, data = self.found(project, file_id, settings, commit)
+            proposed, effect = self.found(project, file_id, settings, commit)
             sites = self.last
-            data = {**data, "sites": sites,
+            data = {"sites": sites,
                     "centers": [p["center"] for p in proposed if p["use"]]}
         kept = sum(s["use"] for s in sites)
         text = f"{kept} pores of {len(sites)} candidates"
@@ -459,7 +460,7 @@ class NPCSegment(SegmenterPlugin):
             text = "preview: " + text
         xy = np.column_stack((np.asarray(locs["x_nm"], dtype=float),
                               np.asarray(locs["y_nm"], dtype=float)))
-        return Result(text=text, settings=settings, data=data,
+        return Result(text=text, settings=settings, data=data, **effect,
                       plot=(lambda ax: draw_sites(ax, xy, sites, settings))
                       if sites else None,
                       plots={"checks": Plot(lambda f: draw_quality(f, sites, settings),

@@ -222,10 +222,10 @@ class RemoveLocalizations(Plugin):
                     f"filtered out by {field} >= {FILTER_BOUND[0]}")
             # the bound belongs to the new table, so the session sets it once
             # that table is in place; see `Session.apply`
-            data = {"bounds": {field: FILTER_BOUND}}
+            bounds = {field: FILTER_BOUND}
         else:
             locs = drop(ctx.locs, keep)
             text = (f"removed {going} of {len(ctx.locs)} localizations "
                     f"{settings.which} {where}; {len(locs)} left")
-            data = {}
-        return Result(locs=locs, text=text, data=data, settings=settings)
+            bounds = {}
+        return Result(locs=locs, text=text, bounds=bounds, settings=settings)

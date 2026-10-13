@@ -166,5 +166,5 @@ class ChainLayers(Plugin):
             out = locs[keep]
             lines.append(f"removed {int((~keep).sum())} of {len(locs)} localizations "
                          "that no layer keeps")
-        return Result(locs=out, text="\n".join(lines), data={"layers": configs},
+        return Result(locs=out, text="\n".join(lines), layers=configs,
                       settings=settings)

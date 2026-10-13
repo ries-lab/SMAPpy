@@ -313,7 +313,7 @@ def test_a_chain_changes_the_roi_project_only_through_its_result():
     cls = chain_class(spec(SEGMENT, each_roi({"plugin": "Analysis/Measure/Localization Statistics"})))
     result = cls().run(session.context(), cls.Settings())
     assert len(session.rois.rois) == 0 and session.rois.runs == []
-    assert len(result.data["roi_project"]["rois"]) == 4
+    assert len(result.roi_project["rois"]) == 4
     session.apply(cls(), result)
     assert len(session.rois.rois) == 4 and len(session.rois.runs) == 1
 
@@ -321,7 +321,7 @@ def test_a_chain_changes_the_roi_project_only_through_its_result():
 def test_a_chain_that_leaves_the_rois_alone_hands_none_back():
     session = four_sites()
     cls = chain_class(spec({"plugin": "Test/Chain/Count"}))
-    assert "roi_project" not in cls().run(session.context(), cls.Settings()).data
+    assert cls().run(session.context(), cls.Settings()).roi_project is None
 
 
 def test_an_evaluator_with_no_sites_to_measure_stops_the_chain():

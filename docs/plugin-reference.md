@@ -48,7 +48,7 @@ and `smappy/simulate` are the record, and the code wins where they differ.
   another thread: end the run early keeping what it has, and "the live source
   is complete".  The panel's Run is Stop while a run goes, and sets `stop`.
   A long plugin checks `ctx.stopped` between steps of its own and returns
-  what it has with `data["stopped"] = True`, or raises `Stopped` when a part
+  what it has with `Result(stopped=True)`, or raises `Stopped` when a part
   is worth nothing (RCC); the panel then says "stopped".  The fitters, COMET,
   RCC, blocks over regions and chains (between steps) honour it.
 * The **grouped** table (one row per blink) is the session's, one for every
@@ -101,14 +101,29 @@ That is why a plugin returns the settings it actually used, and why one that
 changes the table hands back a new one rather than editing `ctx.locs`: the
 undo and the record both hang off the result.
 
-`Result.data["bounds"] = {field: (lo, hi)}` asks the session to open the
-filter on a column the run has just written -- a plugin cannot set it itself,
-because a filter belongs to the table it was built from and the new table
-exists only once `Session.apply` has set it.
+`data` is the plugin's own: numbers and payload for a script or a test,
+which nothing reads to decide what to do.  What a result asks of the session
+beyond its table is a typed field each, read by `Session.apply` (and by a
+chain, a block and the batch); a misspelt keyword raises a `TypeError` where
+the result is made, where a misspelt key of `data` used to do nothing:
 
-`Result.data["images"]` hands the session the camera frames a fit kept
-(`smappy.rawframes`); they replace the session's raw frames, since a fit
-replaces the table.
+| field | what the session does with it |
+| --- | --- |
+| `files` | opens them, as `(locs, info, grouped)`: a loader runs in a worker and must not touch the session |
+| `append` | the `files` join the session's rather than replacing them |
+| `written` | the file the run wrote (a saved table, an export, a recipe, a fit's output): a table made from nothing is named after it, a chain passes it on, the batch records it |
+| `saved` | the table handed back is the one in `written`, so the session is not unsaved |
+| `images` | camera frames a fit kept (`smappy.rawframes`); they replace the session's raw frames, since a fit replaces the table |
+| `bounds` | `{field: (lo, hi)}`, a filter bound on every layer for a column the run has just written -- a plugin cannot set it itself, because a filter belongs to the table it was built from and the new table exists only once `Session.apply` has set it |
+| `layers` | layer set-ups, bounds and grouping per layer (`Session.set_layer_configs`; `Chain/Layers`) |
+| `rois` | the ROIs the run added to the ROI manager's project (`[]` when it found none; None when it adds none): the manager redraws and a preview is dropped |
+| `roi_preview` | a segmenter's proposals, drawn grey and not added (`Session.show_preview`) |
+| `roi_project` | the whole ROI project as a chain left it, loaded into the session's |
+| `id_regions` | what was measured per region of an id column, added to `Session.id_regions` |
+| `region_tables` | a block's tables per region, kept by a block around it as its region's children |
+| `evaluations` | `(name, plugin path)` of the evaluations the run left, so a later step of a chain reads them without asking |
+| `recipe` | the table change as a `LiveRecipe`, which follows a table a fit is still appending to |
+| `stopped` | the run was stopped and this is what it had: the panel says "stopped" |
 
 The figures of one result share a window, a tab each beyond the first, and a
 tab is drawn when it is looked at and not before -- so a plugin with six

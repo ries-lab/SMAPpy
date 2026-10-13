@@ -201,7 +201,7 @@ def test_a_segmenter_preview_proposes_what_run_adds_and_adds_nothing():
     finder = DensityPeaks()
     preview = finder.preview(session.context(), settings)
     assert session.rois.rois == {}
-    sites = preview.data["roi_preview"]["sites"]
+    sites = preview.roi_preview["sites"]
     assert len(sites) == 3 and preview.text == "3 candidates previewed"
 
     # the session puts it where the manager draws it; a run adds the same
@@ -273,18 +273,18 @@ def test_a_replacing_run_is_one_undo_step_that_brings_the_old_rois_back_with_the
     drawn = project.add_roi(file_id, (1500.0, 1500.0))
     finder = DensityPeaks()
     settings = DensityPeakSettings(separation_nm=1000.0, min_count=20)
-    first = finder.run(session.context(), settings).data["rois"]
+    first = finder.run(session.context(), settings).rois
     assert len(first) == 3
     project.evaluate([Instance(plugin="Analysis/Measure/Localization Statistics")])
     assert len(project.results()) == 4
 
     # again without replace: nothing new, and no step for it
-    assert finder.run(session.context(), settings).data["rois"] == []
+    assert finder.run(session.context(), settings).rois == []
     assert project.history.undo_label == "Density Peaks: 3 ROIs"
 
     import dataclasses
     again = finder.run(session.context(),
-                       dataclasses.replace(settings, replace=True)).data["rois"]
+                       dataclasses.replace(settings, replace=True)).rois
     assert len(again) == 3 and drawn.id in project.rois
     assert not {r.id for r in first} & set(project.rois)
     assert project.undo() == "Density Peaks: 3 ROIs for 3"

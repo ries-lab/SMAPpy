@@ -162,11 +162,11 @@ A chain can do what the ROI manager does by hand:
   unless changed, is its default), so its grouping choice is greyed out; a
   `Chain/Layers` step before the block is how a chain sets that up.  What
   a block measures per region of an id column is handed back the same way,
-  as `Result.data["id_regions"]` into `Session.id_regions`.
+  as `Result.id_regions` into `Session.id_regions`.
 
 The scratch session carries a copy of the ROI project as it is
 (`Session.scratch`), and the chain hands the copy back as
-`Result.data["roi_project"]` when a step changed it; `Session.apply` loads it
+`Result.roi_project` when a step changed it; `Session.apply` loads it
 into the session's project, the object the ROI manager's window holds.  So,
 as for the table, nothing reaches the ROI manager until the whole chain has
 succeeded.  Undo does not take the ROIs back: the ROI manager has no undo.
@@ -243,8 +243,8 @@ log.
 
 A layer the step names but the session does not have is created; in the GUI
 the step acts on the session's layers, which is how the Render tab then shows
-what the chain did.  It hands its layers back as `Result.data["layers"]`,
-which `Session.apply` honours, the same way `data["bounds"]` works.
+what the chain did.  It hands its layers back as `Result.layers`,
+which `Session.apply` honours, the same way `Result.bounds` works.
 
 ### Grouping
 

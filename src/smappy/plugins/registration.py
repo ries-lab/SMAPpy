@@ -149,8 +149,8 @@ class CalibrateChannelTransform(Plugin):
                    else default_transform_path(locs, Path.cwd() / "channels_2ct.h5"))
             result.save(out, overwrite=settings.overwrite)
         return Result(text=self._summary(result, out), plot=self._plot(result),
-                      data={"transform": result.transform, "result": result,
-                            "path": out}, settings=settings)
+                      data={"transform": result.transform, "result": result},
+                      written=None if out is None else str(out), settings=settings)
 
     def preview(self, ctx: Context, settings) -> Result:
         result, _ = self._register(ctx, settings)

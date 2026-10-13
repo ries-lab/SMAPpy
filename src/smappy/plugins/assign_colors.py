@@ -757,8 +757,8 @@ class AssignColors(Plugin):
                              _intensity_plotter(values, modes, settings, seen)},
                       data={"modes": modes, "ratios": values, "channel": channel,
                             "probability": probability, "sigma": sigma,
-                            "posteriors": per_colour,
-                            "live_recipe": ColourRecipe(modes, settings)},
+                            "posteriors": per_colour},
+                      recipe=ColourRecipe(modes, settings),
                       settings=settings)
 
     def live_recipe_for(self, settings: AssignColorSettings) -> bool:

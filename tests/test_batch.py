@@ -215,7 +215,7 @@ class FakeFit(Plugin):
         out = Path(settings.output.path or default_output_path(settings.source.path))
         locs = blinks(n_emitters=n)
         save_localizations(out, locs)
-        return Result(locs=locs, text=f"{len(locs)} fitted", data={"path": out})
+        return Result(locs=locs, text=f"{len(locs)} fitted", written=str(out))
 
 
 def test_images_in_means_the_first_step_is_given_each_file(tmp_path):

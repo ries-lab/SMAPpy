@@ -244,7 +244,7 @@ class ColumnToROIs(Plugin):
         column = settings.column.strip()
         outline = settings.outline
         found = column_regions(ctx.locs, column, settings.min_size, outline)
-        made, flat = 0, 0
+        made, flat = [], 0
         with project.edit(f"{self.name}: ROIs") as step:
             replaced = []
             if settings.replace:
@@ -257,17 +257,17 @@ class ColumnToROIs(Plugin):
                 if outline and region["polygon"] is None:
                     flat += 1                   # no hull: the centre, as without
                 file_id = sources.get(region["file"], next(iter(sources.values())))
-                project.add_roi(file_id, region["center"], polygon=region["polygon"],
-                                origin={"method": self.path, "column": column,
-                                        "cluster": region["id"],
-                                        "localizations": int(len(region["rows"]))})
-                made += 1
-            step.label = f"{self.name}: {made} ROIs" + (
+                made.append(project.add_roi(
+                    file_id, region["center"], polygon=region["polygon"],
+                    origin={"method": self.path, "column": column,
+                            "cluster": region["id"],
+                            "localizations": int(len(region["rows"]))}))
+            step.label = f"{self.name}: {len(made)} ROIs" + (
                 f" for {len(replaced)}" if replaced else "")
-        text = f"{made} ROIs of {column}, from {settings.min_size} localizations"
+        text = f"{len(made)} ROIs of {column}, from {settings.min_size} localizations"
         if replaced:
             text += f", replacing {len(replaced)}"
         if flat:
             text += f"; {flat} with no outline (on a line) got the ROI manager's shape"
-        return Result(text=text, settings=settings, data={"rois": made},
-                      values={"rois": made})
+        return Result(text=text, settings=settings, rois=made,
+                      values={"rois": len(made)})

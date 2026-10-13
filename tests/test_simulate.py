@@ -320,7 +320,7 @@ def test_the_plugin_writes_a_simulation_a_fitter_can_open(tmp_path):
     tifffile = pytest.importorskip("tifffile")
     assert tifffile.imread(result.data["tiff"]).shape == (20, 100, 100)
     from smappy.plugins.fit import default_output_path
-    assert default_output_path(result.data["path"]).name == "x_locs.hdf5"
+    assert default_output_path(result.written).name == "x_locs.hdf5"
 
 
 # ------------------------------------------------- after comparing with SMAP

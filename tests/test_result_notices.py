@@ -23,7 +23,7 @@ class HandsBackAProject(Plugin):
     changes_locs = False
 
     def run(self, ctx, settings):
-        return Result(text="done", data={"roi_project": ctx.session.rois.to_dict()})
+        return Result(text="done", roi_project=ctx.session.rois.to_dict())
 
 
 def test_a_project_handed_back_tells_the_windows_the_rois_changed():
@@ -36,6 +36,26 @@ def test_a_project_handed_back_tells_the_windows_the_rois_changed():
     plugin = HandsBackAProject()
     session.apply(plugin, plugin.run(session.context(), None))
     assert "rois" in heard
+
+
+def test_a_misspelt_request_to_the_session_fails_where_the_result_is_made():
+    """What a result asks of the session is a field of `Result`, not a key of
+    `data` that `Session.apply` looks up: a key misspelt there did nothing."""
+    with pytest.raises(TypeError, match="bound"):
+        Result(text="hid some", bound={"use": (0.5, 2.0)})
+
+
+def test_the_plugins_own_numbers_ask_the_session_nothing():
+    """A key of `data` that once named an effect is only the plugin's own."""
+    session = Session()
+    session.set_locs(table())
+    before = dict(session.layers[0].ranges)
+    session.apply(Measures(), Result(text="measured",
+                                     data={"bounds": {"photons": (1e9, 2e9)},
+                                           "layers": [{"bounds": {}}]}))
+    assert dict(session.layers[0].ranges) == before
+    session.apply(Measures(), Result(text="hid", bounds={"photons": (500.0, 2e9)}))
+    assert session.layers[0].ranges["photons"] == (500.0, 2e9)
 
 
 class Measures(Plugin):

@@ -165,8 +165,9 @@ class SegmenterPlugin(Plugin):
 
     def found(self, project, file_id, settings, commit: bool
               ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
-        """``(sites, data)``: each site ``{"center", "use"}``, and the result's
-        data -- the ROIs a run added, or the preview for the manager.
+        """``(sites, effect)``: each site ``{"center", "use"}``, and what the
+        result asks of the session, as `Result` keywords -- the ROIs a run
+        added (``rois``), or the preview for the manager (``roi_preview``).
 
         Previewing changes nothing in the project, not even the preview
         itself: this runs on a worker thread, and the session puts the
@@ -211,10 +212,10 @@ class DensityPeaks(SegmenterPlugin):
         file_id = current_file(project)
         if file_id is None:
             raise ValueError("no file to search: load localizations first")
-        sites, data = self.found(project, file_id, settings, commit)
+        sites, effect = self.found(project, file_id, settings, commit)
         text = f"{len(sites)} candidates " + ("found" if commit else "previewed")
         return Result(text=text, settings=settings,
-                      data={**data, "centers": [s["center"] for s in sites]})
+                      data={"centers": [s["center"] for s in sites]}, **effect)
 
 
 def current_file(project) -> Optional[str]:

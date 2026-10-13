@@ -304,10 +304,9 @@ class MathParser(Plugin):
 
         shown = values if mask is None else np.asarray(values)[mask]
         where = "" if mask is None else f" (selection of {len(ctx.locs)})"
-        data = {}
-        if self.live_recipe_for(settings):
-            data["live_recipe"] = MathRecipe(field, settings.expression)
-        return Result(locs=locs, settings=settings, data=data,
+        recipe = (MathRecipe(field, settings.expression)
+                  if self.live_recipe_for(settings) else None)
+        return Result(locs=locs, settings=settings, recipe=recipe,
                       text=f"{describe(field, shown)}{where}{note}")
 
     def live_recipe_for(self, settings: MathSettings) -> bool:

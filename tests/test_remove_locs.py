@@ -95,7 +95,7 @@ def test_hiding_keeps_the_rows_and_flags_them():
     assert np.array_equal(np.asarray(result.locs["use"]),
                           np.repeat([0.0, 1.0], 10))
     # and the filter is opened on it, which is what makes them disappear
-    assert result.data["bounds"] == {"use": FILTER_BOUND}
+    assert result.bounds == {"use": FILTER_BOUND}
 
 
 def test_hiding_twice_hides_both_regions():

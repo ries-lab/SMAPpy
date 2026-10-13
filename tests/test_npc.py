@@ -319,7 +319,7 @@ def test_the_npc_chain_gives_what_the_three_steps_give_and_leaves_the_pipeline_a
     result = session.run(chain(), chain.Settings())
     assert session.layers[0].grouped                       # the chain's first step
     steps = result.data["results"]
-    found = steps["find_the_pores"].data["rois"]
+    found = steps["find_the_pores"].rois
     assert len(found) > 140
     # every included ROI is evaluated; the empty one fails on its own
     counted = steps["each_pore"].data
@@ -436,10 +436,10 @@ def test_the_segmenter_replaces_only_its_own_pores_when_asked():
     file_id = next(iter(project.sources))
     drawn = project.add_roi(file_id, (100.0, 100.0))
     segment = plugins.get("Analysis/Regions/Find/NPC")
-    first = len(segment()(ctx=session.context()).data["rois"])
-    assert len(segment()(ctx=session.context()).data["rois"]) == 0   # all suppressed
+    first = len(segment()(ctx=session.context()).rois)
+    assert len(segment()(ctx=session.context()).rois) == 0   # all suppressed
     again = segment()(ctx=session.context(), settings=NPCSegmentSettings(replace=True))
-    assert len(again.data["rois"]) == first
+    assert len(again.rois) == first
     assert len(project.rois) == first + 1 and drawn.id in project.rois
 
 
@@ -453,17 +453,17 @@ def test_a_replacing_preview_proposes_what_the_run_adds_and_changes_nothing():
     file_id = next(iter(project.sources))
     drawn = project.add_roi(file_id, (100.0, 100.0))
     segment = plugins.get("Analysis/Regions/Find/NPC")()
-    first = segment(ctx=session.context()).data["rois"]
+    first = segment(ctx=session.context()).rois
     before = set(project.rois)
     settings = NPCSegmentSettings(replace=True)
     preview = segment.preview(session.context(), settings)
-    proposed = preview.data["roi_preview"]
+    proposed = preview.roi_preview
     assert preview.text.startswith("preview: ")
     assert set(project.rois) == before
     assert sorted(proposed["replaces"]) == sorted(r.id for r in first)
     assert drawn.id not in proposed["replaces"]
     assert len(proposed["sites"]) == len(first)
-    again = segment(ctx=session.context(), settings=settings).data["rois"]
+    again = segment(ctx=session.context(), settings=settings).rois
     assert sorted(map(tuple, (s["center"] for s in proposed["sites"]))) == \
         sorted(tuple(r.center) for r in again)
 

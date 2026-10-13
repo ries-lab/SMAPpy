@@ -76,7 +76,7 @@ class _Load(Plugin):
         if grouped is not None:
             text += f", {len(grouped)} after linking"
         return Result(files=[(locs, info, grouped)], text=text,
-                      data={"append": settings.append, "info": info}, settings=settings)
+                      append=settings.append, data={"info": info}, settings=settings)
 
 
 @register("File/Load/Auto")
@@ -220,7 +220,7 @@ class Save(Plugin):
         missing = left_out(ctx.session, settings, done=True)
         if missing:                       # said before, and kept in the log
             text += "; " + missing[0].lower() + missing[1:]
-        return Result(text=text, data={"path": written}, settings=settings)
+        return Result(text=text, written=str(written), settings=settings)
 
 
 # ------------------------------------------------------------------- export
@@ -273,7 +273,7 @@ class ExportImage(Plugin):
                              pixelsize=settings.pixelsize_nm,
                              settings=render, display=display,
                              select=selection.mask)
-        return Result(text=f"written to {written}", data={"path": written},
+        return Result(text=f"written to {written}", written=str(written),
                       settings=settings)
 
 
@@ -309,8 +309,7 @@ class SimulateBlinks(Plugin):
                 f"({md['n_labels']} labels), {md['n_blinks']} blinks over "
                 f"{settings.n_frames} frames, off time {md['off_time_frames']:.0f} "
                 f"frames; {md['n_close']} too close together, {close}")
-        return Result(files=[(locs, info, None)], text=text,
-                      data={"append": False}, settings=settings)
+        return Result(files=[(locs, info, None)], text=text, settings=settings)
 
     def _camera(self, ctx, settings, truth, camera_truth) -> Result:
         from ..simulate.source import write_recipe
@@ -322,7 +321,7 @@ class SimulateBlinks(Plugin):
         text = (f"{len(truth.emission)} spots of {len(truth.fluorophores)} emitters "
                 f"over {settings.n_frames} frames of {cam.size_px} x {cam.size_px} "
                 f"pixels: {path} -- open it in a fitter as its file")
-        data = {"path": str(path)}
+        data = {}
         if cam.tiff:
             import tifffile
             from ..simulate import render
@@ -339,5 +338,5 @@ class SimulateBlinks(Plugin):
             name = f"{path.name} (truth)"
             files = [(locs, FileInfo(name=name, path=str(path), format="simulated",
                                      n=len(locs)), None)]
-            data["append"] = False
-        return Result(files=files, text=text, data=data, settings=settings)
+        return Result(files=files, text=text, data=data, written=str(path),
+                      settings=settings)

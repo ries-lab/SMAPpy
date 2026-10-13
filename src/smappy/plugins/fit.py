@@ -859,9 +859,9 @@ class _FitPlugin(Plugin):
         return Result(locs=finished.locs, text=text, plots=plots,
                       # the file holds this very table: written as it came,
                       # and again after the finishing steps if they changed it
-                      data={"stats": stats, "path": out, "saved": out is not None,
-                            "stopped": stopped,
-                            "images": [raw] if raw is not None else []},
+                      data={"stats": stats},
+                      written=None if out is None else str(out), saved=out is not None,
+                      stopped=stopped, images=[raw] if raw is not None else [],
                       settings=settings)
 
 

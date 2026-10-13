@@ -559,7 +559,7 @@ class ChainPlugin(Plugin):
         kept: Dict[str, Any] = {}
         lines: List[str] = []
         layers = None
-        path = None
+        written = None
         images = None
         rois_before = _roi_signature(session)
         made: List[Tuple[str, str]] = []  # (name, evaluator) of the chain's evaluations
@@ -601,7 +601,7 @@ class ChainPlugin(Plugin):
             except ValueError as error:
                 raise ChainError(str(error)) from None
             session.apply(plugin, result)
-            made.extend((result.data or {}).get("evaluations") or [])
+            made.extend(result.evaluations or ())
             for warning in sctx.warnings:
                 ctx.warn(warning)
             seconds = time.perf_counter() - started
@@ -621,33 +621,27 @@ class ChainPlugin(Plugin):
                 saved = None           # the run stands; only the replot is lost
             if saved:
                 kept[key] = {"plugin": cls.path, "label": label, "data": saved}
-            if "layers" in (result.data or {}) or "bounds" in (result.data or {}):
+            if result.layers is not None or result.bounds:
                 layers = session.layer_configs()
-            path = (result.data or {}).get("path") or path
+            written = result.written or written
             # a fit's kept frames go on with the table, as its path does
-            images = (result.data or {}).get("images") or images
+            images = list(result.images or ()) or images
             first = result.text.splitlines()[0] if result.text else "done"
             lines.append(f"{label}: {first}")
-            stopped = stopped or bool((result.data or {}).get("stopped"))
+            stopped = stopped or result.stopped
         changed = any(r["changed"] for r in records)
-        data: Dict[str, Any] = {"steps": records, "results": results, "kept": kept}
-        if stopped:
-            data["stopped"] = True
-        if layers is not None:
-            data["layers"] = layers
-        if path:
-            data["path"] = path
-        if images:
-            data["images"] = images
-        # the ROIs a segmenter found and the runs an evaluator made, which
-        # `Session.apply` puts into the session's project
-        if _roi_signature(session) != rois_before:
-            data["roi_project"] = session.roi_state()
-        # and what blocks measured per region of an id column
-        if session._id_regions:
-            data["id_regions"] = session.id_regions
         return Result(locs=session.locs if changed else None,
-                      text="\n".join(lines) or "no steps", plots=plots, data=data,
+                      text="\n".join(lines) or "no steps", plots=plots,
+                      data={"steps": records, "results": results, "kept": kept},
+                      stopped=stopped, layers=layers, written=written,
+                      images=images or (),
+                      # the ROIs a segmenter found and the runs an evaluator
+                      # made, which `Session.apply` puts into the session's
+                      # project, and what blocks measured per region of an
+                      # id column
+                      roi_project=(session.roi_state()
+                                   if _roi_signature(session) != rois_before else None),
+                      id_regions=session.id_regions if session._id_regions else {},
                       settings=settings,
                       log={"steps": [{k: v for k, v in r.items() if k != "key"}
                                      for r in records]})

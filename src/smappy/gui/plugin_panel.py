@@ -81,7 +81,7 @@ class PluginPanel(QWidget):
     # run that raised `Stopped` -- once a run or preview is over and the
     # panel has dealt with it: what a caller that started the run itself
     # (`gui.live_session`) waits for.  A stopped run that kept a part of its
-    # work is "done", its result saying ``data["stopped"]``.
+    # work is "done", its result saying `Result.stopped`.
     ended = Signal(str, object)
 
     def __init__(self, plugin_cls: Type[Plugin], session: Session, parent=None):
@@ -697,7 +697,7 @@ class PluginPanel(QWidget):
     def _on_done(self, result: Result) -> None:
         live, self._live_running = self._live_running, False
         asked = self._release_buttons()
-        stopped = bool((result.data or {}).get("stopped"))
+        stopped = result.stopped
         self.result = result
         # a preview is looked at, never applied: it exists so that the session
         # is not changed before the settings are right; nor is a live step

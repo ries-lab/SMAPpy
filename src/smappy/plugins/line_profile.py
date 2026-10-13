@@ -1550,9 +1550,7 @@ class LineProfile(Plugin):
 
         return Result(
             text="\n".join(lines), settings=settings,
-            # "layer_profiles", not "layers": `Session.apply` reads
-            # data["layers"] as layer set-ups to apply (`Chain/Layers`), and
-            # every Run of this plugin crashed there on a list of profiles
+            # one profile per layer, each with its fits
             data={"layer_profiles": layers,
                   "fits": per_layer(lambda l: {f.model: f for f in l.fits}),
                   "values": per_layer(lambda l: {f.model: f.values() for f in l.fits}),

@@ -141,7 +141,7 @@ def test_the_fit_keeps_the_tags_and_shows_the_piezo(tmp_path):
         output="camera", n_frames=N_FRAMES, seed=3,
         labelling=LabellingSettings(efficiency=0.1),
         camera=CameraOutputSettings(path=str(tmp_path / "run.sim.yaml"))))
-    sim = open_stack(made.data["path"])
+    sim = open_stack(made.written)
     frames = np.concatenate([b for _, b in sim.frames(chunk=30)])
     path = tmp_path / "acq" / "acq_MMStack_Pos0.ome.tif"
     path.parent.mkdir()

@@ -949,7 +949,7 @@ class Session:
         if self._rois is not None:
             # the ROI manager's project as it is now, not as the file was
             # saved: a chain's segmenter adds to it and its evaluators run on
-            # it, and the chain hands it back as `data["roi_project"]`
+            # it, and the chain hands it back as `Result.roi_project`
             from .roi_manager.link import SessionROIs
             copy._rois = SessionROIs(copy)
             copy._rois.layer = self._rois.layer
@@ -1476,7 +1476,7 @@ class Session:
         view stopped, the correction was lost, and the log kept a line for a
         correction the table did not have.
         """
-        recipe = ((result.data or {}).get("live_recipe")
+        recipe = (result.recipe
                   if self._live and not finishes_live and not result.files else None)
         if (self._live and not finishes_live and recipe is None
                 and (result.locs is not None or result.files)):
@@ -1495,7 +1495,7 @@ class Session:
         for n, (locs, info, grouped) in enumerate(result.files or ()):
             # the first replaces unless the plugin asked to append; the rest
             # always join, or opening three files would keep only the last
-            self.add_file(locs, info, append=result.data.get("append", False) or n > 0,
+            self.add_file(locs, info, append=result.append or n > 0,
                           grouped=grouped)
         if result.locs is not None and not self.files and not len(self.locs) \
                 and not self._live:
@@ -1504,7 +1504,7 @@ class Session:
             # correction: it gets its layers and its file entry, and its own
             # log, rather than an undo step back to an empty session.
             from .io.formats import FileInfo
-            where = (result.data or {}).get("path")
+            where = result.written
             name = Path(where).name if where else plugin.path.rsplit("/", 1)[-1]
             self.add_file(result.locs, FileInfo(name=name, path=str(where or ""),
                                                 format=plugin.path, n=len(result.locs)))
@@ -1519,12 +1519,12 @@ class Session:
                           text=result.text or "")
         if result.locs is not None:
             # a correction is in no file yet; a fit that wrote its table is
-            self.set_unsaved(not (result.data or {}).get("saved"))
+            self.set_unsaved(not result.saved)
         # The camera frames a fit kept (`smappy.rawframes`), with the table it
         # has just set.  A fit replaces the whole table, so these are all the
         # raw frames there are now -- including any just read back from the
         # file it wrote, which are the same frames.
-        images = (result.data or {}).get("images") or []
+        images = list(result.images or ())
         if images:
             self.images = [im for im in self.images if im.kind != "raw"]
             for im in images:
@@ -1542,7 +1542,7 @@ class Session:
         # so here, as `{field: (lo, hi)}`.  It cannot set the bound itself: a
         # filter belongs to the table it was built from, and the table the
         # column is in is the one that has just been set here.
-        bounds = (result.data or {}).get("bounds") or {}
+        bounds = result.bounds or {}
         for field, (lo, hi) in bounds.items():
             for layer in self.layers:
                 if not layer.is_image:
@@ -1551,19 +1551,19 @@ class Session:
             self.changed("locs")
         # the layers a chain step set up -- bounds and grouping per layer, the
         # Render tab's work done by a plugin (`Chain/Layers`)
-        if (result.data or {}).get("layers"):
-            self.set_layer_configs(result.data["layers"])
+        if result.layers:
+            self.set_layer_configs(result.layers)
         # the ROI manager's project as a chain left it: the ROIs its segmenter
         # found, the runs of its evaluators and the pipeline they make.  Into
         # the project that is there, which the ROI manager's window holds.
-        if (result.data or {}).get("roi_project") is not None:
-            self.rois.from_dict(result.data["roi_project"])
+        if result.roi_project is not None:
+            self.rois.from_dict(result.roi_project)
             self.changed("rois")
-        if (result.data or {}).get("id_regions"):
-            for column, tables in result.data["id_regions"].items():
+        if result.id_regions:
+            for column, tables in result.id_regions.items():
                 self.id_regions.setdefault(column, {}).update(tables)
             self.changed("rois")
-        elif (result.data or {}).get("rois") is not None:
+        elif result.rois is not None:
             # a segmenter added ROIs to the project it was handed; the
             # manager draws them, and what a preview proposed is now either
             # among them or was not wanted
@@ -1578,7 +1578,7 @@ class Session:
         on the GUI thread, since a preview runs on a worker and changes
         nothing.  So far one thing: a segmenter's proposed ROIs
         (`SegmenterPlugin`), which replace the last preview's."""
-        preview = (result.data or {}).get("roi_preview")
+        preview = result.roi_preview
         if preview is not None:
             self.rois.segment_preview = preview
             self.changed("roi-preview")

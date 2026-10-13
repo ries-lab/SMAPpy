@@ -81,8 +81,7 @@ class WritesItsFile(Plugin):
     grouping = "ungrouped"
 
     def run(self, ctx, settings=None):
-        return Result(locs=table(seed=2), data={"path": "/fit_locs.hdf5",
-                                                "saved": True})
+        return Result(locs=table(seed=2), written="/fit_locs.hdf5", saved=True)
 
 
 def test_a_fit_that_wrote_its_own_file_leaves_nothing_unsaved(tmp_path):

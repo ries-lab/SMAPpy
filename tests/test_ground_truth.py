@@ -114,9 +114,9 @@ def test_a_fit_of_simulated_frames_finds_the_isolated_spots_and_is_honest(tmp_pa
         camera=CameraOutputSettings(path=str(tmp_path / "run.sim.yaml")))
     made = get("File/Simulate/Blinking Structure")().run(Context(), settings)
     fitted = GaussianFit().run(Context(), GaussianFitSettings(
-        source=SourceSettings(path=made.data["path"]),
+        source=SourceSettings(path=made.written),
         output=OutputSettings(path=str(tmp_path / "out.hdf5")))).locs
-    assert fitted.metadata["source"] == made.data["path"]
+    assert fitted.metadata["source"] == made.written
     result = GroundTruth().run(Context(locs=fitted), GroundTruthSettings(
         min_photons=300, isolated=True))
     c = result.data["comparison"]

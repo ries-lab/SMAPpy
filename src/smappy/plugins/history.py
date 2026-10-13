@@ -173,6 +173,5 @@ class History(Plugin):
         # `data` and not `locs`: nothing here changes the table, and the log
         # is worth handing to a script that wants to check what a file has
         # been through before it trusts it
-        return Result(text=text, settings=settings,
-                      data={"history": found,
-                            **({"path": written} if written else {})})
+        return Result(text=text, settings=settings, data={"history": found},
+                      written=str(written) if written else None)

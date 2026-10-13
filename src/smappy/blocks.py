@@ -35,7 +35,7 @@ What a run of a block does:
   ``outer:inner``.
 * **Stop** (`Context.stop`) ends the run between regions, and what the
   regions so far measured and wrote back is the result, which says
-  ``stopped`` (``data["stopped"]``).  A region that has begun finishes: its
+  ``stopped`` (`Result.stopped`).  A region that has begun finishes: its
   steps are not told to stop, since half a region's numbers would be kept as
   if they were all of them.
 """
@@ -333,10 +333,11 @@ class BlockPlugin(ChainPlugin):
             text += f"; wrote {', '.join(written)}"
         return Result(locs=locs, text=text, settings=settings,
                       values={"regions": n},
-                      data={"tables": tables, "region_tables": {**tables, **merged},
-                            "evaluations": self.evaluations(settings)
-                            if not ctx.per_region else [],
-                            "regions": n, "failed": failed, "stopped": stopped})
+                      data={"tables": tables, "regions": n, "failed": failed},
+                      region_tables={**tables, **merged},
+                      evaluations=(self.evaluations(settings)
+                                   if not ctx.per_region else []),
+                      stopped=stopped)
 
     def _write_values(self, ctx, settings, tables, names, locs):
         """The steps' numbers ``names`` onto the rows of their regions

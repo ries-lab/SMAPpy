@@ -483,7 +483,7 @@ Each step leaves the program working and the suite green.
      contains itself, naming the loop.  The interim `regions: rois` step
      field is gone; the shipped NPC chain is a block (`each pore`).
      Per-cluster results come back from a chain's scratch session as
-     `data["id_regions"]`.
+     `Result.id_regions`.
    * *4b, done*: `BlockPlugin.estimate` runs the steps in up to five
      regions spread over the source (or a second's worth), nothing kept,
      and multiplies the median per step out (`Estimate.text`: "about 1 h

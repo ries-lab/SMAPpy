@@ -98,7 +98,7 @@ shape, so read the one closest to what you are writing:
 | removes or flags localizations | `remove_locs.py` (a region, a new table or a filtered flag) |
 | fits a model to what is in a ROI | `line_profile.py` (unbinned likelihood, models compared by AIC; one fit per layer, and `live`) |
 | reads the session and reports | `history.py` (the log, with an optional export) |
-| sets up layers and filters from settings | `chain_layers.py` (bounds as rows per layer, `Result.data["layers"]`) |
+| sets up layers and filters from settings | `chain_layers.py` (bounds as rows per layer, `Result.layers`) |
 | scores a fit against a simulation | `ground_truth.py` (the truth redrawn from the recipe, matched per frame) |
 | draws what the microscope recorded per frame | `image_tags.py` (the fit's `metadata["frame_tags"]`) |
 | finds a structure by its shape and judges it, then counts it | `npc.py` (a ring filter and circle fit in the segmenter, a per-site count, and a model of whole pores in `smappy/npc.py` fitted to the site table) |
@@ -189,7 +189,7 @@ class Thing(Plugin):
   settings.  While a fit is still appending, `Session.apply` refuses a table
   change and the GUI asks before such a run, offering a new window.  A change
   that is a column computed from the others can return a `LiveRecipe`
-  instead (`data["live_recipe"]`, with `live_recipe_for`), which follows the
+  instead (`Result.recipe`, with `live_recipe_for`), which follows the
   live table: `math_parser.py`, `assign_colors.py`.
 * Set `live = True` on a plugin whose work is tens of milliseconds: the GUI
   grows a *live* tick and measures again while the ROI is dragged (its

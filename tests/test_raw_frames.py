@@ -27,9 +27,9 @@ def simulated(tmp_path_factory):
     made = get("File/Simulate/Blinking Structure")().run(Context(), settings)
     out = folder / "out.hdf5"
     result = GaussianFit().run(Context(), GaussianFitSettings(
-        source=SourceSettings(path=made.data["path"], chunk=25),
+        source=SourceSettings(path=made.written, chunk=25),
         output=OutputSettings(path=str(out), raw_frames=10)))
-    return made.data["path"], out, result
+    return made.written, out, result
 
 
 def _photons(recipe):
@@ -61,7 +61,7 @@ def test_a_live_keeper_keeps_evenly_spaced_frames_from_the_first():
 def test_the_fit_keeps_the_average_and_the_chosen_frames_in_photons(simulated):
     recipe, out, result = simulated
     photons, camera = _photons(recipe)
-    raw, = result.data["images"]
+    raw, = result.images
     assert raw.kind == "raw"
     assert raw.frames.tolist() == [AVERAGE] + spaced(0, N_FRAMES, 10).tolist()
     assert raw.metadata["n_averaged"] == N_FRAMES
@@ -81,7 +81,7 @@ def test_the_kept_frames_lie_under_their_localizations(simulated):
     """The spot a localization came from is centred on it, to a fraction of a
     pixel: placed half a pixel off, the mean offset would be 0.5 px."""
     _, _, result = simulated
-    raw, = result.data["images"]
+    raw, = result.images
     locs = result.locs
     px, py = raw.pixelsize_xy
     offsets = []
@@ -114,7 +114,7 @@ def test_no_frames_are_kept_when_asked_for_none(simulated, tmp_path):
     result = GaussianFit().run(Context(), GaussianFitSettings(
         source=SourceSettings(path=recipe, stop=20),
         output=OutputSettings(path=str(out), raw_frames=0)))
-    assert result.data["images"] == [] and load_images(out) == []
+    assert result.images == [] and load_images(out) == []
 
 
 def test_the_kept_frames_survive_the_rewrite_of_a_finished_table(simulated, tmp_path,
@@ -141,7 +141,7 @@ def test_opening_a_fitted_file_offers_its_frames_and_an_image_layer_shows_the_av
     layer = session.add_image()
     assert layer.image is raw and layer.frame == 0
     np.testing.assert_allclose(raw.plane_at(0),
-                               np.asarray(result.data["images"][0].data[0]))
+                               np.asarray(result.images[0].data[0]))
 
 
 def test_saving_keeps_the_frames_and_every_image_a_layer_shows(simulated, tmp_path):

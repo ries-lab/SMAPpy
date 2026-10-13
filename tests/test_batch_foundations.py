@@ -110,7 +110,7 @@ class _MadeFromNothing(Plugin):
     path = "Localize/Test"
 
     def run(self, ctx, settings):
-        return Result(locs=blinks(), text="fitted", data={"path": "/tmp/x_locs.hdf5"})
+        return Result(locs=blinks(), text="fitted", written="/tmp/x_locs.hdf5")
 
 
 def test_a_fit_in_an_empty_session_opens_as_a_file_with_its_log():

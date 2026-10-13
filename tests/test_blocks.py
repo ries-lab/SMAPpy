@@ -287,7 +287,7 @@ def test_a_block_stopped_halfway_keeps_and_writes_back_the_regions_it_finished()
     session.apply(cls(), result)
 
     sub = result.data["results"]["each"]
-    assert sub.data["stopped"] and result.data["stopped"]
+    assert sub.stopped and result.stopped
     assert sub.text.startswith("stopped after 2 of 4 cluster_id regions")
     assert session.id_regions["cluster_id"]["tag"].columns()["tagged"].tolist() == [30, 50]
     n_here = np.asarray(session.locs["n_here"])
@@ -308,7 +308,7 @@ def test_a_chain_stopped_in_a_step_runs_no_step_after_it():
     ctx = session.context()
     ctx.stop = stop
     result = cls().run(ctx, cls.Settings())
-    assert result.data["stopped"]
+    assert result.stopped
     assert [r["label"] for r in result.data["steps"]] == ["tag"]
     assert result.text.splitlines()[-1] == "stopped before count"
     assert "n_here" in result.locs                    # the block's part is kept
@@ -325,7 +325,7 @@ def test_a_step_that_keeps_nothing_when_stopped_ends_the_chain_there():
     # not yet when the chain starts RCC; set when RCC first looks
     ctx.stop = _StopsAfter(1)
     result = cls().run(ctx, cls.Settings())
-    assert result.data["stopped"] and result.locs is None
+    assert result.stopped and result.locs is None
     assert result.data["steps"] == []                 # RCC kept nothing
     assert result.text.startswith("rcc: RCC stopped after 0 of")
 
@@ -339,7 +339,7 @@ def test_a_stop_set_before_a_chain_starts_runs_none_of_it():
     ctx = session.context()
     ctx.stop = stop
     result = cls().run(ctx, cls.Settings())
-    assert result.data["stopped"] and result.locs is None
+    assert result.stopped and result.locs is None
     assert result.text == "stopped before count"
 
 

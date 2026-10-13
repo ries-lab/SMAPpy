@@ -238,14 +238,13 @@ class LiveSession:
                                      error=lines[-1] if lines else "failed",
                                      traceback=str(payload)))
             return
-        data = payload.data or {}
-        stopped = bool(data.get("stopped"))
+        stopped = payload.stopped
         live = self.settings.source.live
         complete = not stopped and (self.writer_finished.is_set() or not live)
-        path = data.get("path")
+        path = payload.written
         self._finish(LiveOutcome("cancelled" if stopped else "succeeded", complete,
                                  path=Path(path) if path else None,
-                                 stats=dict(data.get("stats") or {})))
+                                 stats=dict((payload.data or {}).get("stats") or {})))
 
     def _finish(self, outcome: LiveOutcome) -> None:
         self.outcome = outcome

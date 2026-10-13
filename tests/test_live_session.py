@@ -109,7 +109,7 @@ def test_without_a_window_the_fit_ends_on_the_writers_word(tmp_path, frames):
                                        settings_for(data.folder, out,
                                                     **{"source.live_timeout": 30.0}))
     assert result.data["stats"]["frames"] == len(frames)
-    assert not result.data["stopped"] and out.exists()
+    assert not result.stopped and out.exists()
 
 
 @pytest.mark.slow

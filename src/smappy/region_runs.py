@@ -405,7 +405,7 @@ class RegionScratch:
         tables of regions inside this one are kept as its children."""
         if result is None:
             return
-        inner = (result.data or {}).get("region_tables")
+        inner = result.region_tables
         if inner:
             self.children[label] = dict(inner)
         if result.locs is None:
