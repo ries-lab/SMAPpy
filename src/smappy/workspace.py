@@ -42,8 +42,9 @@ REMEMBERED = "gui"                   # config key: the GUI last saved or loaded
 # from whatever plugins are actually installed; afterwards the workspace is
 # data and a tab is whatever the user made of it.
 DEFAULT_TABS = (
-    {"name": "File", "kind": "plugins",
-     "seed": ("File/Load/", "File/Save/", "File/Export/", "File/Simulate/")},
+    # not Load and Save, which the File menu does (they stay in the tree:
+    # a chain and a batch save through `File/Save`)
+    {"name": "File", "kind": "plugins", "seed": ("File/Export/", "File/Simulate/")},
     {"name": "Localize", "kind": "plugins", "header": "localize", "seed": "Localize/"},
     {"name": "Render", "kind": "render"},
     # the regions have a tab of their own (docs/regions.md), so the Analysis

@@ -285,7 +285,7 @@ def load_gui_state(path) -> Optional[Dict[str, object]]:
 #
 # What a tool worked out, kept so that it can be looked at again.  A drift
 # correction subtracts a curve and the corrected table no longer says what the
-# curve was; reopening the file a week later and pressing *Plot* should still
+# curve was; reopening the file a week later and pressing *Show result* should still
 # draw it.  Only what a plugin's `keep` hands over is written -- a curve, a
 # histogram, the few numbers behind a figure -- never the table itself.
 #

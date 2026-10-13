@@ -118,7 +118,7 @@ def test_a_preview_draws_without_touching_the_session(app, tmp_path):
     panel._job = "preview"
     panel._on_done(result)
     assert len(session.locs) == 0                # nothing was applied
-    assert panel.plot_button.isEnabled()
+    assert panel.result_button.isEnabled()
     assert result.data["frame"] == 1 and result.data["candidates"] == 2
     plt.close("all")
 

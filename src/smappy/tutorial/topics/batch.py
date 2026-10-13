@@ -7,7 +7,7 @@ process of its own, writing each file's table, figures and numbers.
 
 The chain is the smallest that shows the point: drift correction and then
 Localization Statistics, over four simulated cells that drift.  It is built in
-the Analysis tab with "+ chain", run on one cell, saved, and picked in the
+the Analysis tab with "+", "a new chain...", run on one cell, saved, and picked in the
 batch window, which is how a user would go about it.  The save and folder
 dialogs are answered (`common.answering`) so the clicks run the windows' own
 code.  The run is a real ``smappy-batch`` subprocess; the storyboard checks
@@ -94,10 +94,11 @@ def make(d) -> None:
 
     d.chapter("A chain")
     analysis = show_tab(d, "Analysis")
-    plus = _button(analysis, "+ chain")
-    d.shot("Plus chain, at the top of the Analysis tab, starts an empty chain.",
+    plus = analysis.add_button
+    d.shot("Plus, at the top of the Analysis tab, adds a plugin; its "
+           "a new chain button starts an empty chain.",
            spot=[plus], point=plus, click=True, zoom=d.around(plus, 700))
-    plus.click()
+    analysis.add_chain()          # what "a new chain..." in the chooser does
     d.settle()
     from ...gui.chain_panel import ChainPanel
     panel = [p for p in analysis.findChildren(ChainPanel) if p.isVisible()][-1]
@@ -225,7 +226,7 @@ def make(d) -> None:
 
     d.chapter("Next")
     d.card("What to remember",
-           "<ul><li><b>+ chain</b> in a tab: add steps, set them, run once, "
+           "<ul><li><b>+, a new chain</b> in a tab: add steps, set them, run once, "
            "save.</li>"
            "<li><b>Tools, Batch:</b> files, a chain, an output folder, Run.</li>"
            "<li>A folder per file, and <b>summary.csv</b> over all of them.</li>"

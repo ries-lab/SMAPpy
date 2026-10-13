@@ -32,6 +32,8 @@ MAX_CHOICES = 8
 
 # the status of a run that warned: what was said is in the output box
 WARNING_STYLE = "color: #c06000; font-weight: bold;"
+RESULT_TIP = ("show what the run made: its figures (the drift curves, say), "
+              "or, when it drew none, its text in a window of its own")
 # a notice that is only worth knowing (`Notice.kind` "info")
 INFO_STYLE = "color: gray;"
 
@@ -157,14 +159,13 @@ class PluginPanel(QWidget):
                 self.preview_frame.setPrefix("frame ")
                 self.preview_frame.setMaximumWidth(110)
                 buttons.addWidget(self.preview_frame)
-        self.plot_button = QPushButton("Plot")
-        self.plot_button.setToolTip("show the plugin's result figure (the drift curves, say)")
-        self.plot_button.setEnabled(False)
-        # the output box below is four lines tall; anything longer than a
-        # summary is unreadable in it, so it gets a window of its own
-        self.text_button = QPushButton("Text")
-        self.text_button.setToolTip("show what the run reported, in its own window")
-        self.text_button.setEnabled(False)
+        # One button for what the run made: its figures, or -- for a run that
+        # drew nothing -- what it reported, in a window that can hold more
+        # than the four lines of the output box.  Plot and Text were two
+        # buttons for one question, and one of them was always greyed.
+        self.result_button = QPushButton("Show result")
+        self.result_button.setToolTip(RESULT_TIP)
+        self.result_button.setEnabled(False)
         # a measurement one aims with rather than one asked for afterwards:
         # the plugin says it is cheap enough (`Plugin.follow_roi`) and the tick
         # re-measures while the ROI is dragged
@@ -187,8 +188,7 @@ class PluginPanel(QWidget):
         self.details_button.hide()
         self._failure: Optional[tuple] = None
         self._details_window = None
-        buttons.addWidget(self.plot_button)
-        buttons.addWidget(self.text_button)
+        buttons.addWidget(self.result_button)
         if self.follow_roi is not None:
             buttons.addWidget(self.follow_roi)
         buttons.addWidget(self.status, 1)
@@ -197,8 +197,7 @@ class PluginPanel(QWidget):
         # are wider than the control column, and a fitter has all five: the
         # section then scrolled sideways and took its title bar -- the ? and
         # the detach arrow -- out of view.  Each may shrink to its text.
-        for button in (self.run_button, self.preview_button, self.plot_button,
-                       self.text_button):
+        for button in (self.run_button, self.preview_button, self.result_button):
             if button is not None:
                 button.setMinimumWidth(
                     button.fontMetrics().horizontalAdvance(button.text()) + 20)
@@ -218,16 +217,12 @@ class PluginPanel(QWidget):
             # plot or read; the window it opens is the result
             self.run_button.setText("Open")
             self.run_button.setToolTip("open the window, set up as above")
-            self.plot_button.hide()
-            self.text_button.hide()
+            self.result_button.hide()
             self.output.hide()
             self.run_button.clicked.connect(self.open_window)
         else:
             self.run_button.clicked.connect(self._run_or_stop)
-        # not `self.plot`: `clicked` hands on `checked` (False), which PySide
-        # puts in the bool `raise_window` and the window stays behind
-        self.plot_button.clicked.connect(lambda: self.plot())
-        self.text_button.clicked.connect(self.show_text)
+        self.result_button.clicked.connect(self.show_result)
         self._following = False
         # this panel's run started the session's live table (the "start" it
         # streamed): its result is that table's finished form, the one
@@ -307,9 +302,9 @@ class PluginPanel(QWidget):
         if result is None or not result.figures():
             return
         self.result = result
-        self.plot_button.setEnabled(True)
+        self.result_button.setEnabled(True)
         when = saved.get("time", "")
-        self.plot_button.setToolTip(
+        self.result_button.setToolTip(
             "show the figure of the run kept with this file"
             + (f" ({when})" if when else ""))
         self.status.setText("ran before" + (f", {when}" if when else ""))
@@ -763,7 +758,6 @@ class PluginPanel(QWidget):
         else:
             self.status.setText("following ROI" if following
                                 else "stopped" if stopped else "done")
-        self.text_button.setEnabled(bool(result.text))
         if not following and self.plugin.text_window and result.text:
             self.show_text()          # a log: not something to scroll through
                                       # a four-line slot (`Plugin.text_window`)
@@ -771,11 +765,10 @@ class PluginPanel(QWidget):
         # the math parser has been given, the evaluations a chain made
         self.form.refresh()
         self._describe()
-        self.plot_button.setEnabled(bool(result.figures()))
-        self.plot_button.setToolTip(
-            "show the plugin's result figure (the drift curves, say)")
+        self.result_button.setEnabled(bool(result.figures() or result.text))
+        self.result_button.setToolTip(RESULT_TIP)
         # The figures are what most runs are for: a measurement is read off
-        # them, so the window opens without a second click on Plot.
+        # them, so the window opens without a second click on Show result.
         if result.figures() and (following or self._show_figures):
             self.plot(raise_window=not following)
         self.ended.emit("done", result)
@@ -830,6 +823,15 @@ class PluginPanel(QWidget):
         self.status.setText("stopped")
         self.status.setStyleSheet("")
         self.ended.emit("stopped", text)
+
+    def show_result(self) -> None:
+        """The figures if the run drew any, else what it reported."""
+        if self.result is None:
+            return
+        if self.result.figures():
+            self.plot()
+        else:
+            self.show_text()
 
     def show_text(self) -> None:
         """What the run reported, in a window that can hold it."""

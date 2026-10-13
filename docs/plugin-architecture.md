@@ -282,28 +282,24 @@ calls them.
 
 `io/formats.py` keeps `Reader` as the low-level mechanism -- the CLI and scripts
 use it and should not have to go through a plugin -- and gains a matching
-`Writer` registry.  The `File/Load/<name>` plugins are written out rather than
-generated: a generated set could not be declared to the AST scanner without
-duplicating the reader list, and a format has its own settings anyway -- only
-csv needs a column mapping.  Adding a format is still a one-line
-`register(Reader(...))`; giving it a plugin of its own is optional, and the
-`Auto` loader picks it up either way.
+`Writer` registry.  There is one loader, `File/Load/Auto`, with an advanced
+*format* choice listing the readers (auto first) and the csv *columns* greyed
+for anything but a csv.  There was a plugin per format as well, until
+2026-10: five entries in the tree for one thing.  Adding a format is a
+one-line `register(Reader(...))`, and it is a choice of the loader at once.
 
 ### The File tab
 
-Seeded with:
+Seeded with what the File menu does not do (Load and Save stay in the
+plugin tree, for chains, the batch and the Plugins menu):
 
-    File/Load/Auto            by extension; append or replace
-    File/Load/<format>        smappy HDF5, SMAP _sml.mat, MINFLUX, csv --
-                              present but unpinned, since Auto covers them
-    File/Save/smappy HDF5     with the GUI state, or without
     File/Export/Image         the rendered view as a picture
     File/Simulate/Blinking Structure   `smappy.simulate`: localizations into
                               the session, or camera frames as a `*.sim.yaml`
                               recipe that a fitter opens as its file
 
-A named loader *means* it: `load` takes an explicit reader, because dispatching
-by extension underneath would have `File/Load/SMAP` on a `.hdf5` quietly read it
+A named format *means* it: `load` takes an explicit reader, because dispatching
+by extension underneath would have *format* SMAP on a `.hdf5` quietly read it
 as SMAPpy.
 
 The menu and the plugins share one *reading* implementation,

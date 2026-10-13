@@ -135,10 +135,10 @@ def make(d) -> None:
         window.hide()
         panel.follow_roi.setChecked(False)
 
-    d.chapter("Text and Plot")
-    d.shot("The numbers appear below. Text opens them in full, Plot opens the "
-           "figures again.",
-           spot=[panel.output, panel.text_button, panel.plot_button],
+    d.chapter("Show result")
+    d.shot("The numbers appear below. Show result opens the figures again, or "
+           "the text in full when there are none.",
+           spot=[panel.output, panel.result_button],
            zoom=d.around(panel.output, 760))
 
     d.chapter("Several at once")

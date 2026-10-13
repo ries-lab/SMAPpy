@@ -72,7 +72,7 @@ saved = Path(tempfile.mkdtemp()) / "cell1_filtered.h5"
 run(first, "File/Save/smappy HDF5", path=str(saved), gui_state=False)
 # a later session opens the saved file
 later = Session()
-run(later, "File/Load/smappy HDF5", path=str(saved))
+run(later, "File/Load/Auto", path=str(saved))
 ```
 
 ```figure The log of a later session that opened a saved file.  The first two entries were written in the session that made the file and came back with it; the measurement run in between is not there, and neither is the save, which was logged only after the file had been written.  The two starred entries are what the numbers in this table depend on.

@@ -78,8 +78,8 @@ engine: on the window's *All* page a plot is handed a `SubFigure`, which has
 neither, and `size` is the hint the window reads instead.  Return the settings
 that were actually used -- that is what the history records.
 
-`text` goes into the plugin panel's output box, however long it is; the Text
-button opens it in a window on request.  Set `text_window = True` on the
+`text` goes into the plugin panel's output box, however long it is; *Show result*
+opens the figures, or, for a result with none, the text in a window.  Set `text_window = True` on the
 plugin only when the text *is* the result and is long -- `history.py` is the
 one that does -- and the window then opens by itself.
 

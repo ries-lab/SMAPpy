@@ -92,7 +92,7 @@ shape, so read the one closest to what you are writing:
 | measures the selection and draws it | `statistics.py` (settings, selection, several figures in one window) |
 | rewrites the table and hands it back | `assign_colors.py` (`Result.locs`, a preview) |
 | a long computation with progress | `drift_comet.py`, `drift_rcc.py` |
-| loads, saves, exports, simulates | `file.py` (a plugin per format, no input table; the simulator's model is `smappy.simulate`) |
+| loads, saves, exports, simulates | `file.py` (one loader with an advanced *format* choice, no input table; the simulator's model is `smappy.simulate`) |
 | finds, measures or summarises ROIs | `roi.py` (a segmenter derives from `SegmenterPlugin`, which gives it a Preview, *replace* (`replace_param()`) and a step of the ROI undo; `per_region = True`; analyse; segmenters under `Analysis/Regions/Find`) |
 | parts, a C++ backend | `fit.py` (nested settings dataclasses; four fitters, thin subclasses of `_FitPlugin`) |
 | adds a derived column, no output | `math_parser.py` (an expression, kept with the table as a recipe) |

@@ -216,7 +216,7 @@ meaningful fit anyway.
 
 ## Output
 
-* **Plot**: one panel per distribution, as in the figure above.
+* **The figures**: one panel per distribution, as in the figure above.
 * **Text**: the numbers, one line per distribution: $N_0$ and the mean and
   median photons; the maximum and rising edge of the precision, from the
   histogram and from the model, its median and $\sigma_c$; $\tau$ and the mean

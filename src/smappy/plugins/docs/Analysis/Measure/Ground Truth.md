@@ -411,7 +411,7 @@ that remains is the drift correction's own error.
   missed, and the Jaccard index; the number set aside, if any; per axis the
   bias, the RMS error and the error / reported precision; and, with z, the
   slope and offset of fitted against true z.
-* **The figure** (the *Plot* button): the recall by photons; the measured
+* **The figure** (*Show result*): the recall by photons; the measured
   error against the reported precision, by photons; the distribution of
   error over reported precision per axis, with the spread in the legend;
   and, with z, fitted against true z.

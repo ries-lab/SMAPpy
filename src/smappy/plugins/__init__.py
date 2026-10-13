@@ -970,7 +970,7 @@ class Plugin:
 
         A tool's figure outlives the run that made it: a drift correction
         subtracts a curve and the corrected table no longer says what the
-        curve was, so reopening the file next week and pressing *Plot* should
+        curve was, so reopening the file next week and pressing *Show result* should
         still draw it.  Return plain, JSON-able data -- the curve, the few
         numbers behind the figure -- and never the table, which is in the file
         already.  None (the default) keeps nothing, and the plot is then

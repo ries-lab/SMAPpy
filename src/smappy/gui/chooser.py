@@ -102,11 +102,16 @@ class PluginTree(QTreeWidget):
             self.collapseAll()
 
 
+# what `choose_plugin` returns for "a new chain...", which is not a plugin
+NEW_CHAIN = "<a new chain>"
+
+
 class PluginChooser(QDialog):
-    """Pick a plugin to pin.  `path` is what was chosen, or None."""
+    """Pick a plugin to pin.  `path` is what was chosen, or None -- or
+    `NEW_CHAIN`, with ``new_chain``, for an empty chain to build."""
 
     def __init__(self, parent=None, per_region: bool = False,
-                 title: str = "Add a plugin"):
+                 title: str = "Add a plugin", new_chain: bool = False):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.path: Optional[str] = None
@@ -123,6 +128,14 @@ class PluginChooser(QDialog):
         layout.addWidget(self.about)
         self.buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         self.buttons.button(QDialogButtonBox.Ok).setEnabled(False)
+        if new_chain:
+            # beside the plugins rather than a button on every tab: a chain
+            # is one more thing to pin, made of plugins
+            chain = self.buttons.addButton("a new chain...",
+                                           QDialogButtonBox.ActionRole)
+            chain.setToolTip("several plugins that run as one; add its steps "
+                             "with 'edit steps'")
+            chain.clicked.connect(lambda: self._accept_path(NEW_CHAIN))
         layout.addWidget(self.buttons)
 
         trouble = plugins.problems()
@@ -152,7 +165,8 @@ class PluginChooser(QDialog):
 
 
 def choose_plugin(parent=None, per_region: bool = False,
-                  title: str = "Add a plugin") -> Optional[str]:
-    """Show the chooser; the plugin path picked, or None."""
-    dialog = PluginChooser(parent, per_region=per_region, title=title)
+                  title: str = "Add a plugin", new_chain: bool = False) -> Optional[str]:
+    """Show the chooser; the plugin path picked, or None (or `NEW_CHAIN`)."""
+    dialog = PluginChooser(parent, per_region=per_region, title=title,
+                           new_chain=new_chain)
     return dialog.path if dialog.exec() == QDialog.Accepted else None

@@ -10,10 +10,12 @@ thread that owns the session.  The reading itself is `session.read_and_group`,
 the same function the window's own `LoadTask` uses -- one implementation, so a
 format behaves the same whichever way it was opened.
 
-There is one small plugin per format rather than one with a dropdown, because a
-format has its own settings: only the csv reader needs a column mapping.
-Adding a format is still a one-line `register(Reader(...))` in `io.formats`;
-giving it a plugin of its own here is optional.
+There is one loader, `File/Load/Auto`, with an advanced *format* choice for
+the file whose name does not say what it is.  There used to be a plugin per
+format as well, which put five entries in the tree for one thing and a csv
+setting where only one of them read it; the csv *columns* is now greyed for
+anything but a csv (`describe`).  Adding a format is a one-line
+`register(Reader(...))` in `io.formats`, and it is a choice here at once.
 """
 from __future__ import annotations
 
@@ -31,6 +33,11 @@ LOCS_FILTER = "Localizations (*.hdf5 *.h5 *.mat *.csv *.npy *.zip *.json)"
 
 # --------------------------------------------------------------------- load
 
+def _format_choices():
+    from ..io.formats import reader_names
+    return [("", "auto: by the file name")] + [(name, name) for name in reader_names()]
+
+
 @dataclass
 class LoadSettings:
     path: str = param("", label="file", kind="open_file", file_filter=LOCS_FILTER,
@@ -38,18 +45,55 @@ class LoadSettings:
     append: bool = param(False, label="add to the open files",
                          help="join the table as one more file instead of "
                               "replacing everything; this is File > Add file")
+    format: str = param("", label="format", choices=_format_choices, advanced=True,
+                        help="auto: from the file's name and, where that is not "
+                             "enough, its contents")
+    mapping: str = param("", label="columns", advanced=True,
+                         help="csv only: header=column pairs, e.g. X=x_nm, "
+                              "Y=y_nm, T=frame; empty means guess from the header")
 
 
-class _Load(Plugin):
-    """Read a localization file into the session."""
+def _reader(path: Path, settings: LoadSettings):
+    """The reader ``settings`` ask for: the one named, or the file's own."""
+    if settings.format:
+        reader = reader_named(settings.format)
+        if reader is None:
+            raise ValueError(f"no reader called {settings.format!r}")
+        return reader
+    return reader_for(path)          # raises with the known formats listed
+
+
+@register("File/Load/Auto")
+class LoadAuto(Plugin):
+    """Read a localization file of any known format into the session."""
 
     Settings = LoadSettings
     changes_locs = True
-    format: str = ""            # "" is by extension; else a reader's name
+    # 2: no *link blinks*; a table with a trace id is grouped by trace;
+    # 3: the per-format loaders are a *format* choice here, and the csv
+    # *columns* came with them
+    version = "3"
 
-    def reader_args(self, path: Path, settings) -> Dict[str, Any]:
-        """Anything the reader needs beyond the path."""
-        return {}
+    def describe(self, ctx: Optional[Context], settings: LoadSettings) -> FormState:
+        """*columns* is read for a csv only: greyed for any other file."""
+        csv = settings.format == "csv"
+        if not settings.format and settings.path:
+            try:
+                csv = reader_for(Path(settings.path)).name == "csv"
+            except (ValueError, OSError):
+                csv = False
+        return FormState(active={"mapping": csv})
+
+    def reader_args(self, path: Path, reader, settings) -> Dict[str, Any]:
+        """Anything the reader needs beyond the path: a csv's columns."""
+        if reader.name != "csv":
+            return {}
+        from ..io.formats import csv_columns, guess_csv_mapping
+        if settings.mapping.strip():
+            pairs = [p.split("=", 1) for p in settings.mapping.split(",") if "=" in p]
+            return {"mapping": {a.strip(): b.strip() for a, b in pairs}}
+        headers, _, _ = csv_columns(path)
+        return {"mapping": guess_csv_mapping(headers)}
 
     def run(self, ctx: Context, settings: LoadSettings) -> Result:
         from ..group import GroupSettings
@@ -59,80 +103,19 @@ class _Load(Plugin):
         path = Path(settings.path)
         if not path.exists():
             raise FileNotFoundError(f"no such file: {path}")
-        if self.format:
-            reader = reader_named(self.format)
-            if reader is None:
-                raise ValueError(f"no reader called {self.format!r}")
-        else:
-            reader = reader_for(path)          # raises with the known formats listed
+        reader = _reader(path, settings)
         ctx.report(f"reading {path.name} as {reader.name}")
         group_settings = (ctx.session.group_settings if ctx.session is not None
                           else GroupSettings())
         locs, info, grouped = read_and_group(
             path, group_settings, append=settings.append,
             progress=ctx.report, reader=reader,
-            **self.reader_args(path, settings))
+            **self.reader_args(path, reader, settings))
         text = f"{len(locs)} localizations from {path.name} ({info.format})"
         if grouped is not None:
             text += f", {len(grouped)} after merging blinks"
         return Result(files=[(locs, info, grouped)], text=text,
                       append=settings.append, data={"info": info}, settings=settings)
-
-
-@register("File/Load/Auto")
-class LoadAuto(_Load):
-    """Read any known format, choosing the reader by the file name."""
-    # 2: no *link blinks*; a table with a trace id is grouped by trace
-    version = "2"
-
-
-@register("File/Load/smappy HDF5")
-class LoadSmappy(_Load):
-    """Read a file smappy wrote."""
-    format = "smappy HDF5"
-    favorite = False
-
-
-@register("File/Load/SMAP")
-class LoadSMAP(_Load):
-    """Read a SMAP `_sml.mat` file."""
-    format = "SMAP"
-    favorite = False
-    # 2: locprecznm, not zerr, is the axial precision when a file has both
-    version = "2"
-
-
-@register("File/Load/MINFLUX")
-class LoadMinflux(_Load):
-    """Read a MINFLUX `.npy`, `.zip` or `.json` export."""
-    format = "MINFLUX"
-    favorite = False
-    # 2: grouped by trace (`tid`), not linked by distance and frame
-    version = "2"
-
-
-@dataclass
-class LoadCsvSettings(LoadSettings):
-    mapping: str = param("", label="columns", advanced=True,
-                         help="header=column pairs, e.g. X=x_nm, Y=y_nm, T=frame; "
-                              "empty means guess from the header")
-
-
-@register("File/Load/csv")
-class LoadCsv(_Load):
-    """Read a csv, tsv or plain text table, guessing its columns."""
-
-    Settings = LoadCsvSettings
-    format = "csv"
-    favorite = False
-
-    def reader_args(self, path: Path, settings) -> Dict[str, Any]:
-        from ..io.formats import csv_columns, guess_csv_mapping
-        if settings.mapping.strip():
-            pairs = [p.split("=", 1) for p in settings.mapping.split(",") if "=" in p]
-            return {"mapping": {a.strip(): b.strip() for a, b in pairs}}
-        headers, _, _ = csv_columns(path)
-        return {"mapping": guess_csv_mapping(headers)}
 
 
 # --------------------------------------------------------------------- save

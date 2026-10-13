@@ -403,9 +403,10 @@ def test_a_report_stays_in_the_panel_unless_the_plugin_is_a_log():
     run(panel)
     assert panel._text_window is None
     assert panel.output.toPlainText().endswith("line 39")
-    assert panel.text_button.isEnabled()      # but the button offers it
-    panel.show_text()
+    assert panel.result_button.isEnabled()      # but the button offers it
+    panel.result_button.click()                 # no figures: the text
     assert panel._text_window.view.toPlainText().endswith("line 39")
+    assert panel._window is None
 
     class Log(Talkative):
         path = "Test/Log"
@@ -452,7 +453,7 @@ def test_run_opens_the_figures_and_a_run_nobody_asked_for_does_not():
     assert unattended.start_run(ask=False)
     finish(unattended)
     assert unattended._window is None
-    assert unattended.plot_button.isEnabled()          # Plot still offers them
+    assert unattended.result_button.isEnabled()          # Show result still offers them
 
 
 def test_a_plugin_that_follows_the_roi_without_a_preview_measures_with_run_and_applies_nothing():
@@ -580,7 +581,7 @@ def test_a_plugin_that_follows_the_roi_refits_while_it_moves_and_says_nothing_ab
     assert panel.output.toPlainText().strip() == ""    # not a word about it
     assert panel._text_window is None                  # even though it is long
     assert panel._window is not None                   # but the figure is there
-    assert panel.text_button.isEnabled()               # and the text is offered
+    assert panel.result_button.isEnabled()               # and the text is offered
 
     panel.follow_roi.setChecked(False)
     while panel._thread is not None and panel._thread.isRunning():
@@ -678,3 +679,21 @@ def test_an_optional_bool_is_a_choice_of_auto_on_and_off():
     for value in (True, False, None):
         form.set_values({"em_on": value})
         assert form.value().em_on is value
+
+
+def test_a_new_chain_is_one_of_the_choices_of_plus():
+    """No "+ chain" beside "+" on every tab: the chooser offers it."""
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication, QPushButton
+
+    from smappy.gui.chooser import NEW_CHAIN, PluginChooser
+
+    QApplication.instance() or QApplication([])
+    plain = PluginChooser()
+    assert not [b for b in plain.findChildren(QPushButton)
+                if b.text() == "a new chain..."]
+    chooser = PluginChooser(new_chain=True)
+    [button] = [b for b in chooser.findChildren(QPushButton)
+                if b.text() == "a new chain..."]
+    button.click()
+    assert chooser.path == NEW_CHAIN and chooser.result() == 1      # accepted

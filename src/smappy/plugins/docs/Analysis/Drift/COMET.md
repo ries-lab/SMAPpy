@@ -357,7 +357,7 @@ and the run refuses the combination.
   localization.  The run is recorded in the file's history.  *Stop* ends the
   fit at its next step and leaves the table as it was: a curve refined half
   way is not one to subtract.
-* **The drift curve**, x, y and z against frame (the *Plot* button); an axis
+* **The drift curve**, x, y and z against frame (*Show result*); an axis
   with no drift at all is not drawn.  It is saved with the file and drawn
   again when it is reopened.
 * **The text** gives the range of the drift in x, y and z, and with *quality

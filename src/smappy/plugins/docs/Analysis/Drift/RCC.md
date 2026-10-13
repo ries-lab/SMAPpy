@@ -259,7 +259,7 @@ See *In detail*.
 * **The table**, with the drift subtracted from `x_nm`, `y_nm` and `z_nm` (or
   the pixel columns) of every localization.  The correction is recorded in the
   file's history and can be undone.
-* **The drift curve**, x, y and z against frame (the *Plot* button).  It is
+* **The drift curve**, x, y and z against frame (*Show result*).  It is
   saved with the file and drawn again when it is reopened.
 * **The text** gives the range of the drift in x, y and z.
 

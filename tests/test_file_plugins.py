@@ -29,12 +29,20 @@ def saved(tmp_path):
 def test_every_file_plugin_is_in_the_tree():
     found = plugins.refs("File/")
     assert set(found) == {
-        "File/Load/Auto", "File/Load/smappy HDF5", "File/Load/SMAP",
-        "File/Load/MINFLUX", "File/Load/csv", "File/Save/smappy HDF5",
+        "File/Load/Auto", "File/Save/smappy HDF5",
         "File/Export/Image", "File/Simulate/Blinking Structure"}
-    # only Auto is pinned by default; the per-format ones are a click away
-    assert found["File/Load/Auto"].favorite
-    assert not found["File/Load/csv"].favorite
+
+
+def test_the_one_loader_offers_every_format_and_reads_columns_for_a_csv_only():
+    loader = plugins.get("File/Load/Auto")
+    spec = loader.specs()["format"]
+    assert spec.info.advanced
+    assert [v for v, _ in spec.info.choices()] == ["", *formats.reader_names()]
+    describe = loader().describe
+    assert describe(None, loader.Settings(path="a.csv")).active == {"mapping": True}
+    assert describe(None, loader.Settings(path="a.hdf5")).active == {"mapping": False}
+    assert describe(None, loader.Settings(path="a.dat", format="csv")).active == \
+        {"mapping": True}
 
 
 def test_the_writer_registry_mirrors_the_readers(tmp_path):
@@ -75,9 +83,9 @@ def test_appending_keeps_the_first_file(saved):
 
 
 def test_a_named_format_refuses_the_wrong_file(saved):
-    plugin = plugins.get("File/Load/SMAP")()
+    plugin = plugins.get("File/Load/Auto")()
     with pytest.raises(Exception):
-        plugin.run(Context(), plugin.Settings(path=str(saved)))
+        plugin.run(Context(), plugin.Settings(path=str(saved), format="SMAP"))
 
 
 def test_a_missing_file_says_so_before_reading(tmp_path):
@@ -91,7 +99,7 @@ def test_a_missing_file_says_so_before_reading(tmp_path):
 def test_csv_guesses_its_columns(tmp_path):
     path = tmp_path / "t.csv"
     path.write_text("x [nm],y [nm],frame\n1,2,0\n3,4,1\n")
-    plugin = plugins.get("File/Load/csv")()
+    plugin = plugins.get("File/Load/Auto")()
     result = plugin.run(Context(), plugin.Settings(path=str(path)))
     locs = result.files[0][0]
     assert len(locs) == 2 and list(locs["x_nm"]) == [1.0, 3.0]
@@ -191,7 +199,7 @@ def test_gui_state_can_be_cleared_and_is_never_fatal(tmp_path):
 
 # ------------------------------------------------------------------ the GUI
 
-def test_the_file_tab_ships_with_the_four_it_needs(tmp_path, monkeypatch):
+def test_the_file_tab_ships_with_what_the_file_menu_does_not_do(tmp_path, monkeypatch):
     pytest.importorskip("PySide6")
     from PySide6.QtWidgets import QApplication
     monkeypatch.setenv("SMAPPY_CONFIG_DIR", str(tmp_path / "config"))
@@ -204,9 +212,9 @@ def test_the_file_tab_ships_with_the_four_it_needs(tmp_path, monkeypatch):
     window = ControlWindow(session, RenderWindow(session))
     assert window.tabs.tabText(0) == "File"
     pinned = [i.plugin for i in window.tabs.widget(0).tab.instances]
-    assert pinned[0] == "File/Load/Auto"
-    assert {"File/Save/smappy HDF5", "File/Export/Image",
-            "File/Simulate/Blinking Structure"} <= set(pinned)
+    # opening and saving are the File menu's; the tree still has them, for
+    # chains and the batch
+    assert set(pinned) == {"File/Export/Image", "File/Simulate/Blinking Structure"}
     # the window is what supplies the state a save embeds, and it leaves
     # geometry out: machine-specific, and worthless as provenance
     state = window.plugin_state()

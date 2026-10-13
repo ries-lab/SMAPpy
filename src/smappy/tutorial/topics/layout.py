@@ -130,7 +130,7 @@ def make(d) -> None:
            spot=[_menu_item(d, menu, "Add file")], zoom=d.around(menu, 700))
     menu.close()
     file_tab = _show_tab(d, "File")
-    d.shot("The File tab has the same, and more: saving, exporting an image, "
+    d.shot("The File tab holds what the menu does not: exporting an image, "
            "and simulating data.",
            spot=[_tab_button(d, "File")], point=_tab_button(d, "File"), click=True)
     section, panel = _open(d, file_tab, "Simulate structure")
@@ -332,8 +332,8 @@ def make(d) -> None:
            spot=[d.rect(section)], zoom=d.around(section, 760))
     panel.run_button.click()
     d.settle()
-    d.shot("Run it: a summary appears, and Plot draws the figures.",
-           spot=[panel.output, panel.plot_button], point=panel.plot_button,
+    d.shot("Run it: a summary appears, and Show result draws the figures.",
+           spot=[panel.output, panel.result_button], point=panel.result_button,
            click=True, zoom=d.around(panel.output, 760))
     panel.plot()
     d.settle()
