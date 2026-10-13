@@ -97,8 +97,8 @@ def region_entry(result, plugin=None, keep: bool = False) -> Dict:
     A value that is not a number (or a string, a flag, None) is refused
     rather than stored: the values are the region table's columns, and a
     list in a column is a table nobody can histogram.  An array belongs in
-    `arrays`.  Until the region table is written in columns (step 3 of
-    `docs/regions.md`) the arrays are kept as JSON lists beside the values.
+    `arrays`, kept here as JSON lists beside the values; `RegionTable`
+    writes them to the file end to end.
 
     With ``keep``, what ``plugin.keep(result)`` returns -- the data its
     figure is drawn from -- goes with the row as ``kept``, so the figure can

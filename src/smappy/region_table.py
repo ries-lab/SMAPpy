@@ -1,6 +1,6 @@
 """The results of one evaluation: a row per region, kept in columns.
 
-`docs/regions.md` ("What a region keeps", "The region table is a table") has
+`docs/regions.md` ("What a region keeps", "Where results live") has
 the decisions.  What this module is for: an evaluation used to be kept as one
 JSON record per region and step, about 1.3 kB a region for one step -- 2.5 MB
 for 2000 ROIs, and 130 MB for the 10^5 clusters a clusterer finds.  Here the
