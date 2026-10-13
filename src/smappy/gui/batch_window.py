@@ -521,17 +521,8 @@ class BatchWindow(QMainWindow):
 
 
 def main(argv=None) -> int:
-    from PySide6.QtWidgets import QApplication
-    app = QApplication.instance() or QApplication(argv if argv is not None else sys.argv)
-    try:
-        from .widgets import apply_style
-        apply_style(app)
-    except Exception:
-        pass
-    from .collector import collect_on_gui_thread
-    collect_on_gui_thread(app)
-    from .icon import install_icon
-    install_icon(app)
+    from . import make_app
+    app = make_app(argv if argv is not None else sys.argv)
     window = BatchWindow()
     args = (argv if argv is not None else sys.argv)[1:]
     if args:

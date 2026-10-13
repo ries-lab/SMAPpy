@@ -27,7 +27,6 @@ which is a cancellation.  `run` returns only once the windows are closed.
 """
 from __future__ import annotations
 
-import sys
 import threading
 import time
 import traceback
@@ -119,18 +118,11 @@ class LiveSession:
         `run` is this plus the loop.  Split so a test can drive the loop
         itself.
         """
-        from PySide6.QtWidgets import QApplication
-
         from ..session import Session
+        from . import make_app
         from .app import ControlWindow, RenderWindow
-        from .collector import collect_on_gui_thread
-        from .widgets import apply_style
 
-        app = QApplication.instance() or QApplication([sys.argv[0]])
-        apply_style(app)
-        collect_on_gui_thread(app)
-        from .icon import install_icon
-        install_icon(app)
+        app = make_app()
         self.session = Session()
         from .identity import install_identity
         install_identity(app, self.session)

@@ -55,10 +55,11 @@ Running the tests -- two tiers:
   collector otherwise runs in whichever thread allocates, and a Qt widget
   left in a reference cycle, destroyed on a fit's reader thread, deadlocked
   a test worker.  `conftest.py` collects on the main thread every 100 tests;
-  the GUI's entry points call `gui/collector.collect_on_gui_thread`, a timer
-  on the GUI thread.  A test that needs an object gone calls `gc.collect()`
-  itself; a new entry point that makes a QApplication installs the collector,
-  the icon (`gui/icon.install_icon`) and the session's identity
+  the GUI's entry points install `gui/collector.collect_on_gui_thread`, a
+  timer on the GUI thread.  A test that needs an object gone calls
+  `gc.collect()` itself; a new entry point gets its QApplication from
+  `gui.make_app()`, which installs the collector, the icon and the fields'
+  style, and one that makes a session installs its identity too
   (`gui/identity.install_identity`: its name and colour in every window title).
 * **A `QTimer.singleShot` callable must never raise.**  PySide leaves its
   exception pending inside `processEvents`, and the next Python override Qt

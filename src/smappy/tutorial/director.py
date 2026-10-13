@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 import tempfile
 import time
 from dataclasses import asdict, dataclass, field
@@ -91,16 +90,12 @@ class Director:
         QSettings.setDefaultFormat(QSettings.IniFormat)
         QSettings.setPath(QSettings.IniFormat, QSettings.UserScope,
                           str(self._config / "qsettings"))
-        self.app = QApplication([sys.argv[0]])
+        from ..gui import make_app
+        self.app = make_app()
         self.app.setApplicationName("smappy-tutorial")
         from ..gui.app import ControlWindow, RenderWindow
-        from ..gui.widgets import CONTROL_WIDTH, apply_style
+        from ..gui.widgets import CONTROL_WIDTH
         from ..session import Session
-        apply_style(self.app)
-        from ..gui.collector import collect_on_gui_thread
-        collect_on_gui_thread(self.app)
-        from ..gui.icon import install_icon
-        install_icon(self.app)
         self.session = Session()
         self.render = RenderWindow(self.session)
         self.control = ControlWindow(self.session, self.render)

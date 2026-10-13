@@ -26,10 +26,9 @@ from .preferences import PreferencesDialog
 from .render_tab import RenderTab
 from .roi_tab import ROIHeader
 from .render_view import RenderToolBar, RenderView
-from .widgets import CONTROL_WIDTH, apply_style, place_beside
-from .collector import collect_on_gui_thread
+from .widgets import CONTROL_WIDTH, place_beside
 from .errors import ERROR_STYLE, details_window, message_of
-from .icon import install_icon
+from . import make_app
 from . import identity
 from .identity import install_identity
 
@@ -1457,10 +1456,7 @@ def _start_log() -> None:
 
 def main(argv: Optional[List[str]] = None) -> int:
     argv = sys.argv if argv is None else argv
-    app = QApplication.instance() or QApplication(argv)
-    apply_style(app)
-    collect_on_gui_thread(app)
-    install_icon(app)
+    app = make_app(argv)
     _start_log()
     session = Session()
     install_identity(app, session)

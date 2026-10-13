@@ -622,16 +622,10 @@ class CalibrationWindow(QMainWindow):
 def show_calibration_qt(paths=(), settings=None):
     """Open the window, making a QApplication if there is none."""
     from PySide6.QtWidgets import QApplication
-    app = QApplication.instance()
-    standalone = app is None
-    if standalone:
-        app = QApplication([])
-    from ..gui.widgets import apply_style
-    apply_style(app)                 # the same editable fields as the main GUI
-    from ..gui.collector import collect_on_gui_thread
-    collect_on_gui_thread(app)
-    from ..gui.icon import install_icon
-    install_icon(app)
+
+    from ..gui import make_app
+    standalone = QApplication.instance() is None
+    app = make_app()
     window = CalibrationWindow(paths, settings)
     window.show()
     if standalone:
