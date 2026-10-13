@@ -11,9 +11,9 @@ import numpy as np
 import pytest
 
 from smappy.locs import Localizations                                  # noqa: E402
-from smappy.roi_manager import ROIProject                              # noqa: E402
 from smappy.roi_manager import pipeline as pipeline_module             # noqa: E402
 from smappy.chain import Block, Step as ChainStep                      # noqa: E402
+from test_roi_session import rois_of                          # noqa: E402
 
 STATISTICS = "Analysis/Measure/Localization Statistics"
 
@@ -28,9 +28,7 @@ def table(centers, per=4, seed=0):
 
 
 def a_project(rois=(0, 1000)):
-    project = ROIProject()
-    source = project.add_source(table(rois))
-    project.set_filters({})
+    project, source = rois_of(table(rois), filters={})
     project.set_geometry(200)
     for center in rois:
         project.add_roi(source.id, [center, 0])

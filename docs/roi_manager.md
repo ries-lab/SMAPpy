@@ -18,12 +18,11 @@ python -m smappy.gui.app localizations.h5
 The files are the ones the session has loaded, so *File → Open* and *Add file*
 are how sources arrive; a fitted or drift-corrected table can be used without
 saving it first.  Inputs are SMAPpy localization HDF5 files, SMAP `_sml.mat`,
-MINFLUX exports and csv, whatever the session can read.  Coordinates must be in
-nm, or carry `pixelsize_nm` metadata for conversion.
+MINFLUX exports and csv, whatever the session can read.
 
-The matplotlib interface and the `smappy-roi` command that this guide first
-described are gone; `ROIProject` and its plugins are unchanged and still
-scriptable, including `save` and `load` of a sidecar project file.
+The matplotlib interface, the `smappy-roi` command that this guide first
+described and the project's sidecar file are gone; a script uses the ROI
+project through a session with no window (*Python API and plugins*, below).
 
 ## Manual selection
 
@@ -126,12 +125,6 @@ file's metadata, together with the geometry, the use flags, the finder
 provenance, the runs of the per-region steps and which ROI was selected.  Opening that file
 brings all of it back.  Draft ROIs are not saved until added.
 
-`ROIProject.save` and `ROIProject.load` still write and read the versioned HDF5
-sidecar described below, for scripts that want ROIs in a file of their own; the
-GUI does not use it.  That sidecar holds source references, geometry, flags,
-comments, provenance, settings and run history, with source paths relative to
-the project.
-
 Every measurement records its plugin name/version, parameters, timestamp, source
 fingerprint, effective filters, merge settings, and geometry. A changed
 analysis input makes the latest result outdated; it is excluded from current
@@ -141,14 +134,22 @@ numerical results. Old runs remain available in `project.runs`.
 
 ## Python API and plugins
 
-```python
-from smappy.plugins.roi import HistogramSettings
-from smappy.roi_manager import ROIProject, histograms
+A script uses the same project as the GUI, through a session with no window:
+the project takes its files from the session and its filters and grouping
+from the session's first layer, so a script measures what the GUI would.
 
-project = ROIProject()
-source = project.add_file("localizations.h5")
+```python
+from smappy.chain import Block, Step
+from smappy.plugins.roi import HistogramSettings
+from smappy.roi_manager import histograms
+from smappy.session import Session
+
+session = Session()
+session.load("localizations.h5")
+session.layers[0].set_ranges({"xy_err_nm": (None, 25), "photons": (500, None)})
+project = session.rois
 project.set_geometry(300, "circle")
-project.set_filters({"xy_err_nm": (None, 25), "photons": (500, None)})
+source = project.source_of(0)              # the first file
 
 # found ROIs are included as the finder judged them (`use`)
 candidates = project.find(source.id, parameters={"min_count": 15})
@@ -156,34 +157,19 @@ candidates = project.find(source.id, parameters={"min_count": 15})
 # Or add one by hand:
 roi = project.add_roi(source.id, [1500, 2500])
 locs = project.extract(roi)
+project.block = Block(steps=[Step(plugin="Analysis/Measure/Localization Statistics")])
 run = project.evaluate()
 rows = project.results()
 counts = histograms(rows, HistogramSettings(bins=20))
-project.save("experiment.rois.h5")
+session.save("localizations_rois.h5")      # the ROIs and their results go with it
 ```
 
-In the GUI the project is a `SessionROIs`, the same model with the session's
-files as its sources and the layer's filters and merge settings instead of its own.
-The GUI uses the built-in plugins. Scripts can pass another plugin object to
-`project.find(..., plugin=...)` or `project.evaluate(plugin=...)`. Plugins declare
-stable `name` and `version` strings and use these interfaces:
+`project.find(file_id, plugin=..., settings=...)` takes any segmenter (a
+`SegmenterPlugin`, whose `propose(locs, settings, existing_centres)` returns
+the centres it found), and `project.evaluate(block)` any `chain.Block`, or a
+list of its steps; without one it runs the project's own block, which the
+per-region steps window edits.  A step is an ordinary plugin with
+`per_region = True`: its `run(ctx, settings)` gets the ROI's localizations in
+`ctx.locs`, its shape in `ctx.region`, and returns its numbers as
+`Result.values`, which become the ROI's row (`docs/plugin-reference.md`).
 
-```python
-finder.find(filtered_localizations, parameters, existing_centers)  # list of xy centers
-per_roi.evaluate(selected_localizations, geometry, parameters)     # dictionary of results
-population.analyze(result_rows, parameters)                       # analysis data
-```
-
-No plugin needs a window. Per-region plugins receive absolute nm coordinates and an
-explicit geometry dictionary, so such a plugin can derive local/rotated
-coordinates when required. Return JSON-compatible values, numeric arrays or
-NumPy scalars; saved runs contain data rather than plotting handles. Custom
-plugin result rows are available with `project.results(plugin.name)`.
-
-For relocated sources, relink by stable source ID while loading:
-
-```python
-project = ROIProject.load("experiment.rois.h5", source_paths={source_id: new_path})
-```
-
-The source-content check still applies after relinking.

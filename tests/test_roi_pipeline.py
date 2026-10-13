@@ -8,9 +8,9 @@ from smappy.plugins import Context, settings_from, settings_values
 from smappy.plugins.roi import (DensityPeakSettings, HistogramSettings, Histograms,
                                 density_peaks, histograms)
 from smappy.plugins.statistics import LocalizationStatistics, StatisticsSettings
-from smappy.roi_manager import ROIProject
 from smappy.roi_manager import pipeline as pipeline_module
 from smappy.chain import Block, Step as ChainStep
+from test_roi_session import rois_of                          # noqa: E402
 
 
 def table(centers, per=10, seed=0):
@@ -52,9 +52,7 @@ def test_the_defaults_dict_became_a_typed_settings_class():
 
 
 def test_statistics_measures_one_site_through_the_context():
-    project = ROIProject()
-    source = project.add_source(table([(0, 0), (5000, 0)], per=30))
-    project.set_filters({})
+    project, source = rois_of(table([(0, 0), (5000, 0)], per=30), filters={})
     roi = project.add_roi(source.id, [0.0, 0.0])
     result = LocalizationStatistics().run(project.region_context(roi),
                                           StatisticsSettings(precision_fit="none"))
@@ -119,9 +117,7 @@ def test_the_same_evaluator_twice_gets_distinct_columns():
 
 
 def test_running_a_two_step_pipeline_over_a_project():
-    project = ROIProject()
-    source = project.add_source(table([(0, 0), (1000, 1000)]))
-    project.set_filters({})
+    project, source = rois_of(table([(0, 0), (1000, 1000)]), filters={})
     project.set_geometry(200)
     for center in ([0, 0], [1000, 1000]):
         project.add_roi(source.id, center)
@@ -207,9 +203,8 @@ def test_a_segmenter_preview_proposes_what_run_adds_and_adds_nothing():
 
 
 def test_propose_is_find_without_the_adding():
-    project = ROIProject()
+    project, source = rois_of(table([(0, 0), (3000, 0)], per=40))
     project.set_geometry(300)
-    source = project.add_source(table([(0, 0), (3000, 0)], per=40))
     settings = DensityPeakSettings(separation_nm=1000.0, min_count=20)
     origin, proposals = project.propose(source.id, settings=settings)
     assert project.rois == {} and len(proposals) == 2
@@ -224,8 +219,7 @@ def test_propose_is_find_without_the_adding():
 
 
 def test_an_roi_edit_is_undone_and_redone_and_a_no_op_leaves_no_step():
-    project = ROIProject()
-    source = project.add_source(table([(0, 0)]))
+    project, source = rois_of(table([(0, 0)]))
     with project.edit("Add ROI"):
         kept = project.add_roi(source.id, (0.0, 0.0))
     with project.edit("Exclude ROI 1"):
@@ -244,8 +238,7 @@ def test_an_roi_edit_is_undone_and_redone_and_a_no_op_leaves_no_step():
 
 
 def test_the_roi_undo_keeps_twenty_steps():
-    project = ROIProject()
-    source = project.add_source(table([(0, 0)]))
+    project, source = rois_of(table([(0, 0)]))
     for i in range(25):
         with project.edit(f"Add {i}"):
             project.add_roi(source.id, (float(i), 0.0))

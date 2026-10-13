@@ -1,7 +1,8 @@
-"""File-associated analysis ROIs, independent of the interactive interface.
+"""Analysis ROIs: their geometry, their history and what was measured in them.
 
-All geometry is in nm. Source tables are immutable snapshots; selection always
-uses the same ViewState filter as rendering, never the visible field of view.
+All geometry is in nm.  The data an ROI sees is the session's (`link`):
+selection always uses the same filter as rendering, never the visible field
+of view.
 """
 from __future__ import annotations
 
@@ -10,18 +11,11 @@ from dataclasses import asdict, dataclass, field, fields, replace
 from datetime import datetime, timezone
 import hashlib
 import json
-import os
-from pathlib import Path
-import tempfile
 from typing import Dict, List, Optional
 from uuid import uuid4
 
-import h5py
 import numpy as np
 
-from ..group import GroupSettings
-from ..io.hdf5 import load_localizations
-from ..locs import Localizations, to_nm
 from ..region_table import RegionTable
 from ..regions import Region
 from ..layer_state import ViewState
@@ -243,52 +237,30 @@ class ROIHistory:
         self._redo.clear()
 
 
-class Source:
-    def __init__(self, locs, path=None, name=None, source_id=None):
-        if "x_nm" not in locs or "y_nm" not in locs:
-            pixelsize = locs.metadata.get("pixelsize_nm")
-            if pixelsize is None:
-                raise ValueError("ROI analysis needs nm coordinates or pixelsize_nm metadata")
-            locs = to_nm(locs, positive(pixelsize, "Pixel size"))
-        if "x_nm" not in locs or "y_nm" not in locs:
-            raise ValueError("Source has no x_nm/y_nm coordinates")
-        columns = {}
-        h = hashlib.sha256()
-        for key in sorted(locs.columns):
-            a = np.array(locs[key], copy=True, order="C")
-            if a.ndim != 1 or len(a) != len(locs) or a.dtype.kind not in "biuf":
-                raise ValueError(f"{key}: expected a numeric column with {len(locs)} rows")
-            h.update(key.encode())
-            h.update(a.dtype.str.encode())
-            h.update(memoryview(a).cast('B'))
-            a.flags.writeable = False
-            columns[key] = a
-        h.update(json_text(locs.metadata).encode())
-        self.fingerprint = h.hexdigest()
-        self.id = source_id or uuid4().hex
-        self.path = str(Path(path).resolve()) if path else None
-        self.name = name or (Path(path).name if path else "Untitled")
-        self.state = ViewState(Localizations(columns, dict(locs.metadata)))
-
-
 class ROIProject:
+    """The ROIs, their results and the steps that made them: the model,
+    without the data.  Where the localizations come from -- one source per
+    file, its view under a filter and a grouping -- is `state` and
+    `_region_tables`, which `link.SessionROIs` answers from the session: a
+    script makes ROIs through a headless `Session` (``Session(locs).rois``),
+    as the GUI does, so the two see the same filters and grouping.
+    """
+
     def __init__(self):
-        self.sources: Dict[str, Source] = {}
+        self.sources: Dict[str, object] = {}     # by id: `link.SessionSource`
         self.rois: Dict[str, ROI] = {}
         self.size_nm = 300.0  # circle diameter or square side length
         self.shape = "circle"
         self.tile_nm = 0.0    # a grid over each file for a systematic walk; 0 = none
-        # the bounds a layer opens with, so a scripted project filters as the GUI does
-        from ..session import DEFAULT_BOUNDS
-        self.filters = dict(DEFAULT_BOUNDS)
+        # the layer's, which `SessionROIs.sync` puts here
+        self.filters: Dict[str, tuple] = {}
         self.grouped = False
-        self.group_settings = GroupSettings()
         # The results, one table per evaluation by its name, a row per ROI
         # (`RegionTable`): the newest result of each evaluation on each ROI,
         # with the step that made it.  Kept in the order they were last
         # written, so the newest is last.  Rows of ROIs that were removed
-        # stay until the project is saved, so an undo brings the ROI back
-        # with its numbers.
+        # stay until the project is saved (`tables_dict`), so an undo brings
+        # the ROI back with its numbers.
         self.tables: Dict[str, RegionTable] = {}
         # What was run, newest last: the pipeline, when, and whether a chain
         # or one site's re-evaluation did it -- a log, without the results,
@@ -314,18 +286,6 @@ class ROIProject:
         # and is saved with the ROIs, so an undone ROI's number is not handed
         # to the next one, and its redo brings it back unchanged
         self.next_number = 1
-
-    def add_file(self, path):
-        return self.add_source(load_localizations(path), path=path)
-
-    def add_source(self, locs, path=None, name=None, source_id=None):
-        if path and any(s.path == str(Path(path).resolve()) for s in self.sources.values()):
-            raise ValueError(f"Source already belongs to this project: {path}")
-        source = Source(locs, path, name, source_id)
-        if source.id in self.sources:
-            raise ValueError("Duplicate source ID")
-        self.sources[source.id] = source
-        return source
 
     def set_geometry(self, size_nm, shape=None):
         size = positive(size_nm, "ROI size")
@@ -371,31 +331,10 @@ class ROIProject:
                 return i
         return None
 
-    def set_filters(self, ranges):
-        normalized = {}
-        for name, bounds in ranges.items():
-            if name in ("filenumber", "file_id"):
-                continue
-            lo, hi = (None if v is None else float(v) for v in bounds)
-            if any(v is not None and not np.isfinite(v) for v in (lo, hi)):
-                raise ValueError(f"{name}: bounds must be finite or blank")
-            if lo is not None and hi is not None and lo > hi:
-                raise ValueError(f"{name}: lower bound exceeds upper bound")
-            if lo is not None or hi is not None:
-                normalized[name] = (lo, hi)
-        self.filters = normalized
-
-    def state(self, file_id):
-        """The file's view under the project's bounds and grouping.  The
-        grouped table is its `Tables`' cache, keyed by the link settings, so
-        a change of them links again when it is next asked for."""
-        source = self.sources[file_id]
-        state = source.state
-        state.tables.settings = self.group_settings
-        state.show_grouped(self.grouped)
-        state.set_ranges({k: v for k, v in self.filters.items()
-                          if k not in ("filenumber", "file_id")})
-        return state
+    def state(self, file_id) -> ViewState:
+        """The file's view under the project's bounds and grouping
+        (`SessionROIs.state`)."""
+        raise NotImplementedError
 
     @contextmanager
     def edit(self, label: str):
@@ -515,26 +454,9 @@ class ROIProject:
                        pinned=pinned, rows=rows, region=region, rois=self, **extra)
 
     def _region_tables(self, roi, region):
-        """``(tables, rows, layer, session)`` for `region_context`.
-
-        A project of its own files has one layer: the file, under the
-        project's bounds and grouping.  `SessionROIs` has the session's.
-        """
-        from ..plugins import Selection
-        state = self.state(roi.file_id)
-        entry = {"shows": "grouped" if state.use_grouped else "ungrouped"}
-        rows = None
-        sets = {"ungrouped": state.tables.ungrouped}
-        if state.tables.is_current:
-            sets["grouped"] = state.tables.peek_grouped()
-        for kind, locset in sets.items():
-            found = rows_in(locset.locs, locset.index, region)
-            if kind == "ungrouped":
-                rows = found
-            entry[kind] = (locset.locs[found],
-                           Selection(np.asarray(state.filter_for(locset).mask)[found],
-                                     layer=0, roi=region, name=str(region)))
-        return {0: entry}, rows, 0, None
+        """``(tables, rows, layer, session)`` for `region_context`: every
+        layer cut to the ROI (`SessionROIs._region_tables`)."""
+        raise NotImplementedError
 
     def inputs(self, roi):
         state = self.state(roi.file_id)
@@ -1070,78 +992,3 @@ class ROIProject:
             if doc["ids"]:
                 out.append(doc)
         return out
-
-    def save(self, path):
-        """Atomic sidecar save. In-memory sources must first be saved as localizations."""
-        path = Path(path).resolve()
-        for source in self.sources.values():
-            if source.path is None:
-                raise ValueError(f"Save localization source {source.name!r} before saving the project")
-            if path == Path(source.path):
-                raise ValueError("The project must not overwrite a localization source")
-        doc = {"size_nm": self.size_nm, "shape": self.shape, "tile_nm": self.tile_nm,
-               "filters": self.filters,
-               "grouped": self.grouped, "group_settings": asdict(self.group_settings),
-               "navigation": self.navigation, "rois": [asdict(r) for r in self.rois.values()],
-               "next_number": self.next_number,
-               "runs": self.runs, "block": self.block.to_dict(),
-               "sources": [{"id": s.id, "name": s.name,
-                            "path": os.path.relpath(s.path, path.parent),
-                            "fingerprint": s.fingerprint} for s in self.sources.values()]}
-        fd, temporary = tempfile.mkstemp(prefix=path.name + '.', suffix='.tmp', dir=path.parent)
-        os.close(fd)
-        try:
-            with h5py.File(temporary, 'w') as f:
-                f.attrs['format'] = 'smappy-roi-project'
-                f.attrs['format_version'] = 1
-                f.create_dataset('project', data=json_text(doc), dtype=h5py.string_dtype('utf-8'))
-                tables = f.create_group('tables')
-                n = 0
-                for table in self.tables.values():
-                    table.keep_only(self.rois)
-                    if len(table):                    # by number: a label may hold "/"
-                        table.to_hdf5(tables.create_group(str(n)))
-                        n += 1
-            os.replace(temporary, path)
-        finally:
-            if os.path.exists(temporary):
-                os.unlink(temporary)
-        return path
-
-    @classmethod
-    def load(cls, path, source_paths=None):
-        """Reload sources and verify contents; source_paths can relink moved files by ID."""
-        path = Path(path).resolve()
-        with h5py.File(path, 'r') as f:
-            if f.attrs.get('format') != 'smappy-roi-project' or f.attrs.get('format_version') != 1:
-                raise ValueError("Unsupported ROI project format")
-            doc = json.loads(f['project'][()])
-            tables = [RegionTable.from_hdf5(f['tables'][k])
-                      for k in sorted(f.get('tables', {}), key=int)]
-        project = cls()
-        project.set_geometry(doc['size_nm'], doc['shape'])
-        project.set_tiles(doc.get('tile_nm', 0.0))
-        project.set_filters(doc['filters'])
-        project.grouped = doc['grouped']
-        project.group_settings = GroupSettings(**doc['group_settings'])
-        for saved in doc['sources']:
-            source_path = (source_paths or {}).get(saved['id'], path.parent / saved['path'])
-            source = project.add_source(load_localizations(source_path), path=source_path,
-                                        name=saved['name'], source_id=saved['id'])
-            if source.fingerprint != saved['fingerprint']:
-                raise ValueError(f"Source contents changed: {source_path}. Restore the original source.")
-        for saved in doc['rois']:
-            roi = ROI.from_dict(saved)
-            if roi.file_id not in project.sources or roi.id in project.rois:
-                raise ValueError("Invalid ROI source or duplicate ROI ID")
-            project.rois[roi.id] = roi
-        project.number_rois(doc.get("next_number"))
-        project.runs = []
-        for run in doc['runs']:
-            project.absorb_run(run)
-        for table in tables:
-            project.tables[table.label] = table
-        project.navigation = doc['navigation']
-        from .link import block_from
-        project.block = block_from(doc)
-        return project

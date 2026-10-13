@@ -10,12 +10,12 @@ import pytest
 
 from smappy.locs import Localizations                                  # noqa: E402
 from smappy.plugins import Plugin, Result, param                       # noqa: E402
-from smappy.roi_manager import ROIProject                              # noqa: E402
 from smappy.chain import Block                                         # noqa: E402
 from smappy.roi_manager import pipeline as pipeline_module             # noqa: E402
 from smappy.session import Session                                     # noqa: E402
 
 from dataclasses import dataclass                                      # noqa: E402
+from test_roi_session import rois_of                          # noqa: E402
 
 
 @dataclass
@@ -80,9 +80,7 @@ def steps(*plugins):
 
 
 def a_project():
-    project = ROIProject()
-    source = project.add_source(table([(0, 0), (1000, 1000)]))
-    project.set_filters({})
+    project, source = rois_of(table([(0, 0), (1000, 1000)]), filters={})
     project.set_geometry(200)
     rois = [project.add_roi(source.id, center)
             for center in ([0, 0], [1000, 1000])]

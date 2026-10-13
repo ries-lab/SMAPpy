@@ -1,11 +1,12 @@
-"""The ROI project, backed by the session instead of by files of its own.
+"""The ROI project, backed by the session.
 
-`ROIProject` normally owns immutable snapshots of localization files.  In the
-GUI the session already holds the tables, the filters and the grouping, and a
-plugin may replace the table (a drift correction, a fit).  `SessionROIs` keeps
-the project's model -- ROIs, their *use*, finder provenance, evaluation runs --
-and takes the data from the session: one source per loaded file, filters and
-grouping from a layer, so what an ROI sees is what the image shows.
+The session holds the tables, the filters and the grouping, and a plugin may
+replace the table (a drift correction, a fit).  `SessionROIs` keeps the
+project's model (`ROIProject`) -- ROIs, their *use*, finder provenance,
+evaluation runs -- and takes the data from the session: one source per loaded
+file, filters and grouping from a layer, so what an ROI sees is what the image
+shows.  It is the only kind of project: a script makes one with a headless
+session, ``Session(locs).rois``.
 
 The project's state travels in the localization file's metadata, so ROIs and
 their results are saved with `File -> Save` and come back with the file.
@@ -142,11 +143,6 @@ class SessionROIs(ROIProject):
     def group_settings(self) -> GroupSettings:
         """The session's: there is one grouped table, and the ROIs see it."""
         return self.session.group_settings
-
-    @group_settings.setter
-    def group_settings(self, settings: GroupSettings) -> None:
-        # `ROIProject.__init__` sets a default; the session's stands
-        pass
 
     def _apply(self, source: SessionSource) -> None:
         """Put the layer's bounds, grouping and look on this source's state."""

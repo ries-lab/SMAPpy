@@ -13,6 +13,7 @@ from smappy.plugins.npc import (FITS, LabelingEfficiencySettings, NPCCornersSett
 from smappy.simulate import simulate
 from smappy.simulate.settings import (BlinkingSettings, LabellingSettings,
                                       SimulationSettings, StructureSettings)
+from test_roi_session import rois_of                          # noqa: E402
 
 R = 53.7
 
@@ -121,7 +122,6 @@ def test_the_far_test_is_off_without_a_precision():
 
 
 def test_rejected_candidates_become_unused_rois_only_when_asked():
-    from smappy.roi_manager import ROIProject
     from smappy.plugins.npc import NPCSegment
     rng = np.random.default_rng(3)
     good = corners_at(range(8), rng, center=(1000, 1000), sd=4)
@@ -131,8 +131,8 @@ def test_rejected_candidates_become_unused_rois_only_when_asked():
                           "frame": np.arange(len(xy)),
                           "xy_err_nm": np.full(len(xy), 5.0)})
     for keep, expected in ((False, 1), (True, 2)):
-        project = ROIProject()
-        file_id = project.add_source(locs).id
+        project, source = rois_of(locs)
+        file_id = source.id
         found = project.find(file_id, plugin=NPCSegment(),
                              settings=NPCSegmentSettings(keep_rejected=keep))
         assert len(found) >= expected and found[0].use

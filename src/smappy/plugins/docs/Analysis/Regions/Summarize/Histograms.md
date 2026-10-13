@@ -34,16 +34,17 @@ Regions tab).
 from smappy.simulate import simulate
 from smappy.simulate.settings import (SimulationSettings, StructureSettings,
                                       LabellingSettings)
-from smappy.roi_manager import ROIProject
+from smappy.session import Session
 from smappy.plugins import Context
 from smappy.plugins.roi import Histograms, HistogramSettings
 sim = SimulationSettings(n_frames=3000, seed=3,
                          structure=StructureSettings(preset="npc"),
                          labelling=LabellingSettings(efficiency=0.6))
 locs = simulate(sim)
-project = ROIProject()
-source = project.add_source(locs)
-project.find(source.id)
+session = Session(locs)                           # the GUI's model, no window
+session.show_grouped(0, False)                    # localizations, not blinks
+project = session.rois
+project.find(project.source_of(0).id)
 project.evaluate()
 rows = project.results()
 ```

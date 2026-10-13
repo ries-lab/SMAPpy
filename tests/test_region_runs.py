@@ -10,6 +10,7 @@ from smappy.region_runs import (ColumnRegions, Progress, evaluate_regions,
                                 progress_text, split_ids)
 from smappy.roi_manager.pipeline import Step
 from smappy.session import Session
+from test_roi_session import rois_of                          # noqa: E402
 
 
 def clusters(sizes=(30, 50, 20), noise=15, seed=0):
@@ -188,11 +189,8 @@ def test_a_cluster_has_its_blinks_through_group_id():
 
 
 def test_the_roi_run_reports_its_status_and_stops_when_asked():
-    from smappy.roi_manager import ROIProject
     from smappy.chain import Block, Step as ChainStep
-    project = ROIProject()
-    source = project.add_source(clusters(sizes=(20,) * 4, noise=0), name="a")
-    project.set_filters({})
+    project, source = rois_of(clusters(sizes=(20,) * 4, noise=0), filters={})
     for k in range(1, 5):
         project.add_roi(source.id, [k * 5000.0, k * 5000.0])
     said = []
@@ -230,10 +228,7 @@ class Drawn(Plugin):
 
 
 def test_a_rois_figure_comes_back_from_what_it_kept_without_measuring_again():
-    from smappy.roi_manager import ROIProject
-    project = ROIProject()
-    source = project.add_source(clusters(noise=0), name="a")
-    project.set_filters({})
+    project, source = rois_of(clusters(noise=0), filters={})
     roi = project.add_roi(source.id, [5000.0, 5000.0])
     steps = [Step("drawn", Drawn.path, Drawn(), None)]
     Drawn.runs = 0

@@ -2,16 +2,18 @@
 
 The interface lives in the GUI (`smappy.gui.roi_window` and the control
 window's Regions tab), which drives this model over the session's files.  A
-project can also be built and evaluated from a script, with no window::
+script uses the same project through a session with no window::
 
-    from smappy.roi_manager import ROIProject
+    from smappy.session import Session
 
-    project = ROIProject()
-    source = project.add_file("localizations.h5")
+    session = Session()
+    session.load("localizations.h5")
+    project = session.rois
     project.set_geometry(300, "circle")
-    project.find(source.id)
+    project.find(next(iter(project.sources)))
     project.evaluate()
     rows = project.results()
+    session.save("localizations.h5")         # the ROIs and results go with it
 
 The plugins themselves live in `smappy.plugins.roi`, with everything else, so
 that the folder tree stays the plugin tree; they are re-exported here because

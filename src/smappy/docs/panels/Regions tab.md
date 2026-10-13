@@ -50,15 +50,17 @@ from matplotlib.patches import Circle, Rectangle, Polygon
 from smappy.simulate import simulate
 from smappy.simulate.settings import (SimulationSettings, StructureSettings,
                                       LabellingSettings)
-from smappy.roi_manager import ROIProject
+from smappy.session import Session
 from smappy.render import (FieldOfView, RenderSettings, SigmaSettings,
                            DisplaySettings, render_locs)
 sim = SimulationSettings(n_frames=3000, seed=3,
                          structure=StructureSettings(preset="npc"),
                          labelling=LabellingSettings(efficiency=0.6))
 locs = simulate(sim)
-project = ROIProject()
-source = project.add_source(locs)
+session = Session(locs)                           # the GUI's model, no window
+session.show_grouped(0, False)                    # localizations, not blinks
+project = session.rois
+source = project.source_of(0)                     # the one file
 rois = project.find(source.id)                    # Density Peaks
 state = project.state(source.id)
 kept = state.locs[state.filter.indices]           # what passes the filter

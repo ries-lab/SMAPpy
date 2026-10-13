@@ -52,7 +52,8 @@ too.
 from smappy.simulate import simulate
 from smappy.simulate.settings import (SimulationSettings, StructureSettings,
                                       LabellingSettings)
-from smappy.roi_manager import ROI, ROIProject
+from smappy.roi_manager import ROI
+from smappy.session import Session
 from smappy.render import FieldOfView
 from smappy.chain import Block, Step
 from smappy.gui.roi_window import (arrow, OTHER_PEN, EXCLUDED_PEN, ROI_PEN,
@@ -62,8 +63,10 @@ sim = SimulationSettings(n_frames=3000, seed=3,
                          structure=StructureSettings(preset="npc"),
                          labelling=LabellingSettings(efficiency=0.6))
 locs = simulate(sim)
-project = ROIProject()
-source = project.add_source(locs, name="pores")
+session = Session(locs)                           # the GUI's model, no window
+session.show_grouped(0, False)                    # localizations, not blinks
+project = session.rois
+source = project.source_of(0)                     # the one file
 project.set_geometry(200, "circle")
 found = project.find(source.id)
 project.set_tiles(2500)

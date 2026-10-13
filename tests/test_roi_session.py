@@ -21,6 +21,35 @@ def _table(n=4000, seed=0):
                           "xy_err_nm": rng.uniform(5, 15, m).astype(np.float32)}, {})
 
 
+def rois_of(*tables, filters=None, grouped=False):
+    """``(project, source)``: the ROI project of a headless session over
+    ``tables``, a file each, and the first file's source -- how a script
+    makes ROIs.  ``filters`` are the layer's bounds (None: the ones a layer
+    opens with); ``grouped`` whether it merges blinks.  Other tests import
+    this."""
+    from smappy.io.formats import FileInfo
+    session = Session()
+    for k, locs in enumerate(tables):
+        session.add_file(locs, FileInfo(name=f"file{k + 1}", path="", format="test"),
+                         append=k > 0)
+    session.show_grouped(0, grouped)
+    if filters is not None:
+        session.layers[0].set_ranges(filters)
+    project = session.rois
+    return project, project.source_of(0)
+
+
+def set_bounds(project, ranges=None, grouped=None):
+    """The layer the project follows given new bounds, or blinks merged or
+    not, and the project told."""
+    session = project.session
+    if ranges is not None:
+        session.layers[0].set_ranges(ranges)
+    if grouped is not None:
+        session.show_grouped(0, grouped)
+    project.sync()
+
+
 def test_rois_follow_the_layer_and_survive_a_save(tmp_path):
     path = tmp_path / "locs.hdf5"
     save_localizations(path, _table())
