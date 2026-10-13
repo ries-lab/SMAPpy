@@ -84,7 +84,13 @@ repeats over an id column of the outer region's table
 (`region_runs.ContextRegions`): regions narrow, and a `cluster_id` an inner
 DBSCAN writes exists only in that region's scratch copy.  The inner block
 makes a table per outer region, kept beside the outer step's with rows named
-`outer:inner`.  A chain that contains itself is refused when loaded
+`outer:inner`.  Nothing an inner block changes reaches the real table:
+writing back inside a nested block is not supported, and a table change
+meant to be kept -- the inner block's *write back*, its *write values*
+unless the outer block writes those columns back, a last step that changes
+the table -- is warned about in the editor (`BlockPlugin.describe`) and when
+the chain runs (`blocks.nested_losses`); a filter before a measurement,
+whose effect is meant to stay in the region, is not.  A chain that contains itself is refused when loaded
 (`chain.load_class`), and a segmenter is refused in a block: ROIs found in
 each region would have nowhere to go.
 

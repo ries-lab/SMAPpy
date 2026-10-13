@@ -85,7 +85,10 @@ steps:
         values: {}
   ```
 
-  A block's step may be a block or a chain.  Among the chain's settings a
+  A block's step may be a block or a chain.  A block inside a block cannot
+  change the real table: its *write back*, its *write values* (unless the
+  outer block writes them back) and a last step that changes the table are
+  discarded, and the editor and the run say so.  Among the chain's settings a
   block is a part, `<key>.regions`, `<key>.write_back`, ... and its steps
   inside it, `<key>.<step key>.<field>`.
 

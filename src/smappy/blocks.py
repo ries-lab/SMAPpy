@@ -31,7 +31,8 @@ What a run of a block does:
   nowhere to go yet.
 * **A block inside a block** makes a table per region, not a row: its tables
   are kept beside the outer step's, a row per inner region named
-  ``outer:inner``.
+  ``outer:inner``.  What it changes stays in the region's copy, and what was
+  asked to be kept of it is warned about (`nested_losses`).
 * **Stop** (`Context.stop`) ends the run between regions, and what the
   regions so far measured and wrote back is the result, which says
   ``stopped`` (`Result.stopped`).  A region that has begun finishes: its
@@ -66,6 +67,9 @@ ASK_ABOVE_SECONDS = 60.0
 # means nothing for a number measured over a region
 ANY_FOR_VALUES = ("overlaps: any applies to write back only; written values "
                   "take last, first or mean")
+# why what a block inside a block's region does to the localizations is lost
+NESTED_LOST = ("inside a nested block, changes to the localizations stay in "
+               "that region's copy")
 
 
 @dataclass
@@ -127,8 +131,16 @@ class BlockPlugin(ChainPlugin):
                 state.active[f"{key}.{GROUPING_FIELD}"] = False
         state.active["merge"] = bool(_columns(settings.write_back)
                                      or _columns(settings.write_values))
+        said = []
         if _columns(settings.write_values) and settings.merge not in VALUE_RULES:
-            state.notice = Notice(ANY_FOR_VALUES)
+            said.append(ANY_FOR_VALUES)
+        try:
+            said += nested_losses(self.block_from(settings))
+        except Exception:
+            pass                           # best effort, like the steps' own
+        if said:
+            # this block's word replaces an inner block's, which says less
+            state.notice = Notice("; ".join(said), kind="warning")
         return state
 
     @classmethod
@@ -265,6 +277,10 @@ class BlockPlugin(ChainPlugin):
             check_writable(ctx.locs, written)
         warned: List[str] = []
         children: Dict[str, Any] = {}
+        if not ctx.per_region:
+            # once, from the outermost block, rather than once per region
+            for lost in nested_losses(self.block_from(settings)):
+                ctx.warn(f"{self.block.title()}: {lost}")
 
         def after(region_id, scratch, original):
             if back:
@@ -412,6 +428,51 @@ def block_class(block: Block) -> type:
                                   or _columns(block.write_values))}
     return type("Block_" + "".join(ch for ch in name if ch.isalnum()), (BlockPlugin,),
                 attrs)
+
+
+def nested_losses(block: Block) -> List[str]:
+    """What the blocks inside ``block`` (at any depth) would change in the
+    localizations and then throw away, a sentence each.
+
+    Inside a block's region a block runs on that region's copy of the table,
+    and nothing it writes reaches the real one (`ContextRegions` runs without
+    the rows a write-back needs).  A step that changes the copy for the step
+    after it is the normal use -- a filter before a measurement -- and its
+    effect is meant to go with the region.  What is reported is what was
+    asked to be kept: an inner block's *write back*; its *write values*,
+    unless the block around it writes those columns back; and a last step
+    that changes the table, whose change nothing reads.
+    """
+    out: List[str] = []
+    for inner in block.steps:
+        if not isinstance(inner, Block) or not inner.enabled:
+            continue
+        name = inner.title()
+        if inner.write_back:
+            out.append(f"{name} writes back {', '.join(inner.write_back)}, which is "
+                       f"discarded: {NESTED_LOST}")
+        lost = [c for c in inner.write_values if c not in block.write_back]
+        if lost:
+            out.append(f"{name} writes the values {', '.join(lost)}, which "
+                       f"{block.title()} does not write back, so they are discarded: "
+                       f"{NESTED_LOST}")
+        steps = [s for s in inner.steps if s.enabled]
+        if steps and not isinstance(steps[-1], Block) and _changes_table(steps[-1]):
+            out.append(f"{steps[-1].title()}, the last step of {name}, changes the "
+                       f"localizations and nothing reads them after it, so the "
+                       f"change is discarded: {NESTED_LOST}")
+        out += nested_losses(inner)
+    return out
+
+
+def _changes_table(step) -> bool:
+    """Whether a chain step hands back a new table with its values."""
+    from .plugins import settings_from
+    try:
+        cls = step_plugin(step)
+        return bool(cls().changes_locs_for(settings_from(cls.Settings, step.values)))
+    except Exception:
+        return False
 
 
 def _columns(text) -> List[str]:

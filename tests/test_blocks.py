@@ -237,6 +237,60 @@ def test_a_block_in_a_block_makes_a_table_of_the_inner_regions():
     assert "cluster_id" not in session.locs or session.locs["cluster_id"].max() == 2
 
 
+def two_rois(session):
+    project = session.rois
+    file_id = next(iter(project.sources))
+    project.set_geometry(400)
+    project.add_roi(file_id, [5000.0, 5000.0])
+    project.add_roi(file_id, [10000.0, 10000.0])
+
+
+def nested(*inner_steps, **inner):
+    """A chain: over the ROIs, split each in halves, then an inner block."""
+    return ChainSpec(steps=[block({"plugin": "Test/Block/Halves"},
+                                  block(*inner_steps, label="halves", **inner),
+                                  regions="rois")])
+
+
+def warned(session, spec):
+    """``(the form's notice or None, what a run warned)``."""
+    cls = chain_class(spec)
+    notice = cls().describe(session.context(), cls.Settings()).notice
+    ctx = session.context()
+    cls().run(ctx, cls.Settings())
+    return notice, ctx.warnings
+
+
+def test_a_nested_block_that_writes_values_says_they_are_discarded():
+    session = a_session(sizes=(40, 60), noise=0)
+    two_rois(session)
+    notice, warnings = warned(session, nested({"plugin": "Test/Block/Count"},
+                                              write_values=["n"]))
+    assert notice is not None and notice.kind == "warning"
+    assert "halves writes the values n" in notice.text
+    assert "inside a nested block" in notice.text
+    lost, = [w for w in warnings if "nested block" in w]
+    assert "halves writes the values n" in lost
+
+
+def test_a_nested_blocks_last_step_that_changes_the_table_is_said_to_be_lost():
+    session = a_session(sizes=(40, 60), noise=0)
+    two_rois(session)
+    notice, warnings = warned(session, nested({"plugin": "Test/Block/Count"},
+                                              {"plugin": "Test/Block/Drop"}))
+    assert "Drop, the last step of halves" in notice.text
+    assert any("Drop, the last step of halves" in w for w in warnings)
+
+
+def test_a_nested_filter_before_a_measurement_is_not_warned_about():
+    session = a_session(sizes=(40, 60), noise=0)
+    two_rois(session)
+    notice, warnings = warned(session, nested({"plugin": "Test/Block/Drop"},
+                                              {"plugin": "Test/Block/Count"}))
+    assert notice is None or "nested block" not in notice.text
+    assert not [w for w in warnings if "nested block" in w]
+
+
 def test_the_rois_block_reports_its_status_and_stops_when_asked():
     import threading
     session = a_session(sizes=(20,) * 5, noise=0)
