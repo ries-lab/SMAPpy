@@ -257,13 +257,15 @@ def assert_no_qt_and_no_session(args):
 
 
 def spy_on_worker(monkeypatch):
-    """What `RenderWorker.render` -- the slot, on the worker's thread -- receives."""
+    """What `RenderWorker.render` -- the slot, on the worker's thread -- receives,
+    and which worker received it: every view has its own, and a view an
+    earlier test left open (collection is off) may still be rendering."""
     from smappy.gui.render_view import RenderWorker
     seen = []
     real = RenderWorker.render
 
     def render(self, job, generation):
-        seen.append((job, generation))
+        seen.append((self, job, generation))
         return real(self, job, generation)
 
     monkeypatch.setattr(RenderWorker, "render", render)
@@ -280,12 +282,13 @@ def test_the_2d_worker_is_handed_a_snapshot_and_no_qt_object(app, monkeypatch):
     view.set_layout_mode("side+overlay")
     view.tile_valid = False
     view.render()
-    settle(app, lambda: seen and not view._busy)
-    assert seen and view.fov is not None and not view.last_error
-    for job, generation in seen:
+    mine = lambda: [(j, g) for w, j, g in seen if w is view._renderer]
+    settle(app, lambda: mine() and not view._busy)
+    assert mine() and view.fov is not None and not view.last_error
+    for job, generation in mine():
         assert isinstance(job, PanelJob) and isinstance(generation, int)
         assert all(isinstance(layer, LayerSnapshot) for layer in job.layers)
-    assert_no_qt_and_no_session(seen)
+    assert_no_qt_and_no_session(mine())
     view.close()
 
 
@@ -298,12 +301,13 @@ def test_the_3d_worker_is_handed_a_snapshot_and_no_qt_object(app, monkeypatch):
     view.show()
     view.fit()
     view.render(preview=True)
-    settle(app, lambda: seen and not view._busy and view._fov is not None)
-    assert seen and view._fov is not None
-    for job, generation in seen:
+    mine = lambda: [(j, g) for w, j, g in seen if w is view._renderer]
+    settle(app, lambda: mine() and not view._busy and view._fov is not None)
+    assert mine() and view._fov is not None
+    for job, generation in mine():
         assert isinstance(job, Job3D) and isinstance(generation, int)
         assert all(isinstance(layer, LayerSnapshot) for layer in job.layers)
-    assert_no_qt_and_no_session(seen)
+    assert_no_qt_and_no_session(mine())
     view.close()
 
 
