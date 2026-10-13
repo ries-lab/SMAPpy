@@ -767,9 +767,9 @@ class Result:
     # ``(name, plugin path)`` of the evaluations this run left on the
     # regions, so that a later step of a chain reads them without asking.
     evaluations: Sequence[Tuple[str, str]] = ()
-    # The table change as a recipe (`LiveRecipe`), which can follow a table
+    # The table change as a recipe (`ColumnRecipe`), which can follow a table
     # a fit is still appending to; `locs` is then the recipe applied.
-    recipe: Optional["LiveRecipe"] = None
+    recipe: Optional["ColumnRecipe"] = None
     # The run was asked to stop (`Context.stop`) and this is what it had:
     # the panel says "stopped" rather than "done".
     stopped: bool = False
@@ -781,7 +781,7 @@ class Result:
                         if draw is not None]
 
 
-class LiveRecipe:
+class ColumnRecipe:
     """A table change that can follow a fit while it is still appending.
 
     A table change cannot go into a table a fit is still adding to
@@ -790,7 +790,7 @@ class LiveRecipe:
     then for every block as it arrives, and once more for the finished
     table.  A plugin that can be one puts it in its result as
     ``Result.recipe``, and says so before the run in
-    `Plugin.live_recipe_for`.  The Math Parser's expression is one, and the
+    `Plugin.column_recipe_for`.  The Math Parser's expression is one, and the
     colour assignment, with the modes it found, is another.
 
     `columns` must work on any table with the columns it reads -- a block of
@@ -892,6 +892,10 @@ class Plugin:
                 f"{cls.__qualname__} must say whether it changes the table: "
                 "set changes_locs = True (it hands back a new table or files) "
                 "or False (it measures, draws or writes elsewhere)")
+        # the old name of `follow_roi`: a plugin that still says it would
+        # lose its tick without a word
+        if "live" in cls.__dict__:
+            raise TypeError(f"{cls.__qualname__}: `live` is `follow_roi` now")
 
     def run(self, ctx: Context, settings) -> Result:
         """Do the work.
@@ -908,12 +912,13 @@ class Plugin:
     # is of the whole selection rather than of one frame -- see
     # `preview_wants_frame` -- and the GUI then asks for no frame number
     # Cheap enough to redo while the ROI is dragged.  A plugin that says so
-    # gets a *live* tick in the GUI, which measures again between drag events
-    # -- its `preview` if it has one, otherwise `run`, looked at and never
-    # applied -- what makes a measurement something one aims with rather than
-    # something one asks for and reads afterwards.  Only claim it for work
-    # measured in tens of milliseconds on a normal selection.
-    live: bool = False
+    # gets a *follow ROI* tick in the GUI, which measures again between drag
+    # events -- its `preview` if it has one, otherwise `run`, looked at and
+    # never applied -- what makes a measurement something one aims with
+    # rather than something one asks for and reads afterwards.  Only claim it
+    # for work measured in tens of milliseconds on a normal selection.  (It
+    # was `live` once; "live" now means only a fit still appending.)
+    follow_roi: bool = False
 
     def preview(self, ctx: Context, settings, frame: int = 0) -> Result:
         """One frame, drawn rather than saved: is this set up right?
@@ -947,8 +952,8 @@ class Plugin:
         """Whether a run with ``settings`` changes the table; see `changes_locs`."""
         return self.changes_locs
 
-    def live_recipe_for(self, settings) -> bool:
-        """Whether a run with ``settings`` hands back a `LiveRecipe`, and so
+    def column_recipe_for(self, settings) -> bool:
+        """Whether a run with ``settings`` hands back a `ColumnRecipe`, and so
         can change a table a fit is still appending to.  False by default."""
         return False
 

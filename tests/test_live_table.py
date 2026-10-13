@@ -150,7 +150,7 @@ def test_an_expression_follows_the_live_table_block_by_block():
     settings = dataclasses.replace(cls.Settings(), field="bright",
                                    expression="photons > 1000")
     plugin = cls()
-    assert plugin.live_recipe_for(settings)
+    assert plugin.column_recipe_for(settings)
     session.append(block(4))                       # after the snapshot
     session.apply(plugin, plugin.run(session.context(), settings))
     session.append(block(5))
@@ -182,9 +182,9 @@ def test_an_expression_over_the_selection_cannot_follow_a_live_table():
     from smappy import plugins
     cls = plugins.get("Analysis/Process/Math Parser")
     settings = dataclasses.replace(cls.Settings(), where="selection")
-    assert not cls().live_recipe_for(settings)
+    assert not cls().column_recipe_for(settings)
     shift = dataclasses.replace(cls.Settings(), field="x_nm", expression="y_nm")
-    assert not cls().live_recipe_for(shift)        # a position: not a recipe
+    assert not cls().column_recipe_for(shift)        # a position: not a recipe
 
 
 def test_colours_follow_the_live_table_and_are_found_again_when_it_is_finished():

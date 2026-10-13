@@ -45,7 +45,7 @@ localization precision `xy_err_nm` (for a z profile, `z_err_nm`) is used when
 the table has it; without it one width is fitted for all localizations, and
 the text says so.
 
-The fit takes tens of milliseconds, so the plugin offers a *live* tick: the
+The fit takes tens of milliseconds, so the plugin offers a *follow ROI* tick: the
 profile is refitted while the line is dragged, which makes it a tool one can
 aim with.
 
@@ -450,7 +450,7 @@ parameter fewer to estimate, which helps a very small sample.
 
 ### bootstrap
 A few hundred resamples.  Each is a full fit, so 200 resamples of the two
-Gaussians take around ten seconds, and *live* becomes slow with it on.
+Gaussians take around ten seconds, and *follow ROI* becomes slow with it on.
 
 ### bin_nm
 The automatic bin follows the Freedman-Diaconis rule, $2\,\mathrm{IQR}/N^{1/3}$,

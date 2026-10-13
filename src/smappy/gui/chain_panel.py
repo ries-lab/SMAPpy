@@ -154,7 +154,7 @@ class ChainPanel(QWidget):
         on = getattr(self, "_runnable", True)
         panel = self.panel
         for w in (panel.run_button, panel.preview_button, panel.preview_frame,
-                  panel.plot_button, panel.text_button, panel.live, panel.status,
+                  panel.plot_button, panel.text_button, panel.follow_roi, panel.status,
                   panel.output):
             if w is not None:
                 w.setVisible(on)

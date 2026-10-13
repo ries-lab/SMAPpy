@@ -122,7 +122,7 @@ the result is made, where a misspelt key of `data` used to do nothing:
 | `id_regions` | what was measured per region of an id column, added to `Session.id_regions` |
 | `region_tables` | a block's tables per region, kept by a block around it as its region's children |
 | `evaluations` | `(name, plugin path)` of the evaluations the run left, so a later step of a chain reads them without asking |
-| `recipe` | the table change as a `LiveRecipe`, which follows a table a fit is still appending to |
+| `recipe` | the table change as a `ColumnRecipe`, which follows a table a fit is still appending to |
 | `stopped` | the run was stopped and this is what it had: the panel says "stopped" |
 
 The figures of one result share a window, a tab each beyond the first, and a

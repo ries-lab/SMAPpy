@@ -100,8 +100,8 @@ The default profile is the one **along** the line, which is what a line is
 usually drawn for; ``axis="across"`` is the one that measures the width of
 something the line crosses.
 
-The plugin declares `Plugin.live`, so the GUI offers a *live* tick that
-refits while the ROI is dragged: the fit is tens of milliseconds and a
+The plugin declares `Plugin.follow_roi`, so the GUI offers a *follow ROI*
+tick that refits while the ROI is dragged: the fit is tens of milliseconds and a
 measurement one can aim with is a different tool from one that is asked for
 and read afterwards.
 
@@ -1563,10 +1563,10 @@ class LineProfile(Plugin):
                   "n": sum(len(l.profile.values) for l in layers)},
             plot=profile_plot, plots=plots)
 
-    # cheap enough to redo while the line is dragged; see `Plugin.live`.  No
+    # cheap enough to redo while the line is dragged; see `Plugin.follow_roi`.  No
     # preview: `run` changes nothing, so a preview would be the same as Run,
     # and Run draws the figures.
-    live = True
+    follow_roi = True
 
 
 def fit_layers(ctx: Context, settings: LineProfileSettings,

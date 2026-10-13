@@ -46,7 +46,7 @@ from ..mathparse import (CONSTANTS, FUNCTIONS, GROUPED_CHOICES, RECOMPUTE,
                          ExpressionError, evaluate, names_in, recipes, reduces,
                          remember)
 from ..render import LATERAL_FIELDS
-from . import Context, LiveRecipe, Plugin, Result, param, register
+from . import Context, ColumnRecipe, Plugin, Result, param, register
 
 MAX_HISTORY = 20
 
@@ -305,11 +305,11 @@ class MathParser(Plugin):
         shown = values if mask is None else np.asarray(values)[mask]
         where = "" if mask is None else f" (selection of {len(ctx.locs)})"
         recipe = (MathRecipe(field, settings.expression)
-                  if self.live_recipe_for(settings) else None)
+                  if self.column_recipe_for(settings) else None)
         return Result(locs=locs, settings=settings, recipe=recipe,
                       text=f"{describe(field, shown)}{where}{note}")
 
-    def live_recipe_for(self, settings: MathSettings) -> bool:
+    def column_recipe_for(self, settings: MathSettings) -> bool:
         """A field over the whole table, from other columns, and not a
         position: that can follow a live fit (`MathRecipe`).  Over the
         selection it cannot -- which rows a block adds to the selection is a
@@ -324,7 +324,7 @@ class MathParser(Plugin):
             return False
 
 
-class MathRecipe(LiveRecipe):
+class MathRecipe(ColumnRecipe):
     """The expression, evaluated for each block a live fit appends -- and
     over the whole table again when it reduces a column (`reduces`), since
     then every row's value moves with the table."""

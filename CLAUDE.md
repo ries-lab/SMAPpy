@@ -96,7 +96,7 @@ shape, so read the one closest to what you are writing:
 | parts, a C++ backend | `fit.py` (nested settings dataclasses; four fitters, thin subclasses of `_FitPlugin`) |
 | adds a derived column, no output | `math_parser.py` (an expression, kept with the table as a recipe) |
 | removes or flags localizations | `remove_locs.py` (a region, a new table or a filtered flag) |
-| fits a model to what is in a ROI | `line_profile.py` (unbinned likelihood, models compared by AIC; one fit per layer, and `live`) |
+| fits a model to what is in a ROI | `line_profile.py` (unbinned likelihood, models compared by AIC; one fit per layer, and `follow_roi`) |
 | reads the session and reports | `history.py` (the log, with an optional export) |
 | sets up layers and filters from settings | `chain_layers.py` (bounds as rows per layer, `Result.layers`) |
 | scores a fit against a simulation | `ground_truth.py` (the truth redrawn from the recipe, matched per frame) |
@@ -188,11 +188,11 @@ class Thing(Plugin):
   truly), and `changes_locs_for(settings)` refines it where it depends on the
   settings.  While a fit is still appending, `Session.apply` refuses a table
   change and the GUI asks before such a run, offering a new window.  A change
-  that is a column computed from the others can return a `LiveRecipe`
-  instead (`Result.recipe`, with `live_recipe_for`), which follows the
+  that is a column computed from the others can return a `ColumnRecipe`
+  instead (`Result.recipe`, with `column_recipe_for`), which follows the
   live table: `math_parser.py`, `assign_colors.py`.
-* Set `live = True` on a plugin whose work is tens of milliseconds: the GUI
-  grows a *live* tick and measures again while the ROI is dragged (its
+* Set `follow_roi = True` on a plugin whose work is tens of milliseconds: the
+  GUI grows a *follow ROI* tick and measures again while the ROI is dragged (its
   `preview` if it has one, else `run`, never applied), silently (no log line,
   no window, no focus).  It turns a measurement one asks for into one that
   can be aimed.

@@ -37,7 +37,7 @@ from typing import Dict, Optional, Sequence, Tuple
 import numpy as np
 
 from ..locs import Localizations
-from . import Context, FormState, LiveRecipe, Plugin, Result, param, register
+from . import Context, FormState, ColumnRecipe, Plugin, Result, param, register
 
 # candidate column pairs, in the order they are looked for: what the paired
 # fit writes first, then the 1-based spelling a SMAP or hand-made table uses
@@ -633,7 +633,7 @@ def decide(values: Ratios, modes: Modes, settings: "AssignColorSettings") -> Dec
     return Decision(values, channel, probability, sigma, per_colour)
 
 
-class ColourRecipe(LiveRecipe):
+class ColourRecipe(ColumnRecipe):
     """The colours, assigned to each block a live fit appends with the modes
     found when the plugin ran -- not found again per block, which would
     recolour what is already on screen every few seconds.  The finished
@@ -761,7 +761,7 @@ class AssignColors(Plugin):
                       recipe=ColourRecipe(modes, settings),
                       settings=settings)
 
-    def live_recipe_for(self, settings: AssignColorSettings) -> bool:
+    def column_recipe_for(self, settings: AssignColorSettings) -> bool:
         return True               # the modes, then every block (`ColourRecipe`)
 
     def _summary(self, values: Ratios, modes: Modes, channel: np.ndarray,

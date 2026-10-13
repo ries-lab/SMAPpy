@@ -332,7 +332,7 @@ class Session:
         # every table this session replaced, newest last; see `smappy.undo`
         self.undo_stack = undo_stack()
         self._live = False                 # the table is being appended to
-        # what follows the live table: `LiveRecipe`s applied while it grows
+        # what follows the live table: `ColumnRecipe`s applied while it grows
         self._recipes: List = []
         self._listeners: List[Callable[[str], None]] = []
         # set by the GUI: what to write into the file's `gui` group.  A session
@@ -1002,7 +1002,7 @@ class Session:
 
     # ------------------------------------------------------- live recipes
     def _follow(self, recipe, plugin: Plugin, result: Result) -> None:
-        """Apply a `LiveRecipe` to the live table now, and to every block.
+        """Apply a `ColumnRecipe` to the live table now, and to every block.
 
         The table is the one the fit is still appending to, so the columns go
         into it in place -- on the table so far, which has grown since the
@@ -1470,11 +1470,11 @@ class Session:
         localizations is refused with `LiveTableError`, before anything is
         touched -- except the fit's own, ``finishes_live``, which is the
         finished form of the table it has been streaming, and one that
-        carries a `LiveRecipe`, which follows the live table (`_follow`).  Applied, a drift
-        correction replaced the growing table with one that could not take
-        the next block, and the fit's result then replaced it in turn: the
-        view stopped, the correction was lost, and the log kept a line for a
-        correction the table did not have.
+        carries a `ColumnRecipe`, which follows the live table (`_follow`).
+        Applied, a drift correction replaced the growing table with one that
+        could not take the next block, and the fit's result then replaced it
+        in turn: the view stopped, the correction was lost, and the log kept
+        a line for a correction the table did not have.
         """
         recipe = (result.recipe
                   if self._live and not finishes_live and not result.files else None)

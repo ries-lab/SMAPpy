@@ -418,7 +418,7 @@ def test_run_opens_the_figures_and_a_run_nobody_asked_for_does_not():
     assert unattended.plot_button.isEnabled()          # Plot still offers them
 
 
-def test_a_live_plugin_without_a_preview_measures_with_run_and_applies_nothing():
+def test_a_plugin_that_follows_the_roi_without_a_preview_measures_with_run_and_applies_nothing():
     pytest.importorskip("PySide6")
     import time
 
@@ -432,7 +432,7 @@ def test_a_live_plugin_without_a_preview_measures_with_run_and_applies_nothing()
         path = "Test/AimedByRun"
         name = "AimedByRun"
         Settings = None
-        live = True
+        follow_roi = True
 
         def run(self, ctx, settings):
             runs.append(1)
@@ -443,9 +443,9 @@ def test_a_live_plugin_without_a_preview_measures_with_run_and_applies_nothing()
     applied = []
     session.apply = lambda plugin, result: applied.append(result)
     panel = PluginPanel(Aimed, session)
-    assert panel.preview_button is None and panel.live is not None
+    assert panel.preview_button is None and panel.follow_roi is not None
 
-    panel.live.setChecked(True)
+    panel.follow_roi.setChecked(True)
     session.set_roi(Region.line((0, 0), (500, 500), 100.0))
     deadline = time.time() + 20
     while not runs and time.time() < deadline:
@@ -454,10 +454,10 @@ def test_a_live_plugin_without_a_preview_measures_with_run_and_applies_nothing()
     while panel._thread is not None and panel._thread.isRunning():
         app.processEvents()
     app.processEvents()
-    panel.live.setChecked(False)
+    panel.follow_roi.setChecked(False)
 
     assert runs and not applied
-    assert panel.status.text() == "live"
+    assert panel.status.text() == "following ROI"
     assert panel._window is not None
 
 
@@ -494,7 +494,7 @@ def test_a_warning_stays_on_screen_when_progress_follows_it():
     assert panel.status.text() == "done, 1 warning"
 
 
-def test_a_live_plugin_refits_while_the_roi_moves_and_says_nothing_about_it():
+def test_a_plugin_that_follows_the_roi_refits_while_it_moves_and_says_nothing_about_it():
     """Ten times a second: no line in the log, no window taking the focus.
     The figure redrawing where it already is is the whole output."""
     pytest.importorskip("PySide6")
@@ -512,7 +512,7 @@ def test_a_live_plugin_refits_while_the_roi_moves_and_says_nothing_about_it():
         path = "Test/Aimed"
         name = "Aimed"
         Settings = None
-        live = True
+        follow_roi = True
 
         def run(self, ctx, settings):
             return self.preview(ctx, settings)
@@ -526,9 +526,9 @@ def test_a_live_plugin_refits_while_the_roi_moves_and_says_nothing_about_it():
     from smappy.gui.plugin_panel import PluginPanel
     session = Session(table())
     panel = PluginPanel(Aimed, session)
-    assert panel.live is not None                 # the plugin asked for it
+    assert panel.follow_roi is not None                 # the plugin asked for it
 
-    panel.live.setChecked(True)
+    panel.follow_roi.setChecked(True)
     session.set_roi(Region.line((0, 0), (500, 500), 100.0))
     deadline = time.time() + 20
     while not runs and time.time() < deadline:
@@ -538,19 +538,28 @@ def test_a_live_plugin_refits_while_the_roi_moves_and_says_nothing_about_it():
         app.processEvents()
     app.processEvents()
 
-    assert runs, "the live tick never refitted"
-    assert panel.status.text() == "live"
+    assert runs, "the follow ROI tick never refitted"
+    assert panel.status.text() == "following ROI"
     assert panel.output.toPlainText().strip() == ""    # not a word about it
     assert panel._text_window is None                  # even though it is long
     assert panel._window is not None                   # but the figure is there
     assert panel.text_button.isEnabled()               # and the text is offered
 
-    panel.live.setChecked(False)
+    panel.follow_roi.setChecked(False)
     while panel._thread is not None and panel._thread.isRunning():
         app.processEvents()
 
 
-def test_a_plugin_that_is_not_live_gets_no_tick():
+def test_a_plugin_that_still_says_live_is_told_the_new_name():
+    """"live" means a fit still appending; the tick's old name would
+    otherwise be an attribute nothing reads, and the tick gone silently."""
+    with pytest.raises(TypeError, match="follow_roi"):
+        class Old(Plugin):
+            changes_locs = False
+            live = True
+
+
+def test_a_plugin_that_does_not_follow_the_roi_gets_no_tick():
     pytest.importorskip("PySide6")
     from PySide6.QtWidgets import QApplication
 
@@ -566,7 +575,7 @@ def test_a_plugin_that_is_not_live_gets_no_tick():
             return Result(text="done")
 
     from smappy.gui.plugin_panel import PluginPanel
-    assert PluginPanel(Slow, Session(table())).live is None
+    assert PluginPanel(Slow, Session(table())).follow_roi is None
 
 
 def test_a_thin_selection_is_a_warning_that_progress_cannot_overwrite():

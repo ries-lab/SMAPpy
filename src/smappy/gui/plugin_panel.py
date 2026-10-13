@@ -54,8 +54,8 @@ class _Worker(QObject):
         except Exception:                   # a File plugin has no table yet
             n = None
         try:
-            # a live step is a run nobody keeps (`PluginPanel._live_step`)
-            work = getattr(plugin, "run" if self.job == "live" else self.job)
+            # a follow-ROI step is a run nobody keeps (`PluginPanel._follow_step`)
+            work = getattr(plugin, "run" if self.job == "follow" else self.job)
             # into the diagnostic log: what ran, with what, and the traceback
             # if it failed -- the first thing a bug report is asked for
             with running(plugin, self.job, settings, n):
@@ -164,14 +164,14 @@ class PluginPanel(QWidget):
         self.text_button.setToolTip("show what the run reported, in its own window")
         self.text_button.setEnabled(False)
         # a measurement one aims with rather than one asked for afterwards:
-        # the plugin says it is cheap enough (`Plugin.live`) and the tick
+        # the plugin says it is cheap enough (`Plugin.follow_roi`) and the tick
         # re-measures while the ROI is dragged
-        self.live: Optional[QCheckBox] = None
-        if plugin_cls.live:
-            self.live = QCheckBox("live")
-            self.live.setToolTip("redraw while the ROI is moved, without "
-                                 "touching the session")
-            self.live.toggled.connect(self._on_live)
+        self.follow_roi: Optional[QCheckBox] = None
+        if plugin_cls.follow_roi:
+            self.follow_roi = QCheckBox("follow ROI")
+            self.follow_roi.setToolTip("redraw while the ROI is moved, without "
+                                       "touching the session")
+            self.follow_roi.toggled.connect(self._on_follow)
         # the status is where a failure is said, in red (`_on_failed`): it
         # wraps rather than widening the row, since a message may be long
         self.status = QLabel("")
@@ -187,8 +187,8 @@ class PluginPanel(QWidget):
         self._details_window = None
         buttons.addWidget(self.plot_button)
         buttons.addWidget(self.text_button)
-        if self.live is not None:
-            buttons.addWidget(self.live)
+        if self.follow_roi is not None:
+            buttons.addWidget(self.follow_roi)
         buttons.addWidget(self.status, 1)
         buttons.addWidget(self.details_button)
         # Five controls at the style's minimum button width (80 px in Fusion)
@@ -226,15 +226,15 @@ class PluginPanel(QWidget):
         # puts in the bool `raise_window` and the window stays behind
         self.plot_button.clicked.connect(lambda: self.plot())
         self.text_button.clicked.connect(self.show_text)
-        self._live_running = False
+        self._following = False
         # this panel's run started the session's live table (the "start" it
         # streamed): its result is that table's finished form, the one
         # table change `Session.apply` takes while a fit is appending
         self._owns_live = False
         self._show_figures = True
         self._warnings = 0
-        self._live_timer = QTimer(self, singleShot=True, interval=120)
-        self._live_timer.timeout.connect(self._live_step)
+        self._follow_timer = QTimer(self, singleShot=True, interval=120)
+        self._follow_timer.timeout.connect(self._follow_step)
         self.form.field_changed.connect(self._react)
         self.progressed.connect(self._on_progress)
         self.streamed.connect(self._on_stream)
@@ -254,36 +254,36 @@ class PluginPanel(QWidget):
             self._describe()
         if what in ("locs", "results"):
             self._take_saved()
-        elif what in ("roi", "roi-edited") and self.live is not None \
-                and self.live.isChecked():
+        elif what in ("roi", "roi-edited") and self.follow_roi is not None \
+                and self.follow_roi.isChecked():
             # not straight away: a drag is tens of events a second and a
             # refit is tens of milliseconds, so the timer coalesces them and
             # the last position always wins
-            self._live_timer.start()
+            self._follow_timer.start()
 
-    def _on_live(self, on: bool) -> None:
+    def _on_follow(self, on: bool) -> None:
         if on:
-            self._live_timer.start()
+            self._follow_timer.start()
 
-    def _live_step(self) -> None:
-        """One live refit, skipped while another is still running.
+    def _follow_step(self) -> None:
+        """One follow-ROI refit, skipped while another is still running.
 
         Skipped rather than queued: the point is to follow the ROI, and the
         next drag event will ask again in a few tens of milliseconds.
         """
-        if self.live is None or not self.live.isChecked():
+        if self.follow_roi is None or not self.follow_roi.isChecked():
             return
         if self._thread is not None and self._thread.isRunning():
-            self._live_timer.start()          # try again once it is free
+            self._follow_timer.start()          # try again once it is free
             return
-        self._live_running = True
+        self._following = True
         # its preview where it has one; otherwise the run itself, which is
         # then looked at and not applied -- a measurement that only draws
         # needs no Preview button to be aimed
         if self.plugin.has_preview():
             self.preview()
         else:
-            self._start("live", "measuring...")
+            self._start("follow", "measuring...")
 
     def _take_saved(self) -> None:
         """Offer the figure of a run that is over: this file carries its result.
@@ -380,8 +380,8 @@ class PluginPanel(QWidget):
 
     def _on_stream(self, event: str, payload) -> None:
         if event == "warning":
-            if self._live_running:
-                return            # a live step says nothing (`_on_progress`)
+            if self._following:
+                return            # a follow-ROI step says nothing (`_on_progress`)
             # a line of its own that progress does not overwrite: the next
             # progress line goes below it
             self._warnings += 1
@@ -457,7 +457,7 @@ class PluginPanel(QWidget):
             return False
         if (job == "run" and self.session.live and not self._owns_live
                 and self.plugin.changes_locs_for(settings)
-                and not self.plugin.live_recipe_for(settings)):
+                and not self.plugin.column_recipe_for(settings)):
             # (a recipe -- an expression, a colour assignment -- follows the
             # live table instead: `Session._follow`)
             # known before the run: say so now, not after minutes of work
@@ -498,7 +498,7 @@ class PluginPanel(QWidget):
         for button in self._buttons():
             button.setEnabled(False)
         if stop is not None:
-            # a preview and a live step are short and thrown away: only a run
+            # a preview and a follow-ROI step are short and thrown away: only a run
             # is worth stopping
             self._stop = stop
             self.run_button.setText("Stop")
@@ -660,11 +660,11 @@ class PluginPanel(QWidget):
         """Progress replaces the last line while it is a progress line, so a
         long fit does not scroll its own summary away.
 
-        A live step reports nothing: it happens ten times a second and would
+        A follow-ROI step reports nothing: it happens ten times a second and would
         fill the box with the same line while saying less than the figure it
         is redrawing.
         """
-        if self._live_running:
+        if self._following:
             return
         cursor = self.output.textCursor()
         if self._progress_lines:
@@ -695,14 +695,14 @@ class PluginPanel(QWidget):
         return stop is not None and stop.is_set()
 
     def _on_done(self, result: Result) -> None:
-        live, self._live_running = self._live_running, False
+        following, self._following = self._following, False
         asked = self._release_buttons()
         stopped = result.stopped
         self.result = result
         # a preview is looked at, never applied: it exists so that the session
-        # is not changed before the settings are right; nor is a live step
+        # is not changed before the settings are right; nor is a follow-ROI step
         refused = None
-        if self._job not in ("preview", "live"):
+        if self._job not in ("preview", "follow"):
             owns, self._owns_live = self._owns_live, False
             try:
                 self.session.apply(self.plugin, result, finishes_live=owns)
@@ -713,10 +713,10 @@ class PluginPanel(QWidget):
                 refused = str(e)
         else:
             self.session.show_preview(self.plugin, result)
-        # A live step happens ten times a second while the ROI is dragged, so
+        # A follow-ROI step happens ten times a second while the ROI is dragged, so
         # it writes no line, opens no window and takes no focus: the figure
         # redrawing where it already is *is* the output.
-        if not live:
+        if not following:
             self.output.appendPlainText(result.text)
             if asked and not stopped:
                 self.output.appendPlainText("(it finished before it could stop)")
@@ -725,14 +725,15 @@ class PluginPanel(QWidget):
             self.output.appendPlainText(refused + " (its figures are shown)")
             self.status.setText("not applied: the fit is still running")
             self.status.setStyleSheet(WARNING_STYLE)
-        elif self._warnings and not live:
+        elif self._warnings and not following:
             self.status.setText(f"{'stopped' if stopped else 'done'}, "
                                 f"{self._warnings} warning"
                                 f"{'s' if self._warnings > 1 else ''}")
         else:
-            self.status.setText("live" if live else "stopped" if stopped else "done")
+            self.status.setText("following ROI" if following
+                                else "stopped" if stopped else "done")
         self.text_button.setEnabled(bool(result.text))
-        if not live and self.plugin.text_window and result.text:
+        if not following and self.plugin.text_window and result.text:
             self.show_text()          # a log: not something to scroll through
                                       # a four-line slot (`Plugin.text_window`)
         # a run may have added to a list the form offers -- the expressions
@@ -744,14 +745,14 @@ class PluginPanel(QWidget):
             "show the plugin's result figure (the drift curves, say)")
         # The figures are what most runs are for: a measurement is read off
         # them, so the window opens without a second click on Plot.
-        if result.figures() and (live or self._show_figures):
-            self.plot(raise_window=not live)
+        if result.figures() and (following or self._show_figures):
+            self.plot(raise_window=not following)
         self.ended.emit("done", result)
 
     def _on_failed(self, message: str, text: str) -> None:
         """``message`` what the error says, ``text`` its traceback: the one
         in red beside Run, the other behind *details…* (and in the log)."""
-        live, self._live_running = self._live_running, False
+        following, self._following = self._following, False
         if self._owns_live:
             # the fit that was streaming failed: what it streamed stays, as
             # an ordinary table (`Session.end_live`)
@@ -760,11 +761,11 @@ class PluginPanel(QWidget):
         self._progress_lines = 0
         print(text)
         self._release_buttons()
-        if live:
+        if following:
             # the ROI is being dragged and has passed over a position with too
             # few localizations in it, which is not a failure to report: the
             # next position will ask again
-            self.status.setText("live: " + message[:60])
+            self.status.setText("follow ROI: " + message[:60])
             self.ended.emit("failed", text)
             return
         self.output.appendPlainText(f"failed: {message}")
@@ -788,7 +789,7 @@ class PluginPanel(QWidget):
     def _on_stopped(self, text: str) -> None:
         """A run that stopped with nothing worth keeping (`Stopped`): the
         session is as it was, and the plugin says why."""
-        self._live_running = False
+        self._following = False
         if self._owns_live:
             self._owns_live = False
             self.session.end_live()
@@ -813,7 +814,7 @@ class PluginPanel(QWidget):
 
         Only the tab being looked at is drawn, here and on every later run,
         which is what keeps a plugin with six figures as quick to plot as one
-        with a single figure.  ``raise_window`` is off for a live step: taking
+        with a single figure.  ``raise_window`` is off for a follow-ROI step: taking
         the focus ten times a second would make the ROI impossible to drag.
         """
         if self.result is None:
