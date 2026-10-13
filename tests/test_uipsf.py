@@ -120,8 +120,11 @@ def test_an_in_situ_model_is_turned_over_and_zeroed_at_the_focal_plane(tmp_path)
 def test_a_split_frame_goes_back_on_the_chip(layout, main):
     shape, origin = (64, 80), (300, 120)
     split = prepare.make_split(shape, {"layout": layout, "main_channel": main,
-                                       "split_position": 34 if "up" in layout else 38},
+                                       "split_position": 120 + 34 if "up" in layout
+                                       else 300 + 38},     # on the chip
                                origin=origin)
+    assert split.split_position == (34 if "up" in layout else 38)
+    assert split.geometry()["split_position"] == (154 if "up" in layout else 338)
     frame = np.zeros(shape)
     marks = {(5, 7): 1.0, (50, 70): 2.0, (40, 3): 3.0, (20, 60): 4.0}
     for (y, x), value in marks.items():

@@ -27,8 +27,12 @@ rather than 20, a 2 px rather than 1 px RANSAC radius, a 0.15 px rather than
 calibration does not read -- the second matching round, its adaptation, the
 polynomial model and the cap on pairs -- are left off the window's form.
 
-The split is the first zero-based pixel index in the second half. A 512-row
-image defaults to 256: rows 0–255 and 256–511. Unequal half sizes are supported.
+The split is the first zero-based pixel index in the second half, on the
+camera chip -- the coordinates the fitter and a movie registration read it in.
+A bead image taken with a camera ROI is cut where that chip position falls in
+its own pixels; without an ROI the chip and the image coincide.  Auto is the
+middle of the first bead image: a 512-row image at the chip's corner defaults
+to 256, rows 0–255 and 256–511. Unequal half sizes are supported.
 Coordinates in saved transformations are `(x,y)` pixel centers; image arrays use
 `(z,y,x)`. The transformation maps native secondary coordinates to native main
 coordinates and includes the reflection and split displacement.

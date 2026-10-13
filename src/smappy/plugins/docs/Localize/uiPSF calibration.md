@@ -1,5 +1,5 @@
 ---
-version: "1"
+version: "2"
 covers: [smappy.uipsf.prepare.Split, smappy.uipsf.prepare.channel_shift, smappy.uipsf.prepare.subtract_background, smappy.uipsf.prepare.read_beads, smappy.uipsf.prepare.read_movie, smappy.uipsf.uipsf_parameters, smappy.uipsf.runner.run, smappy.uipsf.convert.single_calibration, smappy.uipsf.convert.dual_calibration, smappy.uipsf.convert.channel_transformation, smappy.uipsf.microscopes.Microscope, smappy.uipsf.plots.figures, smappy.uipsf.plots.data_and_model, smappy.uipsf.plots.localization_bias, smappy.uipsf.plots.pupil_images, smappy.uipsf.plots.zernike_phases, smappy.uipsf.plots.transformation_residuals]
 ---
 
@@ -139,7 +139,11 @@ frame = stacks[0].max(axis=0).astype(float)
 
 **2. Splitting a two-channel camera.**  The frame is cut at the split into
 two halves of equal size, the main channel first, and a mirrored half is
-flipped back, so that uiPSF sees two images of the same molecules.  Exactly
+flipped back, so that uiPSF sees two images of the same molecules.  The
+profile's split position is a pixel on the camera chip, as the bead
+calibration and the two-colour fitters read it; a frame taken with a camera
+ROI is cut where that pixel falls in it; left empty, the split is the
+frame's middle.  Exactly
 how they were cut is recorded, because the transformation uiPSF learns
 between the halves has to be put back into camera pixels afterwards.  For beads,
 the shift between the halves is measured first, from the cross-correlation

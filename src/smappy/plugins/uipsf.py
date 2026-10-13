@@ -185,7 +185,7 @@ class UiPSFCalibration(Plugin):
                    "for Spline 3D and Spline 3D 2C")
     Settings = UiPSFSettings
     changes_locs = False
-    version = "1"
+    version = "2"
 
     def run(self, ctx: Context, settings: UiPSFSettings) -> Result:
         from ..uipsf import convert, learn, microscopes, prepare, uipsf_parameters

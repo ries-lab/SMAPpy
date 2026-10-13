@@ -1619,6 +1619,15 @@ That matters because an initial shift, a magnification guess and a wrongly
 assumed image centre are between them the usual cause of a registration that
 fails without saying so.
 
+**The split is a position on the chip, everywhere.**  The fitter
+(`dualfit.which_channel`, the per-half detection threshold), a movie
+registration, the bead calibration and uiPSF's profile all give and read
+`split_position` in camera-chip pixels.  The bead calibration once stored the
+index in the bead image's own pixels, which agreed only while the ROI began at
+the chip's corner along the split: a right-left splitter recorded with its ROI
+at x = 91 recorded 220, and the fitter split the localizations at chip
+x = 220 instead of 311.  A bead stack is now cut where the chip position falls in it.
+
 **One geometry for beads and movies.**  The bead calibration's split used to
 be settings of its own, with a fixed `up-down mirrored` default that a
 left-right splitter failed on.  It is now the movie registration's

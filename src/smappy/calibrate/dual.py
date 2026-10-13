@@ -200,11 +200,10 @@ def bead_registration() -> RegisterSettings:
 # tens of pairs that need no cap.  The bead window leaves these off its form.
 BEAD_UNUSED = ('model', 'fine_tolerance_px', 'adapt_fine_tolerance', 'max_pairs')
 # ...and where it reads a field differently from a movie registration, what
-# the bead window's tooltip says instead.  The split position in particular:
-# a bead calibration cuts each stack in that stack's own pixels.
+# the bead window's tooltip says instead.
 BEAD_HELP = {
-    'split_position': "the first pixel of the second half, in the bead "
-                      "images' own pixels; auto: the middle of the image",
+    'split_position': "the first pixel of the second half, on the chip; "
+                      "auto: the middle of the first bead image",
     'coarse_tolerance_px': "how far a bead may lie from where the offset the "
                            "beads voted for puts its partner",
     'reprojection_threshold_px': "the first round's robust (RANSAC) inlier "
@@ -688,9 +687,7 @@ def collect_dual_beads(inputs, settings=None, progress=None):
     g = s.registration
     shape = stacks[0].images.shape[-2:]
     axis = 1 if 'right-left' in g.layout else 0  # y,x array axes
-    split = g.split_position if g.split_position is not None else shape[axis]//2
-    if not 0 < split < shape[axis]:
-        raise ValueError('split must lie inside the image')
+    coord_axis = 1-axis                           # the same axis, as x,y
     if any(st.images.shape[-2:] != shape for st in stacks):
         raise ValueError('bead acquisitions must share split-frame image dimensions')
     full_chip = all(st.roi is not None for st in stacks)
@@ -699,14 +696,20 @@ def collect_dual_beads(inputs, settings=None, progress=None):
         known = {st.roi for st in stacks if st.roi is not None}
         if len(known) > 1:
             raise ValueError('cannot pool differing known ROIs with missing ROI metadata')
+    origins = [np.array(st.roi[:2] if full_chip else (0, 0), float) for st in stacks]
+    # The split is a position on the chip, as the fitter and a movie
+    # registration read it (`dualfit.which_channel`); each stack is cut where
+    # that position falls in its own pixels.
+    split = (int(g.split_position) if g.split_position is not None
+             else int(origins[0][coord_axis])+shape[axis]//2)
+    cuts = [split-int(o[coord_axis]) for o in origins]
+    if not all(0 < cut < shape[axis] for cut in cuts):
+        raise ValueError(f'the split at {split} px (chip) lies outside a bead image')
     first_main = g.main_channel in ('left', 'upper')
-    slices = [slice(0, split), slice(split, shape[axis])]
     order = [0, 1] if first_main else [1, 0]
     batches, projections, sources = [[], []], [], []
-    origins = []
-    for st in stacks:
-        origin = np.array(st.roi[:2] if full_chip else (0, 0), float)
-        origins.append(origin)
+    for st, cut in zip(stacks, cuts):
+        slices = [slice(0, cut), slice(cut, shape[axis])]
         projections.append(np.max(st.images, axis=0))
         sources.append({'path': st.source, 'axes': st.axes, 'roi': st.roi,
                         'shape': list(st.images.shape), 'z_nm': st.z_nm.tolist()})
@@ -735,18 +738,17 @@ def collect_dual_beads(inputs, settings=None, progress=None):
                 rec['brightness_reason'] = 'unreliable lateral fit'
                 xy = np.array([6., 6.])
             local = np.array([rec['x_px'], rec['y_px']], float)
-            local[1-axis] += split*half
+            local[coord_axis] += cuts[rec['stack']]*half
             rec['full_image_xy'] = local.tolist()
             positions.append(local+origins[rec['stack']]+xy-6)
         points.append(np.asarray(positions))
     # Translation votes are collected within acquisitions after the declared reflection.
     approx = points[1].copy()
-    coord_axis = 1-axis
     if 'mirrored' in g.layout:
-        for i, rec in enumerate(channels[1].records):
-            approx[i, coord_axis] = 2*(origins[rec['stack']][coord_axis]+split)-1-approx[i, coord_axis]
+        approx[:, coord_axis] = 2*split-1-approx[:, coord_axis]
     else:
-        approx[:, coord_axis] += split*(1 if not first_main else -1)
+        cut = np.array([cuts[rec['stack']] for rec in channels[1].records], float)
+        approx[:, coord_axis] += cut*(1 if not first_main else -1)
     diffs = []
     for si in range(len(stacks)):
         ia = [i for i, r in enumerate(channels[0].records) if r['stack'] == si and r['brightness_accepted']]

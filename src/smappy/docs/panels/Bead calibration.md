@@ -554,8 +554,11 @@ the layout: *left*/*right* for right-left, *upper*/*lower* for up-down;
 auto is the left or the upper half.
 
 ### split position
-The first pixel of the second half, in the bead images' own pixels; auto is
-the middle of the image.
+The first pixel of the second half, on the camera chip (the bead image's
+camera ROI corner added), as the two-colour fitters read it; auto is the
+middle of the first bead image.  Each acquisition is cut where that chip
+position falls in it, so acquisitions taken with different ROIs share one
+seam.
 
 ### coarse matching
 How far a bead may lie from where the most common offset between the halves

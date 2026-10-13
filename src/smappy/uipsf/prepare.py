@@ -33,7 +33,9 @@ class Split:
     because uiPSF stacks the two channels into one array; the secondary is
     flipped along that axis when the layout is mirrored.  `to_chip` undoes
     exactly this, which is what turns uiPSF's channel transformation back
-    into chip pixels.
+    into chip pixels.  ``split_position`` is in the frame's own pixels here;
+    a profile and the geometry written with a calibration give it on the
+    chip, as the fitter reads it.
     """
     layout: str
     main_channel: str
@@ -85,7 +87,7 @@ class Split:
         """The split as `smappy.calibrate.dual` records it with a calibration."""
         coord_axis = 1 - self.axis
         return {"layout": self.layout, "main_channel": self.main_channel,
-                "split_position": int(self.split_position),
+                "split_position": int(self.split_position + self.origin[coord_axis]),
                 "image_shape": list(self.image_shape),
                 "coordinate_system": "camera-chip" if any(
                     s.get("roi") is not None for s in sources) else "roi-local",
@@ -95,7 +97,8 @@ class Split:
 
 
 def make_split(shape, dual: dict, origin=(0, 0)) -> Split:
-    """The `Split` of a frame of ``shape`` for a profile's ``dual`` section."""
+    """The `Split` of a frame of ``shape`` for a profile's ``dual`` section,
+    whose ``split_position`` is on the chip; the frame begins at ``origin``."""
     from ..calibrate.dual import LAYOUTS, RegisterSettings
     settings = RegisterSettings(layout=dual.get("layout", "up-down mirrored"),
                                 main_channel=dual.get("main_channel", "upper"),
@@ -108,9 +111,12 @@ def make_split(shape, dual: dict, origin=(0, 0)) -> Split:
         settings.main_channel = "left" if "right-left" in settings.layout else "upper"
     shape = tuple(int(n) for n in shape[-2:])
     axis = 1 if "right-left" in settings.layout else 0
-    split = settings.split_position or shape[axis] // 2
+    start = int(origin[1 - axis])                # the frame's first pixel on that axis
+    split = (settings.split_position - start if settings.split_position is not None
+             else shape[axis] // 2)
     if not 0 < split < shape[axis]:
-        raise ValueError(f"the split at {split} px is outside the {shape[axis]} px frame")
+        raise ValueError(f"the split at {split + start} px (chip) is outside the "
+                         f"{shape[axis]} px frame starting at {start}")
     return Split(settings.layout, settings.main_channel, int(split), shape,
                  min(split, shape[axis] - split), tuple(origin))
 
