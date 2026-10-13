@@ -302,8 +302,11 @@ It changes both the conversion and the noise model; see *In detail*.
 
 ### detection.cutoff
 For the dynamic cutoff, in units of the noise spread (1.5 to 2 is usual);
-for the absolute one, photons in the filtered image.  Use **Preview** to see
-what it finds.
+for the absolute one, photons in the filtered image.  Switching *cutoff*
+puts that mode's default here (1.7, or 20 photons), since the number means
+something else in the other mode.  Use **Preview** to see what it finds.  In
+a script, `smappy.fit(..., cutoff=..., cutoff_mode="absolute")` and
+`smappy-fit --cutoff-mode absolute` say the same.
 
 ### model.elliptical
 Seven parameters instead of five.  Useful for looking at astigmatism, not for

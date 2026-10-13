@@ -226,3 +226,22 @@ def test_a_stack_with_no_pixel_size_is_fitted_on_an_assumed_one(stack, tmp_path)
     saved = load_localizations(tmp_path / "out.hdf5")
     assert saved.metadata.get("pixelsize_assumed") is True
     assert "x_pix" in saved and "x_nm" in saved
+
+
+def test_switching_the_cutoff_mode_puts_that_modes_default_in_the_value():
+    """1.7 noise widths kept as 1.7 photons would find every pixel: the
+    number follows the mode it is read in, in a two-channel fitter too."""
+    from dataclasses import replace
+
+    from smappy.plugins.fit import DualGaussianFit, DualGaussianFitSettings
+
+    settings = GaussianFitSettings(detection=DetectionSettings(cutoff_mode="absolute"))
+    assert GaussianFit().react("detection.cutoff_mode", settings) == \
+        {"detection.cutoff": 20.0}
+    settings = replace(settings, detection=DetectionSettings(cutoff_mode="dynamic",
+                                                             cutoff=35.0))
+    assert GaussianFit().react("detection.cutoff_mode", settings) == \
+        {"detection.cutoff": 1.7}
+    dual = DualGaussianFitSettings(detection=DetectionSettings(cutoff_mode="absolute"))
+    assert DualGaussianFit().react("detection.cutoff_mode", dual) == \
+        {"detection.cutoff": 20.0}

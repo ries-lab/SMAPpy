@@ -142,6 +142,11 @@ class DetectionSettings:
     cutoff: float = param(1.7, label="cutoff value", min=0,
                           help="lower finds dimmer molecules, and more noise")
 
+    # what *cutoff value* becomes when *cutoff* is switched (`_FitPlugin.react`):
+    # the two read the number on different scales, so 1.7 noise widths kept
+    # as 1.7 photons would find every pixel
+    CUTOFF_DEFAULTS = {"dynamic": 1.7, "absolute": 20.0}
+
     def finder(self, n_threads: int = 0) -> PeakFinder:
         image_filter = (DoGFilter(self.sigma) if self.filter == "dog"
                         else GaussFilter(self.sigma))
@@ -553,6 +558,14 @@ class _FitPlugin(Plugin):
         return hints
 
     def react(self, changed: str, settings) -> Optional[Dict[str, Any]]:
+        if changed.endswith("cutoff_mode"):
+            # the number is on the other mode's scale: its default instead
+            prefix = changed[:-len("cutoff_mode")]
+            part = settings
+            for name in filter(None, prefix.split(".")):
+                part = getattr(part, name)
+            value = DetectionSettings.CUTOFF_DEFAULTS.get(part.cutoff_mode)
+            return None if value is None else {prefix + "cutoff": value}
         if changed == "source.path" and settings.source.path:
             updates: Dict[str, Any] = {}
             # the output follows the source, but only while it is ours: a path

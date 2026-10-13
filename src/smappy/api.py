@@ -26,7 +26,8 @@ CameraLike = Union[CameraMetadata, dict, str, Path, None]
 
 def fit(data, out=None, camera: CameraLike = None, calibration=None, *,
         sigma: float = 1.2,
-        cutoff: float = 1.7, filter: str = "dog", roisize: int = 13,
+        cutoff: float = 1.7, cutoff_mode: Optional[str] = None,
+        filter: str = "dog", roisize: int = 13,
         max_fit_distance: Optional[float] = None, threads: int = 0,
         chunk: int = 200, frames: Optional[int] = None,
         settings: Optional[FitSettings] = None, progress=None, on_block=None,
@@ -61,6 +62,12 @@ def fit(data, out=None, camera: CameraLike = None, calibration=None, *,
     only the running counts are wanted, and those include the *candidate* count,
     which is available before anything is fitted.
 
+    ``cutoff`` is read as ``cutoff_mode`` says: "dynamic" (the default), a
+    multiple of each frame's noise in the filtered image, or "absolute", a
+    fixed value in photons on it -- the two choices of the fitters' form.
+    Without a mode a value of 20 or more is still read as photons, as it
+    used to be, with a `DeprecationWarning`: pass the mode.
+
     ``raw_frames`` camera frames are kept in ``out`` beside the table, in
     photons, after the average of every frame fitted (`smappy.rawframes`);
     0 keeps none, and without ``out`` there is nowhere to keep them.
@@ -75,7 +82,7 @@ def fit(data, out=None, camera: CameraLike = None, calibration=None, *,
     cam = _camera(camera, source)
     model = _model(calibration, sigma, cam)
     finder = PeakFinder(DoGFilter(sigma) if filter == "dog" else GaussFilter(sigma),
-                        DynamicCutoff(cutoff) if cutoff < 20 else AbsoluteCutoff(cutoff))
+                        peak_cutoff(cutoff, cutoff_mode, stacklevel=2))
     settings = settings or FitSettings(roisize=roisize,
                                        max_fit_distance=max_fit_distance,
                                        n_threads=threads)
@@ -117,6 +124,37 @@ def fit(data, out=None, camera: CameraLike = None, calibration=None, *,
     collected.metadata["stats"] = dict(engine.stats)
     collected.metadata.update(extra)
     return collected
+
+
+# the value at and above which a cutoff with no mode used to be read as photons
+OLD_ABSOLUTE_FROM = 20.0
+
+
+def peak_cutoff(cutoff: float, mode: Optional[str] = None, stacklevel: int = 1):
+    """The finder's cutoff: ``cutoff`` read as ``mode`` says.
+
+    Before there was a mode the number decided it -- below 20 a multiple of
+    the noise, from 20 up photons -- so 19.9 and 20 meant different things.
+    A number now means one thing; the old reading is kept for a call that
+    names no mode, and says so.
+    """
+    if mode is None:
+        if cutoff >= OLD_ABSOLUTE_FROM:
+            import warnings
+            warnings.warn(
+                f"cutoff={cutoff:g} with no cutoff_mode is read as photons "
+                "(absolute), as before; pass cutoff_mode='absolute' to keep that, "
+                "or 'dynamic' for a multiple of the noise. Without a mode, a "
+                "cutoff will be dynamic whatever its value.",
+                DeprecationWarning, stacklevel=stacklevel + 1)
+            mode = "absolute"
+        else:
+            mode = "dynamic"
+    if mode == "dynamic":
+        return DynamicCutoff(cutoff)
+    if mode == "absolute":
+        return AbsoluteCutoff(cutoff)
+    raise ValueError(f"cutoff_mode is 'dynamic' or 'absolute', not {mode!r}")
 
 
 def _acquisition(source) -> dict:
