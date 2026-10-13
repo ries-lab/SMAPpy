@@ -114,9 +114,9 @@ def test_an_roi_per_cluster_outlines_it_and_replace_makes_them_again():
         inside = project.region(roi).mask(xy[:, 0], xy[:, 1])
         k = roi.origin["cluster"]
         assert inside[truth == k].all()                 # the hull holds its cluster
-    session.run(ColumnToROIs(), ColumnToROIs.Settings(min_size=1, replace=True))
-    assert len(project.rois) == 3
     session.run(ColumnToROIs(), ColumnToROIs.Settings(min_size=1))
+    assert len(project.rois) == 3                       # replace: the default
+    session.run(ColumnToROIs(), ColumnToROIs.Settings(min_size=1, replace=False))
     assert len(project.rois) == 6                       # without replace, beside them
 
 

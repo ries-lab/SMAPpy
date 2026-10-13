@@ -70,8 +70,8 @@ taking in the localizations around a smaller one.
 
 ### replace
 Removes only the ROIs this plugin made of the same column, so ROIs drawn by
-hand or found by a finder stay.  Without it, running again adds a second set
-over the first.
+hand or found by a finder stay.  Off, running again adds a second set over
+the first.
 
 ## Output
 

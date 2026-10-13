@@ -279,12 +279,12 @@ def test_a_replacing_run_is_one_undo_step_that_brings_the_old_rois_back_with_the
     assert len(project.results()) == 4
 
     # again without replace: nothing new, and no step for it
-    assert finder.run(session.context(), settings).rois == []
+    import dataclasses
+    assert finder.run(session.context(),
+                      dataclasses.replace(settings, replace=False)).rois == []
     assert project.history.undo_label == "Density Peaks: 3 ROIs"
 
-    import dataclasses
-    again = finder.run(session.context(),
-                       dataclasses.replace(settings, replace=True)).rois
+    again = finder.run(session.context(), settings).rois     # replace: the default
     assert len(again) == 3 and drawn.id in project.rois
     assert not {r.id for r in first} & set(project.rois)
     assert project.undo() == "Density Peaks: 3 ROIs for 3"

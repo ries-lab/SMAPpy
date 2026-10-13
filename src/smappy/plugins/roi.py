@@ -36,12 +36,14 @@ MAX_FINDER_PIXELS = 16_000_000
 def replace_param(what: str = "ROIs"):
     """The *replace* setting every segmenter's settings end with.
 
-    A chain or a batch has no Preview, and running one again on a file it
-    has segmented before would otherwise find nothing: every candidate is
-    within the separation of an ROI the last run made.  So a segmenter's
-    settings carry this field, and `SegmenterPlugin.replaced` reads it.
+    Running a segmenter again on a file it has segmented before would
+    otherwise find nothing: every candidate is within the separation of an
+    ROI the last run made, which is how a second NPC run reported "0 pores".
+    So it is on by default -- the ROI undo brings the earlier ones back --
+    and off only to add a second pass to the first.  `SegmenterPlugin.replaced`
+    reads it.
     """
-    return param(False, label=f"replace earlier {what}",
+    return param(True, label=f"replace earlier {what}",
                  help="remove the ROIs this segmenter made on the file "
                       "before finding them again")
 

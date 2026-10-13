@@ -197,12 +197,12 @@ reports it) and set it well below that, and well above what a patch of
 background of the same size holds.
 
 ### replace
-For a chain or a batch, which has no *Preview*: run again on a file it has
-segmented before, it would otherwise find nothing, every peak lying within
-*separation* of an ROI the last run made.  On, the ROIs an earlier run of
-Density Peaks made on the file go first (their origin says which); ROIs
-drawn by hand or made by another segmenter stay.  In the GUI, *Preview* and
-the ROI manager's *Undo* usually make it unnecessary.
+On, the ROIs an earlier run of Density Peaks made on the file go first
+(their origin says which); ROIs drawn by hand or made by another segmenter
+stay.  Off, a run on a file segmented before finds nothing, every peak lying
+within *separation* of an ROI the last run made -- useful only to add a
+second pass to the first.  The ROI manager's *Undo* brings replaced ROIs
+back.
 
 ## Output
 

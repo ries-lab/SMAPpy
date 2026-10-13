@@ -246,11 +246,10 @@ On, a second run with other settings gives a fresh answer: the ROIs an
 earlier run of this segmenter made on the file go first (their origin says
 which).  Off, to add the pores of a second region or a second pass to those
 already found -- a candidate near an existing ROI is suppressed.  ROIs drawn
-by hand or made by another segmenter stay either way.  It matters most in a
-chain or a batch, which has no *Preview*: the shipped NPC chain turns it on,
-so that running it again gives a fresh answer instead of none.  A replacing
-run is one step of the ROI manager's *Undo*, which brings the earlier pores
-back.
+by hand or made by another segmenter stay either way.  Off, running again
+with the same settings finds nothing new, so it is on by default.  A
+replacing run is one step of the ROI manager's *Undo*, which brings the
+earlier pores back.
 
 ## Output
 

@@ -428,7 +428,7 @@ def test_the_npc_chain_reads_its_own_counts_without_asking():
     assert corner_settings(session.context(), "NPC Corners").precision_nm == 15.0
 
 
-def test_the_segmenter_replaces_only_its_own_pores_when_asked():
+def test_the_segmenter_replaces_only_its_own_pores_by_default():
     from smappy.session import Session
     session = Session(pores(0.5, seed=3))
     session.show_grouped(0, True)
@@ -437,8 +437,9 @@ def test_the_segmenter_replaces_only_its_own_pores_when_asked():
     drawn = project.add_roi(file_id, (100.0, 100.0))
     segment = plugins.get("Analysis/Regions/Find/NPC")
     first = len(segment()(ctx=session.context()).rois)
-    assert len(segment()(ctx=session.context()).rois) == 0   # all suppressed
-    again = segment()(ctx=session.context(), settings=NPCSegmentSettings(replace=True))
+    kept = NPCSegmentSettings(replace=False)
+    assert len(segment()(ctx=session.context(), settings=kept).rois) == 0  # all suppressed
+    again = segment()(ctx=session.context())
     assert len(again.rois) == first
     assert len(project.rois) == first + 1 and drawn.id in project.rois
 
