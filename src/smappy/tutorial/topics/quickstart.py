@@ -15,7 +15,7 @@ showing -- a file SMAPpy cannot recognise the camera of -- and it is typed in.
 """
 from __future__ import annotations
 
-from .common import (field, open_section, place_beside, section_of, show_tab,
+from .common import (expand, field, open_section, place_beside, section_of, show_tab,
                      tab_button, type_into)
 
 TITLE = "SMAPpy in three minutes"
@@ -112,6 +112,8 @@ def make(d) -> None:
         type_into(panel, f"camera.{name}", value)
     d.settle()
     camera = [field(panel, f"camera.{n}") for n in ("conversion", "offset", "pixelsize_um")]
+    expand(camera[0])               # the camera part starts folded
+    d.settle()
     d.shot("SMAPpy normally reads the camera from the file. This simulated file "
            "says nothing about it, so its numbers are typed in here.",
            spot=[d.union(*camera)], zoom=d.around(camera[1], 760))

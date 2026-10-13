@@ -145,9 +145,14 @@ knowing: what a save leaves out, a simulation that can be fitted now.
 `Plugin.preflight(ctx, settings)` is asked at Run, before the worker starts:
 a string is a yes-or-no, a `PreflightQuestion` offers alternatives
 (`PreflightChoice`, each with the settings it runs with) beside its
-`run_label`.  The dialog's default is the first alternative when there is
-one, otherwise Cancel -- never the run the question is about -- and Escape
-cancels.
+`run_label`.  A choice with a `window` opens that window of the GUI's
+instead of running (the fitters' *Open camera editor* for a camera in no
+database).  The dialog's default is the first alternative that runs when
+there is one, otherwise Cancel -- never the run the question is about --
+and Escape cancels.
+
+`FormState.titles` retitles a part by its dotted name while it is folded:
+the fitters' *camera* says what it resolved to.
 
 ## The table
 

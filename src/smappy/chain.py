@@ -516,9 +516,11 @@ class ChainPlugin(Plugin):
                 continue
             if isinstance(asked, PreflightQuestion) and asked.choices \
                     and not asked.run_label:
+                # a choice that opens a window keeps the step's own settings:
+                # the window is the step's (a fitter's camera editor)
                 choices = [PreflightChoice(
-                    label=c.label, help=c.help,
-                    settings=None if c.settings is None
+                    label=c.label, help=c.help, window=c.window,
+                    settings=c.settings if c.window or c.settings is None
                     else _with_step(settings, key, cls, c.settings))
                     for c in asked.choices]
                 return PreflightQuestion(text=f"{step.title()}: {asked.text}",

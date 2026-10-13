@@ -245,3 +245,68 @@ def test_switching_the_cutoff_mode_puts_that_modes_default_in_the_value():
     dual = DualGaussianFitSettings(detection=DetectionSettings(cutoff_mode="absolute"))
     assert DualGaussianFit().react("detection.cutoff_mode", dual) == \
         {"detection.cutoff": 20.0}
+
+
+# ------------------------------------------------------------ an unknown camera
+
+def test_a_camera_nobody_entered_is_asked_about_at_run_until_its_numbers_are_typed(stack):
+    from smappy.plugins import PreflightQuestion
+
+    bare = GaussianFitSettings(source=SourceSettings(path=str(stack)))
+    question = GaussianFit().preflight(Context(), bare)
+    assert isinstance(question, PreflightQuestion) and not question.run_label
+    assert "not in the camera database" in question.text
+    [choice] = question.choices
+    assert choice.window == "camera editor" and choice.settings is bare
+
+    typed = GaussianFitSettings(source=SourceSettings(path=str(stack)),
+                                camera=CameraSettings(conversion=1.0, offset=100.0,
+                                                      pixelsize_um=0.1))
+    assert GaussianFit().preflight(Context(), typed) is None
+
+
+def test_the_camera_question_opens_the_editor_and_does_not_run(stack, monkeypatch):
+    """Cancel is the default; the editor is the other answer, and neither
+    starts the fit."""
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication
+
+    from smappy.gui.plugin_panel import PluginPanel
+    from smappy.locs import Localizations
+    from smappy.session import Session
+
+    QApplication.instance() or QApplication([])
+    session = Session(Localizations())
+    opened = []
+    session.window_openers["camera editor"] = opened.append
+    panel = PluginPanel(GaussianFit, session)
+    panel.form.set_values({"source.path": str(stack)})
+
+    question = GaussianFit().preflight(Context(), panel.form.value())
+    box, answers = panel.choice_box("t", question)
+    assert box.defaultButton() is box.escapeButton()          # Cancel
+
+    monkeypatch.setattr(PluginPanel, "ask_choice",
+                        lambda self, title, q: q.choices[0])
+    assert panel.start_run() is False
+    assert len(opened) == 1 and opened[0].source.path == str(stack)
+    assert panel._thread is None
+
+
+def test_the_camera_part_is_folded_and_titled_by_what_it_resolves_to(stack):
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication
+
+    from smappy.gui.plugin_panel import PluginPanel
+    from smappy.locs import Localizations
+    from smappy.session import Session
+
+    QApplication.instance() or QApplication([])
+    panel = PluginPanel(GaussianFit, Session(Localizations()))
+    section = panel.form.sections["camera"]
+    assert not section.button.isChecked()
+    panel.form.set_values({"source.path": str(stack), "camera.conversion": 0.5,
+                           "camera.pixelsize_um": 0.108})
+    panel._describe()
+    assert section.title == "camera: auto – 0.5 e-/ADU, 108 nm"
+    assert GaussianFit.specs()["output"].children["show_tags"].info.advanced

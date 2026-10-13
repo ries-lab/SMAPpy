@@ -352,6 +352,8 @@ class PluginPanel(QWidget):
             self.form.set_choices(state.choices)
         if state.active:
             self.form.set_active(state.active)
+        if state.titles:
+            self.form.set_titles(state.titles)
         self._show_notice(state.notice)
 
     def _show_notice(self, notice) -> None:
@@ -587,6 +589,15 @@ class PluginPanel(QWidget):
         chosen = self.ask_choice(title, question)
         if chosen is None:
             return (*self._not_run(), question)
+        if chosen.window:
+            # not a way to run but a way to put things right first: the
+            # window opens and the run waits for the next Run
+            opener = self.session.window_openers.get(chosen.window)
+            if opener is not None:
+                opener(chosen.settings if chosen.settings is not None else settings)
+            self.output.appendPlainText(f"not run: {chosen.label.lower()}")
+            self.status.setText("not run")
+            return False, None, question
         if chosen.settings is not None:
             self.output.appendPlainText(f"chose: {chosen.label}")
             return True, chosen.settings, question
@@ -635,11 +646,13 @@ class PluginPanel(QWidget):
     def choice_box(self, title: str, question):
         """The dialog `ask_choice` shows, and what each of its buttons answers.
 
-        The default -- what Return presses -- is the first alternative when
-        there is one (the cheaper way: COMET's RCC prepass), and otherwise
-        Cancel, never the run that was asked about: the question is put
-        because the run costs more than one would guess, and someone who has
-        just been told so rarely wants it after all.  Escape cancels.
+        The default -- what Return presses -- is the first alternative that
+        runs when there is one (the cheaper way: COMET's RCC prepass), and
+        otherwise Cancel, never the run that was asked about: the question is
+        put because the run costs more than one would guess, and someone who
+        has just been told so rarely wants it after all.  An alternative that
+        opens a window (`PreflightChoice.window`) is never the default.
+        Escape cancels.
         """
         from ..plugins import PreflightChoice
 
@@ -657,7 +670,8 @@ class PluginPanel(QWidget):
             if choice.help:
                 button.setToolTip(choice.help)
             answers[button] = choice
-            first = first or button
+            if not choice.window:
+                first = first or button
         if question.run_label:
             run = box.addButton(question.run_label, QMessageBox.ButtonRole.AcceptRole)
             answers[run] = PreflightChoice(label=question.run_label)

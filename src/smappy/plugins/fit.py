@@ -210,7 +210,7 @@ class OutputSettings:
     raw_frames: int = param(50, label="raw frames", min=0, advanced=True,
                             help="camera frames kept with the table, in "
                                  "photons, after their average; 0: none")
-    show_tags: str = param("PIZStage", label="show image tags",
+    show_tags: str = param("PIZStage", label="show image tags", advanced=True,
                            help="image tags drawn when the fit is done, "
                                 "names or parts of names; empty: none "
                                 "(Analysis/Process/Image Tags)")
@@ -482,6 +482,10 @@ class _FitPlugin(Plugin):
             state.notice = self._notice(settings)
         except Exception:
             pass
+        try:
+            state.titles = {"camera": self._camera_title(settings)}
+        except Exception:
+            pass
         if getattr(settings, "finish", None) is not None:
             from ..drift import merge_values
             dx, dt = merge_values(ctx.session if ctx is not None else None)
@@ -534,6 +538,66 @@ class _FitPlugin(Plugin):
                      else "; the values below are used.")
             return Notice(text, "Add readout mode...", "camera editor")
         return None
+
+    def _camera_title(self, settings) -> str:
+        """The camera part's title while it is folded: which camera, and the
+        numbers that turn counts into photons and pixels into nm."""
+        resolved = self.resolution(settings)
+        camera = (resolved.camera_metadata() if resolved is not None
+                  else settings.camera.resolve(None, require=False))
+        bits = []
+        name = ((resolved.camera_name or resolved.values.get("camera_name"))
+                if resolved is not None else "")
+        if name:
+            bits.append(str(name))
+        if camera.conversion is not None:
+            bits.append(f"{camera.conversion:.3g} e-/ADU")
+        sizes = camera.pixelsize_um_xy
+        if sizes is not None:
+            bits.append(f"{1000 * sizes[0]:.4g} nm")
+        head = f"camera: {settings.camera.camera or 'auto'}"
+        return head + (" \u2013 " + ", ".join(bits) if bits else "")
+
+    def unknown_camera(self, settings) -> Optional[str]:
+        """The question at Run for a camera that is in no database and
+        whose numbers nobody typed, or None.
+
+        The notice (`_notice`) says it while the file is chosen; this asks
+        once more at Run, because a fit on a guessed gain and offset gives
+        photon counts and precisions that are wrong by the factor of the
+        guess, and nothing in the table says so afterwards.  Only while a
+        value the fit needs comes from nowhere -- not from the database, the
+        file or the form: once typed, or once the camera is added, no
+        question.  Never for a simulation, which knows its camera.
+        """
+        from ..io.tiff import SIMULATED
+        if settings.camera.camera:
+            return None
+        resolved = self.resolution(settings)
+        if resolved is None or resolved.camera is not None:
+            return None
+        origin = (resolved.sources or {}).get("camera_name")
+        if origin is not None and (origin.kind, origin.detail) == SIMULATED:
+            return None
+        if not resolved.missing:
+            return None
+        device = resolved.values.get("camera_name")
+        which = f"This camera ({device})" if device else "This camera"
+        return (f"{which} is not in the camera database: its gain and offset "
+                "are guesses. Add it to the camera manager?\n\n"
+                "Or cancel and type them into the camera fields.")
+
+    def preflight(self, ctx: Context, settings):
+        """A camera the database does not know, whose numbers are guesses:
+        the editor that adds it, or Cancel (the default) to type them in."""
+        text = self.unknown_camera(settings)
+        if text is None:
+            return None
+        return PreflightQuestion(text, run_label="", choices=(
+            PreflightChoice("Open camera editor", settings=settings,
+                            window="camera editor",
+                            help="add the camera, with its conversion and "
+                                 "offset, so every file from it is read right"),))
 
     def _camera(self, settings) -> Optional[CameraMetadata]:
         """The camera as it stands: the file's metadata under the user's values.
@@ -925,7 +989,10 @@ def _open(src: SourceSettings, watch: bool, stop_event=None):
 class _Reading:
     """The first half of every fitter's form: what is read and found."""
     source: SourceSettings = field(default_factory=SourceSettings)
-    camera: CameraSettings = field(default_factory=CameraSettings)
+    # folded, its title a one-line summary (`_FitPlugin._camera_title`): the
+    # camera is read far more often than it is set
+    camera: CameraSettings = param(default_factory=CameraSettings, label="camera",
+                                   collapsed=True)
     detection: DetectionSettings = field(default_factory=DetectionSettings)
     model: Any = None                    # each fitter's own part
 
@@ -1447,7 +1514,11 @@ class DualGaussianFit(_TwoChannelFit):
     def preflight(self, ctx: Context, settings):
         """No plain "start anyway": without a transformation the fit cannot
         pair the channels and fails at once, so the one useful answer besides
-        cancelling (and choosing a file) is to measure it from the movie."""
+        cancelling (and choosing a file) is to measure it from the movie.
+        A camera to add comes first (`_FitPlugin.preflight`)."""
+        camera = super().preflight(ctx, settings)
+        if camera is not None:
+            return camera
         if settings.transform.calibrate or settings.transform.path:
             return None
         from dataclasses import replace as _replace

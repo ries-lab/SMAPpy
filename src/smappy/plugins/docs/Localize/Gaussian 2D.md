@@ -31,9 +31,14 @@ The camera matters: the fit works in **photons**, so the conversion from the
 camera's counts (ADU, analog-to-digital units, also called grey values) to
 photons must be right, or every photon count and every
 precision is off by the same factor.  These values come from the file's
-metadata or the camera database where possible; check them in the *camera*
-section, where a field left on *auto* shows in grey what it was read as, and a
-number typed in replaces it.  **Preview** runs detection on one frame and shows it, which is the
+metadata or the camera database where possible.  The *camera* section starts
+folded, its title saying what was found -- "camera: auto -- iXon 888, 0.2
+e-/ADU, 108 nm" -- and opened, a field left on *auto* shows in grey what it
+was read as, and a number typed in replaces it.  A camera that is in no
+database and whose numbers are not typed in is said in a line under the
+settings, and asked about once more at Run: *Open camera editor* adds it
+(and does not run), *Cancel* -- the default -- leaves the numbers to be typed
+into the camera fields.  **Preview** runs detection on one frame and shows it, which is the
 way to set the detection threshold.
 
 ## How it works

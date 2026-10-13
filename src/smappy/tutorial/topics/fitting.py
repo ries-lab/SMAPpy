@@ -99,6 +99,12 @@ def make(d) -> None:
            spot=[field(panel, "source.path")], point=field(panel, "source.path"),
            zoom=d.around(field(panel, "source.path"), 760))
     camera = section_of(panel, "camera")
+    d.shot("The camera section starts folded: its title says which camera and "
+           "which numbers the fit will use.",
+           spot=[camera.button], point=camera.button, click=True,
+           zoom=d.around(camera, 760))
+    camera.set_expanded(True)
+    d.settle()
     d.shot("For a recognised camera these stay on auto: the numbers come from "
            "the file and from SMAPpy's camera database.",
            spot=[camera], zoom=d.around(camera, 760))

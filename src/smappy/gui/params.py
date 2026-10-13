@@ -518,6 +518,7 @@ class SettingsForm(QWidget):
         self.settings_cls = settings_cls
         self.fields: Dict[str, Any] = {}          # _Field or SettingsForm
         self.labels: Dict[str, QLabel] = {}       # the row label of each field
+        self.sections: Dict[str, CollapsibleSection] = {}   # each part's
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(2)
@@ -541,9 +542,11 @@ class SettingsForm(QWidget):
                 part.changed.connect(self.changed)
                 self.fields[name] = part
                 main = None
-                layout.addWidget(CollapsibleSection(spec.info.label or name, part,
-                                                    expanded=not (spec.info.advanced
-                                                                  or spec.info.collapsed)))
+                section = CollapsibleSection(spec.info.label or name, part,
+                                             expanded=not (spec.info.advanced
+                                                           or spec.info.collapsed))
+                self.sections[name] = section
+                layout.addWidget(section)
                 continue
             w = LayersField(spec) if spec.info.kind == "layers" else _Field(spec)
             w.changed.connect(self.changed)
@@ -653,6 +656,25 @@ class SettingsForm(QWidget):
                 continue
             if hasattr(field, "set_choices"):
                 field.set_choices(choices)
+
+    def set_titles(self, titles: Dict[str, str]) -> None:
+        """A part's title by dotted name (`FormState.titles`), cut to the
+        control column with the whole of it in the tooltip: a title is one
+        line and must not widen the form.  Unknown names are ignored."""
+        from .widgets import CONTROL_WIDTH
+        for path, title in titles.items():
+            target = self
+            parts = path.split(".")
+            try:
+                for part in parts[:-1]:
+                    target = target.fields[part]
+                section = target.sections[parts[-1]]
+            except (KeyError, AttributeError):
+                continue
+            metrics = section.button.fontMetrics()
+            shown = metrics.elidedText(title, Qt.ElideRight, CONTROL_WIDTH - 90)
+            section.set_title(shown)
+            section.button.setToolTip(title if shown != title else "")
 
     def set_active(self, flags: Dict[str, bool]) -> None:
         """Grey out the fields the current settings do not read.

@@ -24,7 +24,10 @@ A file from a camera that is *not* in the database has to have them typed
 into the fitter, every time.  The fitters say so as soon as the file is
 chosen, in an orange line under their settings, with a button that opens this
 window: *Add camera...* for a camera the database does not know, *Add readout
-mode...* for a known camera recorded in a mode it has no numbers for.  It
+mode...* for a known camera recorded in a mode it has no numbers for.  A
+camera the database does not know, whose numbers are not typed in either, is
+asked about again at Run, and *Open camera editor* there opens this window
+instead of fitting.  It
 also opens from *Camera editor...* at the top of the Localize tab, and from
 *Add to camera database...* in the *Camera parameters* window.
 

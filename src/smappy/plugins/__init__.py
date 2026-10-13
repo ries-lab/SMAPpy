@@ -566,6 +566,11 @@ class PreflightChoice:
     label: str
     settings: Any = None
     help: str = ""
+    # a window of the GUI's (`Session.window_openers`) that this choice opens
+    # *instead of* running, with ``settings`` (None: the form's): the way to
+    # put right what the question is about -- a camera to add to the
+    # database -- rather than a way to run.  Never the dialog's default.
+    window: Optional[str] = None
 
 
 @dataclass
@@ -634,11 +639,16 @@ class FormState:
       unavailable, never swapped for the first entry.
     * ``notice`` -- a line under the form, with a button that does something
       about it (`Notice`).
+    * ``titles`` -- a part's title, in place of its label: a summary of what
+      it holds, for a part that starts folded.
     """
     hints: Dict[str, Any] = field(default_factory=dict)
     active: Dict[str, bool] = field(default_factory=dict)
     choices: Dict[str, Sequence] = field(default_factory=dict)
     notice: Optional[Notice] = None
+    # a part's title by its dotted name, in place of its label: what the part
+    # holds, said while it is folded ("camera: auto - iXon 888, ...")
+    titles: Dict[str, str] = field(default_factory=dict)
 
     def under(self, key: str, title: str = "", settings: Any = None) -> "FormState":
         """This state as part ``key`` of a larger form -- a chain's step: the
@@ -653,7 +663,8 @@ class FormState:
             hints={f"{key}.{k}": v for k, v in self.hints.items()},
             active={f"{key}.{k}": v for k, v in self.active.items()},
             choices={f"{key}.{k}": v for k, v in self.choices.items()},
-            notice=notice)
+            notice=notice,
+            titles={f"{key}.{k}": v for k, v in self.titles.items()})
 
     def update(self, other: "FormState") -> None:
         """Add ``other``'s parts; the first notice stays, as the panel has
