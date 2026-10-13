@@ -52,9 +52,12 @@ Running the tests -- two tiers:
   makes work stealing the default (xdist's own piles the tutorials onto one
   worker) and runs the slow tests first.
 * **Automatic garbage collection is off, in the tests and in the app.**  The
-  collector otherwise runs in whichever thread allocates, and a Qt widget
-  left in a reference cycle, destroyed on a fit's reader thread, deadlocked
-  a test worker.  `conftest.py` collects on the main thread every 100 tests;
+  collector otherwise runs in whichever thread allocates and frees every
+  cycle in the process, whatever that thread holds.  PySide sends only plain
+  `QWidget`s back to the main thread, not subclasses, so a widget left in a
+  reference cycle is destroyed on the worker.  On a fit's reader thread that
+  deadlocked a test worker, and with automatic collection switched on again
+  in 2026-10, `--slow` segfaulted a worker in 9 runs of 9.  `conftest.py` collects on the main thread every 100 tests;
   the GUI's entry points install `gui/collector.collect_on_gui_thread`, a
   timer on the GUI thread.  A test that needs an object gone calls
   `gc.collect()` itself; a new entry point gets its QApplication from
