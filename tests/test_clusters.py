@@ -219,7 +219,7 @@ def test_histograms_summarise_the_clusters_too():
         Step(plugin="Analysis/Measure/Localization Statistics")])]))
     session.run(cls(), cls.Settings())
     histograms = plugins.get("Analysis/Regions/Summarize/Histograms")
-    offered = histograms().choices(session.context(), histograms.Settings())["evaluation"]
+    offered = histograms().describe(session.context(), histograms.Settings()).choices["evaluation"]
     name = "per cluster_id: Localization Statistics"
     assert (name, name) in offered
     result = histograms()(ctx=session.context(), evaluation=name)
@@ -241,7 +241,8 @@ def test_a_cluster_statistic_goes_onto_its_localizations_and_filters_them():
         Step(plugin="Analysis/Measure/Localization Statistics")])]))
     session.run(cls(), cls.Settings())
     name = "per cluster_id: Localization Statistics"
-    offered = RegionsToColumn().choices(session.context(), RegionsToColumn.Settings())
+    offered = RegionsToColumn().describe(session.context(),
+                                         RegionsToColumn.Settings()).choices
     assert (name, name) in offered["source"]
     session.run(RegionsToColumn(), RegionsToColumn.Settings(
         source=name, values="n_localizations", prefix="cluster_"))
@@ -305,8 +306,8 @@ def test_an_roi_evaluation_goes_onto_the_localizations_in_each_roi():
     session.run(cls(), cls.Settings())
     settings = RegionsToColumn.Settings(source="Localization Statistics",
                                         values="n_localizations, roi_id")
-    assert ("Localization Statistics",) * 2 in RegionsToColumn().choices(
-        session.context(), settings)["source"]
+    assert ("Localization Statistics",) * 2 in RegionsToColumn().describe(
+        session.context(), settings).choices["source"]
     session.run(RegionsToColumn(), settings)
     column = np.asarray(session.locs["n_localizations"])
     assert (column[truth == 1] == SIZES[0]).all() and (column[truth == 2] == SIZES[1]).all()

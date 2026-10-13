@@ -35,7 +35,7 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
-from . import Context, Plugin, Result, param, register
+from . import Context, FormState, Plugin, Result, param, register
 from .roi import auto_only, replace_param
 
 # what *results from* is when it is empty: the ROIs, without an evaluation
@@ -83,10 +83,13 @@ class RegionsToColumn(Plugin):
     grouping = "ungrouped"
     version = "2"         # 2: roi_id is the ROI's own number, kept when others go
 
-    def choices(self, ctx: Context, settings):
+    def describe(self, ctx, settings) -> FormState:
+        """*results from*: the evaluations the session has."""
+        if ctx is None:
+            return FormState()
         from ..region_results import available
-        return {"source": [("", NUMBERS)]
-                + [(str(ev), str(ev)) for ev in available(ctx)]}
+        return FormState(choices={"source": [("", NUMBERS)]
+                                  + [(str(ev), str(ev)) for ev in available(ctx)]})
 
     def run(self, ctx: Context, settings: RegionColumnSettings) -> Result:
         from .. import region_results

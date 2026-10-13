@@ -37,8 +37,8 @@ def test_a_save_says_it_leaves_out_the_region_results_before_and_after(tmp_path)
     measured_per_cluster(session)
     assert region_counts(session) == {"rois": 0, "regions": 3, "kept": 0}
     ctx = session.context()
-    assert Save().notice_for(ctx, Save.Settings()) is None      # all of it saved
-    notice = Save().notice_for(ctx, Save.Settings(region_results=False))
+    assert Save().describe(ctx, Save.Settings()).notice is None      # all of it saved
+    notice = Save().describe(ctx, Save.Settings(region_results=False)).notice
     assert "3 regions of id columns will not be saved" in notice.text
     result = session.run(Save(), Save.Settings(path=str(tmp_path / "a.hdf5"),
                                                region_results=False))

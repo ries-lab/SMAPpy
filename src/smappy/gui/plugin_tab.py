@@ -77,7 +77,7 @@ class _Slot(QWidget):
             self.panel.form.restore(self.instance.values)
         # a panel restored with a file already in it should say what its auto
         # fields resolve to straight away, not only after the next edit
-        self.panel._hints()
+        self.panel.refresh_derived()
         return self.panel
 
     def values(self) -> Dict[str, object]:

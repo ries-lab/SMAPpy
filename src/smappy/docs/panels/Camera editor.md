@@ -2,7 +2,7 @@
 title: Camera editor
 summary: Adds the camera of the file being fitted to your camera database -- or gives a known camera a readout mode it lacked -- so that the next file it takes is converted to photons without typing anything.
 widget: smappy.gui.camera_editor.CameraEditor
-covers: [smappy.camera_db.draft, smappy.camera_db.with_mode, smappy.camera_db.problems, smappy.camera_db.save_camera, smappy.camera_db.CameraDatabase.joined_with, smappy.camera_db.Camera.resolve, smappy.plugins.fit._FitPlugin.notice, smappy.gui.camera_editor.CameraEditor]
+covers: [smappy.camera_db.draft, smappy.camera_db.with_mode, smappy.camera_db.problems, smappy.camera_db.save_camera, smappy.camera_db.CameraDatabase.joined_with, smappy.camera_db.Camera.resolve, smappy.plugins.fit._FitPlugin._notice, smappy.gui.camera_editor.CameraEditor]
 ---
 
 ## What it does

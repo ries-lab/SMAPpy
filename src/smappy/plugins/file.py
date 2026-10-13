@@ -24,7 +24,7 @@ from typing import Any, Dict, Optional
 from ..io.formats import (FileInfo, name_filter, reader_for, reader_named,
                           save_filter, writer_for)
 from ..simulate.settings import SimulationSettings
-from . import Context, Notice, Plugin, Result, param, register
+from . import Context, FormState, Notice, Plugin, Result, param, register
 
 LOCS_FILTER = "Localizations (*.hdf5 *.h5 *.mat *.csv *.npy *.zip *.json)"
 
@@ -198,13 +198,13 @@ class Save(Plugin):
     changes_locs = False
     logged = True          # where a file went is not visible in the file
 
-    def notice_for(self, ctx: Context, settings: SaveSettings) -> Optional[Notice]:
+    def describe(self, ctx: Optional[Context], settings: SaveSettings) -> FormState:
         """Results there are that these settings would not save, said before
         the save rather than found missing when the file is opened again."""
         if ctx is None or ctx.session is None:
-            return None
+            return FormState()
         text = left_out(ctx.session, settings)
-        return None if text is None else Notice(text)
+        return FormState(notice=None if text is None else Notice(text))
 
     def run(self, ctx: Context, settings: SaveSettings) -> Result:
         if ctx.session is None:

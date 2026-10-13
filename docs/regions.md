@@ -459,7 +459,7 @@ Each step leaves the program working and the suite green.
      draws its curves again from the numbers (`model_curve`).  The saver's
      *save the ROI figures' data* leaves it out and says so.  The switch per
      step is in the model (`Step.keep`); its checkbox comes with the editor
-     (step 4).  The warning came later: `Plugin.notice_for` hands a notice
+     (step 4).  The warning came later: `Plugin.describe` hands a notice
      the session, and the saver says what its settings would leave out.
 
    The region table as a session table with its own filter, planned here,

@@ -164,8 +164,8 @@ class ChainPanel(QWidget):
     def form(self):
         return self.panel.form
 
-    def _hints(self) -> None:
-        self.panel._hints()
+    def refresh_derived(self) -> None:
+        self.panel.refresh_derived()
 
     # ------------------------------------------------------------ building
     def _build(self, cls: type) -> None:

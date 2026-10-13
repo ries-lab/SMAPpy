@@ -38,7 +38,7 @@ from ..locs import KEPT_BOUNDS, Localizations
 from ..mathparse import remember
 from ..regions import Region
 from ..render import positions
-from . import Context, Plugin, Result, param, register
+from . import Context, FormState, Plugin, Result, param, register
 
 # What the flag means, and the bound a run opens the filter at.  0 and 1
 # rather than True/False: the table is numeric throughout, and a range filter
@@ -173,8 +173,8 @@ class RemoveLocalizations(Plugin):
     grouping = "ungrouped"
     version = "1"
 
-    def active(self, settings: RemoveSettings):
-        return {"field": settings.action == "hide"}
+    def describe(self, ctx, settings: RemoveSettings) -> FormState:
+        return FormState(active={"field": settings.action == "hide"})
 
     def _keep(self, ctx: Context, settings: RemoveSettings) -> Tuple[np.ndarray, str]:
         """Which localizations survive, and how to say what was done."""

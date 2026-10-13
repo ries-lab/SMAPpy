@@ -56,9 +56,9 @@ from dataclasses import dataclass, field, fields, make_dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from .plugins import (Context, ParamInfo, Plugin, PreflightChoice, PreflightQuestion,
-                      Result, Stopped, _hint_from_text, param, settings_from,
-                      SOURCES, refuse_grouped_table, settings_values)
+from .plugins import (Context, FormState, ParamInfo, Plugin, PreflightChoice,
+                      PreflightQuestion, Result, Stopped, _hint_from_text, param,
+                      settings_from, SOURCES, refuse_grouped_table, settings_values)
 
 SCHEMA = "smappy-chain-v1"
 SUFFIX = ".chain.yaml"
@@ -689,43 +689,29 @@ class ChainPlugin(Plugin):
         replies = cls().react(rest, plugin_settings(cls, getattr(settings, key)))
         return {f"{key}.{k}": v for k, v in (replies or {}).items()} or None
 
-    def hints(self, settings):
-        out = {}
-        for key, step, cls in self.steps:
-            try:
-                found = cls().hints(plugin_settings(cls, getattr(settings, key)))
-            except Exception:
-                found = None
-            out.update({f"{key}.{k}": v for k, v in (found or {}).items()})
-        return out or None
-
-    def choices(self, ctx: Context, settings):
-        """Each step's session-dependent choices, told -- as in `preflight` --
-        which evaluations the steps before it will have made."""
-        out = {}
+    def describe(self, ctx: Optional[Context], settings) -> FormState:
+        """Each step's own, under the step's key: its hints, its fields read,
+        its lists -- told, as in `preflight`, which evaluations the steps
+        before it will have made -- and its notice, saying whose it is and
+        opening its window on the step's settings.  A step whose grouping
+        is fixed by its plugin has none to choose."""
+        state = FormState()
         made: List[Tuple[str, str]] = []
         for key, step, cls in self.steps:
-            sctx = copy.copy(ctx)
-            sctx.evaluations = list(made)
-            made.extend(made_by(cls, getattr(settings, key)))
+            sub = getattr(settings, key)
+            sctx = None
+            if ctx is not None:
+                sctx = copy.copy(ctx)
+                sctx.evaluations = list(made)
+            made.extend(made_by(cls, sub))
             try:
-                found = cls().choices(sctx, plugin_settings(cls, getattr(settings, key)))
+                own = plugin_settings(cls, sub)
+                state.update(cls().describe(sctx, own).under(key, step.title(), own))
             except Exception:
-                found = None
-            out.update({f"{key}.{k}": v for k, v in (found or {}).items()})
-        return out or None
-
-    def active(self, settings):
-        out = {}
-        for key, step, cls in self.steps:
-            try:
-                found = cls().active(plugin_settings(cls, getattr(settings, key)))
-            except Exception:
-                found = None
-            out.update({f"{key}.{k}": v for k, v in (found or {}).items()})
-            if cls.grouping and hasattr(getattr(settings, key), GROUPING_FIELD):
-                out[f"{key}.{GROUPING_FIELD}"] = False
-        return out or None
+                pass                       # best effort, like the panel's
+            if cls.grouping and hasattr(sub, GROUPING_FIELD):
+                state.active[f"{key}.{GROUPING_FIELD}"] = False
+        return state
 
     @classmethod
     def current_spec(cls, settings=None) -> ChainSpec:

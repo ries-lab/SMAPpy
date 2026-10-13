@@ -37,7 +37,7 @@ from typing import Dict, Optional, Sequence, Tuple
 import numpy as np
 
 from ..locs import Localizations
-from . import Context, LiveRecipe, Plugin, Result, param, register
+from . import Context, FormState, LiveRecipe, Plugin, Result, param, register
 
 # candidate column pairs, in the order they are looked for: what the paired
 # fit writes first, then the 1-based spelling a SMAP or hand-made table uses
@@ -706,11 +706,11 @@ class AssignColors(Plugin):
             "probabilistic": ("tolerance", "keep_tails", "crosstalk", "spread",
                               "use_prior")}
 
-    def active(self, settings: AssignColorSettings) -> Dict[str, bool]:
-        """Only the chosen method's parameters are live."""
+    def describe(self, ctx, settings: AssignColorSettings) -> FormState:
+        """Only the chosen method's parameters are read."""
         mine = set(self.USED.get(settings.mode, ()))
         others = {name for names in self.USED.values() for name in names}
-        return {name: name in mine for name in others}
+        return FormState(active={name: name in mine for name in others})
 
     def run(self, ctx: Context, settings: AssignColorSettings) -> Result:
         return self._work(ctx, settings, apply=True)

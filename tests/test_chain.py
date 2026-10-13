@@ -344,7 +344,7 @@ def test_one_evaluator_under_two_names_gives_two_sets_of_columns():
 
 def test_a_steps_grouping_in_a_block_is_each_layers_own_and_cannot_be_chosen():
     cls = chain_class(spec(each_roi({"plugin": "Analysis/Measure/Localization Statistics", "label": "stats"})))
-    assert cls().active(cls.Settings())["sites.stats.use_grouping"] is False
+    assert cls().describe(None, cls.Settings()).active["sites.stats.use_grouping"] is False
 
 
 def test_a_per_region_step_on_the_view_runs_once_and_keeps_nothing_with_the_rois():
@@ -352,7 +352,7 @@ def test_a_per_region_step_on_the_view_runs_once_and_keeps_nothing_with_the_rois
     cls = chain_class(spec(SEGMENT, {"plugin": "Analysis/Measure/Localization Statistics",
                                      "label": "stats"}))
     settings = cls.Settings()
-    assert (cls().active(settings) or {}).get("stats.use_grouping") is not False
+    assert cls().describe(None, settings).active.get("stats.use_grouping") is not False
     result = session.run(cls(), settings)
     assert result.data["results"]["stats"].values["n_localizations"] == \
         len(session.selection(0))                       # the whole view, once

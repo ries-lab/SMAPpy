@@ -622,6 +622,63 @@ class Notice:
     text: str
     action: str = ""                 # the button's text
     window: Optional[str] = None
+    # what the window is opened with; None: the form's settings.  A chain's
+    # step says its own here, since the window wants a fitter's settings and
+    # the form holds the chain's.
+    settings: Any = None
+
+
+@dataclass
+class FormState:
+    """What the form shows about the settings as they stand, beyond their
+    values: one answer to one question (`Plugin.describe`), asked after every
+    edit and whenever the session changes what a list offers.
+
+    Every part is presentation: nothing here is written into the settings,
+    and a script may ignore all of it.  Keys are dotted field names, as in
+    `Plugin.react`.
+
+    * ``hints`` -- what fields left on *auto* currently resolve to, shown
+      greyed in them, so "auto" says what it will do.
+    * ``active`` -- which fields the settings actually read; the rest are
+      greyed out (a greyed field keeps its value), so that a number which
+      does nothing does not look like one which does.
+    * ``choices`` -- ``[(value, label), ...]`` for fields whose list depends
+      on the session: the evaluations on the ROIs, the cameras in the
+      database.  The field declares a callable ``choices`` for a form with no
+      session; a value the list does not have is kept and shown as
+      unavailable, never swapped for the first entry.
+    * ``notice`` -- a line under the form, with a button that does something
+      about it (`Notice`).
+    """
+    hints: Dict[str, Any] = field(default_factory=dict)
+    active: Dict[str, bool] = field(default_factory=dict)
+    choices: Dict[str, Sequence] = field(default_factory=dict)
+    notice: Optional[Notice] = None
+
+    def under(self, key: str, title: str = "", settings: Any = None) -> "FormState":
+        """This state as part ``key`` of a larger form -- a chain's step: the
+        fields prefixed, and the notice saying whose it is and opening its
+        window with the step's own ``settings``."""
+        notice = self.notice
+        if notice is not None:
+            notice = replace(
+                notice, text=f"{title}: {notice.text}" if title else notice.text,
+                settings=notice.settings if notice.settings is not None else settings)
+        return FormState(
+            hints={f"{key}.{k}": v for k, v in self.hints.items()},
+            active={f"{key}.{k}": v for k, v in self.active.items()},
+            choices={f"{key}.{k}": v for k, v in self.choices.items()},
+            notice=notice)
+
+    def update(self, other: "FormState") -> None:
+        """Add ``other``'s parts; the first notice stays, as the panel has
+        room for one line."""
+        self.hints.update(other.hints)
+        self.active.update(other.active)
+        self.choices.update(other.choices)
+        if self.notice is None:
+            self.notice = other.notice
 
 
 @dataclass
@@ -868,59 +925,20 @@ class Plugin:
         """
         return None
 
-    def hints(self, settings) -> Optional[Dict[str, Any]]:
-        """What the settings' *automatic* fields currently resolve to.
+    def describe(self, ctx: Optional["Context"], settings) -> FormState:
+        """What the form should show about ``settings`` beyond their values:
+        hints for the fields on *auto*, which fields are read, the lists that
+        depend on the session, and a notice (`FormState`).
 
-        Keyed by dotted name, like `react`, but these are never written into
-        the settings: the GUI shows them greyed in the fields that are set to
-        auto, so "auto" says what it will do rather than only that it will do
-        something.  Return None when nothing can be resolved yet.
+        Asked after every edit and when the session changes, so it has to be
+        cheap: a fitter says here that the file's camera is not in the
+        database, while the file is being chosen rather than when the run
+        fails for want of a conversion.  ``ctx`` is the session's context, or
+        None when there is no session -- a part that needs one is then left
+        out.  One hook rather than one per part, so that a chain forwards its
+        steps' with one call and none is forgotten.
         """
-        return None
-
-    def choices(self, ctx: "Context", settings) -> Optional[Dict[str, Sequence]]:
-        """The choices of fields whose list depends on the session.
-
-        Keyed by dotted name, ``[(value, label), ...]``: the evaluations on
-        the ROIs, say, for an ROI analysis's *results from*.  The field
-        declares a callable ``choices`` (what a form without a session
-        offers) and the GUI replaces its list with this one when the panel is
-        built, after a run, and when the ROIs or their results change.  A
-        value the list does not have is kept and shown as unavailable, never
-        swapped for the first entry.  Return None when nothing depends on
-        the session.
-        """
-        return None
-
-    def active(self, settings) -> Optional[Dict[str, bool]]:
-        """Which fields the current settings actually read, by dotted name.
-
-        A plugin with alternative methods has parameters that belong to one of
-        them; the GUI greys out the rest, so that a number which does nothing
-        does not look like a number which does.  Nothing is changed by this --
-        a greyed field keeps its value and still comes back from the form -- so
-        it is presentation, and a script may ignore it.  Return None when every
-        field is always live.
-        """
-        return None
-
-    def notice(self, settings) -> Optional[Notice]:
-        """What the panel should say about these settings before a run.
-
-        Asked after every edit, like `hints`, and as cheap: a fitter says
-        here that the file's camera is not in the database, while the file is
-        being chosen rather than when the run fails for want of a
-        conversion.  None says nothing.
-        """
-        return None
-
-    def notice_for(self, ctx: "Context", settings) -> Optional[Notice]:
-        """`notice`, with the session in reach: what a plugin overrides when
-        what it has to say depends on the session rather than the settings
-        alone -- the results a save would leave out.  The panel asks this;
-        by default it is `notice`, so a plugin that needs no session keeps
-        the simpler signature."""
-        return self.notice(settings)
+        return FormState()
 
     def react(self, changed: str, settings) -> Optional[Dict[str, Any]]:
         """A parameter was edited: ``changed`` is its dotted name.

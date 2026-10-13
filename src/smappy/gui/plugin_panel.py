@@ -116,7 +116,7 @@ class PluginPanel(QWidget):
                 leaf.session = session
                 leaf.refresh()
         # what the plugin says about the settings as they stand
-        # (`Plugin.notice`): a camera the database does not know, with the
+        # (`Plugin.describe`): a camera the database does not know, with the
         # button that adds it.  Hidden while there is nothing to say.
         self.notice = QLabel("")
         self.notice.setWordWrap(True)
@@ -238,8 +238,8 @@ class PluginPanel(QWidget):
         self.form.field_changed.connect(self._react)
         self.progressed.connect(self._on_progress)
         self.streamed.connect(self._on_stream)
-        self._active()
-        self._choices()
+        self._notice_settings = None
+        self._describe()
         session.on_change(self._on_session)
         self._take_saved()
 
@@ -250,8 +250,8 @@ class PluginPanel(QWidget):
 
     def _on_session(self, what: str) -> None:
         if what in ("locs", "rois"):
-            self._choices()
-            self._show_notice()        # a save says what it would leave out
+            # the lists of evaluations; a save says what it would leave out
+            self._describe()
         if what in ("locs", "results"):
             self._take_saved()
         elif what in ("roi", "roi-edited") and self.live is not None \
@@ -318,33 +318,48 @@ class PluginPanel(QWidget):
             return
         if updates:
             self.form.set_values(updates)
-        self._hints()
-        self._show_notice()
-        self._active()
+        self._describe()
 
     def refresh_derived(self) -> None:
         """Read again what the plugin works out from outside the form -- the
         lists, the hints, the notice -- after something it reads changed: a
         camera added to the database, say."""
-        self._choices()
-        self._hints()
-        self._show_notice()
+        self._describe()
 
-    def _show_notice(self) -> None:
-        """The plugin's line about the settings (`Plugin.notice`), with its
-        button when the GUI has the window it names.  Best effort, like the
-        hints."""
+    def _describe(self) -> None:
+        """Show what the plugin says about the settings as they stand
+        (`Plugin.describe`): hints in the fields on *auto*, the fields it does
+        not read greyed out, the lists the session decides, and the notice.
+
+        Best effort on purpose: working this out may mean opening a file that
+        is missing, half-written or not an image at all, and none of that is
+        worth an error in a field the user has not finished typing.  A part
+        that is empty leaves what the form shows as it is.
+        """
+        from ..plugins import FormState
         try:
-            notice = self.plugin.notice_for(
+            state = self.plugin.describe(
                 self.session.context(grouping=self.plugin.grouping), self.form.value())
         except Exception:
-            notice = None
+            state = FormState()
+        if state.hints:
+            self.form.set_hints(state.hints)
+        if state.choices:
+            self.form.set_choices(state.choices)
+        if state.active:
+            self.form.set_active(state.active)
+        self._show_notice(state.notice)
+
+    def _show_notice(self, notice) -> None:
+        """The plugin's line about the settings (`Notice`), with its button
+        when the GUI has the window it names."""
         self.notice.setVisible(notice is not None)
         if notice is None:
             self.notice_button.hide()
             return
         self.notice.setText(notice.text)
         self._notice_window = notice.window
+        self._notice_settings = notice.settings
         offered = bool(notice.action and notice.window
                        and notice.window in self.session.window_openers)
         self.notice_button.setText(notice.action)
@@ -354,47 +369,14 @@ class PluginPanel(QWidget):
         opener = self.session.window_openers.get(self._notice_window)
         if opener is None:
             return
-        try:
-            settings = self.form.value()
-        except ValueError as e:
-            self.status.setText(str(e))
-            return
+        settings = self._notice_settings       # a chain's step's own
+        if settings is None:
+            try:
+                settings = self.form.value()
+            except ValueError as e:
+                self.status.setText(str(e))
+                return
         opener(settings)
-
-    def _hints(self) -> None:
-        """Refresh what the fields left on *auto* say they will resolve to.
-
-        Best effort on purpose: working this out means opening the file, which
-        may be missing, half-written or not an image at all, and none of that
-        is worth an error in a field the user has not finished typing.
-        """
-        try:
-            hints = self.plugin.hints(self.form.value())
-        except Exception:
-            return
-        if hints:
-            self.form.set_hints(hints)
-
-    def _choices(self) -> None:
-        """Re-read the lists the session decides (`Plugin.choices`): the
-        evaluations on the ROIs, for an ROI analysis.  Best effort, like the
-        hints: a list that cannot be worked out leaves the one there is."""
-        try:
-            lists = self.plugin.choices(
-                self.session.context(grouping=self.plugin.grouping), self.form.value())
-        except Exception:
-            return
-        if lists:
-            self.form.set_choices(lists)
-
-    def _active(self) -> None:
-        """Grey out the fields the current settings do not read."""
-        try:
-            flags = self.plugin.active(self.form.value())
-        except (ValueError, TypeError):
-            return
-        if flags:
-            self.form.set_active(flags)
 
     def _on_stream(self, event: str, payload) -> None:
         if event == "warning":
@@ -756,7 +738,7 @@ class PluginPanel(QWidget):
         # a run may have added to a list the form offers -- the expressions
         # the math parser has been given, the evaluations a chain made
         self.form.refresh()
-        self._choices()
+        self._describe()
         self.plot_button.setEnabled(bool(result.figures()))
         self.plot_button.setToolTip(
             "show the plugin's result figure (the drift curves, say)")

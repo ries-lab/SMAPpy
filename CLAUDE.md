@@ -172,13 +172,16 @@ class Thing(Plugin):
   plain yes, each carrying the settings it would run with: COMET offers an RCC
   prepass, because "no" is not a useful answer to "this will take an
   afternoon".
-* Override `notice` to say something about the settings as they stand, before
-  any run -- a line under the form, and optionally a button that opens a GUI
-  window by name (`Notice(text, action, window)`, the same
-  `session.window_openers` as `Plugin.window`).  The fitters use it for a file
-  whose camera is not in the database, opening the camera editor.  When
-  what it says depends on the session, override `notice_for(ctx, settings)`
-  instead -- the saver says which region results its settings leave out.
+* Override `describe(ctx, settings)` to say what the form should show about
+  the settings as they stand, before any run, as a `FormState`: `hints` (what
+  fields on *auto* resolve to), `active` (which fields are read; the rest are
+  greyed), `choices` (lists the session decides) and a `notice` -- a line
+  under the form, and optionally a button that opens a GUI window by name
+  (`Notice(text, action, window)`, the same `session.window_openers` as
+  `Plugin.window`).  `ctx` is None when there is no session.  The fitters
+  use it for a file whose camera is not in the database, opening the camera
+  editor; the saver says which region results its settings leave out.  A
+  chain forwards its steps' with the one hook.
 * `changes_locs` -- True if `run` hands back a new table (or files), False
   if not; required, a class that does not declare it is refused when it is
   defined (`tests/test_changes_locs.py` checks the shipped ones say it

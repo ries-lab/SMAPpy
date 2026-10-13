@@ -25,8 +25,8 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
-from . import (Context, Plot, Plugin, PreflightChoice, PreflightQuestion, Result,
-               param, register)
+from . import (Context, FormState, Plot, Plugin, PreflightChoice, PreflightQuestion,
+               Result, param, register)
 from .. import region_results
 from ..region_results import Evaluation
 
@@ -229,7 +229,7 @@ def current_file(project) -> Optional[str]:
 
 def auto_only():
     """*results from* without a session: only *auto*.  The plugin's
-    `choices` puts the evaluations on the ROIs beside it."""
+    `describe` puts the evaluations on the ROIs beside it."""
     return [("", "auto")]
 
 
@@ -374,11 +374,13 @@ class SiteAnalysisPlugin(Plugin):
     # what *auto* is called when it means every evaluation (Histograms)
     auto_label = ""
 
-    def choices(self, ctx: Context, settings):
+    def describe(self, ctx, settings) -> FormState:
         """*results from*: *auto*, saying what it resolves to, then every
         current evaluation by `evaluator` -- a chain's own included, before
         it has run -- on the ROIs, then per region of each id column."""
         from dataclasses import replace
+        if ctx is None:
+            return FormState()
         found = region_results.available(ctx, self.evaluator or None)
         for name, path in ctx.evaluations:
             ev = Evaluation.parse(name)
@@ -392,7 +394,8 @@ class SiteAnalysisPlugin(Plugin):
             auto = "auto (asks which)"
         names = sorted(str(ev) for ev in found if ev.on_rois) + \
             [str(ev) for ev in found if not ev.on_rois]
-        return {"evaluation": [("", auto)] + [(name, name) for name in names]}
+        return FormState(choices={"evaluation": [("", auto)]
+                                  + [(name, name) for name in names]})
 
     def preflight(self, ctx: Context, settings):
         """Which evaluation, when that is not clear: a choice, not a yes.  An

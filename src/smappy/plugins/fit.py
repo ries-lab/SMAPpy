@@ -30,7 +30,7 @@ from ..calibrate.transform import RegisterSettings
 from ..pipeline import FitSettings, fit_stack, provenance
 from ..psf import GaussianPSF, SplinePSF
 from ..rcc import RCCSettings
-from . import (Context, Notice, ParamInfo, Plot, Plugin, PreflightChoice,
+from . import (Context, FormState, Notice, ParamInfo, Plot, Plugin, PreflightChoice,
                PreflightQuestion, Result, param, register)
 from .assign_colors import AssignColorSettings
 
@@ -462,7 +462,24 @@ class _FitPlugin(Plugin):
         self._camera_key, self._camera_value = key, resolved
         return resolved
 
-    def notice(self, settings) -> Optional[Notice]:
+    def describe(self, ctx: Optional[Context], settings) -> FormState:
+        """The database's cameras, read again (one may have been added); what
+        the camera fields on *auto* will be; and a file whose camera the
+        database does not know.  Best effort: working these out opens the
+        file, which may be missing, half-written or not an image at all, and
+        none of that is worth an error in a field still being typed."""
+        state = FormState(choices={"camera.camera": _camera_choices()})
+        try:
+            state.hints = self._hints(settings) or {}
+        except Exception:
+            pass
+        try:
+            state.notice = self._notice(settings)
+        except Exception:
+            pass
+        return state
+
+    def _notice(self, settings) -> Optional[Notice]:
         """A file whose camera the database does not know, said while it is
         chosen, with the way to add it.
 
@@ -507,10 +524,6 @@ class _FitPlugin(Plugin):
             return Notice(text, "Add readout mode...", "camera editor")
         return None
 
-    def choices(self, ctx: Context, settings) -> Optional[Dict[str, Any]]:
-        """The database's cameras, read again: one may have been added."""
-        return {"camera.camera": _camera_choices()}
-
     def _camera(self, settings) -> Optional[CameraMetadata]:
         """The camera as it stands: the file's metadata under the user's values.
 
@@ -520,7 +533,7 @@ class _FitPlugin(Plugin):
         resolved = self.resolution(settings)
         return None if resolved is None else resolved.camera_metadata()
 
-    def hints(self, settings) -> Optional[Dict[str, Any]]:
+    def _hints(self, settings) -> Optional[Dict[str, Any]]:
         """What the camera fields left on *auto* will actually be."""
         camera = self._camera(settings)
         if camera is None:
@@ -543,7 +556,7 @@ class _FitPlugin(Plugin):
                 updates["output.path"] = default
                 self._default_output = default
             # The camera is *not* copied in: a field on auto shows the file's
-            # value as a grey hint (`hints`) and stays auto, so the run reads
+            # value as a grey hint (`describe`) and stays auto, so the run reads
             # the file it is given.  Copying turned the file's numbers into the
             # user's -- they then overrode a later *camera* choice, and the
             # next file inherited the last one's values.

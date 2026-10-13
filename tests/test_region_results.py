@@ -81,7 +81,7 @@ def test_clusters_relabelled_leave_their_results_out_of_date():
     assert not is_current(ctx, ev) and rows(ctx, ev) == [] and available(ctx) == []
     with pytest.raises(ValueError, match="out of date"):
         histograms()(ctx=session.context(), evaluation=PER_CLUSTER)
-    offered = histograms().choices(ctx, histograms.Settings())["evaluation"]
+    offered = histograms().describe(ctx, histograms.Settings()).choices["evaluation"]
     assert (PER_CLUSTER, PER_CLUSTER) not in offered
 
 
@@ -142,7 +142,7 @@ def test_npc_labeling_efficiency_reads_corners_counted_per_cluster():
     session = counted_pores()
     analysis = plugins.get("Analysis/Regions/Summarize/NPC Labeling Efficiency")
     name = "per cluster_id: NPC Corners"
-    offered = analysis().choices(session.context(), analysis.Settings())["evaluation"]
+    offered = analysis().describe(session.context(), analysis.Settings()).choices["evaluation"]
     assert (name, name) in offered
     assert offered[0][1] == f"auto ({name})"          # the only corner count there is
     smap = analysis()(ctx=session.context(),

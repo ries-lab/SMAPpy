@@ -299,7 +299,7 @@ class ControlWindow(QMainWindow):
         session.window_openers["bead calibration"] = \
             lambda settings: self.open_calibration(dual=settings.mode == "dual")
         # a fitter whose file's camera is not in the database offers this
-        # (`Plugin.notice`), opened on the file that fitter is set to
+        # (`Plugin.describe`), opened on the file that fitter is set to
         session.window_openers["camera editor"] = self.open_camera_editor
         tools.addSeparator()
         self.batch_window = None
@@ -396,7 +396,7 @@ class ControlWindow(QMainWindow):
     def open_camera_editor(self, settings=None) -> None:
         """The camera editor, on the file a fitter is set to.
 
-        `settings` are the fitter's that asked (`Plugin.notice`); without them
+        `settings` are the fitter's that asked (`Plugin.describe`); without them
         the first open fitter's are used, and without a fitter the editor
         opens on no file at all, for typing an entry in by hand.
         """

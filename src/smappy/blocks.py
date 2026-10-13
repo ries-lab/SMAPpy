@@ -52,8 +52,8 @@ import numpy as np
 from .chain import (BLOCK_ROIS, DEFAULT_GROUP, KEEP_FIGURES, Block, ChainError,
                     ChainPlugin, Step, _flat_infos, plugin_settings, step_plugin,
                     step_settings_class)
-from .plugins import (Context, ParamInfo, PreflightChoice, PreflightQuestion, Result,
-                      fast_values, param, settings_values)
+from .plugins import (Context, FormState, ParamInfo, PreflightChoice, PreflightQuestion,
+                      Result, fast_values, param, settings_values)
 from .region_runs import WriteBack, changed_columns
 
 # the block's own fields, before its steps', in its settings
@@ -113,15 +113,15 @@ class BlockPlugin(ChainPlugin):
     def changes_locs_for(self, settings) -> bool:
         return bool(_columns(settings.write_back) or _columns(settings.write_values))
 
-    def active(self, settings):
+    def describe(self, ctx: Optional[Context], settings) -> FormState:
         """Its steps' own, and no grouping to choose: in a region every layer
         is cut as it is shown."""
         from .chain import GROUPING_FIELD
-        out = dict(super().active(settings) or {})
+        state = super().describe(ctx, settings)
         for key, step, cls in self.steps:
             if hasattr(getattr(settings, key), GROUPING_FIELD):
-                out[f"{key}.{GROUPING_FIELD}"] = False
-        return out or None
+                state.active[f"{key}.{GROUPING_FIELD}"] = False
+        return state
 
     @classmethod
     def evaluations(cls, settings) -> List[Tuple[str, str]]:

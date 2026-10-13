@@ -35,7 +35,7 @@ class _Field(QWidget):
         super().__init__()
         self.spec = spec
         self._hint = ""
-        # a list the plugin worked out from the session (`Plugin.choices`),
+        # a list the plugin worked out from the session (`Plugin.describe`),
         # which replaces what the field's own callable offers
         self._supplied: Optional[list] = None
         info = spec.info
@@ -149,7 +149,7 @@ class _Field(QWidget):
         self._refill(self._supplied if self._supplied is not None else choices())
 
     def set_choices(self, choices) -> None:
-        """The list the plugin works out from the session; see `Plugin.choices`."""
+        """The list the plugin works out from the session; see `Plugin.describe`."""
         if not isinstance(self.widget, QComboBox):
             return
         self._supplied = list(choices)
@@ -637,7 +637,7 @@ class SettingsForm(QWidget):
 
     def set_choices(self, lists: Dict[str, Any]) -> None:
         """Replace, by dotted name, the lists of fields whose choices the
-        session decides (`Plugin.choices`).  Unknown names are ignored, as
+        session decides (`Plugin.describe`).  Unknown names are ignored, as
         for hints."""
         for path, choices in lists.items():
             target = self

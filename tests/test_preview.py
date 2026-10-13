@@ -88,16 +88,16 @@ def test_the_camera_hints_say_what_auto_resolves_to(stack):
     plugin = GaussianFit()
     settings = plugin.Settings()
     settings.source.path = str(stack)
-    hints = plugin.hints(settings)
+    hints = plugin.describe(None, settings).hints
     assert set(hints) == {f"camera.{n}" for n in plugin.CAMERA_FIELDS}
     # a value the user did set comes back as theirs, not as the file's
     settings.camera.offset = 42.0
-    assert plugin.hints(settings)["camera.offset"] == 42.0
+    assert plugin.describe(None, settings).hints["camera.offset"] == 42.0
 
 
 def test_hints_are_silent_when_there_is_nothing_to_resolve():
     plugin = GaussianFit()
-    assert plugin.hints(plugin.Settings()) is None
+    assert not plugin.describe(None, plugin.Settings()).hints
     settings = plugin.Settings()
     settings.source.path = "/nowhere/at/all.tif"
-    assert plugin.hints(settings) is None
+    assert not plugin.describe(None, settings).hints

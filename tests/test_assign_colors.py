@@ -324,10 +324,10 @@ def test_a_population_between_the_modes_is_reported_and_does_not_move_the_cut():
 
 def test_only_the_chosen_methods_parameters_are_active():
     plugin = plugins.get("Analysis/Dual-Color/AssignColors")()
-    minima = plugin.active(AssignColorSettings(mode="minima"))
+    minima = plugin.describe(None, AssignColorSettings(mode="minima")).active
     assert minima["exclusion"] and not minima["crosstalk"]
     assert not minima["tolerance"] and not minima["spread"]
-    probabilistic = plugin.active(AssignColorSettings(mode="probabilistic"))
+    probabilistic = plugin.describe(None, AssignColorSettings(mode="probabilistic")).active
     assert probabilistic["crosstalk"] and probabilistic["tolerance"]
     assert not probabilistic["exclusion"]
 
