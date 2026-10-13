@@ -81,8 +81,8 @@ papers and in other software.
   inside the slab.
 * **render mode**: how localizations become a picture -- *hist* counts them
   per pixel, *gauss* draws each as a blob of one fixed width, *precision* as
-  a blob as wide as its precision, *dl* as wide as the diffraction limit,
-  like a widefield image.
+  a blob as wide as its precision, *dl* (diffraction-limited) as wide as its
+  fitted spot on the camera's pixels, like a widefield image.
 * **LUT** (lookup table, also called a colour map): the colours that pixel
   values are drawn in, from low to high.
 * **slab**: a slice of the sample of fixed thickness in z, in the 3D view.
@@ -95,8 +95,8 @@ papers and in other software.
   from every localization.
 * **RCC** (redundant cross-correlation): a drift correction that makes a
   picture of each time window and cross-correlates every pair of them.
-* **COMET**: a drift correction that shifts the localizations of each time
-  window until they overlap best with the others, without making pictures.
+* **COMET**: a drift correction that finds the drift curve under which the
+  localizations from different times overlap best, without making pictures.
 
 ## Regions
 
