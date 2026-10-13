@@ -33,21 +33,17 @@ def fast_values(settings_cls: type, prefix: str = "") -> Dict[str, Any]:
     return out
 
 
-_TEXT_TYPES = {"int": int, "float": float, "str": str, "bool": bool}
-
-
-def _hint_from_text(annotation):
-    """A best effort at a type from a string annotation."""
-    if not isinstance(annotation, str):
-        return annotation
-    text = annotation.replace(" ", "")
-    optional = False
-    if text.endswith("|None"):
-        text, optional = text[:-len("|None")], True
-    elif text.startswith("Optional[") and text.endswith("]"):
-        text, optional = text[len("Optional["):-1], True
-    base = _TEXT_TYPES.get(text, Any)
-    return typing.Optional[base] if optional and base is not Any else base
+def settings_hints(settings_cls: type) -> Dict[str, Any]:
+    """`typing.get_type_hints`, with the one failure a plugin author meets
+    explained: under ``from __future__ import annotations``, Python 3.9
+    cannot evaluate ``X | None``, and a form built from guesses at the text
+    would be wrong in ways nobody sees."""
+    try:
+        return typing.get_type_hints(settings_cls)
+    except TypeError as exc:
+        raise TypeError(f"{settings_cls.__name__}: its annotations cannot be "
+                        f"evaluated ({exc}); on Python 3.9 write Optional[X] "
+                        "rather than X | None") from exc
 
 
 def _unwrap_optional(tp) -> Tuple[Any, bool]:
@@ -85,12 +81,7 @@ def param_specs(settings_cls: type) -> Dict[str, ParamSpec]:
     """
     if settings_cls is None or not dataclasses.is_dataclass(settings_cls):
         return {}
-    try:
-        hints = typing.get_type_hints(settings_cls)
-    except TypeError:
-        # a `X | None` annotation under `from __future__ import annotations`
-        # cannot be evaluated before Python 3.10; read what we can from text
-        hints = {f.name: _hint_from_text(f.type) for f in fields(settings_cls)}
+    hints = settings_hints(settings_cls)
     specs = {}
     for f in fields(settings_cls):
         if not f.init:

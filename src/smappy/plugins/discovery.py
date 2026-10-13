@@ -54,7 +54,7 @@ class PluginRef:
     description: str
     origin: Path                    # the file it lives in
     root: str                       # the root it came from, for the UI and errors
-    attr: Optional[str] = None      # the class; None: declared, resolve on import
+    attr: Optional[str] = None      # the class; None for a chain
     per_region: bool = False        # hands back Result.values: can run per region
     favorite: bool = True
     kind: str = "plugin"            # "plugin": a class in a .py.  "chain": a .chain.yaml
@@ -74,18 +74,9 @@ class PluginRef:
             from ..chain import load_class
             return load_class(self.origin, self.path)
         module = load_module(self.origin)
-        if self.attr is not None:
-            cls = getattr(module, self.attr, None)
-            if cls is None:
-                raise ImportError(f"{self.origin} has no {self.attr!r}")
-        else:
-            # declared through __smappy_plugins__: importing ran @register
-            from . import _REGISTRY
-            cls = _REGISTRY.get(self.path)
-            if cls is None:
-                raise ImportError(
-                    f"{self.origin} declares {self.path!r} in __smappy_plugins__ "
-                    "but importing it registered no such plugin")
+        cls = getattr(module, self.attr, None)
+        if cls is None:
+            raise ImportError(f"{self.origin} has no {self.attr!r}")
         # The folder named this plugin, so tell the class where it ended up.
         # Its own __dict__, not getattr: a plugin subclassing a registered one
         # would otherwise inherit that one's path and keep it.
@@ -209,25 +200,6 @@ def _literal_attrs(node: ast.ClassDef) -> Dict[str, Any]:
     return out
 
 
-def _module_declared(tree: ast.Module) -> List[str]:
-    """``__smappy_plugins__ = [...]`` at module level, for dynamic registration."""
-    for statement in tree.body:
-        if not isinstance(statement, ast.Assign):
-            continue
-        names = [t.id for t in statement.targets if isinstance(t, ast.Name)]
-        if "__smappy_plugins__" not in names:
-            continue
-        try:
-            value = ast.literal_eval(statement.value)
-        except (ValueError, TypeError, SyntaxError):
-            return []
-        if isinstance(value, str):
-            return [value]
-        if isinstance(value, (list, tuple)):
-            return [v for v in value if isinstance(v, str)]
-    return []
-
-
 def _looks_like_plugin(cls: _Class) -> bool:
     """A base called ``Plugin``, or one whose name ends in it.
 
@@ -269,16 +241,16 @@ def _refs_in_file(origin: Path, path_prefix: str, root: str
         classes.append(_Class(node.name, bases, _register_paths(node),
                               _literal_attrs(node), ast.get_docstring(node) or ""))
 
-    def make(path: str, cls: Optional[_Class], default_name: str) -> PluginRef:
-        attrs = cls.attrs if cls else {}
+    def make(path: str, cls: _Class, default_name: str) -> PluginRef:
+        attrs = cls.attrs
         leaf = path.rsplit("/", 1)[-1]
-        doc = (cls.doc if cls else "").strip().splitlines()
+        doc = cls.doc.strip().splitlines()
         return PluginRef(
             path=path,
             name=str(attrs.get("name") or leaf or default_name),
             description=str(attrs.get("description") or (doc[0] if doc else "")),
             origin=origin, root=root,
-            attr=cls.name if cls else None,
+            attr=cls.name,
             per_region=attrs.get("per_region") is True,
             favorite=bool(attrs.get("favorite", True)),
         )
@@ -288,12 +260,7 @@ def _refs_in_file(origin: Path, path_prefix: str, root: str
     if explicit:
         return [make(p, cls, cls.name) for cls, p in explicit], []
 
-    # 2. a module that builds its plugins dynamically says so
-    declared = _module_declared(tree)
-    if declared:
-        return [make(p, None, p.rsplit("/", 1)[-1]) for p in declared], []
-
-    # 3. otherwise the folder names it, and the file holds exactly one plugin
+    # 2. otherwise the folder names it, and the file holds exactly one plugin
     candidates = [c for c in classes if _looks_like_plugin(c)
                   and not c.name.startswith("_") and c.name not in used_as_base]
     stem = origin.stem

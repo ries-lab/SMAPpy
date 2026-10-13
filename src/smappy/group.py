@@ -641,7 +641,7 @@ class GroupSettings:
     dx: float = param(50.0, label="within", unit="nm", min=0,
                       help="how far a localization may move from one frame "
                            "to the next (half-width of a box)")
-    k: float = param(2.5, label="k", unit="sigma", min=0.1, step=0.1,
+    k: float = param(2.5, label="k", unit="sigma", min=0.1,
                      help="merge if r^2 < k^2 (s1^2 + s2^2), s the "
                           "precisions")
     dx_min: float = param(10.0, label="at least", unit="nm", min=0,

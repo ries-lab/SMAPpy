@@ -75,8 +75,6 @@ class _Field(QWidget):
             self.widget = QSpinBox()
             self.widget.setRange(int(info.min) if info.min is not None else -10**9,
                                  int(info.max) if info.max is not None else 10**9)
-            if info.step:
-                self.widget.setSingleStep(int(info.step))
             self.widget.valueChanged.connect(self.changed)
         else:
             # a line edit for floats and optionals: it takes "1e-7", and it is

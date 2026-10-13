@@ -21,7 +21,6 @@ class ParamInfo:
     help: Optional[str] = None
     min: Optional[float] = None
     max: Optional[float] = None
-    step: Optional[float] = None
     choices: Optional[Sequence] = None   # values, or (value, label) pairs; may be a callable
     advanced: bool = False      # hidden behind "more"
     hidden: bool = False        # scripting only

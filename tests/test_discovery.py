@@ -180,32 +180,6 @@ def test_load_imports_the_file_and_finds_the_class(tmp_path):
     assert cls.name == "My Drift"
 
 
-def test_a_module_can_declare_plugins_it_builds_dynamically(tmp_path):
-    write(tmp_path, "A/dynamic.py", """
-        from smappy.plugins import Plugin, register
-
-        for label in ("Red", "Green"):
-            register("Colour/" + label)(type(label, (Plugin,), {"changes_locs": False}))
-
-        __smappy_plugins__ = ["Colour/Red", "Colour/Green"]
-    """)
-    refs, problems = scan([("test", tmp_path)])
-    assert problems == [] and set(refs) == {"Colour/Red", "Colour/Green"}
-    assert refs["Colour/Red"].attr is None
-    assert refs["Colour/Red"].load().__name__ == "Red"
-
-
-def test_a_declaration_the_import_does_not_honour_is_an_error(tmp_path):
-    write(tmp_path, "A/lying.py", """
-        from smappy.plugins import Plugin
-
-        __smappy_plugins__ = ["Colour/Blue"]
-    """)
-    refs, _ = scan([("test", tmp_path)])
-    with pytest.raises(ImportError, match="registered no such plugin"):
-        refs["Colour/Blue"].load()
-
-
 # ------------------------------------------------- the registry on top of it
 
 def test_the_builtin_plugins_are_found_by_scanning(tmp_path):

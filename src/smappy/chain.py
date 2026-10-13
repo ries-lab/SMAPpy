@@ -51,13 +51,12 @@ import dataclasses
 import keyword
 import re
 import time
-import typing
 from dataclasses import dataclass, field, fields, make_dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from .plugins import (Context, FormState, ParamInfo, Plugin, PreflightChoice,
-                      PreflightQuestion, Result, Stopped, _hint_from_text, param,
+                      PreflightQuestion, Result, Stopped, param, settings_hints,
                       settings_from, SOURCES, refuse_grouped_table, settings_values)
 
 SCHEMA = "smappy-chain-v1"
@@ -348,13 +347,6 @@ def spec_from(plugin_cls, settings) -> Step:
 
 # ------------------------------------------------------------ the settings
 
-def _hints(settings_cls) -> Dict[str, Any]:
-    try:
-        return typing.get_type_hints(settings_cls)
-    except (TypeError, NameError):
-        return {f.name: _hint_from_text(f.type) for f in fields(settings_cls)}
-
-
 def _flat_infos(specs, prefix: str) -> Dict[str, ParamInfo]:
     """Every spec's presentation by dotted name, copied: `Plugin.specs` writes
     `advanced` onto the infos it returns, which may be a field's own."""
@@ -373,7 +365,7 @@ def step_settings_class(key: str, plugin_cls, step: Step) -> type:
     columns: List[tuple] = []
     if base is not None:
         defaults = settings_from(base, step.values)
-        hints = _hints(base)
+        hints = settings_hints(base)
         for f in fields(base):
             if not f.init:
                 continue

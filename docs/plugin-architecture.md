@@ -80,10 +80,6 @@ So the whole tree is populated instantly and correctly, a plugin that imports
 torch costs nothing until someone opens it, and there is no cache file to go
 stale -- the two things SMAP has to pay for with the generated `plugin.m`.
 
-A module that builds its plugins dynamically says so with a module-level
-`__smappy_plugins__ = ["Analysis/Cluster/DBSCAN", ...]`; the ref then has no
-class name and resolves through `@register` when the module is imported.
-
 Anything else the parser cannot make sense of becomes a `Diagnostic` -- a file
 and a sentence -- collected rather than raised, and shown in the GUI.  The scan
 does *not* fall back to importing such a file: importing what we failed to parse
