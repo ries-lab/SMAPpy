@@ -484,7 +484,10 @@ the fit found what was there.
 
 ### colour by
 *intensity* colours by brightness through the LUT; *field* colours by the
-column chosen beside it.
+column chosen beside it.  A layer coloured by a column puts a colour bar in
+the render window's top right corner: the LUT over the *colour range*, its
+ends in the column's unit.  With several such layers it is the first
+visible one's.  The bar is not part of a saved or copied picture.
 
 ### colour range
 The values that get the two ends of the LUT.  Narrow it to spread the

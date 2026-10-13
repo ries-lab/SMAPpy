@@ -16,7 +16,7 @@ from typing import List, Optional, Tuple
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QAction, QActionGroup, QImage
+from PySide6.QtGui import QAction, QActionGroup, QColor, QImage, QPainter
 from PySide6.QtWidgets import (QDoubleSpinBox, QFileDialog, QGraphicsPathItem,
                                QInputDialog, QLabel, QMenu, QToolBar, QToolButton,
                                QVBoxLayout, QWidget)
@@ -167,6 +167,8 @@ class RenderView(QWidget):
         self.empty_hint.setAlignment(Qt.AlignCenter)
         self.empty_hint.setStyleSheet("color: rgb(150, 150, 150); font-size: 15px;")
         self.empty_hint.setAttribute(Qt.WA_TransparentForMouseEvents)
+        # what the colours mean, when a layer is coloured by a column
+        self.colour_bar = ColourBar(self)
 
         # pan/zoom fires many range changes; render once they settle
         self._timer = QTimer(singleShot=True, interval=40)
@@ -236,6 +238,8 @@ class RenderView(QWidget):
     # ---------------------------------------------------------------- flow
     def _on_session(self, what: str) -> None:
         self._show_hint()
+        if what in ("locs", "layer", "layers", "regrouped"):
+            self.colour_bar.show_for(self.session.layers)
         if what == "locs":
             self.tile_valid = False
             self._arrange()
@@ -299,6 +303,7 @@ class RenderView(QWidget):
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self.empty_hint.setGeometry(self.rect())
+        self.colour_bar.place()
         if len(self.panels) > 1:
             self._arrange()
 
@@ -991,6 +996,100 @@ class RenderToolBar(QToolBar):
         if path:
             folders.remember(path)
             self.view.save_tiff(path, pixelsize, what)
+
+
+class ColourBar(QWidget):
+    """The colour scale of a layer coloured by a column: its LUT from the
+    bottom of the colour range to the top, the two ends in the column's unit.
+
+    A widget over the picture's top right corner rather than an item in it:
+    it is read, not panned, and it stays out of what Save and Copy take,
+    which are the picture alone.  One bar, for the first visible layer
+    coloured by a column -- two layers coloured by two columns are rare, and
+    two bars would take more of the picture than they are worth.  Plain
+    intensity has no bar: its LUT is brightness, which the picture shows.
+    """
+
+    WIDTH, HEIGHT, BAR = 74, 150, 12          # px: the widget, and the bar in it
+
+    def __init__(self, parent: QWidget):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.resize(self.WIDTH, self.HEIGHT)
+        self.field = ""
+        self.range: Tuple[float, float] = (0.0, 1.0)
+        self.table = np.zeros((2, 3), np.float32)
+        self.hide()
+
+    def show_for(self, layers) -> None:
+        """Show the scale of the first visible layer coloured by a column."""
+        from .. import lut as luts
+        for layer in layers:
+            if layer.is_image or not layer.visible or layer.state is None:
+                continue
+            settings, display = layer.state.settings, layer.state.display
+            field = settings.color_field
+            if field is None or field not in layer.locs:
+                continue
+            lo, hi = settings.color_range or _finite_range(layer.locs[field])
+            try:
+                table = luts.get(display.lut, display.invert)
+            except (KeyError, ValueError):
+                continue
+            if display.white_background:
+                table = luts.on_white(table)
+            self.field, self.range, self.table = field, (lo, hi), table
+            self.setToolTip(f"{field}: colour range {lo:g} to {hi:g}")
+            self.place()
+            self.show()
+            self.raise_()
+            self.update()
+            return
+        self.field = ""
+        self.hide()
+
+    def place(self) -> None:
+        parent = self.parentWidget()
+        if parent is not None:
+            self.move(parent.width() - self.WIDTH - 8, 8)
+
+    def labels(self) -> Tuple[str, str, str]:
+        """The title, the top and the bottom label: "z_nm", "300 nm", "-300 nm"."""
+        unit = axis_unit(self.field)
+        unit = "" if unit == self.field else f" {unit}"
+        lo, hi = self.range
+        return self.field, f"{hi:.4g}{unit}", f"{lo:.4g}{unit}"
+
+    def paintEvent(self, event) -> None:          # noqa: N802 (Qt's name)
+        title, top, bottom = self.labels()
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 140))
+        metrics = painter.fontMetrics()
+        line = metrics.height()
+        x, y0, y1 = 6, 6 + line, self.height() - 6
+        # the LUT upwards: the top of the range at the top
+        rgb = (np.clip(self.table[::-1], 0, 1) * 255).astype(np.uint8)
+        rgb = np.ascontiguousarray(np.repeat(rgb[:, None, :], 2, axis=1))
+        image = QImage(rgb.data, 2, len(rgb), 6, QImage.Format_RGB888)
+        painter.drawImage(QRectF(x, y0, self.BAR, y1 - y0), image)
+        painter.setPen(QColor(230, 230, 230))
+        text_x = x + self.BAR + 4
+        for text, rect, align in (
+                (title, QRectF(4, 2, self.width() - 8, line), Qt.AlignLeft),
+                (top, QRectF(text_x, y0, self.width() - text_x, line),
+                 Qt.AlignLeft | Qt.AlignTop),
+                (bottom, QRectF(text_x, y1 - line, self.width() - text_x, line),
+                 Qt.AlignLeft | Qt.AlignBottom)):
+            text = metrics.elidedText(text, Qt.ElideRight, int(rect.width()))
+            painter.drawText(rect, align, text)
+        painter.end()
+
+
+def _finite_range(values) -> Tuple[float, float]:
+    """What the renderer colours over when no range is set: min to max."""
+    values = np.asarray(values, np.float64)
+    finite = values[np.isfinite(values)]
+    return (float(finite.min()), float(finite.max())) if finite.size else (0.0, 1.0)
 
 
 class AxisBars:
