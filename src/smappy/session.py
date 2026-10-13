@@ -956,8 +956,8 @@ class Session:
             # the ROI manager's project as it is now, not as the file was
             # saved: a chain's segmenter adds to it and its evaluators run on
             # it, and the chain hands it back as `Result.roi_project`
-            from .roi_manager.link import SessionROIs
-            copy._rois = SessionROIs(copy)
+            from .roi_manager.core import ROIProject
+            copy._rois = ROIProject(copy)
             copy._rois.layer = self._rois.layer
             copy._rois.sync()
             copy._rois.from_dict(self._rois.to_dict())
@@ -1177,8 +1177,8 @@ class Session:
         evaluation runs, and it is saved with the localization file.
         """
         if self._rois is None:
-            from .roi_manager.link import SessionROIs
-            self._rois = SessionROIs(self)
+            from .roi_manager.core import ROIProject
+            self._rois = ROIProject(self)
             saved = self.locs.metadata.get("roi_project")
             self._rois.sync()
             if saved:
