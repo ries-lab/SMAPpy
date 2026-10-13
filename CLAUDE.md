@@ -334,6 +334,9 @@ holds everything else.
   leave it out.
 * **Settings by their GUI label**, in italics (*time windows*), in the
   prose.  Column names in backticks (`xy_err_nm`).
+* **Jargon** is explained at its first mention on each page: the names
+  common in the field and one plain line, linked to the Glossary
+  (`plugin:Panels/Glossary`) and worded as it is there.
 * **Parameter notes add to the tooltip, never repeat it.**  The tooltip
   (`param(help=...)`) is a short phrase and is shown in the table anyway; a
   `### field` note says how to choose the value, what goes wrong at either
