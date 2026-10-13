@@ -37,6 +37,9 @@ LAYOUTS = (("overlay", "overlay"), ("side", "side by side"),
            ("side+overlay", "side by side + overlay"))
 PANEL_LABEL = (255, 255, 255)
 PANEL_BORDER = pg.mkPen((128, 128, 128), width=1)
+# what the view says while it has nothing to show
+EMPTY_HINT = ("Open or drop a file (File > Open...)\n"
+              "or simulate one: File tab > Simulate structure")
 _LIVE_THREADS = []  # every render thread, so exit can stop them all
 
 
@@ -156,6 +159,14 @@ class RenderView(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.graphics)
+        # A first start is a black window: say what to do about it.  A label
+        # over the picture rather than an item in it, so it neither pans nor
+        # ends up in a saved or copied image; transparent to the mouse, so a
+        # file dropped on it still reaches the window.
+        self.empty_hint = QLabel(EMPTY_HINT, self)
+        self.empty_hint.setAlignment(Qt.AlignCenter)
+        self.empty_hint.setStyleSheet("color: rgb(150, 150, 150); font-size: 15px;")
+        self.empty_hint.setAttribute(Qt.WA_TransparentForMouseEvents)
 
         # pan/zoom fires many range changes; render once they settle
         self._timer = QTimer(singleShot=True, interval=40)
@@ -224,6 +235,7 @@ class RenderView(QWidget):
 
     # ---------------------------------------------------------------- flow
     def _on_session(self, what: str) -> None:
+        self._show_hint()
         if what == "locs":
             self.tile_valid = False
             self._arrange()
@@ -273,8 +285,20 @@ class RenderView(QWidget):
         above = min(W / w, H / n / h)
         return above > across
 
+    def _show_hint(self) -> None:
+        """The empty-view hint while there is nothing to draw, and only then."""
+        empty = not self._has_content()
+        self.empty_hint.setVisible(empty)
+        if empty:
+            # a bar the width of a view that shows nothing measures nothing;
+            # the next render (`_update_guides`) shows it again
+            self.scalebar.setVisible(False)
+            self.empty_hint.setGeometry(self.rect())
+            self.empty_hint.raise_()
+
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
+        self.empty_hint.setGeometry(self.rect())
         if len(self.panels) > 1:
             self._arrange()
 
@@ -335,6 +359,7 @@ class RenderView(QWidget):
 
     def reset(self) -> None:
         """Show everything."""
+        self._show_hint()
         if not self._has_content():
             self.image.clear()
             return
