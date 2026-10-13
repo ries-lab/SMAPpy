@@ -58,7 +58,10 @@ class LocalizationWriter:
         self._write_metadata()
 
     def _write_metadata(self) -> None:
-        small = {k: v for k, v in self._metadata.items() if k not in LARGE}
+        # a key with a leading underscore is the process's own -- the 3D
+        # view's cache token (`view3d.table_token`) -- and meaningless on disk
+        small = {k: v for k, v in self._metadata.items()
+                 if k not in LARGE and not k.startswith("_")}
         rois = small.get("roi_project")
         if isinstance(rois, dict) and "tables" in rois:
             # the ROI results are columns: datasets of their own, not text in

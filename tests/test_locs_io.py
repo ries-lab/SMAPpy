@@ -173,3 +173,13 @@ def test_prefetch_reraises_reader_errors():
 
     with pytest.raises(RuntimeError, match="disk went away"):
         list(prefetch(broken(), depth=2))
+
+
+def test_a_private_metadata_key_is_not_written(tmp_path):
+    """The 3D view's cache token is an `object()`: written, it was junk text."""
+    locs = _table()
+    locs.metadata["_gpu_token"] = object()
+    path = tmp_path / "t.h5"
+    with LocalizationWriter(path, dict(locs.metadata)) as writer:
+        writer.append(locs)
+    assert "_gpu_token" not in load_localizations(path).metadata
