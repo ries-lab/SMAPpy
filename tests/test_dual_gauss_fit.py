@@ -268,6 +268,47 @@ def test_a_saved_transformation_is_used_when_one_is_given(tmp_path):
     assert preview.plot is not None and preview.data["candidates"] > 2
 
 
+def test_a_2d_2c_run_reads_its_transformation_once_and_a_measured_one_not_at_all(
+        tmp_path, monkeypatch):
+    """The two-channel fitters share the reading (`_TwoChannelFit`): a file
+    once per run, and none when the movie is registered on itself, even with
+    a file chosen."""
+    import tifffile
+    from smappy.calibrate import transform as module
+    from smappy.calibrate.transform import save_channel_transform
+    from smappy.plugins.fit import (CameraSettings, ChannelTransformSettings,
+                                    DetectionSettings, DualGaussianFit,
+                                    DualGaussianFitSettings, OutputSettings,
+                                    SourceSettings)
+
+    rng = np.random.default_rng(8)
+    t = transform()
+    frames, _ = movie(12, rng, t)
+    stack = tmp_path / "split.tif"
+    tifffile.imwrite(stack, (frames + 100).astype(np.uint16))
+    path = tmp_path / "given_2ct.h5"
+    save_channel_transform(path, t)
+    reads = []
+    load = module.load_transform
+    monkeypatch.setattr(module, "load_transform",
+                        lambda p: reads.append(p) or load(p))
+    settings = DualGaussianFitSettings(
+        source=SourceSettings(path=str(stack), chunk=4),
+        camera=CameraSettings(conversion=1.0, offset=100.0, pixelsize_um=0.1),
+        detection=DetectionSettings(cutoff_mode="absolute", cutoff=25.0),
+        transform=ChannelTransformSettings(path=str(path)),
+        fit=FitSettings(roisize=13), output=OutputSettings(save=False))
+    plugin = DualGaussianFit()
+    assert len(plugin.run(Context(), settings).locs) > 10
+    assert len(reads) == 1
+
+    reads.clear()
+    monkeypatch.setattr(DualGaussianFit, "_calibrate", lambda self, ctx, s: t)
+    settings.transform.calibrate = True
+    assert len(plugin.run(Context(), settings).locs) > 10
+    assert reads == []
+
+
 def test_it_says_so_when_there_is_no_transformation_at_all(tmp_path):
     from smappy.plugins.fit import (DualGaussianFit, DualGaussianFitSettings,
                                     SourceSettings)

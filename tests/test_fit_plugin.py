@@ -36,6 +36,25 @@ def test_parts_show_up_as_children():
     assert "Localize/Spline 3D" in plugins.available("Localize/")
 
 
+def test_every_fitter_shows_the_shared_parts_in_one_order_and_its_own_in_place():
+    """The forms are declared in halves around the model (fit.py, "the
+    forms"); a part only one fitter has sits where it always did."""
+    from smappy.plugins.fit import DualGaussianFit, DualSplineFit, SplineFit
+    shared = ["source", "camera", "detection", "model", "fit", "output"]
+    assert list(GaussianFit.specs()) == shared
+    assert list(SplineFit.specs()) == shared
+    assert list(DualSplineFit.specs()) == shared + ["finish"]
+    assert list(DualGaussianFit.specs()) == (shared[:4] + ["transform"]
+                                             + shared[4:] + ["finish"])
+    # the model is each fitter's own, and the two-channel ones share links
+    assert [list(cls.specs()["model"].children) for cls in
+            (DualSplineFit, DualGaussianFit)] == [
+        ["calibration", "link_xy", "link_z", "link_photons", "link_background",
+         "photon_ratio"],
+        ["sigma", "link_xy", "link_photons", "link_background", "link_sigma",
+         "photon_ratio"]]
+
+
 def test_fit_runs_without_a_gui_and_streams(stack, tmp_path):
     settings = GaussianFitSettings(
         source=SourceSettings(path=str(stack), chunk=8),

@@ -394,7 +394,10 @@ def camera_resolution(settings):
 
 # -------------------------------------------------------------------- wrappers
 class _FitPlugin(Plugin):
-    """What both fitters share: opening the source, streaming, saving."""
+    """What every fitter shares: opening the source, the camera, detection,
+    streaming, saving.  The four fitters are thin subclasses that say which
+    model they fit and, for two channels (`_TwoChannelFit`), where the
+    registration comes from."""
 
     changes_locs = True
 
@@ -892,53 +895,104 @@ def _open(src: SourceSettings, watch: bool, stop_event=None):
     return open_stack(src.path)
 
 
+# ------------------------------------------------------------------ the forms
+#
+# Every fitter's form is the same parts in the same order -- the frames, the
+# camera, detection, the PSF model, the fit, the output -- and only the model
+# is each fitter's own.  The parts are declared once, in halves rather than in
+# one base: a dataclass lays out its bases' fields first, the most basic base
+# first, so a part that sits *between* two of them -- the 2D two-colour fit's
+# *transform* -- needs a half on either side.  A fitter that declares `model`
+# again keeps it where the first half put it.  Saved workspaces and chains
+# name the fields by these paths (``fit.roisize``), so they are the contract.
 @dataclass
-class GaussianFitSettings:
+class _Reading:
+    """The first half of every fitter's form: what is read and found."""
     source: SourceSettings = field(default_factory=SourceSettings)
     camera: CameraSettings = field(default_factory=CameraSettings)
     detection: DetectionSettings = field(default_factory=DetectionSettings)
+    model: Any = None                    # each fitter's own part
+
+
+@dataclass
+class _Writing:
+    """The second half: how it is fitted and where it goes."""
+    fit: FitSettings = field(default_factory=FitSettings)
+    output: OutputSettings = field(default_factory=OutputSettings)
+
+
+@dataclass
+class _Finishing:
+    """What a two-channel fit does once its last frame is in."""
+    finish: FinishSettings = param(default_factory=FinishSettings,
+                                   label="after the fit")
+
+
+@dataclass
+class GaussianFitSettings(_Writing, _Reading):
     model: GaussianModelSettings = field(default_factory=GaussianModelSettings)
-    fit: FitSettings = field(default_factory=FitSettings)
-    output: OutputSettings = field(default_factory=OutputSettings)
 
 
 @dataclass
-class SplineFitSettings:
-    source: SourceSettings = field(default_factory=SourceSettings)
-    camera: CameraSettings = field(default_factory=CameraSettings)
-    detection: DetectionSettings = field(default_factory=DetectionSettings)
+class SplineFitSettings(_Writing, _Reading):
     model: SplineModelSettings = field(default_factory=SplineModelSettings)
-    fit: FitSettings = field(default_factory=FitSettings)
-    output: OutputSettings = field(default_factory=OutputSettings)
+
+
+# The links two channels can share, declared once for both two-channel
+# models.  Fields made by functions rather than inherited, for the reason the
+# forms are in halves: each model shows its own first field (the calibration,
+# the start sigma) above them, and its own fifth link where it belongs.
+def _link_xy():
+    return param(True, label="link x, y",
+                 help="one position for both channels, through the "
+                      "registration; unlink only to check the transform")
+
+
+def _link_photons(more: str = ""):
+    return param(False, label="link photons",
+                 help="off for two colours -- the photon ratio is what tells "
+                      "the dyes apart" + more)
+
+
+def _link_background():
+    return param(False, label="link background", advanced=True,
+                 help="one background for both halves; off: each half fits "
+                      "its own")
+
+
+def _photon_ratio(auto: str):
+    return param(None, label="photon ratio", min=0, advanced=True,
+                 help="secondary / main, used when the photons are linked; "
+                      "auto: " + auto)
+
+
+class _LinkedChannels:
+    """What the two-channel models share beyond their fields."""
+
+    # the field that links the model's own fifth parameter: z, or the width
+    FIFTH_LINK = ""
+
+    def shared(self) -> tuple:
+        """Which of x, y, photons, background and the fifth parameter both
+        channels fit as one."""
+        return (self.link_xy, self.link_xy, self.link_photons,
+                self.link_background, getattr(self, self.FIFTH_LINK))
 
 
 @dataclass
-class DualModelSettings:
+class DualModelSettings(_LinkedChannels):
     """A dual-colour calibration, and which parameters the channels share."""
+    FIFTH_LINK = "link_z"
     calibration: str = param("", label="calibration", kind="open_file",
                              file_filter="Dual-colour calibration (*.h5 *.hdf5)",
                              help="from Bead calibration in *Dual colour* mode")
-    link_xy: bool = param(True, label="link x, y",
-                          help="one position for both channels, through the "
-                               "registration; unlink only to check the transform")
+    link_xy: bool = _link_xy()
     link_z: bool = param(True, label="link z",
                          help="one z for both channels: this is the sqrt(2)")
-    link_photons: bool = param(False, label="link photons",
-                               help="off for two colours -- the photon ratio is "
-                                    "what tells the dyes apart; on for biplane")
-    link_background: bool = param(False, label="link background", advanced=True,
-                                  help="one background for both halves; off: "
-                                       "each half fits its own")
-    photon_ratio: Optional[float] = param(None, label="photon ratio", min=0,
-                                          advanced=True,
-                                          help="secondary / main, used when the "
-                                               "photons are linked; auto: the "
-                                               "split the calibration's two "
-                                               "PSFs carry")
-
-    def shared(self) -> tuple:
-        return (self.link_xy, self.link_xy, self.link_photons,
-                self.link_background, self.link_z)
+    link_photons: bool = _link_photons("; on for biplane")
+    link_background: bool = _link_background()
+    photon_ratio: Optional[float] = _photon_ratio(
+        "the split the calibration's two PSFs carry")
 
     def load(self):
         from ..calibrate.dual import load_dual_color_calibration
@@ -956,17 +1010,11 @@ class DualModelSettings:
 
 
 @dataclass
-class DualSplineFitSettings:
-    source: SourceSettings = field(default_factory=SourceSettings)
-    camera: CameraSettings = field(default_factory=CameraSettings)
-    detection: DetectionSettings = field(default_factory=DetectionSettings)
+class DualSplineFitSettings(_Finishing, _Writing, _Reading):
     model: DualModelSettings = field(default_factory=DualModelSettings)
-    fit: FitSettings = field(default_factory=FitSettings)
-    output: OutputSettings = field(default_factory=OutputSettings)
-    finish: FinishSettings = param(default_factory=FinishSettings,
-                                   label="after the fit")
 
 
+# --------------------------------------------------------------- the fitters
 @register("Localize/Gaussian 2D")
 class GaussianFit(_FitPlugin):
     description = "Detect and fit with a free-width Gaussian PSF: x, y, photons, sigma."
@@ -992,8 +1040,108 @@ class SplineFit(_FitPlugin):
         return settings.model.model(camera, roisize=settings.fit.roisize)
 
 
+class _TwoChannelFit(_FitPlugin):
+    """What both two-channel fitters share: one emitter, both halves.
+
+    Candidates are found over the whole frame, each half thresholded on its
+    own, and combined; each gets an ROI in both halves, and the pair is fitted
+    at once with the parameters the form links (`dualfit`).  The two differ
+    only in where the registration comes from -- a dual-colour bead
+    calibration, which brings the two PSFs with it, or a transformation alone
+    -- so that is all each of them says (`read_registration`).
+
+    The registration is read once per run or preview and handed to the
+    finder, the model, the engine and the back-projection, which each read the
+    file before: three times a run, four a preview.  It is kept with the path
+    it came from, so that a preview with another file chosen meanwhile never
+    gets a run's.
+    """
+
+    _loaded = None             # (path, registration) of the run in progress
+
+    def registration_path(self, settings) -> str:
+        raise NotImplementedError
+
+    def read_registration(self, settings):
+        raise NotImplementedError
+
+    def measure(self, ctx: Context, settings):
+        """A registration measured from the movie before the fit, or None."""
+        return None
+
+    def registration(self, settings):
+        """The registration: the one this run read, or off disk."""
+        loaded = self._loaded
+        if loaded is not None and loaded[0] == self.registration_path(settings):
+            return loaded[1]
+        return self.read_registration(settings)
+
+    def _reading_once(self, settings, call, measured=None):
+        """``call()`` with the registration read once beforehand.
+
+        A file that cannot be read is not an error here: the steps that need
+        it then try themselves and fail as they did, so a preview still draws
+        the candidates and says why it could not fit them.
+        """
+        key = self.registration_path(settings)
+        if measured is not None:
+            self._loaded = (key, measured)
+        else:
+            try:
+                self._loaded = (key, self.read_registration(settings))
+            except Exception:
+                self._loaded = None
+        try:
+            return call()
+        finally:
+            self._loaded = None
+
+    def run(self, ctx: Context, settings) -> Result:
+        measured = self.measure(ctx, settings)
+        return self._reading_once(
+            settings, lambda: super(_TwoChannelFit, self).run(ctx, settings),
+            measured)
+
+    def preview(self, ctx: Context, settings, frame: int = 0) -> Result:
+        return self._reading_once(
+            settings, lambda: super(_TwoChannelFit, self).preview(ctx, settings,
+                                                                  frame))
+
+    def back_projected(self, settings, camera, candidates):
+        from ..dualfit import secondary_to_reference, which_channel
+        registration = self.registration(settings)
+        ox, oy = camera.roi_offset
+        secondary = ~which_channel(candidates.x + ox, candidates.y + oy,
+                                   registration.geometry)
+        mapped = secondary_to_reference(candidates.x[secondary],
+                                        candidates.y[secondary],
+                                        registration, (ox, oy))
+        return mapped[:, 0], mapped[:, 1]
+
+    def finder(self, settings, camera=None):
+        """Each half thresholded on its own.
+
+        The two halves are two detection channels; a dynamic cutoff pooled
+        over both is set by whichever is brighter, and the dim one then loses
+        the fainter partner of every pair -- which is most of the pairs a
+        registration would have had, and most of the colour the fit is for.
+        """
+        from dataclasses import replace as _replace
+        base = super().finder(settings, camera)
+        try:
+            geometry = self.registration(settings).geometry
+        except Exception:
+            return base                          # none yet: preview only
+        return _replace(base, split=self._split_for_detection(geometry, camera))
+
+    def engine(self, settings, camera, finder, model):
+        from ..dualfit import DualChannelEngine
+        return DualChannelEngine(camera, finder, model, self.registration(settings),
+                                 settings.fit, settings.model.photon_ratio)
+
+
 @register("Localize/Spline 3D 2C")
-class DualSplineFit(_FitPlugin):
+class DualSplineFit(_TwoChannelFit):
     """The 3D two-channel workflow: one emitter, both halves of a split frame.
 
     Candidates are found over the whole frame and combined, each gets an ROI
@@ -1016,71 +1164,15 @@ class DualSplineFit(_FitPlugin):
     version = "5"
     Settings = DualSplineFitSettings
 
-    # The calibration of the run in progress, with the path it was read from.
-    # `finder`, `model`, `engine` and `back_projected` all need it, and each
-    # used to read the file -- two PSFs and their splines, three times a run
-    # and four a preview.  Keyed on the path, so that a preview with another
-    # file chosen meanwhile never gets a run's.
-    _loaded = None
+    def registration_path(self, settings) -> str:
+        return settings.model.calibration
 
-    def calibration(self, settings):
-        """The dual-colour calibration: the one this run read, or off disk."""
-        loaded = self._loaded
-        if loaded is not None and loaded[0] == settings.model.calibration:
-            return loaded[1]
+    def read_registration(self, settings):
+        """The dual-colour calibration: the registration and both PSFs."""
         return settings.model.load()
 
-    def _reading_once(self, settings, call):
-        """``call()`` with the calibration read once beforehand.
-
-        A file that cannot be read is not an error here: the steps that need
-        it then try themselves and fail as they did, so a preview still draws
-        the candidates and says why it could not fit them.
-        """
-        try:
-            self._loaded = (settings.model.calibration, settings.model.load())
-        except Exception:
-            self._loaded = None
-        try:
-            return call()
-        finally:
-            self._loaded = None
-
-    def run(self, ctx: Context, settings) -> Result:
-        return self._reading_once(settings, lambda: super(DualSplineFit, self)
-                                  .run(ctx, settings))
-
-    def preview(self, ctx: Context, settings, frame: int = 0) -> Result:
-        return self._reading_once(settings, lambda: super(DualSplineFit, self)
-                                  .preview(ctx, settings, frame))
-
     def model(self, settings, camera):
-        return settings.model.model(self.calibration(settings), camera)
-
-    def back_projected(self, settings, camera, candidates):
-        from ..dualfit import secondary_to_reference, which_channel
-        calibration = self.calibration(settings)
-        ox, oy = camera.roi_offset
-        secondary = ~which_channel(candidates.x + ox, candidates.y + oy,
-                                   calibration.geometry)
-        mapped = secondary_to_reference(candidates.x[secondary],
-                                        candidates.y[secondary],
-                                        calibration, (ox, oy))
-        return mapped[:, 0], mapped[:, 1]
-
-    def finder(self, settings, camera=None):
-        from dataclasses import replace as _replace
-        base = super().finder(settings, camera)
-        try:
-            geometry = self.calibration(settings).geometry
-        except Exception:
-            return base                          # no calibration yet: preview only
-        return _replace(base, split=self._split_for_detection(geometry, camera))
-
-    def engine(self, settings, camera, finder, model):
-        from ..dualfit import DualChannelEngine
-        return DualChannelEngine(camera, finder, model, self.calibration(settings),
-                                 settings.fit, settings.model.photon_ratio)
+        return settings.model.model(self.registration(settings), camera)
 
 
 # ----------------------------------------------------- two channels, no model
@@ -1257,35 +1349,22 @@ class ChannelTransformSettings:
 
 
 @dataclass
-class DualGaussianModelSettings:
+class DualGaussianModelSettings(_LinkedChannels):
     """A free-width Gaussian per channel, and which parameters they share."""
+    FIFTH_LINK = "link_sigma"
     sigma: float = param(1.2, label="start sigma", unit="pix", min=0.1,
                          help="the PSF width both halves' fits start from; "
                               "each is fitted")
-    link_xy: bool = param(True, label="link x, y",
-                          help="one position for both channels, through the "
-                               "registration; unlink only to check the transform")
-    link_photons: bool = param(False, label="link photons",
-                               help="off for two colours -- the photon ratio is "
-                                    "what tells the dyes apart")
-    link_background: bool = param(False, label="link background", advanced=True,
-                                  help="one background for both halves; off: "
-                                       "each half fits its own")
+    link_xy: bool = _link_xy()
+    link_photons: bool = _link_photons()
+    link_background: bool = _link_background()
     link_sigma: bool = param(False, label="link width", advanced=True,
                              help="off: each half finds its own width, which it "
                                   "should -- they see different wavelengths and "
                                   "rarely share a focus")
-    photon_ratio: Optional[float] = param(None, label="photon ratio", min=0,
-                                          advanced=True,
-                                          help="secondary / main, used when the "
-                                               "photons are linked; auto: the "
-                                               "beads' ratio if the "
-                                               "transformation is a bead "
-                                               "calibration, otherwise 1")
-
-    def shared(self) -> tuple:
-        return (self.link_xy, self.link_xy, self.link_photons,
-                self.link_background, self.link_sigma)
+    photon_ratio: Optional[float] = _photon_ratio(
+        "the beads' ratio if the transformation is a bead calibration, "
+        "otherwise 1")
 
     def model(self, channels: int = 2):
         from ..psf import GlobalGaussianPSF
@@ -1294,20 +1373,18 @@ class DualGaussianModelSettings:
 
 
 @dataclass
-class DualGaussianFitSettings:
-    source: SourceSettings = field(default_factory=SourceSettings)
-    camera: CameraSettings = field(default_factory=CameraSettings)
-    detection: DetectionSettings = field(default_factory=DetectionSettings)
-    model: DualGaussianModelSettings = field(default_factory=DualGaussianModelSettings)
+class _Transform:
+    """The part only the 2D two-colour form has, between its two halves."""
     transform: ChannelTransformSettings = field(default_factory=ChannelTransformSettings)
-    fit: FitSettings = field(default_factory=FitSettings)
-    output: OutputSettings = field(default_factory=OutputSettings)
-    finish: FinishSettings = param(default_factory=FinishSettings,
-                                   label="after the fit")
+
+
+@dataclass
+class DualGaussianFitSettings(_Finishing, _Writing, _Transform, _Reading):
+    model: DualGaussianModelSettings = field(default_factory=DualGaussianModelSettings)
 
 
 @register("Localize/Gaussian 2D 2C")
-class DualGaussianFit(_FitPlugin):
+class DualGaussianFit(_TwoChannelFit):
     """The 2D two-channel workflow: one emitter, both halves, no PSF model.
 
     `DualSplineFit` without the calibration.  Candidates are found over the
@@ -1335,48 +1412,21 @@ class DualGaussianFit(_FitPlugin):
     def model(self, settings, camera):
         return settings.model.model()
 
-    # a transformation measured from this movie, kept so that `engine` and
-    # `back_projected` need no file: writing one only to read it back would
-    # make saving it a precondition of fitting rather than a convenience
-    _measured = None
+    def registration_path(self, settings) -> str:
+        return settings.transform.path
 
-    def transform(self, settings):
-        """The registration this fit will use: measured here, or off disk."""
-        if self._measured is not None:
-            return self._measured
+    def read_registration(self, settings):
+        """A transformation off disk, or the one in a dual-colour calibration."""
         return settings.transform.load()
 
-    def back_projected(self, settings, camera, candidates):
-        from ..dualfit import secondary_to_reference, which_channel
-        transform = self.transform(settings)
-        ox, oy = camera.roi_offset
-        secondary = ~which_channel(candidates.x + ox, candidates.y + oy,
-                                   transform.geometry)
-        mapped = secondary_to_reference(candidates.x[secondary],
-                                        candidates.y[secondary],
-                                        transform, (ox, oy))
-        return mapped[:, 0], mapped[:, 1]
+    def measure(self, ctx: Context, settings):
+        """The transformation measured from this movie, when that is asked for.
 
-    def finder(self, settings, camera=None):
-        """Each half thresholded on its own.
-
-        The two halves are two detection channels; a dynamic cutoff pooled
-        over both is set by whichever is brighter, and the dim one then loses
-        the fainter partner of every pair -- which is most of the pairs a
-        registration would have had, and most of the colour the fit is for.
+        Handed to the run rather than saved and read back: writing a file
+        only to read it would make saving it a precondition of fitting rather
+        than a convenience.
         """
-        from dataclasses import replace as _replace
-        base = super().finder(settings, camera)
-        try:
-            geometry = self.transform(settings).geometry
-        except Exception:
-            return base                          # no transformation yet
-        return _replace(base, split=self._split_for_detection(geometry, camera))
-
-    def engine(self, settings, camera, finder, model):
-        from ..dualfit import DualChannelEngine
-        return DualChannelEngine(camera, finder, model, self.transform(settings),
-                                 settings.fit, settings.model.photon_ratio)
+        return self._calibrate(ctx, settings) if settings.transform.calibrate else None
 
     def preflight(self, ctx: Context, settings):
         """No plain "start anyway": without a transformation the fit cannot
@@ -1393,15 +1443,6 @@ class DualGaussianFit(_FitPlugin):
             "cancel and choose a file.",
             choices=(PreflightChoice("Calibrate from this movie", calibrated),),
             run_label="")
-
-    def run(self, ctx: Context, settings) -> Result:
-        self._measured = None
-        if settings.transform.calibrate:
-            self._measured = self._calibrate(ctx, settings)
-        try:
-            return super().run(ctx, settings)
-        finally:
-            self._measured = None
 
     # ------------------------------------------------------------ calibrate
     def _calibrate(self, ctx: Context, settings):
