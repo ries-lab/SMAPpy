@@ -7,8 +7,8 @@ from smappy.locs import Localizations
 from smappy.mathparse import recipes
 from smappy.plugins.clusters import DBSCAN, auto_eps, dbscan, sizes_of
 from smappy.plugins.region_column import (ColumnToROIs, RegionsToColumn, column_regions,
-                                          hull, roi_numbers)
-from smappy.region_runs import values_onto
+                                          hull)
+from smappy.region_runs import roi_numbers, values_onto
 from smappy.session import Session
 
 SIZES = (60, 40, 25)

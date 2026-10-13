@@ -1,6 +1,6 @@
 ---
 version: "2"
-covers: [smappy.plugins.region_column.RegionsToColumn.run, smappy.plugins.region_column.rows_values, smappy.plugins.region_column.roi_numbers, smappy.region_runs.region_members, smappy.region_runs.values_onto, smappy.region_runs.merge_pieces, smappy.region_runs.with_region_columns]
+covers: [smappy.plugins.region_column.RegionsToColumn.run, smappy.plugins.region_column.rows_values, smappy.region_runs.write_values, smappy.region_runs.roi_numbers, smappy.region_runs.region_members, smappy.region_runs.values_onto, smappy.region_runs.merge_pieces, smappy.region_runs.with_region_columns]
 ---
 
 ## What it does
@@ -57,7 +57,10 @@ on the column drops it.  The ROI number is 0 outside every ROI.
 
 **Overlaps.**  Where two ROIs overlap, a localization takes the later ROI's
 value -- the one made after the other -- or, with *overlaps*, the first's or
-the mean of both.  The regions of an id column never overlap.
+the mean of both.  The regions of an id column never overlap.  A block's
+*write values* writes by the same rules, the block's own *overlaps*; its
+fourth choice, *any*, is for a flag the block writes back and is refused
+for written values.
 
 **Merged blinks.**  The columns are kept when blinks are merged -- [merge
 blinks](plugin:Panels/Glossary), also called grouping or linking, combines

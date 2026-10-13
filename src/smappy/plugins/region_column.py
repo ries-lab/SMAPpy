@@ -36,11 +36,11 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 
 from . import Context, FormState, Plugin, Result, param, register
+from ..region_runs import VALUE_RULES
 from .roi import auto_only, replace_param
 
 # what *results from* is when it is empty: the ROIs, without an evaluation
 NUMBERS = "the ROIs' numbers"
-OVERLAPS = ("last", "first", "mean")
 
 
 @dataclass
@@ -53,7 +53,7 @@ class RegionColumnSettings:
                              "measurement has; roi_id: the ROI's number")
     prefix: str = param("", label="prefix", advanced=True,
                         help="put before each column's name")
-    merge: str = param("last", label="overlaps", choices=OVERLAPS, advanced=True,
+    merge: str = param("last", label="overlaps", choices=VALUE_RULES, advanced=True,
                        help="a localization in two ROIs takes the later ROI's "
                             "value, the first's, or their mean")
 
@@ -94,8 +94,7 @@ class RegionsToColumn(Plugin):
     def run(self, ctx: Context, settings: RegionColumnSettings) -> Result:
         from .. import region_results
         from ..chain import BLOCK_ROIS
-        from ..region_runs import (REGION_NUMBER, region_members, values_onto,
-                                   with_region_columns)
+        from ..region_runs import REGION_NUMBER, write_values
         names = [v.strip() for v in settings.values.split(",") if v.strip()]
         source = settings.source
         ev = region_results.Evaluation.parse(source)
@@ -120,25 +119,12 @@ class RegionsToColumn(Plugin):
             elif measured:
                 raise ValueError(f"{', '.join(measured)}: name the measurement that "
                                  "measured them in *results from*")
-        members = region_members(ctx, regions)
-        if regions == BLOCK_ROIS:
-            # an ROI by its number, as the results' rows name it
-            by_id = ctx.rois.numbers()
-            members = [(str(by_id[r]), rows) for r, rows in members]
+        out, members = write_values(ctx, ctx.locs, regions, values, settings.merge,
+                                    {"source": source or NUMBERS}, settings.prefix,
+                                    numbers=numbers)
         n = len(ctx.locs)
-        columns = {settings.prefix + k: v for k, v in
-                   values_onto(n, members, values, settings.merge).items()}
-        if regions == BLOCK_ROIS and numbers:
-            columns[settings.prefix + REGION_NUMBER] = roi_numbers(
-                n, members, {r: int(r) for r, _ in members},
-                "first" if settings.merge == "first" else "last")
-        if not columns:
-            raise ValueError("there is nothing to write")
-        for name in columns:
-            if not name.isidentifier():
-                raise ValueError(f"{name!r} is not usable as a column name")
-        out = with_region_columns(ctx.locs, columns,
-                                  {"regions": regions, "source": source or NUMBERS})
+        columns = [settings.prefix + k for k in values] + (
+            [settings.prefix + REGION_NUMBER] if numbers else [])
         inside = np.zeros(n, dtype=bool)
         for _, rows in members:
             inside[rows] = True
@@ -148,17 +134,6 @@ class RegionsToColumn(Plugin):
                            f"{int(inside.sum())} localizations, "
                            f"{n - int(inside.sum())} in none",
                       values={"regions": len(members), "inside": int(inside.sum())})
-
-
-def roi_numbers(n: int, members, numbers: Dict[Any, int], rule: str = "last") -> np.ndarray:
-    """``n`` rows, each the number (``numbers`` of its id in ``members``) of
-    the last ROI in ``members`` -- in the order they were made -- that holds
-    it (the first, with ``rule``), 0 in none."""
-    from ..region_runs import merge_pieces
-    numbers = {str(k): v for k, v in numbers.items()}
-    pieces = [(rows, np.full(len(rows), numbers[r], dtype=np.int64))
-              for r, rows in members if len(rows)]
-    return merge_pieces(n, pieces, rule) if pieces else np.zeros(n, dtype=np.int64)
 
 
 # ------------------------------------------------------------ column to ROIs

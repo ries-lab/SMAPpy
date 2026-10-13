@@ -538,6 +538,10 @@ def merge_pieces(n: int, pieces: Sequence[Tuple[np.ndarray, np.ndarray]],
 REGION_COLUMNS = "region_columns"
 # what a region's own number is asked for by, beside its measured values
 REGION_NUMBER = "roi_id"
+# how a localization in two regions takes their values: `WriteBack.RULES`
+# but ``any``, which is for a flag a step wrote and means nothing for a
+# number measured over a region
+VALUE_RULES = ("last", "first", "mean")
 
 
 def region_members(ctx, regions: str) -> List[Tuple[str, np.ndarray]]:
@@ -582,6 +586,58 @@ def values_onto(n: int, members: Sequence[Tuple[str, np.ndarray]],
         out[name] = (merge_pieces(n, pieces, rule, fill=np.nan) if pieces
                      else np.full(n, np.nan))
     return out
+
+
+def write_values(ctx, locs: Localizations, regions: str,
+                 values: Dict[str, Dict[str, float]], rule: str = "last",
+                 origin: Optional[Dict[str, Any]] = None, prefix: str = "",
+                 numbers: bool = False) -> Tuple[Localizations, List[Tuple[str, np.ndarray]]]:
+    """``locs`` with each region's ``values`` written onto its rows: what a
+    block's *write values* and *Regions to column* both do.
+
+    ``values`` is ``{name: {region: value}}``, a region named as its results'
+    rows name it: an ROI by its number (`ROI.number`, the ``roi_id`` a user
+    sees), a region of an id column by its id.  ``rule`` is one of
+    `VALUE_RULES`, for a localization in two regions; ``numbers`` also writes
+    each ROI's own number as ``roi_id``.  Every column goes in under
+    ``prefix``, refused where the table has one of the name that was not
+    written from regions (`with_region_columns`).  Hands back the table and
+    the regions' rows (`region_members`, by number for the ROIs).
+    """
+    from .chain import BLOCK_ROIS
+    if rule not in VALUE_RULES:
+        raise ValueError(f"overlaps {rule!r} applies to write back only: written "
+                         f"values take {', '.join(VALUE_RULES)}")
+    members = region_members(ctx, regions)
+    if regions == BLOCK_ROIS:
+        by_id = ctx.rois.numbers()
+        members = [(str(by_id[r]), rows) for r, rows in members]
+    elif numbers:
+        raise ValueError(f"the regions of {regions} have no ROI numbers: "
+                         f"{regions} itself is theirs")
+    n = len(locs)
+    columns = {prefix + k: v for k, v in values_onto(n, members, values, rule).items()}
+    if numbers:
+        columns[prefix + REGION_NUMBER] = roi_numbers(
+            n, members, {r: int(r) for r, _ in members},
+            "first" if rule == "first" else "last")
+    if not columns:
+        raise ValueError("there is nothing to write")
+    for name in columns:
+        if not name.isidentifier():
+            raise ValueError(f"{name!r} is not usable as a column name")
+    out = with_region_columns(locs, columns, {"regions": regions, **(origin or {})})
+    return out, members
+
+
+def roi_numbers(n: int, members, numbers: Dict[Any, int], rule: str = "last") -> np.ndarray:
+    """``n`` rows, each the number (``numbers`` of its id in ``members``) of
+    the last ROI in ``members`` -- in the order they were made -- that holds
+    it (the first, with ``rule``), 0 in none."""
+    numbers = {str(k): v for k, v in numbers.items()}
+    pieces = [(rows, np.full(len(rows), numbers[r], dtype=np.int64))
+              for r, rows in members if len(rows)]
+    return merge_pieces(n, pieces, rule) if pieces else np.zeros(n, dtype=np.int64)
 
 
 def table_values(table: RegionTable, names: Sequence[str] = ()) -> Dict[str, Dict[str, float]]:

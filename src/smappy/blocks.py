@@ -22,7 +22,7 @@ What a run of a block does:
   the first region that has one.  A block that writes back changes the table,
   one undo step and one log line; one that does not changes nothing.
 * **Write values** puts numbers the steps measured onto the table, each
-  region's onto its rows (`region_runs.values_onto`; `docs/regions.md`,
+  region's onto its rows (`region_runs.write_values`; `docs/regions.md`,
   "Region values as columns"), so a filter or a colour can use them; the
   columns are refused when the table has one of the name that was not
   written from regions.
@@ -63,6 +63,10 @@ SAMPLE_REGIONS = 5
 SAMPLE_SECONDS = 1.0
 # a run estimated to take longer than this asks before it starts
 ASK_ABOVE_SECONDS = 60.0
+# why *overlaps* any is refused beside *write values*: a flag's rule, which
+# means nothing for a number measured over a region
+ANY_FOR_VALUES = ("overlaps: any applies to write back only; written values "
+                  "take last, first or mean")
 
 
 @dataclass
@@ -113,12 +117,19 @@ class BlockPlugin(ChainPlugin):
 
     def describe(self, ctx: Optional[Context], settings) -> FormState:
         """Its steps' own, and no grouping to choose: in a region every layer
-        is cut as it is shown."""
+        is cut as it is shown.  *overlaps* is read only when something is
+        written, and *any* not for written values (`ANY_FOR_VALUES`)."""
         from .chain import GROUPING_FIELD
+        from .plugins import Notice
+        from .region_runs import VALUE_RULES
         state = super().describe(ctx, settings)
         for key, step, cls in self.steps:
             if hasattr(getattr(settings, key), GROUPING_FIELD):
                 state.active[f"{key}.{GROUPING_FIELD}"] = False
+        state.active["merge"] = bool(_columns(settings.write_back)
+                                     or _columns(settings.write_values))
+        if _columns(settings.write_values) and settings.merge not in VALUE_RULES:
+            state.notice = Notice(ANY_FOR_VALUES)
         return state
 
     @classmethod
@@ -251,7 +262,9 @@ class BlockPlugin(ChainPlugin):
         back = WriteBack(columns, settings.merge)
         written = _columns(settings.write_values)
         if written:
-            from .region_runs import check_writable
+            from .region_runs import VALUE_RULES, check_writable
+            if settings.merge not in VALUE_RULES:
+                raise ValueError(ANY_FOR_VALUES)
             check_writable(ctx.locs, written)
         warned: List[str] = []
         children: Dict[str, Any] = {}
@@ -315,10 +328,9 @@ class BlockPlugin(ChainPlugin):
 
     def _write_values(self, ctx, settings, tables, names, locs):
         """The steps' numbers ``names`` onto the rows of their regions
-        (`region_runs.values_onto`); a number two steps return is the later
-        step's."""
-        from .region_runs import (region_members, table_values, values_onto,
-                                  with_region_columns)
+        (`region_runs.write_values`, as *Regions to column* writes them); a
+        number two steps return is the later step's."""
+        from .region_runs import table_values, write_values
         values: Dict[str, Dict[str, float]] = {}
         owner: Dict[str, str] = {}
         for label, table in tables.items():
@@ -335,13 +347,15 @@ class BlockPlugin(ChainPlugin):
         if missing:
             raise ValueError(f"{self.block.title()}: no step measured "
                              f"{', '.join(missing)}, which it is to write")
-        members = region_members(ctx, settings.regions)
-        rule = "mean" if settings.merge == "mean" else (
-            "first" if settings.merge == "first" else "last")
-        columns = values_onto(len(locs), members, values, rule)
-        return with_region_columns(locs, columns,
-                                   {"regions": settings.regions,
-                                    "source": f"block {self.block.title()}"})
+        if settings.regions == BLOCK_ROIS:
+            # the steps' tables know an ROI by its id; a written value, as a
+            # results row, by its number
+            number = ctx.rois.numbers()
+            values = {name: {str(number[r]): v for r, v in per.items() if r in number}
+                      for name, per in values.items()}
+        out, _ = write_values(ctx, locs, settings.regions, values, settings.merge,
+                              {"source": f"block {self.block.title()}"})
+        return out
 
     # ------------------------------------------------------------ the three
     def _run_rois(self, ctx, steps, after, writes, report):
@@ -417,7 +431,7 @@ def block_class(block: Block) -> type:
         ("merge", str, param(
             block.merge, label="overlaps", choices=WriteBack.RULES, advanced=True,
             help="a row in two regions takes the last region's value, the "
-                 "first's, their mean, or any (a flag)")),
+                 "first's, their mean, or any (a flag written back)")),
         ("keep_figures", str, param(
             block.keep_figures, label="keep figure data", choices=KEEP_FIGURES,
             advanced=True,

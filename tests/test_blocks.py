@@ -420,3 +420,43 @@ def test_a_long_block_asks_first(monkeypatch):
     assert "each will take" in text and "over 20 regions" in text
     monkeypatch.setattr(blocks, "ASK_ABOVE_SECONDS", 1e9)
     assert cls().preflight(session.context(), settings) is None
+
+
+def test_a_block_writes_values_by_each_rule_as_regions_to_column_does():
+    from smappy.plugins.region_column import RegionsToColumn
+    from smappy.region_runs import VALUE_RULES
+    session = a_session(sizes=(40,), noise=0)
+    project = session.rois
+    file_id = next(iter(project.sources))
+    project.set_geometry(400)
+    project.add_roi(file_id, [5000.0, 5000.0])                     # all 40
+    project.add_roi(file_id, [5000.0, 5000.0],
+                    polygon=[[4990, 4900], [5100, 4900], [5100, 5100],
+                             [4990, 5100]])                       # part of them
+    original = dict(session.locs.columns)
+    written = {}
+    for rule in VALUE_RULES:
+        session.locs = Localizations(dict(original), {})
+        run(session, block({"plugin": "Test/Block/Tag"}, regions="rois",
+                           write_values=["tagged"], merge=rule))
+        session.run(RegionsToColumn(), RegionsToColumn.Settings(
+            source="Tag", values="tagged", prefix="r2c_", merge=rule))
+        by_block = np.asarray(session.locs["tagged"])
+        assert np.array_equal(by_block, np.asarray(session.locs["r2c_tagged"]),
+                              equal_nan=True)
+        written[rule] = by_block
+    # the rules differ where the two ROIs overlap
+    assert len({tuple(v) for v in written.values()}) == len(VALUE_RULES)
+
+
+def test_any_is_refused_for_written_values_and_the_form_says_so():
+    from smappy.blocks import ANY_FOR_VALUES, block_class
+    session = a_session()
+    cls = block_class(block({"plugin": "Test/Block/Count"}, write_values=["n"],
+                            merge="any"))
+    state = cls().describe(session.context(), cls.Settings())
+    assert state.notice is not None and state.notice.text == ANY_FOR_VALUES
+    with pytest.raises(ValueError, match="any applies to write back only"):
+        cls()(ctx=session.context())
+    quiet = block_class(block({"plugin": "Test/Block/Count"}))
+    assert quiet().describe(session.context(), quiet.Settings()).active["merge"] is False

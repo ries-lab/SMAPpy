@@ -106,7 +106,7 @@ shape, so read the one closest to what you are writing:
 | summarises what evaluators measured | `roi.py`'s `SiteAnalysisPlugin` (an evaluator to read, a *results from* field, a preflight that asks which when there are several; under `Analysis/Regions/Summarize`) |
 | runs the ROI manager's segment, measure and analyse as one | `npc_analysis.chain.yaml` (a shipped chain: a block runs NPC Corners in every ROI before the next step; `docs/batch.md`, "ROIs: segment, measure, analyse") |
 | finds clusters and names them in the table | `clusters.py` (DBSCAN: `cluster_id` / `n_in_cluster`; ROIs of them are `region_column.py`'s *Column to ROIs*, for any id column) |
-| writes what was measured per region onto its localizations | `region_column.py` (*Regions to column*: `region_runs.values_onto`, NaN outside, never over a column of the localizations' own; a block's *write values* does the same) |
+| writes what was measured per region onto its localizations | `region_column.py` (*Regions to column*: `region_runs.write_values`, NaN outside, never over a column of the localizations' own; a block's *write values* calls the same) |
 | runs steps once per region, writes columns back | `smappy/blocks.py` (a `chain.Block`; `region_runs.RegionScratch`, `WriteBack`, *write values*; per-cluster results in `Session.id_regions`) |
 | opens an interactive window of the GUI's | `bead_calibration.py` (`Plugin.window`: the button opens what the GUI registered in `session.window_openers`) |
 | runs an external program in its own Python | `uipsf.py` (`smappy.uipsf`: a worker script under that program's interpreter, progress read from its output, the result converted into smappy's own file) |
