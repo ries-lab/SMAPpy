@@ -79,9 +79,10 @@ papers and in other software.
 * **selection**: what a plugin measures -- the localizations that pass the
   layer's filter, inside the drawn ROI and, when the 3D view's slab is used,
   inside the slab.
-* **render mode**: how localizations become a picture -- *hist* counts them
-  per pixel, *gauss* draws each as a blob of one fixed width, *precision* as
-  a blob as wide as its precision, *dl* (diffraction-limited) as wide as its
+* **render mode**: how localizations become a picture -- *histogram* counts
+  them per pixel, *Gaussian (fixed)* draws each as a blob of one fixed width,
+  *Gaussian (precision)* as a blob as wide as its precision,
+  *diffraction-limited* as wide as its
   fitted spot on the camera's pixels, like a widefield image.
 * **LUT** (lookup table, also called a colour map): the colours that pixel
   values are drawn in, from low to high.

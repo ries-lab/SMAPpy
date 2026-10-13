@@ -136,17 +136,17 @@ c.set_xlabel("n_in_group (frames)", fontsize=8); c.tick_params(labelsize=7)
 ```
 
 **4. Drawing the localizations.**  *render* chooses the spot each
-localization is drawn as.  *hist* counts localizations per pixel: exact, but
-at a fine pixel size mostly single bright pixels.  *gauss* draws every
+localization is drawn as.  *histogram* counts localizations per pixel: exact, but
+at a fine pixel size mostly single bright pixels.  *Gaussian (fixed)* draws every
 localization as the same Gaussian blob, of width *sigma x (gauss)*.
-*precision*, the default, draws each one as a Gaussian as wide as its own
+*Gaussian (precision)*, the default, draws each one as a Gaussian as wide as its own
 [localization precision](plugin:Panels/Glossary) (also called the CRLB or
 localization uncertainty: how far its fitted position is expected to lie from
 the true one) times the *precision factor*
 ([Baddeley et al. 2010](https://doi.org/10.1017/S143192760999122X)): a
 precise localization is a sharp dot, an uncertain one a faint wide blur, so
-the picture shows how well each position is known.  *dl* (diffraction
-limited) draws what the camera saw instead: each localization as a spot as
+the picture shows how well each position is known.  *diffraction-limited*
+draws what the camera saw instead: each localization as a spot as
 wide as its fitted [PSF](plugin:Panels/Glossary) (point spread function: the
 image one molecule makes on the camera), on the camera's own pixels -- the widefield picture
 of the same molecules, to set beside the super-resolved one.
@@ -154,16 +154,16 @@ of the same molecules, to set beside the super-resolved one.
 ```figure The crossing of the two lines, 800 nm across, drawn with each of the three super-resolution modes.
 fig.set_size_inches(7.5, 2.6)
 axes = fig.subplots(1, 3)
-draw(axes[0], "hist", mode="hist")
-draw(axes[1], "gauss, sigma 10 nm", mode="gauss", sigma=10.0)
-draw(axes[2], "precision, factor 0.5")
+draw(axes[0], "histogram", mode="hist")
+draw(axes[1], "Gaussian (fixed), sigma 10 nm", mode="gauss", sigma=10.0)
+draw(axes[2], "Gaussian (precision), factor 0.5")
 ```
 
-```figure The whole field, 10 µm across, in *precision* and in *dl*: on 100 nm camera pixels the ring and the lines are as wide as the PSF, as the camera saw them.
+```figure The whole field, 10 µm across, in *Gaussian (precision)* and *diffraction-limited*: on 100 nm camera pixels the ring and the lines are as wide as the PSF, as the camera saw them.
 fig.set_size_inches(5.2, 2.6)
 axes = fig.subplots(1, 2)
-draw(axes[0], "precision", fov=whole)
-draw(axes[1], "dl", fov=whole, mode="dl")
+draw(axes[0], "Gaussian (precision)", fov=whole)
+draw(axes[1], "diffraction-limited", fov=whole, mode="dl")
 ```
 
 **5. Brightness and colour.**  A super-resolution image has a few very bright
@@ -242,7 +242,7 @@ image, whatever its width and wherever it sits in its pixel; a histogram is
 the limit $\sigma \to 0$ of the same kernel.  A pixel $j$ covers
 $[x_0 + jp,\, x_0 + (j+1)p)$ for pixel size $p$.
 
-**The width in *precision* mode.**  With $\sigma_i$ the localization
+**The width in *Gaussian (precision)*.**  With $\sigma_i$ the localization
 precision of localization $i$ (`xy_err_nm`), $f$ the *precision factor*
 (0.5 by default) and $p$ the rendered pixel size,
 
@@ -257,7 +257,7 @@ precision is drawn at the floor.  On an axis that is z, the axial precision
 position at all (photons, frame), there is no precision, and the explicit
 width is used -- zero, plain binning, unless set.
 
-**The *dl* mode.**  As SMAP's DL: the picture is rendered on a grid of
+**The *diffraction-limited* mode.**  As SMAP's DL: the picture is rendered on a grid of
 camera pixels -- their edges on multiples of the pixel size $a$, which comes
 from the fit's metadata (`pixelsize_nm`, or the camera's), a simulation's
 optics, or 100 nm -- with each localization a Gaussian of width `sigma_nm`
@@ -265,7 +265,7 @@ optics, or 100 nm -- with each localization a Gaussian of width `sigma_nm`
 the view pixel by pixel, without interpolation, so that the camera's pixels
 stay visible.  A width that is missing, not positive or above 1500 nm (a
 failed fit) is one camera pixel.  It needs the positions on both axes; the
-3D view, whose turned picture no camera saw, draws it as *gauss* at the
+3D view, whose turned picture no camera saw, draws it as *Gaussian (fixed)* at the
 median PSF width.
 
 **Contrast and gamma.**  With $I$ the rendered intensity of a pixel and $c$
@@ -414,8 +414,10 @@ ticked at first: the bounds and the files are usually what makes two layers
 two.
 
 ### filter
-The quick buttons (*prec*, *LL*, *frame*, *z*, *phot*, *PSF*, *ch*, *file*)
-pick the usual columns; the drop-down has every numeric column.  A column
+The quick buttons (*precision*, *fit quality*, *frame*, *z*, *photons*,
+*PSF*, *channel*, *file*) pick the usual columns -- `xy_err_nm`, `logl_rel`,
+`frame`, `z_nm`, `photons`, `sigma_nm`, `channel`, `filenumber`, each where
+the table has it, and named in the button's tooltip; the drop-down has every numeric column.  A column
 with a bound on it is bold and marked with a dot, and the line under the
 quick buttons lists every bound of the layer (`xy_err_nm ≤ 25`): click one to
 edit it, × to remove it, so a bound on a column not on show is not
@@ -473,9 +475,10 @@ How the selected layer is drawn.  An image layer uses only the LUT, contrast,
 gamma and white background.
 
 ### render
-*precision* for the usual picture.  *gauss* when every spot should look
-alike, e.g. to compare layers of different quality; *hist* for counting, or
-at a pixel size well above the precision.  *dl* for the widefield picture:
+*Gaussian (precision)* for the usual picture.  *Gaussian (fixed)* when
+every spot should look alike, e.g. to compare layers of different quality;
+*histogram* for counting, or at a pixel size well above the precision.
+*diffraction-limited* for the widefield picture:
 zoomed out it looks like the average of the raw frames, which is a check that
 the fit found what was there.
 
@@ -533,7 +536,7 @@ it.  The drift corrections take these settings too, unless their own
 The rendering widths, gamma and the white background.
 
 ### sigma x (gauss)
-The width in mode *gauss*, in the units of the horizontal axis; 0 bins.  A
+The width in *Gaussian (fixed)*, in the units of the horizontal axis; 0 bins.  A
 few times the pixel size, or about the typical precision.
 
 ### sigma y (gauss)
@@ -592,7 +595,9 @@ Based on SMAP's layer panel (`gui.GuiChannel`), its renderer
 ([Ries 2020](https://doi.org/10.1038/s41592-020-0938-1)).
 
 * **The modes are renamed.**  SMAP's *Gauss* (width from the precision) is
-  *precision* here, its *constGauss* is *gauss*, and its *DL* is *dl*, with
+  *Gaussian (precision)* here, its *constGauss* is *Gaussian (fixed)*, and
+  its *DL* is *diffraction-limited* (stored as `precision`, `gauss` and `dl`
+  in a layer's settings), with
   the same widths and fallback.  SMAP's tiff, raw and Other modes and its intensity coding (photons, blinks) are not in the tab.
 * **The width from the precision.**  SMAP draws at 0.4 times the precision,
   with a floor of 3 nm or 0.7 pixels and a cap at 400 nm; here the factor is

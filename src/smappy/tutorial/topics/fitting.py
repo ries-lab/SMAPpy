@@ -163,7 +163,7 @@ def make(d) -> None:
     if ll is not None:
         ll.click()
         d.settle()
-        d.shot("LL is how well the model fits. A spot that is not a single "
+        d.shot("Fit quality is how well the model fits. A spot that is not a single "
                "molecule fits badly, and the default filter drops the worst.",
                spot=[ll, d.rect(filt.plot)], point=ll, click=True,
                zoom=d.around(filt, 700))

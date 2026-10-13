@@ -130,21 +130,22 @@ def make(d) -> None:
            point=tab_button(d, "Analysis"))
 
     d.chapter("Render modes")
-    d.shot("Render precision draws each localization as wide as it is "
+    d.shot("Gaussian (precision) draws each localization as wide as it is "
            "uncertain: well-localized ones are sharp, poor ones are soft.",
            spot=[tab.mode, d.rect(render.view.graphics, pad=-2)], point=tab.mode)
-    tab.mode.setCurrentText("hist")
+    tab.set_mode("hist")
     d.settle()
-    d.shot("Hist counts the localizations in each pixel. Nothing is smoothed, "
+    d.shot("Histogram counts the localizations in each pixel. Nothing is smoothed, "
            "so up close the picture is grainy, but it hides nothing.",
            spot=[tab.mode, d.rect(render.view.graphics, pad=-2)], point=tab.mode)
-    tab.mode.setCurrentText("gauss")
+    tab.set_mode("gauss")
     d.settle()
     expand(tab.sigma)
-    d.shot("Gauss draws every localization with the same width, set under more.",
+    d.shot("Gaussian (fixed) draws every localization with the same width, "
+           "set under more.",
            spot=[tab.mode, tab.sigma], point=tab.sigma,
            zoom=d.around(tab.sigma, 760))
-    tab.mode.setCurrentText("precision")
+    tab.set_mode("precision")
     render.view.reset()
     d.settle()
 

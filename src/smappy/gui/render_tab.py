@@ -16,7 +16,7 @@ import pyqtgraph as pg
 from PySide6.QtCore import QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog,
-                               QFormLayout, QHBoxLayout, QLabel, QLineEdit,
+                               QFormLayout, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
                                QListWidget, QListWidgetItem, QMenu, QPushButton,
                                QSlider, QToolButton, QVBoxLayout, QWidget)
 
@@ -29,17 +29,28 @@ from . import folders
 from .render_view import nice_below
 from .widgets import CollapsibleSection, ColumnScroll, detach_to_window
 
-# the fields with a quick button, best-named alternative first
+# the fields with a quick button, best-named alternative first.  In words,
+# not the columns' abbreviations: the tooltip names the column
 QUICK_FIELDS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
-    ("prec", ("xy_err_nm",)),
-    ("LL", ("logl_rel",)),
+    ("precision", ("xy_err_nm",)),
+    ("fit quality", ("logl_rel",)),
     ("frame", ("frame",)),
     ("z", ("z_nm",)),
-    ("phot", ("photons",)),
+    ("photons", ("photons",)),
     ("PSF", ("sigma_nm",)),
-    ("ch", ("channel",)),
+    ("channel", ("channel",)),
     ("file", ("filenumber",)),
 )
+# `RenderSettings.mode` -> what the *render* list shows.  The key is what is
+# stored (layer settings, saved workspaces, chains) and stays short; the
+# words are only the list's, kept in its item data
+RENDER_MODES: Tuple[Tuple[str, str], ...] = (
+    ("precision", "Gaussian (precision)"),
+    ("gauss", "Gaussian (fixed)"),
+    ("hist", "histogram"),
+    ("dl", "diffraction-limited"),
+)
+QUICK_PER_ROW = 4
 HIST_BINS = 120
 HIST_SAMPLE = 2_000_000     # beyond this the histogram is of a random sample
 
@@ -93,16 +104,19 @@ class FilterWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(2)
 
-        # The quick buttons have a row to themselves and the drop-down and the
+        # The quick buttons have rows to themselves and the drop-down and the
         # count share the next.  All on one line, a table with all eight quick
         # fields made the panel ~440 px wide in a 380 px window, and the scroll
         # area (no horizontal bar) cut off the histogram's right end -- with
-        # the handle of the upper bound on it.
-        row = QHBoxLayout()
+        # the handle of the upper bound on it.  Named in words they need two
+        # rows of `QUICK_PER_ROW`.
+        grid = QGridLayout()
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setSpacing(2)
+        grid.setColumnStretch(QUICK_PER_ROW, 1)
         self.quick: Dict[str, QToolButton] = {}
-        self.quick_row = row
-        row.addStretch(1)
-        layout.addLayout(row)
+        self.quick_grid = grid
+        layout.addLayout(grid)
         # Every bound of the layer, whichever field is on show: a picture
         # that comes out sparse should say why without a hunt through the
         # drop-down.  A bound is a link to its field; the cross removes it.
@@ -196,8 +210,8 @@ class FilterWidget(QWidget):
             b = QToolButton(text=label, checkable=True, autoExclusive=True)
             b.setToolTip(name)
             b.clicked.connect(lambda _=False, n=name: self._select(n))
+            self.quick_grid.addWidget(b, *divmod(len(self.quick), QUICK_PER_ROW))
             self.quick[name] = b
-            self.quick_row.insertWidget(len(self.quick) - 1, b)
         first = current if current in numeric else next(iter(self.quick), None)
         if first is None and numeric:
             first = numeric[0]
@@ -960,7 +974,11 @@ class RenderTab(QWidget):
         form.setContentsMargins(0, 0, 0, 0)
         form.setVerticalSpacing(2)
         self.mode = QComboBox()
-        self.mode.addItems(["precision", "gauss", "hist", "dl"])
+        for key, text in RENDER_MODES:
+            self.mode.addItem(text, key)
+        self.mode.setToolTip("how a localization is drawn: a Gaussian as wide as "
+                             "its precision, one of a fixed width, a count per "
+                             "pixel, or the spot the camera saw")
         self.color = QComboBox()
         self.color.addItem("intensity", None)
         self.color.addItem("field", "field")
@@ -1035,7 +1053,7 @@ class RenderTab(QWidget):
         more_form.setContentsMargins(0, 0, 0, 0)
         more_form.setVerticalSpacing(2)
         self.sigma = QDoubleSpinBox(minimum=0.0, maximum=1000, singleStep=1, decimals=1)
-        self.sigma.setToolTip("rendering sigma along x for mode 'gauss', in the "
+        self.sigma.setToolTip("rendering sigma along x for Gaussian (fixed), in the "
                               "units of that axis; 0 bins instead of blurring")
         self.sigma_y = _Bound()
         self.sigma_y.setToolTip("rendering sigma along y, in the units of that "
@@ -1045,7 +1063,7 @@ class RenderTab(QWidget):
         self.gamma = QDoubleSpinBox(minimum=0.1, maximum=3, singleStep=0.1, decimals=2)
         self.factor = QDoubleSpinBox(minimum=0.05, maximum=5, singleStep=0.1, decimals=2)
         self.factor.setToolTip("rendering sigma = factor x localization precision "
-                               "(mode 'precision')")
+                               "(Gaussian (precision))")
         self.white = QCheckBox("white background")
         self.white.setToolTip("the picture on white paper, whatever the LUT: the "
                               "brightness is turned over and the hue is kept, so "
@@ -1074,7 +1092,7 @@ class RenderTab(QWidget):
         self.strip.selected.connect(self._bind_layer)
         self.strip.add_image_requested.connect(self._add_image)
         self.filter.changed.connect(lambda: session.changed("layer"))
-        self.mode.currentTextChanged.connect(self._on_render_settings)
+        self.mode.currentIndexChanged.connect(self._on_render_settings)
         self.sigma.valueChanged.connect(self._on_render_settings)
         self.sigma_y.editingFinished.connect(self._on_render_settings)
         self.factor.valueChanged.connect(self._on_render_settings)
@@ -1184,7 +1202,7 @@ class RenderTab(QWidget):
         lo, hi = settings.color_range or (None, None)
         self.color_lo.set(lo)
         self.color_hi.set(hi)
-        self.mode.setCurrentText(settings.mode)
+        self.set_mode(settings.mode)
         self.sigma.setValue(settings.sigma)
         self.sigma_y.set(settings.sigma_y)
         self.factor.setValue(settings.sigma_settings.factor)
@@ -1197,6 +1215,14 @@ class RenderTab(QWidget):
         for w in widgets:
             w.blockSignals(False)
 
+    def set_mode(self, key: str) -> None:
+        """Choose a render mode by its stored key ("precision", "gauss", ...)."""
+        index = self.mode.findData(key)
+        if index < 0:
+            raise ValueError(f"render mode {key!r}: one of "
+                             f"{', '.join(k for k, _ in RENDER_MODES)}")
+        self.mode.setCurrentIndex(index)
+
     def _on_render_settings(self) -> None:
         state = self.layer.state
         sigmas = dataclasses.replace(state.settings.sigma_settings, factor=self.factor.value())
@@ -1204,7 +1230,7 @@ class RenderTab(QWidget):
             sigma_y = self.sigma_y.value()
         except ValueError:                       # half-typed; the old one stands
             sigma_y = state.settings.sigma_y
-        state.settings = dataclasses.replace(state.settings, mode=self.mode.currentText(),
+        state.settings = dataclasses.replace(state.settings, mode=self.mode.currentData(),
                                              sigma=self.sigma.value(), sigma_y=sigma_y,
                                              sigma_settings=sigmas)
         self.session.changed("layer")

@@ -76,7 +76,7 @@ $$n_x = \mathrm{round}\left( \frac{x_{\max} - x_{\min}}{p} \right)$$
 pixels wide, and likewise high; there is no margin, so the outermost
 localizations sit at the edge.
 
-**The blob width.**  In the default *precision* mode a localization with
+**The blob width.**  In the default *Gaussian (precision)* render mode a localization with
 precision $\sigma_{\mathrm{loc}}$ is drawn with
 
 $$\sigma = \min\left( \max\left( f\,\sigma_{\mathrm{loc}},\ 0.7\,p \right),\ 10\,\tilde\sigma \right),$$
