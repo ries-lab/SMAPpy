@@ -58,7 +58,7 @@ class WatchSettings:
 def watch_stack(path, chunk: int = 100, settings: Optional[WatchSettings] = None,
                 start: int = 0, stop: Optional[int] = None,
                 stop_event=None, on_wait=None, tags=None, finished=None,
-                idle_blocks: bool = False) -> Iterator[Tuple[int, np.ndarray]]:
+                idle_blocks: bool = False, on_behind=None) -> Iterator[Tuple[int, np.ndarray]]:
     """Yield ``(first_frame, block)`` from an acquisition as it is written.
 
     Blocks are ``chunk`` frames, except that whatever has accumulated is handed
@@ -69,7 +69,9 @@ def watch_stack(path, chunk: int = 100, settings: Optional[WatchSettings] = None
     what a viewer sets when its window is closed.  ``on_wait(seconds)`` is
     called on each idle poll with the time since the last new frame, for a
     progress line.  ``tags`` is a `smappy.frametags.FrameTags` that is handed
-    each frame's metadata as it is read.
+    each frame's metadata as it is read.  ``on_behind(frames)`` is called on
+    each look at an NDTiff dataset with how many written frames are not yet
+    read: how far whoever consumes the stream has fallen behind the camera.
 
     ``finished``, a :class:`threading.Event`, is set once the writer is known
     to be done; given one, idle time never ends the stream (see the module
@@ -84,7 +86,8 @@ def watch_stack(path, chunk: int = 100, settings: Optional[WatchSettings] = None
         ndtiff.tags = tags
         yield from ndtiff.watch(chunk=chunk, settings=settings, start=start,
                                 stop=stop, stop_event=stop_event, on_wait=on_wait,
-                                finished=finished, idle_blocks=idle_blocks)
+                                finished=finished, idle_blocks=idle_blocks,
+                                on_behind=on_behind)
         return
 
     first = _wait_for_file(path, settings, stop_event)

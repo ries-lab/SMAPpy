@@ -262,3 +262,39 @@ def test_a_dataset_kept_under_full_resolution_is_found_from_the_folder_above(tmp
     assert is_ndtiff(tmp_path / "acq")
     source = open_ndtiff(tmp_path / "acq")
     assert np.array_equal(source.frame(3), frames[3])
+
+
+def test_an_index_read_again_parses_only_the_records_it_adds(tmp_path, monkeypatch):
+    """A live watch reads the index on every poll: what it had is not re-parsed."""
+    import smappy.io.ndtiff as ndtiff
+
+    frames = stack(n=6)
+    folder = write_ndtiff(tmp_path / "ds", frames[:4])
+    first = read_index(folder)
+    write_ndtiff(folder, frames)
+    parsed = []
+    real = ndtiff._axes
+    monkeypatch.setattr(ndtiff, "_axes", lambda text: parsed.append(text) or real(text))
+    again = read_index(folder, previous=first)
+    monkeypatch.undo()
+    whole = read_index(folder)
+
+    assert len(parsed) == 2
+    assert len(again) == 6
+    for name in ("file_index", "pixel_offset", "width", "height", "bytes_per_pixel",
+                 "md_offset", "md_length", "record_end"):
+        assert np.array_equal(getattr(again, name), getattr(whole, name)), name
+    assert again.axes == whole.axes
+
+
+def test_a_record_cut_off_mid_write_is_read_once_it_is_whole(tmp_path):
+    frames = stack(n=6)
+    folder = write_ndtiff(tmp_path / "ds", frames, pad=False)
+    raw = (folder / INDEX_NAME).read_bytes()
+    first = read_index(folder)
+    (folder / INDEX_NAME).write_bytes(raw[:int(first.record_end[3]) + 7])
+    cut = read_index(folder, previous=read_index(folder))
+    (folder / INDEX_NAME).write_bytes(raw)
+
+    assert len(cut) == 4
+    assert len(read_index(folder, previous=cut)) == 6

@@ -626,15 +626,24 @@ file added to `Session.protected`, because the caller hands it on with a
 digest while the window stays open and a Ctrl+S would change what that digest
 vouches for.
 
-**The engine is flushed on a timer as well as when its ROI buffer fills.**  The
-buffer holds 15000 ROIs; a sparse sample would take minutes to fill it, and
-nothing would appear in the meantime.  The timer is checked once per block, so
-during a pause the watch sends empty blocks (`idle_blocks`) for it to be checked
-on -- without them, what was buffered before a pause stayed off the screen
-until the pause was over.  The GUI's live fit flushes every 5 s
-(`LIVE_FLUSH_SECONDS`); `LiveFit`, which keeps its own loop for its stop
-event, flushes every `LiveSettings.flush_seconds` and skips the idle blocks
-(a `QueueSource` sends them as the file watchers do) as `drive` does.
+**A live fit fits each read at once.**  The engine's buffer holds about 9000
+ROIs (15000 at a 10 px box); the live fit no longer waits for it, nor for a
+timer, but flushes after every block (`drive(flush_seconds=0)`), and the
+NDTiff watch looks again at once after reading new frames instead of sleeping
+its poll (`LIVE_POLL_SECONDS`, 0.05 s, applies only when nothing arrived).
+Measured on a 4-core container (2026-10-13, an NDTiff written at 100 frames/s,
+3000 frames): frame written to its localizations, median / max, went from
+2.8 / 6.5 s to 0.04 / 0.11 s at 0.3 localizations a frame, and from 3.3 / 6.7 s
+to 0.08 / 0.17 s at 7.8 a frame -- the same localizations either way.  It
+costs no throughput: a camera writing 1000 frames/s that the fitter could not
+follow took 15.0 s to fit, against 15.7 s with the old timer.  A fitter that
+falls behind is handed up to *frames per block* frames at a time, so it
+catches up in large blocks; the progress line says how many frames it is
+behind, and it warns once when that is more than 5 s of acquisition
+(`LIVE_BEHIND_WARN_SECONDS`).  This needed the index read incrementally
+(`read_index(previous=...)`): parsing it whole took 0.06 s at 10,000 frames
+and 0.6 s at 100,000.  `LiveFit`, which keeps its own loop for its stop
+event, still flushes every `LiveSettings.flush_seconds`.
 
 Checked against the offline path on 300 frames of the astigmatic dataset,
 replayed frame by frame into a growing two-file series: same 28724

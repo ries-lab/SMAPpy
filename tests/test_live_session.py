@@ -210,3 +210,96 @@ def test_a_fit_that_cannot_start_is_reported_once_as_failed(tmp_path):
         close(live)
         live.wait()
     assert len(ended) == 1
+
+
+def _fit_in_background(folder, out, **more):
+    """A headless live fit on a thread; its streamed blocks and warnings, timed."""
+    import threading
+
+    from smappy import plugins
+    from smappy.plugins import Context
+
+    seen = {"blocks": [], "warnings": []}
+
+    def stream(event, payload):
+        if event == "block":
+            seen["blocks"].append((time.monotonic(), np.unique(payload["frame"])))
+        elif event == "warning":
+            seen["warnings"].append(payload)
+
+    finished = threading.Event()
+    context = Context(stream=stream, writer_finished=finished)
+    thread = threading.Thread(target=plugins.get(PLUGIN)().run,
+                              args=(context, settings_for(folder, out, **more)))
+    thread.start()
+    return seen, finished, thread
+
+
+def test_a_frame_is_fitted_within_a_fraction_of_a_second_of_being_written(tmp_path, frames):
+    """Each read is fitted at once: no waiting for boxes to gather or a 5 s timer."""
+    data = GrowingNDTiff(tmp_path / "ds", frames.shape[1:])
+    data.write(frames[:1])
+    seen, finished, thread = _fit_in_background(data.folder, tmp_path / "locs.hdf5")
+    try:
+        deadline = time.monotonic() + 20
+        while not seen["blocks"] and time.monotonic() < deadline:
+            time.sleep(0.01)              # the first block: the fit is running
+        lags = []
+        for frame in frames[1:]:
+            data.write([frame])
+            written = time.monotonic()
+            n = data.n - 1
+            while time.monotonic() < written + 3:
+                hit = [t for t, which in seen["blocks"] if n in which]
+                if hit:
+                    lags.append(hit[0] - written)
+                    break
+                time.sleep(0.005)
+    finally:
+        finished.set()
+        thread.join(30)
+    assert len(lags) > 20
+    assert np.median(lags) < 0.5, lags
+
+
+def test_a_fit_that_falls_behind_the_camera_says_so(tmp_path, frames, monkeypatch):
+    import smappy.plugins.fit as fit
+
+    monkeypatch.setattr(fit, "LIVE_BEHIND_WARN_SECONDS", 0.0)
+    data = GrowingNDTiff(tmp_path / "ds", frames.shape[1:])
+    data.write(frames)                  # all of it before the fit reads a frame
+    seen, finished, thread = _fit_in_background(data.folder, tmp_path / "locs.hdf5",
+                                                **{"source.chunk": 2})
+    finished.set()
+    thread.join(30)
+    assert len(seen["warnings"]) == 1
+    assert "cannot keep up" in seen["warnings"][0]
+
+
+def test_the_window_hands_the_fits_progress_on_as_numbers(tmp_path, frames):
+    """`on_stream` gets the fitted blocks and a ``fitted`` count per block:
+    what a program following the fit (smappy-microclaw) turns into metrics."""
+    pytest.importorskip("PySide6")
+    from smappy.gui.live_session import LiveSession
+
+    data = GrowingNDTiff(tmp_path / "ds", frames.shape[1:])
+    data.write(frames)
+    streamed = []
+    ended = []
+    live = LiveSession(PLUGIN, settings_for(data.folder, tmp_path / "locs.hdf5"),
+                       on_finished=ended.append,
+                       on_stream=lambda event, payload: streamed.append((event, payload)))
+    live.open()
+    try:
+        live.writer_finished.set()
+        assert pump(lambda: ended)
+    finally:
+        close(live)
+        live.wait()
+    fitted = [p for e, p in streamed if e == "fitted"]
+    blocks = [p for e, p in streamed if e == "block"]
+    assert fitted and blocks
+    assert fitted[-1]["frames"] == len(frames)
+    assert fitted[-1]["localizations"] == sum(len(b) for b in blocks) == len(live.session.locs)
+    assert [f["frames"] for f in fitted] == sorted(f["frames"] for f in fitted)
+    assert fitted[-1]["behind"] == 0        # caught up: nothing written is unread

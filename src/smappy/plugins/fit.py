@@ -806,14 +806,19 @@ class _FitPlugin(Plugin):
         # what the microscope recorded per frame, read with the pixels
         from ..frametags import FrameTags, acquisition
         tags = FrameTags()
+        behind = [0]              # frames written and not yet read: the lag
         if src.live:
             from ..io.watch import WatchSettings, watch_stack
             # given `ctx.writer_finished`, the writer's word ends the watch
             # and *stop after* is never consulted (`smappy.io.watch`)
+            def on_behind(frames: int) -> None:
+                behind[0] = frames
             blocks = watch_stack(src.path, chunk=src.chunk, start=src.start, stop=src.stop,
-                                 settings=WatchSettings(timeout=src.live_timeout),
+                                 settings=WatchSettings(timeout=src.live_timeout,
+                                                        poll=LIVE_POLL_SECONDS),
                                  tags=tags, stop_event=ctx.stop,
-                                 finished=ctx.writer_finished, idle_blocks=True)
+                                 finished=ctx.writer_finished, idle_blocks=True,
+                                 on_behind=on_behind)
             total = None                 # a growing stack has no end to count to
         else:
             stop = min(src.stop, source.n_frames) if src.stop else None
@@ -851,6 +856,7 @@ class _FitPlugin(Plugin):
             ctx.emit("block", block)
 
         started = time.perf_counter()
+        warned = [False]
 
         def report(engine) -> None:
             """Where it has got to, how fast, and how much longer.
@@ -867,14 +873,30 @@ class _FitPlugin(Plugin):
             if total and rate > 0 and s["frames"] < total:
                 seconds = int((total - s["frames"]) / rate)
                 left = f", {seconds // 60}:{seconds % 60:02d} left"
+            lag = ""
+            if behind[0] and rate > 0:
+                seconds = behind[0] / rate
+                lag = f"  {behind[0]:,} frames behind"
+                if seconds > LIVE_BEHIND_WARN_SECONDS and not warned[0]:
+                    warned[0] = True
+                    ctx.warn(f"the fit cannot keep up with the camera: "
+                             f"{behind[0]:,} frames (about {seconds:.0f} s) "
+                             f"behind, at {rate:,.0f} frames/s; what is shown "
+                             f"lags the acquisition, and catches up once it "
+                             f"slows or ends")
             ctx.report(f"{where}  {rate:,.1f} frames/s{left}  "
-                       f"{s['localizations']:,} localizations")
+                       f"{s['localizations']:,} localizations{lag}")
+            # the same as numbers, for a program following the fit
+            # (smappy-microclaw's metrics): frames are counted from frame 0
+            ctx.emit("fitted", {"frames": src.start + s["frames"],
+                                "localizations": s["localizations"],
+                                "behind": behind[0]})
 
         try:
             from ..pipeline import drive
             engine = self.engine(settings, camera, finder, model)
             drive(engine, blocks, sink=sink, progress=report, read_ahead=2,
-                  flush_seconds=LIVE_FLUSH_SECONDS if src.live else None)
+                  flush_seconds=0.0 if src.live else None)
             record["frame_tags"] = tags.table()
             # kept with the localizations, so a file that was fitted against
             # a mismatched calibration says so whoever opens it
@@ -954,9 +976,15 @@ class _FitPlugin(Plugin):
                       settings=settings)
 
 
-# how often a live fit fits what it has buffered, whether or not the buffer is
-# full: the interval at which a sparse acquisition appears on screen
-LIVE_FLUSH_SECONDS = 5.0
+# how often a live fit looks for new frames.  Each block read is fitted at once
+# (`drive`'s ``flush_seconds=0``) rather than when thousands of boxes have
+# gathered or every 5 s, as before: the time from a frame written to its
+# localizations was 2.8-3.3 s at the median and up to 6.7 s, which is too slow
+# for anything that acts on the result.  A fitter that falls behind is handed
+# up to ``chunk`` frames at a time, so it catches up in large blocks.
+LIVE_POLL_SECONDS = 0.05
+# a live fit this far behind the camera says so, once
+LIVE_BEHIND_WARN_SECONDS = 5.0
 
 
 def _until(blocks, stop_event):

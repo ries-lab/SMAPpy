@@ -56,6 +56,9 @@ class NDTiffIndex:
     md_offset: np.ndarray
     md_length: np.ndarray
     axes: List[dict]
+    # the byte just past each record in the index file: where reading the
+    # records after it starts (`read_index`'s ``previous``)
+    record_end: np.ndarray = None
 
     def __len__(self) -> int:
         return len(self.pixel_offset)
@@ -72,7 +75,7 @@ class NDTiffIndex:
         return self.folder / self.files[int(self.file_index[i])]
 
 
-def read_index(folder) -> NDTiffIndex:
+def read_index(folder, previous: Optional[NDTiffIndex] = None) -> NDTiffIndex:
     """Parse ``NDTiff.index``.
 
     Each record is, little-endian: ``axesLength``, ``axes`` (JSON),
@@ -80,64 +83,124 @@ def read_index(folder) -> NDTiffIndex:
     ``width``, ``height``, ``pixelType``, ``pixelCompression``,
     ``metadataOffset``, ``metadataLength``, ``metadataCompression``.  The table
     is zero-padded, so parsing stops at the first ``axesLength == 0``.
+
+    Given ``previous`` -- this index as last read -- only the records after it
+    are parsed and appended.  A live watch re-reads the index on every poll,
+    and parsing it whole took 0.06 s at 10,000 frames and 0.6 s at 100,000
+    (2026-10-13): a long acquisition would spend its polls re-reading what it
+    already had.  Records that arrive out of time order fall back to the whole
+    parse, which sorts them.
     """
     folder = Path(folder)
-    raw = (folder / INDEX_NAME).read_bytes()
-    n = len(raw)
+    if previous is not None and previous.record_end is not None and len(previous):
+        files = list(previous.files)
+        new = _records(folder, int(previous.record_end[-1]), files)
+        if not new["offsets"]:
+            return previous
+        times = [a.get("time", -1) for a in new["axes"]]
+        last = previous.axes[-1].get("time", -1)
+        if min([last] + times) >= 0 and (np.diff([last] + times) < 0).any():
+            return read_index(folder)
+        added = _build(folder, files, new,
+                       np.full(len(new["offsets"]), previous.bytes_per_pixel[0], np.int64))
+        added = _truncated_to_what_was_written(added)
+        return _joined(previous, added) if len(added) else previous
 
     files: List[str] = []
-    by_name: Dict[str, int] = {}
-    file_index, offsets, widths, heights = [], [], [], []
-    types, md_offsets, md_lengths, axes = [], [], [], []
-
-    p = 0
-    while p + 4 <= n:
-        alen = int(np.frombuffer(raw, np.uint32, 1, p)[0]); p += 4
-        if alen == 0 or p + alen > n:       # the zero padding at the end
-            break
-        axes_text = raw[p:p + alen].decode("utf-8", "replace"); p += alen
-        if p + 4 > n:
-            break
-        flen = int(np.frombuffer(raw, np.uint32, 1, p)[0]); p += 4
-        if flen == 0 or p + flen > n:
-            break
-        name = raw[p:p + flen].decode("utf-8", "replace"); p += flen
-        if p + 32 > n:
-            break
-        v = np.frombuffer(raw, np.uint32, 8, p); p += 32
-
-        index = by_name.get(name)
-        if index is None:
-            index = by_name[name] = len(files)
-            files.append(name)
-        file_index.append(index)
-        offsets.append(int(v[0])); widths.append(int(v[1]))
-        heights.append(int(v[2])); types.append(int(v[3]))
-        md_offsets.append(int(v[5])); md_lengths.append(int(v[6]))
-        axes.append(_axes(axes_text))
-        if v[4] or v[7]:
-            raise ValueError(f"{folder / INDEX_NAME}: compressed NDTiff images "
-                             f"are not supported")
-
-    if not offsets:
+    found = _records(folder, 0, files)
+    if not found["offsets"]:
         raise ValueError(f"no images listed in {folder / INDEX_NAME}")
-
-    index = NDTiffIndex(
-        folder=folder, files=files,
-        file_index=np.array(file_index, np.int64),
-        pixel_offset=np.array(offsets, np.int64),
-        width=np.array(widths, np.int64), height=np.array(heights, np.int64),
-        bytes_per_pixel=_bytes_per_pixel(np.array(types, np.int64),
-                                         np.array(offsets, np.int64),
-                                         np.array(md_offsets, np.int64),
-                                         np.array(widths, np.int64),
-                                         np.array(heights, np.int64)),
-        md_offset=np.array(md_offsets, np.int64),
-        md_length=np.array(md_lengths, np.int64),
-        axes=axes,
-    )
-    index = _sorted_by_time(index)
+    offsets = np.array(found["offsets"], np.int64)
+    width, height = (np.array(found[k], np.int64) for k in ("widths", "heights"))
+    per_pixel = _bytes_per_pixel(np.array(found["types"], np.int64), offsets,
+                                 np.array(found["md_offsets"], np.int64), width, height)
+    index = _sorted_by_time(_build(folder, files, found, per_pixel))
     return _truncated_to_what_was_written(index)
+
+
+def _records(folder: Path, start: int, files: List[str]) -> Dict[str, list]:
+    """The records from byte ``start`` on; ``files`` gains any new file name.
+
+    Read in pieces up to the zero padding, not the whole remaining file: the
+    writer pads the table ahead of itself, and a poll should cost what arrived.
+    """
+    by_name = {name: i for i, name in enumerate(files)}
+    out: Dict[str, list] = {k: [] for k in ("file_index", "offsets", "widths", "heights",
+                                            "types", "md_offsets", "md_lengths",
+                                            "axes", "ends")}
+    with open(folder / INDEX_NAME, "rb") as stream:
+        stream.seek(start)
+        raw, base, eof, short = b"", start, False, True
+        p = 0
+        while True:
+            if not eof and (short or len(raw) - p < 1 << 16):
+                more = stream.read(1 << 18)
+                eof = len(more) < 1 << 18
+                raw = raw[p:] + more
+                base += p
+                p, short = 0, False
+            n = len(raw)
+            if p + 4 > n:
+                break
+            alen = int(np.frombuffer(raw, np.uint32, 1, p)[0])
+            if alen == 0:                    # the zero padding at the end
+                break
+            q = p + 4 + alen
+            if q + 4 > n:
+                if eof:
+                    break
+                short = True
+                continue                     # a record cut by the read: read more
+            flen = int(np.frombuffer(raw, np.uint32, 1, q)[0])
+            if flen == 0:
+                break
+            r = q + 4 + flen + 32
+            if r > n:
+                if eof:
+                    break
+                short = True
+                continue
+            axes_text = raw[p + 4:q].decode("utf-8", "replace")
+            name = raw[q + 4:q + 4 + flen].decode("utf-8", "replace")
+            v = np.frombuffer(raw, np.uint32, 8, q + 4 + flen)
+            if v[4] or v[7]:
+                raise ValueError(f"{folder / INDEX_NAME}: compressed NDTiff images "
+                                 f"are not supported")
+            index = by_name.get(name)
+            if index is None:
+                index = by_name[name] = len(files)
+                files.append(name)
+            out["file_index"].append(index)
+            out["offsets"].append(int(v[0])); out["widths"].append(int(v[1]))
+            out["heights"].append(int(v[2])); out["types"].append(int(v[3]))
+            out["md_offsets"].append(int(v[5])); out["md_lengths"].append(int(v[6]))
+            out["axes"].append(_axes(axes_text))
+            out["ends"].append(base + r)
+            p = r
+    return out
+
+
+def _build(folder: Path, files: List[str], found: Dict[str, list],
+           bytes_per_pixel: np.ndarray) -> NDTiffIndex:
+    return NDTiffIndex(
+        folder=folder, files=files,
+        file_index=np.array(found["file_index"], np.int64),
+        pixel_offset=np.array(found["offsets"], np.int64),
+        width=np.array(found["widths"], np.int64),
+        height=np.array(found["heights"], np.int64),
+        bytes_per_pixel=bytes_per_pixel,
+        md_offset=np.array(found["md_offsets"], np.int64),
+        md_length=np.array(found["md_lengths"], np.int64),
+        axes=found["axes"], record_end=np.array(found["ends"], np.int64))
+
+
+def _joined(a: NDTiffIndex, b: NDTiffIndex) -> NDTiffIndex:
+    return NDTiffIndex(
+        folder=a.folder, files=b.files,
+        **{k: np.concatenate([getattr(a, k), getattr(b, k)])
+           for k in ("file_index", "pixel_offset", "width", "height",
+                     "bytes_per_pixel", "md_offset", "md_length", "record_end")},
+        axes=a.axes + b.axes)
 
 
 def _axes(text: str) -> dict:
@@ -201,7 +264,7 @@ def _take(index: NDTiffIndex, which) -> NDTiffIndex:
         width=index.width[which], height=index.height[which],
         bytes_per_pixel=index.bytes_per_pixel[which],
         md_offset=index.md_offset[which], md_length=index.md_length[which],
-        axes=[index.axes[i] for i in which],
+        axes=[index.axes[i] for i in which], record_end=index.record_end[which],
     )
 
 
@@ -243,7 +306,7 @@ class NDTiffSource(ImageSource):
 
     def watch(self, chunk: int = 100, settings=None, start: int = 0,
               stop: Optional[int] = None, stop_event=None, on_wait=None,
-              finished=None, idle_blocks: bool = False
+              finished=None, idle_blocks: bool = False, on_behind=None
               ) -> Iterator[Tuple[int, np.ndarray]]:
         """Yield blocks as the acquisition writes them.
 
@@ -265,13 +328,22 @@ class NDTiffSource(ImageSource):
             ending = _stopped(finished)
             self.reload()
             available = len(self.index) if stop is None else min(stop, len(self.index))
+            if on_behind is not None:
+                on_behind(available - index)
+            before = index
             while index < available and not _stopped(stop_event):
                 last = min(index + chunk, available)
                 yield index, self._block(index, last)
                 index = last
                 last_new = time.monotonic()
+                if on_behind is not None:
+                    on_behind(available - index)
             if ending or (stop is not None and index >= stop):
                 break
+            if index > before:
+                # look again at once: frames that arrived while these were
+                # processed are waiting, and a poll's sleep is pure latency
+                continue
             waited = time.monotonic() - last_new
             if finished is None and waited >= settings.timeout:
                 break
@@ -285,7 +357,7 @@ class NDTiffSource(ImageSource):
     def reload(self) -> "NDTiffSource":
         """Re-read the index; new frames appear in ``n_frames``."""
         try:
-            self.index = read_index(self.index.folder)
+            self.index = read_index(self.index.folder, previous=self.index)
         except (OSError, ValueError):
             return self         # being written to: what we have still stands
         self.n_frames = len(self.index)

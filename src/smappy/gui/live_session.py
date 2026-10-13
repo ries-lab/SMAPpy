@@ -93,6 +93,7 @@ class LiveSession:
                  on_finished: Optional[Callable[[LiveOutcome], None]] = None,
                  on_progress: Optional[Callable[[str], None]] = None,
                  on_closed: Optional[Callable[[], None]] = None,
+                 on_stream: Optional[Callable[[str, Any], None]] = None,
                  stop: Optional[threading.Event] = None,
                  writer_finished: Optional[threading.Event] = None):
         self.plugin_path = plugin_path
@@ -100,6 +101,7 @@ class LiveSession:
         self.on_finished = on_finished
         self.on_progress = on_progress
         self.on_closed = on_closed
+        self.on_stream = on_stream
         # the caller's own events when it has them -- a protocol reader that
         # sets them as the messages arrive -- else ours, set through these
         self.stop = stop or threading.Event()
@@ -141,6 +143,7 @@ class LiveSession:
         self.panel.form.set(self.settings)
         self.panel.ended.connect(self._ended)
         self.panel.progressed.connect(self._progressed)
+        self.panel.streamed.connect(self._streamed)
         if not self.panel.start_run(ask=False, stop=self.stop,
                                     writer_finished=self.writer_finished):
             self._finish(LiveOutcome("failed", False,
@@ -212,6 +215,12 @@ class LiveSession:
                                     self.control)
         self._window.show()
         return self._window.panel
+
+    def _streamed(self, event: str, payload) -> None:
+        """The fit's partial results -- ``block`` and ``fitted`` among them
+        (`Context.emit`) -- for the caller, until the fit has ended."""
+        if self.on_stream is not None and self.outcome is None:
+            self.on_stream(event, payload)
 
     def _progressed(self, text: str) -> None:
         if self.on_progress is not None and self.outcome is None:
