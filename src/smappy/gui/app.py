@@ -322,6 +322,9 @@ class ControlWindow(QMainWindow):
         # a written simulation offers this (`SimulateBlinks.describe`), with the
         # file's path: into a fitter as a dropped stack goes
         session.window_openers["fit file"] = self.fit_file
+        # Line Profile with no line ROI offers this (`LineProfile.describe`):
+        # the render window, drawing a line
+        session.window_openers["draw line"] = lambda settings=None: self.draw_line()
         tools.addSeparator()
         self.batch_window = None
         self._action(tools, "Batch...", None, self.open_batch)
@@ -931,6 +934,13 @@ class ControlWindow(QMainWindow):
                 # closing over the loop variable would undo the whole list
                 # whichever entry was picked
                 entry.triggered.connect(lambda checked=False, count=n, run=go: run(count))
+
+    def draw_line(self) -> None:
+        """Start drawing a line ROI on the picture, which comes to the front."""
+        self.render_window.show()
+        self.render_window.raise_()
+        self.render_window.activateWindow()
+        self.render_window.view.start_drawing("line")
 
     def open_calibration(self, dual: Optional[bool] = None) -> None:
         """The calibration window: bead stacks in, a spline calibration out.

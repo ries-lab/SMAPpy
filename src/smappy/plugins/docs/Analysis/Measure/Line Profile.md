@@ -1,6 +1,6 @@
 ---
-version: "6"
-covers: [smappy.plugins.line_profile.project, smappy.plugins.line_profile.profiles, smappy.plugins.line_profile.fit_profile, smappy.plugins.line_profile.fit_models, smappy.plugins.line_profile.em_two_gaussians, smappy.plugins.line_profile.bootstrap, smappy.plugins.line_profile.gauss_density, smappy.plugins.line_profile.step_density, smappy.plugins.line_profile.arc_density, smappy.plugins.line_profile.smoothed_profile, smappy.plugins.line_profile.fit_layers, smappy.plugins.line_profile.draw_profile]
+version: "7"
+covers: [smappy.plugins.line_profile.project, smappy.plugins.line_profile.profiles, smappy.plugins.line_profile.fit_profile, smappy.plugins.line_profile.fit_models, smappy.plugins.line_profile.determined, smappy.plugins.line_profile.verdict, smappy.plugins.line_profile.em_two_gaussians, smappy.plugins.line_profile.bootstrap, smappy.plugins.line_profile.gauss_density, smappy.plugins.line_profile.step_density, smappy.plugins.line_profile.arc_density, smappy.plugins.line_profile.smoothed_profile, smappy.plugins.line_profile.fit_layers, smappy.plugins.line_profile.draw_profile]
 ---
 
 ## What it does
@@ -45,7 +45,9 @@ to the blinks' values.  (Before version 5 every layer was measured on its
 single localizations, whatever it showed.)
 
 **What it needs.**  A line ROI, drawn in the render window, with a width
-wide enough to take in the structure.  At least 8 localizations per layer (a
+wide enough to take in the structure.  Without one, a line under the
+settings says so, and its *Draw line* button brings the render window to
+the front ready to draw it.  At least 8 localizations per layer (a
 layer with fewer is skipped, and a single layer with fewer is refused); below 30 the fit still stands, but its error
 bars are too optimistic and the bootstrap (below) is the one to read.  The
 localization precision `xy_err_nm` (for a z profile, `z_err_nm`) is used when
@@ -239,6 +241,16 @@ one, because they can become one.  The question is whether they fit
 for every parameter.  Lower is better.  With *model* set to *all five,
 compared*, every model is fitted and they are listed best first by AIC.
 
+A model can fit without having measured anything: a ring fitted to a single
+peak shrinks its radius to zero, two Gaussians fitted to one peak can push
+one of them to the edge of the ROI.  A parameter that ends on the edge of
+what it is allowed to be, or whose error bar is wider than half the ROI, is
+printed as **not determined**, and its model is left out of the
+comparison -- it is listed last, drawn dotted, and the verdict names it as
+left out.  The one exception is a width of zero: the structure is narrower
+than the localization precision can resolve, which is an answer, not a
+failure.
+
 ```figure Eleven simulated pairs of structures, 0 to 50 nm apart (200 localizations each, structures 6 nm wide, precisions around 8 nm).  Left: how much lower the AIC of two Gaussians is than that of one; above the dashed line two are preferred.  Right: the distance the two-Gaussian fit returned, against the truth (line).  Where two are preferred (red), the distance comes back.  Where one is (grey), the two-Gaussian distance means nothing -- below about 15 nm the pair is not resolved, and the second component wanders off onto the background.  Near the resolution limit a pair can also be missed, both components settling on one broad peak: a distance of zero there is worth a second look.
 distances = np.arange(0, 55, 5).astype(float)
 rng = np.random.default_rng(4)
@@ -412,6 +424,12 @@ on its bound (a width at zero, a background at nothing) has no error bar and
 is left out; the rest are $\sqrt{[H^{-1}]_{jj}}$ of the remaining block, and a
 width's error is carried back from its variance, $\delta s = \delta(s^2)/2s$.
 
+**Not determined.**  A parameter is *not determined* when it ends within
+$10^{-3}$ of its range from a bound -- except a width at zero -- or when its
+error bar is larger than $T/2$.  A model with such a parameter is not a
+candidate: the verdict compares the AIC of the others only, and says which
+were left out.
+
 **The bootstrap.**  Each resample draws $N$ localizations with replacement,
 each keeping its own precision, and refits the same model starting from the
 full fit's parameters, with the step facing the same way.  The interval is
@@ -453,13 +471,16 @@ Also useful to keep a long line's profile to the part around the structure.
 
 ## Output
 
-* **The text** gives, per layer and per model, the fitted values with their
-  error bars (a value printed without one usually ended on its bound), the background
-  fraction, the log-likelihood, AIC and BIC.  With several models, the best
-  by AIC is named and by how much.  With the bootstrap on, the interval of
+* **The text** gives, per layer and per model, the fitted values as
+  value ± error in the profile's unit (nm, or px for a table in pixels; a
+  value printed without an error bar is a width at zero), *not determined*
+  where the data does not fix a parameter, the background fraction, the
+  log-likelihood, AIC and BIC.  With several models, the best by AIC among
+  those that determined every parameter is named, and by how much.  With the bootstrap on, the interval of
   every parameter of the best model.
 * **The profile**: the histogram with the fitted curves.  With one layer,
-  every model fitted is drawn and the best is red; with several layers,
+  every model fitted is drawn and the best is red, on top of the others
+  (a model with a parameter not determined is dotted); with several layers,
   each is drawn in its layer's colour with only its best model.  The curve
   is the density scaled to the histogram, and it is a fit to the
   localizations, not to the bars -- it can sit over an empty bin with
@@ -474,8 +495,8 @@ Also useful to keep a long line's profile to the part around the structure.
 
 A good result has a curve that follows the histogram, an error bar well below
 the value, and, for a distance, an AIC clearly in favour of two Gaussians.
-A distance whose bootstrap piles up at zero, or a width with no error bar, has
-not been measured: the data do not resolve it.
+A distance whose bootstrap piles up at zero, or a parameter *not determined*,
+has not been measured: the data do not resolve it.
 
 ## Differences from SMAP
 

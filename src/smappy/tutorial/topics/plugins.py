@@ -83,6 +83,11 @@ def make(d) -> None:
         f = field(panel, name)
         f.set(value)
         f.changed.emit()
+    if panel.notice_button.isVisible():
+        d.shot("Without a line ROI it says so: Draw line starts one in the "
+               "render window.",
+               spot=[panel.notice, panel.notice_button], point=panel.notice_button,
+               zoom=d.around(panel.notice_button, 760))
     # well clear of the ring, which crosses this line near 0.3 and 0.7
     roi, centre = _across(0.15)
     toolbar(d)._set_kind("line", "line")

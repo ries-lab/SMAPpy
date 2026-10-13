@@ -115,7 +115,8 @@ import numpy as np
 from ..locs import Localizations
 from ..regions import Region
 from ..render import positions
-from . import Context, Plot, Plugin, Result, param, register
+from . import (Context, FormState, Notice, Plot, Plugin, Result, param,
+               register)
 
 PRECISION_FIELDS = ("xy_err_nm",)
 PRECISION_Z_FIELDS = ("z_err_nm",)
@@ -291,7 +292,7 @@ class Model:
     start: Callable                 # start(t, precision, window, **variant)
     bounds: Callable                # bounds(t, window) -> [(lo, hi), ...]
     shape: Callable                 # shape(params, t, precision, window) -> density
-    describe: Callable              # describe(params, errors) -> str
+    describe: Callable              # describe(Shown) -> str
     variants: Tuple[Dict, ...] = ({},)   # fits tried, best likelihood wins
     # Which parameters are widths that add to the localization precision in
     # quadrature, and so are fitted as *variances*.  A width enters the model
@@ -312,10 +313,31 @@ def _fwhm(s: float) -> float:
     return FWHM_PER_SIGMA * s
 
 
-def _pm(value: float, error: float, digits: int = 1) -> str:
+def _pm(value: float, error: float, digits: int = 1, unit: str = "") -> str:
+    """``12.3 ± 0.4 nm``: the value, its error where there is one, the unit."""
+    tail = f" {unit}" if unit else ""
     if not np.isfinite(error):
-        return f"{value:.{digits}f}"
-    return f"{value:.{digits}f} +- {error:.{digits}f}"
+        return f"{value:.{digits}f}{tail}"
+    return f"{value:.{digits}f} \u00b1 {error:.{digits}f}{tail}"
+
+
+UNDETERMINED = "not determined"
+
+
+@dataclass
+class Shown:
+    """What a model's `describe` formats from: the parameters, their errors,
+    which of them the data determined, and the profile's unit."""
+    p: np.ndarray
+    e: np.ndarray
+    ok: np.ndarray
+    unit: str = ""
+
+    def pm(self, i: int, length: bool = True) -> str:
+        """Parameter ``i`` with its error and unit, or "not determined"."""
+        if not self.ok[i]:
+            return UNDETERMINED
+        return _pm(self.p[i], self.e[i], unit=self.unit if length else "")
 
 
 # ------------------------------------------------------- starting values
@@ -666,8 +688,9 @@ GAUSS = Model(
     bounds=lambda t, window: [window, _positive(window)],
     shape=lambda p, t, prec, window: gauss_density(t, p[0],
                                                    _widths(p[1], prec), window),
-    describe=lambda p, e: (f"centre {_pm(p[0], e[0])}, sigma {_pm(p[1], e[1])} "
-                           f"(FWHM {_fwhm(p[1]):.1f})"),
+    describe=lambda f: (f"centre {f.pm(0)}, sigma {f.pm(1)}"
+                        + (f" (FWHM {_fwhm(f.p[1]):.1f} {f.unit})".replace(" )", ")")
+                           if f.ok[1] else "")),
     squares=(1,),
 )
 
@@ -681,9 +704,9 @@ TWO_GAUSS = Model(
         p[3] * gauss_density(t, p[0] - 0.5 * p[1], _widths(p[2], prec), window)
         + (1 - p[3]) * gauss_density(t, p[0] + 0.5 * p[1],
                                      _widths(p[2], prec), window)),
-    describe=lambda p, e: (f"distance {_pm(p[1], e[1])}, sigma {_pm(p[2], e[2])}, "
-                           f"centre {_pm(p[0], e[0])}, "
-                           f"weights {p[3]:.2f}/{1 - p[3]:.2f}"),
+    describe=lambda f: (f"distance {f.pm(1)}, sigma {f.pm(2)}, centre {f.pm(0)}, "
+                        "weights " + (f"{f.p[3]:.2f}/{1 - f.p[3]:.2f}" if f.ok[3]
+                                      else UNDETERMINED)),
     squares=(2,),
 )
 
@@ -694,7 +717,7 @@ STEP = Model(
     bounds=lambda t, window: [window, _positive(window)],
     shape=lambda p, t, prec, window, side=1.0: step_density(
         t, p[0], _widths(p[1], prec), window, side),
-    describe=lambda p, e: f"edge at {_pm(p[0], e[0])}, blur sigma {_pm(p[1], e[1])}",
+    describe=lambda f: f"edge at {f.pm(0)}, blur sigma {f.pm(1)}",
     # which way the edge faces is not a parameter to be walked to: it is one
     # bit, and both are cheap to try
     variants=({"side": 1.0}, {"side": -1.0}),
@@ -709,8 +732,7 @@ DISK = Model(
     shape=lambda p, t, prec, window: arc_density(t, p[0], p[1],
                                                  _widths(p[2], prec), window,
                                                  kind="disk"),
-    describe=lambda p, e: (f"radius {_pm(p[1], e[1])}, centre {_pm(p[0], e[0])}, "
-                           f"blur sigma {_pm(p[2], e[2])}"),
+    describe=lambda f: f"radius {f.pm(1)}, centre {f.pm(0)}, blur sigma {f.pm(2)}",
     squares=(2,),
 )
 
@@ -722,8 +744,7 @@ RING = Model(
     shape=lambda p, t, prec, window: arc_density(t, p[0], p[1],
                                                  _widths(p[2], prec), window,
                                                  kind="ring"),
-    describe=lambda p, e: (f"radius {_pm(p[1], e[1])}, centre {_pm(p[0], e[0])}, "
-                           f"blur sigma {_pm(p[2], e[2])}"),
+    describe=lambda f: f"radius {f.pm(1)}, centre {f.pm(0)}, blur sigma {f.pm(2)}",
     squares=(2,),
 )
 
@@ -756,6 +777,20 @@ class Fit:
     replicates: Optional[np.ndarray] = None
     intervals: Optional[Dict[str, Tuple[float, float]]] = None
     level: float = 0.95
+    unit: str = ""                       # the profile's: nm or px
+    # per parameter: whether the data fixed it (`determined`); None: all were
+    determined: Optional[np.ndarray] = None
+
+    @property
+    def degenerate(self) -> bool:
+        """A parameter the data did not determine: the model is not a
+        candidate for the AIC verdict (`verdict`)."""
+        return self.determined is not None and not bool(np.all(self.determined))
+
+    def undetermined(self) -> List[str]:
+        if self.determined is None:
+            return []
+        return [n for n, ok in zip(self.names, self.determined) if not ok]
 
     @property
     def k(self) -> int:
@@ -794,7 +829,10 @@ class Fit:
 
     @property
     def summary(self) -> str:
-        text = MODELS[self.model].describe(self.params, self.errors)
+        ok = (np.ones(len(self.params), bool) if self.determined is None
+              else np.asarray(self.determined, bool))
+        text = MODELS[self.model].describe(Shown(self.params, self.errors, ok,
+                                                 self.unit))
         if self.extra.get("has_background"):
             text += f", background {100 * self.background:.0f}%"
         if self.extra.get("side", 1.0) < 0:
@@ -967,11 +1005,36 @@ def _in_widths(errors: np.ndarray, params: np.ndarray,
     return out
 
 
+def determined(errors, at_low, at_high, window,
+               widths: Sequence[int] = ()) -> np.ndarray:
+    """Which parameters the data fixed.
+
+    Not one that ended on its bound -- a distance of zero, a centre at the
+    window's edge, a weight of 0 or 1: the optimizer stopped there because
+    it could go no further, not because the likelihood peaks there -- nor
+    one whose error is more than half the window, which says the profile
+    allows it almost anywhere.  Such a number is printed as "not determined"
+    rather than as a value that looks measured, and the model it belongs to
+    is left out of the AIC verdict.
+
+    The one exception is a structural width at zero (``widths``): the
+    structure is narrower than the localization precision lets the profile
+    resolve, which is an answer -- a ring of 60 nm drawn with 8 nm precision
+    has its blur there -- and not a fit that failed.
+    """
+    errors = np.asarray(errors, float)
+    half = 0.5 * float(window[1] - window[0])
+    wide = np.isfinite(errors) & (errors > half)
+    low = np.asarray(at_low, bool).copy()
+    low[[i for i in widths if i < len(low)]] = False
+    return ~(low | np.asarray(at_high, bool) | wide)
+
+
 def fit_profile(t, precision=None, model: str = "gauss",
                 window: Optional[Tuple[float, float]] = None,
                 background: bool = True,
                 start: Optional[Dict[str, float]] = None,
-                variant: Optional[Dict] = None) -> Fit:
+                variant: Optional[Dict] = None, unit: str = "") -> Fit:
     """Fit one coordinate of the localizations with ``model``.
 
     ``t`` are the positions themselves, never a histogram, and ``precision``
@@ -1044,6 +1107,13 @@ def fit_profile(t, precision=None, model: str = "gauss",
         errors = _in_widths(_errors_from(_hessian(nll, vector), free),
                             _from_fit(vector, squares), squares)
         density = _density_of(spec, params, window, fraction, background, shape)
+        n_params = len(params)
+        # on the bound to a thousandth of its range: L-BFGS-B stops a hair
+        # inside it as often as on it
+        fixed = determined(errors[:n_params],
+                           (vector <= lower + 1e-3 * span)[:n_params],
+                           (vector >= upper - 1e-3 * span)[:n_params],
+                           window, widths=squares)
         fit = Fit(model=spec.key, label=spec.label, names=spec.names,
                   params=np.asarray(params, float),
                   errors=np.asarray(errors[:len(params)], float),
@@ -1052,7 +1122,8 @@ def fit_profile(t, precision=None, model: str = "gauss",
                   n=len(t), log_likelihood=-nll(vector),
                   with_precision=precision is not None, window=window,
                   extra={"has_background": background, **shape},
-                  curve=_curve_of(density, precision))
+                  curve=_curve_of(density, precision), unit=unit,
+                  determined=fixed)
         if best is None or fit.log_likelihood > best.log_likelihood:
             best = fit
     return best
@@ -1149,7 +1220,23 @@ def fit_models(t, precision=None, models: Sequence[str] = ("gauss",),
     the second Gaussian can only ever fit better.
     """
     found = [fit_profile(t, precision, model=m, **kwargs) for m in models]
-    return sorted(found, key=lambda f: f.aic)
+    # a model with a parameter the data did not fix is not a candidate, so
+    # it goes after the ones that are, whatever its AIC
+    return sorted(found, key=lambda f: (f.degenerate, f.aic))
+
+
+def verdict(fits: Sequence[Fit]) -> str:
+    """The AIC comparison, over the models that determined every parameter."""
+    candidates = [f for f in fits if not f.degenerate]
+    left_out = [f.label for f in fits if f.degenerate]
+    tail = (f"; left out, not determined: {', '.join(left_out)}"
+            if left_out else "")
+    if not candidates:
+        return "no model determined all its parameters" + tail
+    if len(candidates) == 1:
+        return f"best by AIC: {candidates[0].label} (no other to compare){tail}"
+    return (f"best by AIC: {candidates[0].label} "
+            f"(by {candidates[1].aic - candidates[0].aic:.1f}){tail}")
 
 
 # ------------------------------------------------------------ the profiles
@@ -1312,10 +1399,15 @@ def draw_profile(ax, layers: Sequence["LayerProfile"]) -> None:
         grid = np.linspace(profile.window[0], profile.window[1], 400)
         scale = len(profile.values) * layer.bin_size
         shown = layer.fits if alone else layer.fits[:1]
-        for fit, colour in zip(shown, model_colours):
+        for k, (fit, colour) in enumerate(zip(shown, model_colours)):
+            # the best first in the legend and last on the canvas: drawn
+            # first, the winner was under the curves that lost
             ax.plot(grid, scale * fit.curve(grid),
                     color=colour if alone else layer.colour, linewidth=1.5,
-                    label=fit.label if alone else None)
+                    linestyle=":" if fit.degenerate else "-",
+                    zorder=3 + len(shown) - k,
+                    label=(fit.label + (" (not determined)" if fit.degenerate
+                                        else "")) if alone else None)
     if not alone or len(layers[0].fits) > 1:
         ax.legend(fontsize=6.5, frameon=False)
     first = layers[0].profile
@@ -1454,8 +1546,22 @@ class LineProfile(Plugin):
     # EM starts are tried narrow as well, so a close pair is not merged; the
     # binned fit integrates over its bins; the z window is the filter's, in nm;
     # 5: each layer as it is shown -- its blinks, when it is grouped;
-    # 6: the binned least-squares fit and its setting are gone
-    version = "6"
+    # 6: the binned least-squares fit and its setting are gone; 7: a
+    # parameter on its bound or with an error over half the window is "not
+    # determined" and its model left out of the AIC verdict
+    version = "7"
+
+    def describe(self, ctx: Optional[Context], settings) -> FormState:
+        """Say so before Run when there is no line to take a profile along,
+        with a button that starts drawing one (the GUI's ``"draw line"``)."""
+        if ctx is None or ctx.session is None:
+            return FormState()
+        try:
+            _line_roi(ctx)
+        except ValueError as e:
+            return FormState(notice=Notice(f"{e}.", action="Draw line",
+                                           window="draw line", kind="info"))
+        return FormState()
 
     def run(self, ctx: Context, settings: LineProfileSettings) -> Result:
         region = _line_roi(ctx)
@@ -1472,10 +1578,12 @@ class LineProfile(Plugin):
                 lines.append(f"{fit.summary}")
                 lines.append(f"    log L {fit.log_likelihood:.1f}, "
                              f"AIC {fit.aic:.1f}, BIC {fit.bic:.1f}")
+                if fit.degenerate:
+                    lines.append(f"    not determined: {', '.join(fit.undetermined())}"
+                                 " -- the profile does not fix them")
                 lines.extend(fit.interval_lines())
             if len(layer.fits) > 1:
-                lines.append(f"best by AIC: {layer.fits[0].label} "
-                             f"(by {layer.fits[1].aic - layer.fits[0].aic:.1f})")
+                lines.append(verdict(layer.fits))
 
         def profile_plot(ax) -> None:
             draw_profile(ax, layers)
@@ -1561,7 +1669,8 @@ def fit_layers(ctx: Context, settings: LineProfileSettings,
         ctx.report(f"fitting {len(profile.values)} localizations"
                    + (f" -- {name}" if len(groups) > 1 else ""))
         fits = fit_models(profile.values, precision, models=models,
-                          window=profile.window, background=settings.background)
+                          window=profile.window, background=settings.background,
+                          unit=profile.unit)
 
         # only the best model is resampled: a few hundred refits are worth
         # spending on the answer, not on the models that lost
