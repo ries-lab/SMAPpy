@@ -526,6 +526,23 @@ def _as_plot(plot, name: str = "") -> Plot:
 SOURCES = ("Localize/", "File/Load/", "File/Simulate/")
 
 
+def reads_locs(plugin) -> bool:
+    """Whether a run reads the session's localizations -- and so, in the
+    GUI, waits for a merge of its blinks that is still running
+    (`gui.merging`).  Everything does but what makes its own table: a fit, a
+    loader, a simulation (`SOURCES`), and a chain that starts with one."""
+    cls = plugin if isinstance(plugin, type) else type(plugin)
+    path = getattr(cls, "path", "") or ""
+    if path.startswith(SOURCES):
+        return False
+    spec = getattr(cls, "spec", None)
+    steps = getattr(spec, "steps", None)
+    if steps:
+        first = getattr(steps[0], "plugin", "") or ""
+        return not first.startswith(SOURCES)
+    return True
+
+
 def refuse_grouped_table(ctx: "Context", result: "Result", plugin: "Plugin",
                          name: str = "") -> None:
     """Refuse a new table made from the grouped one.

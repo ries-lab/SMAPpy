@@ -1175,6 +1175,18 @@ class ROIManagerWindow(QMainWindow):
         if not steps:
             self.status.showMessage("no per-region step is enabled")
             return
+        from .merging import _MERGERS
+        merger = _MERGERS.get(self.session) if hasattr(self, "session") else None
+        if merger is not None and merger.pending():
+            # not on localizations standing in for blinks still being merged
+            self.status.showMessage("merging blinks... the ROI is measured when "
+                                    "it is done")
+            if not getattr(self, "_merge_wait", None):
+                def again():
+                    self._merge_wait = None
+                    self.evaluate_active(label)
+                self._merge_wait = merger.after(again)
+            return
         window = self.site_window()
         window.set_steps([step.label for step in steps])
         label = label or window.current

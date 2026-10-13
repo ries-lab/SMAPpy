@@ -117,9 +117,10 @@ localization, at their weighted mean position, with the photons of all of
 them and a correspondingly better precision.  A picture of merged blinks is
 cleaner and counts molecules more fairly: a long blink no longer weighs more
 than a short one.  Layers merge blinks by default (*merge blinks*).  A large
-file does not wait for the merge: it opens on its single localizations,
-the blinks are merged in the background with the progress in the status
-bar, and the picture switches when they are there.  The distance and the
+file does not wait for the merge: it opens at once, the blinks are merged in
+the background -- the picture says "merging blinks" with the stage and a
+clock, and so does the status bar -- and they are drawn when they are there.
+No single localizations are drawn in their place meanwhile.  The distance and the
 number of dark frames allowed are set under *merge settings...*, beside it,
 for every layer at once.  The distance is either
 fixed or, with *merge by* set to *precision*, scaled by how precisely each
@@ -362,9 +363,10 @@ on, and `group_id` are written onto both tables.  Merging is done once per
 table and kept; switching *merge blinks* off and on costs nothing after the
 first time.  It is done when the merged table is first read: for a table of
 300,000 localizations or more, in the background (a few seconds for a few
-million), the layer drawing the localizations until it is ready -- after a
-file opens, a table is changed, *merge blinks* is ticked or the merge
-settings change.
+million), the layer drawing nothing until it is ready -- after a file
+opens, a table is changed, *merge blinks* is ticked or the merge settings
+change.  A plugin run started meanwhile waits for it and starts by itself
+when it is done.
 
 **The axes.**  A coordinate is the column divided by that axis's scale,
 $u / s$, and the render grid stays square in these units -- so the zoom, the
@@ -525,10 +527,10 @@ brightness.
 
 ### merge blinks
 Draws one localization per blink; on by default.  The table is merged the
-first time it is needed -- for a large one in the background, with the
-progress in the status bar, the tick showing the setting and the picture
-following when the blinks are ready; after that it is free.  Unticked
-meanwhile, the merge still finishes and is kept.  A plugin
+first time it is needed -- for a large one in the background, the tick
+showing the setting and the picture "merging blinks" until the blinks are
+ready; after that it is free.  Unticked meanwhile, the layer shows the
+localizations at once, and the merge still finishes and is kept.  A plugin
 measures what the layer shows -- blinks, when they are merged -- except one
 that needs the single localizations (a drift correction, Localization
 Precision, anything that changes the table), which says so on its page.
@@ -544,7 +546,7 @@ neighbours that their precision could tell apart; merging by precision
 avoids both, at the price of cutting the 4% of links that fall beyond 2.5
 sigma (raise *k* to keep more).  OK merges the table again -- once, since
 every layer shows the same merged table; a large one in the background, the
-layers keeping the old blinks until then -- and records the new settings in
+layers drawing nothing until then -- and records the new settings in
 the file's history, since the merged table cannot tell which ones produced
 it.  The drift corrections take these settings too, unless their own
 *within* and *dark frames* are set.

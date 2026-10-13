@@ -143,35 +143,43 @@ def _large(monkeypatch):
     monkeypatch.setattr(merging, "IN_PLACE", 1000)
 
 
-def test_a_large_file_opens_on_localizations_and_merges_in_the_background(
+def _expected_blinks(session):
+    expected, _ = group(Localizations(dict(table().columns), {"units": "nm"}),
+                        session.group_settings)
+    return len(expected)
+
+
+def test_a_large_file_opens_at_once_and_shows_no_localizations_until_its_blinks_are_merged(
         app, monkeypatch):
-    """Opened, the layer is set to blinks and shows the localizations; the
-    status bar says how the merge goes, and the layer shows blinks when they
-    are there -- what linking in place would give."""
+    """Opened, the layer is set to blinks and draws nothing -- the picture
+    says the blinks are being merged, and so does the status bar -- and it
+    draws the blinks when they are there: what linking in place would give."""
     from smappy.gui.app import ControlWindow, RenderWindow
     _large(monkeypatch)
     session = Session()
-    control = ControlWindow(session, RenderWindow(session))
+    render = RenderWindow(session)
+    control = ControlWindow(session, render)
     said = []
     control.statusBar().messageChanged.connect(said.append)
 
     session.add_file(table(), FileInfo("t.hdf5", "/t.hdf5", "smappy"))
     layer = session.layers[0]
     assert control.merger.busy                                   # started, not done
-    assert layer.grouped and not layer.state.shows_grouped       # localizations meanwhile
-    assert len(layer.locs) == 20_000
+    assert layer.grouped and layer.state.waiting
+    assert len(layer.locs) == 0                                  # no localizations
+    hint = render.view.merge_hint
+    assert not hint.isHidden() and hint.text().startswith("merging blinks")
+    assert control._shown_text() == "merging blinks"            # not "0 of 0 shown"
     _run_until(app, lambda: not control.merger.busy)
 
-    assert layer.state.shows_grouped and session.tables.is_current
+    assert not layer.state.waiting and session.tables.is_current and hint.isHidden()
     assert "n_in_group" in session.locs                          # written back
     assert any(m.startswith("merging blinks") for m in said)
     assert any("blinks from 20,000 localizations" in m for m in said)
-    expected, _ = group(Localizations(dict(table().columns), {"units": "nm"}),
-                        session.group_settings)
-    assert len(layer.locs) == len(expected)
+    assert len(layer.locs) == _expected_blinks(session)
 
 
-def test_unticked_while_it_merges_the_layer_keeps_localizations_and_the_merge_is_kept(
+def test_unticked_while_it_merges_the_layer_shows_localizations_and_the_merge_is_kept(
         app, monkeypatch):
     from smappy.gui.render_tab import RenderTab
     _large(monkeypatch)
@@ -180,12 +188,13 @@ def test_unticked_while_it_merges_the_layer_keeps_localizations_and_the_merge_is
     session.add_file(table(), FileInfo("t.hdf5", "/t.hdf5", "smappy"))
     assert tab.grouped.isChecked() and tab.merger.busy      # the setting, from the start
     tab.grouped.click()                                     # unticked meanwhile
-    _run_until(app, lambda: not tab.merger.busy)
     layer = session.layers[0]
+    assert layer.locs is session.locs                       # localizations, at once
+    _run_until(app, lambda: not tab.merger.busy)
     assert not layer.grouped and layer.locs is session.locs
     assert session.tables.is_current                         # kept for later
     tab.grouped.click()
-    assert layer.state.shows_grouped and not tab.merger.busy  # at once
+    assert len(layer.locs) == _expected_blinks(session) and not tab.merger.busy
 
 
 def test_a_merge_the_table_moved_under_is_done_again_for_the_new_one(app, monkeypatch):
@@ -198,13 +207,13 @@ def test_a_merge_the_table_moved_under_is_done_again_for_the_new_one(app, monkey
     half = session.locs[np.arange(len(session.locs)) < 10_000]
     session.set_locs(half, label="halve")              # while the worker links
     _run_until(app, lambda: not tab.merger.busy)
-    assert session.layers[0].state.shows_grouped and session.tables.is_current
+    assert not session.layers[0].state.waiting and session.tables.is_current
     assert session.layers[0].locs is session.tables.peek_grouped().locs
     blinks = session.tables.peek_grouped().locs
     assert int(np.asarray(blinks["n_in_group"]).sum()) == 10_000   # of the half
 
 
-def test_new_merge_settings_merge_again_in_a_worker_and_the_old_blinks_stay_meanwhile(
+def test_new_merge_settings_merge_again_in_a_worker_and_nothing_stale_is_drawn(
         app, monkeypatch):
     from smappy.group import GroupSettings
     from smappy.gui.dialogs import GroupingDialog
@@ -219,21 +228,96 @@ def test_new_merge_settings_merge_again_in_a_worker_and_the_old_blinks_stay_mean
     dialog.form.set(GroupSettings(dx=20.0, dt=1))
     dialog._apply()
     assert session.group_settings.dx == 20.0
-    assert tab.merger.busy and session.layers[0].locs is old   # not linked here
+    assert tab.merger.busy and len(session.layers[0].locs) == 0   # not linked here
     _run_until(app, lambda: not tab.merger.busy)
     assert session.tables.is_current and not session.tables.merging
     assert len(session.layers[0].locs) > len(old)              # a tighter box
 
 
-def test_a_plugin_run_while_it_merges_measures_what_is_shown(app, monkeypatch):
-    """Not a second merge on the GUI thread: the localizations, as drawn."""
+@pytest.fixture
+def counted():
+    """A plugin that counts the rows it is handed, registered for these tests."""
+    from smappy.plugins import Plugin, Result
+
+    class CountRows(Plugin):
+        path = "Test/Merge/Count"
+        changes_locs = False
+
+        def run(self, ctx, settings=None):
+            return Result(text=f"{len(ctx.locs)} rows", data={"n": len(ctx.locs)})
+    return CountRows
+
+
+def _panel_done(panel):
+    return panel._merge_wait is None and (panel._thread is None
+                                          or not panel._thread.isRunning()) \
+        and panel.result is not None
+
+
+def test_a_run_started_while_blinks_are_merged_waits_and_then_measures_blinks(
+        app, monkeypatch, counted):
+    from smappy.gui.plugin_panel import PluginPanel
     from smappy.gui.render_tab import RenderTab
     _large(monkeypatch)
     session = Session()
     tab = RenderTab(session)
     session.add_file(table(), FileInfo("t.hdf5", "/t.hdf5", "smappy"))
-    assert tab.merger.busy
-    ctx = session.context()
-    assert ctx.locs is session.locs and not session.tables.is_current
+    panel = PluginPanel(counted, session)
+    panel.run()
+    assert panel._merge_wait is not None and panel._thread is None   # held back
+    assert "the run starts when it is done" in panel.status.text()
+    assert panel.run_button.text() == "Stop"
+    _run_until(app, lambda: _panel_done(panel))
+    assert panel.result.data["n"] == _expected_blinks(session)        # blinks
+    assert not tab.merger.busy
+
+
+def test_stop_while_waiting_for_the_merge_does_not_run(app, monkeypatch, counted):
+    from smappy.gui.plugin_panel import PluginPanel
+    from smappy.gui.render_tab import RenderTab
+    _large(monkeypatch)
+    session = Session()
+    tab = RenderTab(session)
+    session.add_file(table(), FileInfo("t.hdf5", "/t.hdf5", "smappy"))
+    panel = PluginPanel(counted, session)
+    panel.run()
+    panel.run_button.click()                       # Stop: give up waiting
+    assert panel._merge_wait is None and panel.run_button.text() == "Run"
     _run_until(app, lambda: not tab.merger.busy)
-    assert len(session.context().locs) < len(session.locs)
+    app.processEvents()
+    assert panel.result is None and panel._thread is None
+
+
+def test_a_loader_does_not_wait_for_the_merge(app, monkeypatch):
+    from smappy import plugins
+    from smappy.plugins import reads_locs
+    assert not reads_locs(plugins.get("File/Load/Auto"))
+    assert reads_locs(plugins.get("Analysis/Measure/Localization Statistics"))
+
+
+def test_a_chain_waits_for_the_merge_and_shares_it(app, monkeypatch, counted):
+    """The chain's copy of the session uses the session's merged table: it
+    links nothing itself, on its worker."""
+    import smappy.layer_state as layer_state
+    from smappy.chain import chain_class
+    from test_chain import spec
+    from smappy.gui.plugin_panel import PluginPanel
+    from smappy.gui.render_tab import RenderTab
+    from smappy.plugins import register
+    _large(monkeypatch)
+    register("Test/Merge/Count")(counted)
+    links = []
+    real = layer_state.group
+    monkeypatch.setattr(layer_state, "group",
+                        lambda *a, **k: links.append(1) or real(*a, **k))
+    session = Session()
+    tab = RenderTab(session)
+    session.add_file(table(), FileInfo("t.hdf5", "/t.hdf5", "smappy"))
+    cls = chain_class(spec({"plugin": "Test/Merge/Count", "label": "n",
+                            "grouping": "grouped"}))
+    panel = PluginPanel(cls, session)
+    panel.run()
+    assert panel._merge_wait is not None                 # waits, as any run
+    _run_until(app, lambda: _panel_done(panel))
+    assert panel.result.data["results"]["n"].data["n"] == _expected_blinks(session)
+    assert links == []                                   # the session's merge, shared

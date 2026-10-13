@@ -168,9 +168,9 @@ class Tables:
     that read is on the GUI thread, so a large table is not linked by
     reading it: with ``defer_from`` set (the GUI sets it, `gui.merging`), a
     table of at least that many rows is `deferred` -- a layer that shows
-    blinks shows what there is (the last grouped table, else the
-    localizations) and the GUI links it in a worker (`link_job`,
-    `take_grouped`).
+    blinks draws nothing meanwhile (`pending`), and the GUI links it in a
+    worker (`link_job`, `take_grouped`).  A copy made with `sharing` (a
+    chain's) links on read, into columns of its own.
     """
 
     def __init__(self, locs: Localizations, settings: Optional[GroupSettings] = None,
@@ -192,6 +192,11 @@ class Tables:
         # `gui.merging`): a layer showing blinks keeps the ones it has until
         # the new ones arrive, rather than linking them again, here, at once
         self.merging = False
+        self._pending = None            # the empty table shown meanwhile
+        self._shared = False
+        # the GUI's merge of these rows failed: the layers show the
+        # localizations rather than nothing, and it is not tried again
+        self.merge_failed = False
         if grouped is not None:
             self._grouped = LocSet(grouped)
             self._key = self._wanted()
@@ -210,6 +215,12 @@ class Tables:
         made._key = other._key
         made.merging = False
         made.defer_from = None          # a copy is headless: it links on read
+        made._pending = None
+        made.merge_failed = False
+        # what the copy links is its own, and so are the columns linking
+        # writes back (`group_id`, `n_in_group`): it runs on a worker, and
+        # the table is the session's (`grouped` copies it first)
+        made._shared = True
         return made
 
     @property
@@ -231,6 +242,23 @@ class Tables:
     def peek_grouped(self) -> Optional[LocSet]:
         """The grouped table linked last, current or not; None if never."""
         return self._grouped
+
+    def _unshare(self) -> None:
+        """Take a table of one's own over the shared one's arrays, so that
+        linking writes its columns there and not into the session's."""
+        shared = self.ungrouped
+        own = copy.copy(shared)
+        own.locs = Localizations(dict(shared.locs.columns), dict(shared.locs.metadata))
+        self.ungrouped = own
+        self._shared = False
+
+    def pending(self) -> LocSet:
+        """What a layer showing blinks draws while they are merged elsewhere:
+        nothing -- an empty table with the localizations' columns, so the
+        picture shows no single localizations in place of blinks."""
+        if self._pending is None or set(self._pending.locs.keys()) != set(self.locs.keys()):
+            self._pending = LocSet(self.locs[np.zeros(0, np.int64)])
+        return self._pending
 
     def available(self) -> Optional[LocSet]:
         """The current grouped table for a reader that can do without it:
@@ -264,6 +292,8 @@ class Tables:
         `extend` refuses a table whose columns do not match.
         """
         if not self.is_current:
+            if self._shared:
+                self._unshare()
             key = self._wanted()
             if self._link_with is not None:
                 table = self._link_with(self.settings, not self.growing)
@@ -453,16 +483,19 @@ class ViewState:
         """The table shown.  Grouped, it is linked if it is not current --
         except on a table that is still growing, whose grouped form stays as it
         was linked until somebody asks for it again (`group`), and on a
-        table whose linking is deferred to a worker (`Tables.deferred`)."""
+        table whose linking is deferred to a worker (`Tables.deferred`),
+        where it is an empty table until the blinks are there."""
         if not self.use_grouped:
             return self.tables.ungrouped
         tables = self.tables
-        if tables.growing and tables.peek_grouped() is not None:
-            return tables.peek_grouped()
+        if tables.growing:
+            # a live fit's: as linked last, linked here the first time
+            return tables.peek_grouped() or tables.grouped()
         if tables.deferred():
-            # being merged elsewhere: the blinks there were, else the
-            # localizations, until the new blinks arrive
-            return tables.peek_grouped() or tables.ungrouped
+            # being merged elsewhere: nothing until the blinks arrive -- not
+            # the localizations, which would be taken for blinks, nor blinks
+            # merged with other settings
+            return tables.ungrouped if tables.merge_failed else tables.pending()
         return tables.grouped()
 
     @property
@@ -507,10 +540,10 @@ class ViewState:
         self.use_grouped = bool(on)
 
     @property
-    def shows_grouped(self) -> bool:
-        """Whether blinks are what is drawn now -- not only asked for: while
-        they are being merged elsewhere the localizations stand in."""
-        return self.use_grouped and self.current is not self.tables.ungrouped
+    def waiting(self) -> bool:
+        """Whether this layer is set to blinks that are being merged elsewhere,
+        and so draws nothing for now (`Tables.pending`)."""
+        return self.use_grouped and self.current is self.tables._pending
 
     @property
     def cull_index(self):

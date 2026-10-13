@@ -28,8 +28,7 @@ The file's layer shows its blinks merged, the same whichever reader was
 used: [merge blinks](plugin:Panels/Glossary) (also called grouping or
 linking) combines the localizations in consecutive frames that come from one
 blinking event into one localization.  The file does not wait for that to
-open: a large one opens on its single localizations and is merged in the
-background.
+open: a large one opens at once and is merged in the background.
 
 ## How it works
 
@@ -88,9 +87,9 @@ and 1 dark frame by default; *merge settings...* in the Render tab).  The
 merged blinks are what a layer shows when *merge blinks* is ticked, which is
 how it opens.  The merge is not part of reading: a small file is merged when
 it is first drawn, and a large one (300,000 localizations or more) opens at
-once on its single localizations while it is merged in the background, with
-its progress in the status bar; the picture switches to blinks when they are
-there.  Headless -- in a script, a chain or a batch -- the blinks are merged
+once and is merged in the background, the picture and the status bar saying
+so; the blinks are drawn when they are there, and a plugin run started
+meanwhile waits for them.  Headless -- in a script, a chain or a batch -- the blinks are merged
 when something first reads them.  An added file is merged together with the
 files already open.  A table with a trace id (`tid`, as a MINFLUX export
 has) is merged by trace instead, one row per trace.  To look at every

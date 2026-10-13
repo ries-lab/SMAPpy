@@ -773,7 +773,7 @@ class Session:
     def set_group_settings(self, settings: GroupSettings) -> None:
         """New linking parameters: the grouped table is linked again, once
         for every layer, when it is next read -- in the GUI in a worker for a
-        large table, the layers keeping the old blinks until then.
+        large table, the layers drawing nothing until then.
 
         Logged like a plugin run: the grouped table is data the user reads
         numbers off, and which `dx` and `dt` produced it is not recoverable

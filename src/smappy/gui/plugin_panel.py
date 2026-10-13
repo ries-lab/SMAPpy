@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (QCheckBox, QHBoxLayout, QLabel, QMainWindow,
                                QSizePolicy, QSpinBox, QToolButton, QVBoxLayout,
                                QWidget)
 
-from ..plugins import Plugin, Result, Stopped
+from ..plugins import reads_locs, Plugin, Result, Stopped
 from ..session import LiveTableError, Session
 from .errors import ERROR_STYLE, details_window, message_of
 from .params import SettingsForm
@@ -232,6 +232,8 @@ class PluginPanel(QWidget):
         self._warnings = 0
         self._follow_timer = QTimer(self, singleShot=True, interval=120)
         self._follow_timer.timeout.connect(self._follow_step)
+        # the token of a run waiting for the blinks to be merged (`gui.merging`)
+        self._merge_wait = None
         self.form.field_changed.connect(self._react)
         self.progressed.connect(self._on_progress)
         self.streamed.connect(self._on_stream)
@@ -409,7 +411,9 @@ class PluginPanel(QWidget):
         self._start("run", "running...")
 
     def _run_or_stop(self) -> None:
-        if self._stop is not None:
+        if self._merge_wait is not None:
+            self._cancel_wait()
+        elif self._stop is not None:
             self.stop()
         else:
             self.run()
@@ -488,6 +492,79 @@ class PluginPanel(QWidget):
             # (`gui.live_session`), so either can end it
             stop = context.get("stop") or threading.Event()
             context["stop"] = stop
+        merger = self._merger()
+        if merger is not None and reads_locs(self.plugin):
+            if merger.pending():
+                # not on localizations standing in for blinks being merged:
+                # the run waits for them and starts by itself
+                if job == "follow":
+                    if self._merge_wait is None:   # measured once they are there
+                        self._merge_wait = merger.after(self._follow_after_merge)
+                    return False
+                self._wait_for_merge(merger, job, message, settings, context,
+                                     stop, ask, kwargs)
+                return True
+            merger.prepare()
+        return self._launch(job, message, settings, context, stop, ask, kwargs)
+
+    def _merger(self):
+        """The session's background merge (`gui.merging`), if this program
+        has one; a panel without a window around it has none."""
+        from .merging import _MERGERS
+        from shiboken6 import isValid
+        found = _MERGERS.get(self.session)
+        return found if found is not None and isValid(found) else None
+
+    def _follow_after_merge(self) -> None:
+        self._merge_wait = None
+        self._follow_timer.start()
+
+    def _wait_for_merge(self, merger, job, message, settings, context, stop,
+                        ask, kwargs) -> None:
+        """Hold the run until the blinks are merged, saying so, and start
+        it then; Stop (the run button) gives up waiting."""
+        def go():
+            self._merge_wait = None
+            merger.status.disconnect(self._on_merge_status)
+            self._release_buttons()
+            self._launch(job, message, settings, context, stop, ask, kwargs)
+
+        def failed(text):
+            self._merge_wait = None
+            merger.status.disconnect(self._on_merge_status)
+            self._release_buttons()
+            self.status.setText(f"could not merge blinks ({text}): not run")
+            self.status.setStyleSheet(WARNING_STYLE)
+
+        for button in self._buttons():
+            button.setEnabled(False)
+        self._stop = stop or threading.Event()
+        self.run_button.setText("Stop")
+        self.run_button.setToolTip("do not run: stop waiting for the merge")
+        self.run_button.setEnabled(True)
+        self.status.setStyleSheet("")
+        merger.status.connect(self._on_merge_status)
+        self._merge_wait = -1                       # waiting, token to come
+        self._on_merge_status(merger.text or "merging blinks...")
+        self._merge_wait = merger.after(go, failed)
+
+    def _on_merge_status(self, text: str) -> None:
+        if text and self._merge_wait is not None:
+            self.status.setText(f"{text} -- the run starts when it is done")
+
+    def _cancel_wait(self) -> None:
+        merger = self._merger()
+        if merger is not None:
+            merger.cancel(self._merge_wait)
+            try:
+                merger.status.disconnect(self._on_merge_status)
+            except (RuntimeError, TypeError):
+                pass
+        self._merge_wait = None
+        self._release_buttons()
+        self.status.setText("not run")
+
+    def _launch(self, job, message, settings, context, stop, ask, kwargs) -> bool:
         # built here, on the GUI thread: the context reads the table and the
         # selection now, so the worker cannot race a live fit rebinding them
         context = self.session.context(progress=self.progressed.emit,

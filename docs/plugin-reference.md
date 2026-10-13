@@ -56,8 +56,14 @@ and `smappy/simulate` are the record, and the code wins where they differ.
   cache keyed by the rows and `session.group_settings`.
   A layer shows it by default, but nothing is linked when a file opens: it
   is linked when first read, and in the GUI a large table (`gui.merging`)
-  in a worker after the file opens -- meanwhile a layer set to blinks shows
-  the localizations, and `ctx.locs` is what it shows.
+  in a worker after the file opens, a layer set to blinks drawing nothing
+  meanwhile.  **A run waits for that merge** if it reads the session's
+  localizations -- every plugin but one that makes its own table (a fit, a
+  loader, a simulation: `SOURCES`, and a chain whose first step is one;
+  `plugins.reads_locs`): the panel holds it and starts it when the blinks
+  are there, so a plugin never sees localizations standing in for blinks.
+  A chain's copy of the session (`Session.scratch`) then shares the merged
+  table; what the copy links itself goes into columns of its own.
   `session.tables.peek_grouped()` is what was linked last (None if nothing
   was), `session.tables.is_current` whether it still matches,
   `session.tables.grouped()` links it if it does not, and

@@ -284,10 +284,10 @@ the merge -- about 24 s with the exact walk -- follows in the background.
 
 Every file was merged before it opened, so that its layer could open on
 blinks, and that is what the chunked linker was for.  A layer still shows
-merged blinks by default, but in the GUI the file opens at once on its
-single localizations and the merge runs in a worker (`gui.merging`) with
-the stage and a clock in the status bar; the layer switches to blinks when
-they are there.  The worker gets the table read-only (`Tables.link_job`, a
+merged blinks by default, but in the GUI the file opens at once and the
+merge runs in a worker (`gui.merging`) with the stage and a clock over the
+picture and in the status bar; the layer draws nothing until the blinks are
+there, and a run that reads the table waits for them.  The worker gets the table read-only (`Tables.link_job`, a
 snapshot of a live one) and hands the answer back to be kept on the GUI
 thread (`Tables.take_grouped`), which writes `group_id` and `n_in_group`
 back.  Below 300,000 localizations it merges in place, on first read.

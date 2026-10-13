@@ -167,6 +167,16 @@ class RenderView(QWidget):
         self.empty_hint.setAlignment(Qt.AlignCenter)
         self.empty_hint.setStyleSheet("color: rgb(150, 150, 150); font-size: 15px;")
         self.empty_hint.setAttribute(Qt.WA_TransparentForMouseEvents)
+        # while a layer's blinks are merged in the background it draws
+        # nothing (`Tables.pending`): this says why, with the merge's stage
+        self.merge_hint = QLabel("", self)
+        self.merge_hint.setAlignment(Qt.AlignCenter)
+        self.merge_hint.setStyleSheet("color: rgb(170, 170, 170); font-size: 15px;")
+        self.merge_hint.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.merge_hint.hide()
+        from .merging import merger_for
+        self._merger = merger_for(session, self)
+        self._merger.status.connect(self._show_merge_hint)
         # what the colours mean, when layers are coloured by a column
         self.colour_bars = ColourBars(self)
 
@@ -236,8 +246,25 @@ class RenderView(QWidget):
         stop_render_threads()
 
     # ---------------------------------------------------------------- flow
+    def _show_merge_hint(self, text: Optional[str] = None) -> None:
+        """"Merging blinks..." over the picture while a visible layer waits
+        for its blinks, and only then."""
+        try:
+            text = self._merger.text if text is None else text
+            waiting = bool(text) and any(
+                l.visible and not l.is_image and l.state.waiting
+                for l in self.session.layers)
+            self.merge_hint.setVisible(waiting)
+            if waiting:
+                self.merge_hint.setText(text)
+                self.merge_hint.setGeometry(self.rect())
+                self.merge_hint.raise_()
+        except Exception:                     # a slot must not raise into Qt
+            traceback.print_exc()
+
     def _on_session(self, what: str) -> None:
         self._show_hint()
+        self._show_merge_hint()
         if what in ("locs", "layer", "layers", "regrouped"):
             self.colour_bars.show_for(self.session.layers)
         if what == "locs":
@@ -303,6 +330,7 @@ class RenderView(QWidget):
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self.empty_hint.setGeometry(self.rect())
+        self.merge_hint.setGeometry(self.rect())
         self.colour_bars.place()
         if len(self.panels) > 1:
             self._arrange()

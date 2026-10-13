@@ -145,6 +145,7 @@ class ControlWindow(QMainWindow):
         # merges a large table's blinks in the background, after it opens
         # and whenever a layer asks for them again (`gui.merging`)
         self.merger = merger_for(session, self)
+        self.merger.message.connect(lambda text, ms: self.statusBar().showMessage(text, ms))
         self.setProperty(identity.OWN_TITLE, True)      # names the session itself
         # the GUI last saved or loaded, or the shipped one: never one written
         # behind anybody's back (see `workspace`)
@@ -1045,8 +1046,9 @@ class ControlWindow(QMainWindow):
 
         def one(layer) -> str:
             kept, of = len(layer.filter), len(layer.locs)
-            text = (f"{kept:,} of {of:,}" + (" blinks" if layer.state.shows_grouped else "")
-                    + " shown")
+            if layer.state.waiting:
+                return "merging blinks"
+            text = f"{kept:,} of {of:,}" + (" blinks" if layer.grouped else "") + " shown"
             hidden = 1.0 - kept / of if of else 0.0
             # said in so many words: a bound set long ago hides data silently
             return text + (f", filters hide {hidden:.0%}" if hidden >= 0.005 else "")
