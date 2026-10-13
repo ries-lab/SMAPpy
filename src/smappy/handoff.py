@@ -296,16 +296,19 @@ def receive(path) -> Tuple[Localizations, Dict[str, Any]]:
 
 
 def take(path, group_settings=None, progress=None):
-    """`receive`, and link the table as opening a file would:
-    ``(locs, state, grouped)``.  The slow half, for a worker thread."""
-    from .session import DEFAULT_GROUP_SETTINGS, GROUPED_BY_DEFAULT
+    """`receive`, and link the table if a layer handed over shows merged
+    blinks: ``(locs, state, grouped)``.  The slow half, for a worker thread
+    -- linked here and not when the layers are read, so the new window does
+    not wait for it, and not at all when no layer shows blinks."""
+    from .session import DEFAULT_GROUP_SETTINGS
     locs, state = receive(path)
     grouped = None
-    if GROUPED_BY_DEFAULT and len(locs) and "frame" in locs:
+    wanted = any(c.get("grouped") for c in state.get("layers") or [])
+    if wanted and len(locs) and "frame" in locs:
         from .group import group as link
         settings = _group_settings(state, group_settings or DEFAULT_GROUP_SETTINGS)
         grouped, _ = link(locs, settings,
-                          progress=(lambda text, _f: progress(f"Grouper: {text}"))
+                          progress=(lambda text, _f: progress(f"merging blinks: {text}"))
                           if progress else None)
     return locs, state, grouped
 

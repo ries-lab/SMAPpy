@@ -223,12 +223,15 @@ def test_found_rois_are_evaluated_without_a_review_step():
 def test_the_default_histograms_draw_every_number_the_statistics_gave():
     locs, _ = pores()
     p, s = rois_of(locs)
+    p.session.layers[0].show_grouped(True)
+    p.session.layers[0].locs                 # merged once: `n_in_group` is written
+    p.session.layers[0].show_grouped(False)
     p.find(s.id)
     p.evaluate()
     drawn = histograms(p.results(), HistogramSettings(bins=10))
     assert set(drawn) == {'n_localizations', 'mean_photons', 'median_photons',
                           'photons_n0', 'mean_precision_nm', 'median_precision_nm',
-                          'sigma_c_nm', 'on_time_frames', 'n_blinks'}   # linked on load
+                          'sigma_c_nm', 'on_time_frames', 'n_blinks'}
 
 
 def test_results_live_in_a_table_per_evaluation_and_runs_are_only_a_log():

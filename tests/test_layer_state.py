@@ -78,8 +78,9 @@ def test_one_bound_holds_on_both_tables_and_keeps_different_rows():
     ungrouped_kept = state.filter.mask.mean()
 
     state.show_grouped(True)
-    assert state.has_grouped
+    assert not state.has_grouped                     # a setting: linked when read
     assert len(state.locs) < len(state.tables.locs)
+    assert state.has_grouped
     assert state.filter.ranges == {"xy_err_nm": (None, 8.0)}
     assert state.filter.mask.mean() > ungrouped_kept  # a blink beats its frames
 

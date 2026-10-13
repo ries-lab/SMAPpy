@@ -131,6 +131,11 @@ class ColumnRegions:
     def __init__(self, session=None, column: str = "cluster_id", layer: int = 0,
                  locs: Optional[Localizations] = None):
         self.session = session
+        if session is not None and locs is None and \
+                any(l.grouped for l in session.layers if not l.is_image):
+            # linked first, where that is allowed, so `group_id` is on the
+            # rows the regions are cut from (`_grouped_rows`)
+            session.tables.available()
         self.locs = locs if locs is not None else session.locs
         if column not in self.locs:
             raise ValueError(f"the table has no {column!r}: it has "
@@ -226,7 +231,8 @@ class ColumnRegions:
     def _grouped_rows(self, i, lay, rows):
         """The grouped table's rows for these localizations, via ``group_id``."""
         tables = self.session.tables
-        locset = tables.peek_grouped()
+        locset = tables.available() if lay.grouped else \
+            (tables.peek_grouped() if tables.is_current else None)
         if locset is None or not tables.is_current or "group_id" not in self.locs \
                 or "group_id" not in locset.locs:
             return None

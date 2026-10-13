@@ -6,7 +6,7 @@ sessions.  They are ordinary plugins now.
 
 A loader runs in the panel's worker thread and must not touch the session, so
 it hands its work back as `Result.files` and `Session.apply` adds them on the
-thread that owns the session.  The reading itself is `session.read_and_group`,
+thread that owns the session.  The reading itself is `session.read_localizations`,
 the same function the window's own `LoadTask` uses -- one implementation, so a
 format behaves the same whichever way it was opened.
 
@@ -96,8 +96,7 @@ class LoadAuto(Plugin):
         return {"mapping": guess_csv_mapping(headers)}
 
     def run(self, ctx: Context, settings: LoadSettings) -> Result:
-        from ..group import GroupSettings
-        from ..session import read_and_group
+        from ..session import read_localizations
         if not settings.path:
             raise ValueError("choose a file")
         path = Path(settings.path)
@@ -105,16 +104,12 @@ class LoadAuto(Plugin):
             raise FileNotFoundError(f"no such file: {path}")
         reader = _reader(path, settings)
         ctx.report(f"reading {path.name} as {reader.name}")
-        group_settings = (ctx.session.group_settings if ctx.session is not None
-                          else GroupSettings())
-        locs, info, grouped = read_and_group(
-            path, group_settings, append=settings.append,
-            progress=ctx.report, reader=reader,
-            **self.reader_args(path, reader, settings))
+        locs, info = read_localizations(path, progress=ctx.report, reader=reader,
+                                        **self.reader_args(path, reader, settings))
         text = f"{len(locs)} localizations from {path.name} ({info.format})"
-        if grouped is not None:
-            text += f", {len(grouped)} after merging blinks"
-        return Result(files=[(locs, info, grouped)], text=text,
+        # not merged here: the layer merges its blinks when first read, and
+        # the GUI in the background once the file is open
+        return Result(files=[(locs, info, None)], text=text,
                       append=settings.append, data={"info": info}, settings=settings)
 
 

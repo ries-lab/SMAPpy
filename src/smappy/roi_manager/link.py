@@ -220,8 +220,11 @@ class SessionROIs(ROIProject):
             mask = np.asarray(lay.selection(i).mask, dtype=bool)
             entry = {"ungrouped": (locs, Selection(mask[rows], layer=i, roi=region,
                                                    name=f"{lay.name}, {region}"))}
-            locset = session.tables.peek_grouped()
-            if locset is not None and session.tables.is_current:
+            # linked here if a layer shows blinks and nothing defers it;
+            # otherwise offered only where it is current
+            locset = (session.tables.available() if lay.grouped else
+                      session.tables.peek_grouped() if session.tables.is_current else None)
+            if locset is not None:
                 keep = self._file_mask(locset.locs, source.number)
                 g = rows_in(locset.locs, locset.index, region, keep)
                 entry["grouped"] = (locset.locs[g], Selection(

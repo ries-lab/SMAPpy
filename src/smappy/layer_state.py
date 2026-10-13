@@ -161,21 +161,37 @@ class Tables:
 
     ``link`` replaces the linking, for a table whose grouped form is cut from
     another one rather than linked afresh (one file of a session, in the ROI
-    manager).
+    manager); ``ready()`` then says whether that is cheap now.
+
+    **Deferred linking.**  A layer reads the grouped table when it is drawn,
+    and headless that links it there and then, on first read.  In the GUI
+    that read is on the GUI thread, so a large table is not linked by
+    reading it: with ``defer_from`` set (the GUI sets it, `gui.merging`), a
+    table of at least that many rows is `deferred` -- a layer that shows
+    blinks shows what there is (the last grouped table, else the
+    localizations) and the GUI links it in a worker (`link_job`,
+    `take_grouped`).
     """
 
     def __init__(self, locs: Localizations, settings: Optional[GroupSettings] = None,
                  *, grouped: Optional[Localizations] = None, live: bool = False,
                  extent: Optional[Sequence[float]] = None,
-                 link: Optional[Linker] = None):
+                 link: Optional[Linker] = None,
+                 ready: Optional[Callable[[], bool]] = None,
+                 defer_from: Optional[int] = None):
         """``grouped`` is ``locs`` already linked with ``settings`` -- by a
-        worker thread, off the GUI's, which is the only way opening a large
-        file does not freeze the window."""
+        worker thread, off the GUI's."""
         self.ungrouped = LocSet(locs, extent=extent, growable=live)
         self.settings = settings if settings is not None else GroupSettings()
         self._link_with = link
+        self._ready = ready
+        self.defer_from = defer_from
         self._grouped: Optional[LocSet] = None
         self._key = None
+        # set while a merge of these rows runs elsewhere (the GUI's worker,
+        # `gui.merging`): a layer showing blinks keeps the ones it has until
+        # the new ones arrive, rather than linking them again, here, at once
+        self.merging = False
         if grouped is not None:
             self._grouped = LocSet(grouped)
             self._key = self._wanted()
@@ -189,8 +205,11 @@ class Tables:
         made.ungrouped = other.ungrouped
         made.settings = other.settings
         made._link_with = other._link_with
+        made._ready = other._ready
         made._grouped = other._grouped
         made._key = other._key
+        made.merging = False
+        made.defer_from = None          # a copy is headless: it links on read
         return made
 
     @property
@@ -213,6 +232,28 @@ class Tables:
         """The grouped table linked last, current or not; None if never."""
         return self._grouped
 
+    def available(self) -> Optional[LocSet]:
+        """The current grouped table for a reader that can do without it:
+        linked now if it is not current and linking here is allowed, None
+        while it is deferred to the GUI's worker or the table still grows."""
+        if self.is_current:
+            return self._grouped
+        if self.growing or self.deferred():
+            return None
+        return self.grouped()
+
+    def deferred(self) -> bool:
+        """Whether reading the grouped table must not link it now: a merge
+        runs elsewhere, or the table is large enough for the GUI to link it
+        in a worker (``defer_from``).  A table cut from another one is
+        never deferred once that one is current -- cutting is cheap."""
+        if self.is_current:
+            return False
+        if self._link_with is not None and self._ready is not None and self._ready():
+            return False
+        return self.merging or (self.defer_from is not None
+                                and len(self.locs) >= self.defer_from)
+
     def grouped(self, progress=None) -> LocSet:
         """The grouped table for the rows and settings as they are now.
 
@@ -232,6 +273,37 @@ class Tables:
             self._grouped = LocSet(table)
             self._key = key
         return self._grouped
+
+    def link_job(self) -> Optional[Tuple[Localizations, GroupSettings, tuple]]:
+        """What linking these rows takes, for a worker thread:
+        ``(locs, settings, key)``, to run `group.group` on with
+        ``attach_columns=False`` and hand back to `take_grouped`.  None when
+        there is nothing to do, or when the linking is not `group` (a
+        `Tables` cut from another one).  A growing table is handed over as a
+        snapshot, so the worker reads rows the fit is not adding to."""
+        if self.is_current or self._link_with is not None:
+            return None
+        locs = self.locs.snapshot() if self.growing else self.locs
+        return locs, self.settings, (len(locs), asdict(self.settings))
+
+    def take_grouped(self, grouped: Localizations, group_index: np.ndarray,
+                     key: tuple) -> bool:
+        """Keep a grouped table linked elsewhere from `link_job`'s rows, on
+        the thread that owns the tables.  False, and nothing kept, when the
+        rows or the settings moved since the job was handed out -- except
+        that a growing table keeps what was linked, as `peek_grouped` does.
+        Writes `group_id` and `n_in_group` back, as `grouped` does."""
+        from .group import attach
+        if self.is_current:
+            return True
+        wanted = self._wanted()
+        if key[1] != wanted[1] or (key[0] != wanted[0] and not self.growing):
+            return False
+        if not self.growing:
+            attach(self.locs, grouped, group_index)
+        self._grouped = LocSet(grouped)
+        self._key = key
+        return True
 
     def append(self, new: Localizations) -> int:
         return self.ungrouped.append(new)
@@ -380,12 +452,18 @@ class ViewState:
     def current(self) -> LocSet:
         """The table shown.  Grouped, it is linked if it is not current --
         except on a table that is still growing, whose grouped form stays as it
-        was linked until somebody asks for it again (`group`)."""
+        was linked until somebody asks for it again (`group`), and on a
+        table whose linking is deferred to a worker (`Tables.deferred`)."""
         if not self.use_grouped:
             return self.tables.ungrouped
-        if self.tables.growing and self.tables.peek_grouped() is not None:
-            return self.tables.peek_grouped()
-        return self.tables.grouped()
+        tables = self.tables
+        if tables.growing and tables.peek_grouped() is not None:
+            return tables.peek_grouped()
+        if tables.deferred():
+            # being merged elsewhere: the blinks there were, else the
+            # localizations, until the new blinks arrive
+            return tables.peek_grouped() or tables.ungrouped
+        return tables.grouped()
 
     @property
     def locs(self) -> Localizations:
@@ -422,9 +500,17 @@ class ViewState:
         return n
 
     def show_grouped(self, on: bool, settings: Optional[GroupSettings] = None) -> None:
-        if on:
-            self.group(settings)
+        """Show blinks, or localizations.  A setting: nothing is linked here,
+        but when the table is first read (`current`)."""
+        if settings is not None:
+            self.tables.settings = settings
         self.use_grouped = bool(on)
+
+    @property
+    def shows_grouped(self) -> bool:
+        """Whether blinks are what is drawn now -- not only asked for: while
+        they are being merged elsewhere the localizations stand in."""
+        return self.use_grouped and self.current is not self.tables.ungrouped
 
     @property
     def cull_index(self):
@@ -441,7 +527,9 @@ class ViewState:
     def bounds(self) -> Tuple[float, float, float, float]:
         """``(x0, y0, x1, y1)`` of the whole table, in render coordinates."""
         if self.settings.axes.is_default:
-            return self.index.bounds
+            # the localizations' extent, which the blinks' lies within: a
+            # full view does not need them merged
+            return self.tables.ungrouped.index.bounds
         return self.current.axis_bounds(self.settings.axes)
 
     def full_view(self, margin_fraction: float = 0.01) -> Tuple[tuple, tuple]:

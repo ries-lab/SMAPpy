@@ -26,6 +26,7 @@ from ..filter import histogram_range
 from ..session import Layer, Session
 from ..lut import FIELD_LUT, INTENSITY_LUT
 from . import folders
+from .merging import merger_for
 from .render_view import nice_below
 from .widgets import CollapsibleSection, ColumnScroll, detach_to_window
 
@@ -917,6 +918,9 @@ class RenderTab(QWidget):
     def __init__(self, session: Session, view=None, parent=None):
         super().__init__(parent)
         self.session = session
+        # merges a large table's blinks in the background (`gui.merging`):
+        # the control window's, or this tab's own when it stands alone
+        self.merger = merger_for(session, self)
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         inner = QWidget()
@@ -1392,6 +1396,8 @@ class RenderTab(QWidget):
         GroupingDialog(self.session, self).exec()
 
     def _on_grouped(self, on: bool) -> None:
-        self.session.show_grouped(self.strip.current, on)   # links once per table
+        # a setting: the blinks are merged when first drawn, or for a large
+        # table in the background (`gui.merging`), and the picture follows
+        self.session.show_grouped(self.strip.current, on)
         self.filter.bind(self.layer)     # the same bounds, over the other table
         self.session.changed("layer")

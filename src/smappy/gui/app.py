@@ -19,7 +19,7 @@ from ..io.formats import (csv_columns, guess_csv_mapping, load as load_any,
                           name_filter, reader_for)
 from . import drops, folders
 from .dialogs import CsvMappingDialog, PixelSizeDialog
-from ..session import Session, read_and_group
+from ..session import Session, read_localizations
 from ..workspace import Workspace
 from .plugin_tab import PluginTab
 from .preferences import PreferencesDialog
@@ -28,15 +28,16 @@ from .roi_tab import ROIHeader
 from .render_view import RenderToolBar, RenderView
 from .widgets import CONTROL_WIDTH, place_beside
 from .errors import ERROR_STYLE, details_window, message_of
+from .merging import merger_for
 from . import make_app
 from . import identity
 from .identity import install_identity
 
 
 class HandoffTask(QThread):
-    """Take a session another instance handed over (`smappy.handoff`), and
-    link it, off the GUI thread -- `LoadTask` for a table that comes through
-    shared memory instead of a file."""
+    """Take a session another instance handed over (`smappy.handoff`) off the
+    GUI thread, and merge its blinks there if a layer shows them -- `LoadTask`
+    for a table that comes through shared memory instead of a file."""
 
     progress = Signal(str)
     loaded = Signal(object, object, object)      # locs, state, grouped or None
@@ -56,32 +57,28 @@ class HandoffTask(QThread):
 
 
 class LoadTask(QThread):
-    """Read a file, and link it, off the GUI thread.
+    """Read a file off the GUI thread.
 
-    Both halves are slow enough to freeze a window on a real dataset -- 31 s of
-    gzip and 96 s of linking on a 57 M localization ``_sml.mat`` -- and neither
-    touches Qt or the session, so both belong here.  What comes back is plain
-    data; the session is only ever changed on the main thread, in `_loaded`.
-
-    An appended file is read but not linked: `Session.add_file` re-links the
-    merged table anyway, so linking it here would be work done twice.
+    Reading is slow enough to freeze a window on a real dataset -- 31 s of
+    gzip on a 57 M localization ``_sml.mat`` -- and does not touch Qt or the
+    session, so it belongs here.  What comes back is plain data; the session
+    is only ever changed on the main thread, in `_loaded`.  The blinks are
+    not merged here: the file opens on its localizations and is merged in the
+    background after (`gui.merging`), so the window has it at once.
     """
 
     progress = Signal(str)
-    loaded = Signal(object, object, object)      # locs, info, grouped or None
+    loaded = Signal(object, object)              # locs, info
     failed = Signal(str, str)                    # the message; the traceback
 
-    def __init__(self, path: str, args: dict, append: bool,
-                 group_settings, parent=None):
+    def __init__(self, path: str, args: dict, parent=None):
         super().__init__(parent)
-        self.path, self.args, self.append = path, args, append
-        self.group_settings = group_settings
+        self.path, self.args = path, args
 
     def run(self) -> None:
         try:
-            self.loaded.emit(*read_and_group(self.path, self.group_settings,
-                                             append=self.append,
-                                             progress=self.progress.emit, **self.args))
+            self.loaded.emit(*read_localizations(self.path, progress=self.progress.emit,
+                                                 **self.args))
         except Exception as e:                   # a bad file is not a crash
             self.failed.emit(message_of(e), traceback.format_exc())
 
@@ -145,6 +142,9 @@ class ControlWindow(QMainWindow):
         super().__init__()
         self.session = session
         self.render_window = render
+        # merges a large table's blinks in the background, after it opens
+        # and whenever a layer asks for them again (`gui.merging`)
+        self.merger = merger_for(session, self)
         self.setProperty(identity.OWN_TITLE, True)      # names the session itself
         # the GUI last saved or loaded, or the shipped one: never one written
         # behind anybody's back (see `workspace`)
@@ -1045,7 +1045,8 @@ class ControlWindow(QMainWindow):
 
         def one(layer) -> str:
             kept, of = len(layer.filter), len(layer.locs)
-            text = f"{kept:,} of {of:,}" + (" blinks" if layer.grouped else "") + " shown"
+            text = (f"{kept:,} of {of:,}" + (" blinks" if layer.state.shows_grouped else "")
+                    + " shown")
             hidden = 1.0 - kept / of if of else 0.0
             # said in so many words: a bound set long ago hides data silently
             return text + (f", filters hide {hidden:.0%}" if hidden >= 0.005 else "")
@@ -1096,10 +1097,10 @@ class ControlWindow(QMainWindow):
         path, args, append, reset_view = self._queue.pop(0)
         self._set_loading(True)
         self._loading_name = Path(path).name
-        self._task = LoadTask(path, args, append, self.session.group_settings, self)
+        self._task = LoadTask(path, args, self)
         self._task.progress.connect(self._loading_progress)
         self._task.loaded.connect(
-            lambda l, i, g, a=append, r=reset_view: self._loaded(l, i, g, a, r))
+            lambda l, i, a=append, r=reset_view: self._loaded(l, i, a, r))
         self._task.failed.connect(self._load_failed)
         self._task.finished.connect(self._task_finished)
         self._elapsed.restart()
@@ -1142,8 +1143,8 @@ class ControlWindow(QMainWindow):
                 message = f"{message}  {name}"
         bar.showMessage(message)
 
-    def _loaded(self, locs, info, grouped, append: bool, reset_view: bool) -> None:
-        self.session.add_file(locs, info, append=append, grouped=grouped)
+    def _loaded(self, locs, info, append: bool, reset_view: bool) -> None:
+        self.session.add_file(locs, info, append=append)
         if reset_view:
             self.render_window.view.reset()
 

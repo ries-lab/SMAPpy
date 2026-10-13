@@ -7,7 +7,7 @@ from smappy.io import formats
 from smappy.io.hdf5 import load_gui_state, load_localizations, save_gui_state
 from smappy.locs import Localizations
 from smappy.plugins import Context
-from smappy.session import Session, read_and_group
+from smappy.session import Session, read_localizations
 
 
 def table(n=50):
@@ -105,14 +105,21 @@ def test_csv_guesses_its_columns(tmp_path):
     assert len(locs) == 2 and list(locs["x_nm"]) == [1.0, 3.0]
 
 
-def test_read_and_group_is_the_one_implementation(saved):
-    """The window's LoadTask, Session.load and the plugin all go through it."""
-    from smappy.group import GroupSettings
-    locs, info, grouped = read_and_group(saved, GroupSettings())
+def test_read_localizations_is_the_one_implementation_and_merges_nothing(saved):
+    """The window's LoadTask, Session.load and the plugin all go through it.
+    The layer is set to blinks, and they are merged when it is first read:
+    the file does not wait for them."""
+    locs, info = read_localizations(saved)
     assert len(locs) == 50 and info.format == "smappy"
-    assert grouped is not None                       # linked, because not appending
-    _, _, not_linked = read_and_group(saved, GroupSettings(), append=True)
-    assert not_linked is None                        # add_file re-links the merge
+    assert "group_id" not in locs and "n_in_group" not in locs
+    result = plugins.get("File/Load/Auto")().run(
+        Context(), plugins.get("File/Load/Auto").Settings(path=str(saved)))
+    assert result.files[0][2] is None
+    session = Session()
+    session.load(saved)
+    assert session.layers[0].grouped and session.tables.peek_grouped() is None
+    session.layers[0].locs
+    assert session.tables.is_current
 
 
 # ------------------------------------------------------------- the rest

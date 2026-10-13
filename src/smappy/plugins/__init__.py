@@ -387,7 +387,9 @@ class Context:
                                  "localizations first (group.group), or run "
                                  "this on the localizations")
             return self.locs, self.selection
-        locs, selection = self.session.table(index, self.grouping)
+        locs, selection = self.session.table(
+            index, self.grouping,
+            progress=lambda text, _f: self.report(f"merging blinks: {text}"))
         if locs is not self.session.locs:
             self.served_grouped = True
         return locs, selection

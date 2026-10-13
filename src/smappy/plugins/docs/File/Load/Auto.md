@@ -1,6 +1,6 @@
 ---
 version: "3"
-covers: [smappy.io.formats.reader_for, smappy.io.formats._is_smappy, smappy.io.formats._has_saveloc, smappy.session.read_and_group, smappy.io.formats._load_smappy, smappy.io.hdf5.load_localizations, smappy.io.formats._load_sml, smappy.io.formats._load_minflux, smappy.io.formats._minflux_records, smappy.io.formats._minflux_from_json, smappy.group.by_trace, smappy.io.formats._load_csv, smappy.io.formats.guess_csv_mapping, smappy.io.formats.csv_columns]
+covers: [smappy.io.formats.reader_for, smappy.io.formats._is_smappy, smappy.io.formats._has_saveloc, smappy.session.read_localizations, smappy.io.formats._load_smappy, smappy.io.hdf5.load_localizations, smappy.io.formats._load_sml, smappy.io.formats._load_minflux, smappy.io.formats._minflux_records, smappy.io.formats._minflux_from_json, smappy.group.by_trace, smappy.io.formats._load_csv, smappy.io.formats.guess_csv_mapping, smappy.io.formats.csv_columns]
 ---
 
 ## What it does
@@ -24,10 +24,12 @@ is inside.  It is what File > Open does.  The formats:
 A file whose name does not say what it is -- a SMAP file not called
 `_sml.mat` -- is read by choosing its *format* by hand (under *more*).
 
-After reading, the blinks are merged, the same whichever reader was used:
-[merge blinks](plugin:Panels/Glossary) (also called grouping or linking)
-combines the localizations in consecutive frames that come from one blinking
-event into one localization.
+The file's layer shows its blinks merged, the same whichever reader was
+used: [merge blinks](plugin:Panels/Glossary) (also called grouping or
+linking) combines the localizations in consecutive frames that come from one
+blinking event into one localization.  The file does not wait for that to
+open: a large one opens on its single localizations and is merged in the
+background.
 
 ## How it works
 
@@ -84,8 +86,13 @@ refused with the list of formats that are known.
 frames are merged into one, with the session's merge settings (within 50 nm
 and 1 dark frame by default; *merge settings...* in the Render tab).  The
 merged blinks are what a layer shows when *merge blinks* is ticked, which is
-how it opens.  An added file is not merged here: it is merged together with
-the files already open.  A table with a trace id (`tid`, as a MINFLUX export
+how it opens.  The merge is not part of reading: a small file is merged when
+it is first drawn, and a large one (300,000 localizations or more) opens at
+once on its single localizations while it is merged in the background, with
+its progress in the status bar; the picture switches to blinks when they are
+there.  Headless -- in a script, a chain or a batch -- the blinks are merged
+when something first reads them.  An added file is merged together with the
+files already open.  A table with a trace id (`tid`, as a MINFLUX export
 has) is merged by trace instead, one row per trace.  To look at every
 localization, untick *merge blinks* on the layer: the single localizations
 are always kept.
@@ -119,9 +126,11 @@ every `.csv`, `.txt` or `.tsv` for a table of localizations.  With a
 **What opening costs.**  Every reader holds the whole table in memory:
 $N \sum_c b_c$ bytes for $N$ localizations, $b_c$ the bytes per value of
 column $c$ -- 4 for most columns, 8 for `frame` -- so some 60 bytes per
-localization for a fitted 3D table, plus the merged blinks.  Merging the blinks of a
-table of tens of millions of localizations takes minutes.  Here it is done while the file is read, off
-the window's thread, so the window stays usable and says what it is doing.
+localization for a fitted 3D table, plus the merged blinks.  Reading is done
+off the window's thread, so the window stays usable and says what it is
+doing.  Merging the blinks -- a few seconds for a few million
+localizations, some 25 s for 57 million -- follows in the background, after
+the file has opened.
 
 **smappy HDF5.**  The columns are read from `/locs`, one dataset each, with
 the types they were saved with, and the file's metadata comes back with
@@ -235,8 +244,8 @@ the File menu asks for the mapping in a dialog instead.
 
 The table, added to the session as a file of its own, or joined to the open
 ones with *add to the open files* (a `filenumber` column tells them apart).
-The text says how many localizations were read, in which format, and how
-many there are after merging blinks.  The load is written into the history with
+The text says how many localizations were read, and in which format.  The
+load is written into the history with
 its settings, after the entries an HDF5 file brought with it.
 
 ## Differences from SMAP

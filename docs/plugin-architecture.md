@@ -303,7 +303,7 @@ by extension underneath would have *format* SMAP on a `.hdf5` quietly read it
 as SMAPpy.
 
 The menu and the plugins share one *reading* implementation,
-`session.read_and_group`, which the window's `LoadTask`, `Session.load` and
+`session.read_localizations`, which the window's `LoadTask`, `Session.load` and
 every loader plugin call.  `File -> Open` still drives it through `LoadTask`
 rather than through the plugin: the menu owns a multi-file queue, a progress
 line and the csv mapping dialog, none of which a panel expresses, and routing it

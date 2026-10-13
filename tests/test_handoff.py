@@ -62,6 +62,28 @@ def test_a_live_session_is_handed_over_as_it_was_and_carries_on_growing(tmp_path
     assert not copy.live
 
 
+def test_blinks_are_merged_in_the_taking_only_for_a_layer_that_shows_them(tmp_path):
+    """`take` runs on the new window's worker: the merge belongs there when
+    a layer handed over shows blinks, and nowhere when none does."""
+    from smappy.locs import concat
+    session = Session(concat([block(f) for f in range(1, 9)]))
+    session.show_grouped(0, False)
+    offer = handoff.offer(session, folder=tmp_path)
+    _, _, grouped = handoff.take(offer.path)
+    offer.release()
+    assert grouped is None                          # nothing asked for blinks
+
+    session.show_grouped(0, True)
+    offer = handoff.offer(session, folder=tmp_path)
+    locs, state, grouped = handoff.take(offer.path)
+    offer.release()
+    assert grouped is not None and len(grouped) < len(locs)
+    copy = Session()
+    handoff.apply_state(copy, locs, state, grouped)
+    assert copy.layers[0].grouped and copy.tables.is_current
+    assert copy.layers[0].locs is copy.tables.peek_grouped().locs   # not relinked
+
+
 def test_an_offer_nobody_takes_is_released_and_leaves_nothing(tmp_path):
     from multiprocessing import shared_memory
     offer = handoff.offer(live_session(), folder=tmp_path)

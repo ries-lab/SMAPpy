@@ -114,6 +114,7 @@ def test_results_of_a_table_that_never_came_from_a_file_survive_a_save(tmp_path)
     ungrouped = len(project.results())
     assert ungrouped == len(project.rois)
     s.show_grouped(0, True)
+    s.layers[0].locs                                  # drawn: linked
     s.show_grouped(0, False)
     assert "group_id" in s.locs
     assert len(project.results()) == ungrouped

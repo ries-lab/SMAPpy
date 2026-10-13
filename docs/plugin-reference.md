@@ -29,7 +29,7 @@ and `smappy/simulate` are the record, and the code wins where they differ.
   localizations (DBSCAN maps each blink's cluster back through `group_id`).
 * `ctx.table(layer)` -- `(locs, selection)` of any layer, by the same rule:
   `ctx.locs` and `ctx.selection` for the context's own.  `Session.table`
-  links the grouped table on request.
+  links the grouped table on request, with its progress in `ctx.report`.
 * `ctx.selection` -- over `ctx.locs`, what the user is looking at: the layer's filter *and* the
   ROI *and*, while the 3D window is open with "plugins use the slab" ticked,
   the slab (`session.selects_slab`), as a boolean mask.  `.apply(locs)` cuts the table,
@@ -54,9 +54,14 @@ and `smappy/simulate` are the record, and the code wins where they differ.
 * The **grouped** table (one row per blink) is the session's, one for every
   layer: `session.tables` holds the ungrouped table and its grouped form, a
   cache keyed by the rows and `session.group_settings`.
+  A layer shows it by default, but nothing is linked when a file opens: it
+  is linked when first read, and in the GUI a large table (`gui.merging`)
+  in a worker after the file opens -- meanwhile a layer set to blinks shows
+  the localizations, and `ctx.locs` is what it shows.
   `session.tables.peek_grouped()` is what was linked last (None if nothing
-  was), `session.tables.is_current` whether it still matches, and
-  `session.tables.grouped()` links it if it does not.  A layer has one set of
+  was), `session.tables.is_current` whether it still matches,
+  `session.tables.grouped()` links it if it does not, and
+  `session.tables.available()` links it only where that is allowed now.  A layer has one set of
   bounds (`layer.ranges`), applied to the table it shows --
   `layer.state.filter_for(locset)` is its filter over either -- so on the
   grouped table a bound on `xy_err_nm` is a bound on the combined precision.

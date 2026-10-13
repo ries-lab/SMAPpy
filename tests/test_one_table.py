@@ -18,7 +18,23 @@ from smappy.simulate import simulate
 
 
 def a_session(n_frames=800, seed=3):
-    return Session(simulate(n_frames=n_frames, seed=seed))
+    """A session as a window shows it: its layer merges blinks by default,
+    and drawing it reads them -- which is when they are linked."""
+    session = Session(simulate(n_frames=n_frames, seed=seed))
+    session.layers[0].locs
+    return session
+
+
+def test_a_layer_shows_blinks_by_default_and_links_them_when_first_read(links):
+    session = Session(simulate(n_frames=800, seed=3))
+    layer = session.layers[0]
+    assert layer.grouped and links == []                       # a setting, no work
+    assert session.tables.peek_grouped() is None
+    session.add_layer(like=0)
+    assert links == []
+    assert len(layer.locs) < len(session.locs) and len(links) == 1   # read: linked
+    assert "n_in_group" in session.locs                        # written back
+    assert session.layers[1].locs is layer.locs and len(links) == 1  # shared
 
 
 @pytest.fixture
@@ -59,6 +75,8 @@ def test_the_grouped_table_is_linked_again_when_the_link_settings_change(links):
     links.clear()
 
     session.set_group_settings(GroupSettings(dx=20.0, dt=1))
+    assert links == []                                         # when next read
+    session.layers[0].locs
     after = session.tables.peek_grouped()
     assert len(links) == 1                                     # once, for every layer
     assert after is not before and session.tables.is_current
@@ -85,6 +103,7 @@ def test_the_grouped_table_is_linked_again_when_the_table_changes(links):
             return Result(locs=Localizations(columns, dict(ctx.locs.metadata)))
 
     session.run(Shift())
+    layer.locs                                                 # drawn again
     after = session.tables.peek_grouped()
     assert len(links) == 1 and after is not before and session.tables.is_current
     assert layer.locs is after.locs
@@ -121,6 +140,7 @@ def test_a_chain_copy_shares_the_tables_and_links_nothing(links):
     assert copy.layers[1].locs is session.layers[1].locs
     assert copy.layers[1].ranges == session.layers[1].ranges
     copy.set_group_settings(GroupSettings(dx=20.0, dt=1))     # the copy's own
+    copy.layers[0].locs
     assert len(links) == 1
     assert session.tables.is_current                          # the session's stands
     assert copy.layers[0].locs is not session.layers[0].locs
@@ -175,6 +195,7 @@ def test_a_live_fit_appends_once_and_every_layer_follows():
 
     # grouped while it grows: kept as linked until somebody asks again
     second.show_grouped(True)
+    second.locs                                                # drawn: linked
     linked = session.tables.peek_grouped()
     session.append(block(6))
     assert not session.tables.is_current and second.locs is linked.locs
@@ -200,6 +221,7 @@ def test_undo_brings_back_the_table_the_bounds_and_the_link_settings_stay():
     session.set_group_settings(GroupSettings(dx=20.0, dt=1))
     session.undo()
     assert session.locs is original
+    layer.locs                                                 # drawn
     assert session.tables.is_current
     assert session.tables.settings == GroupSettings(dx=20.0, dt=1)
     assert layer.grouped and layer.ranges["photons"] == (300.0, None)
