@@ -1070,8 +1070,8 @@ class RenderTab(QWidget):
                               "red stays red, hot runs white through red and yellow "
                               "to black, and grey is black on white.  A property of "
                               "the picture, so it is set on every layer at once.")
-        more_form.addRow("sigma x (gauss)", self.sigma)
-        more_form.addRow("sigma y (gauss)", self.sigma_y)
+        more_form.addRow("sigma x (fixed)", self.sigma)
+        more_form.addRow("sigma y (fixed)", self.sigma_y)
         more_form.addRow("precision factor", self.factor)
         more_form.addRow("gamma", self.gamma)
         more_form.addRow("", self.white)

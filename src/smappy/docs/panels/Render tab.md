@@ -138,7 +138,7 @@ c.set_xlabel("n_in_group (frames)", fontsize=8); c.tick_params(labelsize=7)
 **4. Drawing the localizations.**  *render* chooses the spot each
 localization is drawn as.  *histogram* counts localizations per pixel: exact, but
 at a fine pixel size mostly single bright pixels.  *Gaussian (fixed)* draws every
-localization as the same Gaussian blob, of width *sigma x (gauss)*.
+localization as the same Gaussian blob, of width *sigma x (fixed)*.
 *Gaussian (precision)*, the default, draws each one as a Gaussian as wide as its own
 [localization precision](plugin:Panels/Glossary) (also called the CRLB or
 localization uncertainty: how far its fitted position is expected to lie from
@@ -538,11 +538,11 @@ it.  The drift corrections take these settings too, unless their own
 ### more
 The rendering widths, gamma and the white background.
 
-### sigma x (gauss)
+### sigma x (fixed)
 The width in *Gaussian (fixed)*, in the units of the horizontal axis; 0 bins.  A
 few times the pixel size, or about the typical precision.
 
-### sigma y (gauss)
+### sigma y (fixed)
 The vertical width, for axes that are not the same quantity.  Empty follows
 *sigma x* where the two axes are the same quantity and bins where they are
 not.
