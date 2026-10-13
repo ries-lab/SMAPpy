@@ -1,11 +1,13 @@
 # Review status, October 2026
 
-Where `docs/review-2026-10.md` stands after the simplification plan
-(`docs/simplification-plan.md`, sections A–F) landed on
-`claude/trusting-cray-bhwh1n`: 47 commits, 341 files, about 6,000 lines
-fewer (+10,950 / −16,920).  `--slow -n auto`: 1672 passed, 6 skipped.
+Where `docs/review-2026-10.md` stands on `claude/trusting-cray-bhwh1n`
+(PR ries-lab/SMAPpy#19): the simplification plan
+(`docs/simplification-plan.md`, sections A–F) and a second round from this
+document's open list.  83 commits, 378 files, about 7,100 lines fewer
+(+15,230 / −22,340).  `--slow -n 3`: 1670 passed, 6 skipped; CI green on
+all platforms.
 
-## Done
+## Done: the plan
 
 | review | what changed |
 | --- | --- |
@@ -23,54 +25,44 @@ fewer (+10,950 / −16,920).  `--slow -n auto`: 1672 passed, 6 skipped.
 | §7.5 words | *ROI* / *region* / *per-region steps*, *merge blinks*, *fit box*, British spelling, px and µm; jargon explained on every page with a Glossary (now a CLAUDE.md rule) |
 | §2 CLAUDE.md | trimmed; the reference moved to `docs/plugin-reference.md` |
 
-## Open, with recommendations
+## Done: the second round
 
-In order of value for the effort.
+| item | what changed |
+| --- | --- |
+| CI | the wheels' smoke test no longer passes the removed `units=`; checked on Python 3.9 too |
+| segmenters | *replace earlier ROIs* on by default, so a second run finds the pores again |
+| cleanup (§5) | `integration/` and most of `scripts/` gone; Line Profile's binned fit gone; dead contract leftovers (`_hint_from_text`, `__smappy_plugins__`, `ParamInfo.step`); one `gui.make_app()`; NOTES.md 2,180 → 1,470 lines (diaries to `docs/drift.md`, `docs/performance.md`); `docs/regions.md` 564 → ~210 lines, the current model |
+| small UX (§7) | a hint on the empty view; File > Workspace; render modes and quick filters in words; a colour bar per layer coloured by a column; *Fit this* after simulating; undo entries named in the ROI manager; "workspace" in the title |
+| merge blinks (§4.2) | files open at once; a large table merges in the background and the layer switches to merged blinks when ready (small ones at once, as before); scripts merge on first read; the approximate chunked linker gone (exact: 0.8 s for 2 M, 3–6 s for 5 M) |
+| regions (§4.4) | no `reviewed` flag; no `slow` options (Statistics' *precision fit* is one choice none / histogram / MLE); one `write_values` for blocks and *Regions to column*, *any* refused there; the ROI project holds a `chain.Block`; one adapter over ROIs and id columns (`regions_of`); the file-backed `ROIProject` and its sidecar gone (scripts use a `Session`); *keep figure data* gone; `smappy/roi.py` → `fit_rois.py` |
+| questions before a run | one dialog; Enter takes the faster alternative, else Cancel -- never the long run |
+| forms (§7.3) | notices by kind (info grey); optional bools as *auto / on / off*; *boxes per fit* and *threads* scripting-only; the camera part folded under a summary, and at Run a camera nobody entered asks *Open camera editor* / *Cancel*; *cutoff value* resets when *cutoff* changes mode; `cutoff_mode` in `smappy.fit` and `smappy-fit` (a bare cutoff ≥ 20 warns) |
+| Line Profile | units and ±; an undetermined parameter says so and leaves the comparison; the winner drawn on top; *Draw line* when there is no line |
+| layout (§7.2) | one loader (*Auto* with *format*); the File tab holds Export and Simulate; one *Show result*; "+ chain" in the + chooser; Tools without the duplicate ROI manager / per-region steps / bead calibration entries; the Regions tab header folded; bead calibration asks single/dual once |
 
-1. **Segmenters keep their earlier ROIs by default.**  *replace earlier
-   ROIs* exists but is off, so a second NPC run still finds "0 pores".
-   Turn it on by default; undo covers regret.  *XS.*
-2. **Cleanup commit (§5)**: `integration/` (now `ries-lab/smappy-microclaw`),
-   `scripts/` except `make_icon.py`, `drift_correct.py` and a live-fit
-   example (`check_stack.py` is broken), Line Profile's `binned` method,
-   `_hint_from_text`, `__smappy_plugins__`, `ParamInfo.step`, one
-   `gui.make_app()` for the five QApplication setups, NOTES.md diaries out
-   to `docs/`, `docs/regions.md` from a 564-line log to the current model.
-   *S, no design questions.*
-3. **Small UX wins left from §7**: an empty-view hint ("Open or drop a
-   file, or File > Simulate"); *Workspace* in place of "Save GUI / Load
-   GUI"; render modes and quick filters in words (*Gaussian (precision)*,
-   *histogram*, *diffraction-limited*; *precision*, *fit quality*,
-   *photons*); a colour bar when colouring by a column; the simulator's
-   "open it in a fitter" as a *Fit this* button; undo entries that name
-   what they undo.  *S each.*
-4. **Merge blinks lazily (§4.2).**  Every file is still merged on open
-   (`GROUPED_BY_DEFAULT`), which is why `_group_chunked.py` (362 lines,
-   approximate) exists.  Merge on the first *merge blinks* tick, with
-   progress; then the chunking can go.  *M.*
-5. **Garbage collection back on.**  The snapshot render (§4.5) removed the
-   known cause.  Try it in the test suite and the app under a live fit;
-   keep the collector as the safety net if anything hangs.  *S to try.*
-6. **Regions, the rest of §4.4**: one runner over ROIs and id columns
-   (`RegionSource`), the ROI project holding a `chain.Block`, one
-   write-back rule, and the removals (file-backed `ROIProject`/`Source`,
-   `reviewed`, `keep_figures`, `slow`/`fast_values`).  Rename `roi.py`
-   (the fitter's boxes) to `fit_rois.py`.  *L; do after 1–2.*
-7. **Forms (§7.3)**: camera as one line with *edit*; *boxes per fit*,
-   *threads* and *iterations* out of the GUI; `api.fit`'s cutoff that
-   changes meaning at 20 becomes two arguments; tri-state boxes as combos;
-   one vocabulary for which localizations a plugin reads (*selection / per
-   layer / all*); a *Draw line* button in Line Profile, and its output with
-   units and without degenerate fits.  *M in all.*
-8. **Layout (§7.2)**: one entry point each for Load/Save, Bead calibration,
-   ROI manager and per-region steps; the Regions tab header collapsible;
-   Plot/Text buttons merged into one *Show result*; notices coloured by
-   kind.  *M.*
-9. **Deferred by the owner**: the Analysis tab (to become a lean GUI users
-   add to), the 3D view redesign with picture settings on the session and
-   the slab as a 3D ROI (§4.6), COMET's GPU path (benchmark on Windows,
-   then keep only the spline fit and delete the rest of `_comet`), one
-   *Drift correction* plugin.
+## Open
+
+1. **Garbage collection back on** -- an experiment is running (the test
+   suite repeatedly with collection on, and with it forced constantly).
+   Turn it on only on clean evidence; the CLAUDE.md rule changes with it.
+2. **Merged blinks, edge cases**: a never-merged layer has no
+   `n_in_group`/`group_id` (no on-time in per-region Statistics there); a
+   plugin run during a background merge measures what is on screen; a chain
+   step set to merged blinks merges again in its scratch copy and does not
+   hand the result back.  Recommend: adopt the scratch copy's merge when it
+   matches the session's table and settings.
+3. **`cutoff` ≥ 20 without a mode** still means photons, with a warning;
+   make the mode required in a later release.
+4. **Regions**: `ROIProject` is now a base with one implementation
+   (`SessionROIs`) -- merge the two; write back inside a nested block is
+   still unsupported.
+5. **Deferred by the owner**: the Analysis tab (a lean GUI users add to),
+   the 3D view redesign with picture settings on the session and the slab as
+   a 3D ROI (§4.6), COMET's GPU path (benchmark on Windows, then keep only
+   the spline fit), one *Drift correction* plugin.
+6. **Dropped on purpose**: one engine for ROI and column runs (per-ROI reuse
+   stays separate), removing kept figure data entirely, an *edit* button
+   from the fitter to the camera database, *iterations* out of the GUI.
 
 ## For the owner to check
 
@@ -79,5 +71,8 @@ In order of value for the effort.
   not at the chip's edge along the split must be made again.
 - `ries-lab/smappy-microclaw` still passes `output_unit`; a two-line PR
   removes it.
-- Saved workspaces and chains naming `Dual-Color/AssignColors` or
-  `NPC Labeling Efficiency` no longer find them (no aliases, by decision).
+- Not loaded any more (no aliases, by decision): workspaces and chains
+  naming `Dual-Color/AssignColors`, `NPC Labeling Efficiency` or the
+  per-format loaders; old settings with *fit precision* off get the
+  histogram fit; ROIs saved as not reviewed are measured.
+- Scripts with `cutoff=` ≥ 20 now warn: add `cutoff_mode="absolute"`.
