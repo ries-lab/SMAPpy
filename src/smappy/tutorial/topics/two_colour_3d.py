@@ -90,9 +90,13 @@ def make(d) -> None:
     d.place(window, 30, 20)
     window.add_paths([str(p) for p in stacks])
     form = window.form
-    for name, value in (("layout", "up-down"), ("main_channel", "upper"),
-                        ("dz_nm", DZ_NM)):
-        f = form.fields[name]
+    geometry = form.fields["registration"]      # the split: a part of its own
+    # set by hand: the simulated beads sit on a grid centred in each half,
+    # which is its own mirror image, so *detect* could not tell the two apart
+    for part, name, value in ((geometry, "layout", "up-down"),
+                              (geometry, "main_channel", "upper"),
+                              (form, "dz_nm", DZ_NM)):
+        f = part.fields[name]
         f.set(value)
         f.changed.emit()
     d.settle()
@@ -100,11 +104,11 @@ def make(d) -> None:
            "halves, and the pairs are what the map is measured from.",
            spot=[window.file_list, window.mode_box], point=window.mode_box,
            zoom=d.around(window.file_list, 760))
-    layout = form.fields["layout"]
-    main = form.fields["main_channel"]
-    d.shot("Say how the chip is split: here into an upper and a lower half, "
-           "with the main channel above. Mirrored is for a splitter that flips "
-           "one half.",
+    layout = geometry.fields["layout"]
+    main = geometry.fields["main_channel"]
+    d.shot("How the chip is split: detect finds it from the beads, or say it "
+           "here, an upper and a lower half with the main channel above. "
+           "Mirrored is for a splitter that flips one half.",
            spot=[layout, main], point=layout, zoom=d.around(layout, 700))
 
     d.chapter("Calibrate")
