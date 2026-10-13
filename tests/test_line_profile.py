@@ -164,21 +164,14 @@ def test_the_model_with_the_better_aic_is_the_one_the_data_came_from():
     assert best.model == "gauss"
 
 
-def test_the_fit_does_not_depend_on_the_bin_width_and_the_binned_one_does():
+def test_the_fit_does_not_depend_on_the_bin_width():
     """Unbinned is unbinned: the bins are the picture, not the estimator."""
-    locs = simulate(600, 0.0, precision=10.0, sigma=15.0, seed=13)
-    profile = profiles(locs, ROI)["across"]
-    fits = [fit_profile(profile.values, profile.precision, model="gauss",
-                        window=profile.window, bin_size=size)
-            for size in (2.0, 25.0)]
-    assert fits[0].values()["sigma"] == fits[1].values()["sigma"]
-
-    binned = [fit_profile(profile.values, profile.precision, model="gauss",
-                          window=profile.window, method="binned", bin_size=size)
-              for size in (2.0, 25.0)]
-    assert binned[0].values()["sigma"] != binned[1].values()["sigma"]
-    # and it should still be the right answer, to within the bins
-    assert binned[0].values()["sigma"] == pytest.approx(15.0, abs=3.0)
+    session = _two_channel_session()
+    fine, coarse = (session.run(LineProfile(),
+                                LineProfileSettings(axis="across", bin_nm=size))
+                    for size in (2.0, 25.0))
+    assert fine.data["bin"] != coarse.data["bin"]
+    assert fine.data["values"] == coarse.data["values"]
 
 
 def test_a_uniform_background_is_fitted_rather_than_widening_the_peak():
@@ -623,15 +616,6 @@ def test_a_run_is_applied_to_the_session_without_touching_its_layers():
     result = session.run(LineProfile(), LineProfileSettings(axis="across"))
     assert result.layers is None and len(result.data["layer_profiles"]) == 2
     assert [l.name for l in session.layers] == before
-
-
-def test_the_binned_fit_integrates_over_its_bins():
-    """Sampled at bin centres, a peak two bins wide came back too narrow."""
-    rng = np.random.default_rng(5)
-    values = rng.normal(0.0, 4.0, 20000)
-    fit = fit_profile(values, None, model="gauss", window=(-50.0, 50.0),
-                      method="binned", bin_size=8.0, background=False)
-    assert fit.values()["sigma"] == pytest.approx(4.0, rel=0.03)
 
 
 def test_the_z_window_comes_from_the_filter_in_nm_and_is_open_where_it_is():

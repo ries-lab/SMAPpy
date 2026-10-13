@@ -30,7 +30,7 @@ information away, and least squares on Poisson counts is the wrong estimator
 where the counts are small -- an empty bin carries as much information as a
 full one, and a weight of ``1/sqrt(N)`` cannot express that.
 
-So the default here is **unbinned maximum likelihood** (`method="mle"`): the
+So the fit here is **unbinned maximum likelihood**: the
 model is a probability density over the ROI window, and what is maximized is
 ``sum(log p(t_i))`` over the localizations themselves.  No bins exist; the
 histogram in the figure is drawing only, and changing its bin width changes no
@@ -80,11 +80,6 @@ samples.  Below ~50 localizations, set `bootstrap` to a few hundred and read
 the confidence intervals instead: they resample the localizations and assume
 nothing about the shape of the likelihood, which is where the small-sample
 error bar goes wrong.
-
-`method="binned"` keeps the old way for comparison, as Poisson-weighted least
-squares on the histogram rather than SMAP's plain least squares.  Even then
-the likelihood that is reported is the unbinned one at the fitted parameters,
-so the two methods -- and every model -- are compared on the same scale.
 
 One fit per layer
 -----------------
@@ -751,8 +746,7 @@ class Fit:
     background: float               # the uniform fraction, 0 when not fitted
     background_error: float
     n: int
-    log_likelihood: float           # always the unbinned one, whatever fitted
-    method: str
+    log_likelihood: float
     with_precision: bool
     window: Tuple[float, float]
     extra: Dict = field(default_factory=dict)
@@ -898,7 +892,7 @@ def _errors_from(hessian: np.ndarray,
 
 
 def histogram(t, window, bin_size: float):
-    """Counts and edges over the window: for the picture, and for `binned`."""
+    """Counts and edges over the window, for the picture."""
     lo, hi = window
     n_bins = max(int(round((hi - lo) / max(bin_size, 1e-9))), 1)
     edges = np.linspace(lo, hi, n_bins + 1)
@@ -975,8 +969,7 @@ def _in_widths(errors: np.ndarray, params: np.ndarray,
 
 def fit_profile(t, precision=None, model: str = "gauss",
                 window: Optional[Tuple[float, float]] = None,
-                method: str = "mle", background: bool = True,
-                bin_size: float = 0.0,
+                background: bool = True,
                 start: Optional[Dict[str, float]] = None,
                 variant: Optional[Dict] = None) -> Fit:
     """Fit one coordinate of the localizations with ``model``.
@@ -984,19 +977,15 @@ def fit_profile(t, precision=None, model: str = "gauss",
     ``t`` are the positions themselves, never a histogram, and ``precision``
     is each localization's own error -- or None to fit one width for all of
     them.  ``window`` is where a localization could have been (the ROI), and
-    is part of the likelihood, so the truncation costs no bias.
-
-    ``method``: ``"mle"`` maximizes the unbinned likelihood; ``"binned"`` is
-    Poisson-weighted least squares on a histogram of ``bin_size``, kept for
-    comparison with the old way.  Either way the likelihood reported is the
-    unbinned one at the fitted parameters, so every fit is on one scale.
+    is part of the likelihood, so the truncation costs no bias.  What is
+    maximized is the unbinned likelihood; no bin width enters it.
 
     ``start`` and ``variant`` override the starting values and the direction
     a step faces.  They exist for `bootstrap`, which refits the same data a
     few hundred times and should neither re-derive the starting values on
     each resample nor be free to answer with a different shape each time.
     """
-    from scipy.optimize import least_squares, minimize
+    from scipy.optimize import minimize
 
     t = np.asarray(t, float)
     t = t[np.isfinite(t)]
@@ -1043,36 +1032,11 @@ def fit_profile(t, precision=None, model: str = "gauss",
                                   shape)
             return float(-np.sum(np.log(np.maximum(density(t, precision), TINY))))
 
-        if method == "binned":
-            counts, edges = histogram(t, window, bin_size or auto_bin(t, window))
-            centres = 0.5 * (edges[:-1] + edges[1:])
-            widths = np.diff(edges)
-            total = float(counts.sum())
-            # the density integrated over each bin, by three-point
-            # Gauss-Legendre, rather than sampled at its centre: a peak a bin
-            # or two wide is otherwise fitted too tall and too narrow
-            nodes = np.concatenate([centres + f * 0.5 * widths
-                                    for f in (-np.sqrt(0.6), 0.0, np.sqrt(0.6))])
-            quadrature = np.array([5.0, 8.0, 5.0]) / 18.0
-
-            def residuals(vector):
-                params, fraction = split(np.asarray(vector, float))
-                density = _density_of(spec, params, window, fraction,
-                                      background, shape)
-                at = _curve_of(density, precision)(nodes).reshape(3, -1)
-                expected = total * widths * (quadrature @ at)
-                # Poisson weights rather than SMAP's plain least squares: at
-                # ten counts a bin the two differ by more than the bin width
-                return (counts - expected) / np.sqrt(np.maximum(expected, 1.0))
-
-            found = least_squares(residuals, first, bounds=(lower, upper))
-            vector = np.asarray(found.x, float)
-        else:
-            found = minimize(nll, first, method="L-BFGS-B",
-                             bounds=list(zip(lower, upper)))
-            vector = np.asarray(found.x, float)
-            if not np.all(np.isfinite(vector)):
-                vector = first
+        found = minimize(nll, first, method="L-BFGS-B",
+                         bounds=list(zip(lower, upper)))
+        vector = np.asarray(found.x, float)
+        if not np.all(np.isfinite(vector)):
+            vector = first
 
         params, fraction = split(vector)
         span = np.maximum(upper - lower, 1e-12)
@@ -1085,10 +1049,9 @@ def fit_profile(t, precision=None, model: str = "gauss",
                   errors=np.asarray(errors[:len(params)], float),
                   background=fraction,
                   background_error=float(errors[-1]) if background else 0.0,
-                  n=len(t), log_likelihood=-nll(vector), method=method,
+                  n=len(t), log_likelihood=-nll(vector),
                   with_precision=precision is not None, window=window,
-                  extra={"has_background": background, "bin_size": bin_size,
-                         **shape},
+                  extra={"has_background": background, **shape},
                   curve=_curve_of(density, precision))
         if best is None or fit.log_likelihood > best.log_likelihood:
             best = fit
@@ -1154,9 +1117,7 @@ def bootstrap(fit: Fit, t, precision=None, rounds: int = 200,
             again = fit_profile(t[pick],
                                 None if precision is None else precision[pick],
                                 model=fit.model, window=fit.window,
-                                method=fit.method, background=has_background,
-                                bin_size=float(fit.extra.get("bin_size", 0.0)),
-                                start=start, variant=variant)
+                                background=has_background, start=start, variant=variant)
         except (ValueError, FloatingPointError, np.linalg.LinAlgError):
             continue
         kept.append([float(v) for v in again.params] + [again.background])
@@ -1454,13 +1415,6 @@ class LineProfileSettings:
                                 ("ring", "ring, seen edge-on"),
                                 ("all", "all five, compared")),
                        help="what the profile is expected to be")
-    method: str = param("mle", label="fit",
-                        choices=(("mle", "unbinned, maximum likelihood"),
-                                 ("binned", "binned, least squares")),
-                        help="the unbinned fit uses the localizations "
-                             "themselves, so no fitted number depends on the "
-                             "bin width; with few localizations it is the "
-                             "only one worth trusting")
     use_precision: bool = param(True, label="use localization precision",
                                 help="each localization is a Gaussian of its "
                                      "own precision, so the fitted width is "
@@ -1481,9 +1435,8 @@ class LineProfileSettings:
                               max=99.9, advanced=True,
                               help="the interval the resamples are asked for")
     bin_nm: float = param(0.0, label="bin", unit="nm", min=0.0,
-                          help="0: chosen from the data.  In pixels for a "
-                               "table in pixels.  Drawing only, unless the "
-                               "binned fit is chosen")
+                          help="0: chosen from the data.  Drawing only: "
+                               "no fitted number depends on it")
     length_nm: float = param(0.0, label="length", unit="nm", min=0.0,
                              advanced=True,
                              help="0: the ROI's own length.  Otherwise a "
@@ -1500,8 +1453,9 @@ class LineProfile(Plugin):
     # 2: the two-Gaussian start tries peaks far apart; 3: z_err_nm; 4: the
     # EM starts are tried narrow as well, so a close pair is not merged; the
     # binned fit integrates over its bins; the z window is the filter's, in nm;
-    # 5: each layer as it is shown -- its blinks, when it is grouped
-    version = "5"
+    # 5: each layer as it is shown -- its blinks, when it is grouped;
+    # 6: the binned least-squares fit and its setting are gone
+    version = "6"
 
     def run(self, ctx: Context, settings: LineProfileSettings) -> Result:
         region = _line_roi(ctx)
@@ -1604,12 +1558,10 @@ def fit_layers(ctx: Context, settings: LineProfileSettings,
         precision = profile.precision if settings.use_precision else None
         bin_size = settings.bin_nm or auto_bin(profile.values, profile.window)
         models = (tuple(MODELS) if settings.model == "all" else (settings.model,))
-        ctx.report(f"fitting {len(profile.values)} localizations "
-                   f"({'unbinned' if settings.method == 'mle' else 'binned'})"
+        ctx.report(f"fitting {len(profile.values)} localizations"
                    + (f" -- {name}" if len(groups) > 1 else ""))
         fits = fit_models(profile.values, precision, models=models,
-                          window=profile.window, method=settings.method,
-                          background=settings.background, bin_size=bin_size)
+                          window=profile.window, background=settings.background)
 
         # only the best model is resampled: a few hundred refits are worth
         # spending on the answer, not on the models that lost

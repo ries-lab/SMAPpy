@@ -1,5 +1,5 @@
 ---
-version: "5"
+version: "6"
 covers: [smappy.plugins.line_profile.project, smappy.plugins.line_profile.profiles, smappy.plugins.line_profile.fit_profile, smappy.plugins.line_profile.fit_models, smappy.plugins.line_profile.em_two_gaussians, smappy.plugins.line_profile.bootstrap, smappy.plugins.line_profile.gauss_density, smappy.plugins.line_profile.step_density, smappy.plugins.line_profile.arc_density, smappy.plugins.line_profile.smoothed_profile, smappy.plugins.line_profile.fit_layers, smappy.plugins.line_profile.draw_profile]
 ---
 
@@ -217,9 +217,7 @@ parameters under which the localizations that were actually found are most
 probable -- the **maximum likelihood** estimate.  No histogram is involved,
 so no fitted number depends on a bin width; the bars in the figure are only
 for the eye.  Because the probability is spread over the ROI's own extent,
-a structure cut off by the end of the ROI is not biased by the cut.  The old
-way, a least-squares fit to a histogram, is available as *binned* for
-comparison.
+a structure cut off by the end of the ROI is not biased by the cut.
 
 **6. Starting where the data is.**  A fit finds the best answer near where
 it starts.  Started badly, a two-Gaussian fit can settle on both peaks
@@ -425,15 +423,6 @@ twenty-five simulated profiles of forty localizations, a nominal 95%
 interval on the width held the true value 22 times.  Only the best model is
 resampled.
 
-**Binned.**  With *fit* set to *binned*, the parameters minimise
-$\sum_j (n_j - e_j)^2 / \max(e_j, 1)$ over the histogram bins of width
-*bin*, $e_j$ the counts the model predicts in the bin -- its density
-integrated over the bin, by three-point Gauss-Legendre quadrature (for
-per-localization precisions, the density averaged over the sample's
-precisions).  The log-likelihood that is reported is still the unbinned one
-at those parameters, so the two methods and all models are compared on the
-same scale.
-
 ## Parameters
 
 ### axis
@@ -442,10 +431,6 @@ For a z profile, the table needs `z_nm`; its precision is `z_err_nm`.
 ### model
 *All five, compared* is the way to find out which shape the data supports;
 then fit that one alone.
-
-### method
-*Binned* is there to compare with SMAP and older results.  Its answer moves
-with *bin*.
 
 ### use_precision
 Leave it on.  Off, the fitted widths include the localization error, which is
