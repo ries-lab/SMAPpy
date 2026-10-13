@@ -146,7 +146,7 @@ def make(d) -> None:
            spot=[model], zoom=d.around(model, 760))
     roi = field(panel, "fit.roi_size") if "roi_size" in field(panel, "fit").fields else None
     if roi is not None:
-        d.shot("The ROI size is the square fitted around each spot: large enough "
+        d.shot("The fit box is the square fitted around each spot: large enough "
                "for the spot, small enough not to catch a neighbour.",
                spot=[roi], zoom=d.around(roi, 760))
 

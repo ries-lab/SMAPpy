@@ -23,7 +23,8 @@ from ..params import param
 
 @dataclass
 class CalibrationSettings:
-    roi_size: int = param(27, label="ROI size", unit="px", min=7)
+    roi_size: int = param(27, label="bead box", unit="px", min=7,
+                         help="the square cut around each bead; the model's size")
     padding: int = param(5, unit="px", min=1, advanced=True)
     dz_nm: Optional[float] = param(None, label="z step", unit="nm",
                                    help="auto: from the acquisition")

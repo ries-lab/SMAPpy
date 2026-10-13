@@ -687,7 +687,7 @@ class LabelingEfficiencySettings:
                               ("sqrt least squares (SMAP)", "SMAP's least squares")),
                      help="how SMAP's method fits its histogram")
     bootstrap: int = param(100, label="bootstrap", min=0, advanced=True,
-                           help="resamplings of the sites for SMAP's error; 0: none")
+                           help="resamplings of the pores for SMAP's error; 0: none")
 
 
 def labeling_efficiency(n_corners, settings: LabelingEfficiencySettings,
@@ -850,8 +850,8 @@ def corner_settings(ctx: Context, evaluation, rows=()) -> NPCCornersSettings:
         ids = [roi.id for roi in found if roi is not None]
     made = steps(ctx, ev, ids or None)
     if len(made) > 1:
-        raise ValueError(f"the sites were counted with different settings under "
-                         f"{str(ev)!r}: evaluate them all again")
+        raise ValueError(f"the pores were counted with different settings under "
+                         f"{str(ev)!r}: measure them all again")
     values = (made[0].get("parameters") if made else None) or {}
     return settings_from(NPCCornersSettings, values)
 
@@ -870,7 +870,7 @@ def field_precisions(project, rows) -> np.ndarray:
                              "(xy_err_nm); use the corners (SMAP) method")
         out.append(np.asarray(locs[name], float))
     if not out:
-        raise ValueError("the sites' files are not in the ROI manager")
+        raise ValueError("the pores' files are not in the ROI manager")
     return np.concatenate(out)
 
 
@@ -948,7 +948,7 @@ class NPCLabelingEfficiency(SiteAnalysisPlugin):
     def run(self, ctx: Context, settings: LabelingEfficiencySettings) -> Result:
         rows, ev = self.rows(ctx, settings)
         if not rows:
-            raise ValueError("the ROIs have no corner counts: evaluate them with "
+            raise ValueError("the ROIs have no corner counts: measure them with "
                              "NPC Corners first")
         count = corner_settings(ctx, ev, rows)
         label = None if ev is None else ev.label
@@ -981,8 +981,8 @@ class NPCLabelingEfficiency(SiteAnalysisPlugin):
         name = column(rows, "n_corners_smap" if settings.method == "smap" else "n_corners",
                       label)
         if name is None:
-            raise ValueError("the site table has no corner counts: add NPC Corners "
-                             "to the evaluation and evaluate")
+            raise ValueError("the region results have no corner counts: add NPC "
+                             "Corners to the per-region steps and run them")
         k = np.array([r.get(name, np.nan) for r in rows], dtype=float)
         truth = None
         known = site_truth(project, rows, int(settings.corners)) \
@@ -1013,7 +1013,7 @@ class NPCLabelingEfficiency(SiteAnalysisPlugin):
     def _joint(self, project, rows, k, settings, truth, count, label=None) -> Result:
         n_name = column(rows, "n_localizations", label)
         if n_name is None:
-            raise ValueError("the site table has no n_localizations: evaluate again "
+            raise ValueError("the region results have no n_localizations: measure again "
                              "with this version of NPC Corners")
         n = np.array([r.get(n_name, np.nan) for r in rows], dtype=float)
         ok = np.isfinite(k) & np.isfinite(n)

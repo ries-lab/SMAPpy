@@ -376,7 +376,7 @@ class BlockPlugin(ChainPlugin):
             raise ValueError("there is no ROI manager project to repeat over")
         ids = [i for i, roi in project.rois.items() if roi.reviewed and roi.use]
         if not ids:
-            raise ValueError("there are no ROIs to evaluate: find or draw some first")
+            raise ValueError("there are no ROIs to measure: find or draw some first")
         run = project.evaluate(steps=steps, roi_ids=ids, reuse=not writes,
                                chain=f"block {self.block.title()}", report=report,
                                stop=ctx.stop, after=after, tag=writes)

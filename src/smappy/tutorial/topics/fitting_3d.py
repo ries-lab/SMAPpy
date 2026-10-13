@@ -182,7 +182,7 @@ def make(d) -> None:
            "so type it in.",
            spot=[dz], point=dz, zoom=d.around(dz, 700))
     roi = form.fields["roi_size"]
-    d.shot("The ROI size is the square cut around each bead: large enough for "
+    d.shot("The bead box is the square cut around each bead: large enough for "
            "the widest spot, far out of focus.",
            spot=[roi], zoom=d.around(roi, 700))
 

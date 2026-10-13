@@ -466,10 +466,10 @@ exist only in dual colour.
 The calibration's settings.  The common ones are shown; *more* has the
 rest, whose defaults rarely need changing.
 
-### ROI size
+### bead box
 The model's width, in camera pixels; odd, at least 7.  It must hold the
 spot at the ends of the z range, where it is widest: too small cuts off the
-tails, too large lets neighbouring beads in.  The fitter's ROI may be
+tails, too large lets neighbouring beads in.  The fitter's *fit box* may be
 smaller.
 
 ### z step

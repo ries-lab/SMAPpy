@@ -271,7 +271,7 @@ class ROIList(QAbstractTableModel):
             if role == Qt.CheckStateRole:
                 return Qt.Checked if roi.use else Qt.Unchecked
             if role == Qt.ToolTipRole:
-                return "include this ROI in the evaluation (space toggles it)"
+                return "include this ROI when the per-region steps run (space toggles it)"
             return None
         if role == Qt.DisplayRole:
             return str(self.numbers.get(roi_id, "")) if column == 0 else str(
@@ -282,8 +282,8 @@ class ROIList(QAbstractTableModel):
             if self.waiting(roi_id):
                 return pg.mkColor(STALE_COLOUR)
         if role == Qt.ToolTipRole and roi.use and self.waiting(roi_id):
-            return ("the data or the evaluators' parameters have changed since "
-                    "this ROI was evaluated")
+            return ("the data or the steps' parameters have changed since "
+                    "this ROI was measured")
         return None
 
     def setData(self, index, value, role=Qt.EditRole) -> bool:  # noqa: N802
@@ -417,20 +417,20 @@ class ROIManagerWindow(QMainWindow):
         # the pipeline is set up in the control window's Regions tab, but it is
         # here that its results are looked at, one site after another; the
         # same window, opened from where the eye already is
-        self.evaluation_button = QPushButton("Region steps...")
+        self.evaluation_button = QPushButton("Per-region steps...")
         self.evaluation_button.setToolTip("the steps run once in every ROI: choose "
                                           "them, order them and set them up")
         self.evaluation_button.clicked.connect(self.evaluation_requested.emit)
         llayout.addWidget(self.evaluation_button)
-        self.evaluate_live = QCheckBox("plot the evaluation")
+        self.evaluate_live = QCheckBox("plot the ROI's figures")
         self.evaluate_live.setToolTip(
-            "open the site window: what the evaluators draw for the selected "
-            "ROI, a tab per evaluator, redrawn in place by the next ROI -- so "
+            "open the ROI results window: what the steps draw for the selected "
+            "ROI, a tab per step, redrawn in place by the next ROI -- so "
             "that stepping down the list compares like with like.  Only the "
-            "tab being looked at is drawn, and only that evaluator runs.")
+            "tab being looked at is drawn, and only that step runs.")
         self.evaluate_live.toggled.connect(self._on_evaluate_live)
         llayout.addWidget(self.evaluate_live)
-        self.re_evaluate = QCheckBox("re-evaluate when out of date")
+        self.re_evaluate = QCheckBox("measure again when out of date")
         self.re_evaluate.setChecked(True)
         self.re_evaluate.setToolTip(
             "a selected ROI whose stored numbers were measured with data or "
@@ -587,7 +587,7 @@ class ROIManagerWindow(QMainWindow):
         proposed = (f"; previewing {len(preview['sites'])} (grey): Run adds them"
                     if preview is not None else "")
         self.status.showMessage(f"{len(self.rows.ids)} ROIs, {used} used"
-                                + (f", {len(waiting)} to evaluate" if waiting else "")
+                                + (f", {len(waiting)} to measure" if waiting else "")
                                 + proposed)
 
     # ------------------------------------------------------------ drawing
@@ -1156,7 +1156,7 @@ class ROIManagerWindow(QMainWindow):
             return
         steps = pipeline_module.resolve(project.pipeline)
         if not steps:
-            self.status.showMessage("no evaluator is enabled in the pipeline")
+            self.status.showMessage("no per-region step is enabled")
             return
         window = self.site_window()
         window.set_steps([step.label for step in steps])
@@ -1169,7 +1169,7 @@ class ROIManagerWindow(QMainWindow):
                 roi.id, steps=steps, reuse=True, force=[label] if label else [],
                 store=True, run="stale" if self.re_evaluate.isChecked() else "forced")
         except Exception as error:
-            self.status.showMessage(f"the evaluation failed: {error}")
+            self.status.showMessage(f"the measurement failed: {error}")
             return
         finally:
             self._evaluating = False
@@ -1181,14 +1181,14 @@ class ROIManagerWindow(QMainWindow):
             elif result is not None and result.figures():
                 window.show_plots(step.label, result.figures(), f"ROI {number}")
             elif result is not None:
-                window.show_message(step.label, "this evaluator draws nothing; "
+                window.show_message(step.label, "this step draws nothing; "
                                                 "its numbers are in the Regions tab")
         # the table first: it writes the ROI counts into the status bar, and
         # what just happened to this site is the more useful of the two
         self._fill_table()
         drew = [label for label, result in results.items() if result is not None]
         if updated:
-            self.status.showMessage(f"ROI {number}: {', '.join(updated)} evaluated")
+            self.status.showMessage(f"ROI {number}: {', '.join(updated)} measured")
         elif drew:
             self.status.showMessage(f"ROI {number}: {', '.join(drew)} drawn from "
                                     "the result already stored")

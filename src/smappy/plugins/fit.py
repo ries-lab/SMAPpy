@@ -188,9 +188,9 @@ class SplineModelSettings:
             lateral = min(calibration.shape[1:])
             if roisize > lateral - 2:
                 raise ValueError(
-                    f"the ROI ({roisize} px) must be at least 2 px smaller than "
-                    f"the calibration ({lateral} px across): make the ROI "
-                    f"smaller, or the calibration's ROI size larger")
+                    f"the fit box ({roisize} px) must be at least 2 px smaller than "
+                    f"the calibration ({lateral} px across): make the fit box "
+                    f"smaller, or the calibration's bead box larger")
         return SplinePSF(calibration, z_start_nm=float(self.z_start_nm))
 
 

@@ -147,7 +147,7 @@ class SaveSettings:
              "Restore GUI state from file to put back")
     region_results: bool = param(
         True, label="save the ROI results",
-        help="the numbers the evaluations measured in the ROIs; off keeps "
+        help="the numbers measured in the ROIs; off keeps "
              "the ROIs and drops their results")
     region_figures: bool = param(
         True, label="save the ROI figures' data",

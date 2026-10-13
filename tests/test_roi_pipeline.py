@@ -76,7 +76,7 @@ def test_a_bad_setting_is_refused_rather_than_silently_odd():
 
 
 def test_histograms_needs_a_site_table():
-    with pytest.raises(ValueError, match="no site table"):
+    with pytest.raises(ValueError, match="nothing measured in the regions yet"):
         Histograms().run(Context(), HistogramSettings())
 
 
@@ -378,7 +378,7 @@ def test_find_evaluate_and_analyse_through_the_session(app):
     assert "4 ROIs, 1 step(s)" in window.status.text()
     # the session's log says what was evaluated, with each step's settings
     entry = session.history[-1]
-    assert entry["what"] == "Analysis/Regions/Region steps" and "4 ROIs" in entry["text"]
+    assert entry["what"] == "Analysis/Regions/Per-region steps" and "4 ROIs" in entry["text"]
     assert entry["steps"][0]["plugin"] == "Chain/Block"
     assert entry["steps"][0]["values"]["localization_statistics.fit_precision"] is False
     rows = project.results()

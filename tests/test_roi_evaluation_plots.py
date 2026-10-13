@@ -193,7 +193,7 @@ def test_every_stale_step_is_measured_but_only_the_open_one_is_drawn(app, monkey
     assert [site.tabs.tabText(i) for i in range(site.tabs.count())] == [
         "Drawing", "Other"]
     assert site.current == "Drawing"
-    assert "Drawing, Other evaluated" in window.status.currentMessage()
+    assert "Drawing, Other measured" in window.status.currentMessage()
 
     assert site.figures["Drawing"].panes[""].figure.axes      # looked at: drawn
     assert not site.figures["Other"].panes[""].figure.axes    # measured, not drawn
@@ -269,7 +269,7 @@ def test_an_empty_pipeline_says_so_rather_than_drawing(app):
     window.project.pipeline = []
     window.evaluate_live.setChecked(True)
     window.select(list(project.rois)[0])
-    assert "no evaluator" in window.status.currentMessage()
+    assert "no per-region step" in window.status.currentMessage()
 
 
 def test_whether_to_plot_is_remembered_with_the_project(app):

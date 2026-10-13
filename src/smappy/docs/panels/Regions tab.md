@@ -224,14 +224,14 @@ Draw a rectangle, a line or a polygon in the 2D view first.  Useful for
 structures that are not round, or a region the automatic finder would not
 propose; the outline is kept as it is.
 
-### evaluate
+### results
 The measurements.  The table lists what was measured on the ROI selected in
 the ROI manager, one line per number, marked with its state -- *(stale)*, say -- where the
 step that produced it is not current; below it, how many sites have a complete, current
 row in the site table.
 
-### Region steps...
-Opens the region steps window: which steps run, in what order, with which
+### Per-region steps...
+Opens the per-region steps window: which steps run, in what order, with which
 settings; *check* to time them in a few ROIs, and Run, which measures what
 is out of date and carries the rest forward.  While it measures, Run is
 Stop: the ROI being measured is finished, the ones measured so far are kept,

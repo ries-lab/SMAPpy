@@ -377,7 +377,7 @@ def test_a_renamed_corner_count_stands_beside_the_first_and_is_chosen_by_name():
     analysis = plugins.get("Analysis/Regions/Summarize/NPC Labeling Efficiency")
     # nothing says which: a script is told, the GUI is asked (a choice, no
     # plain run), and each choice carries the settings it would run with
-    with pytest.raises(ValueError, match="2 NPC Corners evaluations"):
+    with pytest.raises(ValueError, match="2 sets of results by NPC Corners"):
         analysis()(ctx=session.context())
     asked = analysis().preflight(session.context(), LabelingEfficiencySettings())
     assert asked.run_label == "" and {c.label for c in asked.choices} == {
@@ -392,7 +392,7 @@ def test_a_renamed_corner_count_stands_beside_the_first_and_is_chosen_by_name():
     assert abs(plain.data["efficiency"] - 0.5) < 0.05
     assert abs(strict.data["efficiency"] - 0.5) < 0.05
     assert plain.data["counts"] != strict.data["counts"]
-    with pytest.raises(ValueError, match="no evaluation on the ROIs is called 'loose'"):
+    with pytest.raises(ValueError, match="no results on the ROIs are called 'loose'"):
         analysis()(ctx=session.context(),
                    settings=LabelingEfficiencySettings(evaluation="loose"))
     # once named, nothing is asked

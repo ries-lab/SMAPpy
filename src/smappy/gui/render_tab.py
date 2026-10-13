@@ -743,7 +743,7 @@ class AxesSection(QWidget):
         except KeyError:
             self.note.hide()
             return
-        self.note.setText(f"{x_name} across, {y_name} up.  Sites and anything "
+        self.note.setText(f"{x_name} across, {y_name} up.  ROIs and anything "
                           "that measures nanometres read the columns, not the "
                           "picture; the scale bars are in the axes' own units.")
         self.note.show()

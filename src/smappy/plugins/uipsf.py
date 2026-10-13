@@ -88,7 +88,7 @@ class LearningPart:
     """What uiPSF is told beyond the microscope."""
     roi_size_px: Optional[int] = param(None, label="model size", unit="px", min=11,
                                        help="auto: the microscope profile's; at "
-                                            "least 3 px more than the fit's ROI")
+                                            "least 3 px more than the fit box")
     emission_wavelength_nm: Optional[float] = param(None, label="wavelength",
                                                     unit="nm", min=300, max=1200,
                                                     help="auto: the profile's")

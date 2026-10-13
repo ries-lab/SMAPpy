@@ -60,7 +60,7 @@ class DensityPeakSettings:
                                    help="localizations within this radius must reach "
                                         "the minimum count")
     min_count: int = param(10, label="minimum count", min=1,
-                           help="a peak with fewer localizations is not a site")
+                           help="a peak with fewer localizations is not made an ROI")
     replace: bool = replace_param()
 
 
@@ -243,9 +243,9 @@ class HistogramSettings:
                         help="comma separated; empty means every numeric "
                              "column but the counts behind the means")
     evaluation: str = param("", label="results from", choices=auto_only,
-                            help="the evaluation whose columns are drawn, on "
+                            help="the measurement whose columns are drawn, on "
                                  "the ROIs or per region of an id column; "
-                                 "auto: every evaluation on the ROIs")
+                                 "auto: everything measured on the ROIs")
 
 
 def histograms(rows: Sequence[Dict[str, Any]], settings: HistogramSettings
@@ -291,7 +291,7 @@ def measure_title(field: str) -> str:
 
 # ---------------------------------------------------------------- analysis
 
-EVALUATION_HELP = ("the evaluation whose results are analysed; auto: the only "
+EVALUATION_HELP = ("the measurement whose results are analysed; auto: the only "
                    "one there is, or the chain's own -- asked when there are "
                    "several")
 
@@ -301,8 +301,8 @@ class AmbiguousEvaluation(ValueError):
 
     def __init__(self, evaluator: str, found: Sequence[Evaluation]):
         self.evaluations = list(found)
-        name = evaluator.rsplit("/", 1)[-1] if evaluator else "evaluator"
-        super().__init__(f"there are {len(found)} {name} evaluations "
+        name = evaluator.rsplit("/", 1)[-1] if evaluator else "the steps"
+        super().__init__(f"there are {len(found)} sets of results by {name} "
                          f"({', '.join(map(str, found))}): name one in *results from*")
 
 
@@ -412,9 +412,9 @@ class SiteAnalysisPlugin(Plugin):
                 choices.append(PreflightChoice(
                     label=str(ev), settings=replace(settings, evaluation=str(ev)),
                     help=", ".join(f"{k} {v}" for k, v in values.items())))
-            name = self.evaluator.rsplit("/", 1)[-1] or "evaluator"
+            name = self.evaluator.rsplit("/", 1)[-1] or "the steps"
             return PreflightQuestion(
-                text=f"There are {len(unclear.evaluations)} {name} evaluations. "
+                text=f"There are {len(unclear.evaluations)} sets of results by {name}. "
                      f"Which should {self.name or 'the analysis'} read?",
                 choices=choices, run_label="")
         except ValueError:
@@ -424,7 +424,7 @@ class SiteAnalysisPlugin(Plugin):
 
 @register("Analysis/Regions/Summarize/Histograms")
 class Histograms(SiteAnalysisPlugin):
-    """Distributions of the evaluation results, one histogram per column."""
+    """Distributions of what was measured per region, one histogram per column."""
 
     Settings = HistogramSettings
     changes_locs = False
@@ -441,7 +441,8 @@ class Histograms(SiteAnalysisPlugin):
     def run(self, ctx: Context, settings: HistogramSettings) -> Result:
         rows, ev = self.rows(ctx, settings)
         if not rows:
-            raise ValueError("evaluate some ROIs first: there is no site table")
+            raise ValueError("nothing measured in the regions yet: run the "
+                             "per-region steps first")
         data = histograms(rows, settings)
         # a measure no region has a value for is said, not drawn as an empty
         # panel (NPC's labelling-efficiency columns before it has run, say)

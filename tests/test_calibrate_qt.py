@@ -24,7 +24,7 @@ def test_settings_forms_cover_both_dataclasses_on_this_python():
     geometry = dual["registration"].children
     assert geometry["split_position"].optional and geometry["split_position"].type is int
     assert geometry["layout"].info.choices
-    assert dual["roi_size"].info.label == "ROI size"     # inherited, labelled
+    assert dual["roi_size"].info.label == "bead box"     # inherited, labelled
 
 
 def test_window_draws_a_real_result_and_offers_it(app, tmp_path):

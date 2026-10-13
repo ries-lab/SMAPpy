@@ -86,7 +86,7 @@ class ROIHeader(QWidget):
         evaluate = QWidget()
         elayout = QVBoxLayout(evaluate)
         elayout.setContentsMargins(0, 0, 0, 0)
-        self.evaluate_button = QPushButton("Region steps...")
+        self.evaluate_button = QPushButton("Per-region steps...")
         self.evaluate_button.setToolTip("the steps run once in every ROI: choose them, "
                                         "order them and set them up; opens its own window")
         self.evaluate_button.clicked.connect(self.open_evaluation)
@@ -101,7 +101,7 @@ class ROIHeader(QWidget):
         self.summary.setWordWrap(True)
         self.summary.setStyleSheet("color: gray")
         elayout.addWidget(self.summary)
-        layout.addWidget(CollapsibleSection("evaluate", evaluate, expanded=True, major=True))
+        layout.addWidget(CollapsibleSection("results", evaluate, expanded=True, major=True))
         layout.addStretch(1)
 
         session.on_change(self._on_session)
@@ -246,7 +246,7 @@ class ROIHeader(QWidget):
         self._update_counts()
         self._show_result()
         self.summary.setText(result.text.splitlines()[0].split(": ", 1)[-1]
-                             if result.text else "evaluated")
+                             if result.text else "measured")
         self._notify()
 
     def _show_result(self) -> None:
@@ -259,7 +259,7 @@ class ROIHeader(QWidget):
         record, states = project.latest(roi.id)
         if record is None:
             self.results.setRowCount(1)
-            self.results.setItem(0, 0, QTableWidgetItem("not evaluated"))
+            self.results.setItem(0, 0, QTableWidgetItem("not measured"))
             return
         # a value is as good as the step that produced it, so the mark goes
         # per step and not on the whole row: one edited evaluator does not

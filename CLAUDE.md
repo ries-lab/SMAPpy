@@ -153,7 +153,7 @@ class Thing(Plugin):
   column each of the region table) and `Result.arrays`, so it can run once
   per ROI -- in `ROIProject.region_context(roi)`: `ctx.locs` the ROI's rows,
   each layer's filter over them, `ctx.region` its shape -- as well as on the
-  view like any other plugin.  The evaluation window offers these; in a chain
+  view like any other plugin.  The per-region steps window offers these; in a chain
   it runs once in each region as a step of a block (`chain.Block`,
   `smappy/blocks.py`): over the ROIs or an id column such as `cluster_id`
   (`docs/regions.md`).  Its results belong to
@@ -271,7 +271,7 @@ renders with its maths and figures (the figures in the slow tier).
 Plugins reach the shipped workspace by themselves: the Analysis tab seeds from
 `Analysis/` except `Analysis/Regions/`, which seeds the Regions tab, and `favorite` defaults to True, so there is no registry to edit.
 For a `per_region` plugin, `favorite` also decides whether it is in a
-new evaluation pipeline; a specialised one (`NPC Corners`) sets it False.
+new list of per-region steps; a specialised one (`NPC Corners`) sets it False.
 
 ## The plugin's page
 
@@ -284,7 +284,7 @@ understand the algorithm without reading the code.  The format is in
 `src/smappy/docs/__init__.py`; `Analysis/Drift/RCC.md` is the example to copy.
 
 The tabs and windows that are not plugins (the Render tab, the Regions tab,
-the ROI manager, the region steps, the 3D view, the bead calibration, the batch window) have pages too,
+the ROI manager, the per-region steps, the 3D view, the bead calibration, the batch window) have pages too,
 in `src/smappy/docs/panels/`, with `title`, `summary` and `widget` in the
 front matter and a *Controls* section in place of *Parameters*: one
 `### label` per control, the label exactly as the panel shows it.

@@ -46,11 +46,11 @@ OVERLAPS = ("last", "first", "mean")
 @dataclass
 class RegionColumnSettings:
     source: str = param("", label="results from", choices=auto_only,
-                        help="an evaluation on the ROIs, or one per region of "
+                        help="what was measured on the ROIs, or per region of "
                              "an id column; empty: the ROIs, for their numbers")
     values: str = param("", label="values",
                         help="comma separated; empty: every number the "
-                             "evaluation measured; roi_id: the ROI's number")
+                             "measurement has; roi_id: the ROI's number")
     prefix: str = param("", label="prefix", advanced=True,
                         help="put before each column's name")
     merge: str = param("last", label="overlaps", choices=OVERLAPS, advanced=True,
@@ -118,7 +118,7 @@ class RegionsToColumn(Plugin):
                 if measured or not names:
                     values = rows_values(region_results.rows(ctx, ev), measured)
             elif measured:
-                raise ValueError(f"{', '.join(measured)}: name the evaluation that "
+                raise ValueError(f"{', '.join(measured)}: name the measurement that "
                                  "measured them in *results from*")
         members = region_members(ctx, regions)
         if regions == BLOCK_ROIS:

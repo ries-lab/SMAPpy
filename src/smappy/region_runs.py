@@ -595,7 +595,7 @@ def table_values(table: RegionTable, names: Sequence[str] = ()) -> Dict[str, Dic
     wanted = list(names) or list(numeric)
     missing = [k for k in wanted if k not in numeric]
     if missing:
-        raise ValueError(f"{table.label or 'the evaluation'} has no numeric "
+        raise ValueError(f"{table.label or 'the measurement'} has no numeric "
                          f"{', '.join(missing)}: it has {', '.join(sorted(numeric))}")
     return {k: {r: numeric[k][i] for i, r in enumerate(table.ids)
                 if not table.errors[i] and numeric[k][i] is not None}

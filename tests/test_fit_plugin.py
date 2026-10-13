@@ -31,7 +31,7 @@ def stack(tmp_path):
 def test_parts_show_up_as_children():
     specs = GaussianFit.specs()
     assert set(specs) == {"source", "camera", "detection", "model", "fit", "output"}
-    assert specs["fit"].children["roisize"].info.label == "ROI size"
+    assert specs["fit"].children["roisize"].info.label == "fit box"
     assert specs["source"].children["path"].info.kind == "open_file"
     assert "Localize/Spline 3D" in plugins.available("Localize/")
 

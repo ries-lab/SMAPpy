@@ -27,7 +27,7 @@ from ..roi_manager import pipeline as pipeline_module
 from ..workspace import Instance
 from .chain_panel import ChainPanel
 
-PATH = "Analysis/Regions/Region steps"
+PATH = "Analysis/Regions/Per-region steps"
 
 
 class RegionStepsWindow(QWidget):
@@ -37,7 +37,7 @@ class RegionStepsWindow(QWidget):
 
     def __init__(self, session, parent=None):
         super().__init__(parent, Qt.Window)
-        self.setWindowTitle("Region steps")
+        self.setWindowTitle("Per-region steps")
         self.session = session
         project = session.rois
         if not project.pipeline:

@@ -341,16 +341,16 @@ Back to the circle or square of the Regions tab.
 ### Clear line
 Removes the direction.
 
-### Region steps...
+### Per-region steps...
 The same window as the Regions tab's button of that name.  Run there measures
 only what is out of date, which after one edited parameter is one step over
-the sites rather than all of them.
+the ROIs rather than all of them.
 
-### plot the evaluation
-Opens the evaluation window beside this one.  Closing that window unticks
-it.  Its tabs appear only for the evaluators enabled in the pipeline.
+### plot the ROI's figures
+Opens the *ROI results* window beside this one.  Closing that window unticks
+it.  Its tabs appear only for the per-region steps that are enabled.
 
-### re-evaluate when out of date
+### measure again when out of date
 On by default.  Untick it to scroll a large project quickly: nothing is then
 computed behind you except the figure of the open tab.
 

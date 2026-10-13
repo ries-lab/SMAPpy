@@ -33,12 +33,12 @@ from .params import param
 class FitSettings:
     """Everything about the fit that is not the camera or the PSF model."""
 
-    roisize: int = param(13, label="ROI size", unit="pix", min=5,
+    roisize: int = param(13, label="fit box", unit="px", min=5,
                          help="the square cut around each candidate and "
                               "fitted")
     iterations: int = param(50, min=1, advanced=True,
                             help="the most steps a fit may take")
-    max_block_rois: int = param(15000, label="ROIs per fit", min=100,
+    max_block_rois: int = param(15000, label="boxes per fit", min=100,
                                 advanced=True,
                                 help="how many are collected before they "
                                      "are fitted together; speed and memory "
@@ -46,7 +46,7 @@ class FitSettings:
     n_threads: int = param(0, label="threads", min=0, help="0: one per core",
                            advanced=True)
     max_fit_distance: Optional[float] = param(None, label="max fit distance",
-                                              unit="pix", advanced=True,
+                                              unit="px", advanced=True,
                                               help="reject fits that ran "
                                                    "off; auto: keep all")
 

@@ -327,7 +327,7 @@ def test_a_chain_that_leaves_the_rois_alone_hands_none_back():
 def test_an_evaluator_with_no_sites_to_measure_stops_the_chain():
     session = four_sites()
     cls = chain_class(spec(each_roi({"plugin": "Analysis/Measure/Localization Statistics", "label": "stats"})))
-    with pytest.raises(ChainError, match="'sites'.*no ROIs to evaluate"):
+    with pytest.raises(ChainError, match="'sites'.*no ROIs to measure"):
         session.run(cls(), cls.Settings())
 
 

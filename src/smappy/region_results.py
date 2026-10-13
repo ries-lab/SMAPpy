@@ -148,7 +148,7 @@ def missing(ctx, ev: Evaluation) -> str:
                 "were measured; run them again")
     if ev.on_rois:
         there = available(ctx)
-        return (f"no evaluation on the ROIs is called {ev.label!r}"
+        return (f"no results on the ROIs are called {ev.label!r}"
                 + (f"; there is {', '.join(map(str, there))}" if there else ""))
     return f"there are no results {str(ev)!r} (any more)"
 
