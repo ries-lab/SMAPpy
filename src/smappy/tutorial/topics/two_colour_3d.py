@@ -78,13 +78,13 @@ def make(d) -> None:
     d.chapter("Dual-colour calibration")
     localize = show_tab(d, "Localize")
     _, panel = open_section(d, localize, "Bead calibration")
-    type_into(panel, "mode", "dual")
     d.shot("The Bead calibration section of the Localize tab opens the "
-           "calibration window. Set the mode to dual colour, then Open.",
-           spot=[field(panel, "mode"), panel.run_button], point=panel.run_button,
+           "calibration window.",
+           spot=[panel.run_button], point=panel.run_button,
            click=True, zoom=d.around(panel, 700))
     panel.run_button.click()
     window = control.calibration_window
+    window.mode_box.setCurrentText("Dual colour")
     assert window.is_dual, "the calibration window is not in dual-colour mode"
     window.resize(1540, 860)
     d.place(window, 30, 20)
@@ -100,8 +100,9 @@ def make(d) -> None:
         f.set(value)
         f.changed.emit()
     d.settle()
-    d.shot("Bead stacks from the split camera: every bead appears in both "
-           "halves, and the pairs are what the map is measured from.",
+    d.shot("Set the mode to dual colour. Bead stacks from the split camera: "
+           "every bead appears in both halves, and the pairs are what the map "
+           "is measured from.",
            spot=[window.file_list, window.mode_box], point=window.mode_box,
            zoom=d.around(window.file_list, 760))
     layout = geometry.fields["layout"]

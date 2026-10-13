@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from .common import field, menu, menu_item, open_section, show_tab, type_into
+from .common import field, open_section, show_tab, type_into
 
 TITLE = "3D fitting: bead calibration and spline fitting"
 DESCRIPTION = ("Why a measured PSF, making a bead calibration, checking it, and "
@@ -157,13 +157,13 @@ def make(d) -> None:
                "and smoothed, they become the model.")
 
     d.chapter("The calibration window")
-    tools = menu(d, "Tools")
-    item = menu_item(d, tools, "Bead calibration")
-    d.shot("Tools, Bead calibration opens its window. The Localize tab has it "
-           "too, as a section beside the fitters.",
-           spot=[item], point=item, click=True, zoom=d.around(tools, 700))
-    tools.close()
-    control.open_calibration()
+    localize = show_tab(d, "Localize")
+    _, panel = open_section(d, localize, "Bead calibration")
+    d.shot("The Bead calibration section of the Localize tab, beside the "
+           "fitters, opens its window.",
+           spot=[panel.run_button], point=panel.run_button, click=True,
+           zoom=d.around(panel, 700))
+    panel.run_button.click()
     window = control.calibration_window
     window.resize(1540, 860)
     d.place(window, 30, 20)

@@ -32,8 +32,8 @@ What it needs:
 
 * **A calibration** of this microscope, in this configuration: a z-stack of
   fluorescent beads on a coverslip, turned into a model with
-  **Tools > Bead calibration...** (the *Bead calibration* section of the
-  Localize tab opens it too; saving the calibration puts it into this
+  the bead calibration window (the *Bead calibration* section of the
+  Localize tab opens it; saving the calibration puts it into this
   plugin's *calibration* field).  A SMAP `_3dcal.mat` works as well, and
   can be kept as an `.h5` by loading and saving it:
   `save_spline_calibration("beads.h5", load_spline_calibration("beads_3dcal.mat"))`,

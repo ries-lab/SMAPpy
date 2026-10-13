@@ -176,26 +176,32 @@ def test_the_window_opens_the_shipped_tabs(window):
         {s.title for s in localize.sections}
 
 
-def test_the_bead_calibration_section_opens_the_window_in_its_mode(window):
+def test_the_bead_calibration_section_opens_the_window_as_it_was_left(window):
     localize = tab_named(window, "Localize")
     instance = next(i for i in localize.tab.instances
                     if i.plugin == "Localize/Bead calibration")
     localize.open_section(instance.id)
     panel = localize.slots[instance.id].panel
     assert panel.run_button.text() == "Open"
-    panel.form.set_values({"mode": "dual"})
+    assert not panel.form.fields          # single or dual is the window's to ask
     panel.run_button.click()
+    window.calibration_window.mode_box.setCurrentText("Dual colour")
+    window.calibration_window.hide()
+    panel.run_button.click()
+    assert window.calibration_window.isVisible()
     assert window.calibration_window.is_dual
-    panel.form.set_values({"mode": "single"})
-    panel.run_button.click()
-    assert not window.calibration_window.is_dual
 
 
-def test_the_tools_menu_has_the_bead_calibration_once(window):
+def test_the_menus_have_no_second_way_into_what_a_tab_opens(window):
+    """The bead calibration is the Localize tab's, the ROI manager and the
+    per-region steps the Regions tab's; Ctrl+R still opens the manager."""
     from PySide6.QtGui import QAction
-    titles = [a.text() for a in window.findChildren(QAction)
-              if "calibration" in a.text().lower()]
-    assert titles == ["Bead calibration..."]
+    from PySide6.QtWidgets import QMenu
+    in_menus = [a.text() for m in window.findChildren(QMenu) for a in m.actions()]
+    assert not [t for t in in_menus if "calibration" in t.lower()
+                or "ROI manager" in t or "Per-region" in t]
+    shortcuts = [a for a in window.actions() if a.shortcut().toString() == "Ctrl+R"]
+    assert [a.text() for a in shortcuts] == ["ROI manager"]
 
 
 def test_opening_a_section_is_what_imports_the_plugin(window):

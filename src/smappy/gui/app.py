@@ -299,18 +299,23 @@ class ControlWindow(QMainWindow):
         # is in it without a restart
         self.plugins_menu.aboutToShow.connect(self._fill_plugins_menu)
         tools = _add_menu(self.menuBar(), "Tools", self)
-        self._action(tools, "ROI manager", "Ctrl+R", self._open_manager)
-        self._action(tools, "Per-region steps...", None, self._open_evaluation)
-        tools.addSeparator()
-        # the window is also the Localize tab's Bead calibration plugin, which
-        # says which mode to open in; from here it opens as it was left
-        self._action(tools, "Bead calibration...", None, lambda: self.open_calibration())
+        # The ROI manager, the per-region steps and the bead calibration are
+        # not in this menu: each has one way in where it is used (the Regions
+        # tab; the Localize tab's section), and a second entry in a menu made
+        # two of everything.  Ctrl+R stays, from this window and the picture.
+        manager = QAction("ROI manager", self, triggered=self._open_manager)
+        manager.setShortcut("Ctrl+R")
+        manager.setShortcutContext(Qt.WindowShortcut)
+        self.addAction(manager)
+        render.addAction(manager)
         # a plugin that would change a table a fit is still appending to
         # offers to run in a new instance instead (`PluginPanel._ask_live`)
         session.window_openers["new window"] = \
             lambda run=None: self.open_in_new_window(run=run)
+        # the Localize tab's Bead calibration section (`Plugin.window`): the
+        # window asks single or dual itself, and opens as it was left
         session.window_openers["bead calibration"] = \
-            lambda settings: self.open_calibration(dual=settings.mode == "dual")
+            lambda settings=None: self.open_calibration()
         # a fitter whose file's camera is not in the database offers this
         # (`Plugin.describe`), opened on the file that fitter is set to
         session.window_openers["camera editor"] = self.open_camera_editor
@@ -779,10 +784,6 @@ class ControlWindow(QMainWindow):
     def _open_manager(self) -> None:
         if self.roi_tab is not None:
             self.roi_tab.open_manager()
-
-    def _open_evaluation(self) -> None:
-        if self.roi_tab is not None:
-            self.roi_tab.open_evaluation()
 
     # ------------------------------------------------------------ plugins
     def _fill_plugins_menu(self) -> None:

@@ -11,7 +11,7 @@ frame in one global fit, pages under Help > Plugin documentation.
 
 ## Use
 
-Open **Tools → bead calibration…** in the localization viewer,
+Open the *Bead calibration* section of the Localize tab,
 or run `smappy-calibrate`. Set **mode → Dual colour**. The *registration*
 section holds the split: the layout, the main channel and optionally a split
 position. Supported layouts are right-left and up-down, each with or without

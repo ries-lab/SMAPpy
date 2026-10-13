@@ -206,11 +206,24 @@ results table pass over excluded ROIs; their earlier results stay in the file.
 ### Open ROI manager
 The window where ROIs are found, drawn, moved, included or excluded, and
 where each ROI is shown with what the per-region steps measured in it (also
-*Tools > ROI manager*, Ctrl+R).  Under the button, the file chosen there and
+Ctrl+R).  Under the button, the file chosen there and
 how many of its ROIs there are and are used.
 
+### Per-region steps...
+Opens the per-region steps window: which steps run, in what order, with which
+settings; *check* to time them in a few ROIs, and Run, which measures what
+is out of date and carries the rest forward.  While it measures, Run is
+Stop: the ROI being measured is finished, the ones measured so far are kept,
+and the rest wait for the next Run.  A new list starts with the
+general measurements, once each, with their own defaults; a specialised
+one, such as NPC Corners, is added there when the data call for it.  A run
+that will take more than a minute says how long before it starts.  The list is
+saved in the file with the results, because the results table's columns mean
+nothing without it, and *save as...* keeps it as a chain.
+
 ### geometry
-What every ROI's outline is, unless it has a polygon of its own.
+What every ROI's outline is, unless it has a polygon of its own.  Folded
+when the tab opens: it is set once for a project.
 
 ### shape
 *circle* for round structures; *square* for structures that are square or
@@ -238,22 +251,11 @@ structures that are not round, or a region the automatic finder would not
 propose; the outline is kept as it is.
 
 ### results
-The measurements.  The table lists what was measured on the ROI selected in
-the ROI manager, one line per number, marked with its state -- *(stale)*, say -- where the
-step that produced it is not current; below it, how many ROIs have a complete, current
-row in the results table.
-
-### Per-region steps...
-Opens the per-region steps window: which steps run, in what order, with which
-settings; *check* to time them in a few ROIs, and Run, which measures what
-is out of date and carries the rest forward.  While it measures, Run is
-Stop: the ROI being measured is finished, the ones measured so far are kept,
-and the rest wait for the next Run.  A new list starts with the
-general measurements, once each, with their own defaults; a specialised
-one, such as NPC Corners, is added there when the data call for it.  A run
-that will take more than a minute says how long before it starts.  The list is
-saved in the file with the results, because the results table's columns mean
-nothing without it, and *save as...* keeps it as a chain.
+The measurements, folded when the tab opens.  First, how many ROIs have a
+complete, current row in the results table.  Below it, once an ROI is
+selected in the ROI manager, a table of what was measured on it, one line
+per number, marked with its state -- *(stale)*, say -- where the
+step that produced it is not current.
 
 ## Differences from SMAP
 

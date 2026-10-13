@@ -8,8 +8,8 @@ navigation aid; moving through the file never moves ROIs.
 
 ## Open the manager
 
-Start the GUI and open the manager from the Regions tab's **Open ROI manager**, from
-**Tools → ROI manager**, or with Ctrl+R:
+Start the GUI and open the manager from the Regions tab's **Open ROI manager**,
+or with Ctrl+R:
 
 ```sh
 python -m smappy.gui.app localizations.h5
