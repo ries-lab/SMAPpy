@@ -62,9 +62,11 @@ def test_a_part_keeps_the_default_its_parent_declares_for_it():
 
 def test_a_plugin_has_a_version_and_no_grouping_requirement_unless_it_says():
     class Plain(Plugin):
+        changes_locs = False
         pass
 
     class Picky(Plugin):
+        changes_locs = False
         version = "3"
         grouping = "grouped"
 
@@ -104,6 +106,7 @@ def test_a_grouped_table_without_a_session_is_refused_with_a_reason():
 
 
 class _MadeFromNothing(Plugin):
+    changes_locs = True
     path = "Localize/Test"
 
     def run(self, ctx, settings):

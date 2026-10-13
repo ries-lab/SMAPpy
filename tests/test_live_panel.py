@@ -1,6 +1,6 @@
 """A plugin panel while a fit is still appending: a table change is offered a
-new window instead -- before the run when the plugin says it changes the
-table, after it when the plugin does not say."""
+new window instead, before the run, since every plugin says whether it
+changes the table."""
 import numpy as np
 import pytest
 
@@ -42,9 +42,11 @@ class Declared(Plugin):
         raise AssertionError("must not run during a live fit")
 
 
-class Undeclared(Plugin):
-    path = "Test/Undeclared"
-    name = "Undeclared"
+class Mistaken(Plugin):
+    """Says it measures, and hands back a table."""
+    changes_locs = False
+    path = "Test/Mistaken"
+    name = "Mistaken"
 
     def run(self, ctx, settings):
         return Result(locs=ctx.locs[:10], text="cut")
@@ -97,21 +99,23 @@ def test_cancelling_the_question_runs_nothing(app):
     assert not opened and panel.status.text() == "not run: the fit is still running"
 
 
-def test_an_undeclared_table_change_is_held_back_and_then_offered(app):
+def test_a_plugin_that_does_not_say_whether_it_changes_the_table_is_refused():
+    with pytest.raises(TypeError, match="changes_locs"):
+        class Undeclared(Plugin):
+            def run(self, ctx, settings):
+                return Result(locs=ctx.locs[:10])
+
+
+def test_a_plugin_that_wrongly_says_it_measures_is_not_applied_during_a_fit_and_asks_nothing(app):
     from smappy.gui.plugin_panel import PluginPanel
     session = live_session()
-    asked = []
-    panel = PluginPanel(Undeclared, session)
-    panel.ask_new_window = lambda text: asked.append(text) or False
+    panel = PluginPanel(Mistaken, session)
+    panel.ask_new_window = lambda text: pytest.fail("asked after the run")
     run_and_wait(panel, app)
+    app.processEvents()
     assert session.live and len(session.locs) == 300      # not applied
     assert "not applied" in panel.output.toPlainText()
-    import time
-    end = time.monotonic() + 5                            # asked on a timer
-    while not asked and time.monotonic() < end:
-        app.processEvents()
-        time.sleep(0.01)
-    assert asked and "run again in a new window" in asked[0]
+    assert panel.status.text() == "not applied: the fit is still running"
 
 
 def test_a_measurement_runs_on_the_live_table_as_it_was(app):

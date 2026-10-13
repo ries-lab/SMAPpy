@@ -208,6 +208,7 @@ def test_a_failing_step_costs_its_columns_and_not_the_run():
     from smappy.plugins import Plugin, Result
 
     class Mean(Plugin):
+        changes_locs = False
         name, version = 'example', '1'
         per_region = True
 
@@ -234,6 +235,7 @@ def test_two_steps_share_a_row_and_collisions_are_qualified():
     from smappy.plugins import Plugin, Result
 
     class Count(Plugin):
+        changes_locs = False
         per_region = True
 
         def run(self, ctx, settings):

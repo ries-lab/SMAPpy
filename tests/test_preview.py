@@ -40,6 +40,7 @@ def test_only_the_plugins_that_can_preview_say_so():
     assert GaussianFit.has_preview() and SplineFit.has_preview()
 
     class Plain(Plugin):
+        changes_locs = False
         pass
 
     assert not Plain.has_preview()

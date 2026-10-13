@@ -162,6 +162,7 @@ def test_one_bad_file_costs_that_file(tmp_path, folder):
 
 @register("Test/Batch/Slow")
 class Slow(Plugin):
+    changes_locs = False
     def preflight(self, ctx, settings):
         return "this takes an afternoon"
 
@@ -204,6 +205,7 @@ class FakeFitSettings:
 
 @register("Localize/Test Fake")
 class FakeFit(Plugin):
+    changes_locs = True
     Settings = FakeFitSettings
 
     def run(self, ctx, settings):

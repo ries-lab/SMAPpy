@@ -106,8 +106,11 @@ class BlockPlugin(ChainPlugin):
     # its regions are an id column of the localizations, and what it writes
     # back goes onto them; each region's steps see the layers as shown
     grouping = "ungrouped"
+    # whether it writes columns back: `block_class` answers for the block's
+    # own values, `changes_locs_for` for the form's
+    changes_locs = True
 
-    def changes_locs_for(self, settings) -> Optional[bool]:
+    def changes_locs_for(self, settings) -> bool:
         return bool(_columns(settings.write_back) or _columns(settings.write_values))
 
     def active(self, settings):
@@ -479,7 +482,10 @@ def block_class(block: Block) -> type:
     attrs = {"block": block, "spec": None, "steps": steps, "Settings": settings_cls,
              "params": extras, "name": name, "path": "Chain/Block",
              "description": name + ": " + " -> ".join(s.title() for _, s, _ in steps),
-             "version": "1"}
+             "version": "1",
+             # as its own settings start; `changes_locs_for` reads the form's
+             "changes_locs": bool(_columns(block.write_back)
+                                  or _columns(block.write_values))}
     return type("Block_" + "".join(ch for ch in name if ch.isalnum()), (BlockPlugin,),
                 attrs)
 

@@ -28,6 +28,7 @@ def test_only_a_plugin_that_can_preview_grows_the_button(app):
     from smappy.plugins import Plugin, Result
 
     class Plain(Plugin):
+        changes_locs = False
         Settings = None
 
         def run(self, ctx, settings):
@@ -135,6 +136,7 @@ def test_the_figures_share_one_window_and_draw_when_looked_at(app):
     drawn = []
 
     class Plotter(Plugin):
+        changes_locs = False
         Settings = None
 
         def run(self, ctx, settings):
@@ -168,6 +170,7 @@ def test_a_tab_can_be_taken_out_into_its_own_window(app):
     drawn = []
 
     class Plotter(Plugin):
+        changes_locs = False
         Settings = None
 
         def run(self, ctx, settings):

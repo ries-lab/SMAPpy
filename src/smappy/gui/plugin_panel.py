@@ -719,13 +719,16 @@ class PluginPanel(QWidget):
         self.result = result
         # a preview is looked at, never applied: it exists so that the session
         # is not changed before the settings are right; nor is a live step
-        held_back = None
+        refused = None
         if self._job not in ("preview", "live"):
             owns, self._owns_live = self._owns_live, False
             try:
                 self.session.apply(self.plugin, result, finishes_live=owns)
             except LiveTableError as e:
-                held_back = str(e)
+                # a plugin whose `changes_locs` is wrong, or a fit that began
+                # while this ran: what was declared is asked about before the
+                # run (`_start`), so this is only said, not offered again
+                refused = str(e)
         else:
             self.session.show_preview(self.plugin, result)
         # A live step happens ten times a second while the ROI is dragged, so
@@ -736,12 +739,10 @@ class PluginPanel(QWidget):
             if asked and not stopped:
                 self.output.appendPlainText("(it finished before it could stop)")
         self._progress_lines = 0
-        if held_back is not None:
-            # a plugin that did not say beforehand (`Plugin.changes_locs`)
-            self.output.appendPlainText(held_back + " (its figures are shown)")
+        if refused is not None:
+            self.output.appendPlainText(refused + " (its figures are shown)")
             self.status.setText("not applied: the fit is still running")
             self.status.setStyleSheet(WARNING_STYLE)
-            QTimer.singleShot(0, lambda: self._held_back(held_back))
         elif self._warnings and not live:
             self.status.setText(f"{'stopped' if stopped else 'done'}, "
                                 f"{self._warnings} warning"
@@ -764,15 +765,6 @@ class PluginPanel(QWidget):
         if result.figures() and (live or self._show_figures):
             self.plot(raise_window=not live)
         self.ended.emit("done", result)
-
-    def _held_back(self, text: str) -> None:
-        try:
-            self._offer_new_window(self.result.settings,
-                                   f"{text}.\n\nIt can run again in a new window, "
-                                   "on the localizations so far; the fit carries "
-                                   "on here.")
-        except Exception:                    # a singleShot callable must not raise
-            traceback.print_exc()
 
     def _on_failed(self, message: str, text: str) -> None:
         """``message`` what the error says, ``text`` its traceback: the one

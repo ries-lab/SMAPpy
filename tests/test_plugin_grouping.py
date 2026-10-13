@@ -33,6 +33,7 @@ def spy_on(cls):
 
 class Echo(Plugin):
     """A measurement that declares nothing."""
+    changes_locs = False
     path = "Test/Echo"
 
     def run(self, ctx, settings):
@@ -89,6 +90,7 @@ def test_line_profile_measures_what_each_layer_shows():
 
 def test_a_new_table_made_from_blinks_is_refused_and_the_session_kept():
     class Halve(Plugin):
+        changes_locs = True
         path = "Test/Halve"            # written to the old rule: no grouping
 
         def run(self, ctx, settings):
@@ -103,6 +105,7 @@ def test_a_new_table_made_from_blinks_is_refused_and_the_session_kept():
 
 def test_a_loader_on_a_grouped_layer_is_not_refused_its_new_table():
     class Loads(Plugin):
+        changes_locs = True
         path = "File/Load/Test"            # makes a table of its own
 
         def run(self, ctx, settings):

@@ -180,6 +180,7 @@ def test_removing_roi_3_of_5_leaves_roi_5_as_5_in_the_list_the_column_and_the_re
     from smappy.plugins.region_column import RegionsToColumn
 
     class Count(Plugin):
+        changes_locs = False
         def run(self, ctx, settings=None):
             return Result(values={"n": float(len(ctx.selection.apply(ctx.locs)))})
 

@@ -85,10 +85,9 @@ def changes_table(step) -> bool:
     """Does this step hand back a new table (`Plugin.changes_locs_for`)?  In
     a region's run its table is what the steps after it measure."""
     try:
-        answer = step.plugin.changes_locs_for(step.settings)
+        return bool(step.plugin.changes_locs_for(step.settings))
     except Exception:
-        answer = getattr(step.plugin, "changes_locs", None)
-    return answer is True
+        return bool(getattr(step.plugin, "changes_locs", False))
 
 
 def region_entry(result, plugin=None, keep: bool = False) -> Dict:

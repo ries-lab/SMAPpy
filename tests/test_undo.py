@@ -112,6 +112,7 @@ def test_the_log_keeps_every_step_and_says_what_was_undone():
 def test_a_plugin_run_is_named_after_the_plugin_in_the_menu():
     @register("Analysis/Measure/Undo test")
     class Doubler(Plugin):
+        changes_locs = True
         version = "1"
         grouping = "ungrouped"
 

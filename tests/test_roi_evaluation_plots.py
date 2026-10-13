@@ -24,6 +24,7 @@ class DrawingSettings:
 
 class Drawing(Plugin):
     """An evaluator with a figure, which the shipped ones do not have."""
+    changes_locs = False
     name = "Drawing"
     path = "ROIManager/Evaluate/Drawing"
     per_region = True
@@ -39,6 +40,7 @@ class Drawing(Plugin):
 
 class Other(Plugin):
     """A second evaluator with a figure, to watch what the first one costs."""
+    changes_locs = False
     name = "Other"
     path = "ROIManager/Evaluate/Other"
     per_region = True
@@ -50,6 +52,7 @@ class Other(Plugin):
 
 
 class Failing(Plugin):
+    changes_locs = False
     name = "Failing"
     path = "ROIManager/Evaluate/Failing"
     per_region = True

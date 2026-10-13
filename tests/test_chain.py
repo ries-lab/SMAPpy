@@ -25,6 +25,7 @@ def with_sigma(locs):
 @register("Test/Chain/Count")
 class Count(Plugin):
     """How many rows the table it reads has: grouped or not."""
+    changes_locs = False
     def run(self, ctx, settings):
         locs, sel = ctx.table()
         return Result(text=f"{len(locs)} rows, {len(sel)} selected",
@@ -39,6 +40,7 @@ class CountGrouped(Count):
 @register("Test/Chain/Rewrite")
 class Rewrite(Plugin):
     """Hands back a table from whatever it read -- wrong on a grouped one."""
+    changes_locs = True
     def run(self, ctx, settings):
         locs, _ = ctx.table()
         return Result(locs=locs[: len(locs) // 2], text="halved")
@@ -46,6 +48,7 @@ class Rewrite(Plugin):
 
 @register("Test/Chain/Expensive")
 class Expensive(Plugin):
+    changes_locs = False
     def preflight(self, ctx, settings):
         return "this will take an afternoon"
 
@@ -398,6 +401,7 @@ class WhichSettings:
 @register("Test/Chain/Which")
 class Which(Plugin):
     """Asks which, until told."""
+    changes_locs = False
     Settings = WhichSettings
 
     def preflight(self, ctx, settings):

@@ -22,6 +22,7 @@ PLAIN = """
 
     class MyDrift(Plugin):
         '''Corrects a drift the cheap way.'''
+        changes_locs = False
         description = "the one line that wins over the docstring"
 """
 
@@ -46,6 +47,7 @@ def test_docstring_is_the_description_when_nothing_else_says(tmp_path):
 
             And this part is not the description.
             '''
+            changes_locs = False
     """)
     refs, _ = scan([("test", tmp_path)])
     assert refs["Analysis/Quiet"].description == "Says only this."
@@ -56,6 +58,7 @@ def test_register_wins_over_the_folder_and_gives_several_per_file(tmp_path):
         from smappy.plugins import Plugin, register
 
         class _Base(Plugin):
+            changes_locs = False
             pass
 
         @register("Localize/Alpha")
@@ -84,6 +87,7 @@ def test_per_region_must_be_true_itself(tmp_path):
         from smappy.plugins import Plugin
 
         class Odd(Plugin):
+            changes_locs = False
             per_region = "yes"
     """)
     refs, _ = scan([("test", tmp_path)])
@@ -97,6 +101,7 @@ def test_computed_attributes_are_left_alone_rather_than_guessed(tmp_path):
         PREFIX = "auto"
 
         class Computed(Plugin):
+            changes_locs = False
             name = PREFIX + " name"
     """)
     refs, _ = scan([("test", tmp_path)])
@@ -123,9 +128,11 @@ def test_several_plugins_without_register_is_reported_not_guessed(tmp_path):
         from smappy.plugins import Plugin
 
         class One(Plugin):
+            changes_locs = False
             pass
 
         class Two(Plugin):
+            changes_locs = False
             pass
     """)
     refs, problems = scan([("test", tmp_path)])
@@ -178,7 +185,7 @@ def test_a_module_can_declare_plugins_it_builds_dynamically(tmp_path):
         from smappy.plugins import Plugin, register
 
         for label in ("Red", "Green"):
-            register("Colour/" + label)(type(label, (Plugin,), {}))
+            register("Colour/" + label)(type(label, (Plugin,), {"changes_locs": False}))
 
         __smappy_plugins__ = ["Colour/Red", "Colour/Green"]
     """)
@@ -280,12 +287,14 @@ def test_two_roots_with_the_same_filename_load_as_different_modules(tmp_path):
         from smappy.plugins import Plugin
 
         class Thing(Plugin):
+            changes_locs = False
             description = "the first"
     """)
     write(second, "Beta/thing.py", """
         from smappy.plugins import Plugin
 
         class Thing(Plugin):
+            changes_locs = False
             description = "the second"
     """)
     refs, problems = scan([("a", first), ("b", second)])
@@ -302,12 +311,14 @@ def test_a_subclass_of_a_registered_plugin_does_not_inherit_its_path(tmp_path):
 
         @register("Elsewhere/Base")
         class Base(Plugin):
+            changes_locs = False
             pass
     """)
     write(tmp_path, "Mine/derived.py", """
         from smappy.plugins import Plugin
 
         class Derived(Plugin):
+            changes_locs = False
             pass
     """)
     refs, _ = scan([("test", tmp_path)])

@@ -404,6 +404,7 @@ class Settings:
 
 class CountNeighbours(Plugin):
     """Counts each localization's neighbours within a radius."""
+    changes_locs = True
     Settings = Settings
     grouping = "ungrouped"        # it writes a column onto the localizations
 

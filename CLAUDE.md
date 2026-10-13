@@ -180,8 +180,9 @@ class Thing(Plugin):
   what it says depends on the session, override `notice_for(ctx, settings)`
   instead -- the saver says which region results its settings leave out.
 * `changes_locs` -- True if `run` hands back a new table (or files), False
-  if not; every shipped plugin declares it (`tests/test_changes_locs.py`),
-  and `changes_locs_for(settings)` refines it where it depends on the
+  if not; required, a class that does not declare it is refused when it is
+  defined (`tests/test_changes_locs.py` checks the shipped ones say it
+  truly), and `changes_locs_for(settings)` refines it where it depends on the
   settings.  While a fit is still appending, `Session.apply` refuses a table
   change and the GUI asks before such a run, offering a new window.  A change
   that is a column computed from the others can return a `LiveRecipe`

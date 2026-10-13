@@ -34,6 +34,7 @@ def table(n=4000, seed=0):
 
 class Corrector(Plugin):
     """Stands in for a drift correction: the same rows, x and y moved."""
+    changes_locs = True
     name = "corrector"
     path = "Test/Corrector"
     grouping = "ungrouped"

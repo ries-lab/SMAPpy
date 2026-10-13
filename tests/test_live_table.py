@@ -31,6 +31,7 @@ def live_session(blocks=3):
 
 class Shift(Plugin):
     """Stands in for a drift correction: a new table, x moved."""
+    changes_locs = True
     path = "Analysis/Drift/Shift"
     name = "Shift"
 

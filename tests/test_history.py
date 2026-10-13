@@ -133,6 +133,7 @@ def test_a_measurement_is_not_logged_but_its_settings_go_with_its_result():
         bins: int = param(50)
 
     class Measure(Plugin):
+        changes_locs = False
         path = "Analysis/Measure/Fake"
         Settings = MeasureSettings
 

@@ -75,6 +75,7 @@ def test_the_grouped_table_is_linked_again_when_the_table_changes(links):
     before = session.tables.peek_grouped()
 
     class Shift(Plugin):
+        changes_locs = True
         path = "Test/Shift"
         grouping = "ungrouped"
 

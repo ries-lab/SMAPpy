@@ -33,6 +33,7 @@ def clusters(sizes=(30, 50, 20), noise=15, seed=0):
 
 class Count(Plugin):
     """Counts what it is given, and how often it ran."""
+    changes_locs = False
     name = "Count"
     path = "Test/Count"
     per_region = True
@@ -109,6 +110,7 @@ def test_a_stopped_run_keeps_the_regions_it_measured():
 
 def test_a_failing_step_costs_its_entry_in_that_region_only():
     class Picky(Plugin):
+        changes_locs = False
         per_region = True
 
         def run(self, ctx, settings):
@@ -184,6 +186,7 @@ def test_the_roi_run_reports_its_status_and_stops_when_asked():
 
 class Drawn(Plugin):
     """Keeps the data of its figure; counts how often it measured."""
+    changes_locs = False
     name = "Drawn"
     path = "Test/Drawn"
     per_region = True

@@ -1,9 +1,9 @@
 """Every shipped plugin says before it runs whether it changes the table.
 
 The GUI asks before a table change while a fit is still appending, and it can
-ask only if the plugin says so up front; a plugin that does not is asked
-about afterwards, once the work is done.  So the shipped ones must all say,
-and say it truly.
+ask only if the plugin says so up front.  A plugin that does not say cannot
+be defined (`Plugin.__init_subclass__`); this checks that the shipped ones say
+it truly.
 """
 import numpy as np
 import pytest

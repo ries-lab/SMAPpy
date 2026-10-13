@@ -748,10 +748,12 @@ class Plugin:
     # a fit; False for a measurement, an ROI tool or an export.  Known before
     # the run, which is what lets the GUI ask first rather than after minutes
     # of work -- while a fit is still appending, a table change cannot go
-    # into the session (`Session.apply`).  None, for a plugin that does not
-    # say, is asked about once it has run.  Where it depends on the settings,
-    # override `changes_locs_for` too.
-    changes_locs: Optional[bool] = None
+    # into the session (`Session.apply`).  Required: a class that does not
+    # say is refused when it is defined (`__init_subclass__`).  There used to
+    # be a third answer, "not said, ask after the run", and it was a dialog
+    # offering to redo minutes of work in another window.  Where the answer
+    # depends on the settings, override `changes_locs_for` too.
+    changes_locs: bool
     # A window of the GUI's that this plugin opens instead of running: the
     # panel's button becomes *Open* and hands the settings to whatever the
     # GUI registered under this name (`Session.window_openers`).  For a tool
@@ -759,6 +761,18 @@ class Plugin:
     # its bead table -- and which a form and a Run button cannot be; the
     # plugin is what lets it sit in a tab, and it imports no Qt to do so.
     window: Optional[str] = None
+
+    def __init_subclass__(cls, **kwargs):
+        # At definition, not at the first run: a dropped-in plugin that does
+        # not say then fails to load with the reason, in the list of problems,
+        # rather than surprising someone during a fit.  Inherited counts -- the
+        # loaders share theirs with their base.
+        super().__init_subclass__(**kwargs)
+        if not isinstance(getattr(cls, "changes_locs", None), bool):
+            raise TypeError(
+                f"{cls.__qualname__} must say whether it changes the table: "
+                "set changes_locs = True (it hands back a new table or files) "
+                "or False (it measures, draws or writes elsewhere)")
 
     def run(self, ctx: Context, settings) -> Result:
         """Do the work.
@@ -810,7 +824,7 @@ class Plugin:
         except (TypeError, ValueError):
             return True
 
-    def changes_locs_for(self, settings) -> Optional[bool]:
+    def changes_locs_for(self, settings) -> bool:
         """Whether a run with ``settings`` changes the table; see `changes_locs`."""
         return self.changes_locs
 

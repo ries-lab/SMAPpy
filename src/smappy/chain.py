@@ -466,6 +466,9 @@ class ChainPlugin(Plugin):
     spec: ChainSpec = None
     steps: List[tuple] = []           # (key, Step, plugin class) of enabled steps
     logged = True                     # a chain's record is the point of it
+    # whether a step changes the table: `chain_class` answers for the
+    # chain's own values, `changes_locs_for` for the form's
+    changes_locs = True
     # What a step's preflight question means here.  "proceed": a person has
     # already agreed (the GUI asks every step up front, in `preflight`), or a
     # script asked for the run.  "skip" and "abort" are for a batch, where
@@ -480,19 +483,17 @@ class ChainPlugin(Plugin):
             return "images"
         return "localizations"
 
-    def changes_locs_for(self, settings) -> Optional[bool]:
-        """Whether any step changes the table: True if one does, None if one
-        does not say and none does, else False."""
-        answers = []
+    def changes_locs_for(self, settings) -> bool:
+        """Whether any step changes the table with the settings it has."""
         for key, step, cls in self.steps:
             try:
-                answers.append(cls().changes_locs_for(
-                    plugin_settings(cls, getattr(settings, key))))
+                answer = cls().changes_locs_for(
+                    plugin_settings(cls, getattr(settings, key)))
             except Exception:
-                answers.append(cls.changes_locs)
-        if any(a is True for a in answers):
-            return True
-        return None if any(a is None for a in answers) else False
+                answer = cls.changes_locs
+            if answer:
+                return True
+        return False
 
     def preflight(self, ctx: Context, settings):
         """Every step's question, asked once, before any of them runs.
@@ -797,7 +798,14 @@ def chain_class(spec: ChainSpec, path: Optional[str] = None) -> type:
         "description": spec.description or " -> ".join(s.title() for _, s, _ in steps),
         "version": "1",
     }
-    return type(f"Chain_{identifier(name)}", (ChainPlugin,), attrs)
+    chain = type(f"Chain_{identifier(name)}", (ChainPlugin,), attrs)
+    # the answer for the chain's own values, as a plugin's class says it for
+    # its defaults; `changes_locs_for` answers for the form's
+    try:
+        chain.changes_locs = bool(chain().changes_locs_for(settings_cls()))
+    except Exception:
+        chain.changes_locs = any(cls.changes_locs for _, _, cls in steps)
+    return chain
 
 
 # the chain files being built, innermost last: a chain that contains itself,

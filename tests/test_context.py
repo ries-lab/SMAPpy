@@ -21,6 +21,7 @@ def table(n=100):
 
 class Echo(Plugin):
     """Reports what it was given, so a test can look at the context."""
+    changes_locs = False
     Settings = None
 
     def run(self, ctx, settings):
@@ -75,6 +76,7 @@ def test_per_region_says_a_plugin_hands_back_values():
     assert Plugin.per_region is False and Echo.per_region is False
 
     class PerRegion(Plugin):
+        changes_locs = False
         per_region = True
 
     assert PerRegion.per_region is True
@@ -82,6 +84,7 @@ def test_per_region_says_a_plugin_hands_back_values():
 
 def test_calling_a_plugin_needs_no_localizations_at_all():
     class Maker(Plugin):
+        changes_locs = True
         def run(self, ctx, settings):
             return Result(locs=table(7), text="made some")
 
@@ -91,6 +94,7 @@ def test_calling_a_plugin_needs_no_localizations_at_all():
 
 def test_session_run_applies_and_logs_through_the_context():
     class Halve(Plugin):
+        changes_locs = True
         path = "Test/Halve"
         name = "Halve"
         grouping = "ungrouped"            # it hands back a new table
@@ -121,6 +125,7 @@ def test_the_panel_builds_the_context_on_the_gui_thread_and_streams_back():
     seen = {}
 
     class Slow(Plugin):
+        changes_locs = True
         path = "Test/Slow"
         name = "Slow"
         grouping = "ungrouped"            # it hands back a new table
@@ -179,6 +184,7 @@ def test_a_declined_preflight_question_does_not_run_the_plugin(monkeypatch):
     seen = {"ran": False}
 
     class Expensive(Plugin):
+        changes_locs = True
         path = "Test/Expensive"
         name = "Expensive"
 
@@ -226,6 +232,7 @@ def test_a_preflight_choice_runs_with_the_settings_it_carries(monkeypatch):
         radius: float = param(500.0, label="radius", min=1)
 
     class Expensive(Plugin):
+        changes_locs = True
         path = "Test/Choosy"
         name = "Choosy"
         Settings = Cost
@@ -276,6 +283,7 @@ def test_choices_of_which_are_asked_until_none_is_left(monkeypatch):
         second: str = ""
 
     class Choosy(Plugin):
+        changes_locs = False
         path = "Test/Which"
         name = "Which"
         Settings = Two
@@ -313,6 +321,7 @@ def test_a_preflight_that_fails_does_not_block_the_run():
     QApplication.instance() or QApplication([])
 
     class Broken(Plugin):
+        changes_locs = True
         path = "Test/Broken"
         name = "Broken"
 
@@ -337,6 +346,7 @@ def test_a_report_stays_in_the_panel_unless_the_plugin_is_a_log():
     app = QApplication.instance() or QApplication([])
 
     class Talkative(Plugin):
+        changes_locs = False
         path = "Test/Talkative"
         name = "Talkative"
         Settings = None
@@ -380,6 +390,7 @@ def test_run_opens_the_figures_and_a_run_nobody_asked_for_does_not():
     app = QApplication.instance() or QApplication([])
 
     class Drawn(Plugin):
+        changes_locs = False
         path = "Test/Drawn"
         name = "Drawn"
         Settings = None
@@ -417,6 +428,7 @@ def test_a_live_plugin_without_a_preview_measures_with_run_and_applies_nothing()
     runs = []
 
     class Aimed(Plugin):
+        changes_locs = False
         path = "Test/AimedByRun"
         name = "AimedByRun"
         Settings = None
@@ -457,6 +469,7 @@ def test_a_warning_stays_on_screen_when_progress_follows_it():
     app = QApplication.instance() or QApplication([])
 
     class Warns(Plugin):
+        changes_locs = False
         path = "Test/Warns"
         name = "Warns"
         Settings = None
@@ -495,6 +508,7 @@ def test_a_live_plugin_refits_while_the_roi_moves_and_says_nothing_about_it():
     runs = []
 
     class Aimed(Plugin):
+        changes_locs = False
         path = "Test/Aimed"
         name = "Aimed"
         Settings = None
@@ -543,6 +557,7 @@ def test_a_plugin_that_is_not_live_gets_no_tick():
     QApplication.instance() or QApplication([])
 
     class Slow(Plugin):
+        changes_locs = False
         path = "Test/Slow"
         name = "Slow"
         Settings = None

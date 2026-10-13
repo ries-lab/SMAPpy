@@ -108,6 +108,7 @@ PLUGIN = '''
         mode: str = param("a", choices=(("a", "the first"), ("b", "the second")))
 
     class Thing(Plugin):
+        changes_locs = False
         Settings = ThingSettings
         version = "2"
         description = "Measures a thing."

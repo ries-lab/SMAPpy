@@ -20,6 +20,7 @@ def table(n=200, seed=0):
 
 class Brighter(Plugin):
     """Changes the table."""
+    changes_locs = True
     path = "Test/Brighter"
     grouping = "ungrouped"
 
@@ -31,6 +32,7 @@ class Brighter(Plugin):
 
 class Count(Plugin):
     """Only measures."""
+    changes_locs = False
     path = "Test/Count"
 
     def run(self, ctx, settings=None):
@@ -74,6 +76,7 @@ def test_the_table_is_unsaved_after_a_change_an_undo_or_a_fit_and_saved_after_sa
 
 class WritesItsFile(Plugin):
     """As a fitter does: the table it hands back is the file it wrote."""
+    changes_locs = True
     path = "Test/Writes"
     grouping = "ungrouped"
 
