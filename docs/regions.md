@@ -17,12 +17,13 @@ annotates and organises ROIs; it is not the only place they can be measured.
   session).  Its shape is a `regions.Region` (rect, polygon, line, circle):
   its own polygon, or the project's circle or square of `size_nm` round its
   centre, worked out when asked for (`ROI.region`) so that changing the
-  project's shape is one edit for every ROI.  *direction*, *reviewed*,
-  *use*, *comment* and *origin* are annotations beside it.  The ROIs a run
-  covers are the **included** ones: reviewed and *use* ticked.  `ROI.number`
+  project's shape is one edit for every ROI.  *direction*, *use*,
+  *comment* and *origin* are annotations beside it.  The ROIs a run covers
+  are the **included** ones: *use* ticked.  `ROI.number`
   is given once and never reused, so ROI 5 stays 5 in the list, in a
   `roi_id` column and in the results after ROI 3 is deleted.
-* **An id column** (`region_runs.ColumnRegions`): one sort splits the table
+* **An id column** (`region_runs.ColumnRegions`; `ROIRegions` is the same
+  interface over the ROIs, and `regions_of` picks one): one sort splits the table
   (`split_ids`).  Any integer column serves -- `cluster_id`, `roi_id`,
   `channel`.  An id of 0 or below (DBSCAN's noise), or NaN, is in no region
   and is never measured.
@@ -51,23 +52,15 @@ id column through `group_id`, so a blink whose localizations fall in two
 regions is in both.  Whether a plugin measures per layer or several layers
 together stays its own business, as on the view.
 
-### Slow, optional parts
+### Slow work is timed
 
-Optional work that costs time per region -- a bootstrap, a fit beside the
-numbers -- is a setting declared `param(..., slow=True)`.  A step added to a
-block or to the per-region steps starts with those off (`plugins.fast_values`,
-`pipeline.instance_for`); ticking one back on is a choice.  Localization
-Statistics' *fit the precision model* is the example: most of its time a
-region, and nothing the region's numbers need.
-
-### Necessary slow work is timed
-
-A step that is slow because the measurement is slow has nothing to switch
-off, so the block is timed instead of flagged: `BlockPlugin.estimate` runs
+Nothing in a step is switched off for running per region (Localization
+Statistics' *precision fit* runs in each ROI unless set to *none*); the
+block is timed instead: `BlockPlugin.estimate` runs
 the steps in up to five regions spread over the source (or a second's worth),
 keeps nothing, and multiplies each step's median out ("about 1 h over 100000
 regions ...").  The editor's *check* shows it; a run estimated over a minute
-asks first and offers *Slow options off*.  While it runs the status line
+asks first.  While it runs the status line
 gives the percentage, the rate and the time left (`region_runs.Progress`).
 *Stop* (`ctx.stop`) ends it between regions and keeps what was measured; a
 region that has begun finishes, since half its numbers would be kept as if
@@ -83,7 +76,7 @@ away afterwards.  Because of that, once one step must run in a region every
 step before it that changes the table runs too, and a step's signature
 includes the identities of those steps.  The per-region steps window
 (`gui/region_steps.py`) is the chain panel opened on the ROI project's own
-block (`ROIProject.pipeline` and `block_options`, saved with the project);
+block (`ROIProject.block`, a `chain.Block` saved with the project);
 its Run measures what is out of date and carries the rest.
 
 **Nesting.**  A step may be a chain or a block.  A block inside a block
@@ -121,11 +114,10 @@ made them.
 
 ### Figures
 
-With the block's *keep figure data* on, a row also keeps what `Plugin.keep`
-returns, and `Plugin.restore` draws the figure again without measuring.  The
-default follows the region source, not the plugin (`keep_figures` *auto*):
-on for ROIs, looked at one by one, off for an id column -- to look at
-clusters, make ROIs of them.  What `keep` holds is binned data, never
+A row of an ROI also keeps what `Plugin.keep` returns, and `Plugin.restore`
+draws the figure again without measuring; a row of an id column does not --
+ROIs are looked at one by one, clusters are not (to look at clusters, make
+ROIs of them).  What `keep` holds is binned data, never
 per-localization arrays, which would be the table again.  Off, a figure
 comes back by running the step on that region again, which gives the same
 figure since the row is signed with what made it.
@@ -164,11 +156,11 @@ their figure data, out.
 To filter or colour localizations by what was measured in their region --
 the pores with six corners, the clusters with a good precision -- each
 region's number is written onto its rows as a column
-(`region_runs.values_onto`): by *write values* on a block, at the end of
+(`region_runs.write_values`): by *write values* on a block, at the end of
 every run so a chain keeps it current, or by *Regions to column* for results
 already there, the ROIs' own numbers (`roi_id`) among them.  NaN outside any
-region or where the region has no value; the block's overlap rule where ROIs
-overlap.  Everything that reads a column then works on it: each layer's
+region or where the region has no value; where ROIs overlap, the last, the
+first or the mean (*any* is for write back, and refused here).  Everything that reads a column then works on it: each layer's
 filter, colour by a field, merge blinks (a blink takes the mean, the highest
 of a `roi_id`), the file.
 
