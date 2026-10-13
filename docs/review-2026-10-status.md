@@ -3,8 +3,8 @@
 Where `docs/review-2026-10.md` stands on `claude/trusting-cray-bhwh1n`
 (PR ries-lab/SMAPpy#19): the simplification plan
 (`docs/simplification-plan.md`, sections A–F) and a second round from this
-document's open list.  83 commits, 378 files, about 7,100 lines fewer
-(+15,230 / −22,340).  `--slow -n 3`: 1676 passed, 6 skipped; CI green on
+document's open list.  95 commits, 379 files, about 6,500 lines fewer
+(+16,170 / −22,680).  `--slow -n auto`: 1678 passed, 6 skipped; CI green on
 all platforms.
 
 ## Done: the plan
