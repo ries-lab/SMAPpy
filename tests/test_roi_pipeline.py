@@ -450,15 +450,20 @@ def test_the_manager_undoes_a_removal_with_its_own_undo(app):
     project.add_roi(file_id, (3000.0, 0.0))
     window = ROIManagerWindow(session)
     assert not window.undo_button.isEnabled()
+    assert window.undo_button.text() == "Undo ROI edit"
 
     window.select(first.id)
     window._remove()
     assert first.id not in project.rois and window.table.model().rowCount() == 1
     assert window.undo_button.toolTip() == "undo: Remove ROI 1"
+    # the button names the edit, so it is not the main window's "Undo RCC"
+    assert window.undo_button.text() == "Undo remove ROI 1"
     window.undo_button.click()
     assert first.id in project.rois and window.table.model().rowCount() == 2
     assert "undid Remove ROI 1" in window.status.currentMessage()
     assert window.redo_button.toolTip() == "redo: Remove ROI 1"
+    assert window.redo_button.text() == "Redo remove ROI 1"
+    assert window.undo_button.text() == "Undo ROI edit"
     # the table's undo is another stack, and has nothing to undo
     assert not session.can_undo
     window.redo_button.click()

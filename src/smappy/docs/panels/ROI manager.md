@@ -316,19 +316,21 @@ again, so ROI 5 is ROI 5 in the list, in the results and in the `roi_id`
 column of *Regions to column*, whatever was removed before it.  *Undo*
 brings a removed ROI back under its own number.
 
-### Undo
+### Undo ROI edit
 Takes back the last edit of the ROIs: a segmenter's run (all the ROIs it
 added, and any it replaced), an ROI added, removed, included or excluded,
-an outline or a direction.  Ctrl+Z in this window does the same; the
-tooltip says what it would undo.  This is the ROI manager's own undo, apart
+an outline or a direction.  Ctrl+Z in this window does the same.  The button
+names the edit it would undo -- *Undo remove ROI 3*, *Undo Density Peaks* --
+where the main window's *Edit > Undo* names a change of the table (*Undo
+RCC*).  This is the ROI manager's own undo, apart
 from the main window's, which undoes changes to the localizations: one
 never undoes the other.  Measuring is not an undo step, since it can be run
 again, and its results stay with the ROI, so an ROI brought back brings
 its numbers back.  Twenty steps are kept, and opening another file starts
 afresh.
 
-### Redo
-Puts back what *Undo* took back (Ctrl+Shift+Z, or the platform's own redo key, Ctrl+Y on Windows and Linux).  A new edit
+### Redo ROI edit
+Puts back what *Undo* took back, and names it as *Undo* does (Ctrl+Shift+Z, or the platform's own redo key, Ctrl+Y on Windows and Linux).  A new edit
 after an undo makes the undone step unrecoverable.
 
 ### Discard preview

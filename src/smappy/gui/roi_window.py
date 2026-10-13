@@ -73,6 +73,17 @@ def arrow(direction):
     return xs, ys
 
 
+UNDO_TEXT_WIDTH = 130      # px of an undo button's text, past which it is elided
+
+
+def _lowered(label: str) -> str:
+    """"Remove ROI 3" -> "remove ROI 3", to follow "Undo"; an acronym
+    ("NPC") keeps its capitals."""
+    if len(label) > 1 and label[0].isupper() and label[1].islower():
+        return label[0].lower() + label[1:]
+    return label
+
+
 class ImagePane(QWidget):
     """One rendered quadrant: an image, outlines over it, and clicks."""
 
@@ -397,10 +408,12 @@ class ROIManagerWindow(QMainWindow):
         self.remove_button.setToolTip("remove the selected ROI")
         self.remove_button.clicked.connect(self._remove)
         # the ROIs' own undo (`ROIProject.history`), not the main window's,
-        # which is for tables: Ctrl+Z here never undoes a drift correction
-        self.undo_button = QPushButton("Undo")
+        # which is for tables: Ctrl+Z here never undoes a drift correction.
+        # The buttons name the edit ("Undo remove ROI 3"), as Edit > Undo
+        # names the table's step ("Undo RCC"), so the two read differently
+        self.undo_button = QPushButton("Undo ROI edit")
         self.undo_button.clicked.connect(self.undo)
-        self.redo_button = QPushButton("Redo")
+        self.redo_button = QPushButton("Redo ROI edit")
         self.redo_button.clicked.connect(self.redo)
         edits.addWidget(self.remove_button, 1)
         edits.addWidget(self.undo_button)
@@ -967,6 +980,10 @@ class ROIManagerWindow(QMainWindow):
                 (self.redo_button, history.can_redo, history.redo_label, "redo")):
             button.setEnabled(can)
             button.setToolTip(f"{what}: {label}" if can else f"nothing to {what}")
+            text = f"{what.capitalize()} {_lowered(label) if can else 'ROI edit'}"
+            # elided: a long label must not widen the column of the ROI list
+            button.setText(button.fontMetrics().elidedText(
+                text, Qt.ElideRight, UNDO_TEXT_WIDTH))
 
     def _edit(self, what: str):
         """An undoable edit, named after the selected ROI's number."""
