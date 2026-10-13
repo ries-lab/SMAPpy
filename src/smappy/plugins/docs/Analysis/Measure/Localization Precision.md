@@ -420,8 +420,6 @@ line per number:
 * Notes: the search radius used, too few pairs, a cut-off axial search or a
   thin slab.
 
-A table in pixels (`x_pix`, `xy_err_pix`) is measured and reported in pixels.
-
 Besides the text:
 
 * **Figures**, a tab per method, each named after it: *NeNA*, the distance

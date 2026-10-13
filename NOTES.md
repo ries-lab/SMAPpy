@@ -51,14 +51,21 @@ in 2D" and the dual-colour calibration in `docs/dual_color_calibration.md`).
 * **EM excess noise lives outside the fitter.**  Photons are divided by 2 before
   fitting and photons/background scaled back afterwards, so the fitter assumes
   pure Poisson statistics and knows nothing about cameras.
-* **Pixels are primary, nm is always there.**  The fit measures pixels; nm is
-  derived at the very end by `to_nm()`, which keeps the pixel columns beside
-  the nm ones, because the pixel size is a separate calibration that may be
-  corrected later.  Everything downstream reads nm only.  Without a pixel size
-  the nm columns use `DEFAULT_PIXELSIZE_NM` and the table records
-  `pixelsize_assumed` (2026-10: the *units* setting, and a fit refusing a
-  stack with no pixel size, are gone).  `z_nm` is the exception: it comes from
-  the calibration's `dz` and has no pixel equivalent.
+* **The fit measures pixels; its table is in nm.**  nm is derived at the very
+  end by `to_nm()`, and the fit's output keeps the nm columns only, with the
+  pixel size in the metadata (`pixelsize_nm`, `pixelsize_nm_xy`), so a pixel
+  correction later is a division, not a refit.  `locs.in_pixels` gives a
+  column back in camera pixels -- the channel registration is the one reader
+  (2026-10: the pixel columns had been kept beside the nm ones, 24 bytes a
+  localization for a 2D fit, 20 for 3D, read by nothing else).  The
+  candidate positions `peak_x_pix` / `peak_y_pix` stay, as the record of
+  where the peak finder found the spot on the chip.  A file saved in pixels
+  keeps its own and is given nm columns on load (`io.formats.with_nm`).
+  Everything downstream reads nm only.  Without a pixel size the nm columns
+  use `DEFAULT_PIXELSIZE_NM` and the table records `pixelsize_assumed`
+  (2026-10: the *units* setting, and a fit refusing a stack with no pixel
+  size, are gone).  `z_nm` is the exception: it comes from the
+  calibration's `dz` and has no pixel equivalent.
 * **The background starts at the ROI's border, and the Hessian is the expected
   information.**  SMAP starts from the ROI's minimum and uses the observed
   information `d / mu^2`; together they left a spline fit at a few background

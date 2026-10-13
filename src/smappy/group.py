@@ -105,6 +105,8 @@ except ImportError:  # pure-Python fallback if the extension is not built
 
 # How each column is combined.  Taken from SMAP's `Grouper.m`; names translated
 # to this package's, and the two corrections described in the module docstring.
+# The `*_pix` rules are for a file saved in pixels, which keeps its own
+# beside the nm ones; a fit's table has only `peak_x_pix` / `peak_y_pix`.
 COMBINE_MODES: Dict[str, str] = {
     "x_nm": "mean", "y_nm": "mean", "z_nm": "mean",
     "x_pix": "mean", "y_pix": "mean",
@@ -137,7 +139,9 @@ GROUP_COLUMNS = ("group_id", "n_in_group")
 
 # The precision columns the general weight is taken from, best first (SMAP's
 # order).  It is a lateral precision, so it is the right weight for x and y.
-WEIGHT_FIELDS = ("xy_err_nm", "xy_err_pix", "x_err_nm", "x_err_pix")
+# nm only: a fit writes no pixel columns, and a file saved in pixels is given
+# nm ones on the way in (`io.formats.with_nm`).
+WEIGHT_FIELDS = ("xy_err_nm", "x_err_nm")
 
 # Columns that carry their own uncertainty and are weighted by it rather than by
 # the pooled lateral precision.  SMAP weights everything with `locprecnm`

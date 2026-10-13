@@ -13,6 +13,7 @@ from smappy.detect import AbsoluteCutoff, DoGFilter, PeakFinder
 from smappy.dualfit import (DualChannelEngine, LINK_XYZ, combine_peaks,
                             cut_paired_rois, which_channel)
 from smappy.io.calibration import SplineCalibration, evaluate_spline
+from smappy.locs import in_pixels
 from smappy.metadata import CameraMetadata
 from smappy.pipeline import FitSettings
 from smappy.plugins import Context
@@ -162,8 +163,9 @@ def test_the_joint_fit_recovers_position_z_and_the_photon_ratio():
     locs = engine.flush()
 
     assert len(locs) > 40
-    assert np.median(locs["x_pix"]) == pytest.approx(truth[0], abs=0.15)
-    assert np.median(locs["y_pix"]) == pytest.approx(truth[1], abs=0.15)
+    x, y = in_pixels(locs, "x_pix", "y_pix")
+    assert np.median(x) == pytest.approx(truth[0], abs=0.15)
+    assert np.median(y) == pytest.approx(truth[1], abs=0.15)
     assert np.median(locs["z_nm"]) == pytest.approx(cal.main.z_index_to_nm(z_index),
                                                     abs=25.0)
     assert np.median(locs["photons"]) == pytest.approx(total, rel=0.12)
@@ -224,10 +226,10 @@ def test_an_unlinked_fit_keeps_how_far_the_partner_is_in_x_y_and_z():
         cal, FitSettings(roisize=13))
     engine.push(frames, 0)
     locs = engine.flush()
-    for name in ("dx_pix_ch1", "dy_pix_ch1", "dz_nm_ch1"):
+    for name in ("dx_nm_ch1", "dy_nm_ch1", "dz_nm_ch1"):
         assert name in locs
-    assert abs(np.median(locs["dx_pix_ch1"])) < 0.05
-    assert abs(np.median(locs["dy_pix_ch1"])) < 0.05
+    assert abs(np.median(in_pixels(locs, "dx_pix_ch1"))) < 0.05
+    assert abs(np.median(in_pixels(locs, "dy_pix_ch1"))) < 0.05
     assert abs(np.median(locs["dz_nm_ch1"])) < 15.0
     assert np.std(locs["dz_nm_ch1"]) > 0            # two fits, not one copied
 
@@ -480,8 +482,9 @@ def test_a_mirrored_splitter_keeps_its_colour(mirrored):
     assert np.all(locs["photons_err_ch0"] > 0)
     assert np.median(locs["photons_err_ch1"]) < np.median(locs["photons_ch1"])
     assert np.median(locs["z_nm"]) == pytest.approx(-40, abs=5)
+    x, y = in_pixels(locs, "x_pix", "y_pix")
     for x0, y0 in truth:
-        mine = np.hypot(locs["x_pix"] - x0, locs["y_pix"] - y0) < 3
+        mine = np.hypot(x - x0, y - y0) < 3
         assert mine.sum() == 30
-        assert np.median(np.abs(locs["x_pix"][mine] - x0)) < 0.1
-        assert np.median(np.abs(locs["y_pix"][mine] - y0)) < 0.1
+        assert np.median(np.abs(x[mine] - x0)) < 0.1
+        assert np.median(np.abs(y[mine] - y0)) < 0.1

@@ -209,8 +209,9 @@ def test_a_fit_without_warnings_writes_none(stack, tmp_path):
 
 
 def test_a_stack_with_no_pixel_size_is_fitted_on_an_assumed_one(stack, tmp_path):
-    """It used to be refused.  The pixel columns are the measurement; the nm
-    ones use the default size, and the table and the run both say so."""
+    """It used to be refused.  The nm columns use the default size, and the
+    table and the run both say so -- the table with the size, so the pixels
+    divide back out exactly."""
     from smappy.io.hdf5 import load_localizations
     from smappy.metadata import DEFAULT_PIXELSIZE_NM
     settings = GaussianFitSettings(
@@ -222,10 +223,13 @@ def test_a_stack_with_no_pixel_size_is_fitted_on_an_assumed_one(stack, tmp_path)
     result = GaussianFit().run(ctx, settings)
     assert any("assumed" in w for w in ctx.warnings)
     locs = result.locs
-    assert len(locs) and np.allclose(locs["x_nm"], locs["x_pix"] * DEFAULT_PIXELSIZE_NM)
+    assert len(locs) and locs.metadata["pixelsize_nm"] == DEFAULT_PIXELSIZE_NM
+    # near where the peak finder put it, in pixels of that size
+    assert np.median(np.abs(locs["x_nm"] / DEFAULT_PIXELSIZE_NM - locs["peak_x_pix"])) < 0.5
     saved = load_localizations(tmp_path / "out.hdf5")
     assert saved.metadata.get("pixelsize_assumed") is True
-    assert "x_pix" in saved and "x_nm" in saved
+    assert saved.metadata.get("pixelsize_nm") == DEFAULT_PIXELSIZE_NM
+    assert "x_pix" not in saved and "x_nm" in saved
 
 
 def test_switching_the_cutoff_mode_puts_that_modes_default_in_the_value():

@@ -141,8 +141,9 @@ reduced by its rule when blinks are merged), the **kept bounds**, which open
 on every layer, the drawn **ROI** and the ROI manager's project, the camera,
 the fit settings, and what a tool kept with the file -- a drift curve, say
 (`/results/saved`) -- so its figure can be shown again.  A table is opened
-in the units it was saved in: a fitter can write camera pixels (`x_pix`,
-...) instead of nanometres.  The GUI state that may be in the file (`/gui`)
+as it was saved: a fit writes nanometres and the pixel size, and a file from
+an earlier version that also has camera-pixel columns (`x_pix`, ...) keeps
+them.  The GUI state that may be in the file (`/gui`)
 is left alone: File > Workspace > From data file puts it back on request.
 Only this program's HDF5 files are read: one from another program --
 Picasso's, for instance -- does not open.

@@ -1,5 +1,5 @@
 ---
-version: "3"
+version: "4"
 covers: [smappy.psf.SplinePSF, smappy.io.calibration.load_spline_calibration, smappy.io.calibration.SplineCalibration, smappy.io.calibration.evaluate_spline, smappy.io.calibration.warn_on_em_mismatch, smappy.fit_rois.cut_rois, smappy.calibrate.core.build_calibration]
 ---
 
@@ -175,8 +175,8 @@ right.legend(frameon=False, fontsize=8)
 ```
 
 **5. The table.**  Positions are converted to nanometres with the *pixel
-size* (the pixel columns, `x_pix` and the rest, are kept beside them), fits
-that failed or whose z is not a number are dropped, and the table is saved as `<acquisition>_locs.hdf5`.
+size* (which the file records, so a position in camera pixels is `x_nm`
+divided by it; no pixel columns are kept), fits that failed or whose z is not a number are dropped, and the table is saved as `<acquisition>_locs.hdf5`.
 
 ## In detail
 

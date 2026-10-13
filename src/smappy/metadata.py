@@ -18,10 +18,10 @@ from typing import Optional, Sequence, Tuple, Union
 
 REQUIRED = ("conversion", "offset")
 
-#: The pixel size a fit converts with when nothing says what it is: the
-#: pixel columns (`x_pix`, ...) are then the measurement, and the nm ones a
-#: convenience on an assumed scale, which the table records
-#: (``metadata["pixelsize_assumed"]``) and the fit says.  Rare -- a bare TIFF
+#: The pixel size a fit converts with when nothing says what it is: the nm
+#: columns are then on an assumed scale, which the table records
+#: (``metadata["pixelsize_assumed"]``, beside ``pixelsize_nm``, so the
+#: measured pixels divide back out exactly) and the fit says.  Rare -- a bare TIFF
 #: whose numbers nobody typed in -- but refusing to fit it helped nobody.
 DEFAULT_PIXELSIZE_NM = 100.0
 

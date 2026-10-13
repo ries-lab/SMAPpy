@@ -541,7 +541,7 @@ class DualChannelEngine:
         locs = locs[keep]
         self.stats["localizations"] += len(locs)
 
-        return to_nm(locs, *self.camera.pixelsize_nm_or_default)
+        return to_nm(locs, *self.camera.pixelsize_nm_or_default, keep_pixels=False)
 
     def __str__(self) -> str:
         s = self.stats

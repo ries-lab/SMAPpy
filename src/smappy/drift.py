@@ -56,6 +56,8 @@ from .params import param
 # the position columns a drift correction touches, and the drift axis each
 # follows.  Deliberately not `peak_*`: those are detection positions, kept as
 # the record of what was found where, not measurements of the structure.
+# A fit's table has no `x_pix`; a file saved in pixels keeps its own beside
+# the nm ones `io.formats.with_nm` adds, and they must move with them.
 _POSITION_COLUMNS = {"x_nm": 0, "x_pix": 0,
                      "y_nm": 1, "y_pix": 1,
                      "z_nm": 2}

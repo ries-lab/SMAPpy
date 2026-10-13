@@ -1,5 +1,5 @@
 ---
-version: "2"
+version: "3"
 covers: [smappy.pipeline.LocalizationEngine, smappy.detect.PeakFinder, smappy.detect.DynamicCutoff, smappy.psf.GaussianPSF, smappy.camera.to_photons, smappy.rawframes.RawFrameKeeper]
 ---
 
@@ -189,8 +189,8 @@ ax.set_ylabel("precision in x (nm, 100 nm pixels)")
 ax.legend(frameon=False, fontsize=8)
 ```
 
-Finally positions are converted to nanometres with the *pixel size*, fits
-that failed (a position or photon count that is not a number) are dropped,
+Finally positions, precisions and widths are converted to nanometres with
+the *pixel size*, fits that failed (a position or photon count that is not a number) are dropped,
 and the table is saved as `<acquisition>_locs.hdf5` next to the data.
 
 ## In detail
@@ -348,6 +348,12 @@ The table, with one row per fitted spot:
 | `logl`, `logl_rel` | the log-likelihood, and per pixel |
 | `peak_x_pix`, `peak_y_pix` | the candidate the fit box was cut around |
 | `iterations` | how many steps the fit took |
+
+All lengths are in nm.  The fit measures in camera pixels and converts
+at the end; it keeps no pixel copy of these columns, because the file
+records the pixel size (`pixelsize_nm`, and `pixelsize_nm_xy` for pixels
+that are not square): a position on the camera is `x_nm` divided by it.
+Only the candidate, `peak_x_pix` and `peak_y_pix`, stays in camera pixels.
 
 The file also records the camera, the settings and the software version, so
 it can always be told how a table was made.

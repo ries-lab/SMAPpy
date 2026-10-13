@@ -1,5 +1,5 @@
 ---
-version: "5"
+version: "6"
 covers: [smappy.psf.GlobalSplinePSF, smappy.dualfit.combine_peaks, smappy.dualfit.build_link, smappy.dualfit.cut_paired_rois, smappy.dualfit.paired_to_localizations, smappy.dualfit.DualChannelEngine, smappy.calibrate.dual.build_dual_calibration, smappy.calibrate.dual.fit_dual_transform, smappy.calibrate.core.positive_pair_models, smappy.calibrate.dual.load_dual_color_calibration, smappy.plugins.fit.DualSplineFit, smappy.plugins.fit.finish_localizations]
 ---
 
@@ -460,6 +460,10 @@ photons of each half beside the totals:
 | `logl`, `logl_rel` | the log-likelihood, and per pixel of both fit boxes |
 | `peak_x_nm`, `peak_y_nm`, `iterations` | the candidate in the main half, and the steps taken |
 | `dx_nm_ch1`, `dy_nm_ch1`, `dz_nm_ch1` | unlinked only: the secondary half's position against the calibration's |
+
+Every length is in nm, with no pixel copy beside it; the file records the
+pixel size, and only the candidate (`peak_x_pix`, `peak_y_pix`) stays in
+camera pixels.
 
 What to check, beyond the checks of [Spline 3D](plugin:Localize/Spline 3D)
 (the z histogram, `logl_rel`, `z_err_nm`):

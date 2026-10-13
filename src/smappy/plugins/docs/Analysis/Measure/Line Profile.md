@@ -340,7 +340,7 @@ localization $i$'s density as
 
 $$w_i = \sqrt{s^2 + \sigma_i^2} ,$$
 
-$\sigma_i$ its precision (`xy_err_nm` or `xy_err_pix`, `z_err_nm` for z).  A
+$\sigma_i$ its precision (`xy_err_nm`, `z_err_nm` for z).  A
 missing or non-positive precision is replaced by the median of the others;
 without precisions, $w_i = s$ for all.  The maximum is found with L-BFGS-B
 within bounds: a centre or an edge inside the window, a width, distance or

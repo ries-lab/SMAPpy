@@ -1,9 +1,14 @@
 """Localizations: fit results as a table.
 
-Positions are kept in **camera pixels**, which is what the fitter measures.
-Converting to nm needs the pixel size, a separate calibration that can change
-or be corrected afterwards, so it is a derived quantity produced by
-:func:`to_nm` at the end of the pipeline rather than baked into the fit.
+The fitter measures in **camera pixels**, and the table is built in them
+(`fit_to_localizations`); :func:`to_nm` converts it at the end of the
+pipeline.  A fit's output keeps the nm columns only: the pixel ones were a
+second copy of every position, precision and width (24 bytes a localization
+for a 2D fit, 20 for 3D), read by nothing but the channel registration, and
+the pixel size is in the metadata, so `in_pixels` gives them back.  The
+candidate positions `peak_x_pix` / `peak_y_pix` stay: they are where the
+peak finder found the spot on the chip, which registration and the
+two-channel pairing work with.
 
 Two things are undone here because they are properties of the camera, not
 units: the ROI offset on the chip is added to the pixel coordinates, so
@@ -17,7 +22,7 @@ pixel equivalent, so ``z_nm`` is always in nm.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Sequence, Dict, Iterator, Optional
+from typing import Sequence, Dict, Iterator, Optional, Tuple
 
 import numpy as np
 
@@ -212,14 +217,21 @@ def _nm_name(name: str):
     return None
 
 
-def to_nm(locs: Localizations, pixelsize_nm, assumed: bool = False
-          ) -> Localizations:
-    """Return a copy with nm columns beside the pixel ones.
+#: the pixel columns a fit's output keeps: the candidate positions on the
+#: chip, where the peak finder put them, not a measurement of the emitter
+KEPT_PIXEL_COLUMNS = ("peak_x_pix", "peak_y_pix")
 
-    The pixel columns stay: they are what the fit measured, and on the rare
-    table whose pixel size was not known (``assumed``, the default size) they
-    are the only exact positions.  Everything downstream -- rendering,
-    grouping, every analysis -- reads the nm columns.
+
+def to_nm(locs: Localizations, pixelsize_nm, assumed: bool = False,
+          keep_pixels: bool = True) -> Localizations:
+    """Return a copy with nm columns for the pixel ones.
+
+    ``keep_pixels`` keeps the pixel columns beside them, as a file loaded in
+    pixels does (`io.formats.with_nm`): they are what the file has.  A fit
+    passes False and keeps only `KEPT_PIXEL_COLUMNS`.  The pixel size goes
+    into the metadata either way -- assumed or not -- so `in_pixels` gives
+    the rest back exactly.  Everything downstream -- rendering, grouping,
+    every analysis -- reads the nm columns.
 
     ``pixelsize_nm`` is one number, or x and y for a camera whose pixels are
     not square -- one number means the same in both directions.  ``z_nm`` is
@@ -242,9 +254,12 @@ def to_nm(locs: Localizations, pixelsize_nm, assumed: bool = False
     # scaled by the mean above; derived again so that it stays the RMS of the
     # two errors when the pixels are not square
     add_xy_err(columns)
+    if not keep_pixels:
+        columns = {name: values for name, values in columns.items()
+                   if _nm_name(name) is None or name in KEPT_PIXEL_COLUMNS}
 
     metadata = dict(locs.metadata)
-    metadata["units"] = "pixel+nm"
+    metadata["units"] = "pixel+nm" if keep_pixels else "nm"
     # one number for everything that wants a scale, both when they differ:
     # a tool that asks "how big is a pixel" wants an answer, not a pair
     metadata["pixelsize_nm"] = float(mean_nm)
@@ -253,6 +268,52 @@ def to_nm(locs: Localizations, pixelsize_nm, assumed: bool = False
     if assumed:
         metadata["pixelsize_assumed"] = True
     return Localizations(columns, metadata)
+
+
+def table_pixel_sizes(locs: Localizations) -> Tuple[float, float]:
+    """The camera pixel, x and y in nm, that the table's nm columns were made with.
+
+    What `to_nm` recorded (``pixelsize_nm_xy`` when the pixels are not
+    square, else ``pixelsize_nm``), or else the camera's ``pixelsize_um``.
+    """
+    meta = locs.metadata
+    sizes = pixel_sizes(meta.get("pixelsize_nm_xy") or meta.get("pixelsize_nm"))
+    if sizes is None:
+        camera = meta.get("camera")
+        micron = pixel_sizes(camera.get("pixelsize_um")
+                             if isinstance(camera, dict) else None)
+        sizes = None if micron is None else (micron[0] * 1e3, micron[1] * 1e3)
+    if sizes is None or not all(np.isfinite(sizes)) or min(sizes) <= 0:
+        raise ValueError("the table does not record its pixel size, so its nm "
+                         "columns cannot be put back into camera pixels")
+    return sizes
+
+
+def in_pixels(locs: Localizations, *names: str):
+    """Columns in camera pixels, by their pixel names (``"x_pix"``, ...).
+
+    A fit's table has the nm columns only, so each is the nm column divided
+    by the pixel size along its axis (`table_pixel_sizes`; a precision or a
+    width by the mean of the two, as `to_nm` scaled it).  A table that has
+    the pixel column itself -- a file saved in pixels -- gives that.  One
+    name gives an array, several a tuple; float64 either way.
+    """
+    out = []
+    for name in names:
+        if name in locs:
+            out.append(np.asarray(locs[name], np.float64))
+            continue
+        target = _nm_name(name)
+        if target is None:
+            raise KeyError(f"{name} is not a column in pixels")
+        if target not in locs:
+            raise KeyError(f"no {name} or {target} in the table; it has "
+                           f"{', '.join(sorted(locs.keys()))}")
+        x_nm, y_nm = table_pixel_sizes(locs)
+        axis = _AXIS.get(_base_column(name))
+        scale = 0.5 * (x_nm + y_nm) if axis is None else (x_nm, y_nm)[axis]
+        out.append(np.asarray(locs[target], np.float64) / scale)
+    return out[0] if len(out) == 1 else tuple(out)
 
 
 def valid(locs: Localizations, max_fit_distance: Optional[float] = None

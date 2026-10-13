@@ -223,8 +223,8 @@ meaningful fit anyway.
   on-time.  If the on-time could not be shown, the reason.
 * **Per ROI**, the row each ROI gets: `n_localizations`; `mean_photons`,
   `median_photons` and `photons_n0`; `mean_precision_nm`,
-  `median_precision_nm` and `sigma_c_nm` (`_pix` for a table in pixels,
-  `sigma_c` NaN when the model was not fitted); for 3D data the same with
+  `median_precision_nm` and `sigma_c_nm` (`sigma_c` NaN when the model was
+  not fitted); for 3D data the same with
   `z_` (`median_z_precision_nm`, ...); and where the ROI's table carries
   `n_in_group`, `on_time_frames` ($\tau$) and `n_blinks`.  The on-time of an
   ROI comes from its own rows only: the session's merged blinks, which the

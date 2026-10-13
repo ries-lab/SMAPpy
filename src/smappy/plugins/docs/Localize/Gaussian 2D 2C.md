@@ -1,5 +1,5 @@
 ---
-version: "3"
+version: "4"
 covers: [smappy.dualfit.combine_peaks, smappy.dualfit.build_link, smappy.dualfit.cut_paired_rois, smappy.dualfit.paired_to_localizations, smappy.dualfit.DualChannelEngine, smappy.psf.GlobalGaussianPSF, smappy.detect.find_candidates, smappy.plugins.fit.DualGaussianFit, smappy.plugins.fit.calibration_blocks, smappy.plugins.fit.finish_localizations, smappy.calibrate.transform.register_channels]
 ---
 
@@ -466,6 +466,10 @@ The table, one row per molecule and frame:
 | `channel` | the colour Assign colours gave it: 1, 2, or 0 for none |
 | `logl`, `logl_rel` | the log-likelihood, and per pixel of both fit boxes |
 | `peak_x_nm`, `peak_y_nm`, `iterations` | the candidate in the main half, and the steps taken |
+
+As for [Gaussian 2D](plugin:Localize/Gaussian 2D), every length is in nm and
+no pixel copy is kept: the file records the pixel size, and only the
+candidate (`peak_x_pix`, `peak_y_pix`) stays in camera pixels.
 
 The finishing steps' figures -- the ratio histogram of Assign colours, the
 drift curve -- open with the fit's result.

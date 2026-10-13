@@ -406,8 +406,8 @@ def _render_numpy(x, y, fov, sigma, sigma_y, weights, colors, roi_sigma) -> Rend
 
 # ------------------------------------------------------------------ front door
 # The columns positions and precisions are read from: nm, always.  A fit writes
-# its pixel columns beside them (`locs.to_nm`) and a loader gives a pixel-only
-# file nm ones (`io.formats.with_nm`), so nothing downstream has two cases.
+# nm only (`locs.to_nm`) and a loader gives a pixel-only file nm ones
+# (`io.formats.with_nm`), so nothing downstream has two cases.
 POSITION_FIELDS = (("x_nm", "y_nm"),)
 PRECISION_FIELDS = ("xy_err_nm",)
 LATERAL_FIELDS = tuple(n for pair in POSITION_FIELDS for n in pair)

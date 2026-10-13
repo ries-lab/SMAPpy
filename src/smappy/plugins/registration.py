@@ -33,6 +33,7 @@ from typing import Optional
 import numpy as np
 
 from ..calibrate.transform import RegisterSettings, register_channels
+from ..locs import in_pixels
 from . import Context, ParamInfo, Plot, Plugin, Result, param, register
 
 TRANSFORM_FILTER = "Channel transformation (*_2ct.h5 *.h5 *.hdf5)"
@@ -53,27 +54,21 @@ class RegisterLocsSettings:
 
 
 def chip_pixels(locs, report=None):
-    """The table's positions as chip pixels, whatever unit it was saved in.
+    """The table's positions as chip pixels.
 
     A transformation is a statement about the camera, so it lives in chip
     pixels -- `dualfit.which_channel` and `combine_peaks` both read it that
-    way.  A fit writes nm by default and drops the pixel columns, so they are
-    recovered from the pixel size the conversion recorded rather than demanded
-    back from the user.
+    way.  A fit writes nm only, so they are recovered from the pixel size the
+    conversion recorded (`locs.in_pixels`) rather than demanded back from the
+    user; a file saved in pixels gives its own.
     """
-    if "x_pix" in locs and "y_pix" in locs:
-        return np.asarray(locs["x_pix"], float), np.asarray(locs["y_pix"], float)
-    if "x_nm" not in locs or "y_nm" not in locs:
+    if "x_nm" not in locs and "x_pix" not in locs:
         raise ValueError("the table has no positions to register")
-    pixelsize = locs.metadata.get("pixelsize_nm")
-    if not pixelsize:
-        raise ValueError("the table is in nm and does not record its pixel size, "
-                         "so it cannot be put back into chip pixels; re-run the "
-                         "fit with units 'pixel+nm'")
-    if report is not None:
-        report(f"converting nm back to pixels at {pixelsize:g} nm/px")
-    return (np.asarray(locs["x_nm"], float) / pixelsize,
-            np.asarray(locs["y_nm"], float) / pixelsize)
+    if report is not None and "x_pix" not in locs:
+        sizes = locs.metadata.get("pixelsize_nm")
+        if sizes:
+            report(f"converting nm to chip pixels at {float(sizes):g} nm/px")
+    return in_pixels(locs, "x_pix", "y_pix")
 
 
 def source_geometry(locs):
@@ -128,15 +123,10 @@ class CalibrateChannelTransform(Plugin):
             raise ValueError("registration pairs within a frame, and the table "
                              "has no frame column")
         # the fit's own error bars, so a dim pair counts for what it knows --
-        # in pixels, as the positions are; a table in nm has them in nm, and
-        # reading only the pixel column lost the weighting for every fit
-        # saved in the default unit
+        # in pixels, as the positions are
         precision = None
-        if "xy_err_pix" in locs:
-            precision = np.asarray(locs["xy_err_pix"], float)
-        elif "xy_err_nm" in locs and locs.metadata.get("pixelsize_nm"):
-            precision = (np.asarray(locs["xy_err_nm"], float)
-                         / float(locs.metadata["pixelsize_nm"]))
+        if "xy_err_nm" in locs or "xy_err_pix" in locs:
+            precision = in_pixels(locs, "xy_err_pix")
         return register_channels(x, y, np.asarray(locs["frame"]), shape, roi,
                                  settings=settings.registration,
                                  progress=ctx.report, precision=precision), locs

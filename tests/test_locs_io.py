@@ -33,6 +33,30 @@ def test_pixels_are_primary_and_nm_is_derived_beside_them():
     assert "pixelsize_assumed" not in nm.metadata
 
 
+def test_a_fits_table_keeps_nm_only_and_the_pixels_divide_back_out(tmp_path):
+    """What the fitters write: no pixel copies but the candidate, and the
+    pixel size kept -- through the file too -- so they come back per axis."""
+    from smappy.locs import in_pixels
+    locs = _table()
+    locs.columns["peak_x_pix"] = np.round(locs["x_pix"])
+    nm = to_nm(locs, (127.0, 131.0), keep_pixels=False)
+    assert [n for n in nm.keys() if n.endswith("_pix")] == ["peak_x_pix"]
+    assert {"x_nm", "y_nm", "x_err_nm", "xy_err_nm", "peak_x_nm"} <= set(nm.keys())
+    assert nm.metadata["units"] == "nm"
+    path = tmp_path / "fit.h5"
+    with LocalizationWriter(path, nm.metadata) as writer:
+        writer.append(nm)
+    back = load_localizations(path)
+    x, y, x_err = in_pixels(back, "x_pix", "y_pix", "x_err_pix")
+    assert np.allclose(x, locs["x_pix"], rtol=1e-6)
+    assert np.allclose(y, locs["y_pix"], rtol=1e-6)
+    assert np.allclose(x_err, locs["x_err_pix"], rtol=1e-6)
+    # a precision is scaled by the mean, as `to_nm` scaled it
+    assert np.allclose(in_pixels(back, "xy_err_pix"), back["xy_err_nm"] / 129.0)
+    with pytest.raises(ValueError, match="pixel size"):
+        in_pixels(Localizations({"x_nm": np.zeros(2)}, {}), "x_pix")
+
+
 def test_an_assumed_pixel_size_is_recorded_with_the_table():
     """A file with no pixel size is still fitted; its nm columns are on an
     assumed scale, and the table says so."""

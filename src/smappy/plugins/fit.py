@@ -728,12 +728,13 @@ class _FitPlugin(Plugin):
 
         fitted = None
         if locs is not None and len(locs):
-            # drawn over the frame, so in its pixels: `x_pix` is a chip
-            # coordinate (the camera ROI offset added when it is made) while
-            # the image drawn is the ROI, so the offset comes off
+            # drawn over the frame, so in its pixels: a chip coordinate (the
+            # camera ROI offset added when it is made) while the image drawn
+            # is the ROI, so the offset comes off
+            from ..locs import in_pixels
             offset = camera.roi_offset
-            fitted = (np.asarray(locs["x_pix"]) - offset[0],
-                      np.asarray(locs["y_pix"]) - offset[1])
+            x, y = in_pixels(locs, "x_pix", "y_pix")
+            fitted = (x - offset[0], y - offset[1])
 
         def plot(figure) -> None:
             """Detection on the left, the fit on the right.
@@ -829,8 +830,8 @@ class _FitPlugin(Plugin):
 
         if camera.pixelsize_um is None:
             ctx.warn(f"no pixel size: x_nm and y_nm use an assumed "
-                     f"{DEFAULT_PIXELSIZE_NM:g} nm per pixel; x_pix and y_pix "
-                     f"are the measured positions")
+                     f"{DEFAULT_PIXELSIZE_NM:g} nm per pixel, which the table "
+                     f"records, so they divide back into camera pixels exactly")
         ctx.emit("start", {"extent": camera_extent(camera, source.shape),
                            "path": out})
         record = provenance(camera, finder, model, fit, source=src.path)
@@ -1103,7 +1104,8 @@ class GaussianFit(_FitPlugin):
     description = "Detect and fit with a free-width Gaussian PSF: x, y, photons, sigma."
     Settings = GaussianFitSettings
     # 2: the camera's read noise in the likelihood (1 e- without EM gain)
-    version = "2"
+    # 3: nm columns only; the pixel ones (`x_pix`, ...) are no longer written
+    version = "3"
 
     def model(self, settings, camera):
         return settings.model.model()
@@ -1117,7 +1119,8 @@ class SplineFit(_FitPlugin):
     # 2: the camera's read noise in the likelihood (1 e- without EM gain)
     # 3: a SMAP calibration is x-flipped only if SMAP flipped its beads
     #    (`EMon`), no longer for any non-zero `emmirror` ("no mirror" is 2)
-    version = "3"
+    # 4: nm columns only; the pixel ones (`x_pix`, ...) are no longer written
+    version = "4"
 
     def model(self, settings, camera):
         return settings.model.model(camera, roisize=settings.fit.roisize)
@@ -1244,7 +1247,9 @@ class DualSplineFit(_TwoChannelFit):
     #    the background (the version is the calibration's as much as the fit's)
     # 5: the camera's read noise in the likelihood; the calibration's photon
     #    shares from the light before clipping
-    version = "5"
+    # 6: nm columns only; the pixel ones (`x_pix`, `dx_pix_ch1`, ...) are no
+    #    longer written
+    version = "6"
     Settings = DualSplineFitSettings
 
     def registration_path(self, settings) -> str:
@@ -1283,12 +1288,14 @@ def _dim_channel_count(parts, split) -> int:
     if split is None:
         return sum(len(p) for p in parts)
     axis, chip = split
+    from ..locs import in_pixels
     column = "x_pix" if axis == 1 else "y_pix"
     low = high = 0
     for part in parts:
-        if column not in part:
+        try:
+            values = in_pixels(part, column)
+        except (KeyError, ValueError):
             return sum(len(p) for p in parts)
-        values = np.asarray(part[column], float)
         low += int((values < chip).sum())
         high += int((values >= chip).sum())
     return min(low, high)
@@ -1489,7 +1496,9 @@ class DualGaussianFit(_TwoChannelFit):
                    "registration can be measured from the movie itself.")
     # 2: linked photons are the total over both halves, not the main half's
     # 3: the camera's read noise in the likelihood (1 e- without EM gain)
-    version = "3"
+    # 4: nm columns only; the pixel ones (`x_pix`, `sigma_pix_ch0`, ...) are
+    #    no longer written
+    version = "4"
     Settings = DualGaussianFitSettings
 
     def model(self, settings, camera):
@@ -1566,7 +1575,7 @@ class DualGaussianFit(_TwoChannelFit):
                 camera=settings.camera, detection=settings.detection,
                 model=GaussianModelSettings(sigma=settings.model.sigma),
                 # a transformation is a statement about the camera, and is
-                # fitted in the chip pixels every fit writes beside nm
+                # fitted in chip pixels: the nm columns over the pixel size
                 fit=settings.fit,
                 output=OutputSettings(save=False, raw_frames=0))
             # the provisional split only decides which half a localization is
@@ -1612,13 +1621,15 @@ class DualGaussianFit(_TwoChannelFit):
         enough = "" if dim >= want else f" -- wanted {want:,}, the movie ran out"
         ctx.report(f"registering {len(locs):,} localizations from {used:,} frames "
                    f"({dim:,} in the dimmer channel{enough})")
+        # in chip pixels, which the table records the size of
+        from ..locs import in_pixels
+        x, y = in_pixels(locs, "x_pix", "y_pix")
         result = register_channels(
-            np.asarray(locs["x_pix"], float), np.asarray(locs["y_pix"], float),
-            np.asarray(locs["frame"]), source.shape[-2:],
+            x, y, np.asarray(locs["frame"]), source.shape[-2:],
             camera.roi, settings=settings.transform.registration,
             progress=ctx.report,
-            precision=(np.asarray(locs["xy_err_pix"], float)
-                       if "xy_err_pix" in locs else None))
+            precision=(in_pixels(locs, "xy_err_pix")
+                       if "xy_err_nm" in locs else None))
 
         if settings.transform.save_calibration:
             out = settings.output.resolve(src.path)

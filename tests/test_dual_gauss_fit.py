@@ -9,6 +9,7 @@ import pytest
 from scipy.special import erf
 
 from smappy.calibrate.dual import ChannelTransform
+from smappy.locs import in_pixels
 from smappy.metadata import CameraMetadata
 from smappy.pipeline import FitSettings
 from smappy.plugins import Context
@@ -90,15 +91,15 @@ def test_the_paired_gaussian_fit_finds_the_position_and_the_colour():
     assert locs is not None and len(locs) > 80
     # every fit lands on a true emitter
     want = np.vstack(truth)
-    got = np.c_[locs["x_pix"], locs["y_pix"]]
+    got = np.c_[in_pixels(locs, "x_pix", "y_pix")]
     from scipy.spatial import cKDTree
     distance, _ = cKDTree(want).query(got)
     assert np.median(distance) < 0.1
 
     assert abs(np.median(locs["ratio"]) - ratio) < 0.02
     # the widths were free, so each half found its own
-    assert abs(np.median(locs["sigma_pix_ch0"]) - WIDTHS[0]) < 0.08
-    assert abs(np.median(locs["sigma_pix_ch1"]) - WIDTHS[1]) < 0.08
+    assert abs(np.median(in_pixels(locs, "sigma_pix_ch0")) - WIDTHS[0]) < 0.08
+    assert abs(np.median(in_pixels(locs, "sigma_pix_ch1")) - WIDTHS[1]) < 0.08
     assert "z_nm" not in locs
 
 
@@ -147,9 +148,9 @@ def test_an_unlinked_fit_keeps_how_far_the_partner_is_from_the_link():
     assert abs(np.median(wrong["dy_nm_ch1"])) < 5
     # linked, there is nothing to compare
     assert "dx_nm_ch1" not in fit(transform(), (True, True, False, False, False))
-    # and every width and its error has its nm column beside the pixel one
-    assert all(name.replace("_pix", "_nm") in right
-               for name in right.keys() if "_pix" in name)
+    # and every width and its error is in nm, with no pixel copy beside it
+    assert "sigma_nm_ch1" in right and "sigma_err_nm_ch1" in right
+    assert [n for n in right.keys() if "_pix" in n] == ["peak_x_pix", "peak_y_pix"]
 
 
 def test_linked_photons_are_the_emitters_total():
@@ -216,7 +217,7 @@ def test_the_2c2d_plugin_calibrates_on_the_movie_and_then_fits_it(tmp_path):
 
     assert result.locs is not None and len(result.locs) > 500
     assert abs(np.median(result.locs["ratio"]) - 0.35) < 0.03
-    assert "sigma_pix_ch1" in result.locs and "z_nm" not in result.locs
+    assert "sigma_nm_ch1" in result.locs and "z_nm" not in result.locs
     assert (tmp_path / "out.hdf5").exists()
     # the measured transformation was written beside the output
     saved = tmp_path / "out_2ct.h5"
@@ -331,3 +332,45 @@ def test_without_a_transformation_the_question_offers_calibrating_not_a_doomed_r
     assert not settings.transform.calibrate                  # the form's own untouched
     settings.transform.calibrate = True
     assert DualGaussianFit().preflight(None, settings) is None
+
+
+def test_a_fit_writes_nm_and_the_peak_pixels_and_registers_from_them(tmp_path):
+    """A fit's table has no pixel copies of its nm columns -- only the peak
+    finder's candidates stay in chip pixels -- and the registration, which
+    lives in chip pixels, recovers them from the pixel size the table
+    records, along each axis: these pixels are not square."""
+    import tifffile
+    from smappy.plugins.fit import (CameraSettings, DetectionSettings,
+                                    GaussianFit, GaussianFitSettings,
+                                    OutputSettings, SourceSettings)
+    from smappy.plugins.registration import (CalibrateChannelTransform,
+                                             RegisterLocsSettings)
+
+    rng = np.random.default_rng(11)
+    t = transform(dx=0.8, dy=-0.5)
+    frames, _ = movie(200, rng, t, ratio=0.4, per=4)
+    stack = tmp_path / "split.tif"
+    tifffile.imwrite(stack, (frames + 100).astype(np.uint16))
+    settings = GaussianFitSettings(
+        source=SourceSettings(path=str(stack)),
+        camera=CameraSettings(conversion=1.0, offset=100.0, pixelsize_um=0.1,
+                              pixelsize_y_um=0.12),
+        detection=DetectionSettings(cutoff_mode="absolute", cutoff=25.0),
+        fit=FitSettings(roisize=13),
+        output=OutputSettings(save=False))
+    locs = GaussianFit().run(Context(), settings).locs
+
+    assert {"x_nm", "y_nm", "xy_err_nm", "sigma_nm",
+            "peak_x_pix", "peak_y_pix"} <= set(locs.keys())
+    assert not {"x_pix", "y_pix", "x_err_pix", "xy_err_pix",
+                "sigma_pix"} & set(locs.keys())
+    assert locs.metadata["units"] == "nm"
+    assert locs.metadata["pixelsize_nm_xy"] == [100.0, 120.0]
+    x, y = in_pixels(locs, "x_pix", "y_pix")
+    assert np.median(np.abs(x - locs["peak_x_pix"])) < 0.5
+    assert np.median(np.abs(y - locs["peak_y_pix"])) < 0.5
+
+    found = CalibrateChannelTransform().preview(
+        Context(locs=locs), RegisterLocsSettings(save=False)).data["transform"]
+    probe = np.c_[[20.0, 40.0], [60.0, 80.0]]
+    np.testing.assert_allclose(found.transform(probe), t.transform(probe), atol=0.3)

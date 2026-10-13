@@ -228,7 +228,7 @@ to at least a half and a quarter of it: 10 and 5 pixels in the first round,
 the set values in a tight second round.
 
 **Weights.**  If the table has a [localization
-precision](plugin:Panels/Glossary) (also called the CRLB) -- `xy_err_pix`, or `xy_err_nm`
+precision](plugin:Panels/Glossary) (also called the CRLB) -- `xy_err_nm`,
 converted with the pixel size it records -- a pair's weight is the inverse
 variance of its separation,
 

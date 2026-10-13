@@ -104,10 +104,10 @@ class RawFrameKeeper:
 
         In nanometres, as the table's positions are -- with the assumed pixel
         size where the camera has none, as the table's nm columns are.  A
-        localization's ``x_pix`` is the chip column
-        of the pixel whose *centre* it sits on (the camera ROI offset
-        included), so pixel 0 of the frame spans ``roi_x - 0.5`` to
-        ``roi_x + 0.5``.
+        localization's position in pixels (``x_nm`` over the pixel size) is
+        the chip column of the pixel whose *centre* it sits on (the camera
+        ROI offset included), so pixel 0 of the frame spans ``roi_x - 0.5``
+        to ``roi_x + 0.5``.
         """
         if not self.n:
             return None

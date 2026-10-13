@@ -12,7 +12,7 @@ all platforms.
 | review | what changed |
 | --- | --- |
 | §3 bugs 1–10 | all fixed: ROI count after a chain, progress fragments, one filter with two meanings (§4.2), pixel-table grouping (§4.1), COMET torch, 2C preflight, "(grouped)" twice, file camera values, `require` warning, ROI numbers stable |
-| §4.1 units | nm and px columns always both present (owner's choice: keep pixels); the *units* setting and every `*_pix` fallback went; no pixel size → 100 nm, said in the metadata and the Render tab |
+| §4.1 units | a fit's table is nm only (owner's choice, reversing an earlier "keep pixels"): `peak_x_pix`/`peak_y_pix` stay, the pixel size is in the metadata and `locs.in_pixels` gives registration its chip pixels; the *units* setting and every `*_pix` fallback went; no pixel size → 100 nm, said in the metadata and the Render tab |
 | §4.2 tables | one ungrouped and one grouped table per session, bounds per layer; `share=`, `grouped_stale` and the bound copying went (`layer_state.py`) |
 | §4.3 plugin contract | `param()` the one way to declare settings; `describe() -> FormState` instead of five hooks; `changes_locs` required; typed `Result` fields instead of magic `data` keys; *follow ROI*, `ColumnRecipe`; plugins follow the layer's grouping (`Plugin.grouping`) |
 | §4.4 regions | one interface over both result stores (`region_results`, `Evaluation(source, label)`), fixing three bugs; region summary as a titled grid |

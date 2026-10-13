@@ -174,7 +174,7 @@ the fitters' *camera* says what it resolved to.
 | column | meaning |
 | --- | --- |
 | `x_nm`, `y_nm`, `z_nm` | position; what everything reads |
-| `x_pix`, `y_pix`, ... | a fit's positions in camera pixels, kept beside the nm ones (`metadata["pixelsize_assumed"]` when the nm ones are on the default scale) |
+| `peak_x_pix`, `peak_y_pix` | where the peak finder found the spot, in camera pixels.  A fit writes no other pixel columns: the pixel size is `metadata["pixelsize_nm"]` (`"pixelsize_nm_xy"` when not square; `"pixelsize_assumed"` when it is the default), and `locs.in_pixels(locs, "x_pix", ...)` divides the nm columns by it.  A file saved in pixels keeps its own `x_pix`, ... |
 | `frame` | camera frame, int64 |
 | `photons`, `background` | per localization |
 | `xy_err_nm` | lateral precision, the RMS of `x_err_nm` and `y_err_nm` |
