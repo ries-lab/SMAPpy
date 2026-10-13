@@ -322,3 +322,24 @@ def test_an_older_files_runs_with_their_records_become_tables():
     assert p.runs[-1] == {'id': 'r', 'pipeline': [step], 'regions': 1}
     assert p.tables['old'].entry(roi.id) == {'values': {'n': 2}, 'signature': 's'}
     assert p.tables['old'].step(roi.id) == step
+
+
+def test_the_region_histograms_are_a_titled_grid_and_say_which_measures_had_no_values(
+        monkeypatch):
+    """Twelve panels stacked in one column overlapped and named nothing."""
+    from matplotlib.figure import Figure
+    from smappy.plugins import Context
+    from smappy.plugins.roi import Histograms, grid_shape, measure_title
+    rng = np.random.default_rng(0)
+    rows = [{"roi_id": i, "file_id": "", "radius_nm": float(rng.normal(50, 3)),
+             "n_corners": int(rng.integers(0, 9)), "angle_deg": float(rng.uniform(0, 45)),
+             "efficiency": float("nan")} for i in range(40)]
+    monkeypatch.setattr(Histograms, "rows", lambda self, ctx, s: (rows, None))
+    result = Histograms().run(Context(), HistogramSettings(bins=10))
+    assert "no values for efficiency" in result.text
+    figure = Figure()
+    result.plot.draw(figure)
+    titles = [a.get_title() for a in figure.axes if a.get_visible()]
+    assert titles == ["radius (nm)", "n corners", "angle (°)"]
+    assert grid_shape(12) == (3, 4) and grid_shape(4) == (2, 2)
+    assert measure_title("sigma_c_nm") == "sigma c (nm)"

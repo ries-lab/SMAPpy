@@ -272,6 +272,22 @@ def histograms(rows: Sequence[Dict[str, Any]], settings: HistogramSettings
     return out
 
 
+def grid_shape(n: int, columns: int = 4) -> Tuple[int, int]:
+    """``(rows, columns)`` for ``n`` panels: up to four across, so a dozen
+    measures read as three rows rather than a column a screen tall."""
+    across = max(1, min(columns, n, int(np.ceil(np.sqrt(n)))))
+    return int(np.ceil(n / across)), across
+
+
+def measure_title(field: str) -> str:
+    """``radius_nm`` -> ``radius (nm)``: the unit a column carries by name."""
+    units = {"nm": "nm", "deg": "\u00b0", "pix": "px", "s": "s"}
+    stem, _, last = field.rpartition("_")
+    if stem and last in units:
+        return f"{stem.replace('_', ' ')} ({units[last]})"
+    return field.replace("_", " ")
+
+
 # ---------------------------------------------------------------- analysis
 
 EVALUATION_HELP = ("the evaluation whose results are analysed; auto: the only "
@@ -423,31 +439,46 @@ class Histograms(SiteAnalysisPlugin):
         if not rows:
             raise ValueError("evaluate some ROIs first: there is no site table")
         data = histograms(rows, settings)
-        if not data:
-            raise ValueError("no numeric columns to histogram")
+        # a measure no region has a value for is said, not drawn as an empty
+        # panel (NPC's labelling-efficiency columns before it has run, say)
+        empty = [field for field, d in data.items() if not len(d["values"])]
+        shown = {field: d for field, d in data.items() if len(d["values"])}
+        if not shown:
+            raise ValueError("no numeric columns with values to histogram"
+                             + (f" ({', '.join(empty)} have none)" if empty else ""))
+        what = "ROIs" if ev is None or ev.on_rois else "regions"
+        rows_n, across = grid_shape(len(shown))
 
-        def one(ax, field, d) -> None:
+        def one(ax, field, d, first_column) -> None:
             ax.bar(d["edges"][:-1], d["counts"], width=np.diff(d["edges"]),
                    align="edge", color="0.6", edgecolor="0.3")
-            ax.set_xlabel(field.replace("_", " "))
-            ax.set_ylabel("regions")
+            ax.set_title(measure_title(field), fontsize=9)
+            ax.tick_params(labelsize=7)
+            if first_column:
+                ax.set_ylabel(what, fontsize=8)
             if d["missing"]:
-                ax.set_title(f"{d['missing']} missing", fontsize=8, color="0.4")
+                ax.text(0.98, 0.95, f"{d['missing']} without a value",
+                        transform=ax.transAxes, ha="right", va="top",
+                        fontsize=7, color="0.4")
 
         def plot(figure) -> None:
-            """A grid, one histogram per column.
+            """A grid, up to four across, one histogram per measure.
 
-            As many panels as there are columns, which is why this declares
+            As many panels as there are measures, which is why this declares
             them and is handed the figure: a single axis is right for a plugin
-            with one thing to draw and this has as many as the site table has
+            with one thing to draw and this has as many as the table has
             columns.
             """
-            for axis, (field, d) in zip(figure.subplots(len(data), 1, squeeze=False)
-                                        .ravel(), data.items()):
-                one(axis, field, d)
+            axes = figure.subplots(rows_n, across, squeeze=False).ravel()
+            for i, (axis, (field, d)) in enumerate(zip(axes, shown.items())):
+                one(axis, field, d, i % across == 0)
+            for axis in axes[len(shown):]:
+                axis.set_visible(False)
 
-        what = "ROIs" if ev is None or ev.on_rois else "regions"
-        return Result(text=f"{len(rows)} {what}, {len(data)} columns",
-                      plot=Plot(draw=plot, panels=len(data),
-                                size=(5, max(2.2 * len(data), 2.2))),
+        text = f"{len(rows)} {what}, {len(shown)} measures"
+        if empty:
+            text += f"; no values for {', '.join(empty)}"
+        return Result(text=text,
+                      plot=Plot(draw=plot, panels=len(shown),
+                                size=(3.2 * across, 2.6 * rows_n)),
                       data={"histograms": data, "rows": rows}, settings=settings)

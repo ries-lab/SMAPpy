@@ -66,9 +66,10 @@ columns named, in that order.
 
 **3. The histograms.**  Each column's values are split into *bins* equal
 bins from the smallest to the largest value, and the number of sites in each
-bin is drawn, one panel per column.
+bin is drawn: a grid of panels, up to four across, each titled with the
+measure and its unit (`radius_nm` is *radius (nm)*).
 
-```figure The histograms drawn for about 140 simulated nuclear pores (Nup96, 60 % labelling) evaluated with Statistics, one panel per column (the plugin stacks them; here they are side by side).  The number of localizations per pore varies several-fold, from the random labelling and blinking alone; precision and photons, which are averages over a site, vary much less.
+```figure The histograms drawn for about 140 simulated nuclear pores (Nup96, 60 % labelling) evaluated with Statistics, one panel per column.  The number of localizations per pore varies several-fold, from the random labelling and blinking alone; precision and photons, which are averages over a site, vary much less.
 fig.set_size_inches(7.5, 2.4)
 panels = fig.subfigures(1, 3)
 for panel, name in zip(panels, ("n_localizations", "mean_precision_nm", "mean_photons")):
@@ -95,8 +96,9 @@ means (`mean_photons_n`, `mean_precision_nm_n`), which equal
 those out.
 
 **Missing values.**  A value that is not finite (`NaN`, or a row without that
-column) is left out of its histogram, and the panel's title says how many
-were missing.
+column) is left out of its histogram, and the panel says how many regions
+have no value.  A column no region has a value for is not drawn: the text
+names it instead.
 
 **Bins.**  The bins are $B$ equal intervals from the smallest to the largest
 finite value, as `numpy.histogram` makes them; the largest value falls into
