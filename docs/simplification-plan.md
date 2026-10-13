@@ -6,9 +6,9 @@ is one commit (or a short series) that leaves the suite green, fast and
 re-reads its page.  Sizes are rough.  Steps marked *depends* need the one
 named first.
 
-**Status.**  Done on `claude/trusting-cray-bhwh1n`: sections A to E
-(`--slow -n auto`: 1646 passed, 6 skipped).  Left: section F, by the owner's
-decision.
+**Status.**  Done on `claude/trusting-cray-bhwh1n`: sections A to F
+(`--slow -n auto`: 1671 passed, 6 skipped, and one flaky test since made
+deterministic).  Left: what F lists under *Not now*.
 
 ## A. Small and independent
 

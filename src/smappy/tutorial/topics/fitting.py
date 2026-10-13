@@ -8,8 +8,8 @@ calibration, is `fitting_3d`: the same fitter form, with a measured PSF.
 """
 from __future__ import annotations
 
-from .common import (field, open_section, place_beside, section, section_of,
-                     show_tab, type_into)
+from .common import (expand, field, open_section, place_beside, section,
+                     section_of, show_tab, type_into)
 
 TITLE = "Fitting in 2D"
 DESCRIPTION = ("The camera, finding the spots, the PSF model, and checking the "
@@ -144,11 +144,12 @@ def make(d) -> None:
     d.shot("Gaussian 2D fits the position, photons, background and the width "
            "of each spot. Elliptical fits a width in x and one in y.",
            spot=[model], zoom=d.around(model, 760))
-    roi = field(panel, "fit.roi_size") if "roi_size" in field(panel, "fit").fields else None
-    if roi is not None:
-        d.shot("The fit box is the square fitted around each spot: large enough "
-               "for the spot, small enough not to catch a neighbour.",
-               spot=[roi], zoom=d.around(roi, 760))
+    box = field(panel, "fit.roisize")
+    expand(box)
+    d.settle()
+    d.shot("The fit box is the square fitted around each spot: large enough "
+           "for the spot, small enough not to catch a neighbour.",
+           spot=[box], zoom=d.around(box, 760))
 
     d.chapter("Fit and check")
     d.shot("Run.", spot=[panel.run_button], point=panel.run_button, click=True,
