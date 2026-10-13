@@ -169,17 +169,17 @@ def test_the_fitter_says_an_unknown_camera_is_unknown_and_where_it_is_added(
     from smappy.plugins.fit import GaussianFit
     plugin = GaussianFit()
     settings = plugin.Settings()
-    assert plugin.notice(settings) is None                  # no file yet
+    assert plugin.describe(None, settings).notice is None                  # no file yet
     settings.source.path = a_tiff(tmp_path / "prime_MMStack.ome.tif", PRIME)
-    notice = plugin.notice(settings)
+    notice = plugin.describe(None, settings).notice
     assert "Prime95B" in notice.text and "conversion" in notice.text
     assert notice.window == "camera editor" and notice.action == "Add camera..."
 
     save_camera(with_mode(draft(PRIME), PRIME, ["Prime95B-ReadoutRate"],
                           {"conversion": 1.2, "offset": 100.0}))
-    assert plugin.notice(settings) is None                  # the cache noticed
+    assert plugin.describe(None, settings).notice is None                  # the cache noticed
     assert plugin.resolution(settings).values["conversion"] == 1.2
-    assert ("Prime95B", "Prime95B") in plugin.choices(None, settings)["camera.camera"]
+    assert ("Prime95B", "Prime95B") in plugin.describe(None, settings).choices["camera.camera"]
 
 
 def test_the_fitter_offers_a_readout_mode_the_database_lacks(config, tmp_path):
@@ -188,12 +188,12 @@ def test_the_fitter_offers_a_readout_mode_the_database_lacks(config, tmp_path):
     settings = plugin.Settings()
     settings.source.path = a_tiff(tmp_path / "evolve_MMStack.ome.tif",
                                   dict(EVOLVE, **{"Evolve512-ReadoutRate": "1MHz"}))
-    notice = plugin.notice(settings)
+    notice = plugin.describe(None, settings).notice
     assert notice.action == "Add readout mode..."
     assert "M2 Evolve" in notice.text and "conversion" in notice.text
 
     settings.source.path = a_tiff(tmp_path / "known_MMStack.ome.tif", EVOLVE)
-    assert plugin.notice(settings) is None
+    assert plugin.describe(None, settings).notice is None
 
 
 # ------------------------------------------------------------------ the GUI
@@ -293,6 +293,33 @@ def test_the_panel_shows_the_notice_and_its_button_opens_the_editor(
     assert panel.notice.isHidden()
 
 
+def test_a_fit_in_a_chain_says_its_camera_is_unknown_and_opens_the_editor_on_its_own_settings(
+        app, config, tmp_path):
+    """A chain forwards its steps' form state with one hook, the notice
+    included, and the button hands the window the fit's settings rather
+    than the chain's, which a camera editor could not read."""
+    from smappy.chain import ChainSpec, Step, chain_class
+    from smappy.gui.plugin_panel import PluginPanel
+    from smappy.plugins.fit import GaussianFit
+    from smappy.session import Session
+
+    cls = chain_class(ChainSpec(steps=[Step(plugin="Localize/Gaussian 2D", label="fit")]))
+    key = cls.steps[0][0]
+    session = Session()
+    opened = []
+    session.window_openers["camera editor"] = opened.append
+    panel = PluginPanel(cls, session)
+    assert panel.notice.isHidden()
+    path = a_tiff(tmp_path / "p_MMStack.ome.tif", PRIME)
+    panel.form.set_values({f"{key}.source.path": path})
+    panel._react(f"{key}.source.path")
+    assert not panel.notice.isHidden()
+    assert panel.notice.text().startswith("fit: ") and "Prime95B" in panel.notice.text()
+    panel.notice_button.click()
+    assert isinstance(opened[0], GaussianFit.Settings)
+    assert opened[0].source.path == path
+
+
 def test_without_an_editor_the_notice_has_no_button(app, config, tmp_path):
     from smappy.gui.plugin_panel import PluginPanel
     from smappy.plugins.fit import GaussianFit
@@ -345,3 +372,29 @@ def test_the_main_window_opens_the_editor_on_the_fitters_file(
     editor.save()
     assert camera_db.database().identify(PRIME).name == "Prime95B"
     window.close()
+
+
+def test_choosing_a_file_shows_its_camera_but_leaves_the_fields_on_auto(
+        app, config, tmp_path):
+    """The file's numbers are shown, greyed, and stay the file's: copied in,
+    they overrode a later *camera* choice and outlived the file."""
+    from smappy.gui.plugin_panel import PluginPanel
+    from smappy.plugins.fit import GaussianFit
+    from smappy.session import Session
+
+    panel = PluginPanel(GaussianFit, Session())
+    panel.form.set_values({"source.path": a_tiff(tmp_path / "p_MMStack.ome.tif",
+                                                 PRIME)})
+    panel._react("source.path")
+    panel.refresh_derived()
+    assert panel.form.value().camera.pixelsize_um is None          # still auto
+    shown = panel.form.fields["camera"].fields["pixelsize_um"]
+    assert shown.widget.text() == "0.11"                           # the hint
+
+    other = tmp_path / "bare.tif"
+    import tifffile
+    tifffile.imwrite(other, np.zeros((2, 32, 32), np.uint16))
+    panel.form.set_values({"source.path": str(other)})
+    panel._react("source.path")
+    panel.refresh_derived()
+    assert panel.form.value().camera.pixelsize_um is None          # nothing inherited

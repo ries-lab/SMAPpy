@@ -19,16 +19,18 @@ into the image in the main window, as in SMAP.  *Layers* on the picture's
 toolbar shows them *side by side* instead, a panel per layer, or *side by side
 + overlay* with the added-up picture after them (SMAP's *split* and *comp*).
 The panels go across or one above another, whichever shows the data larger in
-the window, and move and zoom together; the ROI is drawn and edited on the
-first and its outline is on all of them.  Beside it, *pixel* says what one
+the window, and move and zoom together; the [ROI](plugin:Panels/Glossary)
+(region of interest: a rectangle, line or polygon drawn on the picture) is
+drawn and edited on the first and its outline is on all of them.  Beside it, *pixel* says what one
 screen pixel is: the zoom, as a number.  Type a size to zoom to it, or press
 *pixel* to go to 10 nm.  Every control below the layer strip edits one layer,
 the one selected in the strip.
 
 What a layer shows is also what the rest of the program works on.  A plugin
-measures the localizations the layer's filter keeps (inside the drawn ROI, if
-there is one), and the ROI manager takes its filter and its grouping from a
-layer too.  So a filter set here to clean up the picture also decides what is
+measures the localizations the layer's filter keeps (inside the drawn
+ROI, if there is one), and
+the ROI manager takes its filter, and whether blinks are merged, from a layer
+too.  So a filter set here to clean up the picture also decides what is
 measured.
 
 From top to bottom the tab has: a small *overview* of the whole field, the
@@ -42,10 +44,10 @@ against any other.
 ```figure-setup
 import dataclasses
 from smappy.simulate import simulate
-from smappy.session import Layer
+from smappy.session import Session
 from smappy.render import FieldOfView, RenderAxes, render_locs
 locs = simulate(n_frames=10000, seed=1)
-layer = Layer(locs)             # what the tab edits: default bounds, grouped
+layer = Session(locs).layers[0]  # what the tab edits: default bounds, grouped
 zoom = FieldOfView.from_range((4700, 5500), (4400, 5200), 4.0)
 whole = FieldOfView.from_range((0, 10000), (0, 10000), 20.0)
 
@@ -72,7 +74,8 @@ with the file (their average, and a few single frames), or a widefield or
 diffraction-limited picture of the same cells.  The layers are drawn one by one
 and their colours added.
 
-**2. The filter.**  A filter is a range per column: keep the localizations
+**2. The filter.**  A [filter](plugin:Panels/Glossary) (also called bounds)
+is a range per column: keep the localizations
 whose precision is at most 25 nm, whose z lies within 500 nm of focus, and so
 on.  A localization is shown only if it is inside every range.  The tab shows
 one column at a time, as a histogram with the kept range shaded, and the
@@ -105,58 +108,66 @@ c.set_xticks([]); c.set_yticks([])
 layer.show_grouped(True)
 ```
 
-**3. Grouping.**  A fluorophore that stays on for several camera frames is
+**3. Merging blinks.**  A fluorophore that stays on for several camera frames is
 localized in each of them, so one blink appears as a small cluster of
-localizations.  Grouping links the localizations of consecutive frames that
-lie within a small box of each other into one blink and replaces them by a
-single localization -- at their weighted mean position, with the photons of
-all of them and a correspondingly better precision.  A grouped picture is
+localizations.  [Merge blinks](plugin:Panels/Glossary) (also called grouping
+or linking) combines the localizations in consecutive frames that come from
+one blinking event -- that lie within a small box of each other -- into one
+localization, at their weighted mean position, with the photons of all of
+them and a correspondingly better precision.  A picture of merged blinks is
 cleaner and counts molecules more fairly: a long blink no longer weighs more
-than a short one.  Layers are grouped by default (*grouped*); the linking
-distance and the number of dark frames allowed are set under *link
-settings...*, beside it, for every layer at once.  The distance is either
-fixed or, with *link by* set to *precision*, scaled by how precisely each
+than a short one.  Layers merge blinks by default (*merge blinks*).  A large
+file does not wait for the merge: it opens at once, the blinks are merged in
+the background -- the picture says "merging blinks" with the stage and a
+clock, and so does the status bar -- and they are drawn when they are there.
+No single localizations are drawn in their place meanwhile.  The distance and the
+number of dark frames allowed are set under *merge settings...*, beside it,
+for every layer at once.  The distance is either
+fixed or, with *merge by* set to *precision*, scaled by how precisely each
 localization was measured: bright ones are held close together, dim ones may
 lie further apart.
 
-```figure The same localizations (with the default bounds, drawn as a histogram) before and after grouping, and how many frames each blink was linked over.
+```figure The same localizations (with the default bounds, drawn as a histogram) before and after merging blinks, and how many frames each blink lasted.
 fig.set_size_inches(7.5, 2.6)
 a, b, c = fig.subplots(1, 3)
 layer.show_grouped(False)
-draw(a, f"ungrouped: {len(layer.filter)}", mode="hist")
+draw(a, f"localizations: {len(layer.filter)}", mode="hist")
 layer.show_grouped(True)
-draw(b, f"grouped: {len(layer.filter)}", mode="hist")
+draw(b, f"blinks merged: {len(layer.filter)}", mode="hist")
 fig.subplots_adjust(wspace=0.35)
 c.hist(np.asarray(layer.locs["n_in_group"]), bins=np.arange(0.5, 12.5), color="0.5")
 c.set_xlabel("n_in_group (frames)", fontsize=8); c.tick_params(labelsize=7)
 ```
 
 **4. Drawing the localizations.**  *render* chooses the spot each
-localization is drawn as.  *hist* counts localizations per pixel: exact, but
-at a fine pixel size mostly single bright pixels.  *gauss* draws every
-localization as the same Gaussian blob, of width *sigma x (gauss)*.
-*precision*, the default, draws each one as a Gaussian as wide as its own
-localization precision times the *precision factor*
+localization is drawn as.  *histogram* counts localizations per pixel: exact, but
+at a fine pixel size mostly single bright pixels.  *Gaussian (fixed)* draws every
+localization as the same Gaussian blob, of width *sigma x (fixed)*.
+*Gaussian (precision)*, the default, draws each one as a Gaussian as wide as its own
+[localization precision](plugin:Panels/Glossary) (also called the CRLB or
+localization uncertainty: how far its fitted position is expected to lie from
+the true one) times the *precision factor*
 ([Baddeley et al. 2010](https://doi.org/10.1017/S143192760999122X)): a
 precise localization is a sharp dot, an uncertain one a faint wide blur, so
-the picture shows how well each position is known.  *dl* (diffraction
-limited) draws what the camera saw instead: each localization as a spot as
-wide as its fitted PSF, on the camera's own pixels -- the widefield picture
+the picture shows how well each position is known.  *diffraction-limited*
+draws what the camera saw instead: each localization as a spot as
+wide as its fitted [PSF](plugin:Panels/Glossary) (point spread function: the
+image one molecule makes on the camera), on the camera's own pixels -- the widefield picture
 of the same molecules, to set beside the super-resolved one.
 
 ```figure The crossing of the two lines, 800 nm across, drawn with each of the three super-resolution modes.
 fig.set_size_inches(7.5, 2.6)
 axes = fig.subplots(1, 3)
-draw(axes[0], "hist", mode="hist")
-draw(axes[1], "gauss, sigma 10 nm", mode="gauss", sigma=10.0)
-draw(axes[2], "precision, factor 0.5")
+draw(axes[0], "histogram", mode="hist")
+draw(axes[1], "Gaussian (fixed), sigma 10 nm", mode="gauss", sigma=10.0)
+draw(axes[2], "Gaussian (precision), factor 0.5")
 ```
 
-```figure The whole field, 10 µm across, in *precision* and in *dl*: on 100 nm camera pixels the ring and the lines are as wide as the PSF, as the camera saw them.
+```figure The whole field, 10 µm across, in *Gaussian (precision)* and *diffraction-limited*: on 100 nm camera pixels the ring and the lines are as wide as the PSF, as the camera saw them.
 fig.set_size_inches(5.2, 2.6)
 axes = fig.subplots(1, 2)
-draw(axes[0], "precision", fov=whole)
-draw(axes[1], "dl", fov=whole, mode="dl")
+draw(axes[0], "Gaussian (precision)", fov=whole)
+draw(axes[1], "diffraction-limited", fov=whole, mode="dl")
 ```
 
 **5. Brightness and colour.**  A super-resolution image has a few very bright
@@ -164,8 +175,8 @@ pixels -- a long blink, a fiducial bead -- and a great many faint ones, so its
 brightest pixel is a useless scale.  *contrast* instead saturates a fixed
 fraction of the pixels: at contrast 3 the brightest one in a thousand are
 white, at 2 one in a hundred (brighter), at 4 one in ten thousand (darker).
-*gamma* below 1 lifts the faint parts further.  The *LUT* (look-up table) is
-the colour scale brightness is shown in.  Instead of brightness alone, the
+*gamma* below 1 lifts the faint parts further.  The *LUT* (look-up table,
+also called a colour map) is the colour scale brightness is shown in.  Instead of brightness alone, the
 colour can also encode a column (*colour by*, e.g. z), with the brightness
 still showing density.
 
@@ -235,7 +246,7 @@ image, whatever its width and wherever it sits in its pixel; a histogram is
 the limit $\sigma \to 0$ of the same kernel.  A pixel $j$ covers
 $[x_0 + jp,\, x_0 + (j+1)p)$ for pixel size $p$.
 
-**The width in *precision* mode.**  With $\sigma_i$ the localization
+**The width in *Gaussian (precision)*.**  With $\sigma_i$ the localization
 precision of localization $i$ (`xy_err_nm`), $f$ the *precision factor*
 (0.5 by default) and $p$ the rendered pixel size,
 
@@ -250,7 +261,7 @@ precision is drawn at the floor.  On an axis that is z, the axial precision
 position at all (photons, frame), there is no precision, and the explicit
 width is used -- zero, plain binning, unless set.
 
-**The *dl* mode.**  As SMAP's DL: the picture is rendered on a grid of
+**The *diffraction-limited* mode.**  As SMAP's DL: the picture is rendered on a grid of
 camera pixels -- their edges on multiples of the pixel size $a$, which comes
 from the fit's metadata (`pixelsize_nm`, or the camera's), a simulation's
 optics, or 100 nm -- with each localization a Gaussian of width `sigma_nm`
@@ -258,7 +269,7 @@ optics, or 100 nm -- with each localization a Gaussian of width `sigma_nm`
 the view pixel by pixel, without interpolation, so that the camera's pixels
 stay visible.  A width that is missing, not positive or above 1500 nm (a
 failed fit) is one camera pixel.  It needs the positions on both axes; the
-3D view, whose turned picture no camera saw, draws it as *gauss* at the
+3D view, whose turned picture no camera saw, draws it as *Gaussian (fixed)* at the
 median PSF width.
 
 **Contrast and gamma.**  With $I$ the rendered intensity of a pixel and $c$
@@ -297,14 +308,17 @@ are bright.
 **The filter.**  A bound $(\mathrm{lo}, \mathrm{hi})$ on a column keeps
 $\mathrm{lo} \leq u \leq \mathrm{hi}$; an empty end is no bound.  A
 localization with no value there (NaN) is excluded by any bound on that
-column -- a localization without a z is not in a z slab.  The shown set is
+column -- a localization without a z is not in a z slab (a slice of fixed
+thickness in z, as the 3D view uses).  The shown set is
 the intersection of all bounds and of the file choice.  A new layer starts
 with `xy_err_nm` at most 25 nm, `logl_rel` at least -2 and `z_nm`
 between -500 and 500 nm, plus `sigma_nm` at most 180 nm on a 2D table (in 3D the PSF width changes with z by design), each only if the
 table has that column, and any bounds the file carries from
-[Remove Localizations](plugin:Analysis/Process/Remove Localizations).  A bound
-applies to the grouped and the ungrouped table alike, so what is drawn and
-what a plugin gets never disagree.  The histogram spans the bulk of the
+[Remove Localizations](plugin:Analysis/Process/Remove Localizations).  A
+layer has one set of bounds, applied to the table it shows: on a layer that
+merges blinks a bound on `xy_err_nm` or `photons` is a bound on a blink's combined
+precision or summed photons, so the same bound keeps more blinks than it
+keeps frames.  The histogram spans the bulk of the
 column in 120 bins (of a random sample of two million, for a larger table):
 the 1st to 99th percentile, cut to three interquartile ranges beyond the
 quartiles, so that the long tail of a precision column -- a few faint spots
@@ -315,13 +329,13 @@ anywhere else it is the number.  Only the dragged end changes: a bound that
 lies beyond the histogram (the 25 nm one, on a sharp table) stays until its
 own edge is moved or its number typed.
 
-**Grouping.**  The linking follows SMAP's: the localizations are sorted by
+**Merging blinks.**  The linking follows SMAP's: the localizations are sorted by
 frame and x, and each one not yet linked starts a new blink.  From the
 blink's running position it looks in the next frame for the first
-unlinked localization inside a box of half-width $d$ (*link within*, 50 nm)
+unlinked localization inside a box of half-width $d$ (*within*, 50 nm)
 in both x and y -- the first found, not the nearest -- and moves the running
-position halfway towards it.  A blink may skip up to *gap* dark frames (1)
-before it is closed.  With *link by* *precision* (SMAP's locprec mode) the
+position halfway towards it.  A blink may skip up to *dark frames* (1)
+before it is closed.  With *merge by* *precision* (SMAP's locprec mode) the
 box becomes a circle whose radius depends on the localizations: one joins
 the blink if its distance $r$ from the running position satisfies
 
@@ -345,9 +359,14 @@ y by `y_err_nm`, z by `z_err_nm` where the table has them), photons and
 background summed, precisions combined as $1/\sqrt{\sum_i 1/\sigma_i^2}$,
 the error of a summed quantity as $\sqrt{\sum_i \sigma_i^2}$, `logl_rel` the
 best, `frame` the first.  `n_in_group`, the number of frames the blink was
-on, and `group_id` are written onto both tables.  Grouping is done once per
-table and kept; switching *grouped* back and forth costs nothing after the
-first time.
+on, and `group_id` are written onto both tables.  Merging is done once per
+table and kept; switching *merge blinks* off and on costs nothing after the
+first time.  It is done when the merged table is first read: for a table of
+300,000 localizations or more, in the background (a few seconds for a few
+million), the layer drawing nothing until it is ready -- after a file
+opens, a table is changed, *merge blinks* is ticked or the merge settings
+change.  A plugin run started meanwhile waits for it and starts by itself
+when it is done.
 
 **The axes.**  A coordinate is the column divided by that axis's scale,
 $u / s$, and the render grid stays square in these units -- so the zoom, the
@@ -386,7 +405,7 @@ layer lists of the dialogs that ask for one.
 
 ### localizations
 A new localization layer on the same table, starting as a copy of the
-selected one -- its bounds, files, display and grouping -- and the tab moves
+selected one -- its bounds, files, display and *merge blinks* -- and the tab moves
 onto it.
 
 ### image...
@@ -404,11 +423,15 @@ ticked at first: the bounds and the files are usually what makes two layers
 two.
 
 ### filter
-The quick buttons (*prec*, *LL*, *frame*, *z*, *phot*, *PSF*, *ch*, *file*)
-pick the usual columns; the drop-down has every numeric column.  A column
-with a bound on it is bold and marked with a dot, so a bound on a column not
-on show is not forgotten.  The count reads *shown / all*, and how many are in
-the ROI when one is drawn.  For `filenumber` the histogram is replaced by a
+The quick buttons (*precision*, *fit quality*, *frame*, *z*, *photons*,
+*PSF*, *channel*, *file*) pick the usual columns -- `xy_err_nm`, `logl_rel`,
+`frame`, `z_nm`, `photons`, `sigma_nm`, `channel`, `filenumber`, each where
+the table has it, and named in the button's tooltip; the drop-down has every numeric column.  A column
+with a bound on it is bold and marked with a dot, and the line under the
+quick buttons lists every bound of the layer (`xy_err_nm ≤ 25`): click one to
+edit it, × to remove it, so a bound on a column not on show is not
+forgotten.  The status bar says how much the filters hide.  The count reads
+*shown / all*, and how many are in the ROI when one is drawn.  For `filenumber` the histogram is replaced by a
 list of the files to tick; right-click a file to remove it from the session.
 
 ### min
@@ -461,15 +484,22 @@ How the selected layer is drawn.  An image layer uses only the LUT, contrast,
 gamma and white background.
 
 ### render
-*precision* for the usual picture.  *gauss* when every spot should look
-alike, e.g. to compare layers of different quality; *hist* for counting, or
-at a pixel size well above the precision.  *dl* for the widefield picture:
+*Gaussian (precision)* for the usual picture.  *Gaussian (fixed)* when
+every spot should look alike, e.g. to compare layers of different quality;
+*histogram* for counting, or at a pixel size well above the precision.
+*diffraction-limited* for the widefield picture:
 zoomed out it looks like the average of the raw frames, which is a check that
 the fit found what was there.
 
 ### colour by
 *intensity* colours by brightness through the LUT; *field* colours by the
-column chosen beside it.
+column chosen beside it.  A visible layer coloured by a column puts a
+colour bar in the render window's top right corner: the LUT over the
+*colour range*, its ends in the column's unit, and above it the layer and
+the column (*layer 2: z_nm*).  Each scale has its own bar, stacked one
+under the other; layers with the same column, LUT, inversion and range
+share one, labelled with all of them.  The bars are not part of a saved or
+copied picture.
 
 ### colour range
 The values that get the two ends of the LUT.  Narrow it to spread the
@@ -495,31 +525,40 @@ too high, and all but the brightest spots disappear.  The same number
 transfers between datasets, because it is a fraction of pixels, not a
 brightness.
 
-### grouped
-Draws one localization per blink.  The first switch links the table, which
-takes seconds to minutes on a large one; after that it is free.  Plugins get
-the ungrouped table unless they ask for the grouped one.
+### merge blinks
+Draws one localization per blink; on by default.  The table is merged the
+first time it is needed -- for a large one in the background, the tick
+showing the setting and the picture "merging blinks" until the blinks are
+ready; after that it is free.  Unticked meanwhile, the layer shows the
+localizations at once, and the merge still finishes and is kept.  A plugin
+measures what the layer shows -- blinks, when they are merged -- except one
+that needs the single localizations (a drift correction, Localization
+Precision, anything that changes the table), which says so on its page.
 
-### link settings...
-The linking parameters of grouping, for every layer at once: *link by* --
-*fixed distance*, a box of half-width *link within* (nm), or *precision*, a
-radius of *k* times the two localizations' combined precision, held between
-*at least* and *at most* (nm) -- and *gap* (frames).  A fixed box wide
+### merge settings...
+How blinks are merged, the session's settings, for every layer at once:
+*merge by* -- *fixed distance*, a box of half-width *within* (nm), or
+*precision*, a radius of *k* times the two localizations' combined
+precision, held between *at least* and *at most* (nm) -- and *dark frames*,
+how many frames a blink may be dark and still continue.  A fixed box wide
 enough to keep the dim localizations of a blink together also merges bright
-neighbours that their precision could tell apart; linking by precision
+neighbours that their precision could tell apart; merging by precision
 avoids both, at the price of cutting the 4% of links that fall beyond 2.5
-sigma (raise *k* to keep more).  OK groups all the layers again and records the new
-parameters in the file's history, since the grouped table cannot tell which
-ones produced it.
+sigma (raise *k* to keep more).  OK merges the table again -- once, since
+every layer shows the same merged table; a large one in the background, the
+layers drawing nothing until then -- and records the new settings in
+the file's history, since the merged table cannot tell which ones produced
+it.  The drift corrections take these settings too, unless their own
+*within* and *dark frames* are set.
 
 ### more
 The rendering widths, gamma and the white background.
 
-### sigma x (gauss)
-The width in mode *gauss*, in the units of the horizontal axis; 0 bins.  A
+### sigma x (fixed)
+The width in *Gaussian (fixed)*, in the units of the horizontal axis; 0 bins.  A
 few times the pixel size, or about the typical precision.
 
-### sigma y (gauss)
+### sigma y (fixed)
 The vertical width, for axes that are not the same quantity.  Empty follows
 *sigma x* where the two axes are the same quantity and bins where they are
 not.
@@ -575,7 +614,9 @@ Based on SMAP's layer panel (`gui.GuiChannel`), its renderer
 ([Ries 2020](https://doi.org/10.1038/s41592-020-0938-1)).
 
 * **The modes are renamed.**  SMAP's *Gauss* (width from the precision) is
-  *precision* here, its *constGauss* is *gauss*, and its *DL* is *dl*, with
+  *Gaussian (precision)* here, its *constGauss* is *Gaussian (fixed)*, and
+  its *DL* is *diffraction-limited* (stored as `precision`, `gauss` and `dl`
+  in a layer's settings), with
   the same widths and fallback.  SMAP's tiff, raw and Other modes and its intensity coding (photons, blinks) are not in the tab.
 * **The width from the precision.**  SMAP draws at 0.4 times the precision,
   with a floor of 3 nm or 0.7 pixels and a cap at 400 nm; here the factor is
@@ -590,9 +631,9 @@ Based on SMAP's layer panel (`gui.GuiChannel`), its renderer
   for 2D data; z within 500 nm is the same.
 * **Contrast** is SMAP's quantile contrast with the same meaning; the default
   is 3, where SMAP uses 3.5, which is darker.
-* **Grouping** links within 50 nm and one dark frame, where SMAP's File tab
-  starts at 35 nm, and its parameters sit under *link settings...*, beside
-  *grouped*, rather than in the File tab.  The summed photons' error adds in quadrature and each
+* **Merging blinks** (SMAP's grouping) links within 50 nm and one dark
+  frame, where SMAP's File tab starts at 35 nm, and its settings sit under
+  *merge settings...*, beside *merge blinks*, rather than in the File tab.  The summed photons' error adds in quadrature and each
   coordinate is weighted by its own error; SMAP uses the precision rule and
   the lateral precision for all of them.
 * **The versatile renderer** is the renderer itself, set in the *axes*

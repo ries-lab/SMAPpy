@@ -8,14 +8,14 @@ The short way in::
                       camera={"conversion": 6.7, "offset": 400,
                               "pixelsize_um": 0.127},
                       calibration="..._3dcal.mat")
-    smappy.view("OUT.h5")
+    smappy.show("OUT.h5")       # the GUI, in a process of its own
 
 `data` is a path, an image source, or frames already in memory.  Every stage is
 also available on its own -- `smappy.fit` only assembles them, and the names
 below are re-exports of the modules that define them.
 
 They are resolved on first use rather than at import, so ``import smappy`` costs
-nothing but this file: the viewer does not drag in matplotlib, and a fit does
+nothing but this file: showing a table does not drag in Qt, and a fit does
 not drag in scipy until a calibration is actually read.
 """
 
@@ -36,7 +36,7 @@ __all__ = [
     "FieldOfView", "RenderSettings", "RenderAxes", "DisplaySettings", "render_locs",
     "save_image", "show",
     "correct_drift", "DriftSettings",
-    "LiveFit", "LiveSettings", "live_view", "QueueSource", "queue_source",
+    "LiveFit", "LiveSettings", "QueueSource", "queue_source",
     "CalibrationSettings", "save_spline_calibration", "DualColorSettings",
     "DualColorCalibration", "calibrate_dual", "load_dual_color_calibration", "__version__",
 ]
@@ -66,9 +66,9 @@ _EXPORTS = {
     "FieldOfView": "render", "RenderSettings": "render", "RenderAxes": "render",
     "DisplaySettings": "render", "render_locs": "render",
     "save_image": "render",
-    "show": "viewer",
+    "show": "api",
     "correct_drift": "drift", "DriftSettings": "drift",
-    "LiveFit": "live", "LiveSettings": "live", "live_view": "live",
+    "LiveFit": "live", "LiveSettings": "live",
     "QueueSource": "io.queue_source", "queue_source": "io.queue_source",
 }
 

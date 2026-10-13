@@ -30,7 +30,7 @@ information away, and least squares on Poisson counts is the wrong estimator
 where the counts are small -- an empty bin carries as much information as a
 full one, and a weight of ``1/sqrt(N)`` cannot express that.
 
-So the default here is **unbinned maximum likelihood** (`method="mle"`): the
+So the fit here is **unbinned maximum likelihood**: the
 model is a probability density over the ROI window, and what is maximized is
 ``sum(log p(t_i))`` over the localizations themselves.  No bins exist; the
 histogram in the figure is drawing only, and changing its bin width changes no
@@ -81,11 +81,6 @@ the confidence intervals instead: they resample the localizations and assume
 nothing about the shape of the likelihood, which is where the small-sample
 error bar goes wrong.
 
-`method="binned"` keeps the old way for comparison, as Poisson-weighted least
-squares on the histogram rather than SMAP's plain least squares.  Even then
-the likelihood that is reported is the unbinned one at the fitted parameters,
-so the two methods -- and every model -- are compared on the same scale.
-
 One fit per layer
 -----------------
 
@@ -100,8 +95,8 @@ The default profile is the one **along** the line, which is what a line is
 usually drawn for; ``axis="across"`` is the one that measures the width of
 something the line crosses.
 
-The plugin declares `Plugin.live`, so the GUI offers a *live* tick that
-refits while the ROI is dragged: the fit is tens of milliseconds and a
+The plugin declares `Plugin.follow_roi`, so the GUI offers a *follow ROI*
+tick that refits while the ROI is dragged: the fit is tens of milliseconds and a
 measurement one can aim with is a different tool from one that is asked for
 and read afterwards.
 
@@ -120,9 +115,10 @@ import numpy as np
 from ..locs import Localizations
 from ..regions import Region
 from ..render import positions
-from . import Context, Plot, Plugin, Result, param, register
+from . import (Context, FormState, Notice, Plot, Plugin, Result, param,
+               register)
 
-PRECISION_FIELDS = ("xy_err_nm", "xy_err_pix")
+PRECISION_FIELDS = ("xy_err_nm",)
 PRECISION_Z_FIELDS = ("z_err_nm",)
 MIN_FOR_FIT = 8             # below this the maximum is not where the data is
 THIN = 30                   # below this the error bars are worth a warning
@@ -296,7 +292,7 @@ class Model:
     start: Callable                 # start(t, precision, window, **variant)
     bounds: Callable                # bounds(t, window) -> [(lo, hi), ...]
     shape: Callable                 # shape(params, t, precision, window) -> density
-    describe: Callable              # describe(params, errors) -> str
+    describe: Callable              # describe(Shown) -> str
     variants: Tuple[Dict, ...] = ({},)   # fits tried, best likelihood wins
     # Which parameters are widths that add to the localization precision in
     # quadrature, and so are fitted as *variances*.  A width enters the model
@@ -317,10 +313,31 @@ def _fwhm(s: float) -> float:
     return FWHM_PER_SIGMA * s
 
 
-def _pm(value: float, error: float, digits: int = 1) -> str:
+def _pm(value: float, error: float, digits: int = 1, unit: str = "") -> str:
+    """``12.3 ± 0.4 nm``: the value, its error where there is one, the unit."""
+    tail = f" {unit}" if unit else ""
     if not np.isfinite(error):
-        return f"{value:.{digits}f}"
-    return f"{value:.{digits}f} +- {error:.{digits}f}"
+        return f"{value:.{digits}f}{tail}"
+    return f"{value:.{digits}f} \u00b1 {error:.{digits}f}{tail}"
+
+
+UNDETERMINED = "not determined"
+
+
+@dataclass
+class Shown:
+    """What a model's `describe` formats from: the parameters, their errors,
+    which of them the data determined, and the profile's unit."""
+    p: np.ndarray
+    e: np.ndarray
+    ok: np.ndarray
+    unit: str = ""
+
+    def pm(self, i: int, length: bool = True) -> str:
+        """Parameter ``i`` with its error and unit, or "not determined"."""
+        if not self.ok[i]:
+            return UNDETERMINED
+        return _pm(self.p[i], self.e[i], unit=self.unit if length else "")
 
 
 # ------------------------------------------------------- starting values
@@ -671,8 +688,9 @@ GAUSS = Model(
     bounds=lambda t, window: [window, _positive(window)],
     shape=lambda p, t, prec, window: gauss_density(t, p[0],
                                                    _widths(p[1], prec), window),
-    describe=lambda p, e: (f"centre {_pm(p[0], e[0])}, sigma {_pm(p[1], e[1])} "
-                           f"(FWHM {_fwhm(p[1]):.1f})"),
+    describe=lambda f: (f"centre {f.pm(0)}, sigma {f.pm(1)}"
+                        + (f" (FWHM {_fwhm(f.p[1]):.1f} {f.unit})".replace(" )", ")")
+                           if f.ok[1] else "")),
     squares=(1,),
 )
 
@@ -686,9 +704,9 @@ TWO_GAUSS = Model(
         p[3] * gauss_density(t, p[0] - 0.5 * p[1], _widths(p[2], prec), window)
         + (1 - p[3]) * gauss_density(t, p[0] + 0.5 * p[1],
                                      _widths(p[2], prec), window)),
-    describe=lambda p, e: (f"distance {_pm(p[1], e[1])}, sigma {_pm(p[2], e[2])}, "
-                           f"centre {_pm(p[0], e[0])}, "
-                           f"weights {p[3]:.2f}/{1 - p[3]:.2f}"),
+    describe=lambda f: (f"distance {f.pm(1)}, sigma {f.pm(2)}, centre {f.pm(0)}, "
+                        "weights " + (f"{f.p[3]:.2f}/{1 - f.p[3]:.2f}" if f.ok[3]
+                                      else UNDETERMINED)),
     squares=(2,),
 )
 
@@ -699,7 +717,7 @@ STEP = Model(
     bounds=lambda t, window: [window, _positive(window)],
     shape=lambda p, t, prec, window, side=1.0: step_density(
         t, p[0], _widths(p[1], prec), window, side),
-    describe=lambda p, e: f"edge at {_pm(p[0], e[0])}, blur sigma {_pm(p[1], e[1])}",
+    describe=lambda f: f"edge at {f.pm(0)}, blur sigma {f.pm(1)}",
     # which way the edge faces is not a parameter to be walked to: it is one
     # bit, and both are cheap to try
     variants=({"side": 1.0}, {"side": -1.0}),
@@ -714,8 +732,7 @@ DISK = Model(
     shape=lambda p, t, prec, window: arc_density(t, p[0], p[1],
                                                  _widths(p[2], prec), window,
                                                  kind="disk"),
-    describe=lambda p, e: (f"radius {_pm(p[1], e[1])}, centre {_pm(p[0], e[0])}, "
-                           f"blur sigma {_pm(p[2], e[2])}"),
+    describe=lambda f: f"radius {f.pm(1)}, centre {f.pm(0)}, blur sigma {f.pm(2)}",
     squares=(2,),
 )
 
@@ -727,8 +744,7 @@ RING = Model(
     shape=lambda p, t, prec, window: arc_density(t, p[0], p[1],
                                                  _widths(p[2], prec), window,
                                                  kind="ring"),
-    describe=lambda p, e: (f"radius {_pm(p[1], e[1])}, centre {_pm(p[0], e[0])}, "
-                           f"blur sigma {_pm(p[2], e[2])}"),
+    describe=lambda f: f"radius {f.pm(1)}, centre {f.pm(0)}, blur sigma {f.pm(2)}",
     squares=(2,),
 )
 
@@ -751,8 +767,7 @@ class Fit:
     background: float               # the uniform fraction, 0 when not fitted
     background_error: float
     n: int
-    log_likelihood: float           # always the unbinned one, whatever fitted
-    method: str
+    log_likelihood: float
     with_precision: bool
     window: Tuple[float, float]
     extra: Dict = field(default_factory=dict)
@@ -762,6 +777,20 @@ class Fit:
     replicates: Optional[np.ndarray] = None
     intervals: Optional[Dict[str, Tuple[float, float]]] = None
     level: float = 0.95
+    unit: str = ""                       # the profile's: nm or px
+    # per parameter: whether the data fixed it (`determined`); None: all were
+    determined: Optional[np.ndarray] = None
+
+    @property
+    def degenerate(self) -> bool:
+        """A parameter the data did not determine: the model is not a
+        candidate for the AIC verdict (`verdict`)."""
+        return self.determined is not None and not bool(np.all(self.determined))
+
+    def undetermined(self) -> List[str]:
+        if self.determined is None:
+            return []
+        return [n for n, ok in zip(self.names, self.determined) if not ok]
 
     @property
     def k(self) -> int:
@@ -800,7 +829,10 @@ class Fit:
 
     @property
     def summary(self) -> str:
-        text = MODELS[self.model].describe(self.params, self.errors)
+        ok = (np.ones(len(self.params), bool) if self.determined is None
+              else np.asarray(self.determined, bool))
+        text = MODELS[self.model].describe(Shown(self.params, self.errors, ok,
+                                                 self.unit))
         if self.extra.get("has_background"):
             text += f", background {100 * self.background:.0f}%"
         if self.extra.get("side", 1.0) < 0:
@@ -898,7 +930,7 @@ def _errors_from(hessian: np.ndarray,
 
 
 def histogram(t, window, bin_size: float):
-    """Counts and edges over the window: for the picture, and for `binned`."""
+    """Counts and edges over the window, for the picture."""
     lo, hi = window
     n_bins = max(int(round((hi - lo) / max(bin_size, 1e-9))), 1)
     edges = np.linspace(lo, hi, n_bins + 1)
@@ -973,30 +1005,50 @@ def _in_widths(errors: np.ndarray, params: np.ndarray,
     return out
 
 
+def determined(errors, at_low, at_high, window,
+               widths: Sequence[int] = ()) -> np.ndarray:
+    """Which parameters the data fixed.
+
+    Not one that ended on its bound -- a distance of zero, a centre at the
+    window's edge, a weight of 0 or 1: the optimizer stopped there because
+    it could go no further, not because the likelihood peaks there -- nor
+    one whose error is more than half the window, which says the profile
+    allows it almost anywhere.  Such a number is printed as "not determined"
+    rather than as a value that looks measured, and the model it belongs to
+    is left out of the AIC verdict.
+
+    The one exception is a structural width at zero (``widths``): the
+    structure is narrower than the localization precision lets the profile
+    resolve, which is an answer -- a ring of 60 nm drawn with 8 nm precision
+    has its blur there -- and not a fit that failed.
+    """
+    errors = np.asarray(errors, float)
+    half = 0.5 * float(window[1] - window[0])
+    wide = np.isfinite(errors) & (errors > half)
+    low = np.asarray(at_low, bool).copy()
+    low[[i for i in widths if i < len(low)]] = False
+    return ~(low | np.asarray(at_high, bool) | wide)
+
+
 def fit_profile(t, precision=None, model: str = "gauss",
                 window: Optional[Tuple[float, float]] = None,
-                method: str = "mle", background: bool = True,
-                bin_size: float = 0.0,
+                background: bool = True,
                 start: Optional[Dict[str, float]] = None,
-                variant: Optional[Dict] = None) -> Fit:
+                variant: Optional[Dict] = None, unit: str = "") -> Fit:
     """Fit one coordinate of the localizations with ``model``.
 
     ``t`` are the positions themselves, never a histogram, and ``precision``
     is each localization's own error -- or None to fit one width for all of
     them.  ``window`` is where a localization could have been (the ROI), and
-    is part of the likelihood, so the truncation costs no bias.
-
-    ``method``: ``"mle"`` maximizes the unbinned likelihood; ``"binned"`` is
-    Poisson-weighted least squares on a histogram of ``bin_size``, kept for
-    comparison with the old way.  Either way the likelihood reported is the
-    unbinned one at the fitted parameters, so every fit is on one scale.
+    is part of the likelihood, so the truncation costs no bias.  What is
+    maximized is the unbinned likelihood; no bin width enters it.
 
     ``start`` and ``variant`` override the starting values and the direction
     a step faces.  They exist for `bootstrap`, which refits the same data a
     few hundred times and should neither re-derive the starting values on
     each resample nor be free to answer with a different shape each time.
     """
-    from scipy.optimize import least_squares, minimize
+    from scipy.optimize import minimize
 
     t = np.asarray(t, float)
     t = t[np.isfinite(t)]
@@ -1043,36 +1095,11 @@ def fit_profile(t, precision=None, model: str = "gauss",
                                   shape)
             return float(-np.sum(np.log(np.maximum(density(t, precision), TINY))))
 
-        if method == "binned":
-            counts, edges = histogram(t, window, bin_size or auto_bin(t, window))
-            centres = 0.5 * (edges[:-1] + edges[1:])
-            widths = np.diff(edges)
-            total = float(counts.sum())
-            # the density integrated over each bin, by three-point
-            # Gauss-Legendre, rather than sampled at its centre: a peak a bin
-            # or two wide is otherwise fitted too tall and too narrow
-            nodes = np.concatenate([centres + f * 0.5 * widths
-                                    for f in (-np.sqrt(0.6), 0.0, np.sqrt(0.6))])
-            quadrature = np.array([5.0, 8.0, 5.0]) / 18.0
-
-            def residuals(vector):
-                params, fraction = split(np.asarray(vector, float))
-                density = _density_of(spec, params, window, fraction,
-                                      background, shape)
-                at = _curve_of(density, precision)(nodes).reshape(3, -1)
-                expected = total * widths * (quadrature @ at)
-                # Poisson weights rather than SMAP's plain least squares: at
-                # ten counts a bin the two differ by more than the bin width
-                return (counts - expected) / np.sqrt(np.maximum(expected, 1.0))
-
-            found = least_squares(residuals, first, bounds=(lower, upper))
-            vector = np.asarray(found.x, float)
-        else:
-            found = minimize(nll, first, method="L-BFGS-B",
-                             bounds=list(zip(lower, upper)))
-            vector = np.asarray(found.x, float)
-            if not np.all(np.isfinite(vector)):
-                vector = first
+        found = minimize(nll, first, method="L-BFGS-B",
+                         bounds=list(zip(lower, upper)))
+        vector = np.asarray(found.x, float)
+        if not np.all(np.isfinite(vector)):
+            vector = first
 
         params, fraction = split(vector)
         span = np.maximum(upper - lower, 1e-12)
@@ -1080,16 +1107,23 @@ def fit_profile(t, precision=None, model: str = "gauss",
         errors = _in_widths(_errors_from(_hessian(nll, vector), free),
                             _from_fit(vector, squares), squares)
         density = _density_of(spec, params, window, fraction, background, shape)
+        n_params = len(params)
+        # on the bound to a thousandth of its range: L-BFGS-B stops a hair
+        # inside it as often as on it
+        fixed = determined(errors[:n_params],
+                           (vector <= lower + 1e-3 * span)[:n_params],
+                           (vector >= upper - 1e-3 * span)[:n_params],
+                           window, widths=squares)
         fit = Fit(model=spec.key, label=spec.label, names=spec.names,
                   params=np.asarray(params, float),
                   errors=np.asarray(errors[:len(params)], float),
                   background=fraction,
                   background_error=float(errors[-1]) if background else 0.0,
-                  n=len(t), log_likelihood=-nll(vector), method=method,
+                  n=len(t), log_likelihood=-nll(vector),
                   with_precision=precision is not None, window=window,
-                  extra={"has_background": background, "bin_size": bin_size,
-                         **shape},
-                  curve=_curve_of(density, precision))
+                  extra={"has_background": background, **shape},
+                  curve=_curve_of(density, precision), unit=unit,
+                  determined=fixed)
         if best is None or fit.log_likelihood > best.log_likelihood:
             best = fit
     return best
@@ -1154,9 +1188,7 @@ def bootstrap(fit: Fit, t, precision=None, rounds: int = 200,
             again = fit_profile(t[pick],
                                 None if precision is None else precision[pick],
                                 model=fit.model, window=fit.window,
-                                method=fit.method, background=has_background,
-                                bin_size=float(fit.extra.get("bin_size", 0.0)),
-                                start=start, variant=variant)
+                                background=has_background, start=start, variant=variant)
         except (ValueError, FloatingPointError, np.linalg.LinAlgError):
             continue
         kept.append([float(v) for v in again.params] + [again.background])
@@ -1188,7 +1220,23 @@ def fit_models(t, precision=None, models: Sequence[str] = ("gauss",),
     the second Gaussian can only ever fit better.
     """
     found = [fit_profile(t, precision, model=m, **kwargs) for m in models]
-    return sorted(found, key=lambda f: f.aic)
+    # a model with a parameter the data did not fix is not a candidate, so
+    # it goes after the ones that are, whatever its AIC
+    return sorted(found, key=lambda f: (f.degenerate, f.aic))
+
+
+def verdict(fits: Sequence[Fit]) -> str:
+    """The AIC comparison, over the models that determined every parameter."""
+    candidates = [f for f in fits if not f.degenerate]
+    left_out = [f.label for f in fits if f.degenerate]
+    tail = (f"; left out, not determined: {', '.join(left_out)}"
+            if left_out else "")
+    if not candidates:
+        return "no model determined all its parameters" + tail
+    if len(candidates) == 1:
+        return f"best by AIC: {candidates[0].label} (no other to compare){tail}"
+    return (f"best by AIC: {candidates[0].label} "
+            f"(by {candidates[1].aic - candidates[0].aic:.1f}){tail}")
 
 
 # ------------------------------------------------------------ the profiles
@@ -1235,7 +1283,7 @@ def profiles(locs: Localizations, region: Region,
 
     lateral = column(kept, PRECISION_FIELDS)
     precision = np.asarray(kept[lateral], float) if lateral else None
-    unit = "nm" if "x_nm" in kept else "pix"
+    unit = "nm" if "x_nm" in kept else "px"
     missing = "" if lateral else ("no localization precision in the table: one "
                                   "width is fitted for every localization")
 
@@ -1351,10 +1399,15 @@ def draw_profile(ax, layers: Sequence["LayerProfile"]) -> None:
         grid = np.linspace(profile.window[0], profile.window[1], 400)
         scale = len(profile.values) * layer.bin_size
         shown = layer.fits if alone else layer.fits[:1]
-        for fit, colour in zip(shown, model_colours):
+        for k, (fit, colour) in enumerate(zip(shown, model_colours)):
+            # the best first in the legend and last on the canvas: drawn
+            # first, the winner was under the curves that lost
             ax.plot(grid, scale * fit.curve(grid),
                     color=colour if alone else layer.colour, linewidth=1.5,
-                    label=fit.label if alone else None)
+                    linestyle=":" if fit.degenerate else "-",
+                    zorder=3 + len(shown) - k,
+                    label=(fit.label + (" (not determined)" if fit.degenerate
+                                        else "")) if alone else None)
     if not alone or len(layers[0].fits) > 1:
         ax.legend(fontsize=6.5, frameon=False)
     first = layers[0].profile
@@ -1454,13 +1507,6 @@ class LineProfileSettings:
                                 ("ring", "ring, seen edge-on"),
                                 ("all", "all five, compared")),
                        help="what the profile is expected to be")
-    method: str = param("mle", label="fit",
-                        choices=(("mle", "unbinned, maximum likelihood"),
-                                 ("binned", "binned, least squares")),
-                        help="the unbinned fit uses the localizations "
-                             "themselves, so no fitted number depends on the "
-                             "bin width; with few localizations it is the "
-                             "only one worth trusting")
     use_precision: bool = param(True, label="use localization precision",
                                 help="each localization is a Gaussian of its "
                                      "own precision, so the fitted width is "
@@ -1481,9 +1527,8 @@ class LineProfileSettings:
                               max=99.9, advanced=True,
                               help="the interval the resamples are asked for")
     bin_nm: float = param(0.0, label="bin", unit="nm", min=0.0,
-                          help="0: chosen from the data.  In pixels for a "
-                               "table in pixels.  Drawing only, unless the "
-                               "binned fit is chosen")
+                          help="0: chosen from the data.  Drawing only: "
+                               "no fitted number depends on it")
     length_nm: float = param(0.0, label="length", unit="nm", min=0.0,
                              advanced=True,
                              help="0: the ROI's own length.  Otherwise a "
@@ -1499,8 +1544,24 @@ class LineProfile(Plugin):
     changes_locs = False
     # 2: the two-Gaussian start tries peaks far apart; 3: z_err_nm; 4: the
     # EM starts are tried narrow as well, so a close pair is not merged; the
-    # binned fit integrates over its bins; the z window is the filter's, in nm
-    version = "4"
+    # binned fit integrates over its bins; the z window is the filter's, in nm;
+    # 5: each layer as it is shown -- its blinks, when it is grouped;
+    # 6: the binned least-squares fit and its setting are gone; 7: a
+    # parameter on its bound or with an error over half the window is "not
+    # determined" and its model left out of the AIC verdict
+    version = "7"
+
+    def describe(self, ctx: Optional[Context], settings) -> FormState:
+        """Say so before Run when there is no line to take a profile along,
+        with a button that starts drawing one (the GUI's ``"draw line"``)."""
+        if ctx is None or ctx.session is None:
+            return FormState()
+        try:
+            _line_roi(ctx)
+        except ValueError as e:
+            return FormState(notice=Notice(f"{e}.", action="Draw line",
+                                           window="draw line", kind="info"))
+        return FormState()
 
     def run(self, ctx: Context, settings: LineProfileSettings) -> Result:
         region = _line_roi(ctx)
@@ -1517,10 +1578,12 @@ class LineProfile(Plugin):
                 lines.append(f"{fit.summary}")
                 lines.append(f"    log L {fit.log_likelihood:.1f}, "
                              f"AIC {fit.aic:.1f}, BIC {fit.bic:.1f}")
+                if fit.degenerate:
+                    lines.append(f"    not determined: {', '.join(fit.undetermined())}"
+                                 " -- the profile does not fix them")
                 lines.extend(fit.interval_lines())
             if len(layer.fits) > 1:
-                lines.append(f"best by AIC: {layer.fits[0].label} "
-                             f"(by {layer.fits[1].aic - layer.fits[0].aic:.1f})")
+                lines.append(verdict(layer.fits))
 
         def profile_plot(ax) -> None:
             draw_profile(ax, layers)
@@ -1549,9 +1612,7 @@ class LineProfile(Plugin):
 
         return Result(
             text="\n".join(lines), settings=settings,
-            # "layer_profiles", not "layers": `Session.apply` reads
-            # data["layers"] as layer set-ups to apply (`Chain/Layers`), and
-            # every Run of this plugin crashed there on a list of profiles
+            # one profile per layer, each with its fits
             data={"layer_profiles": layers,
                   "fits": per_layer(lambda l: {f.model: f for f in l.fits}),
                   "values": per_layer(lambda l: {f.model: f.values() for f in l.fits}),
@@ -1564,10 +1625,10 @@ class LineProfile(Plugin):
                   "n": sum(len(l.profile.values) for l in layers)},
             plot=profile_plot, plots=plots)
 
-    # cheap enough to redo while the line is dragged; see `Plugin.live`.  No
+    # cheap enough to redo while the line is dragged; see `Plugin.follow_roi`.  No
     # preview: `run` changes nothing, so a preview would be the same as Run,
     # and Run draws the figures.
-    live = True
+    follow_roi = True
 
 
 def fit_layers(ctx: Context, settings: LineProfileSettings,
@@ -1605,12 +1666,11 @@ def fit_layers(ctx: Context, settings: LineProfileSettings,
         precision = profile.precision if settings.use_precision else None
         bin_size = settings.bin_nm or auto_bin(profile.values, profile.window)
         models = (tuple(MODELS) if settings.model == "all" else (settings.model,))
-        ctx.report(f"fitting {len(profile.values)} localizations "
-                   f"({'unbinned' if settings.method == 'mle' else 'binned'})"
+        ctx.report(f"fitting {len(profile.values)} localizations"
                    + (f" -- {name}" if len(groups) > 1 else ""))
         fits = fit_models(profile.values, precision, models=models,
-                          window=profile.window, method=settings.method,
-                          background=settings.background, bin_size=bin_size)
+                          window=profile.window, background=settings.background,
+                          unit=profile.unit)
 
         # only the best model is resampled: a few hundred refits are worth
         # spending on the answer, not on the models that lost
@@ -1638,7 +1698,8 @@ def _groups(ctx: Context, settings: LineProfileSettings):
         for i, layer in enumerate(getattr(session, "layers", [])):
             if layer.is_image or not layer.visible:
                 continue
-            locs = ctx.layer_selection(i).apply(ctx.locs)
+            table, selection = ctx.table(i)       # as the layer shows it
+            locs = selection.apply(table)
             taken = [colour for _, colour, _ in found]
             found.append((layer.name,
                           layer_colour(layer.get_display(), len(found), taken),
@@ -1647,7 +1708,7 @@ def _groups(ctx: Context, settings: LineProfileSettings):
             return found
         if getattr(session, "layers", None):
             ctx.report("no visible localization layer: the selection is used instead")
-    ctx.selection.require(MIN_FOR_FIT, ctx.report, "a profile fit")
+    ctx.selection.require(MIN_FOR_FIT, ctx.warn, "a profile fit")
     return [(ctx.selection.name or "selection", FALLBACK_COLOURS[0],
              ctx.selection.apply(ctx.locs))]
 
@@ -1684,7 +1745,7 @@ def _z_window(ctx: Context) -> Optional[Tuple[Optional[float], Optional[float]]]
         return None
     try:
         layer = session._locs_layer()
-        ranges = layer.state.sets["ungrouped"].filter.ranges
+        ranges = layer.ranges
     except Exception:
         return None
     low, high = ranges.get("z_nm", (None, None))

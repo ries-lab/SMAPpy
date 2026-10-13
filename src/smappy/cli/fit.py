@@ -2,16 +2,20 @@
 
   smappy-fit DATA OUT --camera CONFIG.yaml [--cal FILE]
              [--frames N] [--roisize N] [--sigma S]
-             [--cutoff F] [--filter dog|gauss] [--raw-frames N]
+             [--cutoff F [--cutoff-mode dynamic|absolute]]
+             [--filter dog|gauss] [--raw-frames N]
 
-The camera is stated in --camera or with --pixelsize/--conversion/--offset;
---cameras CAMERAS.mat is an optional shortcut where a SMAP settings file exists.
+The camera comes from the camera database and the file's metadata; what they
+do not say is stated in --camera CONFIG.yaml or with
+--pixelsize/--conversion/--offset.
 """
 import argparse
+import sys
 import time
+import warnings
 
-from ..detect import (AbsoluteCutoff, DoGFilter, DynamicCutoff,
-                            GaussFilter, PeakFinder)
+from ..api import OLD_ABSOLUTE_FROM, peak_cutoff
+from ..detect import DoGFilter, GaussFilter, PeakFinder
 from ..io.calibration import load_spline_calibration, warn_on_em_mismatch
 from ..io.hdf5 import LocalizationWriter, save_images
 from ..io.tiff import open_stack
@@ -30,10 +34,13 @@ def main() -> None:
     ap.add_argument("--chunk", type=int, default=200)
     ap.add_argument("--roisize", type=int, default=13)
     ap.add_argument("--sigma", type=float, default=1.2)
-    ap.add_argument("--cutoff", type=float, default=1.7)
+    ap.add_argument("--cutoff", type=float, default=1.7,
+                    help="the detection threshold, read as --cutoff-mode says")
+    ap.add_argument("--cutoff-mode", choices=["dynamic", "absolute"], default=None,
+                    help="dynamic (default): a multiple of each frame's noise; "
+                         "absolute: photons on the filtered image")
     ap.add_argument("--filter", choices=["dog", "gauss"], default="dog")
     ap.add_argument("--max-fit-distance", type=float, default=None)
-    ap.add_argument("--units", choices=["pixel", "nm", "pixel+nm"], default="pixel")
     ap.add_argument("--threads", type=int, default=0, help="0 = one per core")
     ap.add_argument("--read-ahead", type=int, default=2)
     ap.add_argument("--raw-frames", type=int, default=50,
@@ -50,10 +57,18 @@ def main() -> None:
     else:
         model = GaussianPSF(sigma=a.sigma)
     flt = DoGFilter(a.sigma) if a.filter == "dog" else GaussFilter(a.sigma)
-    cut = DynamicCutoff(a.cutoff) if a.cutoff < 20 else AbsoluteCutoff(a.cutoff)
+    if a.cutoff_mode is None and a.cutoff >= OLD_ABSOLUTE_FROM:
+        # said where it is seen: a DeprecationWarning is hidden by default
+        print(f"warning: --cutoff {a.cutoff:g} without --cutoff-mode is read as "
+              "photons, as before; pass --cutoff-mode absolute (or dynamic). "
+              "Without a mode it will be dynamic whatever its value.",
+              file=sys.stderr)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        cut = peak_cutoff(a.cutoff, a.cutoff_mode)
     finder = PeakFinder(flt, cut)
     settings = FitSettings(roisize=a.roisize, max_fit_distance=a.max_fit_distance,
-                           output_unit=a.units, n_threads=a.threads)
+                           n_threads=a.threads)
 
     n_frames = min(a.frames, src.n_frames) if a.frames else src.n_frames
     print(f"{cam}\n{model}\n{finder}\nfitting {n_frames} of {src.n_frames} frames, "
@@ -83,7 +98,7 @@ def main() -> None:
         writer.set_metadata({"frame_tags": src.tags.table(),
                              "acquisition": acquisition(src)})
         n_written = len(writer)
-    raw = keeper.image(cam, settings.output_unit, source=str(a.data), name="raw frames")
+    raw = keeper.image(cam, source=str(a.data), name="raw frames")
     if raw is not None:
         save_images(a.out, [raw])
     elapsed = time.time() - t0

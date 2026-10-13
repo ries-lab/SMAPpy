@@ -8,8 +8,8 @@ calibration, is `fitting_3d`: the same fitter form, with a measured PSF.
 """
 from __future__ import annotations
 
-from .common import (field, open_section, place_beside, section, section_of,
-                     show_tab, type_into)
+from .common import (expand, field, open_section, place_beside, section,
+                     section_of, show_tab, type_into)
 
 TITLE = "Fitting in 2D"
 DESCRIPTION = ("The camera, finding the spots, the PSF model, and checking the "
@@ -99,6 +99,12 @@ def make(d) -> None:
            spot=[field(panel, "source.path")], point=field(panel, "source.path"),
            zoom=d.around(field(panel, "source.path"), 760))
     camera = section_of(panel, "camera")
+    d.shot("The camera section starts folded: its title says which camera and "
+           "which numbers the fit will use.",
+           spot=[camera.button], point=camera.button, click=True,
+           zoom=d.around(camera, 760))
+    camera.set_expanded(True)
+    d.settle()
     d.shot("For a recognised camera these stay on auto: the numbers come from "
            "the file and from SMAPpy's camera database.",
            spot=[camera], zoom=d.around(camera, 760))
@@ -144,11 +150,12 @@ def make(d) -> None:
     d.shot("Gaussian 2D fits the position, photons, background and the width "
            "of each spot. Elliptical fits a width in x and one in y.",
            spot=[model], zoom=d.around(model, 760))
-    roi = field(panel, "fit.roi_size") if "roi_size" in field(panel, "fit").fields else None
-    if roi is not None:
-        d.shot("The ROI size is the square fitted around each spot: large enough "
-               "for the spot, small enough not to catch a neighbour.",
-               spot=[roi], zoom=d.around(roi, 760))
+    box = field(panel, "fit.roisize")
+    expand(box)
+    d.settle()
+    d.shot("The fit box is the square fitted around each spot: large enough "
+           "for the spot, small enough not to catch a neighbour.",
+           spot=[box], zoom=d.around(box, 760))
 
     d.chapter("Fit and check")
     d.shot("Run.", spot=[panel.run_button], point=panel.run_button, click=True,
@@ -162,7 +169,7 @@ def make(d) -> None:
     if ll is not None:
         ll.click()
         d.settle()
-        d.shot("LL is how well the model fits. A spot that is not a single "
+        d.shot("Fit quality is how well the model fits. A spot that is not a single "
                "molecule fits badly, and the default filter drops the worst.",
                spot=[ll, d.rect(filt.plot)], point=ll, click=True,
                zoom=d.around(filt, 700))
@@ -179,7 +186,7 @@ def make(d) -> None:
     analysis = show_tab(d, "Analysis")
     drift = [section(analysis, name).button for name in ("COMET", "RCC")]
     d.shot("Before measuring, correct the drift, with RCC or COMET in the "
-           "Analysis tab. Filtering and grouping are in the rendering tutorial.",
+           "Analysis tab. Filtering and merging blinks are in the rendering tutorial.",
            spot=drift, point=drift[0], zoom=d.around(drift[0], 760))
 
     d.chapter("Next")

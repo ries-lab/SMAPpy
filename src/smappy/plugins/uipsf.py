@@ -54,10 +54,10 @@ class BeadPart:
 @dataclass
 class BlinkingPart:
     """Single molecules in the sample (in situ)."""
-    depth_um: float = param(1.0, label="depth", unit="um", min=0,
+    depth_um: float = param(1.0, label="depth", unit="µm", min=0,
                             help="how far the objective's focus was moved into "
                                  "the sample from the coverslip; uiPSF refines it")
-    z_range_um: float = param(2.0, label="z range", unit="um", min=0.2,
+    z_range_um: float = param(2.0, label="z range", unit="µm", min=0.2,
                               help="the depth of the model, around focus")
     z_step_nm: float = param(50.0, label="z step", unit="nm", min=5,
                              help="the model's plane spacing")
@@ -88,7 +88,7 @@ class LearningPart:
     """What uiPSF is told beyond the microscope."""
     roi_size_px: Optional[int] = param(None, label="model size", unit="px", min=11,
                                        help="auto: the microscope profile's; at "
-                                            "least 3 px more than the fit's ROI")
+                                            "least 3 px more than the fit box")
     emission_wavelength_nm: Optional[float] = param(None, label="wavelength",
                                                     unit="nm", min=300, max=1200,
                                                     help="auto: the profile's")
@@ -111,35 +111,44 @@ class LearningPart:
 
 @dataclass
 class UiPSFSettings:
-    data: str = param("beads", choices=(("beads", "bead z-stacks"),
-                                        ("blinking", "blinking molecules")),
-                      help="beads: a calibration as the bead window makes one; "
-                           "blinking: the PSF in the sample itself")
-    path: str = param("", label="file", kind="open_file", file_filter=TIFF_FILTER,
+    data: str = param("beads",
+                      choices=(("beads", "bead z-stacks"),
+                               ("blinking", "blinking molecules")),
+                      help="beads: a calibration as the bead window makes "
+                           "one; blinking: the PSF in the sample itself")
+    path: str = param("", label="file", kind="open_file",
+                      file_filter=TIFF_FILTER,
                       help="a file of the acquisition")
     microscope: str = param("", choices=lambda: _microscopes(),
                             help="the optics: NA, refractive indices, "
                                  "wavelength, the splitter")
-    channels: str = param("auto", choices=(("auto", "as the microscope"),
-                                           ("single", "one"),
-                                           ("dual", "two (split camera)")),
+    channels: str = param("auto",
+                          choices=(("auto", "as the microscope"),
+                                   ("single", "one"),
+                                   ("dual", "two (split camera)")),
                           help="auto: two if the microscope has a splitter")
-    model: str = param("zernike", choices=(("zernike", "Zernike pupil"),
-                                           ("voxel", "voxels (beads)"),
-                                           ("pupil", "free pupil (blinking)")),
-                       help="Zernike: smooth and physical; voxels: any shape, "
-                            "needs many beads; free pupil: for unusual PSFs "
-                            "such as a tetrapod")
+    model: str = param("zernike",
+                       choices=(("zernike", "Zernike pupil"),
+                                ("voxel", "voxels (beads)"),
+                                ("pupil", "free pupil (blinking)")),
+                       help="Zernike: smooth and physical; voxels: any "
+                            "shape, needs many beads; free pupil: for "
+                            "unusual PSFs such as a tetrapod")
     output: str = param("", label="save as", kind="save_file",
                         file_filter=CALIBRATION_FILTER,
-                        help="auto: <acquisition>_uipsf_3dcal.h5 beside the data")
-    beads: BeadPart = param(default_factory=BeadPart, label="beads")
-    blinking: BlinkingPart = param(default_factory=BlinkingPart, label="blinking",
-                                   collapsed=True)
-    learning: LearningPart = param(default_factory=LearningPart, label="learning",
-                                   collapsed=True)
-    camera: CameraSettings = param(default_factory=CameraSettings, label="camera",
-                                   collapsed=True)
+                        help="auto: <acquisition>_uipsf_3dcal.h5 beside the "
+                             "data")
+    beads: BeadPart = param(default_factory=BeadPart, label="beads",
+                            advanced=True)
+    blinking: BlinkingPart = param(default_factory=BlinkingPart,
+                                   label="blinking", collapsed=True,
+                                   advanced=True)
+    learning: LearningPart = param(default_factory=LearningPart,
+                                   label="learning", collapsed=True,
+                                   advanced=True)
+    camera: CameraSettings = param(default_factory=CameraSettings,
+                                   label="camera", collapsed=True,
+                                   advanced=True)
 
 
 def output_path(settings: UiPSFSettings) -> Path:
@@ -176,8 +185,7 @@ class UiPSFCalibration(Plugin):
                    "for Spline 3D and Spline 3D 2C")
     Settings = UiPSFSettings
     changes_locs = False
-    version = "1"
-    main = ("data", "path", "microscope", "channels", "model", "output")
+    version = "2"
 
     def run(self, ctx: Context, settings: UiPSFSettings) -> Result:
         from ..uipsf import convert, learn, microscopes, prepare, uipsf_parameters
@@ -201,15 +209,6 @@ class UiPSFCalibration(Plugin):
         ctx.report(f"{data.images.shape} photons, "
                    f"{'two channels' if dual else 'one channel'}")
         lp, b = settings.learning, settings.blinking
-        params = uipsf_parameters(
-            profile, data=settings.data, pixelsize_xy_um=prepare.pixel_size_xy_um(data.camera),
-            dz_nm=dz, roi_size_px=lp.roi_size_px,
-            emission_wavelength_nm=lp.emission_wavelength_nm, peak_height=lp.peak_height,
-            max_beads=settings.beads.max_beads,
-            bead_diameter_nm=settings.beads.bead_diameter_nm, iterations=lp.iterations,
-            zernike_order=lp.zernike_order, depth_um=b.depth_um, z_range_um=b.z_range_um,
-            min_photon=b.min_photon, z_bins=b.z_bins, per_bin=b.per_bin, repeat=b.repeat,
-            start_from=_uipsf_file(b.start_from) if settings.data == "blinking" else "")
         shift = (prepare.channel_shift(data.images)
                  if dual and settings.data == "beads" else None)
         out = output_path(settings)

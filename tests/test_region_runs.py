@@ -10,6 +10,7 @@ from smappy.region_runs import (ColumnRegions, Progress, evaluate_regions,
                                 progress_text, split_ids)
 from smappy.roi_manager.pipeline import Step
 from smappy.session import Session
+from test_roi_session import rois_of                          # noqa: E402
 
 
 def clusters(sizes=(30, 50, 20), noise=15, seed=0):
@@ -33,6 +34,7 @@ def clusters(sizes=(30, 50, 20), noise=15, seed=0):
 
 class Count(Plugin):
     """Counts what it is given, and how often it ran."""
+    changes_locs = False
     name = "Count"
     path = "Test/Count"
     per_region = True
@@ -54,6 +56,30 @@ def test_an_id_column_names_its_regions_and_zero_is_none():
     assert [r.tolist() for r in rows] == [[2, 5], [0, 3, 6]]
     ids, rows = split_ids(np.array([0.0, np.nan, 3.0]))
     assert ids.tolist() == [3.0] and rows[0].tolist() == [2]
+
+
+def test_rois_and_an_id_column_are_regions_of_one_interface():
+    """`regions_of` hands a block either kind; each region's rows are the
+    same whichever names it, and only an ROI has a signature of its own."""
+    from smappy.region_runs import ColumnRegions, ROIRegions, regions_of
+    session = Session(clusters(noise=0))
+    session.show_grouped(0, False)
+    project = session.rois
+    project.set_geometry(400)
+    for k in (1, 2, 3):
+        project.add_roi(next(iter(project.sources)), [k * 5000.0, k * 5000.0])
+    ctx = session.context()
+    rois, column = regions_of(ctx, "rois"), regions_of(ctx, "cluster_id")
+    assert isinstance(rois, ROIRegions) and isinstance(column, ColumnRegions)
+    assert len(rois) == len(column) == 3
+    for k in range(3):
+        assert rois.tables(k)[1].tolist() == column.tables(k)[1].tolist()
+        assert rois.region(k) is not None and column.region(k) is None
+    assert len({column.signature(k) for k in range(3)}) == 1
+    assert len({rois.signature(k) for k in range(3)}) == 3
+    before = [rois.signature(k) for k in range(3)]
+    project.move_roi(rois.region_ids()[0], [5010.0, 5000.0])
+    assert [rois.signature(k) == before[k] for k in range(3)] == [False, True, True]
 
 
 def test_the_status_says_how_far_how_fast_and_how_long():
@@ -109,6 +135,7 @@ def test_a_stopped_run_keeps_the_regions_it_measured():
 
 def test_a_failing_step_costs_its_entry_in_that_region_only():
     class Picky(Plugin):
+        changes_locs = False
         per_region = True
 
         def run(self, ctx, settings):
@@ -128,7 +155,7 @@ def test_the_statistics_run_per_cluster_and_an_empty_one_is_a_zero():
     session = Session(clusters())
     session.show_grouped(0, False)
     session.layers[0].set_bound("photons", 1e9, None)     # nothing passes
-    steps = pipeline_module.resolve(pipeline_module.default_instances())
+    steps = pipeline_module.block_steps(pipeline_module.default_block())
     table = session.evaluate_regions("cluster_id", steps)["Localization Statistics"]
     assert table.columns()["n_localizations"].tolist() == [0, 0, 0]
 
@@ -162,17 +189,14 @@ def test_a_cluster_has_its_blinks_through_group_id():
 
 
 def test_the_roi_run_reports_its_status_and_stops_when_asked():
-    from smappy.roi_manager import ROIProject
-    from smappy.workspace import Instance
-    project = ROIProject()
-    source = project.add_source(clusters(sizes=(20,) * 4, noise=0), name="a")
-    project.set_filters({})
+    from smappy.chain import Block, Step as ChainStep
+    project, source = rois_of(clusters(sizes=(20,) * 4, noise=0), filters={})
     for k in range(1, 5):
-        project.add_roi(source.id, [k * 5000.0, k * 5000.0], reviewed=True)
+        project.add_roi(source.id, [k * 5000.0, k * 5000.0])
     said = []
     calls = []
-    run = project.evaluate([Instance(plugin="Analysis/Measure/Localization Statistics",
-                                     values={"fit_precision": False})],
+    run = project.evaluate([ChainStep(plugin="Analysis/Measure/Localization Statistics",
+                                     values={"precision_fit": "none"})],
                            report=said.append,
                            stop=lambda: len(calls) >= 2,
                            progress=lambda done, total: calls.append(done))
@@ -184,6 +208,7 @@ def test_the_roi_run_reports_its_status_and_stops_when_asked():
 
 class Drawn(Plugin):
     """Keeps the data of its figure; counts how often it measured."""
+    changes_locs = False
     name = "Drawn"
     path = "Test/Drawn"
     per_region = True
@@ -203,11 +228,8 @@ class Drawn(Plugin):
 
 
 def test_a_rois_figure_comes_back_from_what_it_kept_without_measuring_again():
-    from smappy.roi_manager import ROIProject
-    project = ROIProject()
-    source = project.add_source(clusters(noise=0), name="a")
-    project.set_filters({})
-    roi = project.add_roi(source.id, [5000.0, 5000.0], reviewed=True)
+    project, source = rois_of(clusters(noise=0), filters={})
+    roi = project.add_roi(source.id, [5000.0, 5000.0])
     steps = [Step("drawn", Drawn.path, Drawn(), None)]
     Drawn.runs = 0
     project.evaluate(steps=steps)
@@ -218,13 +240,12 @@ def test_a_rois_figure_comes_back_from_what_it_kept_without_measuring_again():
     assert results["drawn"].data == {"n": 30} and results["drawn"].figures()
 
 
-def test_a_columns_regions_keep_no_figure_data_unless_asked():
+def test_a_columns_regions_keep_no_figure_data():
+    """To look at clusters one makes ROIs of them, which keep theirs."""
     source = ColumnRegions(locs=clusters(), column="cluster_id")
     steps = [Step("drawn", Drawn.path, Drawn(), None)]
     table = evaluate_regions(source, steps)["drawn"]
     assert "kept" not in table.entry("1")
-    table = evaluate_regions(source, steps, keep_figures=True, reuse=False)["drawn"]
-    assert table.entry("1")["kept"] == {"n": 30}
 
 
 def test_the_statistics_keep_their_histograms_and_draw_the_same_curves_again():

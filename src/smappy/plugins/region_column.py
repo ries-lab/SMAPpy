@@ -35,25 +35,25 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
-from . import Context, Plugin, Result, param, register
-from .roi import PER, auto_only, id_table, replace_param, table_rows
+from . import Context, FormState, Plugin, Result, param, register
+from ..region_runs import VALUE_RULES
+from .roi import auto_only, replace_param
 
 # what *results from* is when it is empty: the ROIs, without an evaluation
 NUMBERS = "the ROIs' numbers"
-OVERLAPS = ("last", "first", "mean")
 
 
 @dataclass
 class RegionColumnSettings:
     source: str = param("", label="results from", choices=auto_only,
-                        help="an evaluation on the ROIs, or one per region of "
+                        help="what was measured on the ROIs, or per region of "
                              "an id column; empty: the ROIs, for their numbers")
     values: str = param("", label="values",
                         help="comma separated; empty: every number the "
-                             "evaluation measured; roi_id: the ROI's number")
+                             "measurement has; roi_id: the ROI's number")
     prefix: str = param("", label="prefix", advanced=True,
                         help="put before each column's name")
-    merge: str = param("last", label="overlaps", choices=OVERLAPS, advanced=True,
+    merge: str = param("last", label="overlaps", choices=VALUE_RULES, advanced=True,
                        help="a localization in two ROIs takes the later ROI's "
                             "value, the first's, or their mean")
 
@@ -79,63 +79,52 @@ class RegionsToColumn(Plugin):
 
     Settings = RegionColumnSettings
     changes_locs = True
-    version = "1"
+    # the values go onto the localizations
+    grouping = "ungrouped"
+    version = "2"         # 2: roi_id is the ROI's own number, kept when others go
 
-    def choices(self, ctx: Context, settings):
-        out = [("", NUMBERS)]
-        if ctx.rois is not None:
-            out += [(name, name) for name in sorted(ctx.rois.labels())]
-        if ctx.session is not None:
-            for column, tables in sorted(ctx.session.id_regions.items()):
-                out += [(f"{PER}{column}: {label}",) * 2 for label in tables]
-        return {"source": out}
+    def describe(self, ctx, settings) -> FormState:
+        """*results from*: the evaluations the session has."""
+        if ctx is None:
+            return FormState()
+        from ..region_results import available
+        return FormState(choices={"source": [("", NUMBERS)]
+                                  + [(str(ev), str(ev)) for ev in available(ctx)]})
 
     def run(self, ctx: Context, settings: RegionColumnSettings) -> Result:
+        from .. import region_results
         from ..chain import BLOCK_ROIS
-        from ..region_runs import (REGION_NUMBER, region_members, values_onto,
-                                   with_region_columns)
+        from ..region_runs import REGION_NUMBER, write_values
         names = [v.strip() for v in settings.values.split(",") if v.strip()]
         source = settings.source
-        found = id_table(ctx, source)
-        if found is not None:
-            regions, table = found
+        ev = region_results.Evaluation.parse(source)
+        regions = ev.source
+        if source and not region_results.is_current(ctx, ev):
+            raise ValueError(region_results.missing(ctx, ev))
+        if not ev.on_rois:
             numbers = False
             if REGION_NUMBER in names:
                 raise ValueError(f"the regions of {regions} have no ROI numbers: "
                                  f"{regions} itself is theirs")
-            values = rows_values(table_rows(table), names)
-        elif source.startswith(PER):
-            raise ValueError(f"there are no results {source!r} (any more)")
+            values = rows_values(region_results.rows(ctx, ev), names)
         else:
-            regions = BLOCK_ROIS
             if ctx.rois is None:
                 raise ValueError("there are no ROIs: find or draw some first")
             numbers = not source or REGION_NUMBER in names
             measured = [n for n in names if n != REGION_NUMBER]
             values = {}
             if source:
-                if source not in ctx.rois.labels():
-                    raise ValueError(f"no evaluation on the ROIs is called {source!r}")
                 if measured or not names:
-                    values = rows_values(ctx.rois.results(labels=[source]), measured)
+                    values = rows_values(region_results.rows(ctx, ev), measured)
             elif measured:
-                raise ValueError(f"{', '.join(measured)}: name the evaluation that "
+                raise ValueError(f"{', '.join(measured)}: name the measurement that "
                                  "measured them in *results from*")
-        members = region_members(ctx, regions)
+        out, members = write_values(ctx, ctx.locs, regions, values, settings.merge,
+                                    {"source": source or NUMBERS}, settings.prefix,
+                                    numbers=numbers)
         n = len(ctx.locs)
-        columns = {settings.prefix + k: v for k, v in
-                   values_onto(n, members, values, settings.merge).items()}
-        if regions == BLOCK_ROIS and numbers:
-            columns[settings.prefix + REGION_NUMBER] = roi_numbers(
-                n, members, ctx.rois.numbers(),
-                "first" if settings.merge == "first" else "last")
-        if not columns:
-            raise ValueError("there is nothing to write")
-        for name in columns:
-            if not name.isidentifier():
-                raise ValueError(f"{name!r} is not usable as a column name")
-        out = with_region_columns(ctx.locs, columns,
-                                  {"regions": regions, "source": source or NUMBERS})
+        columns = [settings.prefix + k for k in values] + (
+            [settings.prefix + REGION_NUMBER] if numbers else [])
         inside = np.zeros(n, dtype=bool)
         for _, rows in members:
             inside[rows] = True
@@ -145,17 +134,6 @@ class RegionsToColumn(Plugin):
                            f"{int(inside.sum())} localizations, "
                            f"{n - int(inside.sum())} in none",
                       values={"regions": len(members), "inside": int(inside.sum())})
-
-
-def roi_numbers(n: int, members, numbers: Dict[Any, int], rule: str = "last") -> np.ndarray:
-    """``n`` rows, each the number of the last ROI in ``members`` -- in the
-    order they were made -- that holds it (the first, with ``rule``), 0 in
-    none."""
-    from ..region_runs import merge_pieces
-    numbers = {str(k): v for k, v in numbers.items()}
-    pieces = [(rows, np.full(len(rows), numbers[r], dtype=np.int64))
-              for r, rows in members if len(rows)]
-    return merge_pieces(n, pieces, rule) if pieces else np.zeros(n, dtype=np.int64)
 
 
 # ------------------------------------------------------------ column to ROIs
@@ -224,6 +202,8 @@ class ColumnToROIs(Plugin):
 
     Settings = ColumnROIsSettings
     changes_locs = False
+    # an id column is the localizations', and so is a region's outline
+    grouping = "ungrouped"
     version = "1"
 
     def run(self, ctx: Context, settings: ColumnROIsSettings) -> Result:
@@ -239,7 +219,7 @@ class ColumnToROIs(Plugin):
         column = settings.column.strip()
         outline = settings.outline
         found = column_regions(ctx.locs, column, settings.min_size, outline)
-        made, flat = 0, 0
+        made, flat = [], 0
         with project.edit(f"{self.name}: ROIs") as step:
             replaced = []
             if settings.replace:
@@ -252,17 +232,17 @@ class ColumnToROIs(Plugin):
                 if outline and region["polygon"] is None:
                     flat += 1                   # no hull: the centre, as without
                 file_id = sources.get(region["file"], next(iter(sources.values())))
-                project.add_roi(file_id, region["center"], polygon=region["polygon"],
-                                origin={"method": self.path, "column": column,
-                                        "cluster": region["id"],
-                                        "localizations": int(len(region["rows"]))})
-                made += 1
-            step.label = f"{self.name}: {made} ROIs" + (
+                made.append(project.add_roi(
+                    file_id, region["center"], polygon=region["polygon"],
+                    origin={"method": self.path, "column": column,
+                            "cluster": region["id"],
+                            "localizations": int(len(region["rows"]))}))
+            step.label = f"{self.name}: {len(made)} ROIs" + (
                 f" for {len(replaced)}" if replaced else "")
-        text = f"{made} ROIs of {column}, from {settings.min_size} localizations"
+        text = f"{len(made)} ROIs of {column}, from {settings.min_size} localizations"
         if replaced:
             text += f", replacing {len(replaced)}"
         if flat:
             text += f"; {flat} with no outline (on a line) got the ROI manager's shape"
-        return Result(text=text, settings=settings, data={"rois": made},
-                      values={"rois": made})
+        return Result(text=text, settings=settings, rois=made,
+                      values={"rois": len(made)})

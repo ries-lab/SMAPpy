@@ -184,8 +184,8 @@ class StackViewer(QMainWindow):
                                        self.calibration.z_index_to_nm(depth - 1),
                                        self.calibration.z_index_to_nm(0)))
             ax.imshow(image, **options)
-            ax.set(xlabel="y (pixels)" if orientation == "YZ" else "x (pixels)",
-                   ylabel="y (pixels)" if orientation == "XY" else "emitter z (nm)",
+            ax.set(xlabel="y (px)" if orientation == "YZ" else "x (px)",
+                   ylabel="y (px)" if orientation == "XY" else "emitter z (nm)",
                    title=" - ".join(p for p in (title, orientation) if p))
         self.canvas.draw_idle()
         where = (f"emitter z = {self.calibration.z_index_to_nm(index):.1f} nm"

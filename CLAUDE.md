@@ -5,7 +5,8 @@ localization table -> analysis, with a Qt GUI over the same functions.  Read
 `NOTES.md` for the decisions behind the fitting pipeline and
 `docs/plugin-architecture.md` for why the plugin system is shaped as it is,
 and `docs/regions.md` for ROIs, clusters and what is measured per region.
-This file is the practical part: what a session needs before it can write a
+`docs/plugin-reference.md` is the reference: the context, the result, the
+table's columns.  This file is the practical part: what a session needs before it can write a
 plugin, and the traps that cost time.  It is a summary written at one moment
 and the code moves, so treat it as a starting point, not as authority -- and
 see "Keeping this file true" at the end.
@@ -19,11 +20,9 @@ Pull first:
 Work lands on `origin/main` from cloud sessions and other machines, so the
 local `main` is routinely well behind it -- 28 commits, on one occasion.
 Editing first means rebasing finished work through conflicts in files upstream
-has already changed, and it is always the same files: `NOTES.md`, and the
-plugin-list assertions in `tests/test_workspace.py` and `tests/test_discovery.py`,
-which every added plugin extends.  If you have already started, `git stash push
--u` first so new untracked files come along, and rebuild afterwards if `csrc/`
-moved.
+has already changed -- `NOTES.md` most often.  If you have already started,
+`git stash push -u` first so new untracked files come along, and rebuild
+afterwards if `csrc/` moved.
 
 ## Getting the checkout to run
 
@@ -53,13 +52,17 @@ Running the tests -- two tiers:
   makes work stealing the default (xdist's own piles the tutorials onto one
   worker) and runs the slow tests first.
 * **Automatic garbage collection is off, in the tests and in the app.**  The
-  collector otherwise runs in whichever thread allocates, and a Qt widget
-  left in a reference cycle, destroyed on a fit's reader thread, deadlocked
-  a test worker.  `conftest.py` collects on the main thread every 100 tests;
-  the GUI's entry points call `gui/collector.collect_on_gui_thread`, a timer
-  on the GUI thread.  A test that needs an object gone calls `gc.collect()`
-  itself; a new entry point that makes a QApplication installs the collector,
-  the icon (`gui/icon.install_icon`) and the session's identity
+  collector otherwise runs in whichever thread allocates and frees every
+  cycle in the process, whatever that thread holds.  PySide sends only plain
+  `QWidget`s back to the main thread, not subclasses, so a widget left in a
+  reference cycle is destroyed on the worker.  On a fit's reader thread that
+  deadlocked a test worker, and with automatic collection switched on again
+  in 2026-10, `--slow` segfaulted a worker in 9 runs of 9.  `conftest.py` collects on the main thread every 100 tests;
+  the GUI's entry points install `gui/collector.collect_on_gui_thread`, a
+  timer on the GUI thread.  A test that needs an object gone calls
+  `gc.collect()` itself; a new entry point gets its QApplication from
+  `gui.make_app()`, which installs the collector, the icon and the fields'
+  style, and one that makes a session installs its identity too
   (`gui/identity.install_identity`: its name and colour in every window title).
 * **A `QTimer.singleShot` callable must never raise.**  PySide leaves its
   exception pending inside `processEvents`, and the next Python override Qt
@@ -67,8 +70,6 @@ Running the tests -- two tiers:
   `QTimer`'s `timeout` signal instead.  Make matplotlib canvases with
   `gui/canvas.canvas_class()`, whose queued redraw survives a deleted canvas.
 
-* Plain `pytest` collects `externaltools/Comet`, which imports numba and errors
-  out.  Always name `tests`.
 * The Qt tests need Qt's own libraries, not a display: on a bare container they
   fail with `ImportError: libEGL.so.1`.  Install them once --
 
@@ -94,22 +95,22 @@ shape, so read the one closest to what you are writing:
 | measures the selection and draws it | `statistics.py` (settings, selection, several figures in one window) |
 | rewrites the table and hands it back | `assign_colors.py` (`Result.locs`, a preview) |
 | a long computation with progress | `drift_comet.py`, `drift_rcc.py` |
-| loads, saves, exports, simulates | `file.py` (a plugin per format, no input table; the simulator's model is `smappy.simulate`) |
+| loads, saves, exports, simulates | `file.py` (one loader with an advanced *format* choice, no input table; the simulator's model is `smappy.simulate`) |
 | finds, measures or summarises ROIs | `roi.py` (a segmenter derives from `SegmenterPlugin`, which gives it a Preview, *replace* (`replace_param()`) and a step of the ROI undo; `per_region = True`; analyse; segmenters under `Analysis/Regions/Find`) |
-| parts, presets, a C++ backend | `fit.py` (nested settings dataclasses) |
+| parts, a C++ backend | `fit.py` (nested settings dataclasses; four fitters, thin subclasses of `_FitPlugin`) |
 | adds a derived column, no output | `math_parser.py` (an expression, kept with the table as a recipe) |
 | removes or flags localizations | `remove_locs.py` (a region, a new table or a filtered flag) |
-| fits a model to what is in a ROI | `line_profile.py` (unbinned likelihood, models compared by AIC; one fit per layer, and `live`) |
+| fits a model to what is in a ROI | `line_profile.py` (unbinned likelihood, models compared by AIC; one fit per layer, and `follow_roi`) |
 | reads the session and reports | `history.py` (the log, with an optional export) |
-| sets up layers and filters from settings | `chain_layers.py` (bounds as rows per layer, `Result.data["layers"]`) |
+| sets up layers and filters from settings | `chain_layers.py` (bounds as rows per layer, `Result.layers`) |
 | scores a fit against a simulation | `ground_truth.py` (the truth redrawn from the recipe, matched per frame) |
 | draws what the microscope recorded per frame | `image_tags.py` (the fit's `metadata["frame_tags"]`) |
 | finds a structure by its shape and judges it, then counts it | `npc.py` (a ring filter and circle fit in the segmenter, a per-site count, and a model of whole pores in `smappy/npc.py` fitted to the site table) |
 | summarises what evaluators measured | `roi.py`'s `SiteAnalysisPlugin` (an evaluator to read, a *results from* field, a preflight that asks which when there are several; under `Analysis/Regions/Summarize`) |
-| runs the ROI manager's segment, evaluate and analyse as one | `npc_analysis.chain.yaml` (a shipped chain: a block runs NPC Corners in every ROI before the next step; `docs/batch.md`, "ROIs: segment, evaluate, analyse") |
+| runs the ROI manager's segment, measure and analyse as one | `npc_analysis.chain.yaml` (a shipped chain: a block runs NPC Corners in every ROI before the next step; `docs/batch.md`, "ROIs: segment, measure, analyse") |
 | finds clusters and names them in the table | `clusters.py` (DBSCAN: `cluster_id` / `n_in_cluster`; ROIs of them are `region_column.py`'s *Column to ROIs*, for any id column) |
-| writes what was measured per region onto its localizations | `region_column.py` (*Regions to column*: `region_runs.values_onto`, NaN outside, never over a column of the localizations' own; a block's *write values* does the same) |
-| runs steps once per region, writes columns back | `blocks.py` (a `chain.Block`; `region_runs.RegionScratch`, `WriteBack`, *write values*; per-cluster results in `Session.id_regions`) |
+| writes what was measured per region onto its localizations | `region_column.py` (*Regions to column*: `region_runs.write_values`, NaN outside, never over a column of the localizations' own; a block's *write values* calls the same) |
+| runs steps once per region, writes columns back | `smappy/blocks.py` (a `chain.Block`; the regions through `region_runs.regions_of` -- ROIs or an id column, one interface; `RegionScratch`, `WriteBack`, *write values*; per-cluster results in `Session.id_regions`; the ROI project holds one, `ROIProject.block`) |
 | opens an interactive window of the GUI's | `bead_calibration.py` (`Plugin.window`: the button opens what the GUI registered in `session.window_openers`) |
 | runs an external program in its own Python | `uipsf.py` (`smappy.uipsf`: a worker script under that program's interpreter, progress read from its output, the result converted into smappy's own file) |
 | hands the session to a new instance | `smappy.handoff` (*File > Open in a new window*: the table through shared memory, the rest as JSON, `smappy-gui --handoff`) |
@@ -156,13 +157,15 @@ class Thing(Plugin):
   column each of the region table) and `Result.arrays`, so it can run once
   per ROI -- in `ROIProject.region_context(roi)`: `ctx.locs` the ROI's rows,
   each layer's filter over them, `ctx.region` its shape -- as well as on the
-  view like any other plugin.  The evaluation window offers these; in a chain
+  view like any other plugin.  The per-region steps window offers these; in a chain
   it runs once in each region as a step of a block (`chain.Block`,
-  `blocks.py`): over the ROIs or an id column such as `cluster_id`
+  `smappy/blocks.py`): over the ROIs or an id column such as `cluster_id`
   (`docs/regions.md`).  Its results belong to
   the ROI, whoever ran them, under the evaluation's name
-  (`ROIProject.evaluations`; a renamed one is a second evaluation), so an
-  analysis reads `ROIProject.results()` and never the pipeline.
+  (`ROIProject.evaluations`; a renamed one is a second evaluation), or to
+  the id column (`Session.id_regions`), so an analysis reads them through
+  `region_results` (`rows`, the current ones of either) and never the
+  pipeline.
 * Override `preview` for a plugin that can show its work before committing;
   the GUI grows a button when it is overridden and nothing when it is not.
   A plugin that changes nothing needs none: Run opens its figures.
@@ -173,231 +176,71 @@ class Thing(Plugin):
   plain yes, each carrying the settings it would run with: COMET offers an RCC
   prepass, because "no" is not a useful answer to "this will take an
   afternoon".
-* Override `notice` to say something about the settings as they stand, before
-  any run -- a line under the form, and optionally a button that opens a GUI
-  window by name (`Notice(text, action, window)`, the same
-  `session.window_openers` as `Plugin.window`).  The fitters use it for a file
-  whose camera is not in the database, opening the camera editor.  When
-  what it says depends on the session, override `notice_for(ctx, settings)`
-  instead -- the saver says which region results its settings leave out.
+* Override `describe(ctx, settings)` to say what the form should show about
+  the settings as they stand, before any run, as a `FormState`: `hints` (what
+  fields on *auto* resolve to), `active` (which fields are read; the rest are
+  greyed), `choices` (lists the session decides) and a `notice` -- a line
+  under the form, and optionally a button that opens a GUI window by name
+  (`Notice(text, action, window)`, the same `session.window_openers` as
+  `Plugin.window`).  `ctx` is None when there is no session.  The fitters
+  use it for a file whose camera is not in the database, opening the camera
+  editor; the saver says which region results its settings leave out.  A
+  chain forwards its steps' with the one hook.
 * `changes_locs` -- True if `run` hands back a new table (or files), False
-  if not; every shipped plugin declares it (`tests/test_changes_locs.py`),
-  and `changes_locs_for(settings)` refines it where it depends on the
+  if not; required, a class that does not declare it is refused when it is
+  defined (`tests/test_changes_locs.py` checks the shipped ones say it
+  truly), and `changes_locs_for(settings)` refines it where it depends on the
   settings.  While a fit is still appending, `Session.apply` refuses a table
   change and the GUI asks before such a run, offering a new window.  A change
-  that is a column computed from the others can return a `LiveRecipe`
-  instead (`data["live_recipe"]`, with `live_recipe_for`), which follows the
+  that is a column computed from the others can return a `ColumnRecipe`
+  instead (`Result.recipe`, with `column_recipe_for`), which follows the
   live table: `math_parser.py`, `assign_colors.py`.
-* Set `live = True` on a plugin whose work is tens of milliseconds: the GUI
-  grows a *live* tick and measures again while the ROI is dragged (its
+* Set `follow_roi = True` on a plugin whose work is tens of milliseconds: the
+  GUI grows a *follow ROI* tick and measures again while the ROI is dragged (its
   `preview` if it has one, else `run`, never applied), silently (no log line,
   no window, no focus).  It turns a measurement one asks for into one that
   can be aimed.
 * **A plugin that measures usually wants one answer per layer**, not one over
   the selection: a line is drawn over two channels and the measurement is how
-  they differ.  `ctx.layer_selection(i)` is layer `i`'s (not
-  `session.selection(i)`: during a live fit the session's table has grown
-  since the context was made), and `line_profile.py`'s `_groups` is the
-  shape to copy.
+  they differ.  `ctx.table(i)` is layer `i`'s table and selection, as the
+  layer shows it (not `session.table(i)`: during a live fit the session's
+  table has grown since the context was made), and `line_profile.py`'s
+  `_groups` is the shape to copy.
 
 **Put the algorithm in module-level functions that take arrays** and let `run`
 be the thin wrapper.  A script, a test and a notebook should be able to get the
 same numbers without a session, a plugin or a window.  Every shipped plugin is
 written this way; it is also what makes the tests readable.
 
-### The context
+### The essentials
 
-* `ctx.locs` -- the whole table, **always the ungrouped one**; during a live
-  fit, a snapshot taken when the run started.
-* `ctx.table(layer)` -- `(locs, selection)`, grouped or not as the layer, a
-  chain and `Plugin.grouping` decide.  Read this, not `ctx.locs`, in a plugin
-  that should honour a chain's grouping; `Session.table` links the grouped
-  table on request.
-* `ctx.selection` -- what the user is looking at: the layer's filter *and* the
-  ROI *and*, while the 3D window is open with "plugins use the slab" ticked,
-  the slab (`session.selects_slab`), as a boolean mask.  `.apply(locs)` cuts the table,
-  `.require(n, ctx.report, "what")` refuses an empty one and warns about a thin
-  one.  A plugin that offers "all localizations" means `ctx.locs` unfiltered.
-* `ctx.session` -- may be `None`; a script can say `Context(locs=locs)`, so
-  never assume a session exists.
-* `ctx.report(text)` for progress, `ctx.emit(event, payload)` to hand partial
-  results on.  Both are no-ops when nobody is listening.
-* `ctx.warn(text)` for what must not be missed: kept in `ctx.warnings`, shown
-  as its own line that progress does not overwrite.  Put the warnings in the
-  result's text if they should reach the history.
-* `ctx.region_id` / `ctx.per_region` -- set when the run is one region of
-  many (an ROI or a cluster); `ctx.region` is the shape, None for a cluster.
-* `ctx.stop` and `ctx.writer_finished` -- `threading.Event`s or None, set from
-  another thread: end the run early keeping what it has, and "the live source
-  is complete".  The Fit plugin honours both; a long plugin may check `stop`.
-* The **grouped** table (one row per blink) is a table of its own, with its own
-  filter, at `session.layers[i].state.sets["grouped"]`; it exists only once the
-  user has switched that layer to grouped, and `state.grouped_stale` says it no
-  longer matches the current table.  Linking costs seconds to minutes -- say
-  what is missing instead of doing it behind the user's back.  Once it has been
-  built once, `group_id` and `n_in_group` are on the *ungrouped* table too
-  (`group.attach`), so a column computed afterwards can be reduced per blink
-  with a `bincount` and no relinking.
+The full reference -- every field of the context and the result, the column
+vocabulary, the picture's axes, simulated data -- is `docs/plugin-reference.md`.
+What a plugin gets wrong without it:
 
-### The result
-
-`Result(locs=..., text=..., plot=..., plots={...}, data={...}, settings=...,
-title=...)`, every part optional (`title` says what the figures are of, in
-the figure window's title).  `plot(ax)` is handed **one** axis; for a grid, pass
-`Plot(draw, panels=n, size=(w, h))` instead, and `draw` is handed the figure
-and lays out its own panels (`statistics.py`, `Analysis/Regions/Summarize/Histograms`
-and the fit preview all do this).  Never set the figure's size or its layout
-engine: on the window's *All* page a plot is handed a `SubFigure`, which has
-neither, and `size` is the hint the window reads instead.  Return the settings
-that were actually used -- that is what the history records.
-
-`text` goes into the plugin panel's output box, however long it is; the Text
-button opens it in a window on request.  Set `text_window = True` on the
-plugin only when the text *is* the result and is long -- `history.py` is the
-one that does -- and the window then opens by itself.
-
-A run that **changes** the localizations is logged: `Session.apply` appends
-the plugin's path, the result's `text` and its settings to `session.history`,
-which is written into the file (`metadata["history"]`, capped at
-`MAX_HISTORY`) and read back when it is reopened, so a table says what was
-done to it and with which numbers.  A run that only measures is not: it can
-be repeated from the file, and logging it would record only that somebody
-looked.  What a measurement worked out goes with its *result* instead --
-`Plugin.keep`, and the session stores the settings beside it, which for a
-measurement is the only record there is.  `Plugin.logged` overrides the rule
-(`True` for a run that changes something the log cannot see, such as writing
-a file; `False` for never), and `Analysis/Process/History` shows the log and
-exports it.  A chain logs once, its steps under `steps`, whether or not it
-changed the table.
-
-That is why a plugin returns the settings it actually used, and why one that
-changes the table hands back a new one rather than editing `ctx.locs`: the
-undo and the record both hang off the result.
-
-`Result.data["bounds"] = {field: (lo, hi)}` asks the session to open the
-filter on a column the run has just written -- a plugin cannot set it itself,
-because a filter belongs to the table it was built from and the new table
-exists only once `Session.apply` has set it.
-
-`Result.data["images"]` hands the session the camera frames a fit kept
-(`smappy.rawframes`); they replace the session's raw frames, since a fit
-replaces the table.
-
-The figures of one result share a window, a tab each beyond the first, and a
-tab is drawn when it is looked at and not before -- so a plugin with six
-figures costs what one costs, and a plot must be a closure over its data
-rather than something already drawn.
-
-## The table
-
-`Localizations` is a dataclass of `columns: Dict[str, np.ndarray]` plus
-`metadata`.  `locs["photons"]`, `"photons" in locs`, `locs.keys()`, `len(locs)`,
-`locs[mask]` (a new table).  The column vocabulary:
-
-| column | meaning |
-| --- | --- |
-| `x_nm`, `y_nm`, `z_nm` | position (a pixel-unit table has `x_pix`, ...) |
-| `frame` | camera frame, int64 |
-| `photons`, `background` | per localization |
-| `xy_err_nm` | lateral precision, the RMS of `x_err_nm` and `y_err_nm`; `xy_err_pix` in a pixel table |
-| `z_err_nm` | axial precision, when the fit produced one |
-| `n_in_group` | **on-time in frames** (for a table with a trace id, `tid`, the localizations in the trace); grouping writes it onto both tables |
-| `group_id` | which group a localization was linked into, 1-based; on the grouped table, its own row |
-| `cluster_id`, `n_in_cluster` | which cluster, 1-based, 0 for none, and the localizations in it -- written by `Analysis/Regions/Find/DBSCAN` (`plugins/clusters.py`) |
-| `sigma_nm`, `sigma_y_nm`, `logl_rel` | PSF width and fit quality |
-| `filenumber`, `channel` | which file, which channel |
-
-Every precision is `<quantity>_err_<unit>` -- `x_err_nm`, `z_err_nm`,
-`photons_err` (no unit, nothing after `_err`).
-
-Prefer `next((n for n in ("xy_err_nm", "xy_err_pix") if n in locs), None)`
-over assuming one spelling, and raise a message naming the columns the table
-*does* have when something is missing.
-
-A column that needs a **rule for grouping** is a recipe rather than data:
-`mathparse` keeps it in `metadata["derived"]`, and the recipe says what the
-field means once the localizations are grouped -- recomputed from its
-expression there, or reduced by a rule (`mean`, `sum`, `any`, ...).  It is
-`group.combine` that honours it, so a derived column is never averaged by
-accident, and it survives a save.  Usually the recipe is an expression
-(`math_parser.py`); a column that was *measured* per localization and only
-needs the rule -- the `use` flag `remove_locs.py` writes -- is a recipe with
-a rule and no expression.
-
-Columns written from what was measured per region (`n_corners` on every
-localization of its pore) are listed in `metadata["region_columns"]`, and
-only those may be written over from regions again (`region_runs.check_writable`).
-
-A fitted table also carries `metadata["frame_tags"]` (the image tags that
-changed, per frame: `smappy.frametags`) and `metadata["acquisition"]` (the
-Micro-Manager summary, devices and comment); both are written beside `/locs`,
-not in the metadata attribute.
-
-## What the picture's axes are
-
-The render grid is normally the table's positions, and usually a plugin can
-forget this -- but it does not have to be.  `RenderSettings.axes`
-(`render.RenderAxes`) says which column each axis is and what to divide it by,
-so the same renderer draws photons against frame, or one fit parameter against
-another, with the same layers, LUTs, filters, ROIs and 3D box; the hidden
-"axes" section of the Render tab is where a user turns it on.  A coordinate is
-the column over that axis's scale, which keeps the grid square in *render
-units* -- that is why nothing downstream knows about it.
-
-What that means for a plugin:
-
-* `ctx.locs` and `render.positions` are unchanged: they are the table and its
-  position columns, in nanometres, whatever the picture is showing.  Only the
-  render path goes through `axes.coordinates`.
-* `ctx.selection` is still a mask over the same rows, and an ROI drawn on a
-  versatile picture is in that picture's coordinates, so the mask means what
-  the user drew.
-* `session.axes()` is the current set and `axes.is_default` is the ordinary
-  picture.  A plugin that draws in nanometres, measures a distance or places a
-  site should say so -- or check -- rather than assume: the extent the user is
-  looking at may be in photons.
-* A width per axis: `settings.sigma` and `settings.sigma_y`, in each axis's own
-  units, zero meaning plain binning.  The localization precision only blurs an
-  axis that is a position (`render.render_sigmas` has the rule).
-
-`NOTES.md` under "Any column against any other" records why it is shaped this
-way and what was left out of SMAP's `VersatileRenderer`.
-
-## Simulated data
-
-`smappy.simulate` is one model with two outputs, and the `File/Simulate/
-Blinking Structure` plugin (shown as *Simulate structure*) is its form:
-structure -> labelling -> blinking -> localizations or camera frames.  NOTES.md, "The simulation model", has the
-assumptions.  What a session needs:
-
-* Structures are YAML (the syntax is in `simulate/structure.py`); the
-  built-ins are the files in `src/smappy/data/structures` -- `demo` (the ring
-  and cross the tutorials measure), `npc`, `filaments`, `pie` -- and a new
-  one is a file dropped there.
-* `simulate(n_frames=..., seed=..., drift=...)` gives a localization table;
-  `camera_frames(...)` gives `(frames, truth)`.  Both take the settings
-  dataclasses of `simulate/settings.py` for everything else.
-* A camera simulation saved as `*.sim.yaml` (`simulate.source.write_recipe`)
-  is an acquisition: a fitter's `source.path` may name it, `open_stack` opens
-  it, the frames are drawn as they are read, and the camera comes from it.
-* The truth columns: `emitter` (which fluorophore), `dye`, `copy` (which
-  copy of the structure); camera truth adds `neighbour_nm`, the nearest other
-  spot in the same frame.  `metadata["copies"]` has each copy's position and
-  turn by its `copy` number (`x_nm`, ..., `alpha_deg`, `beta_deg`,
-  `gamma_deg`: R = Rz(alpha) Ry(beta) Rz(gamma)).
-* Simulated localizations go down to 10 photons, as SMAP's do, and Ground
-  Truth sets anything below its `min_photons` (100) aside, so a check of a
-  simulated table's precision should look at the bright ones.
-* `Analysis/Measure/Ground Truth` scores a table against its simulation --
-  found, false, missed, Jaccard, bias, and error over reported precision --
-  finding the recipe by the table's `source` (a fitter writes it) or its
-  `simulation_settings`; `plugins/ground_truth.py` has `match` and `compare`
-  as functions for a test.  The `simulation` tutorial walks the whole path.
-* The camera frames keep every spot, and every fluorophore blinks within the
-  stack whatever its length, so a short test stack is dense: pass
-  `labelling=LabellingSettings(efficiency=0.1)`, and compare a fit only
-  against truth with `neighbour_nm > ISOLATED_NM` -- crowded spots pull z
-  towards focus.  `tests/test_camera_frames.py` is the pattern.
+* `ctx.locs` is **the table the layer shows** -- one row per blink on a
+  grouped layer -- and `ctx.selection` is what the user is looking at
+  (filter, ROI, slab) as a mask over it.  A plugin that needs the
+  localizations (it hands back a new table, or pairs frames as NeNA does)
+  declares `grouping = "ungrouped"` and gets them whatever the layer shows;
+  a new table made from the grouped one is refused.  `ctx.ungrouped()` is
+  the localizations for a plugin that measures blinks and writes onto them
+  (`clusters.py`), and `ctx.table(layer)` another layer's table.  Say on the
+  plugin's page which table it reads.
+* `ctx.session` may be `None`: a script says `Context(locs=locs)`.
+* `ctx.report` for progress, `ctx.warn` for what must not be missed (progress
+  overwrites the one, not the other).
+* Return a **new** table in `Result.locs`, never edit `ctx.locs`, and return
+  the settings actually used: the undo and the history hang off the result.
+  A run that changes the table is logged; one that only measures is not.
+* `plot(ax)` gets one axis; for a grid use `Plot(draw, panels=n, size=...)`.
+  Never set a figure's size or layout engine (on the *All* page it is a
+  `SubFigure`), and make a plot a closure over its data: tabs draw lazily.
+* Columns are `<quantity>_<unit>` and precisions `<quantity>_err_<unit>`
+  (`x_nm`, `xy_err_nm`, `photons_err`); look a column up rather than assume
+  it, and name the columns the table *does* have when one is missing.
+* A column that needs a rule for grouping is a recipe (`metadata["derived"]`),
+  not plain data: `math_parser.py`.
 
 ## Tests
 
@@ -406,15 +249,11 @@ assumptions.  What a session needs:
 numbers: simulate data with known parameters and assert they come back.
 `tests/test_statistics.py` is the pattern.
 
-One coupling to remember: **`tests/test_discovery.py` and
-`tests/test_workspace.py` enumerate the `Analysis/` plugins exhaustively**, so
-a new plugin there fails four tests until it is listed in both (the workspace
-ones name the seeded Analysis tab, including the order its titles come back
-in).  `tests/test_file_plugins.py::test_the_file_tab_ships_with_the_four_it_needs`
-asserts the File tab's exact contents, so a new File plugin needs a line there
-too (it is a Qt test and skips without PySide6).  Likewise
-`tests/test_workspace.py::test_the_window_opens_the_shipped_tabs` lists the
-Localize tab's titles, so a new Localize plugin needs a line there.
+The discovery and workspace tests (`test_discovery.py`, `test_workspace.py`,
+`test_file_plugins.py`) check that the shipped plugins are found and that the
+tabs seed by rule -- a floor of plugins that must be there, the Analysis tab
+being every favourite under `Analysis/` but the regions, finders before
+summaries.  Adding a plugin needs no test edits unless it changes a rule.
 
 `tests/test_control_width.py` builds every shipped plugin's panel and fails if
 it is wider than the control column (`CONTROL_WIDTH`): a new plugin with a long
@@ -430,15 +269,13 @@ or moved.  Before writing or editing a storyboard, read
 speak.
 
 `tests/test_plugin_docs.py` checks every shipped plugin's page: that it
-exists or the plugin is in `UNDOCUMENTED` (the plugins written before pages
-were -- a list that only shrinks, and a new plugin never joins it), that its
-`version` is the plugin's, that every setting is explained, and that it
+exists, that its `version` is the plugin's, that every setting is explained, and that it
 renders with its maths and figures (the figures in the slow tier).
 
 Plugins reach the shipped workspace by themselves: the Analysis tab seeds from
 `Analysis/` except `Analysis/Regions/`, which seeds the Regions tab, and `favorite` defaults to True, so there is no registry to edit.
 For a `per_region` plugin, `favorite` also decides whether it is in a
-new evaluation pipeline; a specialised one (`NPC Corners`) sets it False.
+new list of per-region steps; a specialised one (`NPC Corners`) sets it False.
 
 ## The plugin's page
 
@@ -451,13 +288,17 @@ understand the algorithm without reading the code.  The format is in
 `src/smappy/docs/__init__.py`; `Analysis/Drift/RCC.md` is the example to copy.
 
 The tabs and windows that are not plugins (the Render tab, the Regions tab,
-the ROI manager, the region steps, the 3D view, the bead calibration, the batch window) have pages too,
+the ROI manager, the per-region steps, the 3D view, the bead calibration, the batch window) have pages too,
 in `src/smappy/docs/panels/`, with `title`, `summary` and `widget` in the
 front matter and a *Controls* section in place of *Parameters*: one
 `### label` per control, the label exactly as the panel shows it.
 `tests/test_panel_docs.py` builds each panel and fails on a label it does not
 show, so a session that renames a control or adds one updates the panel's
-page too.
+page too.  Beside them is `Glossary.md`, which has no widget (`WIDGETLESS`
+in that test): the field's words with the other names they go by, which a
+page links (`plugin:Panels/Glossary`) where it first explains one.
+`tests/test_plugin_docs.py` checks that every link between pages leads to a
+page.
 
 **Writing it is part of the work, and it is yours.**  A session that adds a
 plugin writes its page in the same change.  A session that changes what a
@@ -480,8 +321,8 @@ holds everything else.
   (the steps, one bold lead-in each, with figures), *In detail* (the maths,
   the constants, the edge cases), *Parameters* (notes only), *Output* (what
   each number and figure means, what a good and a bad result look like),
-  *Differences from SMAP*, *References*.  Leave out a section that has
-  nothing to say.
+  *Differences from SMAP* (only for a plugin ported from SMAP),
+  *References*.  Leave out a section that has nothing to say.
 * **Two registers.**  The first two sections are for a biologist: plain
   words, one idea per sentence, an equation only where it says something a
   sentence cannot, every symbol explained where it first appears.  *In
@@ -497,13 +338,18 @@ holds everything else.
   leave it out.
 * **Settings by their GUI label**, in italics (*time windows*), in the
   prose.  Column names in backticks (`xy_err_nm`).
+* **Jargon** is explained at its first mention on each page: the names
+  common in the field and one plain line, linked to the Glossary
+  (`plugin:Panels/Glossary`) and worded as it is there.
 * **Parameter notes add to the tooltip, never repeat it.**  The tooltip
   (`param(help=...)`) is a short phrase and is shown in the table anyway; a
   `### field` note says how to choose the value, what goes wrong at either
   extreme, or a typical range.  A setting with neither fails the test, and a
   tooltip is the better place for anything short, because the GUI shows it
   on hover.
-* **Figures show the method working**, drawn by the plugin's own
+* **Figures show the method working** -- for a plugin with a method; a
+  loader, a saver or a plugin that only reshapes the table needs none.  They
+  are drawn by the plugin's own
   module-level functions on data from `smappy.simulate`, with the known
   truth drawn beside the answer where there is one.  Put the shared
   simulation in one ```` ```figure-setup ```` block; keep a page's figures to
@@ -530,7 +376,8 @@ holds everything else.
   the output (a different estimator, a step added or dropped, a model that
   differs), not every constant, option or speed-up.  A plugin with no method
   paper behind it cites none.
-* **References** that were checked (PubMed or the journal), with a DOI link;
+* **References** that were checked (PubMed or the journal) -- only where
+  there is a paper to cite -- with a DOI link;
   write a `(` or `)` in a URL as `%28` / `%29`.  Say in a few words what each
   one is cited for when it is not obvious.
 * Spelling as the plugin's module.  Look at the rendered page (the Help
@@ -556,7 +403,7 @@ transliterated.  The correspondence:
 | `obj.getPar` / `setPar`, global parameters | `ctx.session`, or a setting |
 | `obj.locData.getloc(fields, 'layer', L, 'position', 'roi')` | `ctx.selection.apply(ctx.locs)` |
 | `'position', 'all'` | `ctx.locs` |
-| `'grouping', 'grouped'` | the session's grouped set (see above) |
+| `'grouping', 'grouped'` | `ctx.table(layer)` (`docs/plugin-reference.md`) |
 | `obj.setPar('status', ...)` | `ctx.report(text)` |
 | `obj.showresults` / `initaxis` | `Result.plot` / `Result.plots` |
 | `out.clipboard`, the tab-separated summary | `Result.text` and `Result.data` |
@@ -583,7 +430,7 @@ you are in; see `group.py` (why one column at a time, with timings) or
 or American spelling, whichever the file already uses.
 
 Keep changes minimal and finish them: a new plugin means the module, its tests,
-its page, and any exhaustive test that now needs a line.
+and its page.
 
 ## Keeping this file true
 
@@ -593,14 +440,14 @@ session will follow it instead of reading the code.  So, while you work:
 * **Check what you use.**  When this file tells you something you are about to
   rely on -- a column name, a signature, which test enumerates what -- confirm
   it in the code as you go.  The code wins, always.
-* **If it disagrees with the code, stop and ask.**  Say which line is wrong and
-  what you found instead, and let the user decide whether the file or the code
-  is the thing to change.  Do not quietly work around it, and do not assume the
-  file is describing an intention that the code has drifted from -- it may be
-  the code that is the mistake.
-* **If your own change makes a line here wrong, say so.**  Adding a plugin
-  shape, moving the grouped table, renaming a column or changing how the tests
-  enumerate plugins all land in this file.  Propose the edit -- quote the old
-  line and the new one -- and ask before making it, in the same message as the
-  work it belongs to.  Keeping this file current is part of finishing the
-  change, not a separate chore, but it is the user's file and their call.
+* **If a fact here disagrees with the code, trust the code and correct the
+  line** -- a renamed file, function, column or test -- in the same change,
+  and say so in the summary.  The same goes for `docs/plugin-reference.md`.
+* **Stop and ask only when a line states a rule or an intention** (how
+  plugins are written, what is logged, what a test must cover) that the code
+  contradicts: it may be the code that is the mistake, and which one changes
+  is the user's call.
+* **If your own change makes a line here wrong, fix it in the same change.**
+  Adding a plugin shape, moving the grouped table or renaming a column lands
+  here.  Changing a *rule* -- a section of this file, not a fact in it --
+  is proposed first: quote the old line and the new one and ask.

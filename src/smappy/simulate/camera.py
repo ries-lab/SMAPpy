@@ -236,8 +236,7 @@ def _draw_spline(image, frame, xy_px, z_nm, photons, cal) -> None:
 
     Each spot is evaluated in a ROI of the spline's own size around its pixel
     (`evaluate_spline`, whose x and y are ROI coordinates with pixel k
-    centred on k), and a mirrored calibration -- beads imaged through the EM
-    register -- is drawn mirrored, as the fitter flips the ROIs back."""
+    centred on k)."""
     from ..io.calibration import evaluate_spline
     if len(frame) == 0:
         return
@@ -246,16 +245,10 @@ def _draw_spline(image, frame, xy_px, z_nm, photons, cal) -> None:
     size = max(min(nx, ny) - 3, 5)
     half = size // 2
     z_index = cal.z_nm_to_index(np.asarray(z_nm, float))
-    mirror = bool(cal.em_mirror)
     for k in range(len(frame)):
         cx, cy = xy_px[k]
         ox, oy = int(np.rint(cx)) - half, int(np.rint(cy)) - half
-        rx, ry = cx - ox, cy - oy
-        if mirror:
-            rx = size - 1 - rx
-        spot = evaluate_spline(cal, rx, ry, float(z_index[k]), size)
-        if mirror:
-            spot = spot[:, ::-1]
+        spot = evaluate_spline(cal, cx - ox, cy - oy, float(z_index[k]), size)
         x0, y0 = max(ox, 0), max(oy, 0)
         x1, y1 = min(ox + size, width), min(oy + size, height)
         if x1 <= x0 or y1 <= y0:

@@ -21,6 +21,35 @@ def _table(n=4000, seed=0):
                           "xy_err_nm": rng.uniform(5, 15, m).astype(np.float32)}, {})
 
 
+def rois_of(*tables, filters=None, grouped=False):
+    """``(project, source)``: the ROI project of a headless session over
+    ``tables``, a file each, and the first file's source -- how a script
+    makes ROIs.  ``filters`` are the layer's bounds (None: the ones a layer
+    opens with); ``grouped`` whether it merges blinks.  Other tests import
+    this."""
+    from smappy.io.formats import FileInfo
+    session = Session()
+    for k, locs in enumerate(tables):
+        session.add_file(locs, FileInfo(name=f"file{k + 1}", path="", format="test"),
+                         append=k > 0)
+    session.show_grouped(0, grouped)
+    if filters is not None:
+        session.layers[0].set_ranges(filters)
+    project = session.rois
+    return project, project.source_of(0)
+
+
+def set_bounds(project, ranges=None, grouped=None):
+    """The layer the project follows given new bounds, or blinks merged or
+    not, and the project told."""
+    session = project.session
+    if ranges is not None:
+        session.layers[0].set_ranges(ranges)
+    if grouped is not None:
+        session.show_grouped(0, grouped)
+    project.sync()
+
+
 def test_rois_follow_the_layer_and_survive_a_save(tmp_path):
     path = tmp_path / "locs.hdf5"
     save_localizations(path, _table())
@@ -41,8 +70,6 @@ def test_rois_follow_the_layer_and_survive_a_save(tmp_path):
     project.sync()
     found = project.find(file_id, parameters={"min_count": 5})
     assert found                                   # the blobs are found
-    for r in project.rois.values():
-        r.reviewed = True
     project.evaluate()
     before = len(project.results())
     assert before == len(project.rois)
@@ -87,6 +114,7 @@ def test_results_of_a_table_that_never_came_from_a_file_survive_a_save(tmp_path)
     ungrouped = len(project.results())
     assert ungrouped == len(project.rois)
     s.show_grouped(0, True)
+    s.layers[0].locs                                  # drawn: linked
     s.show_grouped(0, False)
     assert "group_id" in s.locs
     assert len(project.results()) == ungrouped
@@ -149,7 +177,7 @@ def test_new_rois_count_without_a_review_step(tmp_path):
     file_id = next(iter(project.sources))
     found = project.find(file_id, parameters={"min_count": 5})
     manual = project.add_roi(file_id, [2000, 2000])
-    assert found and all(r.reviewed for r in project.rois.values())
+    assert found
     project.evaluate()
     assert len(project.results()) == len(found) + 1
     manual.use = False
@@ -168,7 +196,85 @@ def test_numbering_is_stable_and_names_the_file(tmp_path):
     assert project.numbers() == {a.id: 1, b.id: 2}
     assert project.file_number(file_id) == 1
     project.rois.pop(a.id)
-    assert project.numbers() == {b.id: 1}
+    assert project.numbers() == {b.id: 2}            # not renumbered
+    c = project.add_roi(file_id, [3000, 3000])
+    assert c.number == 3                              # and 1 is not given again
+
+
+def test_removing_roi_3_of_5_leaves_roi_5_as_5_in_the_list_the_column_and_the_results(
+        tmp_path):
+    from smappy.roi_manager.pipeline import Step
+    from smappy.plugins import Plugin, Result
+    from smappy.plugins.region_column import RegionsToColumn
+
+    class Count(Plugin):
+        changes_locs = False
+        def run(self, ctx, settings=None):
+            return Result(values={"n": float(len(ctx.selection.apply(ctx.locs)))})
+
+    session, window = _manager(tmp_path)
+    project = session.rois
+    file_id = next(iter(project.sources))
+    project.set_geometry(300)
+    centres = [[1000, 1000], [2500, 1000], [4000, 1000], [5500, 1000], [7000, 1000]]
+    rois = [project.add_roi(file_id, c) for c in centres]
+    fifth = rois[4]
+
+    def listed():
+        model = window.rows
+        return {model.ids[i]: model.data(model.index(i, 0)) for i in range(model.rowCount())}
+
+    window.refresh()
+    window.select(rois[2].id)
+    window._remove()                                  # ROI 3, undoably
+    assert rois[2].id not in project.rois
+    assert listed()[fifth.id] == "5"
+    assert fifth.number == 5
+
+    project.evaluate(steps=[Step(label="Count", path="Test/Count", plugin=Count(),
+                                 settings=None)])
+    assert sorted(r["roi_id"] for r in project.results()) == [1, 2, 4, 5]
+    session.run(RegionsToColumn(), RegionsToColumn.Settings())
+    inside = project.region(fifth).mask(np.asarray(session.locs["x_nm"]),
+                                        np.asarray(session.locs["y_nm"]))
+    assert inside.any()
+    assert (np.asarray(session.locs["roi_id"])[inside] == 5).all()
+    assert 3 not in set(np.asarray(session.locs["roi_id"]).tolist())
+
+    # undo brings ROI 3 back as 3, redo takes it away again, and the next
+    # ROI made is 6 -- a number is never given twice
+    window.undo()
+    assert project.numbers()[rois[2].id] == 3
+    window._fill_table()
+    assert listed()[rois[2].id] == "3"
+    window.redo()
+    assert rois[2].id not in project.rois
+    assert project.add_roi(file_id, [1000, 4000]).number == 6
+
+
+def test_roi_numbers_travel_with_the_file_and_old_files_get_them_in_order(tmp_path):
+    path = tmp_path / "locs.hdf5"
+    save_localizations(path, _table(500))
+    s = Session()
+    s.load(path)
+    project = s.rois
+    file_id = next(iter(project.sources))
+    a, b, c = (project.add_roi(file_id, [x, 1000]) for x in (1000, 2000, 3000))
+    project.rois.pop(a.id)
+    out = s.save(tmp_path / "numbered.hdf5")
+    back = Session()
+    back.load(out)
+    assert sorted(back.rois.numbers().values()) == [2, 3]
+    assert back.rois.add_roi(next(iter(back.rois.sources)), [4000, 1000]).number == 4
+
+    # a project saved before ROIs had numbers: numbered in the order made
+    doc = project.to_dict()
+    for saved in doc["rois"]:
+        saved.pop("number")
+    doc.pop("next_number")
+    project.from_dict(doc)
+    assert [r.number for r in project.rois.values()] == [1, 2]
+    assert project.next_number == 3
 
 
 def _manager(tmp_path, qtbot=None):

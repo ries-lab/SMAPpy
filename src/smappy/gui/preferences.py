@@ -1,4 +1,5 @@
-"""Preferences: the folders scanned for plugins, and the tabs.
+"""Preferences: the folders scanned for plugins, the tabs, and whether
+quitting asks about unsaved changes.
 
 Both are things the user names on purpose.  There is no implicit plugin folder,
 and no tab appears because a stray directory exists -- but a plugin that no tab
@@ -10,7 +11,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QAbstractItemView, QDialog, QDialogButtonBox,
+from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QDialog, QDialogButtonBox,
                                QFileDialog, QHBoxLayout, QInputDialog, QLabel,
                                QListWidget, QListWidgetItem, QMessageBox,
                                QPushButton, QTabWidget, QVBoxLayout, QWidget)
@@ -82,6 +83,22 @@ class RootsPage(QWidget):
             self.status.setToolTip("\n".join(str(d) for d in trouble))
         self.status.setText(text)
         self.status.setStyleSheet("color: #a05000" if trouble else "color: gray")
+
+
+class GeneralPage(QWidget):
+    """What the program does on its own: so far, whether quitting asks."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        self.ask_quit = QCheckBox("ask before quitting with unsaved changes")
+        self.ask_quit.setToolTip("closing the control window or quitting with a "
+                                 "table changed since it was saved or opened "
+                                 "(* in the title) offers to save it first")
+        self.ask_quit.setChecked(config.ask_before_quit())
+        self.ask_quit.toggled.connect(config.set_ask_before_quit)
+        layout.addWidget(self.ask_quit)
+        layout.addStretch(1)
 
 
 class TabsPage(QWidget):
@@ -189,8 +206,10 @@ class PreferencesDialog(QDialog):
         self.pages = QTabWidget()
         self.roots = RootsPage()
         self.tabs = TabsPage(workspace)
+        self.general = GeneralPage()
         self.pages.addTab(self.roots, "Plugin folders")
         self.pages.addTab(self.tabs, "Tabs")
+        self.pages.addTab(self.general, "General")
         layout.addWidget(self.pages)
         buttons = QDialogButtonBox(QDialogButtonBox.Close)
         buttons.rejected.connect(self.accept)

@@ -256,17 +256,6 @@ def test_a_thin_slab_is_warned_about_and_a_thick_one_is_not():
                    for note in measure(locs, max_gap=1, slab_nm=600.0).notes)
 
 
-def test_a_pixel_table_is_reported_in_pixels():
-    locs = blinking(sigma=5.0, on_time=4, seed=4)
-    columns = {"frame": locs["frame"], "x_pix": locs["x_nm"] / 100,
-               "y_pix": locs["y_nm"] / 100, "xy_err_pix": locs["xy_err_nm"] / 100,
-               "photons": locs["photons"]}
-    found = measure(Localizations(columns, {}), max_gap=1)
-    assert found.radial.sigma == pytest.approx(0.05, rel=0.1)
-    text = summary([found])
-    assert "0.05 +/-" in text and "pixels at gap 1" in text and " nm" not in text
-
-
 def test_the_gap_line_falls_back_to_the_one_gap_it_has():
     line = drift_free_sigma([1], [7.0], [0.1])
     assert line["sigma0"] == pytest.approx(7.0)

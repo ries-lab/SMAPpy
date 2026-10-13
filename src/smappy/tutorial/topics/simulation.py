@@ -75,8 +75,8 @@ def make(d) -> None:
     section_of(sim, "labelling").set_expanded(True)
     type_into(sim, "labelling.efficiency", 0.6)
     d.settle()
-    d.shot("Not every site carries a dye: a labelling efficiency near 60 % is "
-           "typical for the pores. Each label gets one fluorophore.",
+    d.shot("Not every copy of the protein carries a dye: a labelling "
+           "efficiency near 60 % is typical for the pores. Each label gets one fluorophore.",
            spot=[efficiency], point=efficiency, click=True,
            zoom=d.around(efficiency, 760))
     blinking = section_of(sim, "blinking")
@@ -123,11 +123,17 @@ def make(d) -> None:
            spot=[sim.output], zoom=d.around(sim.output, 760))
 
     d.chapter("Fitting them")
+    fit_this = sim.notice_button
+    assert fit_this.isVisible() and fit_this.text() == "Fit this"
+    d.shot("Fit this gives the recipe to a fitter as its file.",
+           spot=[fit_this], point=fit_this, click=True,
+           zoom=d.around(fit_this, 760))
+    fit_this.click()
+    d.settle()
     localize = show_tab(d, "Localize")
     _, fit = open_section(d, localize, "Gaussian 2D")
-    type_into(fit, "source.path", str(path))
-    d.settle()
-    d.shot("Give the fitter the recipe as its file.",
+    assert fit.form.values()["source.path"] == str(path)
+    d.shot("The Localize tab opens on the fitter, with the recipe as its file.",
            spot=[field(fit, "source.path")], point=field(fit, "source.path"),
            zoom=d.around(field(fit, "source.path"), 760))
     button = next(b for b in control.findChildren(type(fit.run_button))

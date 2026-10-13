@@ -7,8 +7,8 @@ covers: [smappy.session.Session.save, smappy.io.hdf5.save_localizations, smappy.
 
 Writes the localizations to an HDF5 file (`.hdf5` or `.h5`), together with
 the record of what was done to them, so that the file can be opened again
-here -- by [smappy HDF5](plugin:File/Load/smappy HDF5) or
-[Auto](plugin:File/Load/Auto) -- and still says how it was made.  HDF5 is
+here -- by File > Open or [Auto](plugin:File/Load/Auto) -- and still
+says how it was made.  HDF5 is
 an open format; any language can read the columns (in Python with `h5py`,
 in MATLAB with `h5read`).
 
@@ -42,22 +42,25 @@ with tempfile.TemporaryDirectory() as folder:
 
 **1. The table.**  Every column of the current table is written as it is,
 one dataset per column under `/locs`, with its own type, compressed.  It is
-the ungrouped table: the grouped one is made again by linking when the file
-is opened.  If it has been linked, `group_id` and `n_in_group` are among
-the columns.
+the single localizations: the merged blinks -- [merge
+blinks](plugin:Panels/Glossary), also called grouping or linking, combines
+the localizations in consecutive frames that come from one blinking event
+into one -- are made again when the file
+is opened.  If blinks have been merged, `group_id` and `n_in_group` are
+among the columns.
 
 **2. The record.**  The table's metadata goes into one attribute of the
 file, as JSON: the history (every change made to the table, with its
 settings), the recipes of derived columns, the bounds a plugin asked to
 keep with the table, a drift correction's summary, the camera and the fit
 settings of a table that came from a fit, the simulation's settings for a
-simulated one, the ROI that is drawn, and the ROI manager's project if it
+simulated one, the [ROI](plugin:Panels/Glossary) (region of interest) that is drawn, and the ROI manager's project if it
 was used.  Two parts of a fitted table's metadata are too large for an
 attribute and go beside it: the image tags (what the microscope recorded per
 frame, such as the piezo position) into `/frame_tags`, and the acquisition's
 Micro-Manager summary and device properties into `/acquisition`.  Both are
 read back into the metadata when the file is opened.  So do the numbers the
-ROI manager's evaluations measured: a group per evaluation under `/regions`,
+ROI manager's per-region steps measured: an HDF5 group per step under `/regions`,
 a dataset per column and a row per ROI, so a thousand ROIs cost what their
 numbers do rather than a megabyte of text in the attribute.
 
@@ -68,7 +71,7 @@ into `/results/saved`.
 **4. The GUI, optionally.**  With *save the GUI state too*, the tabs, their
 plugins and their settings are written into `/gui/state`, without the
 window's size and position.  They are not put back when the file is opened;
-File > Restore GUI state from file does that.
+File > Workspace > From data file does that.
 
 ```figure What a saved file holds: a simulated table after one Math Parser run, with an ROI drawn.
 fig.set_size_inches(7.5, 3.3)
@@ -101,10 +104,10 @@ metadata is one attribute.  An entry is a few hundred bytes.
 it before is gone, including tool results and a GUI state the session no
 longer has.
 
-**What is not saved.**  The layers -- their filters, their grouping, their
-colours -- belong to the session, not to the file; only the bounds a plugin
-asked to keep with the table (Remove Localizations' hide flag, for
-instance) come back.  The grouped table is not saved either.
+**What is not saved.**  The layers -- their filters, whether they merge
+blinks, their colours -- belong to the session, not to the file; only the
+bounds a plugin asked to keep with the table (Remove Localizations' hide
+flag, for instance) come back.  The merged blinks are not saved either.
 
 **How big the file is.**  Before compression, a table of $N$
 localizations takes
@@ -134,14 +137,14 @@ harm in a file that is shared.
 ### region_results
 Off, the ROIs are kept -- their places, shapes, *use* flags and comments --
 and what was measured in them is not; the ROI manager shows them as not
-evaluated when the file is opened again.  Worth it only when the results
-are large, many evaluations over many ROIs, and can be measured again.
+measured when the file is opened again.  Worth it only when the results
+are large, many steps over many ROIs, and can be measured again.
 
 ### region_figures
 What an ROI keeps for its figures is binned -- a few kB per ROI and
-evaluation (Localization Statistics' histograms: about 2 kB) -- so it is
+step (Localization Statistics' histograms: about 2 kB) -- so it is
 usually worth keeping.  Off, every number is saved, and an ROI's figure is
-drawn by running its evaluator again, which for most plugins takes
+drawn by running its step again, which for most plugins takes
 milliseconds and for a slow one is the reason to keep it.
 
 ## Output
@@ -153,7 +156,9 @@ under the settings says what the session has that the save will leave out
 -- "The results measured in 40 ROIs and 2000 regions of id columns will not
 be saved" -- as soon as there is any, and the text after the save says it
 again, so it reaches the history.  The regions of id columns are the
-clusters a block measured in.  The save is
+clusters a block measured in; ROIs and clusters are both
+[regions](plugin:Panels/Glossary), sets of localizations measured
+together.  The save is
 written into the session's history, so that the log says where the table
 went.
 

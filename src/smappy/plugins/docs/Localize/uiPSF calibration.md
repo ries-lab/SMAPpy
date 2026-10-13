@@ -1,13 +1,15 @@
 ---
-version: "1"
+version: "2"
 covers: [smappy.uipsf.prepare.Split, smappy.uipsf.prepare.channel_shift, smappy.uipsf.prepare.subtract_background, smappy.uipsf.prepare.read_beads, smappy.uipsf.prepare.read_movie, smappy.uipsf.uipsf_parameters, smappy.uipsf.runner.run, smappy.uipsf.convert.single_calibration, smappy.uipsf.convert.dual_calibration, smappy.uipsf.convert.channel_transformation, smappy.uipsf.microscopes.Microscope, smappy.uipsf.plots.figures, smappy.uipsf.plots.data_and_model, smappy.uipsf.plots.localization_bias, smappy.uipsf.plots.pupil_images, smappy.uipsf.plots.zernike_phases, smappy.uipsf.plots.transformation_residuals]
 ---
 
 ## What it does
 
 A 3D fit needs to know what a molecule looks like at every height: the
-**point spread function** (PSF).  The [bead calibration](panel:Bead calibration)
-measures it by averaging beads imaged at a series of focus positions.  This
+**point spread function** (PSF).  The [bead calibration](plugin:Panels/Bead calibration)
+measures it by averaging beads imaged at a series of focus positions, and
+makes a [spline calibration](plugin:Panels/Glossary) (also called a cspline
+or experimental PSF model) of it.  This
 plugin hands the same job to **uiPSF**
 ([Liu et al. 2024](https://doi.org/10.1038/s41592-024-02282-x)), which instead
 fits a *model of the microscope* to the images.  The model is the light's
@@ -30,8 +32,11 @@ That gives two things the bead average cannot:
 The result is saved as an ordinary smappy calibration file, which
 [Spline 3D](plugin:Localize/Spline 3D) and
 [Spline 3D 2C](plugin:Localize/Spline 3D 2C) read exactly as they read a bead
-calibration.  For a split camera it holds both channels' models and the
-transformation between the halves, which uiPSF learns together with the PSF.
+calibration.  For a split camera -- a [splitter](plugin:Panels/Glossary),
+also called a dual-view, that puts two channels side by side on one chip --
+it holds both channels' models and the transformation between the halves
+(the [registration](plugin:Panels/Glossary), also called channel alignment),
+which uiPSF learns together with the PSF.
 
 **What it needs.**  uiPSF itself, installed in a Python environment of its own
 (see *Installing uiPSF* below), and a **microscope
@@ -139,7 +144,11 @@ frame = stacks[0].max(axis=0).astype(float)
 
 **2. Splitting a two-channel camera.**  The frame is cut at the split into
 two halves of equal size, the main channel first, and a mirrored half is
-flipped back, so that uiPSF sees two images of the same molecules.  Exactly
+flipped back, so that uiPSF sees two images of the same molecules.  The
+profile's split position is a pixel on the camera chip, as the bead
+calibration and the two-colour fitters read it; a frame taken with a camera
+ROI is cut where that pixel falls in it; left empty, the split is the
+frame's middle.  Exactly
 how they were cut is recorded, because the transformation uiPSF learns
 between the halves has to be put back into camera pixels afterwards.  For beads,
 the shift between the halves is measured first, from the cross-correlation
@@ -294,8 +303,10 @@ Raise it for data with many dim molecules, which carry little information
 about the PSF.
 
 ### learning.roi_size_px
-The fitters cut their ROI from inside the model, so it must be at least three
-pixels wider than the fit's ROI.  Larger also captures the wings of a
+The fitters cut their [fit box](plugin:Panels/Glossary) (also called ROI
+size: the square of pixels fitted around each spot) from inside the model, so
+it must be at least three
+pixels wider than the fitter's fit box.  Larger also captures the wings of a
 defocused spot.
 
 ### learning.iterations

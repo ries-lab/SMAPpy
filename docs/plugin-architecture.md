@@ -80,10 +80,6 @@ So the whole tree is populated instantly and correctly, a plugin that imports
 torch costs nothing until someone opens it, and there is no cache file to go
 stale -- the two things SMAP has to pay for with the generated `plugin.m`.
 
-A module that builds its plugins dynamically says so with a module-level
-`__smappy_plugins__ = ["Analysis/Cluster/DBSCAN", ...]`; the ref then has no
-class name and resolves through `@register` when the module is imported.
-
 Anything else the parser cannot make sense of becomes a `Diagnostic` -- a file
 and a sentence -- collected rather than raised, and shown in the GUI.  The scan
 does *not* fall back to importing such a file: importing what we failed to parse
@@ -204,9 +200,11 @@ ordinary plugins that run on the view as well; `docs/regions.md`.)
 
 ### The ROI evaluation pipeline is a separate window
 
-*To be replaced* -- `docs/regions.md` (2026-10-11) folds evaluators into
-ordinary plugins and the pipeline into a block of a chain.  What follows
-describes the code as it still is.
+*Replaced* -- `docs/regions.md` (2026-10-11) folded evaluators into ordinary
+plugins and the pipeline into a block of a chain, which the ROI project holds
+(`ROIProject.block`) and the per-region steps window edits; a pipeline file
+of its own is gone (*save as...* keeps the block as a chain).  What follows
+is the design as it was, kept for its reasoning.
 
 Evaluators are the one thing that does not fit a tab.  A tab's pins are run
 individually on demand; an evaluation is an *ordered pipeline* run over every
@@ -246,8 +244,8 @@ not in `f.attrs`, and the existing `metadata` attribute is left alone.
 Beyond the pipeline, the rest of the GUI state -- tabs, their instances and
 values, which section is open -- is saved:
 
-* in a **GUI file**, and only when someone asks: *File > Save GUI* overwrites
-  the loaded one, *Save GUI as* writes a new one, *Load GUI* reads one, and the
+* in a **GUI file**, and only when someone asks: *File > Workspace > Save*
+  overwrites the loaded one, *Save as* writes a new one, *Open* reads one, and the
   next start opens whichever was saved or loaded last (the shipped default when
   none was, or it has gone).  Nothing is written behind the user's back: one
   installation serves a lab, and a value one person typed that the program
@@ -265,7 +263,7 @@ the only part that is worthless as provenance -- while the plugin state is small
 preference turns the embedding off (`save_gui_state_in_files`) for anyone who
 wants their data files to contain only data.  Reading it back is deliberately
 *not* automatic: rearranging someone's tabs because they opened a colleague's
-dataset would be a surprise, so it is a menu item, *Restore GUI state from file*.  Values are a flat map of dotted names read off the form
+dataset would be a surprise, so it is a menu item, *File > Workspace > From data file*.  Values are a flat map of dotted names read off the form
 widgets -- so a form left mid-edit with an unparseable number is still saveable,
 and a panel never opened keeps the values it was given rather than being
 blanked -- and are read back a field at a time: a name the plugin no longer has
@@ -284,32 +282,28 @@ calls them.
 
 `io/formats.py` keeps `Reader` as the low-level mechanism -- the CLI and scripts
 use it and should not have to go through a plugin -- and gains a matching
-`Writer` registry.  The `File/Load/<name>` plugins are written out rather than
-generated: a generated set could not be declared to the AST scanner without
-duplicating the reader list, and a format has its own settings anyway -- only
-csv needs a column mapping.  Adding a format is still a one-line
-`register(Reader(...))`; giving it a plugin of its own is optional, and the
-`Auto` loader picks it up either way.
+`Writer` registry.  There is one loader, `File/Load/Auto`, with an advanced
+*format* choice listing the readers (auto first) and the csv *columns* greyed
+for anything but a csv.  There was a plugin per format as well, until
+2026-10: five entries in the tree for one thing.  Adding a format is a
+one-line `register(Reader(...))`, and it is a choice of the loader at once.
 
 ### The File tab
 
-Seeded with:
+Seeded with what the File menu does not do (Load and Save stay in the
+plugin tree, for chains, the batch and the Plugins menu):
 
-    File/Load/Auto            by extension; append or replace
-    File/Load/<format>        smappy HDF5, SMAP _sml.mat, MINFLUX, csv --
-                              present but unpinned, since Auto covers them
-    File/Save/smappy HDF5     with the GUI state, or without
     File/Export/Image         the rendered view as a picture
     File/Simulate/Blinking Structure   `smappy.simulate`: localizations into
                               the session, or camera frames as a `*.sim.yaml`
                               recipe that a fitter opens as its file
 
-A named loader *means* it: `load` takes an explicit reader, because dispatching
-by extension underneath would have `File/Load/SMAP` on a `.hdf5` quietly read it
+A named format *means* it: `load` takes an explicit reader, because dispatching
+by extension underneath would have *format* SMAP on a `.hdf5` quietly read it
 as SMAPpy.
 
 The menu and the plugins share one *reading* implementation,
-`session.read_and_group`, which the window's `LoadTask`, `Session.load` and
+`session.read_localizations`, which the window's `LoadTask`, `Session.load` and
 every loader plugin call.  `File -> Open` still drives it through `LoadTask`
 rather than through the plugin: the menu owns a multi-file queue, a progress
 line and the csv mapping dialog, none of which a panel expresses, and routing it

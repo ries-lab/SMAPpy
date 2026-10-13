@@ -9,6 +9,7 @@ import pytest
 from scipy.special import erf
 
 from smappy.calibrate.dual import ChannelTransform
+from smappy.locs import in_pixels
 from smappy.metadata import CameraMetadata
 from smappy.pipeline import FitSettings
 from smappy.plugins import Context
@@ -83,28 +84,28 @@ def test_the_paired_gaussian_fit_finds_the_position_and_the_colour():
     finder = PeakFinder(DoGFilter(1.2), AbsoluteCutoff(25.0))
     model = GlobalGaussianPSF(sigma=1.2)
     engine = DualChannelEngine(camera(), finder, model, t,
-                               FitSettings(roisize=13, output_unit="pixel"))
+                               FitSettings(roisize=13))
     engine.push(raw, first_frame=0)
     locs = engine.flush()
 
     assert locs is not None and len(locs) > 80
     # every fit lands on a true emitter
     want = np.vstack(truth)
-    got = np.c_[locs["x_pix"], locs["y_pix"]]
+    got = np.c_[in_pixels(locs, "x_pix", "y_pix")]
     from scipy.spatial import cKDTree
     distance, _ = cKDTree(want).query(got)
     assert np.median(distance) < 0.1
 
     assert abs(np.median(locs["ratio"]) - ratio) < 0.02
     # the widths were free, so each half found its own
-    assert abs(np.median(locs["sigma_pix_ch0"]) - WIDTHS[0]) < 0.08
-    assert abs(np.median(locs["sigma_pix_ch1"]) - WIDTHS[1]) < 0.08
+    assert abs(np.median(in_pixels(locs, "sigma_pix_ch0")) - WIDTHS[0]) < 0.08
+    assert abs(np.median(in_pixels(locs, "sigma_pix_ch1")) - WIDTHS[1]) < 0.08
     assert "z_nm" not in locs
 
 
 def test_the_table_has_no_half_converted_widths():
-    """`sigma_pix_ch1` has to become nm when `sigma_pix` does, or the table
-    would carry two units under one name."""
+    """`sigma_pix_ch1` gets its nm column when `sigma_pix` does, or the nm
+    columns would be incomplete."""
     from smappy.locs import Localizations, to_nm
 
     table = Localizations({"x_pix": np.zeros(3), "y_pix": np.zeros(3),
@@ -112,7 +113,7 @@ def test_the_table_has_no_half_converted_widths():
                            "sigma_pix_ch1": np.full(3, 2.0),
                            "photons_ch1": np.ones(3)}, {})
     nm = to_nm(table, 100.0)
-    assert "sigma_nm_ch1" in nm and "sigma_pix_ch1" not in nm
+    assert "sigma_nm_ch1" in nm and "sigma_pix_ch1" in nm
     np.testing.assert_allclose(nm["sigma_nm_ch1"], 200.0)
     assert "photons_ch1" in nm          # not a length, left alone
 
@@ -131,7 +132,7 @@ def test_an_unlinked_fit_keeps_how_far_the_partner_is_from_the_link():
     def fit(t, shared):
         model = GlobalGaussianPSF(sigma=1.2, shared=shared)
         engine = DualChannelEngine(camera(), finder, model, t,
-                                   FitSettings(roisize=13, output_unit="nm"))
+                                   FitSettings(roisize=13))
         engine.push(raw, first_frame=0)
         return engine.flush()
 
@@ -147,8 +148,9 @@ def test_an_unlinked_fit_keeps_how_far_the_partner_is_from_the_link():
     assert abs(np.median(wrong["dy_nm_ch1"])) < 5
     # linked, there is nothing to compare
     assert "dx_nm_ch1" not in fit(transform(), (True, True, False, False, False))
-    # and every width and its error is in nm in an nm table
-    assert not [name for name in right.keys() if "_pix" in name]
+    # and every width and its error is in nm, with no pixel copy beside it
+    assert "sigma_nm_ch1" in right and "sigma_err_nm_ch1" in right
+    assert [n for n in right.keys() if "_pix" in n] == ["peak_x_pix", "peak_y_pix"]
 
 
 def test_linked_photons_are_the_emitters_total():
@@ -162,7 +164,7 @@ def test_linked_photons_are_the_emitters_total():
     engine = DualChannelEngine(
         camera(), PeakFinder(DoGFilter(1.2), AbsoluteCutoff(25.0)),
         GlobalGaussianPSF(sigma=1.2, shared=(True, True, True, False, False)),
-        transform(), FitSettings(roisize=13, output_unit="pixel"),
+        transform(), FitSettings(roisize=13),
         photon_ratio=0.35 / 0.65)
     engine.push((frames + 100).astype(np.uint16), first_frame=0)
     locs = engine.flush()
@@ -179,7 +181,7 @@ def test_frames_from_another_camera_roi_are_refused():
     t.geometry["coordinate_system"] = "roi-local"
     engine = DualChannelEngine(camera(), PeakFinder(DoGFilter(1.2), AbsoluteCutoff(25.0)),
                                GlobalGaussianPSF(sigma=1.2), t,
-                               FitSettings(roisize=13, output_unit="pixel"))
+                               FitSettings(roisize=13))
     with pytest.raises(ValueError, match="original bead image"):
         engine.push(np.zeros((2, SHAPE[0] + 8, SHAPE[1]), np.uint16) + 100)
 
@@ -207,7 +209,7 @@ def test_the_2c2d_plugin_calibrates_on_the_movie_and_then_fits_it(tmp_path):
         detection=DetectionSettings(cutoff_mode="absolute", cutoff=25.0),
         model=DualGaussianModelSettings(sigma=1.2),
         transform=ChannelTransformSettings(calibrate=True, calibrate_frames=150),
-        fit=FitSettings(roisize=13, output_unit="pixel+nm"),
+        fit=FitSettings(roisize=13),
         output=OutputSettings(path=str(tmp_path / "out.hdf5")))
 
     said = []
@@ -215,7 +217,7 @@ def test_the_2c2d_plugin_calibrates_on_the_movie_and_then_fits_it(tmp_path):
 
     assert result.locs is not None and len(result.locs) > 500
     assert abs(np.median(result.locs["ratio"]) - 0.35) < 0.03
-    assert "sigma_pix_ch1" in result.locs and "z_nm" not in result.locs
+    assert "sigma_nm_ch1" in result.locs and "z_nm" not in result.locs
     assert (tmp_path / "out.hdf5").exists()
     # the measured transformation was written beside the output
     saved = tmp_path / "out_2ct.h5"
@@ -253,7 +255,7 @@ def test_a_saved_transformation_is_used_when_one_is_given(tmp_path):
         detection=DetectionSettings(cutoff_mode="absolute", cutoff=25.0),
         model=DualGaussianModelSettings(sigma=1.2),
         transform=ChannelTransformSettings(path=str(path)),
-        fit=FitSettings(roisize=13, output_unit="pixel"),
+        fit=FitSettings(roisize=13),
         output=OutputSettings(save=False))
 
     plugin = DualGaussianFit()
@@ -267,10 +269,108 @@ def test_a_saved_transformation_is_used_when_one_is_given(tmp_path):
     assert preview.plot is not None and preview.data["candidates"] > 2
 
 
+def test_a_2d_2c_run_reads_its_transformation_once_and_a_measured_one_not_at_all(
+        tmp_path, monkeypatch):
+    """The two-channel fitters share the reading (`_TwoChannelFit`): a file
+    once per run, and none when the movie is registered on itself, even with
+    a file chosen."""
+    import tifffile
+    from smappy.calibrate import transform as module
+    from smappy.calibrate.transform import save_channel_transform
+    from smappy.plugins.fit import (CameraSettings, ChannelTransformSettings,
+                                    DetectionSettings, DualGaussianFit,
+                                    DualGaussianFitSettings, OutputSettings,
+                                    SourceSettings)
+
+    rng = np.random.default_rng(8)
+    t = transform()
+    frames, _ = movie(12, rng, t)
+    stack = tmp_path / "split.tif"
+    tifffile.imwrite(stack, (frames + 100).astype(np.uint16))
+    path = tmp_path / "given_2ct.h5"
+    save_channel_transform(path, t)
+    reads = []
+    load = module.load_transform
+    monkeypatch.setattr(module, "load_transform",
+                        lambda p: reads.append(p) or load(p))
+    settings = DualGaussianFitSettings(
+        source=SourceSettings(path=str(stack), chunk=4),
+        camera=CameraSettings(conversion=1.0, offset=100.0, pixelsize_um=0.1),
+        detection=DetectionSettings(cutoff_mode="absolute", cutoff=25.0),
+        transform=ChannelTransformSettings(path=str(path)),
+        fit=FitSettings(roisize=13), output=OutputSettings(save=False))
+    plugin = DualGaussianFit()
+    assert len(plugin.run(Context(), settings).locs) > 10
+    assert len(reads) == 1
+
+    reads.clear()
+    monkeypatch.setattr(DualGaussianFit, "_calibrate", lambda self, ctx, s: t)
+    settings.transform.calibrate = True
+    assert len(plugin.run(Context(), settings).locs) > 10
+    assert reads == []
+
+
 def test_it_says_so_when_there_is_no_transformation_at_all(tmp_path):
     from smappy.plugins.fit import (DualGaussianFit, DualGaussianFitSettings,
                                     SourceSettings)
     settings = DualGaussianFitSettings(source=SourceSettings(path=str(tmp_path / "x.tif")))
-    assert "calibrate from this movie" in DualGaussianFit().preflight(Context(), settings)
+    assert "this movie" in DualGaussianFit().preflight(Context(), settings).text
     with pytest.raises(ValueError, match="needs a transformation"):
         settings.transform.load()
+
+
+def test_without_a_transformation_the_question_offers_calibrating_not_a_doomed_run():
+    """"Start anyway" always failed: the channels cannot be paired without a
+    transformation.  The one way on is to measure it from the movie."""
+    from smappy.plugins import PreflightQuestion
+    from smappy.plugins.fit import DualGaussianFit, DualGaussianFitSettings
+    settings = DualGaussianFitSettings()
+    question = DualGaussianFit().preflight(None, settings)
+    assert isinstance(question, PreflightQuestion) and question.run_label == ""
+    (choice,) = question.choices
+    assert choice.settings.transform.calibrate
+    assert not settings.transform.calibrate                  # the form's own untouched
+    settings.transform.calibrate = True
+    assert DualGaussianFit().preflight(None, settings) is None
+
+
+def test_a_fit_writes_nm_and_the_peak_pixels_and_registers_from_them(tmp_path):
+    """A fit's table has no pixel copies of its nm columns -- only the peak
+    finder's candidates stay in chip pixels -- and the registration, which
+    lives in chip pixels, recovers them from the pixel size the table
+    records, along each axis: these pixels are not square."""
+    import tifffile
+    from smappy.plugins.fit import (CameraSettings, DetectionSettings,
+                                    GaussianFit, GaussianFitSettings,
+                                    OutputSettings, SourceSettings)
+    from smappy.plugins.registration import (CalibrateChannelTransform,
+                                             RegisterLocsSettings)
+
+    rng = np.random.default_rng(11)
+    t = transform(dx=0.8, dy=-0.5)
+    frames, _ = movie(200, rng, t, ratio=0.4, per=4)
+    stack = tmp_path / "split.tif"
+    tifffile.imwrite(stack, (frames + 100).astype(np.uint16))
+    settings = GaussianFitSettings(
+        source=SourceSettings(path=str(stack)),
+        camera=CameraSettings(conversion=1.0, offset=100.0, pixelsize_um=0.1,
+                              pixelsize_y_um=0.12),
+        detection=DetectionSettings(cutoff_mode="absolute", cutoff=25.0),
+        fit=FitSettings(roisize=13),
+        output=OutputSettings(save=False))
+    locs = GaussianFit().run(Context(), settings).locs
+
+    assert {"x_nm", "y_nm", "xy_err_nm", "sigma_nm",
+            "peak_x_pix", "peak_y_pix"} <= set(locs.keys())
+    assert not {"x_pix", "y_pix", "x_err_pix", "xy_err_pix",
+                "sigma_pix"} & set(locs.keys())
+    assert locs.metadata["units"] == "nm"
+    assert locs.metadata["pixelsize_nm_xy"] == [100.0, 120.0]
+    x, y = in_pixels(locs, "x_pix", "y_pix")
+    assert np.median(np.abs(x - locs["peak_x_pix"])) < 0.5
+    assert np.median(np.abs(y - locs["peak_y_pix"])) < 0.5
+
+    found = CalibrateChannelTransform().preview(
+        Context(locs=locs), RegisterLocsSettings(save=False)).data["transform"]
+    probe = np.c_[[20.0, 40.0], [60.0, 80.0]]
+    np.testing.assert_allclose(found.transform(probe), t.transform(probe), atol=0.3)

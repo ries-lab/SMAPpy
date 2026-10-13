@@ -98,15 +98,16 @@ class RawFrameKeeper:
                     self.kept = {k: v for k, v in self.kept.items()
                                  if (k - self.start) % self.stride == 0}
 
-    def image(self, camera: CameraMetadata, unit: str = "nm",
-              name: str = "raw frames", source: str = "") -> Optional[ImageData]:
+    def image(self, camera: CameraMetadata, name: str = "raw frames",
+              source: str = "") -> Optional[ImageData]:
         """The average and the kept frames, in photons, placed under the table.
 
-        ``unit`` is the table's: "nm" puts the image in nanometres, anything
-        else in camera pixels.  A localization's ``x_pix`` is the chip column
-        of the pixel whose *centre* it sits on (the camera ROI offset
-        included), so pixel 0 of the frame spans ``roi_x - 0.5`` to
-        ``roi_x + 0.5``.
+        In nanometres, as the table's positions are -- with the assumed pixel
+        size where the camera has none, as the table's nm columns are.  A
+        localization's position in pixels (``x_nm`` over the pixel size) is
+        the chip column of the pixel whose *centre* it sits on (the camera
+        ROI offset included), so pixel 0 of the frame spans ``roi_x - 0.5``
+        to ``roi_x + 0.5``.
         """
         if not self.n:
             return None
@@ -114,8 +115,7 @@ class RawFrameKeeper:
         numbers = sorted(self.kept)
         planes = [self.total / self.n] + [self.kept[k] for k in numbers]
         data = to_photons(np.stack(planes), camera)
-        sizes = camera.pixelsize_nm_xy if unit != "pixel" else None
-        px, py = sizes if sizes is not None else (1.0, 1.0)
+        (px, py), _ = camera.pixelsize_nm_or_default
         rx, ry = camera.roi_offset
         return ImageData(
             data=data, pixelsize=float(px), pixelsize_y=float(py),

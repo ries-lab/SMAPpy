@@ -11,36 +11,37 @@ from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (QApplication, QCheckBox, QDialog, QFileDialog, QHBoxLayout,
                                QMessageBox, QPushButton,
                                QLabel, QLineEdit,
-                               QMainWindow, QMenu, QScrollArea, QTabWidget, QVBoxLayout,
-                               QWidget)
+                               QMainWindow, QMenu, QScrollArea, QSizePolicy, QTabWidget,
+                               QToolButton, QVBoxLayout, QWidget)
 
 from .. import plugins, workspace as workspace_module
 from ..io.formats import (csv_columns, guess_csv_mapping, load as load_any,
                           name_filter, reader_for)
-from . import folders
+from . import drops, folders
 from .dialogs import CsvMappingDialog, PixelSizeDialog
-from ..session import Session, read_and_group
+from ..session import Session, read_localizations
 from ..workspace import Workspace
 from .plugin_tab import PluginTab
 from .preferences import PreferencesDialog
 from .render_tab import RenderTab
 from .roi_tab import ROIHeader
 from .render_view import RenderToolBar, RenderView
-from .widgets import CONTROL_WIDTH, apply_style, place_beside
-from .collector import collect_on_gui_thread
-from .icon import install_icon
+from .widgets import CONTROL_WIDTH, place_beside
+from .errors import ERROR_STYLE, details_window, message_of
+from .merging import merger_for
+from . import make_app
 from . import identity
 from .identity import install_identity
 
 
 class HandoffTask(QThread):
-    """Take a session another instance handed over (`smappy.handoff`), and
-    link it, off the GUI thread -- `LoadTask` for a table that comes through
-    shared memory instead of a file."""
+    """Take a session another instance handed over (`smappy.handoff`) off the
+    GUI thread, and merge its blinks there if a layer shows them -- `LoadTask`
+    for a table that comes through shared memory instead of a file."""
 
     progress = Signal(str)
     loaded = Signal(object, object, object)      # locs, state, grouped or None
-    failed = Signal(str)
+    failed = Signal(str, str)                    # the message; the traceback
 
     def __init__(self, path: str, group_settings, parent=None):
         super().__init__(parent)
@@ -52,38 +53,34 @@ class HandoffTask(QThread):
             self.loaded.emit(*handoff.take(self.path, self.group_settings,
                                            progress=self.progress.emit))
         except Exception as e:
-            self.failed.emit(f"{e}")
+            self.failed.emit(message_of(e), traceback.format_exc())
 
 
 class LoadTask(QThread):
-    """Read a file, and link it, off the GUI thread.
+    """Read a file off the GUI thread.
 
-    Both halves are slow enough to freeze a window on a real dataset -- 31 s of
-    gzip and 96 s of linking on a 57 M localization ``_sml.mat`` -- and neither
-    touches Qt or the session, so both belong here.  What comes back is plain
-    data; the session is only ever changed on the main thread, in `_loaded`.
-
-    An appended file is read but not linked: `Session.add_file` re-links the
-    merged table anyway, so linking it here would be work done twice.
+    Reading is slow enough to freeze a window on a real dataset -- 31 s of
+    gzip on a 57 M localization ``_sml.mat`` -- and does not touch Qt or the
+    session, so it belongs here.  What comes back is plain data; the session
+    is only ever changed on the main thread, in `_loaded`.  The blinks are
+    not merged here: the file opens on its localizations and is merged in the
+    background after (`gui.merging`), so the window has it at once.
     """
 
     progress = Signal(str)
-    loaded = Signal(object, object, object)      # locs, info, grouped or None
-    failed = Signal(str)
+    loaded = Signal(object, object)              # locs, info
+    failed = Signal(str, str)                    # the message; the traceback
 
-    def __init__(self, path: str, args: dict, append: bool,
-                 group_settings, parent=None):
+    def __init__(self, path: str, args: dict, parent=None):
         super().__init__(parent)
-        self.path, self.args, self.append = path, args, append
-        self.group_settings = group_settings
+        self.path, self.args = path, args
 
     def run(self) -> None:
         try:
-            self.loaded.emit(*read_and_group(self.path, self.group_settings,
-                                             append=self.append,
-                                             progress=self.progress.emit, **self.args))
+            self.loaded.emit(*read_localizations(self.path, progress=self.progress.emit,
+                                                 **self.args))
         except Exception as e:                   # a bad file is not a crash
-            self.failed.emit(f"{e}")
+            self.failed.emit(message_of(e), traceback.format_exc())
 
 
 def _keys(standard, fallback: str):
@@ -145,6 +142,10 @@ class ControlWindow(QMainWindow):
         super().__init__()
         self.session = session
         self.render_window = render
+        # merges a large table's blinks in the background, after it opens
+        # and whenever a layer asks for them again (`gui.merging`)
+        self.merger = merger_for(session, self)
+        self.merger.message.connect(lambda text, ms: self.statusBar().showMessage(text, ms))
         self.setProperty(identity.OWN_TITLE, True)      # names the session itself
         # the GUI last saved or loaded, or the shipped one: never one written
         # behind anybody's back (see `workspace`)
@@ -159,7 +160,38 @@ class ControlWindow(QMainWindow):
         self.roi_tab: Optional[ROIHeader] = None
         self.build_tabs()
         self._update_title()
-        self.setCentralWidget(self.tabs)
+        # under the tabs, shown only after a file failed to open: what went
+        # wrong in red, and the traceback behind *details…* -- as a plugin's
+        # panel says a failed run, rather than a box to click away
+        central = QWidget()
+        column = QVBoxLayout(central)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(0)
+        column.addWidget(self.tabs, 1)
+        self.load_error = QWidget()
+        row = QHBoxLayout(self.load_error)
+        row.setContentsMargins(6, 2, 6, 2)
+        self.load_error_text = QLabel("")
+        self.load_error_text.setWordWrap(True)
+        self.load_error_text.setStyleSheet(ERROR_STYLE)
+        self.load_error_text.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.load_error_details = QToolButton()
+        self.load_error_details.setText("details\u2026")
+        self.load_error_details.setToolTip("the whole error, and a bug report")
+        self.load_error_details.clicked.connect(self.show_load_error)
+        dismiss = QToolButton()
+        dismiss.setText("\u00d7")
+        dismiss.setToolTip("hide this message")
+        dismiss.clicked.connect(self.load_error.hide)
+        row.addWidget(self.load_error_text, 1)
+        row.addWidget(self.load_error_details)
+        row.addWidget(dismiss)
+        column.addWidget(self.load_error)
+        self.load_error.hide()
+        self._load_failure: Optional[tuple] = None
+        self._load_error_window = None
+        self.setCentralWidget(central)
+        self.setAcceptDrops(True)          # a file dropped here: `open_dropped`
         # tall on purpose: with a file open the Render tab's own content wants
         # some 700 px, and scrolling for the display settings every time is
         # what one notices.  Capped so it still fits a laptop screen.
@@ -170,6 +202,7 @@ class ControlWindow(QMainWindow):
         # Loading runs in a LoadTask; these hold its state.  `_load_locked` is
         # everything that would change the table under a running one.
         self._queue: List[tuple] = []
+        self._pending_images: List[Path] = []     # dropped, opened once loading ends
         self._task: Optional[LoadTask] = None
         self._loading_name = ""
         self._loading = False
@@ -195,12 +228,26 @@ class ControlWindow(QMainWindow):
                                     "filters, ROIs -- in a new instance of the "
                                     "program; a live fit carries on here")
         menu.addSeparator()
-        self._action(menu, "Restore GUI state from file...", None,
-                     self.restore_state_from_file)
-        self._action(menu, "Save GUI", None, self.save_gui)
-        self._action(menu, "Save GUI as...", None, self.save_gui_as)
-        self._action(menu, "Load GUI...", None, self.load_gui)
-        self._action(menu, "Load default GUI", None, self.load_default_gui)
+        # the tabs, their plugins and their values (`smappy.workspace`), in a
+        # submenu of their own: a "Save GUI" beside Save left one guessing
+        # which of the two kept the data
+        self.workspace_menu = _add_menu(menu, "Workspace", self)
+        self.workspace_menu.setToolTipsVisible(True)
+        for text, slot, tip in (
+                ("Save", self.save_gui, "overwrite the workspace file that is loaded"),
+                ("Save as...", self.save_gui_as,
+                 "the tabs, their plugins and their values, to a new file"),
+                ("Open...", self.load_gui,
+                 "a saved workspace: its tabs and values replace these"),
+                ("Reset", self.load_default_gui,
+                 "the shipped workspace, now and at the next start"),
+                (None, None, None),
+                ("From data file...", self.restore_state_from_file,
+                 "the workspace a localization file was saved with")):
+            if text is None:
+                self.workspace_menu.addSeparator()
+            else:
+                self._action(self.workspace_menu, text, None, slot).setToolTip(tip)
         self._action(menu, "Preferences...", QKeySequence.Preferences,
                      self.open_preferences)
         menu.addSeparator()
@@ -219,6 +266,7 @@ class ControlWindow(QMainWindow):
         # it would take back a step of a table that window is not about
         render.addAction(self.undo_action)
         render.addAction(self.redo_action)
+        render.dropped = self.open_dropped      # the picture takes files too
         self._offers: list = []            # sessions handed to new instances
         self._offer_timer = QTimer(self, interval=500)
         self._offer_timer.timeout.connect(self._check_offers)
@@ -252,21 +300,32 @@ class ControlWindow(QMainWindow):
         # is in it without a restart
         self.plugins_menu.aboutToShow.connect(self._fill_plugins_menu)
         tools = _add_menu(self.menuBar(), "Tools", self)
-        self._action(tools, "ROI manager", "Ctrl+R", self._open_manager)
-        self._action(tools, "Region steps...", None, self._open_evaluation)
-        tools.addSeparator()
-        # the window is also the Localize tab's Bead calibration plugin, which
-        # says which mode to open in; from here it opens as it was left
-        self._action(tools, "Bead calibration...", None, lambda: self.open_calibration())
+        # The ROI manager, the per-region steps and the bead calibration are
+        # not in this menu: each has one way in where it is used (the Regions
+        # tab; the Localize tab's section), and a second entry in a menu made
+        # two of everything.  Ctrl+R stays, from this window and the picture.
+        manager = QAction("ROI manager", self, triggered=self._open_manager)
+        manager.setShortcut("Ctrl+R")
+        manager.setShortcutContext(Qt.WindowShortcut)
+        self.addAction(manager)
+        render.addAction(manager)
         # a plugin that would change a table a fit is still appending to
         # offers to run in a new instance instead (`PluginPanel._ask_live`)
         session.window_openers["new window"] = \
             lambda run=None: self.open_in_new_window(run=run)
+        # the Localize tab's Bead calibration section (`Plugin.window`): the
+        # window asks single or dual itself, and opens as it was left
         session.window_openers["bead calibration"] = \
-            lambda settings: self.open_calibration(dual=settings.mode == "dual")
+            lambda settings=None: self.open_calibration()
         # a fitter whose file's camera is not in the database offers this
-        # (`Plugin.notice`), opened on the file that fitter is set to
+        # (`Plugin.describe`), opened on the file that fitter is set to
         session.window_openers["camera editor"] = self.open_camera_editor
+        # a written simulation offers this (`SimulateBlinks.describe`), with the
+        # file's path: into a fitter as a dropped stack goes
+        session.window_openers["fit file"] = self.fit_file
+        # Line Profile with no line ROI offers this (`LineProfile.describe`):
+        # the render window, drawing a line
+        session.window_openers["draw line"] = lambda settings=None: self.draw_line()
         tools.addSeparator()
         self.batch_window = None
         self._action(tools, "Batch...", None, self.open_batch)
@@ -362,7 +421,7 @@ class ControlWindow(QMainWindow):
     def open_camera_editor(self, settings=None) -> None:
         """The camera editor, on the file a fitter is set to.
 
-        `settings` are the fitter's that asked (`Plugin.notice`); without them
+        `settings` are the fitter's that asked (`Plugin.describe`); without them
         the first open fitter's are used, and without a fitter the editor
         opens on no file at all, for typing an entry in by hand.
         """
@@ -439,24 +498,8 @@ class ControlWindow(QMainWindow):
 
     def save_bug_report(self) -> None:
         """The log, the crash stacks and what is open, zipped for an issue."""
-        from datetime import datetime
-        from PySide6.QtWidgets import QInputDialog, QMessageBox
-        from .. import diagnostics
-        note, ok = QInputDialog.getMultiLineText(
-            self, "Bug report", "What happened, and what did you expect?  (optional)")
-        if not ok:
-            return
-        default = str(Path.home() / f"smappy-bug-{datetime.now():%Y%m%d-%H%M}.zip")
-        path, _ = QFileDialog.getSaveFileName(self, "Save bug report", default,
-                                              "Zip (*.zip)")
-        if not path:
-            return
-        written = diagnostics.bug_report(path, self.session, note)
-        QMessageBox.information(
-            self, "Bug report",
-            f"Written to\n{written}\n\nIt has the log, the environment and a "
-            "description of the open table (its columns, files and history), "
-            "not the localizations.  File names and folders are in it.")
+        from .errors import save_bug_report
+        save_bug_report(self, self.session)
 
     def show_log_folder(self) -> None:
         from PySide6.QtCore import QUrl
@@ -483,18 +526,18 @@ class ControlWindow(QMainWindow):
 
         Not done automatically on open: rearranging someone's tabs because they
         looked at a colleague's dataset would be a surprise.  What is restored
-        has no GUI file of its own, so *Save GUI* asks where to put it.
+        has no file of its own, so *Workspace > Save* asks where to put it.
         """
         from ..io.hdf5 import load_gui_state
         start = str(self.session.path) if self.session.path else folders.start()
-        path, _ = QFileDialog.getOpenFileName(self, "Restore GUI state from",
+        path, _ = QFileDialog.getOpenFileName(self, "Workspace from data file",
                                               start, name_filter())
         if not path:
             return
         state = load_gui_state(path)
         if not state:
-            QMessageBox.information(self, "Restore GUI state",
-                                    "that file carries no GUI state")
+            QMessageBox.information(self, "Workspace from data file",
+                                    "that file carries no workspace")
             return
         self.workspace = Workspace.from_dict(state)
         missing = self.workspace.prune(list(plugins.refs()))
@@ -502,7 +545,7 @@ class ControlWindow(QMainWindow):
         self._update_title(f"from {Path(path).name}")
         if missing:
             QMessageBox.information(
-                self, "Restore GUI state",
+                self, "Workspace from data file",
                 "restored, without plugins that are not installed here:\n"
                 + "\n".join(sorted(set(missing))))
 
@@ -523,17 +566,18 @@ class ControlWindow(QMainWindow):
         return self.workspace
 
     def _update_title(self, name: Optional[str] = None) -> None:
-        """Say whose GUI this is, so nobody saves over somebody else's --
+        """Say whose workspace this is, so nobody saves over somebody else's --
         and, once named, which session this is (`identity`)."""
         if name is not None:
             self._gui_name = name
         gui = getattr(self, "_gui_name", None) or \
             workspace_module.display_name(self.workspace.path)
+        app = f"{identity.unsaved(self.session)}SMAPpy"
         if self.session.name or self.session.colour:
-            text = identity.title(self.session, "SMAPpy")
-            self.setWindowTitle(f"{text} (GUI: {gui})")
+            text = identity.title(self.session, app)
+            self.setWindowTitle(f"{text} (workspace: {gui})")
         else:
-            self.setWindowTitle(f"SMAPpy \u2014 {gui}")
+            self.setWindowTitle(f"{app} \u2014 {gui}")
         colour = identity.colour_hex(self.session)
         # a stripe as well as the circle: seen from across the room, and on a
         # title font that draws the circle in black
@@ -682,8 +726,8 @@ class ControlWindow(QMainWindow):
         start = self.workspace.path or (workspace_module.guis_dir()
                                         / f"my{workspace_module.GUI_SUFFIX}")
         start.parent.mkdir(parents=True, exist_ok=True)
-        path, _ = QFileDialog.getSaveFileName(self, "Save GUI", str(start),
-                                              "GUI (*.yaml)")
+        path, _ = QFileDialog.getSaveFileName(self, "Save workspace", str(start),
+                                              "Workspace (*.yaml)")
         if path:
             self._write_gui(path)
 
@@ -691,13 +735,13 @@ class ControlWindow(QMainWindow):
         try:
             self.save_gui_to(path)
         except OSError as e:
-            QMessageBox.warning(self, "Save GUI", f"could not write {path}:\n{e}")
+            QMessageBox.warning(self, "Save workspace", f"could not write {path}:\n{e}")
 
     def load_gui(self) -> None:
         start = self.workspace.path.parent if self.workspace.path else \
             workspace_module.guis_dir()
-        path, _ = QFileDialog.getOpenFileName(self, "Load GUI", str(start),
-                                              "GUI (*.yaml)")
+        path, _ = QFileDialog.getOpenFileName(self, "Open workspace", str(start),
+                                              "Workspace (*.yaml)")
         if path:
             self.load_gui_from(path)
 
@@ -714,11 +758,11 @@ class ControlWindow(QMainWindow):
         workspace_module.remember(self.workspace.path)
         self._update_title()
         if path and self.workspace.path is None:
-            QMessageBox.information(self, "Load GUI",
-                                    f"{path} is not a GUI file; the default is loaded")
+            QMessageBox.information(self, "Open workspace",
+                                    f"{path} is not a workspace file; the default is loaded")
         elif missing:
             QMessageBox.information(
-                self, "Load GUI",
+                self, "Open workspace",
                 "loaded, without plugins that are not installed here:\n"
                 + "\n".join(sorted(set(missing))))
 
@@ -744,10 +788,6 @@ class ControlWindow(QMainWindow):
     def _open_manager(self) -> None:
         if self.roi_tab is not None:
             self.roi_tab.open_manager()
-
-    def _open_evaluation(self) -> None:
-        if self.roi_tab is not None:
-            self.roi_tab.open_evaluation()
 
     # ------------------------------------------------------------ plugins
     def _fill_plugins_menu(self) -> None:
@@ -863,7 +903,7 @@ class ControlWindow(QMainWindow):
         QApplication.clipboard().setImage(image)
         self.statusBar().showMessage(
             f"Copied {window.windowTitle() or 'the picture'} "
-            f"({image.width()} x {image.height()} pixels)", 3000)
+            f"({image.width()} x {image.height()} px)", 3000)
         return True
 
     def _refresh_undo(self) -> None:
@@ -895,6 +935,13 @@ class ControlWindow(QMainWindow):
                 # closing over the loop variable would undo the whole list
                 # whichever entry was picked
                 entry.triggered.connect(lambda checked=False, count=n, run=go: run(count))
+
+    def draw_line(self) -> None:
+        """Start drawing a line ROI on the picture, which comes to the front."""
+        self.render_window.show()
+        self.render_window.raise_()
+        self.render_window.activateWindow()
+        self.render_window.view.start_drawing("line")
 
     def open_calibration(self, dual: Optional[bool] = None) -> None:
         """The calibration window: bead stacks in, a spline calibration out.
@@ -966,13 +1013,19 @@ class ControlWindow(QMainWindow):
         name = (names[0] if len(names) == 1 else f"{len(names)} files") if names else "no file"
         n = len(self.session.locs)
         shown = self._shown_text()
-        self.statusBar().showMessage(f"{name}: {n} localizations" + (f", {shown}" if shown else ""))
-        if what in ("name", "locs"):
+        meta = self.session.locs.metadata
+        # x_nm on a scale nobody gave: worth seeing whenever the table is
+        assumed = (f"; nm on an assumed {meta.get('pixelsize_nm', 0):g} nm pixel"
+                   if meta.get("pixelsize_assumed") else "")
+        self.statusBar().showMessage(f"{name}: {n} localizations"
+                                     + (f", {shown}" if shown else "") + assumed)
+        if what in ("name", "locs", "unsaved"):
             self._update_title()
         if self.session.name or self.session.colour:
             name = self.session.display_name or name
         self.render_window.setWindowTitle(
-            f"{identity.mark(self.session)} SMAPpy - {name}".strip()
+            f"{identity.mark(self.session)} {identity.unsaved(self.session)}"
+            f"SMAPpy - {name}".strip()
             + (f" - {shown}" if shown else ""))
         colour = identity.colour_hex(self.session)
         self.render_window.toolbar.setStyleSheet(
@@ -993,7 +1046,12 @@ class ControlWindow(QMainWindow):
 
         def one(layer) -> str:
             kept, of = len(layer.filter), len(layer.locs)
-            return f"{kept:,} of {of:,}" + (" grouped" if layer.grouped else "") + " shown"
+            if layer.state.waiting:
+                return "merging blinks"
+            text = f"{kept:,} of {of:,}" + (" blinks" if layer.grouped else "") + " shown"
+            hidden = 1.0 - kept / of if of else 0.0
+            # said in so many words: a bound set long ago hides data silently
+            return text + (f", filters hide {hidden:.0%}" if hidden >= 0.005 else "")
 
         if len(layers) == 1:
             return one(layers[0])
@@ -1017,6 +1075,8 @@ class ControlWindow(QMainWindow):
         """Queue files for the loader.  ``reset_view`` frames the first one,
         which is what starting with a file on the command line wants."""
         folders.remember(paths)      # however it came: dialog, drop, command line
+        if paths:
+            self.load_error.hide()   # the last failure is old news
         for i, path in enumerate(paths):
             args = {}
             if self._needs_mapping(path):
@@ -1034,14 +1094,15 @@ class ControlWindow(QMainWindow):
         if not self._queue:
             self._set_loading(False)
             self._on_session("locs")          # back to "name: N localizations"
+            self._open_pending_images()
             return
         path, args, append, reset_view = self._queue.pop(0)
         self._set_loading(True)
         self._loading_name = Path(path).name
-        self._task = LoadTask(path, args, append, self.session.group_settings, self)
+        self._task = LoadTask(path, args, self)
         self._task.progress.connect(self._loading_progress)
         self._task.loaded.connect(
-            lambda l, i, g, a=append, r=reset_view: self._loaded(l, i, g, a, r))
+            lambda l, i, a=append, r=reset_view: self._loaded(l, i, a, r))
         self._task.failed.connect(self._load_failed)
         self._task.finished.connect(self._task_finished)
         self._elapsed.restart()
@@ -1084,13 +1145,29 @@ class ControlWindow(QMainWindow):
                 message = f"{message}  {name}"
         bar.showMessage(message)
 
-    def _loaded(self, locs, info, grouped, append: bool, reset_view: bool) -> None:
-        self.session.add_file(locs, info, append=append, grouped=grouped)
+    def _loaded(self, locs, info, append: bool, reset_view: bool) -> None:
+        self.session.add_file(locs, info, append=append)
         if reset_view:
             self.render_window.view.reset()
 
-    def _load_failed(self, message: str) -> None:
-        QMessageBox.warning(self, "could not open", f"{self._loading_name}:\n{message}")
+    def _load_failed(self, message: str, details: str = "") -> None:
+        """Say it under the tabs, in red, with the traceback behind
+        *details…*; a modal box here held up every file queued after it."""
+        print(details or message)
+        name = self._loading_name
+        self._load_failure = (f"could not open {name}: {message}", details or message)
+        self.load_error_text.setText(self._load_failure[0])
+        self.load_error_text.setToolTip(self._load_failure[0])
+        self.load_error.show()
+
+    def show_load_error(self) -> None:
+        if self._load_failure is None:
+            return
+        message, details = self._load_failure
+        if self._load_error_window is not None:
+            self._load_error_window.close()
+        self._load_error_window = details_window(self, "could not open", message,
+                                                 details, self.session)
 
     def _task_finished(self) -> None:
         self._task = None
@@ -1119,19 +1196,131 @@ class ControlWindow(QMainWindow):
         guessed = set(guess_csv_mapping(csv_columns(Path(path))[0]).values())
         return not {"x_nm", "y_nm"} <= guessed
 
+    # ---------------------------------------------------------------- drops
+    def dragEnterEvent(self, event) -> None:
+        if drops.accepts(event.mimeData()):
+            event.acceptProposedAction()
+
+    def dropEvent(self, event) -> None:
+        _drop(event, self.open_dropped)
+
+    def open_dropped(self, paths) -> None:
+        """Files dropped on either main window, sorted by `drops.kind_of`.
+
+        Localization files go to `load_paths` together, which is *File >
+        Open* with all of them chosen at once: the first replaces the table,
+        the rest are added to it.  A short TIFF (`drops.MAX_IMAGE_FRAMES`
+        frames or fewer) or a PNG is an image layer, as *Open image* makes.  A
+        long stack goes into a fitter's *file* (`fit_file`); only one can, so
+        the first.  Anything else is refused in
+        the status bar -- a dialog for a stray file would be out of proportion.
+        """
+        tables, images, stacks, refused = [], [], [], []
+        for path in map(Path, paths):
+            kind = drops.kind_of(path)
+            (tables if kind == drops.LOCS else images if kind == drops.IMAGE else
+             stacks if kind == drops.STACK else refused).append(path)
+        if stacks:
+            self.fit_file(stacks[0])
+        if tables:
+            if self._loading:
+                # what File > Open says by being disabled: one load at a time
+                self.statusBar().showMessage(
+                    f"still loading {self._loading_name}; drop "
+                    f"{tables[0].name} again when it is done", 8000)
+            else:
+                self.load_paths([str(p) for p in tables])
+        # after the tables, which load on a thread: a table opened after the
+        # image would replace the session the image was added to
+        self._pending_images.extend(images)
+        if not self._loading:
+            self._open_pending_images()
+        if refused:
+            more = f" (and {len(refused) - 1} more)" if len(refused) > 1 else ""
+            self.statusBar().showMessage(
+                f"cannot open {refused[0].name}: not a localization file or an "
+                f"image stack{more}", 8000)
+
+    def _fitter_for_file(self):
+        """``(tab index, tab, instance)`` of the fitter a dropped stack goes to.
+
+        The fitter open on the Localize tab, if one is -- which is the one
+        last used, since the open section is kept with the GUI -- else the
+        Gaussian 2D fitter, on whichever tab it is pinned to.  None if
+        neither is there.
+        """
+        tabs = [(i, w) for i, w in enumerate(self._tab_widgets())
+                if isinstance(w, PluginTab)]
+        # the Localize tab by its header, so a renamed one is still found
+        tabs.sort(key=lambda item: item[1].tab.header != "localize")
+        if tabs and tabs[0][1].tab.header == "localize":
+            index, tab = tabs[0]
+            opened = tab.open_instance()
+            slot = tab.slots.get(opened) if opened else None
+            if slot is not None and _takes_a_stack(slot.panel):
+                instance = tab.tab.instances[tab.tab.index_of(opened)]
+                return index, tab, instance
+        for index, tab in tabs:
+            for instance in tab.tab.instances:
+                if instance.plugin == DROP_FITTER:
+                    return index, tab, instance
+        return None
+
+    def fit_file(self, path) -> bool:
+        """Set a fitter's *file* to ``path`` as if it had been picked with the
+        field's own button: the fitter hears of it (`react` fills the camera
+        and the output, the hints follow), and nothing is fitted.
+
+        Returns whether a fitter took it.
+        """
+        path = Path(path)
+        found = self._fitter_for_file()
+        panel = None
+        if found is not None:
+            index, tab, instance = found
+            panel = tab.slots[instance.id].ensure()      # imports the plugin
+        if not _takes_a_stack(panel):
+            self.statusBar().showMessage(
+                f"{path.name} is an image stack, but no fitter is pinned to a "
+                "tab - add one to the Localize tab with +", 12000)
+            return False
+        self.tabs.setCurrentIndex(index)
+        tab.open_section(instance.id)
+        field = panel.form.fields["source"].fields["path"]
+        field.set(str(path))
+        folders.remember(path, stack=True)
+        field.changed.emit()                  # -> PluginPanel._react
+        edit = getattr(field, "widget", None)
+        if hasattr(edit, "setCursorPosition"):
+            edit.setCursorPosition(len(edit.text()))   # show the file's name
+        self.statusBar().showMessage(
+            f"{instance.title(panel.plugin.name)}: file set to {path.name}; "
+            "Run fits it", 8000)
+        return True
+
     def open_image(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Open image", folders.start(),
                                               "Images (*.tif *.tiff *.png)")
         if not path:
             return
         folders.remember(path)
+        self.open_image_path(path)
+
+    def _open_pending_images(self) -> None:
+        images, self._pending_images = self._pending_images, []
+        for path in images:
+            self.open_image_path(path)
+
+    def open_image_path(self, path) -> None:
+        """An image as a layer of its own, asking its pixel size if the file
+        does not say it."""
         try:
-            self.session.open_image(path)
+            self.session.open_image(str(path))
         except ValueError:                                  # no pixel size in the file
             dialog = PixelSizeDialog(Path(path).name, parent=self)
             if dialog.exec() == QDialog.Accepted:
                 px, x0, y0 = dialog.values()
-                self.session.open_image(path, px, x0, y0)
+                self.session.open_image(str(path), px, x0, y0)
 
     def save(self) -> None:
         from ..io.formats import writer_for
@@ -1162,6 +1351,49 @@ class ControlWindow(QMainWindow):
                 return
             self._on_session("locs")
 
+    # ------------------------------------------------------------ quitting
+    def closeEvent(self, event) -> None:              # noqa: N802 (Qt's name)
+        """Closing this window, and quitting -- Qt 6's `quit` closes every
+        window first and is called off when one refuses -- asks about a
+        changed table, when the preference says to."""
+        try:
+            leave = self.may_close()
+        except Exception:                 # a question that fails must not
+            traceback.print_exc()         # keep the window open for good
+            leave = True
+        if not leave:
+            event.ignore()
+            return
+        super().closeEvent(event)
+
+    def may_close(self) -> bool:
+        """Whether to go: always, unless the table has changed since it was
+        saved or opened and the preference asks (`config.ask_before_quit`);
+        then Save (and go only if it was saved), Discard, or Cancel."""
+        from .. import config
+        if not self.session.unsaved or not config.ask_before_quit():
+            return True
+        answer = self._ask_unsaved()
+        if answer == "save":
+            self.save()
+            return not self.session.unsaved      # a cancelled Save as stays
+        return answer == "discard"
+
+    def _ask_unsaved(self) -> str:
+        """"save", "discard" or "cancel"."""
+        name = self.session.display_name or "the localizations"
+        box = QMessageBox(QMessageBox.Warning, "Unsaved changes",
+                          f"{name} changed since it was saved or opened.",
+                          QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
+                          self)
+        box.setInformativeText("Save the table before quitting?")
+        box.setDefaultButton(QMessageBox.Save)
+        box.exec()
+        chosen = box.standardButton(box.clickedButton()) if box.clickedButton() else None
+        if chosen == QMessageBox.Save:
+            return "save"
+        return "discard" if chosen == QMessageBox.Discard else "cancel"
+
 
 class RenderWindow(QMainWindow):
     def __init__(self, session: Session):
@@ -1173,10 +1405,59 @@ class RenderWindow(QMainWindow):
         self.setProperty(identity.OWN_TITLE, True)      # names the session itself
         self.resize(900, 900)
         window_shortcuts(self)
+        # Files dropped on the picture go where those dropped on the control
+        # window go (`ControlWindow.open_dropped`), which sets this.  The
+        # graphics view accepts drops by default and its scene then refuses
+        # them, which would make the picture -- most of this window -- a
+        # place the cursor says nothing can be dropped; so it does not take
+        # them and they come up to the window.
+        self.dropped = None
+        self.setAcceptDrops(True)
+        for widget in (self.view.graphics, self.view.graphics.viewport()):
+            widget.setAcceptDrops(False)
+
+    def dragEnterEvent(self, event) -> None:
+        if self.dropped is not None and drops.accepts(event.mimeData()):
+            event.acceptProposedAction()
+
+    def dropEvent(self, event) -> None:
+        if self.dropped is not None:
+            _drop(event, self.dropped)
 
     def clipboard_image(self):
         """What Edit > Copy puts on the clipboard: the view as displayed."""
         return self.view.qimage()
+
+
+DROP_FITTER = "Localize/Gaussian 2D"      # a dropped stack's fitter, by default
+
+
+def _takes_a_stack(panel) -> bool:
+    """A built panel with a fitter's *file* in it (`plugins.fit.SourceSettings`)."""
+    fields = getattr(getattr(panel, "form", None), "fields", {})
+    return (hasattr(getattr(panel, "plugin", None), "resolution")
+            and "source" in fields and "path" in getattr(fields["source"], "fields", {}))
+
+
+def _drop(event, handler) -> None:
+    """Take a drop, and open what it carried once the drop is over.
+
+    Not inside the event: opening may ask something (a csv's columns), and a
+    dialog during a drop holds the program it was dragged from until it is
+    answered.  The deferred call must never raise (a `QTimer.singleShot`
+    callable that does crashes PySide), so it prints instead.
+    """
+    paths = drops.local_paths(event.mimeData())
+    event.acceptProposedAction()
+
+    def open_them():
+        try:
+            handler(paths)
+        except Exception:
+            traceback.print_exc()
+
+    if paths:
+        QTimer.singleShot(0, open_them)
 
 
 def _start_log() -> None:
@@ -1206,10 +1487,7 @@ def _start_log() -> None:
 
 def main(argv: Optional[List[str]] = None) -> int:
     argv = sys.argv if argv is None else argv
-    app = QApplication.instance() or QApplication(argv)
-    apply_style(app)
-    collect_on_gui_thread(app)
-    install_icon(app)
+    app = make_app(argv)
     _start_log()
     session = Session()
     install_identity(app, session)

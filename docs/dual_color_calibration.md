@@ -1,27 +1,47 @@
 # Split-frame dual-color bead calibration
 
-The first version generates two spline PSFs with one common axial reference,
-a strictly two-dimensional projective transformation, and pair diagnostics.
+The first version generates two spline PSFs (a spline calibration, also
+called a cspline or experimental PSF model: the measured image of one emitter
+at every height) with one common axial reference, a strictly two-dimensional
+projective transformation -- the registration of the two halves, also called
+channel alignment or chromatic correction -- and pair diagnostics.
 The calibration is what `Localize/Spline 3D 2C` fits with (and, for its
 transformation alone, `Localize/Gaussian 2D 2C`): both halves of the split
 frame in one global fit, pages under Help > Plugin documentation.
 
 ## Use
 
-Open **Tools → bead calibration…** in the localization viewer,
-or run `smappy-calibrate`. Set **mode → Dual colour**. Choose a layout, the main channel,
-and optionally a split position. Supported layouts are right-left and up-down,
-each with or without reflection of the secondary channel along the split axis.
-The main channel selector names the actual half: left/right or upper/lower.
+Open the *Bead calibration* section of the Localize tab,
+or run `smappy-calibrate`. Set **mode → Dual colour**. The *registration*
+section holds the split: the layout, the main channel and optionally a split
+position. Supported layouts are right-left and up-down, each with or without
+reflection of the secondary channel along the split axis; the default,
+*detect*, finds which from the beads (below). The main channel selector names
+the actual half, left/right or upper/lower; its default is the left or upper
+half.
 
-The split is the first zero-based pixel index in the second half. A 512-row
-image defaults to 256: rows 0–255 and 256–511. Unequal half sizes are supported.
+The section is `RegisterSettings`, the same settings the movie registration
+(`smappy.calibrate.transform`, *Calibrate transform* and the 2D two-colour
+fit's *calibrate from this movie*) reads -- one geometry, with each its own
+defaults. A bead calibration has tens of bright pairs, a movie thousands of
+localizations of every brightness, so `bead_registration()` asks for 8 pairs
+rather than 20, a 2 px rather than 1 px RANSAC radius, a 0.15 px rather than
+0.5 px dx/dy screen, and pairs within 12 px rather than 20. The settings a bead
+calibration does not read -- the second matching round, its adaptation, the
+polynomial model and the cap on pairs -- are left off the window's form.
+
+The split is the first zero-based pixel index in the second half, on the
+camera chip -- the coordinates the fitter and a movie registration read it in.
+A bead image taken with a camera ROI is cut where that chip position falls in
+its own pixels; without an ROI the chip and the image coincide.  Auto is the
+middle of the first bead image: a 512-row image at the chip's corner defaults
+to 256, rows 0–255 and 256–511. Unequal half sizes are supported.
 Coordinates in saved transformations are `(x,y)` pixel centers; image arrays use
 `(z,y,x)`. The transformation maps native secondary coordinates to native main
 coordinates and includes the reflection and split displacement.
 
 ```sh
-smappy-calibrate /path/to/beads --layout 'up-down mirrored' --main-channel lower
+smappy-calibrate /path/to/beads --layout auto
 smappy-calibrate /path/to/beads --layout 'up-down mirrored' --main-channel lower \
   --out dual_calibration.h5
 ```
@@ -33,12 +53,15 @@ limit, default 0.15 pixels on each axis). Geometry and
 numerical settings are available through the Python API as well.
 
 ```python
+from dataclasses import replace
 from smappy.calibrate import (
     DualColorSettings, collect_dual_beads, build_dual_calibration,
     load_dual_color_calibration,
 )
+from smappy.calibrate.dual import bead_registration
 
-settings = DualColorSettings(layout='up-down mirrored', main_channel='lower')
+settings = DualColorSettings(registration=replace(
+    bead_registration(), layout='up-down mirrored', main_channel='lower'))
 beads = collect_dual_beads('/path/to/beads', settings)
 result = build_dual_calibration(beads)
 # Stable pair IDs: exclusion rebuilds the projective transform AND both PSFs.
@@ -123,9 +146,24 @@ Each bead's lateral coordinate is refined by an elliptical Gaussian fit to the
 mean of eleven central objective planes. There is no independent channel z fit
 or channel z alignment. Failed lateral fits cannot contribute to calibration.
 
-The declared split/reflection initializes matching. A two-pixel-bin translation
-vote pools candidate differences **within** each acquisition. Mutual nearest
-neighbors within 12 pixels form candidate pairs; pairs never cross acquisitions.
+With the layout on *detect*, it is found first (`detect_bead_layout`): the
+beads of each acquisition are detected over the whole frame, as for a single
+channel, and handed to the movie registration's vote
+(`transform.detect_layout`), one acquisition standing for one frame. Within an
+acquisition every ordered pair of beads gives a difference vector, and for each
+mirror axis a vector with that coordinate summed instead; a bead and its
+partner give the same value every time, so the sharpest peak among the three
+names the mirror and the axis the partners lie apart along names the split.
+What was found is written into the settings the beads carry, so a rebuild, the
+pages and the saved file read the layout that was used. Positions alone cannot
+tell a mirrored from an unmirrored layout when the beads form a regular grid
+centred in its half, which is its own mirror image; choose the layout for such
+a sample.
+
+The declared or detected split/reflection initializes matching. A
+two-pixel-bin translation vote pools candidate differences **within** each
+acquisition. Mutual nearest neighbors within the coarse matching tolerance
+(12 pixels by default) form candidate pairs; pairs never cross acquisitions.
 A two-round projective fit pools all brightness-qualified, reliably localized,
 non-manually-excluded pairs, independently of PSF shape:
 
@@ -236,10 +274,12 @@ an explicit instruction to use `load_dual_color_calibration()`.
 Focused tests cover all four layouts, selectable reference halves, unequal regions,
 shared z shifts, retention of relative channel axial offsets and intensity ratios,
 PSFs clipped at zero and normalised together, projective outliers/degeneracy, coordinate fallback,
-exclusion/rebuild, and save/load compatibility. To reproduce the real-data check:
+exclusion/rebuild, and save/load compatibility. The real-data check was made with
+`scripts/check_dual_calibration.py`, since removed from the tree; to reproduce it:
 
 ```sh
-python scripts/check_dual_calibration.py /path/to/beads --out /path/to/new-results
+git show ec09f06:scripts/check_dual_calibration.py > check_dual_calibration.py
+python check_dual_calibration.py /path/to/beads --out /path/to/new-results
 ```
 
 The script fits both channels, excludes the last acquisition, rebuilds, refits its

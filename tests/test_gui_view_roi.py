@@ -166,7 +166,7 @@ def test_layers_side_by_side_get_a_panel_each_and_the_overlay_is_their_sum(app, 
 
     fov = view.current_fov()
     first, second, overlay = view.panel_images(fov)
-    summed, _ = view.composite(fov)
+    summed = view.panel_images(fov, ["overlay"])[0]
     assert np.allclose(overlay, summed)
     assert np.allclose(overlay, np.clip(first + second, 0, 1))
 

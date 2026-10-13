@@ -36,7 +36,15 @@ def cuda_available():
 
 
 def torch_available():
-    """True if PyTorch is importable."""
+    """True if PyTorch is importable *and* COMET's torch wrapper is here.
+
+    smappy edit: the wrapper (``core/pytorch_wrapper``) was not vendored, so
+    with torch installed the "torch" backend was offered -- and picked
+    automatically on a CUDA machine -- and then failed on import.
+    """
+    from importlib.util import find_spec
+    if find_spec(__package__ + ".pytorch_wrapper") is None:
+        return False
     try:
         import torch  # noqa: F401
         return True
@@ -93,7 +101,7 @@ def torch_accelerated():
 
     MPS stays selectable with mode="torch"; it is just not the automatic choice.
     """
-    return torch_device() == "cuda"
+    return torch_available() and torch_device() == "cuda"
 
 
 def available_backends():

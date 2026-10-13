@@ -168,7 +168,7 @@ def test_the_live_fit_reads_it_like_a_growing_file():
                   CameraMetadata(conversion=1.0, offset=100.0, pixelsize_um=0.1),
                   PeakFinder(DoGFilter(1.2), AbsoluteCutoff(40.0)),
                   GaussianPSF(sigma=1.2),
-                  FitSettings(roisize=9, output_unit="nm"), live)
+                  FitSettings(roisize=9), live)
     thread = threading.Thread(target=acquire)
     thread.start()
     fit.start()
@@ -178,63 +178,6 @@ def test_the_live_fit_reads_it_like_a_growing_file():
     assert fit.error is None
     assert fit.n_emitted == 6
     assert fit.engine.stats["frames"] == 6
-
-
-def test_live_view_takes_a_queue_source(tmp_path):
-    """The live window, fed by a producer instead of by a file."""
-    matplotlib = pytest.importorskip("matplotlib")
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
-    from smappy.detect import AbsoluteCutoff, DoGFilter, PeakFinder
-    from smappy.io.hdf5 import load_localizations
-    from smappy.live import LiveSettings, live_view
-    from smappy.metadata import CameraMetadata
-    from smappy.pipeline import FitSettings
-    from smappy.psf import GaussianPSF
-
-    shape = (48, 48)
-    rng = np.random.default_rng(1)
-    source = queue_source(shape=shape)
-    out = tmp_path / "live.h5"
-
-    def acquire():
-        for _ in range(6):
-            time.sleep(0.02)
-            y, x = np.mgrid[0:shape[0], 0:shape[1]]
-            cx, cy = rng.uniform(8, 40), rng.uniform(8, 40)
-            clean = 2000.0 * np.exp(-((x - cx) ** 2 + (y - cy) ** 2) / 2.0)
-            source.push((rng.poisson(clean) + 100).astype(np.uint16))
-        source.close()
-
-    live = LiveSettings(chunk=2, update_seconds=0.05, flush_seconds=0.05,
-                        watch=WatchSettings(poll=0.01, timeout=0.5))
-    thread = threading.Thread(target=acquire)
-    thread.start()
-    viewer = live_view(source, CameraMetadata(conversion=1.0, offset=100.0,
-                                              pixelsize_um=0.1),
-                       PeakFinder(DoGFilter(1.2), AbsoluteCutoff(40.0)),
-                       GaussianPSF(sigma=1.2),
-                       FitSettings(roisize=9, output_unit="nm"),
-                       output=out, live=live, block=False)
-    try:
-        deadline = time.monotonic() + 20
-        while viewer.fit.running and time.monotonic() < deadline:
-            viewer.update()
-            time.sleep(0.02)
-        viewer.update()
-        thread.join()
-
-        assert viewer.fit.error is None
-        assert len(viewer.state.locs) == 6
-        # the frame comes from the camera, so the image does not rescale
-        assert viewer.axes.get_xlim()[1] > shape[1] * 100.0 * 0.9
-    finally:
-        viewer.close()
-        viewer.fit.stop()
-        plt.close(viewer.figure)
-
-    assert len(load_localizations(out)) == 6
 
 
 def test_idle_blocks_are_empty_and_say_where_the_next_frame_goes():

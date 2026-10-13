@@ -332,7 +332,7 @@ def cut_paired_rois(photons: np.ndarray, reference: Candidates, secondary: Candi
     No resampling: each ROI is taken at its own integer pixel and the
     remainder rides along in the link.
     """
-    from .roi import _block_index
+    from .fit_rois import _block_index
 
     photons = np.asarray(photons, np.float32)
     if photons.ndim == 2:
@@ -541,11 +541,7 @@ class DualChannelEngine:
         locs = locs[keep]
         self.stats["localizations"] += len(locs)
 
-        if self.settings.output_unit != "pixel":
-            self.camera.require("pixelsize_um")
-            locs = to_nm(locs, self.camera.pixelsize_nm_xy,
-                         keep_pixels=self.settings.output_unit == "pixel+nm")
-        return locs
+        return to_nm(locs, *self.camera.pixelsize_nm_or_default, keep_pixels=False)
 
     def __str__(self) -> str:
         s = self.stats

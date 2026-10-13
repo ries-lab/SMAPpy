@@ -10,7 +10,7 @@ Three plugins, one for each step of the ROI manager, ported from SMAP's
 * **Evaluate/NPC Corners** counts, per pore, the corners seen with the
   precise localizations and the localizations it has -- and SMAP's corner
   count beside them.
-* **Analyze/NPC Labeling Efficiency** fits the two jointly over all pores
+* **Analyze/NPC labelling efficiency** fits the two jointly over all pores
   with the model of `smappy.npc`, or SMAP's corner histogram alone.
 
 *Workflow/NPC Analysis*, which runs the three in one go, is not a plugin but
@@ -428,6 +428,7 @@ class NPCSegment(SegmenterPlugin):
     def segment(self, ctx: Context, settings: NPCSegmentSettings,
                 commit: bool) -> Result:
         project = ctx.rois
+        effect: Dict[str, Any] = {}
         if project is None:
             locs = ctx.locs
             sites = segment_npcs(locs, settings)
@@ -440,9 +441,9 @@ class NPCSegment(SegmenterPlugin):
             state = project.state(file_id)
             locs = state.locs[state.filter.indices]
             self.last = []
-            proposed, data = self.found(project, file_id, settings, commit)
+            proposed, effect = self.found(project, file_id, settings, commit)
             sites = self.last
-            data = {**data, "sites": sites,
+            data = {"sites": sites,
                     "centers": [p["center"] for p in proposed if p["use"]]}
         kept = sum(s["use"] for s in sites)
         text = f"{kept} pores of {len(sites)} candidates"
@@ -459,7 +460,7 @@ class NPCSegment(SegmenterPlugin):
             text = "preview: " + text
         xy = np.column_stack((np.asarray(locs["x_nm"], dtype=float),
                               np.asarray(locs["y_nm"], dtype=float)))
-        return Result(text=text, settings=settings, data=data,
+        return Result(text=text, settings=settings, data=data, **effect,
                       plot=(lambda ax: draw_sites(ax, xy, sites, settings))
                       if sites else None,
                       plots={"checks": Plot(lambda f: draw_quality(f, sites, settings),
@@ -686,7 +687,7 @@ class LabelingEfficiencySettings:
                               ("sqrt least squares (SMAP)", "SMAP's least squares")),
                      help="how SMAP's method fits its histogram")
     bootstrap: int = param(100, label="bootstrap", min=0, advanced=True,
-                           help="resamplings of the sites for SMAP's error; 0: none")
+                           help="resamplings of the pores for SMAP's error; 0: none")
 
 
 def labeling_efficiency(n_corners, settings: LabelingEfficiencySettings,
@@ -781,7 +782,7 @@ def site_truth(project, rows, corners: int) -> Optional[np.ndarray]:
     tables = {}
     out = []
     for row in rows:
-        roi = project.rois.get(row["roi_id"])
+        roi = project.roi_numbered(row["roi_id"])
         if roi is None:
             return None
         locs = project.extract(roi)
@@ -804,7 +805,7 @@ def site_truth(project, rows, corners: int) -> Optional[np.ndarray]:
 
 def simulated_efficiency(project, rows) -> Optional[float]:
     """The labelling efficiency the sites' file was simulated with, if it was."""
-    roi = project.rois.get(rows[0]["roi_id"]) if rows else None
+    roi = project.roi_numbered(rows[0]["roi_id"]) if rows else None
     if roi is None:
         return None
     recipe = project.state(roi.file_id).locs.metadata.get("simulation_settings") or {}
@@ -833,17 +834,24 @@ def corner_column(rows) -> Optional[str]:
     return column(rows, "n_corners")
 
 
-def corner_settings(project, label: Optional[str], rows=()) -> NPCCornersSettings:
-    """The settings the NPC Corners evaluation called ``label`` counted these
-    sites with -- the cutoffs the counts mean something with -- as its run
-    recorded them, not whatever the evaluation window holds now."""
-    if project is None or not label:
+def corner_settings(ctx: Context, evaluation, rows=()) -> NPCCornersSettings:
+    """The settings the NPC Corners evaluation ``evaluation`` (an
+    `region_results.Evaluation`, or its name) counted these sites with -- the
+    cutoffs the counts mean something with -- as its run recorded them, not
+    whatever the evaluation window holds now; on the ROIs or per cluster."""
+    from ..region_results import Evaluation, steps
+    if not evaluation:
         return NPCCornersSettings()
-    ids = [r["roi_id"] for r in rows if r.get("roi_id") in project.rois] or None
-    made = project.evaluation_steps(label, ids)
+    ev = evaluation if isinstance(evaluation, Evaluation) else Evaluation.parse(evaluation)
+    ids = [r["roi_id"] for r in rows if "roi_id" in r]
+    if ev.on_rois:            # a row names its ROI by number, the store by id
+        found = [ctx.rois.roi_numbered(i) if ctx.rois is not None else None
+                 for i in ids]
+        ids = [roi.id for roi in found if roi is not None]
+    made = steps(ctx, ev, ids or None)
     if len(made) > 1:
-        raise ValueError(f"the sites were counted with different settings under "
-                         f"{label!r}: evaluate them all again")
+        raise ValueError(f"the pores were counted with different settings under "
+                         f"{str(ev)!r}: measure them all again")
     values = (made[0].get("parameters") if made else None) or {}
     return settings_from(NPCCornersSettings, values)
 
@@ -852,8 +860,8 @@ def field_precisions(project, rows) -> np.ndarray:
     """The precision of every localization of the files the sites are in, as
     the layer filters them -- what a cutoff's pass fraction is measured on."""
     out = []
-    for file_id in {project.rois[r["roi_id"]].file_id for r in rows
-                    if r["roi_id"] in project.rois}:
+    found = (project.roi_numbered(r["roi_id"]) for r in rows)
+    for file_id in {roi.file_id for roi in found if roi is not None}:
         state = project.state(file_id)
         locs = state.locs[state.filter.indices]
         name = precision_column(locs)
@@ -862,7 +870,7 @@ def field_precisions(project, rows) -> np.ndarray:
                              "(xy_err_nm); use the corners (SMAP) method")
         out.append(np.asarray(locs[name], float))
     if not out:
-        raise ValueError("the sites' files are not in the ROI manager")
+        raise ValueError("the pores' files are not in the ROI manager")
     return np.concatenate(out)
 
 
@@ -926,7 +934,7 @@ def draw_joint(figure, fitted: Dict[str, Any], truth=None) -> None:
     right.legend(fontsize=7, frameon=False)
 
 
-@register("Analysis/Regions/Summarize/NPC Labeling Efficiency")
+@register("Analysis/Regions/Summarize/NPC labelling efficiency")
 class NPCLabelingEfficiency(SiteAnalysisPlugin):
     """The labelling efficiency of nuclear pores, from the corners each shows
     and the localizations it has (NPC Corners)."""
@@ -938,16 +946,31 @@ class NPCLabelingEfficiency(SiteAnalysisPlugin):
     evaluator = CORNERS
 
     def run(self, ctx: Context, settings: LabelingEfficiencySettings) -> Result:
-        rows, label = self.rows(ctx, settings)
+        rows, ev = self.rows(ctx, settings)
         if not rows:
-            raise ValueError("the ROIs have no corner counts: evaluate them with "
+            raise ValueError("the ROIs have no corner counts: measure them with "
                              "NPC Corners first")
-        count = corner_settings(ctx.rois, label, rows)
-        result = self.analyse(ctx.rois, rows, settings, count, label)
-        if label and label != CORNERS.rsplit("/", 1)[-1]:
-            result.text += f"; counted by {label!r}"
+        count = corner_settings(ctx, ev, rows)
+        label = None if ev is None else ev.label
+        # per cluster there are no ROIs: no files whose field the precisions
+        # come from (`field_precisions`), no shapes to find a pore's truth in
+        # (`site_truth`) -- said here rather than as a missing ROI further down
+        per_cluster = ev is not None and not ev.on_rois
+        project = None if per_cluster else ctx.rois
+        if per_cluster and settings.method != "smap":
+            raise ValueError(
+                f"the joint model needs the ROIs' files, for the precisions of the "
+                f"whole field, and {str(ev)!r} was counted per region of "
+                f"{ev.source}, not in ROIs: use the corners (SMAP) method, or make "
+                f"ROIs of the clusters (Column to ROIs) and count their corners there")
+        result = self.analyse(project, rows, settings, count, label)
+        if per_cluster and ctx.locs.metadata.get("simulation_settings"):
+            result.text += ("; not compared with the simulation's labelled corners, "
+                            "which are found through ROIs")
+        if ev is not None and str(ev) != CORNERS.rsplit("/", 1)[-1]:
+            result.text += f"; counted by {str(ev)!r}"
         if settings.method != "smap" and getattr(ctx.rois, "grouped", True) is False:
-            result.text += ("; the layer is not grouped: the model expects one "
+            result.text += ("; the layer does not merge blinks: the model expects one "
                             "localization per blink")
         return result
 
@@ -958,8 +981,8 @@ class NPCLabelingEfficiency(SiteAnalysisPlugin):
         name = column(rows, "n_corners_smap" if settings.method == "smap" else "n_corners",
                       label)
         if name is None:
-            raise ValueError("the site table has no corner counts: add NPC Corners "
-                             "to the evaluation and evaluate")
+            raise ValueError("the region results have no corner counts: add NPC "
+                             "Corners to the per-region steps and run them")
         k = np.array([r.get(name, np.nan) for r in rows], dtype=float)
         truth = None
         known = site_truth(project, rows, int(settings.corners)) \
@@ -990,7 +1013,7 @@ class NPCLabelingEfficiency(SiteAnalysisPlugin):
     def _joint(self, project, rows, k, settings, truth, count, label=None) -> Result:
         n_name = column(rows, "n_localizations", label)
         if n_name is None:
-            raise ValueError("the site table has no n_localizations: evaluate again "
+            raise ValueError("the region results have no n_localizations: measure again "
                              "with this version of NPC Corners")
         n = np.array([r.get(n_name, np.nan) for r in rows], dtype=float)
         ok = np.isfinite(k) & np.isfinite(n)

@@ -14,7 +14,7 @@ from smappy.metadata import CameraMetadata
 SHAPE = (48, 48)
 CAMERA = {"conversion": 1.0, "offset": 100.0, "pixelsize_um": 0.1,
           "em_on": False, "emgain": 1.0}
-FIT = dict(camera=CAMERA, sigma=1.2, cutoff=40.0, roisize=9)
+FIT = dict(camera=CAMERA, sigma=1.2, cutoff=40.0, cutoff_mode="absolute", roisize=9)
 
 
 def frames(n=8) -> np.ndarray:
@@ -70,30 +70,33 @@ def test_camera_may_be_a_dataclass_a_dict_or_a_file(tmp_path):
     stack = frames(4)
     reference = smappy.fit(stack, **FIT)["x_nm"]
     for camera in (CameraMetadata(**CAMERA), CAMERA, config, str(config)):
-        locs = smappy.fit(stack, camera=camera, sigma=1.2, cutoff=40.0, roisize=9)
+        locs = smappy.fit(stack, camera=camera, sigma=1.2, cutoff=40.0,
+                          cutoff_mode="absolute", roisize=9)
         assert np.array_equal(locs["x_nm"], reference)
 
 
 def test_images_without_a_camera_say_so():
     with pytest.raises(ValueError, match="camera has to be given"):
-        smappy.fit(frames(2), sigma=1.2, cutoff=40.0)
+        smappy.fit(frames(2), sigma=1.2, cutoff=40.0, cutoff_mode="absolute")
 
 
 def test_an_incomplete_camera_names_what_is_missing():
     with pytest.raises(ValueError, match="conversion"):
-        smappy.fit(frames(2), camera={"pixelsize_um": 0.1}, sigma=1.2, cutoff=40.0)
+        smappy.fit(frames(2), camera={"pixelsize_um": 0.1}, sigma=1.2,
+                   cutoff=40.0, cutoff_mode="absolute")
 
 
-def test_view_accepts_a_saved_file(tmp_path, monkeypatch):
-    pytest.importorskip("matplotlib")
-    out = tmp_path / "locs.h5"
-    smappy.fit(frames(), out=out, **FIT)
-
-    seen = {}
-    monkeypatch.setattr("smappy.viewer.show",
-                        lambda locs, *a, **k: seen.setdefault("n", len(locs)))
-    smappy.view(out)
-    assert seen["n"] == 8
+def test_show_opens_a_saved_file_in_the_gui_of_its_own(tmp_path, monkeypatch):
+    """`smappy.show` (and the old name, `view`) starts the GUI on a path."""
+    import subprocess
+    import sys
+    started = []
+    monkeypatch.setattr(subprocess, "Popen",
+                        lambda command, **kwargs: started.append(command))
+    smappy.show(tmp_path / "locs.h5")
+    smappy.view(tmp_path / "locs.h5")
+    assert started == [[sys.executable, "-m", "smappy.cli.gui",
+                        str(tmp_path / "locs.h5")]] * 2
 
 
 def test_importing_smappy_does_not_import_the_world():
@@ -104,25 +107,6 @@ def test_importing_smappy_does_not_import_the_world():
     out = subprocess.run([sys.executable, "-c", code], capture_output=True,
                          text=True, check=True)
     assert out.stdout.strip() == "0"
-
-
-def test_the_viewer_opens_on_a_file_as_well_as_a_table(tmp_path, monkeypatch):
-    """`show` loads a path itself, so a saved file is one call away."""
-    pytest.importorskip("matplotlib")
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
-    from smappy.viewer import show
-
-    out = tmp_path / "locs.h5"
-    locs = smappy.fit(frames(), out=out, **FIT)
-    monkeypatch.setattr(plt, "show", lambda *a, **k: None)
-    viewer = show(out, block=False)
-    try:
-        assert len(viewer.state.locs) == len(locs)
-    finally:
-        plt.close("all")
 
 
 def test_blocks_reach_the_caller_as_they_are_fitted():
@@ -152,3 +136,31 @@ def test_progress_reports_candidates_before_anything_is_fitted():
         (engine.stats["frames"], engine.stats["candidates"])), **FIT)
     assert counts and counts[-1][0] == 8
     assert counts[-1][1] >= 8       # at least the one emitter per frame
+
+
+def test_a_cutoff_means_what_its_mode_says_whatever_the_number():
+    """19.9 and 20 used to mean different things; with a mode they do not,
+    and a call that names none still reads 20 and up as photons, warning."""
+    import warnings
+
+    from smappy.api import peak_cutoff
+    from smappy.detect import AbsoluteCutoff, DynamicCutoff
+
+    assert isinstance(peak_cutoff(40.0, "dynamic"), DynamicCutoff)
+    assert isinstance(peak_cutoff(1.7, "absolute"), AbsoluteCutoff)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert isinstance(peak_cutoff(1.7), DynamicCutoff)       # no warning
+    with pytest.warns(DeprecationWarning, match="cutoff_mode"):
+        assert isinstance(peak_cutoff(40.0), AbsoluteCutoff)
+    with pytest.raises(ValueError, match="dynamic"):
+        peak_cutoff(2.0, "relative")
+
+
+def test_fit_warns_where_a_cutoff_without_a_mode_is_read_as_photons():
+    legacy = dict(FIT)
+    legacy.pop("cutoff_mode")
+    with pytest.warns(DeprecationWarning) as caught:
+        old = smappy.fit(frames(2), **legacy)
+    assert caught[0].filename == __file__          # the caller's line, not ours
+    assert np.array_equal(old["x_nm"], smappy.fit(frames(2), **FIT)["x_nm"])

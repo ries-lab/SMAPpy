@@ -38,7 +38,7 @@ from ..locs import KEPT_BOUNDS, Localizations
 from ..mathparse import remember
 from ..regions import Region
 from ..render import positions
-from . import Context, Plugin, Result, param, register
+from . import Context, FormState, Plugin, Result, param, register
 
 # What the flag means, and the bound a run opens the filter at.  0 and 1
 # rather than True/False: the table is numeric throughout, and a range filter
@@ -128,7 +128,7 @@ def check_field(field: str, locs: Optional[Localizations] = None) -> str:
                          "letters, digits and underscores, not starting with "
                          "a digit")
     if name in ("group_id", "n_in_group"):
-        raise ValueError(f"{name!r} is written by the grouping itself and "
+        raise ValueError(f"{name!r} is written by merge blinks itself and "
                          "would be overwritten again")
     if locs is not None and name in locs:
         from ..mathparse import recipes
@@ -169,10 +169,12 @@ class RemoveLocalizations(Plugin):
 
     Settings = RemoveSettings
     changes_locs = True
+    # it removes or flags localizations, not blinks
+    grouping = "ungrouped"
     version = "1"
 
-    def active(self, settings: RemoveSettings):
-        return {"field": settings.action == "hide"}
+    def describe(self, ctx, settings: RemoveSettings) -> FormState:
+        return FormState(active={"field": settings.action == "hide"})
 
     def _keep(self, ctx: Context, settings: RemoveSettings) -> Tuple[np.ndarray, str]:
         """Which localizations survive, and how to say what was done."""
@@ -220,10 +222,10 @@ class RemoveLocalizations(Plugin):
                     f"filtered out by {field} >= {FILTER_BOUND[0]}")
             # the bound belongs to the new table, so the session sets it once
             # that table is in place; see `Session.apply`
-            data = {"bounds": {field: FILTER_BOUND}}
+            bounds = {field: FILTER_BOUND}
         else:
             locs = drop(ctx.locs, keep)
             text = (f"removed {going} of {len(ctx.locs)} localizations "
                     f"{settings.which} {where}; {len(locs)} left")
-            data = {}
-        return Result(locs=locs, text=text, data=data, settings=settings)
+            bounds = {}
+        return Result(locs=locs, text=text, bounds=bounds, settings=settings)

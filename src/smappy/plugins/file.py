@@ -6,14 +6,16 @@ sessions.  They are ordinary plugins now.
 
 A loader runs in the panel's worker thread and must not touch the session, so
 it hands its work back as `Result.files` and `Session.apply` adds them on the
-thread that owns the session.  The reading itself is `session.read_and_group`,
+thread that owns the session.  The reading itself is `session.read_localizations`,
 the same function the window's own `LoadTask` uses -- one implementation, so a
 format behaves the same whichever way it was opened.
 
-There is one small plugin per format rather than one with a dropdown, because a
-format has its own settings: only the csv reader needs a column mapping.
-Adding a format is still a one-line `register(Reader(...))` in `io.formats`;
-giving it a plugin of its own here is optional.
+There is one loader, `File/Load/Auto`, with an advanced *format* choice for
+the file whose name does not say what it is.  There used to be a plugin per
+format as well, which put five entries in the tree for one thing and a csv
+setting where only one of them read it; the csv *columns* is now greyed for
+anything but a csv (`describe`).  Adding a format is a one-line
+`register(Reader(...))` in `io.formats`, and it is a choice here at once.
 """
 from __future__ import annotations
 
@@ -24,12 +26,17 @@ from typing import Any, Dict, Optional
 from ..io.formats import (FileInfo, name_filter, reader_for, reader_named,
                           save_filter, writer_for)
 from ..simulate.settings import SimulationSettings
-from . import Context, Notice, Plugin, Result, param, register
+from . import Context, FormState, Notice, Plugin, Result, param, register
 
 LOCS_FILTER = "Localizations (*.hdf5 *.h5 *.mat *.csv *.npy *.zip *.json)"
 
 
 # --------------------------------------------------------------------- load
+
+def _format_choices():
+    from ..io.formats import reader_names
+    return [("", "auto: by the file name")] + [(name, name) for name in reader_names()]
+
 
 @dataclass
 class LoadSettings:
@@ -38,101 +45,72 @@ class LoadSettings:
     append: bool = param(False, label="add to the open files",
                          help="join the table as one more file instead of "
                               "replacing everything; this is File > Add file")
+    format: str = param("", label="format", choices=_format_choices, advanced=True,
+                        help="auto: from the file's name and, where that is not "
+                             "enough, its contents")
+    mapping: str = param("", label="columns", advanced=True,
+                         help="csv only: header=column pairs, e.g. X=x_nm, "
+                              "Y=y_nm, T=frame; empty means guess from the header")
 
 
-class _Load(Plugin):
-    """Read a localization file into the session."""
-
-    Settings = LoadSettings
-    changes_locs = True
-    format: str = ""            # "" is by extension; else a reader's name
-
-    def reader_args(self, path: Path, settings) -> Dict[str, Any]:
-        """Anything the reader needs beyond the path."""
-        return {}
-
-    def run(self, ctx: Context, settings: LoadSettings) -> Result:
-        from ..group import GroupSettings
-        from ..session import read_and_group
-        if not settings.path:
-            raise ValueError("choose a file")
-        path = Path(settings.path)
-        if not path.exists():
-            raise FileNotFoundError(f"no such file: {path}")
-        if self.format:
-            reader = reader_named(self.format)
-            if reader is None:
-                raise ValueError(f"no reader called {self.format!r}")
-        else:
-            reader = reader_for(path)          # raises with the known formats listed
-        ctx.report(f"reading {path.name} as {reader.name}")
-        group_settings = (ctx.session.group_settings if ctx.session is not None
-                          else GroupSettings())
-        locs, info, grouped = read_and_group(
-            path, group_settings, append=settings.append,
-            progress=ctx.report, reader=reader,
-            **self.reader_args(path, settings))
-        text = f"{len(locs)} localizations from {path.name} ({info.format})"
-        if grouped is not None:
-            text += f", {len(grouped)} after linking"
-        return Result(files=[(locs, info, grouped)], text=text,
-                      data={"append": settings.append, "info": info}, settings=settings)
+def _reader(path: Path, settings: LoadSettings):
+    """The reader ``settings`` ask for: the one named, or the file's own."""
+    if settings.format:
+        reader = reader_named(settings.format)
+        if reader is None:
+            raise ValueError(f"no reader called {settings.format!r}")
+        return reader
+    return reader_for(path)          # raises with the known formats listed
 
 
 @register("File/Load/Auto")
-class LoadAuto(_Load):
-    """Read any known format, choosing the reader by the file name."""
-    # 2: no *link blinks*; a table with a trace id is grouped by trace
-    version = "2"
+class LoadAuto(Plugin):
+    """Read a localization file of any known format into the session."""
 
+    Settings = LoadSettings
+    changes_locs = True
+    # 2: no *link blinks*; a table with a trace id is grouped by trace;
+    # 3: the per-format loaders are a *format* choice here, and the csv
+    # *columns* came with them
+    version = "3"
 
-@register("File/Load/smappy HDF5")
-class LoadSmappy(_Load):
-    """Read a file smappy wrote."""
-    format = "smappy HDF5"
-    favorite = False
+    def describe(self, ctx: Optional[Context], settings: LoadSettings) -> FormState:
+        """*columns* is read for a csv only: greyed for any other file."""
+        csv = settings.format == "csv"
+        if not settings.format and settings.path:
+            try:
+                csv = reader_for(Path(settings.path)).name == "csv"
+            except (ValueError, OSError):
+                csv = False
+        return FormState(active={"mapping": csv})
 
-
-@register("File/Load/SMAP")
-class LoadSMAP(_Load):
-    """Read a SMAP `_sml.mat` file."""
-    format = "SMAP"
-    favorite = False
-    # 2: locprecznm, not zerr, is the axial precision when a file has both
-    version = "2"
-
-
-@register("File/Load/MINFLUX")
-class LoadMinflux(_Load):
-    """Read a MINFLUX `.npy`, `.zip` or `.json` export."""
-    format = "MINFLUX"
-    favorite = False
-    # 2: grouped by trace (`tid`), not linked by distance and frame
-    version = "2"
-
-
-@dataclass
-class LoadCsvSettings(LoadSettings):
-    mapping: str = param("", label="columns", advanced=True,
-                         help="header=column pairs, e.g. X=x_nm, Y=y_nm, T=frame; "
-                              "empty means guess from the header")
-
-
-@register("File/Load/csv")
-class LoadCsv(_Load):
-    """Read a csv, tsv or plain text table, guessing its columns."""
-
-    Settings = LoadCsvSettings
-    format = "csv"
-    favorite = False
-
-    def reader_args(self, path: Path, settings) -> Dict[str, Any]:
+    def reader_args(self, path: Path, reader, settings) -> Dict[str, Any]:
+        """Anything the reader needs beyond the path: a csv's columns."""
+        if reader.name != "csv":
+            return {}
         from ..io.formats import csv_columns, guess_csv_mapping
         if settings.mapping.strip():
             pairs = [p.split("=", 1) for p in settings.mapping.split(",") if "=" in p]
             return {"mapping": {a.strip(): b.strip() for a, b in pairs}}
         headers, _, _ = csv_columns(path)
         return {"mapping": guess_csv_mapping(headers)}
+
+    def run(self, ctx: Context, settings: LoadSettings) -> Result:
+        from ..session import read_localizations
+        if not settings.path:
+            raise ValueError("choose a file")
+        path = Path(settings.path)
+        if not path.exists():
+            raise FileNotFoundError(f"no such file: {path}")
+        reader = _reader(path, settings)
+        ctx.report(f"reading {path.name} as {reader.name}")
+        locs, info = read_localizations(path, progress=ctx.report, reader=reader,
+                                        **self.reader_args(path, reader, settings))
+        text = f"{len(locs)} localizations from {path.name} ({info.format})"
+        # not merged here: the layer merges its blinks when first read, and
+        # the GUI in the background once the file is open
+        return Result(files=[(locs, info, None)], text=text,
+                      append=settings.append, data={"info": info}, settings=settings)
 
 
 # --------------------------------------------------------------------- save
@@ -144,10 +122,10 @@ class SaveSettings:
     gui_state: bool = param(
         True, label="save the GUI state too",
         help="the tabs, their plugins and their parameters, for File > "
-             "Restore GUI state from file to put back")
+             "Workspace > From data file to put back")
     region_results: bool = param(
         True, label="save the ROI results",
-        help="the numbers the evaluations measured in the ROIs; off keeps "
+        help="the numbers measured in the ROIs; off keeps "
              "the ROIs and drops their results")
     region_figures: bool = param(
         True, label="save the ROI figures' data",
@@ -198,13 +176,13 @@ class Save(Plugin):
     changes_locs = False
     logged = True          # where a file went is not visible in the file
 
-    def notice_for(self, ctx: Context, settings: SaveSettings) -> Optional[Notice]:
+    def describe(self, ctx: Optional[Context], settings: SaveSettings) -> FormState:
         """Results there are that these settings would not save, said before
         the save rather than found missing when the file is opened again."""
         if ctx is None or ctx.session is None:
-            return None
+            return FormState()
         text = left_out(ctx.session, settings)
-        return None if text is None else Notice(text)
+        return FormState(notice=None if text is None else Notice(text, kind="info"))
 
     def run(self, ctx: Context, settings: SaveSettings) -> Result:
         if ctx.session is None:
@@ -220,7 +198,7 @@ class Save(Plugin):
         missing = left_out(ctx.session, settings, done=True)
         if missing:                       # said before, and kept in the log
             text += "; " + missing[0].lower() + missing[1:]
-        return Result(text=text, data={"path": written}, settings=settings)
+        return Result(text=text, written=str(written), settings=settings)
 
 
 # ------------------------------------------------------------------- export
@@ -273,7 +251,7 @@ class ExportImage(Plugin):
                              pixelsize=settings.pixelsize_nm,
                              settings=render, display=display,
                              select=selection.mask)
-        return Result(text=f"written to {written}", data={"path": written},
+        return Result(text=f"written to {written}", written=str(written),
                       settings=settings)
 
 
@@ -294,6 +272,22 @@ class SimulateBlinks(Plugin):
     # precision is Mortensen's maximum-likelihood one, not least squares'
     version = "4"
 
+    def describe(self, ctx: Optional[Context], settings: SimulationSettings) -> FormState:
+        """Once the simulation file exists, offer to fit it: the GUI puts it
+        into the Localize tab's fitter (the window ``"fit file"``, which is
+        what a stack dropped on the window goes through), so nobody retypes
+        a path the plugin has just written."""
+        from ..simulate.source import recipe_path
+        if settings.output != "camera" or not settings.camera.path:
+            return FormState()
+        path = recipe_path(settings.camera.path)
+        if not path.is_file():
+            return FormState()
+        return FormState(notice=Notice(
+            f"{path.name} is written: fit it in the Localize tab",
+            action="Fit this", window="fit file", settings=str(path),
+            kind="info"))
+
     def run(self, ctx: Context, settings: SimulationSettings) -> Result:
         from ..simulate import camera_truth, ground_truth, localizations
         ctx.report(f"simulating {settings.n_frames} frames...")
@@ -309,8 +303,7 @@ class SimulateBlinks(Plugin):
                 f"({md['n_labels']} labels), {md['n_blinks']} blinks over "
                 f"{settings.n_frames} frames, off time {md['off_time_frames']:.0f} "
                 f"frames; {md['n_close']} too close together, {close}")
-        return Result(files=[(locs, info, None)], text=text,
-                      data={"append": False}, settings=settings)
+        return Result(files=[(locs, info, None)], text=text, settings=settings)
 
     def _camera(self, ctx, settings, truth, camera_truth) -> Result:
         from ..simulate.source import write_recipe
@@ -322,7 +315,7 @@ class SimulateBlinks(Plugin):
         text = (f"{len(truth.emission)} spots of {len(truth.fluorophores)} emitters "
                 f"over {settings.n_frames} frames of {cam.size_px} x {cam.size_px} "
                 f"pixels: {path} -- open it in a fitter as its file")
-        data = {"path": str(path)}
+        data = {}
         if cam.tiff:
             import tifffile
             from ..simulate import render
@@ -339,5 +332,5 @@ class SimulateBlinks(Plugin):
             name = f"{path.name} (truth)"
             files = [(locs, FileInfo(name=name, path=str(path), format="simulated",
                                      n=len(locs)), None)]
-            data["append"] = False
-        return Result(files=files, text=text, data=data, settings=settings)
+        return Result(files=files, text=text, data=data, written=str(path),
+                      settings=settings)

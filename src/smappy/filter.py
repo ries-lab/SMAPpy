@@ -139,6 +139,22 @@ class LocFilter:
         return self._indices
 
     @property
+    def cached_indices(self) -> Optional[np.ndarray]:
+        """`indices` if they have been computed for the current mask, else None."""
+        return self._indices
+
+    def keep_indices(self, mask: np.ndarray, indices: np.ndarray) -> None:
+        """Take ``indices`` computed elsewhere -- by a render thread, from a
+        snapshot's mask -- if ``mask`` is still this filter's.
+
+        Compacting five million rows is 10-20 ms; a render thread that had to
+        do it hands the answer back, so the next render does not.  Both arrays
+        are only ever replaced, never written, so identity says they agree.
+        """
+        if self._indices is None and mask is self._combined:
+            self._indices = indices
+
+    @property
     def ranges(self) -> Dict[str, Tuple[Optional[float], Optional[float]]]:
         return dict(self._ranges)
 

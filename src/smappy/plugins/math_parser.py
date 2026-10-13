@@ -46,7 +46,7 @@ from ..mathparse import (CONSTANTS, FUNCTIONS, GROUPED_CHOICES, RECOMPUTE,
                          ExpressionError, evaluate, names_in, recipes, reduces,
                          remember)
 from ..render import LATERAL_FIELDS
-from . import Context, LiveRecipe, Plugin, Result, param, register
+from . import Context, ColumnRecipe, Plugin, Result, param, register
 
 MAX_HISTORY = 20
 
@@ -162,7 +162,7 @@ def check_field(field: str, locs: Localizations) -> str:
                          "column of that name would change what it means; "
                          "choose another")
     if name in ("group_id", "n_in_group"):
-        raise ValueError(f"{name!r} is written by the grouping itself and "
+        raise ValueError(f"{name!r} is written by merge blinks itself and "
                          "would be overwritten again")
     return name
 
@@ -191,7 +191,7 @@ class MathSettings:
                                 ("selection", "the selection")],
                        help="the selection is the layer's filter, the ROI and "
                             "the slab together; the rest of the field is NaN")
-    grouped: str = param(RECOMPUTE, label="grouped",
+    grouped: str = param(RECOMPUTE, label="merged blinks",
                          choices=[(RECOMPUTE, "recompute the expression"),
                                   ("mean", "mean of the localizations"),
                                   ("sum", "sum of the localizations"),
@@ -199,12 +199,12 @@ class MathSettings:
                                   ("any", "any localization (flag)"),
                                   ("all", "all localizations (flag)"),
                                   ("none", "leave it off")],
-                         help="what the field means once the localizations "
-                              "are grouped: the expression again, or a rule "
+                         help="what the field means once the blinks "
+                              "are merged: the expression again, or a rule "
                               "to combine their values")
     recall: str = param("", label="history", choices=_recall_choices,
                         help="an expression used before; choosing one fills "
-                             "the field, the expression and the grouped rule")
+                             "the field, the expression and the merged-blinks rule")
 
 
 @register("Analysis/Process/Math Parser")
@@ -213,6 +213,8 @@ class MathParser(Plugin):
 
     Settings = MathSettings
     changes_locs = True
+    # a column per localization; the grouped table takes it by the recipe's rule
+    grouping = "ungrouped"
     version = "1"
 
     def react(self, changed: str, settings: MathSettings):
@@ -234,14 +236,14 @@ class MathParser(Plugin):
         if missing:
             hint = ""
             if "n_in_group" in missing or "group_id" in missing:
-                hint = ("; on-time and group id are written by the grouping -- "
-                        "switch a layer to grouped once and they are there")
+                hint = ("; on-time and group id are written by merge blinks -- "
+                        "tick merge blinks on a layer once and they are there")
             raise ExpressionError(
                 f"no column {', '.join(missing)}; the table has: "
                 f"{', '.join(sorted(locs.keys()))}{hint}")
         mask = None
         if settings.where == "selection":
-            ctx.selection.require(1, ctx.report, "this")
+            ctx.selection.require(1, ctx.warn, "this")
             mask = np.asarray(ctx.selection.mask, bool)
             # evaluated on the selected rows only, so that a reduction --
             # median(z_nm) -- is the selection's, as in SMAP, and not the
@@ -278,7 +280,7 @@ class MathParser(Plugin):
         note = ""
         if mask is not None and rule == RECOMPUTE:
             rule = "mean"
-            note = ("; on the grouped table it is the mean of the "
+            note = ("; on merged blinks it is the mean of the "
                     "localizations, since the expression cannot be "
                     "recomputed for a selection")
         if field in names_in(settings.expression):
@@ -302,13 +304,12 @@ class MathParser(Plugin):
 
         shown = values if mask is None else np.asarray(values)[mask]
         where = "" if mask is None else f" (selection of {len(ctx.locs)})"
-        data = {}
-        if self.live_recipe_for(settings):
-            data["live_recipe"] = MathRecipe(field, settings.expression)
-        return Result(locs=locs, settings=settings, data=data,
+        recipe = (MathRecipe(field, settings.expression)
+                  if self.column_recipe_for(settings) else None)
+        return Result(locs=locs, settings=settings, recipe=recipe,
                       text=f"{describe(field, shown)}{where}{note}")
 
-    def live_recipe_for(self, settings: MathSettings) -> bool:
+    def column_recipe_for(self, settings: MathSettings) -> bool:
         """A field over the whole table, from other columns, and not a
         position: that can follow a live fit (`MathRecipe`).  Over the
         selection it cannot -- which rows a block adds to the selection is a
@@ -323,7 +324,7 @@ class MathParser(Plugin):
             return False
 
 
-class MathRecipe(LiveRecipe):
+class MathRecipe(ColumnRecipe):
     """The expression, evaluated for each block a live fit appends -- and
     over the whole table again when it reduces a column (`reduces`), since
     then every row's value moves with the table."""

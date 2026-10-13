@@ -78,33 +78,38 @@ def make(d) -> None:
     d.chapter("Dual-colour calibration")
     localize = show_tab(d, "Localize")
     _, panel = open_section(d, localize, "Bead calibration")
-    type_into(panel, "mode", "dual")
     d.shot("The Bead calibration section of the Localize tab opens the "
-           "calibration window. Set the mode to dual colour, then Open.",
-           spot=[field(panel, "mode"), panel.run_button], point=panel.run_button,
+           "calibration window.",
+           spot=[panel.run_button], point=panel.run_button,
            click=True, zoom=d.around(panel, 700))
     panel.run_button.click()
     window = control.calibration_window
+    window.mode_box.setCurrentText("Dual colour")
     assert window.is_dual, "the calibration window is not in dual-colour mode"
     window.resize(1540, 860)
     d.place(window, 30, 20)
     window.add_paths([str(p) for p in stacks])
     form = window.form
-    for name, value in (("layout", "up-down"), ("main_channel", "upper"),
-                        ("dz_nm", DZ_NM)):
-        f = form.fields[name]
+    geometry = form.fields["registration"]      # the split: a part of its own
+    # set by hand: the simulated beads sit on a grid centred in each half,
+    # which is its own mirror image, so *detect* could not tell the two apart
+    for part, name, value in ((geometry, "layout", "up-down"),
+                              (geometry, "main_channel", "upper"),
+                              (form, "dz_nm", DZ_NM)):
+        f = part.fields[name]
         f.set(value)
         f.changed.emit()
     d.settle()
-    d.shot("Bead stacks from the split camera: every bead appears in both "
-           "halves, and the pairs are what the map is measured from.",
+    d.shot("Set the mode to dual colour. Bead stacks from the split camera: "
+           "every bead appears in both halves, and the pairs are what the map "
+           "is measured from.",
            spot=[window.file_list, window.mode_box], point=window.mode_box,
            zoom=d.around(window.file_list, 760))
-    layout = form.fields["layout"]
-    main = form.fields["main_channel"]
-    d.shot("Say how the chip is split: here into an upper and a lower half, "
-           "with the main channel above. Mirrored is for a splitter that flips "
-           "one half.",
+    layout = geometry.fields["layout"]
+    main = geometry.fields["main_channel"]
+    d.shot("How the chip is split: detect finds it from the beads, or say it "
+           "here, an upper and a lower half with the main channel above. "
+           "Mirrored is for a splitter that flips one half.",
            spot=[layout, main], point=layout, zoom=d.around(layout, 700))
 
     d.chapter("Calibrate")

@@ -12,7 +12,7 @@ hand-started fit does not need:
   keyboard, so the plugin's preflight is skipped; the caller checks what it
   would have asked before calling.
 * **It is controlled from another thread.**  `stop` ends the fit early and
-  keeps the file; `writer_finished` says the acquisition is complete, after
+  keeps the file (the panel's Stop button sets the same event); `writer_finished` says the acquisition is complete, after
   which the watch reads what is left and the fit ends -- not after an idle
   timeout, because a pause in an acquisition is not its end
   (`smappy.io.watch`).  Both are `threading.Event`s, so a reader thread can set
@@ -27,7 +27,6 @@ which is a cancellation.  `run` returns only once the windows are closed.
 """
 from __future__ import annotations
 
-import sys
 import threading
 import time
 import traceback
@@ -119,18 +118,11 @@ class LiveSession:
         `run` is this plus the loop.  Split so a test can drive the loop
         itself.
         """
-        from PySide6.QtWidgets import QApplication
-
         from ..session import Session
+        from . import make_app
         from .app import ControlWindow, RenderWindow
-        from .collector import collect_on_gui_thread
-        from .widgets import apply_style
 
-        app = QApplication.instance() or QApplication([sys.argv[0]])
-        apply_style(app)
-        collect_on_gui_thread(app)
-        from .icon import install_icon
-        install_icon(app)
+        app = make_app()
         self.session = Session()
         from .identity import install_identity
         install_identity(app, self.session)
@@ -228,23 +220,23 @@ class LiveSession:
     def _ended(self, kind: str, payload) -> None:
         if self.outcome is not None:
             return                       # a later run the user started by hand
-        if kind == "failed":
+        if kind in ("failed", "stopped"):
             lines = str(payload).strip().splitlines()
             # stopped before it had a file -- while the dataset was still
             # being waited for, say -- is still a stop, not a broken fit
-            state = "cancelled" if self.stop.is_set() else "failed"
+            state = ("cancelled" if kind == "stopped" or self.stop.is_set()
+                     else "failed")
             self._finish(LiveOutcome(state, False,
                                      error=lines[-1] if lines else "failed",
                                      traceback=str(payload)))
             return
-        data = payload.data or {}
-        stopped = bool(data.get("stopped"))
+        stopped = payload.stopped
         live = self.settings.source.live
         complete = not stopped and (self.writer_finished.is_set() or not live)
-        path = data.get("path")
+        path = payload.written
         self._finish(LiveOutcome("cancelled" if stopped else "succeeded", complete,
                                  path=Path(path) if path else None,
-                                 stats=dict(data.get("stats") or {})))
+                                 stats=dict((payload.data or {}).get("stats") or {})))
 
     def _finish(self, outcome: LiveOutcome) -> None:
         self.outcome = outcome

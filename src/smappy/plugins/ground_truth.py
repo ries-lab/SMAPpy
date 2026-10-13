@@ -363,6 +363,8 @@ class GroundTruth(Plugin):
 
     Settings = GroundTruthSettings
     changes_locs = False
+    # the truth is matched frame by frame
+    grouping = "ungrouped"
     # 2: dim spots not counted by default; a z radius.  3: a drift-corrected
     # table is compared with the truth less the drift's mean
     version = "4"

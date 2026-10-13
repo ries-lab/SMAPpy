@@ -6,24 +6,26 @@ projection (rotation, zoom, pan) and edits the session's slab.
 from __future__ import annotations
 
 import copy
-from typing import List, Optional
+from dataclasses import dataclass
+from typing import List, Optional, Tuple
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, Qt, QThread, QTimer, Signal
+from PySide6.QtCore import QEvent, QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QImage
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog,
                                QFormLayout, QGridLayout, QHBoxLayout, QInputDialog,
                                QLabel, QMainWindow, QMenu, QPushButton, QScrollArea,
                                QToolBar, QToolButton, QVBoxLayout, QWidget)
 
+from ..layer_state import LayerSnapshot
 from ..render import FieldOfView, axis_unit
 from ..session import Session
 from . import folders
-from .render_view import bar_label, nice_step
+from .render_view import RenderWorker, bar_label, nice_step
 from .widgets import CONTROL_WIDTH, place_beside
 from ..view3d import (PRESETS, PREVIEW_SCALE, PreviewBudget, Projection, Slab, render_3d,
-                      upscale)
+                      snapshot_3d, upscale)
 
 BOX_PEN = pg.mkPen((255, 255, 0, 160), width=1)
 DEGREES_PER_PIXEL = 0.4
@@ -33,63 +35,41 @@ AXIS_FRACTION = 0.09        # arm length, as a fraction of the view's width
 AXIS_CORNER = 0.12          # where the tripod sits, from the bottom left corner
 
 
-class _Renderer3D(QObject):
-    done = Signal(object, object, object, int)      # rgb, fov, depth histogram, generation
+@dataclass(frozen=True)
+class Job3D:
+    """The 3D view's render: the layers frozen on the GUI thread
+    (`snapshot_3d`), a copy of the projection and the slab, the canvas size.
+    Run by a `RenderWorker`, whose thread holds the GPU engine and the
+    preview budgets."""
 
-    engine_ready = Signal(str)            # the GPU's name, or "" if there is none
+    layers: Tuple[LayerSnapshot, ...]
+    projection: Projection
+    slab: Optional[Slab]
+    nx: int
+    ny: int
+    preview: bool
 
-    def __init__(self):
-        super().__init__()
-        self.thread = QThread()
-        self.thread.setStackSize(32 * 1024 * 1024)
-        self.moveToThread(self.thread)
-        self.thread.start()
-        from .render_view import _LIVE_THREADS
-        _LIVE_THREADS.append(self.thread)
-        self._gpu = None
-        self._gpu_tried = False
-        # one per engine: a drag frame costs an order of magnitude more on the
-        # CPU than on the GPU, so a rate learned under one says nothing about
-        # the next.  Keyed by the engine that was actually used, not asked for.
-        self._budgets: dict = {}
-
-    def gpu(self):
-        """The GPU engine, made on this thread on first use; None without one."""
-        if not self._gpu_tried:
-            self._gpu_tried = True
-            try:
-                from ..gpu import GPUEngine
-                self._gpu = GPUEngine()
-                self.engine_ready.emit(self._gpu.name)
-            except Exception as e:
-                print(f"no GPU engine: {e}")
-                self.engine_ready.emit("")
-        return self._gpu
-
-    def render(self, session: Session, projection: Projection, slab, nx: int, ny: int,
-               preview: bool, generation: int) -> None:
+    def run(self, worker):
+        """``(rgb, fov, depth histogram)``."""
+        projection, preview = self.projection, self.preview
         scale = PREVIEW_SCALE if preview else 1
-        fov = projection.fov(nx, ny, scale)
-        engine = self.gpu() if projection.engine != "cpu" else None
+        fov = projection.fov(self.nx, self.ny, scale)
+        engine = worker.gpu() if projection.engine != "cpu" else None
         if projection.engine != "cpu" and engine is None:
             projection = copy.copy(projection)
             projection.engine = "cpu"
         if projection.engine == "spheres" and preview:
             preview = False                      # the g-buffer look must not change mid-drag
-        budget = self._budgets.setdefault(projection.engine, PreviewBudget())
-        try:
-            rgb, hist = render_3d(session.layers, projection, slab, fov, preview, engine,
-                                  budget=budget)
-        except Exception as e:                      # the table changed under us
-            print(f"3D render failed: {e}")
-            return
-        self.done.emit(upscale(rgb, scale, ny, nx), fov, hist, generation)
+        budget = worker.budgets.setdefault(projection.engine, PreviewBudget())
+        rgb, hist = render_3d(self.layers, projection, self.slab, fov, preview, engine,
+                              budget=budget)
+        return upscale(rgb, scale, self.ny, self.nx), fov, hist
 
 
 class View3D(QWidget):
     """The canvas: an image in view coordinates, the slab's box over it."""
 
-    render_requested = Signal(object, object, object, int, int, bool, int)
+    render_requested = Signal(object, int)       # a `Job3D`, generation
     changed = Signal()          # projection or slab edited here
     depth_histogram = Signal(object)
 
@@ -135,9 +115,10 @@ class View3D(QWidget):
         self._pending: Optional[bool] = None       # queued render: preview flag
         self._dragging = False
         self._last: Optional[QPointF] = None
-        self._renderer = _Renderer3D()
+        self._renderer = RenderWorker()
         self.render_requested.connect(self._renderer.render)
         self._renderer.done.connect(self._on_rendered)
+        self._renderer.failed.connect(self._on_render_failed)
         self._timer = QTimer(singleShot=True, interval=30)
         self._timer.timeout.connect(lambda: self.render(preview=False))
         self.graphics.mousePressEvent = self._press
@@ -203,12 +184,22 @@ class View3D(QWidget):
         size = self.graphics.size()
         self._generation += 1
         self._busy = True
-        self.render_requested.emit(self.session, copy.deepcopy(self.projection),
-                                   copy.deepcopy(self.session.slab),
-                                   max(size.width(), 16), max(size.height(), 16),
-                                   preview, self._generation)
+        # frozen here, on the GUI thread: the worker sees nothing else
+        job = Job3D(snapshot_3d(self.session.layers), copy.deepcopy(self.projection),
+                    copy.deepcopy(self.session.slab),
+                    max(size.width(), 16), max(size.height(), 16), preview)
+        self.render_requested.emit(job, self._generation)
 
-    def _on_rendered(self, rgb, fov: FieldOfView, hist, generation: int) -> None:
+    def _on_render_failed(self, message: str, generation: int) -> None:
+        """Free the view for the next render; the last picture stays.  It
+        used to return in silence, and the view then waited for good."""
+        self._busy = False
+        if self._pending is not None:
+            preview, self._pending = self._pending, None
+            self.render(preview)
+
+    def _on_rendered(self, result, generation: int) -> None:
+        rgb, fov, hist = result
         self._busy = False
         if generation == self._generation:
             self.depth_histogram.emit(hist)
@@ -419,12 +410,11 @@ class View3D(QWidget):
             return render_3d(self.session.layers, proj, slab, fov)[0]
         weight = np.zeros((fov.ny, fov.nx), np.float32)
         from ..view3d import render_layer_3d
-        for layer in self.session.layers:
+        for layer in snapshot_3d(self.session.layers):
             if layer.visible and not layer.is_image:
-                st = layer.state
-                weight += render_layer_3d(st.locs, st.filter.mask, proj, slab, fov,
-                                          st.settings, st.display,
-                                          index=getattr(st, "cull_index", None))[1].weight
+                weight += render_layer_3d(layer.locs, layer.mask, proj, slab, fov,
+                                          layer.settings, layer.display,
+                                          index=layer.index)[1].weight
         return weight
 
     def move_along_sight(self, steps: float) -> None:

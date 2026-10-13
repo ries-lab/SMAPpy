@@ -15,7 +15,7 @@ microscope, kept where the group shares it, with the values uiPSF's own
     dual:                            # a split camera; omit for one channel
       layout: up-down mirrored       # as the bead calibration: smappy.calibrate.dual.LAYOUTS
       main_channel: upper
-      split_position: null           # null: the middle
+      split_position: null           # on the chip; null: the middle
     insitu:                          # the pupil learning from blinking starts at
       zernike_index: [5]             # Noll index (5: astigmatism)
       zernike_coeff: [0.5]           # its amplitude, in radians

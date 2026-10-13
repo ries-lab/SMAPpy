@@ -181,7 +181,7 @@ def test_a_table_without_an_on_time_says_so_rather_than_linking_anything():
     result = LocalizationStatistics().run(
         Context(locs=locs, progress=said.append), StatisticsSettings())
     assert "on_time" not in result.data["stats"]
-    assert "grouped" in result.data["note"] and said
+    assert "merged blinks" in result.data["note"] and said
 
 
 def test_a_table_with_nothing_to_describe_is_refused():
@@ -234,7 +234,7 @@ def test_a_grouped_layer_is_described_blink_by_blink_and_an_ungrouped_one_frame_
     grouped = LocalizationStatistics().run(session.context(0), StatisticsSettings())
     assert grouped.data["n"] == 300
     assert grouped.data["stats"]["photons"]["median"] == pytest.approx(2100, rel=0.05)
-    assert "(grouped)" in grouped.text
+    assert ", blinks merged)" in grouped.text and grouped.text.count("merged") == 1
 
     session.show_grouped(0, False)
     frames = LocalizationStatistics().run(session.context(0), StatisticsSettings())

@@ -5,27 +5,36 @@ covers: [smappy.plugins.npc.count_corners, smappy.plugins.npc.segments, smappy.p
 
 ## What it does
 
-A nuclear pore has eight corners, and each corner of the Nup96 ring holds
+A nuclear pore -- an [NPC](plugin:Panels/Glossary), nuclear pore complex, the
+ring of proteins in the nuclear envelope -- has eight corners, and each
+corner of the Nup96 ring holds
 four copies of the protein.  How many corners a pore shows, and how many
 localizations it has, together tell how well the sample was labelled and how
 often a fluorophore blinks (Thevathasan et al. 2019,
 [doi:10.1038/s41592-019-0574-9](https://doi.org/10.1038/s41592-019-0574-9)).
 
-This evaluator measures both, one pore (one ROI) at a time:
+This plugin measures both, one pore at a time, each in its own
+[ROI](plugin:Panels/Glossary) (region of interest: here a circle around the
+pore):
 
 * the **corners** the pore shows, counted with its precise localizations;
 * its **localizations**, a little less strictly selected;
 * and **SMAP's corner count**, for SMAP's way of analysing them.
 
-The numbers go into the site table, and
-[NPC Labeling Efficiency](plugin:Analysis/Regions/Summarize/NPC Labeling Efficiency)
-turns them into the labelling efficiency.  Its page explains why the counts
-are taken this way.
+The numbers go into the ROIs' results table, and
+[NPC labelling efficiency](plugin:Analysis/Regions/Summarize/NPC labelling efficiency)
+turns them into the [labelling efficiency](plugin:Panels/Glossary) (also
+called degree of labelling: the fraction of the target proteins that carry a
+detected label).  Its page explains why the counts are taken this way.
 
-It is not in a new evaluation pipeline by itself: add it in the evaluation
-window when the sites are pores.  It needs ROIs centred roughly on the pores,
-such as those of [NPC](plugin:Analysis/Regions/Find/NPC), pores seen face on,
-grouped localizations, and the localization precision (`xy_err_nm`).
+It is not in a new list of per-region steps by itself: add it in the
+*Per-region steps...* window when the ROIs are pores.  It needs ROIs centred
+roughly on the pores, such as those of [NPC](plugin:Analysis/Regions/Find/NPC),
+pores seen face on, blinks merged -- [merge blinks](plugin:Panels/Glossary),
+also called grouping or linking, combines the localizations in consecutive
+frames that come from one blinking event into one -- and the
+[localization precision](plugin:Panels/Glossary) (`xy_err_nm`, also called
+the CRLB).
 
 ## How it works
 
@@ -82,6 +91,10 @@ for ax, copy in zip(axes.ravel(), range(6, 12)):
 ```
 
 ## In detail
+
+**Which table.**  The one the layer shows, cut to the ROI: on a layer that
+merges blinks, the blinks -- which is what the corner count assumes, one
+localization per blink.
 
 **The centre** minimises $\sum_i \rho(d_i - R)$ over the precise
 localizations, $d_i$ the distance of localization $i$ from the centre, $R$
@@ -140,7 +153,7 @@ About the ring's radius plus three of the count's precisions.
 
 ## Output
 
-One row per ROI in the site table:
+One row per ROI in the results table:
 
 * `n_corners`, the corners seen with the precise localizations;
 * `n_localizations`, the localizations better than *count precision*;
@@ -174,7 +187,7 @@ kept as `n_corners_smap`.
   mean is the answer.
 * **Left out**: SMAP's split of the count by time and its counts on the
   simulation's true positions; the truth is compared in
-  [NPC Labeling Efficiency](plugin:Analysis/Regions/Summarize/NPC Labeling Efficiency)
+  [NPC labelling efficiency](plugin:Analysis/Regions/Summarize/NPC labelling efficiency)
   instead.
 
 ## References

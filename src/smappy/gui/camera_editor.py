@@ -38,11 +38,11 @@ MISSING_COLOUR = "#c07000"
 # (parameter, label, unit) in the order the window shows them
 ROWS = (("conversion", "conversion", "e-/ADU"),
         ("offset", "offset", "ADU"),
-        ("pixelsize_um", "pixel size", "um"),
+        ("pixelsize_um", "pixel size", "µm"),
         ("em_on", "EM gain on", ""),
         ("emgain", "EM gain", ""),
         ("exposure_ms", "exposure", "ms"),
-        ("roi", "camera ROI", "pix"))
+        ("roi", "camera ROI", "px"))
 
 SOURCES = (("fixed", "fixed"), ("tag", "from a tag"),
            ("state", "per readout mode"), ("none", "not set"))

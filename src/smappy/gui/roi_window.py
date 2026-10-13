@@ -73,6 +73,17 @@ def arrow(direction):
     return xs, ys
 
 
+UNDO_TEXT_WIDTH = 130      # px of an undo button's text, past which it is elided
+
+
+def _lowered(label: str) -> str:
+    """"Remove ROI 3" -> "remove ROI 3", to follow "Undo"; an acronym
+    ("NPC") keeps its capitals."""
+    if len(label) > 1 and label[0].isupper() and label[1].islower():
+        return label[0].lower() + label[1:]
+    return label
+
+
 class ImagePane(QWidget):
     """One rendered quadrant: an image, outlines over it, and clicks."""
 
@@ -235,7 +246,7 @@ class ROIList(QAbstractTableModel):
             project = self.window.project
             roi = project.rois.get(roi_id)
             found = False
-            if roi is not None and roi.reviewed and roi.use and self._steps:
+            if roi is not None and roi.use and self._steps:
                 try:
                     found = bool(project.stale_steps(roi_id, self._steps))
                 except Exception:
@@ -271,7 +282,7 @@ class ROIList(QAbstractTableModel):
             if role == Qt.CheckStateRole:
                 return Qt.Checked if roi.use else Qt.Unchecked
             if role == Qt.ToolTipRole:
-                return "include this ROI in the evaluation (space toggles it)"
+                return "include this ROI when the per-region steps run (space toggles it)"
             return None
         if role == Qt.DisplayRole:
             return str(self.numbers.get(roi_id, "")) if column == 0 else str(
@@ -282,8 +293,8 @@ class ROIList(QAbstractTableModel):
             if self.waiting(roi_id):
                 return pg.mkColor(STALE_COLOUR)
         if role == Qt.ToolTipRole and roi.use and self.waiting(roi_id):
-            return ("the data or the evaluators' parameters have changed since "
-                    "this ROI was evaluated")
+            return ("the data or the steps' parameters have changed since "
+                    "this ROI was measured")
         return None
 
     def setData(self, index, value, role=Qt.EditRole) -> bool:  # noqa: N802
@@ -397,10 +408,12 @@ class ROIManagerWindow(QMainWindow):
         self.remove_button.setToolTip("remove the selected ROI")
         self.remove_button.clicked.connect(self._remove)
         # the ROIs' own undo (`ROIProject.history`), not the main window's,
-        # which is for tables: Ctrl+Z here never undoes a drift correction
-        self.undo_button = QPushButton("Undo")
+        # which is for tables: Ctrl+Z here never undoes a drift correction.
+        # The buttons name the edit ("Undo remove ROI 3"), as Edit > Undo
+        # names the table's step ("Undo RCC"), so the two read differently
+        self.undo_button = QPushButton("Undo ROI edit")
         self.undo_button.clicked.connect(self.undo)
-        self.redo_button = QPushButton("Redo")
+        self.redo_button = QPushButton("Redo ROI edit")
         self.redo_button.clicked.connect(self.redo)
         edits.addWidget(self.remove_button, 1)
         edits.addWidget(self.undo_button)
@@ -417,20 +430,20 @@ class ROIManagerWindow(QMainWindow):
         # the pipeline is set up in the control window's Regions tab, but it is
         # here that its results are looked at, one site after another; the
         # same window, opened from where the eye already is
-        self.evaluation_button = QPushButton("Region steps...")
+        self.evaluation_button = QPushButton("Per-region steps...")
         self.evaluation_button.setToolTip("the steps run once in every ROI: choose "
                                           "them, order them and set them up")
         self.evaluation_button.clicked.connect(self.evaluation_requested.emit)
         llayout.addWidget(self.evaluation_button)
-        self.evaluate_live = QCheckBox("plot the evaluation")
+        self.evaluate_live = QCheckBox("plot the ROI's figures")
         self.evaluate_live.setToolTip(
-            "open the site window: what the evaluators draw for the selected "
-            "ROI, a tab per evaluator, redrawn in place by the next ROI -- so "
+            "open the ROI results window: what the steps draw for the selected "
+            "ROI, a tab per step, redrawn in place by the next ROI -- so "
             "that stepping down the list compares like with like.  Only the "
-            "tab being looked at is drawn, and only that evaluator runs.")
+            "tab being looked at is drawn, and only that step runs.")
         self.evaluate_live.toggled.connect(self._on_evaluate_live)
         llayout.addWidget(self.evaluate_live)
-        self.re_evaluate = QCheckBox("re-evaluate when out of date")
+        self.re_evaluate = QCheckBox("measure again when out of date")
         self.re_evaluate.setChecked(True)
         self.re_evaluate.setToolTip(
             "a selected ROI whose stored numbers were measured with data or "
@@ -587,7 +600,7 @@ class ROIManagerWindow(QMainWindow):
         proposed = (f"; previewing {len(preview['sites'])} (grey): Run adds them"
                     if preview is not None else "")
         self.status.showMessage(f"{len(self.rows.ids)} ROIs, {used} used"
-                                + (f", {len(waiting)} to evaluate" if waiting else "")
+                                + (f", {len(waiting)} to measure" if waiting else "")
                                 + proposed)
 
     # ------------------------------------------------------------ drawing
@@ -967,6 +980,10 @@ class ROIManagerWindow(QMainWindow):
                 (self.redo_button, history.can_redo, history.redo_label, "redo")):
             button.setEnabled(can)
             button.setToolTip(f"{what}: {label}" if can else f"nothing to {what}")
+            text = f"{what.capitalize()} {_lowered(label) if can else 'ROI edit'}"
+            # elided: a long label must not widen the column of the ROI list
+            button.setText(button.fontMetrics().elidedText(
+                text, Qt.ElideRight, UNDO_TEXT_WIDTH))
 
     def _edit(self, what: str):
         """An undoable edit, named after the selected ROI's number."""
@@ -1154,9 +1171,21 @@ class ROIManagerWindow(QMainWindow):
         roi = self._selected()
         if roi is None or self._evaluating or not self.evaluate_live.isChecked():
             return
-        steps = pipeline_module.resolve(project.pipeline)
+        steps = project.block_steps()
         if not steps:
-            self.status.showMessage("no evaluator is enabled in the pipeline")
+            self.status.showMessage("no per-region step is enabled")
+            return
+        from .merging import _MERGERS
+        merger = _MERGERS.get(self.session) if hasattr(self, "session") else None
+        if merger is not None and merger.pending():
+            # not on localizations standing in for blinks still being merged
+            self.status.showMessage("merging blinks... the ROI is measured when "
+                                    "it is done")
+            if not getattr(self, "_merge_wait", None):
+                def again():
+                    self._merge_wait = None
+                    self.evaluate_active(label)
+                self._merge_wait = merger.after(again)
             return
         window = self.site_window()
         window.set_steps([step.label for step in steps])
@@ -1169,7 +1198,7 @@ class ROIManagerWindow(QMainWindow):
                 roi.id, steps=steps, reuse=True, force=[label] if label else [],
                 store=True, run="stale" if self.re_evaluate.isChecked() else "forced")
         except Exception as error:
-            self.status.showMessage(f"the evaluation failed: {error}")
+            self.status.showMessage(f"the measurement failed: {error}")
             return
         finally:
             self._evaluating = False
@@ -1181,14 +1210,14 @@ class ROIManagerWindow(QMainWindow):
             elif result is not None and result.figures():
                 window.show_plots(step.label, result.figures(), f"ROI {number}")
             elif result is not None:
-                window.show_message(step.label, "this evaluator draws nothing; "
+                window.show_message(step.label, "this step draws nothing; "
                                                 "its numbers are in the Regions tab")
         # the table first: it writes the ROI counts into the status bar, and
         # what just happened to this site is the more useful of the two
         self._fill_table()
         drew = [label for label, result in results.items() if result is not None]
         if updated:
-            self.status.showMessage(f"ROI {number}: {', '.join(updated)} evaluated")
+            self.status.showMessage(f"ROI {number}: {', '.join(updated)} measured")
         elif drew:
             self.status.showMessage(f"ROI {number}: {', '.join(drew)} drawn from "
                                     "the result already stored")

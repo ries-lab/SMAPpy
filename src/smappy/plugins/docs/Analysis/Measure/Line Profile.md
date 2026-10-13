@@ -1,6 +1,6 @@
 ---
-version: "4"
-covers: [smappy.plugins.line_profile.project, smappy.plugins.line_profile.profiles, smappy.plugins.line_profile.fit_profile, smappy.plugins.line_profile.fit_models, smappy.plugins.line_profile.em_two_gaussians, smappy.plugins.line_profile.bootstrap, smappy.plugins.line_profile.gauss_density, smappy.plugins.line_profile.step_density, smappy.plugins.line_profile.arc_density, smappy.plugins.line_profile.smoothed_profile, smappy.plugins.line_profile.fit_layers, smappy.plugins.line_profile.draw_profile]
+version: "7"
+covers: [smappy.plugins.line_profile.project, smappy.plugins.line_profile.profiles, smappy.plugins.line_profile.fit_profile, smappy.plugins.line_profile.fit_models, smappy.plugins.line_profile.determined, smappy.plugins.line_profile.verdict, smappy.plugins.line_profile.em_two_gaussians, smappy.plugins.line_profile.bootstrap, smappy.plugins.line_profile.gauss_density, smappy.plugins.line_profile.step_density, smappy.plugins.line_profile.arc_density, smappy.plugins.line_profile.smoothed_profile, smappy.plugins.line_profile.fit_layers, smappy.plugins.line_profile.draw_profile]
 ---
 
 ## What it does
@@ -9,7 +9,9 @@ Many questions about a super-resolved image come down to a line drawn over
 it: how far apart are the two membranes of the nuclear envelope, how wide is
 this filament, where does this labelled region end, how large is this
 vesicle.  Line Profile answers them.  It takes the localizations inside a
-**line ROI**, lays them out along the line (or across it, or in z), and fits
+**line ROI** -- an [ROI](plugin:Panels/Glossary) (region of interest) that is
+a line with a width, drawn over the picture -- lays them out along the line
+(or across it, or in z), and fits
 a model of the structure to them: one peak, two peaks a distance apart, an
 edge, a filled disk or a ring.  The numbers that come back -- a distance, a
 width, a radius -- come with error bars and with a score that says which
@@ -20,25 +22,39 @@ that matter when there are few localizations:
 
 * It fits **the localizations themselves**, not a histogram of them.  No
   number it reports depends on a bin width.
-* It knows **how precisely each localization was measured**, and takes that
-  blur out, so a width is the width of the structure rather than of its
+* It knows **how precisely each localization was measured** -- its
+  [localization precision](plugin:Panels/Glossary), also called the CRLB or
+  localization uncertainty -- and takes that blur out, so a width is the width of the structure rather than of its
   blurred picture.
 * A **flat background** of unspecific localizations is part of every model,
   so a few stray points do not widen a peak.
 
 A line is usually drawn over two channels, and what is wanted is how they
-differ, so each visible layer is fitted on its own and drawn in its own
-colour.
+differ, so each visible [layer](plugin:Panels/Glossary) (one picture of the
+localizations, with its own filter and colour) is fitted on its own and drawn
+in its own colour.
+
+**Which table.**  Each layer as it is shown.  On a layer that merges blinks
+-- [merge blinks](plugin:Panels/Glossary), also called grouping or linking,
+combines the localizations in consecutive frames that come from one blinking
+event into one -- that is its blinks: a molecule that was on for three frames
+counts once, at its combined position and with its combined precision, rather
+than three times.  On a layer that does not, it is the localizations, frame
+by frame.  The layer's filters apply to what is shown -- with blinks merged,
+to the blinks' values.  (Before version 5 every layer was measured on its
+single localizations, whatever it showed.)
 
 **What it needs.**  A line ROI, drawn in the render window, with a width
-wide enough to take in the structure.  At least 8 localizations per layer (a
+wide enough to take in the structure.  Without one, a line under the
+settings says so, and its *Draw line* button brings the render window to
+the front ready to draw it.  At least 8 localizations per layer (a
 layer with fewer is skipped, and a single layer with fewer is refused); below 30 the fit still stands, but its error
 bars are too optimistic and the bootstrap (below) is the one to read.  The
 localization precision `xy_err_nm` (for a z profile, `z_err_nm`) is used when
 the table has it; without it one width is fitted for all localizations, and
 the text says so.
 
-The fit takes tens of milliseconds, so the plugin offers a *live* tick: the
+The fit takes tens of milliseconds, so the plugin offers a *follow ROI* tick: the
 profile is refitted while the line is dragged, which makes it a tool one can
 aim with.
 
@@ -203,9 +219,7 @@ parameters under which the localizations that were actually found are most
 probable -- the **maximum likelihood** estimate.  No histogram is involved,
 so no fitted number depends on a bin width; the bars in the figure are only
 for the eye.  Because the probability is spread over the ROI's own extent,
-a structure cut off by the end of the ROI is not biased by the cut.  The old
-way, a least-squares fit to a histogram, is available as *binned* for
-comparison.
+a structure cut off by the end of the ROI is not biased by the cut.
 
 **6. Starting where the data is.**  A fit finds the best answer near where
 it starts.  Started badly, a two-Gaussian fit can settle on both peaks
@@ -226,6 +240,16 @@ one, because they can become one.  The question is whether they fit
 (Akaike information criterion) measures: the fit's likelihood with a penalty
 for every parameter.  Lower is better.  With *model* set to *all five,
 compared*, every model is fitted and they are listed best first by AIC.
+
+A model can fit without having measured anything: a ring fitted to a single
+peak shrinks its radius to zero, two Gaussians fitted to one peak can push
+one of them to the edge of the ROI.  A parameter that ends on the edge of
+what it is allowed to be, or whose error bar is wider than half the ROI, is
+printed as **not determined**, and its model is left out of the
+comparison -- it is listed last, drawn dotted, and the verdict names it as
+left out.  The one exception is a width of zero: the structure is narrower
+than the localization precision can resolve, which is an answer, not a
+failure.
 
 ```figure Eleven simulated pairs of structures, 0 to 50 nm apart (200 localizations each, structures 6 nm wide, precisions around 8 nm).  Left: how much lower the AIC of two Gaussians is than that of one; above the dashed line two are preferred.  Right: the distance the two-Gaussian fit returned, against the truth (line).  Where two are preferred (red), the distance comes back.  Where one is (grey), the two-Gaussian distance means nothing -- below about 15 nm the pair is not resolved, and the second component wanders off onto the background.  Near the resolution limit a pair can also be missed, both components settling on one broad peak: a distance of zero there is worth a second look.
 distances = np.arange(0, 55, 5).astype(float)
@@ -316,7 +340,7 @@ localization $i$'s density as
 
 $$w_i = \sqrt{s^2 + \sigma_i^2} ,$$
 
-$\sigma_i$ its precision (`xy_err_nm` or `xy_err_pix`, `z_err_nm` for z).  A
+$\sigma_i$ its precision (`xy_err_nm`, `z_err_nm` for z).  A
 missing or non-positive precision is replaced by the median of the others;
 without precisions, $w_i = s$ for all.  The maximum is found with L-BFGS-B
 within bounds: a centre or an edge inside the window, a width, distance or
@@ -400,6 +424,12 @@ on its bound (a width at zero, a background at nothing) has no error bar and
 is left out; the rest are $\sqrt{[H^{-1}]_{jj}}$ of the remaining block, and a
 width's error is carried back from its variance, $\delta s = \delta(s^2)/2s$.
 
+**Not determined.**  A parameter is *not determined* when it ends within
+$10^{-3}$ of its range from a bound -- except a width at zero -- or when its
+error bar is larger than $T/2$.  A model with such a parameter is not a
+candidate: the verdict compares the AIC of the others only, and says which
+were left out.
+
 **The bootstrap.**  Each resample draws $N$ localizations with replacement,
 each keeping its own precision, and refits the same model starting from the
 full fit's parameters, with the step facing the same way.  The interval is
@@ -411,15 +441,6 @@ twenty-five simulated profiles of forty localizations, a nominal 95%
 interval on the width held the true value 22 times.  Only the best model is
 resampled.
 
-**Binned.**  With *fit* set to *binned*, the parameters minimise
-$\sum_j (n_j - e_j)^2 / \max(e_j, 1)$ over the histogram bins of width
-*bin*, $e_j$ the counts the model predicts in the bin -- its density
-integrated over the bin, by three-point Gauss-Legendre quadrature (for
-per-localization precisions, the density averaged over the sample's
-precisions).  The log-likelihood that is reported is still the unbinned one
-at those parameters, so the two methods and all models are compared on the
-same scale.
-
 ## Parameters
 
 ### axis
@@ -428,10 +449,6 @@ For a z profile, the table needs `z_nm`; its precision is `z_err_nm`.
 ### model
 *All five, compared* is the way to find out which shape the data supports;
 then fit that one alone.
-
-### method
-*Binned* is there to compare with SMAP and older results.  Its answer moves
-with *bin*.
 
 ### use_precision
 Leave it on.  Off, the fitted widths include the localization error, which is
@@ -443,7 +460,7 @@ parameter fewer to estimate, which helps a very small sample.
 
 ### bootstrap
 A few hundred resamples.  Each is a full fit, so 200 resamples of the two
-Gaussians take around ten seconds, and *live* becomes slow with it on.
+Gaussians take around ten seconds, and *follow ROI* becomes slow with it on.
 
 ### bin_nm
 The automatic bin follows the Freedman-Diaconis rule, $2\,\mathrm{IQR}/N^{1/3}$,
@@ -454,13 +471,16 @@ Also useful to keep a long line's profile to the part around the structure.
 
 ## Output
 
-* **The text** gives, per layer and per model, the fitted values with their
-  error bars (a value printed without one usually ended on its bound), the background
-  fraction, the log-likelihood, AIC and BIC.  With several models, the best
-  by AIC is named and by how much.  With the bootstrap on, the interval of
+* **The text** gives, per layer and per model, the fitted values as
+  value ± error in the profile's unit (nm, or px for a table in pixels; a
+  value printed without an error bar is a width at zero), *not determined*
+  where the data does not fix a parameter, the background fraction, the
+  log-likelihood, AIC and BIC.  With several models, the best by AIC among
+  those that determined every parameter is named, and by how much.  With the bootstrap on, the interval of
   every parameter of the best model.
 * **The profile**: the histogram with the fitted curves.  With one layer,
-  every model fitted is drawn and the best is red; with several layers,
+  every model fitted is drawn and the best is red, on top of the others
+  (a model with a parameter not determined is dotted); with several layers,
   each is drawn in its layer's colour with only its best model.  The curve
   is the density scaled to the histogram, and it is a fit to the
   localizations, not to the bars -- it can sit over an empty bin with
@@ -475,8 +495,8 @@ Also useful to keep a long line's profile to the part around the structure.
 
 A good result has a curve that follows the histogram, an error bar well below
 the value, and, for a distance, an AIC clearly in favour of two Gaussians.
-A distance whose bootstrap piles up at zero, or a width with no error bar, has
-not been measured: the data do not resolve it.
+A distance whose bootstrap piles up at zero, or a parameter *not determined*,
+has not been measured: the data do not resolve it.
 
 ## Differences from SMAP
 

@@ -16,7 +16,7 @@ import pyqtgraph as pg
 from PySide6.QtCore import QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog,
-                               QFormLayout, QHBoxLayout, QLabel, QLineEdit,
+                               QFormLayout, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
                                QListWidget, QListWidgetItem, QMenu, QPushButton,
                                QSlider, QToolButton, QVBoxLayout, QWidget)
 
@@ -24,22 +24,34 @@ from .. import lut as luts
 from ..render import FieldOfView, RenderAxes, axis_unit, is_position
 from ..filter import histogram_range
 from ..session import Layer, Session
-from ..viewer import FIELD_LUT, INTENSITY_LUT
+from ..lut import FIELD_LUT, INTENSITY_LUT
 from . import folders
+from .merging import merger_for
 from .render_view import nice_below
 from .widgets import CollapsibleSection, ColumnScroll, detach_to_window
 
-# the fields with a quick button, best-named alternative first
+# the fields with a quick button, best-named alternative first.  In words,
+# not the columns' abbreviations: the tooltip names the column
 QUICK_FIELDS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
-    ("prec", ("xy_err_nm", "xy_err_pix")),
-    ("LL", ("logl_rel",)),
+    ("precision", ("xy_err_nm",)),
+    ("fit quality", ("logl_rel",)),
     ("frame", ("frame",)),
     ("z", ("z_nm",)),
-    ("phot", ("photons",)),
-    ("PSF", ("sigma_nm", "sigma_pix")),
-    ("ch", ("channel",)),
+    ("photons", ("photons",)),
+    ("PSF", ("sigma_nm",)),
+    ("channel", ("channel",)),
     ("file", ("filenumber",)),
 )
+# `RenderSettings.mode` -> what the *render* list shows.  The key is what is
+# stored (layer settings, saved workspaces, chains) and stays short; the
+# words are only the list's, kept in its item data
+RENDER_MODES: Tuple[Tuple[str, str], ...] = (
+    ("precision", "Gaussian (precision)"),
+    ("gauss", "Gaussian (fixed)"),
+    ("hist", "histogram"),
+    ("dl", "diffraction-limited"),
+)
+QUICK_PER_ROW = 4
 HIST_BINS = 120
 HIST_SAMPLE = 2_000_000     # beyond this the histogram is of a random sample
 
@@ -58,6 +70,25 @@ class _Bound(QLineEdit):
         self.setText("" if value is None else f"{value:g}")
 
 
+def bounds_text(bounds: Dict[str, Tuple[Optional[float], Optional[float]]]) -> str:
+    """The bounds as one line of links: ``xy_err_nm <= 25 x``, ``-500 <= z_nm
+    <= 500 x``; each name edits its bound, each cross removes it."""
+    if not bounds:
+        return "<span style='color: gray'>no filter</span>"
+    parts = []
+    for name, (lo, hi) in bounds.items():
+        if lo is not None and hi is not None:
+            text = f"{lo:g} \u2264 {name} \u2264 {hi:g}"
+        elif hi is not None:
+            text = f"{name} \u2264 {hi:g}"
+        else:
+            text = f"{name} \u2265 {lo:g}"
+        parts.append(f"<a href='edit:{name}' style='text-decoration: none'>{text}</a>"
+                     f"&nbsp;<a href='remove:{name}' style='text-decoration: none; "
+                     f"color: gray'>\u00d7</a>")
+    return "&nbsp;&nbsp; ".join(parts)
+
+
 class FilterWidget(QWidget):
     """One field of one layer's filter: histogram, range, numbers."""
 
@@ -74,16 +105,29 @@ class FilterWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(2)
 
-        # The quick buttons have a row to themselves and the drop-down and the
+        # The quick buttons have rows to themselves and the drop-down and the
         # count share the next.  All on one line, a table with all eight quick
         # fields made the panel ~440 px wide in a 380 px window, and the scroll
         # area (no horizontal bar) cut off the histogram's right end -- with
-        # the handle of the upper bound on it.
-        row = QHBoxLayout()
+        # the handle of the upper bound on it.  Named in words they need two
+        # rows of `QUICK_PER_ROW`.
+        grid = QGridLayout()
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setSpacing(2)
+        grid.setColumnStretch(QUICK_PER_ROW, 1)
         self.quick: Dict[str, QToolButton] = {}
-        self.quick_row = row
-        row.addStretch(1)
-        layout.addLayout(row)
+        self.quick_grid = grid
+        layout.addLayout(grid)
+        # Every bound of the layer, whichever field is on show: a picture
+        # that comes out sparse should say why without a hunt through the
+        # drop-down.  A bound is a link to its field; the cross removes it.
+        self.bounds_line = QLabel("")
+        self.bounds_line.setWordWrap(True)
+        self.bounds_line.setTextFormat(Qt.RichText)
+        self.bounds_line.setToolTip("the bounds on this layer: click one to edit "
+                                    "it, x to remove it")
+        self.bounds_line.linkActivated.connect(self._on_bound_link)
+        layout.addWidget(self.bounds_line)
         field_row = QHBoxLayout()
         self.field = QComboBox()
         self.field.setMinimumWidth(110)
@@ -167,8 +211,8 @@ class FilterWidget(QWidget):
             b = QToolButton(text=label, checkable=True, autoExclusive=True)
             b.setToolTip(name)
             b.clicked.connect(lambda _=False, n=name: self._select(n))
+            self.quick_grid.addWidget(b, *divmod(len(self.quick), QUICK_PER_ROW))
             self.quick[name] = b
-            self.quick_row.insertWidget(len(self.quick) - 1, b)
         first = current if current in numeric else next(iter(self.quick), None)
         if first is None and numeric:
             first = numeric[0]
@@ -200,8 +244,10 @@ class FilterWidget(QWidget):
         """
         if self.layer is None:
             return
-        ranges = self.layer.filter.ranges
+        ranges = self.layer.ranges
         bounded = {n for n, r in ranges.items() if r != (None, None)}
+        self.bounds_line.setText(bounds_text(
+            {n: ranges[n] for n in sorted(bounded)}))
         plain, bold = QFont(self.field.font()), QFont(self.field.font())
         bold.setBold(True)
         for i in range(self.field.count()):
@@ -248,7 +294,7 @@ class FilterWidget(QWidget):
             return
         counts, edges = self._histogram(name)
         self.bars.setData(edges, counts.astype(np.float64))
-        lo, hi = self.layer.filter.ranges.get(name, (None, None))
+        lo, hi = self.layer.ranges.get(name, (None, None))
         self.lo.set(lo)
         self.hi.set(hi)
         # the region stands in for an open bound at the histogram's edge
@@ -263,7 +309,7 @@ class FilterWidget(QWidget):
 
     def _show_files(self) -> None:
         """One tickable row per file, plus 'all'."""
-        chosen = self.layer.filter._masks.get("files")
+        chosen = self.layer.files
         present = {int(n) for n in np.unique(self.layer.locs["filenumber"])}  # float once grouped
         self.files.blockSignals(True)
         self.files.clear()
@@ -273,7 +319,7 @@ class FilterWidget(QWidget):
             item = QListWidgetItem(name)
             item.setData(Qt.UserRole, number)
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-            on = chosen is None or bool(chosen[self.layer.locs["filenumber"] == number].any())
+            on = chosen is None or number in chosen
             item.setCheckState(Qt.Checked if on else Qt.Unchecked)
             self.files.addItem(item)
         self.files.blockSignals(False)
@@ -326,7 +372,7 @@ class FilterWidget(QWidget):
         # not cut off; anywhere else it is the number.  Only the end that was
         # dragged: the other keeps its bound, which may lie beyond the
         # histogram (the 25 nm precision bound over a sharp simulation).
-        old_lo, old_hi = self.layer.filter.ranges.get(name, (None, None))
+        old_lo, old_hi = self.layer.ranges.get(name, (None, None))
         shown_lo, shown_hi = self._shown_region
         if lo != shown_lo:
             old_lo = None if lo <= edges[0] else float(lo)
@@ -342,6 +388,15 @@ class FilterWidget(QWidget):
 
     def _on_clear(self) -> None:
         self._apply(None, None)
+
+    def _on_bound_link(self, link: str) -> None:
+        action, _, name = link.partition(":")
+        if action == "remove":
+            self.layer.remove_bound(name)
+            self._show_field()
+            self.changed.emit()
+        else:
+            self._select(name)
 
     def _all_files(self) -> None:
         self.layer.set_files(None)
@@ -542,7 +597,7 @@ class Overview(QWidget):
         `processEvents` by PySide, and the next Python override Qt calls --
         a pyqtgraph item's -- segfaults (6.10) or hangs (see gui/canvas.py).
         A table with no precision column raised here when it was opened.
-        The main view prints and moves on too (`_RenderWorker.render`).
+        The main view prints and moves on too (`RenderWorker.render`).
         """
         try:
             self.update_image()
@@ -559,7 +614,7 @@ class Overview(QWidget):
         self.box.invertY(self.session.axes().is_default)
         (x0, x1), (y0, y1) = self.session.full_view()
         fov = FieldOfView.fit((x0, x1), (y0, y1), 300, 200)
-        rgb, _ = self.view.composite(fov)
+        rgb = self.view.panel_images(fov, ["overlay"])[0]
         self.image.setImage(np.ascontiguousarray(rgb), levels=[0, 1], autoLevels=False)
         self.image.setRect(QRectF(fov.x0, fov.y0, fov.x1 - fov.x0, fov.y1 - fov.y0))
         self.box.setRange(QRectF(fov.x0, fov.y0, fov.x1 - fov.x0, fov.y1 - fov.y0),
@@ -703,7 +758,7 @@ class AxesSection(QWidget):
         except KeyError:
             self.note.hide()
             return
-        self.note.setText(f"{x_name} across, {y_name} up.  Sites and anything "
+        self.note.setText(f"{x_name} across, {y_name} up.  ROIs and anything "
                           "that measures nanometres read the columns, not the "
                           "picture; the scale bars are in the axes' own units.")
         self.note.show()
@@ -863,6 +918,9 @@ class RenderTab(QWidget):
     def __init__(self, session: Session, view=None, parent=None):
         super().__init__(parent)
         self.session = session
+        # merges a large table's blinks in the background (`gui.merging`):
+        # the control window's, or this tab's own when it stands alone
+        self.merger = merger_for(session, self)
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         inner = QWidget()
@@ -920,7 +978,11 @@ class RenderTab(QWidget):
         form.setContentsMargins(0, 0, 0, 0)
         form.setVerticalSpacing(2)
         self.mode = QComboBox()
-        self.mode.addItems(["precision", "gauss", "hist", "dl"])
+        for key, text in RENDER_MODES:
+            self.mode.addItem(text, key)
+        self.mode.setToolTip("how a localization is drawn: a Gaussian as wide as "
+                             "its precision, one of a fixed width, a count per "
+                             "pixel, or the spot the camera saw")
         self.color = QComboBox()
         self.color.addItem("intensity", None)
         self.color.addItem("field", "field")
@@ -969,9 +1031,9 @@ class RenderTab(QWidget):
         lut_row.addWidget(self.invert)
         lut_row.addWidget(self.invert_mode)
         self.contrast = QDoubleSpinBox(minimum=0, maximum=6, singleStep=0.1, decimals=2)
-        self.grouped = QCheckBox("grouped")
+        self.grouped = QCheckBox("merge blinks")
         self.grouped.setToolTip("one entry per blink instead of one per frame; "
-                                "links the table on first use")
+                                "merges the table on first use")
         form.addRow("render", self.mode)
         form.addRow("colour by", color_row)
         form.addRow("colour range", self.color_range_row)
@@ -979,9 +1041,10 @@ class RenderTab(QWidget):
         form.addRow("contrast", self.contrast)
         # the linking settings sit beside the switch that uses them; they are
         # the session's, not the layer's, so OK regroups every grouped layer
-        self.grouping_button = QPushButton("link settings...")
-        self.grouping_button.setToolTip("how localizations are linked into blinks: "
-                                        "distance and gap, for every layer")
+        self.grouping_button = QPushButton("merge settings...")
+        self.grouping_button.setToolTip("how the localizations of one blink are "
+                                        "merged: distance and dark frames, for "
+                                        "every layer")
         self.grouping_button.clicked.connect(self._grouping)
         grouped_row = QHBoxLayout()
         grouped_row.setContentsMargins(0, 0, 0, 0)
@@ -994,7 +1057,7 @@ class RenderTab(QWidget):
         more_form.setContentsMargins(0, 0, 0, 0)
         more_form.setVerticalSpacing(2)
         self.sigma = QDoubleSpinBox(minimum=0.0, maximum=1000, singleStep=1, decimals=1)
-        self.sigma.setToolTip("rendering sigma along x for mode 'gauss', in the "
+        self.sigma.setToolTip("rendering sigma along x for Gaussian (fixed), in the "
                               "units of that axis; 0 bins instead of blurring")
         self.sigma_y = _Bound()
         self.sigma_y.setToolTip("rendering sigma along y, in the units of that "
@@ -1004,15 +1067,15 @@ class RenderTab(QWidget):
         self.gamma = QDoubleSpinBox(minimum=0.1, maximum=3, singleStep=0.1, decimals=2)
         self.factor = QDoubleSpinBox(minimum=0.05, maximum=5, singleStep=0.1, decimals=2)
         self.factor.setToolTip("rendering sigma = factor x localization precision "
-                               "(mode 'precision')")
+                               "(Gaussian (precision))")
         self.white = QCheckBox("white background")
         self.white.setToolTip("the picture on white paper, whatever the LUT: the "
                               "brightness is turned over and the hue is kept, so "
                               "red stays red, hot runs white through red and yellow "
                               "to black, and grey is black on white.  A property of "
                               "the picture, so it is set on every layer at once.")
-        more_form.addRow("sigma x (gauss)", self.sigma)
-        more_form.addRow("sigma y (gauss)", self.sigma_y)
+        more_form.addRow("sigma x (fixed)", self.sigma)
+        more_form.addRow("sigma y (fixed)", self.sigma_y)
         more_form.addRow("precision factor", self.factor)
         more_form.addRow("gamma", self.gamma)
         more_form.addRow("", self.white)
@@ -1033,7 +1096,7 @@ class RenderTab(QWidget):
         self.strip.selected.connect(self._bind_layer)
         self.strip.add_image_requested.connect(self._add_image)
         self.filter.changed.connect(lambda: session.changed("layer"))
-        self.mode.currentTextChanged.connect(self._on_render_settings)
+        self.mode.currentIndexChanged.connect(self._on_render_settings)
         self.sigma.valueChanged.connect(self._on_render_settings)
         self.sigma_y.editingFinished.connect(self._on_render_settings)
         self.factor.valueChanged.connect(self._on_render_settings)
@@ -1143,7 +1206,7 @@ class RenderTab(QWidget):
         lo, hi = settings.color_range or (None, None)
         self.color_lo.set(lo)
         self.color_hi.set(hi)
-        self.mode.setCurrentText(settings.mode)
+        self.set_mode(settings.mode)
         self.sigma.setValue(settings.sigma)
         self.sigma_y.set(settings.sigma_y)
         self.factor.setValue(settings.sigma_settings.factor)
@@ -1156,6 +1219,14 @@ class RenderTab(QWidget):
         for w in widgets:
             w.blockSignals(False)
 
+    def set_mode(self, key: str) -> None:
+        """Choose a render mode by its stored key ("precision", "gauss", ...)."""
+        index = self.mode.findData(key)
+        if index < 0:
+            raise ValueError(f"render mode {key!r}: one of "
+                             f"{', '.join(k for k, _ in RENDER_MODES)}")
+        self.mode.setCurrentIndex(index)
+
     def _on_render_settings(self) -> None:
         state = self.layer.state
         sigmas = dataclasses.replace(state.settings.sigma_settings, factor=self.factor.value())
@@ -1163,7 +1234,7 @@ class RenderTab(QWidget):
             sigma_y = self.sigma_y.value()
         except ValueError:                       # half-typed; the old one stands
             sigma_y = state.settings.sigma_y
-        state.settings = dataclasses.replace(state.settings, mode=self.mode.currentText(),
+        state.settings = dataclasses.replace(state.settings, mode=self.mode.currentData(),
                                              sigma=self.sigma.value(), sigma_y=sigma_y,
                                              sigma_settings=sigmas)
         self.session.changed("layer")
@@ -1325,6 +1396,8 @@ class RenderTab(QWidget):
         GroupingDialog(self.session, self).exec()
 
     def _on_grouped(self, on: bool) -> None:
-        self.session.show_grouped(self.strip.current, on)   # links once per table
-        self.filter.bind(self.layer)     # the grouped table has its own filter
+        # a setting: the blinks are merged when first drawn, or for a large
+        # table in the background (`gui.merging`), and the picture follows
+        self.session.show_grouped(self.strip.current, on)
+        self.filter.bind(self.layer)     # the same bounds, over the other table
         self.session.changed("layer")

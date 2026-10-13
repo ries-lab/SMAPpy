@@ -28,6 +28,7 @@ def test_only_a_plugin_that_can_preview_grows_the_button(app):
     from smappy.plugins import Plugin, Result
 
     class Plain(Plugin):
+        changes_locs = False
         Settings = None
 
         def run(self, ctx, settings):
@@ -41,7 +42,7 @@ def test_a_method_greys_out_the_other_methods_parameters(app):
     from smappy import plugins
     from smappy.gui.plugin_panel import PluginPanel
 
-    panel = PluginPanel(plugins.get("Analysis/Dual-Color/AssignColors"), Session())
+    panel = PluginPanel(plugins.get("Analysis/Dual-colour/Assign colours"), Session())
     form = panel.form
     # the panel greys on the way up, before anything is edited
     assert form.fields["exclusion"].isEnabled()
@@ -63,7 +64,7 @@ def test_a_preview_that_is_not_of_a_frame_gets_no_frame_number(app):
     from smappy import plugins
     from smappy.gui.plugin_panel import PluginPanel
 
-    panel = PluginPanel(plugins.get("Analysis/Dual-Color/AssignColors"), Session())
+    panel = PluginPanel(plugins.get("Analysis/Dual-colour/Assign colours"), Session())
     assert panel.preview_button is not None and panel.preview_frame is None
 
 
@@ -117,7 +118,7 @@ def test_a_preview_draws_without_touching_the_session(app, tmp_path):
     panel._job = "preview"
     panel._on_done(result)
     assert len(session.locs) == 0                # nothing was applied
-    assert panel.plot_button.isEnabled()
+    assert panel.result_button.isEnabled()
     assert result.data["frame"] == 1 and result.data["candidates"] == 2
     plt.close("all")
 
@@ -135,6 +136,7 @@ def test_the_figures_share_one_window_and_draw_when_looked_at(app):
     drawn = []
 
     class Plotter(Plugin):
+        changes_locs = False
         Settings = None
 
         def run(self, ctx, settings):
@@ -168,6 +170,7 @@ def test_a_tab_can_be_taken_out_into_its_own_window(app):
     drawn = []
 
     class Plotter(Plugin):
+        changes_locs = False
         Settings = None
 
         def run(self, ctx, settings):

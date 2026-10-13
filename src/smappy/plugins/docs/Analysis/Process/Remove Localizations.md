@@ -15,7 +15,9 @@ It can do that in two ways (*action*):
 * **remove** -- the localizations are deleted from the table.  Every other
   plugin, every layer and a save afterwards see the smaller table.
 * **hide** -- nothing is deleted.  The localizations are marked in a column
-  (`use` by default: 1 kept, 0 hidden) and the filter is set on that column,
+  (`use` by default: 1 kept, 0 hidden) and the [filter](plugin:Panels/Glossary)
+  -- also called bounds: the lowest and highest values of columns a
+  localization must lie between -- is set on that column,
   so they disappear from the picture and from what the other plugins get, but
   are still in the file and come back when the filter is opened again.
 
@@ -23,7 +25,9 @@ Hiding is the safer of the two.  A removal can be undone only as long as the
 session lasts; once the table is saved, the removed localizations are gone
 from the file.  A hidden localization is one slider away, now or next week.
 
-It needs a table and, for the usual use, an ROI drawn in the render window.
+It needs a table and, for the usual use, an [ROI](plugin:Panels/Glossary)
+(region of interest: a rectangle, polygon or line with a width) drawn in the
+render window.
 
 ## How it works
 
@@ -58,7 +62,8 @@ filter does not narrow it, so every localization of the table in the drawn
 shape counts, whichever file or layer it belongs to.
 
 With *region* set to *the selection*, "inside" means everything that
-decides what the current layer shows: its filter, the ROI if one is drawn,
+decides what the current [layer](plugin:Panels/Glossary) (one picture of the
+localizations, with its own filter and colours) shows: its filter, the ROI if one is drawn,
 and the 3D slab while the 3D window is set to have plugins use it.  This is
 the way to say "keep exactly what I see" (*remove* the localizations
 *outside* the selection), or to remove the localizations a filter already
@@ -100,14 +105,18 @@ rectangle), is tested with the even-odd rule: a point is inside when a ray
 from it crosses the outline an odd number of times.  Only the points in the
 polygon's bounding box are tested, so a small ROI on a large table is quick.
 
-**The whole table.**  Both actions work on the whole ungrouped table, not on
+**The whole table.**  Both actions work on the whole table of single
+localizations, not on
 the selection of one layer: a localization inside the drawn ROI goes (or is
 hidden) whatever layer or file it is in.  To act on one file only, set
-*region* to *the selection* with the layer showing that file.
+*region* to *the selection* with the layer showing that file.  The selection
+is then the layer's bounds applied to each localization, also when the
+layer shows blinks.
 
-**A hidden flag and grouping.**  Once the localizations are linked into
-blinks, a blink is kept only if **all** of its localizations are.  The flag
-is stored with a rule for grouping (a recipe with the rule *all* and no
+**A hidden flag and merged blinks.**  Once the localizations of a blink are
+merged -- [merge blinks](plugin:Panels/Glossary), also called grouping or
+linking -- a blink is kept only if **all** of its localizations are.  The
+flag is stored with a rule for merging (a recipe with the rule *all* and no
 expression, in the table's `metadata["derived"]`), so it is not averaged
 like a measured column: a blink that straddles the edge of the hidden region
 is hidden as a whole rather than coming back as a blink with half a
@@ -117,7 +126,7 @@ recipes work.
 **The flag's name.**  *flag* must be a word of letters, digits and
 underscores that does not start with a digit, so that it can be used in a
 filter and in an expression.  `group_id` and `n_in_group` are refused,
-because grouping writes them itself and would overwrite the flag.  So is a
+because merging blinks writes them itself and would overwrite the flag.  So is a
 column the table already has, unless it is a flag itself: hiding writes 0 and
 1 over it, and a flag named `photons` would have replaced the photons.
 
@@ -144,14 +153,14 @@ filter.
 
 * **The table** -- smaller after *remove*; with the flag column after
   *hide*, and the filter set on it in every localization layer.  A layer that
-  was showing the grouped table is grouped again from the new one.
+  merges blinks has them merged again from the new one.
 * **The text** says how many of how many localizations went, and on which
   side of which region: "removed 5619 of 24693 localizations inside the rect
   ROI 3500 x 3500; 19074 left".  After hiding it also says how many are
   hidden in all, counting earlier runs.
 
 The run is recorded in the file's history, with its settings, and can be
-undone.  The flag column and its grouping rule are saved with the file, so
+undone.  The flag column and its merging rule are saved with the file, so
 the decision survives a reload.  So does the filter on it: the bound is kept
 with the table, and a reopened file hides the same localizations again.
 
@@ -167,8 +176,8 @@ Based on SMAP's `Process/Modify/RemoveLocs`
 * **Hiding.**  SMAP's *set property: active* writes an `active` field and
   regroups the table after every run.  Here the column is named by *flag*,
   the filter is set on it so the hidden localizations actually disappear, and
-  it carries the rule *all* for grouping, so nothing is relinked unless a
-  layer is showing the grouped table.
+  it carries the rule *all* for merging blinks, so nothing is merged again
+  unless a layer merges blinks.
 
 ## References
 

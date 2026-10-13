@@ -380,8 +380,8 @@ def header(plugin_cls) -> str:
             facts.append("has a preview")
     except Exception:
         pass
-    if getattr(plugin_cls, "live", False):
-        facts.append("can run live")
+    if getattr(plugin_cls, "follow_roi", False):
+        facts.append("can follow the ROI")
     out = [f"<h1>{html.escape(plugin_cls.name or path)}</h1>",
            f'<p class="crumbs">{" &middot; ".join([crumbs] + facts)}</p>']
     summary = plugin_cls.description or (plugin_cls.__doc__ or "").strip().split("\n")[0]

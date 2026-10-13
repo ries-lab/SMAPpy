@@ -92,7 +92,7 @@ def test_the_export_draws_the_layers_grouped_table(tmp_path):
     plugin.run(ctx, ExportImageSettings(path=str(tmp_path / "g.png")))
     locs, _ = served[0]
     assert len(locs) < len(session.locs)          # one row per blink
-    layer.state.sets["ungrouped"].filter.set("photons", 1e12, None)
+    layer.set_bound("photons", 1e12, None)
     layer.show_grouped(False)
     with pytest.raises(ValueError, match="nothing selected"):
         plugin.run(session.context(), ExportImageSettings(path=str(tmp_path / "e.png")))

@@ -5,31 +5,37 @@ covers: [smappy.chain.ChainPlugin.run, smappy.blocks.BlockPlugin.run, smappy.plu
 
 ## What it does
 
-The labelling efficiency of nuclear pores takes three steps in the ROI
-manager: find the pores, count each one's corners and localizations, and fit
+The [labelling efficiency](plugin:Panels/Glossary) (also called degree of
+labelling: the fraction of the target proteins that carry a detected label)
+of nuclear pores takes three steps in the ROI manager: find the pores, count each one's corners and localizations, and fit
 the efficiency to all of them.  This runs the three in one go, on the file
 the ROI manager is showing, and shows the results of all three in one
 window.
 
-It is a *chain* -- the plugins it runs, one after the other, each with its
-own settings in a section of this panel -- rather than a plugin of its own:
+It is a [chain](plugin:Panels/Glossary) (also called a pipeline or
+workflow) -- the plugins it runs, one after the other, each with its own
+settings in a section of this panel -- rather than a plugin of its own:
 [NPC](plugin:Analysis/Regions/Find/NPC),
 [NPC Corners](plugin:Analysis/Measure/NPC Corners) and
-[NPC Labeling Efficiency](plugin:Analysis/Regions/Summarize/NPC Labeling Efficiency).
+[NPC labelling efficiency](plugin:Analysis/Regions/Summarize/NPC labelling efficiency).
 Their pages explain the methods; this one only what running them together
 changes.  Because it is a chain, it can be edited (*edit steps*), saved
 under another name, and run over many files in a batch.
 
 Use it for the standard analysis, and the three plugins separately to look at
-one step more closely -- the ROIs this one makes are ordinary ROIs, and can be
-walked through, judged and evaluated again in the ROI manager.  It needs the
-localization precision (`xy_err_nm`).
+one step more closely -- the [ROIs](plugin:Panels/Glossary) (regions of
+interest) this one makes are ordinary ROIs, and can be walked through, judged
+and measured again in the ROI manager.  It needs the
+[localization precision](plugin:Panels/Glossary) (`xy_err_nm`, also called
+the CRLB).
 
 ## How it works
 
-**1. Group.**  The *layers* step switches the first layer to grouped, one
-localization per blink, as the model expects; its filter stays as the Render
-tab has it.
+**1. Merge blinks.**  The *layers* step ticks *merge blinks* on the first
+layer, one localization per blink, as the model expects -- [merge
+blinks](plugin:Panels/Glossary), also called grouping or linking, combines
+the localizations in consecutive frames that come from one blinking event
+into one; its filter stays as the Render tab has it.
 
 **2. Find the pores.**  The file's earlier NPC ROIs are removed (*replace
 earlier pores* is ticked in the *find the pores* section), and the pores are
@@ -40,7 +46,7 @@ another segmenter, are left alone.
 runs once in every ROI the manager includes, with the settings of its *NPC
 Corners* section, before the next step starts: each pore's corners seen
 with the precise localizations, and its localizations.  The numbers are
-stored with the ROIs, as an evaluation in the ROI manager stores them.
+stored with the ROIs, as the per-region steps of the ROI manager store them.
 
 **4. Fit.**  The labelling efficiency and the blinks per copy are fitted to
 all the counted ROIs with the settings of the *labelling efficiency* section.
@@ -56,21 +62,21 @@ whoever made it -- and the chain goes on only when all are done.  A ROI on
 which a step fails (no localizations, say) loses its own entry and is
 counted in the block's line, not the run.
 
-**The region steps window is left alone.**  The counts are stored with the
-ROIs as an evaluation called *NPC Corners*, like any other, and the
-region steps window's list stays as it was set up -- for this work or for
-another.  A result belongs to its ROI, whoever ran it, so the site table
-shows the chain's counts beside the pipeline's numbers, and NPC Labeling
-Efficiency run again from the Regions tab finds them, with the cutoffs they were
-counted with.  Running the chain again replaces its counts; to keep a second
+**The per-region steps window is left alone.**  The counts are stored with
+the ROIs as results called *NPC Corners*, like any other, and the per-region
+steps window's list stays as it was set up -- for this work or for another.
+A result belongs to its ROI, whoever ran it, so the results table shows the
+chain's counts beside the per-region steps' numbers, and NPC labelling
+efficiency run again from the Regions tab finds them, with the cutoffs they
+were counted with.  Running the chain again replaces its counts; to keep a second
 set beside the first -- other cutoffs, to compare -- rename the NPC Corners
 step (*edit steps*).  The chain's analysis reads the chain's own counts,
 whatever else is on the ROIs; run from the Regions tab afterwards, it asks which
-evaluation to read when there are several.
+set of results to read when there are several.
 
 **Nothing changes until the end.**  The chain runs on a copy of the session,
-ROI manager included; the ROIs it found, the evaluation run and the pipeline
-reach the ROI manager only when the whole chain has succeeded.  A step that
+ROI manager included; the ROIs it found and the counts it made reach the
+ROI manager only when the whole chain has succeeded.  A step that
 fails leaves the ROI manager as it was.
 
 **Re-running.**  With *replace earlier pores* off, the pores of an earlier
@@ -81,9 +87,9 @@ measured again.
 
 ## Output
 
-* **The text**: one line per step -- the grouping, the pores found among the
+* **The text**: one line per step -- the merged blinks, the pores found among the
   candidates, the ROIs counted, then the labelling efficiency and the
-  blinks per copy with their errors, as NPC Labeling Efficiency gives them;
+  blinks per copy with their errors, as NPC labelling efficiency gives them;
   on a simulation also the simulated efficiency and the truth.
 * **The figures**: the pores found (fitted circles, kept in blue, rejected in
   grey), the segmenter's checks, and the fit.
@@ -93,7 +99,7 @@ measured again.
 ## Differences from SMAP
 
 SMAP has no single counterpart: its NPC analysis is run as `segmentNPC`,
-then an evaluation with `NPCLabelingQuantify_s` in the ROI manager, then
+then `NPCLabelingQuantify_s` in every ROI of the ROI manager, then
 `NPCLabelingEfficiency` ([Ries 2020](https://doi.org/10.1038/s41592-020-0938-1)).
 
 ## References

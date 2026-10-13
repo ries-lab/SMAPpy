@@ -2,10 +2,10 @@
 
 Every analysis in SMAPpy is a plugin, and they all work the same way, so
 this is the one place the way is shown: the Analysis tab and its find box,
-the settings form, Run and its figures, *live*, Text, a plugin in a window of
+the settings form, Run and its figures, *follow ROI*, Text, a plugin in a window of
 its own, and what a run leaves behind (undo, and the History log).
 
-Line Profile is the example because it has everything -- *live*, a fit to
+Line Profile is the example because it has everything -- *follow ROI*, a fit to
 look at -- and because a line across one of the simulated lines has a width
 the fit should find.  Preview belongs to the plugins that change the table,
 and the fitting tutorials show it.  What the measuring plugins measure, and how
@@ -15,9 +15,9 @@ from __future__ import annotations
 
 from .common import field, open_section, place_beside, show_tab, tab_button, toolbar
 
-TITLE = "Plugins: running, plotting, live"
+TITLE = "Plugins: running, plotting, following the ROI"
 DESCRIPTION = ("How every plugin works: finding it, its settings, Run and its "
-               "figures, live, and what a run leaves behind.")
+               "figures, following the ROI, and what a run leaves behind.")
 
 # a line of the simulated structure (`simulate.structure`): from (1000, 1500)
 # to (9000, 7500) nm, so a line ROI across it is along (-0.6, 0.8)
@@ -78,11 +78,16 @@ def make(d) -> None:
            "to see what it does; more holds the rest.",
            spot=[panel.form], zoom=d.around(panel.form, 760))
 
-    d.chapter("Run and live")
+    d.chapter("Run and follow ROI")
     for name, value in (("axis", "along"), ("model", "gauss")):
         f = field(panel, name)
         f.set(value)
         f.changed.emit()
+    if panel.notice_button.isVisible():
+        d.shot("Without a line ROI it says so: Draw line starts one in the "
+               "render window.",
+               spot=[panel.notice, panel.notice_button], point=panel.notice_button,
+               zoom=d.around(panel.notice_button, 760))
     # well clear of the ring, which crosses this line near 0.3 and 0.7
     roi, centre = _across(0.15)
     toolbar(d)._set_kind("line", "line")
@@ -109,14 +114,14 @@ def make(d) -> None:
     d.shot("The profile and its fit: the width of the line, with its "
            "uncertainty.",
            spot=[d.window_rect(window)])
-    if panel.live is not None:
-        panel.live.setChecked(True)
+    if panel.follow_roi is not None:
+        panel.follow_roi.setChecked(True)
         d.settle()
         window.hide()
-        d.shot("With live ticked, the figure follows the line while it is "
+        d.shot("With follow ROI ticked, the figure follows the line while it is "
                "moved: a measurement you can aim.",
-               spot=[panel.live], point=panel.live, click=True,
-               zoom=d.around(panel.live, 760))
+               spot=[panel.follow_roi], point=panel.follow_roi, click=True,
+               zoom=d.around(panel.follow_roi, 760))
         roi, centre = _across(0.85)
         session.set_roi(roi)
         render.view.frame_on((centre[0] - 700, centre[0] + 700),
@@ -128,12 +133,12 @@ def make(d) -> None:
         d.shot("Moved further along, the same line measured again, at once.",
                spot=[d.window_rect(window)])
         window.hide()
-        panel.live.setChecked(False)
+        panel.follow_roi.setChecked(False)
 
-    d.chapter("Text and Plot")
-    d.shot("The numbers appear below. Text opens them in full, Plot opens the "
-           "figures again.",
-           spot=[panel.output, panel.text_button, panel.plot_button],
+    d.chapter("Show result")
+    d.shot("The numbers appear below. Show result opens the figures again, or "
+           "the text in full when there are none.",
+           spot=[panel.output, panel.result_button],
            zoom=d.around(panel.output, 760))
 
     d.chapter("Several at once")
@@ -171,8 +176,8 @@ def make(d) -> None:
     d.card("What to remember",
            "<ul><li>Find a plugin in its tab, with find, or in the Plugins "
            "menu.</li>"
-           "<li><b>Run</b> measures and opens the figures; <b>live</b> "
-           "follows the ROI.</li>"
+           "<li><b>Run</b> measures and opens the figures; <b>follow "
+           "ROI</b> measures again as the ROI moves.</li>"
            "<li><b>Text</b> and <b>Plot</b> show the result again.</li>"
            "<li>A plugin that changes the table has <b>Preview</b>: the work "
            "shown, nothing changed.</li>"

@@ -16,13 +16,13 @@ from .filter import LocFilter
 from .group import GROUP_COLUMNS, GroupSettings
 from .images import ImageData, load_image
 from .locs import KEPT_BOUNDS, Localizations, concat
-from .plugins import Context, Plugin, Result, Selection
+from .plugins import Context, Plugin, Result, Selection, refuse_grouped_table
 from .io.formats import FileInfo, load as load_any
 from .regions import Region
 from .view3d import Projection, Slab
 from .render import DisplaySettings, RenderAxes, RenderSettings, SigmaSettings
 from .undo import Edit, configured as undo_stack
-from .viewer import ViewState
+from .layer_state import Tables, ViewState
 
 # The bounds a layer opens with: what is thrown away is on screen, not hidden.
 DEFAULT_BOUNDS: Dict[str, Tuple[Optional[float], Optional[float]]] = {
@@ -61,42 +61,39 @@ def default_bounds(locs: Localizations) -> Dict[str, Tuple]:
 class Layer:
     """A filter and how its localizations are drawn -- or a pixel image.
 
-    A ``"locs"`` layer wraps a `ViewState`, which owns the filter, the
-    spatial index and the render/display settings -- everything the render
-    view needs per layer.  An ``"image"`` layer holds an `ImageData` and only
-    the display settings; it is resampled onto the view instead of rendered.
+    A ``"locs"`` layer wraps a `ViewState` over the session's `Tables`: its
+    bounds (the user's setting, one dict for the grouped and the ungrouped
+    table alike), its file choice, whether it shows the grouped table, and its
+    render and display settings.  The tables themselves -- the ungrouped one,
+    the grouped one, their spatial indices -- are the session's, shared by
+    every layer.  An ``"image"`` layer holds an `ImageData` and only the
+    display settings; it is resampled onto the view instead of rendered.
     """
 
-    def __init__(self, locs: Localizations, name: str = "layer 1",
+    def __init__(self, tables: Tables, name: str = "layer 1",
                  defaults: bool = True,
                  settings: Optional[RenderSettings] = None,
                  display: Optional[DisplaySettings] = None,
-                 live: bool = False, extent=None, share: Optional["Layer"] = None,
-                 group_settings: Optional[GroupSettings] = None,
-                 grouped: Optional[Localizations] = None):
-        """``share`` is a layer over the same table whose spatial index (and
-        grouped table) this one reuses -- a new layer then costs nothing.
-
-        ``grouped`` is that table already linked -- by a worker thread, off the
-        GUI's, which is the only way opening a large file does not freeze the
-        window.  Given it, the `show_grouped` below finds the set already there
-        and links nothing.
-        """
+                 grouped: Optional[bool] = None):
+        """``grouped`` None opens the layer grouped where that is the default
+        (`GROUPED_BY_DEFAULT`, a table with frames that is not still being
+        fitted).  Nothing is linked here: the grouped table is linked when it
+        is first read, or in the GUI's worker (`gui.merging`)."""
         self.kind = "locs"
         self.image: Optional[ImageData] = None
-        self.files: Optional[List[int]] = None     # file numbers shown; None = all
         self.name = name
         self.visible = True
         if settings is None:
             settings = RenderSettings(sigma_settings=SigmaSettings(factor=PRECISION_FACTOR))
-        other = share.state if share is not None and not share.is_image else None
-        self.group_settings = group_settings or DEFAULT_GROUP_SETTINGS
-        self.state = ViewState(locs, settings, display, grouped=grouped, live=live,
-                               extent=extent, share=other)
+        self.state = ViewState(settings=settings, display=display, tables=tables)
         if defaults:
             self.apply_defaults()
-        if GROUPED_BY_DEFAULT and not live and len(locs) and "frame" in locs:
-            self.show_grouped(True, share)
+        locs = tables.locs
+        if grouped is None:
+            grouped = (GROUPED_BY_DEFAULT and not tables.growing and bool(len(locs))
+                       and "frame" in locs)
+        if grouped:
+            self.show_grouped(True)
 
     @classmethod
     def from_image(cls, image: ImageData, name: Optional[str] = None,
@@ -151,20 +148,26 @@ class Layer:
         return self.state.bounds()
 
     def apply_defaults(self) -> None:
-        for field, (lo, hi) in default_bounds(self.locs).items():
+        for field, (lo, hi) in default_bounds(self.state.tables.locs).items():
             self.set_bound(field, lo, hi)
 
+    @property
+    def ranges(self) -> Dict[str, Tuple[Optional[float], Optional[float]]]:
+        """The bounds the user set, ``{field: (lo, hi)}``: one set for the
+        layer, applied to whichever table it shows."""
+        return self.state.ranges
+
     def set_bound(self, field: str, lo: Optional[float], hi: Optional[float]) -> None:
-        """A bound applies to the grouped and the ungrouped table alike, so
-        what is drawn and what a plugin gets never disagree."""
-        for locset in self.state.sets.values():
-            if field in locset.locs:
-                locset.filter.set(field, lo, hi)
+        """One bound, applied to the table the layer shows -- the grouped
+        one's combined values when it is grouped (`layer_state`)."""
+        self.state.set_bound(field, lo, hi)
 
     def remove_bound(self, field: str) -> None:
-        for locset in self.state.sets.values():
-            if field in locset.filter:
-                locset.filter.remove(field)
+        self.state.remove_bound(field)
+
+    def set_ranges(self, ranges) -> None:
+        """Replace every bound at once."""
+        self.state.set_ranges(ranges)
 
     @property
     def locs(self) -> Localizations:
@@ -173,95 +176,58 @@ class Layer:
 
     @property
     def filter(self) -> LocFilter:
+        """The filter over the table this layer draws (derived from `ranges`)."""
         return self.state.filter
+
+    @property
+    def files(self) -> Optional[List[int]]:
+        """File numbers shown; None = all."""
+        return None if self.is_image else self.state.files
+
+    @files.setter
+    def files(self, files: Optional[Sequence[int]]) -> None:
+        self.set_files(files)
 
     def set_files(self, files: Optional[Sequence[int]]) -> None:
         """Restrict to these file numbers; None means every file."""
-        self.files = None if files is None else sorted(int(f) for f in files)
-        for locset in self.state.sets.values():
-            if files is None:
-                if "files" in locset.filter:
-                    locset.filter.remove("files")
-            elif "filenumber" in locset.locs:
-                locset.filter.set_mask("files", np.isin(locset.locs["filenumber"], list(files)))
+        self.state.set_files(files)
 
-    def rebind(self, locs: Localizations, share: Optional["Layer"] = None) -> None:
-        """Point at a new table, keeping the bounds and display the user set."""
+    def rebind(self, tables: Tables) -> None:
+        """Look at the session's new tables, keeping the bounds and display
+        the user set."""
         if self.is_image:
             return
-        old = self.state
-        other = share.state if share is not None and not share.is_image else None
-        self.state = ViewState(locs, old.settings, old.display, share=other)
-        if share is not None and not share.is_image:
-            self.group_settings = share.group_settings
-        for field, (lo, hi) in old.sets["ungrouped"].filter.ranges.items():
-            if field in locs:
-                self.filter.set(field, lo, hi)
-        if old.use_grouped:
-            # through the layer, not the state: the grouped table is built
-            # fresh here and `show_grouped` is what copies the bounds onto it.
-            # Going straight to the state would leave the grouped set -- the
-            # one on screen -- unfiltered, so a drift correction or a colour
-            # assignment would look like it had thrown the filters away.
-            self.show_grouped(True, share)
-        if self.files is not None:
-            self.set_files(self.files)
-
-    def append(self, block: Localizations) -> int:
-        """Take in a block of a table that is still being produced."""
-        first = not len(self.locs)
-        n = self.state.append(block)
-        if first:
-            self.apply_defaults()
-        return n
+        self.state.rebind(tables)
 
     @property
     def grouped(self) -> bool:
         return self.state.use_grouped
 
-    def _grouped_carries_the_filter(self, grouped) -> bool:
-        """Does the grouped set already have this layer's bounds and files?
-
-        `set_bound` writes to every set, so the two filters agreeing is the
-        invariant; this asks whether it still holds.  It is asked rather than
-        remembered because a grouped set arrives from three directions -- built
-        here, inherited from another layer over the same table, or carried
-        through a `rebind` -- and only the first of them is a relink.
-        """
-        wanted = {field: bound
-                  for field, bound in self.state.sets["ungrouped"].filter.ranges.items()
-                  if field in grouped.locs}
-        if dict(grouped.filter.ranges) != wanted:
-            return False
-        return self.files is None or "files" in grouped.filter
-
-    def show_grouped(self, on: bool, share: Optional["Layer"] = None) -> None:
-        """Draw one entry per blink instead of one per frame.  Links on first
-        use -- unless ``share``, a layer over the same table, has it already."""
-        other = share.state if share is not None and not share.is_image else None
-        self.state.show_grouped(on, self.group_settings, share=other)
-        grouped = self.state.sets.get("grouped")
-        if on and grouped is not None and not self._grouped_carries_the_filter(grouped):
-            # A grouped set this layer has not filtered yet.  Inheriting one
-            # from another layer brings that layer's *table* but a filter of
-            # its own, and that is how the second layer came out of a drift
-            # correction unfiltered: nothing was linked here, so the old test
-            # (had it just been relinked?) said there was nothing to do.
-            for field, (lo, hi) in self.state.sets["ungrouped"].filter.ranges.items():
-                self.set_bound(field, lo, hi)
-            if self.files is not None:
-                self.set_files(self.files)
+    def show_grouped(self, on: bool) -> None:
+        """Draw one entry per blink instead of one per frame.  Linked when
+        first read -- once for the session, since the grouped table is
+        shared."""
+        self.state.show_grouped(on)
 
     def selection(self, index: int = 0, without: Tuple[str, ...] = ()) -> Selection:
-        """The *ungrouped* localizations this layer's filter keeps.
+        """The *ungrouped* localizations this layer's bounds keep.
 
-        Plugins work on the full table, so a grouped layer hands back the
-        ungrouped filter, which is what it would apply to it.  ``without``
-        names filters to leave out (`LocFilter.mask_without`).
+        ``without`` names filters to leave out (`LocFilter.mask_without`).
         """
-        f = self.state.sets["ungrouped"].filter
+        f = self.state.filter_for(self.state.tables.ungrouped)
         mask = f.mask_without(*without) if without else f.mask
         return Selection(mask, layer=index, name=self.name)
+
+    def grouped_selection(self, index: int = 0, without: Tuple[str, ...] = (),
+                          progress=None, locset=None) -> Tuple[Localizations, Selection]:
+        """The grouped table and what this layer's bounds keep of it,
+        linking it if it is not current (``progress(text, fraction)``) --
+        or ``locset``, a grouped table already in hand."""
+        if locset is None:
+            locset = self.state.tables.grouped(progress=progress)
+        f = self.state.filter_for(locset)
+        mask = f.mask_without(*without) if without else f.mask
+        return locset.locs, Selection(mask, layer=index, name=f"{self.name}, blinks merged")
 
 
 # The colours a session can be marked with, and the mark each puts in a
@@ -300,42 +266,41 @@ def file_history(locs: Localizations) -> List[Dict]:
     return [dict(e) for e in found if isinstance(e, dict)][-MAX_HISTORY:]
 
 
-def read_and_group(path, group_settings: GroupSettings, append: bool = False,
-                   progress: Optional[Callable[[str], None]] = None,
-                   reader=None, **reader_args):
-    """Read a localization file and link it: ``(locs, info, grouped)``.
+def read_localizations(path, progress: Optional[Callable[[str], None]] = None,
+                       reader=None, **reader_args) -> Tuple[Localizations, FileInfo]:
+    """Read a localization file: ``(locs, info)``.
 
     The one implementation, used by the GUI's `LoadTask`, by `Session.load` and
-    by the `File/Load` plugins -- all of which need the slow half off whatever
+    by the loader plugin -- all of which need the slow part off whatever
     thread owns the session, and none of which should own a copy of it.
 
-    An appended file is not linked: `Session.add_file` re-links the merged
-    table anyway, so linking here would be work done twice.
+    Nothing is merged here, though a layer shows merged blinks by default:
+    they are merged when first read, and in the GUI in a worker after the
+    file has opened (`gui.merging`), so that a file opens at once.
     """
     if progress:
         progress("loading")
-    locs, info = load_any(path, reader=reader, **reader_args)
-    grouped = None
-    # every layer opens grouped, so a file not linked here would be linked
-    # there anyway -- on the session's thread rather than this one
-    if not append and GROUPED_BY_DEFAULT and len(locs) and "frame" in locs:
-        from .group import group as link
-        grouped, _ = link(locs, group_settings,
-                          progress=(lambda text, _f: progress(f"Grouper: {text}"))
-                          if progress else None)
-    return locs, info, grouped
+    return load_any(path, reader=reader, **reader_args)
 
 
 class Session:
     def __init__(self, locs: Optional[Localizations] = None, path=None):
-        self.locs = locs if locs is not None else Localizations({}, {})
+        # how localizations are linked into blinks: the session's, for every
+        # layer -- there is one grouped table (`tables`)
+        self._group_settings = DEFAULT_GROUP_SETTINGS
+        # the table and its grouped form, shared by every layer
+        # the size from which the GUI merges blinks in a worker rather than
+        # on first read (`Tables.defer_from`, `gui.merging`); None headless
+        self.defer_merge_from: Optional[int] = None
+        self.tables = self._new_tables(locs if locs is not None else Localizations({}, {}),
+                                       self._group_settings)
         self.path: Optional[Path] = Path(path) if path else None
         # Files `save` refuses to write over.  A fit run for MicroClaw hands
         # its file on as the job's result, with a digest taken there and then,
         # and the window stays open on it: a Ctrl+S afterwards would change
         # what the record vouches for.  The session's work goes to a new file.
         self.protected: set = set()
-        self.layers: List[Layer] = [Layer(self.locs)]
+        self.layers: List[Layer] = [Layer(self.tables)]
         self.roi: Optional[Region] = None          # the drawn 2D ROI (regions.py)
         self._rois = None                          # the ROI manager's project
         # what was measured per region of an id column (a cluster's
@@ -365,7 +330,7 @@ class Session:
         # every table this session replaced, newest last; see `smappy.undo`
         self.undo_stack = undo_stack()
         self._live = False                 # the table is being appended to
-        # what follows the live table: `LiveRecipe`s applied while it grows
+        # what follows the live table: `ColumnRecipe`s applied while it grows
         self._recipes: List = []
         self._listeners: List[Callable[[str], None]] = []
         # set by the GUI: what to write into the file's `gui` group.  A session
@@ -383,6 +348,37 @@ class Session:
         # name: the file's.  The colour is a name from `COLOURS`, "" for none.
         self.name = ""
         self.colour = ""
+        # Whether the table changed since it was last saved or opened: a
+        # change that went into the table (`apply`, undo, redo, a fit), not
+        # a filter, a layer or an ROI, which are views of it.  The windows put
+        # a `*` in their titles, and quitting can ask (`set_unsaved`).
+        self.unsaved = False
+
+    @property
+    def locs(self) -> Localizations:
+        """The table: always the ungrouped one (`tables` has the grouped)."""
+        return self.tables.locs
+
+    @locs.setter
+    def locs(self, locs: Localizations) -> None:
+        """Put another table under the layers, without an undo step or a log
+        line -- for a script; a correction goes through `set_locs`."""
+        self._take_tables(self._new_tables(locs, self._group_settings))
+
+    def _new_tables(self, locs: Localizations, settings: GroupSettings,
+                    **kwargs) -> Tables:
+        """`Tables` over ``locs``, deferring its linking as the session does
+        (`defer_merge_from`)."""
+        return Tables(locs, settings, defer_from=self.defer_merge_from, **kwargs)
+
+    def _take_tables(self, tables: Tables) -> None:
+        """Make ``tables`` the session's and every layer's.  Its grouped table
+        is linked when a layer showing blinks reads it (`ViewState.current`;
+        render threads are handed snapshots taken on the GUI thread, so none
+        meets one being linked)."""
+        self.tables = tables
+        for layer in self.layers:
+            layer.rebind(tables)
 
     # ----------------------------------------------------------- observers
     def on_change(self, callback: Callable[[str], None]) -> None:
@@ -390,8 +386,8 @@ class Session:
         setting changed), "layers" (added/removed/visibility), "history" or
         "results" (a tool kept something worth drawing again), "rois" (the
         ROI manager's project), "roi-preview" (a segmenter's proposals,
-        `Session.show_preview`) and "name" (`rename`, or a file opened with
-        a name of its own)."""
+        `Session.show_preview`), "name" (`rename`, or a file opened with
+        a name of its own) and "unsaved" (`set_unsaved`)."""
         self._listeners.append(callback)
 
     def off_change(self, callback: Callable[[str], None]) -> None:
@@ -400,8 +396,16 @@ class Session:
             self._listeners.remove(callback)
 
     def changed(self, what: str) -> None:
-        for cb in self._listeners:
+        for cb in list(self._listeners):
             cb(what)
+
+    def set_unsaved(self, on: bool) -> None:
+        """Say whether the table differs from the file; "unsaved" when that
+        changes, for the titles."""
+        on = bool(on)
+        if on != self.unsaved:
+            self.unsaved = on
+            self.changed("unsaved")
 
     # ---------------------------------------------------------------- data
     def load(self, path, append: bool = False, progress=None, **reader_args) -> FileInfo:
@@ -411,9 +415,8 @@ class Session:
         column tells them apart, and the layers can pick); otherwise it
         replaces everything.
         """
-        locs, info, grouped = read_and_group(path, self.group_settings, append=append,
-                                             progress=progress, **reader_args)
-        return self.add_file(locs, info, append=append, grouped=grouped)
+        locs, info = read_localizations(path, progress=progress, **reader_args)
+        return self.add_file(locs, info, append=append)
 
     @staticmethod
     def _file_results(info: FileInfo) -> Dict[str, Dict]:
@@ -522,6 +525,9 @@ class Session:
                           label=f"add {info.name}", text=str(info.path))
         self.locs.metadata["files"] = [f.to_dict() for f in self.files]
         self.log("load", str(info.path), append=append)
+        # a file opened is the table as saved; one added to it makes a table
+        # no file holds yet
+        self.set_unsaved(number > 0)
         return info
 
     def file_names(self) -> List[str]:
@@ -696,21 +702,13 @@ class Session:
         # and a SMAP _sml.mat, a csv or a MINFLUX export is not a file this
         # writes -- it used to be overwritten with HDF5 under its own name
         writer_for(path)
-        metadata = self.file_metadata()
-        if not region_results:
-            if isinstance(metadata.get("roi_project"), dict):
-                metadata["roi_project"] = {k: v for k, v in metadata["roi_project"].items()
-                                           if k != "tables"}
-            metadata.pop("id_regions", None)
-        elif not region_figures:
-            unkept = lambda doc: {k: v for k, v in doc.items() if k != "kept"}
-            if isinstance(metadata.get("roi_project"), dict):
-                project = dict(metadata["roi_project"])
-                project["tables"] = [unkept(t) for t in project.get("tables") or []]
-                metadata["roi_project"] = project
-            if metadata.get("id_regions"):
-                metadata["id_regions"] = {c: [unkept(t) for t in ts]
-                                          for c, ts in metadata["id_regions"].items()}
+        from .region_results import without_results
+        if any(l.grouped for l in self.layers if not l.is_image):
+            # a layer shows blinks: the file gets each localization's
+            # `group_id` and `n_in_group`, merged now where that is allowed
+            # (not while the GUI merges a large table in its worker)
+            self.tables.available()
+        metadata = without_results(self.file_metadata(), region_results, region_figures)
         # read before the file is started again: frames opened from it are
         # read from it a plane at a time (`StoredStack`)
         from .io.hdf5 import save_images
@@ -738,6 +736,7 @@ class Session:
                 # reported failure.
                 self.log("save", f"the GUI state was not saved: {e}")
         self.path = path
+        self.set_unsaved(False)
         return path
 
     def set_locs(self, locs: Localizations, undoable: bool = True,
@@ -751,53 +750,38 @@ class Session:
         there is nothing left to go back to.
         """
         if self._live:                     # the finished form of the live table
-            self.layers = [Layer(locs)]    # (the step before the run is already pushed)
+            self.tables = self._new_tables(locs, self._group_settings)
+            self.layers = [Layer(self.tables)]    # (the step before the run is already pushed)
             self._live = False
         elif undoable or keep_layers:      # the same data, corrected: keep the layers
             if undoable:
                 self._push_undo(label or "change", text)
-            first = None                   # one index for the table, shared by all
-            for layer in self.layers:
-                if layer.is_image:
-                    continue
-                layer.rebind(locs, share=first)
-                first = first or layer
+            self._take_tables(self._new_tables(locs, self._group_settings))
         else:                              # a new file: start over with one layer
             self.undo_stack.clear()
+            self.tables = self._new_tables(locs, self._group_settings, grouped=grouped)
             self.layers = [l for l in self.layers if l.is_image]
-            self.layers.insert(0, Layer(locs, grouped=grouped))
-        self.locs = locs
+            self.layers.insert(0, Layer(self.tables))
         self.changed("locs")
 
     @property
     def group_settings(self) -> GroupSettings:
-        layer = self._locs_layer()
-        return layer.group_settings if layer is not None else DEFAULT_GROUP_SETTINGS
+        """How localizations are linked into blinks: one setting for the
+        session, since there is one grouped table."""
+        return self._group_settings
 
     def set_group_settings(self, settings: GroupSettings) -> None:
-        """New linking parameters: every grouped table is rebuilt (once, shared).
+        """New linking parameters: the grouped table is linked again, once
+        for every layer, when it is next read -- in the GUI in a worker for a
+        large table, the layers drawing nothing until then.
 
         Logged like a plugin run: the grouped table is data the user reads
         numbers off, and which `dx` and `dt` produced it is not recoverable
         from the file afterwards.
         """
-        first = None
-        for layer in self.layers:
-            if layer.is_image:
-                continue
-            layer.group_settings = settings
-            layer.state.grouped_stale = True
-            was_on = layer.grouped
-            if "grouped" in layer.state.sets:
-                bounds = dict(layer.state.sets["ungrouped"].filter.ranges)
-                layer.show_grouped(True, first)
-                layer.state.use_grouped = was_on
-                for field, (lo, hi) in bounds.items():
-                    layer.set_bound(field, lo, hi)
-                if layer.files is not None:
-                    layer.set_files(layer.files)
-            first = first or layer
-        self.log("regroup", f"dx = {settings.dx:g}, dt = {settings.dt}",
+        self._group_settings = settings
+        self.tables.settings = settings
+        self.log("merge settings", f"within {settings.dx:g}, dark frames {settings.dt}",
                  settings=asdict(settings), changed=True)
         self.changed("regrouped")
 
@@ -805,11 +789,8 @@ class Session:
         return next((l for l in self.layers if not l.is_image), None)
 
     def show_grouped(self, index: int, on: bool) -> None:
-        """Grouped display for one layer, reusing another layer's grouped table."""
-        layer = self.layers[index]
-        partner = next((l for l in self.layers if l is not layer and not l.is_image
-                        and "grouped" in l.state.sets), None)
-        layer.show_grouped(on, partner)
+        """Grouped display for one layer; the grouped table is the session's."""
+        self.layers[index].show_grouped(on)
 
     def add_layer(self, like: Optional[int] = None) -> Layer:
         """A new layer on the same table.
@@ -823,26 +804,21 @@ class Session:
         template = None
         if like is not None and 0 <= like < len(self.layers) and not self.layers[like].is_image:
             template = self.layers[like]
-        # live: the table is still being appended to, so the new layer must
-        # take blocks too, and must not link it (linking writes `group_id`
-        # into the table every layer shares)
-        layer = Layer(self.locs, name=f"layer {len(self.layers) + 1}",
-                      share=self._locs_layer(), live=self._live,
+        # on the session's tables: a live table's new rows reach it too, and
+        # it is not linked while growing (the default grouping says so)
+        layer = Layer(self.tables, name=f"layer {len(self.layers) + 1}",
                       defaults=template is None,
                       settings=(dataclasses.replace(template.state.settings)
                                 if template is not None else None),
                       display=(dataclasses.replace(template.get_display())
                                if template is not None else None),
-                      group_settings=template.group_settings if template is not None else None)
+                      grouped=template.grouped if template is not None else None)
         if template is None:
             if "filenumber" in self.locs:
                 layer.set_files([])        # starts empty: pick the file(s) it shows
         else:
-            for field, (lo, hi) in template.state.sets["ungrouped"].filter.ranges.items():
-                layer.set_bound(field, lo, hi)
+            layer.set_ranges(template.ranges)
             layer.set_files(template.files)
-            if layer.grouped != template.grouped:
-                layer.show_grouped(template.grouped, template)
         self.layers.append(layer)
         self.changed("layers")
         return layer
@@ -870,16 +846,11 @@ class Session:
             dst.state.settings = dataclasses.replace(src.state.settings)
             dst.set_display(dataclasses.replace(src.get_display()))
         if bounds:
-            for field in list(dst.state.sets["ungrouped"].filter.ranges):
-                dst.remove_bound(field)
-            for field, (lo, hi) in src.state.sets["ungrouped"].filter.ranges.items():
-                dst.set_bound(field, lo, hi)
+            dst.set_ranges(src.ranges)
         if files:
             dst.set_files(src.files)
-        if grouping:
-            dst.group_settings = src.group_settings
-            if dst.grouped != src.grouped:
-                dst.show_grouped(src.grouped, src)
+        if grouping and dst.grouped != src.grouped:
+            dst.show_grouped(src.grouped)
         self.changed("layer")
 
     def layer_configs(self) -> List[Dict]:
@@ -890,7 +861,7 @@ class Session:
         for layer in self.layers:
             if layer.is_image:
                 continue
-            ranges = layer.state.sets["ungrouped"].filter.ranges
+            ranges = layer.ranges
             out.append({"grouped": bool(layer.grouped),
                         "bounds": {f: [lo, hi] for f, (lo, hi) in ranges.items()},
                         "files": None if layer.files is None else list(layer.files)})
@@ -914,11 +885,9 @@ class Session:
             index = indices[n]
             layer = self.layers[index]
             if "bounds" in config:
-                for name in list(layer.state.sets["ungrouped"].filter.ranges):
-                    layer.remove_bound(name)
-                for name, (lo, hi) in (config.get("bounds") or {}).items():
-                    if name in self.locs:
-                        layer.set_bound(name, lo, hi)
+                layer.set_ranges({name: (lo, hi) for name, (lo, hi)
+                                  in (config.get("bounds") or {}).items()
+                                  if name in self.locs})
             if "files" in config:
                 layer.set_files(config["files"])
             if "grouped" in config and bool(config["grouped"]) != layer.grouped:
@@ -930,8 +899,9 @@ class Session:
         grouping, ROI and slab; no undo, no log, no listeners.
 
         The arrays are shared, not copied -- a plugin hands back a new table
-        and never edits the one it was given -- and so is every grouped table
-        that is still current, so a copy costs neither memory nor a relink.
+        and never edits the one it was given -- and so are the spatial index
+        and the grouped table (`Tables.sharing`), so a copy costs neither
+        memory nor a relink.  What the copy links afterwards is its own.
         What the chain does to the copy reaches this session only as the
         chain's result.
         """
@@ -947,7 +917,19 @@ class Session:
         # growing as it reads it.
         if locs is None:
             locs = self.locs.snapshot() if self._live else self.locs
-        copy.locs = locs
+        if locs is self.locs and not self._live:
+            # the same table: its index and its grouped table come along
+            tables = Tables.sharing(self.tables)
+        else:
+            # a snapshot: the grouped table comes along only if it was
+            # linked from exactly these rows
+            grouped = self.tables.peek_grouped()
+            take = (grouped is not None and self.tables.is_current
+                    and len(locs) == len(self.locs))
+            tables = Tables(locs, self._group_settings,
+                            grouped=grouped.locs if take else None)
+        copy._group_settings = self._group_settings
+        copy.tables = tables
         copy.path = self.path
         copy.files = list(self.files)
         copy.images = list(self.images)
@@ -957,36 +939,26 @@ class Session:
         copy.slab_shown = self.slab_shown
         copy.projection = self.projection
         copy.layers = []
-        first = None
         for layer in self.layers:
             if layer.is_image:
                 copy.layers.append(layer)
                 continue
-            sets = layer.state.sets
-            grouped = (sets["grouped"].locs if "grouped" in sets
-                       and not layer.state.grouped_stale else None)
-            made = Layer(copy.locs, name=layer.name, defaults=False,
+            made = Layer(tables, name=layer.name, defaults=False,
                          settings=dataclasses.replace(layer.state.settings),
                          display=dataclasses.replace(layer.get_display()),
-                         group_settings=layer.group_settings,
-                         grouped=grouped if first is None else None, share=first)
-            for name, (lo, hi) in sets["ungrouped"].filter.ranges.items():
-                made.set_bound(name, lo, hi)
+                         grouped=layer.grouped)
+            made.set_ranges(layer.ranges)
             made.set_files(layer.files)
-            if made.grouped != layer.grouped:
-                made.show_grouped(layer.grouped, first)
             copy.layers.append(made)
-            first = first or made
         if not any(not l.is_image for l in copy.layers):
-            copy.layers.insert(0, Layer(copy.locs))
+            copy.layers.insert(0, Layer(copy.tables))
         if self._rois is not None:
             # the ROI manager's project as it is now, not as the file was
             # saved: a chain's segmenter adds to it and its evaluators run on
-            # it, and the chain hands it back as `data["roi_project"]`
-            from .roi_manager.link import SessionROIs
-            copy._rois = SessionROIs(copy)
+            # it, and the chain hands it back as `Result.roi_project`
+            from .roi_manager.core import ROIProject
+            copy._rois = ROIProject(copy)
             copy._rois.layer = self._rois.layer
-            copy._rois.auto_review = self._rois.auto_review
             copy._rois.sync()
             copy._rois.from_dict(self._rois.to_dict())
         # what was measured per cluster, so a block finds what is current
@@ -1015,11 +987,13 @@ class Session:
             self._push_undo("live acquisition")
         self._live = True
         self._recipes = []
-        self.locs = Localizations({}, {})
-        self.layers = [Layer(self.locs, live=True, extent=extent)]
+        self.tables = self._new_tables(Localizations({}, {}), self._group_settings,
+                             live=True, extent=extent)
+        self.layers = [Layer(self.tables)]
         if path is not None:
             self.path = Path(path)
         self.changed("locs")
+        self.set_unsaved(True)
 
     def _take_identity(self, saved) -> None:
         name = colour = ""
@@ -1033,7 +1007,7 @@ class Session:
 
     # ------------------------------------------------------- live recipes
     def _follow(self, recipe, plugin: Plugin, result: Result) -> None:
-        """Apply a `LiveRecipe` to the live table now, and to every block.
+        """Apply a `ColumnRecipe` to the live table now, and to every block.
 
         The table is the one the fit is still appending to, so the columns go
         into it in place -- on the table so far, which has grown since the
@@ -1055,12 +1029,8 @@ class Session:
             self.locs.columns[name] = values
             self.locs._buffers[name] = values    # `extend` grows it from here
         for layer in self.layers:
-            if layer.is_image:
-                continue
-            ranges = layer.state.sets["ungrouped"].filter.ranges
-            for name in columns:
-                if name in ranges:               # its mask is of the old values
-                    layer.set_bound(name, *ranges[name])
+            if not layer.is_image:               # their masks are of the old values
+                layer.state.columns_changed(list(columns))
 
     def _recipe_block(self, block: Localizations) -> Localizations:
         """A block with the recipes' columns, so it matches the live table."""
@@ -1099,11 +1069,14 @@ class Session:
         """Add a block to the live table; every layer takes it in -- with the
         columns of the recipes followed so far (`_follow`)."""
         block = self._recipe_block(block)
-        n = 0
+        first = not len(self.locs)
+        n = self.tables.append(block)
         for layer in self.layers:
-            if not layer.is_image:
-                n = layer.append(block)
-        self.locs = self.layers[self.first_locs_layer()].state.sets["ungrouped"].locs
+            if layer.is_image:
+                continue
+            layer.state.catch_up()
+            if first:
+                layer.apply_defaults()          # the columns exist only now
         for recipe in self._recipes:
             if recipe.whole and n:
                 self._set_columns(recipe.columns(self.locs))
@@ -1129,13 +1102,7 @@ class Session:
         linked again on the way (`Layer.rebind`): coming back from a drift
         correction has to show what it showed before, filters and all.
         """
-        self.locs = edit.locs
-        first = None
-        for layer in self.layers:
-            if layer.is_image:
-                continue
-            layer.rebind(self.locs, share=first)
-            first = first or layer
+        self._take_tables(self._new_tables(edit.locs, self._group_settings))
         self.files = [FileInfo(**{k: v for k, v in f.items() if k != "n"})
                       for f in self.locs.metadata.get("files", [])] or self.files
 
@@ -1198,6 +1165,7 @@ class Session:
         if done:
             self.log(direction, ", ".join(done), changed=True)
             self.changed("locs")
+            self.set_unsaved(True)
 
     # -------------------------------------------------------- ROI manager
     @property
@@ -1205,12 +1173,12 @@ class Session:
         """The ROI manager's project over this session's files.
 
         Separate from `roi`, the rectangle or line drawn in the 2D view: this
-        is the collection of analysis ROIs, their review state and their
+        is the collection of analysis ROIs, their *use* and their
         evaluation runs, and it is saved with the localization file.
         """
         if self._rois is None:
-            from .roi_manager.link import SessionROIs
-            self._rois = SessionROIs(self)
+            from .roi_manager.core import ROIProject
+            self._rois = ROIProject(self)
             saved = self.locs.metadata.get("roi_project")
             self._rois.sync()
             if saved:
@@ -1234,18 +1202,14 @@ class Session:
         return self._id_regions
 
     def evaluate_regions(self, column: str, steps, layer: int = 0,
-                         report=None, tick=None, stop=None, reuse: bool = True,
-                         keep_figures: bool = False, after=None, tag: bool = False):
+                         report=None, stop=None, reuse: bool = True,
+                         after=None, tag: bool = False):
         """Run ``steps`` once in each region of the id ``column`` and keep
-        their tables under it (`region_runs.evaluate_regions`): the
+        their tables under it (`region_runs.ColumnRegions.evaluate`): the
         per-cluster counterpart of `ROIProject.evaluate`."""
-        from .region_runs import ColumnRegions, evaluate_regions
-        source = ColumnRegions(self, column, layer)
-        tables = evaluate_regions(source, steps, self.id_regions.get(column),
-                                  report=report, tick=tick, stop=stop, reuse=reuse,
-                                  keep_figures=keep_figures, after=after, tag=tag)
-        self.id_regions[column] = tables
-        self.changed("rois")
+        from .region_runs import ColumnRegions
+        tables, _ = ColumnRegions(self, column, layer).evaluate(
+            steps, report=report, stop=stop, reuse=reuse, after=after, tag=tag)
         return tables
 
     def roi_state(self) -> Optional[dict]:
@@ -1274,7 +1238,7 @@ class Session:
         name = axes.depth_name(self.locs)
         if name is None:
             return (-1.0, 1.0)
-        lo, hi = layer.state.sets["ungrouped"].filter.ranges.get(name, (None, None))
+        lo, hi = layer.ranges.get(name, (None, None))
         z = np.asarray(axes.depth(self.locs))
         finite = z[np.isfinite(z)]
         dlo, dhi = (float(finite.min()), float(finite.max())) if finite.size else (-1.0, 1.0)
@@ -1402,17 +1366,18 @@ class Session:
             sel.name += f", {self.slab}"
         return sel
 
-    def table(self, layer: int = 0, grouping: Optional[str] = None
+    def table(self, layer: int = 0, grouping: Optional[str] = None,
+              progress: Optional[Callable[[str, float], None]] = None
               ) -> Tuple[Localizations, Selection]:
         """A layer's table and selection, grouped or not: ``(locs, selection)``.
 
         ``grouping`` is "grouped", "ungrouped", or None for whatever the layer
         itself shows.  This is where the choice a chain or a plugin makes
         (`Context.table`) meets the session: the ungrouped answer is
-        `self.locs` with `selection`, and the grouped one is the layer's
-        linked table with its own filter, cut to the same ROI and slab.
+        `self.locs` with `selection`, and the grouped one is the session's
+        grouped table under the layer's bounds, cut to the same ROI and slab.
 
-        Asking for the grouped table of a layer that has none links it.  The
+        Asking for a grouped table that is not current links it.  The
         rule elsewhere is to say what is missing rather than spend minutes
         behind the user's back, but here somebody has asked for exactly this
         table -- a chain step set to grouped -- and linking is the answer.
@@ -1421,19 +1386,19 @@ class Session:
         if self.layers[layer].is_image:
             layer = self.first_locs_layer()
         lay = self.layers[layer]
-        grouped = lay.grouped if grouping is None else grouping == "grouped"
-        if not grouped:
+        if grouping is None:
+            # what the layer shows: while its blinks are merged in the GUI's
+            # worker that is the localizations, and a measurement measures
+            # what is on screen rather than linking them here, again
+            shown = lay.state.current
+            if shown is lay.state.tables.ungrouped:
+                return self.locs, self.selection(layer)
+            locs, sel = lay.grouped_selection(layer, locset=shown)
+            return locs, self._clip(sel, locs, layer)
+        if grouping != "grouped":
             return self.locs, self.selection(layer)
-        if "grouped" not in lay.state.sets or lay.state.grouped_stale:
-            showing = lay.state.use_grouped
-            partner = next((l for l in self.layers if l is not lay and not l.is_image
-                            and "grouped" in l.state.sets
-                            and not l.state.grouped_stale), None)
-            lay.show_grouped(True, partner)
-            lay.state.use_grouped = showing
-        locset = lay.state.sets["grouped"]
-        sel = Selection(locset.filter.mask, layer=layer, name=f"{lay.name}, grouped")
-        return locset.locs, self._clip(sel, locset.locs, layer)
+        locs, sel = lay.grouped_selection(layer, progress=progress)
+        return locs, self._clip(sel, locs, layer)
 
     def context(self, layer: int = 0,
                 progress: Optional[Callable[[str], None]] = None,
@@ -1467,14 +1432,15 @@ class Session:
         """Every locs layer's ``(table, selection)``, as of now, for `context`.
 
         The ungrouped table is one snapshot shared by all layers.  A grouped
-        table is offered only where the layer already has one: it is a table
-        of its own, never appended to, so it is safe to hand on -- but it
+        table is offered only where the session already has one: it is a
+        table of its own, never appended to, so it is safe to hand on -- but it
         does not include what arrived since it was linked, and linking a
         table that is still growing, on a worker, is exactly the race this
         avoids.
         """
         locs = self.locs.snapshot()
         n = len(locs)
+        grouped = self.tables.peek_grouped()
         out: Dict[int, Dict[str, Tuple[Localizations, Selection]]] = {}
         for i, lay in enumerate(self.layers):
             if lay.is_image:
@@ -1485,11 +1451,10 @@ class Session:
             # its first n entries are the snapshot's
             sel.mask = sel.mask[:n].copy()
             tables = {"ungrouped": (locs, self._clip(sel, locs, i))}
-            if "grouped" in lay.state.sets:
-                locset = lay.state.sets["grouped"]
-                gsel = Selection(locset.filter.mask.copy(), layer=i,
-                                 name=f"{lay.name}, grouped")
-                tables["grouped"] = (locset.locs, self._clip(gsel, locset.locs, i))
+            if grouped is not None:
+                gsel = Selection(lay.state.filter_for(grouped).mask.copy(), layer=i,
+                                 name=f"{lay.name}, blinks merged")
+                tables["grouped"] = (grouped.locs, self._clip(gsel, grouped.locs, i))
             out[i] = tables
         return out
 
@@ -1501,8 +1466,9 @@ class Session:
         The plugin runs on whatever thread calls this; only `apply` touches
         the session, so a GUI can run the plugin in a worker and apply here.
         """
-        result = plugin.run(self.context(layer, progress, stream,
-                                         grouping=plugin.grouping), settings)
+        ctx = self.context(layer, progress, stream, grouping=plugin.grouping)
+        result = plugin.run(ctx, settings)
+        refuse_grouped_table(ctx, result, plugin, plugin.path.rsplit("/", 1)[-1])
         self.apply(plugin, result)
         return result
 
@@ -1514,13 +1480,13 @@ class Session:
         localizations is refused with `LiveTableError`, before anything is
         touched -- except the fit's own, ``finishes_live``, which is the
         finished form of the table it has been streaming, and one that
-        carries a `LiveRecipe`, which follows the live table (`_follow`).  Applied, a drift
-        correction replaced the growing table with one that could not take
-        the next block, and the fit's result then replaced it in turn: the
-        view stopped, the correction was lost, and the log kept a line for a
-        correction the table did not have.
+        carries a `ColumnRecipe`, which follows the live table (`_follow`).
+        Applied, a drift correction replaced the growing table with one that
+        could not take the next block, and the fit's result then replaced it
+        in turn: the view stopped, the correction was lost, and the log kept
+        a line for a correction the table did not have.
         """
-        recipe = ((result.data or {}).get("live_recipe")
+        recipe = (result.recipe
                   if self._live and not finishes_live and not result.files else None)
         if (self._live and not finishes_live and recipe is None
                 and (result.locs is not None or result.files)):
@@ -1539,7 +1505,7 @@ class Session:
         for n, (locs, info, grouped) in enumerate(result.files or ()):
             # the first replaces unless the plugin asked to append; the rest
             # always join, or opening three files would keep only the last
-            self.add_file(locs, info, append=result.data.get("append", False) or n > 0,
+            self.add_file(locs, info, append=result.append or n > 0,
                           grouped=grouped)
         if result.locs is not None and not self.files and not len(self.locs) \
                 and not self._live:
@@ -1548,7 +1514,7 @@ class Session:
             # correction: it gets its layers and its file entry, and its own
             # log, rather than an undo step back to an empty session.
             from .io.formats import FileInfo
-            where = (result.data or {}).get("path")
+            where = result.written
             name = Path(where).name if where else plugin.path.rsplit("/", 1)[-1]
             self.add_file(result.locs, FileInfo(name=name, path=str(where or ""),
                                                 format=plugin.path, n=len(result.locs)))
@@ -1561,11 +1527,14 @@ class Session:
             # after the plugin rather than after the fact that a table changed
             self.set_locs(result.locs, label=plugin.path.rsplit("/", 1)[-1],
                           text=result.text or "")
+        if result.locs is not None:
+            # a correction is in no file yet; a fit that wrote its table is
+            self.set_unsaved(not result.saved)
         # The camera frames a fit kept (`smappy.rawframes`), with the table it
         # has just set.  A fit replaces the whole table, so these are all the
         # raw frames there are now -- including any just read back from the
         # file it wrote, which are the same frames.
-        images = (result.data or {}).get("images") or []
+        images = list(result.images or ())
         if images:
             self.images = [im for im in self.images if im.kind != "raw"]
             for im in images:
@@ -1583,7 +1552,7 @@ class Session:
         # so here, as `{field: (lo, hi)}`.  It cannot set the bound itself: a
         # filter belongs to the table it was built from, and the table the
         # column is in is the one that has just been set here.
-        bounds = (result.data or {}).get("bounds") or {}
+        bounds = result.bounds or {}
         for field, (lo, hi) in bounds.items():
             for layer in self.layers:
                 if not layer.is_image:
@@ -1592,18 +1561,19 @@ class Session:
             self.changed("locs")
         # the layers a chain step set up -- bounds and grouping per layer, the
         # Render tab's work done by a plugin (`Chain/Layers`)
-        if (result.data or {}).get("layers"):
-            self.set_layer_configs(result.data["layers"])
+        if result.layers:
+            self.set_layer_configs(result.layers)
         # the ROI manager's project as a chain left it: the ROIs its segmenter
         # found, the runs of its evaluators and the pipeline they make.  Into
         # the project that is there, which the ROI manager's window holds.
-        if (result.data or {}).get("roi_project") is not None:
-            self.rois.from_dict(result.data["roi_project"])
-        if (result.data or {}).get("id_regions"):
-            for column, tables in result.data["id_regions"].items():
+        if result.roi_project is not None:
+            self.rois.from_dict(result.roi_project)
+            self.changed("rois")
+        if result.id_regions:
+            for column, tables in result.id_regions.items():
                 self.id_regions.setdefault(column, {}).update(tables)
             self.changed("rois")
-        elif (result.data or {}).get("rois") is not None:
+        elif result.rois is not None:
             # a segmenter added ROIs to the project it was handed; the
             # manager draws them, and what a preview proposed is now either
             # among them or was not wanted
@@ -1618,7 +1588,7 @@ class Session:
         on the GUI thread, since a preview runs on a worker and changes
         nothing.  So far one thing: a segmenter's proposed ROIs
         (`SegmenterPlugin`), which replace the last preview's."""
-        preview = (result.data or {}).get("roi_preview")
+        preview = result.roi_preview
         if preview is not None:
             self.rois.segment_preview = preview
             self.changed("roi-preview")

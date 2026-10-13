@@ -86,7 +86,7 @@ def test_a_spline_3d_fits_z_precision_reaches_statistics_and_the_render():
         frames.append(rng.poisson(frame).astype(np.float32))
     frames = np.stack(frames)
     locs, _ = fit_stack([(0, frames)], camera(), finder(), SplinePSF(cal),
-                        FitSettings(roisize=13, output_unit="nm"))
+                        FitSettings(roisize=13))
 
     assert len(locs) >= 0.9 * 3 * n_frames
     assert {"z_nm", "z_err_nm", "xy_err_nm"} <= set(locs.keys())

@@ -49,19 +49,23 @@ Two departures, both because the blanket rule is wrong for the column:
 
 Grouping is expensive (the linking is sequential and cannot be vectorised), so
 it is done once and the grouped table kept alongside the original rather than
-recomputed when the display switches between them.
+recomputed when the display switches between them -- and only when something
+reads it (`layer_state.Tables`).  A file does not wait for it to open: in the
+GUI a large table is merged in the background after it opens (`gui.merging`).
 
 Most of what grouping cost was not the linking.  On a 57 M localization file
 `connect` took 71.7 s, and 68 s of that was the `np.lexsort` in front of the
 walk; the walk itself is 5.5 s.  `sorted_order` below returns the same order --
-element for element -- in 2.1 s.
+element for element -- in 2.1 s.  With the reduction compiled
+(`csrc/combine.hpp`) as well, grouping that file is about 24 s: 13 s the
+walk, 9 s `combine`, 2 s the sort.
 
-Opening that file went 134 s -> 56 s, and its peak memory 20 GB -> 9.7: the
-sort, the linking cut into chunks that run at once (`link_chunks`, and
-`smappy._group_chunked` for what it costs in exactness), and the reduction
-compiled (`csrc/combine.hpp`).  What is left of the 56 s: 32 s reading the
-file, 9 s `combine`, 6 s the linking, 2 s the sort, 6 s the indices and
-filters.
+The walk is the exact sequential one.  It ran in chunks of the frame axis for a
+while (13 s to 6 s on that file), to make every file's open faster, at the cost
+of exactness at the seams -- about 1 localization in 20,000 in another group.
+Grouped once, in the background, with progress, the exact walk is quick enough:
+5 M localizations at 500 per frame group in 4.5-6 s (the walk 4.3 s; chunked
+it was 3.3 s), 2 M in 1.4 s, on a shared 4-core machine.
 
 **To revisit: read fewer columns**, which is a memory problem before it is a
 speed one.  30 columns are read from that file and 13 are read by anything
@@ -86,6 +90,7 @@ from .columns import xy_err
 from .locs import Localizations
 from .mathparse import (COMBINE_RULES, RECOMPUTE, apply_recipes,
                         derived_names, recipes)
+from .params import param
 
 # ``progress(text, fraction)``: what stage this is in, and how far through the
 # table it is.  Both are advisory -- the fraction is coarse and the text is for
@@ -100,6 +105,8 @@ except ImportError:  # pure-Python fallback if the extension is not built
 
 # How each column is combined.  Taken from SMAP's `Grouper.m`; names translated
 # to this package's, and the two corrections described in the module docstring.
+# The `*_pix` rules are for a file saved in pixels, which keeps its own
+# beside the nm ones; a fit's table has only `peak_x_pix` / `peak_y_pix`.
 COMBINE_MODES: Dict[str, str] = {
     "x_nm": "mean", "y_nm": "mean", "z_nm": "mean",
     "x_pix": "mean", "y_pix": "mean",
@@ -132,7 +139,9 @@ GROUP_COLUMNS = ("group_id", "n_in_group")
 
 # The precision columns the general weight is taken from, best first (SMAP's
 # order).  It is a lateral precision, so it is the right weight for x and y.
-WEIGHT_FIELDS = ("xy_err_nm", "xy_err_pix", "x_err_nm", "x_err_pix")
+# nm only: a fit writes no pixel columns, and a file saved in pixels is given
+# nm ones on the way in (`io.formats.with_nm`).
+WEIGHT_FIELDS = ("xy_err_nm", "x_err_nm")
 
 # Columns that carry their own uncertainty and are weighted by it rather than by
 # the pooled lateral precision.  SMAP weights everything with `locprecnm`
@@ -632,20 +641,26 @@ class GroupSettings:
     """
 
     # in the order the grouping dialog shows them
-    link: str = "fixed"
-    dx: float = 50.0
-    k: float = 2.5
-    dx_min: float = 10.0
-    dx_max: float = 150.0
-    dt: int = 1
-    block_fields: Sequence[str] = ("filenumber", "channel")
-    # How many pieces the frame axis is cut into for the linking, which runs
-    # one thread per piece.  Not a free choice: a cut trace is repaired at the
-    # seam but the repair is not exact (see `smappy._group_chunked`), so the
-    # grouping depends on this number.  It is a setting rather than a thread
-    # count for that reason -- the same file groups the same way on any
-    # machine, whatever it has to run on.  1 is the sequential walk.
-    link_chunks: int = 8
+    link: str = param("fixed", label="merge by",
+                      choices=[("fixed", "fixed distance"),
+                               ("precision", "precision")],
+                      help="a fixed distance, or one scaled by the "
+                           "localization precisions (SMAP's locprec)")
+    dx: float = param(50.0, label="within", unit="nm", min=0,
+                      help="how far a localization may move from one frame "
+                           "to the next (half-width of a box)")
+    k: float = param(2.5, label="k", unit="sigma", min=0.1,
+                     help="merge if r^2 < k^2 (s1^2 + s2^2), s the "
+                          "precisions")
+    dx_min: float = param(10.0, label="at least", unit="nm", min=0,
+                          help="the distance always allowed, however "
+                               "precise")
+    dx_max: float = param(150.0, label="at most", unit="nm", min=0,
+                          help="the distance never exceeded, however "
+                               "imprecise")
+    dt: int = param(1, label="dark frames", unit="frames", min=0,
+                    help="frames a blink may be dark and still continue")
+    block_fields: Sequence[str] = param(("filenumber", "channel"), hidden=True)
 
 
 def attach(locs: Localizations, grouped: Localizations,
@@ -725,7 +740,8 @@ def group(locs: Localizations, settings: Optional[GroupSettings] = None,
         try:
             precision = _link_precision(locs)
         except KeyError as missing:
-            # every file opens grouped, so refusing would refuse to open it
+            # every layer merges blinks by default, so refusing would refuse
+            # to show the file
             warnings.warn(f"{missing.args[0]}: linked by the fixed box instead")
         else:
             dx = settings.dx_max
@@ -734,14 +750,8 @@ def group(locs: Localizations, settings: Optional[GroupSettings] = None,
     elif settings.link != "fixed":
         raise ValueError(f"unknown link mode {settings.link!r}; "
                          f"one of {', '.join(LINK_MODES)}")
-    if settings.link_chunks > 1:
-        from ._group_chunked import connect_chunked
-        group_index = connect_chunked(x, y, locs["frame"], dx, settings.dt,
-                                      blocks, n_chunks=settings.link_chunks,
-                                      progress=progress, **by_precision)
-    else:
-        group_index = connect(x, y, locs["frame"], dx, settings.dt, blocks,
-                              progress=progress, **by_precision)
+    group_index = connect(x, y, locs["frame"], dx, settings.dt, blocks,
+                          progress=progress, **by_precision)
     grouped = combine(locs, group_index, progress=progress)
     if attach_columns:
         attach(locs, grouped, group_index)

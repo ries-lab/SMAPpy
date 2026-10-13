@@ -1,6 +1,6 @@
 ---
 version: "1"
-covers: [smappy.rcc.estimate_drift_rcc, smappy.rcc._pair_shifts, smappy.rcc._axial_shifts, smappy.rcc._solve]
+covers: [smappy.rcc.estimate_drift_rcc, smappy.drift.merge_from_session, smappy.rcc._pair_shifts, smappy.rcc._axial_shifts, smappy.rcc._solve]
 ---
 
 ## What it does
@@ -20,9 +20,13 @@ answer, for every pair of windows, is the drift between them.
 Use it on **fixed** samples.  It assumes the structure itself does not change,
 only where it is, so anything that moves by itself (live cells, diffusing
 molecules) is taken for drift.  It needs enough localizations per window for
-each image to show structure: a few thousand in the selection at the very
-least (below 5000 the plugin warns), and many more for a precise
-curve.
+each image to show structure: a few thousand in the
+[selection](plugin:Panels/Glossary) at the very least (below 5000 the plugin
+warns), and many more for a precise curve.  The selection is what the plugin
+measures: the localizations that pass the layer's filter -- the lowest and
+highest values of columns such as precision or photons, set in the Render
+tab -- inside the drawn [ROI](plugin:Panels/Glossary) (region of interest),
+if there is one.
 
 It is the classic method, and fast -- seconds, where
 [COMET](plugin:Analysis/Drift/COMET) takes minutes.  The two share no code
@@ -45,9 +49,11 @@ window = np.clip(np.searchsorted(edges, frame, side="right") - 1,
 ```
 
 **1. Time windows.**  The frames are split into a number of equal windows
-(*time windows*, 20 by default).  Blinks are first grouped, so that a molecule
-that is on for five frames counts once rather than five times (*group
-blinks*).
+(*time windows*, 20 by default).  Blinks are first merged, so that a molecule
+that is on for five frames counts once rather than five times: [merge
+blinks](plugin:Panels/Glossary) (also called grouping or linking) combines
+the localizations in consecutive frames that come from one blinking event
+into one localization.
 
 **2. An image per window.**  The localizations of each window are binned into
 a 2D histogram with small pixels (15 nm by default).
@@ -149,6 +155,17 @@ ax.legend(frameon=False, fontsize=8)
 
 ## In detail
 
+**Which table.**  The localizations, whatever the layer shows.  The
+images are made from those the layer's filter and the ROI select -- the
+bounds applied to each localization, also on a layer that merges blinks -- and the
+correction is applied to every localization of the table, selected or not.
+The blinks it merges before the images are made (*merge blinks*) are
+merged with the session's merge settings -- the distance and dark frames of
+the Render tab's *merge settings...* -- unless *within* and *dark frames* are
+set here; a session that merges by precision lends its largest distance,
+*at most*.  Without a session (a script) they are 50 nm and 1 frame, the
+session's own defaults.  The merged blinks are thrown away afterwards.
+
 **The pair equations.**  With $s_{kl}$ the measured shift of window $k$
 against window $l$, the drifts $d_1, \ldots, d_T$ solve, in the least-squares
 sense,
@@ -199,7 +216,7 @@ and a wide range lets the maximum wander.
 [Wang et al. 2014](https://doi.org/10.1364/OE.22.015982): images of time
 windows, every window correlated with every other, and the drift solved from
 the redundant set of shifts.  The main changes are SMAP's and this code's
-(*Differences from SMAP*): blinks are grouped before the images are made, a
+(*Differences from SMAP*): blinks are merged before the images are made, a
 pair that disagrees with the rest is weighted down by the Cauchy weight above,
 and z comes from the tiled z histograms.
 
@@ -242,7 +259,7 @@ See *In detail*.
 * **The table**, with the drift subtracted from `x_nm`, `y_nm` and `z_nm` (or
   the pixel columns) of every localization.  The correction is recorded in the
   file's history and can be undone.
-* **The drift curve**, x, y and z against frame (the *Plot* button).  It is
+* **The drift curve**, x, y and z against frame (*Show result*).  It is
   saved with the file and drawn again when it is reopened.
 * **The text** gives the range of the drift in x, y and z.
 
@@ -250,6 +267,10 @@ A curve that is smooth and plausible (a few hundred nanometres at most, slow
 changes) is a good sign.  A curve that jumps between windows means the
 correlations had too little to work with: fewer windows, more
 localizations, or a larger *pixel size*.
+
+*Stop* ends the correlations after the time window being worked on.  The
+table is then left as it was: the drift is solved from every pair of windows
+at once, so the pairs measured so far give no curve worth subtracting.
 
 ## Differences from SMAP
 

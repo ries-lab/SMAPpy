@@ -1,11 +1,11 @@
 """Camera metadata needed to turn raw camera counts into photons.
 
 Only what the fitting pipeline actually needs is kept.  Values can come from
-three places, in increasing priority:
+three places, in increasing priority (`smappy.io.tiff.resolve_camera`):
 
-1. the image file itself (Micro-Manager / OME tags)
-2. a camera preset (:mod:`smappy.io.cameras_mat`, SMAP's ``*_cameras.mat``)
-3. explicit user input -- a dict or a YAML file
+1. the camera database (`smappy.camera_db`), for the camera the file names
+2. the image file itself (Micro-Manager / OME tags)
+3. explicit user input -- the fitter's fields, a dict or a YAML file
 
 Missing required values raise a clear error rather than silently defaulting.
 """
@@ -16,7 +16,14 @@ from dataclasses import asdict, dataclass, fields, replace
 from pathlib import Path
 from typing import Optional, Sequence, Tuple, Union
 
-REQUIRED = ("conversion", "offset", "pixelsize_um")
+REQUIRED = ("conversion", "offset")
+
+#: The pixel size a fit converts with when nothing says what it is: the nm
+#: columns are then on an assumed scale, which the table records
+#: (``metadata["pixelsize_assumed"]``, beside ``pixelsize_nm``, so the
+#: measured pixels divide back out exactly) and the fit says.  Rare -- a bare TIFF
+#: whose numbers nobody typed in -- but refusing to fit it helped nobody.
+DEFAULT_PIXELSIZE_NM = 100.0
 
 #: a pixel size is one number or two.  Almost every microscope has square
 #: pixels and says so with one; a camera whose x and y differ says both, and
@@ -112,6 +119,15 @@ class CameraMetadata:
         """The pixel size in x and y, in nm -- what a fit converts with."""
         sizes = self.pixelsize_um_xy
         return None if sizes is None else (sizes[0] * 1000.0, sizes[1] * 1000.0)
+
+    @property
+    def pixelsize_nm_or_default(self) -> Tuple[Tuple[float, float], bool]:
+        """``((x, y) in nm, assumed)``: the pixel size, or the default and
+        True when there is none (`DEFAULT_PIXELSIZE_NM`)."""
+        sizes = self.pixelsize_nm_xy
+        if sizes is None:
+            return (DEFAULT_PIXELSIZE_NM, DEFAULT_PIXELSIZE_NM), True
+        return sizes, False
 
     @property
     def square_pixels(self) -> bool:

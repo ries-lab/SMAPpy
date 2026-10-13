@@ -19,28 +19,70 @@ def _table(n=100, seed=0):
     }, {"units": "pixel"})
 
 
-def test_pixels_are_primary_and_nm_is_derived():
+def test_pixels_are_primary_and_nm_is_derived_beside_them():
     locs = _table()
     nm = to_nm(locs, 127.0)
-    assert "x_nm" in nm and "x_pix" not in nm
+    assert "x_nm" in nm and np.array_equal(nm["x_pix"], locs["x_pix"])
     assert np.allclose(nm["x_nm"], locs["x_pix"] * 127.0)
     assert np.allclose(nm["x_err_nm"], locs["x_err_pix"] * 127.0)
     # z is already nm and must not be scaled again
     assert np.array_equal(nm["z_nm"], locs["z_nm"])
     # photons are not a length
     assert np.array_equal(nm["photons"], locs["photons"])
-    assert nm.metadata["units"] == "nm" and nm.metadata["pixelsize_nm"] == 127.0
+    assert nm.metadata["units"] == "pixel+nm" and nm.metadata["pixelsize_nm"] == 127.0
+    assert "pixelsize_assumed" not in nm.metadata
 
 
-def test_keep_pixels_gives_both():
-    both = to_nm(_table(), 100.0, keep_pixels=True)
-    assert "x_pix" in both and "x_nm" in both
-    assert both.metadata["units"] == "pixel+nm"
+def test_a_fits_table_keeps_nm_only_and_the_pixels_divide_back_out(tmp_path):
+    """What the fitters write: no pixel copies but the candidate, and the
+    pixel size kept -- through the file too -- so they come back per axis."""
+    from smappy.locs import in_pixels
+    locs = _table()
+    locs.columns["peak_x_pix"] = np.round(locs["x_pix"])
+    nm = to_nm(locs, (127.0, 131.0), keep_pixels=False)
+    assert [n for n in nm.keys() if n.endswith("_pix")] == ["peak_x_pix"]
+    assert {"x_nm", "y_nm", "x_err_nm", "xy_err_nm", "peak_x_nm"} <= set(nm.keys())
+    assert nm.metadata["units"] == "nm"
+    path = tmp_path / "fit.h5"
+    with LocalizationWriter(path, nm.metadata) as writer:
+        writer.append(nm)
+    back = load_localizations(path)
+    x, y, x_err = in_pixels(back, "x_pix", "y_pix", "x_err_pix")
+    assert np.allclose(x, locs["x_pix"], rtol=1e-6)
+    assert np.allclose(y, locs["y_pix"], rtol=1e-6)
+    assert np.allclose(x_err, locs["x_err_pix"], rtol=1e-6)
+    # a precision is scaled by the mean, as `to_nm` scaled it
+    assert np.allclose(in_pixels(back, "xy_err_pix"), back["xy_err_nm"] / 129.0)
+    with pytest.raises(ValueError, match="pixel size"):
+        in_pixels(Localizations({"x_nm": np.zeros(2)}, {}), "x_pix")
 
 
-def test_converting_twice_is_a_no_op():
+def test_an_assumed_pixel_size_is_recorded_with_the_table():
+    """A file with no pixel size is still fitted; its nm columns are on an
+    assumed scale, and the table says so."""
+    from smappy.metadata import DEFAULT_PIXELSIZE_NM, CameraMetadata
+    sizes, assumed = CameraMetadata(conversion=1.0, offset=0.0).pixelsize_nm_or_default
+    assert assumed and sizes == (DEFAULT_PIXELSIZE_NM, DEFAULT_PIXELSIZE_NM)
+    nm = to_nm(_table(), sizes, assumed=assumed)
+    assert nm.metadata["pixelsize_assumed"] is True
+    assert np.allclose(nm["x_nm"], nm["x_pix"] * DEFAULT_PIXELSIZE_NM)
+
+
+def test_converting_twice_changes_nothing():
     once = to_nm(_table(), 127.0)
-    assert to_nm(once, 127.0) is once
+    twice = to_nm(once, 127.0)
+    assert twice.keys() == once.keys()
+    assert all(np.array_equal(twice[k], once[k]) for k in once.keys())
+
+
+def test_a_table_loaded_in_pixels_only_gets_nm_columns(tmp_path):
+    from smappy.io.formats import with_nm
+    table = _table()
+    assert "x_nm" in with_nm(table, 110.0)
+    assert np.allclose(with_nm(table, 110.0)["x_nm"], table["x_pix"] * 110.0)
+    assert with_nm(table).metadata["pixelsize_assumed"] is True
+    done = to_nm(table, 110.0)
+    assert with_nm(done) is done
 
 
 def test_hdf5_round_trip(tmp_path):
@@ -155,3 +197,13 @@ def test_prefetch_reraises_reader_errors():
 
     with pytest.raises(RuntimeError, match="disk went away"):
         list(prefetch(broken(), depth=2))
+
+
+def test_a_private_metadata_key_is_not_written(tmp_path):
+    """The 3D view's cache token is an `object()`: written, it was junk text."""
+    locs = _table()
+    locs.metadata["_gpu_token"] = object()
+    path = tmp_path / "t.h5"
+    with LocalizationWriter(path, dict(locs.metadata)) as writer:
+        writer.append(locs)
+    assert "_gpu_token" not in load_localizations(path).metadata

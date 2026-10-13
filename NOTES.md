@@ -51,19 +51,40 @@ in 2D" and the dual-colour calibration in `docs/dual_color_calibration.md`).
 * **EM excess noise lives outside the fitter.**  Photons are divided by 2 before
   fitting and photons/background scaled back afterwards, so the fitter assumes
   pure Poisson statistics and knows nothing about cameras.
-* **Pixels are primary.**  The fit measures pixels; nm is derived at the very end
-  via `to_nm()` / `FitSettings.output_unit`, because the pixel size is a separate
-  calibration that may be corrected later.  `z_nm` is the exception: it comes
-  from the calibration's `dz` and has no pixel equivalent.
+* **The fit measures pixels; its table is in nm.**  nm is derived at the very
+  end by `to_nm()`, and the fit's output keeps the nm columns only, with the
+  pixel size in the metadata (`pixelsize_nm`, `pixelsize_nm_xy`), so a pixel
+  correction later is a division, not a refit.  `locs.in_pixels` gives a
+  column back in camera pixels -- the channel registration is the one reader
+  (2026-10: the pixel columns had been kept beside the nm ones, 24 bytes a
+  localization for a 2D fit, 20 for 3D, read by nothing else).  The
+  candidate positions `peak_x_pix` / `peak_y_pix` stay, as the record of
+  where the peak finder found the spot on the chip.  A file saved in pixels
+  keeps its own and is given nm columns on load (`io.formats.with_nm`).
+  Everything downstream reads nm only.  Without a pixel size the nm columns
+  use `DEFAULT_PIXELSIZE_NM` and the table records `pixelsize_assumed`
+  (2026-10: the *units* setting, and a fit refusing a stack with no pixel
+  size, are gone).  `z_nm` is the exception: it comes from the
+  calibration's `dz` and has no pixel equivalent.
 * **The background starts at the ROI's border, and the Hessian is the expected
   information.**  SMAP starts from the ROI's minimum and uses the observed
   information `d / mu^2`; together they left a spline fit at a few background
   photons per pixel stuck at no background -- see "A fit that starts at no
   background".  The maximum is the same, and at ordinary backgrounds so are the
   fits.
-* **No mirroring in the fitter.**  A calibration built from mirrored bead images
-  (`parameters.emmirror` in the `_3Dcal.mat`) is handled by flipping the ROI in x
-  and flipping the fitted x back; the fitter itself is orientation-free.
+* **No mirroring outside the loader.**  SMAP flips bead images taken with EM
+  gain before it builds the spline, and flips the data the same way; here the
+  data are never flipped, so a `_3Dcal.mat` of flipped beads is turned into the
+  camera's orientation when it is loaded (`io/calibration._unmirror_x`:
+  S'(u) = S(nx - u), the x cells reversed and each cubic re-expanded in 1 - t,
+  an odd nx one cell wider), and the ROIs, the fitter and the simulator know
+  nothing of mirroring.  It used to flip every ROI instead; the converted model
+  equals that to float32 rounding, and fits agree to the size of a one-ulp
+  change in the coefficients (`tests/test_unmirror.py`).  Whether SMAP flipped
+  is read from `SXY.EMon`, its `isem`, not from `parameters.emmirror`, which is
+  a popup (1 from metadata, 2 no mirror, 3 mirror) and was once read as a bool,
+  flipping files saved with "no mirror".  That reading is from SMAP's code and
+  waits for a real file (`SMAPPY_TEST_CAL`, `tests/test_calibration.py`).
 
 ## Rendering
 
@@ -246,11 +267,7 @@ dark frames) and combines each run into one row using the per-column rules from
   keeps 95.6% of a blink's links -- and cuts the other 4.4%, which a fixed box
   wide enough does not.  A localization with no precision (NaN) links to
   `dx_max`; a table with no precision column falls back to the box, with a
-  warning, because every file is grouped as it opens.  The chunked linker
-  carries the precision across its seams too, but a head re-seeded past a
-  seam starts with its own precision rather than the trace's running one, so
-  it is a little less exact there than for the box (0.996 against 0.999 on
-  the all-seam test table).
+  warning, because every layer merges blinks by default.
 * **The error of a summed quantity adds in quadrature.**  This is the rule that
   keeps shot noise consistent: with `e_i = sqrt(N_i)`, `sqrt(sum(e_i^2))` is
   `sqrt(sum(N_i))` exactly -- the shot noise of the summed photons.  SMAP
@@ -276,10 +293,32 @@ dark frames) and combines each run into one row using the per-column rules from
   localization precision, so it is not cosmetic.
 
 Grouped and ungrouped are **two tables kept side by side**, each with its own
-filter and spatial index (`LocSet`), because a precision cut that makes sense
-for single localizations is the wrong one for groups, and because rebuilding the
-filter caches on every switch would throw away the work.  The viewer's switch is
-then a single assignment; only the first switch pays for the linking.
+spatial index (`layer_state.LocSet`), so that a switch is a single assignment
+and only the first one pays for the linking.  There is one of each per
+session (`layer_state.Tables`), shared by every layer; the grouped table is a
+cache keyed by the rows it was linked from and the link settings, which are
+the session's, so it is linked again when either moves and there is no
+"stale" flag to keep.  A layer has **one** set of bounds, applied to the
+table it shows (October 2026, review section 4.2).  Each table used to carry
+a filter of its own, on the argument that a precision cut for single
+localizations is the wrong one for groups -- but the bounds were then copied
+between the two filters in five places, and each was a place to forget: a
+grouped table came out of a correction unfiltered.  So the same bound now
+keeps different localizations on the two tables (on the grouped one,
+`xy_err_nm <= 25` is the combined precision), which is intended: it is the
+user's statement of what is good enough, applied to what is shown.
+
+**A plugin measures what the layer shows** (October 2026, B3).  Until then
+`ctx.locs` was always the ungrouped table and only Statistics, DBSCAN, NPC
+and the image export read the grouped one, so a measurement on a grouped
+layer -- the default -- silently disagreed with the picture.  Now the
+context hands out the shown table, and a plugin that needs the
+localizations says so (`Plugin.grouping = "ungrouped"`): every one that
+changes the table, since no table can be made back from blinks (such a
+result is refused, `refuse_grouped_table`, rather than allowed to replace
+the localizations), and the few that measure frames -- NeNA, the ground
+truth match, the bead pairs of the channel registration, the per-frame
+count of Image Tags.  Of the shipped measurements only Line Profile moved.
 
 **Linking writes back.**  `group.attach` puts `group_id` and `n_in_group` onto
 the ungrouped table as well.  The on-time is a property of a localization --
@@ -336,11 +375,15 @@ layout:
 
 * the loaded spline coefficients reproduce the bead stack stored beside them in
   the same file (correlation 0.9999, vs 0.82/0.82/0.83 for transposed,
-  x-mirrored and z-flipped controls) -- `scripts/check_calibration.py`
+  x-mirrored and z-flipped controls) -- `scripts/check_calibration.py`, since
+  removed (`git show ec09f06:scripts/check_calibration.py`)
 * the Gaussian models are checked against independently simulated data: unbiased
   to <0.01 px, scatter matches the returned CRLB
 * the mirror flip was confirmed on real data: the flipped orientation has the
-  better log-likelihood for 65.8% of ROIs (median dlogL +2.82)
+  better log-likelihood for 65.8% of ROIs (median dlogL +2.82).  That was the
+  ROI flip; the conversion on load that replaced it is the same model, and
+  `scripts/check_fit.py` (removed; `git show ec09f06:scripts/check_fit.py`) kept
+  the x-flipped fit as a control
 * threaded output is bit-identical to serial, at every stage
 * the render kernel's second moment is `sigma^2 + 1/12`, the variance the pixel
   itself contributes -- a point-sampled kernel would give `sigma^2`
@@ -448,166 +491,7 @@ failed on the old fitter with 43 % stalled.
 
 ## Performance
 
-M1 Pro, 46,005 frames of 200x200, spline fit, ROI 13: **35.9 s** (1283 frames/s,
-~850k localizations).  Detection 12.9 s, fitting 22.2 s, I/O 0.8 s.
-
-Findings worth keeping:
-
-* the C++ single-pass maximum search beats `scipy.ndimage.maximum_filter` 5.2x
-  (short-circuit evaluation rejects most pixels after one comparison)
-* the 2-D DoG kernel has **rank 2**, so it is not separable -- subtracting the
-  1-D kernels is wrong.  Subtracting the 2-D kernels and doing one convolution
-  is exact and, below radius 4, faster than the fused separable passes
-  (`_SEPARABLE_FROM_RADIUS`)
-* SMAP's DoG window is `max(ceil(6*sigma-1), 3)`: radius 3 for sigma 1.2
-* threading gives ~4x on filtering and maxima, ~6.5x on fitting
-* the per-frame dynamic-cutoff loop is the last serial part (~2.7 s, 80% of it
-  numpy dispatch overhead).  It could be vectorised with one lexsort per chunk.
-
-### Rendering
-
-M1 Pro, 5M localizations into 2000x2000:
-
-| | full field (100 nm/px) | zoomed 10x (10 nm/px) |
-|---|---|---|
-| histogram | 49 ms | 23 ms |
-| fixed sigma | 156 ms | 40 ms |
-| sigma from precision | 133 ms | 42 ms |
-| the same, coloured | 314 ms | 48 ms |
-| the same, one thread | 898 ms | 44 ms |
-
-Filtering 5M localizations on four fields: 18 ms to build, 5 ms for the AND,
-3 ms to compact.  Moving one slider costs 14 ms (one field recomputed, AND,
-compact) plus 31 ms to render the 0.7M that survive -- live filtering at ~20 fps.
-
-Grouping 844k localizations (dx = 50 nm, dt = 1): **0.31 s**, dominated by the
-sequential linking.  The population median precision *rises* (17.5 -> 21.0 nm)
-even though every group improves, because bright long-lived emitters collapse
-into few rows and dim singles stay -- the per-group comparison above is the one
-that means something.
-
-End to end through the viewer, 5M localizations filtered to 3.7M, into a
-1000x1000 canvas: **126 ms** for the full field, **3.9 ms** zoomed 10x, **0.4 ms**
-zoomed 100x (select + render).  Without the index the zoomed cases cost ~42 ms,
-because every thread walked all five million localizations to find the ones on
-screen.
-
-The spatial index over 5M localizations builds in 100 ms and answers in
-0.02-0.12 ms.  It is a `lexsort` on 16-bit row and column keys: numpy radix-sorts
-narrow integer keys and falls back to a comparison sort for wide ones, so the
-obvious `argsort` on a combined cell id costs 1.5 s instead of 60 ms.
-
-### The 3D view queries the same index
-
-The 3D view did not, and every frame walked the whole table to find the slab's
-localizations, so cropping to a 300 nm box did not make it faster -- on a 46 M
-localization file (35.4 M after the filter) a drag frame was ~0.5 s for a tiny
-crop and ~1.2 s for the whole field.  Three things, in the order they cost:
-
-* the **depth histogram** was a second full `project_layer` per layer per frame
-  -- the projection the render had just done and dropped.  It is a shape, not a
-  count (the panel hides the axis), so `depth_sample` takes `HIST_POINTS` of
-  the slab's rows.  This one is paid by the GPU engines too: it runs on the CPU
-  whatever `Projection.engine` says, which is why "slow in every mode" was the
-  symptom.
-* `slab_candidates` asks the index for the slab's bounding rectangle instead of
-  reading every row.  The candidates are **not** sorted back into table order:
-  sorting 3 M indices costs 126 ms, more than the tidier gather saves.
-* `Projection.apply` and `Slab.to_local` promoted float32 tables to float64 and
-  `apply` built an (N, 3) stack for the matmul -- 2.2 GB of temporaries per
-  call.  Row by row in the table's own precision is 2.2x faster and half the
-  memory; nanometres over a few hundred microns resolve to ~4 pm in float32,
-  far below any rendered pixel.
-
-A drag frame, 900x700, same file: whole field **1176 -> 543 ms**, a 10 um crop
-**1123 -> 384 ms**, a 300 nm crop **519 -> 5.0 ms**.  The whole-field case is
-now the render itself, which is the 2 M points it is asked to draw.
-
-### The GPU engines, and why they were not faster
-
-Three things kept them from being the fast proxy they are meant to be, all
-found by running them on a 46 M localization file for the first time:
-
-* the splat compute shader dispatched a **1-D** grid.  A dimension is capped at
-  65535 workgroups, so at 256 threads it covered 16,776,960 points and a larger
-  table failed validation outright -- "GPU" mode could not open this file at
-  all.  The grid is 2-D now (`dispatch_grid`), and the count is compared as a
-  u32: it used to ride in `depth.w` as an f32, which stops counting exactly at
-  2^24 -- the same 16.7 M boundary, by coincidence of 256 x 65535.
-* the selection was the whole filtered table, every frame, with the slab
-  applied per point **inside** the shader.  So the GPU repeated what the CPU
-  engine used to: a crop cost what the full field cost.  `selection_rows`
-  narrows it through the index and memoises it on (filter, slab) -- neither of
-  which a rotation changes, so a drag reuses the array *and* the GPU buffer
-  built from it, which is keyed on that array's identity.
-* points mode sorted back to front for the alpha, keyed on the three angles, so
-  every frame of a drag re-sorted on the CPU and re-uploaded.  This made a
-  small selection slower than a large one -- 1 M points ran at 8 fps where 2 M
-  ran at 45, because 2 M was over `PREVIEW_POINTS` and skipped the sort.  The
-  sort is now skipped while previewing, which is exactly when it does not
-  matter.
-
-Rotating a 900x700 preview, same file, after all three: a 10 um crop **3.3 fps
-on the CPU, 33.6 on the GPU**; a 1 um crop 150 / 108.  Below ~100k points the
-CPU wins again -- the GPU round trip is ~8 ms of readback whatever it drew, so
-a 300 nm crop is 246 fps on the CPU and 117 on the GPU.
-
-### The preview point budget
-
-The full field was 8.4 fps because 18 M points were drawn into a 450x350
-preview -- **116 points per rendered pixel**, so 99% of the work could not
-change one.  A drag frame now draws a sample (`thinned`, `PreviewBudget`); a
-final frame never does, so the image anyone measures or exports is still the
-whole table.
-
-**Thinned, not merged.**  An SMLM image is a density map, and dropping a fixed
-fraction scales every pixel alike: a preview is what a shorter acquisition
-would have looked like, which is a degradation that cannot be misread.
-Merging neighbours into superpixels holds the total but *moves* it, and can
-make a sparse filament look continuous -- an artifact that appears only while
-the mouse is down and is gone before it can be checked.  Merging becomes right
-when the ratio is 100x+ rather than the 9x wanted here, and then the criterion
-is to merge only *below the rendered pixel*: the kernel is already floored at
-`max(min_sigma, min_sigma_pixels * pixelsize)`, so points closer than that
-cannot be told apart in the image.  That is an LOD octree, and it is the build
-to do at 10^8 localizations, not at 10^7.
-
-**Evenly spaced, not drawn.**  `choice(n, k, replace=False)` permutes n first
-(73 ms at 35 M) and returns an unsorted list, which then scatters the gather.
-`linspace` costs the k it returns, comes back ascending, and is deterministic,
-so the same budget asks the GPU for the same selection and the buffer is
-reused.  It is a systematic sample and only as good as row order being
-unrelated to position -- measured against a random draw of the same size on a
-3 M row file, sampled density over a 64 x 64 grid differed by L1 0.2305 against
-the draw's 0.2349, on the grouped table as well as the raw one.
-
-**Timed, not fixed.**  No constant serves a base M1 and a 3090, and the same
-machine is an order of magnitude apart between a sub-pixel blob and a fat one.
-The budget is the smaller of what can be seen (13 points per rendered pixel)
-and what the machine got through last frame at `TARGET_FPS`.  The visible cap
-applies before anything has been timed, and final frames are timed too, so the
-first frame of the first drag already has a rate to work from.  The loop is a
-contraction while the fixed per-frame overhead is under the target; past that
-it falls to `minimum` and simply runs slower, which is the honest outcome.
-
-Rotating a 900x700 preview on the 46 M file, before -> settled:
-
-| slab | CPU | GPU planes | GPU points |
-| --- | --- | --- | --- |
-| whole field | 6.2 -> **25.8** | 9.0 -> **24.5** | 5.4 -> **23.3** |
-| 10 um crop | 4.9 -> **25.5** | 31.1 -> **27.1** | 25.4 -> **28.1** |
-| 1 um crop | 123 -> 122 | 102 -> 105 | 125 -> 116 |
-
-The 1 um row does not move because the slab holds fewer points than the budget:
-nothing is thinned, and a crop is drawn whole.  The whole field on the CPU
-settles at 1.4 points per pixel, which is visibly sparse -- that is what a CPU
-can do at 25 fps with 18 M points, and the GPU holds 11/px for the same rate.
-
-Rendering at *display* resolution rather than a fixed nm/pixel is what bounds
-this: zoomed out the kernels collapse onto the `mingausspix` floor, zoomed in
-there are fewer localizations in view.  The zoomed numbers are floored by every
-thread scanning all 5M localizations to find the ~50k in view; a spatial index
-would remove that.
+Measurements and their investigations: `docs/performance.md`.
 
 ## Two windows
 
@@ -642,38 +526,15 @@ and an unfiltered first view is not what anyone wants to look at.  Every one of
 them throws localizations away, so each is written into its box: the earlier
 rule that opening a file must never *silently* drop localizations still holds,
 it is the silence that mattered, not the absence of a default.  They apply once
-per table (the grouped table gets its own), a bound already set is never
+per layer (the grouped table shares them), a bound already set is never
 overridden, and a bound the user clears stays cleared.  Only fields with a
 fixed unit get one, since 25 nm means nothing in pixels.
 
 ## Interaction latency
 
-Two things made a drag feel like it started a second late, neither of them the
-render (35 ms for 211k localizations at this canvas size):
-
-**Every `TextBox` redraws the whole figure when a click lands anywhere else**,
-to take its cursor away -- with `canvas.draw()`, which blocks.  A window with a
-dozen boxes therefore paid a dozen full draws before the first motion event of
-a drag was delivered: 212 ms measured here, close to a second on a retina
-canvas.  `viewer._patched_text_box` swaps `draw` for `draw_idle` around
-`stop_typing`, collapsing all of them into the one draw that was going to
-happen anyway; the press went from 212 ms to 0.9 ms.  It is swapped in around
-the call rather than reimplementing `stop_typing`, whose body reaches into
-private state that changes between matplotlib versions.
-
-**A queued render could land in the middle of the gesture.**  The press now
-stops the timer.
-
-With those gone, deferring the render to the end of a gesture is no longer
-worth it when the render is cheap: `_refresh` renders inside the gesture when
-the last one took under `LIVE_RENDER_SECONDS` (0.12 s), throttled by the
-render's own cost so a gesture never queues up renders it cannot keep up with,
-and falls back to moving the image and deferring when it is slower -- a slow
-render inside a gesture would make it lurch, which is worse than a blank edge.
-Panning and zooming therefore fill in what they expose as they go.  `fit`
-keeps the centre and is idempotent, so re-rendering repeatedly inside a drag
-cannot make the view creep: measured drift over a twelve-event drag is 7e-12
-nm.
+The matplotlib viewer's notes on drag latency (a deferred re-render, a patched
+`TextBox`) went with it in 2026-10: the Qt GUI renders on its own thread and
+never had either problem.
 
 ## Online analysis
 
@@ -734,8 +595,9 @@ number.  The LUT follows the choice (`hot` for intensity, `turbo` for a field),
 because a coded field cannot be read off a brightness ramp.
 
 **Grouping is the one thing that cannot be extended.**  It links localizations
-across frames, so an append marks the grouped table stale and it is rebuilt the
-next time it is asked for, keeping the bounds set on it.  The title says
+across frames, so after an append the grouped table no longer matches the
+rows it was linked from (`Tables.is_current`) and it is linked again the next
+time it is asked for; the bounds are the layer's and stay.  The title says
 "(stale)" rather than the view quietly lagging.
 
 **Knowing when the acquisition ended.**  Micro-Manager does not say, and the
@@ -770,10 +632,9 @@ nothing would appear in the meantime.  The timer is checked once per block, so
 during a pause the watch sends empty blocks (`idle_blocks`) for it to be checked
 on -- without them, what was buffered before a pause stayed off the screen
 until the pause was over.  The GUI's live fit flushes every 5 s
-(`LIVE_FLUSH_SECONDS`), and `smappy-live` every `LiveSettings.flush_seconds`
-(5 s, `--flush`): `live_view` asks its source for idle blocks too (a
-`QueueSource` sends them as the file watchers do), and `LiveFit`, which keeps
-its own loop for its stop event, skips them as `drive` does.
+(`LIVE_FLUSH_SECONDS`); `LiveFit`, which keeps its own loop for its stop
+event, flushes every `LiveSettings.flush_seconds` and skips the idle blocks
+(a `QueueSource` sends them as the file watchers do) as `drive` does.
 
 Checked against the offline path on 300 frames of the astigmatic dataset,
 replayed frame by frame into a growing two-file series: same 28724
@@ -802,8 +663,9 @@ and four things broke on it before any rule was written:
   built layers over the shared table, and linking writes `group_id` into the
   table it is given: the next block failed on a column mismatch.
 * **A second layer took every block twice**: each set over the table
-  extended it.  The first set to take a block now extends the table and the
-  shared index, and the others only their own filter.
+  extended it.  Now there is one table per session (`layer_state.Tables`):
+  it takes the block once, and each layer's filter catches up with the new
+  rows.
 
 What a user wants during an acquisition, then, comes in three kinds, and
 `Plugin.changes_locs` says before the run which one a plugin is:
@@ -855,7 +717,7 @@ its own (`diagnostics`, `smappy-<pid>.log`).
 
 ## Drift correction
 
-Estimation is not ours: COMET (vendored under `externaltools/Comet`) is called
+Estimation is not ours: COMET (vendored, trimmed, under `src/smappy/_comet`) is called
 as a library. `drift.py` is the seam between it and the rest of the package,
 and it is deliberately thin -- an array in, a per-frame drift table out.
 
@@ -880,433 +742,8 @@ and it is deliberately thin -- an array in, a per-frame drift table out.
   correction is a hypothesis (segmentation width, maximum drift) that is worth
   redoing with other parameters, and the raw fit must stay untouched to redo it.
 
-### Where the time goes
-
-Measured on the clathrin dataset (410 k localizations after filtering, 92 time
-windows, 314 M neighbour pairs):
-
-| stage | time |
-|---|---|
-| segmentation | 0.03 s |
-| pair-count estimate (the safety check) | 0.6 s |
-| KD-tree neighbour search | 5 s |
-| **optimization** | **97 s** (was 309 s) |
-| applying the drift and writing the file | ~5 s |
-
-The optimization is everything: L-BFGS-B evaluates cost and gradient a few
-hundred times, and each evaluation is one `exp()` per pair over all 314 M of
-them -- ~0.6 s, compute-bound at ~2 ns/pair across the cores.  So there are only
-two levers: the work per evaluation (the pair count) and the number of
-evaluations.  Two changes to the vendored COMET, both opt-in from `drift.py`
-(`CPU_WRAPPER` and `LBFGSB_OPTIONS` in `comet/core/drift_optimizer.py` keep
-upstream's values for anyone importing COMET directly):
-
-* **`cpu_wrapper_chunked_fast`** -- the original converts its arguments on every
-  call, and the pair indices arrive as int32 and are copied to int64: 5 GB of
-  allocation and copying per cost evaluation, for nothing, since the compiled
-  kernel specialises on whatever dtypes it gets.  0.73 -> 0.61 s per call, same
-  answer to 5e-10.
-* **`ftol = 1e-7`** instead of COMET's `1e3 * eps` (~2e-13).  423 -> 154 cost
-  evaluations.  The drift changes by 0.12 nm rms (2.2 nm on one window out of
-  92) and the rendered image by 0.03% -- against a localization precision of
-  10-20 nm, that tolerance was buying nothing.
-
-Together: 309 s -> 97 s (and 75 s with the approximate kernel below).  Things that were tried and did **not** help, so that
-they are not tried again:
-
-* float32 coordinates, int32 indices, and sorting the localizations spatially so
-  that paired ones sit near each other in memory: no change at all.  The kernel
-  is compute-bound on `exp`, not waiting on memory, which is also why the
-  gradient scatter-add is not worth restructuring.
-* a chunked NumPy version, to get NumPy's SIMD `exp`: **44x slower** -- it is
-  single-threaded and materialises the per-pair temporaries.
-* dropping same-segment pairs (they add a constant and exactly zero gradient):
-  correct, but only 6.8% of the pairs.
-* a smaller `max_drift_nm`.  Pairs grow with r^3 only for uniform data; this is
-  clustered, and going 300 -> 150 nm removes just 21% of the pairs.
-* the PyTorch/MPS backend on Apple silicon: the index tensors alone are 5 GB on
-  the device and a single cost evaluation did not finish in ten minutes.
-
-### Saying what it will cost, before it costs it
-
-A 8.4 M-localization, 93 k-frame dataset with `max_drift_nm = 500` does not run
-at all: 2.75 M localizations survive the standard filter, grouping leaves
-1.7 M, and the neighbour search within 500 nm wants **4 x 10^9 pairs**.  scipy
-hands those back as one int64 `(N, 2)` array and `pair_indices_kdtree` copies
-them into two int32 arrays -- 24 bytes a pair alive at once, 97 GB, before
-counting the vector scipy builds the array from.  On a 34 GB machine that is
-tens of minutes in swap and then a dead process, and the optimization it never
-reached would have been another 19 minutes (4 x 10^9 pairs x 136 evaluations x
-2 ns).  Nothing said so: `pair_indices_safety_check` is only on the segmented
-path, and the spline is the default; it warns through `warnings.warn`, which in
-the GUI goes to a terminal nobody is reading; and its `estimate_pairs` counts
-only within-cell pairs, which came out 40% low on the two datasets checked.
-
-`estimate_cost` answers the question in **0.2-0.4 s** instead, for both paths.
-Pairs are counted on a sample and scaled: the count grows as N^2 for a fixed
-field, so a sample of 60 k localizations answers for millions.  Measured
-against the pair count the real run then built: **0.1%** out ungrouped, 7%
-grouped -- and grouped needs the sample to be grouped too, since grouping is
-exactly what removes the densest, shortest-range pairs.  The sample is a
-stretch of frames from the middle of the acquisition, which is a fair sample of
-the field because every frame images the same one, and the ratio it groups by
-is the ratio the whole table groups by.
-
-From the pair count both numbers follow, with constants measured here and kept
-in one place at the top of the estimator: ~2 ns per pair per cost evaluation,
-~16 ns per pair for the KD-tree search, ~23 evaluations per sigma level (136
-over 6 levels on the dataset above, 154 over 6 on the clathrin one), 24 bytes
-per pair.  They are only ever used to decide whether to warn.  The GUI asks
-before starting when the estimate is over five minutes, or when the pairs want
-more than half the machine's memory -- the table, its index and the rendered
-view are already resident, and the pair figure is a floor.
-
-The asking is `Plugin.preflight`, called on the session's own thread before the
-worker exists, so a "no" is no work at all rather than a thread started and
-abandoned, and the dialog is an ordinary modal one rather than something
-marshalled off a worker.  A preflight that raises is ignored: an estimate is a
-courtesy, and one that cannot be made must not be what stops a run.
-
-### What it says while it runs
-
-A drift estimate is one call that can take minutes, and silence is
-indistinguishable from a hang -- which is what a 4 x 10^9-pair run looks like
-from the outside.  `correct_drift`, `estimate_drift` and the spline estimator
-take a `progress` callback (the GUI passes the plugin panel's `ctx.report`, the
-command line still uses `display`), and report the stages that take the time:
-grouping and what it left, the neighbour search and its radius *before* it
-starts -- that call is uninterruptible, so a run that dies in it at least says
-what it was asked for -- the pair count, and then each sigma level.
-
-Inside the optimizer the evaluations all cost the same, one pass over the
-pairs, so two of them are enough to say how long the rest will take: the line
-is "evaluation 12 of about 138, 8.1 s each, ~17 min left", rewritten at most
-once a second because each one is a queued signal into the GUI thread and on a
-small dataset they arrive hundreds of times a second.  The total is
-approximate -- L-BFGS-B decides when it is done -- which is why it says "about".
-
-### Two more that were tried
-
-* **A looser tolerance for the coarse sigma steps** -- the idea being that they
-  only have to land the estimate in the right basin.  **Refuted.**  Coarse
-  `ftol=1e-4` is 2.3x faster but moves the drift by 4.8 nm rms and 52 nm on
-  individual windows, and a *tighter* final step does not repair it: a local
-  optimizer at small sigma cannot undo a wrong basin.  Loosening `gtol` instead
-  traces the same curve (48 evaluations, 2.4 nm rms), so it is not an artefact
-  of `ftol` being a relative criterion.  Anything below ~140 evaluations costs
-  tens of nm.  The knob survives as `optimizer_ftol_coarse`, defaulting to off.
-* **An approximate kernel** (`cpu_wrapper_chunked_approx`).  Kept: **1.35x**,
-  100.8 -> 74.8 s end to end, drift unchanged (0.12 nm rms against the reference,
-  the same as the exact kernel) and image sharpness identical to four digits.
-  `exp` is 54% of the kernel on ARM, so it is tabulated on the integer part and
-  Taylor-expanded on the fraction; pairs beyond 6 sigma are skipped, and the
-  four divisions per pair become one hoisted reciprocal.  A 4 sigma cutoff was
-  measured too: no faster, and two orders of magnitude less accurate.
-  *Since the kernel moved to C++ (`csrc/drift.hpp`) only the cutoff is left*:
-  it calls `std::exp`, so the Gaussian is exact and "approximate" means only
-  that pairs beyond 6 sigma are skipped -- which is where the saving was, once
-  sigma has tightened.  The table and the Taylor series were numba's problem.
-
-### The noise floor, and how to measure it
-
-Deviation from a previous run is a bad yardstick without knowing how much a
-drift estimate varies by chance.  Split the filtered localizations into two
-disjoint halves, estimate from each, and their difference is pure noise by
-construction; since noise goes as 1/sqrt(N), the full estimate's noise is half
-the difference between the halves:
-
-| estimate | halves differ by | noise of the full estimate |
-|---|---|---|
-| ungrouped | 3.25 nm rms | **1.6 nm** |
-| grouped | 6.19 nm rms | **3.1 nm** |
-
-So a change that moves the drift by less than ~2 nm rms is not measurable, which
-is what makes `ftol=1e-7` (0.12 nm) and the approximate kernel (0.12 nm) safe,
-and what makes the coarse-tolerance experiment (4.8 nm) a real degradation.
-
-### Grouping before estimating
-
-`DriftSettings.group` estimates from grouped localizations -- one entry per
-blink instead of one per frame.  On the clathrin dataset 410 k -> 146 k
-localizations, and **314 M -> 21 M pairs**: the whole correction takes 5 s
-instead of 1:17.  It beats the 2.8^2 that the localization count alone suggests,
-because it removes exactly the dense very-short-range pairs, which is where the
-pair count grows fastest.
-
-Grouping links in x and y only and averages z, which is right: one localization
-per frame is one molecule (multi-emitter fits are removed by the log-likelihood
-cut), and a molecule does not move in z between consecutive frames, so averaging
-z only makes it more precise.
-
-**Filter before estimating, and include z.**  Without a z cut the two estimates
-disagreed by 8.2 nm rms and the ungrouped z drift range came out 113 nm against
-the grouped 75 nm -- which looked like grouping damaging the axial estimate, and
-was not.  `z_err_nm` has a median of 41 nm and a 95th percentile of 108 nm: the
-out-of-focus tail carries the axial estimate away.  With
-`logl_rel > -2`, `xy_err_nm < 15`, `|z_nm| < 300` (323 k of 844 k
-localizations) the ranges agree (69 vs 75 nm) and the two curves lie on top of
-each other: **median |difference| 0.9 nm in x, 0.6 in y, 1.4 in z**.
-
-What is left is that grouping doubles the noise of the estimate (3.1 nm against
-1.6 nm, split-half) because there are fewer, though better, localizations per
-window.  On the image that costs a few percent: of the improvement the full
-estimate makes over no correction, grouping recovers 93% in the x-y projection
-and 82% in x-z.  So the full estimate stays the default and grouping is the
-switch for a first look, for large datasets, and wherever 35x matters more than
-a few percent of resolution.
-
-### A failed window, and quality control on the CPU
-
-The ungrouped estimate on this dataset contains one **bad time window** (49,
-centred on frame 24 819): the drift swings 46 nm in y and 34 nm in z and comes
-straight back, over 2500 frames, where the grouped estimate -- same data, more
-precise positions -- moves 6 nm.  A stage does not do that.  It is what inflates
-the grouped-vs-ungrouped rms (4.3 nm in y) over its median (0.6 nm).
-
-COMET's answer to this is quality control: per segment, compare the overlap the
-fitted drift achieves against the overlap with no drift correction at all, and
-NaN the segments that fail, so the spline bridges them.  It was wired into the
-`cuda_qc` and `torch_qc` backends only; the CPU path raised "not implemented".
-It now works there (`cpu_wrapper_chunked_qc`, `DriftSettings.quality_control`,
-`--qc`), one extra pass over the pairs, about 4 s of the 150 s run.
-
-**The criterion, however, does not work as written, and the replacement only
-half works.**  Both findings are worth keeping:
-
-* Upstream flags a segment when ``q_obs < q_null + std(q_null)``, where the
-  standard deviation is taken *across* segments.  That spread is not an
-  uncertainty on any one segment: on a bleaching sample the pair count per
-  window falls from 14 M to 2 M, so the null varies five times more between
-  segments than the correction improves any of them.  It flagged **90 of 92**
-  windows here; with 18 left the spline bridged gaps of thousands of frames and
-  the estimated drift range blew up from 53/75/69 nm to 491/267/591 nm.
-* Normalising instead by the null itself -- the **lift**,
-  ``q_obs / q_null - 1`` (`flag_flawed_segments_by_lift`, the default here) --
-  removes that density dependence, and at sigma = 20-30 nm it does single out
-  window 49 as the only segment whose fitted drift makes its own overlap
-  *worse* than no correction.  But the lift is a function of sigma, and at the
-  sigma this run actually finishes at (13 nm) window 49 comes out at +0.06 and
-  is not flagged.  So the flag is real but marginal, and it catches this failure
-  only at some sigmas.
-
-The reason neither works well is that overlap-versus-null is not the quantity
-one wants.  Window 49 has few pairs (2.7 M against 14 M early in the movie), so
-its cost landscape is flat: the estimate is badly *constrained*, while its
-overlap is not obviously bad.  What that asks for is the **curvature of the cost
-in each segment's three parameters**, which is an uncertainty per window in nm,
-accumulated in the same single pass and needing a threshold in nm rather than a
-tuned dimensionless one.  That is the thing to implement next; it would also
-give the drift curve error bars, which nothing currently does.
-
-### Redundant cross-correlation
-
-`smappy.rcc` is the other classical estimator -- bin the acquisition into time
-windows, render each, and measure how far one has moved against another by
-cross-correlation -- ported from SMAP's `finddriftfeature.m` /
-`finddisplacementZ2.m`.  It shares no code and almost no assumptions with the
-overlap estimator, which is the point: it is the second opinion on a drift
-curve, and it takes seconds.
-
-*Redundant* means every pair of windows is correlated, not just consecutive
-ones, giving T(T-1)/2 measurements of `d_k - d_l` for T unknowns; the drift is
-the robust least-squares solution of that overdetermined system, so a
-correlation peak found in the wrong place is outvoted instead of accumulated.
-
-Compared on the same footing -- same filter, all estimating from **grouped**
-localizations, each judged on the half of the molecules it did not see:
-
-| estimator | time | noise x/y/z (nm) | out-of-sample x-y | x-z |
-|---|---|---|---|---|
-| **COMET spline, 2000 fr knots (default)** | 3.6 s | 0.69 / 0.61 / 0.73 | **4.4249e-5** | **3.7097e-5** |
-| COMET spline, 2300 fr knots (= RCC window) | 2.0 s | 0.63 / 0.58 / 0.61 | 4.4178e-5 | 3.7068e-5 |
-| COMET per-window | 1.7 s | 1.25 / 1.70 / 1.45 | 4.3983e-5 | 3.6563e-5 |
-| RCC, 20 windows | 7.4 s | 0.61 / 0.90 / 0.86 | 4.3843e-5 | 3.6580e-5 |
-| no correction | | | 3.5268e-5 | 3.1192e-5 |
-
-At matched smoothing -- spline knots at the RCC window spacing -- the two agree
-to **1.2 / 1.7 / 1.6 nm rms**, at the level of their own noise, from methods
-sharing no code and no assumptions.  The spline is the better of the two on both
-counts here, but not by much, and RCC's axial noise is close to it.
-
-Grouping matters as much to RCC as it does to COMET, so it is on by default
-there too.  Comparing a grouped estimator against an ungrouped one, which is
-what the first version of this table did, mostly measures the grouping.
-
-Two things were needed to get there, both of which cost a factor of ten or more
-in accuracy when wrong:
-
-* **The axial correlation must be tiled in both x and y.**  SMAP's
-  `finddisplacementZ` slices only in x, each slice spanning the whole field;
-  each z profile then pools hundreds of structures into a slab whose correlation
-  peak has nothing to lock onto.  Measured: pairwise shifts *uncorrelated* with
-  COMET's (-0.09) with x-slices, +0.96 with 200 nm square tiles.  The tiled
-  version, `finddisplacementZ2`, is the one to follow.
-* **The lateral drift must be taken out before the axial pass**, or a tile holds
-  different structure in different time windows and the z profiles being
-  correlated are not of the same thing.
-
-`exclude_zero_lag` leaves the zero-lag sample out of the axial peak search and
-fit, on the grounds that anything sitting at the same z in both windows --
-a molecule on in both, localizations pinned to a z plane by the fit -- pulls the
-estimate towards zero drift.  Measured here it makes no difference (0.86 nm
-axial noise excluded against 0.70 nm kept, identical agreement with COMET),
-because grouping already collapses each molecule to one entry and this data has
-no pinning: no 5 nm z bin holds more than three times the median count.  It
-stays on as insurance for data that does; a z histogram is how to check.
-
-Other departures: the correlation peak is located by a quadratic fit rather than
-a 2D Gaussian (the peak is not Gaussian, and this needs no starting values); the
-overdetermined system is solved by iteratively reweighted least squares rather
-than MATLAB's robust `nlinfit`, since `d_k - d_l` is linear in the unknowns and
-needs no nonlinear fit; per-frame interpolation is PCHIP, which does not
-overshoot between windows.
-
-### Drift as a spline in time
-
-`DriftSettings.spline` (`--spline`) replaces the free vector per time window
-with a cubic B-spline in time, fitted directly: the optimizer's variables are
-the spline's coefficients, the cost and gradient are COMET's over the same
-pairs, and the chain rule to the coefficients is one matrix product.  There is
-**no segmentation** -- each localization sits at its own frame -- and no
-interpolation afterwards, because the fitted curve *is* the per-frame drift.
-B-splines are variation-diminishing, so it cannot overshoot the way an
-interpolating spline through noisy window estimates does.
-
-Drift is slow creep with the occasional small jump, so a coefficient every 2000
-frames (26 of them here, against 276 free window parameters) describes it, and
-each coefficient is constrained by every localization near it in time rather
-than by one window's worth.
-
-Judged on halves that are **disjoint in molecules** (see below), and by
-correcting each half with the *other* half's drift so that no estimate is graded
-on localizations it was fitted to:
-
-| estimator | time | noise x/y/z (nm) | out-of-sample x-y | x-z |
-|---|---|---|---|---|
-| windows, ungrouped | 34 s | 1.87 / 3.73 / 5.19 | 94.0% | 100.0% |
-| windows, grouped | 2 s | 1.25 / 1.70 / 1.45 | 100.0% | 90.0% |
-| spline, ungrouped | 31 s | 1.62 / 3.39 / 5.03 | 94.1% | 100.7% |
-| **spline, grouped** | **2 s** | **0.93 / 0.81 / 0.99** | **102.9%** | 95.9% |
-
-Knot spacing on the full data: 200 frames gives 1.7-2.0 nm noise, 2000 gives
-0.6-0.7 nm, and the out-of-sample sharpness is flat from 1000 to 4000 -- no sign
-of over-smoothing, which is what a slowly drifting stage should look like.
-`spline_penalty` adds a second-difference penalty on top if a dataset needs it.
-
-### Time resolution, and the first seconds
-
-The estimate can be made as fine as one likes -- `spline_knot_frames` for the
-overlap fit, `n_timepoints` for RCC -- and on this dataset finer is worse
-everywhere except at the very start:
-
-| curve | ranges x/y/z (nm) | dz over frames 0-1000 | time |
-|---|---|---|---|
-| spline, 2000 fr knots (default) | 62.5 / 70.1 / 69.9 | 4.4 nm | 2.6 s |
-| spline, 500 fr knots | 63.5 / 74.8 / 72.7 | 3.9 nm | 5.1 s |
-| RCC, 20 windows of 2300 fr (default) | 56.0 / 71.5 / 61.1 | 0.0 nm | 3.8 s |
-| RCC, 92 windows of 500 fr | 58.8 / 75.6 / 73.6 | 7.7 nm | 72 s |
-
-Past frame 30 000 both 500-frame estimators break into +-5 nm oscillations that
-the defaults do not have, and the two disagree on their phase -- noise, not
-signal.  That is where the localization density has fallen from 31 to 4.4 per
-frame and the median precision has gone from 10 to 23 nm, so a 500-frame window
-has the least to work with.  Split-half noise says the same: 0.69/0.61/0.73 nm
-at 2000-frame knots against 1.14/1.10/1.27 at 500.  RCC's cost also grows with
-the square of the window count -- 4186 correlations instead of 190.
-
-**The drift really is faster at the start**, which is worth knowing before
-trying to regularise it away.  Over the first 5000 frames the lateral drift
-moves 31 nm in x and 39 nm in y, against ~10 nm per 5000 frames later.  It is
-not an artefact of density or of mislocalization: a strict filter
-(precision < 10 nm, `logl_rel > -1.4`) makes it *larger* (37 / 56 nm), and
-matching the localization density across the movie changes nothing (33 / 52 nm).
-Both estimators show it, grouped and ungrouped alike.  The first 2000 frames
-also carry 4x the density of the rest at 2.5x fewer photons each -- a sample
-that has just been mounted, settling.
-
-There is a separate, sharper feature in **z over the first ~1000 frames**.  RCC
-at its default 20 windows appears flat there, but only because its first
-estimate sits at frame 1150 and PCHIP extrapolates: given 500-frame windows it
-shows 7.7 nm, larger than either spline (3.9-4.4 nm) and in the same direction.
-Three bases agree it is there.  What is *not* real is the additional ~6 nm spike
-at frame 0 that only the per-window fit has (39 nm against 28-32 for everything
-else): its first window has no left neighbour to constrain it and the cubic
-interpolation through it overshoots at the edge.  The spline has no such edge.
-
-Not a way to fix any of this: `spline_penalty`.  At 1e3 it flattens the initial
-lateral excursion from 31 nm to 3.6 nm and simultaneously moves the curve 12.9 nm
-away from RCC over those frames and 6.7 nm away over the whole movie.  It
-removes the correction, not an artefact.
-
-### Two ways to be wrong about which estimate is better
-
-Both of these produced a wrong conclusion earlier in this work, so they are
-written down:
-
-* **Split by molecule, not by localization.**  A blink is several localizations
-  of one molecule in consecutive frames.  Splitting localizations at random puts
-  one molecule in both halves, the halves share their errors, and the noise
-  comes out too low -- it said the ungrouped estimate had a 1.6 nm noise floor
-  against the grouped one's 3.1 nm.  Splitting whole molecules reverses it:
-  1.9/3.7/5.2 nm ungrouped against 1.3/1.7/1.5 nm grouped.  Grouping does not
-  throw information away; treating a molecule's repeats as independent
-  measurements adds correlated noise, and over-weights bright molecules.
-* **Grade out of sample.**  Rendering the same localizations the drift was
-  fitted to rewards the estimator that fitted their noise.  In sample the
-  ungrouped estimate looked sharper (3.9761e-5 against 3.9056e-5); correcting
-  each half with the other half's drift reverses that laterally.
-
-The remaining honest gap is axial: the ungrouped estimate is still slightly
-better in x-z (100% against 95.9%), even though its z drift is by far the
-noisiest.  Worth understanding rather than explaining away.
-
-### Two passes: grouped, then a small radius
-
-*Both passes, and the RCC prepass, used to run only with the time-window fit.*
-`estimate_drift` took the spline branch before looking at `two_stage` or
-`rcc_prepass`, so with the spline on -- the default since it was added -- both
-were skipped without a word.  The slow-run dialogue's "RCC first, then COMET
-within 50 nm" then ran one spline fit over 50 nm and no RCC: on 10 000 simulated
-frames with drift, 29 / 42 / 10 nm rms error in x / y / z where the default
-gives 10 / 6 / 6.  The passes are now checked first and each runs the fit that
-was asked for; the same offer gives 8.7 / 5.5 / 5.5 nm.  Every test of the
-passes had set `spline=False`, which is why none saw it.  COMET's version went
-to 2.  (Found writing its documentation page, 2026-09-27.)
-
-`DriftSettings.two_stage` (`--two-stage`) runs the grouped estimate first, takes
-that drift out, and then runs an ungrouped estimate over a **30 nm** search
-radius.  The pair count is what costs time, and once the coarse pass has removed
-the drift the fine pass only has to look a few nm: 314 M pairs become 42 M.
-
-| | time | vs the single pass (x/y/z) | sharpness x-y | x-z |
-|---|---|---|---|---|
-| single pass, ungrouped | 153 s | reference | 3.9761e-5 | 3.3623e-5 |
-| grouped only | 6 s | 1.8 / 4.3 / 4.7 nm | 3.9056e-5 | 3.2388e-5 |
-| grouped + fine, r=100 nm | 91 s | 1.5 / 6.6 / 6.3 nm | 3.9465e-5 | 3.3769e-5 |
-| grouped + fine, r=50 nm | 26 s | 1.2 / 4.0 / 3.5 nm | 3.9583e-5 | 3.3626e-5 |
-| **grouped + fine, r=30 nm** | **18 s** | 0.8 / 3.6 / 3.0 nm | **3.9743e-5** | 3.3513e-5 |
-
-**8.7x faster for 99.8% of the lateral and 98.4% of the axial improvement**, and
-theremaining difference is at the noise floor (1.6 nm).  Note that the earlier estimate
-of what this would gain -- 2.5-3.5x -- was too pessimistic: it assumed the fine
-pass would need as many cost evaluations as the single pass, and it does not,
-because it starts a few nm from the answer instead of a hundred.
-
-It is also **more robust**, which was not the point of it.  The fine pass is
-bounded by its own radius, so it cannot make a large excursion: over the window
-where the single pass fails (frames 24 000-26 500) the single-pass estimate
-swings 46 nm in y, and the two-stage one 7.9 nm.  A small search radius is a
-speed knob and a regularizer at once.
-
-The radii are tuned on one dataset.  `two_stage_radius_nm` sets the fine pass's
-radius and, from it, its sigma schedule (radius/3 down to radius/5); it must
-stay well above the residual the grouped pass leaves, which was a few nm here.
-
-What is left is a real trade, not a free win, so it stays a parameter:
-`max_locs_per_segment` caps the localizations per time window and the pair count
-falls roughly quadratically -- 2000 per window is 10x faster (33 s) and moves
-the drift by 2.5 nm rms, 1000 per window is 15x faster and moves it by 6 nm.
-Worth it for a first look at a large dataset, not for the final result.
+Where the time goes, what was tried, how estimates were compared, RCC and
+the spline fit, measured: `docs/drift.md`.
 
 ## What a tool leaves behind
 
@@ -1485,6 +922,15 @@ is saved goes into the user's `cameras.json`, never the shipped list an
 update replaces; a shipped camera edited there is saved as the user's copy
 under its own name, which `joined_with` puts in its place.
 
+One camera path: the database, the file, and the fitter's typed fields, met
+in one place (`io.tiff.resolve_camera`, which `CameraSettings.resolution`
+calls for every fitter, its parameter view, the camera editor and the uiPSF
+calibration).  The camera YAML presets -- a second database of a camera per
+file, merged in three places -- and the reading of SMAP's `*_cameras.mat`
+went with it.  A plain YAML file of the typed fields stays for scripts
+(`smappy-fit --camera CONFIG.yaml`, `smappy.fit(camera="cam.yaml")`): it is
+the fields written down, not another source of cameras.
+
 A pixel size is one number or two.  Almost every microscope has square pixels;
 where x and y differ the database keeps both, `to_nm` scales each axis by its
 own, and a width or a precision -- which is neither x nor y -- by the mean.
@@ -1531,6 +977,34 @@ the points, and needs nothing.  The offset comes first and the split follows.
 That matters because an initial shift, a magnification guess and a wrongly
 assumed image centre are between them the usual cause of a registration that
 fails without saying so.
+
+**The split is a position on the chip, everywhere.**  The fitter
+(`dualfit.which_channel`, the per-half detection threshold), a movie
+registration, the bead calibration and uiPSF's profile all give and read
+`split_position` in camera-chip pixels.  The bead calibration once stored the
+index in the bead image's own pixels, which agreed only while the ROI began at
+the chip's corner along the split: a right-left splitter recorded with its ROI
+at x = 91 recorded 220, and the fitter split the localizations at chip
+x = 220 instead of 311.  A bead stack is now cut where the chip position falls in it.
+
+**One geometry for beads and movies.**  The bead calibration's split used to
+be settings of its own, with a fixed `up-down mirrored` default that a
+left-right splitter failed on.  It is now the movie registration's
+`RegisterSettings` as a part of `DualColorSettings`, its defaults set by
+`bead_registration` rather than by a second class: 8 pairs, not 20 (a slide
+gives tens); a 2 px RANSAC radius and a 0.15 px dx/dy screen, not 1 and 0.5
+(beads are all bright, and that screen is where a bead calibration's accuracy
+comes from); and pairing within 12 px, not 20 -- the numbers the bead
+calibration had, so a calibration with its layout chosen is what it was.  On
+*auto* the layout is found by the same vote, taken on the beads with each
+stack as one frame, and the beads are then paired as before.  Two things did
+not merge.  `ChannelTransform` and `DualColorCalibration` stay two classes:
+the second is the first plus two PSFs, they share the mapping and the
+geometry check already (`_Mapping`, `check_geometry`), and one class would
+mean PSF fields that are None for a transformation, or a new constructor
+for every caller and reader.  And a regular bead grid centred in its half is
+its own mirror image, so positions alone cannot say whether it is mirrored:
+a simulated grid needs its layout chosen, a slide does not.
 
 Two stages of pair-and-refit, as in SMAP, and measurably: the tight second round
 is worth a factor of three to seven in accuracy over the coarse one alone, and a
@@ -1929,19 +1403,6 @@ saving) is the price of keeping it out of that window.
 
 ## Open questions
 
-* **Pages for what is not a plugin.**  Every plugin has a page behind its ?
-  (`smappy.docs`), but the controls a user meets first do not: the Render
-  tab (layers, the renderer and its LUTs, the filter, grouping, the axes
-  section), the ROI tab and ROI manager, the 3D view, bead and dual-colour
-  calibration, the batch window.  They want the same kind of page, in the
-  same register (CLAUDE.md, "The plugin's page"), in the same Help window.
-  What does not carry over is the generated settings table: `render_tab.py`
-  builds its widgets by hand rather than from `param` specs, so either the
-  page lists its controls in writing (and a test checks the names against the
-  widgets), or those panels move to `SettingsForm` first.  The page lookup
-  already works for any path (`docs.page_file`); `docs.render` wants a plugin
-  class, and would need a variant for a page with no class behind it.
-  (Jonas Ries, 2026-09-27)
 * Fitted x sits ~0.24 px from the peak-finder position, and the sign flips with
   the mirror (-0.22 unmirrored, +0.26 mirrored) while y stays at -0.09.  A
   round trip (render the model, fit it back) is exact, so this is a property of
@@ -1951,53 +1412,6 @@ saving) is the price of keeping it out of that window.
   so the settings file is used with a warning.  Should that be a hard error?
 * RCC's slice width, z bin width and number of time windows are SMAP's values,
   which were set by hand rather than optimized; there is likely room there.
-* **Opening a 57 M localization `_sml.mat`** was 134 s and is 64 s.  What
-  looked like 79 s of linking was 68 s of `np.lexsort` and 5.5 s of the walk:
-  the sort, not the link, was the cost.  It is a radix sort now -- 2.1 s, the
-  same permutation to the element.  numpy has a radix sort in it for uint8 and
-  uint16 and a comparison sort above that (0.18 s against 9.9 s on 20 M of the
-  same numbers), so the key goes in 16-bit digits, least significant first.
-  Everything above the frame's low 16 bits -- the block keys and the frame's
-  high bits -- is not sorted at all but computed per localization as a
-  partition, and the partitions sort independently across threads.  Nothing
-  assumes an input order: the partition is a key each localization carries and
-  the pass that gathers them is itself a counting sort.
-  Not taken: numpy's own stable sorts LSD-style over x, frame, block (exact,
-  72 s -- they are comparison sorts at those widths); block+frame first then
-  threaded lexsorts of x inside each bucket (exact, 5.1 s); discretizing x to
-  one 16-bit digit (0.4 s faster, 0.19% of localizations change places).
-* The linking runs in chunks now (`GroupSettings.link_chunks`, default 8):
-  13 s to 6 s.  It is not exact -- a trace cut at a seam is put back together
-  by `smappy._group_chunked._stitch`, but the sequential walk *claims*
-  localizations as it goes and a chunk cannot know about the claims reaching
-  into it, so about 1 in 20,000 localizations lands in a different group.
-  Different, not worse: the walk claims the first match in x order rather than
-  the nearest, so which of two candidates wins was never meaningful.  The cut
-  points come from the data and not from the core count, so a file groups the
-  same way on any machine; `link_chunks=1` is the sequential walk exactly.
-* **`combine` does not parallelize, and that was worth finding out.**  The
-  columns are independent and numpy drops the GIL, but a column in flight holds
-  a float64 output over the groups and a float64 temporary over the table --
-  0.78 GB on that file, where the table is already 8 GB.  Threads against
-  seconds: 1: 12.5, 2: 10.5, 3: 12.9, 4: 14.8, 6: 23.1, 8: 31.8.  Two threads
-  win 2 s and each further one loses more, on a 34 GB machine; on the 8-16 GB a
-  microscope PC has, the second thread is what starts the swapping.  So it runs
-  one column at a time.  What did help there was the per-group sort:
-  `np.argsort(kind="stable")` on the group ids is 3.8 s, by 16-bit digits 2.1.
-* `combine` is compiled now (`csrc/combine.hpp`): 17.3 s to 9.1 s, and the peak
-  for the whole open from 20 GB to 9.7.  The memory is the point.  numpy wants
-  the column as float64 and the weighted product as an array, so a float32
-  column costs two 457 MB temporaries before `np.bincount` allocates its own
-  output; in C++ the cast, the weight and the sum are one pass and there are no
-  temporaries.  It also threads properly, which the numpy version could not:
-  every thread wanted its own accumulator over all 40 M groups, where
-  partitioning by *group* gives each thread a disjoint slice of one output and
-  nothing to coordinate.  All six modes (mean, sum, precision, quad, min, max)
-  and the per-coordinate weighting are unchanged -- C++ accumulates, Python
-  finishes, and the numpy path stays as the reference the tests compare to.
-* What is left of the 56 s: 32 s read, 9 s `combine`, 6 s linking, 2 s sort,
-  6 s indices and filters.
-
 ## Loading only the columns that are used
 
 The next thing to do, and a memory problem before it is a speed one.  Opening

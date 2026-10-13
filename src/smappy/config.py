@@ -98,6 +98,22 @@ def set_plugin_roots(roots) -> None:
     set("plugin_roots", [str(Path(p).expanduser()) for p in roots])
 
 
+# ---------------------------------------------------------- unsaved changes
+
+def ask_before_quit() -> bool:
+    """Whether quitting with a changed table asks to save it first.
+
+    Off by default: most tables here are a file's analysis, written again by
+    a chain or a click in seconds, and a question at every quit is one that
+    gets answered without being read.
+    """
+    return bool(get("ask_before_quit_unsaved", False))
+
+
+def set_ask_before_quit(on: bool) -> None:
+    set("ask_before_quit_unsaved", bool(on))
+
+
 # -------------------------------------------------------------- last folder
 
 def last_folder() -> Path | None:

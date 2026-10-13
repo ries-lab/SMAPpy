@@ -9,25 +9,30 @@ Nuclear pore complexes (NPCs) are rings of eight corners, about 110 nm
 across, in the flat nuclear envelope.  Imaged at a pore protein such as
 Nup96, they are the reference structure of quantitative SMLM
 (Thevathasan et al. 2019, [doi:10.1038/s41592-019-0574-9](https://doi.org/10.1038/s41592-019-0574-9)):
-the labelling efficiency, the resolution and the scale of a microscope can all
-be measured on them.  For that, each pore needs its own region of interest
-(ROI) in the ROI manager, centred on the pore.
+the [labelling efficiency](plugin:Panels/Glossary) (also called degree of
+labelling: the fraction of target proteins that carry a detected label), the
+resolution and the scale of a microscope can all be measured on them.  For
+that, each pore needs its own [ROI](plugin:Panels/Glossary) (region of
+interest) in the ROI manager, centred on the pore.
 
 This plugin finds the pores in a file and puts an ROI on each.  It looks for
 rings of the pore's radius, fits a circle to every candidate, and keeps those
 that look like a ring: the right radius, and few localizations far from it.
 The ROIs are centred on the fitted circle, which is what
 [NPC Corners](plugin:Analysis/Measure/NPC Corners) and
-[NPC Labeling Efficiency](plugin:Analysis/Regions/Summarize/NPC Labeling Efficiency)
+[NPC labelling efficiency](plugin:Analysis/Regions/Summarize/NPC labelling efficiency)
 need.
 
 The checks are made to keep sparse pores.  A pore with only a few corners
 labelled is still a pore, and those pores are what the labelling efficiency
 is measured from; what has to go is what is not a ring at all -- blobs,
 filled clumps, pieces of filament.  Use it on a 2D view of the nuclear
-envelope at the bottom of the nucleus, where the pores are seen face on, on
-grouped localizations (one per blink).  For structures that are not rings,
-[Density Peaks](plugin:Analysis/Regions/Find/Density Peaks) finds sites by
+envelope at the bottom of the nucleus, where the pores are seen face on,
+with blinks merged (one localization per blink) -- [merge
+blinks](plugin:Panels/Glossary), also called grouping or linking, combines
+the localizations in consecutive frames that come from one blinking event
+into one.  For structures that are not rings,
+[Density Peaks](plugin:Analysis/Regions/Find/Density Peaks) finds ROIs by
 density alone.
 
 ## How it works
@@ -67,7 +72,10 @@ strongest first.  A candidate with fewer than *min localizations* (4) in the
 band of ±*ring width* around its ring is dropped at once.
 
 **4. Circle fit, on the precise localizations.**  Only the localizations
-better than *judge on precision* (20 nm) within the *window* (100 nm) are
+better than *judge on precision* (20 nm) -- the
+[localization precision](plugin:Panels/Glossary), also called the CRLB, how
+far a fitted position is expected to lie from the true one -- within the
+*window* (100 nm) are
 used from here on.  A circle of the set *radius* is fitted to them to place
 the centre, twice; the ROI goes there.  Then the radius is fitted as well.
 
@@ -108,7 +116,7 @@ axes[0].plot([lo + 100, lo + 600], [lo + 100, lo + 100], "k", lw=2)
 axes[0].text(lo + 350, lo + 160, "500 nm", ha="center", va="bottom", fontsize=7)
 ```
 
-```figure What the checks see, on made-up structures with a precision of 5 nm: the fitted circle (blue), the localizations more than 3 precisions from it (red), and the verdict.  A full pore passes, and so does a sparse one with three corners.  A single blob fits a small circle.  A filled disc fails on its far localizations, whether the site is on it or beside it -- where the ring filter often puts it.
+```figure What the checks see, on made-up structures with a precision of 5 nm: the fitted circle (blue), the localizations more than 3 precisions from it (red), and the verdict.  A full pore passes, and so does a sparse one with three corners.  A single blob fits a small circle.  A filled disc fails on its far localizations, whether the centre is on it or beside it -- where the ring filter often puts it.
 rng = np.random.default_rng(0)
 def corners(which, n=12):
     return np.concatenate([np.column_stack((53.7 * np.cos(k * np.pi / 4) + rng.normal(0, 4, n),
@@ -178,7 +186,7 @@ localization, as SMAP's clean-up does, those fractions do not tell a pore
 from a clump at low photon numbers: a pore's imprecise localizations land
 inside and outside too.  And a filled clump the size of a pore passes them,
 because the ring filter answers a filled disc with a ring of response
-*around* it, so the site lands beside the clump, and from there the clump is
+*around* it, so the centre lands beside the clump, and from there the clump is
 an arc of the right radius with nothing inside.  On simulations with
 pore-sized clumps among the pores, the far test kept the clumps that reached
 the analysis to 3 to 5 per 300 pores at 5000 photons (16 to 19 with the
@@ -193,8 +201,9 @@ pores showing 4 corners in the simulations of `studies/npc_le`, and 14 % with
 one blink per fluorophore at 500 photons.
 
 **What it runs on.**  In the ROI manager, the plugin runs on the file being
-shown, on its localizations after the layer's filters, and on the grouped
-localizations when the layer is grouped.  The ROIs get the manager's size and
+shown, on its localizations after the layer's filters (the lowest and
+highest values of columns, set in the Render tab), and on the merged blinks
+when the layer merges them.  The ROIs get the manager's size and
 shape (a circle of 300 nm by default).  Each ROI records how it was found
 (this plugin, its version, its settings, the filters) and its numbers: the
 fitted radius, the localizations on the ring, the precise ones, the fraction
@@ -237,11 +246,10 @@ On, a second run with other settings gives a fresh answer: the ROIs an
 earlier run of this segmenter made on the file go first (their origin says
 which).  Off, to add the pores of a second region or a second pass to those
 already found -- a candidate near an existing ROI is suppressed.  ROIs drawn
-by hand or made by another segmenter stay either way.  It matters most in a
-chain or a batch, which has no *Preview*: the shipped NPC chain turns it on,
-so that running it again gives a fresh answer instead of none.  A replacing
-run is one step of the ROI manager's *Undo*, which brings the earlier pores
-back.
+by hand or made by another segmenter stay either way.  Off, running again
+with the same settings finds nothing new, so it is on by default.  A
+replacing run is one step of the ROI manager's *Undo*, which brings the
+earlier pores back.
 
 ## Output
 
@@ -267,7 +275,7 @@ pores that passed in `data["centers"]`.
 
 ## Differences from SMAP
 
-Ported from SMAP's `ROIManager/Segment/segmentNPC` and its clean-up evaluator
+Ported from SMAP's `ROIManager/Segment/segmentNPC` and its clean-up evaluator (SMAP's word for a plugin run in every ROI)
 `ROIManager/Evaluate/NPCsegmentCleanup`
 ([Ries 2020](https://doi.org/10.1038/s41592-020-0938-1)).
 
@@ -279,7 +287,7 @@ Ported from SMAP's `ROIManager/Segment/segmentNPC` and its clean-up evaluator
 * **The checks.**  SMAP's clean-up compares the localizations inside and
   outside the ring with those on it (*in/ring* < 0.3, *out/ring* < 0.75),
   checks the fitted radius, a minimum size and the mean PSF width, and
-  marks the bad sites as not used.  Here the radius is kept and the fractions
+  marks the bad sites (ROIs) as not used.  Here the radius is kept and the fractions
   are replaced by the far test on the precise localizations, for the reasons
   in *In detail*; the PSF width is a filter on `sigma_nm` in the layer.
 * **One step.**  Segmenting and judging happen in one run, and the rejected

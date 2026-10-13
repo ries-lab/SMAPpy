@@ -31,6 +31,7 @@ def live_session(blocks=3):
 
 class Shift(Plugin):
     """Stands in for a drift correction: a new table, x moved."""
+    changes_locs = True
     path = "Analysis/Drift/Shift"
     name = "Shift"
 
@@ -74,9 +75,8 @@ def test_every_layers_selection_agrees_with_the_pinned_table():
 
 
 def test_a_grouped_table_is_refused_during_a_live_fit_when_the_layer_has_none():
-    ctx = live_session().context(grouping="grouped")
-    with pytest.raises(ValueError, match="grouped"):
-        ctx.table()
+    with pytest.raises(ValueError, match="merged blinks"):
+        live_session().context(grouping="grouped")
 
 
 def test_a_table_change_is_refused_while_the_fit_appends_and_the_view_keeps_growing():
@@ -150,7 +150,7 @@ def test_an_expression_follows_the_live_table_block_by_block():
     settings = dataclasses.replace(cls.Settings(), field="bright",
                                    expression="photons > 1000")
     plugin = cls()
-    assert plugin.live_recipe_for(settings)
+    assert plugin.column_recipe_for(settings)
     session.append(block(4))                       # after the snapshot
     session.apply(plugin, plugin.run(session.context(), settings))
     session.append(block(5))
@@ -182,9 +182,9 @@ def test_an_expression_over_the_selection_cannot_follow_a_live_table():
     from smappy import plugins
     cls = plugins.get("Analysis/Process/Math Parser")
     settings = dataclasses.replace(cls.Settings(), where="selection")
-    assert not cls().live_recipe_for(settings)
+    assert not cls().column_recipe_for(settings)
     shift = dataclasses.replace(cls.Settings(), field="x_nm", expression="y_nm")
-    assert not cls().live_recipe_for(shift)        # a position: not a recipe
+    assert not cls().column_recipe_for(shift)        # a position: not a recipe
 
 
 def test_colours_follow_the_live_table_and_are_found_again_when_it_is_finished():

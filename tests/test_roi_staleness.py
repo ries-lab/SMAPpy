@@ -11,9 +11,9 @@ import numpy as np
 import pytest
 
 from smappy.locs import Localizations                                  # noqa: E402
-from smappy.roi_manager import ROIProject                              # noqa: E402
 from smappy.roi_manager import pipeline as pipeline_module             # noqa: E402
-from smappy.workspace import Instance                                  # noqa: E402
+from smappy.chain import Block, Step as ChainStep                      # noqa: E402
+from test_roi_session import rois_of                          # noqa: E402
 
 STATISTICS = "Analysis/Measure/Localization Statistics"
 
@@ -28,13 +28,11 @@ def table(centers, per=4, seed=0):
 
 
 def a_project(rois=(0, 1000)):
-    project = ROIProject()
-    source = project.add_source(table(rois))
-    project.set_filters({})
+    project, source = rois_of(table(rois), filters={})
     project.set_geometry(200)
     for center in rois:
         project.add_roi(source.id, [center, 0])
-    project.pipeline = [Instance(plugin=STATISTICS)]
+    project.block = Block(steps=[ChainStep(plugin=STATISTICS)])
     return project, list(project.rois)
 
 
@@ -50,7 +48,7 @@ def test_an_edited_parameter_makes_the_stored_numbers_out_of_date():
     assert states(project, ids[0]) == {"Localization Statistics": "current"}
     assert len(project.results()) == 2
 
-    project.pipeline[0].values = {"bins": 50}
+    project.block.steps[0].values = {"bins": 50}
     assert states(project, ids[0]) == {"Localization Statistics": "stale"}
     assert set(project.needs_evaluation()) == set(ids)
     # the numbers stay in the site table until they are replaced: still true
@@ -66,7 +64,7 @@ def test_renaming_a_step_does_not_invalidate_anything():
     """The label names the columns; it is not part of the measurement."""
     project, ids = a_project()
     project.evaluate()
-    project.pipeline[0].label = "precision"
+    project.block.steps[0].label = "precision"
     assert states(project, ids[0]) == {"precision": "current"}
     assert len(project.results()) == 2
 
@@ -90,22 +88,22 @@ def test_a_step_that_was_never_run_is_missing_rather_than_stale():
 
 def test_two_steps_go_stale_one_at_a_time():
     project, ids = a_project()
-    project.pipeline.append(Instance(plugin=STATISTICS, label="photons"))
+    project.block.steps.append(ChainStep(plugin=STATISTICS, label="photons"))
     project.evaluate()
     assert states(project, ids[0]) == {"Localization Statistics": "current", "photons": "current"}
 
-    project.pipeline[1].values = {"bins": 50}
+    project.block.steps[1].values = {"bins": 50}
     assert states(project, ids[0]) == {"Localization Statistics": "current", "photons": "stale"}
 
 
 def test_re_evaluating_runs_the_stale_step_and_copies_the_rest_forward():
     project, ids = a_project()
-    project.pipeline.append(Instance(plugin=STATISTICS, label="photons"))
+    project.block.steps.append(ChainStep(plugin=STATISTICS, label="photons"))
     project.evaluate()
     before = project.tables["Localization Statistics"].entry(ids[0])
     photons = project.tables["photons"].entry(ids[0])
 
-    project.pipeline[1].values = {"bins": 50}
+    project.block.steps[1].values = {"bins": 50}
     run = project.evaluate(reuse=True)
     after = run["records"][ids[0]]["steps"]
     assert after["Localization Statistics"] == before           # copied, not run again
@@ -123,7 +121,7 @@ def test_one_site_reuses_what_is_current_and_says_what_it_ran():
     assert results["Localization Statistics"] is None           # kept, so nothing to draw
     assert record["steps"]["Localization Statistics"]["values"]["n_localizations"] == 4
 
-    project.pipeline[0].values = {"bins": 50}
+    project.block.steps[0].values = {"bins": 50}
     record, results, _ = project.evaluate_one(ids[0], reuse=True)
     assert results["Localization Statistics"] is not None       # stale, so it ran
     assert record["steps"]["Localization Statistics"]["values"]["mean_precision_nm"] == 11.0
@@ -140,7 +138,7 @@ def test_a_figure_can_be_asked_for_even_when_the_numbers_are_current():
 def test_what_a_site_re_evaluation_stores_makes_it_current():
     project, ids = a_project()
     project.evaluate()
-    project.pipeline[0].values = {"bins": 50}
+    project.block.steps[0].values = {"bins": 50}
     assert project.needs_evaluation() == list(ids)
 
     project.evaluate_one(ids[0], reuse=True, store=True)
@@ -155,8 +153,8 @@ def test_what_a_site_re_evaluation_stores_makes_it_current():
 def test_a_pipeline_nobody_stored_is_read_back_from_the_run():
     """A script that hands its steps to `evaluate` still gets its results."""
     project, ids = a_project()
-    project.pipeline = []
-    steps = pipeline_module.resolve([Instance(plugin=STATISTICS)])
+    project.block = Block(steps=[])
+    steps = pipeline_module.block_steps(Block(steps=[ChainStep(plugin=STATISTICS)]))
     project.evaluate(steps=steps)
     assert len(project.results()) == 2
     assert states(project, ids[0]) == {"Localization Statistics": "current"}
@@ -176,7 +174,7 @@ def test_the_region_steps_window_re_runs_only_what_changed(tmp_path):
     file_id = next(iter(project.sources))
     for center in (0, 1000):
         project.add_roi(file_id, [center, 0])
-    project.pipeline = [Instance(plugin=STATISTICS)]
+    project.block = Block(steps=[ChainStep(plugin=STATISTICS)])
 
     window = RegionStepsWindow(session)
     assert "2 ROI(s) to measure" in window.status.text()
@@ -187,7 +185,7 @@ def test_the_region_steps_window_re_runs_only_what_changed(tmp_path):
 
     # an edited parameter reaches the project as it is typed
     window.panel.form.set_values({"for_each_roi.localization_statistics.bins": 50})
-    assert project.pipeline[0].values["bins"] == 50
+    assert project.block.steps[0].values["bins"] == 50
     assert "2 ROI(s) to measure" in window.status.text()
     window.run()
     assert not project.needs_evaluation()

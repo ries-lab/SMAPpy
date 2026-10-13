@@ -3,13 +3,12 @@
 import numpy as np
 import pytest
 
-from smappy.io.hdf5 import save_localizations
 from smappy.locs import Localizations
 from smappy.group import GroupSettings
-from smappy.roi_manager import ROIProject, DensityPeaks, Histograms
-from smappy.roi_manager.core import json_text
+from smappy.roi_manager import DensityPeaks, Histograms
 from smappy.roi_manager.pipeline import Step, errors, merged_values
 from smappy.plugins.roi import HistogramSettings, histograms
+from test_roi_session import rois_of, set_bounds              # noqa: E402
 
 
 def table(x, y=None):
@@ -22,30 +21,28 @@ def table(x, y=None):
 
 
 def test_circle_square_polygon_boundaries_filters_and_file_isolation():
-    p = ROIProject()
-    a = p.add_source(table([0, 100, 150, 150.01, -150, 100, 0], [0, 100, 0, 0, 0, -100, 151]))
-    b = p.add_source(table([0]))
-    p.set_filters({})
+    p, a = rois_of(table([0, 100, 150, 150.01, -150, 100, 0], [0, 100, 0, 0, 0, -100, 151]),
+                   table([0]), filters={})
+    b = p.source_of(1)
     roi = p.add_roi(a.id, [0, 0])
     assert p.indices(roi).tolist() == [0, 1, 2, 4, 5]
     p.set_geometry(200, 'square')
     assert p.indices(roi).tolist() == [0, 1, 5]
     roi.polygon = [[0, 0], [150, 0], [0, 150]]
     assert p.indices(roi).tolist() == [0, 2]
-    p.set_filters({'photons': [200, None], 'filenumber': [99, 99]})
+    set_bounds(p, {'photons': (200, None)})
     assert p.indices(roi).tolist() == [2]
     assert not p.state(b.id).filter.mask.any()
     p.state(a.id).display.contrast = 1
     assert p.indices(roi).tolist() == [2]
 
 
-def test_statistics_review_and_stale_results():
-    p = ROIProject()
-    s = p.add_source(table([0, 10, 140]))
-    p.set_filters({})
-    roi = p.add_roi(s.id, [0, 0], reviewed=False)
+def test_statistics_use_and_stale_results():
+    p, s = rois_of(table([0, 10, 140]), filters={})
+    roi = p.add_roi(s.id, [0, 0])
+    roi.use = False
     assert not p.evaluate()['records']
-    roi.reviewed = True
+    roi.use = True
     run = p.evaluate()
     values = merged_values(run['records'][roi.id])
     assert values['n_localizations'] == 3
@@ -63,7 +60,7 @@ def test_statistics_review_and_stale_results():
     assert not p.results()
     p.evaluate()
     assert p.results()[0]['n_localizations'] == 2
-    p.set_filters({'photons': [200, None]})
+    set_bounds(p, {'photons': (200, None)})
     assert p.stale_steps(roi.id)
     p.evaluate()
     assert p.results()[0]['n_localizations'] == 1
@@ -74,8 +71,7 @@ def test_statistics_review_and_stale_results():
 
 
 def test_polygon_ignores_global_size_but_translation_moves_all_geometry():
-    p = ROIProject()
-    s = p.add_source(table([0, 10, 1000]))
+    p, s = rois_of(table([0, 10, 1000]))
     roi = p.add_roi(s.id, [0, 0], polygon=[[-20, -20], [20, -20], [20, 20], [-20, 20]])
     roi.direction = [[0, 0], [10, 0]]
     p.evaluate()
@@ -88,11 +84,9 @@ def test_polygon_ignores_global_size_but_translation_moves_all_geometry():
 
 
 def test_empty_and_nonfinite_measurements():
-    p = ROIProject()
     locs = table([0, 10, 100])
     locs['photons'][1] = np.nan
-    p.set_filters({})
-    s = p.add_source(locs)
+    p, s = rois_of(locs, filters={})
     p.add_roi(s.id, [0, 0])
     p.add_roi(s.id, [1000, 1000])
     p.evaluate()
@@ -107,56 +101,24 @@ def test_empty_and_nonfinite_measurements():
 
 
 def test_grouped_render_and_analysis_share_filters_after_regrouping():
-    p = ROIProject()
-    p.set_filters({'photons': [250, None]})
-    s = p.add_source(table([0, 1, 1000]))
+    p, s = rois_of(table([0, 1, 1000]), filters={'photons': (250, None)})
+    p.session.set_group_settings(GroupSettings(dx=1.5, dt=1))
     roi = p.add_roi(s.id, [0, 0])
     assert len(p.extract(roi)) == 0
-    p.grouped = True
+    set_bounds(p, grouped=True)
     assert len(p.extract(roi)) == 1
     assert p.extract(roi)['photons'][0] == 300
     assert p.state(s.id).filter.ranges['photons'] == (250, None)
     p.evaluate()
-    p.group_settings = GroupSettings(dx=.1)
+    p.session.set_group_settings(GroupSettings(dx=.1, dt=1))
+    p.sync()
     assert len(p.extract(roi)) == 0
     assert p.stale_steps(roi.id)
     assert p.state(s.id).filter.ranges['photons'] == (250, None)
 
 
-def test_save_reload_relink_and_changed_source_detection(tmp_path):
-    source_path = tmp_path / 'locs.h5'
-    locs = table([0, 10, 150])
-    save_localizations(source_path, locs)
-    p = ROIProject()
-    s = p.add_file(source_path)
-    roi = p.add_roi(s.id, [0, 0])
-    roi.comment = 'NPC α'
-    p.evaluate()
-    p.navigation = {'detail_center': [300, 400]}
-    path = p.save(tmp_path / 'project.h5')
-    loaded = ROIProject.load(path)
-    assert loaded.rois[roi.id].comment == 'NPC α'
-    same = lambda a, b: json_text(a) == json_text(b)          # NaN as NaN
-    assert same(loaded.results(), p.results())
-    assert loaded.navigation == p.navigation
-    renamed = tmp_path / 'renamed.h5'
-    source_path.rename(renamed)
-    loaded = ROIProject.load(path, {s.id: renamed})
-    assert same(loaded.results(), p.results())
-    save_localizations(renamed, table([99, 10, 150]))
-    with pytest.raises(ValueError, match='contents changed'):
-        ROIProject.load(path, {s.id: renamed})
-    with pytest.raises(ValueError, match='overwrite'):
-        p.save(source_path)
-
-
-def test_units_validation_and_invalid_geometry():
-    p = ROIProject()
-    with pytest.raises(ValueError, match='nm coordinates'):
-        p.add_source(Localizations({'x_pix': np.array([1.]), 'y_pix': np.array([2.])}))
-    s = p.add_source(Localizations({'x_pix': np.array([1.]), 'y_pix': np.array([2.])},
-                                    {'pixelsize_nm': 100.}))
-    assert s.state.locs['x_nm'][0] == 100
+def test_invalid_geometry_is_refused():
+    p, s = rois_of(table([0]))
     with pytest.raises(ValueError):
         p.set_geometry(-1)
     with pytest.raises(ValueError):
@@ -185,21 +147,17 @@ def pores():
 
 def test_find_rings_and_blobs_review_evaluate_histogram():
     locs, centers = pores()
-    p = ROIProject()
-    s = p.add_source(locs)
+    p, s = rois_of(locs)
     rois = p.find(s.id)
     assert len(rois) == 4
     for roi in rois:
         assert np.min(np.linalg.norm(centers - roi.center, axis=1)) < 15
     assert not p.find(s.id)  # repeat finding does not duplicate existing ROIs
-    assert not p.evaluate()['records']
-    for roi in rois:
-        roi.reviewed = True
     p.evaluate()
     assert [row['n_localizations'] for row in p.results()] == [30] * 4
     hist = histograms(p.results(), HistogramSettings(bins=10))
     assert hist['n_localizations']['counts'].sum() == 4
-    p.set_filters({'photons': [2000, None]})
+    set_bounds(p, {'photons': (2000, None)})
     assert not p.find(s.id)
     assert not p.results()
 
@@ -208,6 +166,7 @@ def test_a_failing_step_costs_its_columns_and_not_the_run():
     from smappy.plugins import Plugin, Result
 
     class Mean(Plugin):
+        changes_locs = False
         name, version = 'example', '1'
         per_region = True
 
@@ -217,8 +176,7 @@ def test_a_failing_step_costs_its_columns_and_not_the_run():
                 raise ValueError('empty ROI')
             return Result(values={'x': float(locs['x_nm'].mean())})
 
-    p = ROIProject()
-    s = p.add_source(table([0]))
+    p, s = rois_of(table([0]))
     empty = p.add_roi(s.id, [1000, 0])
     good = p.add_roi(s.id, [0, 0])
     step = Step(label='Mean', path='Test/Mean', plugin=Mean(), settings=None)
@@ -226,7 +184,7 @@ def test_a_failing_step_costs_its_columns_and_not_the_run():
     assert list(errors(run['records'][empty.id])) == ['Mean']
     assert not errors(run['records'][good.id])
     rows = p.results()
-    assert [row['roi_id'] for row in rows] == [good.id]
+    assert [row['roi_id'] for row in rows] == [good.number]
     assert rows[0]['x'] == 0.0
 
 
@@ -234,14 +192,13 @@ def test_two_steps_share_a_row_and_collisions_are_qualified():
     from smappy.plugins import Plugin, Result
 
     class Count(Plugin):
+        changes_locs = False
         per_region = True
 
         def run(self, ctx, settings):
             return Result(values={'n': len(ctx.selection), 'only_here': 1})
 
-    p = ROIProject()
-    s = p.add_source(table([0, 10]))
-    p.set_filters({})
+    p, s = rois_of(table([0, 10]), filters={})
     roi = p.add_roi(s.id, [0, 0])
     steps = [Step(label='first', path='T/C', plugin=Count(), settings=None),
              Step(label='second', path='T/C', plugin=Count(), settings=None)]
@@ -253,44 +210,32 @@ def test_two_steps_share_a_row_and_collisions_are_qualified():
     assert row['first.only_here'] == 1 and row['second.only_here'] == 1
 
 
-def test_a_script_can_trust_the_finder():
-    """Found candidates are unreviewed and evaluate() passes over them, so
-    the documented find-then-evaluate evaluated nothing; reviewed=True says
-    the script trusts the finder."""
+def test_found_rois_are_evaluated_without_a_review_step():
+    """find() then evaluate(), as a script writes it, measures what was
+    found: there is no review flag for evaluate() to pass over."""
     locs, _ = pores()
-    p = ROIProject()
-    s = p.add_source(locs)
-    p.find(s.id, reviewed=True)
+    p, s = rois_of(locs)
+    p.find(s.id)
     p.evaluate()
     assert len(p.results()) == 4
 
 
 def test_the_default_histograms_draw_every_number_the_statistics_gave():
     locs, _ = pores()
-    p = ROIProject()
-    s = p.add_source(locs)
-    p.find(s.id, reviewed=True)
+    p, s = rois_of(locs)
+    p.session.layers[0].show_grouped(True)
+    p.session.layers[0].locs                 # merged once: `n_in_group` is written
+    p.session.layers[0].show_grouped(False)
+    p.find(s.id)
     p.evaluate()
     drawn = histograms(p.results(), HistogramSettings(bins=10))
     assert set(drawn) == {'n_localizations', 'mean_photons', 'median_photons',
                           'photons_n0', 'mean_precision_nm', 'median_precision_nm',
-                          'sigma_c_nm'}
-
-
-def test_a_pixel_precision_is_averaged_under_a_pixel_name():
-    from smappy.plugins.statistics import statistics, statistics_values
-    locs = Localizations({'x_pix': np.zeros(3), 'y_pix': np.zeros(3),
-                          'xy_err_pix': np.array([0.1, 0.2, 0.3]),
-                          'photons': np.ones(3)}, {'units': 'pixel'})
-    values = statistics_values(locs, statistics(locs))
-    assert values['mean_precision_pix'] == pytest.approx(0.2)
-    assert 'mean_precision_nm' not in values
+                          'sigma_c_nm', 'on_time_frames', 'n_blinks'}
 
 
 def test_results_live_in_a_table_per_evaluation_and_runs_are_only_a_log():
-    p = ROIProject()
-    s = p.add_source(table([0, 10, 1000]))
-    p.set_filters({})
+    p, s = rois_of(table([0, 10, 1000]), filters={})
     a = p.add_roi(s.id, [0, 0])
     b = p.add_roi(s.id, [1000, 0])
     run = p.evaluate()
@@ -303,9 +248,7 @@ def test_results_live_in_a_table_per_evaluation_and_runs_are_only_a_log():
 
 
 def test_a_removed_roi_keeps_its_numbers_for_an_undo_but_not_in_the_file():
-    p = ROIProject()
-    s = p.add_source(table([0, 1000]))
-    p.set_filters({})
+    p, s = rois_of(table([0, 1000]), filters={})
     a = p.add_roi(s.id, [0, 0])
     b = p.add_roi(s.id, [1000, 0])
     p.evaluate()
@@ -321,9 +264,7 @@ def test_a_removed_roi_keeps_its_numbers_for_an_undo_but_not_in_the_file():
 
 
 def test_an_older_files_runs_with_their_records_become_tables():
-    p = ROIProject()
-    s = p.add_source(table([0, 10]))
-    p.set_filters({})
+    p, s = rois_of(table([0, 10]), filters={})
     roi = p.add_roi(s.id, [0, 0])
     step = {'label': 'old', 'plugin': 'X/Y', 'version': '1', 'parameters': {}}
     p.absorb_run({'id': 'r', 'pipeline': [step],
@@ -332,3 +273,24 @@ def test_an_older_files_runs_with_their_records_become_tables():
     assert p.runs[-1] == {'id': 'r', 'pipeline': [step], 'regions': 1}
     assert p.tables['old'].entry(roi.id) == {'values': {'n': 2}, 'signature': 's'}
     assert p.tables['old'].step(roi.id) == step
+
+
+def test_the_region_histograms_are_a_titled_grid_and_say_which_measures_had_no_values(
+        monkeypatch):
+    """Twelve panels stacked in one column overlapped and named nothing."""
+    from matplotlib.figure import Figure
+    from smappy.plugins import Context
+    from smappy.plugins.roi import Histograms, grid_shape, measure_title
+    rng = np.random.default_rng(0)
+    rows = [{"roi_id": i, "file_id": "", "radius_nm": float(rng.normal(50, 3)),
+             "n_corners": int(rng.integers(0, 9)), "angle_deg": float(rng.uniform(0, 45)),
+             "efficiency": float("nan")} for i in range(40)]
+    monkeypatch.setattr(Histograms, "rows", lambda self, ctx, s: (rows, None))
+    result = Histograms().run(Context(), HistogramSettings(bins=10))
+    assert "no values for efficiency" in result.text
+    figure = Figure()
+    result.plot.draw(figure)
+    titles = [a.get_title() for a in figure.axes if a.get_visible()]
+    assert titles == ["radius (nm)", "n corners", "angle (°)"]
+    assert grid_shape(12) == (3, 4) and grid_shape(4) == (2, 2)
+    assert measure_title("sigma_c_nm") == "sigma c (nm)"

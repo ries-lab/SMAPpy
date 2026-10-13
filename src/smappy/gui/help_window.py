@@ -196,7 +196,9 @@ class HelpWindow(QMainWindow):
             "setting means; the settings table is read off the plugin itself, "
             "so it is always the one you are looking at.  <i>Panels</i> are the "
             "tabs and windows that are not plugins -- the Render tab, the ROI "
-            "manager, the 3D view -- with their controls explained.</p><p>The "
+            "manager, the 3D view -- with their controls explained, and the "
+            "<i>Glossary</i>, the words of the field with the other names they "
+            "go by.</p><p>The "
             "<b>?</b> in a plugin's or a section's title bar, or F1, opens its "
             "page here.</p>")
 

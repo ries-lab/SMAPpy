@@ -108,11 +108,10 @@ def session_state(session, gui_state=None, view=None) -> Dict[str, Any]:
     for layer in session.layers:
         if layer.is_image:
             continue
-        ranges = layer.state.sets["ungrouped"].filter.ranges
+        ranges = layer.ranges
         layers.append({
             "name": layer.name, "visible": bool(layer.visible),
             "grouped": bool(layer.grouped),
-            "group_settings": _plain(layer.group_settings),
             "bounds": {f: [lo, hi] for f, (lo, hi) in ranges.items()},
             "files": None if layer.files is None else list(layer.files),
             "render": _plain(layer.state.settings),
@@ -124,6 +123,7 @@ def session_state(session, gui_state=None, view=None) -> Dict[str, Any]:
         "files": [_plain(f.to_dict()) for f in session.files],
         "results": _plain(session.results),
         "layers": layers,
+        "group_settings": _plain(session.group_settings),
         "view": _plain(view) if view is not None else None,
         "gui_state": _plain(gui_state) if gui_state is not None else None,
         # what the copy was taken from, for its log
@@ -296,21 +296,31 @@ def receive(path) -> Tuple[Localizations, Dict[str, Any]]:
 
 
 def take(path, group_settings=None, progress=None):
-    """`receive`, and link the table as opening a file would:
-    ``(locs, state, grouped)``.  The slow half, for a worker thread."""
-    from .session import DEFAULT_GROUP_SETTINGS, GROUPED_BY_DEFAULT
+    """`receive`, and link the table if a layer handed over shows merged
+    blinks: ``(locs, state, grouped)``.  The slow half, for a worker thread
+    -- linked here and not when the layers are read, so the new window does
+    not wait for it, and not at all when no layer shows blinks."""
+    from .session import DEFAULT_GROUP_SETTINGS
     locs, state = receive(path)
     grouped = None
-    if GROUPED_BY_DEFAULT and len(locs) and "frame" in locs:
-        from .group import GroupSettings, group as link
-        first = next(iter(state.get("layers") or []), {})
-        settings = (_from_plain(GroupSettings, first["group_settings"])
-                    if first.get("group_settings")
-                    else group_settings or DEFAULT_GROUP_SETTINGS)
+    wanted = any(c.get("grouped") for c in state.get("layers") or [])
+    if wanted and len(locs) and "frame" in locs:
+        from .group import group as link
+        settings = _group_settings(state, group_settings or DEFAULT_GROUP_SETTINGS)
         grouped, _ = link(locs, settings,
-                          progress=(lambda text, _f: progress(f"Grouper: {text}"))
+                          progress=(lambda text, _f: progress(f"merging blinks: {text}"))
                           if progress else None)
     return locs, state, grouped
+
+
+def _group_settings(state: Dict[str, Any], default):
+    """The link settings the state was taken with: the session's, or -- from
+    an instance that kept them per layer -- the first layer's."""
+    from .group import GroupSettings
+    saved = state.get("group_settings")
+    if not saved:
+        saved = next(iter(state.get("layers") or []), {}).get("group_settings")
+    return _from_plain(GroupSettings, saved) if saved else default
 
 
 def apply_state(session, locs: Localizations, state: Dict[str, Any],
@@ -321,11 +331,14 @@ def apply_state(session, locs: Localizations, state: Dict[str, Any],
     the ROI manager's project and the name come from the metadata the same
     way; then the files, results and layers are put back as they were.
     """
-    from .group import GroupSettings
     from .io.formats import FileInfo
     from .render import DisplaySettings, RenderSettings
     identity = state.get("identity") or {}
     name = identity.get("name") or "snapshot"
+    # before the table: the grouped table handed in was linked with these
+    settings = _group_settings(state, session.group_settings)
+    if settings != session.group_settings:
+        session.set_group_settings(settings)
     session.add_file(locs, FileInfo(name=name, path="", format="snapshot",
                                     n=len(locs)), grouped=grouped)
     files = [FileInfo(**{k: v for k, v in f.items() if k != "n"})
@@ -353,8 +366,6 @@ def apply_state(session, locs: Localizations, state: Dict[str, Any],
     for layer, config in zip(layers, configs):
         layer.name = config.get("name") or layer.name
         layer.visible = bool(config.get("visible", True))
-        if config.get("group_settings"):
-            layer.group_settings = _from_plain(GroupSettings, config["group_settings"])
         if config.get("render"):
             layer.state.settings = _from_plain(RenderSettings, config["render"])
         if config.get("display"):

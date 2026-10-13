@@ -580,8 +580,8 @@ def run_one(cls, job: Job, item: Item, report: Callable[[str], None] = lambda t:
         runner.preflight_policy = job.preflight
         result = runner.run(session.context(0, progress=report), settings)
         session.apply(runner, result)
-        if (result.data or {}).get("path"):
-            fitted = Path(result.data["path"])
+        if result.written:
+            fitted = Path(result.written)
         if job.output.locs:
             target = folder / f"{_stem(item.path)}{job.output.suffix}.h5"
             session.save(target, gui_state=False)
@@ -597,7 +597,9 @@ def run_one(cls, job: Job, item: Item, report: Callable[[str], None] = lambda t:
         for step in (result.data or {}).get("steps", []):
             done = results.get(step["key"])
             record["steps"].append({**chains._plain({k: v for k, v in step.items()}),
-                                    "data": json_safe(done.data if done else {})})
+                                    "data": json_safe(done.data if done else {}),
+                                    **({"written": done.written}
+                                       if done is not None and done.written else {})})
         record["n_localizations"] = len(session.locs)
         if fitted is not None:
             record["output"]["fitted"] = str(fitted)

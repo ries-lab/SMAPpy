@@ -14,7 +14,6 @@ expandable section.
 """
 from __future__ import annotations
 
-import os
 import time
 from dataclasses import asdict, dataclass, field, is_dataclass, replace
 from datetime import datetime
@@ -26,12 +25,13 @@ import numpy as np
 from ..detect import AbsoluteCutoff, DoGFilter, DynamicCutoff, GaussFilter, PeakFinder
 from ..drift import DriftSettings
 from ..locs import Localizations
-from ..metadata import CameraMetadata
+from ..metadata import DEFAULT_PIXELSIZE_NM, CameraMetadata
 from ..calibrate.transform import RegisterSettings
 from ..pipeline import FitSettings, fit_stack, provenance
 from ..psf import GaussianPSF, SplinePSF
 from ..rcc import RCCSettings
-from . import Context, Notice, ParamInfo, Plot, Plugin, Result, param, register
+from . import (Context, FormState, Notice, ParamInfo, Plot, Plugin, PreflightChoice,
+               PreflightQuestion, Result, param, register)
 from .assign_colors import AssignColorSettings
 
 # a simulation's recipe opens as an acquisition too (`smappy.simulate.source`)
@@ -70,18 +70,16 @@ class CameraSettings:
     # the file whose camera carries no tag to recognise it by
     camera: str = param("", label="camera", choices=lambda: _camera_choices(),
                         help="auto: identified from the file's metadata")
-    preset: str = param("", label="preset", choices=lambda: _preset_choices(),
-                        help="a camera YAML; fills the fields below")
     conversion: Optional[float] = param(None, unit="e-/ADU", min=0,
                                         help="photoelectrons per count; auto: "
                                              "from the file or the camera "
                                              "database")
     offset: Optional[float] = param(None, unit="ADU",
                                     help="the count of a pixel that saw no light")
-    pixelsize_um: Optional[float] = param(None, label="pixel size", unit="um", min=0,
+    pixelsize_um: Optional[float] = param(None, label="pixel size", unit="µm", min=0,
                                           help="the pixel's size in the sample, "
                                                "after the magnification")
-    pixelsize_y_um: Optional[float] = param(None, label="pixel size y", unit="um",
+    pixelsize_y_um: Optional[float] = param(None, label="pixel size y", unit="µm",
                                             min=0, advanced=True,
                                             help="auto: square pixels, the same "
                                                  "as in x")
@@ -99,22 +97,30 @@ class CameraSettings:
     def overrides(self) -> Dict[str, Any]:
         """What the user set, to win over the file's metadata."""
         out = {k: v for k, v in asdict(self).items()
-               if k not in ("preset", "camera", "pixelsize_y_um") and v is not None}
+               if k not in ("camera", "pixelsize_y_um") and v is not None}
         if self.pixelsize_y_um and self.pixelsize_um:
             out["pixelsize_um"] = [self.pixelsize_um, self.pixelsize_y_um]
         return out
 
-    def resolve(self, source) -> CameraMetadata:
-        """The complete camera: the file's metadata under the user's values."""
-        overrides = self.overrides()
-        if self.preset:
-            preset = asdict(CameraMetadata.from_yaml(self.preset))
-            overrides = {**{k: v for k, v in preset.items() if v is not None}, **overrides}
-        if source is not None:
-            from ..io.tiff import camera_metadata
-            return camera_metadata(source, overrides=overrides, camera=self.camera)
-        cam = CameraMetadata.from_dict(overrides)
-        cam.require()
+    def resolution(self, source):
+        """Everything known about the camera behind ``source``, and from where.
+
+        The one place these fields meet a file: the camera database, the
+        file's own metadata, then the fields set here, each winning over the
+        one before (`io.tiff.resolve_camera`).  The fitters, their parameter
+        view, the camera editor and the uiPSF calibration all come through
+        here, so that none of them can disagree with the fit about a camera.
+        """
+        from ..io.tiff import resolve_camera
+        return resolve_camera(source, camera=self.camera, overrides=self.overrides())
+
+    def resolve(self, source, require: bool = True) -> CameraMetadata:
+        """The camera the fit uses: `resolution`'s values, or with no file
+        these fields alone.  Complete unless ``require`` is False."""
+        cam = (CameraMetadata.from_dict(self.overrides()) if source is None
+               else self.resolution(source).camera_metadata())
+        if require:
+            cam.require()
         return cam
 
 
@@ -126,7 +132,7 @@ class DetectionSettings:
                         help="what the frame is smoothed with before maxima are "
                              "looked for; the difference of Gaussians also "
                              "removes a smooth background")
-    sigma: float = param(1.2, label="filter sigma", unit="pix", min=0.1,
+    sigma: float = param(1.2, label="filter sigma", unit="px", min=0.1,
                          help="the width of the smoothing: about the PSF's")
     cutoff_mode: str = param("dynamic", label="cutoff",
                              choices=(("dynamic", "dynamic (x noise)"),
@@ -135,6 +141,11 @@ class DetectionSettings:
                                   "filtered image; absolute: a fixed value")
     cutoff: float = param(1.7, label="cutoff value", min=0,
                           help="lower finds dimmer molecules, and more noise")
+
+    # what *cutoff value* becomes when *cutoff* is switched (`_FitPlugin.react`):
+    # the two read the number on different scales, so 1.7 noise widths kept
+    # as 1.7 photons would find every pixel
+    CUTOFF_DEFAULTS = {"dynamic": 1.7, "absolute": 20.0}
 
     def finder(self, n_threads: int = 0) -> PeakFinder:
         image_filter = (DoGFilter(self.sigma) if self.filter == "dog"
@@ -147,7 +158,7 @@ class DetectionSettings:
 @dataclass
 class GaussianModelSettings:
     """A free-width Gaussian: x, y, photons, background and sigma."""
-    sigma: float = param(1.2, label="start sigma", unit="pix", min=0.1,
+    sigma: float = param(1.2, label="start sigma", unit="px", min=0.1,
                          help="the PSF width the fit starts from; it is fitted")
     elliptical: bool = param(False, help="fit sigma_x and sigma_y separately")
 
@@ -182,9 +193,9 @@ class SplineModelSettings:
             lateral = min(calibration.shape[1:])
             if roisize > lateral - 2:
                 raise ValueError(
-                    f"the ROI ({roisize} px) must be at least 2 px smaller than "
-                    f"the calibration ({lateral} px across): make the ROI "
-                    f"smaller, or the calibration's ROI size larger")
+                    f"the fit box ({roisize} px) must be at least 2 px smaller than "
+                    f"the calibration ({lateral} px across): make the fit box "
+                    f"smaller, or the calibration's bead box larger")
         return SplinePSF(calibration, z_start_nm=float(self.z_start_nm))
 
 
@@ -199,7 +210,7 @@ class OutputSettings:
     raw_frames: int = param(50, label="raw frames", min=0, advanced=True,
                             help="camera frames kept with the table, in "
                                  "photons, after their average; 0: none")
-    show_tags: str = param("PIZStage", label="show image tags",
+    show_tags: str = param("PIZStage", label="show image tags", advanced=True,
                            help="image tags drawn when the fit is done, "
                                 "names or parts of names; empty: none "
                                 "(Analysis/Process/Image Tags)")
@@ -260,7 +271,7 @@ class FinishSettings:
     assign_colors: bool = param(True, label="assign colours",
                                 help="split the localizations by their photon "
                                      "ratio and write `channel` "
-                                     "(Analysis/Dual-Color/AssignColors)")
+                                     "(Analysis/Dual-colour/Assign colours)")
     drift: str = param("none", label="drift correction",
                        choices=(("none", "none"), ("rcc", "RCC"),
                                 ("comet", "COMET")),
@@ -293,22 +304,6 @@ class FinishSettings:
             from .assign_colors import AssignColors
             out.append((AssignColors(), self.colors))
         return out
-
-
-def finish_params() -> Dict[str, ParamInfo]:
-    """The finishing plugins' own labels, under ``finish``.
-
-    Read off the plugins rather than copied out: the fields are the same
-    numbers with the same meaning, and a second vocabulary for them -- "time
-    windows" here, ``n_timepoints`` in the Analysis tab -- would be a way of
-    getting one of the two wrong.  `AssignColorSettings` declares its own with
-    `param` and needs nothing.
-    """
-    from .drift_comet import CometDrift
-    from .drift_rcc import RCCDrift
-    out = {f"finish.comet.{name}": info for name, info in CometDrift.params.items()}
-    out.update({f"finish.rcc.{name}": info for name, info in RCCDrift.params.items()})
-    return out
 
 
 @dataclass
@@ -362,22 +357,6 @@ def finish_localizations(locs: Localizations, settings: FinishSettings,
     return finished
 
 
-FIT_PARAMS = {
-    "roisize": ParamInfo(label="ROI size", unit="pix", min=5,
-                         help="the square cut around each candidate and fitted"),
-    "iterations": ParamInfo(min=1, advanced=True,
-                            help="the most steps a fit may take"),
-    "max_block_rois": ParamInfo(label="ROIs per fit", min=100, advanced=True,
-                                help="how many are collected before they are "
-                                     "fitted together; speed and memory only"),
-    "n_threads": ParamInfo(label="threads", min=0, help="0: one per core", advanced=True),
-    "max_fit_distance": ParamInfo(label="max fit distance", unit="pix", advanced=True,
-                                  help="reject fits that ran off; auto: keep all"),
-    "output_unit": ParamInfo(label="units", choices=("nm", "pixel", "pixel+nm"),
-                             help="the unit of the positions in the table"),
-}
-
-
 def _camera_choices() -> List:
     """The cameras in the database, for a file that identifies none."""
     from ..camera_db import database
@@ -388,20 +367,6 @@ def _camera_choices() -> List:
     return [("", "auto")] + [(name, name) for name in names]
 
 
-def _preset_choices() -> List:
-    """Camera YAMLs: ``~/.smappy/cameras`` and the checkout's ``examples``."""
-    dirs = [Path.home() / ".smappy" / "cameras",
-            Path(__file__).resolve().parents[3] / "examples"]
-    extra = os.environ.get("SMAPPY_CAMERAS")
-    if extra:
-        dirs.insert(0, Path(extra))
-    choices = [("", "-")]
-    for d in dirs:
-        if d.is_dir():
-            choices += [(str(p), p.stem) for p in sorted(d.glob("*.yaml"))]
-    return choices
-
-
 def camera_resolution(settings):
     """The camera behind a fitter's settings: the database, the file, the
     user's fields -- or None when the source cannot be opened.
@@ -410,22 +375,17 @@ def camera_resolution(settings):
     on what a fitter is set to fit without the fitter that is set to fit it.
     """
     try:
-        from ..io.tiff import resolve_camera
-        source = _open(settings.source, watch=False)
-        overrides = settings.camera.overrides()
-        if settings.camera.preset:
-            preset = asdict(CameraMetadata.from_yaml(settings.camera.preset))
-            overrides = {**{k: v for k, v in preset.items() if v is not None},
-                         **overrides}
-        return resolve_camera(source, camera=settings.camera.camera,
-                              overrides=overrides)
+        return settings.camera.resolution(_open(settings.source, watch=False))
     except Exception:
         return None
 
 
 # -------------------------------------------------------------------- wrappers
 class _FitPlugin(Plugin):
-    """What both fitters share: opening the source, streaming, saving."""
+    """What every fitter shares: opening the source, the camera, detection,
+    streaming, saving.  The four fitters are thin subclasses that say which
+    model they fit and, for two channels (`_TwoChannelFit`), where the
+    registration comes from."""
 
     changes_locs = True
 
@@ -496,7 +456,7 @@ class _FitPlugin(Plugin):
         path = settings.source.path
         if not path:
             return None
-        key = (path, settings.camera.preset, settings.camera.camera, tuple(
+        key = (path, settings.camera.camera, tuple(
             getattr(settings.camera, name) for name in self.CAMERA_FIELDS),
             settings.camera.pixelsize_y_um, revision())
         if getattr(self, "_camera_key", None) == key:
@@ -507,7 +467,34 @@ class _FitPlugin(Plugin):
         self._camera_key, self._camera_value = key, resolved
         return resolved
 
-    def notice(self, settings) -> Optional[Notice]:
+    def describe(self, ctx: Optional[Context], settings) -> FormState:
+        """The database's cameras, read again (one may have been added); what
+        the camera fields on *auto* will be; and a file whose camera the
+        database does not know.  Best effort: working these out opens the
+        file, which may be missing, half-written or not an image at all, and
+        none of that is worth an error in a field still being typed."""
+        state = FormState(choices={"camera.camera": _camera_choices()})
+        try:
+            state.hints = self._hints(settings) or {}
+        except Exception:
+            pass
+        try:
+            state.notice = self._notice(settings)
+        except Exception:
+            pass
+        try:
+            state.titles = {"camera": self._camera_title(settings)}
+        except Exception:
+            pass
+        if getattr(settings, "finish", None) is not None:
+            from ..drift import merge_values
+            dx, dt = merge_values(ctx.session if ctx is not None else None)
+            for part in ("rcc", "comet"):
+                state.hints[f"finish.{part}.group_dx_nm"] = dx
+                state.hints[f"finish.{part}.group_dt"] = dt
+        return state
+
+    def _notice(self, settings) -> Optional[Notice]:
         """A file whose camera the database does not know, said while it is
         chosen, with the way to add it.
 
@@ -537,6 +524,9 @@ class _FitPlugin(Plugin):
                     if device else "this file names no camera")
             text += (f": {', '.join(missing)} must be typed in below."
                      if missing else ".")
+            if "pixel size" in missing:
+                text += (f" Without a pixel size the nm positions use an "
+                         f"assumed {DEFAULT_PIXELSIZE_NM:g} nm.")
             return Notice(text, "Add camera...", "camera editor")
         modal = [name for name, parameter in resolved.camera.parameters.items()
                  if parameter.state]
@@ -545,13 +535,69 @@ class _FitPlugin(Plugin):
             text = f"{resolved.camera_name}: this readout mode is not in the camera database"
             text += (f", so {', '.join(unknown)} "
                      f"{'is' if len(unknown) == 1 else 'are'} not known." if unknown
-                     else "; the values typed below are used.")
+                     else "; the values below are used.")
             return Notice(text, "Add readout mode...", "camera editor")
         return None
 
-    def choices(self, ctx: Context, settings) -> Optional[Dict[str, Any]]:
-        """The database's cameras, read again: one may have been added."""
-        return {"camera.camera": _camera_choices()}
+    def _camera_title(self, settings) -> str:
+        """The camera part's title while it is folded: which camera, and the
+        numbers that turn counts into photons and pixels into nm."""
+        resolved = self.resolution(settings)
+        camera = (resolved.camera_metadata() if resolved is not None
+                  else settings.camera.resolve(None, require=False))
+        bits = []
+        name = ((resolved.camera_name or resolved.values.get("camera_name"))
+                if resolved is not None else "")
+        if name:
+            bits.append(str(name))
+        if camera.conversion is not None:
+            bits.append(f"{camera.conversion:.3g} e-/ADU")
+        sizes = camera.pixelsize_um_xy
+        if sizes is not None:
+            bits.append(f"{1000 * sizes[0]:.4g} nm")
+        head = f"camera: {settings.camera.camera or 'auto'}"
+        return head + (" \u2013 " + ", ".join(bits) if bits else "")
+
+    def unknown_camera(self, settings) -> Optional[str]:
+        """The question at Run for a camera that is in no database and
+        whose numbers nobody typed, or None.
+
+        The notice (`_notice`) says it while the file is chosen; this asks
+        once more at Run, because a fit on a guessed gain and offset gives
+        photon counts and precisions that are wrong by the factor of the
+        guess, and nothing in the table says so afterwards.  Only while a
+        value the fit needs comes from nowhere -- not from the database, the
+        file or the form: once typed, or once the camera is added, no
+        question.  Never for a simulation, which knows its camera.
+        """
+        from ..io.tiff import SIMULATED
+        if settings.camera.camera:
+            return None
+        resolved = self.resolution(settings)
+        if resolved is None or resolved.camera is not None:
+            return None
+        origin = (resolved.sources or {}).get("camera_name")
+        if origin is not None and (origin.kind, origin.detail) == SIMULATED:
+            return None
+        if not resolved.missing:
+            return None
+        device = resolved.values.get("camera_name")
+        which = f"This camera ({device})" if device else "This camera"
+        return (f"{which} is not in the camera database: its gain and offset "
+                "are guesses. Add it to the camera manager?\n\n"
+                "Or cancel and type them into the camera fields.")
+
+    def preflight(self, ctx: Context, settings):
+        """A camera the database does not know, whose numbers are guesses:
+        the editor that adds it, or Cancel (the default) to type them in."""
+        text = self.unknown_camera(settings)
+        if text is None:
+            return None
+        return PreflightQuestion(text, run_label="", choices=(
+            PreflightChoice("Open camera editor", settings=settings,
+                            window="camera editor",
+                            help="add the camera, with its conversion and "
+                                 "offset, so every file from it is read right"),))
 
     def _camera(self, settings) -> Optional[CameraMetadata]:
         """The camera as it stands: the file's metadata under the user's values.
@@ -562,7 +608,7 @@ class _FitPlugin(Plugin):
         resolved = self.resolution(settings)
         return None if resolved is None else resolved.camera_metadata()
 
-    def hints(self, settings) -> Optional[Dict[str, Any]]:
+    def _hints(self, settings) -> Optional[Dict[str, Any]]:
         """What the camera fields left on *auto* will actually be."""
         camera = self._camera(settings)
         if camera is None:
@@ -576,6 +622,14 @@ class _FitPlugin(Plugin):
         return hints
 
     def react(self, changed: str, settings) -> Optional[Dict[str, Any]]:
+        if changed.endswith("cutoff_mode"):
+            # the number is on the other mode's scale: its default instead
+            prefix = changed[:-len("cutoff_mode")]
+            part = settings
+            for name in filter(None, prefix.split(".")):
+                part = getattr(part, name)
+            value = DetectionSettings.CUTOFF_DEFAULTS.get(part.cutoff_mode)
+            return None if value is None else {prefix + "cutoff": value}
         if changed == "source.path" and settings.source.path:
             updates: Dict[str, Any] = {}
             # the output follows the source, but only while it is ours: a path
@@ -584,19 +638,12 @@ class _FitPlugin(Plugin):
             if settings.output.path in ("", getattr(self, "_default_output", None)):
                 updates["output.path"] = default
                 self._default_output = default
-            try:
-                source = _open(settings.source, watch=False)
-                from ..io.tiff import camera_metadata
-                cam = camera_metadata(source, require=False)
-            except Exception:
-                return updates or None
-            updates.update({f"camera.{k}": v for k, v in asdict(cam).items()
-                            if k in self.CAMERA_FIELDS and v is not None})
-            return updates
-        if changed == "camera.preset" and settings.camera.preset:
-            cam = CameraMetadata.from_yaml(settings.camera.preset)
-            return {f"camera.{k}": v for k, v in asdict(cam).items()
-                    if k in self.CAMERA_FIELDS and v is not None}
+            # The camera is *not* copied in: a field on auto shows the file's
+            # value as a grey hint (`describe`) and stays auto, so the run reads
+            # the file it is given.  Copying turned the file's numbers into the
+            # user's -- they then overrode a later *camera* choice, and the
+            # next file inherited the last one's values.
+            return updates or None
         return None
 
     def finish(self, ctx: Context, settings, locs: Localizations) -> Finished:
@@ -608,6 +655,11 @@ class _FitPlugin(Plugin):
         wanted = getattr(settings, "finish", None)
         if wanted is None:
             return Finished(locs)
+        # the drift steps merge blinks as the session does, as they would
+        # when run from the Analysis tab (`drift.merge_from_session`)
+        from ..drift import merge_from_session
+        wanted = replace(wanted, rcc=merge_from_session(wanted.rcc, ctx.session),
+                         comet=merge_from_session(wanted.comet, ctx.session))
         return finish_localizations(locs, wanted, ctx.report)
 
     def back_projected(self, settings, camera: CameraMetadata, candidates):
@@ -661,12 +713,6 @@ class _FitPlugin(Plugin):
         try:
             model = self._model_telling(ctx, settings, camera)
             engine = self.engine(settings, camera, finder, model)
-            if camera.pixelsize_um is None:
-                # pixels, then: a preview is about detection and shape, and
-                # nm coordinates would only fail on the missing pixel size
-                engine.settings = replace(engine.settings, output_unit="pixel")
-                ctx.warn("no pixel size: the preview is in pixels, and a run "
-                         "will refuse to start without one")
             engine.push(raw[None], first_frame=index)
             locs = engine.flush()
         except Exception as error:
@@ -680,20 +726,15 @@ class _FitPlugin(Plugin):
             lines.append("not fitted -- " + trouble)
         text = "; ".join(lines)
 
-        unit = "nm" if (locs is not None and "x_nm" in locs.columns) else "pix"
         fitted = None
         if locs is not None and len(locs):
-            scale = (1000.0*float(camera.pixelsize_um)
-                     if unit == "nm" and camera.pixelsize_um else 1.0)
-            names = ("x_nm", "y_nm") if unit == "nm" else ("x_pix", "y_pix")
-            # both columns are chip coordinates -- x_pix has the camera ROI
-            # offset added when it is made, x_nm inherits it -- while the image
-            # drawn is the ROI, so the offset comes off in either unit.  Taking
-            # it off only for nm put every fit of a pixel-unit preview one ROI
-            # offset away, onto the other half of a split frame.
+            # drawn over the frame, so in its pixels: a chip coordinate (the
+            # camera ROI offset added when it is made) while the image drawn
+            # is the ROI, so the offset comes off
+            from ..locs import in_pixels
             offset = camera.roi_offset
-            fitted = (np.asarray(locs[names[0]])/scale-offset[0],
-                      np.asarray(locs[names[1]])/scale-offset[1])
+            x, y = in_pixels(locs, "x_pix", "y_pix")
+            fitted = (x - offset[0], y - offset[1])
 
         def plot(figure) -> None:
             """Detection on the left, the fit on the right.
@@ -787,7 +828,11 @@ class _FitPlugin(Plugin):
                                 None if src.live else src.start + total)
         blocks = keeper.watch(blocks)
 
-        ctx.emit("start", {"extent": camera_extent(camera, source.shape, fit.output_unit),
+        if camera.pixelsize_um is None:
+            ctx.warn(f"no pixel size: x_nm and y_nm use an assumed "
+                     f"{DEFAULT_PIXELSIZE_NM:g} nm per pixel, which the table "
+                     f"records, so they divide back into camera pixels exactly")
+        ctx.emit("start", {"extent": camera_extent(camera, source.shape),
                            "path": out})
         record = provenance(camera, finder, model, fit, source=src.path)
         record["acquisition"] = acquisition(source)
@@ -880,7 +925,7 @@ class _FitPlugin(Plugin):
             record["history"] = finished.locs.metadata.get("history") or []
             from ..io.hdf5 import save_localizations
             save_localizations(out, finished.locs, record)
-        raw = keeper.image(camera, fit.output_unit, source=str(src.path),
+        raw = keeper.image(camera, source=str(src.path),
                            name=f"{Path(str(src.path)).name}: raw frames")
         if raw is not None and out is not None:
             # last, after any rewrite above: that one starts the file again
@@ -901,8 +946,11 @@ class _FitPlugin(Plugin):
             if shown:
                 text = "\n".join([text, summary(record["frame_tags"], shown)])
         return Result(locs=finished.locs, text=text, plots=plots,
-                      data={"stats": stats, "path": out, "stopped": stopped,
-                            "images": [raw] if raw is not None else []},
+                      # the file holds this very table: written as it came,
+                      # and again after the finishing steps if they changed it
+                      data={"stats": stats},
+                      written=None if out is None else str(out), saved=out is not None,
+                      stopped=stopped, images=[raw] if raw is not None else [],
                       settings=settings)
 
 
@@ -928,53 +976,107 @@ def _open(src: SourceSettings, watch: bool, stop_event=None):
     return open_stack(src.path)
 
 
+# ------------------------------------------------------------------ the forms
+#
+# Every fitter's form is the same parts in the same order -- the frames, the
+# camera, detection, the PSF model, the fit, the output -- and only the model
+# is each fitter's own.  The parts are declared once, in halves rather than in
+# one base: a dataclass lays out its bases' fields first, the most basic base
+# first, so a part that sits *between* two of them -- the 2D two-colour fit's
+# *transform* -- needs a half on either side.  A fitter that declares `model`
+# again keeps it where the first half put it.  Saved workspaces and chains
+# name the fields by these paths (``fit.roisize``), so they are the contract.
 @dataclass
-class GaussianFitSettings:
+class _Reading:
+    """The first half of every fitter's form: what is read and found."""
     source: SourceSettings = field(default_factory=SourceSettings)
-    camera: CameraSettings = field(default_factory=CameraSettings)
+    # folded, its title a one-line summary (`_FitPlugin._camera_title`): the
+    # camera is read far more often than it is set
+    camera: CameraSettings = param(default_factory=CameraSettings, label="camera",
+                                   collapsed=True)
     detection: DetectionSettings = field(default_factory=DetectionSettings)
+    model: Any = None                    # each fitter's own part
+
+
+@dataclass
+class _Writing:
+    """The second half: how it is fitted and where it goes."""
+    fit: FitSettings = field(default_factory=FitSettings)
+    output: OutputSettings = field(default_factory=OutputSettings)
+
+
+@dataclass
+class _Finishing:
+    """What a two-channel fit does once its last frame is in."""
+    finish: FinishSettings = param(default_factory=FinishSettings,
+                                   label="after the fit")
+
+
+@dataclass
+class GaussianFitSettings(_Writing, _Reading):
     model: GaussianModelSettings = field(default_factory=GaussianModelSettings)
-    fit: FitSettings = field(default_factory=lambda: FitSettings(output_unit="nm"))
-    output: OutputSettings = field(default_factory=OutputSettings)
 
 
 @dataclass
-class SplineFitSettings:
-    source: SourceSettings = field(default_factory=SourceSettings)
-    camera: CameraSettings = field(default_factory=CameraSettings)
-    detection: DetectionSettings = field(default_factory=DetectionSettings)
+class SplineFitSettings(_Writing, _Reading):
     model: SplineModelSettings = field(default_factory=SplineModelSettings)
-    fit: FitSettings = field(default_factory=lambda: FitSettings(output_unit="nm"))
-    output: OutputSettings = field(default_factory=OutputSettings)
+
+
+# The links two channels can share, declared once for both two-channel
+# models.  Fields made by functions rather than inherited, for the reason the
+# forms are in halves: each model shows its own first field (the calibration,
+# the start sigma) above them, and its own fifth link where it belongs.
+def _link_xy():
+    return param(True, label="link x, y",
+                 help="one position for both channels, through the "
+                      "registration; unlink only to check the transform")
+
+
+def _link_photons(more: str = ""):
+    return param(False, label="link photons",
+                 help="off for two colours -- the photon ratio is what tells "
+                      "the dyes apart" + more)
+
+
+def _link_background():
+    return param(False, label="link background", advanced=True,
+                 help="one background for both halves; off: each half fits "
+                      "its own")
+
+
+def _photon_ratio(auto: str):
+    return param(None, label="photon ratio", min=0, advanced=True,
+                 help="secondary / main, used when the photons are linked; "
+                      "auto: " + auto)
+
+
+class _LinkedChannels:
+    """What the two-channel models share beyond their fields."""
+
+    # the field that links the model's own fifth parameter: z, or the width
+    FIFTH_LINK = ""
+
+    def shared(self) -> tuple:
+        """Which of x, y, photons, background and the fifth parameter both
+        channels fit as one."""
+        return (self.link_xy, self.link_xy, self.link_photons,
+                self.link_background, getattr(self, self.FIFTH_LINK))
 
 
 @dataclass
-class DualModelSettings:
+class DualModelSettings(_LinkedChannels):
     """A dual-colour calibration, and which parameters the channels share."""
+    FIFTH_LINK = "link_z"
     calibration: str = param("", label="calibration", kind="open_file",
                              file_filter="Dual-colour calibration (*.h5 *.hdf5)",
                              help="from Bead calibration in *Dual colour* mode")
-    link_xy: bool = param(True, label="link x, y",
-                          help="one position for both channels, through the "
-                               "registration; unlink only to check the transform")
+    link_xy: bool = _link_xy()
     link_z: bool = param(True, label="link z",
                          help="one z for both channels: this is the sqrt(2)")
-    link_photons: bool = param(False, label="link photons",
-                               help="off for two colours -- the photon ratio is "
-                                    "what tells the dyes apart; on for biplane")
-    link_background: bool = param(False, label="link background", advanced=True,
-                                  help="one background for both halves; off: "
-                                       "each half fits its own")
-    photon_ratio: Optional[float] = param(None, label="photon ratio", min=0,
-                                          advanced=True,
-                                          help="secondary / main, used when the "
-                                               "photons are linked; auto: the "
-                                               "split the calibration's two "
-                                               "PSFs carry")
-
-    def shared(self) -> tuple:
-        return (self.link_xy, self.link_xy, self.link_photons,
-                self.link_background, self.link_z)
+    link_photons: bool = _link_photons("; on for biplane")
+    link_background: bool = _link_background()
+    photon_ratio: Optional[float] = _photon_ratio(
+        "the split the calibration's two PSFs carry")
 
     def load(self):
         from ..calibrate.dual import load_dual_color_calibration
@@ -992,24 +1094,18 @@ class DualModelSettings:
 
 
 @dataclass
-class DualSplineFitSettings:
-    source: SourceSettings = field(default_factory=SourceSettings)
-    camera: CameraSettings = field(default_factory=CameraSettings)
-    detection: DetectionSettings = field(default_factory=DetectionSettings)
+class DualSplineFitSettings(_Finishing, _Writing, _Reading):
     model: DualModelSettings = field(default_factory=DualModelSettings)
-    fit: FitSettings = field(default_factory=lambda: FitSettings(output_unit="nm"))
-    output: OutputSettings = field(default_factory=OutputSettings)
-    finish: FinishSettings = param(default_factory=FinishSettings,
-                                   label="after the fit")
 
 
+# --------------------------------------------------------------- the fitters
 @register("Localize/Gaussian 2D")
 class GaussianFit(_FitPlugin):
     description = "Detect and fit with a free-width Gaussian PSF: x, y, photons, sigma."
     Settings = GaussianFitSettings
     # 2: the camera's read noise in the likelihood (1 e- without EM gain)
-    version = "2"
-    params = {f"fit.{k}": v for k, v in FIT_PARAMS.items()}
+    # 3: nm columns only; the pixel ones (`x_pix`, ...) are no longer written
+    version = "3"
 
     def model(self, settings, camera):
         return settings.model.model()
@@ -1021,15 +1117,117 @@ class SplineFit(_FitPlugin):
                    "calibration: adds z.")
     Settings = SplineFitSettings
     # 2: the camera's read noise in the likelihood (1 e- without EM gain)
-    version = "2"
-    params = GaussianFit.params
+    # 3: a SMAP calibration is x-flipped only if SMAP flipped its beads
+    #    (`EMon`), no longer for any non-zero `emmirror` ("no mirror" is 2)
+    # 4: nm columns only; the pixel ones (`x_pix`, ...) are no longer written
+    version = "4"
 
     def model(self, settings, camera):
         return settings.model.model(camera, roisize=settings.fit.roisize)
 
 
+class _TwoChannelFit(_FitPlugin):
+    """What both two-channel fitters share: one emitter, both halves.
+
+    Candidates are found over the whole frame, each half thresholded on its
+    own, and combined; each gets an ROI in both halves, and the pair is fitted
+    at once with the parameters the form links (`dualfit`).  The two differ
+    only in where the registration comes from -- a dual-colour bead
+    calibration, which brings the two PSFs with it, or a transformation alone
+    -- so that is all each of them says (`read_registration`).
+
+    The registration is read once per run or preview and handed to the
+    finder, the model, the engine and the back-projection, which each read the
+    file before: three times a run, four a preview.  It is kept with the path
+    it came from, so that a preview with another file chosen meanwhile never
+    gets a run's.
+    """
+
+    _loaded = None             # (path, registration) of the run in progress
+
+    def registration_path(self, settings) -> str:
+        raise NotImplementedError
+
+    def read_registration(self, settings):
+        raise NotImplementedError
+
+    def measure(self, ctx: Context, settings):
+        """A registration measured from the movie before the fit, or None."""
+        return None
+
+    def registration(self, settings):
+        """The registration: the one this run read, or off disk."""
+        loaded = self._loaded
+        if loaded is not None and loaded[0] == self.registration_path(settings):
+            return loaded[1]
+        return self.read_registration(settings)
+
+    def _reading_once(self, settings, call, measured=None):
+        """``call()`` with the registration read once beforehand.
+
+        A file that cannot be read is not an error here: the steps that need
+        it then try themselves and fail as they did, so a preview still draws
+        the candidates and says why it could not fit them.
+        """
+        key = self.registration_path(settings)
+        if measured is not None:
+            self._loaded = (key, measured)
+        else:
+            try:
+                self._loaded = (key, self.read_registration(settings))
+            except Exception:
+                self._loaded = None
+        try:
+            return call()
+        finally:
+            self._loaded = None
+
+    def run(self, ctx: Context, settings) -> Result:
+        measured = self.measure(ctx, settings)
+        return self._reading_once(
+            settings, lambda: super(_TwoChannelFit, self).run(ctx, settings),
+            measured)
+
+    def preview(self, ctx: Context, settings, frame: int = 0) -> Result:
+        return self._reading_once(
+            settings, lambda: super(_TwoChannelFit, self).preview(ctx, settings,
+                                                                  frame))
+
+    def back_projected(self, settings, camera, candidates):
+        from ..dualfit import secondary_to_reference, which_channel
+        registration = self.registration(settings)
+        ox, oy = camera.roi_offset
+        secondary = ~which_channel(candidates.x + ox, candidates.y + oy,
+                                   registration.geometry)
+        mapped = secondary_to_reference(candidates.x[secondary],
+                                        candidates.y[secondary],
+                                        registration, (ox, oy))
+        return mapped[:, 0], mapped[:, 1]
+
+    def finder(self, settings, camera=None):
+        """Each half thresholded on its own.
+
+        The two halves are two detection channels; a dynamic cutoff pooled
+        over both is set by whichever is brighter, and the dim one then loses
+        the fainter partner of every pair -- which is most of the pairs a
+        registration would have had, and most of the colour the fit is for.
+        """
+        from dataclasses import replace as _replace
+        base = super().finder(settings, camera)
+        try:
+            geometry = self.registration(settings).geometry
+        except Exception:
+            return base                          # none yet: preview only
+        return _replace(base, split=self._split_for_detection(geometry, camera))
+
+    def engine(self, settings, camera, finder, model):
+        from ..dualfit import DualChannelEngine
+        return DualChannelEngine(camera, finder, model, self.registration(settings),
+                                 settings.fit, settings.model.photon_ratio)
+
+
 @register("Localize/Spline 3D 2C")
-class DualSplineFit(_FitPlugin):
+class DualSplineFit(_TwoChannelFit):
     """The 3D two-channel workflow: one emitter, both halves of a split frame.
 
     Candidates are found over the whole frame and combined, each gets an ROI
@@ -1049,38 +1247,20 @@ class DualSplineFit(_FitPlugin):
     #    the background (the version is the calibration's as much as the fit's)
     # 5: the camera's read noise in the likelihood; the calibration's photon
     #    shares from the light before clipping
-    version = "5"
+    # 6: nm columns only; the pixel ones (`x_pix`, `dx_pix_ch1`, ...) are no
+    #    longer written
+    version = "6"
     Settings = DualSplineFitSettings
-    params = {**GaussianFit.params, **finish_params()}
+
+    def registration_path(self, settings) -> str:
+        return settings.model.calibration
+
+    def read_registration(self, settings):
+        """The dual-colour calibration: the registration and both PSFs."""
+        return settings.model.load()
 
     def model(self, settings, camera):
-        return settings.model.model(settings.model.load(), camera)
-
-    def back_projected(self, settings, camera, candidates):
-        from ..dualfit import secondary_to_reference, which_channel
-        calibration = settings.model.load()
-        ox, oy = camera.roi_offset
-        secondary = ~which_channel(candidates.x + ox, candidates.y + oy,
-                                   calibration.geometry)
-        mapped = secondary_to_reference(candidates.x[secondary],
-                                        candidates.y[secondary],
-                                        calibration, (ox, oy))
-        return mapped[:, 0], mapped[:, 1]
-
-    def finder(self, settings, camera=None):
-        from dataclasses import replace as _replace
-        base = super().finder(settings, camera)
-        try:
-            geometry = settings.model.load().geometry
-        except Exception:
-            return base                          # no calibration yet: preview only
-        return _replace(base, split=self._split_for_detection(geometry, camera))
-
-    def engine(self, settings, camera, finder, model):
-        from ..dualfit import DualChannelEngine
-        return DualChannelEngine(camera, finder, model, settings.model.load(),
-                                 settings.fit, settings.model.photon_ratio)
-
+        return settings.model.model(self.registration(settings), camera)
 
 
 # ----------------------------------------------------- two channels, no model
@@ -1108,12 +1288,14 @@ def _dim_channel_count(parts, split) -> int:
     if split is None:
         return sum(len(p) for p in parts)
     axis, chip = split
+    from ..locs import in_pixels
     column = "x_pix" if axis == 1 else "y_pix"
     low = high = 0
     for part in parts:
-        if column not in part:
+        try:
+            values = in_pixels(part, column)
+        except (KeyError, ValueError):
             return sum(len(p) for p in parts)
-        values = np.asarray(part[column], float)
         low += int((values < chip).sum())
         high += int((values >= chip).sum())
     return min(low, high)
@@ -1257,35 +1439,22 @@ class ChannelTransformSettings:
 
 
 @dataclass
-class DualGaussianModelSettings:
+class DualGaussianModelSettings(_LinkedChannels):
     """A free-width Gaussian per channel, and which parameters they share."""
-    sigma: float = param(1.2, label="start sigma", unit="pix", min=0.1,
+    FIFTH_LINK = "link_sigma"
+    sigma: float = param(1.2, label="start sigma", unit="px", min=0.1,
                          help="the PSF width both halves' fits start from; "
                               "each is fitted")
-    link_xy: bool = param(True, label="link x, y",
-                          help="one position for both channels, through the "
-                               "registration; unlink only to check the transform")
-    link_photons: bool = param(False, label="link photons",
-                               help="off for two colours -- the photon ratio is "
-                                    "what tells the dyes apart")
-    link_background: bool = param(False, label="link background", advanced=True,
-                                  help="one background for both halves; off: "
-                                       "each half fits its own")
+    link_xy: bool = _link_xy()
+    link_photons: bool = _link_photons()
+    link_background: bool = _link_background()
     link_sigma: bool = param(False, label="link width", advanced=True,
                              help="off: each half finds its own width, which it "
                                   "should -- they see different wavelengths and "
                                   "rarely share a focus")
-    photon_ratio: Optional[float] = param(None, label="photon ratio", min=0,
-                                          advanced=True,
-                                          help="secondary / main, used when the "
-                                               "photons are linked; auto: the "
-                                               "beads' ratio if the "
-                                               "transformation is a bead "
-                                               "calibration, otherwise 1")
-
-    def shared(self) -> tuple:
-        return (self.link_xy, self.link_xy, self.link_photons,
-                self.link_background, self.link_sigma)
+    photon_ratio: Optional[float] = _photon_ratio(
+        "the beads' ratio if the transformation is a bead calibration, "
+        "otherwise 1")
 
     def model(self, channels: int = 2):
         from ..psf import GlobalGaussianPSF
@@ -1294,50 +1463,18 @@ class DualGaussianModelSettings:
 
 
 @dataclass
-class DualGaussianFitSettings:
-    source: SourceSettings = field(default_factory=SourceSettings)
-    camera: CameraSettings = field(default_factory=CameraSettings)
-    detection: DetectionSettings = field(default_factory=DetectionSettings)
-    model: DualGaussianModelSettings = field(default_factory=DualGaussianModelSettings)
+class _Transform:
+    """The part only the 2D two-colour form has, between its two halves."""
     transform: ChannelTransformSettings = field(default_factory=ChannelTransformSettings)
-    fit: FitSettings = field(default_factory=lambda: FitSettings(output_unit="nm"))
-    output: OutputSettings = field(default_factory=OutputSettings)
-    finish: FinishSettings = param(default_factory=FinishSettings,
-                                   label="after the fit")
 
 
-# `RegisterSettings` is a plain dataclass; its tooltips, under the 2C fit's
-# "transform.registration" part.  Help only: labels and widgets stay as they were.
-REGISTRATION_PARAMS = {f"transform.registration.{name}": ParamInfo(help=text)
-                       for name, text in {
-    "layout": "how the chip is split: auto (detected from the pairs), "
-              "right-left, up-down, or either mirrored",
-    "main_channel": "the reference half: auto, left, right, upper or lower",
-    "model": "projective (8 coefficients), or polynomial (third order, 20) "
-             "for a distorted field the pairs cover",
-    "split_position": "the seam between the halves, in chip pixels; auto: "
-                      "measured from the pairs",
-    "vote_bin_px": "the bin, in pixels, of the histogram of pair vectors "
-                   "the channel offset is voted in",
-    "vote_smooth_px": "the width of the difference-of-Gaussians filter the "
-                      "vote is scored with, in pixels",
-    "coarse_tolerance_px": "first round: how far apart, in pixels, the "
-                           "partners may be after the voted offset",
-    "fine_tolerance_px": "second round: how far apart the partners may be "
-                         "through the first round's map; 0 skips it",
-    "adapt_fine_tolerance": "widen the second round's tolerance to the first "
-                            "round's misfit, when its pairs are clean",
-    "min_pairs": "fewer pairs than this and the registration refuses",
-    "max_pairs": "at most this many pairs, drawn at random, go into each fit",
-    "reprojection_threshold_px": "the robust (RANSAC) fit's inlier radius, "
-                                 "at least; it widens with the tolerance",
-    "transform_axis_limit_px": "the largest |dx| or |dy| a pair may keep "
-                               "after the first fit, at least",
-}.items()}
+@dataclass
+class DualGaussianFitSettings(_Finishing, _Writing, _Transform, _Reading):
+    model: DualGaussianModelSettings = field(default_factory=DualGaussianModelSettings)
 
 
 @register("Localize/Gaussian 2D 2C")
-class DualGaussianFit(_FitPlugin):
+class DualGaussianFit(_TwoChannelFit):
     """The 2D two-channel workflow: one emitter, both halves, no PSF model.
 
     `DualSplineFit` without the calibration.  Candidates are found over the
@@ -1359,71 +1496,49 @@ class DualGaussianFit(_FitPlugin):
                    "registration can be measured from the movie itself.")
     # 2: linked photons are the total over both halves, not the main half's
     # 3: the camera's read noise in the likelihood (1 e- without EM gain)
-    version = "3"
+    # 4: nm columns only; the pixel ones (`x_pix`, `sigma_pix_ch0`, ...) are
+    #    no longer written
+    version = "4"
     Settings = DualGaussianFitSettings
-    params = {**GaussianFit.params, **finish_params(), **REGISTRATION_PARAMS}
 
     def model(self, settings, camera):
         return settings.model.model()
 
-    # a transformation measured from this movie, kept so that `engine` and
-    # `back_projected` need no file: writing one only to read it back would
-    # make saving it a precondition of fitting rather than a convenience
-    _measured = None
+    def registration_path(self, settings) -> str:
+        return settings.transform.path
 
-    def transform(self, settings):
-        """The registration this fit will use: measured here, or off disk."""
-        if self._measured is not None:
-            return self._measured
+    def read_registration(self, settings):
+        """A transformation off disk, or the one in a dual-colour calibration."""
         return settings.transform.load()
 
-    def back_projected(self, settings, camera, candidates):
-        from ..dualfit import secondary_to_reference, which_channel
-        transform = self.transform(settings)
-        ox, oy = camera.roi_offset
-        secondary = ~which_channel(candidates.x + ox, candidates.y + oy,
-                                   transform.geometry)
-        mapped = secondary_to_reference(candidates.x[secondary],
-                                        candidates.y[secondary],
-                                        transform, (ox, oy))
-        return mapped[:, 0], mapped[:, 1]
+    def measure(self, ctx: Context, settings):
+        """The transformation measured from this movie, when that is asked for.
 
-    def finder(self, settings, camera=None):
-        """Each half thresholded on its own.
-
-        The two halves are two detection channels; a dynamic cutoff pooled
-        over both is set by whichever is brighter, and the dim one then loses
-        the fainter partner of every pair -- which is most of the pairs a
-        registration would have had, and most of the colour the fit is for.
+        Handed to the run rather than saved and read back: writing a file
+        only to read it would make saving it a precondition of fitting rather
+        than a convenience.
         """
-        from dataclasses import replace as _replace
-        base = super().finder(settings, camera)
-        try:
-            geometry = self.transform(settings).geometry
-        except Exception:
-            return base                          # no transformation yet
-        return _replace(base, split=self._split_for_detection(geometry, camera))
-
-    def engine(self, settings, camera, finder, model):
-        from ..dualfit import DualChannelEngine
-        return DualChannelEngine(camera, finder, model, self.transform(settings),
-                                 settings.fit, settings.model.photon_ratio)
+        return self._calibrate(ctx, settings) if settings.transform.calibrate else None
 
     def preflight(self, ctx: Context, settings):
+        """No plain "start anyway": without a transformation the fit cannot
+        pair the channels and fails at once, so the one useful answer besides
+        cancelling (and choosing a file) is to measure it from the movie.
+        A camera to add comes first (`_FitPlugin.preflight`)."""
+        camera = super().preflight(ctx, settings)
+        if camera is not None:
+            return camera
         if settings.transform.calibrate or settings.transform.path:
             return None
-        return ("No transformation chosen.  Tick 'calibrate from this movie' to "
-                "measure one from the first frames, or choose a file.  Start "
-                "anyway?")
-
-    def run(self, ctx: Context, settings) -> Result:
-        self._measured = None
-        if settings.transform.calibrate:
-            self._measured = self._calibrate(ctx, settings)
-        try:
-            return super().run(ctx, settings)
-        finally:
-            self._measured = None
+        from dataclasses import replace as _replace
+        calibrated = _replace(settings, transform=_replace(settings.transform,
+                                                           calibrate=True))
+        return PreflightQuestion(
+            "No transformation chosen: the two channels cannot be paired "
+            "without one.  Measure it from the first frames of this movie, or "
+            "cancel and choose a file.",
+            choices=(PreflightChoice("Calibrate from this movie", calibrated),),
+            run_label="")
 
     # ------------------------------------------------------------ calibrate
     def _calibrate(self, ctx: Context, settings):
@@ -1459,9 +1574,9 @@ class DualGaussianFit(_FitPlugin):
                 source=replace(src, start=start, stop=stop, live=False),
                 camera=settings.camera, detection=settings.detection,
                 model=GaussianModelSettings(sigma=settings.model.sigma),
-                # pixels as well as nm: a transformation is a statement about
-                # the camera, and is fitted in chip pixels
-                fit=replace(settings.fit, output_unit="pixel+nm"),
+                # a transformation is a statement about the camera, and is
+                # fitted in chip pixels: the nm columns over the pixel size
+                fit=settings.fit,
                 output=OutputSettings(save=False, raw_frames=0))
             # the provisional split only decides which half a localization is
             # in, for the threshold and for the count; the seam the fit will
@@ -1506,13 +1621,15 @@ class DualGaussianFit(_FitPlugin):
         enough = "" if dim >= want else f" -- wanted {want:,}, the movie ran out"
         ctx.report(f"registering {len(locs):,} localizations from {used:,} frames "
                    f"({dim:,} in the dimmer channel{enough})")
+        # in chip pixels, which the table records the size of
+        from ..locs import in_pixels
+        x, y = in_pixels(locs, "x_pix", "y_pix")
         result = register_channels(
-            np.asarray(locs["x_pix"], float), np.asarray(locs["y_pix"], float),
-            np.asarray(locs["frame"]), source.shape[-2:],
+            x, y, np.asarray(locs["frame"]), source.shape[-2:],
             camera.roi, settings=settings.transform.registration,
             progress=ctx.report,
-            precision=(np.asarray(locs["xy_err_pix"], float)
-                       if "xy_err_pix" in locs else None))
+            precision=(in_pixels(locs, "xy_err_pix")
+                       if "xy_err_nm" in locs else None))
 
         if settings.transform.save_calibration:
             out = settings.output.resolve(src.path)

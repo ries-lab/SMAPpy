@@ -9,18 +9,19 @@ from __future__ import annotations
 import traceback
 
 import atexit
+from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
 
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QAction, QActionGroup, QImage
+from PySide6.QtGui import QAction, QActionGroup, QColor, QImage, QPainter
 from PySide6.QtWidgets import (QDoubleSpinBox, QFileDialog, QGraphicsPathItem,
                                QInputDialog, QLabel, QMenu, QToolBar, QToolButton,
                                QVBoxLayout, QWidget)
 
-from .. import lut as luts
+from ..layer_state import LayerSnapshot, render_panels, snapshot_layers
 from ..regions import Region
 from ..render import FieldOfView, axis_unit
 from ..session import Session
@@ -36,6 +37,9 @@ LAYOUTS = (("overlay", "overlay"), ("side", "side by side"),
            ("side+overlay", "side by side + overlay"))
 PANEL_LABEL = (255, 255, 255)
 PANEL_BORDER = pg.mkPen((128, 128, 128), width=1)
+# what the view says while it has nothing to show
+EMPTY_HINT = ("Open or drop a file (File > Open...)\n"
+              "or simulate one: File tab > Simulate structure")
 _LIVE_THREADS = []  # every render thread, so exit can stop them all
 
 
@@ -63,11 +67,25 @@ DRAW_PEN = pg.mkPen((255, 255, 0), width=2, style=Qt.DashLine)
 DRAW_HALO_PEN = pg.mkPen((0, 0, 0, 200), width=5)
 
 
-class _Renderer(QObject):
-    """Renders on its own thread; the view keeps answering to the mouse."""
+class RenderWorker(QObject):
+    """Renders on its own thread; the view keeps answering to the mouse.
 
-    done = Signal(object, object, int)      # rgb, fov, generation
+    It is handed jobs (`PanelJob`, `gui.view3d.Job3D`): plain objects holding
+    a snapshot of the layers taken on the GUI thread (`LayerSnapshot`) and
+    whatever else the picture needs, never a widget, a layer or the session.
+    So the GUI thread may change a filter, swap the table or append a block
+    while a render runs, and the render still sees one consistent state; and
+    no Qt object is ever referenced from this thread, which is how one's
+    last reference could otherwise be dropped here (`gui.collector`).
+
+    One class for the 2D and the 3D view; each view has its own, so the two
+    windows render side by side.  What lives on the thread itself -- the GPU
+    engine, the preview budgets -- is made here on first use.
+    """
+
+    done = Signal(object, int)              # what the job made, generation
     failed = Signal(str, int)               # what went wrong, generation
+    engine_ready = Signal(str)              # the GPU's name, or "" if there is none
 
     def __init__(self):
         super().__init__()
@@ -76,23 +94,54 @@ class _Renderer(QObject):
         self.moveToThread(self.thread)
         self.thread.start()
         _LIVE_THREADS.append(self.thread)
+        self._gpu = None
+        self._gpu_tried = False
+        # one per engine: a drag frame costs an order of magnitude more on the
+        # CPU than on the GPU, so a rate learned under one says nothing about
+        # the next.  Keyed by the engine that was actually used, not asked for.
+        self.budgets: dict = {}
 
-    def render(self, view: "RenderView", fov: FieldOfView, generation: int) -> None:
+    def gpu(self):
+        """The GPU engine, made on this thread on first use; None without one."""
+        if not self._gpu_tried:
+            self._gpu_tried = True
+            try:
+                from ..gpu import GPUEngine
+                self._gpu = GPUEngine()
+                self.engine_ready.emit(self._gpu.name)
+            except Exception as e:
+                print(f"no GPU engine: {e}")
+                self.engine_ready.emit("")
+        return self._gpu
+
+    def render(self, job, generation: int) -> None:
         try:
-            rgb = view.panel_images(fov)
+            result = job.run(self)
         except Exception as e:
             # Always answer.  Returning in silence left the view waiting for
             # this render forever, so it never asked for another: one failure
-            # -- a table swapped mid-render, a layer that cannot be drawn --
-            # and the image stayed black for good.
+            # -- a layer that cannot be drawn -- and the image stayed black
+            # for good.
             traceback.print_exc()
             self.failed.emit(f"{type(e).__name__}: {e}", generation)
             return
-        self.done.emit(rgb, fov, generation)
+        self.done.emit(result, generation)
+
+
+@dataclass(frozen=True)
+class PanelJob:
+    """The 2D view's render: every panel of a tile, from a snapshot."""
+
+    layers: Tuple[LayerSnapshot, ...]
+    fov: FieldOfView
+    panels: Tuple = ("overlay",)
+
+    def run(self, worker=None) -> List[np.ndarray]:
+        return render_panels(self.layers, self.fov, self.panels)[0]
 
 
 class RenderView(QWidget):
-    render_requested = Signal(object, object, int)
+    render_requested = Signal(object, int)  # a `PanelJob`, generation
     render_failed = Signal(str)             # shown by the window, not swallowed
 
     def __init__(self, session: Session, parent=None):
@@ -110,6 +159,26 @@ class RenderView(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.graphics)
+        # A first start is a black window: say what to do about it.  A label
+        # over the picture rather than an item in it, so it neither pans nor
+        # ends up in a saved or copied image; transparent to the mouse, so a
+        # file dropped on it still reaches the window.
+        self.empty_hint = QLabel(EMPTY_HINT, self)
+        self.empty_hint.setAlignment(Qt.AlignCenter)
+        self.empty_hint.setStyleSheet("color: rgb(150, 150, 150); font-size: 15px;")
+        self.empty_hint.setAttribute(Qt.WA_TransparentForMouseEvents)
+        # while a layer's blinks are merged in the background it draws
+        # nothing (`Tables.pending`): this says why, with the merge's stage
+        self.merge_hint = QLabel("", self)
+        self.merge_hint.setAlignment(Qt.AlignCenter)
+        self.merge_hint.setStyleSheet("color: rgb(170, 170, 170); font-size: 15px;")
+        self.merge_hint.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.merge_hint.hide()
+        from .merging import merger_for
+        self._merger = merger_for(session, self)
+        self._merger.status.connect(self._show_merge_hint)
+        # what the colours mean, when layers are coloured by a column
+        self.colour_bars = ColourBars(self)
 
         # pan/zoom fires many range changes; render once they settle
         self._timer = QTimer(singleShot=True, interval=40)
@@ -129,8 +198,9 @@ class RenderView(QWidget):
         self._generation = 0             # the newest request; older results are dropped
         self._busy = False
         self._pending = False
+        self._job: Optional[PanelJob] = None   # the one in flight
         self.last_error = ""
-        self._renderer = _Renderer()
+        self._renderer = RenderWorker()
         self.render_requested.connect(self._renderer.render)
         self._renderer.done.connect(self._on_rendered)
         self._renderer.failed.connect(self._on_render_failed)
@@ -176,7 +246,27 @@ class RenderView(QWidget):
         stop_render_threads()
 
     # ---------------------------------------------------------------- flow
+    def _show_merge_hint(self, text: Optional[str] = None) -> None:
+        """"Merging blinks..." over the picture while a visible layer waits
+        for its blinks, and only then."""
+        try:
+            text = self._merger.text if text is None else text
+            waiting = bool(text) and any(
+                l.visible and not l.is_image and l.state.waiting
+                for l in self.session.layers)
+            self.merge_hint.setVisible(waiting)
+            if waiting:
+                self.merge_hint.setText(text)
+                self.merge_hint.setGeometry(self.rect())
+                self.merge_hint.raise_()
+        except Exception:                     # a slot must not raise into Qt
+            traceback.print_exc()
+
     def _on_session(self, what: str) -> None:
+        self._show_hint()
+        self._show_merge_hint()
+        if what in ("locs", "layer", "layers", "regrouped"):
+            self.colour_bars.show_for(self.session.layers)
         if what == "locs":
             self.tile_valid = False
             self._arrange()
@@ -226,8 +316,22 @@ class RenderView(QWidget):
         above = min(W / w, H / n / h)
         return above > across
 
+    def _show_hint(self) -> None:
+        """The empty-view hint while there is nothing to draw, and only then."""
+        empty = not self._has_content()
+        self.empty_hint.setVisible(empty)
+        if empty:
+            # a bar the width of a view that shows nothing measures nothing;
+            # the next render (`_update_guides`) shows it again
+            self.scalebar.setVisible(False)
+            self.empty_hint.setGeometry(self.rect())
+            self.empty_hint.raise_()
+
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
+        self.empty_hint.setGeometry(self.rect())
+        self.merge_hint.setGeometry(self.rect())
+        self.colour_bars.place()
         if len(self.panels) > 1:
             self._arrange()
 
@@ -268,36 +372,27 @@ class RenderView(QWidget):
         except IndexError:
             return ""
 
-    def panel_images(self, fov: FieldOfView) -> List[np.ndarray]:
-        """An RGB image per panel on ``fov``; one for the overlay alone.
+    def snapshot(self) -> Tuple[LayerSnapshot, ...]:
+        """The layers as a render needs them, frozen (`LayerSnapshot`)."""
+        return snapshot_layers(self.session.layers)
 
-        Each layer is rendered once: the overlay of the side-by-side panels
-        is their sum, as `composite` makes it.
-        """
-        specs = list(self.panels)
-        if specs == ["overlay"]:
-            return [self.composite(fov)[0]]
-        images, white_any = {}, False
-        total = np.zeros((fov.ny, fov.nx, 3), np.float32)
-        for i, layer in enumerate(self.session.layers):
-            if not layer.visible:
-                continue
-            white = layer.get_display().white_background
-            white_any = white_any or white
-            image, _ = layer.render(fov, white_background=False)
-            total += image
-            image = np.clip(image, 0, 1)
-            images[i] = luts.on_white(image) if white else image
-        total = np.clip(total, 0, 1)
-        images["overlay"] = luts.on_white(total) if white_any else total
-        blank = np.zeros((fov.ny, fov.nx, 3), np.float32)
-        return [images.get(spec, blank) for spec in specs]
+    def panel_images(self, fov: FieldOfView, panels=None) -> List[np.ndarray]:
+        """An RGB image per panel on ``fov`` -- the view's own panels unless
+        ``panels`` says which; ``["overlay"]`` is every visible layer added
+        up, as SMAP does.  Synchronous, from a snapshot like the render
+        thread's (`render_panels`)."""
+        job = PanelJob(self.snapshot(), fov,
+                       tuple(self.panels if panels is None else panels))
+        images = job.run()
+        self._keep_indices(job)
+        return images
 
     def schedule(self) -> None:
         self._timer.start()
 
     def reset(self) -> None:
         """Show everything."""
+        self._show_hint()
         if not self._has_content():
             self.image.clear()
             return
@@ -325,25 +420,6 @@ class RenderView(QWidget):
             return True
         state = self.session.layers[0].state
         return state is not None and bool(getattr(state.index, "extent", None))
-
-    def composite(self, fov: FieldOfView) -> Tuple[np.ndarray, np.ndarray]:
-        """Every visible layer rendered on ``fov`` and added up, as SMAP does.
-
-        Returns the RGB image in [0, 1] and the summed intensity planes.
-        """
-        rgb = np.zeros((fov.ny, fov.nx, 3), np.float32)
-        weight = np.zeros((fov.ny, fov.nx), np.float32)
-        white = False
-        for layer in self.session.layers:
-            if layer.visible:
-                white = white or layer.get_display().white_background
-                image, rendered = layer.render(fov, white_background=False)
-                rgb += image
-                weight += rendered.weight
-        rgb = np.clip(rgb, 0, 1)
-        # once, to the sum: a white ground added to a white ground is still
-        # white and would swallow everything drawn on either of them
-        return (luts.on_white(rgb) if white else rgb), weight
 
     def _screen_size(self) -> Tuple[int, int]:
         """The main panel's size in screen pixels: the whole widget unless
@@ -418,11 +494,16 @@ class RenderView(QWidget):
                                int(view.nx * TILE), int(view.ny * TILE))
         self._generation += 1
         self._busy = True
-        self.render_requested.emit(self, tile, self._generation)
+        # frozen here, on the GUI thread: the worker sees nothing else
+        self._job = PanelJob(self.snapshot(), tile, tuple(self.panels))
+        self.render_requested.emit(self._job, self._generation)
 
-    def _on_rendered(self, rgb, fov: FieldOfView, generation: int) -> None:
+    def _on_rendered(self, rgb, generation: int) -> None:
         self._busy = False
-        if generation != self._generation:      # superseded while it ran
+        job, self._job = self._job, None
+        fov = job.fov if job is not None else None
+        self._keep_indices(job)
+        if generation != self._generation or job is None:    # superseded while it ran
             self._pending = True
         elif len(rgb) != 1 + len(self.mirrors):  # the panels changed meanwhile
             self._pending = True
@@ -439,6 +520,15 @@ class RenderView(QWidget):
             self._pending = False
             self.render()
 
+    def _keep_indices(self, job: Optional[PanelJob]) -> None:
+        """Hand the filters what the render thread compacted from their masks,
+        so the next render does not do it again (`LocFilter.keep_indices`)."""
+        if job is None or len(job.layers) != len(self.session.layers):
+            return
+        for layer, snap in zip(self.session.layers, job.layers):
+            if not layer.is_image and snap.mask is not None:
+                layer.state.keep_indices(snap)
+
     def _on_render_failed(self, message: str, generation: int) -> None:
         """Free the view for the next render, and say why this one is missing.
 
@@ -446,6 +536,7 @@ class RenderView(QWidget):
         re-running the one that just failed would fail the same way, in a loop.
         """
         self._busy = False
+        self._job = None
         self.last_error = message
         self.render_failed.emit(message)
         if self._pending:
@@ -455,8 +546,7 @@ class RenderView(QWidget):
     def render_now(self) -> np.ndarray:
         """Synchronous: the exact current view, for saving and tests."""
         fov = self.current_fov()
-        rgb, _ = self.composite(fov)
-        return np.ascontiguousarray(rgb)
+        return np.ascontiguousarray(self.panel_images(fov, ["overlay"])[0])
 
     def _update_guides(self, fov: FieldOfView) -> None:
         """Which way up the picture hangs, and what its bars say.
@@ -669,7 +759,7 @@ class RenderView(QWidget):
         rect = self.view.viewRect()
         fov = FieldOfView.from_range((rect.left(), rect.right()),
                                      (rect.top(), rect.bottom()), pixelsize)
-        rgb, weight = self.composite(fov)
+        (rgb,), weight = render_panels(self.snapshot(), fov)
         data = ((rgb * 255).astype(np.uint8) if what == "rgb"
                 else weight.astype(np.float32))
         px_um = pixelsize / 1000.0
@@ -934,6 +1024,150 @@ class RenderToolBar(QToolBar):
         if path:
             folders.remember(path)
             self.view.save_tiff(path, pixelsize, what)
+
+
+class ColourBar(QWidget):
+    """One colour scale: a LUT from the bottom of a colour range to the top,
+    the two ends in the column's unit, and whose it is above it."""
+
+    WIDTH, HEIGHT, BAR = 120, 120, 12         # px: the widget, and the bar in it
+
+    def __init__(self, parent: QWidget):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.resize(self.WIDTH, self.HEIGHT)
+        self.layers: List[str] = []
+        self.field = ""
+        self.range: Tuple[float, float] = (0.0, 1.0)
+        self.table = np.zeros((2, 3), np.float32)
+
+    def set(self, layers: List[str], field: str, range_: Tuple[float, float],
+            table: np.ndarray) -> None:
+        self.layers, self.field, self.range, self.table = list(layers), field, range_, table
+        lo, hi = range_
+        self.setToolTip(f"{', '.join(layers)}: {field} from {lo:g} to {hi:g}")
+        self.update()
+
+    def labels(self) -> Tuple[str, str, str]:
+        """The title, the top and the bottom label: "layer 1: z_nm", "300 nm",
+        "-300 nm"."""
+        unit = axis_unit(self.field)
+        unit = "" if unit == self.field else f" {unit}"
+        lo, hi = self.range
+        return (f"{', '.join(self.layers)}: {self.field}",
+                f"{_bar_number(hi)}{unit}", f"{_bar_number(lo)}{unit}")
+
+    def paintEvent(self, event) -> None:          # noqa: N802 (Qt's name)
+        title, top, bottom = self.labels()
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 140))
+        metrics = painter.fontMetrics()
+        line = metrics.height()
+        x, y0, y1 = 6, 6 + line, self.height() - 6
+        # the LUT upwards: the top of the range at the top
+        rgb = (np.clip(self.table[::-1], 0, 1) * 255).astype(np.uint8)
+        rgb = np.ascontiguousarray(np.repeat(rgb[:, None, :], 2, axis=1))
+        image = QImage(rgb.data, 2, len(rgb), 6, QImage.Format_RGB888)
+        painter.drawImage(QRectF(x, y0, self.BAR, y1 - y0), image)
+        painter.setPen(QColor(230, 230, 230))
+        text_x = x + self.BAR + 4
+        for text, rect, align in (
+                (title, QRectF(4, 2, self.width() - 8, line), Qt.AlignLeft),
+                (top, QRectF(text_x, y0, self.width() - text_x, line),
+                 Qt.AlignLeft | Qt.AlignTop),
+                (bottom, QRectF(text_x, y1 - line, self.width() - text_x, line),
+                 Qt.AlignLeft | Qt.AlignBottom)):
+            text = metrics.elidedText(text, Qt.ElideRight, int(rect.width()))
+            painter.drawText(rect, align, text)
+        painter.end()
+
+
+class ColourBars(QWidget):
+    """The colour scales of the layers coloured by a column, stacked in the
+    picture's top right corner.
+
+    A bar per scale, not per picture: two layers coloured by two columns, or
+    by one column through two LUTs or over two ranges, read differently and
+    need a key each; layers that agree on the column, the colours and the
+    range share one bar, labelled with all of them.  Widgets over the
+    picture rather than items in it: they are read, not panned, and they stay
+    out of what Save and Copy take, which are the picture alone.  Plain
+    intensity has no bar: its LUT is brightness, which the picture shows.
+    """
+
+    GAP = 4                                    # px between two bars
+
+    def __init__(self, parent: QWidget):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.bars: List[ColourBar] = []
+        self.hide()
+
+    @staticmethod
+    def scales(layers) -> List[tuple]:
+        """``(layer names, column, (lo, hi), LUT table)`` per distinct scale,
+        in the layers' order."""
+        from .. import lut as luts
+        found: dict = {}
+        for layer in layers:
+            if layer.is_image or not layer.visible or layer.state is None:
+                continue
+            settings, display = layer.state.settings, layer.state.display
+            field = settings.color_field
+            if field is None or field not in layer.locs:
+                continue
+            lo, hi = settings.color_range or _finite_range(layer.locs[field])
+            try:
+                table = luts.get(display.lut, display.invert)
+            except (KeyError, ValueError):
+                continue
+            if display.white_background:
+                table = luts.on_white(table)
+            # the colours themselves, not the LUT's name: an inverted LUT and
+            # its plain one share a name and not a scale
+            key = (field, float(lo), float(hi), table.tobytes())
+            if key in found:
+                found[key][0].append(layer.name)
+            else:
+                found[key] = ([layer.name], field, (float(lo), float(hi)), table)
+        return list(found.values())
+
+    def show_for(self, layers) -> None:
+        scales = self.scales(layers)
+        while len(self.bars) < len(scales):
+            self.bars.append(ColourBar(self))
+        for bar in self.bars[len(scales):]:
+            bar.hide()
+        del self.bars[len(scales):]
+        if not scales:
+            self.hide()
+            return
+        step = ColourBar.HEIGHT + self.GAP
+        for i, (bar, scale) in enumerate(zip(self.bars, scales)):
+            bar.set(*scale)
+            bar.move(0, i * step)
+            bar.show()
+        self.resize(ColourBar.WIDTH, len(scales) * step - self.GAP)
+        self.place()
+        self.show()
+        self.raise_()
+
+    def place(self) -> None:
+        parent = self.parentWidget()
+        if parent is not None:
+            self.move(parent.width() - self.width() - 8, 8)
+
+
+def _bar_number(value: float) -> str:
+    """Four digits, but a frame number of 20000 as itself, not 2e+04."""
+    return f"{value:.0f}" if 1e4 <= abs(value) < 1e9 else f"{value:.4g}"
+
+
+def _finite_range(values) -> Tuple[float, float]:
+    """What the renderer colours over when no range is set: min to max."""
+    values = np.asarray(values, np.float64)
+    finite = values[np.isfinite(values)]
+    return (float(finite.min()), float(finite.max())) if finite.size else (0.0, 1.0)
 
 
 class AxisBars:

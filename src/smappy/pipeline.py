@@ -25,19 +25,31 @@ from .detect import Candidates, PeakFinder
 from .locs import Localizations, fit_to_localizations, to_nm, valid
 from .metadata import CameraMetadata
 from .psf import PSFModel
-from .roi import ROIStack, cut_rois
+from .fit_rois import ROIStack, cut_rois
+from .params import param
 
 
 @dataclass
 class FitSettings:
     """Everything about the fit that is not the camera or the PSF model."""
 
-    roisize: int = 13
-    iterations: int = 50
-    max_block_rois: int = 15000  # ROIs accumulated before a fit is run
-    n_threads: int = 0  # 0 = one per core, for detection and fitting alike
-    max_fit_distance: Optional[float] = None  # reject runaway fits, in pixels
-    output_unit: str = "pixel"  # "pixel", "nm", or "pixel+nm"
+    roisize: int = param(13, label="fit box", unit="px", min=5,
+                         help="the square cut around each candidate and "
+                              "fitted")
+    iterations: int = param(50, min=1, advanced=True,
+                            help="the most steps a fit may take")
+    # speed and memory only, never the result: for scripts, not the form
+    max_block_rois: int = param(15000, label="boxes per fit", min=100,
+                                hidden=True,
+                                help="how many are collected before they "
+                                     "are fitted together; speed and memory "
+                                     "only")
+    n_threads: int = param(0, label="threads", min=0, help="0: one per core",
+                           hidden=True)
+    max_fit_distance: Optional[float] = param(None, label="max fit distance",
+                                              unit="px", advanced=True,
+                                              help="reject fits that ran "
+                                                   "off; auto: keep all")
 
     def block_rois(self) -> int:
         """SMAP scales the block with the ROI area; keep that behaviour."""
@@ -57,7 +69,6 @@ class LocalizationEngine:
     finder: PeakFinder
     model: PSFModel
     settings: FitSettings = field(default_factory=FitSettings)
-    mirror: Optional[bool] = None  # default: ask the PSF model
 
     _rois: List[np.ndarray] = field(default_factory=list, init=False)
     _candidates: List[Candidates] = field(default_factory=list, init=False)
@@ -65,8 +76,6 @@ class LocalizationEngine:
     stats: dict = field(default_factory=dict, init=False)
 
     def __post_init__(self):
-        if self.mirror is None:
-            self.mirror = bool(getattr(self.model, "mirror", False))
         self.stats = {"frames": 0, "candidates": 0, "rois": 0, "localizations": 0,
                       "dropped_at_border": 0, "rejected": 0,
                       "detect_seconds": 0.0, "fit_seconds": 0.0}
@@ -80,7 +89,7 @@ class LocalizationEngine:
         candidates, _ = self.finder(photons, first_frame=first_frame,
                                     n_threads=self.settings.n_threads)
         rois = cut_rois(photons, candidates, self.settings.roisize,
-                        first_frame=first_frame, mirror=self.mirror)
+                        first_frame=first_frame)
         self.stats["detect_seconds"] += time.perf_counter() - t0
         self.stats["frames"] += len(photons)
         self.stats["candidates"] += len(candidates)
@@ -104,7 +113,7 @@ class LocalizationEngine:
         candidates = _concat_candidates(self._candidates)
         self._rois, self._candidates, self._buffered = [], [], 0
 
-        stack = ROIStack(images, candidates, self.settings.roisize, self.mirror)
+        stack = ROIStack(images, candidates, self.settings.roisize)
         t0 = time.perf_counter()
         variance = self.camera.readout_variance
         result = self.model.fit(with_readout(stack.images, variance),
@@ -120,11 +129,7 @@ class LocalizationEngine:
         locs = locs[keep]
         self.stats["localizations"] += len(locs)
 
-        if self.settings.output_unit != "pixel":
-            self.camera.require("pixelsize_um")
-            locs = to_nm(locs, self.camera.pixelsize_nm_xy,
-                         keep_pixels=self.settings.output_unit == "pixel+nm")
-        return locs
+        return to_nm(locs, *self.camera.pixelsize_nm_or_default, keep_pixels=False)
 
     def __str__(self) -> str:
         s = self.stats
@@ -311,8 +316,7 @@ def provenance(camera: CameraMetadata, finder: PeakFinder, model: PSFModel,
         "psf_model": str(model),
         "fit": {"roisize": settings.roisize, "iterations": settings.iterations,
                 "rois_per_block": settings.block_rois(),
-                "max_fit_distance": settings.max_fit_distance,
-                "output_unit": settings.output_unit},
+                "max_fit_distance": settings.max_fit_distance},
         "smappy_version": _version(),
     }
     calibration = getattr(model, "calibration", None)
@@ -321,9 +325,11 @@ def provenance(camera: CameraMetadata, finder: PeakFinder, model: PSFModel,
             "file": str(calibration.source),
             "dz_nm": calibration.dz, "z0": calibration.z0,
             "grid": list(calibration.shape),
-            "mirrored": bool(calibration.em_mirror),
             "em_on": calibration.em_on,
         }
+        conversion = calibration.parameters.get("smappy_conversion")
+        if conversion:  # a SMAP spline of x-mirrored beads, flipped on load
+            info["calibration"]["conversion"] = conversion
     return info
 
 

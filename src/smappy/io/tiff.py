@@ -153,6 +153,28 @@ def open_stack(path) -> ImageSource:
     )
 
 
+STACK_SUFFIXES = (".tif", ".tiff")      # ".ome.tif" ends in one of them
+
+
+def is_image_stack(path) -> bool:
+    """Whether `open_stack` would take ``path``, judged without opening it.
+
+    By name for a file -- a TIFF or a simulation recipe -- and by what is in
+    it for a folder: an NDTiff dataset (or any file of one), or TIFFs.  Cheap
+    on purpose: a file dropped on a window is sorted with it before anything
+    is read.
+    """
+    from .ndtiff import is_ndtiff
+    from ..simulate.source import is_simulation
+
+    path = Path(path)
+    if path.is_dir():
+        return is_ndtiff(path) or any(next(path.glob(f"*{s}"), None) is not None
+                                      for s in STACK_SUFFIXES)
+    return (path.name.lower().endswith(STACK_SUFFIXES) or is_simulation(path)
+            or is_ndtiff(path))
+
+
 def _first_of_series(paths: List[Path]) -> Path:
     """Pick the base file of an MM series (the one without a ``_<n>`` suffix)."""
     base = [p for p in paths if not re.search(r"_\d+\.ome\.tiff?$", p.name)]
@@ -232,7 +254,7 @@ def _generic_values(tags: Dict[str, str]) -> Dict[str, object]:
 SIMULATED = ("metadata", "the simulation")
 
 
-def resolve_camera(source: ImageSource, camera: str = "", presets=None,
+def resolve_camera(source: ImageSource, camera: str = "",
                    overrides=None) -> Resolution:
     """Everything known about the camera behind this stack, and from where.
 
@@ -247,14 +269,14 @@ def resolve_camera(source: ImageSource, camera: str = "", presets=None,
 
     `camera` names a database entry to use instead of identifying one, which
     is what a file whose camera carries no identifying tag needs.
+
+    Every camera smappy resolves is resolved here: the fitters through
+    `CameraSettings.resolution`, a script through `camera_metadata`.
     """
     from ..camera_db import Source, database
 
     tags = camera_tags(source)
-    known = database()
-    if presets is not None:
-        known = known.joined_with(_as_database(presets))
-    resolution = known.resolve(tags, camera=camera)
+    resolution = database().resolve(tags, camera=camera)
 
     generic = _generic_values(tags)
     if resolution.camera is None:
@@ -282,37 +304,17 @@ def resolve_camera(source: ImageSource, camera: str = "", presets=None,
     return resolution
 
 
-def _as_database(presets):
-    """A camera database from whatever was passed: one, or a SMAP ``.mat``."""
-    from ..camera_db import CameraDatabase
-    if isinstance(presets, CameraDatabase):
-        return presets
-    path = Path(presets)
-    if path.suffix.lower() == ".mat":
-        from .cameras_mat import to_database
-        return to_database(path)
-    return CameraDatabase.load(path)
-
-
-def metadata_from_stack(source: ImageSource, presets=None) -> CameraMetadata:
-    """What the file and the camera database know about this acquisition.
-
-    ``presets`` adds a camera database beyond the shipped one -- another JSON
-    file, or a SMAP ``*_cameras.mat``, which is converted on the spot.
-    """
-    return resolve_camera(source, presets=presets).camera_metadata()
-
-
-def camera_metadata(source: ImageSource, presets=None, overrides=None,
+def camera_metadata(source: ImageSource, overrides=None,
                     require: bool = True, camera: str = "") -> CameraMetadata:
     """Camera metadata for a stack: the database, the file, then the user.
 
-    ``overrides`` may be a :class:`~smappy.metadata.CameraMetadata`, a dict, or
-    a path to a YAML file, and is the last word on every value it sets -- so a
-    camera that is in no database and a file that says nothing can still be
-    fitted by stating the three numbers.  ``presets`` adds a camera database
-    beyond the shipped one (another JSON file, or a SMAP ``*_cameras.mat``),
-    and ``camera`` names an entry to use instead of identifying one.
+    `resolve_camera`'s values, for a script.  ``overrides`` may be a
+    :class:`~smappy.metadata.CameraMetadata`, a dict, or a path to a YAML
+    file of the same fields (``smappy-fit --camera CONFIG.yaml``), and is the
+    last word on every value it sets -- so a camera that is in no database
+    and a file that says nothing can still be fitted by stating the three
+    numbers.  ``camera`` names a database entry to use instead of identifying
+    one; a camera is added to the database with the camera editor.
 
     With ``require=True`` the result is checked for completeness, so a missing
     pixel size fails here rather than silently producing wrong nm coordinates.
@@ -321,7 +323,7 @@ def camera_metadata(source: ImageSource, presets=None, overrides=None,
         overrides = CameraMetadata.from_yaml(overrides)
     if isinstance(overrides, CameraMetadata):
         overrides = {k: v for k, v in overrides.to_dict().items() if v is not None}
-    meta = resolve_camera(source, camera=camera, presets=presets,
+    meta = resolve_camera(source, camera=camera,
                           overrides=overrides).camera_metadata()
     if require:
         meta.require()

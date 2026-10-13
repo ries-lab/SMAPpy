@@ -123,7 +123,7 @@ def test_a_field_name_has_to_be_usable_in_a_later_expression():
         check_field("two words", locs)
     with pytest.raises(ValueError, match="function"):
         check_field("mean", locs)
-    with pytest.raises(ValueError, match="grouping"):
+    with pytest.raises(ValueError, match="merge blinks"):
         check_field("n_in_group", locs)
 
 
@@ -338,7 +338,7 @@ def test_an_expression_that_reads_its_own_field_is_applied_once():
                         MathSettings(field="photons", expression="photons * 2"))
     session.apply(plugin, result)
     assert np.median(np.asarray(session.locs["photons"], float) / before) == pytest.approx(2.0)
-    assert "photons" in session.layers[0].state.sets["grouped"].locs
+    assert "photons" in session.tables.grouped().locs
     assert "applied once" in result.text
 
 

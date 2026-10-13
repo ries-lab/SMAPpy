@@ -2,15 +2,17 @@
 title: Camera editor
 summary: Adds the camera of the file being fitted to your camera database -- or gives a known camera a readout mode it lacked -- so that the next file it takes is converted to photons without typing anything.
 widget: smappy.gui.camera_editor.CameraEditor
-covers: [smappy.camera_db.draft, smappy.camera_db.with_mode, smappy.camera_db.problems, smappy.camera_db.save_camera, smappy.camera_db.CameraDatabase.joined_with, smappy.camera_db.Camera.resolve, smappy.plugins.fit._FitPlugin.notice, smappy.gui.camera_editor.CameraEditor]
+covers: [smappy.camera_db.draft, smappy.camera_db.with_mode, smappy.camera_db.problems, smappy.camera_db.save_camera, smappy.camera_db.CameraDatabase.joined_with, smappy.camera_db.Camera.resolve, smappy.plugins.fit._FitPlugin._notice, smappy.gui.camera_editor.CameraEditor]
 ---
 
 ## What it does
 
 A fit needs three numbers about the camera before it can turn a movie into
-photons and nanometres: the *conversion* (photoelectrons per count), the
-*offset* (the count of a pixel that saw no light) and the *pixel size* in the
-sample.  Micro-Manager records the pixel size if it was calibrated, and never
+photons and nanometres: the [conversion](plugin:Panels/Glossary) (also
+called sensitivity or gain: photoelectrons per count), the
+[offset](plugin:Panels/Glossary) (also called baseline or bias: the count of
+a pixel that saw no light) and the *pixel size* in the sample.  A count is
+the camera's raw pixel value, in ADU (analog-to-digital units).  Micro-Manager records the pixel size if it was calibrated, and never
 the other two.  They depend on the camera's readout mode -- the readout rate,
 the pre-amp gain, the amplifier -- and that the file *does* record.  So
 smappy keeps a **camera database**: for each camera, the tag that recognises
@@ -22,13 +24,19 @@ A file from a camera that is *not* in the database has to have them typed
 into the fitter, every time.  The fitters say so as soon as the file is
 chosen, in an orange line under their settings, with a button that opens this
 window: *Add camera...* for a camera the database does not know, *Add readout
-mode...* for a known camera recorded in a mode it has no numbers for.  It
+mode...* for a known camera recorded in a mode it has no numbers for.  A
+camera the database does not know, whose numbers are not typed in either, is
+asked about again at Run, and *Open camera editor* there opens this window
+instead of fitting.  It
 also opens from *Camera editor...* at the top of the Localize tab, and from
 *Add to camera database...* in the *Camera parameters* window.
 
 The window starts from **the file the fitter is set to**: its tags already
-say which device took it, its serial number, which tags carry the EM gain,
-the exposure and the camera ROI, and which ones set the readout mode.  All of
+say which device took it, its serial number, which tags carry the
+[EM gain](plugin:Panels/Glossary) (electron multiplication: how much an EMCCD
+amplifies the signal before reading it out), the exposure and the
+[camera ROI](plugin:Panels/Glossary) (also called the readout region: the
+part of the chip that was read out), and which ones set the readout mode.  All of
 that is filled in.  What is left is the conversion and the offset of this
 file's readout mode, from the camera's data sheet or a calibration (the mean
 of a dark movie is the offset).  Save, and every later file from that camera
@@ -38,9 +46,10 @@ adds that mode to the camera and keeps the others.
 
 The entries are saved in **your own** `cameras.json`, in smappy's settings
 folder (the window shows where), never in the list that comes with smappy,
-which an update replaces.  A lab that already has its cameras in SMAP's
-`settings/*_cameras.mat` converts that file once instead, with
-`python -m smappy.io.cameras_mat lab_cameras.mat`.
+which an update replaces.  The database and the fitter's own camera fields
+are the only two places a camera's numbers come from: smappy reads neither
+camera YAML presets nor SMAP's `settings/*_cameras.mat`.  The cameras of the
+Ries lab's SMAP file are in the list that comes with smappy.
 
 ## How it works
 
@@ -137,7 +146,7 @@ data sheet, or measured from the mean and variance of a flat illumination.
 The count of a pixel that saw no light: the mean of a dark movie in this
 readout mode.
 
-### pixel size (um)
+### pixel size (µm)
 The size of a camera pixel in the sample: the physical pixel divided by the
 total magnification.
 

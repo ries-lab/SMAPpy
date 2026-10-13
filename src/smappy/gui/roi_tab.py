@@ -19,7 +19,6 @@ from PySide6.QtWidgets import (QComboBox, QDoubleSpinBox, QFormLayout,
                                QPushButton, QTableWidget,
                                QTableWidgetItem, QVBoxLayout, QWidget)
 
-from ..roi_manager import pipeline as pipeline_module
 from ..session import Session
 from .widgets import CONTROL_WIDTH, CollapsibleSection, ColumnScroll
 from .roi_window import COUNT_LIMIT
@@ -48,6 +47,14 @@ class ROIHeader(QWidget):
         self.open_button.setToolTip("the window for choosing and judging ROIs")
         self.open_button.clicked.connect(self.open_manager)
         layout.addWidget(self.open_button)
+        # beside the manager's button, out of any fold: the two windows are
+        # what this tab is for, and below them the plugins' Run buttons
+        # should be in view without scrolling
+        self.evaluate_button = QPushButton("Per-region steps...")
+        self.evaluate_button.setToolTip("the steps run once in every ROI: choose them, "
+                                        "order them and set them up; opens its own window")
+        self.evaluate_button.clicked.connect(self.open_evaluation)
+        layout.addWidget(self.evaluate_button)
 
         # which file this acts on is chosen in the manager; here it is only named
         self.file_count = QLabel("")
@@ -80,28 +87,28 @@ class ROIHeader(QWidget):
                                     "2D view into an analysis ROI")
         self.from_region.clicked.connect(self._from_region)
         form.addRow(self.from_region)
-        layout.addWidget(CollapsibleSection("geometry", geometry, expanded=True, major=True))
+        # folded: set once per project, and open it pushed the plugins below
+        # out of view
+        layout.addWidget(CollapsibleSection("geometry", geometry, expanded=False, major=True))
 
         # -------------------------------------------------------- evaluate
         evaluate = QWidget()
         elayout = QVBoxLayout(evaluate)
         elayout.setContentsMargins(0, 0, 0, 0)
-        self.evaluate_button = QPushButton("Region steps...")
-        self.evaluate_button.setToolTip("the steps run once in every ROI: choose them, "
-                                        "order them and set them up; opens its own window")
-        self.evaluate_button.clicked.connect(self.open_evaluation)
-        elayout.addWidget(self.evaluate_button)
         self.results = QTableWidget(0, 2)
         self.results.setHorizontalHeaderLabels(["measure", "value"])
         self.results.verticalHeader().setVisible(False)
         self.results.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.results.setFixedHeight(110)
-        elayout.addWidget(self.results)
         self.summary = QLabel("")
         self.summary.setWordWrap(True)
         self.summary.setStyleSheet("color: gray")
         elayout.addWidget(self.summary)
-        layout.addWidget(CollapsibleSection("evaluate", evaluate, expanded=True, major=True))
+        # the table only once there is something in it: 110 px of empty grid
+        # was most of what the tab showed before anything had been measured
+        elayout.addWidget(self.results)
+        self.results.hide()
+        layout.addWidget(CollapsibleSection("results", evaluate, expanded=False, major=True))
         layout.addStretch(1)
 
         session.on_change(self._on_session)
@@ -246,7 +253,7 @@ class ROIHeader(QWidget):
         self._update_counts()
         self._show_result()
         self.summary.setText(result.text.splitlines()[0].split(": ", 1)[-1]
-                             if result.text else "evaluated")
+                             if result.text else "measured")
         self._notify()
 
     def _show_result(self) -> None:
@@ -254,12 +261,13 @@ class ROIHeader(QWidget):
         active = project.navigation.get("roi")
         roi = project.rois.get(active) if active else None
         self.results.setRowCount(0)
+        self.results.setVisible(roi is not None)
         if roi is None:
             return
         record, states = project.latest(roi.id)
         if record is None:
             self.results.setRowCount(1)
-            self.results.setItem(0, 0, QTableWidgetItem("not evaluated"))
+            self.results.setItem(0, 0, QTableWidgetItem("not measured"))
             return
         # a value is as good as the step that produced it, so the mark goes
         # per step and not on the whole row: one edited evaluator does not

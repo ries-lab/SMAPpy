@@ -162,6 +162,7 @@ def test_one_bad_file_costs_that_file(tmp_path, folder):
 
 @register("Test/Batch/Slow")
 class Slow(Plugin):
+    changes_locs = False
     def preflight(self, ctx, settings):
         return "this takes an afternoon"
 
@@ -204,6 +205,7 @@ class FakeFitSettings:
 
 @register("Localize/Test Fake")
 class FakeFit(Plugin):
+    changes_locs = True
     Settings = FakeFitSettings
 
     def run(self, ctx, settings):
@@ -213,7 +215,7 @@ class FakeFit(Plugin):
         out = Path(settings.output.path or default_output_path(settings.source.path))
         locs = blinks(n_emitters=n)
         save_localizations(out, locs)
-        return Result(locs=locs, text=f"{len(locs)} fitted", data={"path": out})
+        return Result(locs=locs, text=f"{len(locs)} fitted", written=str(out))
 
 
 def test_images_in_means_the_first_step_is_given_each_file(tmp_path):

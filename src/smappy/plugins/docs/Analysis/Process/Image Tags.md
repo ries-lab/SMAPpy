@@ -50,9 +50,11 @@ frame (without the serial-port settings) and the note in `comments.txt`, if
 the acquisition has one.  This plugin prints the note above its summary.
 
 **Drawing.**  Each tag is drawn against the frame number.  A state is drawn
-as steps between its values.  The localizations in the current selection are
-counted in at most 500 bins across the frames and drawn as the mean number
-per frame.
+as steps between its values.  The localizations in the current
+[selection](plugin:Panels/Glossary) -- those that pass the layer's filter, the
+lowest and highest values of columns set in the Render tab, inside the drawn
+[ROI](plugin:Panels/Glossary) (region of interest) -- are counted in at most
+500 bins across the frames and drawn as the mean number per frame.
 
 ```figure-setup
 from smappy.simulate import simulate
@@ -77,6 +79,10 @@ fig.tight_layout()
 ```
 
 ## In detail
+
+**Which table.**  The localizations, whatever the layer shows: the
+count beside the tags is of localizations per frame, and a blink merged
+over several frames would be counted once, in its first.
 
 **What is compared.**  The metadata of a frame is flattened to
 `Device-Property` keys first.  User data that Micro-Manager wraps as

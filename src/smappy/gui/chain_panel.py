@@ -154,7 +154,7 @@ class ChainPanel(QWidget):
         on = getattr(self, "_runnable", True)
         panel = self.panel
         for w in (panel.run_button, panel.preview_button, panel.preview_frame,
-                  panel.plot_button, panel.text_button, panel.live, panel.status,
+                  panel.result_button, panel.follow_roi, panel.status,
                   panel.output):
             if w is not None:
                 w.setVisible(on)
@@ -164,8 +164,8 @@ class ChainPanel(QWidget):
     def form(self):
         return self.panel.form
 
-    def _hints(self) -> None:
-        self.panel._hints()
+    def refresh_derived(self) -> None:
+        self.panel.refresh_derived()
 
     # ------------------------------------------------------------ building
     def _build(self, cls: type) -> None:
@@ -374,7 +374,8 @@ class ChainPanel(QWidget):
             return
         try:
             settings = getattr(self.panel.form.value(), key)
-            estimate = found[1]().estimate(self.session.context(), settings)
+            estimate = found[1]().estimate(
+                self.session.context(grouping=found[1].grouping), settings)
         except Exception as error:
             self.checked.setText(f"cannot check: {error}")
             return

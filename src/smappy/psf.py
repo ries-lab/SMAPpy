@@ -292,10 +292,6 @@ class GlobalSplinePSF(_GlobalPSF):
         """The reference channel's, which sets the z scale for all of them."""
         return self.calibrations[0]
 
-    @property
-    def mirror(self) -> bool:
-        return bool(self.calibration.em_mirror)
-
     def fit(self, rois: np.ndarray, link: np.ndarray = None, iterations: int = 50,
             n_threads: int = 0) -> FitResult:
         if link is None:
@@ -392,9 +388,7 @@ class SplinePSF(PSFModel):
     """Experimental PSF interpolated by a cubic spline, from a SMAP calibration.
 
     ``z_start`` is the starting z in nm relative to focus; it is converted to
-    the spline's index units.  ``mirror`` reports whether the calibration was
-    computed from mirrored bead images, in which case the ROIs must be flipped
-    in x before fitting (see :func:`smappy.roi.cut_rois`).
+    the spline's index units.
     """
 
     calibration: SplineCalibration
@@ -404,11 +398,6 @@ class SplinePSF(PSFModel):
     @property
     def is_3d(self) -> bool:
         return True
-
-    @property
-    def mirror(self) -> bool:
-        """Whether ROIs must be x-flipped to match this calibration."""
-        return bool(self.calibration.em_mirror)
 
     def fit(self, rois: np.ndarray, iterations: int = 50,
             n_threads: int = 0) -> FitResult:
@@ -435,5 +424,4 @@ class SplinePSF(PSFModel):
 
     def __str__(self) -> str:
         nz, ny, nx = self.calibration.shape
-        return (f"SplinePSF({nx}x{ny}x{nz} grid, dz={self.calibration.dz:g} nm"
-                f"{', mirrored calibration' if self.mirror else ''})")
+        return f"SplinePSF({nx}x{ny}x{nz} grid, dz={self.calibration.dz:g} nm)"

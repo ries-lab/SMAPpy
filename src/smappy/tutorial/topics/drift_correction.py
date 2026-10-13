@@ -180,10 +180,10 @@ def make(d) -> None:
     comet._window.hide()
 
     d.chapter("What is kept")
-    d.shot("The drift curve is saved with the file, so Plot draws it again after "
-           "the file is reopened, and the correction can be undone.",
-           spot=[comet.plot_button], point=comet.plot_button,
-           zoom=d.around(comet.plot_button, 760))
+    d.shot("The drift curve is saved with the file, so Show result draws it "
+           "again after the file is reopened, and the correction can be undone.",
+           spot=[comet.result_button], point=comet.result_button,
+           zoom=d.around(comet.result_button, 760))
 
     d.chapter("Next")
     d.card("What to remember",

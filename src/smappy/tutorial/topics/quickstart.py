@@ -15,7 +15,7 @@ showing -- a file SMAPpy cannot recognise the camera of -- and it is typed in.
 """
 from __future__ import annotations
 
-from .common import (field, open_section, place_beside, section_of, show_tab,
+from .common import (expand, field, open_section, place_beside, section_of, show_tab,
                      tab_button, type_into)
 
 TITLE = "SMAPpy in three minutes"
@@ -112,6 +112,8 @@ def make(d) -> None:
         type_into(panel, f"camera.{name}", value)
     d.settle()
     camera = [field(panel, f"camera.{n}") for n in ("conversion", "offset", "pixelsize_um")]
+    expand(camera[0])               # the camera part starts folded
+    d.settle()
     d.shot("SMAPpy normally reads the camera from the file. This simulated file "
            "says nothing about it, so its numbers are typed in here.",
            spot=[d.union(*camera)], zoom=d.around(camera[1], 760))
@@ -158,7 +160,7 @@ def make(d) -> None:
     render.view.reset()
     show_tab(d, "Render")
     d.shot("The Render tab sets how the picture looks: filters, colours, "
-           "and grouping of blinks.",
+           "and merging of blinks.",
            spot=[tab_button(d, "Render")], point=tab_button(d, "Render"), click=True)
 
     d.chapter("Next")
@@ -168,9 +170,9 @@ def make(d) -> None:
            "<li><b>Render</b> shows the result.</li>"
            "<li><b>Analysis</b> measures it.</li>"
            "<li>The <b>?</b> beside a plugin explains it.</li></ul>"
-           "<p>Next: the tour of SMAPpy, with filters, layers and grouping.</p>",
+           "<p>Next: the tour of SMAPpy, with filters, layers and merging blinks.</p>",
            say="That is all it takes. Next, the tour of SMAPpy: filters, layers "
-               "and grouping.")
+               "and merging blinks.")
 
 
 def _documentation(d, sec) -> None:

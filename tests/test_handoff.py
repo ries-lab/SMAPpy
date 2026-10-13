@@ -57,9 +57,31 @@ def test_a_live_session_is_handed_over_as_it_was_and_carries_on_growing(tmp_path
     assert copy.locs["photons"].dtype == np.float32
     assert (copy.name, copy.colour) == (name, "orange")
     assert [l.name for l in copy.layers] == ["layer 1", "bright"]
-    assert copy.layers[1].state.sets["ungrouped"].filter.ranges["photons"] == (1000, 2000)
+    assert copy.layers[1].ranges["photons"] == (1000, 2000)
     assert copy.path is None and copy.history[-1]["what"] == "copy"
     assert not copy.live
+
+
+def test_blinks_are_merged_in_the_taking_only_for_a_layer_that_shows_them(tmp_path):
+    """`take` runs on the new window's worker: the merge belongs there when
+    a layer handed over shows blinks, and nowhere when none does."""
+    from smappy.locs import concat
+    session = Session(concat([block(f) for f in range(1, 9)]))
+    session.show_grouped(0, False)
+    offer = handoff.offer(session, folder=tmp_path)
+    _, _, grouped = handoff.take(offer.path)
+    offer.release()
+    assert grouped is None                          # nothing asked for blinks
+
+    session.show_grouped(0, True)
+    offer = handoff.offer(session, folder=tmp_path)
+    locs, state, grouped = handoff.take(offer.path)
+    offer.release()
+    assert grouped is not None and len(grouped) < len(locs)
+    copy = Session()
+    handoff.apply_state(copy, locs, state, grouped)
+    assert copy.layers[0].grouped and copy.tables.is_current
+    assert copy.layers[0].locs is copy.tables.peek_grouped().locs   # not relinked
 
 
 def test_an_offer_nobody_takes_is_released_and_leaves_nothing(tmp_path):
@@ -203,3 +225,36 @@ def test_a_run_handed_over_is_run_by_the_new_instance(app, tmp_path, monkeypatch
         for w in windows:
             w.close()
         uninstall_identity(app)
+
+
+def test_show_hands_a_table_to_a_gui_of_its_own_and_frees_it_once_taken(monkeypatch):
+    """`smappy.show` from a script: the table arrives as it was, and the
+    shared block is gone once the GUI has it."""
+    import threading
+    from multiprocessing import shared_memory
+
+    from smappy import api
+    taken = {}
+
+    class Process:
+        def poll(self):
+            return None
+
+    def launch(path):                  # the GUI's side, without starting one
+        def take():
+            time.sleep(0.2)
+            taken["locs"], taken["state"] = handoff.receive(path)
+        threading.Thread(target=take).start()
+        return Process()
+
+    monkeypatch.setattr(handoff, "launch", launch)
+    sent = block(1)
+    made = []
+    real = handoff._shared_memory
+    monkeypatch.setattr(handoff, "_shared_memory",
+                        lambda *a, **k: made.append(real(*a, **k)) or made[-1])
+    assert isinstance(api.show(sent, name="from a script", wait=True), Process)
+    assert np.array_equal(taken["locs"]["x_nm"], sent["x_nm"])
+    assert taken["state"]["identity"]["name"] == "from a script"
+    with pytest.raises(FileNotFoundError):         # released: unlinked
+        shared_memory.SharedMemory(name=made[0].name)

@@ -21,6 +21,7 @@ def table(n=100):
 
 class Echo(Plugin):
     """Reports what it was given, so a test can look at the context."""
+    changes_locs = False
     Settings = None
 
     def run(self, ctx, settings):
@@ -48,6 +49,7 @@ def test_locs_alone_selects_everything():
 def test_a_session_context_snapshots_the_table_and_the_selection():
     locs = table()
     session = Session(locs)
+    session.show_grouped(0, False)        # the localizations themselves
     session.set_roi(Region.rect(0, 0, 500, 500))
     ctx = session.context()
     assert ctx.session is session and ctx.locs is session.locs
@@ -74,6 +76,7 @@ def test_per_region_says_a_plugin_hands_back_values():
     assert Plugin.per_region is False and Echo.per_region is False
 
     class PerRegion(Plugin):
+        changes_locs = False
         per_region = True
 
     assert PerRegion.per_region is True
@@ -81,6 +84,7 @@ def test_per_region_says_a_plugin_hands_back_values():
 
 def test_calling_a_plugin_needs_no_localizations_at_all():
     class Maker(Plugin):
+        changes_locs = True
         def run(self, ctx, settings):
             return Result(locs=table(7), text="made some")
 
@@ -90,8 +94,10 @@ def test_calling_a_plugin_needs_no_localizations_at_all():
 
 def test_session_run_applies_and_logs_through_the_context():
     class Halve(Plugin):
+        changes_locs = True
         path = "Test/Halve"
         name = "Halve"
+        grouping = "ungrouped"            # it hands back a new table
 
         def run(self, ctx, settings):
             ctx.report(f"halving {len(ctx.locs)}")
@@ -119,8 +125,10 @@ def test_the_panel_builds_the_context_on_the_gui_thread_and_streams_back():
     seen = {}
 
     class Slow(Plugin):
+        changes_locs = True
         path = "Test/Slow"
         name = "Slow"
+        grouping = "ungrouped"            # it hands back a new table
 
         def run(self, ctx, settings):
             seen["ran_on"] = threading.get_ident()
@@ -170,12 +178,13 @@ def test_a_declined_preflight_question_does_not_run_the_plugin(monkeypatch):
     """The preflight runs before the worker exists, so 'no' means no work at
     all -- not a thread started and abandoned."""
     pytest.importorskip("PySide6")
-    from PySide6.QtWidgets import QApplication, QMessageBox
+    from PySide6.QtWidgets import QApplication
 
     app = QApplication.instance() or QApplication([])
     seen = {"ran": False}
 
     class Expensive(Plugin):
+        changes_locs = True
         path = "Test/Expensive"
         name = "Expensive"
 
@@ -190,10 +199,13 @@ def test_a_declined_preflight_question_does_not_run_the_plugin(monkeypatch):
     from smappy.gui.plugin_panel import PluginPanel
     panel = PluginPanel(Expensive, Session(table()))
 
-    answer = {"button": QMessageBox.StandardButton.No}
-    monkeypatch.setattr(QMessageBox, "question",
-                        lambda *a, **k: answer["button"], raising=False)
+    from smappy.plugins import PreflightChoice
+    answer = {"run": False}
 
+    def ask(self, title, question):
+        return PreflightChoice(question.run_label) if answer["run"] else None
+
+    monkeypatch.setattr(PluginPanel, "ask_choice", ask)
     panel.run()
     app.processEvents()
     assert seen["ran"] is False
@@ -201,8 +213,42 @@ def test_a_declined_preflight_question_does_not_run_the_plugin(monkeypatch):
     # what it would have cost is in the log either way, so a 'no' is informed
     assert "this will take 3 hours" in panel.output.toPlainText()
 
-    answer["button"] = QMessageBox.StandardButton.Yes
+    answer["run"] = True
     assert panel._preflight(None)[0] is True      # and 'yes' lets the run start
+
+
+def test_a_cost_question_defaults_to_the_cheaper_way_or_else_to_cancel():
+    """Return never starts the run that was just said to be expensive: it
+    takes the first alternative when there is one, Cancel when not, and
+    Escape always cancels -- the same for a plain question and a choice."""
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication
+
+    from smappy.gui.plugin_panel import PluginPanel
+    from smappy.plugins import PreflightChoice, PreflightQuestion
+
+    QApplication.instance() or QApplication([])
+
+    class Costly(Plugin):
+        changes_locs = False
+        path = "Test/Costly"
+        name = "Costly"
+
+        def run(self, ctx, settings):
+            return Result()
+
+    panel = PluginPanel(Costly, Session(table()))
+    plain = PreflightQuestion("3 hours. Run it?", run_label="Run")
+    box, answers = panel.choice_box("t", plain)
+    assert box.defaultButton() is box.escapeButton()
+    assert box.defaultButton() not in answers          # Cancel: no answer
+    assert {a.label for a in answers.values()} == {"Run"}
+
+    cheaper = PreflightQuestion("3 hours.", choices=[
+        PreflightChoice("RCC prepass", settings="fast")])
+    box, answers = panel.choice_box("t", cheaper)
+    assert answers[box.defaultButton()].label == "RCC prepass"
+    assert box.escapeButton() not in answers
 
 
 def test_a_preflight_choice_runs_with_the_settings_it_carries(monkeypatch):
@@ -223,6 +269,7 @@ def test_a_preflight_choice_runs_with_the_settings_it_carries(monkeypatch):
         radius: float = param(500.0, label="radius", min=1)
 
     class Expensive(Plugin):
+        changes_locs = True
         path = "Test/Choosy"
         name = "Choosy"
         Settings = Cost
@@ -273,6 +320,7 @@ def test_choices_of_which_are_asked_until_none_is_left(monkeypatch):
         second: str = ""
 
     class Choosy(Plugin):
+        changes_locs = False
         path = "Test/Which"
         name = "Which"
         Settings = Two
@@ -310,6 +358,7 @@ def test_a_preflight_that_fails_does_not_block_the_run():
     QApplication.instance() or QApplication([])
 
     class Broken(Plugin):
+        changes_locs = True
         path = "Test/Broken"
         name = "Broken"
 
@@ -334,6 +383,7 @@ def test_a_report_stays_in_the_panel_unless_the_plugin_is_a_log():
     app = QApplication.instance() or QApplication([])
 
     class Talkative(Plugin):
+        changes_locs = False
         path = "Test/Talkative"
         name = "Talkative"
         Settings = None
@@ -353,9 +403,10 @@ def test_a_report_stays_in_the_panel_unless_the_plugin_is_a_log():
     run(panel)
     assert panel._text_window is None
     assert panel.output.toPlainText().endswith("line 39")
-    assert panel.text_button.isEnabled()      # but the button offers it
-    panel.show_text()
+    assert panel.result_button.isEnabled()      # but the button offers it
+    panel.result_button.click()                 # no figures: the text
     assert panel._text_window.view.toPlainText().endswith("line 39")
+    assert panel._window is None
 
     class Log(Talkative):
         path = "Test/Log"
@@ -377,6 +428,7 @@ def test_run_opens_the_figures_and_a_run_nobody_asked_for_does_not():
     app = QApplication.instance() or QApplication([])
 
     class Drawn(Plugin):
+        changes_locs = False
         path = "Test/Drawn"
         name = "Drawn"
         Settings = None
@@ -401,10 +453,10 @@ def test_run_opens_the_figures_and_a_run_nobody_asked_for_does_not():
     assert unattended.start_run(ask=False)
     finish(unattended)
     assert unattended._window is None
-    assert unattended.plot_button.isEnabled()          # Plot still offers them
+    assert unattended.result_button.isEnabled()          # Show result still offers them
 
 
-def test_a_live_plugin_without_a_preview_measures_with_run_and_applies_nothing():
+def test_a_plugin_that_follows_the_roi_without_a_preview_measures_with_run_and_applies_nothing():
     pytest.importorskip("PySide6")
     import time
 
@@ -414,10 +466,11 @@ def test_a_live_plugin_without_a_preview_measures_with_run_and_applies_nothing()
     runs = []
 
     class Aimed(Plugin):
+        changes_locs = False
         path = "Test/AimedByRun"
         name = "AimedByRun"
         Settings = None
-        live = True
+        follow_roi = True
 
         def run(self, ctx, settings):
             runs.append(1)
@@ -428,9 +481,9 @@ def test_a_live_plugin_without_a_preview_measures_with_run_and_applies_nothing()
     applied = []
     session.apply = lambda plugin, result: applied.append(result)
     panel = PluginPanel(Aimed, session)
-    assert panel.preview_button is None and panel.live is not None
+    assert panel.preview_button is None and panel.follow_roi is not None
 
-    panel.live.setChecked(True)
+    panel.follow_roi.setChecked(True)
     session.set_roi(Region.line((0, 0), (500, 500), 100.0))
     deadline = time.time() + 20
     while not runs and time.time() < deadline:
@@ -439,10 +492,10 @@ def test_a_live_plugin_without_a_preview_measures_with_run_and_applies_nothing()
     while panel._thread is not None and panel._thread.isRunning():
         app.processEvents()
     app.processEvents()
-    panel.live.setChecked(False)
+    panel.follow_roi.setChecked(False)
 
     assert runs and not applied
-    assert panel.status.text() == "live"
+    assert panel.status.text() == "following ROI"
     assert panel._window is not None
 
 
@@ -454,6 +507,7 @@ def test_a_warning_stays_on_screen_when_progress_follows_it():
     app = QApplication.instance() or QApplication([])
 
     class Warns(Plugin):
+        changes_locs = False
         path = "Test/Warns"
         name = "Warns"
         Settings = None
@@ -478,7 +532,7 @@ def test_a_warning_stays_on_screen_when_progress_follows_it():
     assert panel.status.text() == "done, 1 warning"
 
 
-def test_a_live_plugin_refits_while_the_roi_moves_and_says_nothing_about_it():
+def test_a_plugin_that_follows_the_roi_refits_while_it_moves_and_says_nothing_about_it():
     """Ten times a second: no line in the log, no window taking the focus.
     The figure redrawing where it already is is the whole output."""
     pytest.importorskip("PySide6")
@@ -492,10 +546,11 @@ def test_a_live_plugin_refits_while_the_roi_moves_and_says_nothing_about_it():
     runs = []
 
     class Aimed(Plugin):
+        changes_locs = False
         path = "Test/Aimed"
         name = "Aimed"
         Settings = None
-        live = True
+        follow_roi = True
 
         def run(self, ctx, settings):
             return self.preview(ctx, settings)
@@ -509,9 +564,9 @@ def test_a_live_plugin_refits_while_the_roi_moves_and_says_nothing_about_it():
     from smappy.gui.plugin_panel import PluginPanel
     session = Session(table())
     panel = PluginPanel(Aimed, session)
-    assert panel.live is not None                 # the plugin asked for it
+    assert panel.follow_roi is not None                 # the plugin asked for it
 
-    panel.live.setChecked(True)
+    panel.follow_roi.setChecked(True)
     session.set_roi(Region.line((0, 0), (500, 500), 100.0))
     deadline = time.time() + 20
     while not runs and time.time() < deadline:
@@ -521,25 +576,35 @@ def test_a_live_plugin_refits_while_the_roi_moves_and_says_nothing_about_it():
         app.processEvents()
     app.processEvents()
 
-    assert runs, "the live tick never refitted"
-    assert panel.status.text() == "live"
+    assert runs, "the follow ROI tick never refitted"
+    assert panel.status.text() == "following ROI"
     assert panel.output.toPlainText().strip() == ""    # not a word about it
     assert panel._text_window is None                  # even though it is long
     assert panel._window is not None                   # but the figure is there
-    assert panel.text_button.isEnabled()               # and the text is offered
+    assert panel.result_button.isEnabled()               # and the text is offered
 
-    panel.live.setChecked(False)
+    panel.follow_roi.setChecked(False)
     while panel._thread is not None and panel._thread.isRunning():
         app.processEvents()
 
 
-def test_a_plugin_that_is_not_live_gets_no_tick():
+def test_a_plugin_that_still_says_live_is_told_the_new_name():
+    """"live" means a fit still appending; the tick's old name would
+    otherwise be an attribute nothing reads, and the tick gone silently."""
+    with pytest.raises(TypeError, match="follow_roi"):
+        class Old(Plugin):
+            changes_locs = False
+            live = True
+
+
+def test_a_plugin_that_does_not_follow_the_roi_gets_no_tick():
     pytest.importorskip("PySide6")
     from PySide6.QtWidgets import QApplication
 
     QApplication.instance() or QApplication([])
 
     class Slow(Plugin):
+        changes_locs = False
         path = "Test/Slow"
         name = "Slow"
         Settings = None
@@ -548,4 +613,87 @@ def test_a_plugin_that_is_not_live_gets_no_tick():
             return Result(text="done")
 
     from smappy.gui.plugin_panel import PluginPanel
-    assert PluginPanel(Slow, Session(table())).live is None
+    assert PluginPanel(Slow, Session(table())).follow_roi is None
+
+
+def test_a_thin_selection_is_a_warning_that_progress_cannot_overwrite():
+    """It went through `report`, and the next progress line replaced it."""
+    heard = []
+    ctx = Context(locs=Localizations({"x_nm": np.zeros(10), "y_nm": np.zeros(10)}, {}),
+                  stream=lambda event, payload: heard.append((event, payload)))
+    ctx.selection.require(100, ctx.warn, "a fit")
+    assert ctx.warnings == ["only 10 localizations; a fit wants at least ~100"]
+    assert ("warning", ctx.warnings[0]) in heard
+
+
+def test_an_info_notice_is_drawn_quietly_and_a_warning_loudly():
+    """Only what will go wrong is orange and bold: a save's note of what it
+    leaves out is grey, so the warnings keep being read."""
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication
+
+    from smappy.gui.plugin_panel import INFO_STYLE, WARNING_STYLE, PluginPanel
+    from smappy.plugins import Notice
+
+    QApplication.instance() or QApplication([])
+
+    class Quiet(Plugin):
+        changes_locs = False
+        path = "Test/Quiet"
+        name = "Quiet"
+
+        def run(self, ctx, settings):
+            return Result()
+
+    panel = PluginPanel(Quiet, Session(table()))
+    panel._show_notice(Notice("worth knowing", kind="info"))
+    assert panel.notice.styleSheet() == INFO_STYLE
+    panel._show_notice(Notice("this camera is a guess"))
+    assert panel.notice.styleSheet() == WARNING_STYLE
+
+
+def test_an_optional_bool_is_a_choice_of_auto_on_and_off():
+    """Not a tri-state tick box, whose third state nobody reads as auto:
+    the words, and auto saying what it resolves to."""
+    pytest.importorskip("PySide6")
+    from dataclasses import dataclass
+    from typing import Optional
+    from PySide6.QtWidgets import QApplication, QComboBox
+
+    from smappy.gui.params import SettingsForm
+    from smappy.plugins import param
+
+    QApplication.instance() or QApplication([])
+
+    @dataclass
+    class Cam:
+        em_on: Optional[bool] = param(None, label="EM gain on")
+
+    form = SettingsForm(Cam)
+    box = form.fields["em_on"].widget
+    assert isinstance(box, QComboBox)
+    assert [box.itemText(i) for i in range(box.count())] == ["auto", "on", "off"]
+    assert form.value().em_on is None
+    form.set_hints({"em_on": True})
+    assert box.itemText(0) == "auto (on)" and form.value().em_on is None
+    for value in (True, False, None):
+        form.set_values({"em_on": value})
+        assert form.value().em_on is value
+
+
+def test_a_new_chain_is_one_of_the_choices_of_plus():
+    """No "+ chain" beside "+" on every tab: the chooser offers it."""
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication, QPushButton
+
+    from smappy.gui.chooser import NEW_CHAIN, PluginChooser
+
+    QApplication.instance() or QApplication([])
+    plain = PluginChooser()
+    assert not [b for b in plain.findChildren(QPushButton)
+                if b.text() == "a new chain..."]
+    chooser = PluginChooser(new_chain=True)
+    [button] = [b for b in chooser.findChildren(QPushButton)
+                if b.text() == "a new chain..."]
+    button.click()
+    assert chooser.path == NEW_CHAIN and chooser.result() == 1      # accepted

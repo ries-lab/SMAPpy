@@ -30,6 +30,12 @@ the ones that shape this module:
   belongs to the ROI and says how it was made (`ROIProject.evaluations`),
   so nothing downstream needs to know which pipeline ran it.
 
+* **Stop ends it between steps.**  A step is handed the chain's
+  `Context.stop`; once it is set, no further step starts, and the steps
+  done -- the one that was running, if it kept a part (a fit's frames so
+  far) -- are the chain's result, which says ``stopped``.  A step that
+  raises `Stopped` keeps nothing and the chain ends before it.
+
 * **Linear.**  SMAP's workflows were graphs; `NOTES.md` ("No module chain")
   records why the fitting pipeline is not, and the same reasons hold here --
   a chain does what a person clicking through the tabs would do, in order.
@@ -45,25 +51,28 @@ import dataclasses
 import keyword
 import re
 import time
-import typing
 from dataclasses import dataclass, field, fields, make_dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from .plugins import (Context, ParamInfo, Plugin, PreflightChoice, PreflightQuestion,
-                      Result, _hint_from_text, param, settings_from, settings_values)
+from .plugins import (Context, FormState, ParamInfo, Plugin, PreflightChoice,
+                      PreflightQuestion, Result, Stopped, param, settings_hints,
+                      settings_from, SOURCES, refuse_grouped_table, settings_values)
 
 SCHEMA = "smappy-chain-v1"
 SUFFIX = ".chain.yaml"
 # the chain's own choice of table for every step, and a step's
 STEP_GROUPINGS = ("auto", "grouped", "ungrouped")
 CHAIN_GROUPINGS = ("layer", "grouped", "ungrouped")
+# as the GUI says them: which table, in the words of the Render tab's
+# *merge blinks*
+MERGED = {"auto": "auto", "layer": "as each layer", "grouped": "merged",
+          "ungrouped": "not merged"}
 # the field a step's settings gain; a plugin with a field of this name cannot
 # be a step, and says so rather than having its field shadowed
 GROUPING_FIELD = "use_grouping"
 # a block's choices: what it repeats over, and how it merges overlaps
 BLOCK_ROIS = "rois"
-KEEP_FIGURES = ("auto", "yes", "no")
 # where a chain lands in the tree when its file does not say
 DEFAULT_GROUP = "Analysis/Chains"
 
@@ -144,7 +153,6 @@ class Block:
     write_back: List[str] = field(default_factory=list)
     write_values: List[str] = field(default_factory=list)
     merge: str = "last"
-    keep_figures: str = "auto"       # auto: on for ROIs, off for an id column
     enabled: bool = True
     plugin: str = ""                 # a step's field, empty: a block has none
     grouping: str = "auto"
@@ -165,8 +173,6 @@ class Block:
             out["write_values"] = list(self.write_values)
         if self.merge != "last":
             out["merge"] = self.merge
-        if self.keep_figures != "auto":
-            out["keep_figures"] = self.keep_figures
         if not self.enabled:
             out["enabled"] = False
         out["steps"] = [s.to_dict() for s in self.steps]
@@ -182,10 +188,8 @@ class Block:
         if merge not in WriteBack.RULES:
             raise ChainError(f"block merge {merge!r} is not one of "
                              f"{', '.join(WriteBack.RULES)}")
-        keep = str(raw.get("keep_figures", "auto"))
-        if keep not in KEEP_FIGURES:
-            raise ChainError(f"block keep_figures {keep!r} is not one of "
-                             f"{', '.join(KEEP_FIGURES)}")
+        # ``keep_figures``, which older files may hold, is no choice any more:
+        # an ROI keeps its figure data, a region of an id column does not
         def names(key):
             found = raw.get(key) or []
             if isinstance(found, str):
@@ -195,8 +199,7 @@ class Block:
                    label=str(raw.get("block") or raw.get("label") or ""),
                    regions=str(raw.get("regions") or BLOCK_ROIS),
                    write_back=names("write_back"), write_values=names("write_values"),
-                   merge=merge,
-                   keep_figures=keep, enabled=bool(raw.get("enabled", True)))
+                   merge=merge, enabled=bool(raw.get("enabled", True)))
 
 
 def step_from_dict(raw: Dict[str, Any]):
@@ -337,13 +340,6 @@ def spec_from(plugin_cls, settings) -> Step:
 
 # ------------------------------------------------------------ the settings
 
-def _hints(settings_cls) -> Dict[str, Any]:
-    try:
-        return typing.get_type_hints(settings_cls)
-    except (TypeError, NameError):
-        return {f.name: _hint_from_text(f.type) for f in fields(settings_cls)}
-
-
 def _flat_infos(specs, prefix: str) -> Dict[str, ParamInfo]:
     """Every spec's presentation by dotted name, copied: `Plugin.specs` writes
     `advanced` onto the infos it returns, which may be a field's own."""
@@ -362,7 +358,7 @@ def step_settings_class(key: str, plugin_cls, step: Step) -> type:
     columns: List[tuple] = []
     if base is not None:
         defaults = settings_from(base, step.values)
-        hints = _hints(base)
+        hints = settings_hints(base)
         for f in fields(base):
             if not f.init:
                 continue
@@ -378,12 +374,13 @@ def step_settings_class(key: str, plugin_cls, step: Step) -> type:
             columns.append((f.name, hints.get(f.name, Any), made))
     required = getattr(plugin_cls, "grouping", None)
     if required:
-        help = f"this plugin only works {required}"
+        help = f"this plugin only works with blinks {MERGED[required]}"
     else:
-        help = ("which table this step reads: auto takes the chain's choice, "
-                "or each layer's own; in each ROI, each layer's own")
+        help = ("whether this step reads merged blinks: auto takes the chain's "
+                "choice, or each layer's own; in each ROI, each layer's own")
     columns.append((GROUPING_FIELD, str, param(
-        required or step.grouping, label="grouping", choices=STEP_GROUPINGS,
+        required or step.grouping, label="merge blinks",
+        choices=[(g, MERGED[g]) for g in STEP_GROUPINGS],
         advanced=True, help=help)))
     name = "".join(w.capitalize() for w in key.split("_")) + "Step"
     return make_dataclass(name, columns, namespace={"__module__": __name__})
@@ -416,7 +413,7 @@ def is_source(plugin_cls) -> bool:
     What decides a batch's input kind: a chain whose first step is a fit reads
     images, and anything else is handed localization files.
     """
-    return plugin_cls.path.startswith(("Localize/", "File/Load/", "File/Simulate/"))
+    return plugin_cls.path.startswith(SOURCES)
 
 
 def is_evaluator(plugin_cls) -> bool:
@@ -425,8 +422,9 @@ def is_evaluator(plugin_cls) -> bool:
 
 
 def made_by(plugin_cls, step_settings) -> List[Tuple[str, str]]:
-    """The evaluations a step leaves on the ROIs, as ``(name, plugin path)``:
-    a block over the ROIs leaves one per step; anything else none."""
+    """The evaluations a step leaves, as ``(name, plugin path)``: a block
+    leaves one per step, on the ROIs or per region of its id column
+    (`BlockPlugin.evaluations`); anything else none."""
     from .blocks import BlockPlugin
     if isinstance(plugin_cls, type) and issubclass(plugin_cls, BlockPlugin):
         return plugin_cls.evaluations(step_settings)
@@ -458,6 +456,9 @@ class ChainPlugin(Plugin):
     spec: ChainSpec = None
     steps: List[tuple] = []           # (key, Step, plugin class) of enabled steps
     logged = True                     # a chain's record is the point of it
+    # whether a step changes the table: `chain_class` answers for the
+    # chain's own values, `changes_locs_for` for the form's
+    changes_locs = True
     # What a step's preflight question means here.  "proceed": a person has
     # already agreed (the GUI asks every step up front, in `preflight`), or a
     # script asked for the run.  "skip" and "abort" are for a batch, where
@@ -472,19 +473,17 @@ class ChainPlugin(Plugin):
             return "images"
         return "localizations"
 
-    def changes_locs_for(self, settings) -> Optional[bool]:
-        """Whether any step changes the table: True if one does, None if one
-        does not say and none does, else False."""
-        answers = []
+    def changes_locs_for(self, settings) -> bool:
+        """Whether any step changes the table with the settings it has."""
         for key, step, cls in self.steps:
             try:
-                answers.append(cls().changes_locs_for(
-                    plugin_settings(cls, getattr(settings, key))))
+                answer = cls().changes_locs_for(
+                    plugin_settings(cls, getattr(settings, key)))
             except Exception:
-                answers.append(cls.changes_locs)
-        if any(a is True for a in answers):
-            return True
-        return None if any(a is None for a in answers) else False
+                answer = cls.changes_locs
+            if answer:
+                return True
+        return False
 
     def preflight(self, ctx: Context, settings):
         """Every step's question, asked once, before any of them runs.
@@ -517,9 +516,11 @@ class ChainPlugin(Plugin):
                 continue
             if isinstance(asked, PreflightQuestion) and asked.choices \
                     and not asked.run_label:
+                # a choice that opens a window keeps the step's own settings:
+                # the window is the step's (a fitter's camera editor)
                 choices = [PreflightChoice(
-                    label=c.label, help=c.help,
-                    settings=None if c.settings is None
+                    label=c.label, help=c.help, window=c.window,
+                    settings=c.settings if c.window or c.settings is None
                     else _with_step(settings, key, cls, c.settings))
                     for c in asked.choices]
                 return PreflightQuestion(text=f"{step.title()}: {asked.text}",
@@ -538,20 +539,29 @@ class ChainPlugin(Plugin):
 
     def run(self, ctx: Context, settings) -> Result:
         from .session import Session
-        session = (ctx.session.scratch(ctx.locs) if ctx.session is not None
-                   else Session(ctx.locs).scratch())
+        # the whole table, whatever the chain's own context shows: each step
+        # gets the table its grouping says, from the copy
+        locs, _ = ctx.ungrouped()
+        ctx.served_grouped = False
+        session = (ctx.session.scratch(locs) if ctx.session is not None
+                   else Session(locs).scratch())
         records: List[Dict[str, Any]] = []
         results: Dict[str, Result] = {}
         plots: Dict[str, Any] = {}
         kept: Dict[str, Any] = {}
         lines: List[str] = []
         layers = None
-        path = None
+        written = None
         images = None
         rois_before = _roi_signature(session)
         made: List[Tuple[str, str]] = []  # (name, evaluator) of the chain's evaluations
+        stopped = False
         for key, step, cls in self.steps:
             label = step.title()
+            if ctx.stopped:
+                lines.append(f"stopped before {label}")
+                stopped = True
+                break
             sub = getattr(settings, key)
             plugin = cls()
             own = plugin_settings(cls, sub)
@@ -571,16 +581,19 @@ class ChainPlugin(Plugin):
             sctx.stop = ctx.stop
             try:
                 result = plugin.run(sctx, own)
+            except Stopped as error:
+                lines.append(f"{label}: {error}")
+                stopped = True
+                break
             except Exception as error:
                 raise ChainError(f"step {label!r} ({cls.path}) failed -- "
                                  f"{type(error).__name__}: {error}") from error
-            if result.locs is not None and sctx.served_grouped:
-                raise ChainError(
-                    f"step {label!r} ran on the grouped table and handed back a "
-                    "new table: there is no way from one row per blink back to "
-                    "the localizations, so run it ungrouped")
+            try:
+                refuse_grouped_table(sctx, result, plugin, f"step {label!r}")
+            except ValueError as error:
+                raise ChainError(str(error)) from None
             session.apply(plugin, result)
-            made.extend((result.data or {}).get("evaluations") or [])
+            made.extend(result.evaluations or ())
             for warning in sctx.warnings:
                 ctx.warn(warning)
             seconds = time.perf_counter() - started
@@ -600,30 +613,27 @@ class ChainPlugin(Plugin):
                 saved = None           # the run stands; only the replot is lost
             if saved:
                 kept[key] = {"plugin": cls.path, "label": label, "data": saved}
-            if "layers" in (result.data or {}) or "bounds" in (result.data or {}):
+            if result.layers is not None or result.bounds:
                 layers = session.layer_configs()
-            path = (result.data or {}).get("path") or path
+            written = result.written or written
             # a fit's kept frames go on with the table, as its path does
-            images = (result.data or {}).get("images") or images
+            images = list(result.images or ()) or images
             first = result.text.splitlines()[0] if result.text else "done"
             lines.append(f"{label}: {first}")
+            stopped = stopped or result.stopped
         changed = any(r["changed"] for r in records)
-        data: Dict[str, Any] = {"steps": records, "results": results, "kept": kept}
-        if layers is not None:
-            data["layers"] = layers
-        if path:
-            data["path"] = path
-        if images:
-            data["images"] = images
-        # the ROIs a segmenter found and the runs an evaluator made, which
-        # `Session.apply` puts into the session's project
-        if _roi_signature(session) != rois_before:
-            data["roi_project"] = session.roi_state()
-        # and what blocks measured per region of an id column
-        if session._id_regions:
-            data["id_regions"] = session.id_regions
         return Result(locs=session.locs if changed else None,
-                      text="\n".join(lines) or "no steps", plots=plots, data=data,
+                      text="\n".join(lines) or "no steps", plots=plots,
+                      data={"steps": records, "results": results, "kept": kept},
+                      stopped=stopped, layers=layers, written=written,
+                      images=images or (),
+                      # the ROIs a segmenter found and the runs an evaluator
+                      # made, which `Session.apply` puts into the session's
+                      # project, and what blocks measured per region of an
+                      # id column
+                      roi_project=(session.roi_state()
+                                   if _roi_signature(session) != rois_before else None),
+                      id_regions=session.id_regions if session._id_regions else {},
                       settings=settings,
                       log={"steps": [{k: v for k, v in r.items() if k != "key"}
                                      for r in records]})
@@ -665,43 +675,29 @@ class ChainPlugin(Plugin):
         replies = cls().react(rest, plugin_settings(cls, getattr(settings, key)))
         return {f"{key}.{k}": v for k, v in (replies or {}).items()} or None
 
-    def hints(self, settings):
-        out = {}
-        for key, step, cls in self.steps:
-            try:
-                found = cls().hints(plugin_settings(cls, getattr(settings, key)))
-            except Exception:
-                found = None
-            out.update({f"{key}.{k}": v for k, v in (found or {}).items()})
-        return out or None
-
-    def choices(self, ctx: Context, settings):
-        """Each step's session-dependent choices, told -- as in `preflight` --
-        which evaluations the steps before it will have made."""
-        out = {}
+    def describe(self, ctx: Optional[Context], settings) -> FormState:
+        """Each step's own, under the step's key: its hints, its fields read,
+        its lists -- told, as in `preflight`, which evaluations the steps
+        before it will have made -- and its notice, saying whose it is and
+        opening its window on the step's settings.  A step whose grouping
+        is fixed by its plugin has none to choose."""
+        state = FormState()
         made: List[Tuple[str, str]] = []
         for key, step, cls in self.steps:
-            sctx = copy.copy(ctx)
-            sctx.evaluations = list(made)
-            made.extend(made_by(cls, getattr(settings, key)))
+            sub = getattr(settings, key)
+            sctx = None
+            if ctx is not None:
+                sctx = copy.copy(ctx)
+                sctx.evaluations = list(made)
+            made.extend(made_by(cls, sub))
             try:
-                found = cls().choices(sctx, plugin_settings(cls, getattr(settings, key)))
+                own = plugin_settings(cls, sub)
+                state.update(cls().describe(sctx, own).under(key, step.title(), own))
             except Exception:
-                found = None
-            out.update({f"{key}.{k}": v for k, v in (found or {}).items()})
-        return out or None
-
-    def active(self, settings):
-        out = {}
-        for key, step, cls in self.steps:
-            try:
-                found = cls().active(plugin_settings(cls, getattr(settings, key)))
-            except Exception:
-                found = None
-            out.update({f"{key}.{k}": v for k, v in (found or {}).items()})
-            if cls.grouping and hasattr(getattr(settings, key), GROUPING_FIELD):
-                out[f"{key}.{GROUPING_FIELD}"] = False
-        return out or None
+                pass                       # best effort, like the panel's
+            if cls.grouping and hasattr(sub, GROUPING_FIELD):
+                state.active[f"{key}.{GROUPING_FIELD}"] = False
+        return state
 
     @classmethod
     def current_spec(cls, settings=None) -> ChainSpec:
@@ -742,9 +738,10 @@ def chain_class(spec: ChainSpec, path: Optional[str] = None) -> type:
     keys = spec.keys()
     steps: List[tuple] = []
     columns: List[tuple] = [("grouping", str, param(
-        spec.grouping, label="grouping", choices=CHAIN_GROUPINGS, advanced=True,
-        help="which table every step reads, unless the step says otherwise: "
-             "layer leaves it to each layer, as the Render tab has it"))]
+        spec.grouping, label="merge blinks",
+        choices=[(g, MERGED[g]) for g in CHAIN_GROUPINGS], advanced=True,
+        help="whether every step reads merged blinks, unless the step says "
+             "otherwise: as each layer has it in the Render tab, or not"))]
     extras: Dict[str, ParamInfo] = {}
     for key, step in zip(keys, spec.steps):
         if not step.enabled:
@@ -774,7 +771,14 @@ def chain_class(spec: ChainSpec, path: Optional[str] = None) -> type:
         "description": spec.description or " -> ".join(s.title() for _, s, _ in steps),
         "version": "1",
     }
-    return type(f"Chain_{identifier(name)}", (ChainPlugin,), attrs)
+    chain = type(f"Chain_{identifier(name)}", (ChainPlugin,), attrs)
+    # the answer for the chain's own values, as a plugin's class says it for
+    # its defaults; `changes_locs_for` answers for the form's
+    try:
+        chain.changes_locs = bool(chain().changes_locs_for(settings_cls()))
+    except Exception:
+        chain.changes_locs = any(cls.changes_locs for _, _, cls in steps)
+    return chain
 
 
 # the chain files being built, innermost last: a chain that contains itself,

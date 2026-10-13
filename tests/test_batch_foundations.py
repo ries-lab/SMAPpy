@@ -54,20 +54,19 @@ class Declared:
 
 
 def test_a_part_keeps_the_default_its_parent_declares_for_it():
-    """`GaussianFitSettings` declares ``FitSettings(output_unit="nm")``; built
-    from a map that did not name the unit, the fit came out in pixels."""
+    """A part built from a map that does not name a field takes the
+    default its parent declares, not its own class's."""
     assert settings_from(Declared, {}).fit.method == "slow"
     assert settings_from(Declared, {"fit.roisize": 9}).fit == Inner(9, "slow")
-    from smappy.plugins.fit import GaussianFitSettings
-    assert settings_from(GaussianFitSettings,
-                         {"camera.conversion": 0.5}).fit.output_unit == "nm"
 
 
 def test_a_plugin_has_a_version_and_no_grouping_requirement_unless_it_says():
     class Plain(Plugin):
+        changes_locs = False
         pass
 
     class Picky(Plugin):
+        changes_locs = False
         version = "3"
         grouping = "grouped"
 
@@ -100,17 +99,18 @@ def test_a_layer_that_shows_grouped_hands_out_grouped_unless_overridden():
 
 def test_a_grouped_table_without_a_session_is_refused_with_a_reason():
     ctx = Context(locs=blinks(), grouping="grouped")
-    with pytest.raises(ValueError, match="needs a session"):
+    with pytest.raises(ValueError, match="need a session"):
         ctx.table()
     locs, sel = Context(locs=blinks()).table()
     assert len(locs) == 160 and len(sel) == 160
 
 
 class _MadeFromNothing(Plugin):
+    changes_locs = True
     path = "Localize/Test"
 
     def run(self, ctx, settings):
-        return Result(locs=blinks(), text="fitted", data={"path": "/tmp/x_locs.hdf5"})
+        return Result(locs=blinks(), text="fitted", written="/tmp/x_locs.hdf5")
 
 
 def test_a_fit_in_an_empty_session_opens_as_a_file_with_its_log():

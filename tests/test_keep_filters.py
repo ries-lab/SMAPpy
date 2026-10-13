@@ -13,6 +13,13 @@ from smappy.plugins import Plugin, Result
 from smappy.session import Session
 
 
+def filters(session, layer):
+    """The layer's filter over each of the session's two tables."""
+    tables = session.tables
+    return {"ungrouped": layer.state.filter_for(tables.ungrouped),
+            "grouped": layer.state.filter_for(tables.grouped())}
+
+
 def table(n=4000, seed=0):
     rng = np.random.default_rng(seed)
     return Localizations({
@@ -27,8 +34,10 @@ def table(n=4000, seed=0):
 
 class Corrector(Plugin):
     """Stands in for a drift correction: the same rows, x and y moved."""
+    changes_locs = True
     name = "corrector"
     path = "Test/Corrector"
+    grouping = "ungrouped"
 
     def run(self, ctx, settings=None) -> Result:
         locs = ctx.session.locs
@@ -49,23 +58,23 @@ def test_a_correction_keeps_the_bounds_on_both_tables():
 
     layer = session.layers[0]
     assert layer.grouped
-    for which in ("ungrouped", "grouped"):
-        ranges = layer.state.sets[which].filter.ranges
+    for which, f in filters(session, layer).items():
+        ranges = f.ranges
         assert ranges.get("phot") == (500, None), which
         assert ranges.get("xy_err_nm") == (None, 25.0), which
     assert layer.filter.mask.sum() == before   # and the same rows are kept
 
 
 def test_a_correction_keeps_the_bounds_on_a_second_layer_too():
-    """The second layer inherits the first's grouped *table* but has a filter
-    of its own, so nothing is linked for it and the bounds have to be put on
-    that filter explicitly -- which is what did not happen."""
+    """The second layer shares the first's grouped *table* but has bounds
+    of its own, and they have to reach that table too -- which once they did
+    not."""
     session = Session(table())
     session.add_layer(like=0)
     for i, layer in enumerate(session.layers):
         layer.set_bound("phot", 500 + 100 * i, None)
         if not layer.grouped:
-            layer.show_grouped(True, session.layers[0] if i else None)
+            layer.show_grouped(True)
     before = [layer.filter.mask.sum() for layer in session.layers]
     assert before[0] != before[1]              # the two layers differ to begin with
 
@@ -73,15 +82,14 @@ def test_a_correction_keeps_the_bounds_on_a_second_layer_too():
 
     for i, layer in enumerate(session.layers):
         assert layer.grouped
-        for which in ("ungrouped", "grouped"):
-            assert layer.state.sets[which].filter.ranges.get("phot") == (500 + 100 * i, None), \
-                f"layer {i}, {which}"
+        for which, f in filters(session, layer).items():
+            assert f.ranges.get("phot") == (500 + 100 * i, None), f"layer {i}, {which}"
         assert layer.filter.mask.sum() == before[i]
 
 
 def test_a_layer_that_takes_over_a_grouped_table_takes_the_files_too():
     """Switching a layer to grouped when another layer has the table already
-    reuses that table -- and its filter is empty, files included."""
+    reuses that table -- under its own file choice, not the other's."""
     locs = table()
     locs.columns["filenumber"] = (np.arange(len(locs)) % 2).astype(np.int64)
     session = Session(locs)
@@ -89,6 +97,6 @@ def test_a_layer_that_takes_over_a_grouped_table_takes_the_files_too():
     session.layers[1].set_files([1])
     session.layers[1].show_grouped(False)
     session.show_grouped(1, True)
-    grouped = session.layers[1].state.sets["grouped"]
-    assert "files" in grouped.filter
-    assert set(np.asarray(grouped.locs["filenumber"])[grouped.filter.mask]) == {1}
+    grouped, selection = session.layers[1].grouped_selection(1)
+    assert grouped is session.layers[0].locs              # one grouped table
+    assert set(np.asarray(grouped["filenumber"])[selection.mask]) == {1}

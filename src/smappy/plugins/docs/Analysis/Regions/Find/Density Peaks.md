@@ -8,24 +8,26 @@ covers: [smappy.plugins.roi.density_peaks, smappy.roi_manager.core.ROIProject.fi
 Many SMLM experiments image the same small structure hundreds of times over
 one cell: nuclear pore complexes, clathrin-coated pits, centrioles,
 kinetochores.  The ROI manager analyses them one by one.  It first needs a
-list of *sites*: one region of interest (ROI) centred on each structure.
-Clicking hundreds of them by hand is slow, and not reproducible.
+list of [ROIs](plugin:Panels/Glossary) (regions of interest): one circle or
+square centred on each structure.  Clicking hundreds of them by hand is slow,
+and not reproducible.
 
-Density Peaks proposes those sites automatically.  It looks for places where
+Density Peaks proposes those ROIs automatically.  It looks for places where
 localizations pile up, and puts an ROI on each one that holds enough
 localizations and is not too close to another.  It is the first of the ROI
 manager's three steps:
 
-1. **Segment** (this plugin): find the sites in a file.
-2. **Evaluate**: measure every site, with plugins that run once per ROI,
-   such as [Localization Statistics](plugin:Analysis/Measure/Localization Statistics).
-3. **Analyze**: summarise the collection of sites, for example as
+1. **Find** (this plugin): put ROIs on the structures of a file.
+2. **Measure**: measure every ROI, with the per-region steps -- plugins that
+   run once per ROI, such as
+   [Localization Statistics](plugin:Analysis/Measure/Localization Statistics).
+3. **Summarise**: summarise the collection of ROIs, for example as
    [Histograms](plugin:Analysis/Regions/Summarize/Histograms).
 
 Use it for compact, well separated structures of roughly 50 to 200 nm, on a
 low background.  It looks only at how dense the localizations are, not at
 their shape.  A ring, a blob and a piece of filament are all the same to it,
-so on filaments or a dense meshwork it puts sites along every line (see the
+so on filaments or a dense meshwork it puts ROIs along every line (see the
 second figure).  The ROIs it adds can be removed, or excluded with *use*, in
 the ROI manager like any other.
 
@@ -72,13 +74,13 @@ background.
 localizations, which is more precise than the pixel it was found in.  The
 count is checked again at the new centre.
 
-**6. Separation.**  A candidate closer than *separation* (150 nm) to a site
+**6. Separation.**  A candidate closer than *separation* (150 nm) to a centre
 already accepted is dropped.  Because the highest peaks come first, of two
 maxima on one structure the stronger one wins.  ROIs that are already in the
 file count as accepted too, so running the plugin a second time adds only
 what is new.
 
-```figure Simulated nuclear pores (Nup96, 60 % labelling) in a 2 µm piece of the field.  Left: the localizations.  Middle: the blurred density image the maxima are found in.  Right: the sites found (circles: the *count radius*) and the true pore centres (+).  Every pore is found, and nothing else.
+```figure Simulated nuclear pores (Nup96, 60 % labelling) in a 2 µm piece of the field.  Left: the localizations.  Middle: the blurred density image the maxima are found in.  Right: the ROIs found (circles: the *count radius*) and the true pore centres (+).  Every pore is found, and nothing else.
 from scipy.ndimage import gaussian_filter
 lo, hi = 2500.0, 4500.0
 inside = (x > lo) & (x < hi) & (y > lo) & (y < hi)
@@ -97,14 +99,14 @@ for cx, cy in centres:
     if lo < cx < hi and lo < cy < hi:
         axes[2].add_patch(Circle((cx, cy), settings.count_radius_nm, fill=False,
                                  color="#d62728", lw=1))
-for ax, title in zip(axes, ("localizations", "blurred density", "sites found")):
+for ax, title in zip(axes, ("localizations", "blurred density", "ROIs found")):
     ax.set_xlim(lo, hi); ax.set_ylim(lo, hi); ax.set_aspect("equal")
     ax.set_xticks([]); ax.set_yticks([]); ax.set_title(title, fontsize=9)
 axes[0].plot([lo + 100, lo + 600], [lo + 100, lo + 100], "k", lw=2)
 axes[0].text(lo + 350, lo + 160, "500 nm", ha="center", va="bottom", fontsize=7)
 ```
 
-```figure The same plugin on the ring and crossed lines of the `demo` structure, with a *minimum count* of 10 (left) and 100 (right).  It finds density, not shape: sites line the ring and the lines at about the *separation*, and at the low threshold also land on the scattered background molecules.
+```figure The same plugin on the ring and crossed lines of the `demo` structure, with a *minimum count* of 10 (left) and 100 (right).  It finds density, not shape: ROIs line the ring and the lines at about the *separation*, and at the low threshold also land on the scattered background molecules.
 demo = simulate(n_frames=3000, seed=4)
 dx, dy = np.asarray(demo["x_nm"]), np.asarray(demo["y_nm"])
 fig.set_size_inches(7, 3.3)
@@ -113,7 +115,7 @@ for ax, count in zip(fig.subplots(1, 2), (10, 100)):
     ax.scatter(dx, dy, s=0.2, c="0.6", linewidths=0)
     ax.plot(found[:, 0], found[:, 1], "o", mfc="none", mec="#d62728", ms=4, mew=0.8)
     ax.set_aspect("equal"); ax.set_xticks([]); ax.set_yticks([])
-    ax.set_title(f"minimum count {count}: {len(found)} sites", fontsize=9)
+    ax.set_title(f"minimum count {count}: {len(found)} ROIs", fontsize=9)
 ```
 
 ## In detail
@@ -144,8 +146,8 @@ and must pass the same count at $\mathbf{c}'$.  The mean is taken over the
 compact neighbourhood rather than over the analysis ROI, so a neighbouring
 structure just outside $r$ does not pull the centre.  It is still a mean of
 what was detected: on an incompletely labelled pore the centre moves towards
-the labelled side, by about 15 nm (median) in the simulation above.  An
-evaluator that fits a model to the site refines it further.
+the labelled side, by about 15 nm (median) in the simulation above.  A
+per-region step that fits a model to the ROI refines it further.
 
 **Separation.**  $\mathbf{c}'$ is rejected if it lies closer than the
 *separation* to any accepted centre, including the centres of the ROIs
@@ -154,12 +156,15 @@ nanometres: which of two close candidates survives is decided by the order,
 highest density first.
 
 **What it runs on.**  In the ROI manager, the plugin runs on the file being
-shown, on its localizations after the layer's filters, and on its grouped
-localizations when the layer is grouped.  The new ROIs get the manager's
+shown, on its localizations after the layer's filters (the lowest and
+highest values of columns, set in the Render tab), and on its merged blinks
+when the layer merges them -- [merge blinks](plugin:Panels/Glossary), also
+called grouping or linking, combines the localizations in consecutive frames
+that come from one blinking event into one.  The new ROIs get the manager's
 global size and shape (a circle of 300 nm by default), which has nothing to
 do with the *count radius*: detection and analysis are set separately.  Each
 ROI records how it was found: this plugin and its version, its settings, the
-filters and the grouping.
+filters and the merge settings.
 
 ## Parameters
 
@@ -176,42 +181,43 @@ neighbouring structures into one.
 
 ### separation_nm
 A bit more than the diameter of the structure and less than the typical
-distance between two of them.  Too small gives two sites on one structure;
+distance between two of them.  Too small gives two ROIs on one structure;
 too large loses one of two close neighbours.
 
 ### count_radius_nm
-About the radius of the structure plus the localization precision, so that
+About the radius of the structure plus the
+[localization precision](plugin:Panels/Glossary) (also called the CRLB), so that
 the count and the re-centring see the whole structure but not its
 neighbours.
 
 ### min_count
 The most useful setting for a given data set: it separates structures from
-background.  Look at how many localizations a real site has (Statistics
+background.  Look at how many localizations a real structure has (Statistics
 reports it) and set it well below that, and well above what a patch of
 background of the same size holds.
 
 ### replace
-For a chain or a batch, which has no *Preview*: run again on a file it has
-segmented before, it would otherwise find nothing, every peak lying within
-*separation* of an ROI the last run made.  On, the ROIs an earlier run of
-Density Peaks made on the file go first (their origin says which); ROIs
-drawn by hand or made by another segmenter stay.  In the GUI, *Preview* and
-the ROI manager's *Undo* usually make it unnecessary.
+On, the ROIs an earlier run of Density Peaks made on the file go first
+(their origin says which); ROIs drawn by hand or made by another segmenter
+stay.  Off, a run on a file segmented before finds nothing, every peak lying
+within *separation* of an ROI the last run made -- useful only to add a
+second pass to the first.  The ROI manager's *Undo* brings replaced ROIs
+back.
 
 ## Output
 
-* **ROIs**, one per site found, added to the current file in the ROI
+* **ROIs**, one per structure found, added to the current file in the ROI
   manager, brightest first.  They are included (*use*) from the start.
 * **The text** says how many candidates were found.
 
-*Preview* finds the same sites and adds none: they are drawn grey and
+*Preview* finds the same ROIs and adds none: they are drawn grey and
 dashed in the ROI manager, and the next preview replaces them.  Try
-settings with it until the sites sit on the structures, then *Run*.
+settings with it until the ROIs sit on the structures, then *Run*.
 
-A good result has one site on each structure and none on the background.
-Sites on empty background: raise *minimum count*.  Faint structures missed:
-lower it.  Two sites on one structure: raise *separation* or *smoothing*.
-Two structures under one site: lower them.
+A good result has one ROI on each structure and none on the background.
+ROIs on empty background: raise *minimum count*.  Faint structures missed:
+lower it.  Two ROIs on one structure: raise *separation* or *smoothing*.
+Two structures under one ROI: lower them.
 
 Run without the ROI manager (from a script, `Context(locs=locs)`), it
 returns only the list of centres, in `data["centers"]`.

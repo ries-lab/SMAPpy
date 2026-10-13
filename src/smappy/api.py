@@ -25,8 +25,9 @@ CameraLike = Union[CameraMetadata, dict, str, Path, None]
 
 
 def fit(data, out=None, camera: CameraLike = None, calibration=None, *,
-        units: str = "nm", presets=None, sigma: float = 1.2,
-        cutoff: float = 1.7, filter: str = "dog", roisize: int = 13,
+        sigma: float = 1.2,
+        cutoff: float = 1.7, cutoff_mode: Optional[str] = None,
+        filter: str = "dog", roisize: int = 13,
         max_fit_distance: Optional[float] = None, threads: int = 0,
         chunk: int = 200, frames: Optional[int] = None,
         settings: Optional[FitSettings] = None, progress=None, on_block=None,
@@ -40,9 +41,8 @@ def fit(data, out=None, camera: CameraLike = None, calibration=None, *,
     no file.
 
     ``camera`` is a :class:`~smappy.metadata.CameraMetadata`, a dict of its
-    fields, or the path of a YAML config, and overrides whatever the image
-    metadata says.  ``presets`` is an optional SMAP ``*_cameras.mat``.  Images
-    passed directly carry no metadata at all, so the camera must be complete --
+    fields, or the path of a YAML file of them, and overrides whatever the
+    camera database and the image metadata say.  Images passed directly carry no metadata at all, so the camera must be complete --
     and coordinates are then relative to the image, unless ``roi`` says where on
     the chip it sat.
 
@@ -62,6 +62,12 @@ def fit(data, out=None, camera: CameraLike = None, calibration=None, *,
     only the running counts are wanted, and those include the *candidate* count,
     which is available before anything is fitted.
 
+    ``cutoff`` is read as ``cutoff_mode`` says: "dynamic" (the default), a
+    multiple of each frame's noise in the filtered image, or "absolute", a
+    fixed value in photons on it -- the two choices of the fitters' form.
+    Without a mode a value of 20 or more is still read as photons, as it
+    used to be, with a `DeprecationWarning`: pass the mode.
+
     ``raw_frames`` camera frames are kept in ``out`` beside the table, in
     photons, after the average of every frame fitted (`smappy.rawframes`);
     0 keeps none, and without ``out`` there is nowhere to keep them.
@@ -73,11 +79,11 @@ def fit(data, out=None, camera: CameraLike = None, calibration=None, *,
     keeper = RawFrameKeeper(raw_frames if out is not None else 0, 0,
                             _n_frames(data, source, frames))
     blocks = keeper.watch(blocks)
-    cam = _camera(camera, source, presets)
+    cam = _camera(camera, source)
     model = _model(calibration, sigma, cam)
     finder = PeakFinder(DoGFilter(sigma) if filter == "dog" else GaussFilter(sigma),
-                        DynamicCutoff(cutoff) if cutoff < 20 else AbsoluteCutoff(cutoff))
-    settings = settings or FitSettings(roisize=roisize, output_unit=units,
+                        peak_cutoff(cutoff, cutoff_mode, stacklevel=2))
+    settings = settings or FitSettings(roisize=roisize,
                                        max_fit_distance=max_fit_distance,
                                        n_threads=threads)
 
@@ -109,7 +115,7 @@ def fit(data, out=None, camera: CameraLike = None, calibration=None, *,
     finally:
         if writer is not None:
             writer.close()
-    raw = keeper.image(cam, settings.output_unit, source=_source_name(data, source),
+    raw = keeper.image(cam, source=_source_name(data, source),
                        name="raw frames")
     if raw is not None:
         from .io.hdf5 import save_images
@@ -120,6 +126,37 @@ def fit(data, out=None, camera: CameraLike = None, calibration=None, *,
     return collected
 
 
+# the value at and above which a cutoff with no mode used to be read as photons
+OLD_ABSOLUTE_FROM = 20.0
+
+
+def peak_cutoff(cutoff: float, mode: Optional[str] = None, stacklevel: int = 1):
+    """The finder's cutoff: ``cutoff`` read as ``mode`` says.
+
+    Before there was a mode the number decided it -- below 20 a multiple of
+    the noise, from 20 up photons -- so 19.9 and 20 meant different things.
+    A number now means one thing; the old reading is kept for a call that
+    names no mode, and says so.
+    """
+    if mode is None:
+        if cutoff >= OLD_ABSOLUTE_FROM:
+            import warnings
+            warnings.warn(
+                f"cutoff={cutoff:g} with no cutoff_mode is read as photons "
+                "(absolute), as before; pass cutoff_mode='absolute' to keep that, "
+                "or 'dynamic' for a multiple of the noise. Without a mode, a "
+                "cutoff will be dynamic whatever its value.",
+                DeprecationWarning, stacklevel=stacklevel + 1)
+            mode = "absolute"
+        else:
+            mode = "dynamic"
+    if mode == "dynamic":
+        return DynamicCutoff(cutoff)
+    if mode == "absolute":
+        return AbsoluteCutoff(cutoff)
+    raise ValueError(f"cutoff_mode is 'dynamic' or 'absolute', not {mode!r}")
+
+
 def _acquisition(source) -> dict:
     """The image tags recorded while reading, and the static metadata."""
     if source is None:
@@ -128,14 +165,6 @@ def _acquisition(source) -> dict:
     tags = source.tags.table() if getattr(source, "tags", None) else {}
     out = {"frame_tags": tags, "acquisition": acquisition(source)}
     return {k: v for k, v in out.items() if v}
-
-
-def view(locs, settings=None, display=None, block: bool = True,
-         group_settings=None):
-    """Open the viewer on a table or on a saved HDF5 file."""
-    from .viewer import show
-    return show(_localizations(locs), settings, display, block=block,
-                group_settings=group_settings)
 
 
 def load(path) -> Localizations:
@@ -174,10 +203,10 @@ def _n_frames(data, source, frames: Optional[int]) -> Optional[int]:
     return None                                      # an iterable: live
 
 
-def _camera(camera: CameraLike, source, presets) -> CameraMetadata:
+def _camera(camera: CameraLike, source) -> CameraMetadata:
     if source is not None:
         from .io.tiff import camera_metadata
-        return camera_metadata(source, presets, camera)
+        return camera_metadata(source, camera)
     if camera is None:
         raise ValueError(
             "images passed directly carry no metadata, so the camera has to be "
@@ -219,3 +248,59 @@ def _source_name(data, source):
         return data
     files = getattr(source, "files", None)
     return files[0] if files else None
+
+
+# ------------------------------------------------------------------ the GUI
+def show(data, *, name: str = "", wait: bool = False):
+    """Open the GUI on a table, a session or a file, from a script or a notebook.
+
+    ``data`` is a `Localizations`, a `Session` (its layers, filters and ROIs
+    come along) or a path to anything *File > Open* reads.  The GUI runs in a
+    process of its own -- no Qt, event loop or main thread is needed here, so
+    this works the same from a plain script, a notebook or a server -- and
+    the call returns at once with the `subprocess.Popen`.
+
+    An in-memory table goes the way *File > Open in a new window* sends one
+    (`smappy.handoff`): through shared memory, which this process frees once
+    the GUI has taken it.  ``wait`` blocks until then; without it a thread
+    does that, and a script that ends sooner waits for it at exit -- up to
+    `handoff.Offer.timeout` -- rather than taking the table with it.
+    """
+    import atexit
+    import subprocess
+    import sys
+    import threading
+    import time
+
+    from . import handoff
+
+    if isinstance(data, (str, Path)):
+        command = [sys.executable, "-m", "smappy.cli.gui", str(data)]
+        return subprocess.Popen(command, start_new_session=(sys.platform != "win32"))
+
+    from .session import Session
+    if isinstance(data, Session):
+        session = data
+    else:
+        from .io.formats import FileInfo
+        session = Session()
+        session.add_file(_localizations(data),
+                         FileInfo(name or "table", "", "memory"))
+    offer = handoff.offer(session, name=name)
+    process = handoff.launch(offer.path)
+
+    def release() -> None:
+        while not (offer.taken or offer.expired) and process.poll() is None:
+            time.sleep(0.1)
+        offer.release()
+
+    if wait:
+        release()
+    else:
+        threading.Thread(target=release, daemon=True).start()
+        atexit.register(release)
+    return process
+
+
+#: the name the matplotlib viewer had; the GUI took its place in 2026-10
+view = show

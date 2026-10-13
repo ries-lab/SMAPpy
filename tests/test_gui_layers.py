@@ -55,7 +55,7 @@ def test_a_new_layer_is_a_copy_of_the_one_it_was_added_from():
     second = session.add_layer(like=0)
 
     assert second.files == [1]                      # including the file it shows
-    assert second.state.sets["ungrouped"].filter.ranges["photons"] == (200.0, 800.0)
+    assert second.ranges["photons"] == (200.0, 800.0)
     assert (second.get_display().lut, second.get_display().invert) == ("viridis", True)
     assert second.get_display().gamma == pytest.approx(0.7)
     assert (second.state.settings.mode, second.state.settings.sigma) == ("gauss", 12.0)
@@ -70,7 +70,7 @@ def test_without_a_template_a_new_layer_still_starts_empty_and_default():
     session.layers[0].set_bound("photons", 200.0, 800.0)
     fresh = session.add_layer()
     assert fresh.files == []                        # pick the file(s) it shows
-    assert fresh.state.sets["ungrouped"].filter.ranges.get("photons") != (200.0, 800.0)
+    assert fresh.ranges.get("photons") != (200.0, 800.0)
 
 
 def test_the_add_button_copies_the_layer_the_tab_is_on_and_moves_to_it(app):
@@ -82,7 +82,7 @@ def test_the_add_button_copies_the_layer_the_tab_is_on_and_moves_to_it(app):
     tab.strip._add()
 
     assert tab.strip.current == 1 and tab.filter.layer_index == 1
-    assert session.layers[1].state.sets["ungrouped"].filter.ranges["photons"] == (300.0, 700.0)
+    assert session.layers[1].ranges["photons"] == (300.0, 700.0)
 
 
 def test_the_strip_says_visible_and_selected_in_different_ways(app):
@@ -127,12 +127,12 @@ def test_white_background_turns_the_picture_over_once(app):
     session.add_layer(like=0)
     fov = view.current_fov(200, 160)
 
-    dark, _ = view.composite(fov)
+    dark = view.panel_images(fov, ["overlay"])[0]
     assert dark[0, 0].max() < 0.05                      # the ground is black
 
     tab.white.setChecked(True)
     assert all(l.get_display().white_background for l in session.layers)
-    light, _ = view.composite(fov)
+    light = view.panel_images(fov, ["overlay"])[0]
     assert light[0, 0].min() > 0.95                     # ...and now white
     assert (light.min(axis=2) < 0.6).sum() > 100        # with the ink still on it
     # the same picture, turned over: brightness flipped, hue kept
@@ -180,13 +180,12 @@ def test_copying_settings_from_another_layer_takes_only_what_is_asked_for():
     session.copy_layer(0, 1)
     assert second.get_display().lut == "hot"
     assert second.state.settings.sigma == 7.0
-    assert second.state.sets["ungrouped"].filter.ranges["photons"] == (700, None)
+    assert second.ranges["photons"] == (700, None)
 
     # and the bounds when they are asked for: the other layer's, not both
     session.copy_layer(0, 1, display=False, bounds=True)
-    assert "photons" not in second.state.sets["ungrouped"].filter.ranges
-    assert (second.state.sets["ungrouped"].filter.ranges
-            == first.state.sets["ungrouped"].filter.ranges)
+    assert "photons" not in second.ranges
+    assert second.ranges == first.ranges
 
 
 def test_copying_a_layer_onto_itself_or_out_of_range_does_nothing():
@@ -194,10 +193,10 @@ def test_copying_a_layer_onto_itself_or_out_of_range_does_nothing():
 
     session = Session(_layer_table())
     session.add_layer(like=0)
-    before = dict(session.layers[1].state.sets["ungrouped"].filter.ranges)
+    before = dict(session.layers[1].ranges)
     session.copy_layer(1, 1, bounds=True)
     session.copy_layer(5, 1, bounds=True)
-    assert dict(session.layers[1].state.sets["ungrouped"].filter.ranges) == before
+    assert dict(session.layers[1].ranges) == before
 
 
 def _layer_table(n=2000):
@@ -245,3 +244,45 @@ def test_the_invert_tick_and_the_inversion_are_one_setting():
     tab._bind_layer(0)
     assert tab.invert.isChecked()
     assert tab.invert_mode.currentData() == luts.DEFAULT_INVERSION
+
+
+def test_render_modes_read_in_words_and_store_the_short_key(app):
+    from smappy.gui.render_tab import RenderTab
+    session = two_files()
+    tab = RenderTab(session)
+    shown = [tab.mode.itemText(i) for i in range(tab.mode.count())]
+    assert shown == ["Gaussian (precision)", "Gaussian (fixed)", "histogram",
+                     "diffraction-limited"]
+    tab.mode.setCurrentText("histogram")             # as a click on the list
+    assert session.layers[0].state.settings.mode == "hist"
+    tab.set_mode("gauss")
+    assert session.layers[0].state.settings.mode == "gauss"
+    # a layer whose settings say "dl" -- a saved workspace, a chain -- shows it
+    session.layers[0].state.settings = dataclasses.replace(
+        session.layers[0].state.settings, mode="dl")
+    tab._bind_layer(0)
+    assert tab.mode.currentText() == "diffraction-limited"
+
+
+def test_the_quick_filter_buttons_are_words_and_all_eight_fit_the_column(app):
+    from smappy.gui.render_tab import RenderTab
+    from smappy.gui.widgets import CONTROL_WIDTH
+    def full(seed):
+        """Every column with a quick button."""
+        base, rng = table(seed), np.random.default_rng(seed)
+        columns = {name: np.asarray(base[name]) for name in base}
+        for name in ("z_nm", "logl_rel", "sigma_nm"):
+            columns[name] = rng.uniform(1, 100, len(base)).astype(np.float32)
+        columns["channel"] = rng.integers(0, 2, len(base))
+        return Localizations(columns, {"units": "nm"})
+
+    session = Session()
+    session.add_file(full(0), FileInfo("a.hdf5", "/a.hdf5", "smappy"))
+    session.add_file(full(1), FileInfo("b.hdf5", "/b.hdf5", "smappy"))
+    tab = RenderTab(session)
+    buttons = {name: b.text() for name, b in tab.filter.quick.items()}
+    assert buttons == {"xy_err_nm": "precision", "logl_rel": "fit quality",
+                       "frame": "frame", "z_nm": "z", "photons": "photons",
+                       "sigma_nm": "PSF", "channel": "channel", "filenumber": "file"}
+    assert tab.filter.quick["logl_rel"].toolTip() == "logl_rel"
+    assert tab.filter.minimumSizeHint().width() <= CONTROL_WIDTH

@@ -164,21 +164,14 @@ def test_the_model_with_the_better_aic_is_the_one_the_data_came_from():
     assert best.model == "gauss"
 
 
-def test_the_fit_does_not_depend_on_the_bin_width_and_the_binned_one_does():
+def test_the_fit_does_not_depend_on_the_bin_width():
     """Unbinned is unbinned: the bins are the picture, not the estimator."""
-    locs = simulate(600, 0.0, precision=10.0, sigma=15.0, seed=13)
-    profile = profiles(locs, ROI)["across"]
-    fits = [fit_profile(profile.values, profile.precision, model="gauss",
-                        window=profile.window, bin_size=size)
-            for size in (2.0, 25.0)]
-    assert fits[0].values()["sigma"] == fits[1].values()["sigma"]
-
-    binned = [fit_profile(profile.values, profile.precision, model="gauss",
-                          window=profile.window, method="binned", bin_size=size)
-              for size in (2.0, 25.0)]
-    assert binned[0].values()["sigma"] != binned[1].values()["sigma"]
-    # and it should still be the right answer, to within the bins
-    assert binned[0].values()["sigma"] == pytest.approx(15.0, abs=3.0)
+    session = _two_channel_session()
+    fine, coarse = (session.run(LineProfile(),
+                                LineProfileSettings(axis="across", bin_nm=size))
+                    for size in (2.0, 25.0))
+    assert fine.data["bin"] != coarse.data["bin"]
+    assert fine.data["values"] == coarse.data["values"]
 
 
 def test_a_uniform_background_is_fitted_rather_than_widening_the_peak():
@@ -614,23 +607,15 @@ def test_a_layer_colour_is_read_off_its_lut_and_falls_back_when_it_cannot_be():
 
 
 def test_a_run_is_applied_to_the_session_without_touching_its_layers():
-    """Run hands its result to `Session.apply`, which takes data["layers"] as
-    layer set-ups (Chain/Layers); the per-layer profiles were under that key
-    once, and every Run from the GUI failed there."""
+    """Run hands its result to `Session.apply`, which once took a `data` key
+    "layers" as layer set-ups (Chain/Layers); the per-layer profiles were
+    under that key, and every Run from the GUI failed there.  Layer set-ups
+    are `Result.layers` now, and the profiles stay the plugin's own."""
     session = _two_channel_session()
     before = [l.name for l in session.layers]
     result = session.run(LineProfile(), LineProfileSettings(axis="across"))
-    assert "layers" not in result.data and len(result.data["layer_profiles"]) == 2
+    assert result.layers is None and len(result.data["layer_profiles"]) == 2
     assert [l.name for l in session.layers] == before
-
-
-def test_the_binned_fit_integrates_over_its_bins():
-    """Sampled at bin centres, a peak two bins wide came back too narrow."""
-    rng = np.random.default_rng(5)
-    values = rng.normal(0.0, 4.0, 20000)
-    fit = fit_profile(values, None, model="gauss", window=(-50.0, 50.0),
-                      method="binned", bin_size=8.0, background=False)
-    assert fit.values()["sigma"] == pytest.approx(4.0, rel=0.03)
 
 
 def test_the_z_window_comes_from_the_filter_in_nm_and_is_open_where_it_is():
@@ -643,11 +628,70 @@ def test_the_z_window_comes_from_the_filter_in_nm_and_is_open_where_it_is():
                           "frame": np.arange(500)}, {"units": "nm"})
     session = Session(locs)
     ctx = Context(locs=locs, session=session)
-    z_filter = session._locs_layer().state.sets["ungrouped"].filter
-    z_filter.set("z_nm", -100.0, None)
+    layer = session._locs_layer()
+    layer.set_bound("z_nm", -100.0, None)
     assert _z_window(ctx) == (-100.0, None)         # open above: widened data
-    z_filter.set("z_nm", None, None)
+    layer.set_bound("z_nm", None, None)
     assert _z_window(ctx) is None
     profile = profiles(locs, Region.line((0, 500), (1000, 500), 400.0),
                        z_window=(-100.0, None))["z"]
     assert profile.window[0] == -100.0 and profile.window[1] > locs["z_nm"].max()
+
+
+# ------------------------------------------------- units and what is undetermined
+
+def test_a_known_width_comes_back_with_its_unit_and_error():
+    """20 nm of structure under 8 nm of precision: the fit takes the
+    precision out and says nanometres, with a ± on each number."""
+    locs = simulate(3000, 0.0, precision=8.0, seed=11, sigma=20.0)
+    result = LineProfile().run(context(locs), LineProfileSettings(
+        axis="across", source="selection", model="gauss"))
+    fit = result.data["fits"]["gauss"]
+    assert fit.values()["sigma"] == pytest.approx(20.0, abs=1.5)
+    assert fit.unit == "nm" and not fit.degenerate
+    assert "sigma 19.9 ± 0.3 nm" in result.text
+    assert "+-" not in result.text
+
+
+def test_a_parameter_the_profile_does_not_fix_is_not_determined_and_not_compared():
+    """A ring fitted to one Gaussian puts its radius on the bound at zero:
+    that is not a measurement of a ring, and the verdict leaves it out."""
+    from smappy.plugins.line_profile import verdict
+
+    rng = np.random.default_rng(1)
+    values = rng.normal(0, 15, 40)
+    fits = fit_models(values, np.full(40, 8.0), models=("gauss", "ring"),
+                      window=(-150.0, 150.0), unit="nm")
+    ring = next(f for f in fits if f.model == "ring")
+    assert ring.degenerate and ring.undetermined() == ["radius"]
+    assert "radius not determined" in ring.summary
+    assert fits[-1] is ring                      # after every candidate
+    assert verdict(fits).startswith("best by AIC: Gaussian (no other to compare)")
+    assert "left out, not determined: ring" in verdict(fits)
+
+
+def test_the_winning_model_is_drawn_on_top():
+    from matplotlib.figure import Figure
+
+    from smappy.plugins.line_profile import draw_profile
+
+    locs = simulate(600, [-20.0, 20.0] * 300, precision=6.0, seed=3, sigma=5.0)
+    result = LineProfile().run(context(locs), LineProfileSettings(
+        axis="across", source="selection", model="all"))
+    ax = Figure().subplots()
+    draw_profile(ax, result.data["layer_profiles"])
+    lines = ax.get_lines()
+    best = result.data["layer_profiles"][0].fits[0].label
+    top = max(lines, key=lambda line: line.get_zorder())
+    assert top.get_label().startswith(best)
+
+
+def test_with_no_line_the_form_offers_to_draw_one():
+    from smappy.session import Session
+
+    session = Session(simulate(50, 0.0))
+    state = LineProfile().describe(session.context(), LineProfileSettings())
+    assert state.notice is not None and state.notice.window == "draw line"
+    assert state.notice.action == "Draw line" and state.notice.kind == "info"
+    session.set_roi(ROI)
+    assert LineProfile().describe(session.context(), LineProfileSettings()).notice is None

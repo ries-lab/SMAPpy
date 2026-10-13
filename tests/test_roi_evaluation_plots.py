@@ -10,11 +10,12 @@ import pytest
 
 from smappy.locs import Localizations                                  # noqa: E402
 from smappy.plugins import Plugin, Result, param                       # noqa: E402
-from smappy.roi_manager import ROIProject                              # noqa: E402
+from smappy.chain import Block                                         # noqa: E402
 from smappy.roi_manager import pipeline as pipeline_module             # noqa: E402
 from smappy.session import Session                                     # noqa: E402
 
 from dataclasses import dataclass                                      # noqa: E402
+from test_roi_session import rois_of                          # noqa: E402
 
 
 @dataclass
@@ -24,6 +25,7 @@ class DrawingSettings:
 
 class Drawing(Plugin):
     """An evaluator with a figure, which the shipped ones do not have."""
+    changes_locs = False
     name = "Drawing"
     path = "ROIManager/Evaluate/Drawing"
     per_region = True
@@ -39,6 +41,7 @@ class Drawing(Plugin):
 
 class Other(Plugin):
     """A second evaluator with a figure, to watch what the first one costs."""
+    changes_locs = False
     name = "Other"
     path = "ROIManager/Evaluate/Other"
     per_region = True
@@ -50,6 +53,7 @@ class Other(Plugin):
 
 
 class Failing(Plugin):
+    changes_locs = False
     name = "Failing"
     path = "ROIManager/Evaluate/Failing"
     per_region = True
@@ -76,9 +80,7 @@ def steps(*plugins):
 
 
 def a_project():
-    project = ROIProject()
-    source = project.add_source(table([(0, 0), (1000, 1000)]))
-    project.set_filters({})
+    project, source = rois_of(table([(0, 0), (1000, 1000)]), filters={})
     project.set_geometry(200)
     rois = [project.add_roi(source.id, center)
             for center in ([0, 0], [1000, 1000])]
@@ -116,7 +118,7 @@ def test_the_shipped_evaluator_draws_the_distributions_it_counted():
     project, rois = a_project()
     _, results, _ = project.evaluate_one(
         rois[0].id,
-        steps=pipeline_module.resolve(pipeline_module.default_instances()))
+        steps=pipeline_module.block_steps(pipeline_module.default_block()))
     figure, = results["Localization Statistics"].figures()
 
     from matplotlib.figure import Figure
@@ -128,7 +130,7 @@ def test_the_shipped_evaluator_draws_the_distributions_it_counted():
 
 def test_the_pipeline_on_the_project_is_what_runs_by_default():
     project, rois = a_project()
-    project.pipeline = pipeline_module.default_instances()
+    project.block = pipeline_module.default_block()
     record, results, _ = project.evaluate_one(rois[0].id)
     assert "Localization Statistics" in results
     assert record["steps"]["Localization Statistics"]["values"]["n_localizations"] == 10
@@ -161,7 +163,7 @@ def two_steps():
 
 
 def test_the_next_roi_redraws_in_the_window_that_is_already_open(app, monkeypatch):
-    monkeypatch.setattr(pipeline_module, "resolve", lambda instances: steps(Drawing))
+    monkeypatch.setattr(pipeline_module, "block_steps", lambda block: steps(Drawing))
     window, project = a_window(app)
     window.evaluate_live.setChecked(True)
     ids = list(project.rois)
@@ -181,8 +183,8 @@ def test_every_stale_step_is_measured_but_only_the_open_one_is_drawn(app, monkey
     """The numbers are what the site table needs; the figures are what is looked
     at, and five evaluators with three figures each is why that is not the same
     thing."""
-    monkeypatch.setattr(pipeline_module, "resolve",
-                        lambda instances: steps(Drawing, Other))
+    monkeypatch.setattr(pipeline_module, "block_steps",
+                        lambda block: steps(Drawing, Other))
     window, project = a_window(app)
     window.evaluate_live.setChecked(True)
     window.select(list(project.rois)[0])
@@ -190,7 +192,7 @@ def test_every_stale_step_is_measured_but_only_the_open_one_is_drawn(app, monkey
     assert [site.tabs.tabText(i) for i in range(site.tabs.count())] == [
         "Drawing", "Other"]
     assert site.current == "Drawing"
-    assert "Drawing, Other evaluated" in window.status.currentMessage()
+    assert "Drawing, Other measured" in window.status.currentMessage()
 
     assert site.figures["Drawing"].panes[""].figure.axes      # looked at: drawn
     assert not site.figures["Other"].panes[""].figure.axes    # measured, not drawn
@@ -200,7 +202,7 @@ def test_every_stale_step_is_measured_but_only_the_open_one_is_drawn(app, monkey
 
 
 def test_an_evaluator_that_fails_says_so_on_its_tab(app, monkeypatch):
-    monkeypatch.setattr(pipeline_module, "resolve", lambda instances: two_steps())
+    monkeypatch.setattr(pipeline_module, "block_steps", lambda block: two_steps())
     window, project = a_window(app)
     window.evaluate_live.setChecked(True)
     window.select(list(project.rois)[0])
@@ -210,7 +212,7 @@ def test_an_evaluator_that_fails_says_so_on_its_tab(app, monkeypatch):
 
 
 def test_only_the_figure_being_looked_at_is_drawn(app, monkeypatch):
-    monkeypatch.setattr(pipeline_module, "resolve", lambda instances: steps(Drawing))
+    monkeypatch.setattr(pipeline_module, "block_steps", lambda block: steps(Drawing))
     window, project = a_window(app)
     window.evaluate_live.setChecked(True)
     window.select(list(project.rois)[0])
@@ -223,7 +225,7 @@ def test_only_the_figure_being_looked_at_is_drawn(app, monkeypatch):
 
 
 def test_nothing_runs_until_the_plots_are_asked_for(app, monkeypatch):
-    monkeypatch.setattr(pipeline_module, "resolve", lambda instances: steps(Drawing))
+    monkeypatch.setattr(pipeline_module, "block_steps", lambda block: steps(Drawing))
     window, project = a_window(app)
     window.select(list(project.rois)[0])
     assert window._site is None
@@ -231,7 +233,7 @@ def test_nothing_runs_until_the_plots_are_asked_for(app, monkeypatch):
 
 def test_what_is_current_is_not_measured_again(app, monkeypatch):
     """Scrolling back to a site already measured costs nothing."""
-    monkeypatch.setattr(pipeline_module, "resolve", lambda instances: steps(Drawing))
+    monkeypatch.setattr(pipeline_module, "block_steps", lambda block: steps(Drawing))
     window, project = a_window(app)
     window.evaluate_live.setChecked(True)
     ids = list(project.rois)
@@ -244,7 +246,7 @@ def test_what_is_current_is_not_measured_again(app, monkeypatch):
 
 
 def test_with_re_evaluation_off_a_stale_step_is_left_alone(app, monkeypatch):
-    monkeypatch.setattr(pipeline_module, "resolve", lambda instances: two_steps())
+    monkeypatch.setattr(pipeline_module, "block_steps", lambda block: two_steps())
     window, project = a_window(app)
     window.evaluate_live.setChecked(True)
     ids = list(project.rois)
@@ -263,10 +265,10 @@ def test_with_re_evaluation_off_a_stale_step_is_left_alone(app, monkeypatch):
 
 def test_an_empty_pipeline_says_so_rather_than_drawing(app):
     window, project = a_window(app)
-    window.project.pipeline = []
+    window.project.block = Block()
     window.evaluate_live.setChecked(True)
     window.select(list(project.rois)[0])
-    assert "no evaluator" in window.status.currentMessage()
+    assert "no per-region step" in window.status.currentMessage()
 
 
 def test_whether_to_plot_is_remembered_with_the_project(app):
@@ -290,7 +292,7 @@ def test_the_manager_opens_the_pipeline_window(app):
 
 def test_closing_the_site_window_stops_the_measuring(app, monkeypatch):
     """Nobody is looking, so nothing should be computed for it."""
-    monkeypatch.setattr(pipeline_module, "resolve", lambda instances: steps(Drawing))
+    monkeypatch.setattr(pipeline_module, "block_steps", lambda block: steps(Drawing))
     window, project = a_window(app)
     window.evaluate_live.setChecked(True)
     ids = list(project.rois)
@@ -304,7 +306,7 @@ def test_closing_the_site_window_stops_the_measuring(app, monkeypatch):
 
 
 def test_copy_takes_the_roi_pane_and_the_evaluators_figure(app, monkeypatch):
-    monkeypatch.setattr(pipeline_module, "resolve", lambda instances: steps(Drawing))
+    monkeypatch.setattr(pipeline_module, "block_steps", lambda block: steps(Drawing))
     window, project = a_window(app)
     window.show()
     window.evaluate_live.setChecked(True)

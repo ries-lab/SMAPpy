@@ -67,7 +67,7 @@ from ..locs import Localizations
 from . import Context, Plot, Plugin, Result, param, register
 
 # the precision columns, in the order they are looked for
-PRECISION_FIELDS = ("xy_err_nm", "xy_err_pix")
+PRECISION_FIELDS = ("xy_err_nm",)
 PRECISION_Z_FIELDS = ("z_err_nm",)
 # the tails dropped before a precision is fitted.  A row with a precision of
 # 0.1 nm is not a good localization, it is a bad fit, and the estimator below
@@ -505,18 +505,15 @@ def model_curve(key: str, stats: Dict[str, float], edges: np.ndarray
 def statistics(locs: Localizations, bins: int = 100, photon_start: float = 0.0,
                on_time: Optional[Sequence[float]] = None,
                exposure_ms: float = 0.0,
-               precision_fit: str = "histogram",
-               fit_precision: bool = True) -> List[Distribution]:
+               precision_fit: str = "histogram") -> List[Distribution]:
     """Every distribution the table can supply, in reading order.
 
     ``on_time`` is given separately because it lives in the *grouped* table:
     one row per blink, not one per frame.  A table that carries ``n_in_group``
     already -- a grouped file, or a grouped layer -- supplies it itself.
-    Without ``fit_precision`` the precision model is not fitted: the median
-    and the histogram's landmarks are still there.
+    ``precision_fit`` is `precision_model`'s method; "none" fits no model,
+    and the median and the histogram's landmarks are still there.
     """
-    if not fit_precision:
-        precision_fit = "none"
     found: List[Distribution] = []
     if "photons" in locs:
         found.append(photon_distribution(locs["photons"], bins, photon_start))
@@ -559,7 +556,7 @@ def statistics_values(locs: Localizations, found: Sequence[Distribution]
         if key not in by_key:
             continue
         column = next(n for n in column_names if n in locs)
-        unit = "pix" if column.endswith("_pix") else "nm"
+        unit = "nm"
         values = np.asarray(locs[column], dtype=float)
         values = values[np.isfinite(values)]
         stats = by_key[key].stats
@@ -633,13 +630,12 @@ class StatisticsSettings:
                            "localizations and ignore this; the precision fit "
                            "is on these bins")
     precision_fit: str = param("histogram", label="precision fit",
-                               choices=(("histogram", "least squares on the histogram"),
+                               choices=(("none", "none: median and landmarks only"),
+                                        ("histogram", "least squares on the histogram"),
                                         ("mle", "maximum likelihood (outlier-sensitive)")),
-                               advanced=True,
-                               help="the likelihood weighs a localization by "
-                                    "1/sigma^2, so a few failed fits with a "
-                                    "precision near zero carry the answer; "
-                                    "the binned fit does not see them")
+                               help="the model of the precision and its sigma_c; "
+                                    "the likelihood is thrown by a few failed "
+                                    "fits with a precision near zero")
     photon_start: float = param(0.0, label="photons from", unit="photons", min=0.0,
                                 help="where the exponential fit starts; "
                                      "0: at the maximum of the histogram, below "
@@ -648,9 +644,6 @@ class StatisticsSettings:
     exposure_ms: float = param(0.0, label="exposure", unit="ms", min=0.0,
                                advanced=True,
                                help="0: the on-time is reported in frames only")
-    fit_precision: bool = param(True, label="fit the precision model", slow=True,
-                                help="off: the precision's median and landmarks "
-                                     "only, without sigma_c")
 
 
 def blink_on_times(locs: Localizations) -> np.ndarray:
@@ -671,14 +664,14 @@ def grouped_on_time(session, layer: int = 0, selected: bool = True
                     ) -> Tuple[Optional[np.ndarray], str]:
     """``n_in_group`` from the session's grouped table, and why not if not.
 
-    The grouped table is a table of its own with a filter of its own, so the
-    selection is rebuilt here rather than carried over: the same bounds and the
-    same ROI, applied to blinks instead of to frames.  Nothing is linked -- a
+    The grouped table is a table of its own, so the selection is rebuilt here
+    rather than carried over: the layer's bounds and the same ROI, applied to
+    blinks instead of to frames.  Nothing is linked -- a
     session that has never been switched to grouped has no on-time to show, and
     saying so is better than spending a minute of someone's time on it.
     """
     if session is None:
-        return None, "no session: no grouped table to take the on-time from"
+        return None, "no session: no merged blinks to take the on-time from"
     layers = getattr(session, "layers", None)
     if not layers:
         return None, "no layer to take the on-time from"
@@ -686,21 +679,21 @@ def grouped_on_time(session, layer: int = 0, selected: bool = True
     if getattr(layers[index], "is_image", False):
         index = session.first_locs_layer()
     state = getattr(layers[index], "state", None)
-    sets = getattr(state, "sets", {}) or {}
-    if "grouped" not in sets:
-        return None, ("no on-time: switch the layer to grouped once, so the "
-                      "localizations are linked into blinks")
-    if getattr(state, "grouped_stale", False):
-        return None, ("no on-time: the grouped table is out of date; switch the "
-                      "layer to grouped to link it again")
-    locset = sets["grouped"]
+    tables = getattr(session, "tables", None)
+    locset = tables.peek_grouped() if tables is not None else None
+    if state is None or locset is None:
+        return None, ("no on-time: tick merge blinks on the layer once, so the "
+                      "localizations are merged into blinks")
+    if not tables.is_current:
+        return None, ("no on-time: the merged blinks are out of date; tick merge "
+                      "blinks on the layer to merge them again")
     locs = locset.locs
     if "n_in_group" not in locs or not len(locs):
-        return None, "no on-time: the grouped table has no n_in_group"
+        return None, "no on-time: the merged blinks have no n_in_group"
     if not selected:
         return np.asarray(locs["n_in_group"]), ""
     from ..render import positions
-    mask = np.asarray(locset.filter.mask, dtype=bool)
+    mask = np.asarray(state.filter_for(locset).mask, dtype=bool)
     roi = getattr(session, "roi", None)
     in_slab = bool(getattr(session, "selects_slab", False))
     if roi is not None or in_slab:
@@ -722,23 +715,24 @@ class LocalizationStatistics(Plugin):
     per_region = True
     # 2: the table the layer shows rather than always the ungrouped one, and
     # the on-time counted once per blink rather than once per frame
-    version = "3"        # 3: finds a SMAPpy 3D fit's z precision, z_err_nm
+    # 3: finds a SMAPpy 3D fit's z precision, z_err_nm
+    # 4: *precision fit* none / histogram / MLE, one choice; a region fits the
+    # model as the view does, where it used to start without it
+    version = "4"
 
     def run(self, ctx: Context, settings: StatisticsSettings) -> Result:
         table, selection = ctx.table()
-        grouped = table is not ctx.locs
+        grouped = table is not ctx.ungrouped()[0]
         if settings.source == "all":
             locs = table
-            where = "all localizations"
+            where = "all localizations" + (" (blinks merged)" if grouped else "")
         else:
             if not ctx.per_region:
                 # in a region an empty one is an answer -- no localizations
                 # here -- and a row that says so, not a failure
-                selection.require(MIN_FOR_FIT, ctx.report, "a distribution")
+                selection.require(MIN_FOR_FIT, ctx.warn, "a distribution")
             locs = selection.apply(table)
-            where = str(selection)
-        if grouped:
-            where += " (grouped)"
+            where = str(selection)          # names the grouping itself
         if not len(locs) and not ctx.per_region:
             raise ValueError("no localizations to describe")
         on_time, why = None, ""
@@ -752,8 +746,7 @@ class LocalizationStatistics(Plugin):
         found = statistics(locs, bins=settings.bins,
                            photon_start=settings.photon_start, on_time=on_time,
                            exposure_ms=settings.exposure_ms,
-                           precision_fit=settings.precision_fit,
-                           fit_precision=settings.fit_precision)
+                           precision_fit=settings.precision_fit)
         if not found:
             raise ValueError("the table has no photons, precision or on-time: "
                              f"it has {', '.join(sorted(locs.keys()))}")

@@ -77,7 +77,7 @@ class _Slot(QWidget):
             self.panel.form.restore(self.instance.values)
         # a panel restored with a file already in it should say what its auto
         # fields resolve to straight away, not only after the next edit
-        self.panel._hints()
+        self.panel.refresh_derived()
         return self.panel
 
     def values(self) -> Dict[str, object]:
@@ -107,15 +107,11 @@ class PluginTab(QWidget):
         self.search.setClearButtonEnabled(True)
         self.search.textChanged.connect(self._filter)
         add = QToolButton(text="+", autoRaise=True)
-        add.setToolTip("add a plugin to this tab")
+        add.setToolTip("add a plugin, or a new chain of plugins, to this tab")
         add.clicked.connect(self.add_plugin)
-        new_chain = QToolButton(text="+ chain", autoRaise=True)
-        new_chain.setToolTip("a new chain of plugins that runs as one; "
-                             "add its steps with 'edit steps'")
-        new_chain.clicked.connect(self.add_chain)
+        self.add_button = add
         top.addWidget(self.search, 1)
         top.addWidget(add)
-        top.addWidget(new_chain)
         layout.addLayout(top)
         if header is not None:
             layout.addWidget(header)
@@ -217,8 +213,12 @@ class PluginTab(QWidget):
     def add_plugin(self) -> None:
         # any plugin, from any branch of the tree: one that can run per
         # region runs on the view as well (`docs/regions.md`)
-        path = choose_plugin(self.window())
+        from .chooser import NEW_CHAIN
+        path = choose_plugin(self.window(), new_chain=True)
         if not path:
+            return
+        if path == NEW_CHAIN:
+            self.add_chain()
             return
         instance = Instance(plugin=path)
         self.tab.instances.append(instance)

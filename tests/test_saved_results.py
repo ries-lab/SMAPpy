@@ -122,7 +122,7 @@ def test_the_panel_offers_the_plot_of_a_run_that_is_over(tmp_path):
     opened = Session()
     opened.load(path)
     panel = PluginPanel(CometDrift, opened)
-    assert panel.plot_button.isEnabled()
+    assert panel.result_button.isEnabled()
     assert "ran before" in panel.status.text()
     assert panel.result.figures()
 
@@ -139,9 +139,9 @@ def test_the_panel_picks_up_a_file_opened_after_it_was_built(tmp_path):
 
     opened = Session()
     panel = PluginPanel(CometDrift, opened)
-    assert not panel.plot_button.isEnabled()
+    assert not panel.result_button.isEnabled()
     opened.load(path)
-    assert panel.plot_button.isEnabled()
+    assert panel.result_button.isEnabled()
 
 
 def test_the_curve_comes_back_however_the_file_is_opened_and_survives_a_save(tmp_path):
@@ -153,7 +153,7 @@ def test_the_curve_comes_back_however_the_file_is_opened_and_survives_a_save(tmp
     path = session.save(tmp_path / "corrected.hdf5", gui_state=False)
 
     opened = Session()
-    loader = plugins.get("File/Load/smappy HDF5")()
+    loader = plugins.get("File/Load/Auto")()
     settings = loader.Settings(path=str(path))
     opened.apply(loader, loader.run(opened.context(), settings))
     assert COMET in opened.results

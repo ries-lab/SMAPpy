@@ -32,9 +32,12 @@ meant to disagree -- the way they disagree is the diagnosis:
   the two images still agree.  This folds in the labelling density, the drift
   and the number of localizations as well as the precision.
 
-It measures the localizations as they are shown: the layer's filter, the ROI
-and, while the 3D view's slab is used by plugins, the slab.  To measure all of
-them, clear the filter and the ROI.  A filter on precision or photons does not
+It measures the localizations as they are shown: the layer's
+[filter](plugin:Panels/Glossary) (also called bounds: the lowest and highest
+values of columns a localization must lie between), the drawn
+[ROI](plugin:Panels/Glossary) (region of interest) and, while the 3D view's
+slab (a slice of fixed thickness in z) is used by plugins, the slab.  To
+measure all of them, clear the filter and the ROI.  A filter on precision or photons does not
 bias the pairwise fit, but it does select: both partners of a pair must
 survive it, and the first and last frames of a blink are the dim ones, so a
 hard cut removes true pairs preferentially.  The fitted signal fraction shows
@@ -46,9 +49,11 @@ CRLB histogram and for comparing each pair with its bound; `photons` for the
 photon law (below).  The displacement fit wants at least 200 pairs in the
 search radius.  FRC wants at least 1000 localizations.
 
-It always reads the **ungrouped** table, even when the layer shows the
-grouped one: grouping merges the repeated localizations of a blink into one,
-and those repeats are exactly what the pairwise displacement measures.
+It always reads the **single localizations**, even when the layer merges
+blinks: [merge blinks](plugin:Panels/Glossary) (also called grouping or
+linking) combines the localizations in consecutive frames that come from one
+blinking event into one, and those repeats are exactly what the pairwise
+displacement measures.
 
 Photons and on-times are described by
 [Localization Statistics](plugin:Analysis/Measure/Localization Statistics),
@@ -414,8 +419,6 @@ line per number:
   motion beyond the scatter of the gaps.
 * Notes: the search radius used, too few pairs, a cut-off axial search or a
   thin slab.
-
-A table in pixels (`x_pix`, `xy_err_pix`) is measured and reported in pixels.
 
 Besides the text:
 

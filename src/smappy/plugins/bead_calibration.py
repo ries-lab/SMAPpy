@@ -11,15 +11,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from . import Context, Plugin, Result, param, register
+from . import Context, Plugin, Result, register
 
 
 @dataclass
 class BeadCalibrationSettings:
-    mode: str = param("single", choices=(("single", "single channel"),
-                                         ("dual", "dual colour")),
-                      help="dual colour: a camera split into two halves; the "
-                           "calibration then carries the map between them")
+    """Nothing: the window asks single or dual colour itself, and asking here
+    too meant two answers to one question (and the window's won anyway once
+    it was switched there)."""
 
 
 @register("Localize/Bead calibration")
@@ -29,7 +28,8 @@ class BeadCalibration(Plugin):
                    "from bead z-stacks; opens its own window")
     changes_locs = False
     Settings = BeadCalibrationSettings
-    version = "1"
+    # 2: no *mode*: the window's own combo is the one place it is chosen
+    version = "2"
     window = "bead calibration"
 
     def run(self, ctx: Context, settings: BeadCalibrationSettings) -> Result:

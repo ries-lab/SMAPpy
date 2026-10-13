@@ -154,10 +154,11 @@ class DBSCAN(Plugin):
     version = "1"
 
     def run(self, ctx: Context, settings: DBSCANSettings) -> Result:
-        table, selection = ctx.table()
-        grouped = table is not ctx.locs
+        table, selection = ctx.locs, ctx.selection    # what the layer shows
+        whole, _ = ctx.ungrouped()
+        grouped = table is not whole
         # the localizations get their blink's cluster through group_id, so
-        # handing back the ungrouped table is right (see `Context.table`)
+        # handing back the ungrouped table is right (see `Context.ungrouped`)
         ctx.served_grouped = False
         use = np.asarray(selection.mask, dtype=bool)
         columns = [c for c in ("x_nm", "y_nm") if c in table]
@@ -182,18 +183,18 @@ class DBSCAN(Plugin):
             offset = max(offset, int(found.max(initial=0)))
             labels[rows] = found
         if grouped:
-            labels = _per_localization(ctx.locs, table, labels)
+            labels = _per_localization(whole, table, labels)
         n_clusters = int(labels.max(initial=0))
         clustered = int((labels > 0).sum())
         text = (f"{n_clusters} clusters of {clustered} localizations, "
                 f"{int(len(labels) - clustered)} in none; radius "
                 + ", ".join(f"{e:.1f}" for e in eps_used) + f" nm, {settings.neighbours} "
                 "neighbours" + (" (blinks)" if grouped else ""))
-        locs = with_clusters(ctx.locs, labels)
+        locs = with_clusters(whole, labels)
         data: Dict[str, Any] = {"clusters": n_clusters, "radius_nm": eps_used}
         sizes = np.bincount(labels)[1:] if n_clusters else np.zeros(0, int)
-        xy = np.column_stack([np.asarray(ctx.locs["x_nm"], float),
-                              np.asarray(ctx.locs["y_nm"], float)])
+        xy = np.column_stack([np.asarray(whole["x_nm"], float),
+                              np.asarray(whole["y_nm"], float)])
         return Result(locs=locs, text=text, settings=settings, data=data,
                       values={"clusters": n_clusters, "clustered": clustered},
                       plot=Plot(lambda figure: draw_clusters(figure, xy, labels, sizes),
@@ -204,8 +205,8 @@ def _per_localization(locs: Localizations, grouped: Localizations,
                       labels: np.ndarray) -> np.ndarray:
     """A blink's cluster on each of its localizations, through ``group_id``."""
     if "group_id" not in locs or "group_id" not in grouped:
-        raise ValueError("the grouped table has no group_id to map the clusters "
-                         "back to the localizations: cluster the ungrouped table")
+        raise ValueError("the merged blinks have no group_id to map the clusters "
+                         "back to the localizations: cluster with blinks not merged")
     gid = np.asarray(grouped["group_id"])
     order = np.argsort(gid, kind="stable")
     wanted = np.asarray(locs["group_id"])

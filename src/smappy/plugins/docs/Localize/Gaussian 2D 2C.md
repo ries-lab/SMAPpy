@@ -1,17 +1,18 @@
 ---
-version: "3"
+version: "4"
 covers: [smappy.dualfit.combine_peaks, smappy.dualfit.build_link, smappy.dualfit.cut_paired_rois, smappy.dualfit.paired_to_localizations, smappy.dualfit.DualChannelEngine, smappy.psf.GlobalGaussianPSF, smappy.detect.find_candidates, smappy.plugins.fit.DualGaussianFit, smappy.plugins.fit.calibration_blocks, smappy.plugins.fit.finish_localizations, smappy.calibrate.transform.register_channels]
 ---
 
 ## What it does
 
 This is the fitter for **two colours on one camera in 2D**.  A dichroic
-mirror in the detection path splits each molecule's light between two halves
-of the camera chip, so every molecule appears twice in the same frame: once
+mirror in the detection path -- a [splitter](plugin:Panels/Glossary), also
+called a dual-view or image splitter -- splits each molecule's light between
+two halves of the camera chip, so every molecule appears twice in the same frame: once
 in the *main* (reference) half and once in the *secondary* half, a little
 shifted, turned and magnified.  Both dyes appear in both halves, but in
 different proportions, and that proportion -- the **photon ratio** -- is what
-tells the dyes apart.  This is *ratiometric* multicolour imaging
+tells the dyes apart.  This is [ratiometric](plugin:Panels/Glossary) multicolour imaging
 ([Bossi et al. 2008](https://doi.org/10.1021/nl801471d)).
 
 The plugin fits the two spots of a molecule **together, as one emitter**, the
@@ -19,23 +20,26 @@ global fit of [Li et al. 2022](https://doi.org/10.1038/s41467-022-30719-4): one
 position for both halves, and a photon number for each.  The position is then
 as precise as all the photons allow, and the photon split comes out of the
 same fit.  At the end of the run it assigns the colours from that split
-([Assign colours](plugin:Analysis/Dual-Color/AssignColors)) and, if asked,
+([Assign colours](plugin:Analysis/Dual-colour/Assign colours)) and, if asked,
 corrects the drift ([RCC](plugin:Analysis/Drift/RCC) or
 [COMET](plugin:Analysis/Drift/COMET)).  The detection, the camera settings and
-the Gaussian PSF are those of [Gaussian 2D](plugin:Localize/Gaussian 2D),
-which explains them.
+the Gaussian [PSF](plugin:Panels/Glossary) (point spread function: the image
+one molecule makes on the camera) are those of
+[Gaussian 2D](plugin:Localize/Gaussian 2D), which explains them.
 
 What it needs:
 
 * **A split-frame movie**, both halves in every frame, and the camera's
   conversion and offset, exactly as for the single-channel fitter.
 * **The transformation between the halves**: where the secondary half sees
-  what the main half sees.  There are three ways to get it.  Tick *calibrate
+  what the main half sees -- the [registration](plugin:Panels/Glossary) of the
+  two channels, also called channel alignment or chromatic correction.  There are three ways to get it.  Tick *calibrate
   from this movie* and it is measured from the movie itself, which is the
   usual route, because in a ratiometric experiment every molecule is already
   imaged in both halves.  Or choose a file: one written by an earlier run of
   this plugin or by *Analysis/Register/Calibrate transform* (`*_2ct.h5`), or a
-  dual-colour bead calibration (**Tools > Dual-colour calibration**), whose
+  dual-colour [bead calibration](plugin:Panels/Glossary) (a PSF model measured
+  on beads; the *Bead calibration* section of the Localize tab), whose
   transformation is used and whose PSF models are not.  With neither, the run
   asks before it starts.
 
@@ -68,7 +72,7 @@ camera = CameraMetadata(conversion=0.5, offset=100.0, pixelsize_um=0.1,
                         em_on=False, roi=(0, 0, 100, 200))
 finder = replace(DetectionSettings().finder(), split=(0, 100.0))
 engine = DualChannelEngine(camera, finder, DualGaussianModelSettings().model(),
-                           transform, FitSettings(roisize=13, output_unit="nm"))
+                           transform, FitSettings(roisize=13))
 engine.push(frames, 0)
 locs = engine.flush()
 # each localization's dye: the nearest true molecule in its frame
@@ -134,18 +138,19 @@ become one candidate, at their mean position weighted by the square root of
 each peak's height.  Peaks without a partner are **kept**: a molecule of the
 dye that puts little light into one half may be found only in the other, and
 it is still fitted.  The candidate is rounded to a pixel in the main half,
-that pixel is mapped into the secondary half and rounded again, and a ROI
-(*ROI size*) is cut at each.  A candidate whose two ROIs do not both fit
+that pixel is mapped into the secondary half and rounded again, and a box
+(the [fit box](plugin:Panels/Glossary), also called ROI size or fitting
+window: *fit box*) is cut at each.  A candidate whose two fit boxes do not both fit
 inside the frame, each on its own half, is dropped.
 
-**4. One fit for both ROIs.**  Each ROI has its own Gaussian model, as in
+**4. One fit for both fit boxes.**  Each fit box has its own Gaussian model, as in
 the single-channel fit, and the two are fitted at once by maximum likelihood:
-the Poisson likelihood of every pixel of *both* ROIs.  What makes it one
+the Poisson likelihood of every pixel of *both* fit boxes.  What makes it one
 emitter is that some parameters are **linked** -- one number for both halves
 -- and the rest are free.  By default:
 
 * **x and y are linked** (*link x, y*).  One position for the molecule, seen
-  in the secondary ROI through the transformation.  This is what pins the two
+  in the secondary fit box through the transformation.  This is what pins the two
   spots to one emitter, and what lets all the photons of both spots inform
   the position.
 * **The photons are free** (*link photons* off).  Each half gets its own
@@ -241,7 +246,7 @@ whole table, in this order (*after the fit*):
   whose size the form cannot know; COMET's question before a long run is not
   asked here, since choosing it is the agreement.
 * **Colour assignment**, on by default:
-  [Assign colours](plugin:Analysis/Dual-Color/AssignColors) reads
+  [Assign colours](plugin:Analysis/Dual-colour/Assign colours) reads
   `photons_ch0` and `photons_ch1`, finds the peaks of their ratio and writes
   a `channel` column -- 1 and 2 for the two colours, 0 for what it will not
   assign.  Its settings are under *colour assignment*.
@@ -285,7 +290,7 @@ residual in x and y.
 
 ## In detail
 
-**The model.**  For pixel $i$ of the ROI of half $c$ ($c = 0$ the main half,
+**The model.**  For pixel $i$ of the fit box of half $c$ ($c = 0$ the main half,
 $c = 1$ the secondary),
 
 $$\mu_{c,i} = b_c + N_c\, E_x(x_i - x_c; \sigma_c)\, E_y(y_i - y_c; \sigma_c) ,$$
@@ -302,29 +307,29 @@ $$\theta_c = f_c\, \theta + o_c ,$$
 and a free one as $\theta_c + o_c$.  The main half has $f = 1$, $o = 0$.  For
 the secondary half, $f$ for x and y is the local scale of the transformation
 at the candidate (its derivative, by a one-pixel finite difference), and the
-offset is the sub-pixel remainder left when the partner ROI was rounded to a
-pixel, plus $(1 - f)\,h$ with $h$ half the ROI size, because the scale acts
-about the ROI's centre and not its corner.  The link is diagonal: a rotation
+offset is the sub-pixel remainder left when the partner fit box was rounded to a
+pixel, plus $(1 - f)\,h$ with $h$ half the fit box size, because the scale acts
+about the fit box's centre and not its corner.  The link is diagonal: a rotation
 between the halves has no term of its own, and at the fraction of a degree of
-a splitter its effect within one ROI is far below the precision.  The images
+a splitter its effect within one fit box is far below the precision.  The images
 are never resampled -- warping one half onto the other would correlate the
 noise of neighbouring pixels and break the Poisson likelihood.
 
 **The fit.**  The deviance of [Gaussian 2D](plugin:Localize/Gaussian 2D),
-summed over the pixels of both ROIs, is minimised with the same
+summed over the pixels of both fit boxes, is minimised with the same
 Levenberg-Marquardt steps, with the gradient taken through the link:
 
 $$\frac{\partial \mu_{c,i}}{\partial \theta} = f_c\, \frac{\partial \mu_{c,i}}{\partial \theta_c} .$$
 
-Each half starts as the single-channel fitter would from its own ROI (centre
+Each half starts as the single-channel fitter would from its own fit box (centre
 of mass, border background, brightest pixel); a linked parameter starts from
 the main half's value.  The limits ($N \geq 1$, $b \geq 0.01$, the width
-inside the ROI) apply per half, and a linked parameter is limited once,
-through the main half.  A pair one of whose ROIs has no light at all is
+inside the fit box) apply per half, and a linked parameter is limited once,
+through the main half.  A pair one of whose fit boxes has no light at all is
 returned as not-a-number and dropped: the two halves are one measurement.
 
 **The precision.**  The Cramér-Rao bound comes from the Fisher information
-summed over both ROIs,
+summed over both fit boxes,
 
 $$I_{jk} = \sum_{c} \sum_i \frac{1}{\mu_{c,i}}\, \frac{\partial\mu_{c,i}}{\partial\theta_j}\, \frac{\partial\mu_{c,i}}{\partial\theta_k} ,$$
 
@@ -341,9 +346,9 @@ and the halves see $\hat{N}$ and $r\,\hat{N}$ for the *photon ratio* $r$;
 `photons` is their total, $(1 + r)\,\hat{N}$, and `ratio` is 0: there is no
 split left to measure.  (Before version 2 it was the main half's $\hat{N}$
 alone.)  `logl_rel` is the log-likelihood per pixel of
-the two ROIs together.  EM gain and the camera's read noise are handled as in the
+the two fit boxes together.  EM gain (an EMCCD's electron multiplication) and the camera's read noise are handled as in the
 single-channel fit ([Gaussian 2D](plugin:Localize/Gaussian 2D)), the read
-noise in both ROIs.
+noise in both fit boxes.
 The first frames are checked against the transformation's geometry: a
 registration made on another camera ROI is refused, and a movie without a
 camera ROI in its metadata is taken to start at the chip's corner, with a
@@ -355,8 +360,8 @@ offers a Gaussian PSF beside its spline.  Where the code departs from the public
 
 * **The link.**  The paper links a shared parameter through a scale and a
   translation, the translation being the sub-pixel remainder left when the
-  partner ROI is rounded to whole pixels.  Here the scale for x and y is the
-  transformation's local derivative, and it acts about the ROI's centre (the
+  partner fit box is rounded to whole pixels.  Here the scale for x and y is the
+  transformation's local derivative, and it acts about the fit box's centre (the
   $(1 - f)\,h$ above), so a mirrored splitter, $f = -1$, needs no flipped
   image.
 * **No bead calibration is needed.**  The paper builds its transformation from
@@ -425,7 +430,7 @@ About seven times the residual of a healthy registration (0.13 px); tighter
 strips the edges of the field.
 
 ### fit.roisize
-Both ROIs of a pair have this size, and both must lie inside the frame, each
+Both fit boxes of a pair have this size, and both must lie inside the frame, each
 on its own half.
 
 ### finish.drift
@@ -436,7 +441,7 @@ Their pages, [RCC](plugin:Analysis/Drift/RCC) and
 ### output.raw_frames
 50 is enough to see what the camera saw at the start, the end and a few
 points between.  Each kept frame costs its size in the file: for a
-256 x 256 ROI about a quarter of a megabyte, for a full 2048 x 2048 sCMOS
+256 x 256 camera ROI about a quarter of a megabyte, for a full 2048 x 2048 sCMOS
 chip 16 MB, so fifty of those are 800 MB -- set fewer there.
 
 ### output.show_tags
@@ -459,8 +464,12 @@ The table, one row per molecule and frame:
 | `background_ch0`, `background_ch1` | the background per pixel of each half (`background` is the main half's) |
 | `sigma_nm_ch0`, `sigma_nm_ch1` | the fitted PSF width of each half (`sigma_nm` is the main half's) |
 | `channel` | the colour Assign colours gave it: 1, 2, or 0 for none |
-| `logl`, `logl_rel` | the log-likelihood, and per pixel of both ROIs |
+| `logl`, `logl_rel` | the log-likelihood, and per pixel of both fit boxes |
 | `peak_x_nm`, `peak_y_nm`, `iterations` | the candidate in the main half, and the steps taken |
+
+As for [Gaussian 2D](plugin:Localize/Gaussian 2D), every length is in nm and
+no pixel copy is kept: the file records the pixel size, and only the
+candidate (`peak_x_pix`, `peak_y_pix`) stays in camera pixels.
 
 The finishing steps' figures -- the ratio histogram of Assign colours, the
 drift curve -- open with the fit's result.
@@ -473,8 +482,8 @@ What to check:
   a good registration; a cross beside it shows the error directly.
 * **The ratio histogram** should show one clear peak per dye.  Peaks that
   merge mean too few photons or dyes too alike; a pile-up at 0 or 1 is
-  molecules whose partner ROI held only background -- a dye that sends almost
-  nothing into one half, or a partner ROI placed where the molecule is not.
+  molecules whose partner fit box held only background -- a dye that sends almost
+  nothing into one half, or a partner fit box placed where the molecule is not.
 * **The two widths** (`sigma_nm_ch0`, `sigma_nm_ch1`) should each be steady
   across the field; a width that grows towards one side is a half out of
   focus there.

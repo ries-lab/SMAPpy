@@ -29,41 +29,13 @@ from ..plugins import ParamInfo, param_specs
 from . import plots
 from .core import (CalibrationSettings, build_calibration, calibration_save_defaults,
                    calibration_save_path, collect_beads)
-from .dual import LAYOUTS, DualColorSettings, collect_dual_beads, build_dual_calibration
+from .dual import (BEAD_HELP, BEAD_UNUSED, DualColorSettings, build_dual_calibration,
+                   collect_dual_beads)
 from .input import discover_acquisitions
 
 PAGES = ("Overview", "Transformation", "Fit quality", "Field diagnostics", "Bead diagnostics")
 COLUMNS = ("bead", "stack", "x, y (px)", "brightness", "dz (nm)", "correlation",
            "residual", "state")
-
-SETTING_INFO = {
-    "roi_size": ParamInfo(label="ROI size", unit="px", min=7),
-    "padding": ParamInfo(unit="px", min=1, advanced=True),
-    "dz_nm": ParamInfo(label="z step", unit="nm", help="auto: from the acquisition"),
-    "detection_sigma_px": ParamInfo(label="detection sigma", unit="px", advanced=True),
-    "detection_threshold_sigma": ParamInfo(label="threshold", unit="sigma"),
-    "min_distance_px": ParamInfo(label="min distance", unit="px"),
-    "max_xy_shift_px": ParamInfo(label="max xy shift", unit="px", advanced=True),
-    "max_z_shift_nm": ParamInfo(label="max z shift", unit="nm", advanced=True),
-    "alignment_range_nm": ParamInfo(label="alignment range", unit="nm", advanced=True),
-    "registration_iterations": ParamInfo(label="iterations", min=1, advanced=True),
-    "rejection_mad": ParamInfo(label="rejection (MAD)", advanced=True),
-    "smooth_z_nm": ParamInfo(label="smoothing z", unit="nm"),
-    "smooth_xy_px": ParamInfo(label="smoothing xy", unit="px", advanced=True),
-    "min_beads": ParamInfo(label="min beads", min=1, advanced=True),
-    "brightness_range": ParamInfo(label="brightness range", advanced=True,
-                                  help="largest accepted max/min; auto disables it"),
-    "saturation_adu": ParamInfo(label="saturation", unit="ADU", advanced=True,
-                                help="auto: the integer type's maximum"),
-    "layout": ParamInfo(choices=LAYOUTS),
-    "main_channel": ParamInfo(label="main channel",
-                              choices=("left", "right", "upper", "lower")),
-    "split_position": ParamInfo(label="split position", unit="px",
-                                help="auto: the midpoint"),
-    "min_pairs": ParamInfo(label="min pairs", min=1),
-    "reprojection_threshold_px": ParamInfo(label="RANSAC radius", unit="px"),
-    "transform_axis_limit_px": ParamInfo(label="dx/dy limit", unit="px"),
-}
 
 
 class _Worker(QObject):
@@ -79,6 +51,25 @@ class _Worker(QObject):
             self.done.emit(self.kind, self.function())
         except Exception as error:                       # shown, never fatal
             self.done.emit("error", error)
+
+
+def _bead_specs(cls):
+    """The form of a calibration's settings, as a bead calibration reads them.
+
+    Dual colour's *registration* is the movie registration's settings
+    (`RegisterSettings`); the fields a bead calibration does not read are
+    left off, and those it reads differently say so in their tooltips.
+    """
+    from dataclasses import replace
+    specs = param_specs(cls)
+    registration = specs.get('registration')
+    if registration is not None:
+        for name, spec in registration.children.items():
+            if name in BEAD_UNUSED:
+                spec.info = replace(spec.info, hidden=True)
+            elif name in BEAD_HELP:
+                spec.info = replace(spec.info, help=BEAD_HELP[name])
+    return specs
 
 
 class CalibrationWindow(QMainWindow):
@@ -210,7 +201,7 @@ class CalibrationWindow(QMainWindow):
         self.settings_layout.setContentsMargins(0, 0, 0, 0)
         self.forms = {}
         for cls in (CalibrationSettings, DualColorSettings):
-            form = SettingsForm(cls, param_specs(cls, SETTING_INFO))
+            form = SettingsForm(cls, _bead_specs(cls))
             self.settings_layout.addWidget(form)
             self.forms[cls] = form
         if settings is not None:
@@ -552,7 +543,7 @@ class CalibrationWindow(QMainWindow):
             hints['saturation_adu'] = first.get('saturation_adu')
         geometry = getattr(result.calibration, 'geometry', None)
         if isinstance(geometry, dict):
-            hints['split_position'] = geometry.get('split_position')
+            hints['registration.split_position'] = geometry.get('split_position')
         self.form.set_hints({k: v for k, v in hints.items() if v is not None})
 
     # -------------------------------------------------------- stack viewer
@@ -631,16 +622,10 @@ class CalibrationWindow(QMainWindow):
 def show_calibration_qt(paths=(), settings=None):
     """Open the window, making a QApplication if there is none."""
     from PySide6.QtWidgets import QApplication
-    app = QApplication.instance()
-    standalone = app is None
-    if standalone:
-        app = QApplication([])
-    from ..gui.widgets import apply_style
-    apply_style(app)                 # the same editable fields as the main GUI
-    from ..gui.collector import collect_on_gui_thread
-    collect_on_gui_thread(app)
-    from ..gui.icon import install_icon
-    install_icon(app)
+
+    from ..gui import make_app
+    standalone = QApplication.instance() is None
+    app = make_app()
     window = CalibrationWindow(paths, settings)
     window.show()
     if standalone:

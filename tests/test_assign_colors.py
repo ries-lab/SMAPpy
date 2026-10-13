@@ -127,7 +127,7 @@ def test_the_posteriors_are_a_partition_of_one():
 
 def test_the_plugin_writes_a_channel_column_and_the_preview_does_not():
     locs, truth = simulate(n=20000, seed=7, **OVERLAP)
-    plugin = plugins.get("Analysis/Dual-Color/AssignColors")()
+    plugin = plugins.get("Analysis/Dual-colour/Assign colours")()
     result = plugin(locs, Selection.all(len(locs)),
                     AssignColorSettings(mode="minima", exclusion=0.05))
     assert result.locs is not None
@@ -160,7 +160,7 @@ def test_the_plugin_writes_a_channel_column_and_the_preview_does_not():
     assert "channel" in session.locs                  # run does change it
 
     # a plugin with a preview that is not of a frame gets no frame number
-    cls = plugins.get("Analysis/Dual-Color/AssignColors")
+    cls = plugins.get("Analysis/Dual-colour/Assign colours")
     assert cls.has_preview() and not cls.preview_wants_frame()
 
 
@@ -172,12 +172,12 @@ def test_a_layer_filtered_to_one_colour_still_shows_both_to_the_histogram():
     columns = dict(locs.columns)
     columns["channel"] = truth.astype(np.int32)
     session = Session(Localizations(columns, dict(locs.metadata)))
-    lay = session.layers[0].state.sets["ungrouped"].filter
-    lay.set("channel", 1, 1)
-    lay.set("photons", 1500, None)                 # other bounds still count
-    ctx = session.context()
+    lay = session.layers[0]
+    lay.set_bound("channel", 1, 1)
+    lay.set_bound("photons", 1500, None)           # other bounds still count
+    plugin = plugins.get("Analysis/Dual-colour/Assign colours")()
+    ctx = session.context(grouping=plugin.grouping)
     assert set(np.unique(ctx.selection.apply(session.locs)["channel"])) == {1}
-    plugin = plugins.get("Analysis/Dual-Color/AssignColors")()
     result = plugin.run(ctx, AssignColorSettings(mode="minima"))
     channel = result.locs["channel"]
     assert (channel == truth).mean() > 0.95
@@ -195,7 +195,7 @@ def test_the_summary_measures_a_species_wider_than_shot_noise():
     n1 = rng.binomial(total, np.clip((1 + rho) / 2, 0, 1)).astype(float)
     locs = Localizations({"photons_ch0": n1, "photons_ch1": total - n1}, {})
 
-    plugin = plugins.get("Analysis/Dual-Color/AssignColors")()
+    plugin = plugins.get("Analysis/Dual-colour/Assign colours")()
     blind = plugin(locs, Selection.all(n),
                    AssignColorSettings(mode="probabilistic"))
     width = [line for line in blind.text.splitlines() if "wide against" in line]
@@ -311,7 +311,7 @@ def test_a_population_between_the_modes_is_reported_and_does_not_move_the_cut():
     position, height = unclaimed[0]
     assert abs(position) < 0.05 and height > 0.05
 
-    plugin = plugins.get("Analysis/Dual-Color/AssignColors")()
+    plugin = plugins.get("Analysis/Dual-colour/Assign colours")()
     text = plugin(locs, Selection.all(len(truth)),
                   AssignColorSettings(mode="minima")).text
     assert "belongs to no colour" in text
@@ -323,11 +323,11 @@ def test_a_population_between_the_modes_is_reported_and_does_not_move_the_cut():
 
 
 def test_only_the_chosen_methods_parameters_are_active():
-    plugin = plugins.get("Analysis/Dual-Color/AssignColors")()
-    minima = plugin.active(AssignColorSettings(mode="minima"))
+    plugin = plugins.get("Analysis/Dual-colour/Assign colours")()
+    minima = plugin.describe(None, AssignColorSettings(mode="minima")).active
     assert minima["exclusion"] and not minima["crosstalk"]
     assert not minima["tolerance"] and not minima["spread"]
-    probabilistic = plugin.active(AssignColorSettings(mode="probabilistic"))
+    probabilistic = plugin.describe(None, AssignColorSettings(mode="probabilistic")).active
     assert probabilistic["crosstalk"] and probabilistic["tolerance"]
     assert not probabilistic["exclusion"]
 
@@ -357,7 +357,7 @@ def test_the_decided_regions_come_back_as_polygons():
 
 def test_the_result_carries_both_figures():
     locs, _ = coincident()
-    plugin = plugins.get("Analysis/Dual-Color/AssignColors")()
+    plugin = plugins.get("Analysis/Dual-colour/Assign colours")()
     result = plugin(locs, Selection.all(len(locs["photons_ch0"])),
                     AssignColorSettings(mode="probabilistic"))
     names = [plot.name for plot in result.figures()]
@@ -382,7 +382,7 @@ def test_the_figure_draws(tmp_path):
     from matplotlib import pyplot as plt
 
     locs, _ = simulate()
-    plugin = plugins.get("Analysis/Dual-Color/AssignColors")()
+    plugin = plugins.get("Analysis/Dual-colour/Assign colours")()
     for mode in ("minima", "probabilistic"):
         result = plugin(locs, Selection.all(len(locs)),
                         AssignColorSettings(mode=mode))

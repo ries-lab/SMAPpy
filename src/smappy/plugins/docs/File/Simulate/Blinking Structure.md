@@ -20,14 +20,18 @@ localizations first, and then fit it from its frames by changing only
 Use it to:
 
 * try the analysis plugins without a microscope (the tutorials do);
-* see what a labelling efficiency, a linkage error or a dye's blinking does to
-  a picture or a measurement;
-* test a fitter, a filter or a drift correction against the truth, with
-  [Ground Truth](plugin:Analysis/Measure/Ground Truth).
+* see what a [labelling efficiency](plugin:Panels/Glossary) (also called
+  degree of labelling: the fraction of target proteins that carry a detected
+  label), a linkage error or a dye's blinking does to a picture or a
+  measurement;
+* test a fitter, a filter or a drift correction against the
+  [ground truth](plugin:Panels/Glossary) -- where the molecules really were --
+  with [Ground Truth](plugin:Analysis/Measure/Ground Truth).
 
 It is a model, not a microscope.  The background is flat, the spot is a
-Gaussian (or a measured PSF), and the dye has one on-state and one
-off-state.  What it tests is whether an analysis gets back what was put in.
+Gaussian (or a measured [PSF](plugin:Panels/Glossary), point spread function:
+the image one molecule makes on the camera), and the dye has one on-state and
+one off-state.  What it tests is whether an analysis gets back what was put in.
 
 ## How it works
 
@@ -204,7 +208,9 @@ or crowded: sorting that out is the fitter's job.
 The frames are not written out as images.  The plugin saves the
 *simulation file*, `*.sim.yaml`, which is the recipe -- these settings and
 the seed -- a few hundred bytes instead of hundreds of megabytes.  Open it in
-a fitter as its file, as you would open a TIFF: the frames are drawn as the
+a fitter as its file, as you would open a TIFF -- once it is written, *Fit
+this* under the form does that, in the Localize tab's open fitter (or
+Gaussian 2D), without running it: the frames are drawn as the
 fitter reads them, identically every time, and the fitter takes the camera's
 pixel size, conversion and offset from it.  Tick *also write a TIFF* for
 other software.
@@ -317,7 +323,8 @@ $\sigma_y(z) = \sigma \sqrt{1 + ((z + c)/d)^2}$, $c$ the *focal offset* and
 $d$ the *focal depth*
 ([Huang et al. 2008](https://doi.org/10.1126/science.1153529)).  The expected
 photons of each pixel, background included, are drawn as a Poisson count of
-electrons; with an *EM gain* that count is multiplied by a gamma of its size,
+electrons; with an *EM gain* -- the electron multiplication of an EMCCD
+camera -- that count is multiplied by a gamma of its size,
 which doubles the variance.  The counts are electrons / *conversion* +
 *offset* plus Gaussian *read noise*, rounded and clipped to 16 bits.  The
 background is flat over a frame, and with *background std* it varies from

@@ -13,6 +13,7 @@ from smappy.detect import AbsoluteCutoff, DoGFilter, PeakFinder
 from smappy.dualfit import (DualChannelEngine, LINK_XYZ, combine_peaks,
                             cut_paired_rois, which_channel)
 from smappy.io.calibration import SplineCalibration, evaluate_spline
+from smappy.locs import in_pixels
 from smappy.metadata import CameraMetadata
 from smappy.pipeline import FitSettings
 from smappy.plugins import Context
@@ -34,7 +35,7 @@ def psf_volume(nz=41, size=17, astigmatism=0.6):
 def spline(astigmatism=0.6):
     volume = psf_volume(astigmatism=astigmatism)
     return SplineCalibration(spline_coefficients(volume), 10., 20., x0=8.0,
-                             psf=volume, em_mirror=False, parameters={})
+                             psf=volume, parameters={})
 
 
 def dual_calibration(dx=0.37, dy=-0.21, ratio=0.45):
@@ -152,7 +153,7 @@ def test_the_joint_fit_recovers_position_z_and_the_photon_ratio():
     rng = np.random.default_rng(2)
     cal = dual_calibration(ratio=0.35)
     model = GlobalSplinePSF((cal.main, cal.secondary), LINK_XYZ)
-    settings = FitSettings(roisize=13, output_unit="pixel")
+    settings = FitSettings(roisize=13)
     engine = DualChannelEngine(camera(), finder(), model, cal, settings)
 
     truth, z_index, total = (25.0, 15.0), 26.0, 12000.
@@ -162,8 +163,9 @@ def test_the_joint_fit_recovers_position_z_and_the_photon_ratio():
     locs = engine.flush()
 
     assert len(locs) > 40
-    assert np.median(locs["x_pix"]) == pytest.approx(truth[0], abs=0.15)
-    assert np.median(locs["y_pix"]) == pytest.approx(truth[1], abs=0.15)
+    x, y = in_pixels(locs, "x_pix", "y_pix")
+    assert np.median(x) == pytest.approx(truth[0], abs=0.15)
+    assert np.median(y) == pytest.approx(truth[1], abs=0.15)
     assert np.median(locs["z_nm"]) == pytest.approx(cal.main.z_index_to_nm(z_index),
                                                     abs=25.0)
     assert np.median(locs["photons"]) == pytest.approx(total, rel=0.12)
@@ -177,7 +179,7 @@ def test_the_two_colours_come_apart_in_the_ratio():
     cal = dual_calibration()
     model = GlobalSplinePSF((cal.main, cal.secondary), LINK_XYZ)
     engine = DualChannelEngine(camera(), finder(), model, cal,
-                              FitSettings(roisize=13, output_unit="pixel"))
+                              FitSettings(roisize=13))
 
     ratios = []
     for fraction in (0.2, 0.8):
@@ -203,7 +205,7 @@ def test_linking_the_photons_makes_the_ratio_meaningless_but_z_tighter():
     for name, shared in (("xyz", LINK_XYZ), ("all", (True,) * 5)):
         engine = DualChannelEngine(
             camera(), finder(), GlobalSplinePSF((cal.main, cal.secondary), shared),
-            cal, FitSettings(roisize=13, output_unit="pixel"))
+            cal, FitSettings(roisize=13))
         engine.push(frames, 0)
         locs = engine.flush()
         spread[name] = np.std(locs["z_nm"])
@@ -221,13 +223,13 @@ def test_an_unlinked_fit_keeps_how_far_the_partner_is_in_x_y_and_z():
                        for _ in range(60)])
     engine = DualChannelEngine(
         camera(), finder(), GlobalSplinePSF((cal.main, cal.secondary), (False,) * 5),
-        cal, FitSettings(roisize=13, output_unit="pixel"))
+        cal, FitSettings(roisize=13))
     engine.push(frames, 0)
     locs = engine.flush()
-    for name in ("dx_pix_ch1", "dy_pix_ch1", "dz_nm_ch1"):
+    for name in ("dx_nm_ch1", "dy_nm_ch1", "dz_nm_ch1"):
         assert name in locs
-    assert abs(np.median(locs["dx_pix_ch1"])) < 0.05
-    assert abs(np.median(locs["dy_pix_ch1"])) < 0.05
+    assert abs(np.median(in_pixels(locs, "dx_pix_ch1"))) < 0.05
+    assert abs(np.median(in_pixels(locs, "dy_pix_ch1"))) < 0.05
     assert abs(np.median(locs["dz_nm_ch1"])) < 15.0
     assert np.std(locs["dz_nm_ch1"]) > 0            # two fits, not one copied
 
@@ -257,7 +259,7 @@ def test_a_split_frame_runs_through_fit_stack_style_blocks():
     cal = dual_calibration()
     engine = DualChannelEngine(
         camera(), finder(), GlobalSplinePSF((cal.main, cal.secondary), LINK_XYZ),
-        cal, FitSettings(roisize=13, output_unit="pixel+nm"))
+        cal, FitSettings(roisize=13))
 
     total = 0
     for block in range(3):
@@ -305,7 +307,7 @@ def test_the_3d_2c_workflow_runs_from_a_tiff_and_a_saved_calibration(tmp_path):
         camera=CameraSettings(conversion=1.0, offset=100.0, pixelsize_um=0.1),
         detection=DetectionSettings(cutoff_mode="absolute", cutoff=20.0),
         model=DualModelSettings(calibration=str(calibration_file)),
-        fit=PipelineFitSettings(roisize=13, output_unit="nm"),
+        fit=PipelineFitSettings(roisize=13),
         output=OutputSettings(path=str(tmp_path / "out.hdf5")))
 
     result = DualSplineFit().run(Context(), settings)
@@ -318,6 +320,43 @@ def test_the_3d_2c_workflow_runs_from_a_tiff_and_a_saved_calibration(tmp_path):
     # both emitters found, at 100 nm pixels
     xs = np.sort(np.unique(np.rint(locs["x_nm"] / 100.0)))
     assert set(xs.astype(int)) <= {25, 42}
+
+
+def test_a_3d_2c_run_and_a_preview_each_read_the_calibration_once(
+        tmp_path, monkeypatch):
+    """The finder, the model, the engine and the back-projection all need it;
+    each used to read the file, three times a run and four a preview."""
+    import tifffile
+    from smappy.calibrate import dual
+    from smappy.plugins.fit import (CameraSettings, DetectionSettings,
+                                    DualModelSettings, DualSplineFit,
+                                    DualSplineFitSettings, OutputSettings,
+                                    SourceSettings)
+
+    rng = np.random.default_rng(9)
+    cal = dual_calibration()
+    frames = np.stack([split_frame([(25.0, 15.0)], 20.0, 9000., 0.3, 30., rng,
+                                   cal) for _ in range(6)])
+    stack = tmp_path / "split.tif"
+    tifffile.imwrite(stack, (frames + 100).astype(np.uint16))
+    settings = DualSplineFitSettings(
+        source=SourceSettings(path=str(stack), chunk=2),
+        camera=CameraSettings(conversion=1.0, offset=100.0, pixelsize_um=0.1),
+        detection=DetectionSettings(cutoff_mode="absolute", cutoff=20.0),
+        model=DualModelSettings(calibration=str(
+            _dual_calibration_file(tmp_path / "dual_3dcal.h5", cal))),
+        fit=FitSettings(roisize=13), output=OutputSettings(save=False))
+
+    reads = []
+    load = dual.load_dual_color_calibration
+    monkeypatch.setattr(dual, "load_dual_color_calibration",
+                        lambda path: reads.append(path) or load(path))
+    plugin = DualSplineFit()
+    assert len(plugin.run(Context(), settings).locs) >= 3
+    assert len(reads) == 1
+    reads.clear()
+    assert plugin.preview(Context(), settings, frame=1).data["locs"] is not None
+    assert len(reads) == 1
 
 
 def test_the_link_flags_reach_the_model():
@@ -405,7 +444,7 @@ def _mirrored_calibration(dx=0.37, dy=-0.21, ratio=0.3):
                                [0., 0., 1.]])
     volume = np.flip(psf_volume(astigmatism=-0.6), axis=1).copy()
     secondary = SplineCalibration(spline_coefficients(volume), 10., 20., x0=8.0,
-                                  psf=volume, em_mirror=False, parameters={})
+                                  psf=volume, parameters={})
     geometry = {"layout": "up-down mirrored", "main_channel": "upper",
                 "split_position": SPLIT, "image_shape": list(SHAPE),
                 "coordinate_system": "camera-chip", "mirror_axis_xy": 1}
@@ -430,7 +469,7 @@ def test_a_mirrored_splitter_keeps_its_colour(mirrored):
                        for _ in range(30)])
     model = GlobalSplinePSF((cal.main, cal.secondary), LINK_XYZ)
     engine = DualChannelEngine(camera(), finder(), model, cal,
-                               FitSettings(roisize=13, output_unit="pixel"))
+                               FitSettings(roisize=13))
     engine.push(frames)
     locs = engine.flush()
 
@@ -443,8 +482,9 @@ def test_a_mirrored_splitter_keeps_its_colour(mirrored):
     assert np.all(locs["photons_err_ch0"] > 0)
     assert np.median(locs["photons_err_ch1"]) < np.median(locs["photons_ch1"])
     assert np.median(locs["z_nm"]) == pytest.approx(-40, abs=5)
+    x, y = in_pixels(locs, "x_pix", "y_pix")
     for x0, y0 in truth:
-        mine = np.hypot(locs["x_pix"] - x0, locs["y_pix"] - y0) < 3
+        mine = np.hypot(x - x0, y - y0) < 3
         assert mine.sum() == 30
-        assert np.median(np.abs(locs["x_pix"][mine] - x0)) < 0.1
-        assert np.median(np.abs(locs["y_pix"][mine] - y0)) < 0.1
+        assert np.median(np.abs(x[mine] - x0)) < 0.1
+        assert np.median(np.abs(y[mine] - y0)) < 0.1

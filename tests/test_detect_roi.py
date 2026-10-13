@@ -4,7 +4,7 @@ import pytest
 
 from smappy.detect import (AbsoluteCutoff, DoGFilter, DynamicCutoff, GaussFilter,
                             PeakFinder, find_candidates, local_maxima)
-from smappy.roi import cut_rois
+from smappy.fit_rois import cut_rois
 
 
 def _spots(positions, shape=(64, 60), amplitude=100.0, sigma=1.2, background=10.0):
@@ -75,17 +75,6 @@ def test_rois_are_centred_on_the_candidate():
     # the fitted-position mapping must return the candidate for a centred fit
     x_back = rois.to_image_x(np.full(len(rois), 6.0))
     assert np.allclose(x_back, rois.candidates.x)
-
-
-def test_mirror_flips_and_maps_back():
-    img = _spots([(30, 30)])
-    finder = PeakFinder(DoGFilter(1.2), AbsoluteCutoff(10.0))
-    cands, _ = finder(img[None])
-    plain = cut_rois(img[None], cands, roisize=13)
-    flipped = cut_rois(img[None], cands, roisize=13, mirror=True)
-    assert np.allclose(flipped.images, plain.images[:, :, ::-1])
-    # a fit at ROI column 4 in the flipped stack is column 8 in the image
-    assert np.allclose(flipped.to_image_x([4.0]), plain.to_image_x([8.0]))
 
 
 def test_frames_are_indexed_absolutely():

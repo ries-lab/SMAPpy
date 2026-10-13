@@ -25,8 +25,10 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
-from . import (Context, Plot, Plugin, PreflightChoice, PreflightQuestion, Result,
-               param, register)
+from . import (Context, FormState, Plot, Plugin, PreflightChoice, PreflightQuestion,
+               Result, param, register)
+from .. import region_results
+from ..region_results import Evaluation
 
 MAX_FINDER_PIXELS = 16_000_000
 
@@ -34,12 +36,14 @@ MAX_FINDER_PIXELS = 16_000_000
 def replace_param(what: str = "ROIs"):
     """The *replace* setting every segmenter's settings end with.
 
-    A chain or a batch has no Preview, and running one again on a file it
-    has segmented before would otherwise find nothing: every candidate is
-    within the separation of an ROI the last run made.  So a segmenter's
-    settings carry this field, and `SegmenterPlugin.replaced` reads it.
+    Running a segmenter again on a file it has segmented before would
+    otherwise find nothing: every candidate is within the separation of an
+    ROI the last run made, which is how a second NPC run reported "0 pores".
+    So it is on by default -- the ROI undo brings the earlier ones back --
+    and off only to add a second pass to the first.  `SegmenterPlugin.replaced`
+    reads it.
     """
-    return param(False, label=f"replace earlier {what}",
+    return param(True, label=f"replace earlier {what}",
                  help="remove the ROIs this segmenter made on the file "
                       "before finding them again")
 
@@ -58,7 +62,7 @@ class DensityPeakSettings:
                                    help="localizations within this radius must reach "
                                         "the minimum count")
     min_count: int = param(10, label="minimum count", min=1,
-                           help="a peak with fewer localizations is not a site")
+                           help="a peak with fewer localizations is not made an ROI")
     replace: bool = replace_param()
 
 
@@ -163,8 +167,9 @@ class SegmenterPlugin(Plugin):
 
     def found(self, project, file_id, settings, commit: bool
               ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
-        """``(sites, data)``: each site ``{"center", "use"}``, and the result's
-        data -- the ROIs a run added, or the preview for the manager.
+        """``(sites, effect)``: each site ``{"center", "use"}``, and what the
+        result asks of the session, as `Result` keywords -- the ROIs a run
+        added (``rois``), or the preview for the manager (``roi_preview``).
 
         Previewing changes nothing in the project, not even the preview
         itself: this runs on a worker thread, and the session puts the
@@ -209,10 +214,10 @@ class DensityPeaks(SegmenterPlugin):
         file_id = current_file(project)
         if file_id is None:
             raise ValueError("no file to search: load localizations first")
-        sites, data = self.found(project, file_id, settings, commit)
+        sites, effect = self.found(project, file_id, settings, commit)
         text = f"{len(sites)} candidates " + ("found" if commit else "previewed")
         return Result(text=text, settings=settings,
-                      data={**data, "centers": [s["center"] for s in sites]})
+                      data={"centers": [s["center"] for s in sites]}, **effect)
 
 
 def current_file(project) -> Optional[str]:
@@ -227,7 +232,7 @@ def current_file(project) -> Optional[str]:
 
 def auto_only():
     """*results from* without a session: only *auto*.  The plugin's
-    `choices` puts the evaluations on the ROIs beside it."""
+    `describe` puts the evaluations on the ROIs beside it."""
     return [("", "auto")]
 
 
@@ -240,9 +245,9 @@ class HistogramSettings:
                         help="comma separated; empty means every numeric "
                              "column but the counts behind the means")
     evaluation: str = param("", label="results from", choices=auto_only,
-                            help="the evaluation whose columns are drawn, on "
+                            help="the measurement whose columns are drawn, on "
                                  "the ROIs or per region of an id column; "
-                                 "auto: every evaluation on the ROIs")
+                                 "auto: everything measured on the ROIs")
 
 
 def histograms(rows: Sequence[Dict[str, Any]], settings: HistogramSettings
@@ -270,9 +275,25 @@ def histograms(rows: Sequence[Dict[str, Any]], settings: HistogramSettings
     return out
 
 
+def grid_shape(n: int, columns: int = 4) -> Tuple[int, int]:
+    """``(rows, columns)`` for ``n`` panels: up to four across, so a dozen
+    measures read as three rows rather than a column a screen tall."""
+    across = max(1, min(columns, n, int(np.ceil(np.sqrt(n)))))
+    return int(np.ceil(n / across)), across
+
+
+def measure_title(field: str) -> str:
+    """``radius_nm`` -> ``radius (nm)``: the unit a column carries by name."""
+    units = {"nm": "nm", "deg": "\u00b0", "pix": "px", "s": "s"}
+    stem, _, last = field.rpartition("_")
+    if stem and last in units:
+        return f"{stem.replace('_', ' ')} ({units[last]})"
+    return field.replace("_", " ")
+
+
 # ---------------------------------------------------------------- analysis
 
-EVALUATION_HELP = ("the evaluation whose results are analysed; auto: the only "
+EVALUATION_HELP = ("the measurement whose results are analysed; auto: the only "
                    "one there is, or the chain's own -- asked when there are "
                    "several")
 
@@ -280,31 +301,33 @@ EVALUATION_HELP = ("the evaluation whose results are analysed; auto: the only "
 class AmbiguousEvaluation(ValueError):
     """More than one evaluation could be meant, and nothing says which."""
 
-    def __init__(self, evaluator: str, labels: Sequence[str]):
-        self.labels = list(labels)
-        name = evaluator.rsplit("/", 1)[-1] if evaluator else "evaluator"
-        super().__init__(f"the ROIs have {len(labels)} {name} evaluations "
-                         f"({', '.join(labels)}): name one in *results from*")
+    def __init__(self, evaluator: str, found: Sequence[Evaluation]):
+        self.evaluations = list(found)
+        name = evaluator.rsplit("/", 1)[-1] if evaluator else "the steps"
+        super().__init__(f"there are {len(found)} sets of results by {name} "
+                         f"({', '.join(map(str, found))}): name one in *results from*")
 
 
-def choose_evaluation(project, evaluator: str = "", chosen: str = "",
-                      made: Sequence = (), roi_ids=None) -> Optional[str]:
-    """The name of the evaluation an ROI analysis reads.
+def choose_evaluation(ctx: Context, evaluator: str = "", chosen: str = ""
+                      ) -> Optional[Evaluation]:
+    """The evaluation an analysis reads, on the ROIs or per region of an id
+    column (`region_results`).
 
-    ``chosen`` when the user named one; else, in a chain that has made an
-    evaluation by ``evaluator`` (``made``: its ``(name, path)`` so far), the
-    chain's own, newest; else the only one on the ROIs.  None when there is
-    none -- the analysis says what is missing.  Several, and nothing saying
-    which, is `AmbiguousEvaluation`: a guess between two settings of the same
-    evaluator would be a result nobody chose.  ``evaluator`` empty means any.
+    ``chosen`` when the user named one; else, in a chain that has made one
+    by ``evaluator`` (``ctx.evaluations``), the chain's own, newest; else the
+    only current one there is.  None when there is none -- the analysis says
+    what is missing.  Several, and nothing saying which, is
+    `AmbiguousEvaluation`: a guess between two settings of the same evaluator
+    would be a result nobody chose.  ``evaluator`` empty means any.
     """
-    found = project.labels(evaluator or None, roi_ids) if project is not None else []
-    own = [name for name, path in made if not evaluator or path == evaluator]
+    found = region_results.available(ctx, evaluator or None)
+    own = [Evaluation.parse(name) for name, path in ctx.evaluations
+           if not evaluator or path == evaluator]
     if chosen:
-        if chosen not in found and chosen not in own:
-            raise ValueError(f"no evaluation on the ROIs is called {chosen!r}"
-                             + (f"; there is {', '.join(found)}" if found else ""))
-        return chosen
+        ev = Evaluation.parse(chosen)
+        if ev not in found and ev not in own:
+            raise ValueError(region_results.missing(ctx, ev))
+        return ev
     if own:
         return own[-1]
     if len(found) == 1:
@@ -314,169 +337,155 @@ def choose_evaluation(project, evaluator: str = "", chosen: str = "",
     raise AmbiguousEvaluation(evaluator, found)
 
 
-# *results from* naming a table of an id column's regions (`Session.id_regions`)
-# rather than an evaluation on the ROIs: "per cluster_id: Localization Statistics"
-PER = "per "
-
-
-def id_table(ctx: Context, chosen: str):
-    """``(column, table)`` when *results from* names a table of an id
-    column's regions, else None."""
-    if not chosen or not chosen.startswith(PER) or ctx.session is None:
-        return None
-    column, _, label = chosen[len(PER):].partition(": ")
-    table = (ctx.session.id_regions.get(column) or {}).get(label)
-    return None if table is None else (column, table)
-
-
-def table_rows(table) -> List[Dict[str, Any]]:
-    """A region table as the rows an analysis reads: a region's id as
-    ``roi_id``, its values beside it, the regions where the step failed left
-    out."""
-    rows = []
-    for region_id in table.ids:
-        entry = table.entry(region_id)
-        if entry and "values" in entry:
-            rows.append({"roi_id": region_id, "file_id": "", **entry["values"]})
-    return rows
-
-
 class SiteAnalysisPlugin(Plugin):
-    """An ROI manager analysis: it summarises what evaluators measured.
+    """An analysis of regions: it summarises what evaluators measured.
 
     ``evaluator`` is the path of the evaluator whose results it reads (empty:
     any).  Its settings have a field ``evaluation`` (*results from*) naming
-    which evaluation, by its name: the same evaluator renamed and run with
-    other settings is a second evaluation, to compare, and the analysis must
-    know which one it is about.  Empty takes the only one, or the chain's
-    own; when that leaves several, `preflight` asks, once, with a button per
-    evaluation, and the answer is written into the field.
+    which evaluation -- on the ROIs, or per region of an id column, in the
+    string form of `region_results.Evaluation`: the same evaluator renamed
+    and run with other settings is a second evaluation, to compare, and the
+    analysis must know which one it is about.  Empty takes the only one, or
+    the chain's own; when that leaves several, `preflight` asks, once, with a
+    button per evaluation, and the answer is written into the field.
     """
     evaluator: str = ""
     changes_locs = False
 
-    def evaluation(self, ctx: Context, settings) -> Optional[str]:
-        """The evaluation this run reads, by name (`choose_evaluation`), or
-        the table of an id column's regions it names (`id_table`)."""
-        chosen = getattr(settings, "evaluation", "")
-        if id_table(ctx, chosen) is not None:
-            return chosen
-        return choose_evaluation(ctx.rois, self.evaluator,
-                                 getattr(settings, "evaluation", ""),
-                                 ctx.evaluations)
+    def evaluation(self, ctx: Context, settings) -> Optional[Evaluation]:
+        """The evaluation this run reads (`choose_evaluation`)."""
+        return choose_evaluation(ctx, self.evaluator, getattr(settings, "evaluation", ""))
 
-    def rows(self, ctx: Context, settings) -> Tuple[List[Dict[str, Any]], Optional[str]]:
-        """The site table of that evaluation, and its name.  A context that
-        brings its own table (`site_table`) is taken as it is."""
+    def rows(self, ctx: Context, settings
+             ) -> Tuple[List[Dict[str, Any]], Optional[Evaluation]]:
+        """The current rows of that evaluation (`region_results.rows`), and
+        the evaluation; every evaluation on the ROIs when it is None.  A
+        context that brings its own table (`site_table`) is taken as it is."""
         if ctx.site_table is not None:
-            return list(ctx.site_table), getattr(settings, "evaluation", "") or None
-        found = id_table(ctx, getattr(settings, "evaluation", ""))
-        if found is not None:
-            return table_rows(found[1]), settings.evaluation
-        if ctx.rois is None:
-            raise ValueError("evaluate some ROIs first: there is no site table")
-        label = self.evaluation(ctx, settings)
-        if label is None and self.evaluator:
-            return [], None
-        return ctx.rois.results(labels=None if label is None else [label]), label
+            chosen = getattr(settings, "evaluation", "")
+            return list(ctx.site_table), Evaluation.parse(chosen) if chosen else None
+        ev = self.evaluation(ctx, settings)
+        if ev is None:
+            if self.evaluator or ctx.rois is None:
+                return [], None
+            return ctx.rois.results(), None
+        found = region_results.rows(ctx, ev)
+        if not found and not region_results.is_current(ctx, ev):
+            raise ValueError(region_results.missing(ctx, ev))
+        return found, ev
 
     # what *auto* is called when it means every evaluation (Histograms)
     auto_label = ""
 
-    def choices(self, ctx: Context, settings):
+    def describe(self, ctx, settings) -> FormState:
         """*results from*: *auto*, saying what it resolves to, then every
-        evaluation by `evaluator` on the ROIs -- a chain's own included,
-        before it has run."""
+        current evaluation by `evaluator` -- a chain's own included, before
+        it has run -- on the ROIs, then per region of each id column."""
         from dataclasses import replace
-        project = ctx.rois
-        found = project.labels(self.evaluator or None) if project is not None else []
+        if ctx is None:
+            return FormState()
+        found = region_results.available(ctx, self.evaluator or None)
         for name, path in ctx.evaluations:
-            if (not self.evaluator or path == self.evaluator) and name not in found:
-                found.append(name)
+            ev = Evaluation.parse(name)
+            if (not self.evaluator or path == self.evaluator) and ev not in found:
+                found.append(ev)
         try:
             meant = self.evaluation(ctx, replace(settings, evaluation=""))
             auto = (f"auto ({meant})" if meant else
                     f"auto ({self.auto_label})" if self.auto_label else "auto")
         except AmbiguousEvaluation:
             auto = "auto (asks which)"
-        per = []
-        if ctx.session is not None:
-            for column, tables in sorted(ctx.session.id_regions.items()):
-                for label, table in tables.items():
-                    made = next((table.step(r) for r in table.ids), {})
-                    if not self.evaluator or made.get("plugin") == self.evaluator:
-                        per.append(f"{PER}{column}: {label}")
-        return {"evaluation": [("", auto)] + [(name, name) for name in sorted(found)]
-                + [(name, name) for name in per]}
+        names = sorted(str(ev) for ev in found if ev.on_rois) + \
+            [str(ev) for ev in found if not ev.on_rois]
+        return FormState(choices={"evaluation": [("", auto)]
+                                  + [(name, name) for name in names]})
 
     def preflight(self, ctx: Context, settings):
-        """Which evaluation, when that is not clear: a choice, not a yes."""
+        """Which evaluation, when that is not clear: a choice, not a yes.  An
+        evaluation that cannot be read is left to the run to say."""
         try:
             self.evaluation(ctx, settings)
         except AmbiguousEvaluation as unclear:
             from dataclasses import replace
-            project = ctx.rois
             choices = []
-            for label in unclear.labels:
-                made = project.evaluation_steps(label) if project is not None else []
+            for ev in unclear.evaluations:
+                made = region_results.steps(ctx, ev)
                 values = (made[0].get("parameters") if made else None) or {}
                 choices.append(PreflightChoice(
-                    label=label, settings=replace(settings, evaluation=label),
+                    label=str(ev), settings=replace(settings, evaluation=str(ev)),
                     help=", ".join(f"{k} {v}" for k, v in values.items())))
-            name = self.evaluator.rsplit("/", 1)[-1] or "evaluator"
+            name = self.evaluator.rsplit("/", 1)[-1] or "the steps"
             return PreflightQuestion(
-                text=f"The ROIs have {len(unclear.labels)} {name} evaluations. "
+                text=f"There are {len(unclear.evaluations)} sets of results by {name}. "
                      f"Which should {self.name or 'the analysis'} read?",
                 choices=choices, run_label="")
+        except ValueError:
+            return None
         return None
 
 
 @register("Analysis/Regions/Summarize/Histograms")
 class Histograms(SiteAnalysisPlugin):
-    """Distributions of the evaluation results, one histogram per column."""
+    """Distributions of what was measured per region, one histogram per column."""
 
     Settings = HistogramSettings
     changes_locs = False
     version = "1"
     auto_label = "all"
 
-    def evaluation(self, ctx: Context, settings) -> Optional[str]:
-        # every column of every evaluation unless one is named: a histogram
-        # of each is the overview, and nothing here can be ambiguous
+    def evaluation(self, ctx: Context, settings) -> Optional[Evaluation]:
+        # every column of every evaluation on the ROIs unless one is named: a
+        # histogram of each is the overview, and nothing here can be ambiguous
         if settings.evaluation:
-            return choose_evaluation(ctx.rois, "", settings.evaluation)
+            return choose_evaluation(ctx, "", settings.evaluation)
         return None
 
     def run(self, ctx: Context, settings: HistogramSettings) -> Result:
-        rows, _ = self.rows(ctx, settings)
+        rows, ev = self.rows(ctx, settings)
         if not rows:
-            raise ValueError("evaluate some ROIs first: there is no site table")
+            raise ValueError("nothing measured in the regions yet: run the "
+                             "per-region steps first")
         data = histograms(rows, settings)
-        if not data:
-            raise ValueError("no numeric columns to histogram")
+        # a measure no region has a value for is said, not drawn as an empty
+        # panel (NPC's labelling-efficiency columns before it has run, say)
+        empty = [field for field, d in data.items() if not len(d["values"])]
+        shown = {field: d for field, d in data.items() if len(d["values"])}
+        if not shown:
+            raise ValueError("no numeric columns with values to histogram"
+                             + (f" ({', '.join(empty)} have none)" if empty else ""))
+        what = "ROIs" if ev is None or ev.on_rois else "regions"
+        rows_n, across = grid_shape(len(shown))
 
-        def one(ax, field, d) -> None:
+        def one(ax, field, d, first_column) -> None:
             ax.bar(d["edges"][:-1], d["counts"], width=np.diff(d["edges"]),
                    align="edge", color="0.6", edgecolor="0.3")
-            ax.set_xlabel(field.replace("_", " "))
-            ax.set_ylabel("regions")
+            ax.set_title(measure_title(field), fontsize=9)
+            ax.tick_params(labelsize=7)
+            if first_column:
+                ax.set_ylabel(what, fontsize=8)
             if d["missing"]:
-                ax.set_title(f"{d['missing']} missing", fontsize=8, color="0.4")
+                ax.text(0.98, 0.95, f"{d['missing']} without a value",
+                        transform=ax.transAxes, ha="right", va="top",
+                        fontsize=7, color="0.4")
 
         def plot(figure) -> None:
-            """A grid, one histogram per column.
+            """A grid, up to four across, one histogram per measure.
 
-            As many panels as there are columns, which is why this declares
+            As many panels as there are measures, which is why this declares
             them and is handed the figure: a single axis is right for a plugin
-            with one thing to draw and this has as many as the site table has
+            with one thing to draw and this has as many as the table has
             columns.
             """
-            for axis, (field, d) in zip(figure.subplots(len(data), 1, squeeze=False)
-                                        .ravel(), data.items()):
-                one(axis, field, d)
+            axes = figure.subplots(rows_n, across, squeeze=False).ravel()
+            for i, (axis, (field, d)) in enumerate(zip(axes, shown.items())):
+                one(axis, field, d, i % across == 0)
+            for axis in axes[len(shown):]:
+                axis.set_visible(False)
 
-        what = "regions" if id_table(ctx, settings.evaluation) else "ROIs"
-        return Result(text=f"{len(rows)} {what}, {len(data)} columns",
-                      plot=Plot(draw=plot, panels=len(data),
-                                size=(5, max(2.2 * len(data), 2.2))),
+        text = f"{len(rows)} {what}, {len(shown)} measures"
+        if empty:
+            text += f"; no values for {', '.join(empty)}"
+        return Result(text=text,
+                      plot=Plot(draw=plot, panels=len(shown),
+                                size=(3.2 * across, 2.6 * rows_n)),
                       data={"histograms": data, "rows": rows}, settings=settings)

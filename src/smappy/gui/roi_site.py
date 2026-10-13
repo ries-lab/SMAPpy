@@ -40,7 +40,7 @@ class SiteWindow(QMainWindow):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowFlag(Qt.Window, True)
-        self.setWindowTitle("ROI evaluation")
+        self.setWindowTitle("ROI results")
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
         self.tabs.currentChanged.connect(self._on_tab)
@@ -107,8 +107,8 @@ class SiteWindow(QMainWindow):
         self._mark(label, ok=not failed)
 
     def title_for(self, subtitle: str) -> None:
-        self.setWindowTitle(f"ROI evaluation: {subtitle}" if subtitle
-                            else "ROI evaluation")
+        self.setWindowTitle(f"ROI results: {subtitle}" if subtitle
+                            else "ROI results")
 
     def _mark(self, label: str, ok: bool) -> None:
         """An evaluator that failed says so on its tab, not only inside it."""

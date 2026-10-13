@@ -53,7 +53,7 @@ def test_the_finishing_step_subtracts_the_drift_and_then_assigns_the_colours():
     # both runs are in the log, with the settings they used, and both figures
     # came back with the result
     assert [entry["what"] for entry in finished.history] == [
-        "Analysis/Drift/COMET", "Analysis/Dual-Color/AssignColors"]
+        "Analysis/Drift/COMET", "Analysis/Dual-colour/Assign colours"]
     assert finished.history[0]["settings"]["max_drift_nm"] == COMET_SETTINGS.max_drift_nm
     assert len(finished.notes) == 2
     assert any("Assign colours" in name for name in finished.plots)
@@ -154,7 +154,7 @@ def test_the_2c_fit_saves_the_table_with_its_colours_on_it(tmp_path):
         detection=DetectionSettings(cutoff_mode="absolute", cutoff=25.0),
         model=DualGaussianModelSettings(sigma=1.2),
         transform=ChannelTransformSettings(path=str(given)),
-        fit=FitSettings(roisize=13, output_unit="nm"),
+        fit=FitSettings(roisize=13),
         output=OutputSettings(path=str(out)))
 
     said = []
@@ -171,4 +171,4 @@ def test_the_2c_fit_saves_the_table_with_its_colours_on_it(tmp_path):
     # and the file says what was done to it
     history = saved.metadata["history"]
     assert [entry["what"] for entry in history] == \
-        ["Analysis/Dual-Color/AssignColors"]
+        ["Analysis/Dual-colour/Assign colours"]

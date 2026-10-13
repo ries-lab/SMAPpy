@@ -16,74 +16,20 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Type
 import numpy as np
 
 from ..locs import Localizations
+from ..params import _META, ParamInfo, param  # noqa: F401  (re-exported)
 from .discovery import Diagnostic, PluginRef, scan
 
-_META = "smappy"
-
-
-@dataclass
-class ParamInfo:
-    """How a settings field is presented.  Everything is optional."""
-    label: Optional[str] = None
-    unit: Optional[str] = None
-    help: Optional[str] = None
-    min: Optional[float] = None
-    max: Optional[float] = None
-    step: Optional[float] = None
-    choices: Optional[Sequence] = None   # values, or (value, label) pairs; may be a callable
-    advanced: bool = False      # hidden behind "more" unless the plugin lists it
-    hidden: bool = False        # scripting only
-    # "open_file", "save_file", "dir": a path with a browse button.
-    # "text": a line that is given the width of the form, for something
-    # written rather than dialled -- an expression, a list of names
-    kind: Optional[str] = None
-    file_filter: str = ""       # a Qt-style name filter for those, "TIFF (*.tif)"
-    # for a part: shown folded until it is opened.  A chain's steps are, so a
-    # chain of eight plugins reads as eight lines rather than eight forms
-    collapsed: bool = False
-    # a bool that turns on optional work which costs time per run -- a
-    # bootstrap, a fit beside the numbers -- and that a run over many regions
-    # starts without (`fast_values`; docs/regions.md, "Slow, optional parts")
-    slow: bool = False
-
-
-def fast_values(settings_cls: type, prefix: str = "") -> Dict[str, Any]:
-    """The dotted names of the `slow` switches of a settings class, off:
-    what a plugin is set to when it is added to run once per region."""
-    def walk(specs, prefix):
-        for name, spec in specs.items():
-            if spec.children:
-                walk(spec.children, f"{prefix}{name}.")
-            elif spec.info.slow:
-                out[prefix + name] = False
-    out: Dict[str, Any] = {}
-    walk(param_specs(settings_cls), prefix)
-    return out
-
-
-def param(default: Any = MISSING, *, default_factory: Any = MISSING, **info):
-    """A dataclass ``field`` carrying :class:`ParamInfo` for the GUI."""
-    metadata = {_META: ParamInfo(**info)}
-    if default_factory is not MISSING:
-        return field(default_factory=default_factory, metadata=metadata)
-    return field(default=default, metadata=metadata)
-
-
-_TEXT_TYPES = {"int": int, "float": float, "str": str, "bool": bool}
-
-
-def _hint_from_text(annotation):
-    """A best effort at a type from a string annotation."""
-    if not isinstance(annotation, str):
-        return annotation
-    text = annotation.replace(" ", "")
-    optional = False
-    if text.endswith("|None"):
-        text, optional = text[:-len("|None")], True
-    elif text.startswith("Optional[") and text.endswith("]"):
-        text, optional = text[len("Optional["):-1], True
-    base = _TEXT_TYPES.get(text, Any)
-    return typing.Optional[base] if optional and base is not Any else base
+def settings_hints(settings_cls: type) -> Dict[str, Any]:
+    """`typing.get_type_hints`, with the one failure a plugin author meets
+    explained: under ``from __future__ import annotations``, Python 3.9
+    cannot evaluate ``X | None``, and a form built from guesses at the text
+    would be wrong in ways nobody sees."""
+    try:
+        return typing.get_type_hints(settings_cls)
+    except TypeError as exc:
+        raise TypeError(f"{settings_cls.__name__}: its annotations cannot be "
+                        f"evaluated ({exc}); on Python 3.9 write Optional[X] "
+                        "rather than X | None") from exc
 
 
 def _unwrap_optional(tp) -> Tuple[Any, bool]:
@@ -107,27 +53,21 @@ class ParamSpec:
     children: Optional[Dict[str, "ParamSpec"]] = None
 
 
-def param_specs(settings_cls: type, extra: Optional[Dict[str, ParamInfo]] = None
-                ) -> Dict[str, ParamSpec]:
+def param_specs(settings_cls: type) -> Dict[str, ParamSpec]:
     """Every field of a settings dataclass with its presentation.
 
     A plugin need not have settings at all, so ``None`` and anything that is
     not a dataclass come back empty rather than raising.
 
-    ``extra`` supplies infos for fields that were not declared with `param`,
-    so a plain dataclass such as `DriftSettings` needs no changes.  A field
+    How a field is shown is declared on the field, with `param` -- the one
+    way, so a settings class shown by two plugins (`DriftSettings` in COMET
+    and in a fitter's *after the fit*) is shown the same in both.  A field
     that is itself a dataclass is a part; its own fields come back under
-    ``children``, and ``extra`` reaches them with dotted keys, ``"fit.roisize"``.
+    ``children``.
     """
     if settings_cls is None or not dataclasses.is_dataclass(settings_cls):
         return {}
-    try:
-        hints = typing.get_type_hints(settings_cls)
-    except TypeError:
-        # a `X | None` annotation under `from __future__ import annotations`
-        # cannot be evaluated before Python 3.10; read what we can from text
-        hints = {f.name: _hint_from_text(f.type) for f in fields(settings_cls)}
-    extra = extra or {}
+    hints = settings_hints(settings_cls)
     specs = {}
     for f in fields(settings_cls):
         if not f.init:
@@ -136,12 +76,10 @@ def param_specs(settings_cls: type, extra: Optional[Dict[str, ParamInfo]] = None
         default = (f.default if f.default is not MISSING
                    else f.default_factory() if f.default_factory is not MISSING
                    else None)
-        info = extra.get(f.name) or f.metadata.get(_META) or ParamInfo()
+        info = f.metadata.get(_META) or ParamInfo()
         spec = ParamSpec(f.name, tp, optional, default, info)
         if dataclasses.is_dataclass(tp) and isinstance(tp, type):
-            prefix = f.name + "."
-            below = {k[len(prefix):]: v for k, v in extra.items() if k.startswith(prefix)}
-            spec.children = param_specs(tp, below)
+            spec.children = param_specs(tp)
             if default is not None:        # the parent's default instance wins
                 for child in spec.children.values():
                     child.default = getattr(default, child.name)
@@ -189,11 +127,11 @@ def _from_specs(settings_cls: type, specs: Dict[str, "ParamSpec"],
                 values: Optional[Dict[str, Any]]):
     """`settings_from` over specs whose defaults are already resolved.
 
-    A part's defaults are its *parent's* -- `GaussianFitSettings` declares
-    ``fit = FitSettings(output_unit="nm")`` -- and `param_specs` carries them
-    down; building a part from its own class instead quietly reset them, so
-    the form and a script made different settings from the same values (a
-    fit from `settings_from` came out in pixels).
+    A part's defaults are its *parent's* -- a settings class may declare
+    ``part: PartSettings = field(default_factory=lambda: PartSettings(n=3))``
+    -- and `param_specs` carries them down; building a part from its own
+    class instead quietly reset them, so the form and a script made
+    different settings from the same values.
     """
     nested: Dict[str, Dict[str, Any]] = {}
     flat: Dict[str, Any] = {}
@@ -254,16 +192,20 @@ class Selection:
     def apply(self, locs: Localizations) -> Localizations:
         return locs[self.mask]
 
-    def require(self, minimum: int, progress=None, what: str = "this") -> None:
-        """Refuse an empty selection; warn about a thin one through ``progress``."""
+    def require(self, minimum: int, warn=None, what: str = "this") -> None:
+        """Refuse an empty selection; warn about a thin one through ``warn``.
+
+        Pass `Context.warn`, not `Context.report`: a progress line is
+        overwritten by the next one, and this one was, before anyone read it.
+        """
         n = len(self)
         where = f" in the {self.roi}" if self.roi is not None else ""
         if n == 0:
             raise ValueError(f"no localizations selected{where}: loosen the filter"
                              + (" or clear the ROI" if self.roi is not None else ""))
-        if n < minimum and progress:
-            progress(f"warning: only {n} localizations{where}; {what} wants "
-                     f"at least ~{minimum}")
+        if n < minimum and warn:
+            warn(f"only {n} localizations{where}; {what} wants "
+                 f"at least ~{minimum}")
 
     def __str__(self) -> str:
         return f"{len(self)} localizations ({self.name or 'selection'})"
@@ -283,6 +225,14 @@ class Context:
     session is given, `locs` and `selection` are read from it *once, now*: the
     GUI builds the context on its own thread and hands it to a worker, so
     reading them later would race with a live fit rebinding the table.
+
+    `locs` and `selection` are the table the layer *shows* -- grouped or not
+    -- unless `grouping` says which (the plugin's requirement, `Plugin.grouping`,
+    or a chain's choice): a measurement measures what is on screen.  A plugin
+    that hands back a new table declares ``grouping = "ungrouped"``, since
+    there is no way from one row per blink back to the localizations; one
+    that measures blinks and writes onto the localizations reads both, the
+    second through `ungrouped` (DBSCAN).
     """
 
     def __init__(self, session=None, locs: Optional[Localizations] = None,
@@ -323,14 +273,17 @@ class Context:
         self.region_id = region_id
         self.site_table = site_table        # the rows evaluation produced
         # (name, evaluator path) of the evaluations a chain has made before
-        # this step, oldest first: an ROI analysis in a chain reads its own
-        # chain's results unless told otherwise (`roi.choose_evaluation`)
+        # this step, oldest first, each name as *results from* spells it
+        # (`region_results.Evaluation`): an analysis of regions in a chain
+        # reads its own chain's results unless told otherwise
+        # (`roi.choose_evaluation`)
         self.evaluations = list(evaluations)
         self._rois = rois                   # a project without a session
         # Two `threading.Event`s for a run that lasts as long as an
         # acquisition, set from another thread; None when nobody can.
         # `stop` asks it to end early and keep what it has -- a fit then
-        # closes its file and returns the table so far.  `writer_finished`
+        # closes its file and returns the table so far; the panel's Stop
+        # button sets it (`stopped`, `Stopped`).  `writer_finished`
         # says a live source is complete, which ends the watch on it after
         # one more read instead of after an idle timeout (`smappy.io.watch`).
         self.stop = stop
@@ -338,13 +291,47 @@ class Context:
         self._progress = progress
         self._stream = stream
         self.warnings: List[str] = []       # what `warn` was told, in order
+        given = locs is not None
         if locs is None:
             locs = session.locs if session is not None else Localizations({}, {})
-        self.locs = locs
         if selection is None:
             selection = (session.selection(layer) if session is not None
                          else Selection.all(len(locs)))
-        self.selection = selection
+        # the ungrouped table and its selection, whatever `locs` is
+        self._ungrouped = (locs, selection)
+        self.locs, self.selection = locs, selection
+        if grouping != "ungrouped" and (pinned is not None
+                                        or (session is not None and not given)):
+            self.locs, self.selection = self._shown()
+
+    def _shown(self) -> Tuple[Localizations, "Selection"]:
+        """The table this run works on, by the rule of `table`, for `locs`.
+
+        Where the layer's own choice is grouped but no grouped table can be
+        had -- one cut to a region while the fit is still adding to it, or
+        a cluster of a table linked before the cluster column was -- the
+        ungrouped table is the answer rather than a refusal: every
+        measurement would otherwise fail in such a region.  Asked for
+        explicitly (a chain step set to grouped), `table` refuses.
+        """
+        try:
+            return self.table()
+        except ValueError:
+            if self.grouping == "grouped":
+                raise
+            self.served_grouped = False
+            return self._ungrouped
+
+    def ungrouped(self) -> Tuple[Localizations, "Selection"]:
+        """The ungrouped table and the layer's selection over it.
+
+        `locs` when the plugin asks for it (``grouping = "ungrouped"``).  For
+        a plugin that follows the layer and still writes onto the
+        localizations: it measures `locs` -- blinks, on a grouped layer --
+        and hands back a new table made from this one (DBSCAN maps each
+        blink's cluster onto its localizations through `group_id`).
+        """
+        return self._ungrouped
 
     @property
     def per_region(self) -> bool:
@@ -352,6 +339,18 @@ class Context:
         cluster -- rather than a run on the view.  A plugin may then make an
         empty region an answer, or leave out what only the whole field has."""
         return self.region_id is not None
+
+    @property
+    def stopped(self) -> bool:
+        """Whether the run has been asked to stop (`stop`).
+
+        A plugin checks it between steps of its own -- time windows,
+        regions, blocks of frames -- and then either returns what it has,
+        with ``Result(stopped=True)`` so the panel says "stopped", or
+        raises `Stopped` when a part of the work is worth nothing (half a
+        drift estimate).  One that never checks simply runs to the end.
+        """
+        return self.stop is not None and self.stop.is_set()
 
     @property
     def rois(self):
@@ -372,8 +371,8 @@ class Context:
         own grouping, the chain's, the chain step's, and the plugin's
         requirement (`Plugin.grouping`); `grouping` here is the outcome of all
         but the first, None leaving it to the layer.  This is SMAP's
-        ``getloc(..., 'grouping', ...)``.  `locs` and `selection` stay the
-        ungrouped table, so a plugin that never asks behaves as it always did.
+        ``getloc(..., 'grouping', ...)``.  For the context's own layer it is
+        `locs` and `selection`; this is how a plugin reads another layer.
 
         Without a session there is no grouped table to hand out, and linking
         one here with settings nobody chose would be a guess; that is refused
@@ -384,11 +383,13 @@ class Context:
             return self._pinned_table(index)
         if self.session is None:
             if self.grouping == "grouped":
-                raise ValueError("a grouped table needs a session: link the "
+                raise ValueError("merged blinks need a session: merge the "
                                  "localizations first (group.group), or run "
-                                 "this ungrouped")
+                                 "this on the localizations")
             return self.locs, self.selection
-        locs, selection = self.session.table(index, self.grouping)
+        locs, selection = self.session.table(
+            index, self.grouping,
+            progress=lambda text, _f: self.report(f"merging blinks: {text}"))
         if locs is not self.session.locs:
             self.served_grouped = True
         return locs, selection
@@ -410,18 +411,18 @@ class Context:
             return tables["ungrouped"]
         if "grouped" not in tables:
             if self.region is not None:
-                raise ValueError(f"layer {index + 1} has no grouped table to cut "
-                                 "to the region: show it grouped first, or run "
-                                 "this ungrouped")
-            raise ValueError("no grouped table while the fit is still adding "
-                             "localizations: show the layer grouped first, or "
-                             "run this ungrouped")
+                raise ValueError(f"layer {index + 1} has no merged blinks to cut "
+                                 "to the region: tick merge blinks first, or run "
+                                 "this on the localizations")
+            raise ValueError("no merged blinks while the fit is still adding "
+                             "localizations: tick merge blinks on the layer "
+                             "first, or run this on the localizations")
         self.served_grouped = True
         return tables["grouped"]
 
     def layer_selection(self, layer: int,
                         without: Tuple[str, ...] = ()) -> "Selection":
-        """Layer ``layer``'s selection over `locs` (the ungrouped table).
+        """Layer ``layer``'s selection over the ungrouped table (`ungrouped`).
 
         `Session.selection`, except that it agrees with `locs` while a fit is
         still appending: a plugin that reads several layers -- one answer per
@@ -520,6 +521,58 @@ def _as_plot(plot, name: str = "") -> Plot:
     return Plot(draw=plot, name=name)
 
 
+# Where the plugins that make a table of their own sit -- from a file, from
+# images or from nothing: they never read the one there is.
+SOURCES = ("Localize/", "File/Load/", "File/Simulate/")
+
+
+def reads_locs(plugin) -> bool:
+    """Whether a run reads the session's localizations -- and so, in the
+    GUI, waits for a merge of its blinks that is still running
+    (`gui.merging`).  Everything does but what makes its own table: a fit, a
+    loader, a simulation (`SOURCES`), and a chain that starts with one."""
+    cls = plugin if isinstance(plugin, type) else type(plugin)
+    path = getattr(cls, "path", "") or ""
+    if path.startswith(SOURCES):
+        return False
+    spec = getattr(cls, "spec", None)
+    steps = getattr(spec, "steps", None)
+    if steps:
+        first = getattr(steps[0], "plugin", "") or ""
+        return not first.startswith(SOURCES)
+    return True
+
+
+def refuse_grouped_table(ctx: "Context", result: "Result", plugin: "Plugin",
+                         name: str = "") -> None:
+    """Refuse a new table made from the grouped one.
+
+    A plugin that follows the layer reads blinks on a grouped layer, and a
+    table it hands back made from them would replace the localizations with
+    one row per blink -- the data gone, with an undo step as the only way
+    back.  A plugin that changes the table declares ``grouping =
+    "ungrouped"``; one written before plugins followed the layer is told so
+    here rather than allowed to do that.  A fit or a loader makes its own
+    table and is not asked.
+    """
+    if (result is None or result.locs is None or not ctx.served_grouped
+            or str(getattr(plugin, "path", "")).startswith(SOURCES)):
+        return
+    name = name or getattr(plugin, "name", "") or type(plugin).__name__
+    raise ValueError(
+        f"{name} ran on merged blinks and handed back a new table: "
+        "there is no way from one row per blink back to the localizations, "
+        "so run it with blinks not merged (a plugin that changes the table declares "
+        "grouping = \"ungrouped\")")
+
+
+class Stopped(Exception):
+    """A run that was asked to stop (`Context.stop`) and has nothing worth
+    keeping: the session is left as it was, and the panel says "stopped"
+    rather than "failed".  A run that has something -- the frames fitted, the
+    regions measured -- returns it instead, with ``Result(stopped=True)``."""
+
+
 @dataclass
 class PreflightChoice:
     """One way out of a preflight question, and what taking it runs.
@@ -532,6 +585,11 @@ class PreflightChoice:
     label: str
     settings: Any = None
     help: str = ""
+    # a window of the GUI's (`Session.window_openers`) that this choice opens
+    # *instead of* running, with ``settings`` (None: the form's): the way to
+    # put right what the question is about -- a camera to add to the
+    # database -- rather than a way to run.  Never the dialog's default.
+    window: Optional[str] = None
 
 
 @dataclass
@@ -561,15 +619,95 @@ class Notice:
     with the form's settings, as `Plugin.window` does -- so the plugin says
     what is wrong and where it is put right without importing Qt.  A GUI with
     no such window shows the line and no button.
+
+    ``kind`` is how loudly: "warning" (orange, bold) for something that will
+    go wrong or be guessed if left as it is -- a camera the database does not
+    know -- and "info" (grey) for something worth knowing that is not a
+    fault, such as what a save leaves out by choice.  Drawing every line as
+    a warning taught people to stop reading them.
     """
     text: str
     action: str = ""                 # the button's text
     window: Optional[str] = None
+    # what the window is opened with; None: the form's settings.  A chain's
+    # step says its own here, since the window wants a fitter's settings and
+    # the form holds the chain's.
+    settings: Any = None
+    kind: str = "warning"            # or "info"
+
+
+@dataclass
+class FormState:
+    """What the form shows about the settings as they stand, beyond their
+    values: one answer to one question (`Plugin.describe`), asked after every
+    edit and whenever the session changes what a list offers.
+
+    Every part is presentation: nothing here is written into the settings,
+    and a script may ignore all of it.  Keys are dotted field names, as in
+    `Plugin.react`.
+
+    * ``hints`` -- what fields left on *auto* currently resolve to, shown
+      greyed in them, so "auto" says what it will do.
+    * ``active`` -- which fields the settings actually read; the rest are
+      greyed out (a greyed field keeps its value), so that a number which
+      does nothing does not look like one which does.
+    * ``choices`` -- ``[(value, label), ...]`` for fields whose list depends
+      on the session: the evaluations on the ROIs, the cameras in the
+      database.  The field declares a callable ``choices`` for a form with no
+      session; a value the list does not have is kept and shown as
+      unavailable, never swapped for the first entry.
+    * ``notice`` -- a line under the form, with a button that does something
+      about it (`Notice`).
+    * ``titles`` -- a part's title, in place of its label: a summary of what
+      it holds, for a part that starts folded.
+    """
+    hints: Dict[str, Any] = field(default_factory=dict)
+    active: Dict[str, bool] = field(default_factory=dict)
+    choices: Dict[str, Sequence] = field(default_factory=dict)
+    notice: Optional[Notice] = None
+    # a part's title by its dotted name, in place of its label: what the part
+    # holds, said while it is folded ("camera: auto - iXon 888, ...")
+    titles: Dict[str, str] = field(default_factory=dict)
+
+    def under(self, key: str, title: str = "", settings: Any = None) -> "FormState":
+        """This state as part ``key`` of a larger form -- a chain's step: the
+        fields prefixed, and the notice saying whose it is and opening its
+        window with the step's own ``settings``."""
+        notice = self.notice
+        if notice is not None:
+            notice = replace(
+                notice, text=f"{title}: {notice.text}" if title else notice.text,
+                settings=notice.settings if notice.settings is not None else settings)
+        return FormState(
+            hints={f"{key}.{k}": v for k, v in self.hints.items()},
+            active={f"{key}.{k}": v for k, v in self.active.items()},
+            choices={f"{key}.{k}": v for k, v in self.choices.items()},
+            notice=notice,
+            titles={f"{key}.{k}": v for k, v in self.titles.items()})
+
+    def update(self, other: "FormState") -> None:
+        """Add ``other``'s parts; the first notice stays, as the panel has
+        room for one line."""
+        self.hints.update(other.hints)
+        self.active.update(other.active)
+        self.choices.update(other.choices)
+        if self.notice is None:
+            self.notice = other.notice
 
 
 @dataclass
 class Result:
-    """What a plugin hands back.  Every part is optional."""
+    """What a plugin hands back.  Every part is optional.
+
+    Two kinds of part.  What the run found -- its text, its figures, its
+    numbers (`data`, `values`, `arrays`) -- is looked at and kept.  What it
+    asks the session to do beyond replacing the table -- open files, set
+    filter bounds, add ROIs, keep camera frames -- is a typed field each,
+    below the line, which `Session.apply` (or a chain, a block, the batch)
+    reads.  They were string keys of `data` once, and a key misspelt or
+    renamed on one side did nothing at all; a misspelt keyword now raises a
+    `TypeError` where the result is made.
+    """
     locs: Optional[Localizations] = None    # replaces the session's table
     # loaded files, as (locs, info, grouped): a loader runs in a worker thread
     # and must not touch the session, so it hands them back and `Session.apply`
@@ -582,7 +720,9 @@ class Result:
     # show, and two views of the same decision belong in two tabs rather
     # than in one crowded axis
     plots: Dict[str, Any] = field(default_factory=dict)
-    data: Dict[str, Any] = field(default_factory=dict)  # anything else
+    # the plugin's own numbers and payload, for a script or a test: nothing
+    # reads a key of it to decide what to do
+    data: Dict[str, Any] = field(default_factory=dict)
     # What a run in one region stores as that region's results
     # (`docs/regions.md`): `values` the numbers, a column each of the region
     # table; `arrays` named arrays -- a fixed-size one (eight corner counts)
@@ -598,6 +738,56 @@ class Result:
     # name: "NeNA, CRLB, FRC of layer 1, 30000 localizations"
     title: str = ""
 
+    # ---------------------------------------------- what the session is asked
+    # The `files` join the session's rather than replacing them (a loader's
+    # *append*); the second and later files always join.
+    append: bool = False
+    # The file this run wrote -- a saved table, an exported picture, a
+    # simulation's recipe, a fit's output.  A table made from nothing is
+    # named after it, a chain passes it on, and the batch records it.
+    written: Optional[str] = None
+    # The table handed back is the one in `written`, so the session is not
+    # "unsaved" after it: a fit that wrote its own output.
+    saved: bool = False
+    # Camera frames a fit kept (`smappy.rawframes`): they replace the
+    # session's raw frames, as the fit's table replaces its table.
+    images: Sequence = ()
+    # Filter bounds ``{column: (lo, hi)}`` set on every localization layer:
+    # for a column the plugin wrote to be filtered on.  It cannot set them
+    # itself, since a filter belongs to the table, and the table is the one
+    # `apply` has just put in place.
+    bounds: Dict[str, Tuple[float, float]] = field(default_factory=dict)
+    # Layer set-ups, bounds and grouping per layer
+    # (`Session.set_layer_configs`): the Render tab's work done by a plugin
+    # (`Chain/Layers`).
+    layers: Optional[List[Dict[str, Any]]] = None
+    # The ROIs this run added to the ROI manager's project (a segmenter, or
+    # *Column to ROIs*), an empty list when it found none; None for a run
+    # that adds no ROIs.  The manager redraws, and a preview is dropped.
+    rois: Optional[List[Any]] = None
+    # A segmenter's preview: the ROIs it would add, shown grey in the
+    # manager and not added (`Session.show_preview`).
+    roi_preview: Optional[Dict[str, Any]] = None
+    # The whole ROI project as a chain left it (`ROIProject.to_dict`): the
+    # ROIs its segmenters found and the runs its evaluators made, put into
+    # the project the session has.
+    roi_project: Optional[Dict[str, Any]] = None
+    # What was measured per region of an id column, ``{column: {name:
+    # table}}``, added to `Session.id_regions`.
+    id_regions: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    # A block's tables per region, which a block around it keeps as the
+    # children of its own region (`region_runs.RegionScratch`).
+    region_tables: Dict[str, Any] = field(default_factory=dict)
+    # ``(name, plugin path)`` of the evaluations this run left on the
+    # regions, so that a later step of a chain reads them without asking.
+    evaluations: Sequence[Tuple[str, str]] = ()
+    # The table change as a recipe (`ColumnRecipe`), which can follow a table
+    # a fit is still appending to; `locs` is then the recipe applied.
+    recipe: Optional["ColumnRecipe"] = None
+    # The run was asked to stop (`Context.stop`) and this is what it had:
+    # the panel says "stopped" rather than "done".
+    stopped: bool = False
+
     def figures(self) -> List[Plot]:
         """Everything there is to draw, as `Plot`s, the main one first."""
         found = [_as_plot(self.plot)] if self.plot is not None else []
@@ -605,7 +795,7 @@ class Result:
                         if draw is not None]
 
 
-class LiveRecipe:
+class ColumnRecipe:
     """A table change that can follow a fit while it is still appending.
 
     A table change cannot go into a table a fit is still adding to
@@ -613,8 +803,8 @@ class LiveRecipe:
     other columns, which the session can work out for the table so far and
     then for every block as it arrives, and once more for the finished
     table.  A plugin that can be one puts it in its result as
-    ``data["live_recipe"]``, and says so before the run in
-    `Plugin.live_recipe_for`.  The Math Parser's expression is one, and the
+    ``Result.recipe``, and says so before the run in
+    `Plugin.column_recipe_for`.  The Math Parser's expression is one, and the
     colour assignment, with the modes it found, is another.
 
     `columns` must work on any table with the columns it reads -- a block of
@@ -654,11 +844,6 @@ class Plugin:
     # which is why it is declared rather than found out.
     per_region: bool = False
     Settings: type = None
-    # presentation for fields that were not declared with `param`
-    params: Dict[str, ParamInfo] = {}
-    # fields shown by default; everything else goes under "more".  None: all
-    # fields not marked advanced.
-    main: Optional[Sequence[str]] = None
     # what the Preview button's tooltip says, when the generic sentence is
     # not enough; empty means the generic one
     preview_help: str = ""
@@ -696,10 +881,12 @@ class Plugin:
     # a fit; False for a measurement, an ROI tool or an export.  Known before
     # the run, which is what lets the GUI ask first rather than after minutes
     # of work -- while a fit is still appending, a table change cannot go
-    # into the session (`Session.apply`).  None, for a plugin that does not
-    # say, is asked about once it has run.  Where it depends on the settings,
-    # override `changes_locs_for` too.
-    changes_locs: Optional[bool] = None
+    # into the session (`Session.apply`).  Required: a class that does not
+    # say is refused when it is defined (`__init_subclass__`).  There used to
+    # be a third answer, "not said, ask after the run", and it was a dialog
+    # offering to redo minutes of work in another window.  Where the answer
+    # depends on the settings, override `changes_locs_for` too.
+    changes_locs: bool
     # A window of the GUI's that this plugin opens instead of running: the
     # panel's button becomes *Open* and hands the settings to whatever the
     # GUI registered under this name (`Session.window_openers`).  For a tool
@@ -707,6 +894,22 @@ class Plugin:
     # its bead table -- and which a form and a Run button cannot be; the
     # plugin is what lets it sit in a tab, and it imports no Qt to do so.
     window: Optional[str] = None
+
+    def __init_subclass__(cls, **kwargs):
+        # At definition, not at the first run: a dropped-in plugin that does
+        # not say then fails to load with the reason, in the list of problems,
+        # rather than surprising someone during a fit.  Inherited counts -- the
+        # loaders share theirs with their base.
+        super().__init_subclass__(**kwargs)
+        if not isinstance(getattr(cls, "changes_locs", None), bool):
+            raise TypeError(
+                f"{cls.__qualname__} must say whether it changes the table: "
+                "set changes_locs = True (it hands back a new table or files) "
+                "or False (it measures, draws or writes elsewhere)")
+        # the old name of `follow_roi`: a plugin that still says it would
+        # lose its tick without a word
+        if "live" in cls.__dict__:
+            raise TypeError(f"{cls.__qualname__}: `live` is `follow_roi` now")
 
     def run(self, ctx: Context, settings) -> Result:
         """Do the work.
@@ -723,12 +926,13 @@ class Plugin:
     # is of the whole selection rather than of one frame -- see
     # `preview_wants_frame` -- and the GUI then asks for no frame number
     # Cheap enough to redo while the ROI is dragged.  A plugin that says so
-    # gets a *live* tick in the GUI, which measures again between drag events
-    # -- its `preview` if it has one, otherwise `run`, looked at and never
-    # applied -- what makes a measurement something one aims with rather than
-    # something one asks for and reads afterwards.  Only claim it for work
-    # measured in tens of milliseconds on a normal selection.
-    live: bool = False
+    # gets a *follow ROI* tick in the GUI, which measures again between drag
+    # events -- its `preview` if it has one, otherwise `run`, looked at and
+    # never applied -- what makes a measurement something one aims with
+    # rather than something one asks for and reads afterwards.  Only claim it
+    # for work measured in tens of milliseconds on a normal selection.  (It
+    # was `live` once; "live" now means only a fit still appending.)
+    follow_roi: bool = False
 
     def preview(self, ctx: Context, settings, frame: int = 0) -> Result:
         """One frame, drawn rather than saved: is this set up right?
@@ -758,12 +962,12 @@ class Plugin:
         except (TypeError, ValueError):
             return True
 
-    def changes_locs_for(self, settings) -> Optional[bool]:
+    def changes_locs_for(self, settings) -> bool:
         """Whether a run with ``settings`` changes the table; see `changes_locs`."""
         return self.changes_locs
 
-    def live_recipe_for(self, settings) -> bool:
-        """Whether a run with ``settings`` hands back a `LiveRecipe`, and so
+    def column_recipe_for(self, settings) -> bool:
+        """Whether a run with ``settings`` hands back a `ColumnRecipe`, and so
         can change a table a fit is still appending to.  False by default."""
         return False
 
@@ -785,7 +989,7 @@ class Plugin:
 
         A tool's figure outlives the run that made it: a drift correction
         subtracts a curve and the corrected table no longer says what the
-        curve was, so reopening the file next week and pressing *Plot* should
+        curve was, so reopening the file next week and pressing *Show result* should
         still draw it.  Return plain, JSON-able data -- the curve, the few
         numbers behind the figure -- and never the table, which is in the file
         already.  None (the default) keeps nothing, and the plot is then
@@ -802,59 +1006,20 @@ class Plugin:
         """
         return None
 
-    def hints(self, settings) -> Optional[Dict[str, Any]]:
-        """What the settings' *automatic* fields currently resolve to.
+    def describe(self, ctx: Optional["Context"], settings) -> FormState:
+        """What the form should show about ``settings`` beyond their values:
+        hints for the fields on *auto*, which fields are read, the lists that
+        depend on the session, and a notice (`FormState`).
 
-        Keyed by dotted name, like `react`, but these are never written into
-        the settings: the GUI shows them greyed in the fields that are set to
-        auto, so "auto" says what it will do rather than only that it will do
-        something.  Return None when nothing can be resolved yet.
+        Asked after every edit and when the session changes, so it has to be
+        cheap: a fitter says here that the file's camera is not in the
+        database, while the file is being chosen rather than when the run
+        fails for want of a conversion.  ``ctx`` is the session's context, or
+        None when there is no session -- a part that needs one is then left
+        out.  One hook rather than one per part, so that a chain forwards its
+        steps' with one call and none is forgotten.
         """
-        return None
-
-    def choices(self, ctx: "Context", settings) -> Optional[Dict[str, Sequence]]:
-        """The choices of fields whose list depends on the session.
-
-        Keyed by dotted name, ``[(value, label), ...]``: the evaluations on
-        the ROIs, say, for an ROI analysis's *results from*.  The field
-        declares a callable ``choices`` (what a form without a session
-        offers) and the GUI replaces its list with this one when the panel is
-        built, after a run, and when the ROIs or their results change.  A
-        value the list does not have is kept and shown as unavailable, never
-        swapped for the first entry.  Return None when nothing depends on
-        the session.
-        """
-        return None
-
-    def active(self, settings) -> Optional[Dict[str, bool]]:
-        """Which fields the current settings actually read, by dotted name.
-
-        A plugin with alternative methods has parameters that belong to one of
-        them; the GUI greys out the rest, so that a number which does nothing
-        does not look like a number which does.  Nothing is changed by this --
-        a greyed field keeps its value and still comes back from the form -- so
-        it is presentation, and a script may ignore it.  Return None when every
-        field is always live.
-        """
-        return None
-
-    def notice(self, settings) -> Optional[Notice]:
-        """What the panel should say about these settings before a run.
-
-        Asked after every edit, like `hints`, and as cheap: a fitter says
-        here that the file's camera is not in the database, while the file is
-        being chosen rather than when the run fails for want of a
-        conversion.  None says nothing.
-        """
-        return None
-
-    def notice_for(self, ctx: "Context", settings) -> Optional[Notice]:
-        """`notice`, with the session in reach: what a plugin overrides when
-        what it has to say depends on the session rather than the settings
-        alone -- the results a save would leave out.  The panel asks this;
-        by default it is `notice`, so a plugin that needs no session keeps
-        the simpler signature."""
-        return self.notice(settings)
+        return FormState()
 
     def react(self, changed: str, settings) -> Optional[Dict[str, Any]]:
         """A parameter was edited: ``changed`` is its dotted name.
@@ -886,11 +1051,7 @@ class Plugin:
     def specs(cls) -> Dict[str, ParamSpec]:
         if cls.Settings is None:
             return {}
-        specs = param_specs(cls.Settings, cls.params)
-        if cls.main is not None:
-            for name, spec in specs.items():
-                spec.info.advanced = name not in cls.main
-        return specs
+        return param_specs(cls.Settings)
 
 
 # ------------------------------------------------------------------ registry

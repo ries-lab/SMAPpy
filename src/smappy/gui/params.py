@@ -30,12 +30,14 @@ class _Field(QWidget):
     """
 
     changed = Signal()
+    # an optional bool: "auto" goes in front, as for any optional choice
+    ON_OFF = ((True, "on"), (False, "off"))
 
     def __init__(self, spec: ParamSpec):
         super().__init__()
         self.spec = spec
         self._hint = ""
-        # a list the plugin worked out from the session (`Plugin.choices`),
+        # a list the plugin worked out from the session (`Plugin.describe`),
         # which replaces what the field's own callable offers
         self._supplied: Optional[list] = None
         info = spec.info
@@ -45,6 +47,10 @@ class _Field(QWidget):
         row.setContentsMargins(2, 0, 6, 0)
         self.auto: Optional[QCheckBox] = None
         choices = info.choices() if callable(info.choices) else info.choices
+        if choices is None and spec.type is bool and spec.optional:
+            # three states as words: a tri-state tick box's third state is a
+            # dash nobody reads as "auto", and it says nothing of what auto is
+            choices = self.ON_OFF
         if choices is not None:
             self.widget = QComboBox()
             self._values = []
@@ -65,9 +71,6 @@ class _Field(QWidget):
             browse.clicked.connect(self._browse)
             row.addWidget(self.widget, 1)
             row.addWidget(browse)
-        elif spec.type is bool and spec.optional:   # three states: on, off, auto
-            self.widget = QCheckBox(tristate=True)
-            self.widget.stateChanged.connect(self.changed)
         elif spec.type is bool:
             self.widget = QCheckBox()
             self.widget.toggled.connect(self.changed)
@@ -75,8 +78,6 @@ class _Field(QWidget):
             self.widget = QSpinBox()
             self.widget.setRange(int(info.min) if info.min is not None else -10**9,
                                  int(info.max) if info.max is not None else 10**9)
-            if info.step:
-                self.widget.setSingleStep(int(info.step))
             self.widget.valueChanged.connect(self.changed)
         else:
             # a line edit for floats and optionals: it takes "1e-7", and it is
@@ -149,7 +150,7 @@ class _Field(QWidget):
         self._refill(self._supplied if self._supplied is not None else choices())
 
     def set_choices(self, choices) -> None:
-        """The list the plugin works out from the session; see `Plugin.choices`."""
+        """The list the plugin works out from the session; see `Plugin.describe`."""
         if not isinstance(self.widget, QComboBox):
             return
         self._supplied = list(choices)
@@ -185,6 +186,14 @@ class _Field(QWidget):
         on, so nothing here can turn a read-from-the-file number into one the
         user is taken to have set.
         """
+        if isinstance(self.widget, QComboBox) and self.spec.optional \
+                and self._values and self._values[0] is None:
+            # a choice on auto says what auto is: "auto (on)"
+            labels = dict(zip(self._values, (self.widget.itemText(i)
+                                             for i in range(self.widget.count()))))
+            shown = labels.get(value, None if value is None else str(value))
+            self.widget.setItemText(0, f"auto ({shown})" if shown else "auto")
+            return
         if self.auto is None or not isinstance(self.widget, QLineEdit):
             return
         self._hint = ("" if value is None else f"{value:g}"
@@ -229,11 +238,7 @@ class _Field(QWidget):
                 self._values.append(value)
             w.setCurrentIndex(self._values.index(value) if value in self._values else 0)
         elif isinstance(w, QCheckBox):
-            if w.isTristate():
-                w.setCheckState(Qt.PartiallyChecked if value is None
-                                else Qt.Checked if value else Qt.Unchecked)
-            else:
-                w.setChecked(bool(value))
+            w.setChecked(bool(value))
         elif isinstance(w, QSpinBox):
             w.setValue(int(value))
         else:
@@ -247,9 +252,6 @@ class _Field(QWidget):
         if isinstance(w, QComboBox):
             return w.currentData()
         if isinstance(w, QCheckBox):
-            if w.isTristate():
-                state = w.checkState()
-                return None if state == Qt.PartiallyChecked else state == Qt.Checked
             return w.isChecked()
         if isinstance(w, QSpinBox):
             return w.value()
@@ -274,7 +276,7 @@ class LayersField(QWidget):
 
     changed = Signal()
     COLUMNS = ("field", "lo", "hi", "quantile", "required")
-    GROUPING = ((None, "as it is"), (True, "grouped"), (False, "ungrouped"))
+    GROUPING = ((None, "as it is"), (True, "merged"), (False, "not merged"))
 
     def __init__(self, spec: ParamSpec):
         super().__init__()
@@ -297,7 +299,8 @@ class LayersField(QWidget):
         remove_layer = QPushButton("- layer")
         remove_layer.clicked.connect(self._remove_layer)
         self.take = QPushButton("from current layers")
-        self.take.setToolTip("the bounds and grouping the Render tab shows now")
+        self.take.setToolTip("the bounds, and whether blinks are merged, as the "
+                             "Render tab shows them now")
         self.take.clicked.connect(self.take_from_session)
         # "from current layers" on a line of its own: beside the layer
         # buttons the row was wider than the control column
@@ -323,7 +326,7 @@ class LayersField(QWidget):
         # one per line, for the same reason
         options = QFormLayout()
         options.setContentsMargins(0, 0, 0, 0)
-        for label, box in (("grouping", self.grouped), ("start from", self.start)):
+        for label, box in (("merge blinks", self.grouped), ("start from", self.start)):
             line = QHBoxLayout()
             line.addWidget(box)
             line.addStretch(1)
@@ -515,6 +518,7 @@ class SettingsForm(QWidget):
         self.settings_cls = settings_cls
         self.fields: Dict[str, Any] = {}          # _Field or SettingsForm
         self.labels: Dict[str, QLabel] = {}       # the row label of each field
+        self.sections: Dict[str, CollapsibleSection] = {}   # each part's
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(2)
@@ -538,9 +542,11 @@ class SettingsForm(QWidget):
                 part.changed.connect(self.changed)
                 self.fields[name] = part
                 main = None
-                layout.addWidget(CollapsibleSection(spec.info.label or name, part,
-                                                    expanded=not (spec.info.advanced
-                                                                  or spec.info.collapsed)))
+                section = CollapsibleSection(spec.info.label or name, part,
+                                             expanded=not (spec.info.advanced
+                                                           or spec.info.collapsed))
+                self.sections[name] = section
+                layout.addWidget(section)
                 continue
             w = LayersField(spec) if spec.info.kind == "layers" else _Field(spec)
             w.changed.connect(self.changed)
@@ -637,7 +643,7 @@ class SettingsForm(QWidget):
 
     def set_choices(self, lists: Dict[str, Any]) -> None:
         """Replace, by dotted name, the lists of fields whose choices the
-        session decides (`Plugin.choices`).  Unknown names are ignored, as
+        session decides (`Plugin.describe`).  Unknown names are ignored, as
         for hints."""
         for path, choices in lists.items():
             target = self
@@ -650,6 +656,25 @@ class SettingsForm(QWidget):
                 continue
             if hasattr(field, "set_choices"):
                 field.set_choices(choices)
+
+    def set_titles(self, titles: Dict[str, str]) -> None:
+        """A part's title by dotted name (`FormState.titles`), cut to the
+        control column with the whole of it in the tooltip: a title is one
+        line and must not widen the form.  Unknown names are ignored."""
+        from .widgets import CONTROL_WIDTH
+        for path, title in titles.items():
+            target = self
+            parts = path.split(".")
+            try:
+                for part in parts[:-1]:
+                    target = target.fields[part]
+                section = target.sections[parts[-1]]
+            except (KeyError, AttributeError):
+                continue
+            metrics = section.button.fontMetrics()
+            shown = metrics.elidedText(title, Qt.ElideRight, CONTROL_WIDTH - 90)
+            section.set_title(shown)
+            section.button.setToolTip(title if shown != title else "")
 
     def set_active(self, flags: Dict[str, bool]) -> None:
         """Grey out the fields the current settings do not read.

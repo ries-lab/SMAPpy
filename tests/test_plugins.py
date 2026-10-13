@@ -27,7 +27,7 @@ def test_plugin_runs_as_a_function_and_through_a_session():
     assert "drift over 50 frames" in result.text
 
     session = Session(locs)
-    session.layers[0].filter.set("xy_err_nm", None, 30.0)
+    session.layers[0].set_bound("xy_err_nm", None, 30.0)
     before = session.locs
     session.run(plugin, SETTINGS)
     assert session.locs is not before and session.can_undo
@@ -63,3 +63,28 @@ def test_regions_mask_and_selection_in_roi():
     session.set_roi(rect)
     sel = session.selection(0)
     assert sel.roi is rect and len(sel) == (session.layers[0].selection().mask & rect.mask(x, y)).sum()
+
+
+def test_a_settings_class_is_shown_the_same_by_every_plugin_that_shows_it():
+    """How a field is shown lives on the field (`param`), so COMET's form and
+    a fitter's *after the fit* section cannot disagree -- and building one
+    form cannot change another, as a plugin's `main` list once did."""
+    from smappy.plugins import param_specs
+    from smappy.plugins.fit import DualGaussianFit, GaussianFit
+    from smappy.plugins.drift_comet import CometDrift
+    from smappy.plugins.registration import CalibrateChannelTransform
+
+    def shown(specs):
+        return {name: (s.info.label, s.info.unit, s.info.advanced)
+                for name, s in specs.items()}
+
+    fitter = DualGaussianFit.specs()
+    assert shown(fitter["finish"].children["comet"].children) == \
+        shown(CometDrift.specs())
+    assert shown(fitter["transform"].children["registration"].children) == \
+        shown(CalibrateChannelTransform.specs()["registration"].children)
+    # every field of the registration has a label of its own, not its name
+    assert all(s.info.label for s in
+               fitter["transform"].children["registration"].children.values())
+    assert shown(param_specs(GaussianFit.Settings)) == \
+        shown(GaussianFit.specs())

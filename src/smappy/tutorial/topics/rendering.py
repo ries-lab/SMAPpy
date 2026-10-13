@@ -15,7 +15,7 @@ from .common import (expand, menu, menu_item, open_section, show_tab, tab_button
                      toolbar)
 
 TITLE = "Rendering in 2D and 3D"
-DESCRIPTION = ("What is drawn (filters and grouping), render modes, contrast "
+DESCRIPTION = ("What is drawn (filters and merged blinks), render modes, contrast "
                "and colours, saving, other axes, and the 3D view.")
 
 _RENDER = """
@@ -94,14 +94,15 @@ def make(d) -> None:
     ring = (6400, 8200), (3600, 5400)
     render.view.frame_on(*ring)
     d.settle()
-    assert tab.grouped.isChecked(), "a new table is not grouped"
-    d.shot("Grouped, each blink is one localization: its positions averaged "
+    assert tab.grouped.isChecked(), "a new table does not merge blinks"
+    d.shot("With merge blinks ticked, each blink is one localization: its "
+           "positions averaged "
            "and its photons added, so it is more precise.",
            spot=[tab.grouped, d.rect(render.view.graphics, pad=-2)],
            point=tab.grouped)
     tab.grouped.click()
     d.settle()
-    d.shot("Ungrouped, every frame of every blink is drawn: more localizations, "
+    d.shot("Unticked, every frame of every blink is drawn: more localizations, "
            "each one less precise.",
            spot=[tab.grouped, d.rect(render.view.graphics, pad=-2)],
            point=tab.grouped, click=True)
@@ -112,35 +113,39 @@ def make(d) -> None:
     dialog.show()
     d.settle()
     x, y, w, h = d.rect(tab.grouping_button)
-    d.place(dialog, x + w + 20, y - 40)
-    d.shot("Link settings, beside grouped, sets how far a molecule may move "
+    from ..director import SIZE as SCREEN, TITLE as TITLE_BAR
+    # beside the button, but kept on the screen however low the button sits
+    d.place(dialog, x + w + 20,
+            min(y - 40, SCREEN[1] - dialog.height() - TITLE_BAR - 20))
+    d.shot("Merge settings, beside merge blinks, sets how far a molecule may move "
            "between frames, and how many dark frames a blink may have.",
            spot=[tab.grouping_button, d.window_rect(dialog)],
            point=tab.grouping_button, click=True,
            zoom=d.around(dialog, 800))
     dialog.reject()
     d.settle()
-    d.shot("The filter and the grouping also decide what the analysis plugins "
+    d.shot("The filter and merge blinks also decide what the analysis plugins "
            "measure: what is drawn is what is measured.",
            spot=[tab_button(d, "Analysis"), d.rect(render.view.graphics, pad=-2)],
            point=tab_button(d, "Analysis"))
 
     d.chapter("Render modes")
-    d.shot("Render precision draws each localization as wide as it is "
+    d.shot("Gaussian (precision) draws each localization as wide as it is "
            "uncertain: well-localized ones are sharp, poor ones are soft.",
            spot=[tab.mode, d.rect(render.view.graphics, pad=-2)], point=tab.mode)
-    tab.mode.setCurrentText("hist")
+    tab.set_mode("hist")
     d.settle()
-    d.shot("Hist counts the localizations in each pixel. Nothing is smoothed, "
+    d.shot("Histogram counts the localizations in each pixel. Nothing is smoothed, "
            "so up close the picture is grainy, but it hides nothing.",
            spot=[tab.mode, d.rect(render.view.graphics, pad=-2)], point=tab.mode)
-    tab.mode.setCurrentText("gauss")
+    tab.set_mode("gauss")
     d.settle()
     expand(tab.sigma)
-    d.shot("Gauss draws every localization with the same width, set under more.",
+    d.shot("Gaussian (fixed) draws every localization with the same width, "
+           "set under more.",
            spot=[tab.mode, tab.sigma], point=tab.sigma,
            zoom=d.around(tab.sigma, 760))
-    tab.mode.setCurrentText("precision")
+    tab.set_mode("precision")
     render.view.reset()
     d.settle()
 

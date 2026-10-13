@@ -33,6 +33,7 @@ from typing import Optional
 import numpy as np
 
 from ..calibrate.transform import RegisterSettings, register_channels
+from ..locs import in_pixels
 from . import Context, ParamInfo, Plot, Plugin, Result, param, register
 
 TRANSFORM_FILTER = "Channel transformation (*_2ct.h5 *.h5 *.hdf5)"
@@ -41,39 +42,33 @@ TRANSFORM_FILTER = "Channel transformation (*_2ct.h5 *.h5 *.hdf5)"
 @dataclass
 class RegisterLocsSettings:
     """The registration, plus where to put it."""
-    registration: RegisterSettings = field(default_factory=RegisterSettings)
+    registration: RegisterSettings = param(default_factory=RegisterSettings)
     save: bool = param(True, label="save transformation",
                        help="write it to a file a two-colour fit can read")
     path: str = param("", label="file", kind="save_file",
                       file_filter=TRANSFORM_FILTER,
-                      help="auto: <name>_2ct.h5 beside the movie the table was "
-                           "fitted from (or the file it was read from)")
-    overwrite: bool = param(False, advanced=True,
-                            help="replace a file that is already there")
+                      help="auto: <name>_2ct.h5 beside the movie the table "
+                           "was fitted from (or the file it was read from)")
+    overwrite: bool = param(False, help="replace a file that is already there",
+                            advanced=True)
 
 
 def chip_pixels(locs, report=None):
-    """The table's positions as chip pixels, whatever unit it was saved in.
+    """The table's positions as chip pixels.
 
     A transformation is a statement about the camera, so it lives in chip
     pixels -- `dualfit.which_channel` and `combine_peaks` both read it that
-    way.  A fit writes nm by default and drops the pixel columns, so they are
-    recovered from the pixel size the conversion recorded rather than demanded
-    back from the user.
+    way.  A fit writes nm only, so they are recovered from the pixel size the
+    conversion recorded (`locs.in_pixels`) rather than demanded back from the
+    user; a file saved in pixels gives its own.
     """
-    if "x_pix" in locs and "y_pix" in locs:
-        return np.asarray(locs["x_pix"], float), np.asarray(locs["y_pix"], float)
-    if "x_nm" not in locs or "y_nm" not in locs:
+    if "x_nm" not in locs and "x_pix" not in locs:
         raise ValueError("the table has no positions to register")
-    pixelsize = locs.metadata.get("pixelsize_nm")
-    if not pixelsize:
-        raise ValueError("the table is in nm and does not record its pixel size, "
-                         "so it cannot be put back into chip pixels; re-run the "
-                         "fit with units 'pixel+nm'")
-    if report is not None:
-        report(f"converting nm back to pixels at {pixelsize:g} nm/pixel")
-    return (np.asarray(locs["x_nm"], float) / pixelsize,
-            np.asarray(locs["y_nm"], float) / pixelsize)
+    if report is not None and "x_pix" not in locs:
+        sizes = locs.metadata.get("pixelsize_nm")
+        if sizes:
+            report(f"converting nm to chip pixels at {float(sizes):g} nm/px")
+    return in_pixels(locs, "x_pix", "y_pix")
 
 
 def source_geometry(locs):
@@ -104,70 +99,14 @@ class CalibrateChannelTransform(Plugin):
                    "frame: no initial shift, no magnification and no split "
                    "position needed.")
     changes_locs = False
+    # bead pairs are matched frame by frame
+    grouping = "ungrouped"
     # 2: a table in nm is weighted by its xy_err_nm too (it was unweighted)
     version = "2"
     Settings = RegisterLocsSettings
     preview_help = ("run the registration and draw it -- the vote, the "
                     "residual scatter and where the pairs are -- without "
                     "writing a file")
-    params = {
-        "registration.layout": ParamInfo(
-            label="layout", choices=(("auto", "detect"), "right-left",
-                                     "right-left mirrored", "up-down",
-                                     "up-down mirrored"),
-            help="how the chip is split; detect votes for all of them and "
-                 "keeps the sharpest"),
-        "registration.main_channel": ParamInfo(
-            label="main channel",
-            choices=(("auto", "the left or upper half"), "left", "right",
-                     "upper", "lower"),
-            help="the half the other is mapped onto, the reference"),
-        "registration.model": ParamInfo(
-            label="transformation", choices=(
-                ("projective", "projective (8 coefficients)"),
-                ("polynomial", "polynomial, order 3 (20)")),
-            help="projective extrapolates gracefully; the polynomial describes "
-                 "a distorted field far better where the pairs reach, and is "
-                 "refused when they do not reach far enough"),
-        "registration.split_position": ParamInfo(
-            label="split position", unit="px", min=1,
-            help="auto: measured from the pairs, in chip coordinates"),
-        "registration.coarse_tolerance_px": ParamInfo(
-            label="coarse matching", unit="px", min=0.1,
-            help="first pass; must cover the rotation between the channels -- "
-                 "3 degrees over 512 px is 27 px"),
-        "registration.fine_tolerance_px": ParamInfo(
-            label="fine matching", unit="px", min=0,
-            help="second pass over clean matches only, which is where the "
-                 "accuracy comes from; 0 skips it"),
-        "registration.adapt_fine_tolerance": ParamInfo(
-            label="adapt fine matching", advanced=True,
-            help="widen the fine matching to what the coarse fit misses its "
-                 "own pairs by, when those pairs are clean"),
-        "registration.vote_bin_px": ParamInfo(
-            label="vote bin", unit="px", min=0.1, advanced=True,
-            help="the bin of the histogram of pair vectors the offset is "
-                 "voted in"),
-        "registration.vote_smooth_px": ParamInfo(
-            label="vote smoothing", unit="px", min=0.1, advanced=True,
-            help="the width of the difference-of-Gaussians filter the vote "
-                 "is scored with"),
-        "registration.min_pairs": ParamInfo(
-            label="minimum pairs", min=4, advanced=True,
-            help="fewer pairs than this and the registration refuses"),
-        "registration.max_pairs": ParamInfo(
-            label="pairs used in the fit", min=4, advanced=True,
-            help="at most this many pairs, drawn at random, go into each fit"),
-        "registration.reprojection_threshold_px": ParamInfo(
-            label="outlier threshold", unit="px", min=0.01, advanced=True,
-            help="the robust (RANSAC) fit's inlier radius, at least; it widens "
-                 "with the matching tolerance"),
-        "registration.transform_axis_limit_px": ParamInfo(
-            label="dx/dy limit", unit="px", min=0.01, advanced=True,
-            help="the largest |dx| or |dy| a pair may keep after the first "
-                 "fit, at least; it widens with the matching tolerance"),
-    }
-    main = ("registration", "save", "path")
 
     # ------------------------------------------------------------ the work
     def _register(self, ctx: Context, settings):
@@ -184,15 +123,10 @@ class CalibrateChannelTransform(Plugin):
             raise ValueError("registration pairs within a frame, and the table "
                              "has no frame column")
         # the fit's own error bars, so a dim pair counts for what it knows --
-        # in pixels, as the positions are; a table in nm has them in nm, and
-        # reading only the pixel column lost the weighting for every fit
-        # saved in the default unit
+        # in pixels, as the positions are
         precision = None
-        if "xy_err_pix" in locs:
-            precision = np.asarray(locs["xy_err_pix"], float)
-        elif "xy_err_nm" in locs and locs.metadata.get("pixelsize_nm"):
-            precision = (np.asarray(locs["xy_err_nm"], float)
-                         / float(locs.metadata["pixelsize_nm"]))
+        if "xy_err_nm" in locs or "xy_err_pix" in locs:
+            precision = in_pixels(locs, "xy_err_pix")
         return register_channels(x, y, np.asarray(locs["frame"]), shape, roi,
                                  settings=settings.registration,
                                  progress=ctx.report, precision=precision), locs
@@ -205,8 +139,8 @@ class CalibrateChannelTransform(Plugin):
                    else default_transform_path(locs, Path.cwd() / "channels_2ct.h5"))
             result.save(out, overwrite=settings.overwrite)
         return Result(text=self._summary(result, out), plot=self._plot(result),
-                      data={"transform": result.transform, "result": result,
-                            "path": out}, settings=settings)
+                      data={"transform": result.transform, "result": result},
+                      written=None if out is None else str(out), settings=settings)
 
     def preview(self, ctx: Context, settings) -> Result:
         result, _ = self._register(ctx, settings)

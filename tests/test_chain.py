@@ -25,6 +25,7 @@ def with_sigma(locs):
 @register("Test/Chain/Count")
 class Count(Plugin):
     """How many rows the table it reads has: grouped or not."""
+    changes_locs = False
     def run(self, ctx, settings):
         locs, sel = ctx.table()
         return Result(text=f"{len(locs)} rows, {len(sel)} selected",
@@ -39,6 +40,7 @@ class CountGrouped(Count):
 @register("Test/Chain/Rewrite")
 class Rewrite(Plugin):
     """Hands back a table from whatever it read -- wrong on a grouped one."""
+    changes_locs = True
     def run(self, ctx, settings):
         locs, _ = ctx.table()
         return Result(locs=locs[: len(locs) // 2], text="halved")
@@ -46,6 +48,7 @@ class Rewrite(Plugin):
 
 @register("Test/Chain/Expensive")
 class Expensive(Plugin):
+    changes_locs = False
     def preflight(self, ctx, settings):
         return "this will take an afternoon"
 
@@ -80,7 +83,9 @@ def test_a_chain_is_a_plugin_whose_settings_are_its_steps():
     settings = cls.Settings()
     assert settings.flag.field == "good" and settings.flag.expression == "photons > 10"
     assert settings.localization_statistics.bins == 40
-    assert settings.flag.use_grouping == "auto" and settings.grouping == "layer"
+    # the math parser writes a column per localization: ungrouped, required
+    assert settings.flag.use_grouping == "ungrouped" and settings.grouping == "layer"
+    assert settings.localization_statistics.use_grouping == "auto"
     specs = cls.specs()
     assert specs["flag"].info.collapsed and specs["flag"].children["expression"].info.kind == "text"
     # what Save chain writes is what the form holds
@@ -143,7 +148,7 @@ def test_the_grouping_is_the_layers_then_the_chains_then_the_steps_then_the_plug
 def test_a_step_that_rewrites_the_grouped_table_is_refused():
     session = Session(blinks())
     cls = chain_class(spec({"plugin": "Test/Chain/Rewrite", "grouping": "grouped"}))
-    with pytest.raises(ChainError, match="grouped table"):
+    with pytest.raises(ChainError, match="merged blinks"):
         session.run(cls(), cls.Settings())
     ungrouped = chain_class(spec({"plugin": "Test/Chain/Rewrite", "grouping": "ungrouped"}))
     session.run(ungrouped(), ungrouped.Settings())
@@ -294,7 +299,7 @@ def test_an_evaluator_step_runs_on_every_site_before_the_next_step():
     assert len(project.rois) == 5 and drawn.id in project.rois
     rows = project.results()
     assert len(rows) == 4 and {r["n_localizations"] for r in rows} == {100}
-    assert project.pipeline == [] and project.runs[-1]["chain"] == "block sites"
+    assert project.block.steps == [] and project.runs[-1]["chain"] == "block sites"
     assert project.labels() == ["stats"]
     # and the log says so, step by step
     assert [s["plugin"] for s in session.history[-1]["steps"]] == [
@@ -308,7 +313,7 @@ def test_a_chain_changes_the_roi_project_only_through_its_result():
     cls = chain_class(spec(SEGMENT, each_roi({"plugin": "Analysis/Measure/Localization Statistics"})))
     result = cls().run(session.context(), cls.Settings())
     assert len(session.rois.rois) == 0 and session.rois.runs == []
-    assert len(result.data["roi_project"]["rois"]) == 4
+    assert len(result.roi_project["rois"]) == 4
     session.apply(cls(), result)
     assert len(session.rois.rois) == 4 and len(session.rois.runs) == 1
 
@@ -316,13 +321,13 @@ def test_a_chain_changes_the_roi_project_only_through_its_result():
 def test_a_chain_that_leaves_the_rois_alone_hands_none_back():
     session = four_sites()
     cls = chain_class(spec({"plugin": "Test/Chain/Count"}))
-    assert "roi_project" not in cls().run(session.context(), cls.Settings()).data
+    assert cls().run(session.context(), cls.Settings()).roi_project is None
 
 
 def test_an_evaluator_with_no_sites_to_measure_stops_the_chain():
     session = four_sites()
     cls = chain_class(spec(each_roi({"plugin": "Analysis/Measure/Localization Statistics", "label": "stats"})))
-    with pytest.raises(ChainError, match="'sites'.*no ROIs to evaluate"):
+    with pytest.raises(ChainError, match="'sites'.*no ROIs to measure"):
         session.run(cls(), cls.Settings())
 
 
@@ -339,7 +344,7 @@ def test_one_evaluator_under_two_names_gives_two_sets_of_columns():
 
 def test_a_steps_grouping_in_a_block_is_each_layers_own_and_cannot_be_chosen():
     cls = chain_class(spec(each_roi({"plugin": "Analysis/Measure/Localization Statistics", "label": "stats"})))
-    assert cls().active(cls.Settings())["sites.stats.use_grouping"] is False
+    assert cls().describe(None, cls.Settings()).active["sites.stats.use_grouping"] is False
 
 
 def test_a_per_region_step_on_the_view_runs_once_and_keeps_nothing_with_the_rois():
@@ -347,7 +352,7 @@ def test_a_per_region_step_on_the_view_runs_once_and_keeps_nothing_with_the_rois
     cls = chain_class(spec(SEGMENT, {"plugin": "Analysis/Measure/Localization Statistics",
                                      "label": "stats"}))
     settings = cls.Settings()
-    assert (cls().active(settings) or {}).get("stats.use_grouping") is not False
+    assert cls().describe(None, settings).active.get("stats.use_grouping") is not False
     result = session.run(cls(), settings)
     assert result.data["results"]["stats"].values["n_localizations"] == \
         len(session.selection(0))                       # the whole view, once
@@ -357,13 +362,13 @@ def test_a_per_region_step_on_the_view_runs_once_and_keeps_nothing_with_the_rois
 def test_a_chains_evaluation_and_the_windows_stand_side_by_side():
     """The window's pipeline runs after a chain: both evaluations are on the
     ROIs, and the chain's run is not taken for the window's pipeline."""
-    from smappy.workspace import Instance
+    from smappy.chain import Block, Step as ChainStep
     session = four_sites()
     cls = chain_class(spec(SEGMENT, each_roi({"plugin": "Analysis/Measure/Localization Statistics", "label": "chain stats"})))
     session.run(cls(), cls.Settings())
     project = session.rois
     assert [s.label for s in project.resolved()] != ["chain stats"]
-    project.evaluate([Instance(plugin="Analysis/Measure/Localization Statistics")])
+    project.evaluate([ChainStep(plugin="Analysis/Measure/Localization Statistics")])
     assert set(project.labels()) == {"chain stats", "Localization Statistics"}
     row = project.results()[0]
     assert row["chain stats.n_localizations"] == row["Localization Statistics.n_localizations"] == 100
@@ -371,13 +376,13 @@ def test_a_chains_evaluation_and_the_windows_stand_side_by_side():
 
 def test_histograms_of_every_evaluation_need_no_choice():
     """Two evaluations on the ROIs: Histograms draws both unless one is named."""
-    from smappy.workspace import Instance
+    from smappy.chain import Block, Step as ChainStep
     session = four_sites()
     cls = chain_class(spec(SEGMENT))
     session.run(cls(), cls.Settings())
     project = session.rois
-    project.evaluate([Instance(plugin="Analysis/Measure/Localization Statistics", label="a")])
-    project.evaluate([Instance(plugin="Analysis/Measure/Localization Statistics", label="b",
+    project.evaluate([ChainStep(plugin="Analysis/Measure/Localization Statistics", label="a")])
+    project.evaluate([ChainStep(plugin="Analysis/Measure/Localization Statistics", label="b",
                                values={"bins": 50})])
     cls = chain_class(spec({"plugin": "Analysis/Regions/Summarize/Histograms", "label": "h",
                             "values": {"evaluation": ""}}))
@@ -396,6 +401,7 @@ class WhichSettings:
 @register("Test/Chain/Which")
 class Which(Plugin):
     """Asks which, until told."""
+    changes_locs = False
     Settings = WhichSettings
 
     def preflight(self, ctx, settings):

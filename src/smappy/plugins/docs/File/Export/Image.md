@@ -11,12 +11,15 @@ It is the picture for a figure, a report or a thumbnail: rendered again
 from the localizations, so a 5 nm pixel over a whole cell gives a file
 thousands of pixels wide, however small the window is.
 
-It draws what the layer shows -- its filter, the ROI if one is drawn, and
-the grouped table (one localization per blink) when the layer shows blinks
--- with that layer's render and colour settings, so the file looks like the
-window.  The picture is framed tightly around those localizations.  A
+It draws what the [layer](plugin:Panels/Glossary) shows (a layer is one
+picture of the localizations with its own filter and colours) -- its
+[filter](plugin:Panels/Glossary) (the lowest and highest values of columns a
+localization must lie between), the [ROI](plugin:Panels/Glossary) (region of
+interest) if one is drawn, and the merged blinks (one localization per blink)
+when the layer merges them -- with that layer's render and colour settings,
+so the file looks like the window.  The picture is framed tightly around those localizations.  A
 filter or ROI that leaves nothing is refused rather than exporting the
-whole table.  (Before version 2 a grouped layer was drawn one localization
+whole table.  (Before version 2 a layer of merged blinks was drawn one localization
 per frame, and the file came out nearly black: the colours were written as
 0 or 1 out of 255.)
 
@@ -41,11 +44,14 @@ from the smallest to the largest x and y, cut into pixels of *pixel*.  The
 number of pixels follows: a field of 20 µm at 10 nm is 2000 pixels wide.
 
 **2. The render.**  Each localization is drawn as a small Gaussian blob
-whose width is its precision (`xy_err_nm`), scaled by the layer's
+whose width is its [localization precision](plugin:Panels/Glossary)
+(`xy_err_nm`, also called the CRLB: how far its fitted position is expected
+to lie from the true one), scaled by the layer's
 settings, and never narrower than 0.7 of a rendered pixel -- or as a plain
 count per pixel, or a fixed Gaussian, if the layer is set so.
 
-**3. The colours.**  The layer's colour table (LUT), contrast and gamma
+**3. The colours.**  The layer's colour table ([LUT](plugin:Panels/Glossary),
+look-up table, also called a colour map), contrast and gamma
 turn the counts into colours.  The contrast sets the brightest pixels to
 full scale: at the default, the brightest 0.1 %.
 
@@ -70,7 +76,7 @@ $$n_x = \mathrm{round}\left( \frac{x_{\max} - x_{\min}}{p} \right)$$
 pixels wide, and likewise high; there is no margin, so the outermost
 localizations sit at the edge.
 
-**The blob width.**  In the default *precision* mode a localization with
+**The blob width.**  In the default *Gaussian (precision)* render mode a localization with
 precision $\sigma_{\mathrm{loc}}$ is drawn with
 
 $$\sigma = \min\left( \max\left( f\,\sigma_{\mathrm{loc}},\ 0.7\,p \right),\ 10\,\tilde\sigma \right),$$

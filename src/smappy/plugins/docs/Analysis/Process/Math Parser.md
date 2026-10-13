@@ -14,7 +14,9 @@ z_true_nm  = z_nm * 0.8
 within     = (xy_err_nm < 25) & (sigma_nm > 100)
 ```
 
-The result is an ordinary column.  The filter, the renderer, the colour
+The result is an ordinary column.  The [filter](plugin:Panels/Glossary)
+(also called bounds: the lowest and highest values of columns a localization
+must lie between to be shown), the renderer, the colour
 coding and every other plugin use it like any column the fitter wrote.  That
 is what makes the plugin useful for everything there is no button for: a
 refractive-index correction on z, an on-time in milliseconds, a ratio of two
@@ -22,7 +24,9 @@ fitted quantities, or a flag (0 or 1) marking the localizations that a range
 filter on one column cannot express.
 
 The expression is kept with the table, as a *recipe*.  That matters once the
-localizations are grouped into blinks: the recipe says what the new column
+blinks are merged -- [merge blinks](plugin:Panels/Glossary), also called
+grouping or linking, combines the localizations in consecutive frames that
+come from one blinking event into one: the recipe says what the new column
 means for a blink, so it is not averaged by accident, and it is still there,
 with how it was computed, when the file is opened again.
 
@@ -42,15 +46,17 @@ it does not, so `within` above is a flag.  A result that is a single number
 
 **3. Writing it.**  With *apply to* set to *all localizations*, the column is
 written for the whole table.  With *the selection*, only the localizations
-of the current selection get the new value (the layer's filter, the ROI and
-the slab together); the others keep what the column had, or get no value
+of the current [selection](plugin:Panels/Glossary) get the new value (the
+layer's filter, the drawn [ROI](plugin:Panels/Glossary) -- region of interest
+-- and the 3D view's slab together); the others keep what the column had, or get no value
 (NaN) if the column is new.
 
 **4. The recipe.**  The expression is stored in the table together with
-*grouped*, the rule for what the column is on the grouped table.  Running
-again into the same *new field* replaces its recipe.  An expression that
-reads the field it writes -- `photons = photons * 2` -- is applied once and
-kept as no recipe at all: re-evaluated at every grouping it would compound.
+*merged blinks*, the rule for what the column is once blinks are merged.
+Running again into the same *new field* replaces its recipe.  An expression
+that reads the field it writes -- `photons = photons * 2` -- is applied once
+and kept as no recipe at all: evaluated again at every merge it would
+compound.
 The column then goes on being combined per blink by its own rule (photons are
 summed).
 
@@ -69,23 +75,23 @@ for rule in ("recompute", "any", "all", "mean"):
 n = np.asarray(grouped["n_in_group"])
 ```
 
-**5. On the grouped table.**  When localizations are linked into blinks,
+**5. On merged blinks.**  When the localizations of a blink are merged,
 each ordinary column is combined by a fixed rule (positions averaged,
 photons summed).  A computed column instead follows its recipe:
 
-* *recompute the expression* evaluates the formula again on the grouped
-  table, with the blink's own values.  This is right for a statement about a
+* *recompute the expression* evaluates the formula again on the merged
+  blinks, with the blink's own values.  This is right for a statement about a
   blink: `on_time_ms = n_in_group * 20` is then the blink's on-time.
 * *mean*, *sum*, *minimum*, *maximum* combine the localizations' values, as
   for a measurement made per localization.
 * *any localization* and *all localizations* are for a flag: the blink is 1
   if any (or all) of its localizations are.
-* *leave it off* keeps the column off the grouped table.
+* *leave it off* keeps the column off the merged blinks.
 
 The same column can mean quite different things per blink, which is why the
 choice is asked for rather than guessed:
 
-```figure The flag `bright = photons > 1000` on a simulated table, taken to the grouped table by four rules.  Left: the fraction of blinks that come out bright -- recomputing asks whether the blink's summed photons exceed 1000, which more blinks do than have all their frames above 1000.  Right: with *mean*, the flag becomes the fraction of a blink's frames that were bright, shown for the blinks of more than one frame.
+```figure The flag `bright = photons > 1000` on a simulated table, taken to the merged blinks by four rules.  Left: the fraction of blinks that come out bright -- recomputing asks whether the blink's summed photons exceed 1000, which more blinks do than have all their frames above 1000.  Right: with *mean*, the flag becomes the fraction of a blink's frames that were bright, shown for the blinks of more than one frame.
 fig.set_size_inches(7, 2.8)
 left, right = fig.subplots(1, 2, gridspec_kw={"wspace": 0.35})
 names = ["recompute", "any", "all", "mean"]
@@ -102,6 +108,11 @@ for ax in (left, right):
 ```
 
 ## In detail
+
+**Which table.**  The localizations, whatever the layer shows: the
+column is computed for each localization, and *the selection* is the
+layer's bounds applied to each localization.  The merged blinks take the
+column by the *merged blinks* rule (below) when they are merged again.
 
 **What an expression may contain.**  Column names are the table's own
 (`x_nm`, `photons`, `xy_err_nm`, ...; the *new field* of an earlier run
@@ -124,8 +135,8 @@ their arguments in order: `clip(photons, 0, 5000)`, `percentile(z_nm, 90)`,
 `where(z_nm > 0, 1, -1)`.  The reductions ignore NaN, as `numpy.nanmedian`
 does; `count` is the number of values, NaN included.  With *apply to* set to *the
 selection*, the expression is evaluated on the selected localizations only,
-so a reduction is the selection's own; recomputed on the grouped table, it is
-the grouped table's.
+so a reduction is the selection's own; recomputed on the merged blinks, it is
+theirs.
 
 **What is refused, and why.**  Each of these is a mistake that numpy would
 answer with either a crash far from the cause or, worse, a plausible wrong
@@ -147,12 +158,13 @@ number, so it is caught with a message instead:
   attribute (`x_nm.max()`), an index (`x_nm[0]`), a lambda, a list.
 
 The expression is walked piece by piece rather than handed to Python's
-`eval`.  It is saved with the table, in the history and in chain files, so it
+`eval`.  It is saved with the table, in the history and in the files of
+[chains](plugin:Panels/Glossary) (plugins run one after another as one), so it
 travels between people, and evaluating a string from someone else's file
 would let it do anything.
 
 **The result as a column.**  A boolean result is stored as 0/1 in float32,
-so the filter can take a range of it and grouping can reduce it.  A
+so the filter can take a range of it and merging blinks can reduce it.  A
 floating-point result is stored as float32, like the rest of the table.  An
 integer result -- `frame // 100` -- keeps its integer type, since a frame
 number stops being exact in float32 above $2^{24}$.  A single number is
@@ -162,25 +174,25 @@ number, is refused.
 **The new field's name.**  It must be a word of letters, digits and
 underscores that does not start with a digit, so that a later expression can
 use it.  The name of one of the functions is refused, and so are `group_id`
-and `n_in_group`, which grouping writes and would overwrite.
+and `n_in_group`, which merging blinks writes and would overwrite.
 
 **The recipe.**  Stored in the table's metadata, `metadata["derived"]`, in
 the order the fields were defined (a field may be computed from an earlier
 one), as the field, the expression and the rule.  It is saved in the file
-with the table.  When the table is grouped, a computed column is left out of
+with the table.  When blinks are merged, a computed column is left out of
 the usual per-column rules and either reduced by its rule -- *mean* is the
 plain average of the localizations' values, not weighted by their precision
 as the positions are; *any* and *all* give 1 where the largest or smallest
-value is not zero -- or recomputed from the expression on the grouped table.
-Each time the table is grouped, the expressions are also evaluated again on
-the ungrouped table, which is what keeps a field in `n_in_group` up to date
-with the latest linking.  An expression in `n_in_group` or `group_id` needs
-the table to have been grouped once, since grouping writes those columns;
+value is not zero -- or recomputed from the expression on the merged blinks.
+Each time blinks are merged, the expressions are also evaluated again on
+the single localizations, which is what keeps a field in `n_in_group` up to
+date with the latest merge.  An expression in `n_in_group` or `group_id`
+needs the blinks to have been merged once, since merging writes those columns;
 before that the plugin says so.  A recipe that cannot be recomputed because a
 column is missing is skipped with a message, and the table is still built.
 
 **A field computed for the selection** is not a function of the table, so its
-expression is never recomputed.  If *grouped* is *recompute the expression*,
+expression is never recomputed.  If *merged blinks* is *recompute the expression*,
 the rule used instead is *mean*, and the text says so.
 
 **The history.**  The last 20 pairs of field and expression are kept in
@@ -201,7 +213,7 @@ numbers, not an error.
 
 ### where
 A field written only for the selection has NaN elsewhere, and is only
-reduced, never recomputed, on the grouped table: over the localizations of
+reduced, never recomputed, on the merged blinks: over the localizations of
 each blink that have a value, and NaN for a blink that has none.
 
 ### grouped
@@ -210,7 +222,7 @@ property of the blink; a combining rule for a measurement per localization;
 *any* or *all* for a flag.
 
 ### recall
-Picking an entry also restores the *grouped* rule it was used with.
+Picking an entry also restores the *merged blinks* rule it was used with.
 
 ## Output
 
@@ -246,10 +258,10 @@ Based on SMAP's `Process/Modify/MathParser`
   column or a precedence mistake is reported before anything is computed.
 * **Precedence.**  `&` and `|` bind tighter than a comparison here and looser
   in MATLAB, which is why an unbracketed comparison is refused.
-* **Grouping.**  SMAP has a *regroup and filter* checkbox that links the
-  whole table again after the calculation.  Here the column carries a rule
-  for the grouped table instead, so recomputing an on-time or reducing a
-  flag does not depend on relinking.
+* **Merging blinks.**  SMAP has a *regroup and filter* checkbox that links
+  the whole table again after the calculation.  Here the column carries a
+  rule for the merged blinks instead, so recomputing an on-time or reducing a
+  flag does not depend on merging again.
 
 ## References
 

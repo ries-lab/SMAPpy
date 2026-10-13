@@ -31,9 +31,28 @@ def stack(tmp_path):
 def test_parts_show_up_as_children():
     specs = GaussianFit.specs()
     assert set(specs) == {"source", "camera", "detection", "model", "fit", "output"}
-    assert specs["fit"].children["roisize"].info.label == "ROI size"   # via dotted extra
+    assert specs["fit"].children["roisize"].info.label == "fit box"
     assert specs["source"].children["path"].info.kind == "open_file"
     assert "Localize/Spline 3D" in plugins.available("Localize/")
+
+
+def test_every_fitter_shows_the_shared_parts_in_one_order_and_its_own_in_place():
+    """The forms are declared in halves around the model (fit.py, "the
+    forms"); a part only one fitter has sits where it always did."""
+    from smappy.plugins.fit import DualGaussianFit, DualSplineFit, SplineFit
+    shared = ["source", "camera", "detection", "model", "fit", "output"]
+    assert list(GaussianFit.specs()) == shared
+    assert list(SplineFit.specs()) == shared
+    assert list(DualSplineFit.specs()) == shared + ["finish"]
+    assert list(DualGaussianFit.specs()) == (shared[:4] + ["transform"]
+                                             + shared[4:] + ["finish"])
+    # the model is each fitter's own, and the two-channel ones share links
+    assert [list(cls.specs()["model"].children) for cls in
+            (DualSplineFit, DualGaussianFit)] == [
+        ["calibration", "link_xy", "link_z", "link_photons", "link_background",
+         "photon_ratio"],
+        ["sigma", "link_xy", "link_photons", "link_background", "link_sigma",
+         "photon_ratio"]]
 
 
 def test_fit_runs_without_a_gui_and_streams(stack, tmp_path):
@@ -54,13 +73,25 @@ def test_fit_runs_without_a_gui_and_streams(stack, tmp_path):
     assert result.locs["x_nm"].max() < 4800
 
 
-def test_react_fills_the_camera_from_a_preset(tmp_path):
-    preset = tmp_path / "cam.yaml"
-    preset.write_text("camera:\n  conversion: 6.7\n  offset: 400\n  pixelsize_um: 0.127\n")
-    settings = GaussianFitSettings(camera=CameraSettings(preset=str(preset)))
-    updates = GaussianFit().react("camera.preset", settings)
-    assert updates == {"camera.conversion": 6.7, "camera.offset": 400,
-                       "camera.pixelsize_um": 0.127}
+def test_every_camera_comes_through_the_one_resolution(stack):
+    """The fit, its parameter view and the uiPSF calibration resolve a camera
+    through `CameraSettings.resolution`, so none can disagree with the fit;
+    and photons are counted by the one `to_photons`."""
+    from smappy.camera import to_photons
+    from smappy.io.tiff import open_stack
+    from smappy.plugins.fit import camera_resolution
+    from smappy.uipsf import prepare
+    camera = CameraSettings(conversion=2.0, offset=100.0, pixelsize_um=0.1)
+    settings = GaussianFitSettings(source=SourceSettings(path=str(stack)),
+                                   camera=camera)
+    source = open_stack(stack)
+    fitted = camera.resolve(source)
+    assert fitted.conversion == 2.0 and fitted.offset == 100.0
+    assert camera_resolution(settings).camera_metadata() == fitted
+    assert GaussianFit()._camera(settings) == fitted
+    profile = type("Profile", (), {"pixelsize_xy_um": None})()
+    assert prepare.resolve_camera(camera, source, profile) == fitted
+    assert prepare.to_photons is to_photons
 
 
 def test_the_default_output_goes_next_to_the_image_folder(tmp_path):
@@ -175,3 +206,111 @@ def test_a_fit_without_warnings_writes_none(stack, tmp_path):
     assert "warning:" not in result.text
     from smappy.io.hdf5 import load_localizations
     assert "warnings" not in load_localizations(out).metadata
+
+
+def test_a_stack_with_no_pixel_size_is_fitted_on_an_assumed_one(stack, tmp_path):
+    """It used to be refused.  The nm columns use the default size, and the
+    table and the run both say so -- the table with the size, so the pixels
+    divide back out exactly."""
+    from smappy.io.hdf5 import load_localizations
+    from smappy.metadata import DEFAULT_PIXELSIZE_NM
+    settings = GaussianFitSettings(
+        source=SourceSettings(path=str(stack)),
+        camera=CameraSettings(conversion=1.0, offset=100.0),
+        detection=DetectionSettings(cutoff_mode="absolute", cutoff=40.0),
+        output=OutputSettings(path=str(tmp_path / "out.hdf5")))
+    ctx = Context()
+    result = GaussianFit().run(ctx, settings)
+    assert any("assumed" in w for w in ctx.warnings)
+    locs = result.locs
+    assert len(locs) and locs.metadata["pixelsize_nm"] == DEFAULT_PIXELSIZE_NM
+    # near where the peak finder put it, in pixels of that size
+    assert np.median(np.abs(locs["x_nm"] / DEFAULT_PIXELSIZE_NM - locs["peak_x_pix"])) < 0.5
+    saved = load_localizations(tmp_path / "out.hdf5")
+    assert saved.metadata.get("pixelsize_assumed") is True
+    assert saved.metadata.get("pixelsize_nm") == DEFAULT_PIXELSIZE_NM
+    assert "x_pix" not in saved and "x_nm" in saved
+
+
+def test_switching_the_cutoff_mode_puts_that_modes_default_in_the_value():
+    """1.7 noise widths kept as 1.7 photons would find every pixel: the
+    number follows the mode it is read in, in a two-channel fitter too."""
+    from dataclasses import replace
+
+    from smappy.plugins.fit import DualGaussianFit, DualGaussianFitSettings
+
+    settings = GaussianFitSettings(detection=DetectionSettings(cutoff_mode="absolute"))
+    assert GaussianFit().react("detection.cutoff_mode", settings) == \
+        {"detection.cutoff": 20.0}
+    settings = replace(settings, detection=DetectionSettings(cutoff_mode="dynamic",
+                                                             cutoff=35.0))
+    assert GaussianFit().react("detection.cutoff_mode", settings) == \
+        {"detection.cutoff": 1.7}
+    dual = DualGaussianFitSettings(detection=DetectionSettings(cutoff_mode="absolute"))
+    assert DualGaussianFit().react("detection.cutoff_mode", dual) == \
+        {"detection.cutoff": 20.0}
+
+
+# ------------------------------------------------------------ an unknown camera
+
+def test_a_camera_nobody_entered_is_asked_about_at_run_until_its_numbers_are_typed(stack):
+    from smappy.plugins import PreflightQuestion
+
+    bare = GaussianFitSettings(source=SourceSettings(path=str(stack)))
+    question = GaussianFit().preflight(Context(), bare)
+    assert isinstance(question, PreflightQuestion) and not question.run_label
+    assert "not in the camera database" in question.text
+    [choice] = question.choices
+    assert choice.window == "camera editor" and choice.settings is bare
+
+    typed = GaussianFitSettings(source=SourceSettings(path=str(stack)),
+                                camera=CameraSettings(conversion=1.0, offset=100.0,
+                                                      pixelsize_um=0.1))
+    assert GaussianFit().preflight(Context(), typed) is None
+
+
+def test_the_camera_question_opens_the_editor_and_does_not_run(stack, monkeypatch):
+    """Cancel is the default; the editor is the other answer, and neither
+    starts the fit."""
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication
+
+    from smappy.gui.plugin_panel import PluginPanel
+    from smappy.locs import Localizations
+    from smappy.session import Session
+
+    QApplication.instance() or QApplication([])
+    session = Session(Localizations())
+    opened = []
+    session.window_openers["camera editor"] = opened.append
+    panel = PluginPanel(GaussianFit, session)
+    panel.form.set_values({"source.path": str(stack)})
+
+    question = GaussianFit().preflight(Context(), panel.form.value())
+    box, answers = panel.choice_box("t", question)
+    assert box.defaultButton() is box.escapeButton()          # Cancel
+
+    monkeypatch.setattr(PluginPanel, "ask_choice",
+                        lambda self, title, q: q.choices[0])
+    assert panel.start_run() is False
+    assert len(opened) == 1 and opened[0].source.path == str(stack)
+    assert panel._thread is None
+
+
+def test_the_camera_part_is_folded_and_titled_by_what_it_resolves_to(stack):
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication
+
+    from smappy.gui.plugin_panel import PluginPanel
+    from smappy.locs import Localizations
+    from smappy.session import Session
+
+    QApplication.instance() or QApplication([])
+    panel = PluginPanel(GaussianFit, Session(Localizations()))
+    section = panel.form.sections["camera"]
+    assert not section.button.isChecked()
+    panel.form.set_values({"source.path": str(stack), "camera.conversion": 0.5,
+                           "camera.pixelsize_um": 0.108})
+    panel._describe()
+    assert section.title == "camera: auto – 0.5 e-/ADU, 108 nm"
+    assert GaussianFit.specs()["output"].children["show_tags"].info.advanced

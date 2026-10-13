@@ -145,7 +145,7 @@ def test_a_gaussian_width_survives_a_trip_through_other_axes(app):
     from smappy.gui.render_tab import RenderTab
     session = loaded()
     tab = RenderTab(session)
-    tab.mode.setCurrentText("gauss")
+    tab.set_mode("gauss")
     tab.sigma.setValue(25.0)
 
     choose(tab, "x", "frame")

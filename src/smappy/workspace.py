@@ -15,8 +15,8 @@ without a GUI, and window geometry is carried as opaque text the GUI encodes.
 
 **Nothing is saved behind the user's back.**  One installation is shared by a
 lab, so a value one person typed and the program remembered would silently
-become everyone's default.  A GUI file is written only by *Save GUI* or *Save
-GUI as*, and read at start only because someone saved or loaded it last
+become everyone's default.  A GUI file is written only by *File > Workspace >
+Save* or *Save as*, and read at start only because someone saved or loaded it last
 (`remember`); with none, the shipped default is built afresh.  The one thing
 kept automatically is where the window was (`window_state`), which moves no
 number.
@@ -42,8 +42,9 @@ REMEMBERED = "gui"                   # config key: the GUI last saved or loaded
 # from whatever plugins are actually installed; afterwards the workspace is
 # data and a tab is whatever the user made of it.
 DEFAULT_TABS = (
-    {"name": "File", "kind": "plugins",
-     "seed": ("File/Load/", "File/Save/", "File/Export/", "File/Simulate/")},
+    # not Load and Save, which the File menu does (they stay in the tree:
+    # a chain and a batch save through `File/Save`)
+    {"name": "File", "kind": "plugins", "seed": ("File/Export/", "File/Simulate/")},
     {"name": "Localize", "kind": "plugins", "header": "localize", "seed": "Localize/"},
     {"name": "Render", "kind": "render"},
     # the regions have a tab of their own (docs/regions.md), so the Analysis
@@ -212,9 +213,9 @@ class Workspace:
 
 
 def display_name(path: Optional[Path]) -> str:
-    """What the title bar calls a GUI: its file name without the suffix."""
+    """What the title bar calls a workspace: its file name without the suffix."""
     if path is None:
-        return "default GUI"
+        return "default workspace"
     name = Path(path).name
     for suffix in (GUI_SUFFIX, ".yaml", ".yml"):
         if name.endswith(suffix) and len(name) > len(suffix):
@@ -223,7 +224,7 @@ def display_name(path: Optional[Path]) -> str:
 
 
 def guis_dir() -> Path:
-    """Where *Save GUI as* offers to put a GUI first; any folder will do."""
+    """Where *Workspace > Save as* offers to put a GUI first; any folder will do."""
     return config.config_dir() / "guis"
 
 
@@ -231,7 +232,7 @@ def load(path=None) -> Workspace:
     """The workspace at ``path``, or the shipped default.
 
     A file that is missing, unreadable or has no tabs also gives the default,
-    with no path: *Save GUI* then asks where to write rather than overwriting
+    with no path: *Workspace > Save* then asks where to write rather than overwriting
     the broken file.
     """
     if not path:

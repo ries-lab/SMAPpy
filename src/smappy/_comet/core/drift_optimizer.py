@@ -84,7 +84,7 @@ def _save_drift_correction_details(*args, **kwargs):
 # --- smappy ----------------------------------------------------------------
 # Two knobs, so the CPU path can be changed from outside without changing what
 # this module does by default: the values below reproduce upstream COMET
-# exactly.  smappy sets them (see SMAPpy/src/smappy/drift.py and NOTES.md):
+# exactly.  smappy sets them (see SMAPpy/src/smappy/drift.py and docs/drift.md):
 # `cpu_wrapper_chunked_fast` drops the per-call array conversions, and a looser
 # `ftol` cuts the number of cost evaluations by ~2.7x for a sub-nm change in the
 # estimated drift.

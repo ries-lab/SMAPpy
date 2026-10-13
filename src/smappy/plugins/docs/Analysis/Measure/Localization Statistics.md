@@ -1,5 +1,5 @@
 ---
-version: "3"
+version: "4"
 covers: [smappy.plugins.statistics.statistics, smappy.plugins.statistics.statistics_values, smappy.plugins.statistics.precision_model, smappy.plugins.statistics.photon_decay, smappy.plugins.statistics.ontime_decay]
 ---
 
@@ -9,8 +9,9 @@ Three histograms that say whether a dataset behaves as SMLM data should, and
 how good it is:
 
 * **photons** per localization -- how bright the fluorophores are;
-* **localization precision** -- how well each position is known, laterally
-  and, for 3D data, in z;
+* **[localization precision](plugin:Panels/Glossary)** (also called the
+  CRLB or localization uncertainty) -- how well each position is known,
+  laterally and, for 3D data, in z;
 * **on-time** -- for how many consecutive frames a fluorophore stays on.
 
 Each has the law it is expected to follow fitted over it, so a glance says
@@ -18,15 +19,21 @@ whether the data look normal, and the fitted numbers are what to compare
 between samples, dyes, buffers or days: the mean photon count $N_0$, the
 typical precision $\sigma_c$ and the mean on-time $\tau$.
 
-It describes the localizations of the layer as they are shown -- after its
-filter and inside the ROI -- unless *localizations* is set to *all*.
+It describes the localizations of the [layer](plugin:Panels/Glossary) as
+they are shown -- after its [filter](plugin:Panels/Glossary) (also called
+bounds: the lowest and highest values of columns a localization must lie
+between) and inside the drawn [ROI](plugin:Panels/Glossary) (region of
+interest) -- unless *localizations* is set to *all*.
 
-The same plugin measures every site of the
-[ROI manager](plugin:Panels/ROI manager), once per ROI: in its evaluation
-pipeline, or as a chain step set to *run on* each ROI.  Each ROI then gets a
-row of numbers (see *Output*), and a site with nothing in it gets a count of
-zero rather than an error.  There the precision model starts switched off
-(*fit the precision model*), since its fit is most of what a site costs.
+The same plugin measures every ROI of the
+[ROI manager](plugin:Panels/ROI manager), once per ROI: as one of its
+per-region steps, or as a step of a [chain](plugin:Panels/Glossary)
+(plugins run one after another as one) set to *run on* each ROI.  Each ROI then
+gets a row of numbers (see *Output*), and an ROI with nothing in it gets a
+count of zero rather than an error.  The precision model is fitted there as
+on the view; its fit is most of what an ROI costs, and a block that will take
+more than a minute says how long before it starts, when *precision fit* set
+to *none* is the way to make it quicker.
 
 ```figure-setup
 from smappy.simulate import simulate
@@ -127,14 +134,15 @@ of a nanometre, which are failed fits and not good localizations.  The
 likelihood weighs each localization by $1/\sigma^2$, so a few per cent of those
 rows carry the answer and pull $\sigma_c$ down by an order of magnitude.
 Binned, they are a few counts in the first bins and move nothing.  *Precision
-fit* switches to the likelihood for anyone who wants it.
+fit* switches to the likelihood for anyone who wants it, or to *none*: the
+histogram, its median and its landmarks without the model.
 
 The z precision, when the table has one, is described the same way.
 
 ### On-time
 
 How many consecutive frames a fluorophore stays on before it blinks off, one
-number per blink, from the linking of localizations into blinks.  If it
+number per blink, from merging the localizations of a blink.  If it
 switches off with the same probability in every frame, the on-time $t$ (in
 frames) is *geometric*,
 
@@ -150,15 +158,18 @@ in frames, and in milliseconds if the *exposure* is given.  $\tau$ is what the
 curve decays with, which makes it comparable to a switching or bleaching time
 measured some other way.
 
-The on-time needs the localizations linked into blinks: switch the layer to
-*grouped* once, and the plugin reads the result.  It does not link by itself,
-because linking can take minutes on a large dataset; it says so instead.
+The on-time needs the blinks merged: tick *merge blinks* on the layer once
+-- [merge blinks](plugin:Panels/Glossary), also called grouping or linking,
+combines the localizations in consecutive frames that come from one blinking
+event into one -- and the plugin reads the result.  It does not merge by
+itself, because merging can take minutes on a large dataset; it says so
+instead.
 
 ## In detail
 
-**Which table.**  The one the layer shows.  A grouped layer is described
-blink by blink -- the photons of a blink added up, the precision that of the
-combined position -- and an ungrouped one frame by frame.  The on-time is the
+**Which table.**  The one the layer shows.  A layer that merges blinks is
+described blink by blink -- the photons of a blink added up, the precision
+that of the combined position -- and one that does not, frame by frame.  The on-time is the
 exception, because it is a property of a blink: it is counted once per blink
 whichever table is shown.  (Counting it per frame would count a three-frame
 blink three times and a one-frame blink once, and weigh the histogram towards
@@ -196,29 +207,28 @@ threshold -- a second, dim population, for example.
 ### precision_fit
 See *How it works*: the histogram fit is robust to the failed fits every
 dataset contains; the likelihood is the efficient estimator on clean data.
-
-### fit_precision
-The fit takes about 10 ms whatever the number of localizations -- nothing
+Either takes about 10 ms whatever the number of localizations -- nothing
 next to one run on the view, but 10 s over a thousand ROIs and a quarter of
-an hour over a hundred thousand clusters.  Off, the histogram, its median and
-its landmarks are still there; only the model curve and $\sigma_c$ go.  A
-site of a few dozen localizations has too few for a meaningful fit anyway.
+an hour over a hundred thousand clusters.  With *none* the histogram, its
+median and its landmarks are still there; only the model curve and
+$\sigma_c$ go.  An ROI of a few dozen localizations has too few for a
+meaningful fit anyway.
 
 ## Output
 
-* **Plot**: one panel per distribution, as in the figure above.
+* **The figures**: one panel per distribution, as in the figure above.
 * **Text**: the numbers, one line per distribution: $N_0$ and the mean and
   median photons; the maximum and rising edge of the precision, from the
   histogram and from the model, its median and $\sigma_c$; $\tau$ and the mean
   on-time.  If the on-time could not be shown, the reason.
-* **Per ROI**, the row each site gets: `n_localizations`; `mean_photons`,
+* **Per ROI**, the row each ROI gets: `n_localizations`; `mean_photons`,
   `median_photons` and `photons_n0`; `mean_precision_nm`,
-  `median_precision_nm` and `sigma_c_nm` (`_pix` for a table in pixels,
-  `sigma_c` NaN when the model was not fitted); for 3D data the same with
-  `z_` (`median_z_precision_nm`, ...); and where the site's table carries
-  `n_in_group`, `on_time_frames` ($\tau$) and `n_blinks`.  The on-time of a
-  site comes from its own rows only: the session's grouped table, which the
-  view falls back on, is the whole field's.  Each ROI also keeps its
+  `median_precision_nm` and `sigma_c_nm` (`sigma_c` NaN when the model was
+  not fitted); for 3D data the same with
+  `z_` (`median_z_precision_nm`, ...); and where the ROI's table carries
+  `n_in_group`, `on_time_frames` ($\tau$) and `n_blinks`.  The on-time of an
+  ROI comes from its own rows only: the session's merged blinks, which the
+  view falls back on, are the whole field's.  Each ROI also keeps its
   histograms and fitted numbers (about 2 kB), so its figure is drawn again
   without measuring again; the curves are recomputed from the numbers.
 

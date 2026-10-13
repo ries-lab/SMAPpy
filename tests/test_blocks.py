@@ -99,16 +99,22 @@ def test_a_block_reads_back_from_its_file_as_it_was_written(tmp_path):
         Step(plugin="Test/Block/Count", label="first"),
         block({"plugin": "Test/Block/Tag"},
               block({"plugin": "Test/Block/Count"}, label="inner"),
-              write_back=["n_here"], merge="mean", keep_figures="no")])
+              write_back=["n_here"], merge="mean")])
     path = chain.write(written, tmp_path / "b.chain.yaml")
     back = chain.read(path)
     outer = back.steps[1]
     assert isinstance(outer, Block) and outer.title() == "each"
     assert outer.write_back == ["n_here"] and outer.merge == "mean"
-    assert outer.keep_figures == "no" and outer.regions == "cluster_id"
+    assert outer.regions == "cluster_id"
     assert isinstance(outer.steps[1], Block) and outer.steps[1].steps[0].plugin == \
         "Test/Block/Count"
     assert back.to_dict() == written.to_dict()
+
+
+def test_a_block_file_from_when_figures_were_a_choice_still_reads():
+    old = Block.from_dict({"block": "", "regions": "rois", "keep_figures": "yes",
+                           "steps": []})
+    assert old.regions == "rois" and "keep_figures" not in old.to_dict()
 
 
 def test_a_block_without_a_label_says_what_it_repeats_over():
@@ -122,13 +128,13 @@ def test_a_segmenter_cannot_run_in_a_block():
         chain_class(ChainSpec(steps=[block({"plugin": "Analysis/Regions/Find/Density Peaks"})]))
 
 
-def test_a_step_added_to_a_block_starts_with_its_slow_options_off():
+def test_a_step_in_a_block_starts_with_the_defaults_it_has_on_the_view():
     cls = chain_class(ChainSpec(steps=[
         block({"plugin": "Analysis/Measure/Localization Statistics"}),
         Step(plugin="Analysis/Measure/Localization Statistics", label="view")]))
     settings = cls.Settings()
-    assert settings.each.localization_statistics.fit_precision is False
-    assert settings.view.fit_precision is True          # on the view, as ever
+    assert settings.each.localization_statistics.precision_fit == "histogram"
+    assert settings.view.precision_fit == "histogram"
 
 
 # ------------------------------------------------------------------- running
@@ -231,6 +237,60 @@ def test_a_block_in_a_block_makes_a_table_of_the_inner_regions():
     assert "cluster_id" not in session.locs or session.locs["cluster_id"].max() == 2
 
 
+def two_rois(session):
+    project = session.rois
+    file_id = next(iter(project.sources))
+    project.set_geometry(400)
+    project.add_roi(file_id, [5000.0, 5000.0])
+    project.add_roi(file_id, [10000.0, 10000.0])
+
+
+def nested(*inner_steps, **inner):
+    """A chain: over the ROIs, split each in halves, then an inner block."""
+    return ChainSpec(steps=[block({"plugin": "Test/Block/Halves"},
+                                  block(*inner_steps, label="halves", **inner),
+                                  regions="rois")])
+
+
+def warned(session, spec):
+    """``(the form's notice or None, what a run warned)``."""
+    cls = chain_class(spec)
+    notice = cls().describe(session.context(), cls.Settings()).notice
+    ctx = session.context()
+    cls().run(ctx, cls.Settings())
+    return notice, ctx.warnings
+
+
+def test_a_nested_block_that_writes_values_says_they_are_discarded():
+    session = a_session(sizes=(40, 60), noise=0)
+    two_rois(session)
+    notice, warnings = warned(session, nested({"plugin": "Test/Block/Count"},
+                                              write_values=["n"]))
+    assert notice is not None and notice.kind == "warning"
+    assert "halves writes the values n" in notice.text
+    assert "inside a nested block" in notice.text
+    lost, = [w for w in warnings if "nested block" in w]
+    assert "halves writes the values n" in lost
+
+
+def test_a_nested_blocks_last_step_that_changes_the_table_is_said_to_be_lost():
+    session = a_session(sizes=(40, 60), noise=0)
+    two_rois(session)
+    notice, warnings = warned(session, nested({"plugin": "Test/Block/Count"},
+                                              {"plugin": "Test/Block/Drop"}))
+    assert "Drop, the last step of halves" in notice.text
+    assert any("Drop, the last step of halves" in w for w in warnings)
+
+
+def test_a_nested_filter_before_a_measurement_is_not_warned_about():
+    session = a_session(sizes=(40, 60), noise=0)
+    two_rois(session)
+    notice, warnings = warned(session, nested({"plugin": "Test/Block/Drop"},
+                                              {"plugin": "Test/Block/Count"}))
+    assert notice is None or "nested block" not in notice.text
+    assert not [w for w in warnings if "nested block" in w]
+
+
 def test_the_rois_block_reports_its_status_and_stops_when_asked():
     import threading
     session = a_session(sizes=(20,) * 5, noise=0)
@@ -249,6 +309,98 @@ def test_the_rois_block_reports_its_status_and_stops_when_asked():
     result = cls().run(ctx, cls.Settings())
     sub = result.data["results"]["each"]
     assert sub.data["regions"] == 1 and any("(1 of 5 ROIs)" in t for t in said)
+
+
+# what Test/Block/PressesStop presses, and after how many regions: the Stop
+# button of a run, standing in for a person (a region's own context has no
+# `stop`, so the plugin is handed the run's here)
+PRESS = {"stop": None, "after": 0, "seen": 0}
+
+
+@register("Test/Block/PressesStop")
+class PressesStop(Plugin):
+    """Tags its region as Tag does, and presses Stop after ``PRESS["after"]``."""
+    per_region = True
+    changes_locs = True
+
+    def run(self, ctx, settings):
+        PRESS["seen"] += 1
+        if PRESS["seen"] >= PRESS["after"] and PRESS["stop"] is not None:
+            PRESS["stop"].set()
+        n = len(ctx.locs)
+        return Result(locs=Localizations({**ctx.locs.columns,
+                                          "n_here": np.full(n, float(n))},
+                                         dict(ctx.locs.metadata)),
+                      values={"tagged": n})
+
+
+def test_a_block_stopped_halfway_keeps_and_writes_back_the_regions_it_finished():
+    import threading
+    session = a_session(sizes=(30, 50, 20, 40), noise=5)
+    stop = threading.Event()
+    PRESS.update(stop=stop, after=2, seen=0)
+    cls = chain_class(ChainSpec(steps=[block({"plugin": "Test/Block/PressesStop",
+                                              "label": "tag"}, write_back=["n_here"])]))
+    ctx = session.context()
+    ctx.stop = stop
+    result = cls().run(ctx, cls.Settings())
+    session.apply(cls(), result)
+
+    sub = result.data["results"]["each"]
+    assert sub.stopped and result.stopped
+    assert sub.text.startswith("stopped after 2 of 4 cluster_id regions")
+    assert session.id_regions["cluster_id"]["tag"].columns()["tagged"].tolist() == [30, 50]
+    n_here = np.asarray(session.locs["n_here"])
+    ids = np.asarray(session.locs["cluster_id"])
+    assert (n_here[ids == 1] == 30).all() and (n_here[ids == 2] == 50).all()
+    assert np.isnan(n_here[(ids == 3) | (ids == 4)]).all()    # never reached
+    assert session.can_undo                                   # applied, as one step
+
+
+def test_a_chain_stopped_in_a_step_runs_no_step_after_it():
+    import threading
+    session = a_session(sizes=(30, 50), noise=0)
+    stop = threading.Event()
+    PRESS.update(stop=stop, after=1, seen=0)
+    cls = chain_class(ChainSpec(steps=[
+        block({"plugin": "Test/Block/PressesStop"}, label="tag", write_back=["n_here"]),
+        Step(plugin="Test/Block/Count", label="count")]))
+    ctx = session.context()
+    ctx.stop = stop
+    result = cls().run(ctx, cls.Settings())
+    assert result.stopped
+    assert [r["label"] for r in result.data["steps"]] == ["tag"]
+    assert result.text.splitlines()[-1] == "stopped before count"
+    assert "n_here" in result.locs                    # the block's part is kept
+
+
+def test_a_step_that_keeps_nothing_when_stopped_ends_the_chain_there():
+    from test_drift import simulate
+    from test_rcc import _StopsAfter
+    locs, _, _ = simulate(n_points=300, n_frames=200, per_frame=40)
+    session = Session(locs)
+    cls = chain_class(ChainSpec(steps=[Step(plugin="Analysis/Drift/RCC", label="rcc"),
+                                       Step(plugin="Test/Block/Count", label="count")]))
+    ctx = session.context()
+    # not yet when the chain starts RCC; set when RCC first looks
+    ctx.stop = _StopsAfter(1)
+    result = cls().run(ctx, cls.Settings())
+    assert result.stopped and result.locs is None
+    assert result.data["steps"] == []                 # RCC kept nothing
+    assert result.text.startswith("rcc: RCC stopped after 0 of")
+
+
+def test_a_stop_set_before_a_chain_starts_runs_none_of_it():
+    import threading
+    session = a_session()
+    stop = threading.Event()
+    stop.set()
+    cls = chain_class(ChainSpec(steps=[Step(plugin="Test/Block/Count", label="count")]))
+    ctx = session.context()
+    ctx.stop = stop
+    result = cls().run(ctx, cls.Settings())
+    assert result.stopped and result.locs is None
+    assert result.text == "stopped before count"
 
 
 # --------------------------------------------------------------- the loops
@@ -288,7 +440,7 @@ def test_a_chain_can_be_a_step_in_a_block():
 
 @register("Test/Block/Slow")
 class Slow(Plugin):
-    """Takes its time, more of it with its slow option on."""
+    """Takes its time, more of it when thorough."""
     per_region = True
     changes_locs = False
 
@@ -297,7 +449,7 @@ class Slow(Plugin):
     @_dc
     class Settings:
         from smappy.plugins import param as _p
-        thorough: bool = _p(True, label="thorough", slow=True, help="slower")
+        thorough: bool = _p(True, label="thorough", help="slower")
 
     def run(self, ctx, settings):
         import time
@@ -316,7 +468,7 @@ def test_a_blocks_time_is_estimated_from_a_few_of_its_regions():
     assert "over 40 regions" in estimate.text() and "timed on 5" in estimate.text()
 
 
-def test_a_long_block_asks_first_and_offers_its_slow_options_off(monkeypatch):
+def test_a_long_block_asks_first(monkeypatch):
     import smappy.blocks as blocks
     monkeypatch.setattr(blocks, "ASK_ABOVE_SECONDS", 0.1)
     session = a_session(sizes=(10,) * 20, noise=0)
@@ -324,10 +476,47 @@ def test_a_long_block_asks_first_and_offers_its_slow_options_off(monkeypatch):
                                               "values": {"thorough": True}})]))
     settings = cls.Settings()
     asked = cls().preflight(session.context(), settings)
-    assert "each will take" in asked.text and "over 20 regions" in asked.text
-    choice, = asked.choices
-    assert choice.label == "Slow options off"
-    assert choice.settings.each.slow.thorough is False
-    assert settings.each.slow.thorough is True          # the form is untouched
+    text = getattr(asked, "text", asked)
+    assert "each will take" in text and "over 20 regions" in text
     monkeypatch.setattr(blocks, "ASK_ABOVE_SECONDS", 1e9)
     assert cls().preflight(session.context(), settings) is None
+
+
+def test_a_block_writes_values_by_each_rule_as_regions_to_column_does():
+    from smappy.plugins.region_column import RegionsToColumn
+    from smappy.region_runs import VALUE_RULES
+    session = a_session(sizes=(40,), noise=0)
+    project = session.rois
+    file_id = next(iter(project.sources))
+    project.set_geometry(400)
+    project.add_roi(file_id, [5000.0, 5000.0])                     # all 40
+    project.add_roi(file_id, [5000.0, 5000.0],
+                    polygon=[[4990, 4900], [5100, 4900], [5100, 5100],
+                             [4990, 5100]])                       # part of them
+    original = dict(session.locs.columns)
+    written = {}
+    for rule in VALUE_RULES:
+        session.locs = Localizations(dict(original), {})
+        run(session, block({"plugin": "Test/Block/Tag"}, regions="rois",
+                           write_values=["tagged"], merge=rule))
+        session.run(RegionsToColumn(), RegionsToColumn.Settings(
+            source="Tag", values="tagged", prefix="r2c_", merge=rule))
+        by_block = np.asarray(session.locs["tagged"])
+        assert np.array_equal(by_block, np.asarray(session.locs["r2c_tagged"]),
+                              equal_nan=True)
+        written[rule] = by_block
+    # the rules differ where the two ROIs overlap
+    assert len({tuple(v) for v in written.values()}) == len(VALUE_RULES)
+
+
+def test_any_is_refused_for_written_values_and_the_form_says_so():
+    from smappy.blocks import ANY_FOR_VALUES, block_class
+    session = a_session()
+    cls = block_class(block({"plugin": "Test/Block/Count"}, write_values=["n"],
+                            merge="any"))
+    state = cls().describe(session.context(), cls.Settings())
+    assert state.notice is not None and state.notice.text == ANY_FOR_VALUES
+    with pytest.raises(ValueError, match="any applies to write back only"):
+        cls()(ctx=session.context())
+    quiet = block_class(block({"plugin": "Test/Block/Count"}))
+    assert quiet().describe(session.context(), quiet.Settings()).active["merge"] is False

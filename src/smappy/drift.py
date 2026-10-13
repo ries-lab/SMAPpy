@@ -19,6 +19,16 @@ reference structure.  Its result is a per-frame drift table
 whose row index *is* the frame number, so applying it is one fancy-index per
 coordinate.
 
+**To simplify (2026-10 review, kept for now on purpose).**  Only the spline
+fit is the default and the one users run; the time-window fit (`spline=False`)
+is kept as legacy so that GPU and CPU can be benchmarked against it -- it is
+the only path with a CUDA backend.  Once that is measured: if the GPU is not
+much faster, keep the spline fit alone, move its two kernels
+(`cpu_wrapper_chunked_approx`, `pair_indices_kdtree`) into this module, and
+delete the rest of `smappy._comet` with the ~13 settings that only the
+time-window fit reads; if it is, give the spline fit a GPU path instead.
+`two_stage` goes either way: the RCC prepass does that job more cheaply.
+
 Not wrapped: COMET's own file I/O, plotting and molecule-set output.  We hand it
 an array and get an array back; reading and writing stays with `io.hdf5`, so the
 corrected file is an ordinary smappy file that the viewer opens unchanged.
@@ -41,10 +51,13 @@ from typing import Callable, Optional, Tuple
 import numpy as np
 
 from .locs import Localizations
+from .params import param
 
 # the position columns a drift correction touches, and the drift axis each
 # follows.  Deliberately not `peak_*`: those are detection positions, kept as
 # the record of what was found where, not measurements of the structure.
+# A fit's table has no `x_pix`; a file saved in pixels keeps its own beside
+# the nm ones `io.formats.with_nm` adds, and they must move with them.
 _POSITION_COLUMNS = {"x_nm": 0, "x_pix": 0,
                      "y_nm": 1, "y_pix": 1,
                      "z_nm": 2}
@@ -63,30 +76,82 @@ class DriftSettings:
     tens of windows for the drift curve to have any time resolution.
     """
 
-    segmentation_mode: int = 2
-    segmentation_var: int = 500
-    max_drift_nm: float = 300.0      # also the neighbour-search radius
-    target_sigma_nm: float = 30.0    # refinement stops at this length scale
-    initial_sigma_nm: Optional[float] = None   # default: max_drift_nm / 3
-    boxcar_width: int = 1            # temporal smoothing between iterations
-    interpolation: str = "cubic"     # "cubic" or "catmull-rom"
-    max_locs_per_segment: Optional[int] = None   # cap, to bound memory
+    segmentation_mode: int = param(2, label="window unit",
+                                   choices=((2, "frames"),
+                                            (1, "localizations"),
+                                            (0, "windows")),
+                                   help="what window size counts; "
+                                        "time-window fit only",
+                                   advanced=True)
+    segmentation_var: int = param(500, label="window size", min=1,
+                                  help="frames or localizations per time "
+                                       "window, or the number of windows; "
+                                       "time-window fit only")
+    max_drift_nm: float = param(300.0, label="max drift", unit="nm", min=1,
+                                help="the largest drift expected; also the "
+                                     "radius within which localizations are "
+                                     "paired")
+    target_sigma_nm: float = param(30.0, label="target sigma", unit="nm",
+                                   min=0.1,
+                                   help="the finest width of the overlap "
+                                        "Gaussian, where refinement stops")
+    initial_sigma_nm: Optional[float] = param(None, label="initial sigma",
+                                              unit="nm",
+                                              help="the width the "
+                                                   "refinement starts from; "
+                                                   "auto: a third of max "
+                                                   "drift",
+                                              advanced=True)
+    boxcar_width: int = param(1, label="smoothing", unit="windows", min=1,
+                              help="running mean over this many windows "
+                                   "between refinement steps; 1 is none; "
+                                   "time-window fit only",
+                              advanced=True)
+    interpolation: str = param("cubic", choices=("cubic", "catmull-rom"),
+                               help="the curve from the window estimates to "
+                                    "every frame; time-window fit only",
+                               advanced=True)
+    max_locs_per_segment: Optional[int] = param(None,
+                                                label="max locs / window",
+                                                min=1,
+                                                help="a random subset of at "
+                                                     "most this many per "
+                                                     "window; auto: all; "
+                                                     "time-window fit only",
+                                                advanced=True)
     # L-BFGS-B relative tolerance.  COMET's own is 1e3*eps (~2e-13), which buys
     # nothing here: loosening it to 1e-7 costs 0.14 nm rms (0.9 nm worst case)
     # on the drift curve -- far below any localization precision -- and cuts the
     # cost evaluations from 423 to 154.  Raise it towards 1e-13 to reproduce
     # upstream COMET exactly.
-    optimizer_ftol: float = 1e-7
+    optimizer_ftol: float = param(1e-7, label="ftol",
+                                  help="relative change of the cost at "
+                                       "which the optimizer stops",
+                                  advanced=True)
     # Skip pairs beyond 6 sigma, where each contributes less than e^-9 of a
     # coincident pair: 1.3x faster.  The Gaussian itself is exact -- the table
     # and polynomial this once used went with the numba kernel -- so the name
-    # is historical.  The spline fit always uses the cutoff.  See NOTES.
-    approximate_kernel: bool = True
+    # is historical.  The spline fit always uses the cutoff.  See docs/drift.md.
+    approximate_kernel: bool = param(True, label="approximate kernel",
+                                     help="skip pairs more than 6 sigma "
+                                          "apart; the spline fit always "
+                                          "does",
+                                     advanced=True)
     # A looser tolerance for the coarse sigma steps.  None (the default) means
     # the same as `optimizer_ftol`: measured, loosening the coarse steps is a
-    # bad trade -- 2.3x faster for tens of nm on individual windows.  See NOTES.
-    optimizer_ftol_coarse: Optional[float] = None
-    backend: Optional[str] = None    # "cuda", "torch", "cpu"; None = fastest
+    # bad trade -- 2.3x faster for tens of nm on individual windows.  See
+    # docs/drift.md.
+    optimizer_ftol_coarse: Optional[float] = param(None, label="ftol coarse",
+                                                   help="ftol for the steps "
+                                                        "above the target "
+                                                        "sigma; auto: ftol; "
+                                                        "time-window fit only",
+                                                   advanced=True)
+    backend: Optional[str] = param(None, choices=("cuda", "cpu"),
+                                   help="where the cost is computed; auto: "
+                                        "the fastest available; time-window "
+                                        "fit only",
+                                   advanced=True)
     # Estimate from *grouped* localizations: one entry per emitter blink rather
     # than one per frame.  20-35x faster (it removes exactly the dense, very
     # short-range pairs, which is where the pair count grows fastest) and, on
@@ -96,22 +161,49 @@ class DriftSettings:
     # Check each time window's estimate against the overlap it would have with
     # no drift correction at all, and discard the ones that do not beat it --
     # the spline then bridges them.  Costs one extra pass over the pairs.
-    quality_control: bool = False   # time-window fit only, not the spline
+    quality_control: bool = param(False, label="quality control",
+                                  help="discard time windows whose fit does "
+                                       "not beat no correction; needs fit "
+                                       "spline off",
+                                  advanced=True)
     # A window is discarded when its fitted drift improves its own overlap by
     # less than this, relative to no correction at all.  0.0 keeps every window
     # whose estimate is better than nothing, which is the honest bar.
-    min_lift: float = 0.0
-    group: bool = True
-    group_dx_nm: float = 50.0        # linking radius
-    group_dt: int = 1                # frames a blink may be missing
+    min_lift: float = param(0.0, label="min lift",
+                            help="how much a window's fit must improve its "
+                                 "overlap over no correction to be kept",
+                            advanced=True)
+    group: bool = param(True, label="merge blinks",
+                        help="merge the localizations of one blink into one "
+                             "before estimating")
+    # None: as the session merges blinks (`merge_from_session`), so that the
+    # estimate sees the blinks the Render tab shows; 50 nm and 1 frame, the
+    # session's own defaults, where there is no session
+    group_dx_nm: Optional[float] = param(None, label="within", unit="nm", min=0,
+                                         help="how close localizations in "
+                                              "consecutive frames must be to be "
+                                              "merged; auto: the session's merge "
+                                              "settings",
+                                         advanced=True)
+    group_dt: Optional[int] = param(None, label="dark frames", unit="frames", min=0,
+                                    help="how many dark frames a blink may skip; "
+                                         "auto: the session's merge settings",
+                                    advanced=True)
     # Estimate in two passes: a grouped one to get within a few nm, then an
     # ungrouped one over a small radius to refine.  The pair count is what costs
     # time, and once the coarse pass has taken the drift out, a 30 nm radius
     # keeps a seventh of the pairs -- 18 s instead of 153 s for 99% of the
     # improvement.  The small radius also bounds the fine pass, which is what
     # keeps it from producing the runaway window the single pass has here.
-    two_stage: bool = False
-    two_stage_radius_nm: float = 30.0
+    two_stage: bool = param(False, label="two stage",
+                            help="a grouped pass, then an ungrouped one "
+                                 "within fine radius",
+                            advanced=True)
+    two_stage_radius_nm: float = param(30.0, label="fine radius", unit="nm",
+                                       min=0,
+                                       help="the max drift of the second, "
+                                            "ungrouped pass",
+                                       advanced=True)
     # A coarse RCC pass first, and then COMET only has to find what RCC left
     # behind.  This is the lever when the estimate would take an afternoon:
     # COMET's cost is the pair count, which grows steeply with the search
@@ -120,13 +212,24 @@ class DriftSettings:
     # `rcc_prepass_max_drift_nm` and COMET refines the tens that are left over
     # a `max_drift_nm` of a few tens -- the same trade as `two_stage`, with a
     # first pass that is seconds instead of the expensive half.
-    rcc_prepass: bool = False
-    rcc_prepass_windows: int = 10    # time windows RCC correlates
+    rcc_prepass: bool = param(False, label="RCC first",
+                              help="correlate rendered time windows to take "
+                                   "out the bulk of the drift, then run "
+                                   "COMET over a small max drift",
+                              advanced=True)
+    rcc_prepass_windows: int = param(10, label="RCC windows", min=2,
+                                     help="the time windows RCC correlates",
+                                     advanced=True)
     # How far the prepass looks.  None is RCC's own default, which is the right
     # thing when the setting is turned on by hand; the preflight's offer puts
     # the max drift that was asked for here, since that is what the user
     # believes the stage did, and leaves `max_drift_nm` for the refinement.
-    rcc_prepass_max_drift_nm: Optional[float] = None
+    rcc_prepass_max_drift_nm: Optional[float] = param(None,
+                                                      label="RCC max drift",
+                                                      unit="nm",
+                                                      help="auto: RCC's own "
+                                                           "default",
+                                                      advanced=True)
     # Fit the drift as a cubic B-spline in time instead of one free vector per
     # time window.  Drift is smooth -- slow creep, occasionally a small jump --
     # so a curve with a coefficient every `spline_knot_frames` frames has far
@@ -137,15 +240,24 @@ class DriftSettings:
     # the per-frame drift.  B-splines are variation-diminishing, so the curve
     # cannot overshoot the way an interpolating cubic spline through noisy
     # window estimates does.
-    spline: bool = True
+    spline: bool = param(True, label="fit spline",
+                         help="fit the drift as a smooth curve in time "
+                              "rather than one value per time window")
     # 2000 frames was the knee on the clathrin dataset (26 coefficients over
     # 46 005 frames); finer knots are noisier without being sharper, and there
     # was no sign of over-smoothing even at 4000.  A dataset with faster drift
     # wants a smaller spacing, which shows up as out-of-sample sharpness getting
     # worse.  Quality control does not apply here -- there are no time windows.
-    spline_knot_frames: int = 2000   # spacing of the coefficients, in frames
-    spline_penalty: float = 0.0      # extra roughness penalty on 2nd differences
-    use_z: Optional[bool] = None     # None: 3D if the table has z_nm
+    spline_knot_frames: int = param(2000, label="knot spacing", unit="frames",
+                                    min=10,
+                                    help="frames between the spline's "
+                                         "coefficients")
+    spline_penalty: float = param(0.0, label="spline penalty", min=0,
+                                  help="extra penalty on the curve's "
+                                       "bending; 0 is none",
+                                  advanced=True)
+    use_z: Optional[bool] = param(None, label="correct z",
+                                  help="auto: if the table has z")
 
 
 class Drift:
@@ -282,8 +394,8 @@ class Drift:
 # Both the time and the memory of a drift estimate are set by one number: how
 # many neighbour pairs there are within `max_drift_nm`.  Every cost evaluation
 # is one `exp()` per pair, and the KD-tree search has to hold all of them at
-# once.  The constants below are measured on an M1 Max (see NOTES.md, "Where
-# the time goes"); they are the right order on any CPU and are only ever used
+# once.  The constants below are measured on an M1 Max (see docs/drift.md,
+# "Where the time goes"); they are the right order on any CPU and are only ever used
 # to decide whether to warn, never to change what is computed.
 _SECONDS_PER_PAIR_EVALUATION = 2.1e-9   # the compiled kernel, across the cores
 _SECONDS_PER_PAIR_SEARCH = 16e-9        # cKDTree.query_pairs
@@ -519,13 +631,19 @@ def _duration(seconds: float) -> str:
 def estimate_drift(locs: Localizations, settings: Optional[DriftSettings] = None,
                    select=None, pixelsize_nm: Optional[float] = None,
                    display: bool = False,
-                   progress: Optional[Progress] = None) -> Drift:
+                   progress: Optional[Progress] = None, stop=None) -> Drift:
     """Estimate drift from the selected localizations.
 
     ``select`` is what to estimate *from*: a `LocFilter`, a boolean mask, an
     index array, or None for everything.  The result covers every frame of the
     input table, not only the selected ones.
+
+    ``stop`` (a `threading.Event`, the plugin's `Context.stop`) ends the
+    spline fit at its next cost evaluation by raising `plugins.Stopped`: a
+    curve refined half way is not one to correct a table with.  The legacy
+    time-window fit only looks before it starts.
     """
+    _check_stop(stop, "before it started")
     from ._comet import best_backend, comet_run_kd   # vendored; see _comet/
     from ._comet.core import drift_optimizer
     from ._comet.core.qc_utils import flag_flawed_segments_by_lift
@@ -542,14 +660,16 @@ def estimate_drift(locs: Localizations, settings: Optional[DriftSettings] = None
     # and "two stage" were skipped without a word, and the slow-run dialogue's
     # "RCC first, then COMET within 50 nm" ran one fit over 50 nm and no RCC.
     if settings.rcc_prepass:
-        return _rcc_prepass(locs, settings, select, pixelsize_nm, display, progress)
+        return _rcc_prepass(locs, settings, select, pixelsize_nm, display,
+                            progress, stop)
     if settings.two_stage:
-        return _two_stage(locs, settings, select, pixelsize_nm, display, progress)
+        return _two_stage(locs, settings, select, pixelsize_nm, display,
+                          progress, stop)
     if settings.spline:
         return _estimate_spline(locs, settings, select, pixelsize_nm, display,
-                                progress)
+                                progress, stop)
 
-    # Opt in to the two changes made to the vendored COMET (see NOTES.md); its
+    # Opt in to the two changes made to the vendored COMET (docs/drift.md); its
     # own defaults are untouched for anyone importing it directly.
     drift_optimizer.CPU_WRAPPER = (cpu_wrapper_chunked_approx
                                    if settings.approximate_kernel
@@ -625,7 +745,7 @@ def _spline_basis(x, n_coefficients: int, lo: float, hi: float, degree: int = 3)
 
 def _estimate_spline(locs: Localizations, settings: DriftSettings, select,
                      pixelsize_nm: Optional[float], display: bool,
-                     progress: Optional[Progress] = None) -> "Drift":
+                     progress: Optional[Progress] = None, stop=None) -> "Drift":
     """Fit drift as a spline in time, with no segmentation at all.
 
     The optimizer's variables are the spline's coefficients; the cost and its
@@ -678,6 +798,8 @@ def _estimate_spline(locs: Localizations, settings: DriftSettings, select,
     expected = _sigma_levels(settings) * _EVALUATIONS_PER_SIGMA_LEVEL
 
     def objective(flat, sigma, factor):
+        # raising here is how the optimizer is left: it has no stop of its own
+        _check_stop(stop, f"at sigma {sigma:.0f} nm")
         c = flat.reshape(n_coefficients, 3)
         mu = np.ascontiguousarray(basis @ c)
         value, gradient = cpu_wrapper_chunked_approx(
@@ -717,6 +839,13 @@ def _estimate_spline(locs: Localizations, settings: DriftSettings, select,
 Progress = Callable[[str], None]
 
 
+def _check_stop(stop, where: str) -> None:
+    """Raise `plugins.Stopped` if ``stop`` is set."""
+    if stop is not None and stop.is_set():
+        from .plugins import Stopped
+        raise Stopped(f"COMET stopped {where}: nothing was corrected")
+
+
 def _log(enabled: bool, message: str, progress: Optional[Progress] = None) -> None:
     if progress is not None:
         progress(message)
@@ -726,18 +855,18 @@ def _log(enabled: bool, message: str, progress: Optional[Progress] = None) -> No
 
 def _two_stage(locs: Localizations, settings: DriftSettings, select,
                pixelsize_nm: Optional[float], display: bool,
-               progress: Optional[Progress] = None) -> "Drift":
+               progress: Optional[Progress] = None, stop=None) -> "Drift":
     """A grouped pass to get close, then an ungrouped one over a small radius."""
     _log(display, "pass 1 of 2: grouped, over the full search radius", progress)
     coarse = estimate_drift(locs, replace(settings, two_stage=False, group=True),
-                            select, pixelsize_nm, display, progress)
+                            select, pixelsize_nm, display, progress, stop)
     radius = settings.two_stage_radius_nm
     _log(display, f"pass 2 of 2: ungrouped, within {radius:g} nm", progress)
     fine = estimate_drift(
         coarse.apply(locs, pixelsize_nm),
         replace(settings, two_stage=False, group=False, max_drift_nm=radius,
                 initial_sigma_nm=radius / 3.0, target_sigma_nm=radius / 5.0),
-        select, pixelsize_nm, display, progress)
+        select, pixelsize_nm, display, progress, stop)
     # the two are drift of the same sample measured in sequence, so they add
     return Drift(coarse.drift + fine.drift, settings, n_used=fine.n_used,
                  flagged_windows=fine.flagged_windows)
@@ -745,7 +874,7 @@ def _two_stage(locs: Localizations, settings: DriftSettings, select,
 
 def _rcc_prepass(locs: Localizations, settings: DriftSettings, select,
                  pixelsize_nm: Optional[float], display: bool,
-                 progress: Optional[Progress] = None) -> "Drift":
+                 progress: Optional[Progress] = None, stop=None) -> "Drift":
     """RCC for the bulk of the drift, then COMET for what is left of it.
 
     The two are drift of the same sample measured one after the other, so they
@@ -760,21 +889,24 @@ def _rcc_prepass(locs: Localizations, settings: DriftSettings, select,
         rcc = replace(rcc, max_drift_nm=float(settings.rcc_prepass_max_drift_nm))
     _log(display, f"pass 1 of 2: RCC over {rcc.n_timepoints} time windows, "
                   f"within {rcc.max_drift_nm:g} nm", progress)
-    coarse = estimate_drift_rcc(locs, rcc, select, pixelsize_nm, display)
+    coarse = estimate_drift_rcc(locs, rcc, select, pixelsize_nm, display,
+                                stop=stop)
     _log(display, f"pass 2 of 2: COMET within {settings.max_drift_nm:g} nm of "
                   "what RCC left", progress)
     fine = estimate_drift(coarse.apply(locs, pixelsize_nm),
                           replace(settings, rcc_prepass=False),
-                          select, pixelsize_nm, display, progress)
+                          select, pixelsize_nm, display, progress, stop)
     return Drift(coarse.drift + fine.drift, settings, n_used=fine.n_used,
                  flagged_windows=fine.flagged_windows, method="rcc+comet")
 
 
 def correct_drift(locs: Localizations, settings: Optional[DriftSettings] = None,
                   select=None, pixelsize_nm: Optional[float] = None,
-                  display: bool = False, progress: Optional[Progress] = None):
+                  display: bool = False, progress: Optional[Progress] = None,
+                  stop=None):
     """Estimate from the selection, correct everything.  Returns (locs, drift)."""
-    drift = estimate_drift(locs, settings, select, pixelsize_nm, display, progress)
+    drift = estimate_drift(locs, settings, select, pixelsize_nm, display,
+                           progress, stop)
     _log(display, f"applying the drift to {len(locs):,} localizations", progress)
     return drift.apply(locs, pixelsize_nm), drift
 
@@ -832,17 +964,51 @@ def load_drift(path) -> Drift:
 
 
 # ---------------------------------------------------------------------- helpers
+MERGE_DX_NM = 50.0      # the merge settings without a session: the session's
+MERGE_DT = 1            # own defaults (`session.DEFAULT_GROUP_SETTINGS`)
+
+
+def merge_values(session) -> Tuple[float, int]:
+    """The distance and dark frames ``session`` merges blinks with, or the
+    defaults without one.
+
+    The session may merge by precision instead of a fixed distance; the
+    drift estimate links by a fixed distance only (it needs no precision
+    column, and works on a table in pixels), so it takes the largest distance
+    that mode allows, `dx_max`.
+    """
+    merge = getattr(session, "group_settings", None)
+    if merge is None:
+        return MERGE_DX_NM, MERGE_DT
+    dx = merge.dx if merge.link == "fixed" else merge.dx_max
+    return float(dx), int(merge.dt)
+
+
+def merge_from_session(settings, session):
+    """``settings`` (`DriftSettings` or `RCCSettings`) with the merge distance
+    and dark frames left on auto taken from ``session``: what a plugin runs
+    with, and records, so that the log says the numbers that were used."""
+    dx, dt = merge_values(session)
+    changes = {}
+    if settings.group_dx_nm is None:
+        changes["group_dx_nm"] = dx
+    if settings.group_dt is None:
+        changes["group_dt"] = dt
+    return replace(settings, **changes) if changes else settings
+
+
 def _grouped(locs: Localizations, settings: "DriftSettings",
              pixelsize_nm: Optional[float], display: bool = False,
              progress: Optional[Progress] = None) -> Localizations:
     """Collapse each emitter's blink into one localization before estimating."""
     from .group import GroupSettings, group
 
-    dx = settings.group_dx_nm
+    dx = MERGE_DX_NM if settings.group_dx_nm is None else settings.group_dx_nm
+    dt = MERGE_DT if settings.group_dt is None else settings.group_dt
     if "x_nm" not in locs:  # a table in pixels; the linking radius is in nm
         dx /= _pixelsize_nm(locs, pixelsize_nm)
     _log(display, f"grouping {len(locs):,} localizations", progress)
-    grouped, _ = group(locs, GroupSettings(dx=dx, dt=settings.group_dt))
+    grouped, _ = group(locs, GroupSettings(dx=dx, dt=dt))
     _log(display, f"grouped {len(locs):,} localizations into {len(grouped):,} "
                   f"blinks", progress)
     return grouped
@@ -912,15 +1078,11 @@ def _pixelsize_nm(locs: Localizations, pixelsize_nm: Optional[float]) -> float:
 def _positions_nm(locs: Localizations, pixelsize_nm: Optional[float],
                   use_z: Optional[bool]):
     """x, y, z of the whole table in nm; z is zero for a 2D table."""
-    if "x_nm" in locs and "y_nm" in locs:
-        x = np.asarray(locs["x_nm"], dtype=np.float64)
-        y = np.asarray(locs["y_nm"], dtype=np.float64)
-    elif "x_pix" in locs and "y_pix" in locs:
-        scale = _pixelsize_nm(locs, pixelsize_nm)
-        x = np.asarray(locs["x_pix"], dtype=np.float64) * scale
-        y = np.asarray(locs["y_pix"], dtype=np.float64) * scale
-    else:
-        raise ValueError("no position columns (x_nm/y_nm or x_pix/y_pix)")
+    if "x_nm" not in locs or "y_nm" not in locs:
+        raise ValueError("no position columns x_nm, y_nm; the table has "
+                         + ", ".join(sorted(locs.keys())))
+    x = np.asarray(locs["x_nm"], dtype=np.float64)
+    y = np.asarray(locs["y_nm"], dtype=np.float64)
 
     has_z = "z_nm" in locs
     if use_z is None:

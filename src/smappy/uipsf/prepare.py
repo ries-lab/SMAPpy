@@ -21,6 +21,8 @@ from typing import Optional, Sequence
 
 import numpy as np
 
+from ..camera import to_photons
+
 
 @dataclass
 class Split:
@@ -31,7 +33,9 @@ class Split:
     because uiPSF stacks the two channels into one array; the secondary is
     flipped along that axis when the layout is mirrored.  `to_chip` undoes
     exactly this, which is what turns uiPSF's channel transformation back
-    into chip pixels.
+    into chip pixels.  ``split_position`` is in the frame's own pixels here;
+    a profile and the geometry written with a calibration give it on the
+    chip, as the fitter reads it.
     """
     layout: str
     main_channel: str
@@ -83,7 +87,7 @@ class Split:
         """The split as `smappy.calibrate.dual` records it with a calibration."""
         coord_axis = 1 - self.axis
         return {"layout": self.layout, "main_channel": self.main_channel,
-                "split_position": int(self.split_position),
+                "split_position": int(self.split_position + self.origin[coord_axis]),
                 "image_shape": list(self.image_shape),
                 "coordinate_system": "camera-chip" if any(
                     s.get("roi") is not None for s in sources) else "roi-local",
@@ -93,17 +97,26 @@ class Split:
 
 
 def make_split(shape, dual: dict, origin=(0, 0)) -> Split:
-    """The `Split` of a frame of ``shape`` for a profile's ``dual`` section."""
-    from ..calibrate.dual import DualColorSettings
-    settings = DualColorSettings(layout=dual.get("layout", "up-down mirrored"),
-                                 main_channel=dual.get("main_channel", "upper"),
-                                 split_position=dual.get("split_position"))
+    """The `Split` of a frame of ``shape`` for a profile's ``dual`` section,
+    whose ``split_position`` is on the chip; the frame begins at ``origin``."""
+    from ..calibrate.dual import LAYOUTS, RegisterSettings
+    settings = RegisterSettings(layout=dual.get("layout", "up-down mirrored"),
+                                main_channel=dual.get("main_channel", "upper"),
+                                split_position=dual.get("split_position"))
     settings.validate()
+    # uiPSF is handed the halves already cut, so the profile has to say how
+    if settings.layout not in LAYOUTS:
+        raise ValueError(f"a microscope profile names its layout, one of {LAYOUTS}")
+    if settings.main_channel == "auto":
+        settings.main_channel = "left" if "right-left" in settings.layout else "upper"
     shape = tuple(int(n) for n in shape[-2:])
     axis = 1 if "right-left" in settings.layout else 0
-    split = settings.split_position or shape[axis] // 2
+    start = int(origin[1 - axis])                # the frame's first pixel on that axis
+    split = (settings.split_position - start if settings.split_position is not None
+             else shape[axis] // 2)
     if not 0 < split < shape[axis]:
-        raise ValueError(f"the split at {split} px is outside the {shape[axis]} px frame")
+        raise ValueError(f"the split at {split + start} px (chip) is outside the "
+                         f"{shape[axis]} px frame starting at {start}")
     return Split(settings.layout, settings.main_channel, int(split), shape,
                  min(split, shape[axis] - split), tuple(origin))
 
@@ -132,26 +145,13 @@ def channel_shift(channels: np.ndarray) -> list:
     return [[0.0, 0.0], [float(dy), float(dx)]]
 
 
-def to_photons(adu: np.ndarray, camera) -> np.ndarray:
-    """Camera counts -> photons, as the fitter converts them."""
-    return ((np.asarray(adu, np.float32) - float(camera.offset))
-            * float(camera.adu_to_photons)).astype(np.float32)
-
-
 def resolve_camera(camera_settings, source, profile):
-    """The camera, with the profile's pixel size where nothing else gave one."""
-    from ..io.tiff import camera_metadata
-    from ..metadata import CameraMetadata
-    overrides = camera_settings.overrides() if camera_settings is not None else {}
-    if camera_settings is not None and camera_settings.preset:
-        from dataclasses import asdict
-        preset = asdict(CameraMetadata.from_yaml(camera_settings.preset))
-        overrides = {**{k: v for k, v in preset.items() if v is not None}, **overrides}
-    name = camera_settings.camera if camera_settings is not None else ""
-    if source is not None:
-        meta = camera_metadata(source, overrides=overrides, camera=name, require=False)
-    else:
-        meta = CameraMetadata.from_dict(overrides)
+    """The camera as a fitter resolves it (`CameraSettings.resolve`), with the
+    profile's pixel size where nothing else gave one."""
+    if camera_settings is None:
+        from ..plugins.fit import CameraSettings
+        camera_settings = CameraSettings()
+    meta = camera_settings.resolve(source, require=False)
     if meta.pixelsize_um is None and profile.pixelsize_xy_um is not None:
         meta.pixelsize_um = list(profile.pixelsize_xy_um)
     meta.require()

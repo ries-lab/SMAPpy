@@ -113,6 +113,39 @@ def test_grouped_estimate_still_corrects_every_localization():
     assert np.abs(error).mean() < 5.0
 
 
+def test_the_drift_plugins_merge_blinks_as_the_session_does_unless_told_otherwise():
+    from smappy.drift import merge_from_session
+    from smappy.group import GroupSettings
+    from smappy.plugins.drift_comet import CometDrift
+    from smappy.plugins.drift_rcc import RCCDrift
+    from smappy.rcc import RCCSettings
+    from smappy.session import Session
+
+    # no session: the session's own defaults, so a script's numbers do not move
+    for settings in (DriftSettings(), RCCSettings()):
+        alone = merge_from_session(settings, None)
+        assert (alone.group_dx_nm, alone.group_dt) == (50.0, 1)
+    session = Session()
+    session.set_group_settings(GroupSettings(dx=30.0, dt=3))
+    for settings in (DriftSettings(), RCCSettings()):
+        used = merge_from_session(settings, session)
+        assert (used.group_dx_nm, used.group_dt) == (30.0, 3)
+        own = merge_from_session(type(settings)(group_dx_nm=80.0, group_dt=0), session)
+        assert (own.group_dx_nm, own.group_dt) == (80.0, 0)
+    for plugin, settings in ((CometDrift(), DriftSettings()), (RCCDrift(), RCCSettings())):
+        hints = plugin.describe(session.context(), settings).hints
+        assert hints == {"group_dx_nm": 30.0, "group_dt": 3}
+    # and in a two-colour fit's own drift step, which runs after the fit
+    from smappy import plugins
+    fit = plugins.get("Localize/Gaussian 2D 2C")()
+    hints = fit.describe(session.context(), fit.Settings()).hints
+    assert hints["finish.comet.group_dx_nm"] == 30.0 and hints["finish.rcc.group_dt"] == 3
+    # by precision, the widest distance that mode allows
+    session.set_group_settings(GroupSettings(link="precision", dx_max=120.0, dt=2))
+    used = merge_from_session(DriftSettings(), session)
+    assert (used.group_dx_nm, used.group_dt) == (120.0, 2)
+
+
 def test_two_stage_matches_the_single_pass():
     locs, truth, _ = simulate()
     single = estimate_drift(locs, SETTINGS)
@@ -435,3 +468,35 @@ def test_a_subset_per_window_is_the_same_on_every_run():
     first = estimate_drift(locs, settings).drift
     np.random.seed(123)                      # whatever else has drawn numbers
     np.testing.assert_array_equal(first, estimate_drift(locs, settings).drift)
+
+
+class _StopsAfter:
+    """A stop that is set once it has been asked ``n`` times."""
+
+    def __init__(self, n):
+        self.n, self.asked = n, 0
+
+    def is_set(self):
+        self.asked += 1
+        return self.asked > self.n
+
+
+def test_comet_stopped_mid_fit_raises_stopped_and_corrects_nothing():
+    """The spline fit is one optimisation: half refined is not a curve to
+    subtract, so a stop leaves the table as it was."""
+    import threading
+
+    from smappy.plugins import Context, Stopped
+    from smappy.plugins.drift_comet import CometDrift
+    from dataclasses import replace
+    spline = replace(SETTINGS, spline=True, spline_knot_frames=10)
+    locs, _, _ = simulate()
+    with pytest.raises(Stopped, match="COMET stopped at sigma"):
+        estimate_drift(locs, spline, stop=_StopsAfter(5))
+    stop = threading.Event()
+    stop.set()
+    with pytest.raises(Stopped, match="nothing was corrected"):
+        CometDrift().run(Context(locs=locs, stop=stop), spline)
+    # a stop never set changes nothing
+    assert np.array_equal(estimate_drift(locs, spline).drift,
+                          estimate_drift(locs, spline, stop=_StopsAfter(10**6)).drift)

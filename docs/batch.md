@@ -79,14 +79,16 @@ steps:
     regions: rois               # rois, or an id column such as cluster_id
     write_back: [corner]        # optional: columns merged into the table
     write_values: [n_corners]   # optional: numbers, each region's onto its rows
-    merge: last                 # optional: last | first | mean | any
-    keep_figures: auto          # optional: auto | yes | no
+    merge: last                 # optional: last | first | mean | any (any: write_back only)
     steps:
       - plugin: Analysis/Measure/NPC Corners
         values: {}
   ```
 
-  A block's step may be a block or a chain.  Among the chain's settings a
+  A block's step may be a block or a chain.  A block inside a block cannot
+  change the real table: its *write back*, its *write values* (unless the
+  outer block writes them back) and a last step that changes the table are
+  discarded, and the editor and the run say so.  Among the chain's settings a
   block is a part, `<key>.regions`, `<key>.write_back`, ... and its steps
   inside it, `<key>.<step key>.<field>`.
 
@@ -130,7 +132,7 @@ chain asks all of them once, up front, and runs without asking again; in a
 batch the job says what an answer is (`preflight: skip | proceed | abort`,
 default `skip`: the file is skipped and the report says why).
 
-### ROIs: segment, evaluate, analyse
+### ROIs: segment, measure, analyse
 
 Decided 2026-10-05, and since 2026-10-11 through blocks (`docs/regions.md`).
 A chain can do what the ROI manager does by hand:
@@ -138,7 +140,7 @@ A chain can do what the ROI manager does by hand:
 * a **segmenter** (`Analysis/Regions/Find/...`) is an ordinary step; the ROIs it
   finds go into the scratch session's ROI project;
 * a **block over the ROIs** runs its steps in *every* ROI the project
-  includes -- reviewed and ticked *use*, whoever made it -- with
+  includes -- ticked *use*, whoever made it -- with
   `ROIProject.evaluate`, and the chain goes on only when all of them are
   done.  A ROI on which a step fails loses that step's entry and is counted
   in the block's line; no ROI at all fails the block.  Results still current
@@ -147,33 +149,33 @@ A chain can do what the ROI manager does by hand:
 * its results are **stored with the ROIs** as an evaluation run of their own,
   marked with the block (`run["chain"]`, ``block <label>``), under each
   step's name -- the
-  plugin's when the step is not renamed.  The evaluation window's pipeline
+  plugin's when the step is not renamed.  The per-region steps window's list
   is not touched: it is the user's, set up for whatever they do next.  A
   result belongs to its ROI and says how it was made
   (`ROIProject.evaluations`: the newest result under each name that is
   still true of the ROI's data, with its plugin, version and parameters),
-  so the site table (`ROIProject.results`) holds the chain's columns beside
-  the pipeline's, and an analysis step -- in the chain, or run from the GUI
+  so the results table (`ROIProject.results`) holds the chain's columns beside
+  the per-region steps', and an analysis step -- in the chain, or run from the GUI
   afterwards -- reads them without knowing who ran them.  The name is the
-  identity: the same evaluator under its name again replaces its numbers,
+  identity: the same plugin under its name again replaces its numbers,
   renamed it adds a second set to compare;
 * a step in a block sees the ROI with every layer's filter and grouping
   (`ROIProject.region_context`; the layer the ROI manager follows, the first
   unless changed, is its default), so its grouping choice is greyed out; a
   `Chain/Layers` step before the block is how a chain sets that up.  What
   a block measures per region of an id column is handed back the same way,
-  as `Result.data["id_regions"]` into `Session.id_regions`.
+  as `Result.id_regions` into `Session.id_regions`.
 
 The scratch session carries a copy of the ROI project as it is
 (`Session.scratch`), and the chain hands the copy back as
-`Result.data["roi_project"]` when a step changed it; `Session.apply` loads it
+`Result.roi_project` when a step changed it; `Session.apply` loads it
 into the session's project, the object the ROI manager's window holds.  So,
 as for the table, nothing reaches the ROI manager until the whole chain has
 succeeded.  Undo does not take the ROIs back: the ROI manager has no undo.
 
 The shipped `Analysis/Regions/Workflow/NPC Analysis` is such a chain
 (`src/smappy/plugins/npc_analysis.chain.yaml`): group, NPC segmenter, NPC
-Corners, NPC Labeling Efficiency, which takes the counts by the plugin that
+Corners, NPC labelling efficiency, which takes the counts by the plugin that
 made them and its cutoffs from their settings.
 
 An ROI analysis (`plugins.roi.SiteAnalysisPlugin`: `evaluator`, the path of
@@ -243,15 +245,20 @@ log.
 
 A layer the step names but the session does not have is created; in the GUI
 the step acts on the session's layers, which is how the Render tab then shows
-what the chain did.  It hands its layers back as `Result.data["layers"]`,
-which `Session.apply` honours, the same way `data["bounds"]` works.
+what the chain did.  It hands its layers back as `Result.layers`,
+which `Session.apply` honours, the same way `Result.bounds` works.
 
 ### Grouping
+
+Grouping is what the GUI calls *merge blinks* (also called linking): the
+localizations in consecutive frames that come from one blinking event are
+combined into one row.  The chain files keep the word `grouping`, with the
+values `grouped` (the GUI's *merged*) and `ungrouped` (*not merged*).
 
 Which table a step reads -- one row per localization, or one per blink -- is
 decided, lowest priority first, by:
 
-1. **the layer** -- its own grouping, as in Render.  The default.
+1. **the layer** -- its own *merge blinks* tick, as in Render.  The default.
 2. **the chain** -- `grouping: grouped | ungrouped` overrides every layer.
 3. **the step** -- `grouping:` in the chain file, the user's choice for that
    plugin, on every layer.
@@ -261,11 +268,11 @@ decided, lowest priority first, by:
 
 A plugin reads the result through `ctx.table(layer)`, which returns
 `(locs, selection)` for that layer with the grouping resolved -- the
-equivalent of SMAP's `getloc(..., 'grouping', ...)`.  `ctx.locs` stays the
-ungrouped table, so a plugin that never calls `ctx.table` behaves as it always
-did.  A step that runs on the grouped table and hands back a new table is
-refused: a grouped run is for measuring, and there is no way back from one row
-per blink to the localizations it came from.
+equivalent of SMAP's `getloc(..., 'grouping', ...)`; for the step's own
+layer that is `ctx.locs` and `ctx.selection`.  A step that runs on the grouped
+table and hands back a new table is refused: a grouped run is for measuring,
+and there is no way back from one row per blink to the localizations it came
+from -- which is why a plugin that changes the table requires *ungrouped*.
 
 ## The batch job
 

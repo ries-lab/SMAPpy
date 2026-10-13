@@ -1,6 +1,6 @@
 ---
-version: "2"
-covers: [smappy.psf.SplinePSF, smappy.io.calibration.load_spline_calibration, smappy.io.calibration.SplineCalibration, smappy.io.calibration.evaluate_spline, smappy.io.calibration.warn_on_em_mismatch, smappy.roi.cut_rois, smappy.calibrate.core.build_calibration]
+version: "4"
+covers: [smappy.psf.SplinePSF, smappy.io.calibration.load_spline_calibration, smappy.io.calibration.SplineCalibration, smappy.io.calibration.evaluate_spline, smappy.io.calibration.warn_on_em_mismatch, smappy.fit_rois.cut_rois, smappy.calibrate.core.build_calibration]
 ---
 
 ## What it does
@@ -9,17 +9,22 @@ This is the 3D fitter.  It does what [Gaussian 2D](plugin:Localize/Gaussian 2D)
 does -- reads the camera frames, finds the single fluorophores that are on,
 and fits each one to get its position far below the size of a pixel -- but
 the model it fits is not a Gaussian.  It is the **measured** image of a point
-source on this microscope, at every height, taken from a *bead calibration*
-and interpolated with cubic splines -- the method of
+source on this microscope, at every height, taken from a
+[bead calibration](plugin:Panels/Glossary) (also called a spline calibration,
+cspline or experimental PSF model) and interpolated with cubic splines -- the
+method of
 [Li et al. 2018](https://doi.org/10.1038/nmeth.4661).
 Because that image changes with the emitter's distance from the focal plane,
 the fit also tells how far it was: every localization gets a `z_nm` and a
 `z_err_nm` besides `x`, `y` and the photons.
 
 The shape has to change with z in a way that tells above from below.  The
-usual way is a weak cylindrical lens in the detection path (*astigmatism*):
+usual way is a weak cylindrical lens in the detection path
+([astigmatism](plugin:Panels/Glossary)):
 the spot is then stretched along one axis above focus, along the other below,
-and round in between.  Any other engineered PSF works as well, as long as the
+and round in between.  Any other engineered [PSF](plugin:Panels/Glossary)
+(point spread function: the image one molecule makes on the camera) works as
+well, as long as the
 calibration was measured with it -- and so do the aberrations of an ordinary
 objective, which a Gaussian would get wrong and a measured model does not.
 
@@ -27,15 +32,21 @@ What it needs:
 
 * **A calibration** of this microscope, in this configuration: a z-stack of
   fluorescent beads on a coverslip, turned into a model with
-  **Tools > Bead calibration...** (the *Bead calibration* section of the
-  Localize tab opens it too; saving the calibration puts it into this
-  plugin's *calibration* field).  A SMAP `_3dcal.mat` works as well.  Take
+  the bead calibration window (the *Bead calibration* section of the
+  Localize tab opens it; saving the calibration puts it into this
+  plugin's *calibration* field).  A SMAP `_3dcal.mat` works as well, and
+  can be kept as an `.h5` by loading and saving it:
+  `save_spline_calibration("beads.h5", load_spline_calibration("beads_3dcal.mat"))`,
+  both from `smappy.io.calibration` (SMAP's averaged bead stack is not
+  carried over; the spline is, turned round if it was mirrored).  Take
   the beads with the same objective, lens, filters, camera and camera
   settings as the data; a calibration from another day is fine as long as
   none of these changed.
 * **The camera**, exactly as for the Gaussian fitter: the conversion to
   photons must be right, or every photon count and every precision is off.
-* **Sparse enough data**: an emitter with a neighbour inside its ROI is fitted
+* **Sparse enough data**: an emitter with a neighbour inside its
+  [fit box](plugin:Panels/Glossary) (also called ROI size or fitting window:
+  the square of pixels fitted around it) is fitted
   as one spot, and its z is pulled towards focus (see *Output*).
 
 For 2D data without a calibration, use [Gaussian 2D](plugin:Localize/Gaussian 2D);
@@ -76,11 +87,11 @@ fitted = model.unpack(model.fit(rois))
 ok = np.isfinite(fitted["z_nm"])
 ```
 
-The detection, the ROIs and the fit itself are those of
+The detection, the fit boxes and the fit itself are those of
 [Gaussian 2D](plugin:Localize/Gaussian 2D), which explains them step by step:
 the counts are converted to photons, candidates are found in a
-difference-of-Gaussians filtered image, a square ROI is cut around each, and
-the ROI is fitted by maximum likelihood with Levenberg-Marquardt.  What is
+difference-of-Gaussians filtered image, a square fit box is cut around each, and
+the fit box is fitted by maximum likelihood with Levenberg-Marquardt.  What is
 different here is the model, and where it comes from.
 
 **1. The calibration.**  Beads are small and bright, so a bead's image *is*
@@ -99,7 +110,7 @@ through the measured values and joins its neighbours without a kink.  That
 makes the model, and how it changes with x, y and z, available everywhere,
 which is what a fit needs.
 
-```figure The calibration.  Top: the spline model at five heights, as the fitter sees it in a 13-pixel ROI.  Bottom: the PSF the simulated beads were drawn with.  The spot is stretched along x below focus and along y above it; the model has learnt that from nine beads.
+```figure The calibration.  Top: the spline model at five heights, as the fitter sees it in a 13-pixel fit box.  Bottom: the PSF the simulated beads were drawn with.  The spot is stretched along x below focus and along y above it; the model has learnt that from nine beads.
 heights = np.array([-600.0, -300.0, 0.0, 300.0, 600.0])
 fig.set_size_inches(7.5, 3.4)
 axes = fig.subplots(2, 5)
@@ -116,14 +127,14 @@ for ax in axes.flat:
     ax.set_xticks([]); ax.set_yticks([])
 ```
 
-**3. The fit.**  Each ROI is compared with the model: the calibrated PSF at
+**3. The fit.**  Each fit box is compared with the model: the calibrated PSF at
 position $(x, y)$ and height $z$, scaled to $N$ photons, on a flat background
 $b$ per pixel.  The five parameters $x, y, N, b, z$ that make the observed
 photons most probable are the result.  z is found the same way x and y are:
 the shape of the spot is what depends on it, and the fit changes z until the
 model's shape matches the spot's.
 
-The fit starts at the centre of mass of the ROI, at the background of its
+The fit starts at the centre of mass of the fit box, at the background of its
 border pixels, and at the *start z* -- the focal plane of the calibration
 unless set otherwise.  From
 there Levenberg-Marquardt walks to the best z; with an astigmatic PSF the
@@ -164,8 +175,8 @@ right.legend(frameon=False, fontsize=8)
 ```
 
 **5. The table.**  Positions are converted to nanometres with the *pixel
-size* (the default *units* here are nm), fits that failed or whose z is not a
-number are dropped, and the table is saved as `<acquisition>_locs.hdf5`.
+size* (which the file records, so a position in camera pixels is `x_nm`
+divided by it; no pixel columns are kept), fits that failed or whose z is not a number are dropped, and the table is saved as `<acquisition>_locs.hdf5`.
 
 ## In detail
 
@@ -183,11 +194,11 @@ stack along each axis in turn, after normalising it so that the brightest
 plane sums to 1 over the calibration ROI; $N$ is then the photons in that
 plane.  A SMAP file brings its own coefficients.
 
-**The model.**  For pixel $i$ of a ROI centred on the candidate,
+**The model.**  For pixel $i$ of a fit box centred on the candidate,
 
 $$\mu_i = b + N\, \mathrm{PSF}(x_i - x, y_i - y, z) ,$$
 
-where the ROI sits in the middle of the (larger) calibration grid.  Its
+where the fit box sits in the middle of the (larger) calibration grid.  Its
 derivatives are those of the polynomial,
 
 $$\frac{\partial\mu_i}{\partial x} = -N \frac{\partial\,\mathrm{PSF}}{\partial u}, \qquad \frac{\partial\mu_i}{\partial z} = N \frac{\partial\,\mathrm{PSF}}{\partial w}, \qquad \frac{\partial\mu_i}{\partial N} = \mathrm{PSF}, \qquad \frac{\partial\mu_i}{\partial b} = 1 ,$$
@@ -220,22 +231,39 @@ different refractive index of the sample is made (for an oil objective
 imaging into water, real distances are shorter, by a factor of roughly 0.7 to
 0.8; [Math Parser](plugin:Analysis/Process/Math Parser) can apply one).
 
-**The start and the limits.**  x and y start at the ROI's centre of mass,
-the background at the mean of the ROI's border pixels, the photons at the
+**The start and the limits.**  x and y start at the fit box's centre of mass,
+the background at the mean of the fit box's border pixels, the photons at the
 brightest pixel above background divided by the model's central value, times
 4, and z at *start z* (0 nm by default, the plane $k_0$).  A z step is capped at a third of the
 calibration's depth (at least two planes) at first, and the cap is halved whenever the step reverses.
 z is held inside the calibration: a fit that tries to leave it stops at an
 end.  During the fit $N \geq 1$ and $b \geq 0.01$; x and y are not held.
 
-**Mirroring.**  A SMAP calibration made from mirrored bead images
-(`emmirror`, for beads read out through the other port of an EMCCD) records
-that; each ROI is then flipped in x before it is fitted and the fitted x
-flipped back, so the table is in the orientation of the data.  Calibrations
-from the Bead calibration tool are never mirrored.
+**Mirroring.**  SMAP flips bead images in x before it builds the spline when
+they were read out through the EM register of an EMCCD, which mirrors them,
+and flips data from that register the same way when it loads them.  Here the
+data are never flipped, so such a calibration is turned round once, when it
+is loaded, and is from then on a calibration like any other.  The spline is
+reflected about the middle of its grid, $\mathrm{PSF}'(u) =
+\mathrm{PSF}(n_x - u)$ along x: the boxes are taken in reverse order, and
+since each is now crossed the other way ($u \to 1 - u$), its polynomial is
+rewritten in powers of the new offset,
 
-**EM gain.**  A calibration records whether the beads were taken with EM
-gain -- the Bead calibration tool reads it from the bead files' metadata, a
+$$a'_{pqs} = (-1)^s \sum_{r=s}^{3} \binom{r}{s}\, a_{pqr} ,$$
+
+with the z and y powers untouched.  An odd $n_x$ gains one box, a copy of the
+new last one, which keeps the fit box where the fitter centres it in the grid.
+Fitting the data as they are with the turned spline gives the positions, z
+and photons that fitting the flipped data with the original gives, to within
+the rounding of single precision (checked on simulated splines).  Whether
+SMAP flipped the beads is read from its own record of it, `EMon`, not from
+its setting `emmirror`, whose "no mirror" (2) was once taken here for a flip;
+a file with no `EMon` is taken as flipped if `emmirror` is 1 or 3.
+Calibrations from the Bead calibration tool are never mirrored.
+
+**EM gain.**  A calibration records whether the beads were taken with
+[EM gain](plugin:Panels/Glossary) -- the electron multiplication of an EMCCD
+camera -- the Bead calibration tool reads it from the bead files' metadata, a
 SMAP calibration carries it -- and if the data's camera says otherwise, the
 fit warns: the EM register of many EMCCDs reads out mirrored, so a model
 from beads on the other port is mirrored against the data, and every fit is
@@ -274,7 +302,7 @@ camera settings of the data.
 
 ### fit.roisize
 At least 2 pixels smaller than the calibration laterally (the Bead
-calibration's *ROI size*, 27 by default), or the fit refuses to start:
+calibration's *bead box*, 27 by default), or the fit refuses to start:
 beyond the grid the model would only repeat its edge.  Large enough for the widest,
 most defocused spot; the default 13 holds the spots of the figures above, over
 $\pm$600 nm.
@@ -293,7 +321,7 @@ Also compared with the calibration's EM setting; see *EM gain* above.
 ### output.raw_frames
 50 is enough to see what the camera saw at the start, the end and a few
 points between.  Each kept frame costs its size in the file: for a
-256 x 256 ROI about a quarter of a megabyte, for a full 2048 x 2048 sCMOS
+256 x 256 camera ROI about a quarter of a megabyte, for a full 2048 x 2048 sCMOS
 chip 16 MB, so fifty of those are 800 MB -- set fewer there.
 
 ### output.show_tags
@@ -317,8 +345,9 @@ z instead of the PSF width:
 | `logl`, `logl_rel` | the log-likelihood, and per pixel |
 | `peak_x_pix`, `peak_y_pix`, `iterations` | the candidate, and the steps taken |
 
-The file also records the calibration used: its path, $dz$, $k_0$, the grid
-and whether it was mirrored.
+The file also records the calibration used: its path, $dz$, $k_0$, the grid,
+whether its beads were taken with EM gain, and, for a SMAP calibration of
+mirrored beads, that it was turned round on load.
 
 What to check:
 
@@ -352,7 +381,7 @@ main changes:
 
 * **The steps**, as in the [Gaussian fitter](plugin:Localize/Gaussian 2D):
   the expected information as curvature and the background started at the
-  ROI's border (together they stop fits at low background from sticking at
+  fit box's border (together they stop fits at low background from sticking at
   no background, which in the spline fitter froze z at its start), and no
   clamp of x and y.
 * **One z start**, at the focal plane unless *start z* says otherwise.  SMAP

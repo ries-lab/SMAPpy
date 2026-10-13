@@ -8,7 +8,7 @@ import os
 import tempfile
 import warnings
 
-from typing import Optional
+from typing import Optional, Tuple
 
 import numpy as np
 from scipy import ndimage, optimize
@@ -18,6 +18,7 @@ from .core import (shift_volume, CalibrationSettings, BeadCollection, collect_be
                    build_calibration, spline_coefficients, robust_shape_error)
 from .input import BeadStack, discover_acquisitions, read_bead_stacks
 from ..io.calibration import SplineCalibration, _validate_native_calibration
+from ..params import param
 
 LAYOUTS = ('right-left', 'right-left mirrored', 'up-down', 'up-down mirrored')
 # Smallest soft-L1 transition used in the geometric refinement, in main-channel
@@ -27,28 +28,203 @@ MIN_LOSS_SCALE_PX = 1e-3
 
 
 @dataclass
+class RegisterSettings:
+    """How the chip is split, how hard to look, and what is already known.
+
+    The one registration geometry: a movie registration
+    (`transform.register_channels`) and a bead calibration
+    (`DualColorSettings.registration`) both read it.  The defaults are a
+    movie's, which has thousands of pairs; a bead calibration has tens and
+    sets its own (`bead_registration`).  ``layout`` and ``split_position``
+    are the two worth setting by hand, and only when the automatic answer is
+    wrong.
+    """
+    layout: str = param('auto', label="layout",
+                        choices=(("auto", "detect"),
+                                 "right-left",
+                                 "right-left mirrored",
+                                 "up-down",
+                                 "up-down mirrored"),
+                        help="how the chip is split; detect votes for all "
+                             "of them and keeps the sharpest")
+    main_channel: str = param('auto', label="main channel",
+                              choices=(("auto", "the left or upper half"),
+                                       "left",
+                                       "right",
+                                       "upper",
+                                       "lower"),
+                              help="the half the other is mapped onto, the "
+                                   "reference")
+    # 'projective' is eight coefficients and extrapolates gracefully;
+    # 'polynomial' is twenty and describes a distorted field far better where
+    # the pairs reach, and not at all where they do not.  See `Polynomial`.
+    model: str = param('projective', label="transformation",
+                       choices=(("projective", "projective (8 coefficients)"),
+                                ("polynomial", "polynomial, order 3 (20)")),
+                       help="projective extrapolates gracefully; the "
+                            "polynomial describes a distorted field far "
+                            "better where the pairs reach, and is refused "
+                            "when they do not reach far enough")
+    split_position: Optional[int] = param(None, label="split position",
+                                          unit="px", min=1,
+                                          help="auto: measured from the "
+                                               "pairs, in chip coordinates")
+    # the vote
+    vote_bin_px: float = param(2.0, label="vote bin", unit="px", min=0.1,
+                               advanced=True,
+                               help="the bin of the histogram of pair "
+                                    "vectors the offset is voted in")
+    vote_smooth_px: float = param(4.0, label="vote smoothing", unit="px",
+                                  min=0.1, advanced=True,
+                                  help="the width of the "
+                                       "difference-of-Gaussians filter the "
+                                       "vote is scored with")
+    # Pair and refit twice, as in SMAP's ``RegisterLocs2``: coarse, then over
+    # clean matches only.  The coarse tolerance has to cover the rotation the
+    # vote cannot see -- 3 degrees over 512 px is 27 px -- and the fine one is
+    # the registration accuracy being claimed.  A third, intermediate stage
+    # was measured and changes nothing: once the coarse round has the
+    # transformation to a fifth of a pixel, the tight round keeps the same
+    # pairs whether or not it was approached gradually.  Dropping the tight
+    # round costs a factor of three to seven, so 0 -- which skips it -- is for
+    # comparison and not for use.
+    coarse_tolerance_px: float = param(20.0, label="coarse matching",
+                                       unit="px", min=0.1,
+                                       help="first pass; must cover the "
+                                            "rotation between the channels "
+                                            "-- 3 degrees over 512 px is 27 "
+                                            "px")
+    # How close a pair must be, in the reference channel, once the coarse
+    # round has placed the two channels on top of each other.  One pixel is
+    # roughly seven times the residual a healthy registration achieves
+    # (~0.13 px measured), so it is loose enough not to shave the edges of
+    # the field and tight enough to keep chance partners out at SMLM
+    # densities.  It is a floor rather than a fixed value: the tight round
+    # widens to whatever the coarse round's own misfit says it must be, and
+    # tightening past that is what silently strips the periphery.
+    fine_tolerance_px: float = param(1.0, label="fine matching", unit="px",
+                                     min=0,
+                                     help="second pass over clean matches "
+                                          "only, which is where the "
+                                          "accuracy comes from; 0 skips it")
+    # On, but guarded: see `transform.MIN_CLEAN_FRACTION`.  It protects the edges of a
+    # distorted field, where the projective fit misses by more than any fixed
+    # tolerance allows; the guard is what stops it misfiring on a dense
+    # dataset, where the coarse round's large residual means contamination
+    # rather than distortion.
+    adapt_fine_tolerance: bool = param(True, label="adapt fine matching",
+                                       advanced=True,
+                                       help="widen the fine matching to "
+                                            "what the coarse fit misses its "
+                                            "own pairs by, when those pairs "
+                                            "are clean")
+
+    @property
+    def tolerances(self) -> Tuple[float, ...]:
+        if self.fine_tolerance_px <= 0:
+            return (self.coarse_tolerance_px,)
+        return (self.coarse_tolerance_px, self.fine_tolerance_px)
+    min_pairs: int = param(20, label="minimum pairs", min=4, advanced=True,
+                           help="fewer pairs than this and the registration "
+                                "refuses")
+    max_pairs: int = param(20000, label="pairs used in the fit", min=4,
+                           advanced=True,
+                           help="at most this many pairs, drawn at random, "
+                                "go into each fit")
+    reprojection_threshold_px: float = param(1.0, label="outlier threshold",
+                                             unit="px", min=0.01,
+                                             advanced=True,
+                                             help="the robust (RANSAC) "
+                                                  "fit's inlier radius, at "
+                                                  "least; it widens with "
+                                                  "the matching tolerance")
+    transform_axis_limit_px: float = param(0.5, label="dx/dy limit", unit="px",
+                                           min=0.01, advanced=True,
+                                           help="the largest |dx| or |dy| a "
+                                                "pair may keep after the "
+                                                "first fit, at least; it "
+                                                "widens with the matching "
+                                                "tolerance")
+
+    def validate(self):
+        if self.layout != 'auto' and self.layout not in LAYOUTS:
+            raise ValueError(f'layout must be auto or one of {LAYOUTS}')
+        if self.model not in ('projective', 'polynomial'):
+            raise ValueError("model must be 'projective' or 'polynomial'")
+        if self.main_channel != 'auto':
+            # with the layout still to be detected, any of the four names is
+            # allowed here and the one that turns out not to fit the detected
+            # split axis is refused later, by name
+            halves = (('left', 'right', 'upper', 'lower') if self.layout == 'auto'
+                      else ('left', 'right') if 'right-left' in self.layout
+                      else ('upper', 'lower'))
+            if self.main_channel not in halves:
+                raise ValueError('main channel must match the split layout')
+        if self.split_position is not None and self.split_position < 1:
+            raise ValueError('split_position must be a positive integer or None')
+        if self.vote_bin_px <= 0 or self.vote_smooth_px <= 0:
+            raise ValueError('the vote bin and smoothing must be positive')
+        if self.coarse_tolerance_px <= 0:
+            raise ValueError('the coarse matching tolerance must be positive')
+        if self.fine_tolerance_px > self.coarse_tolerance_px:
+            raise ValueError('the fine matching tolerance must not exceed the '
+                             'coarse one; the second round tightens the first')
+        if self.min_pairs < 4:
+            raise ValueError('min_pairs must be at least four')
+        if self.max_pairs < self.min_pairs:
+            raise ValueError('max_pairs cannot be below min_pairs')
+        if not all(np.isfinite(v) and v > 0 for v in
+                   (self.reprojection_threshold_px, self.transform_axis_limit_px)):
+            raise ValueError('the reprojection and dx/dy limits must be positive '
+                             'and finite')
+
+
+def bead_registration() -> RegisterSettings:
+    """`RegisterSettings` with a bead calibration's defaults.
+
+    The geometry is the same as a movie's; the numbers are not, because a
+    bead slide gives tens of pairs, all of them bright, where a movie gives
+    thousands spanning orders of magnitude in precision.  So fewer pairs are
+    enough (8, not 20), the first round's RANSAC radius can be looser (2 px,
+    not 1) and the dx/dy screen much tighter (0.15 px, not 0.5); and the beads
+    are paired within 12 px of where the offset they voted for puts them,
+    the distance bead calibrations have always been paired at.
+    """
+    return RegisterSettings(min_pairs=8, reprojection_threshold_px=2.0,
+                            transform_axis_limit_px=0.15,
+                            coarse_tolerance_px=12.0)
+
+
+# What of `RegisterSettings` a bead calibration does not read: it fits the
+# projective map once, without a second matching round or a polynomial, over
+# tens of pairs that need no cap.  The bead window leaves these off its form.
+BEAD_UNUSED = ('model', 'fine_tolerance_px', 'adapt_fine_tolerance', 'max_pairs')
+# ...and where it reads a field differently from a movie registration, what
+# the bead window's tooltip says instead.
+BEAD_HELP = {
+    'split_position': "the first pixel of the second half, on the chip; "
+                      "auto: the middle of the first bead image",
+    'coarse_tolerance_px': "how far a bead may lie from where the offset the "
+                           "beads voted for puts its partner",
+    'reprojection_threshold_px': "the first round's robust (RANSAC) inlier "
+                                 "radius",
+    'transform_axis_limit_px': "the largest |dx| or |dy| a pair may keep "
+                               "after the first round",
+}
+
+
+@dataclass
 class DualColorSettings(CalibrationSettings):
-    layout: str = 'up-down mirrored'
-    main_channel: str = 'upper'
-    split_position: Optional[int] = None
-    min_pairs: int = 8
-    reprojection_threshold_px: float = 2.
-    transform_axis_limit_px: float = .15
+    """A single-channel calibration's settings, and the split between the
+    halves: the same `RegisterSettings` a movie registration reads, with a
+    bead slide's defaults.  With the layout on *auto* it is detected from
+    the beads, by the vote a movie registration takes on its localizations."""
+    registration: RegisterSettings = param(default_factory=bead_registration,
+                                           label="registration")
 
     def validate(self):
         super().validate()
-        if self.layout not in LAYOUTS:
-            raise ValueError(f'layout must be one of {LAYOUTS}')
-        if self.main_channel not in (('left', 'right') if 'right-left' in self.layout else ('upper', 'lower')):
-            raise ValueError('main channel must match the split layout')
-        if self.split_position is not None and (not isinstance(self.split_position, (int, np.integer)) or self.split_position < 1):
-            raise ValueError('split_position must be a positive integer or None')
-        if not isinstance(self.min_pairs, (int, np.integer)) or self.min_pairs < 4:
-            raise ValueError('min_pairs must be at least four (default eight)')
-        if not np.isfinite(self.reprojection_threshold_px) or self.reprojection_threshold_px <= 0:
-            raise ValueError('reprojection threshold must be positive and finite')
-        if not np.isfinite(self.transform_axis_limit_px) or self.transform_axis_limit_px <= 0:
-            raise ValueError('transformation dx/dy limit must be positive and finite')
+        self.registration.validate()
 
 
 def map_points(matrix, points):
@@ -437,6 +613,54 @@ class DualBeads:
     em_on: bool | None = None       # as `BeadCollection.em_on`
 
 
+def detect_bead_layout(stacks, settings, report=None) -> str:
+    """The layout of the split, from where the beads are.
+
+    The vote a movie registration takes on its localizations
+    (`transform.detect_layout`), taken on the beads instead: each stack is
+    one "frame", its beads found over the whole image as a single-channel
+    calibration finds them, so that nothing about the split need be known
+    beforehand.
+    """
+    from .core import detect_beads
+    from .transform import detect_layout
+    x, y, frame = [], [], []
+    for index, stack in enumerate(stacks):
+        yx, _ = detect_beads(stack.images, settings)
+        y.extend(yx[:, 0])
+        x.extend(yx[:, 1])
+        frame.extend([index]*len(yx))
+    if len(x) < 4:
+        raise ValueError(f'{len(x)} beads found: too few to detect the layout '
+                         'from; choose it by hand')
+    layout, vote = detect_layout(x, y, frame, settings.registration)
+    if report:
+        report(f'Layout: {layout}, detected from {len(x)} beads '
+               f'(contrast {vote.score:.1f})')
+    return layout
+
+
+def resolved_geometry(settings, stacks, report=None) -> DualColorSettings:
+    """``settings`` with the layout and the main channel spelt out.
+
+    *auto* is resolved here and nowhere else: what is detected is written
+    into the settings the beads carry (`DualBeads.settings`), so a rebuild
+    with beads excluded, the pages and the saved file all read the layout
+    that was used, not the word *auto*.
+    """
+    g = settings.registration
+    layout = g.layout if g.layout != 'auto' else detect_bead_layout(stacks, settings,
+                                                                    report)
+    halves = ('left', 'right') if 'right-left' in layout else ('upper', 'lower')
+    main = halves[0] if g.main_channel == 'auto' else g.main_channel
+    if main not in halves:
+        raise ValueError(f"the chip is split {halves[0]}/{halves[1]}, so the main "
+                         f"channel cannot be {main!r}; use {halves[0]!r} or "
+                         f"{halves[1]!r}, or set the layout")
+    return replace(settings, registration=replace(g, layout=layout,
+                                                  main_channel=main))
+
+
 def collect_dual_beads(inputs, settings=None, progress=None):
     s = settings or DualColorSettings()
     s.validate()
@@ -459,11 +683,11 @@ def collect_dual_beads(inputs, settings=None, progress=None):
         # recorded it, and the warning the fitters call could not fire
         from .core import _em_on
         em_states = [_em_on(p) for p in paths]
+    s = resolved_geometry(s, stacks, report)
+    g = s.registration
     shape = stacks[0].images.shape[-2:]
-    axis = 1 if 'right-left' in s.layout else 0  # y,x array axes
-    split = s.split_position if s.split_position is not None else shape[axis]//2
-    if not 0 < split < shape[axis]:
-        raise ValueError('split must lie inside the image')
+    axis = 1 if 'right-left' in g.layout else 0  # y,x array axes
+    coord_axis = 1-axis                           # the same axis, as x,y
     if any(st.images.shape[-2:] != shape for st in stacks):
         raise ValueError('bead acquisitions must share split-frame image dimensions')
     full_chip = all(st.roi is not None for st in stacks)
@@ -472,14 +696,20 @@ def collect_dual_beads(inputs, settings=None, progress=None):
         known = {st.roi for st in stacks if st.roi is not None}
         if len(known) > 1:
             raise ValueError('cannot pool differing known ROIs with missing ROI metadata')
-    first_main = s.main_channel in ('left', 'upper')
-    slices = [slice(0, split), slice(split, shape[axis])]
+    origins = [np.array(st.roi[:2] if full_chip else (0, 0), float) for st in stacks]
+    # The split is a position on the chip, as the fitter and a movie
+    # registration read it (`dualfit.which_channel`); each stack is cut where
+    # that position falls in its own pixels.
+    split = (int(g.split_position) if g.split_position is not None
+             else int(origins[0][coord_axis])+shape[axis]//2)
+    cuts = [split-int(o[coord_axis]) for o in origins]
+    if not all(0 < cut < shape[axis] for cut in cuts):
+        raise ValueError(f'the split at {split} px (chip) lies outside a bead image')
+    first_main = g.main_channel in ('left', 'upper')
     order = [0, 1] if first_main else [1, 0]
     batches, projections, sources = [[], []], [], []
-    origins = []
-    for st in stacks:
-        origin = np.array(st.roi[:2] if full_chip else (0, 0), float)
-        origins.append(origin)
+    for st, cut in zip(stacks, cuts):
+        slices = [slice(0, cut), slice(cut, shape[axis])]
         projections.append(np.max(st.images, axis=0))
         sources.append({'path': st.source, 'axes': st.axes, 'roi': st.roi,
                         'shape': list(st.images.shape), 'z_nm': st.z_nm.tolist()})
@@ -508,18 +738,17 @@ def collect_dual_beads(inputs, settings=None, progress=None):
                 rec['brightness_reason'] = 'unreliable lateral fit'
                 xy = np.array([6., 6.])
             local = np.array([rec['x_px'], rec['y_px']], float)
-            local[1-axis] += split*half
+            local[coord_axis] += cuts[rec['stack']]*half
             rec['full_image_xy'] = local.tolist()
             positions.append(local+origins[rec['stack']]+xy-6)
         points.append(np.asarray(positions))
     # Translation votes are collected within acquisitions after the declared reflection.
     approx = points[1].copy()
-    coord_axis = 1-axis
-    if 'mirrored' in s.layout:
-        for i, rec in enumerate(channels[1].records):
-            approx[i, coord_axis] = 2*(origins[rec['stack']][coord_axis]+split)-1-approx[i, coord_axis]
+    if 'mirrored' in g.layout:
+        approx[:, coord_axis] = 2*split-1-approx[:, coord_axis]
     else:
-        approx[:, coord_axis] += split*(1 if not first_main else -1)
+        cut = np.array([cuts[rec['stack']] for rec in channels[1].records], float)
+        approx[:, coord_axis] += cut*(1 if not first_main else -1)
     diffs = []
     for si in range(len(stacks)):
         ia = [i for i, r in enumerate(channels[0].records) if r['stack'] == si and r['brightness_accepted']]
@@ -544,11 +773,11 @@ def collect_dual_beads(inputs, settings=None, progress=None):
         distance, index = cKDTree(approx[ib]).query(points[0][ia])
         _, reverse = cKDTree(points[0][ia]).query(approx[ib])
         for k, (d, j) in enumerate(zip(distance, index)):
-            if d <= 12 and reverse[j] == k:
+            if d <= g.coarse_tolerance_px and reverse[j] == k:
                 pairs.append((ia[k], ib[j]))
     pairs = np.asarray(pairs, int).reshape(-1, 2)
-    if len(pairs) < s.min_pairs:
-        raise ValueError(f'only {len(pairs)} automatic pairs; require {s.min_pairs}')
+    if len(pairs) < g.min_pairs:
+        raise ValueError(f'only {len(pairs)} automatic pairs; require {g.min_pairs}')
     records = []
     for i, (a, b) in enumerate(pairs):
         ra, rb = channels[0].records[a], channels[1].records[b]
@@ -558,9 +787,9 @@ def collect_dual_beads(inputs, settings=None, progress=None):
         record['brightness_reason'] = '; '.join(f'{name}: {r["brightness_reason"]}' for name, r in
                     zip(('main', 'secondary'), (ra, rb)) if not r['brightness_accepted']) or 'accepted'
         records.append(record)
-    geometry = {'layout': s.layout, 'main_channel': s.main_channel, 'split_position': split,
+    geometry = {'layout': g.layout, 'main_channel': g.main_channel, 'split_position': split,
                 'image_shape': list(shape), 'coordinate_system': 'camera-chip' if full_chip else 'roi-local',
-                'sources': sources, 'mirror_axis_xy': coord_axis if 'mirrored' in s.layout else None,
+                'sources': sources, 'mirror_axis_xy': coord_axis if 'mirrored' in g.layout else None,
                 'convention': 'zero-based pixel centers; split is first index of second half'}
     unmatched = [[i for i in range(len(c.records)) if i not in set(pairs[:, ch])]
                  for ch, c in enumerate(channels)]
@@ -604,12 +833,13 @@ def build_dual_calibration(beads, excluded=(), progress=None):
     if not excluded.issubset(range(n)):
         raise ValueError('unknown excluded pair ID')
     mask = np.array([i not in excluded and r['brightness_accepted'] for i, r in enumerate(beads.records)])
-    if mask.sum() < s.min_pairs:
-        raise ValueError(f'keep at least {s.min_pairs} brightness-qualified pairs')
+    if mask.sum() < s.registration.min_pairs:
+        raise ValueError(f'keep at least {s.registration.min_pairs} brightness-qualified pairs')
     eligible = mask.copy()
     ids = np.flatnonzero(eligible)
     report(f'Transformation: two-round robust fit, {len(ids)} eligible pairs')
-    fitted = fit_dual_transform(beads.secondary_points[ids], beads.main_points[ids], s)
+    fitted = fit_dual_transform(beads.secondary_points[ids], beads.main_points[ids],
+                                s.registration)
     h, initial = fitted.transformation, fitted.round1_transformation
     mask[ids] = fitted.accepted
     coarse = np.zeros(n, bool)
@@ -696,7 +926,7 @@ def build_dual_calibration(beads, excluded=(), progress=None):
           {'settings': asdict(s), 'secondary_main_brightness_ratio': float(np.median(ratios)),
            'transform_method': 'two-round RANSAC / soft-L1 geometric refinement; dx/dy screening',
            'transform_selection': 'round-one abs(dx) and abs(dy); independent of PSF shape',
-           'transform_loss_scale_px': s.transform_axis_limit_px/2,
+           'transform_loss_scale_px': s.registration.transform_axis_limit_px/2,
            'transform_weight_meaning': 'per-axis soft-L1 influence weights; not localization precision',
            'transform_pair_count': int(mask.sum()), 'psf_pair_count': int(result.accepted.sum()),
            'coverage_area_px2': coverage,
@@ -787,7 +1017,7 @@ def load_dual_color_calibration(path):
             g = f[name]
             model = SplineCalibration(np.ascontiguousarray(g['coeff'][...]), float(g.attrs['dz']),
                     float(g.attrs['z0']), x0=float(g.attrs['x0']), psf=g['psf'][...],
-                    em_mirror=False, source=Path(path), parameters=json.loads(g['parameters_json'][()]),
+                    source=Path(path), parameters=json.loads(g['parameters_json'][()]),
                     em_on=bool(g.attrs['em_on']) if 'em_on' in g.attrs else None)
             _validate_native_calibration(model)
             models.append(model)

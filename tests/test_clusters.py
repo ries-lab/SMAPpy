@@ -7,8 +7,8 @@ from smappy.locs import Localizations
 from smappy.mathparse import recipes
 from smappy.plugins.clusters import DBSCAN, auto_eps, dbscan, sizes_of
 from smappy.plugins.region_column import (ColumnToROIs, RegionsToColumn, column_regions,
-                                          hull, roi_numbers)
-from smappy.region_runs import values_onto
+                                          hull)
+from smappy.region_runs import roi_numbers, values_onto
 from smappy.session import Session
 
 SIZES = (60, 40, 25)
@@ -109,14 +109,14 @@ def test_an_roi_per_cluster_outlines_it_and_replace_makes_them_again():
     session.run(DBSCAN(), DBSCAN.Settings(radius_nm=40, neighbours=5))
     result = session.run(ColumnToROIs(), ColumnToROIs.Settings(min_size=30))
     project = session.rois
-    assert len(project.rois) == 2 and result.data["rois"] == 2   # 25 < 30
+    assert len(project.rois) == 2 and len(result.rois) == 2   # 25 < 30
     for roi in project.rois.values():
         inside = project.region(roi).mask(xy[:, 0], xy[:, 1])
         k = roi.origin["cluster"]
         assert inside[truth == k].all()                 # the hull holds its cluster
-    session.run(ColumnToROIs(), ColumnToROIs.Settings(min_size=1, replace=True))
-    assert len(project.rois) == 3
     session.run(ColumnToROIs(), ColumnToROIs.Settings(min_size=1))
+    assert len(project.rois) == 3                       # replace: the default
+    session.run(ColumnToROIs(), ColumnToROIs.Settings(min_size=1, replace=False))
     assert len(project.rois) == 6                       # without replace, beside them
 
 
@@ -219,7 +219,7 @@ def test_histograms_summarise_the_clusters_too():
         Step(plugin="Analysis/Measure/Localization Statistics")])]))
     session.run(cls(), cls.Settings())
     histograms = plugins.get("Analysis/Regions/Summarize/Histograms")
-    offered = histograms().choices(session.context(), histograms.Settings())["evaluation"]
+    offered = histograms().describe(session.context(), histograms.Settings()).choices["evaluation"]
     name = "per cluster_id: Localization Statistics"
     assert (name, name) in offered
     result = histograms()(ctx=session.context(), evaluation=name)
@@ -241,7 +241,8 @@ def test_a_cluster_statistic_goes_onto_its_localizations_and_filters_them():
         Step(plugin="Analysis/Measure/Localization Statistics")])]))
     session.run(cls(), cls.Settings())
     name = "per cluster_id: Localization Statistics"
-    offered = RegionsToColumn().choices(session.context(), RegionsToColumn.Settings())
+    offered = RegionsToColumn().describe(session.context(),
+                                         RegionsToColumn.Settings()).choices
     assert (name, name) in offered["source"]
     session.run(RegionsToColumn(), RegionsToColumn.Settings(
         source=name, values="n_localizations", prefix="cluster_"))
@@ -305,8 +306,8 @@ def test_an_roi_evaluation_goes_onto_the_localizations_in_each_roi():
     session.run(cls(), cls.Settings())
     settings = RegionsToColumn.Settings(source="Localization Statistics",
                                         values="n_localizations, roi_id")
-    assert ("Localization Statistics",) * 2 in RegionsToColumn().choices(
-        session.context(), settings)["source"]
+    assert ("Localization Statistics",) * 2 in RegionsToColumn().describe(
+        session.context(), settings).choices["source"]
     session.run(RegionsToColumn(), settings)
     column = np.asarray(session.locs["n_localizations"])
     assert (column[truth == 1] == SIZES[0]).all() and (column[truth == 2] == SIZES[1]).all()

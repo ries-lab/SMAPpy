@@ -1,30 +1,30 @@
-"""File-associated analysis ROIs, independent of the interactive interface.
+"""Analysis ROIs: their geometry, their history and what was measured in them.
 
-All geometry is in nm. Source tables are immutable snapshots; selection always
-uses the same ViewState filter as rendering, never the visible field of view.
+All geometry is in nm.  The data an ROI sees is the session's: one source per
+loaded file, the filters and grouping of a layer, so what an ROI sees is what
+the image shows, and selection always uses the same filter as rendering,
+never the visible field of view.  The project's state travels in the
+localization file's metadata, so ROIs and their results are saved with
+*File > Save* and come back with the file.
 """
 from __future__ import annotations
 
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass, field, replace
+from dataclasses import asdict, dataclass, field, fields, replace
 from datetime import datetime, timezone
 import hashlib
 import json
-import os
-from pathlib import Path
-import tempfile
 from typing import Dict, List, Optional
 from uuid import uuid4
 
-import h5py
 import numpy as np
 
-from ..group import GroupSettings
-from ..io.hdf5 import load_localizations
-from ..locs import Localizations, to_nm
+from ..group import GROUP_COLUMNS, GroupSettings
+from ..layer_state import Tables, ViewState
+from ..locs import Localizations
 from ..region_table import RegionTable
 from ..regions import Region
-from ..viewer import ViewState
+from ..render import RenderAxes
 
 
 def json_text(value):
@@ -85,10 +85,9 @@ def changes_table(step) -> bool:
     """Does this step hand back a new table (`Plugin.changes_locs_for`)?  In
     a region's run its table is what the steps after it measure."""
     try:
-        answer = step.plugin.changes_locs_for(step.settings)
+        return bool(step.plugin.changes_locs_for(step.settings))
     except Exception:
-        answer = getattr(step.plugin, "changes_locs", None)
-    return answer is True
+        return bool(getattr(step.plugin, "changes_locs", False))
 
 
 def region_entry(result, plugin=None, keep: bool = False) -> Dict:
@@ -98,8 +97,8 @@ def region_entry(result, plugin=None, keep: bool = False) -> Dict:
     A value that is not a number (or a string, a flag, None) is refused
     rather than stored: the values are the region table's columns, and a
     list in a column is a table nobody can histogram.  An array belongs in
-    `arrays`.  Until the region table is written in columns (step 3 of
-    `docs/regions.md`) the arrays are kept as JSON lists beside the values.
+    `arrays`, kept here as JSON lists beside the values; `RegionTable`
+    writes them to the file end to end.
 
     With ``keep``, what ``plugin.keep(result)`` returns -- the data its
     figure is drawn from -- goes with the row as ``kept``, so the figure can
@@ -132,9 +131,13 @@ class ROI:
     file_id: str
     center: list
     id: str = field(default_factory=lambda: uuid4().hex)
+    # what the user sees and a column carries (`roi_id`): given once, from the
+    # project's counter, and never reused, so removing ROI 3 leaves ROI 5 as
+    # 5 -- in the list, on the localizations and in the results alike.  The
+    # uuid stays the key the results are stored under.
+    number: int = 0
     polygon: Optional[list] = None
     direction: Optional[list] = None  # two absolute xy endpoints
-    reviewed: bool = False
     use: bool = True
     comment: str = ""
     origin: dict = field(default_factory=lambda: {"method": "manual"})
@@ -145,6 +148,18 @@ class ROI:
         changing it is one edit for every ROI of the project.  So the shape
         is worked out when asked for rather than held."""
         return Region.site(self.center, shape, size_nm, self.polygon)
+
+    @classmethod
+    def from_dict(cls, saved: dict) -> "ROI":
+        """An ROI as a file kept it.  Files from before the review flag went
+        carry ``reviewed``: it was never shown in the GUI, where every ROI
+        counted as reviewed, so it is dropped and ``use`` alone decides."""
+        names = {f.name for f in fields(cls)}
+        roi = cls(**{k: v for k, v in saved.items() if k in names})
+        point(roi.center)
+        if roi.polygon is not None:
+            polygon_vertices(roi.polygon)
+        return roi
 
 
 # Past this nobody is walking back through a list of edits.
@@ -228,67 +243,78 @@ class ROIHistory:
         self._redo.clear()
 
 
+FORMAT_VERSION = 1
+
+# Columns the session writes onto the table itself, rather than the data
+# bringing them: `Session.load` adds `filenumber`, and grouping adds the group
+# columns in place.  Whether they are there yet says nothing about the
+# localizations, so the fingerprint counts them as always present -- present
+# rather than absent so that the fingerprints already saved, which were taken
+# from loaded, usually grouped tables, still match.
+BOOKKEEPING = ("filenumber",) + GROUP_COLUMNS
+
+
 class Source:
-    def __init__(self, locs, path=None, name=None, source_id=None):
-        if "x_nm" not in locs or "y_nm" not in locs:
-            pixelsize = locs.metadata.get("pixelsize_nm")
-            if pixelsize is None:
-                raise ValueError("ROI analysis needs nm coordinates or pixelsize_nm metadata")
-            locs = to_nm(locs, positive(pixelsize, "Pixel size"))
-        if "x_nm" not in locs or "y_nm" not in locs:
-            raise ValueError("Source has no x_nm/y_nm coordinates")
-        columns = {}
-        h = hashlib.sha256()
-        for key in sorted(locs.columns):
-            a = np.array(locs[key], copy=True, order="C")
-            if a.ndim != 1 or len(a) != len(locs) or a.dtype.kind not in "biuf":
-                raise ValueError(f"{key}: expected a numeric column with {len(locs)} rows")
-            h.update(key.encode())
-            h.update(a.dtype.str.encode())
-            h.update(memoryview(a).cast('B'))
-            a.flags.writeable = False
-            columns[key] = a
-        h.update(json_text(locs.metadata).encode())
-        self.fingerprint = h.hexdigest()
-        self.id = source_id or uuid4().hex
-        self.path = str(Path(path).resolve()) if path else None
-        self.name = name or (Path(path).name if path else "Untitled")
-        self.state = ViewState(Localizations(columns, dict(locs.metadata)))
-        self.group_key = None
+    """What the project needs of a source; the data stays in the session."""
+
+    def __init__(self, source_id: str, name: str, path: Optional[str], number: int):
+        self.id = source_id
+        self.name = name
+        self.path = path
+        self.number = number          # the table's `filenumber`
+        self.state: Optional[ViewState] = None
+        self.fingerprint = ""
 
 
 class ROIProject:
-    def __init__(self):
+    """The ROIs, their results and the steps that made them, over the
+    session's files (`Session.rois`).
+
+    The data stays in the session: a plugin may replace the table (a drift
+    correction, a fit), and the project follows (`sync`).  ``layer`` says
+    which layer's filter and grouping the ROIs follow; the layer's *file*
+    choice is deliberately ignored, since an ROI already knows its file.  A
+    script makes ROIs through a headless session, ``Session(locs).rois``, so
+    it sees the filters and grouping the GUI would.
+    """
+
+    def __init__(self, session):
+        self.session = session
+        self.layer = 0
+        self.preview_nm = 0.0        # the ROI image's width; 0 = three ROI widths
+        self._states: Dict[str, ViewState] = {}
+        self._built = None            # what the sources were built from
+        # (id and length of a table, file number) -> that file's rows of it:
+        # computed once, not once per ROI measured
+        self._file_masks: Dict[tuple, np.ndarray] = {}
         self.sources: Dict[str, Source] = {}
         self.rois: Dict[str, ROI] = {}
         self.size_nm = 300.0  # circle diameter or square side length
         self.shape = "circle"
         self.tile_nm = 0.0    # a grid over each file for a systematic walk; 0 = none
-        # the bounds a layer opens with, so a scripted project filters as the GUI does
-        from ..session import DEFAULT_BOUNDS
-        self.filters = dict(DEFAULT_BOUNDS)
+        # the layer's, which `sync` puts here
+        self.filters: Dict[str, tuple] = {}
         self.grouped = False
-        self.group_settings = GroupSettings()
         # The results, one table per evaluation by its name, a row per ROI
         # (`RegionTable`): the newest result of each evaluation on each ROI,
         # with the step that made it.  Kept in the order they were last
         # written, so the newest is last.  Rows of ROIs that were removed
-        # stay until the project is saved, so an undo brings the ROI back
-        # with its numbers.
+        # stay until the project is saved (`tables_dict`), so an undo brings
+        # the ROI back with its numbers.
         self.tables: Dict[str, RegionTable] = {}
         # What was run, newest last: the pipeline, when, and whether a chain
         # or one site's re-evaluation did it -- a log, without the results,
         # which are in `tables`
         self.runs = []
         self.navigation = {}  # GUI state only; never used for extraction
-        # The evaluation pipeline, as `workspace.Instance`s.  It travels with
-        # the project because the columns of a site table mean nothing without
-        # knowing which evaluators produced them, with what parameters.
-        self.pipeline = []
-        # what the pipeline repeats over and how, as a block's own fields
-        # (`pipeline.block_of`): the ROIs, or an id column; write-back
-        from .pipeline import DEFAULT_OPTIONS
-        self.block_options = dict(DEFAULT_OPTIONS)
+        # The per-region steps, a `chain.Block`: what the steps window edits
+        # and runs, and what the ROI manager measures an ROI with.  It
+        # travels with the project because the columns of a results table
+        # mean nothing without knowing which steps produced them, with what
+        # parameters.  No steps: the newest run's, or the default ones
+        # (`resolved`).
+        from ..chain import Block
+        self.block = Block()
         # What a segmenter's Preview proposed and nobody has added yet:
         # ``{"file_id", "method", "sites": [{"center", "use"}], "replaces":
         # [roi ids]}``, or None.  Drawn by the manager and never saved -- it
@@ -296,19 +322,10 @@ class ROIProject:
         # leaving ROIs behind to be removed by hand.
         self.segment_preview = None
         self.history = ROIHistory()
-        self._filter_keys = {}
-
-    def add_file(self, path):
-        return self.add_source(load_localizations(path), path=path)
-
-    def add_source(self, locs, path=None, name=None, source_id=None):
-        if path and any(s.path == str(Path(path).resolve()) for s in self.sources.values()):
-            raise ValueError(f"Source already belongs to this project: {path}")
-        source = Source(locs, path, name, source_id)
-        if source.id in self.sources:
-            raise ValueError("Duplicate source ID")
-        self.sources[source.id] = source
-        return source
+        # the number the next ROI is given (`ROI.number`): it only counts up
+        # and is saved with the ROIs, so an undone ROI's number is not handed
+        # to the next one, and its redo brings it back unchanged
+        self.next_number = 1
 
     def set_geometry(self, size_nm, shape=None):
         size = positive(size_nm, "ROI size")
@@ -354,44 +371,6 @@ class ROIProject:
                 return i
         return None
 
-    def set_filters(self, ranges):
-        normalized = {}
-        for name, bounds in ranges.items():
-            if name in ("filenumber", "file_id"):
-                continue
-            lo, hi = (None if v is None else float(v) for v in bounds)
-            if any(v is not None and not np.isfinite(v) for v in (lo, hi)):
-                raise ValueError(f"{name}: bounds must be finite or blank")
-            if lo is not None and hi is not None and lo > hi:
-                raise ValueError(f"{name}: lower bound exceeds upper bound")
-            if lo is not None or hi is not None:
-                normalized[name] = (lo, hi)
-        self.filters = normalized
-
-    def state(self, file_id):
-        source = self.sources[file_id]
-        state = source.state
-        group_key = digest(asdict(self.group_settings))
-        if self.grouped and source.group_key != group_key:
-            state.sets.pop("grouped", None)
-            state.group(self.group_settings)
-            source.group_key = group_key
-            self._filter_keys.pop((file_id, "grouped"), None)
-        state.use_grouped = self.grouped
-        # every table gets the bounds, not only the one shown: a measurement
-        # in an ROI may ask for the other (`region_context`)
-        for kind, locset in state.sets.items():
-            effective = {k: v for k, v in self.filters.items()
-                         if k in locset.locs and k not in ("filenumber", "file_id")}
-            key = (file_id, kind)
-            signature = digest(effective)
-            if self._filter_keys.get(key) != signature:
-                locset.filter.clear()
-                for k, bounds in effective.items():
-                    locset.filter.set(k, *bounds)
-                self._filter_keys[key] = signature
-        return state
-
     @contextmanager
     def edit(self, label: str):
         """An undoable edit of the ROIs: ``with project.edit("Remove ROI 3"):``.
@@ -414,15 +393,43 @@ class ROIProject:
         step = self.history.redo(self.rois)
         return step.label if step else None
 
-    def add_roi(self, file_id, center, polygon=None, reviewed=True, origin=None):
+    def add_roi(self, file_id, center, polygon=None, origin=None):
         if file_id not in self.sources:
             raise KeyError(file_id)
         roi = ROI(file_id, point(center), polygon=(None if polygon is None else
-                  polygon_vertices(polygon)), reviewed=reviewed)
+                  polygon_vertices(polygon)))
         if origin is not None:
             roi.origin = json.loads(json_text(origin))
+        roi.number = self.next_number
+        self.next_number += 1
         self.rois[roi.id] = roi
         return roi
+
+    def numbers(self) -> Dict[str, int]:
+        """Each ROI's number (`ROI.number`), by its id."""
+        return {roi_id: roi.number for roi_id, roi in self.rois.items()}
+
+    def roi_numbered(self, number) -> Optional[ROI]:
+        """The ROI with this number -- a result row's ``roi_id`` -- or None."""
+        try:
+            number = int(number)
+        except (TypeError, ValueError):
+            return None
+        return next((r for r in self.rois.values() if r.number == number), None)
+
+    def number_rois(self, next_number=None) -> None:
+        """Numbers for the ROIs that have none (a file from before they were
+        kept), in the order the ROIs were made and after the highest in use,
+        and a counter past all of them."""
+        start = max([int(next_number or 1)]
+                    + [r.number + 1 for r in self.rois.values() if r.number > 0])
+        seen = set()
+        for roi in self.rois.values():
+            if roi.number <= 0 or roi.number in seen:
+                roi.number = start
+                start += 1
+            seen.add(roi.number)
+        self.next_number = start
 
     def move_roi(self, roi_id, center):
         """Translate the entire ROI, including its polygon and direction line."""
@@ -459,11 +466,12 @@ class ROIProject:
         """The context a plugin measuring this ROI is given.
 
         The ordinary contract, confined to the ROI (`docs/regions.md`):
-        ``ctx.locs`` is the ROI's rows of its file, unfiltered and ungrouped;
-        ``ctx.selection`` and ``ctx.layer_selection(i)`` are each layer's
-        filter over those rows; ``ctx.table(i)`` hands out the grouped table
-        cut to the ROI as well where the layer has one; ``ctx.region`` is
-        the ROI's shape.  Which rows belong is the ROI's shape alone -- a
+        ``ctx.locs`` is the ROI's rows of its file, unfiltered, of the table
+        the layer shows (the grouped one cut to the ROI where there is one);
+        ``ctx.ungrouped()`` the localizations among them, and
+        ``ctx.layer_selection(i)`` each layer's filter over those;
+        ``ctx.table(i)`` hands out each layer's table cut the same way;
+        ``ctx.region`` is the ROI's shape.  Which rows belong is the ROI's shape alone -- a
         filter is applied inside it, never to decide membership -- and no
         drawn ROI or 3D slab narrows it further: the region replaces them.
         """
@@ -480,57 +488,56 @@ class ROIProject:
         return Context(session=session, locs=locs, selection=selection, layer=layer,
                        pinned=pinned, rows=rows, region=region, rois=self, **extra)
 
-    def _region_tables(self, roi, region):
-        """``(tables, rows, layer, session)`` for `region_context`.
-
-        A project of its own files has one layer: the file, under the
-        project's bounds and grouping.  `SessionROIs` has the session's.
-        """
-        from ..plugins import Selection
-        state = self.state(roi.file_id)
-        entry = {"shows": "grouped" if state.use_grouped else "ungrouped"}
-        rows = None
-        for kind, locset in state.sets.items():
-            found = rows_in(locset.locs, locset.index, region)
-            if kind == "ungrouped":
-                rows = found
-            entry[kind] = (locset.locs[found],
-                           Selection(np.asarray(locset.filter.mask)[found], layer=0,
-                                     roi=region, name=str(region)))
-        return {0: entry}, rows, 0, None
-
     def inputs(self, roi):
+        """What a measurement of this ROI depends on: the ROI's own inputs and
+        every layer's filters and grouping -- a plugin in an ROI may read any
+        layer (`_region_tables`), so a filter changed on any of them makes
+        its numbers out of date."""
         state = self.state(roi.file_id)
-        return {"source": self.sources[roi.file_id].fingerprint,
-                "geometry": self.geometry(roi), "filters": state.filter.ranges,
-                "grouped": self.grouped,
-                "group_settings": asdict(self.group_settings) if self.grouped else None}
+        out = {"source": self.sources[roi.file_id].fingerprint,
+               "geometry": self.geometry(roi), "filters": state.filter.ranges,
+               "grouped": self.grouped,
+               "group_settings": asdict(self.group_settings) if self.grouped else None}
+        from ..region_runs import _layer_inputs
+        out["layers"] = [_layer_inputs(lay) for lay in self.session.layers
+                         if not lay.is_image]
+        return out
+
 
     # ------------------------------------------------- what is still current
-    def resolved(self, steps=None, instances=None):
+    def resolved(self, steps=None, block=None):
         """The steps that would run: resolved once, for callers that share them.
 
-        The project's pipeline, or -- when it has none -- the pipeline of the
-        newest run, which is what a script that handed its steps straight to
-        `evaluate` leaves behind.  Falling
-        back to the installed evaluators instead would report a pipeline
-        nobody ran.
+        ``block`` -- a `chain.Block`, or a list of its steps -- or the
+        project's own, or -- when that has none -- the steps of the newest
+        run, which is what a script that handed its steps straight to
+        `evaluate` leaves behind.  Falling back to the installed plugins
+        instead would report steps nobody ran.
         """
         from . import pipeline as pipeline_module
+        from ..chain import Block
         if steps is not None:
             return list(steps)
-        if instances is None:
-            instances = self.pipeline
-        if not instances:
+        if block is None:
+            block = self.block
+        elif not isinstance(block, Block):
+            block = Block(steps=list(block))
+        if not block.steps:
             for run in reversed(self.runs):
                 if run.get("chain"):
-                    continue        # a chain's evaluators are its own, not the window's
-                instances = pipeline_module.instances_from_run(run.get("pipeline") or [])
-                if instances:
+                    continue        # a chain's steps are its own, not the window's
+                block = pipeline_module.block_from_run(run.get("pipeline") or [])
+                if block.steps:
                     break
-        if not instances:
-            instances = pipeline_module.default_instances()
-        return pipeline_module.resolve(instances)
+        if not block.steps:
+            block = pipeline_module.default_block()
+        return pipeline_module.block_steps(block)
+
+    def block_steps(self):
+        """The project's own block's steps, with no fallback: what the ROI
+        manager measures the ROI being looked at with."""
+        from . import pipeline as pipeline_module
+        return pipeline_module.block_steps(self.block)
 
     def step_signature(self, step, inputs, before=()):
         """What this step's result depends on: the data *and* the parameters.
@@ -649,7 +656,7 @@ class ROIProject:
         return out
 
     def _included(self):
-        return [i for i, roi in self.rois.items() if roi.reviewed and roi.use]
+        return [i for i, roi in self.rois.items() if roi.use]
 
     def stale_steps(self, roi_id, steps=None):
         """The steps of this ROI that would have to run to be sure."""
@@ -659,20 +666,20 @@ class ROIProject:
                 if states[step.label][1] != "current"]
 
     def needs_evaluation(self, steps=None, roi_ids=None):
-        """Which reviewed, included ROIs have a step that is not current."""
+        """Which included ROIs have a step that is not current."""
         steps = self.resolved(steps)
         ids = list(self.rois) if roi_ids is None else list(roi_ids)
-        return [i for i in ids if self.rois[i].reviewed and self.rois[i].use
+        return [i for i in ids if self.rois[i].use
                 and self.stale_steps(i, steps)]
 
     # -------------------------------------------------------------- running
-    def evaluate(self, instances=None, roi_ids=None, progress=None, steps=None,
+    def evaluate(self, block=None, roi_ids=None, progress=None, steps=None,
                  reuse=False, chain="", report=None, stop=None, after=None,
                  tag=False):
-        """Run a pipeline over every reviewed, included ROI.
+        """Run a block's steps over every included ROI.
 
-        `instances` is a list of `workspace.Instance` -- the same type a tab
-        pins -- resolved here into steps.  Each step contributes columns to a
+        ``block`` is a `chain.Block`, or a list of `chain.Step`s, resolved
+        here into steps; by default the project's own (`resolved`).  Each step contributes columns to a
         site's row, and a step that raises costs its own columns and not the
         ROI, nor the ROIs after it.
 
@@ -687,9 +694,9 @@ class ROIProject:
         dialog's ``wasCanceled``) ends the run between ROIs, keeping the ones
         measured.  ``after`` and ``tag`` are a block's (`_evaluate_record`).
         """
-        steps = self.resolved(steps, instances)
+        steps = self.resolved(steps, block)
         ids = list(self.rois) if roi_ids is None else list(roi_ids)
-        ids = [i for i in ids if self.rois[i].reviewed and self.rois[i].use]
+        ids = [i for i in ids if self.rois[i].use]
         from ..region_runs import Progress, stopped
         records = {}
         status = Progress(len(ids), report, progress, what="ROIs")
@@ -814,13 +821,16 @@ class ROIProject:
         it (`RegionScratch.apply`).
         """
         try:
-            result = step.plugin.run(scratch.context(rois=self), step.settings)
+            result = step.plugin.run(scratch.context(
+                rois=self, grouping=step.plugin.grouping), step.settings)
             scratch.apply(result, step.label)
-            return region_entry(result, step.plugin, step.keep), result
+            # an ROI is looked at one by one: it keeps what its figures are
+            # drawn from (an id column's regions do not, `evaluate_regions`)
+            return region_entry(result, step.plugin, keep=True), result
         except Exception as error:
             return {"error": f"{type(error).__name__}: {error}"}, None
 
-    def evaluate_one(self, roi_id, instances=None, steps=None, reuse=False,
+    def evaluate_one(self, roi_id, block=None, steps=None, reuse=False,
                      force=(), store=False, run="stale"):
         """The pipeline on a single ROI, figures and all.
 
@@ -840,7 +850,7 @@ class ROIProject:
         step re-run only for its figure has nothing new to say and is not
         stored again.
         """
-        steps = self.resolved(steps, instances)
+        steps = self.resolved(steps, block)
         record, results, updated = self._evaluate_record(roi_id, steps, reuse=reuse,
                                                          force=force, run=run)
         if store and updated:
@@ -889,7 +899,7 @@ class ROIProject:
         return record, {label: state for label, (_, state) in found.items()}
 
     def results(self, steps=None, labels=None):
-        """The site table: a row per reviewed, included ROI that has results.
+        """The site table: a row per included ROI that has results.
 
         A row holds every evaluation the ROI has that still describes it
         (`evaluations`), whoever ran it -- the evaluation window's pipeline,
@@ -924,7 +934,7 @@ class ROIProject:
                 {"steps": {label: found[label][0] for label in names}})
             if values:
                 roi = self.rois[roi_id]
-                rows.append({"roi_id": roi.id, "file_id": roi.file_id, **values})
+                rows.append({"roi_id": roi.number, "file_id": roi.file_id, **values})
         return rows
 
     def _pipeline_results(self, steps):
@@ -932,7 +942,7 @@ class ROIProject:
         steps = self.resolved(steps)
         rows = []
         for roi in self.rois.values():
-            if not roi.reviewed or not roi.use:
+            if not roi.use:
                 continue
             record, states = self.latest(roi.id, steps)
             if record is None or any(states.get(step.label) in ("stale", "missing", None)
@@ -942,22 +952,19 @@ class ROIProject:
                                           for step in steps}}
             values = pipeline_module.merged_values(record)
             if values:
-                rows.append({"roi_id": roi.id, "file_id": roi.file_id, **values})
+                rows.append({"roi_id": roi.number, "file_id": roi.file_id, **values})
         return rows
 
-    def find(self, file_id, plugin=None, settings=None, parameters=None,
-             reviewed=False):
-        """Propose candidate ROIs on one file with a segmentation plugin.
+    def find(self, file_id, plugin=None, settings=None, parameters=None):
+        """Add the ROIs a segmentation plugin finds on one file.
 
-        Candidates are unreviewed by default, and `evaluate` and `results`
-        pass over unreviewed ROIs: they are proposals until someone has
-        looked at them.  A script that trusts the finder says
-        ``reviewed=True``; the GUI's `SessionROIs` reviews automatically.
+        Each is included as the finder judged it (``use``); `evaluate` and
+        `results` take every included ROI, as the GUI does.
         """
         origin, proposals = self.propose(file_id, plugin, settings, parameters)
         found = []
         for proposed in proposals:
-            roi = self.add_roi(file_id, proposed["center"], reviewed=reviewed,
+            roi = self.add_roi(file_id, proposed["center"],
                                origin={**origin, **proposed["origin"]})
             roi.use = proposed["use"]
             found.append(roi)
@@ -1025,80 +1032,292 @@ class ROIProject:
                 out.append(doc)
         return out
 
-    def save(self, path):
-        """Atomic sidecar save. In-memory sources must first be saved as localizations."""
-        path = Path(path).resolve()
-        for source in self.sources.values():
-            if source.path is None:
-                raise ValueError(f"Save localization source {source.name!r} before saving the project")
-            if path == Path(source.path):
-                raise ValueError("The project must not overwrite a localization source")
-        doc = {"size_nm": self.size_nm, "shape": self.shape, "tile_nm": self.tile_nm,
-               "filters": self.filters,
-               "grouped": self.grouped, "group_settings": asdict(self.group_settings),
-               "navigation": self.navigation, "rois": [asdict(r) for r in self.rois.values()],
-               "runs": self.runs, "pipeline": [asdict(i) for i in self.pipeline],
-               "block_options": self.block_options,
-               "sources": [{"id": s.id, "name": s.name,
-                            "path": os.path.relpath(s.path, path.parent),
-                            "fingerprint": s.fingerprint} for s in self.sources.values()]}
-        fd, temporary = tempfile.mkstemp(prefix=path.name + '.', suffix='.tmp', dir=path.parent)
-        os.close(fd)
-        try:
-            with h5py.File(temporary, 'w') as f:
-                f.attrs['format'] = 'smappy-roi-project'
-                f.attrs['format_version'] = 1
-                f.create_dataset('project', data=json_text(doc), dtype=h5py.string_dtype('utf-8'))
-                tables = f.create_group('tables')
-                n = 0
-                for table in self.tables.values():
-                    table.keep_only(self.rois)
-                    if len(table):                    # by number: a label may hold "/"
-                        table.to_hdf5(tables.create_group(str(n)))
-                        n += 1
-            os.replace(temporary, path)
-        finally:
-            if os.path.exists(temporary):
-                os.unlink(temporary)
-        return path
+    # ------------------------------------------------------------- sources
+    def sync(self) -> None:
+        """Follow the session: files, filters, grouping.  Cheap when nothing moved."""
+        locs = self.session.locs
+        names = self.session.file_names() or (["(unsaved)"] if len(locs) else [])
+        signature = (id(locs), len(locs), tuple(names))
+        if self._built != signature:
+            self._rebuild(names)
+            self._built = signature
+        layer = self.session.layers[min(self.layer, len(self.session.layers) - 1)]
+        if layer.is_image:
+            layer = self.session.layers[self.session.first_locs_layer()]
+        self.filters = layer.ranges
+        self.grouped = layer.grouped
+        # so the manager's images look like the main view -- except for the
+        # axes, which stay the positions: a site is a place, and a versatile
+        # render is a picture of two columns rather than of anywhere
+        self.render = replace(layer.state.settings, axes=RenderAxes())
+        self.display = layer.state.display
+        for source in self.sources.values():         # the states follow the layer
+            if source.state is not None:
+                self._apply(source)
 
-    @classmethod
-    def load(cls, path, source_paths=None):
-        """Reload sources and verify contents; source_paths can relink moved files by ID."""
-        path = Path(path).resolve()
-        with h5py.File(path, 'r') as f:
-            if f.attrs.get('format') != 'smappy-roi-project' or f.attrs.get('format_version') != 1:
-                raise ValueError("Unsupported ROI project format")
-            doc = json.loads(f['project'][()])
-            tables = [RegionTable.from_hdf5(f['tables'][k])
-                      for k in sorted(f.get('tables', {}), key=int)]
-        project = cls()
-        project.set_geometry(doc['size_nm'], doc['shape'])
-        project.set_tiles(doc.get('tile_nm', 0.0))
-        project.set_filters(doc['filters'])
-        project.grouped = doc['grouped']
-        project.group_settings = GroupSettings(**doc['group_settings'])
-        for saved in doc['sources']:
-            source_path = (source_paths or {}).get(saved['id'], path.parent / saved['path'])
-            source = project.add_source(load_localizations(source_path), path=source_path,
-                                        name=saved['name'], source_id=saved['id'])
-            if source.fingerprint != saved['fingerprint']:
-                raise ValueError(f"Source contents changed: {source_path}. Restore the original source.")
-        for saved in doc['rois']:
-            roi = ROI(**saved)
-            point(roi.center)
-            if roi.polygon is not None:
-                polygon_vertices(roi.polygon)
-            if roi.file_id not in project.sources or roi.id in project.rois:
-                raise ValueError("Invalid ROI source or duplicate ROI ID")
-            project.rois[roi.id] = roi
-        project.runs = []
-        for run in doc['runs']:
-            project.absorb_run(run)
-        for table in tables:
-            project.tables[table.label] = table
-        project.navigation = doc['navigation']
-        from .pipeline import DEFAULT_OPTIONS, from_dict as pipeline_from_dict
-        project.pipeline = pipeline_from_dict(doc)
-        project.block_options = {**DEFAULT_OPTIONS, **(doc.get("block_options") or {})}
-        return project
+    def _rebuild(self, names: List[str]) -> None:
+        """Sources for the session's files, keeping the ids ROIs refer to."""
+        by_number = {s.number: s for s in self.sources.values()}
+        self.sources = {}
+        self._states = {}
+        for number, name in enumerate(names):
+            info = self.session.files[number] if number < len(self.session.files) else None
+            old = by_number.get(number)
+            source = Source(old.id if old else f"file{number}", name,
+                                   info.path if info else None, number)
+            source.fingerprint = self._fingerprint(source)
+            self.sources[source.id] = source
+        # ROIs of files that are gone stay in the project but cannot be used
+        self._states.clear()
+
+    def _fingerprint(self, source: Source) -> str:
+        """What an evaluation was run on: the data, not the file's name.
+
+        Row count, column names and a sample of the positions -- enough to
+        notice a corrected or refitted table, cheap enough to recompute on
+        every staleness check, and unchanged by a rename or a "save as" --
+        or by a save and reopen, which adds `filenumber` to a table that
+        never came from a file (see `BOOKKEEPING`).  The columns written from
+        regions' results (`region_runs.REGION_COLUMNS`) are not counted either:
+        an ROI's number or its measured value written onto its localizations
+        changes nothing it was measured on, and used to make the very
+        evaluation it came from out of date.
+        """
+        from ..region_runs import REGION_COLUMNS
+        locs = self.session.locs
+        written = set(locs.metadata.get(REGION_COLUMNS) or {})
+        names = sorted((set(locs.columns) - written) | set(BOOKKEEPING))
+        if not len(locs):
+            return digest([0, names])
+        rows = np.arange(len(locs))
+        if "filenumber" in locs and len(self.sources) > 1:
+            rows = rows[np.asarray(locs["filenumber"]) == source.number]
+        sample = rows[:: max(1, len(rows) // 512)][:512]
+        values = [np.asarray(locs[c])[sample] for c in ("x_nm", "y_nm") if c in locs]
+        return digest([len(rows), names,
+                       [np.round(v.astype(float), 3).tolist() for v in values]])
+
+    def _slice(self, source: Source) -> Localizations:
+        locs = self.session.locs
+        if "filenumber" not in locs or len(self.sources) <= 1:
+            return locs
+        return locs[np.asarray(locs["filenumber"]) == source.number]
+
+    @property
+    def group_settings(self) -> GroupSettings:
+        """The session's: there is one grouped table, and the ROIs see it."""
+        return self.session.group_settings
+
+    def _apply(self, source: Source) -> None:
+        """Put the layer's bounds, grouping and look on this source's state."""
+        state = source.state
+        if state is None:
+            return
+        settings, display = getattr(self, "render", None), getattr(self, "display", None)
+        if settings is not None:
+            state.settings, state.display = settings, display
+        state.tables.settings = self.session.group_settings
+        state.use_grouped = self.grouped
+        state.set_ranges(self.filters)
+
+    def _tables(self, source: Source) -> Tables:
+        """The tables an ROI of this file looks at.  One file: the session's
+        own, grouped table and all.  One of several: its rows of the session's
+        table, and of the session's grouped table -- linking never joins two
+        files (`GroupSettings.block_fields`), so those rows are what linking
+        the file alone would give, without linking anything again."""
+        session = self.session
+        if "filenumber" not in session.locs or len(self.sources) <= 1:
+            return session.tables
+
+        def link(settings, attach_columns, number=source.number):
+            grouped = session.tables.grouped().locs
+            if "filenumber" not in grouped:
+                return grouped
+            return grouped[np.asarray(grouped["filenumber"]) == number]
+        return Tables(self._slice(source), session.group_settings, link=link)
+
+    def state(self, file_id) -> ViewState:
+        """The data an ROI of this file sees: the session's rows for that file,
+        under the layer's filter and grouping."""
+        source = self.sources[file_id]
+        if source.state is None:
+            source.state = ViewState(tables=self._tables(source))
+            self._apply(source)
+        return source.state
+
+    # ------------------------------------------------ measuring in an ROI
+    def _file_mask(self, locs: Localizations, number: int) -> Optional[np.ndarray]:
+        """Which rows of ``locs`` are file ``number``'s; None when all are."""
+        if "filenumber" not in locs or len(self.sources) <= 1:
+            return None
+        key = (id(locs), len(locs), number)
+        if key not in self._file_masks:
+            if len(self._file_masks) > 16:
+                self._file_masks.clear()
+            self._file_masks[key] = np.asarray(locs["filenumber"]) == number
+        return self._file_masks[key]
+
+    def _region_tables(self, roi, region):
+        """Every localization layer of the session, cut to the ROI.
+
+        The rows are found through the file's own index (the ROI belongs to
+        one file) and are rows of the session's table; each layer's
+        selection is its own filter over them -- not the session's
+        selection, which is cut to the drawn ROI and the slab -- and its
+        grouped table is offered, cut the same way, where it has a current
+        one.  The ROI manager's own state for the file decides nothing here
+        but where to look.
+        """
+        from ..plugins import Selection
+        session = self.session
+        source = self.sources[roi.file_id]
+        ungrouped = self.state(roi.file_id).tables.ungrouped
+        found = rows_in(ungrouped.locs, ungrouped.index, region)
+        in_file = self._file_mask(session.locs, source.number)
+        rows = found if in_file is None else np.flatnonzero(in_file)[found]
+        locs = session.locs[rows]
+        tables = {}
+        for i, lay in enumerate(session.layers):
+            if lay.is_image:
+                continue
+            mask = np.asarray(lay.selection(i).mask, dtype=bool)
+            entry = {"ungrouped": (locs, Selection(mask[rows], layer=i, roi=region,
+                                                   name=f"{lay.name}, {region}"))}
+            # linked here if a layer shows blinks and nothing defers it;
+            # otherwise offered only where it is current
+            locset = (session.tables.available() if lay.grouped else
+                      session.tables.peek_grouped() if session.tables.is_current else None)
+            if locset is not None:
+                keep = self._file_mask(locset.locs, source.number)
+                g = rows_in(locset.locs, locset.index, region, keep)
+                entry["grouped"] = (locset.locs[g], Selection(
+                    np.asarray(lay.state.filter_for(locset).mask, dtype=bool)[g],
+                    layer=i, roi=region, name=f"{lay.name}, blinks merged, {region}"))
+            tables[i] = entry
+        layer = min(self.layer, len(session.layers) - 1)
+        if session.layers[layer].is_image:
+            layer = session.first_locs_layer()
+        return tables, rows, layer, session
+
+    # --------------------------------------------------------- persistence
+    def to_dict(self) -> dict:
+        """The project as JSON-compatible data, for the localization file."""
+        return {"format_version": FORMAT_VERSION,
+                "size_nm": self.size_nm, "shape": self.shape,
+                "preview_nm": self.preview_nm, "tile_nm": self.tile_nm,
+                "navigation": self.navigation,
+                "sources": [{"id": s.id, "number": s.number, "name": s.name}
+                            for s in self.sources.values()],
+                "rois": [asdict(r) for r in self.rois.values()],
+                "next_number": self.next_number,
+                "runs": self.runs,
+                # the results, a columnar table per evaluation (`RegionTable`)
+                "tables": self.tables_dict(self.rois),
+                # the block is provenance for the columns in `runs`, so it
+                # is saved with them rather than only in the workspace
+                "block": self.block.to_dict()}
+
+    def from_dict(self, doc: Optional[dict]) -> None:
+        """Restore ROIs, runs and navigation saved with a file."""
+        self.rois = {}
+        self.next_number = 1
+        self.runs = []
+        self.tables = {}
+        self.navigation = {}
+        from ..chain import Block
+        self.block = Block()
+        self.segment_preview = None
+        self.history.clear()        # another file's edits
+        if not doc:
+            return
+        doc = json.loads(json_text(doc)) if not isinstance(doc, dict) else doc
+        if doc.get("format_version", FORMAT_VERSION) > FORMAT_VERSION:
+            raise ValueError("this file's ROIs were written by a newer smappy")
+        self.set_geometry(doc.get("size_nm", self.size_nm), doc.get("shape", self.shape))
+        self.preview_nm = float(doc.get("preview_nm", 0.0) or 0.0)
+        self.set_tiles(doc.get("tile_nm", 0.0) or 0.0)
+        self.navigation = dict(doc.get("navigation", {}))
+        # ids the file used, mapped onto the files this session has
+        by_number = {s.number: s for s in self.sources.values()}
+        remap = {}
+        for saved in doc.get("sources", []):
+            source = by_number.get(saved.get("number"))
+            if source is not None:
+                remap[saved["id"]] = source.id     # the name stays the session's
+        if self.navigation.get("file") in remap:
+            self.navigation["file"] = remap[self.navigation["file"]]
+        for saved in doc.get("rois", []):
+            roi = ROI.from_dict(saved)
+            roi.file_id = remap.get(roi.file_id, roi.file_id)
+            if roi.file_id in self.sources:
+                self.rois[roi.id] = roi
+        self.number_rois(doc.get("next_number"))
+        for run in doc.get("runs", []):
+            records = {i: r for i, r in (run.get("records") or {}).items()
+                       if i in self.rois}
+            self.absorb_run({**run, "records": records})
+        for saved in doc.get("tables", []):
+            table = RegionTable.from_dict(saved)
+            table.keep_only(self.rois)
+            if len(table):
+                self.tables[table.label] = table
+        self.block = block_from(doc)
+
+    # ---------------------------------------------------------------- misc
+    @property
+    def preview_width(self) -> float:
+        """What the ROI image covers, in nm."""
+        return self.preview_nm or 3.0 * self.size_nm
+
+    def rois_of(self, file_id) -> List[ROI]:
+        return [r for r in self.rois.values() if r.file_id == file_id]
+
+    def file_number(self, file_id) -> int:
+        source = self.sources.get(file_id)
+        return source.number + 1 if source is not None else 0
+
+    def source_of(self, number: int) -> Optional[Source]:
+        return next((s for s in self.sources.values() if s.number == number), None)
+
+
+def block_from(doc: dict):
+    """The project's block as a saved project holds it: ``block``, a
+    `chain.Block`'s own form, or -- in a file from before the project held
+    one -- its steps as ``pipeline`` (workspace instances, a block among them
+    as ``plugin: Chain/Block`` with its ``chain``) and its own fields as
+    ``block_options``.  Read tolerantly: a file outlives the code that wrote
+    it, and a step that cannot be read costs that step."""
+    from ..chain import Block, ChainError, Step
+    if isinstance(doc.get("block"), dict):
+        try:
+            return Block.from_dict(doc["block"])
+        except ChainError:
+            return Block()
+    options = doc.get("block_options") or {}
+    steps = []
+    for raw in doc.get("pipeline") or []:
+        if not isinstance(raw, dict) or not raw.get("plugin"):
+            continue
+        enabled = bool(raw.get("enabled", True))
+        try:
+            if raw["plugin"] == "Chain/Block" and isinstance(raw.get("chain"), dict):
+                inner = Block.from_dict(raw["chain"])
+                inner.label = str(raw.get("label") or "") or inner.label
+                inner.enabled = enabled
+                steps.append(inner)
+                continue
+        except ChainError:
+            continue
+        values = raw.get("values")
+        steps.append(Step(plugin=str(raw["plugin"]), label=str(raw.get("label") or ""),
+                          values=dict(values) if isinstance(values, dict) else {},
+                          enabled=enabled))
+    own = {k: options[k] for k in ("regions", "write_back", "write_values", "merge")
+           if k in options}
+    try:
+        block = Block.from_dict({**own, "steps": []})
+    except ChainError:
+        block = Block()
+    block.steps = steps
+    return block

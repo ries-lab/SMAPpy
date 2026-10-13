@@ -5,16 +5,20 @@ covers: [smappy.plugins.region_column.ColumnToROIs.run, smappy.plugins.region_co
 
 ## What it does
 
-Makes an ROI in the [ROI manager](plugin:Panels/ROI manager) for every
-region an id column of the table names -- usually every cluster a clusterer
-found (`cluster_id`, from [DBSCAN](plugin:Analysis/Regions/Find/DBSCAN) or
-any other) -- so the clusters can be looked at one by one, reviewed, excluded
-and annotated.
+Makes an [ROI](plugin:Panels/Glossary) (region of interest: a shape kept in
+the ROI manager, inside which things are measured) in the
+[ROI manager](plugin:Panels/ROI manager) for every
+[region](plugin:Panels/Glossary) an id column of the table names -- usually
+every [cluster](plugin:Panels/Glossary) (localizations lying closer to each
+other than to the rest) a clusterer found (`cluster_id`, from
+[DBSCAN](plugin:Analysis/Regions/Find/DBSCAN) or any other) -- so the
+clusters can be looked at one by one, reviewed, excluded and annotated.
 
 It works on any column of whole numbers: an id of 0 or below means "in no
 region" and gets no ROI, and so does an id with fewer than *at least*
 localizations.  Use it when the clusters need a person's eye or a note; to
-measure every cluster, a block repeating over `cluster_id` does it without
+measure every cluster, a block of a [chain](plugin:Panels/Glossary) (plugins
+run one after another as one) repeating over `cluster_id` does it without
 ROIs, and is much faster for thousands of clusters.
 
 ## How it works
@@ -41,6 +45,12 @@ localizations, its file the one its localizations came from, and it
 remembers the column, the id and the number of localizations (`origin`).
 All the ROIs of a run are one step of the ROI manager's undo.
 
+## In detail
+
+**Which table.**  The localizations, whatever the layer shows: the id
+column is theirs, and a region's outline is drawn round all of its
+localizations.
+
 ## Parameters
 
 ### column
@@ -60,8 +70,8 @@ taking in the localizations around a smaller one.
 
 ### replace
 Removes only the ROIs this plugin made of the same column, so ROIs drawn by
-hand or found by a finder stay.  Without it, running again adds a second set
-over the first.
+hand or found by a finder stay.  Off, running again adds a second set over
+the first.
 
 ## Output
 

@@ -5,7 +5,7 @@ Some acquisitions never write one -- pycro-manager hands each image to a
 callback, and a control program may have the frames in memory already.  This is
 the same `ImageSource` interface for that case: the producer calls `push`, and
 the pipeline reads blocks from `watch` exactly as it reads them from a growing
-TIFF, so `LiveFit` and `live_view` work unchanged.
+TIFF, so `LiveFit` works unchanged.
 
 The producer and the consumer are different threads and neither waits for the
 other: `push` hands a frame over and returns, and the fitting side takes

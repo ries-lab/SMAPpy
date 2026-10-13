@@ -18,8 +18,9 @@ spot it came from and reports two things:
   [Sage et al. 2019](https://doi.org/10.1038/s41592-019-0364-4)).
 * **Accuracy** -- for the localizations that were found, how far they are
   from the truth: the systematic offset (bias), the typical error, and
-  whether the error each localization *claims* (its precision) is the error
-  it really has.
+  whether the error each localization *claims* -- its
+  [localization precision](plugin:Panels/Glossary), also called the CRLB or
+  localization uncertainty -- is the error it really has.
 
 Use it to test a fitter or its settings on data where the answer is known,
 to see what a filter on fit quality costs and gains, or to check that the
@@ -100,8 +101,8 @@ sliver of a frame gave a handful of photons, and no fitter finds it.
 Counting it as missed would measure the simulation, not the fit.  So only
 true spots with at least *count spots from* photons (100 by default) are
 counted.  With *isolated spots only*, only spots with no other spot within
-1 µm in their frame count, which measures the fit without crowding.  An ROI
-drawn in the render window limits the truth as well as the localizations,
+1 µm in their frame count, which measures the fit without crowding.  An
+[ROI](plugin:Panels/Glossary) (region of interest) drawn in the render window limits the truth as well as the localizations,
 so the score is of what is being looked at.  Every true spot still takes
 part in the pairing; the rule only decides which are scored.
 
@@ -191,7 +192,7 @@ error by its own precision gives a number that should scatter like a
 standard normal distribution -- spread 1 -- when the precisions are right.
 The plugin reports that spread as **error / reported precision**.  Above 1,
 the localizations are worse than they claim, and anything that weights by
-precision (grouping, a line profile, a drift correction) trusts them too
+precision (merging blinks, a line profile, a drift correction) trusts them too
 much.  Below 1, they are better than they claim.  The spread is measured
 robustly, so a few wrong pairs do not change it.  A bias widens it too,
 since a shift of a few nanometres is several times the precision of a
@@ -200,7 +201,8 @@ bright spot and a fraction of a dim one's.
 **8. The z scale.**  With z in both, fitted z is plotted against true z and
 a straight line fitted.  Its slope is the scale of the axial calibration: 1
 is right, below 1 the fitted z range is compressed.  Crowded spots pull
-astigmatic z towards the focus and so lower the slope, which is one reason
+astigmatic z (z read from how a cylindrical lens stretches the spot, wider in
+x on one side of the focus and in y on the other) towards the focus and so lower the slope, which is one reason
 to look at isolated spots too.
 
 ```figure The plugin's figure for the simulated table spoiled in known ways, scored on isolated spots: x shifted by 4 nm, extra noise on y of 1.2 times the precision (so a spread of $\sqrt{1 + 1.2^2} \approx 1.56$), z compressed to 90%, and 5% false localizations at random places.  Top right: the measured error lies above the reported precision, most of all for the bright spots, whose precision is smallest next to the 4 nm shift.  Bottom left: the x errors are shifted, the y errors too wide, and the z errors widened by the compression.  Bottom right: z on a slope of 0.9.  The false localizations lower the Jaccard index below the recall, and the extra noise takes a few of the dimmest spots beyond 100 nm, where they count as missed.
@@ -247,6 +249,12 @@ for ax in (left, right):
 ```
 
 ## In detail
+
+**Which table.**  The localizations, whatever the layer shows: the
+truth is a spot per frame, so the fit is matched to it frame by frame, and
+a blink merged over several frames would have nothing to be matched with.
+The [selection](plugin:Panels/Glossary) -- what a plugin measures -- is the
+layer's bounds applied to each localization.
 
 **The truth table.**  The simulation settings come from the file named in
 *simulation*, else from the `*.sim.yaml` in the table's `source`, else from
@@ -403,7 +411,7 @@ that remains is the drift correction's own error.
   missed, and the Jaccard index; the number set aside, if any; per axis the
   bias, the RMS error and the error / reported precision; and, with z, the
   slope and offset of fitted against true z.
-* **The figure** (the *Plot* button): the recall by photons; the measured
+* **The figure** (*Show result*): the recall by photons; the measured
   error against the reported precision, by photons; the distribution of
   error over reported precision per axis, with the spread in the legend;
   and, with z, fitted against true z.

@@ -8,9 +8,9 @@ from smappy.plugins import Context, settings_from, settings_values
 from smappy.plugins.roi import (DensityPeakSettings, HistogramSettings, Histograms,
                                 density_peaks, histograms)
 from smappy.plugins.statistics import LocalizationStatistics, StatisticsSettings
-from smappy.roi_manager import ROIProject
 from smappy.roi_manager import pipeline as pipeline_module
-from smappy.workspace import Instance
+from smappy.chain import Block, Step as ChainStep
+from test_roi_session import rois_of                          # noqa: E402
 
 
 def table(centers, per=10, seed=0):
@@ -35,7 +35,7 @@ def test_the_region_plugins_are_registered_under_regions():
                           "Analysis/Regions/Column to ROIs",
                           "Analysis/Regions/Regions to column",
                           "Analysis/Regions/Summarize/Histograms",
-                          "Analysis/Regions/Summarize/NPC Labeling Efficiency",
+                          "Analysis/Regions/Summarize/NPC labelling efficiency",
                           "Analysis/Regions/Workflow/NPC Analysis"}
     found = {**found, **plugins.refs("Analysis/Measure/")}
     # per_region is what marks an evaluator, not the folder it sits in
@@ -52,22 +52,13 @@ def test_the_defaults_dict_became_a_typed_settings_class():
 
 
 def test_statistics_measures_one_site_through_the_context():
-    project = ROIProject()
-    source = project.add_source(table([(0, 0), (5000, 0)], per=30))
-    project.set_filters({})
-    roi = project.add_roi(source.id, [0.0, 0.0], reviewed=True)
+    project, source = rois_of(table([(0, 0), (5000, 0)], per=30), filters={})
+    roi = project.add_roi(source.id, [0.0, 0.0])
     result = LocalizationStatistics().run(project.region_context(roi),
-                                          StatisticsSettings(fit_precision=False))
+                                          StatisticsSettings(precision_fit="none"))
     assert result.values["n_localizations"] == 30       # this site's, not the file's
     assert result.values["mean_precision_nm"] == 11.0
     assert np.isnan(result.values["sigma_c_nm"])        # the fit was switched off
-
-
-def test_the_pipeline_adds_a_plugin_with_its_slow_options_off():
-    added = pipeline_module.instance_for("Analysis/Measure/Localization Statistics")
-    assert added.values == {"fit_precision": False}
-    assert pipeline_module.default_instances()[0].values == {"fit_precision": False}
-    assert pipeline_module.instance_for("Analysis/Measure/NPC Corners").values == {}
 
 
 def test_a_bad_setting_is_refused_rather_than_silently_odd():
@@ -76,7 +67,7 @@ def test_a_bad_setting_is_refused_rather_than_silently_odd():
 
 
 def test_histograms_needs_a_site_table():
-    with pytest.raises(ValueError, match="no site table"):
+    with pytest.raises(ValueError, match="nothing measured in the regions yet"):
         Histograms().run(Context(), HistogramSettings())
 
 
@@ -90,50 +81,48 @@ def test_histograms_picks_the_numeric_columns_itself():
 
 # ------------------------------------------------------------ the pipeline
 
-def test_a_pipeline_step_is_the_same_instance_type_a_tab_pins():
-    instance = Instance(plugin="Analysis/Measure/Localization Statistics",
-                        values={"bins": 40})
-    step, = pipeline_module.resolve([instance])
-    assert step.label == "Localization Statistics" and step.version == "3"
+def test_a_step_of_the_projects_block_is_a_chains_step():
+    instance = ChainStep(plugin="Analysis/Measure/Localization Statistics",
+                         values={"bins": 40})
+    step, = pipeline_module.block_steps(Block(steps=[instance]))
+    assert step.label == "Localization Statistics" and step.version == "4"
     assert step.settings.bins == 40
     assert step.as_record()["plugin"] == "Analysis/Measure/Localization Statistics"
 
 
 def test_a_specialised_evaluator_is_offered_but_not_in_the_default_pipeline():
     assert plugins.refs()["Analysis/Measure/NPC Corners"].per_region
-    assert [i.plugin for i in pipeline_module.default_instances()] == \
+    assert [i.plugin for i in pipeline_module.default_block().steps] == \
         ["Analysis/Measure/Localization Statistics"]
 
 
 def test_a_disabled_step_is_skipped():
-    instances = pipeline_module.default_instances()
-    instances[0].enabled = False
-    assert pipeline_module.resolve(instances) == []
+    block = pipeline_module.default_block()
+    block.steps[0].enabled = False
+    assert pipeline_module.block_steps(block) == []
 
 
 def test_a_step_whose_plugin_is_gone_costs_only_itself():
-    instances = [Instance(plugin="Gone/Away")] + pipeline_module.default_instances()
-    steps = pipeline_module.resolve(instances)
+    block = pipeline_module.default_block()
+    block.steps.insert(0, ChainStep(plugin="Gone/Away"))
+    steps = pipeline_module.block_steps(block)
     assert [s.path for s in steps] == ["Analysis/Measure/Localization Statistics"]
 
 
 def test_the_same_evaluator_twice_gets_distinct_columns():
     """SMAP's addmodule renames on collision; so does this."""
-    one = Instance(plugin="Analysis/Measure/Localization Statistics")
-    steps = pipeline_module.resolve([one, one.copy()])
+    one = ChainStep(plugin="Analysis/Measure/Localization Statistics")
+    steps = pipeline_module.block_steps(Block(steps=[one, ChainStep(plugin=one.plugin)]))
     assert [s.label for s in steps] == ["Localization Statistics", "Localization Statistics 2"]
 
 
 def test_running_a_two_step_pipeline_over_a_project():
-    project = ROIProject()
-    source = project.add_source(table([(0, 0), (1000, 1000)]))
-    project.set_filters({})
+    project, source = rois_of(table([(0, 0), (1000, 1000)]), filters={})
     project.set_geometry(200)
     for center in ([0, 0], [1000, 1000]):
         project.add_roi(source.id, center)
-    one = Instance(plugin="Analysis/Measure/Localization Statistics")
-    two = one.copy()
-    two.values = {"bins": 50}
+    one = ChainStep(plugin="Analysis/Measure/Localization Statistics")
+    two = ChainStep(plugin=one.plugin, values={"bins": 50})
     run = project.evaluate([one, two])
     assert [step["label"] for step in run["pipeline"]] == ["Localization Statistics", "Localization Statistics 2"]
     rows = project.results()
@@ -143,38 +132,36 @@ def test_running_a_two_step_pipeline_over_a_project():
     assert rows[0]["Localization Statistics 2.mean_precision_nm"] == 11.0
 
 
-def test_a_pipeline_file_round_trips(tmp_path):
-    instances = pipeline_module.default_instances()
-    instances[0].label = "precision only"
-    instances[0].values = {"bins": 50}
-    path = pipeline_module.save(instances, tmp_path / "p.yaml")
-    back = pipeline_module.load(path)
-    assert [i.label for i in back] == ["precision only"]
-    assert back[0].values == {"bins": 50}
-    assert pipeline_module.resolve(back)[0].settings.bins == 50
+def test_the_block_travels_with_the_project():
+    """The columns of a results table are meaningless without it."""
+    from smappy.session import Session
+    session = Session(table([(0, 0)]))
+    project = session.rois
+    project.add_roi(next(iter(project.sources)), [0, 0])
+    project.block = pipeline_module.default_block()
+    project.block.steps[0].label = "my statistics"
+    project.block.write_values = ["n_localizations"]
+    project.evaluate()
+    project.from_dict(project.to_dict())
+    assert [s.label for s in project.block.steps] == ["my statistics"]
+    assert project.block.write_values == ["n_localizations"]
+    assert project.runs[0]["pipeline"][0]["label"] == "my statistics"
 
 
-def test_a_broken_pipeline_file_gives_no_steps_rather_than_raising():
-    assert pipeline_module.from_dict(None) == []
-    assert pipeline_module.from_dict({"pipeline": [{"nope": 1}, "text"]}) == []
-
-
-def test_the_pipeline_travels_with_the_project(tmp_path):
-    """The columns of a site table are meaningless without it."""
-    project = ROIProject()
-    source = project.add_source(table([(0, 0)]), path=str(tmp_path / "locs.hdf5"))
-    project.set_filters({})
-    project.add_roi(source.id, [0, 0])
-    project.pipeline = pipeline_module.default_instances()
-    project.pipeline[0].label = "my statistics"
-    project.evaluate(project.pipeline)
-
-    from smappy.io.hdf5 import save_localizations
-    save_localizations(tmp_path / "locs.hdf5", table([(0, 0)]))
-    path = project.save(tmp_path / "project.h5")
-    loaded = ROIProject.load(path)
-    assert [i.label for i in loaded.pipeline] == ["my statistics"]
-    assert loaded.runs[0]["pipeline"][0]["label"] == "my statistics"
+def test_a_file_from_before_the_block_reads_its_steps_and_options():
+    from smappy.roi_manager.core import block_from
+    block = block_from({
+        "pipeline": [{"plugin": "Analysis/Measure/Localization Statistics",
+                      "label": "stats", "values": {"bins": 50}},
+                     {"plugin": "Chain/Block", "label": "inner", "enabled": False,
+                      "chain": {"block": "", "regions": "cluster_id", "steps": []}},
+                     {"nope": 1}, "text"],
+        "block_options": {"regions": "rois", "write_back": ["n_here"], "merge": "mean"}})
+    first, inner = block.steps
+    assert first.label == "stats" and first.values == {"bins": 50}
+    assert isinstance(inner, Block) and inner.label == "inner" and not inner.enabled
+    assert block.write_back == ["n_here"] and block.merge == "mean"
+    assert block_from({}).steps == []
 
 
 # ------------------------------------------------------------- the settings
@@ -201,7 +188,7 @@ def test_a_segmenter_preview_proposes_what_run_adds_and_adds_nothing():
     finder = DensityPeaks()
     preview = finder.preview(session.context(), settings)
     assert session.rois.rois == {}
-    sites = preview.data["roi_preview"]["sites"]
+    sites = preview.roi_preview["sites"]
     assert len(sites) == 3 and preview.text == "3 candidates previewed"
 
     # the session puts it where the manager draws it; a run adds the same
@@ -216,9 +203,8 @@ def test_a_segmenter_preview_proposes_what_run_adds_and_adds_nothing():
 
 
 def test_propose_is_find_without_the_adding():
-    project = ROIProject()
+    project, source = rois_of(table([(0, 0), (3000, 0)], per=40))
     project.set_geometry(300)
-    source = project.add_source(table([(0, 0), (3000, 0)], per=40))
     settings = DensityPeakSettings(separation_nm=1000.0, min_count=20)
     origin, proposals = project.propose(source.id, settings=settings)
     assert project.rois == {} and len(proposals) == 2
@@ -233,8 +219,7 @@ def test_propose_is_find_without_the_adding():
 
 
 def test_an_roi_edit_is_undone_and_redone_and_a_no_op_leaves_no_step():
-    project = ROIProject()
-    source = project.add_source(table([(0, 0)]))
+    project, source = rois_of(table([(0, 0)]))
     with project.edit("Add ROI"):
         kept = project.add_roi(source.id, (0.0, 0.0))
     with project.edit("Exclude ROI 1"):
@@ -253,8 +238,7 @@ def test_an_roi_edit_is_undone_and_redone_and_a_no_op_leaves_no_step():
 
 
 def test_the_roi_undo_keeps_twenty_steps():
-    project = ROIProject()
-    source = project.add_source(table([(0, 0)]))
+    project, source = rois_of(table([(0, 0)]))
     for i in range(25):
         with project.edit(f"Add {i}"):
             project.add_roi(source.id, (float(i), 0.0))
@@ -273,18 +257,18 @@ def test_a_replacing_run_is_one_undo_step_that_brings_the_old_rois_back_with_the
     drawn = project.add_roi(file_id, (1500.0, 1500.0))
     finder = DensityPeaks()
     settings = DensityPeakSettings(separation_nm=1000.0, min_count=20)
-    first = finder.run(session.context(), settings).data["rois"]
+    first = finder.run(session.context(), settings).rois
     assert len(first) == 3
-    project.evaluate([Instance(plugin="Analysis/Measure/Localization Statistics")])
+    project.evaluate([ChainStep(plugin="Analysis/Measure/Localization Statistics")])
     assert len(project.results()) == 4
 
     # again without replace: nothing new, and no step for it
-    assert finder.run(session.context(), settings).data["rois"] == []
+    import dataclasses
+    assert finder.run(session.context(),
+                      dataclasses.replace(settings, replace=False)).rois == []
     assert project.history.undo_label == "Density Peaks: 3 ROIs"
 
-    import dataclasses
-    again = finder.run(session.context(),
-                       dataclasses.replace(settings, replace=True)).data["rois"]
+    again = finder.run(session.context(), settings).rois     # replace: the default
     assert len(again) == 3 and drawn.id in project.rois
     assert not {r.id for r in first} & set(project.rois)
     assert project.undo() == "Density Peaks: 3 ROIs for 3"
@@ -322,22 +306,21 @@ def test_the_region_steps_window_edits_the_projects_block(app, monkeypatch):
     assert tree.childCount() == 1                       # the block's steps, at the top
     assert tree.child(0).text(0).startswith("Localization Statistics")
     window.panel.form.set_values({"for_each_roi.localization_statistics.bins": 50})
-    assert project.pipeline[0].values["bins"] == 50
+    assert project.block.steps[0].values["bins"] == 50
     # a step added with nothing selected goes into the block
     window.panel.steps.setCurrentItem(None)
     monkeypatch.setattr(chooser, "choose_plugin",
                         lambda *a, **k: "Analysis/Measure/NPC Corners")
     window.panel.add_step()
-    assert [i.plugin for i in project.pipeline] == [
+    assert [i.plugin for i in project.block.steps] == [
         "Analysis/Measure/Localization Statistics", "Analysis/Measure/NPC Corners"]
-    assert project.pipeline[0].values["bins"] == 50     # what the form held survives
+    assert project.block.steps[0].values["bins"] == 50     # what the form held survives
     window.panel.steps.invisibleRootItem().child(1).setCheckState(0, Qt.Unchecked)
-    assert not project.pipeline[1].enabled
-    assert [s.label for s in pipeline_module.resolve(project.pipeline)] == \
-        ["Localization Statistics"]
+    assert not project.block.steps[1].enabled
+    assert [s.label for s in project.block_steps()] == ["Localization Statistics"]
     # what it repeats over is the block's own field
     window.panel.form.set_values({"for_each_roi.write_back": "n_here"})
-    assert project.block_options["write_back"] == ["n_here"]
+    assert project.block.write_back == ["n_here"]
 
 
 def test_a_tab_pins_a_per_region_plugin_too(app):
@@ -370,17 +353,15 @@ def test_find_evaluate_and_analyse_through_the_session(app):
                                                       separation_nm=1000.0,
                                                       min_count=20))
     assert len(found) == 4
-    for roi in project.rois.values():
-        roi.reviewed = True
 
     window = RegionStepsWindow(session)
     window.run()
     assert "4 ROIs, 1 step(s)" in window.status.text()
     # the session's log says what was evaluated, with each step's settings
     entry = session.history[-1]
-    assert entry["what"] == "Analysis/Regions/Region steps" and "4 ROIs" in entry["text"]
+    assert entry["what"] == "Analysis/Regions/Per-region steps" and "4 ROIs" in entry["text"]
     assert entry["steps"][0]["plugin"] == "Chain/Block"
-    assert entry["steps"][0]["values"]["localization_statistics.fit_precision"] is False
+    assert entry["steps"][0]["values"]["localization_statistics.precision_fit"] == "histogram"
     rows = project.results()
     assert len(rows) == 4 and rows[0]["n_localizations"] == 100
 
@@ -450,15 +431,20 @@ def test_the_manager_undoes_a_removal_with_its_own_undo(app):
     project.add_roi(file_id, (3000.0, 0.0))
     window = ROIManagerWindow(session)
     assert not window.undo_button.isEnabled()
+    assert window.undo_button.text() == "Undo ROI edit"
 
     window.select(first.id)
     window._remove()
     assert first.id not in project.rois and window.table.model().rowCount() == 1
     assert window.undo_button.toolTip() == "undo: Remove ROI 1"
+    # the button names the edit, so it is not the main window's "Undo RCC"
+    assert window.undo_button.text() == "Undo remove ROI 1"
     window.undo_button.click()
     assert first.id in project.rois and window.table.model().rowCount() == 2
     assert "undid Remove ROI 1" in window.status.currentMessage()
     assert window.redo_button.toolTip() == "redo: Remove ROI 1"
+    assert window.redo_button.text() == "Redo remove ROI 1"
+    assert window.undo_button.text() == "Undo ROI edit"
     # the table's undo is another stack, and has nothing to undo
     assert not session.can_undo
     window.redo_button.click()

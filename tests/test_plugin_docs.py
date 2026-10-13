@@ -11,13 +11,6 @@ import pytest
 from smappy import docs, plugins
 from smappy.docs import markup
 
-# Plugins still waiting for a written page.  It may only shrink: a new plugin
-# gets a page (docs/<path>.md beside the plugins) or a line here, and a page
-# that is written takes its plugin off.  Until then the Help window shows the
-# summary and the settings table, generated.
-UNDOCUMENTED: set = set()
-
-
 def shipped():
     """The plugins and chains that ship: a shipped chain is a plugin to the
     person who opens it, and has a page like one."""
@@ -31,11 +24,10 @@ def documented():
 
 
 # ------------------------------------------------------------------ coverage
-def test_every_shipped_plugin_has_a_page_or_is_listed_as_waiting_for_one():
+def test_every_shipped_plugin_has_a_page():
     missing = {path for path, ref in shipped().items()
                if docs.page_file(path, ref.origin) is None}
-    assert missing - UNDOCUMENTED == set(), "write a page, or list it above"
-    assert UNDOCUMENTED - missing == set(), "it has a page now: take it off the list"
+    assert missing == set(), "write a page: docs/<path>.md beside the plugins"
 
 
 def test_every_page_belongs_to_a_plugin():
@@ -44,6 +36,25 @@ def test_every_page_belongs_to_a_plugin():
     pages = {str(p.relative_to(root).with_suffix("")).replace("\\", "/")
              for p in root.rglob("*.md")}
     assert pages - set(shipped()) == set()
+
+
+def test_every_link_between_pages_leads_to_a_page():
+    """A link to a renamed plugin, or written with a scheme the Help window
+    does not follow (`panel:`), goes nowhere without a word -- and the
+    glossary links are on every page."""
+    from urllib.parse import unquote
+    root = plugins.BUILTIN_ROOT / docs.DOCS_DIR
+    files = list(root.rglob("*.md")) + list(docs.PANELS.glob("*.md"))
+    known = set(shipped()) | set(docs.panels())
+    broken = []
+    for file in files:
+        for url in re.findall(r"\]\(([^)]+)\)", file.read_text(encoding="utf-8")):
+            if url.startswith(("http://", "https://", "mailto:")):
+                continue
+            target = unquote(url[len("plugin:"):]) if url.startswith("plugin:") else None
+            if target not in known:
+                broken.append(f"{file.name}: {url}")
+    assert broken == []
 
 
 @pytest.mark.parametrize("path", documented())
@@ -116,6 +127,7 @@ PLUGIN = '''
         mode: str = param("a", choices=(("a", "the first"), ("b", "the second")))
 
     class Thing(Plugin):
+        changes_locs = False
         Settings = ThingSettings
         version = "2"
         description = "Measures a thing."
@@ -347,8 +359,8 @@ def test_a_plugins_title_bar_has_a_question_mark_that_opens_its_page(app):
                                                 QUrl(names[0]))
     assert not image.isNull() and image.width() > 10
     # a link to another plugin's page is followed in the same window
-    window._on_link(QUrl("plugin:File/Load/MINFLUX"))
-    assert window.current == "File/Load/MINFLUX"
+    window._on_link(QUrl("plugin:File/Load/Auto"))
+    assert window.current == "File/Load/Auto"
     assert "MINFLUX" in window.browser.toPlainText()
     assert "No written page" not in window.browser.toPlainText()
 

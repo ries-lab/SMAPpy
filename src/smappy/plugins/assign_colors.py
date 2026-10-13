@@ -37,7 +37,7 @@ from typing import Dict, Optional, Sequence, Tuple
 import numpy as np
 
 from ..locs import Localizations
-from . import Context, LiveRecipe, Plugin, Result, param, register
+from . import Context, FormState, ColumnRecipe, Plugin, Result, param, register
 
 # candidate column pairs, in the order they are looked for: what the paired
 # fit writes first, then the 1-based spelling a SMAP or hand-made table uses
@@ -493,66 +493,85 @@ class AssignColorSettings:
     colors: int = param(2, label="colours", min=1, max=MAX_COLORS,
                         help="how many species the histogram of r holds")
     exclusion: float = param(0.05, label="exclusion dr", min=0.0,
-                             help="minima: leave this much of r on either side "
-                                  "of a boundary unassigned")
+                             help="minima: leave this much of r on either "
+                                  "side of a boundary unassigned")
     tolerance: float = param(3.0, label="sigma", min=0.0,
-                             help="probabilistic: a colour is given only within "
-                                  "this many sigma of its expected split, the "
-                                  "sigma being that localization's own photon "
-                                  "statistics plus any extra spread. 0: assign "
-                                  "to the nearest colour however far away")
+                             help="probabilistic: a colour is given only "
+                                  "within this many sigma of its expected "
+                                  "split, the sigma being that "
+                                  "localization's own photon statistics "
+                                  "plus any extra spread. 0: assign to the "
+                                  "nearest colour however far away")
     keep_tails: bool = param(False, label="keep the tails",
                              help="probabilistic: apply the sigma test only "
                                   "between the outermost colours, so a "
-                                  "localization more extreme than the first or "
-                                  "the last mode is kept rather than refused")
-    crosstalk: float = param(0.05, label="allowed crosstalk", min=1e-6, max=0.5,
-                             help="probabilistic: refuse what is too close to "
-                                  "call as well -- the largest expected "
-                                  "fraction of wrongly assigned localizations. "
-                                  "Narrow beside the sigma test, and what "
-                                  "matters where two colours overlap")
+                                  "localization more extreme than the first "
+                                  "or the last mode is kept rather than "
+                                  "refused")
+    crosstalk: float = param(0.05, label="allowed crosstalk", min=1e-6,
+                             max=0.5,
+                             help="probabilistic: refuse what is too close "
+                                  "to call as well -- the largest expected "
+                                  "fraction of wrongly assigned "
+                                  "localizations. Narrow beside the sigma "
+                                  "test, and what matters where two colours "
+                                  "overlap")
     spread: float = param(0.0, label="extra spread", min=0.0,
-                          help="probabilistic: a species' own width in r, added "
-                               "in quadrature to the shot noise, for a dye whose "
-                               "splitting ratio varies across the field or "
-                               "between molecules. 0: shot noise alone (the "
-                               "summary prints what the modes suggest)")
+                          help="probabilistic: a species' own width in r, "
+                               "added in quadrature to the shot noise, for "
+                               "a dye whose splitting ratio varies across "
+                               "the field or between molecules. 0: shot "
+                               "noise alone (the summary prints what the "
+                               "modes suggest)")
     use_errors: bool = param(True, label="use fitted errors",
-                             help="take the photon errors from the fit where "
-                                  "the table has them; otherwise sqrt(photons)")
-    use_prior: bool = param(True, label="use abundances", advanced=True,
-                            help="probabilistic: weight each species by how much "
-                                 "of the sample sits under its mode")
+                             help="take the photon errors from the fit "
+                                  "where the table has them; otherwise "
+                                  "sqrt(photons)")
+    use_prior: bool = param(True, label="use abundances",
+                            help="probabilistic: weight each species by how "
+                                 "much of the sample sits under its mode",
+                            advanced=True)
     min_photons: float = param(0.0, label="minimum photons", min=0.0,
-                               advanced=True,
-                               help="localizations with fewer photons in total "
-                                    "are ignored and left unassigned")
-    cmap: str = param("viridis", label="intensity LUT", advanced=True,
-                      choices=("viridis", "cividis", "turbo", "magma", "inferno",
-                               "Greys", "Greys_r"),
-                      help="the colour map of the intensity plot's 2D histogram")
+                               help="localizations with fewer photons in "
+                                    "total are ignored and left unassigned",
+                               advanced=True)
+    cmap: str = param("viridis", label="intensity LUT",
+                      choices=("viridis",
+                               "cividis",
+                               "turbo",
+                               "magma",
+                               "inferno",
+                               "Greys",
+                               "Greys_r"),
+                      help="the colour map of the intensity plot's 2D "
+                           "histogram",
+                      advanced=True)
     bins: int = param(200, label="histogram bins", min=10, max=2000,
-                      advanced=True,
                       help="how many bins the histogram of r has over its "
-                           "whole range, -1 to 1")
+                           "whole range, -1 to 1",
+                      advanced=True)
     smoothing: float = param(2.0, label="smoothing", unit="bins", min=0.0,
-                             advanced=True,
                              help="the histogram is smoothed by this much "
-                                  "before its maxima are looked for; it also "
-                                  "sets how far apart two modes must be")
-    expected: Optional[str] = param(None, label="expected r", advanced=True,
-                                    help="the species' ratios, comma separated "
-                                         "(\"-0.65, 0.96\"), measured on "
-                                         "single-label samples or computed from "
-                                         "the spectra. auto: the histogram's "
-                                         "own maxima")
-    channel1: Optional[str] = param(None, label="channel 1 column", advanced=True,
-                                    help="auto: photons_ch0, or the first pair "
-                                         "of per-channel columns in the table")
-    channel2: Optional[str] = param(None, label="channel 2 column", advanced=True,
-                                    help="the column r counts negative; name "
-                                         "both columns or neither")
+                                  "before its maxima are looked for; it "
+                                  "also sets how far apart two modes must "
+                                  "be",
+                             advanced=True)
+    expected: Optional[str] = param(None, label="expected r",
+                                    help="the species' ratios, comma "
+                                         'separated ("-0.65, 0.96"), '
+                                         "measured on single-label samples "
+                                         "or computed from the spectra. "
+                                         "auto: the histogram's own maxima",
+                                    advanced=True)
+    channel1: Optional[str] = param(None, label="channel 1 column",
+                                    help="auto: photons_ch0, or the first "
+                                         "pair of per-channel columns in "
+                                         "the table",
+                                    advanced=True)
+    channel2: Optional[str] = param(None, label="channel 2 column",
+                                    help="the column r counts negative; "
+                                         "name both columns or neither",
+                                    advanced=True)
 
 
 @dataclass
@@ -614,7 +633,7 @@ def decide(values: Ratios, modes: Modes, settings: "AssignColorSettings") -> Dec
     return Decision(values, channel, probability, sigma, per_colour)
 
 
-class ColourRecipe(LiveRecipe):
+class ColourRecipe(ColumnRecipe):
     """The colours, assigned to each block a live fit appends with the modes
     found when the plugin ran -- not found again per block, which would
     recolour what is already on screen every few seconds.  The finished
@@ -657,12 +676,12 @@ def histogram_selection(ctx: Context):
     if session is None or not 0 <= layer < len(session.layers):
         return ctx.selection
     lay = session.layers[layer]
-    if lay.is_image or "channel" not in lay.state.sets["ungrouped"].filter:
+    if lay.is_image or "channel" not in lay.ranges:
         return ctx.selection
     return ctx.layer_selection(layer, without=("channel",))
 
 
-@register("Analysis/Dual-Color/AssignColors")
+@register("Analysis/Dual-colour/Assign colours")
 class AssignColors(Plugin):
     name = "Assign colours"
     description = ("Colour two-channel localizations by their photon split, "
@@ -673,25 +692,25 @@ class AssignColors(Plugin):
                    "where the probabilities are too close to choose between "
                    "and where no colour fits at all.")
     changes_locs = True
+    # a colour per localization, written onto the table
+    grouping = "ungrouped"
     preview_help = ("draw the histogram of r with the modes, the boundaries "
                     "and what would be assigned, and the same decision over "
                     "the two channels' intensities.  Nothing is saved and the "
                     "session is not touched.")
     Settings = AssignColorSettings
     version = "2"
-    main = ("mode", "colors", "exclusion", "tolerance", "keep_tails",
-            "crosstalk", "spread", "use_errors")
     # which fields each method actually reads; the GUI greys out the rest, so
     # that a number that does nothing does not look like a number that does
     USED = {"minima": ("exclusion",),
             "probabilistic": ("tolerance", "keep_tails", "crosstalk", "spread",
                               "use_prior")}
 
-    def active(self, settings: AssignColorSettings) -> Dict[str, bool]:
-        """Only the chosen method's parameters are live."""
+    def describe(self, ctx, settings: AssignColorSettings) -> FormState:
+        """Only the chosen method's parameters are read."""
         mine = set(self.USED.get(settings.mode, ()))
         others = {name for names in self.USED.values() for name in names}
-        return {name: name in mine for name in others}
+        return FormState(active={name: name in mine for name in others})
 
     def run(self, ctx: Context, settings: AssignColorSettings) -> Result:
         return self._work(ctx, settings, apply=True)
@@ -704,7 +723,7 @@ class AssignColors(Plugin):
     def _work(self, ctx: Context, settings: AssignColorSettings,
               apply: bool) -> Result:
         selection = histogram_selection(ctx)
-        selection.require(50, ctx.report, "a colour histogram")
+        selection.require(50, ctx.warn, "a colour histogram")
         values = ratios(ctx.locs, settings.channel1, settings.channel2,
                         use_errors=settings.use_errors,
                         min_photons=settings.min_photons)
@@ -738,11 +757,11 @@ class AssignColors(Plugin):
                              _intensity_plotter(values, modes, settings, seen)},
                       data={"modes": modes, "ratios": values, "channel": channel,
                             "probability": probability, "sigma": sigma,
-                            "posteriors": per_colour,
-                            "live_recipe": ColourRecipe(modes, settings)},
+                            "posteriors": per_colour},
+                      recipe=ColourRecipe(modes, settings),
                       settings=settings)
 
-    def live_recipe_for(self, settings: AssignColorSettings) -> bool:
+    def column_recipe_for(self, settings: AssignColorSettings) -> bool:
         return True               # the modes, then every block (`ColourRecipe`)
 
     def _summary(self, values: Ratios, modes: Modes, channel: np.ndarray,

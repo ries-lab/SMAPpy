@@ -22,6 +22,7 @@ PLAIN = """
 
     class MyDrift(Plugin):
         '''Corrects a drift the cheap way.'''
+        changes_locs = False
         description = "the one line that wins over the docstring"
 """
 
@@ -46,6 +47,7 @@ def test_docstring_is_the_description_when_nothing_else_says(tmp_path):
 
             And this part is not the description.
             '''
+            changes_locs = False
     """)
     refs, _ = scan([("test", tmp_path)])
     assert refs["Analysis/Quiet"].description == "Says only this."
@@ -56,6 +58,7 @@ def test_register_wins_over_the_folder_and_gives_several_per_file(tmp_path):
         from smappy.plugins import Plugin, register
 
         class _Base(Plugin):
+            changes_locs = False
             pass
 
         @register("Localize/Alpha")
@@ -84,6 +87,7 @@ def test_per_region_must_be_true_itself(tmp_path):
         from smappy.plugins import Plugin
 
         class Odd(Plugin):
+            changes_locs = False
             per_region = "yes"
     """)
     refs, _ = scan([("test", tmp_path)])
@@ -97,6 +101,7 @@ def test_computed_attributes_are_left_alone_rather_than_guessed(tmp_path):
         PREFIX = "auto"
 
         class Computed(Plugin):
+            changes_locs = False
             name = PREFIX + " name"
     """)
     refs, _ = scan([("test", tmp_path)])
@@ -123,9 +128,11 @@ def test_several_plugins_without_register_is_reported_not_guessed(tmp_path):
         from smappy.plugins import Plugin
 
         class One(Plugin):
+            changes_locs = False
             pass
 
         class Two(Plugin):
+            changes_locs = False
             pass
     """)
     refs, problems = scan([("test", tmp_path)])
@@ -173,32 +180,6 @@ def test_load_imports_the_file_and_finds_the_class(tmp_path):
     assert cls.name == "My Drift"
 
 
-def test_a_module_can_declare_plugins_it_builds_dynamically(tmp_path):
-    write(tmp_path, "A/dynamic.py", """
-        from smappy.plugins import Plugin, register
-
-        for label in ("Red", "Green"):
-            register("Colour/" + label)(type(label, (Plugin,), {}))
-
-        __smappy_plugins__ = ["Colour/Red", "Colour/Green"]
-    """)
-    refs, problems = scan([("test", tmp_path)])
-    assert problems == [] and set(refs) == {"Colour/Red", "Colour/Green"}
-    assert refs["Colour/Red"].attr is None
-    assert refs["Colour/Red"].load().__name__ == "Red"
-
-
-def test_a_declaration_the_import_does_not_honour_is_an_error(tmp_path):
-    write(tmp_path, "A/lying.py", """
-        from smappy.plugins import Plugin
-
-        __smappy_plugins__ = ["Colour/Blue"]
-    """)
-    refs, _ = scan([("test", tmp_path)])
-    with pytest.raises(ImportError, match="registered no such plugin"):
-        refs["Colour/Blue"].load()
-
-
 # ------------------------------------------------- the registry on top of it
 
 def test_the_builtin_plugins_are_found_by_scanning(tmp_path):
@@ -236,21 +217,15 @@ def test_scanning_imports_nothing():
 
 
 def test_refs_and_tree_do_not_import_but_available_does():
-    assert set(plugins.refs("Analysis/")) == {
+    found = plugins.refs("Analysis/")
+    # a floor, not the list: a new plugin needs no line here, but one of these
+    # going missing -- a rename, a file that stopped parsing -- fails
+    assert set(found) >= {
         "Analysis/Drift/COMET", "Analysis/Drift/RCC",
-        "Analysis/Dual-Color/AssignColors",
-        "Analysis/Measure/Ground Truth", "Analysis/Measure/Line Profile",
-        "Analysis/Measure/Localization Precision",
-        "Analysis/Measure/Localization Statistics", "Analysis/Measure/NPC Corners",
-        "Analysis/Process/History", "Analysis/Process/Image Tags",
-        "Analysis/Process/Math Parser", "Analysis/Process/Remove Localizations",
-        "Analysis/Regions/Find/DBSCAN", "Analysis/Regions/Find/Density Peaks",
-        "Analysis/Regions/Find/NPC", "Analysis/Regions/Column to ROIs",
-        "Analysis/Regions/Regions to column",
-        "Analysis/Regions/Summarize/Histograms",
-        "Analysis/Regions/Summarize/NPC Labeling Efficiency",
-        "Analysis/Regions/Workflow/NPC Analysis",
-        "Analysis/Register/Calibrate transform"}
+        "Analysis/Measure/Localization Statistics",
+        "Analysis/Regions/Find/DBSCAN",
+        "Analysis/Regions/Workflow/NPC Analysis"}
+    assert all(path.startswith("Analysis/") for path in found)
     assert isinstance(plugins.tree()["Analysis"]["Drift"]["COMET"], PluginRef)
     classes = plugins.available("Analysis/")
     assert classes["Analysis/Drift/COMET"] is plugins.get("Analysis/Drift/COMET")
@@ -286,12 +261,14 @@ def test_two_roots_with_the_same_filename_load_as_different_modules(tmp_path):
         from smappy.plugins import Plugin
 
         class Thing(Plugin):
+            changes_locs = False
             description = "the first"
     """)
     write(second, "Beta/thing.py", """
         from smappy.plugins import Plugin
 
         class Thing(Plugin):
+            changes_locs = False
             description = "the second"
     """)
     refs, problems = scan([("a", first), ("b", second)])
@@ -308,12 +285,14 @@ def test_a_subclass_of_a_registered_plugin_does_not_inherit_its_path(tmp_path):
 
         @register("Elsewhere/Base")
         class Base(Plugin):
+            changes_locs = False
             pass
     """)
     write(tmp_path, "Mine/derived.py", """
         from smappy.plugins import Plugin
 
         class Derived(Plugin):
+            changes_locs = False
             pass
     """)
     refs, _ = scan([("test", tmp_path)])
