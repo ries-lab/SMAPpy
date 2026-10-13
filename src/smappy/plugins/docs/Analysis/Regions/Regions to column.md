@@ -48,7 +48,7 @@ to date.  The run is written into the table's history.
 **Which localizations.**  A region holds the localizations inside its
 outline -- whatever the layers' filters -- or, for an id column, the rows
 with its id: membership is the region alone, as when a block runs.  Only the
-ROIs that are reviewed and ticked *use* are written.
+ROIs ticked *use* are written.
 
 **The values.**  Each region's number is written over its rows.  A
 localization in no region, or in a region with no result (the measurement

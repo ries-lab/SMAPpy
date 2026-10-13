@@ -55,7 +55,7 @@ def test_statistics_measures_one_site_through_the_context():
     project = ROIProject()
     source = project.add_source(table([(0, 0), (5000, 0)], per=30))
     project.set_filters({})
-    roi = project.add_roi(source.id, [0.0, 0.0], reviewed=True)
+    roi = project.add_roi(source.id, [0.0, 0.0])
     result = LocalizationStatistics().run(project.region_context(roi),
                                           StatisticsSettings(fit_precision=False))
     assert result.values["n_localizations"] == 30       # this site's, not the file's
@@ -370,8 +370,6 @@ def test_find_evaluate_and_analyse_through_the_session(app):
                                                       separation_nm=1000.0,
                                                       min_count=20))
     assert len(found) == 4
-    for roi in project.rois.values():
-        roi.reviewed = True
 
     window = RegionStepsWindow(session)
     window.run()

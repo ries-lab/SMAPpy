@@ -65,7 +65,7 @@ locs = simulate(sim)
 project = ROIProject()
 source = project.add_source(locs, name="pores")
 project.set_geometry(200, "circle")
-found = project.find(source.id, reviewed=True)
+found = project.find(source.id)
 project.set_tiles(2500)
 tiles = project.tiles(source.id)
 state = project.state(source.id)
@@ -141,9 +141,8 @@ c.set_title("ROI", fontsize=9)
 **4. Reviewing.**  Selecting an ROI in the list shows its file, centres the
 zoom on it and draws it in the ROI image.  The *use* box in the list, or the
 space bar, includes or excludes it.  An excluded ROI stays in the list, grey,
-and is left out of the per-region steps and the results.  An ROI counts as reviewed
-from the moment it is made: there is no separate review flag in the window,
-and *use* is the decision.
+and is left out of the per-region steps and the results.  There is no
+separate review flag: *use* is the decision, from the moment an ROI is made.
 
 **5. Shapes.**  All ROIs share the circle or square set in the Regions tab.  One
 ROI can have its own outline instead (*Polygon*), and a direction (*Direction*),

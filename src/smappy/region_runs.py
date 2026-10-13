@@ -541,8 +541,7 @@ REGION_NUMBER = "roi_id"
 
 
 def region_members(ctx, regions: str) -> List[Tuple[str, np.ndarray]]:
-    """``(region id, rows of ctx.locs)`` of every region: the reviewed,
-    included ROIs,
+    """``(region id, rows of ctx.locs)`` of every region: the included ROIs,
     in the order they were made, or the regions of the id column
     ``regions``.  Membership is the region alone, as when a block runs."""
     from .chain import BLOCK_ROIS
@@ -552,7 +551,7 @@ def region_members(ctx, regions: str) -> List[Tuple[str, np.ndarray]]:
             raise ValueError("there are no ROIs: find or draw some first")
         out = []
         for roi_id, roi in project.rois.items():
-            if roi.reviewed and roi.use:
+            if roi.use:
                 _, rows, _, _ = project._region_tables(roi, project.region(roi))
                 out.append((str(roi_id), np.asarray(rows, dtype=np.int64)))
         return out

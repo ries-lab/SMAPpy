@@ -6,7 +6,7 @@ uses the same ViewState filter as rendering, never the visible field of view.
 from __future__ import annotations
 
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass, field, replace
+from dataclasses import asdict, dataclass, field, fields, replace
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -138,7 +138,6 @@ class ROI:
     number: int = 0
     polygon: Optional[list] = None
     direction: Optional[list] = None  # two absolute xy endpoints
-    reviewed: bool = False
     use: bool = True
     comment: str = ""
     origin: dict = field(default_factory=lambda: {"method": "manual"})
@@ -149,6 +148,18 @@ class ROI:
         changing it is one edit for every ROI of the project.  So the shape
         is worked out when asked for rather than held."""
         return Region.site(self.center, shape, size_nm, self.polygon)
+
+    @classmethod
+    def from_dict(cls, saved: dict) -> "ROI":
+        """An ROI as a file kept it.  Files from before the review flag went
+        carry ``reviewed``: it was never shown in the GUI, where every ROI
+        counted as reviewed, so it is dropped and ``use`` alone decides."""
+        names = {f.name for f in fields(cls)}
+        roi = cls(**{k: v for k, v in saved.items() if k in names})
+        point(roi.center)
+        if roi.polygon is not None:
+            polygon_vertices(roi.polygon)
+        return roi
 
 
 # Past this nobody is walking back through a list of edits.
@@ -408,11 +419,11 @@ class ROIProject:
         step = self.history.redo(self.rois)
         return step.label if step else None
 
-    def add_roi(self, file_id, center, polygon=None, reviewed=True, origin=None):
+    def add_roi(self, file_id, center, polygon=None, origin=None):
         if file_id not in self.sources:
             raise KeyError(file_id)
         roi = ROI(file_id, point(center), polygon=(None if polygon is None else
-                  polygon_vertices(polygon)), reviewed=reviewed)
+                  polygon_vertices(polygon)))
         if origin is not None:
             roi.origin = json.loads(json_text(origin))
         roi.number = self.next_number
@@ -675,7 +686,7 @@ class ROIProject:
         return out
 
     def _included(self):
-        return [i for i, roi in self.rois.items() if roi.reviewed and roi.use]
+        return [i for i, roi in self.rois.items() if roi.use]
 
     def stale_steps(self, roi_id, steps=None):
         """The steps of this ROI that would have to run to be sure."""
@@ -685,17 +696,17 @@ class ROIProject:
                 if states[step.label][1] != "current"]
 
     def needs_evaluation(self, steps=None, roi_ids=None):
-        """Which reviewed, included ROIs have a step that is not current."""
+        """Which included ROIs have a step that is not current."""
         steps = self.resolved(steps)
         ids = list(self.rois) if roi_ids is None else list(roi_ids)
-        return [i for i in ids if self.rois[i].reviewed and self.rois[i].use
+        return [i for i in ids if self.rois[i].use
                 and self.stale_steps(i, steps)]
 
     # -------------------------------------------------------------- running
     def evaluate(self, instances=None, roi_ids=None, progress=None, steps=None,
                  reuse=False, chain="", report=None, stop=None, after=None,
                  tag=False):
-        """Run a pipeline over every reviewed, included ROI.
+        """Run a pipeline over every included ROI.
 
         `instances` is a list of `workspace.Instance` -- the same type a tab
         pins -- resolved here into steps.  Each step contributes columns to a
@@ -715,7 +726,7 @@ class ROIProject:
         """
         steps = self.resolved(steps, instances)
         ids = list(self.rois) if roi_ids is None else list(roi_ids)
-        ids = [i for i in ids if self.rois[i].reviewed and self.rois[i].use]
+        ids = [i for i in ids if self.rois[i].use]
         from ..region_runs import Progress, stopped
         records = {}
         status = Progress(len(ids), report, progress, what="ROIs")
@@ -916,7 +927,7 @@ class ROIProject:
         return record, {label: state for label, (_, state) in found.items()}
 
     def results(self, steps=None, labels=None):
-        """The site table: a row per reviewed, included ROI that has results.
+        """The site table: a row per included ROI that has results.
 
         A row holds every evaluation the ROI has that still describes it
         (`evaluations`), whoever ran it -- the evaluation window's pipeline,
@@ -959,7 +970,7 @@ class ROIProject:
         steps = self.resolved(steps)
         rows = []
         for roi in self.rois.values():
-            if not roi.reviewed or not roi.use:
+            if not roi.use:
                 continue
             record, states = self.latest(roi.id, steps)
             if record is None or any(states.get(step.label) in ("stale", "missing", None)
@@ -972,19 +983,16 @@ class ROIProject:
                 rows.append({"roi_id": roi.number, "file_id": roi.file_id, **values})
         return rows
 
-    def find(self, file_id, plugin=None, settings=None, parameters=None,
-             reviewed=False):
-        """Propose candidate ROIs on one file with a segmentation plugin.
+    def find(self, file_id, plugin=None, settings=None, parameters=None):
+        """Add the ROIs a segmentation plugin finds on one file.
 
-        Candidates are unreviewed by default, and `evaluate` and `results`
-        pass over unreviewed ROIs: they are proposals until someone has
-        looked at them.  A script that trusts the finder says
-        ``reviewed=True``; the GUI's `SessionROIs` reviews automatically.
+        Each is included as the finder judged it (``use``); `evaluate` and
+        `results` take every included ROI, as the GUI does.
         """
         origin, proposals = self.propose(file_id, plugin, settings, parameters)
         found = []
         for proposed in proposals:
-            roi = self.add_roi(file_id, proposed["center"], reviewed=reviewed,
+            roi = self.add_roi(file_id, proposed["center"],
                                origin={**origin, **proposed["origin"]})
             roi.use = proposed["use"]
             found.append(roi)
@@ -1113,10 +1121,7 @@ class ROIProject:
             if source.fingerprint != saved['fingerprint']:
                 raise ValueError(f"Source contents changed: {source_path}. Restore the original source.")
         for saved in doc['rois']:
-            roi = ROI(**saved)
-            point(roi.center)
-            if roi.polygon is not None:
-                polygon_vertices(roi.polygon)
+            roi = ROI.from_dict(saved)
             if roi.file_id not in project.sources or roi.id in project.rois:
                 raise ValueError("Invalid ROI source or duplicate ROI ID")
             project.rois[roi.id] = roi

@@ -170,7 +170,7 @@ def test_the_roi_run_reports_its_status_and_stops_when_asked():
     source = project.add_source(clusters(sizes=(20,) * 4, noise=0), name="a")
     project.set_filters({})
     for k in range(1, 5):
-        project.add_roi(source.id, [k * 5000.0, k * 5000.0], reviewed=True)
+        project.add_roi(source.id, [k * 5000.0, k * 5000.0])
     said = []
     calls = []
     run = project.evaluate([Instance(plugin="Analysis/Measure/Localization Statistics",
@@ -210,7 +210,7 @@ def test_a_rois_figure_comes_back_from_what_it_kept_without_measuring_again():
     project = ROIProject()
     source = project.add_source(clusters(noise=0), name="a")
     project.set_filters({})
-    roi = project.add_roi(source.id, [5000.0, 5000.0], reviewed=True)
+    roi = project.add_roi(source.id, [5000.0, 5000.0])
     steps = [Step("drawn", Drawn.path, Drawn(), None)]
     Drawn.runs = 0
     project.evaluate(steps=steps)

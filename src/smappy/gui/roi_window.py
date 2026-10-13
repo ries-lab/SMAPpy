@@ -246,7 +246,7 @@ class ROIList(QAbstractTableModel):
             project = self.window.project
             roi = project.rois.get(roi_id)
             found = False
-            if roi is not None and roi.reviewed and roi.use and self._steps:
+            if roi is not None and roi.use and self._steps:
                 try:
                     found = bool(project.stale_steps(roi_id, self._steps))
                 except Exception:

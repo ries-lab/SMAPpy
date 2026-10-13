@@ -138,7 +138,7 @@ A chain can do what the ROI manager does by hand:
 * a **segmenter** (`Analysis/Regions/Find/...`) is an ordinary step; the ROIs it
   finds go into the scratch session's ROI project;
 * a **block over the ROIs** runs its steps in *every* ROI the project
-  includes -- reviewed and ticked *use*, whoever made it -- with
+  includes -- ticked *use*, whoever made it -- with
   `ROIProject.evaluate`, and the chain goes on only when all of them are
   done.  A ROI on which a step fails loses that step's entry and is counted
   in the block's line; no ROI at all fails the block.  Results still current

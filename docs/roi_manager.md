@@ -136,7 +136,7 @@ Every measurement records its plugin name/version, parameters, timestamp, source
 fingerprint, effective filters, merge settings, and geometry. A changed
 analysis input makes the latest result outdated; it is excluded from current
 histograms until measured again. Global size/shape changes do not invalidate
-polygon ROIs. Comments, review flags, contrast, and navigation do not change the
+polygon ROIs. Comments, the *use* tick, contrast, and navigation do not change the
 numerical results. Old runs remain available in `project.runs`.
 
 ## Python API and plugins
@@ -150,9 +150,8 @@ source = project.add_file("localizations.h5")
 project.set_geometry(300, "circle")
 project.set_filters({"xy_err_nm": (None, 25), "photons": (500, None)})
 
-# candidates are unreviewed, and evaluate() passes over unreviewed ROIs;
-# reviewed=True trusts the finder (the GUI reviews automatically)
-candidates = project.find(source.id, parameters={"min_count": 15}, reviewed=True)
+# found ROIs are included as the finder judged them (`use`)
+candidates = project.find(source.id, parameters={"min_count": 15})
 
 # Or add one by hand:
 roi = project.add_roi(source.id, [1500, 2500])

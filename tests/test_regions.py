@@ -98,7 +98,7 @@ def test_a_region_context_holds_the_roi_unfiltered_and_the_filter_as_its_selecti
     project = ROIProject()
     source = project.add_source(locs, name="a")
     project.set_filters({"photons": (1500, None)})
-    roi = project.add_roi(source.id, [1000.0, 1000.0], reviewed=True)
+    roi = project.add_roi(source.id, [1000.0, 1000.0])
     ctx = project.region_context(roi)
     x, y = np.asarray(locs["x_nm"], float), np.asarray(locs["y_nm"], float)
     inside = project.region(roi).mask(x, y)
@@ -114,7 +114,7 @@ def test_a_region_context_offers_the_grouped_table_when_the_project_is_grouped()
     project = ROIProject()
     source = project.add_source(_blobs(), name="a")
     project.grouped = True
-    roi = project.add_roi(source.id, [4000.0, 4000.0], reviewed=True)
+    roi = project.add_roi(source.id, [4000.0, 4000.0])
     ctx = project.region_context(roi)
     grouped, selection = ctx.table()
     assert ctx.served_grouped and len(grouped) == len(selection.mask)
@@ -165,7 +165,7 @@ def test_npc_corners_counts_round_the_place_the_roi_was_put():
     source = project.add_source(locs, name="pore")
     # a polygon lopsided round the pore: its box's middle is not the pore's
     polygon = [[1900, 1900], [2300, 1900], [2300, 2100], [1900, 2100]]
-    roi = project.add_roi(source.id, [2000.0, 2000.0], polygon=polygon, reviewed=True)
+    roi = project.add_roi(source.id, [2000.0, 2000.0], polygon=polygon)
     ctx = project.region_context(roi)
     assert ctx.region.center.tolist() == [2000.0, 2000.0]
     result = NPCCorners().run(ctx, NPCCorners.Settings())

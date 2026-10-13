@@ -3,7 +3,7 @@
 `ROIProject` normally owns immutable snapshots of localization files.  In the
 GUI the session already holds the tables, the filters and the grouping, and a
 plugin may replace the table (a drift correction, a fit).  `SessionROIs` keeps
-the project's model -- ROIs, review flags, finder provenance, evaluation runs --
+the project's model -- ROIs, their *use*, finder provenance, evaluation runs --
 and takes the data from the session: one source per loaded file, filters and
 grouping from a layer, so what an ROI sees is what the image shows.
 
@@ -23,7 +23,7 @@ from ..locs import Localizations
 from ..render import RenderAxes
 from ..layer_state import Tables, ViewState
 from ..region_table import RegionTable
-from .core import ROI, ROIProject, digest, json_text, point, polygon_vertices, rows_in
+from .core import ROI, ROIProject, digest, json_text, rows_in
 
 FORMAT_VERSION = 1
 
@@ -60,9 +60,6 @@ class SessionROIs(ROIProject):
         super().__init__()
         self.session = session
         self.layer = 0
-        # review is not exposed in the GUI: an ROI counts as reviewed when it
-        # is made, and `use` is what includes or excludes it
-        self.auto_review = True
         self.preview_nm = 0.0        # the ROI image's width; 0 = three ROI widths
         self._states: Dict[str, ViewState] = {}
         self._built = None            # what the sources were built from
@@ -301,10 +298,7 @@ class SessionROIs(ROIProject):
         if self.navigation.get("file") in remap:
             self.navigation["file"] = remap[self.navigation["file"]]
         for saved in doc.get("rois", []):
-            roi = ROI(**saved)
-            point(roi.center)
-            if roi.polygon is not None:
-                polygon_vertices(roi.polygon)
+            roi = ROI.from_dict(saved)
             roi.file_id = remap.get(roi.file_id, roi.file_id)
             if roi.file_id in self.sources:
                 self.rois[roi.id] = roi
@@ -323,12 +317,6 @@ class SessionROIs(ROIProject):
         self.block_options = {**DEFAULT_OPTIONS, **(doc.get("block_options") or {})}
 
     # ---------------------------------------------------------------- misc
-    def add_roi(self, file_id, center, polygon=None, reviewed=None, origin=None):
-        if reviewed is None:
-            reviewed = self.auto_review
-        return super().add_roi(file_id, center, polygon,
-                               reviewed or self.auto_review, origin)
-
     @property
     def preview_width(self) -> float:
         """What the ROI image covers, in nm."""

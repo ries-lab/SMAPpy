@@ -59,7 +59,7 @@ sim = SimulationSettings(n_frames=3000, seed=3,
 locs = simulate(sim)
 project = ROIProject()
 source = project.add_source(locs)
-rois = project.find(source.id, reviewed=True)     # Density Peaks
+rois = project.find(source.id)                    # Density Peaks
 state = project.state(source.id)
 kept = state.locs[state.filter.indices]           # what passes the filter
 # the ROI with the nearest neighbour, so that the geometry matters

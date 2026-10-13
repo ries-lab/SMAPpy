@@ -148,7 +148,7 @@ class BlockPlugin(ChainPlugin):
             project = ctx.rois
             if project is None:
                 return None
-            ids = [i for i, roi in project.rois.items() if roi.reviewed and roi.use]
+            ids = [i for i, roi in project.rois.items() if roi.use]
 
             def cut(k):
                 roi = project.rois[ids[k]]
@@ -374,7 +374,7 @@ class BlockPlugin(ChainPlugin):
         project = ctx.rois
         if project is None:
             raise ValueError("there is no ROI manager project to repeat over")
-        ids = [i for i, roi in project.rois.items() if roi.reviewed and roi.use]
+        ids = [i for i, roi in project.rois.items() if roi.use]
         if not ids:
             raise ValueError("there are no ROIs to measure: find or draw some first")
         run = project.evaluate(steps=steps, roi_ids=ids, reuse=not writes,

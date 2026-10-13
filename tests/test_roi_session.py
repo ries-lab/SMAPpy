@@ -41,8 +41,6 @@ def test_rois_follow_the_layer_and_survive_a_save(tmp_path):
     project.sync()
     found = project.find(file_id, parameters={"min_count": 5})
     assert found                                   # the blobs are found
-    for r in project.rois.values():
-        r.reviewed = True
     project.evaluate()
     before = len(project.results())
     assert before == len(project.rois)
@@ -149,7 +147,7 @@ def test_new_rois_count_without_a_review_step(tmp_path):
     file_id = next(iter(project.sources))
     found = project.find(file_id, parameters={"min_count": 5})
     manual = project.add_roi(file_id, [2000, 2000])
-    assert found and all(r.reviewed for r in project.rois.values())
+    assert found
     project.evaluate()
     assert len(project.results()) == len(found) + 1
     manual.use = False

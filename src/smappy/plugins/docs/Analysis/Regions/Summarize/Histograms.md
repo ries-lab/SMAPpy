@@ -43,8 +43,7 @@ sim = SimulationSettings(n_frames=3000, seed=3,
 locs = simulate(sim)
 project = ROIProject()
 source = project.add_source(locs)
-for roi in project.find(source.id):
-    roi.reviewed = True          # the GUI does this when an ROI is made
+project.find(source.id)
 project.evaluate()
 rows = project.results()
 ```

@@ -953,7 +953,6 @@ class Session:
             from .roi_manager.link import SessionROIs
             copy._rois = SessionROIs(copy)
             copy._rois.layer = self._rois.layer
-            copy._rois.auto_review = self._rois.auto_review
             copy._rois.sync()
             copy._rois.from_dict(self._rois.to_dict())
         # what was measured per cluster, so a block finds what is current
@@ -1168,7 +1167,7 @@ class Session:
         """The ROI manager's project over this session's files.
 
         Separate from `roi`, the rectangle or line drawn in the 2D view: this
-        is the collection of analysis ROIs, their review state and their
+        is the collection of analysis ROIs, their *use* and their
         evaluation runs, and it is saved with the localization file.
         """
         if self._rois is None:

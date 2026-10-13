@@ -39,13 +39,14 @@ def test_circle_square_polygon_boundaries_filters_and_file_isolation():
     assert p.indices(roi).tolist() == [2]
 
 
-def test_statistics_review_and_stale_results():
+def test_statistics_use_and_stale_results():
     p = ROIProject()
     s = p.add_source(table([0, 10, 140]))
     p.set_filters({})
-    roi = p.add_roi(s.id, [0, 0], reviewed=False)
+    roi = p.add_roi(s.id, [0, 0])
+    roi.use = False
     assert not p.evaluate()['records']
-    roi.reviewed = True
+    roi.use = True
     run = p.evaluate()
     values = merged_values(run['records'][roi.id])
     assert values['n_localizations'] == 3
@@ -192,9 +193,6 @@ def test_find_rings_and_blobs_review_evaluate_histogram():
     for roi in rois:
         assert np.min(np.linalg.norm(centers - roi.center, axis=1)) < 15
     assert not p.find(s.id)  # repeat finding does not duplicate existing ROIs
-    assert not p.evaluate()['records']
-    for roi in rois:
-        roi.reviewed = True
     p.evaluate()
     assert [row['n_localizations'] for row in p.results()] == [30] * 4
     hist = histograms(p.results(), HistogramSettings(bins=10))
@@ -255,14 +253,13 @@ def test_two_steps_share_a_row_and_collisions_are_qualified():
     assert row['first.only_here'] == 1 and row['second.only_here'] == 1
 
 
-def test_a_script_can_trust_the_finder():
-    """Found candidates are unreviewed and evaluate() passes over them, so
-    the documented find-then-evaluate evaluated nothing; reviewed=True says
-    the script trusts the finder."""
+def test_found_rois_are_evaluated_without_a_review_step():
+    """find() then evaluate(), as a script writes it, measures what was
+    found: there is no review flag for evaluate() to pass over."""
     locs, _ = pores()
     p = ROIProject()
     s = p.add_source(locs)
-    p.find(s.id, reviewed=True)
+    p.find(s.id)
     p.evaluate()
     assert len(p.results()) == 4
 
@@ -271,7 +268,7 @@ def test_the_default_histograms_draw_every_number_the_statistics_gave():
     locs, _ = pores()
     p = ROIProject()
     s = p.add_source(locs)
-    p.find(s.id, reviewed=True)
+    p.find(s.id)
     p.evaluate()
     drawn = histograms(p.results(), HistogramSettings(bins=10))
     assert set(drawn) == {'n_localizations', 'mean_photons', 'median_photons',
