@@ -320,6 +320,43 @@ def test_the_3d_2c_workflow_runs_from_a_tiff_and_a_saved_calibration(tmp_path):
     assert set(xs.astype(int)) <= {25, 42}
 
 
+def test_a_3d_2c_run_and_a_preview_each_read_the_calibration_once(
+        tmp_path, monkeypatch):
+    """The finder, the model, the engine and the back-projection all need it;
+    each used to read the file, three times a run and four a preview."""
+    import tifffile
+    from smappy.calibrate import dual
+    from smappy.plugins.fit import (CameraSettings, DetectionSettings,
+                                    DualModelSettings, DualSplineFit,
+                                    DualSplineFitSettings, OutputSettings,
+                                    SourceSettings)
+
+    rng = np.random.default_rng(9)
+    cal = dual_calibration()
+    frames = np.stack([split_frame([(25.0, 15.0)], 20.0, 9000., 0.3, 30., rng,
+                                   cal) for _ in range(6)])
+    stack = tmp_path / "split.tif"
+    tifffile.imwrite(stack, (frames + 100).astype(np.uint16))
+    settings = DualSplineFitSettings(
+        source=SourceSettings(path=str(stack), chunk=2),
+        camera=CameraSettings(conversion=1.0, offset=100.0, pixelsize_um=0.1),
+        detection=DetectionSettings(cutoff_mode="absolute", cutoff=20.0),
+        model=DualModelSettings(calibration=str(
+            _dual_calibration_file(tmp_path / "dual_3dcal.h5", cal))),
+        fit=FitSettings(roisize=13), output=OutputSettings(save=False))
+
+    reads = []
+    load = dual.load_dual_color_calibration
+    monkeypatch.setattr(dual, "load_dual_color_calibration",
+                        lambda path: reads.append(path) or load(path))
+    plugin = DualSplineFit()
+    assert len(plugin.run(Context(), settings).locs) >= 3
+    assert len(reads) == 1
+    reads.clear()
+    assert plugin.preview(Context(), settings, frame=1).data["locs"] is not None
+    assert len(reads) == 1
+
+
 def test_the_link_flags_reach_the_model():
     from smappy.plugins.fit import DualModelSettings
     default = DualModelSettings()

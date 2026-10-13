@@ -1016,12 +1016,50 @@ class DualSplineFit(_FitPlugin):
     version = "5"
     Settings = DualSplineFitSettings
 
+    # The calibration of the run in progress, with the path it was read from.
+    # `finder`, `model`, `engine` and `back_projected` all need it, and each
+    # used to read the file -- two PSFs and their splines, three times a run
+    # and four a preview.  Keyed on the path, so that a preview with another
+    # file chosen meanwhile never gets a run's.
+    _loaded = None
+
+    def calibration(self, settings):
+        """The dual-colour calibration: the one this run read, or off disk."""
+        loaded = self._loaded
+        if loaded is not None and loaded[0] == settings.model.calibration:
+            return loaded[1]
+        return settings.model.load()
+
+    def _reading_once(self, settings, call):
+        """``call()`` with the calibration read once beforehand.
+
+        A file that cannot be read is not an error here: the steps that need
+        it then try themselves and fail as they did, so a preview still draws
+        the candidates and says why it could not fit them.
+        """
+        try:
+            self._loaded = (settings.model.calibration, settings.model.load())
+        except Exception:
+            self._loaded = None
+        try:
+            return call()
+        finally:
+            self._loaded = None
+
+    def run(self, ctx: Context, settings) -> Result:
+        return self._reading_once(settings, lambda: super(DualSplineFit, self)
+                                  .run(ctx, settings))
+
+    def preview(self, ctx: Context, settings, frame: int = 0) -> Result:
+        return self._reading_once(settings, lambda: super(DualSplineFit, self)
+                                  .preview(ctx, settings, frame))
+
     def model(self, settings, camera):
-        return settings.model.model(settings.model.load(), camera)
+        return settings.model.model(self.calibration(settings), camera)
 
     def back_projected(self, settings, camera, candidates):
         from ..dualfit import secondary_to_reference, which_channel
-        calibration = settings.model.load()
+        calibration = self.calibration(settings)
         ox, oy = camera.roi_offset
         secondary = ~which_channel(candidates.x + ox, candidates.y + oy,
                                    calibration.geometry)
@@ -1034,14 +1072,14 @@ class DualSplineFit(_FitPlugin):
         from dataclasses import replace as _replace
         base = super().finder(settings, camera)
         try:
-            geometry = settings.model.load().geometry
+            geometry = self.calibration(settings).geometry
         except Exception:
             return base                          # no calibration yet: preview only
         return _replace(base, split=self._split_for_detection(geometry, camera))
 
     def engine(self, settings, camera, finder, model):
         from ..dualfit import DualChannelEngine
-        return DualChannelEngine(camera, finder, model, settings.model.load(),
+        return DualChannelEngine(camera, finder, model, self.calibration(settings),
                                  settings.fit, settings.model.photon_ratio)
 
 
