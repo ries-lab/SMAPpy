@@ -26,7 +26,7 @@ def main() -> int:
     frames = np.stack([frame(i) for i in range(4)])
     locs = smappy.fit(frames, camera={"conversion": 1.0, "offset": 100.0,
                                       "pixelsize_um": 0.1},
-                      sigma=1.2, cutoff=40.0, roisize=9, units="nm")
+                      sigma=1.2, cutoff=40.0, roisize=9)
 
     assert len(locs) == 4, f"expected one localization per frame, got {len(locs)}"
     x, y = locs["x_nm"].mean() / 100.0, locs["y_nm"].mean() / 100.0
