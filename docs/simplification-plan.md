@@ -132,17 +132,46 @@ and "filters hide 33%" in the status line.  *S–M.*
 next to Run, a *details* button with the traceback and *Save a bug
 report*.  A failed load the same way instead of a modal.  *S.*
 
-## F. Later, by the owner's decision
+## F. Decided with the owner (2026-10-13)
 
-- The plugin contract: one form-state hook, one effect hook, typed effects
-  instead of `Result.data` keys (review §4.3).
-- Render threads render a snapshot, not the live session (§4.5) -- the root
-  of the GC workaround.
-- Naming consolidation, with the old names listed in the docs.
-- The Analysis tab's order and grouping; the region summary plots; the 3D
-  view (extras into options).
-- Fitting: one Fit plugin, one registration geometry, one camera path
-  (§4.7).
+**F1. The plugin interface.**  `changes_locs` required (True/False; the "None,
+ask after the run" path goes, and `changes_locs_for` stays for a plugin whose
+answer depends on its settings).  The five form-state hooks (`hints`,
+`active`, `choices`, `notice`, `notice_for`) become one `describe`.  The
+string keys of `Result.data` that ask the session to do something
+(`bounds`, `layers`, `rois`, `roi_project`, `id_regions`, `images`, `path`,
+`saved`, `live_recipe`, `roi_preview`, ...) become typed fields of `Result`;
+`data` keeps only the plugin's own numbers.  `Plugin.live` and its tick
+become *follow ROI*, so "live" means only a fit still appending.
+
+**F2. Render from a snapshot.**  The 2D and 3D render workers get a frozen
+snapshot (column references, masks, settings) taken on the GUI thread
+instead of the widget and the session; one worker class.  Kept only if a
+benchmark on a large table shows no real slowdown.
+
+**F3. Fitting, the four fitters kept.**  They stay four entries, as thin
+subclasses of one shared implementation.  The dual calibration is read once
+per run.  One registration geometry (`RegisterSettings`) serves the movie
+registration and the bead calibration, with layout auto-detection in both.
+One camera path: the camera database and the typed fields; the YAML
+presets and SMAP `*_cameras.mat` go.
+
+**F4. Words** (after F1-F3, which touch the same labels).  "ROI" for a shape
+drawn or found in the ROI manager, "region" when it may also be a cluster;
+"site", "evaluation" and "evaluator" go from the GUI; the fitter's "ROI
+size" becomes "fit box".  Linking blinks is *merge blinks* everywhere, and
+the drift plugins' own merge settings default to the session's.  Old names
+are not kept as "formerly ...": instead every page, at the first mention of
+a piece of jargon, gives the names common in the field and a one-line
+explanation -- "merge blinks (also called grouping or linking): combine the
+localizations in consecutive frames that come from one blinking event into
+one localization".
+
+**F5. Region summary plots.**  A grid of 3-4 columns, a title (measure and
+unit) per panel, and measures with no values listed in the text, not drawn.
+
+**Not now.**  The Analysis tab stays as it is (the shipped GUI will become
+lean, users add what they need); the 3D view is redesigned later.
 
 ## Suggested first batch
 
