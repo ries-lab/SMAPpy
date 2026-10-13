@@ -123,7 +123,7 @@ def test_a_field_name_has_to_be_usable_in_a_later_expression():
         check_field("two words", locs)
     with pytest.raises(ValueError, match="function"):
         check_field("mean", locs)
-    with pytest.raises(ValueError, match="grouping"):
+    with pytest.raises(ValueError, match="merge blinks"):
         check_field("n_in_group", locs)
 
 

@@ -233,7 +233,7 @@ class SessionROIs(ROIProject):
                 g = rows_in(locset.locs, locset.index, region, keep)
                 entry["grouped"] = (locset.locs[g], Selection(
                     np.asarray(lay.state.filter_for(locset).mask, dtype=bool)[g],
-                    layer=i, roi=region, name=f"{lay.name}, grouped, {region}"))
+                    layer=i, roi=region, name=f"{lay.name}, blinks merged, {region}"))
             tables[i] = entry
         layer = min(self.layer, len(session.layers) - 1)
         if session.layers[layer].is_image:

@@ -170,16 +170,22 @@ class DriftSettings:
                             help="how much a window's fit must improve its "
                                  "overlap over no correction to be kept",
                             advanced=True)
-    group: bool = param(True, label="group blinks",
-                        help="link the localizations of one blink into one "
+    group: bool = param(True, label="merge blinks",
+                        help="merge the localizations of one blink into one "
                              "before estimating")
-    group_dx_nm: float = param(50.0, label="group radius", unit="nm", min=0,
-                               help="how close localizations in consecutive "
-                                    "frames must be to be linked",
-                               advanced=True)
-    group_dt: int = param(1, label="group gap", unit="frames", min=0,
-                          help="how many dark frames a blink may skip",
-                          advanced=True)
+    # None: as the session merges blinks (`merge_from_session`), so that the
+    # estimate sees the blinks the Render tab shows; 50 nm and 1 frame, the
+    # session's own defaults, where there is no session
+    group_dx_nm: Optional[float] = param(None, label="within", unit="nm", min=0,
+                                         help="how close localizations in "
+                                              "consecutive frames must be to be "
+                                              "merged; auto: the session's merge "
+                                              "settings",
+                                         advanced=True)
+    group_dt: Optional[int] = param(None, label="dark frames", unit="frames", min=0,
+                                    help="how many dark frames a blink may skip; "
+                                         "auto: the session's merge settings",
+                                    advanced=True)
     # Estimate in two passes: a grouped one to get within a few nm, then an
     # ungrouped one over a small radius to refine.  The pair count is what costs
     # time, and once the coarse pass has taken the drift out, a 30 nm radius
@@ -955,17 +961,51 @@ def load_drift(path) -> Drift:
 
 
 # ---------------------------------------------------------------------- helpers
+MERGE_DX_NM = 50.0      # the merge settings without a session: the session's
+MERGE_DT = 1            # own defaults (`session.DEFAULT_GROUP_SETTINGS`)
+
+
+def merge_values(session) -> Tuple[float, int]:
+    """The distance and dark frames ``session`` merges blinks with, or the
+    defaults without one.
+
+    The session may merge by precision instead of a fixed distance; the
+    drift estimate links by a fixed distance only (it needs no precision
+    column, and works on a table in pixels), so it takes the largest distance
+    that mode allows, `dx_max`.
+    """
+    merge = getattr(session, "group_settings", None)
+    if merge is None:
+        return MERGE_DX_NM, MERGE_DT
+    dx = merge.dx if merge.link == "fixed" else merge.dx_max
+    return float(dx), int(merge.dt)
+
+
+def merge_from_session(settings, session):
+    """``settings`` (`DriftSettings` or `RCCSettings`) with the merge distance
+    and dark frames left on auto taken from ``session``: what a plugin runs
+    with, and records, so that the log says the numbers that were used."""
+    dx, dt = merge_values(session)
+    changes = {}
+    if settings.group_dx_nm is None:
+        changes["group_dx_nm"] = dx
+    if settings.group_dt is None:
+        changes["group_dt"] = dt
+    return replace(settings, **changes) if changes else settings
+
+
 def _grouped(locs: Localizations, settings: "DriftSettings",
              pixelsize_nm: Optional[float], display: bool = False,
              progress: Optional[Progress] = None) -> Localizations:
     """Collapse each emitter's blink into one localization before estimating."""
     from .group import GroupSettings, group
 
-    dx = settings.group_dx_nm
+    dx = MERGE_DX_NM if settings.group_dx_nm is None else settings.group_dx_nm
+    dt = MERGE_DT if settings.group_dt is None else settings.group_dt
     if "x_nm" not in locs:  # a table in pixels; the linking radius is in nm
         dx /= _pixelsize_nm(locs, pixelsize_nm)
     _log(display, f"grouping {len(locs):,} localizations", progress)
-    grouped, _ = group(locs, GroupSettings(dx=dx, dt=settings.group_dt))
+    grouped, _ = group(locs, GroupSettings(dx=dx, dt=dt))
     _log(display, f"grouped {len(locs):,} localizations into {len(grouped):,} "
                   f"blinks", progress)
     return grouped

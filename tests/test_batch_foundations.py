@@ -99,7 +99,7 @@ def test_a_layer_that_shows_grouped_hands_out_grouped_unless_overridden():
 
 def test_a_grouped_table_without_a_session_is_refused_with_a_reason():
     ctx = Context(locs=blinks(), grouping="grouped")
-    with pytest.raises(ValueError, match="needs a session"):
+    with pytest.raises(ValueError, match="need a session"):
         ctx.table()
     locs, sel = Context(locs=blinks()).table()
     assert len(locs) == 160 and len(sel) == 160

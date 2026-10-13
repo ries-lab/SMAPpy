@@ -26,7 +26,7 @@ it was about.  Say who asked and when, so a later reader can weigh it.
   it like "snappy", not "smap-pie"; nothing tells readers how to say it.
   (Jonas Ries, 2026-09-25)
 * Plain words a biologist uses at the bench.  Name a GUI element by the text
-  on it ("Run", "grouped"), so it can be found.
+  on it ("Run", "merge blinks"), so it can be found.
 * Keyboard shortcuts may be said once, where the thing is first shown.
 
 ## The pace
@@ -39,7 +39,7 @@ it was about.  Say who asked and when, so a later reader can weigh it.
 ## What a tutorial is
 
 * Aimed at lab members who know SMLM; a short reminder of a concept
-  (grouping, the selection) is welcome, a lecture is not.
+  (merging blinks, the selection) is welcome, a lecture is not.
 * Simulated data, so anyone can follow along.
 * Menus and shortcuts are mentioned as the alternative to the tabs.
   (Jonas Ries, 2026-09-24)

@@ -1,8 +1,9 @@
 """Redundant cross-correlation drift correction, the classic alternative to COMET."""
 from __future__ import annotations
 
+from ..drift import merge_from_session, merge_values
 from ..rcc import RCCSettings, estimate_drift_rcc
-from . import Context, ParamInfo, Plugin, Result, register
+from . import Context, FormState, ParamInfo, Plugin, Result, register
 from .drift_result import KeepsDrift
 
 
@@ -15,7 +16,14 @@ class RCCDrift(KeepsDrift, Plugin):
     grouping = "ungrouped"
     Settings = RCCSettings
 
+    def describe(self, ctx, settings) -> FormState:
+        """What *within* and *dark frames* on auto take: the session's merge
+        settings."""
+        dx, dt = merge_values(ctx.session if ctx is not None else None)
+        return FormState(hints={"group_dx_nm": dx, "group_dt": dt})
+
     def run(self, ctx: Context, settings: RCCSettings) -> Result:
+        settings = merge_from_session(settings, ctx.session)
         ctx.selection.require(5000, ctx.warn, "a drift estimate")
         ctx.report(f"correlating {ctx.selection}")
         # Stop ends it between time windows with `Stopped`: half the pairs

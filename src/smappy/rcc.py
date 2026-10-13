@@ -87,16 +87,20 @@ class RCCSettings:
                                   help="auto: if the table has z")
     # Estimate from grouped localizations, as `DriftSettings` does by default,
     # so that the two estimators can be compared on the same footing.
-    group: bool = param(True, label="group blinks",
-                        help="link the localizations of one blink into one "
+    group: bool = param(True, label="merge blinks",
+                        help="merge the localizations of one blink into one "
                              "before measuring")
-    group_dx_nm: float = param(50.0, label="group radius", unit="nm", min=0,
-                               help="how close localizations in consecutive "
-                                    "frames must be to be one blink",
-                               advanced=True)
-    group_dt: int = param(1, label="group gap", unit="frames", min=0,
-                          help="how many dark frames a blink may skip",
-                          advanced=True)
+    # None: as the session merges blinks, as in `DriftSettings`
+    group_dx_nm: Optional[float] = param(None, label="within", unit="nm", min=0,
+                                         help="how close localizations in "
+                                              "consecutive frames must be to be "
+                                              "one blink; auto: the session's "
+                                              "merge settings",
+                                         advanced=True)
+    group_dt: Optional[int] = param(None, label="dark frames", unit="frames", min=0,
+                                    help="how many dark frames a blink may skip; "
+                                         "auto: the session's merge settings",
+                                    advanced=True)
     # Axial: z histograms are correlated within tiles of the field of view and
     # the correlations summed, so that each one sees a *local* z profile.  The
     # tiles must be small in both directions -- with slices spanning y (SMAP's

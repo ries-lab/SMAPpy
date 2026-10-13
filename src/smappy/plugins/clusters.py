@@ -205,8 +205,8 @@ def _per_localization(locs: Localizations, grouped: Localizations,
                       labels: np.ndarray) -> np.ndarray:
     """A blink's cluster on each of its localizations, through ``group_id``."""
     if "group_id" not in locs or "group_id" not in grouped:
-        raise ValueError("the grouped table has no group_id to map the clusters "
-                         "back to the localizations: cluster the ungrouped table")
+        raise ValueError("the merged blinks have no group_id to map the clusters "
+                         "back to the localizations: cluster with blinks not merged")
     gid = np.asarray(grouped["group_id"])
     order = np.argsort(gid, kind="stable")
     wanted = np.asarray(locs["group_id"])

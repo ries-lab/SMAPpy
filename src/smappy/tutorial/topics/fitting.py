@@ -179,7 +179,7 @@ def make(d) -> None:
     analysis = show_tab(d, "Analysis")
     drift = [section(analysis, name).button for name in ("COMET", "RCC")]
     d.shot("Before measuring, correct the drift, with RCC or COMET in the "
-           "Analysis tab. Filtering and grouping are in the rendering tutorial.",
+           "Analysis tab. Filtering and merging blinks are in the rendering tutorial.",
            spot=drift, point=drift[0], zoom=d.around(drift[0], 760))
 
     d.chapter("Next")

@@ -180,9 +180,9 @@ that is not saved or has changes is written into the job itself.
 ### save as...
 Writes the chain to a new file.
 
-### grouping
-Whether a step reads the table of localizations or the grouped one (one row
-per blink): per step, and for the whole chain under *more*.  The rules are in
+### merge blinks
+Whether a step reads every localization or the blinks merged (one row per
+blink): per step, and for the whole chain under *more*.  The rules are in
 `docs/batch.md` ("Grouping"): the plugin's own requirement wins, then the
 step's choice, then the chain's, then each layer's.
 

@@ -5,9 +5,10 @@ from typing import Optional
 
 from dataclasses import replace
 
-from ..drift import DriftSettings, correct_drift, estimate_cost
-from . import (Context, ParamInfo, Plugin, PreflightChoice, PreflightQuestion,
-               Result, register)
+from ..drift import (DriftSettings, correct_drift, estimate_cost, merge_from_session,
+                     merge_values)
+from . import (Context, FormState, ParamInfo, Plugin, PreflightChoice,
+               PreflightQuestion, Result, register)
 from .drift_result import KeepsDrift
 
 
@@ -47,6 +48,7 @@ class CometDrift(KeepsDrift, Plugin):
         a few windows, which costs seconds and does not care how far it looks,
         and then COMET over the tens of nanometres it leaves behind.
         """
+        settings = merge_from_session(settings, ctx.session)
         cost = estimate_cost(ctx.locs, settings, select=ctx.selection.mask)
         ctx.report(str(cost))
         question = cost.question(self.slow_seconds)
@@ -69,7 +71,14 @@ class CometDrift(KeepsDrift, Plugin):
                      f"{self.prepass_max_drift_nm:g} nm instead of "
                      f"{settings.max_drift_nm:g}.  Then: {after}")])
 
+    def describe(self, ctx, settings) -> FormState:
+        """What *within* and *dark frames* on auto take: the session's merge
+        settings."""
+        dx, dt = merge_values(ctx.session if ctx is not None else None)
+        return FormState(hints={"group_dx_nm": dx, "group_dt": dt})
+
     def run(self, ctx: Context, settings: DriftSettings) -> Result:
+        settings = merge_from_session(settings, ctx.session)
         ctx.selection.require(5000, ctx.warn, "a drift estimate")
         ctx.report(f"estimating drift from {ctx.selection}")
         corrected, drift = correct_drift(ctx.locs, settings,

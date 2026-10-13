@@ -223,7 +223,7 @@ class Layer:
         locset = self.state.tables.grouped()
         f = self.state.filter_for(locset)
         mask = f.mask_without(*without) if without else f.mask
-        return locset.locs, Selection(mask, layer=index, name=f"{self.name}, grouped")
+        return locset.locs, Selection(mask, layer=index, name=f"{self.name}, blinks merged")
 
 
 # The colours a session can be marked with, and the mark each puts in a
@@ -775,7 +775,7 @@ class Session:
         self.tables.settings = settings
         if self.tables.peek_grouped() is not None:
             self.tables.grouped()
-        self.log("regroup", f"dx = {settings.dx:g}, dt = {settings.dt}",
+        self.log("merge settings", f"within {settings.dx:g}, {settings.dt} dark frames",
                  settings=asdict(settings), changed=True)
         self.changed("regrouped")
 
@@ -1443,7 +1443,7 @@ class Session:
             tables = {"ungrouped": (locs, self._clip(sel, locs, i))}
             if grouped is not None:
                 gsel = Selection(lay.state.filter_for(grouped).mask.copy(), layer=i,
-                                 name=f"{lay.name}, grouped")
+                                 name=f"{lay.name}, blinks merged")
                 tables["grouped"] = (grouped.locs, self._clip(gsel, grouped.locs, i))
             out[i] = tables
         return out

@@ -162,7 +162,7 @@ def check_field(field: str, locs: Localizations) -> str:
                          "column of that name would change what it means; "
                          "choose another")
     if name in ("group_id", "n_in_group"):
-        raise ValueError(f"{name!r} is written by the grouping itself and "
+        raise ValueError(f"{name!r} is written by merge blinks itself and "
                          "would be overwritten again")
     return name
 
@@ -191,7 +191,7 @@ class MathSettings:
                                 ("selection", "the selection")],
                        help="the selection is the layer's filter, the ROI and "
                             "the slab together; the rest of the field is NaN")
-    grouped: str = param(RECOMPUTE, label="grouped",
+    grouped: str = param(RECOMPUTE, label="merged blinks",
                          choices=[(RECOMPUTE, "recompute the expression"),
                                   ("mean", "mean of the localizations"),
                                   ("sum", "sum of the localizations"),
@@ -199,12 +199,12 @@ class MathSettings:
                                   ("any", "any localization (flag)"),
                                   ("all", "all localizations (flag)"),
                                   ("none", "leave it off")],
-                         help="what the field means once the localizations "
-                              "are grouped: the expression again, or a rule "
+                         help="what the field means once the blinks "
+                              "are merged: the expression again, or a rule "
                               "to combine their values")
     recall: str = param("", label="history", choices=_recall_choices,
                         help="an expression used before; choosing one fills "
-                             "the field, the expression and the grouped rule")
+                             "the field, the expression and the merged-blinks rule")
 
 
 @register("Analysis/Process/Math Parser")
@@ -236,8 +236,8 @@ class MathParser(Plugin):
         if missing:
             hint = ""
             if "n_in_group" in missing or "group_id" in missing:
-                hint = ("; on-time and group id are written by the grouping -- "
-                        "switch a layer to grouped once and they are there")
+                hint = ("; on-time and group id are written by merge blinks -- "
+                        "tick merge blinks on a layer once and they are there")
             raise ExpressionError(
                 f"no column {', '.join(missing)}; the table has: "
                 f"{', '.join(sorted(locs.keys()))}{hint}")
@@ -280,7 +280,7 @@ class MathParser(Plugin):
         note = ""
         if mask is not None and rule == RECOMPUTE:
             rule = "mean"
-            note = ("; on the grouped table it is the mean of the "
+            note = ("; on merged blinks it is the mean of the "
                     "localizations, since the expression cannot be "
                     "recomputed for a selection")
         if field in names_in(settings.expression):

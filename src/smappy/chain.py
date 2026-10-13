@@ -65,6 +65,10 @@ SUFFIX = ".chain.yaml"
 # the chain's own choice of table for every step, and a step's
 STEP_GROUPINGS = ("auto", "grouped", "ungrouped")
 CHAIN_GROUPINGS = ("layer", "grouped", "ungrouped")
+# as the GUI says them: which table, in the words of the Render tab's
+# *merge blinks*
+MERGED = {"auto": "auto", "layer": "as each layer", "grouped": "merged",
+          "ungrouped": "not merged"}
 # the field a step's settings gain; a plugin with a field of this name cannot
 # be a step, and says so rather than having its field shadowed
 GROUPING_FIELD = "use_grouping"
@@ -385,12 +389,13 @@ def step_settings_class(key: str, plugin_cls, step: Step) -> type:
             columns.append((f.name, hints.get(f.name, Any), made))
     required = getattr(plugin_cls, "grouping", None)
     if required:
-        help = f"this plugin only works {required}"
+        help = f"this plugin only works with blinks {MERGED[required]}"
     else:
-        help = ("which table this step reads: auto takes the chain's choice, "
-                "or each layer's own; in each ROI, each layer's own")
+        help = ("whether this step reads merged blinks: auto takes the chain's "
+                "choice, or each layer's own; in each ROI, each layer's own")
     columns.append((GROUPING_FIELD, str, param(
-        required or step.grouping, label="grouping", choices=STEP_GROUPINGS,
+        required or step.grouping, label="merge blinks",
+        choices=[(g, MERGED[g]) for g in STEP_GROUPINGS],
         advanced=True, help=help)))
     name = "".join(w.capitalize() for w in key.split("_")) + "Step"
     return make_dataclass(name, columns, namespace={"__module__": __name__})
@@ -746,9 +751,10 @@ def chain_class(spec: ChainSpec, path: Optional[str] = None) -> type:
     keys = spec.keys()
     steps: List[tuple] = []
     columns: List[tuple] = [("grouping", str, param(
-        spec.grouping, label="grouping", choices=CHAIN_GROUPINGS, advanced=True,
-        help="which table every step reads, unless the step says otherwise: "
-             "layer leaves it to each layer, as the Render tab has it"))]
+        spec.grouping, label="merge blinks",
+        choices=[(g, MERGED[g]) for g in CHAIN_GROUPINGS], advanced=True,
+        help="whether every step reads merged blinks, unless the step says "
+             "otherwise: as each layer has it in the Render tab, or not"))]
     extras: Dict[str, ParamInfo] = {}
     for key, step in zip(keys, spec.steps):
         if not step.enabled:

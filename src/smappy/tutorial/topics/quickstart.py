@@ -158,7 +158,7 @@ def make(d) -> None:
     render.view.reset()
     show_tab(d, "Render")
     d.shot("The Render tab sets how the picture looks: filters, colours, "
-           "and grouping of blinks.",
+           "and merging of blinks.",
            spot=[tab_button(d, "Render")], point=tab_button(d, "Render"), click=True)
 
     d.chapter("Next")
@@ -168,9 +168,9 @@ def make(d) -> None:
            "<li><b>Render</b> shows the result.</li>"
            "<li><b>Analysis</b> measures it.</li>"
            "<li>The <b>?</b> beside a plugin explains it.</li></ul>"
-           "<p>Next: the tour of SMAPpy, with filters, layers and grouping.</p>",
+           "<p>Next: the tour of SMAPpy, with filters, layers and merging blinks.</p>",
            say="That is all it takes. Next, the tour of SMAPpy: filters, layers "
-               "and grouping.")
+               "and merging blinks.")
 
 
 def _documentation(d, sec) -> None:

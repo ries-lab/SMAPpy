@@ -1,6 +1,6 @@
 ---
 version: "1"
-covers: [smappy.rcc.estimate_drift_rcc, smappy.rcc._pair_shifts, smappy.rcc._axial_shifts, smappy.rcc._solve]
+covers: [smappy.rcc.estimate_drift_rcc, smappy.drift.merge_from_session, smappy.rcc._pair_shifts, smappy.rcc._axial_shifts, smappy.rcc._solve]
 ---
 
 ## What it does
@@ -46,7 +46,7 @@ window = np.clip(np.searchsorted(edges, frame, side="right") - 1,
 
 **1. Time windows.**  The frames are split into a number of equal windows
 (*time windows*, 20 by default).  Blinks are first grouped, so that a molecule
-that is on for five frames counts once rather than five times (*group
+that is on for five frames counts once rather than five times (*merge
 blinks*).
 
 **2. An image per window.**  The localizations of each window are binned into
@@ -153,9 +153,12 @@ ax.legend(frameon=False, fontsize=8)
 images are made from those the layer's filter and the ROI select -- the
 bounds applied to each localization, also on a grouped layer -- and the
 correction is applied to every localization of the table, selected or not.
-The blinks it links before the images are made (*group blinks*) are linked
-with its own *group radius* and *group gap*, not the session's, and are
-thrown away afterwards.
+The blinks it merges before the images are made (*merge blinks*) are
+merged with the session's merge settings -- the distance and dark frames of
+the Render tab's *merge settings...* -- unless *within* and *dark frames* are
+set here; a session that merges by precision lends its largest distance,
+*at most*.  Without a session (a script) they are 50 nm and 1 frame, the
+session's own defaults.  The merged blinks are thrown away afterwards.
 
 **The pair equations.**  With $s_{kl}$ the measured shift of window $k$
 against window $l$, the drifts $d_1, \ldots, d_T$ solve, in the least-squares

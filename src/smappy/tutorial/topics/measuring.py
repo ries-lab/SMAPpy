@@ -73,7 +73,7 @@ def make(d) -> None:
     d.shot("The precision follows from the photons. Its maximum and rising edge "
            "are landmarks you can read off the histogram.",
            spot=[panels[1]], zoom=d.around(panels[1], 900))
-    d.shot("The on-time, from the grouping: how many frames a molecule stays "
+    d.shot("The on-time, from merging blinks: how many frames a molecule stays "
            "on. A straight line on this log scale is a constant switching rate.",
            spot=[panels[-1]], zoom=d.around(panels[-1], 900))
     window.hide()

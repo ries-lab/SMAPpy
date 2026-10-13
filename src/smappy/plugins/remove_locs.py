@@ -128,7 +128,7 @@ def check_field(field: str, locs: Optional[Localizations] = None) -> str:
                          "letters, digits and underscores, not starting with "
                          "a digit")
     if name in ("group_id", "n_in_group"):
-        raise ValueError(f"{name!r} is written by the grouping itself and "
+        raise ValueError(f"{name!r} is written by merge blinks itself and "
                          "would be overwritten again")
     if locs is not None and name in locs:
         from ..mathparse import recipes

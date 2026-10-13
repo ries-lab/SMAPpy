@@ -406,9 +406,9 @@ class Context:
             return self._pinned_table(index)
         if self.session is None:
             if self.grouping == "grouped":
-                raise ValueError("a grouped table needs a session: link the "
+                raise ValueError("merged blinks need a session: merge the "
                                  "localizations first (group.group), or run "
-                                 "this ungrouped")
+                                 "this on the localizations")
             return self.locs, self.selection
         locs, selection = self.session.table(index, self.grouping)
         if locs is not self.session.locs:
@@ -432,12 +432,12 @@ class Context:
             return tables["ungrouped"]
         if "grouped" not in tables:
             if self.region is not None:
-                raise ValueError(f"layer {index + 1} has no grouped table to cut "
-                                 "to the region: show it grouped first, or run "
-                                 "this ungrouped")
-            raise ValueError("no grouped table while the fit is still adding "
-                             "localizations: show the layer grouped first, or "
-                             "run this ungrouped")
+                raise ValueError(f"layer {index + 1} has no merged blinks to cut "
+                                 "to the region: tick merge blinks first, or run "
+                                 "this on the localizations")
+            raise ValueError("no merged blinks while the fit is still adding "
+                             "localizations: tick merge blinks on the layer "
+                             "first, or run this on the localizations")
         self.served_grouped = True
         return tables["grouped"]
 
@@ -564,9 +564,9 @@ def refuse_grouped_table(ctx: "Context", result: "Result", plugin: "Plugin",
         return
     name = name or getattr(plugin, "name", "") or type(plugin).__name__
     raise ValueError(
-        f"{name} ran on the grouped table and handed back a new table: "
+        f"{name} ran on merged blinks and handed back a new table: "
         "there is no way from one row per blink back to the localizations, "
-        "so run it ungrouped (a plugin that changes the table declares "
+        "so run it with blinks not merged (a plugin that changes the table declares "
         "grouping = \"ungrouped\")")
 
 

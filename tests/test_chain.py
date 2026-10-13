@@ -148,7 +148,7 @@ def test_the_grouping_is_the_layers_then_the_chains_then_the_steps_then_the_plug
 def test_a_step_that_rewrites_the_grouped_table_is_refused():
     session = Session(blinks())
     cls = chain_class(spec({"plugin": "Test/Chain/Rewrite", "grouping": "grouped"}))
-    with pytest.raises(ChainError, match="grouped table"):
+    with pytest.raises(ChainError, match="merged blinks"):
         session.run(cls(), cls.Settings())
     ungrouped = chain_class(spec({"plugin": "Test/Chain/Rewrite", "grouping": "ungrouped"}))
     session.run(ungrouped(), ungrouped.Settings())

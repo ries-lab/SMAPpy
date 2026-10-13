@@ -171,7 +171,7 @@ class ColumnRegions:
             if grouped is not None:
                 table, sel_mask, g = grouped
                 entry["grouped"] = (table[g], Selection(sel_mask[g], layer=i,
-                                                        name=f"{lay.name}, grouped, {name}"))
+                                                        name=f"{lay.name}, blinks merged, {name}"))
             pinned[i] = entry
         layer = min(self.layer, len(self.session.layers) - 1)
         if self.session.layers[layer].is_image:

@@ -678,7 +678,7 @@ def grouped_on_time(session, layer: int = 0, selected: bool = True
     saying so is better than spending a minute of someone's time on it.
     """
     if session is None:
-        return None, "no session: no grouped table to take the on-time from"
+        return None, "no session: no merged blinks to take the on-time from"
     layers = getattr(session, "layers", None)
     if not layers:
         return None, "no layer to take the on-time from"
@@ -689,14 +689,14 @@ def grouped_on_time(session, layer: int = 0, selected: bool = True
     tables = getattr(session, "tables", None)
     locset = tables.peek_grouped() if tables is not None else None
     if state is None or locset is None:
-        return None, ("no on-time: switch the layer to grouped once, so the "
-                      "localizations are linked into blinks")
+        return None, ("no on-time: tick merge blinks on the layer once, so the "
+                      "localizations are merged into blinks")
     if not tables.is_current:
-        return None, ("no on-time: the grouped table is out of date; switch the "
-                      "layer to grouped to link it again")
+        return None, ("no on-time: the merged blinks are out of date; tick merge "
+                      "blinks on the layer to merge them again")
     locs = locset.locs
     if "n_in_group" not in locs or not len(locs):
-        return None, "no on-time: the grouped table has no n_in_group"
+        return None, "no on-time: the merged blinks have no n_in_group"
     if not selected:
         return np.asarray(locs["n_in_group"]), ""
     from ..render import positions
@@ -729,7 +729,7 @@ class LocalizationStatistics(Plugin):
         grouped = table is not ctx.ungrouped()[0]
         if settings.source == "all":
             locs = table
-            where = "all localizations" + (" (grouped)" if grouped else "")
+            where = "all localizations" + (" (blinks merged)" if grouped else "")
         else:
             if not ctx.per_region:
                 # in a region an empty one is an answer -- no localizations

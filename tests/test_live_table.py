@@ -75,7 +75,7 @@ def test_every_layers_selection_agrees_with_the_pinned_table():
 
 
 def test_a_grouped_table_is_refused_during_a_live_fit_when_the_layer_has_none():
-    with pytest.raises(ValueError, match="grouped"):
+    with pytest.raises(ValueError, match="merged blinks"):
         live_session().context(grouping="grouped")
 
 

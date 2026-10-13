@@ -478,7 +478,7 @@ def test_the_analysis_says_when_the_layer_is_not_grouped():
     project.evaluate([Instance(plugin="Analysis/Measure/NPC Corners")])
     result = plugins.get("Analysis/Regions/Summarize/NPC Labeling Efficiency")()(
         ctx=session.context())
-    assert "not grouped" in result.text
+    assert "does not merge blinks" in result.text
 
 
 # --------------------------------------------------------- results from, GUI

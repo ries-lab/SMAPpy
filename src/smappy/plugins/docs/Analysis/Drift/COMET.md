@@ -1,6 +1,6 @@
 ---
 version: "2"
-covers: [smappy.drift.estimate_drift, smappy.drift._estimate_spline, smappy.drift._spline_basis, smappy.drift._two_stage, smappy.drift._rcc_prepass, smappy.drift._grouped, smappy.drift.estimate_cost, smappy.drift._sigma_levels, smappy.drift.Drift.apply, smappy._comet.core.drift_optimizer.comet_run_kd, smappy._comet.core.drift_optimizer.optimize_3d_chunked_better_moving_avg_kd, smappy._comet.core.cpu_wrapper.cpu_wrapper_chunked_approx, smappy._comet.core.segmenter.segmentation_wrapper, smappy._comet.core.interpolation.interpolate_drift, smappy._comet.core.qc_utils.flag_flawed_segments_by_lift]
+covers: [smappy.drift.estimate_drift, smappy.drift._estimate_spline, smappy.drift._spline_basis, smappy.drift._two_stage, smappy.drift._rcc_prepass, smappy.drift._grouped, smappy.drift.merge_from_session, smappy.drift.estimate_cost, smappy.drift._sigma_levels, smappy.drift.Drift.apply, smappy._comet.core.drift_optimizer.comet_run_kd, smappy._comet.core.drift_optimizer.optimize_3d_chunked_better_moving_avg_kd, smappy._comet.core.cpu_wrapper.cpu_wrapper_chunked_approx, smappy._comet.core.segmenter.segmentation_wrapper, smappy._comet.core.interpolation.interpolate_drift, smappy._comet.core.qc_utils.flag_flawed_segments_by_lift]
 ---
 
 ## What it does
@@ -49,7 +49,7 @@ frame = np.asarray(grouped["frame"])
 
 **1. Blinks become molecules.**  A fluorophore that is on for five frames
 gives five localizations of the same molecule.  They are first linked into
-one, at their precision-weighted mean position (*group blinks*).  This
+one, at their precision-weighted mean position (*merge blinks*).  This
 removes the densest, shortest-range pairs of localizations, which makes the
 estimate much faster, and stops one bright molecule from counting as five
 independent measurements.
@@ -156,8 +156,12 @@ drift in seconds, then COMET within 50 nm of what is left.
 estimate is made from those the layer's filter and the ROI select -- the
 bounds applied to each localization, also on a grouped layer -- and the
 correction is applied to every localization of the table, selected or not.
-The blinks the estimate links for itself are linked with its own settings,
-not the session's, and are thrown away afterwards.
+The blinks the estimate merges for itself (*merge blinks*) are merged with
+the session's merge settings -- the distance and dark frames of the Render
+tab's *merge settings...* -- unless *within* and *dark frames* are set here;
+a session that merges by precision lends its largest distance, *at most*.
+Without a session (a script) they are 50 nm and 1 frame, the session's own
+defaults.  The merged blinks are thrown away afterwards.
 
 **The cost.**  With $\mathbf{r}_i$ the position of localization $i$ (x, y
 and z, with z zero for a 2D table), $t_i$ its frame and $\mathbf{d}(t)$ the

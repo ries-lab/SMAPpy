@@ -274,7 +274,7 @@ class LayersField(QWidget):
 
     changed = Signal()
     COLUMNS = ("field", "lo", "hi", "quantile", "required")
-    GROUPING = ((None, "as it is"), (True, "grouped"), (False, "ungrouped"))
+    GROUPING = ((None, "as it is"), (True, "merged"), (False, "not merged"))
 
     def __init__(self, spec: ParamSpec):
         super().__init__()
@@ -297,7 +297,8 @@ class LayersField(QWidget):
         remove_layer = QPushButton("- layer")
         remove_layer.clicked.connect(self._remove_layer)
         self.take = QPushButton("from current layers")
-        self.take.setToolTip("the bounds and grouping the Render tab shows now")
+        self.take.setToolTip("the bounds, and whether blinks are merged, as the "
+                             "Render tab shows them now")
         self.take.clicked.connect(self.take_from_session)
         # "from current layers" on a line of its own: beside the layer
         # buttons the row was wider than the control column
@@ -323,7 +324,7 @@ class LayersField(QWidget):
         # one per line, for the same reason
         options = QFormLayout()
         options.setContentsMargins(0, 0, 0, 0)
-        for label, box in (("grouping", self.grouped), ("start from", self.start)):
+        for label, box in (("merge blinks", self.grouped), ("start from", self.start)):
             line = QHBoxLayout()
             line.addWidget(box)
             line.addStretch(1)

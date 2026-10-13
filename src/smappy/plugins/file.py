@@ -74,7 +74,7 @@ class _Load(Plugin):
             **self.reader_args(path, settings))
         text = f"{len(locs)} localizations from {path.name} ({info.format})"
         if grouped is not None:
-            text += f", {len(grouped)} after linking"
+            text += f", {len(grouped)} after merging blinks"
         return Result(files=[(locs, info, grouped)], text=text,
                       append=settings.append, data={"info": info}, settings=settings)
 

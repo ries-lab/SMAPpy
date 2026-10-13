@@ -633,16 +633,16 @@ class GroupSettings:
     """
 
     # in the order the grouping dialog shows them
-    link: str = param("fixed", label="link by",
+    link: str = param("fixed", label="merge by",
                       choices=[("fixed", "fixed distance"),
                                ("precision", "precision")],
-                      help="a fixed box, or a distance scaled by the "
+                      help="a fixed distance, or one scaled by the "
                            "localization precisions (SMAP's locprec)")
-    dx: float = param(50.0, label="link within", unit="nm", min=0,
-                      help="half-width of the box a localization may move "
-                           "per frame")
+    dx: float = param(50.0, label="within", unit="nm", min=0,
+                      help="how far a localization may move from one frame "
+                           "to the next (half-width of a box)")
     k: float = param(2.5, label="k", unit="sigma", min=0.1, step=0.1,
-                     help="link if r^2 < k^2 (s1^2 + s2^2), s the "
+                     help="merge if r^2 < k^2 (s1^2 + s2^2), s the "
                           "precisions")
     dx_min: float = param(10.0, label="at least", unit="nm", min=0,
                           help="the distance always allowed, however "
@@ -650,7 +650,7 @@ class GroupSettings:
     dx_max: float = param(150.0, label="at most", unit="nm", min=0,
                           help="the distance never exceeded, however "
                                "imprecise")
-    dt: int = param(1, label="gap", unit="frames", min=0,
+    dt: int = param(1, label="dark frames", unit="frames", min=0,
                     help="frames a blink may be dark and still continue")
     block_fields: Sequence[str] = param(("filenumber", "channel"), hidden=True)
     # How many pieces the frame axis is cut into for the linking, which runs

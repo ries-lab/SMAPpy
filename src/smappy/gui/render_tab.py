@@ -1009,9 +1009,9 @@ class RenderTab(QWidget):
         lut_row.addWidget(self.invert)
         lut_row.addWidget(self.invert_mode)
         self.contrast = QDoubleSpinBox(minimum=0, maximum=6, singleStep=0.1, decimals=2)
-        self.grouped = QCheckBox("grouped")
+        self.grouped = QCheckBox("merge blinks")
         self.grouped.setToolTip("one entry per blink instead of one per frame; "
-                                "links the table on first use")
+                                "merges the table on first use")
         form.addRow("render", self.mode)
         form.addRow("colour by", color_row)
         form.addRow("colour range", self.color_range_row)
@@ -1019,9 +1019,10 @@ class RenderTab(QWidget):
         form.addRow("contrast", self.contrast)
         # the linking settings sit beside the switch that uses them; they are
         # the session's, not the layer's, so OK regroups every grouped layer
-        self.grouping_button = QPushButton("link settings...")
-        self.grouping_button.setToolTip("how localizations are linked into blinks: "
-                                        "distance and gap, for every layer")
+        self.grouping_button = QPushButton("merge settings...")
+        self.grouping_button.setToolTip("how the localizations of one blink are "
+                                        "merged: distance and dark frames, for "
+                                        "every layer")
         self.grouping_button.clicked.connect(self._grouping)
         grouped_row = QHBoxLayout()
         grouped_row.setContentsMargins(0, 0, 0, 0)

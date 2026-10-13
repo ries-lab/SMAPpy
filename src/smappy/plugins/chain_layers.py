@@ -43,7 +43,7 @@ def default_layers() -> List[Dict[str, Any]]:
 @dataclass
 class LayersSettings:
     layers: list = param(default_factory=default_layers, label="layers", kind="layers",
-                         help="one block per layer: its grouping, where its bounds "
+                         help="one block per layer: whether it merges blinks, where its bounds "
                               "start from, and rows of field, lo, hi (either may be "
                               "empty); a quantile row takes lo and hi as fractions, "
                               "resolved per file; a required row stops a file that "
@@ -126,7 +126,7 @@ def _describe(bounds: Dict[str, Tuple]) -> str:
 
 @register("Chain/Layers")
 class ChainLayers(Plugin):
-    """The layers' bounds and grouping, as the Render tab would set them."""
+    """The layers' bounds and whether they merge blinks, as the Render tab would set them."""
     Settings = LayersSettings
     changes_locs = True            # only with *remove*: see changes_locs_for
     # quantile bounds are of the localizations; *remove* drops rows
@@ -157,7 +157,8 @@ class ChainLayers(Plugin):
             if layer.get("grouped") is not None:
                 config["grouped"] = bool(layer["grouped"])
             configs.append(config)
-            grouped = {True: ", grouped", False: ", ungrouped"}.get(config.get("grouped"), "")
+            grouped = {True: ", blinks merged", False: ", blinks not merged"}.get(
+                config.get("grouped"), "")
             lines.append(f"layer {n + 1}{grouped}: {_describe(bounds)}"
                          + "".join(f"; {note}" for note in notes))
         out = None

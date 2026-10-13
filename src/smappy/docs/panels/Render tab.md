@@ -499,26 +499,27 @@ too high, and all but the brightest spots disappear.  The same number
 transfers between datasets, because it is a fraction of pixels, not a
 brightness.
 
-### grouped
-Draws one localization per blink.  The first switch links the table, which
+### merge blinks
+Draws one localization per blink.  The first tick merges the table, which
 takes seconds to minutes on a large one; after that it is free.  A plugin
-measures what the layer shows -- blinks, when it is grouped -- except one that
-needs the single localizations (a drift correction, Localization Precision,
-anything that changes the table), which says so on its page.
+measures what the layer shows -- blinks, when they are merged -- except one
+that needs the single localizations (a drift correction, Localization
+Precision, anything that changes the table), which says so on its page.
 
-### link settings...
-The linking parameters of grouping, the session's, for every layer at
-once: *link by* --
-*fixed distance*, a box of half-width *link within* (nm), or *precision*, a
-radius of *k* times the two localizations' combined precision, held between
-*at least* and *at most* (nm) -- and *gap* (frames).  A fixed box wide
+### merge settings...
+How blinks are merged, the session's settings, for every layer at once:
+*merge by* -- *fixed distance*, a box of half-width *within* (nm), or
+*precision*, a radius of *k* times the two localizations' combined
+precision, held between *at least* and *at most* (nm) -- and *dark frames*,
+how many frames a blink may be dark and still continue.  A fixed box wide
 enough to keep the dim localizations of a blink together also merges bright
-neighbours that their precision could tell apart; linking by precision
+neighbours that their precision could tell apart; merging by precision
 avoids both, at the price of cutting the 4% of links that fall beyond 2.5
-sigma (raise *k* to keep more).  OK links the table again -- once, since
-every layer shows the same grouped table -- and records the new parameters
-in the file's history, since the grouped table cannot tell which ones
-produced it.
+sigma (raise *k* to keep more).  OK merges the table again -- once, since
+every layer shows the same merged table -- and records the new settings in
+the file's history, since the merged table cannot tell which ones produced
+it.  The drift corrections take these settings too, unless their own
+*within* and *dark frames* are set.
 
 ### more
 The rendering widths, gamma and the white background.

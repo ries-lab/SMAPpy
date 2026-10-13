@@ -11,7 +11,7 @@ fitting tutorial's job.
 from __future__ import annotations
 
 TITLE = "Finding your way around SMAPpy"
-DESCRIPTION = ("The two windows, the tabs, filters, layers, grouping, what a "
+DESCRIPTION = ("The two windows, the tabs, filters, layers, merging blinks, what a "
                "plugin works on, and undo.")
 
 # ---------------------------------------------------------------- figures
@@ -37,13 +37,13 @@ _GROUPING = """
       <text x="250" y="65" text-anchor="middle" opacity=".6">off</text>
     </g>
     <path d="M300 60 h60" class="arrow" marker-end="url(#head)"/>
-    <text x="330" y="48" text-anchor="middle" opacity=".7">grouped</text>
+    <text x="330" y="48" text-anchor="middle" opacity=".7">merged</text>
     <rect x="380" y="30" width="60" height="60" rx="6" class="panel"/>
     <circle cx="410" cy="59" r="7" class="dot strong"/>
     <text x="455" y="54">1 localization</text>
     <text x="455" y="72" opacity=".7">3 frames on</text>
     <text x="10" y="150" opacity=".85">One fluorophore, on for three frames: three localizations, a few nm apart.</text>
-    <text x="10" y="172" opacity=".85">Grouped, they are one, with the photons added and a better precision.</text>
+    <text x="10" y="172" opacity=".85">Merged, they are one, with the photons added and a better precision.</text>
   </g>
   <defs><marker id="head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
     <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/></marker></defs>
@@ -107,7 +107,7 @@ def make(d) -> None:
     d.chapter("Two windows")
     d.card(TITLE,
            "<p>The two windows, the tabs, and the four ideas the rest of SMAPpy "
-           "is built on: <b>filters</b>, <b>layers</b>, <b>grouping</b> and "
+           "is built on: <b>filters</b>, <b>layers</b>, <b>merging blinks</b> and "
            "<b>the selection</b>.</p>"
            "<p>Everything here uses simulated data, so you can follow along: "
            "<i>File &rarr; Simulate</i>.</p>",
@@ -276,23 +276,23 @@ def make(d) -> None:
     render.view.reset()
     d.settle()
 
-    d.chapter("Grouping")
-    d.card("Grouping",
+    d.chapter("Merge blinks")
+    d.card("Merge blinks",
            "<p>A fluorophore is often on for several frames, and is localized in "
            "each of them.</p>"
-           "<p><b>Grouping</b> links localizations that are close (50 nm) in "
-           "consecutive frames (one dark frame allowed) into one, with the "
-           "photons added. The ungrouped table stays; each layer chooses which "
-           "one it shows.</p>",
+           "<p><b>Merge blinks</b> (also called grouping or linking) combines "
+           "localizations that are close (50 nm) in consecutive frames (one "
+           "dark frame allowed) into one, with the photons added. The single "
+           "localizations stay; each layer chooses which it shows.</p>",
            figure=_GROUPING,
-           say="Grouping. One blink seen in several frames is several "
-               "localizations. Grouping links them into one.")
+           say="Merge blinks. One blink seen in several frames is several "
+               "localizations. Merging makes them one.")
     if not render_tab.grouped.isChecked():
         render_tab.grouped.click()
         d.settle()
-    assert len(session.table(0)[0]) < len(session.locs), "grouping merged nothing"
-    d.shot("SMAPpy groups a new table straight away, so what you see are "
-           "blinks, not single frames. More on grouping in the rendering "
+    assert len(session.table(0)[0]) < len(session.locs), "merging merged nothing"
+    d.shot("SMAPpy merges the blinks of a new table straight away, so what you "
+           "see are blinks, not single frames. More on merging in the rendering "
            "tutorial.",
            spot=[render_tab.grouped], point=render_tab.grouped,
            zoom=d.around(render_tab.grouped, 700))
@@ -375,7 +375,7 @@ def make(d) -> None:
            "<ul><li><b>Filters</b> choose which localizations count.</li>"
            "<li><b>Layers</b> draw the same localizations in different ways, "
            "and add up.</li>"
-           "<li><b>Grouping</b> turns one blink seen in several frames into one "
+           "<li><b>Merge blinks</b> turns one blink seen in several frames into one "
            "localization.</li>"
            "<li><b>The selection</b> &ndash; filter and ROI &ndash; is what a plugin "
            "measures.</li></ul>"

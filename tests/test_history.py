@@ -54,9 +54,9 @@ def test_relinking_is_logged_with_the_parameters_it_used():
     session = Session(table())
     session.set_group_settings(GroupSettings(dx=40.0, dt=2))
     entry = session.history[-1]
-    assert entry["what"] == "regroup" and entry["changed"]
+    assert entry["what"] == "merge settings" and entry["changed"]
     assert entry["settings"]["dx"] == 40.0 and entry["settings"]["dt"] == 2
-    assert "dx = 40" in entry["text"]
+    assert "within 40" in entry["text"]
 
 
 def test_the_log_is_shown_with_the_settings_of_each_run(config_dir):

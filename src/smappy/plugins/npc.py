@@ -970,7 +970,7 @@ class NPCLabelingEfficiency(SiteAnalysisPlugin):
         if ev is not None and str(ev) != CORNERS.rsplit("/", 1)[-1]:
             result.text += f"; counted by {str(ev)!r}"
         if settings.method != "smap" and getattr(ctx.rois, "grouped", True) is False:
-            result.text += ("; the layer is not grouped: the model expects one "
+            result.text += ("; the layer does not merge blinks: the model expects one "
                             "localization per blink")
         return result
 

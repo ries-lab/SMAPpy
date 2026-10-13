@@ -77,12 +77,13 @@ class GroupingDialog(QDialog):
         from ..plugins import ParamInfo, param_specs
         from .params import SettingsForm
         self.session = session
-        self.setWindowTitle("grouping")
+        self.setWindowTitle("Merge blinks")
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("<b>grouping</b>: localizations of one blink are merged"))
-        note = QLabel("Linking is lateral: emitters within the link box in consecutive "
+        layout.addWidget(QLabel("<b>Merge blinks</b>: the localizations of one blinking "
+                                "event, in consecutive frames, become one"))
+        note = QLabel("Merging looks at x and y only: emitters this close in consecutive "
                       "frames overlap in the raw data and were fitted as one anyway, so "
-                      "a z window only split blinks whose z scatters.")
+                      "a z window would only split blinks whose z scatters.")
         note.setWordWrap(True)
         note.setStyleSheet("color: gray")
         layout.addWidget(note)
@@ -155,7 +156,7 @@ class CopyLayerDialog(QDialog):
              ("bounds", "filter bounds",
               "replaces this layer's bounds with the other layer's"),
              ("files", "which files are shown", ""),
-             ("grouping", "grouped or not, and the linking parameters", ""))
+             ("grouping", "merge blinks or not", ""))
 
     def __init__(self, session, target: int, parent=None):
         super().__init__(parent)

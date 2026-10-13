@@ -128,7 +128,7 @@ def test_a_name_that_could_not_be_a_column_is_refused():
     assert check_field(" use ") == "use"
     with pytest.raises(ValueError, match="not usable"):
         check_field("2 things")
-    with pytest.raises(ValueError, match="grouping"):
+    with pytest.raises(ValueError, match="merge blinks"):
         check_field("n_in_group")
 
 
