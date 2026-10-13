@@ -200,9 +200,11 @@ ordinary plugins that run on the view as well; `docs/regions.md`.)
 
 ### The ROI evaluation pipeline is a separate window
 
-*To be replaced* -- `docs/regions.md` (2026-10-11) folds evaluators into
-ordinary plugins and the pipeline into a block of a chain.  What follows
-describes the code as it still is.
+*Replaced* -- `docs/regions.md` (2026-10-11) folded evaluators into ordinary
+plugins and the pipeline into a block of a chain, which the ROI project holds
+(`ROIProject.block`) and the per-region steps window edits; a pipeline file
+of its own is gone (*save as...* keeps the block as a chain).  What follows
+is the design as it was, kept for its reasoning.
 
 Evaluators are the one thing that does not fit a tab.  A tab's pins are run
 individually on demand; an evaluation is an *ordered pipeline* run over every

@@ -295,14 +295,14 @@ class ROIProject:
         # which are in `tables`
         self.runs = []
         self.navigation = {}  # GUI state only; never used for extraction
-        # The evaluation pipeline, as `workspace.Instance`s.  It travels with
-        # the project because the columns of a site table mean nothing without
-        # knowing which evaluators produced them, with what parameters.
-        self.pipeline = []
-        # what the pipeline repeats over and how, as a block's own fields
-        # (`pipeline.block_of`): the ROIs, or an id column; write-back
-        from .pipeline import DEFAULT_OPTIONS
-        self.block_options = dict(DEFAULT_OPTIONS)
+        # The per-region steps, a `chain.Block`: what the steps window edits
+        # and runs, and what the ROI manager measures an ROI with.  It
+        # travels with the project because the columns of a results table
+        # mean nothing without knowing which steps produced them, with what
+        # parameters.  No steps: the newest run's, or the default ones
+        # (`resolved`).
+        from ..chain import Block
+        self.block = Block()
         # What a segmenter's Preview proposed and nobody has added yet:
         # ``{"file_id", "method", "sites": [{"center", "use"}], "replaces":
         # [roi ids]}``, or None.  Drawn by the manager and never saved -- it
@@ -544,30 +544,47 @@ class ROIProject:
                 "group_settings": asdict(self.group_settings) if self.grouped else None}
 
     # ------------------------------------------------- what is still current
-    def resolved(self, steps=None, instances=None):
+    def resolved(self, steps=None, block=None):
         """The steps that would run: resolved once, for callers that share them.
 
-        The project's pipeline, or -- when it has none -- the pipeline of the
-        newest run, which is what a script that handed its steps straight to
-        `evaluate` leaves behind.  Falling
-        back to the installed evaluators instead would report a pipeline
-        nobody ran.
+        ``block`` -- a `chain.Block`, or a list of its steps -- or the
+        project's own, or -- when that has none -- the steps of the newest
+        run, which is what a script that handed its steps straight to
+        `evaluate` leaves behind.  Falling back to the installed plugins
+        instead would report steps nobody ran.
         """
         from . import pipeline as pipeline_module
+        from ..chain import Block
         if steps is not None:
             return list(steps)
-        if instances is None:
-            instances = self.pipeline
-        if not instances:
+        if block is None:
+            block = self.block
+        elif not isinstance(block, Block):
+            block = Block(steps=list(block))
+        if not block.steps:
             for run in reversed(self.runs):
                 if run.get("chain"):
-                    continue        # a chain's evaluators are its own, not the window's
-                instances = pipeline_module.instances_from_run(run.get("pipeline") or [])
-                if instances:
+                    continue        # a chain's steps are its own, not the window's
+                block = pipeline_module.block_from_run(run.get("pipeline") or [])
+                if block.steps:
                     break
-        if not instances:
-            instances = pipeline_module.default_instances()
-        return pipeline_module.resolve(instances)
+        if not block.steps:
+            block = pipeline_module.default_block()
+        return self._for_rois(pipeline_module.block_steps(block))
+
+    def block_steps(self):
+        """The project's own block's steps, with no fallback: what the ROI
+        manager measures the ROI being looked at with."""
+        from . import pipeline as pipeline_module
+        return self._for_rois(pipeline_module.block_steps(self.block))
+
+    @staticmethod
+    def _for_rois(steps):
+        # an ROI is looked at one by one, so it keeps what its figures are
+        # drawn from, whatever the block says it repeats over
+        for step in steps:
+            step.keep = True
+        return steps
 
     def step_signature(self, step, inputs, before=()):
         """What this step's result depends on: the data *and* the parameters.
@@ -703,13 +720,13 @@ class ROIProject:
                 and self.stale_steps(i, steps)]
 
     # -------------------------------------------------------------- running
-    def evaluate(self, instances=None, roi_ids=None, progress=None, steps=None,
+    def evaluate(self, block=None, roi_ids=None, progress=None, steps=None,
                  reuse=False, chain="", report=None, stop=None, after=None,
                  tag=False):
-        """Run a pipeline over every included ROI.
+        """Run a block's steps over every included ROI.
 
-        `instances` is a list of `workspace.Instance` -- the same type a tab
-        pins -- resolved here into steps.  Each step contributes columns to a
+        ``block`` is a `chain.Block`, or a list of `chain.Step`s, resolved
+        here into steps; by default the project's own (`resolved`).  Each step contributes columns to a
         site's row, and a step that raises costs its own columns and not the
         ROI, nor the ROIs after it.
 
@@ -724,7 +741,7 @@ class ROIProject:
         dialog's ``wasCanceled``) ends the run between ROIs, keeping the ones
         measured.  ``after`` and ``tag`` are a block's (`_evaluate_record`).
         """
-        steps = self.resolved(steps, instances)
+        steps = self.resolved(steps, block)
         ids = list(self.rois) if roi_ids is None else list(roi_ids)
         ids = [i for i in ids if self.rois[i].use]
         from ..region_runs import Progress, stopped
@@ -858,7 +875,7 @@ class ROIProject:
         except Exception as error:
             return {"error": f"{type(error).__name__}: {error}"}, None
 
-    def evaluate_one(self, roi_id, instances=None, steps=None, reuse=False,
+    def evaluate_one(self, roi_id, block=None, steps=None, reuse=False,
                      force=(), store=False, run="stale"):
         """The pipeline on a single ROI, figures and all.
 
@@ -878,7 +895,7 @@ class ROIProject:
         step re-run only for its figure has nothing new to say and is not
         stored again.
         """
-        steps = self.resolved(steps, instances)
+        steps = self.resolved(steps, block)
         record, results, updated = self._evaluate_record(roi_id, steps, reuse=reuse,
                                                          force=force, run=run)
         if store and updated:
@@ -1073,8 +1090,7 @@ class ROIProject:
                "grouped": self.grouped, "group_settings": asdict(self.group_settings),
                "navigation": self.navigation, "rois": [asdict(r) for r in self.rois.values()],
                "next_number": self.next_number,
-               "runs": self.runs, "pipeline": [asdict(i) for i in self.pipeline],
-               "block_options": self.block_options,
+               "runs": self.runs, "block": self.block.to_dict(),
                "sources": [{"id": s.id, "name": s.name,
                             "path": os.path.relpath(s.path, path.parent),
                             "fingerprint": s.fingerprint} for s in self.sources.values()]}
@@ -1132,7 +1148,6 @@ class ROIProject:
         for table in tables:
             project.tables[table.label] = table
         project.navigation = doc['navigation']
-        from .pipeline import DEFAULT_OPTIONS, from_dict as pipeline_from_dict
-        project.pipeline = pipeline_from_dict(doc)
-        project.block_options = {**DEFAULT_OPTIONS, **(doc.get("block_options") or {})}
+        from .link import block_from
+        project.block = block_from(doc)
         return project

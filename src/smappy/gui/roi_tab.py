@@ -19,7 +19,6 @@ from PySide6.QtWidgets import (QComboBox, QDoubleSpinBox, QFormLayout,
                                QPushButton, QTableWidget,
                                QTableWidgetItem, QVBoxLayout, QWidget)
 
-from ..roi_manager import pipeline as pipeline_module
 from ..session import Session
 from .widgets import CONTROL_WIDTH, CollapsibleSection, ColumnScroll
 from .roi_window import COUNT_LIMIT

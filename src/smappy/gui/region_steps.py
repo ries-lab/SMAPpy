@@ -8,11 +8,10 @@ is the chain panel (`chain_panel.ChainPanel`) opened on that one block, so
 building it is the same as building a chain: add, move, rename, remove, a
 block inside it, *check* to time it, *save as...* to keep it as a chain file.
 
-The block lives on the ROI project, not on the window (`ROIProject.pipeline`
-for its steps and `ROIProject.block_options` for its own fields), so closing
-the window loses nothing, the project saves it into the localization file
-beside the results it produced, and the ROI manager re-evaluates an ROI on
-selection with it.  Running it skips what is still current: an edited step
+The block lives on the ROI project, not on the window (`ROIProject.block`),
+so closing the window loses nothing, the project saves it into the
+localization file beside the results it produced, and the ROI manager
+re-evaluates an ROI on selection with it.  Running it skips what is still current: an edited step
 runs over the ROIs, the others are carried forward.
 """
 from __future__ import annotations
@@ -22,8 +21,8 @@ from typing import Optional
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
-from ..chain import Block, ChainSpec, chain_class
-from ..roi_manager import pipeline as pipeline_module
+from ..chain import BLOCK_ROIS, Block, ChainSpec, chain_class
+from ..roi_manager.pipeline import default_block
 from ..workspace import Instance
 from .chain_panel import ChainPanel
 
@@ -40,10 +39,9 @@ class RegionStepsWindow(QWidget):
         self.setWindowTitle("Per-region steps")
         self.session = session
         project = session.rois
-        if not project.pipeline:
-            project.pipeline = pipeline_module.default_instances()
-        block = pipeline_module.block_of(project.pipeline, project.block_options)
-        spec = ChainSpec(steps=[block], path=PATH,
+        if not project.block.steps:
+            project.block.steps = default_block().steps
+        spec = ChainSpec(steps=[project.block], path=PATH,
                          description="the steps run once in each region")
         self.instance = Instance(plugin=PATH, chain=spec.to_dict())
         layout = QVBoxLayout(self)
@@ -87,17 +85,16 @@ class RegionStepsWindow(QWidget):
         block = self.block()
         if block is None:
             return
-        project = self.session.rois
-        project.pipeline, project.block_options = pipeline_module.from_block(block)
+        self.session.rois.block = block
         self.refresh_counts()
 
     def refresh_counts(self) -> None:
         project = self.session.rois
-        if project.block_options.get("regions") != "rois":
-            self.status.setText(f"for each {project.block_options.get('regions')}")
+        if project.block.regions != BLOCK_ROIS:
+            self.status.setText(f"for each {project.block.regions}")
             return
         try:
-            steps = pipeline_module.resolve(project.pipeline)
+            steps = project.block_steps()
             waiting = len(project.needs_evaluation(steps=steps)) if steps else 0
         except Exception:
             return

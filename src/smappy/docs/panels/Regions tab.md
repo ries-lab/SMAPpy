@@ -2,7 +2,7 @@
 title: Regions tab
 summary: The shape every analysis ROI shares, and the way into the ROI manager and the steps that measure every ROI.
 widget: smappy.gui.roi_tab.ROIHeader
-covers: [smappy.roi_manager.core.ROIProject.set_geometry, smappy.roi_manager.core.ROIProject.indices, smappy.roi_manager.core.ROIProject.geometry, smappy.roi_manager.core.ROIProject.evaluate, smappy.roi_manager.core.ROIProject.latest, smappy.roi_manager.core.ROIProject.evaluations, smappy.regions.inside_polygon, smappy.roi_manager.link.SessionROIs, smappy.roi_manager.pipeline.default_instances]
+covers: [smappy.roi_manager.core.ROIProject.set_geometry, smappy.roi_manager.core.ROIProject.indices, smappy.roi_manager.core.ROIProject.geometry, smappy.roi_manager.core.ROIProject.evaluate, smappy.roi_manager.core.ROIProject.latest, smappy.roi_manager.core.ROIProject.evaluations, smappy.regions.inside_polygon, smappy.roi_manager.link.SessionROIs, smappy.roi_manager.pipeline.default_block]
 ---
 
 ## What it does

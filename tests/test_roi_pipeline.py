@@ -10,7 +10,7 @@ from smappy.plugins.roi import (DensityPeakSettings, HistogramSettings, Histogra
 from smappy.plugins.statistics import LocalizationStatistics, StatisticsSettings
 from smappy.roi_manager import ROIProject
 from smappy.roi_manager import pipeline as pipeline_module
-from smappy.workspace import Instance
+from smappy.chain import Block, Step as ChainStep
 
 
 def table(centers, per=10, seed=0):
@@ -83,10 +83,10 @@ def test_histograms_picks_the_numeric_columns_itself():
 
 # ------------------------------------------------------------ the pipeline
 
-def test_a_pipeline_step_is_the_same_instance_type_a_tab_pins():
-    instance = Instance(plugin="Analysis/Measure/Localization Statistics",
-                        values={"bins": 40})
-    step, = pipeline_module.resolve([instance])
+def test_a_step_of_the_projects_block_is_a_chains_step():
+    instance = ChainStep(plugin="Analysis/Measure/Localization Statistics",
+                         values={"bins": 40})
+    step, = pipeline_module.block_steps(Block(steps=[instance]))
     assert step.label == "Localization Statistics" and step.version == "4"
     assert step.settings.bins == 40
     assert step.as_record()["plugin"] == "Analysis/Measure/Localization Statistics"
@@ -94,26 +94,27 @@ def test_a_pipeline_step_is_the_same_instance_type_a_tab_pins():
 
 def test_a_specialised_evaluator_is_offered_but_not_in_the_default_pipeline():
     assert plugins.refs()["Analysis/Measure/NPC Corners"].per_region
-    assert [i.plugin for i in pipeline_module.default_instances()] == \
+    assert [i.plugin for i in pipeline_module.default_block().steps] == \
         ["Analysis/Measure/Localization Statistics"]
 
 
 def test_a_disabled_step_is_skipped():
-    instances = pipeline_module.default_instances()
-    instances[0].enabled = False
-    assert pipeline_module.resolve(instances) == []
+    block = pipeline_module.default_block()
+    block.steps[0].enabled = False
+    assert pipeline_module.block_steps(block) == []
 
 
 def test_a_step_whose_plugin_is_gone_costs_only_itself():
-    instances = [Instance(plugin="Gone/Away")] + pipeline_module.default_instances()
-    steps = pipeline_module.resolve(instances)
+    block = pipeline_module.default_block()
+    block.steps.insert(0, ChainStep(plugin="Gone/Away"))
+    steps = pipeline_module.block_steps(block)
     assert [s.path for s in steps] == ["Analysis/Measure/Localization Statistics"]
 
 
 def test_the_same_evaluator_twice_gets_distinct_columns():
     """SMAP's addmodule renames on collision; so does this."""
-    one = Instance(plugin="Analysis/Measure/Localization Statistics")
-    steps = pipeline_module.resolve([one, one.copy()])
+    one = ChainStep(plugin="Analysis/Measure/Localization Statistics")
+    steps = pipeline_module.block_steps(Block(steps=[one, ChainStep(plugin=one.plugin)]))
     assert [s.label for s in steps] == ["Localization Statistics", "Localization Statistics 2"]
 
 
@@ -124,9 +125,8 @@ def test_running_a_two_step_pipeline_over_a_project():
     project.set_geometry(200)
     for center in ([0, 0], [1000, 1000]):
         project.add_roi(source.id, center)
-    one = Instance(plugin="Analysis/Measure/Localization Statistics")
-    two = one.copy()
-    two.values = {"bins": 50}
+    one = ChainStep(plugin="Analysis/Measure/Localization Statistics")
+    two = ChainStep(plugin=one.plugin, values={"bins": 50})
     run = project.evaluate([one, two])
     assert [step["label"] for step in run["pipeline"]] == ["Localization Statistics", "Localization Statistics 2"]
     rows = project.results()
@@ -136,38 +136,36 @@ def test_running_a_two_step_pipeline_over_a_project():
     assert rows[0]["Localization Statistics 2.mean_precision_nm"] == 11.0
 
 
-def test_a_pipeline_file_round_trips(tmp_path):
-    instances = pipeline_module.default_instances()
-    instances[0].label = "precision only"
-    instances[0].values = {"bins": 50}
-    path = pipeline_module.save(instances, tmp_path / "p.yaml")
-    back = pipeline_module.load(path)
-    assert [i.label for i in back] == ["precision only"]
-    assert back[0].values == {"bins": 50}
-    assert pipeline_module.resolve(back)[0].settings.bins == 50
+def test_the_block_travels_with_the_project():
+    """The columns of a results table are meaningless without it."""
+    from smappy.session import Session
+    session = Session(table([(0, 0)]))
+    project = session.rois
+    project.add_roi(next(iter(project.sources)), [0, 0])
+    project.block = pipeline_module.default_block()
+    project.block.steps[0].label = "my statistics"
+    project.block.write_values = ["n_localizations"]
+    project.evaluate()
+    project.from_dict(project.to_dict())
+    assert [s.label for s in project.block.steps] == ["my statistics"]
+    assert project.block.write_values == ["n_localizations"]
+    assert project.runs[0]["pipeline"][0]["label"] == "my statistics"
 
 
-def test_a_broken_pipeline_file_gives_no_steps_rather_than_raising():
-    assert pipeline_module.from_dict(None) == []
-    assert pipeline_module.from_dict({"pipeline": [{"nope": 1}, "text"]}) == []
-
-
-def test_the_pipeline_travels_with_the_project(tmp_path):
-    """The columns of a site table are meaningless without it."""
-    project = ROIProject()
-    source = project.add_source(table([(0, 0)]), path=str(tmp_path / "locs.hdf5"))
-    project.set_filters({})
-    project.add_roi(source.id, [0, 0])
-    project.pipeline = pipeline_module.default_instances()
-    project.pipeline[0].label = "my statistics"
-    project.evaluate(project.pipeline)
-
-    from smappy.io.hdf5 import save_localizations
-    save_localizations(tmp_path / "locs.hdf5", table([(0, 0)]))
-    path = project.save(tmp_path / "project.h5")
-    loaded = ROIProject.load(path)
-    assert [i.label for i in loaded.pipeline] == ["my statistics"]
-    assert loaded.runs[0]["pipeline"][0]["label"] == "my statistics"
+def test_a_file_from_before_the_block_reads_its_steps_and_options():
+    from smappy.roi_manager.link import block_from
+    block = block_from({
+        "pipeline": [{"plugin": "Analysis/Measure/Localization Statistics",
+                      "label": "stats", "values": {"bins": 50}},
+                     {"plugin": "Chain/Block", "label": "inner", "enabled": False,
+                      "chain": {"block": "", "regions": "cluster_id", "steps": []}},
+                     {"nope": 1}, "text"],
+        "block_options": {"regions": "rois", "write_back": ["n_here"], "merge": "mean"}})
+    first, inner = block.steps
+    assert first.label == "stats" and first.values == {"bins": 50}
+    assert isinstance(inner, Block) and inner.label == "inner" and not inner.enabled
+    assert block.write_back == ["n_here"] and block.merge == "mean"
+    assert block_from({}).steps == []
 
 
 # ------------------------------------------------------------- the settings
@@ -268,7 +266,7 @@ def test_a_replacing_run_is_one_undo_step_that_brings_the_old_rois_back_with_the
     settings = DensityPeakSettings(separation_nm=1000.0, min_count=20)
     first = finder.run(session.context(), settings).rois
     assert len(first) == 3
-    project.evaluate([Instance(plugin="Analysis/Measure/Localization Statistics")])
+    project.evaluate([ChainStep(plugin="Analysis/Measure/Localization Statistics")])
     assert len(project.results()) == 4
 
     # again without replace: nothing new, and no step for it
@@ -315,22 +313,21 @@ def test_the_region_steps_window_edits_the_projects_block(app, monkeypatch):
     assert tree.childCount() == 1                       # the block's steps, at the top
     assert tree.child(0).text(0).startswith("Localization Statistics")
     window.panel.form.set_values({"for_each_roi.localization_statistics.bins": 50})
-    assert project.pipeline[0].values["bins"] == 50
+    assert project.block.steps[0].values["bins"] == 50
     # a step added with nothing selected goes into the block
     window.panel.steps.setCurrentItem(None)
     monkeypatch.setattr(chooser, "choose_plugin",
                         lambda *a, **k: "Analysis/Measure/NPC Corners")
     window.panel.add_step()
-    assert [i.plugin for i in project.pipeline] == [
+    assert [i.plugin for i in project.block.steps] == [
         "Analysis/Measure/Localization Statistics", "Analysis/Measure/NPC Corners"]
-    assert project.pipeline[0].values["bins"] == 50     # what the form held survives
+    assert project.block.steps[0].values["bins"] == 50     # what the form held survives
     window.panel.steps.invisibleRootItem().child(1).setCheckState(0, Qt.Unchecked)
-    assert not project.pipeline[1].enabled
-    assert [s.label for s in pipeline_module.resolve(project.pipeline)] == \
-        ["Localization Statistics"]
+    assert not project.block.steps[1].enabled
+    assert [s.label for s in project.block_steps()] == ["Localization Statistics"]
     # what it repeats over is the block's own field
     window.panel.form.set_values({"for_each_roi.write_back": "n_here"})
-    assert project.block_options["write_back"] == ["n_here"]
+    assert project.block.write_back == ["n_here"]
 
 
 def test_a_tab_pins_a_per_region_plugin_too(app):

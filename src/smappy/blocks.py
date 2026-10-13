@@ -139,8 +139,22 @@ class BlockPlugin(ChainPlugin):
         *results from* reads (`region_results.Evaluation`), so an analysis
         after the block takes the block's own without asking."""
         from .region_results import Evaluation
-        return [(str(Evaluation(settings.regions, step.title())), step_cls.path)
-                for key, step, step_cls in cls.steps if not isinstance(step, Block)]
+        return [(str(Evaluation(settings.regions, label)), step_cls.path)
+                for label, (key, step, step_cls) in zip(cls.labels(), cls.steps)
+                if not isinstance(step, Block)]
+
+    @classmethod
+    def labels(cls) -> List[str]:
+        """Each step's name, its results' and its columns': the title, and
+        ``title 2`` for a second step of the same title, so two steps never
+        write into one another's."""
+        out: List[str] = []
+        seen: Dict[str, int] = {}
+        for key, step, step_cls in cls.steps:
+            label = step.title()
+            seen[label] = seen.get(label, 0) + 1
+            out.append(label if seen[label] == 1 else f"{label} {seen[label]}")
+        return out
 
     # ------------------------------------------------------------- timing
     def estimate(self, ctx: Context, settings) -> Optional[Estimate]:
@@ -247,10 +261,10 @@ class BlockPlugin(ChainPlugin):
         keep = {"yes": True, "no": False}.get(settings.keep_figures,
                                               settings.regions == BLOCK_ROIS)
         out = []
-        for key, step, cls in self.steps:
+        for label, (key, step, cls) in zip(self.labels(), self.steps):
             sub = getattr(settings, key)
             own = sub if isinstance(step, Block) else plugin_settings(cls, sub)
-            out.append(Run(label=step.title(), path=cls.path, plugin=cls(),
+            out.append(Run(label=label, path=cls.path, plugin=cls(),
                            settings=own, version=str(cls.version), keep=keep))
         return out
 

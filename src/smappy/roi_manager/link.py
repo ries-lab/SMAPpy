@@ -262,10 +262,9 @@ class SessionROIs(ROIProject):
                 "runs": self.runs,
                 # the results, a columnar table per evaluation (`RegionTable`)
                 "tables": self.tables_dict(self.rois),
-                # the pipeline is provenance for the columns in `runs`, so it
+                # the block is provenance for the columns in `runs`, so it
                 # is saved with them rather than only in the workspace
-                "pipeline": [asdict(i) for i in self.pipeline],
-                "block_options": self.block_options}
+                "block": self.block.to_dict()}
 
     def from_dict(self, doc: Optional[dict]) -> None:
         """Restore ROIs, runs and navigation saved with a file."""
@@ -274,9 +273,8 @@ class SessionROIs(ROIProject):
         self.runs = []
         self.tables = {}
         self.navigation = {}
-        self.pipeline = []
-        from .pipeline import DEFAULT_OPTIONS
-        self.block_options = dict(DEFAULT_OPTIONS)
+        from ..chain import Block
+        self.block = Block()
         self.segment_preview = None
         self.history.clear()        # another file's edits
         if not doc:
@@ -312,9 +310,7 @@ class SessionROIs(ROIProject):
             table.keep_only(self.rois)
             if len(table):
                 self.tables[table.label] = table
-        from .pipeline import DEFAULT_OPTIONS, from_dict as pipeline_from_dict
-        self.pipeline = pipeline_from_dict(doc)
-        self.block_options = {**DEFAULT_OPTIONS, **(doc.get("block_options") or {})}
+        self.block = block_from(doc)
 
     # ---------------------------------------------------------------- misc
     @property
@@ -331,3 +327,45 @@ class SessionROIs(ROIProject):
 
     def source_of(self, number: int) -> Optional[SessionSource]:
         return next((s for s in self.sources.values() if s.number == number), None)
+
+
+def block_from(doc: dict):
+    """The project's block as a saved project holds it: ``block``, a
+    `chain.Block`'s own form, or -- in a file from before the project held
+    one -- its steps as ``pipeline`` (workspace instances, a block among them
+    as ``plugin: Chain/Block`` with its ``chain``) and its own fields as
+    ``block_options``.  Read tolerantly: a file outlives the code that wrote
+    it, and a step that cannot be read costs that step."""
+    from ..chain import Block, ChainError, Step
+    if isinstance(doc.get("block"), dict):
+        try:
+            return Block.from_dict(doc["block"])
+        except ChainError:
+            return Block()
+    options = doc.get("block_options") or {}
+    steps = []
+    for raw in doc.get("pipeline") or []:
+        if not isinstance(raw, dict) or not raw.get("plugin"):
+            continue
+        enabled = bool(raw.get("enabled", True))
+        try:
+            if raw["plugin"] == "Chain/Block" and isinstance(raw.get("chain"), dict):
+                inner = Block.from_dict(raw["chain"])
+                inner.label = str(raw.get("label") or "") or inner.label
+                inner.enabled = enabled
+                steps.append(inner)
+                continue
+        except ChainError:
+            continue
+        values = raw.get("values")
+        steps.append(Step(plugin=str(raw["plugin"]), label=str(raw.get("label") or ""),
+                          values=dict(values) if isinstance(values, dict) else {},
+                          enabled=enabled))
+    own = {k: options[k] for k in ("regions", "write_back", "write_values", "merge",
+                                   "keep_figures") if k in options}
+    try:
+        block = Block.from_dict({**own, "steps": []})
+    except ChainError:
+        block = Block()
+    block.steps = steps
+    return block

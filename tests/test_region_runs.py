@@ -130,7 +130,7 @@ def test_the_statistics_run_per_cluster_and_an_empty_one_is_a_zero():
     session = Session(clusters())
     session.show_grouped(0, False)
     session.layers[0].set_bound("photons", 1e9, None)     # nothing passes
-    steps = pipeline_module.resolve(pipeline_module.default_instances())
+    steps = pipeline_module.block_steps(pipeline_module.default_block())
     table = session.evaluate_regions("cluster_id", steps)["Localization Statistics"]
     assert table.columns()["n_localizations"].tolist() == [0, 0, 0]
 
@@ -165,7 +165,7 @@ def test_a_cluster_has_its_blinks_through_group_id():
 
 def test_the_roi_run_reports_its_status_and_stops_when_asked():
     from smappy.roi_manager import ROIProject
-    from smappy.workspace import Instance
+    from smappy.chain import Block, Step as ChainStep
     project = ROIProject()
     source = project.add_source(clusters(sizes=(20,) * 4, noise=0), name="a")
     project.set_filters({})
@@ -173,7 +173,7 @@ def test_the_roi_run_reports_its_status_and_stops_when_asked():
         project.add_roi(source.id, [k * 5000.0, k * 5000.0])
     said = []
     calls = []
-    run = project.evaluate([Instance(plugin="Analysis/Measure/Localization Statistics",
+    run = project.evaluate([ChainStep(plugin="Analysis/Measure/Localization Statistics",
                                      values={"precision_fit": "none"})],
                            report=said.append,
                            stop=lambda: len(calls) >= 2,

@@ -267,7 +267,7 @@ def test_too_few_pores_in_the_fit_range_is_refused():
 def test_segment_evaluate_and_analyse_through_the_session():
     """The whole chain on grouped localizations, against the simulation."""
     from smappy.session import Session
-    from smappy.workspace import Instance
+    from smappy.chain import Block, Step as ChainStep
     session = Session(pores(0.5, seed=2))
     session.show_grouped(0, True)
     found = plugins.get("Analysis/Regions/Find/NPC")()(ctx=session.context())
@@ -275,7 +275,7 @@ def test_segment_evaluate_and_analyse_through_the_session():
     project = session.rois
     assert len(project.rois) == len(found.data["centers"]) > 140
 
-    project.evaluate([Instance(plugin="Analysis/Measure/NPC Corners")])
+    project.evaluate([ChainStep(plugin="Analysis/Measure/NPC Corners")])
     rows = project.results()
     assert len(rows) == len(project.rois)
     assert {"n_corners", "n_localizations", "n_corners_smap"} <= set(rows[0])
@@ -309,10 +309,10 @@ def test_the_npc_chain_gives_what_the_three_steps_give_and_leaves_the_pipeline_a
     analyse.  Its ROIs and counts reach the session's project; the evaluation
     window's pipeline stays what the user set up."""
     from smappy.session import Session
-    from smappy.workspace import Instance
+    from smappy.chain import Block, Step as ChainStep
     session = Session(pores(0.5, seed=2))
     project = session.rois
-    project.pipeline = [Instance(plugin="Analysis/Measure/Localization Statistics")]
+    project.block = Block(steps=[ChainStep(plugin="Analysis/Measure/Localization Statistics")])
     file_id = next(iter(project.sources))
     drawn = project.add_roi(file_id, (100.0, 100.0))       # by hand, and empty
     chain = plugins.get("Analysis/Regions/Workflow/NPC Analysis")
@@ -332,7 +332,7 @@ def test_the_npc_chain_gives_what_the_three_steps_give_and_leaves_the_pipeline_a
     assert {"find the pores", "find the pores: checks",
             "labelling efficiency"} <= set(result.plots)
     assert drawn.id in project.rois and len(project.rois) == len(found) + 1
-    assert [i.plugin for i in project.pipeline] == ["Analysis/Measure/Localization Statistics"]
+    assert [i.plugin for i in project.block.steps] == ["Analysis/Measure/Localization Statistics"]
     assert project.runs[-1]["chain"] == "block each pore"
 
     # the analysis run from the GUI afterwards finds the chain's counts
@@ -355,13 +355,13 @@ def test_the_npc_chain_gives_what_the_three_steps_give_and_leaves_the_pipeline_a
 def two_corner_counts():
     """Pores counted twice: as NPC Corners, and renamed with a stricter cutoff."""
     from smappy.session import Session
-    from smappy.workspace import Instance
+    from smappy.chain import Block, Step as ChainStep
     session = Session(pores(0.5, seed=2))
     session.show_grouped(0, True)
     project = session.rois
     plugins.get("Analysis/Regions/Find/NPC")()(ctx=session.context())
-    project.evaluate([Instance(plugin="Analysis/Measure/NPC Corners")])
-    project.evaluate([Instance(plugin="Analysis/Measure/NPC Corners", label="strict",
+    project.evaluate([ChainStep(plugin="Analysis/Measure/NPC Corners")])
+    project.evaluate([ChainStep(plugin="Analysis/Measure/NPC Corners", label="strict",
                                values={"precision_nm": 12.0})])
     return session
 
@@ -401,10 +401,10 @@ def test_a_renamed_corner_count_stands_beside_the_first_and_is_chosen_by_name():
 
 def test_running_an_evaluation_again_under_its_name_replaces_it():
     from smappy.plugins.npc import corner_settings
-    from smappy.workspace import Instance
+    from smappy.chain import Block, Step as ChainStep
     session = two_corner_counts()
     project = session.rois
-    project.evaluate([Instance(plugin="Analysis/Measure/NPC Corners",
+    project.evaluate([ChainStep(plugin="Analysis/Measure/NPC Corners",
                                values={"precision_nm": 25.0})])
     assert sorted(project.labels("Analysis/Measure/NPC Corners")) == [
         "NPC Corners", "strict"]
@@ -471,12 +471,12 @@ def test_a_replacing_preview_proposes_what_the_run_adds_and_changes_nothing():
 
 def test_the_analysis_says_when_the_layer_is_not_grouped():
     from smappy.session import Session
-    from smappy.workspace import Instance
+    from smappy.chain import Block, Step as ChainStep
     session = Session(pores(0.5, seed=4))
     session.show_grouped(0, False)
     project = session.rois
     plugins.get("Analysis/Regions/Find/NPC")()(ctx=session.context())
-    project.evaluate([Instance(plugin="Analysis/Measure/NPC Corners")])
+    project.evaluate([ChainStep(plugin="Analysis/Measure/NPC Corners")])
     result = plugins.get("Analysis/Regions/Summarize/NPC labelling efficiency")()(
         ctx=session.context())
     assert "does not merge blinks" in result.text
@@ -497,7 +497,7 @@ def test_results_from_offers_the_evaluations_on_the_rois():
     QApplication.instance() or QApplication([])
     from smappy.gui.plugin_panel import PluginPanel
     from smappy.session import Session
-    from smappy.workspace import Instance
+    from smappy.chain import Block, Step as ChainStep
 
     session = Session(pores(0.5, seed=2))
     session.show_grouped(0, True)
@@ -508,11 +508,11 @@ def test_results_from_offers_the_evaluations_on_the_rois():
 
     project = session.rois
     plugins.get("Analysis/Regions/Find/NPC")()(ctx=session.context())
-    project.evaluate([Instance(plugin="Analysis/Measure/NPC Corners")])
+    project.evaluate([ChainStep(plugin="Analysis/Measure/NPC Corners")])
     session.changed("rois")
     assert entries(field) == [("", "auto (NPC Corners)"), ("NPC Corners", "NPC Corners")]
 
-    project.evaluate([Instance(plugin="Analysis/Measure/NPC Corners", label="strict",
+    project.evaluate([ChainStep(plugin="Analysis/Measure/NPC Corners", label="strict",
                                values={"precision_nm": 12.0})])
     session.changed("rois")
     assert entries(field) == [("", "auto (asks which)"), ("NPC Corners", "NPC Corners"),

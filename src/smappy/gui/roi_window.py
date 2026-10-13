@@ -1171,7 +1171,7 @@ class ROIManagerWindow(QMainWindow):
         roi = self._selected()
         if roi is None or self._evaluating or not self.evaluate_live.isChecked():
             return
-        steps = pipeline_module.resolve(project.pipeline)
+        steps = project.block_steps()
         if not steps:
             self.status.showMessage("no per-region step is enabled")
             return

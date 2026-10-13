@@ -299,7 +299,7 @@ def test_an_evaluator_step_runs_on_every_site_before_the_next_step():
     assert len(project.rois) == 5 and drawn.id in project.rois
     rows = project.results()
     assert len(rows) == 4 and {r["n_localizations"] for r in rows} == {100}
-    assert project.pipeline == [] and project.runs[-1]["chain"] == "block sites"
+    assert project.block.steps == [] and project.runs[-1]["chain"] == "block sites"
     assert project.labels() == ["stats"]
     # and the log says so, step by step
     assert [s["plugin"] for s in session.history[-1]["steps"]] == [
@@ -362,13 +362,13 @@ def test_a_per_region_step_on_the_view_runs_once_and_keeps_nothing_with_the_rois
 def test_a_chains_evaluation_and_the_windows_stand_side_by_side():
     """The window's pipeline runs after a chain: both evaluations are on the
     ROIs, and the chain's run is not taken for the window's pipeline."""
-    from smappy.workspace import Instance
+    from smappy.chain import Block, Step as ChainStep
     session = four_sites()
     cls = chain_class(spec(SEGMENT, each_roi({"plugin": "Analysis/Measure/Localization Statistics", "label": "chain stats"})))
     session.run(cls(), cls.Settings())
     project = session.rois
     assert [s.label for s in project.resolved()] != ["chain stats"]
-    project.evaluate([Instance(plugin="Analysis/Measure/Localization Statistics")])
+    project.evaluate([ChainStep(plugin="Analysis/Measure/Localization Statistics")])
     assert set(project.labels()) == {"chain stats", "Localization Statistics"}
     row = project.results()[0]
     assert row["chain stats.n_localizations"] == row["Localization Statistics.n_localizations"] == 100
@@ -376,13 +376,13 @@ def test_a_chains_evaluation_and_the_windows_stand_side_by_side():
 
 def test_histograms_of_every_evaluation_need_no_choice():
     """Two evaluations on the ROIs: Histograms draws both unless one is named."""
-    from smappy.workspace import Instance
+    from smappy.chain import Block, Step as ChainStep
     session = four_sites()
     cls = chain_class(spec(SEGMENT))
     session.run(cls(), cls.Settings())
     project = session.rois
-    project.evaluate([Instance(plugin="Analysis/Measure/Localization Statistics", label="a")])
-    project.evaluate([Instance(plugin="Analysis/Measure/Localization Statistics", label="b",
+    project.evaluate([ChainStep(plugin="Analysis/Measure/Localization Statistics", label="a")])
+    project.evaluate([ChainStep(plugin="Analysis/Measure/Localization Statistics", label="b",
                                values={"bins": 50})])
     cls = chain_class(spec({"plugin": "Analysis/Regions/Summarize/Histograms", "label": "h",
                             "values": {"evaluation": ""}}))

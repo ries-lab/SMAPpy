@@ -54,7 +54,7 @@ from smappy.simulate.settings import (SimulationSettings, StructureSettings,
                                       LabellingSettings)
 from smappy.roi_manager import ROI, ROIProject
 from smappy.render import FieldOfView
-from smappy.workspace import Instance
+from smappy.chain import Block, Step
 from smappy.gui.roi_window import (arrow, OTHER_PEN, EXCLUDED_PEN, ROI_PEN,
                                    DRAFT_PEN, TILE_PEN, TILE_HERE_PEN, DIRECTION_PEN,
                                    STALE_COLOUR)
@@ -168,7 +168,7 @@ so.
 ```figure The first 14 numbers of the ROI list, and the size of the results table, through four edits: after measuring with Localization Statistics everything is current (black); moving ROI 3 by 40 nm puts only that ROI out of date (orange) and out of the results; excluding ROI 6 greys it and takes it out of the results; editing a parameter of the step puts every included ROI out of date, while the results made with the old setting stay until they are replaced.
 for r in found:
     r.use, r.direction = True, None
-project.pipeline = [Instance(plugin="Analysis/Measure/Localization Statistics", values={"precision_fit": "none"})]
+project.block = Block(steps=[Step(plugin="Analysis/Measure/Localization Statistics", values={"precision_fit": "none"})])
 project.evaluate()
 
 def column(ax, title):
@@ -188,8 +188,8 @@ project.move_roi(found[2].id, np.asarray(found[2].center) + 40)
 column(axes[1], "ROI 3 moved")
 found[5].use = False
 column(axes[2], "ROI 6 excluded")
-project.pipeline = [Instance(plugin="Analysis/Measure/Localization Statistics",
-                             values={"precision_fit": "none", "bins": 50})]
+project.block = Block(steps=[Step(plugin="Analysis/Measure/Localization Statistics",
+                                  values={"precision_fit": "none", "bins": 50})])
 column(axes[3], "a parameter edited")
 ```
 
