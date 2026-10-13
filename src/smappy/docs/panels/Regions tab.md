@@ -247,8 +247,9 @@ settings; *check* to time them in a few ROIs, and Run, which measures what
 is out of date and carries the rest forward.  While it measures, Run is
 Stop: the ROI being measured is finished, the ones measured so far are kept,
 and the rest wait for the next Run.  A new list starts with the
-general measurements, once each, their slow options off; a specialised one,
-such as NPC Corners, is added there when the data call for it.  The list is
+general measurements, once each, with their own defaults; a specialised
+one, such as NPC Corners, is added there when the data call for it.  A run
+that will take more than a minute says how long before it starts.  The list is
 saved in the file with the results, because the results table's columns mean
 nothing without it, and *save as...* keeps it as a chain.
 

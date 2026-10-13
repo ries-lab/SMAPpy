@@ -122,13 +122,13 @@ def test_a_segmenter_cannot_run_in_a_block():
         chain_class(ChainSpec(steps=[block({"plugin": "Analysis/Regions/Find/Density Peaks"})]))
 
 
-def test_a_step_added_to_a_block_starts_with_its_slow_options_off():
+def test_a_step_in_a_block_starts_with_the_defaults_it_has_on_the_view():
     cls = chain_class(ChainSpec(steps=[
         block({"plugin": "Analysis/Measure/Localization Statistics"}),
         Step(plugin="Analysis/Measure/Localization Statistics", label="view")]))
     settings = cls.Settings()
-    assert settings.each.localization_statistics.fit_precision is False
-    assert settings.view.fit_precision is True          # on the view, as ever
+    assert settings.each.localization_statistics.precision_fit == "histogram"
+    assert settings.view.precision_fit == "histogram"
 
 
 # ------------------------------------------------------------------- running
@@ -380,7 +380,7 @@ def test_a_chain_can_be_a_step_in_a_block():
 
 @register("Test/Block/Slow")
 class Slow(Plugin):
-    """Takes its time, more of it with its slow option on."""
+    """Takes its time, more of it when thorough."""
     per_region = True
     changes_locs = False
 
@@ -389,7 +389,7 @@ class Slow(Plugin):
     @_dc
     class Settings:
         from smappy.plugins import param as _p
-        thorough: bool = _p(True, label="thorough", slow=True, help="slower")
+        thorough: bool = _p(True, label="thorough", help="slower")
 
     def run(self, ctx, settings):
         import time
@@ -408,7 +408,7 @@ def test_a_blocks_time_is_estimated_from_a_few_of_its_regions():
     assert "over 40 regions" in estimate.text() and "timed on 5" in estimate.text()
 
 
-def test_a_long_block_asks_first_and_offers_its_slow_options_off(monkeypatch):
+def test_a_long_block_asks_first(monkeypatch):
     import smappy.blocks as blocks
     monkeypatch.setattr(blocks, "ASK_ABOVE_SECONDS", 0.1)
     session = a_session(sizes=(10,) * 20, noise=0)
@@ -416,10 +416,7 @@ def test_a_long_block_asks_first_and_offers_its_slow_options_off(monkeypatch):
                                               "values": {"thorough": True}})]))
     settings = cls.Settings()
     asked = cls().preflight(session.context(), settings)
-    assert "each will take" in asked.text and "over 20 regions" in asked.text
-    choice, = asked.choices
-    assert choice.label == "Slow options off"
-    assert choice.settings.each.slow.thorough is False
-    assert settings.each.slow.thorough is True          # the form is untouched
+    text = getattr(asked, "text", asked)
+    assert "each will take" in text and "over 20 regions" in text
     monkeypatch.setattr(blocks, "ASK_ABOVE_SECONDS", 1e9)
     assert cls().preflight(session.context(), settings) is None

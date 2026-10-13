@@ -23,7 +23,7 @@ steps:
       pixelsize_nm: 20.0
   - plugin: Analysis/Measure/Localization Statistics
     label: stats
-    version: "3"
+    version: "4"
     grouping: ungrouped                # photons and precision per frame
     values:
       source: selection

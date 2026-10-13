@@ -19,20 +19,6 @@ from ..locs import Localizations
 from ..params import _META, ParamInfo, param  # noqa: F401  (re-exported)
 from .discovery import Diagnostic, PluginRef, scan
 
-def fast_values(settings_cls: type, prefix: str = "") -> Dict[str, Any]:
-    """The dotted names of the `slow` switches of a settings class, off:
-    what a plugin is set to when it is added to run once per region."""
-    def walk(specs, prefix):
-        for name, spec in specs.items():
-            if spec.children:
-                walk(spec.children, f"{prefix}{name}.")
-            elif spec.info.slow:
-                out[prefix + name] = False
-    out: Dict[str, Any] = {}
-    walk(param_specs(settings_cls), prefix)
-    return out
-
-
 def settings_hints(settings_cls: type) -> Dict[str, Any]:
     """`typing.get_type_hints`, with the one failure a plugin author meets
     explained: under ``from __future__ import annotations``, Python 3.9

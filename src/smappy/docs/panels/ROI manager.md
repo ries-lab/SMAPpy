@@ -168,7 +168,7 @@ so.
 ```figure The first 14 numbers of the ROI list, and the size of the results table, through four edits: after measuring with Localization Statistics everything is current (black); moving ROI 3 by 40 nm puts only that ROI out of date (orange) and out of the results; excluding ROI 6 greys it and takes it out of the results; editing a parameter of the step puts every included ROI out of date, while the results made with the old setting stay until they are replaced.
 for r in found:
     r.use, r.direction = True, None
-project.pipeline = [Instance(plugin="Analysis/Measure/Localization Statistics", values={"fit_precision": False})]
+project.pipeline = [Instance(plugin="Analysis/Measure/Localization Statistics", values={"precision_fit": "none"})]
 project.evaluate()
 
 def column(ax, title):
@@ -189,7 +189,7 @@ column(axes[1], "ROI 3 moved")
 found[5].use = False
 column(axes[2], "ROI 6 excluded")
 project.pipeline = [Instance(plugin="Analysis/Measure/Localization Statistics",
-                             values={"fit_precision": False, "bins": 50})]
+                             values={"precision_fit": "none", "bins": 50})]
 column(axes[3], "a parameter edited")
 ```
 

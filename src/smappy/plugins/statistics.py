@@ -505,18 +505,15 @@ def model_curve(key: str, stats: Dict[str, float], edges: np.ndarray
 def statistics(locs: Localizations, bins: int = 100, photon_start: float = 0.0,
                on_time: Optional[Sequence[float]] = None,
                exposure_ms: float = 0.0,
-               precision_fit: str = "histogram",
-               fit_precision: bool = True) -> List[Distribution]:
+               precision_fit: str = "histogram") -> List[Distribution]:
     """Every distribution the table can supply, in reading order.
 
     ``on_time`` is given separately because it lives in the *grouped* table:
     one row per blink, not one per frame.  A table that carries ``n_in_group``
     already -- a grouped file, or a grouped layer -- supplies it itself.
-    Without ``fit_precision`` the precision model is not fitted: the median
-    and the histogram's landmarks are still there.
+    ``precision_fit`` is `precision_model`'s method; "none" fits no model,
+    and the median and the histogram's landmarks are still there.
     """
-    if not fit_precision:
-        precision_fit = "none"
     found: List[Distribution] = []
     if "photons" in locs:
         found.append(photon_distribution(locs["photons"], bins, photon_start))
@@ -633,13 +630,12 @@ class StatisticsSettings:
                            "localizations and ignore this; the precision fit "
                            "is on these bins")
     precision_fit: str = param("histogram", label="precision fit",
-                               choices=(("histogram", "least squares on the histogram"),
+                               choices=(("none", "none: median and landmarks only"),
+                                        ("histogram", "least squares on the histogram"),
                                         ("mle", "maximum likelihood (outlier-sensitive)")),
-                               advanced=True,
-                               help="the likelihood weighs a localization by "
-                                    "1/sigma^2, so a few failed fits with a "
-                                    "precision near zero carry the answer; "
-                                    "the binned fit does not see them")
+                               help="the model of the precision and its sigma_c; "
+                                    "the likelihood is thrown by a few failed "
+                                    "fits with a precision near zero")
     photon_start: float = param(0.0, label="photons from", unit="photons", min=0.0,
                                 help="where the exponential fit starts; "
                                      "0: at the maximum of the histogram, below "
@@ -648,9 +644,6 @@ class StatisticsSettings:
     exposure_ms: float = param(0.0, label="exposure", unit="ms", min=0.0,
                                advanced=True,
                                help="0: the on-time is reported in frames only")
-    fit_precision: bool = param(True, label="fit the precision model", slow=True,
-                                help="off: the precision's median and landmarks "
-                                     "only, without sigma_c")
 
 
 def blink_on_times(locs: Localizations) -> np.ndarray:
@@ -722,7 +715,10 @@ class LocalizationStatistics(Plugin):
     per_region = True
     # 2: the table the layer shows rather than always the ungrouped one, and
     # the on-time counted once per blink rather than once per frame
-    version = "3"        # 3: finds a SMAPpy 3D fit's z precision, z_err_nm
+    # 3: finds a SMAPpy 3D fit's z precision, z_err_nm
+    # 4: *precision fit* none / histogram / MLE, one choice; a region fits the
+    # model as the view does, where it used to start without it
+    version = "4"
 
     def run(self, ctx: Context, settings: StatisticsSettings) -> Result:
         table, selection = ctx.table()
@@ -750,8 +746,7 @@ class LocalizationStatistics(Plugin):
         found = statistics(locs, bins=settings.bins,
                            photon_start=settings.photon_start, on_time=on_time,
                            exposure_ms=settings.exposure_ms,
-                           precision_fit=settings.precision_fit,
-                           fit_precision=settings.fit_precision)
+                           precision_fit=settings.precision_fit)
         if not found:
             raise ValueError("the table has no photons, precision or on-time: "
                              f"it has {', '.join(sorted(locs.keys()))}")

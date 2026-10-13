@@ -174,7 +174,7 @@ def test_the_roi_run_reports_its_status_and_stops_when_asked():
     said = []
     calls = []
     run = project.evaluate([Instance(plugin="Analysis/Measure/Localization Statistics",
-                                     values={"fit_precision": False})],
+                                     values={"precision_fit": "none"})],
                            report=said.append,
                            stop=lambda: len(calls) >= 2,
                            progress=lambda done, total: calls.append(done))

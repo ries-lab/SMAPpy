@@ -32,10 +32,6 @@ class ParamInfo:
     # for a part: shown folded until it is opened.  A chain's steps are, so a
     # chain of eight plugins reads as eight lines rather than eight forms
     collapsed: bool = False
-    # a bool that turns on optional work which costs time per run -- a
-    # bootstrap, a fit beside the numbers -- and that a run over many regions
-    # starts without (`fast_values`; docs/regions.md, "Slow, optional parts")
-    slow: bool = False
 
 
 def param(default: Any = MISSING, *, default_factory: Any = MISSING, **info):

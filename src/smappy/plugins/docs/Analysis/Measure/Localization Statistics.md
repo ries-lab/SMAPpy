@@ -1,5 +1,5 @@
 ---
-version: "3"
+version: "4"
 covers: [smappy.plugins.statistics.statistics, smappy.plugins.statistics.statistics_values, smappy.plugins.statistics.precision_model, smappy.plugins.statistics.photon_decay, smappy.plugins.statistics.ontime_decay]
 ---
 
@@ -30,9 +30,10 @@ The same plugin measures every ROI of the
 per-region steps, or as a step of a [chain](plugin:Panels/Glossary)
 (plugins run one after another as one) set to *run on* each ROI.  Each ROI then
 gets a row of numbers (see *Output*), and an ROI with nothing in it gets a
-count of zero rather than an error.  There the precision model starts
-switched off (*fit the precision model*), since its fit is most of what an
-ROI costs.
+count of zero rather than an error.  The precision model is fitted there as
+on the view; its fit is most of what an ROI costs, and a block that will take
+more than a minute says how long before it starts, when *precision fit* set
+to *none* is the way to make it quicker.
 
 ```figure-setup
 from smappy.simulate import simulate
@@ -133,7 +134,8 @@ of a nanometre, which are failed fits and not good localizations.  The
 likelihood weighs each localization by $1/\sigma^2$, so a few per cent of those
 rows carry the answer and pull $\sigma_c$ down by an order of magnitude.
 Binned, they are a few counts in the first bins and move nothing.  *Precision
-fit* switches to the likelihood for anyone who wants it.
+fit* switches to the likelihood for anyone who wants it, or to *none*: the
+histogram, its median and its landmarks without the model.
 
 The z precision, when the table has one, is described the same way.
 
@@ -205,13 +207,12 @@ threshold -- a second, dim population, for example.
 ### precision_fit
 See *How it works*: the histogram fit is robust to the failed fits every
 dataset contains; the likelihood is the efficient estimator on clean data.
-
-### fit_precision
-The fit takes about 10 ms whatever the number of localizations -- nothing
+Either takes about 10 ms whatever the number of localizations -- nothing
 next to one run on the view, but 10 s over a thousand ROIs and a quarter of
-an hour over a hundred thousand clusters.  Off, the histogram, its median and
-its landmarks are still there; only the model curve and $\sigma_c$ go.  An
-ROI of a few dozen localizations has too few for a meaningful fit anyway.
+an hour over a hundred thousand clusters.  With *none* the histogram, its
+median and its landmarks are still there; only the model curve and
+$\sigma_c$ go.  An ROI of a few dozen localizations has too few for a
+meaningful fit anyway.
 
 ## Output
 

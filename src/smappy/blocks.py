@@ -26,8 +26,6 @@ What a run of a block does:
   "Region values as columns"), so a filter or a colour can use them; the
   columns are refused when the table has one of the name that was not
   written from regions.
-* **A step added to a block starts with its slow options off**
-  (`param(slow=True)`, `plugins.fast_values`) unless its values say otherwise.
 * **A segmenter is refused** inside a block: ROIs found in each region have
   nowhere to go yet.
 * **A block inside a block** makes a table per region, not a row: its tables
@@ -52,8 +50,8 @@ import numpy as np
 from .chain import (BLOCK_ROIS, DEFAULT_GROUP, KEEP_FIGURES, Block, ChainError,
                     ChainPlugin, Step, _flat_infos, plugin_settings, step_plugin,
                     step_settings_class)
-from .plugins import (Context, FormState, ParamInfo, PreflightChoice, PreflightQuestion,
-                      Result, fast_values, param, settings_values)
+from .plugins import (Context, FormState, ParamInfo, PreflightQuestion,
+                      Result, param, settings_values)
 from .region_runs import WriteBack, changed_columns
 
 # the block's own fields, before its steps', in its settings
@@ -194,7 +192,7 @@ class BlockPlugin(ChainPlugin):
 
     def preflight(self, ctx: Context, settings):
         """Its steps' own questions, and the time it will take when that is
-        long -- offering to run with the slow options off when there are any."""
+        long (`ASK_ABOVE_SECONDS`)."""
         asked = super().preflight(ctx, settings)
         try:
             estimate = self.estimate(ctx, settings)
@@ -206,31 +204,7 @@ class BlockPlugin(ChainPlugin):
         if asked:
             text += "\n\n" + (asked.text if isinstance(asked, PreflightQuestion)
                                else str(asked))
-        fast = self.without_slow(settings)
-        choices = ([PreflightChoice(label="Slow options off", settings=fast,
-                                    help="run every step without the options "
-                                         "marked slow")]
-                   if fast is not None else [])
-        return PreflightQuestion(text=text, choices=choices)
-
-    def without_slow(self, settings):
-        """These settings with every slow option of its steps off, or None
-        when none is on."""
-        out = copy.deepcopy(settings)
-        changed = False
-        for key, step, cls in self.steps:
-            sub = getattr(out, key)
-            if isinstance(step, Block):
-                inner = cls().without_slow(sub)
-                if inner is not None:
-                    setattr(out, key, inner)
-                    changed = True
-                continue
-            for name in fast_values(cls.Settings):
-                if "." not in name and getattr(sub, name, False):
-                    setattr(sub, name, False)
-                    changed = True
-        return out if changed else None
+        return text
 
     def block_from(self, settings) -> Block:
         """The block as its file would say it, with ``settings``."""
@@ -466,11 +440,6 @@ def block_class(block: Block) -> type:
         if issubclass(cls, SegmenterPlugin):
             raise ChainError(f"{step.title()!r} finds ROIs, which a block cannot "
                              "keep: put it before the block")
-        # a step added to a block starts with its slow options off
-        fast = {k: v for k, v in fast_values(cls.Settings).items()
-                if k not in step.values}
-        if fast:
-            step = dataclasses.replace(step, values={**step.values, **fast})
         step_cls = step_settings_class(key, cls, step)
         columns.append((key, step_cls, param(
             default_factory=step_cls, label=step.title(), collapsed=True,

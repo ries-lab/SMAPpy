@@ -57,17 +57,10 @@ def test_statistics_measures_one_site_through_the_context():
     project.set_filters({})
     roi = project.add_roi(source.id, [0.0, 0.0])
     result = LocalizationStatistics().run(project.region_context(roi),
-                                          StatisticsSettings(fit_precision=False))
+                                          StatisticsSettings(precision_fit="none"))
     assert result.values["n_localizations"] == 30       # this site's, not the file's
     assert result.values["mean_precision_nm"] == 11.0
     assert np.isnan(result.values["sigma_c_nm"])        # the fit was switched off
-
-
-def test_the_pipeline_adds_a_plugin_with_its_slow_options_off():
-    added = pipeline_module.instance_for("Analysis/Measure/Localization Statistics")
-    assert added.values == {"fit_precision": False}
-    assert pipeline_module.default_instances()[0].values == {"fit_precision": False}
-    assert pipeline_module.instance_for("Analysis/Measure/NPC Corners").values == {}
 
 
 def test_a_bad_setting_is_refused_rather_than_silently_odd():
@@ -94,7 +87,7 @@ def test_a_pipeline_step_is_the_same_instance_type_a_tab_pins():
     instance = Instance(plugin="Analysis/Measure/Localization Statistics",
                         values={"bins": 40})
     step, = pipeline_module.resolve([instance])
-    assert step.label == "Localization Statistics" and step.version == "3"
+    assert step.label == "Localization Statistics" and step.version == "4"
     assert step.settings.bins == 40
     assert step.as_record()["plugin"] == "Analysis/Measure/Localization Statistics"
 
@@ -378,7 +371,7 @@ def test_find_evaluate_and_analyse_through_the_session(app):
     entry = session.history[-1]
     assert entry["what"] == "Analysis/Regions/Per-region steps" and "4 ROIs" in entry["text"]
     assert entry["steps"][0]["plugin"] == "Chain/Block"
-    assert entry["steps"][0]["values"]["localization_statistics.fit_precision"] is False
+    assert entry["steps"][0]["values"]["localization_statistics.precision_fit"] == "histogram"
     rows = project.results()
     assert len(rows) == 4 and rows[0]["n_localizations"] == 100
 
