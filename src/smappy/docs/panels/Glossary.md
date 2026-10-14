@@ -115,6 +115,11 @@ papers and in other software.
 * **DBSCAN** (density-based spatial clustering of applications with noise): a
   clustering in which a localization with enough neighbours within a radius
   starts or extends a cluster, and the rest are noise.
+* **local density**: how many localizations lie within a radius of a
+  localization -- a number per localization, not a region.
+* **Voronoi tessellation** (also called a Voronoi diagram): the division of
+  the plane into one cell per localization, the part of the plane closer to
+  it than to any other; a small cell means a dense neighbourhood.
 * **NPC** (nuclear pore complex): the eight-cornered ring of proteins in the
   nuclear envelope, a standard structure for testing labelling and
   resolution.

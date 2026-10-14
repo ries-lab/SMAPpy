@@ -82,7 +82,7 @@ ROI and per cluster.  Nothing is ported twice: SMAP's `X` (Analyze) and
 
 | | what | rows | status |
 |---|---|---|---|
-| B1 | **Neighbourhood** (the renamed `SpatialFilterLocs` / `density_calculator`): per localization, the number of neighbours within r (local density), the mean/median/min/max/quantile of a field around it, and the Voronoi cell density (area⁻¹, SharpViSu). Writes columns (recipes), which can be filtered and coloured, and which Find clusters' Voronoi threshold can use. | #70 #93 (density) #94 | open |
+| B1 | **Neighbourhood** (the renamed `SpatialFilterLocs` / `density_calculator`): per localization, the number of neighbours within r (local density), the mean/median/min/max/quantile of a field around it, and the Voronoi cell density (area⁻¹, SharpViSu). Writes columns (recipes), which can be filtered and coloured, and which Find clusters' Voronoi threshold can use. | #70 #93 (density) #94 | done (step 9) |
 | B2 | **Find clusters**: one plugin with an algorithm choice. Each algorithm's settings are a part; only the selected algorithm's part is **shown**, the others hidden (step 1 below adds that to the form). It replaces `Regions/Find/DBSCAN`. Writes `cluster_id` and `n_in_cluster` as now. | #91 #93 (clusters) | DBSCAN done as its own plugin, to be folded in; the other algorithms are open |
 | B2s | **Shuffle colours**: for any integer column, writes a column with the ids randomly permuted (for example `<column>_shuffled`, a recipe), so colouring by it separates neighbouring ids. A new seed on each run. | #95 | open, S |
 | B2b | Statistics on clusters, also inside ROIs | #96 #120 | done by the structure (a block over `cluster_id`). The cluster-shape measurement is **done** (`Measure/Cluster shape`, step 12). |
@@ -275,6 +275,16 @@ filters and zoom-ins are settled) · AssignColors for more than 2 colours (C4)
   settings in frame pixels, the candidates outside dropped before fitting.
   A figure's panel declares itself drawable with `Plot.edit` (`ShapeEdit`);
   the figure window adds the tools (`gui/shape_tools.py`).  Wave 1 done.
+* **Step 9** (2026-10-14): *Analysis/Process/Neighbourhood*: per
+  localization, the neighbours within r (circle, cylinder or Gaussian;
+  itself not counted), a statistic of a column within r, or the Voronoi
+  density (per um^2, NaN for open cells), between an *around* and a
+  *neighbours from* layer as they show (cross-density for two), per file;
+  a recipe column (`mean`), NaN outside the around layer's filter.  The
+  search is SMAP's sorted sweep made 2D in C++ (`csrc/neighbours.cpp`,
+  5 M localizations in ~5 s); the Voronoi cells come from tiled Delaunay
+  triangulations checked to equal one (5 M in ~1 min); a preflight asks
+  above 20 s.
 * **Step 12** (2026-10-14): *Analysis/Measure/Cluster shape*, `per_region`:
   per layer the number of localizations, centre, convex-hull area and
   density, radius of gyration, standard deviations along the long and the
