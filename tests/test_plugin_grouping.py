@@ -132,8 +132,8 @@ def test_dbscan_on_blinks_still_writes_onto_every_localization():
 def test_every_shipped_plugin_that_changes_the_table_reads_the_localizations():
     """A table change from the grouped table is refused, so a plugin that
     makes one either asks for the ungrouped table or maps blinks back
-    itself -- DBSCAN, through `Context.ungrouped`."""
-    maps_back = {"Analysis/Regions/Find/DBSCAN"}
+    itself -- DBSCAN and Neighbourhood, through `Context.ungrouped`."""
+    maps_back = {"Analysis/Regions/Find/DBSCAN", "Analysis/Process/Neighbourhood"}
     for path, ref in plugins.refs().items():
         cls = plugins.get(path)
         takes_input = not path.startswith(plugins.SOURCES)
