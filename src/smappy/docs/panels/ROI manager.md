@@ -376,7 +376,7 @@ Back to the circle or square of the Regions tab.
 Removes the direction.
 
 ### show in the 2D view
-On by default.  Selecting an ROI centres the main picture on it, at the
+Off by default.  Ticked, selecting an ROI centres the main picture on it, at the
 zoom it has, and a layer that shows other files is switched to the ROI's
 file, so the ROI is looked at where the Render tab's tools are.
 

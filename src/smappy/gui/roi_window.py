@@ -582,7 +582,7 @@ class ROIManagerWindow(QMainWindow):
                 row = ids.index(saved)
             self.files.setCurrentRow(max(0, min(row, self.files.count() - 1)))
         self._fill_table()
-        self.follow_2d.setChecked(bool(project.navigation.get("follow_2d", True)))
+        self.follow_2d.setChecked(bool(project.navigation.get("follow_2d", False)))
         self.tiles_button.setChecked(bool(self.project.tile_nm))
         self.tile_size.setValue(self.project.tile_nm or DEFAULT_TILE_NM)
         self._loading = False

@@ -362,6 +362,8 @@ def test_the_regions_tab_shows_the_selected_rois_numbers_and_the_picture_goes_th
     view = RenderView(session)
     header = ROIHeader(session, view)
     header.open_manager()
+    assert not header.manager.follow_2d.isChecked()          # off by default
+    header.manager.follow_2d.setChecked(True)
     first, second = list(project.rois)
     header.manager.select(first)
     header.manager.select(second)

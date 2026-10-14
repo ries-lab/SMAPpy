@@ -266,7 +266,7 @@ class ROIHeader(QWidget):
         *show in the 2D view* the picture centred on it, on its file."""
         self._show_result()
         if self.view is None or roi is None or \
-                not self.project.navigation.get("follow_2d", True):
+                not self.project.navigation.get("follow_2d", False):
             return
         number = self.project.file_number(roi.file_id)
         changed = False
