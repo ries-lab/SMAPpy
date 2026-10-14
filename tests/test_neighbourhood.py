@@ -245,3 +245,27 @@ def test_the_estimate_asks_before_a_long_run():
     assert nb.expected_seconds(5_000_000, 5_000_000, 40_000.0 ** 2, s) > nb.ASK_ABOVE_S
     assert nb.expected_seconds(100_000, 100_000, 40_000.0 ** 2,
                                Neighbourhood.Settings()) < nb.ASK_ABOVE_S
+
+
+@pytest.mark.parametrize("quantity", ["count", "voronoi"])
+def test_a_run_reports_its_progress_and_a_stop_writes_nothing(monkeypatch, quantity):
+    import threading
+    from smappy.plugins import Stopped
+    monkeypatch.setattr(nb, "CHUNK", 1000)                  # many steps
+    monkeypatch.setattr(nb, "VORONOI_TILE", 1000)
+    session = Session(uniform(10_000))
+    settings = Neighbourhood.Settings(quantity=quantity)
+    lines = []
+    Neighbourhood().run(session.context(0, progress=lines.append), settings)
+    percents = [int(line.rsplit(" ", 1)[1].rstrip("%")) for line in lines if "%" in line]
+    assert len(percents) > 5 and percents == sorted(percents) and percents[-1] == 100
+
+    stop = threading.Event()
+
+    def press(line):                                        # Stop, at the first report
+        stop.set()
+
+    ctx = session.context(0, progress=press, stop=stop)
+    with pytest.raises(Stopped, match="nothing written"):
+        Neighbourhood().run(ctx, settings)
+    assert not any(name.startswith(("density", "voronoi")) for name in session.locs.keys())

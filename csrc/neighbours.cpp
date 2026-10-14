@@ -4,15 +4,27 @@
 //
 // SMAP's countneighbours*.c and SpatialFilterLocs sort the points by x and,
 // for each point, test every point of the strip [x - r, x + r]: no pairs are
-// ever stored, but a strip is as tall as the field, so a point of a 40 um
-// field at 5 M localizations tests ten thousand others to find 25.  Here the
+// ever stored, but a strip is as tall as the field.  Measured, parallel over
+// the points as here: 1 M localizations over 20 um put 5000 points in a strip
+// for 20 in the circle, 2.4 s; 5 M over 40 um, 12500 for 25, 23 s.  Here the
 // neighbours are sorted by a square cell one search radius wide, row after
 // row, so a point's candidates are three runs of the sorted list -- the rows
 // above, at and below it, three cells each -- found by binary search: about
 // 9 / pi times the neighbours there are, whatever the size of the field, and
-// no grid is allocated however sparse the points.  The points asked about are
-// visited in the same cell order, so neighbouring queries read the same
-// memory, and split over threads.
+// no grid is allocated however sparse the points: 0.5 s and 3 s for the two
+// above, the sort included.
+//
+// The sort was then most of the time -- 2 s of 4.7 for 5 M points, an index
+// sorted through a comparison that looks its key up.  It is now the
+// grouping's sort (`group.sorted_order`): the high part of the key, the
+// cell's row, is a partition worked out by counting, with no comparisons, and
+// each row -- a few thousand points -- is then sorted by its column on its
+// own thread, small enough to stay in cache.
+//
+// `Index` is built once from the neighbours, and asked about the points
+// around in pieces, so the caller can report progress and stop between them;
+// `cell_order` puts those points in the same cell order, so that neighbouring
+// queries read the same memory.
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
 
@@ -20,8 +32,8 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
-#include <numeric>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 #include "parallel.hpp"
@@ -32,6 +44,7 @@ namespace {
 
 using Doubles = py::array_t<double, py::array::c_style | py::array::forcecast>;
 using Ints = py::array_t<int64_t, py::array::c_style | py::array::forcecast>;
+using Pair = std::pair<int64_t, int64_t>;          // (cell key, index)
 
 enum Mode { Count = 0, Gauss = 1, Mean = 2, Median = 3, Min = 4, Max = 5, Std = 6,
             Quantile = 7 };
@@ -42,7 +55,43 @@ struct Grid {
     int64_t cx(double x) const { return static_cast<int64_t>(std::floor((x - x0) / cell)); }
     int64_t cy(double y) const { return static_cast<int64_t>(std::floor((y - y0) / cell)); }
     int64_t key(int64_t ix, int64_t iy) const { return iy * width + ix; }
+    int64_t key_of(double x, double y) const { return key(cx(x), cy(y)); }
 };
+
+// The points in cell order -- by row, then column -- with their keys.  Rows
+// by a stable counting pass, then each row sorted by column on a thread.
+std::vector<Pair> sorted_keys(const double* x, const double* y, int64_t n,
+                              const Grid& grid, int threads) {
+    std::vector<int64_t> row(n), col(n);
+    smappy::parallel_ranges(n, threads, [&](long long b, long long e, int) {
+        for (long long i = b; i < e; ++i) { row[i] = grid.cy(y[i]); col[i] = grid.cx(x[i]); }
+    });
+    int64_t rows = 0;
+    for (int64_t i = 0; i < n; ++i) rows = std::max(rows, row[i] + 1);
+    std::vector<Pair> keys(n);                    // (column, index), then (key, index)
+    if (rows > 4 * n + 1000000) {
+        // far more rows than points -- a tiny radius over a sparse field: the
+        // table of rows would be the cost, so a plain sort of the keys
+        for (int64_t i = 0; i < n; ++i) keys[i] = {grid.key(col[i], row[i]), i};
+        std::sort(keys.begin(), keys.end());
+        return keys;
+    }
+    std::vector<int64_t> start(rows + 1, 0);
+    for (int64_t i = 0; i < n; ++i) ++start[row[i] + 1];
+    for (int64_t r = 0; r < rows; ++r) start[r + 1] += start[r];
+    {
+        std::vector<int64_t> at(start.begin(), start.end() - 1);
+        for (int64_t i = 0; i < n; ++i) keys[at[row[i]]++] = {col[i], i};
+    }
+    smappy::parallel_ranges(rows, threads, [&](long long b, long long e, int) {
+        for (long long r = b; r < e; ++r) {
+            std::sort(keys.begin() + start[r], keys.begin() + start[r + 1]);
+            for (int64_t k = start[r]; k < start[r + 1]; ++k)
+                keys[k].first = grid.key(keys[k].first, r);
+        }
+    });
+    return keys;
+}
 
 // The value at quantile q of v (sorted in place, partly), linear between the
 // order statistics as numpy's default.
@@ -58,151 +107,191 @@ double quantile_of(std::vector<double>& v, double q) {
     return low + (high - low) * frac;
 }
 
-// mode, reach (lateral search radius), sigma (Gaussian), z_reach / z_sigma
-// (<= 0: no z), q (quantile).  `same[i]` is the neighbour that is around point
-// i itself, or -1; it is skipped when counting and kept for a statistic.
-py::array_t<double> around(const Doubles& ax, const Doubles& ay, py::object az_obj,
-                           const Doubles& bx, const Doubles& by, py::object bz_obj,
-                           py::object values_obj, py::object same_obj, int mode,
-                           double reach, double sigma, double z_reach, double z_sigma,
-                           double q, int threads) {
-    const int64_t na = ax.size(), nb = bx.size();
-    if (ay.size() != na || by.size() != nb)
-        throw std::invalid_argument("x and y must match");
+Grid make_grid(double x0, double y0, double x1, double reach) {
     if (!(reach > 0)) throw std::invalid_argument("the radius must be positive");
-    const bool use_z = z_reach > 0 && !az_obj.is_none() && !bz_obj.is_none();
-    Doubles az, bz, values;
-    Ints same;
-    if (use_z) {
-        az = az_obj.cast<Doubles>();
-        bz = bz_obj.cast<Doubles>();
-        if (az.size() != na || bz.size() != nb) throw std::invalid_argument("z must match");
-    }
-    const bool stat = mode >= Mean;
-    if (stat) {
-        if (values_obj.is_none()) throw std::invalid_argument("a statistic needs values");
-        values = values_obj.cast<Doubles>();
-        if (values.size() != nb) throw std::invalid_argument("values must match");
-    }
-    const bool have_same = !same_obj.is_none();
-    if (have_same) {
-        same = same_obj.cast<Ints>();
-        if (same.size() != na) throw std::invalid_argument("same must match");
-    }
-    py::array_t<double> out(na);
-    double* res = out.mutable_data();
-    const double fill = stat ? std::numeric_limits<double>::quiet_NaN() : 0.0;
-    std::fill_n(res, na, fill);
-    if (na == 0 || nb == 0) return out;
+    return Grid{x0 - reach, y0 - reach, reach,
+                static_cast<int64_t>(std::floor((x1 - x0) / reach)) + 4};
+}
 
-    const double* pax = ax.data(); const double* pay = ay.data();
-    const double* pbx = bx.data(); const double* pby = by.data();
-    const double* paz = use_z ? az.data() : nullptr;
-    const double* pbz = use_z ? bz.data() : nullptr;
-    const double* pv = stat ? values.data() : nullptr;
-    const int64_t* ps = have_same ? same.data() : nullptr;
-
+// The order that visits points cell by cell, as `Index` stores its own.
+Ints cell_order(const Doubles& x, const Doubles& y, double x0, double y0, double x1,
+                double reach, int threads) {
+    const int64_t n = x.size();
+    if (y.size() != n) throw std::invalid_argument("x and y must match");
+    const Grid grid = make_grid(x0, y0, x1, reach);
+    Ints out(n);
+    int64_t* o = out.mutable_data();
+    const double* px = x.data();
+    const double* py = y.data();
     py::gil_scoped_release release;
-    double x0 = pbx[0], x1 = pbx[0], y0 = pby[0];
-    for (int64_t j = 0; j < nb; ++j) {
-        x0 = std::min(x0, pbx[j]); x1 = std::max(x1, pbx[j]);
-        y0 = std::min(y0, pby[j]);
-    }
-    for (int64_t i = 0; i < na; ++i) {
-        x0 = std::min(x0, pax[i]); x1 = std::max(x1, pax[i]);
-        y0 = std::min(y0, pay[i]);
-    }
-    Grid grid{x0 - reach, y0 - reach, reach,
-              static_cast<int64_t>(std::floor((x1 - x0) / reach)) + 4};
-
-    // the neighbours in cell order
-    std::vector<int64_t> bkey(nb), border(nb);
-    for (int64_t j = 0; j < nb; ++j) bkey[j] = grid.key(grid.cx(pbx[j]), grid.cy(pby[j]));
-    std::iota(border.begin(), border.end(), 0);
-    std::sort(border.begin(), border.end(),
-              [&](int64_t a, int64_t b) { return bkey[a] < bkey[b]; });
-    std::vector<int64_t> skey(nb);
-    std::vector<double> sx(nb), sy(nb), sz(use_z ? nb : 0), sv(stat ? nb : 0);
-    for (int64_t k = 0; k < nb; ++k) {
-        const int64_t j = border[k];
-        skey[k] = bkey[j]; sx[k] = pbx[j]; sy[k] = pby[j];
-        if (use_z) sz[k] = pbz[j];
-        if (stat) sv[k] = pv[j];
-    }
-    // the points asked about, in the same order
-    std::vector<int64_t> akey(na), aorder(na);
-    for (int64_t i = 0; i < na; ++i) akey[i] = grid.key(grid.cx(pax[i]), grid.cy(pay[i]));
-    std::iota(aorder.begin(), aorder.end(), 0);
-    std::sort(aorder.begin(), aorder.end(),
-              [&](int64_t a, int64_t b) { return akey[a] < akey[b]; });
-
-    const double r2 = reach * reach, z2 = z_reach * z_reach;
-    const double gxy = sigma > 0 ? 1.0 / (2 * sigma * sigma) : 0.0;
-    const double gz = z_sigma > 0 ? 1.0 / (2 * z_sigma * z_sigma) : 0.0;
-
-    smappy::parallel_ranges(na, threads, [&](long long begin, long long end, int) {
-        std::vector<double> found;
-        for (long long k = begin; k < end; ++k) {
-            const int64_t i = aorder[k];
-            const double x = pax[i], y = pay[i], z = use_z ? paz[i] : 0.0;
-            const int64_t self = ps ? ps[i] : -1;
-            const int64_t ix = grid.cx(x), iy = grid.cy(y);
-            double total = 0.0;
-            found.clear();
-            for (int64_t dy = -1; dy <= 1; ++dy) {
-                const int64_t lo_key = grid.key(ix - 1, iy + dy);
-                const int64_t hi_key = grid.key(ix + 1, iy + dy);
-                auto lo = std::lower_bound(skey.begin(), skey.end(), lo_key);
-                auto hi = std::upper_bound(lo, skey.end(), hi_key);
-                for (int64_t s = lo - skey.begin(), e = hi - skey.begin(); s < e; ++s) {
-                    const double ddx = sx[s] - x, ddy = sy[s] - y;
-                    const double d2 = ddx * ddx + ddy * ddy;
-                    if (d2 > r2) continue;
-                    double dz2 = 0.0;
-                    if (use_z) {
-                        const double ddz = sz[s] - z;
-                        dz2 = ddz * ddz;
-                        if (dz2 > z2) continue;
-                    }
-                    if (stat) {
-                        const double v = sv[s];
-                        if (std::isfinite(v)) found.push_back(v);
-                        continue;
-                    }
-                    if (border[s] == self) continue;           // not its own neighbour
-                    total += mode == Gauss ? std::exp(-d2 * gxy - dz2 * gz) : 1.0;
-                }
-            }
-            if (!stat) { res[i] = total; continue; }
-            const size_t n = found.size();
-            if (!n) continue;
-            double r = 0.0;
-            switch (mode) {
-            case Mean: case Std: {
-                double sum = 0.0, sq = 0.0;
-                for (double v : found) { sum += v; sq += v * v; }
-                const double mean = sum / n;
-                r = mode == Mean ? mean : std::sqrt(std::max(sq / n - mean * mean, 0.0));
-                break;
-            }
-            case Min: r = *std::min_element(found.begin(), found.end()); break;
-            case Max: r = *std::max_element(found.begin(), found.end()); break;
-            case Median: r = quantile_of(found, 0.5); break;
-            default: r = quantile_of(found, q); break;
-            }
-            res[i] = r;
-        }
-    });
+    const auto keys = sorted_keys(px, py, n, grid, threads);
+    for (int64_t i = 0; i < n; ++i) o[i] = keys[i].second;
     return out;
 }
+
+class Index {
+public:
+    // The neighbours, sorted by cell.  The grid -- (x0, y0) the smallest x
+    // and y of both sets, x1 the largest x -- must be the one `cell_order` is
+    // given for the points asked about.
+    Index(const Doubles& x, const Doubles& y, py::object z_obj, py::object values_obj,
+          double x0, double y0, double x1, double reach, int threads)
+        : grid_(make_grid(x0, y0, x1, reach)) {
+        const int64_t n = x.size();
+        if (y.size() != n) throw std::invalid_argument("x and y must match");
+        Doubles z, values;
+        has_z_ = !z_obj.is_none();
+        has_values_ = !values_obj.is_none();
+        if (has_z_) {
+            z = z_obj.cast<Doubles>();
+            if (z.size() != n) throw std::invalid_argument("z must match");
+        }
+        if (has_values_) {
+            values = values_obj.cast<Doubles>();
+            if (values.size() != n) throw std::invalid_argument("values must match");
+        }
+        const double* px = x.data();
+        const double* py = y.data();
+        const double* pz = has_z_ ? z.data() : nullptr;
+        const double* pv = has_values_ ? values.data() : nullptr;
+        py::gil_scoped_release release;
+        const auto keys = sorted_keys(px, py, n, grid_, threads);
+        key_.resize(n); index_.resize(n); x_.resize(n); y_.resize(n);
+        if (has_z_) z_.resize(n);
+        if (has_values_) v_.resize(n);
+        smappy::parallel_ranges(n, threads, [&](long long b, long long e, int) {
+            for (long long k = b; k < e; ++k) {
+                const int64_t j = keys[k].second;
+                key_[k] = keys[k].first; index_[k] = j; x_[k] = px[j]; y_[k] = py[j];
+                if (pz) z_[k] = pz[j];
+                if (pv) v_[k] = pv[j];
+            }
+        });
+    }
+
+    // Per point asked about: mode, sigma (Gaussian), z_reach / z_sigma (<= 0:
+    // no z), q (quantile).  `same[i]` is the neighbour that is point i itself,
+    // or -1; it is skipped when counting and kept for a statistic.  A point
+    // is a neighbour within the grid's cell laterally.
+    py::array_t<double> query(const Doubles& ax, const Doubles& ay, py::object az_obj,
+                              py::object same_obj, int mode, double sigma,
+                              double z_reach, double z_sigma, double q, int threads) const {
+        const int64_t na = ax.size();
+        if (ay.size() != na) throw std::invalid_argument("x and y must match");
+        const bool use_z = z_reach > 0 && has_z_ && !az_obj.is_none();
+        const bool stat = mode >= Mean;
+        if (stat && !has_values_) throw std::invalid_argument("a statistic needs values");
+        Doubles az;
+        Ints same;
+        if (use_z) {
+            az = az_obj.cast<Doubles>();
+            if (az.size() != na) throw std::invalid_argument("z must match");
+        }
+        const bool have_same = !same_obj.is_none();
+        if (have_same) {
+            same = same_obj.cast<Ints>();
+            if (same.size() != na) throw std::invalid_argument("same must match");
+        }
+        py::array_t<double> out(na);
+        double* res = out.mutable_data();
+        const double fill = stat ? std::numeric_limits<double>::quiet_NaN() : 0.0;
+        std::fill_n(res, na, fill);
+        if (na == 0 || key_.empty()) return out;
+        const double* pax = ax.data();
+        const double* pay = ay.data();
+        const double* paz = use_z ? az.data() : nullptr;
+        const int64_t* ps = have_same ? same.data() : nullptr;
+        const double r2 = grid_.cell * grid_.cell, z2 = z_reach * z_reach;
+        const double gxy = sigma > 0 ? 1.0 / (2 * sigma * sigma) : 0.0;
+        const double gz = z_sigma > 0 ? 1.0 / (2 * z_sigma * z_sigma) : 0.0;
+
+        py::gil_scoped_release release;
+        smappy::parallel_ranges(na, threads, [&](long long begin, long long end, int) {
+            std::vector<double> found;
+            // the three runs of the sorted list of the last cell asked about:
+            // in cell order the next point is mostly in the same cell
+            int64_t last_x = std::numeric_limits<int64_t>::min(), last_y = 0;
+            int64_t run_lo[3] = {0, 0, 0}, run_hi[3] = {0, 0, 0};
+            for (long long i = begin; i < end; ++i) {
+                const double x = pax[i], y = pay[i], z = use_z ? paz[i] : 0.0;
+                const int64_t self = ps ? ps[i] : -1;
+                const int64_t ix = grid_.cx(x), iy = grid_.cy(y);
+                if (ix != last_x || iy != last_y) {
+                    for (int64_t dy = -1; dy <= 1; ++dy) {
+                        auto lo = std::lower_bound(key_.begin(), key_.end(),
+                                                   grid_.key(ix - 1, iy + dy));
+                        auto hi = std::upper_bound(lo, key_.end(), grid_.key(ix + 1, iy + dy));
+                        run_lo[dy + 1] = lo - key_.begin();
+                        run_hi[dy + 1] = hi - key_.begin();
+                    }
+                    last_x = ix;
+                    last_y = iy;
+                }
+                double total = 0.0;
+                found.clear();
+                for (int run = 0; run < 3; ++run) {
+                    for (int64_t s = run_lo[run], e = run_hi[run]; s < e; ++s) {
+                        const double ddx = x_[s] - x, ddy = y_[s] - y;
+                        const double d2 = ddx * ddx + ddy * ddy;
+                        if (d2 > r2) continue;
+                        double dz2 = 0.0;
+                        if (use_z) {
+                            const double ddz = z_[s] - z;
+                            dz2 = ddz * ddz;
+                            if (dz2 > z2) continue;
+                        }
+                        if (stat) {
+                            const double v = v_[s];
+                            if (std::isfinite(v)) found.push_back(v);
+                            continue;
+                        }
+                        if (index_[s] == self) continue;       // not its own neighbour
+                        total += mode == Gauss ? std::exp(-d2 * gxy - dz2 * gz) : 1.0;
+                    }
+                }
+                if (!stat) { res[i] = total; continue; }
+                const size_t n = found.size();
+                if (!n) continue;
+                double r = 0.0;
+                switch (mode) {
+                case Mean: case Std: {
+                    double sum = 0.0, sq = 0.0;
+                    for (double v : found) { sum += v; sq += v * v; }
+                    const double mean = sum / n;
+                    r = mode == Mean ? mean : std::sqrt(std::max(sq / n - mean * mean, 0.0));
+                    break;
+                }
+                case Min: r = *std::min_element(found.begin(), found.end()); break;
+                case Max: r = *std::max_element(found.begin(), found.end()); break;
+                case Median: r = quantile_of(found, 0.5); break;
+                default: r = quantile_of(found, q); break;
+                }
+                res[i] = r;
+            }
+        });
+        return out;
+    }
+
+private:
+    Grid grid_;
+    bool has_z_ = false, has_values_ = false;
+    std::vector<int64_t> key_, index_;
+    std::vector<double> x_, y_, z_, v_;
+};
 
 }  // namespace
 
 PYBIND11_MODULE(_neighbours, m) {
     m.doc() = "Neighbours within a radius and statistics over them (neighbourhood.py)";
-    m.def("around", &around, py::arg("ax"), py::arg("ay"), py::arg("az"), py::arg("bx"),
-          py::arg("by"), py::arg("bz"), py::arg("values"), py::arg("same"),
-          py::arg("mode"), py::arg("reach"), py::arg("sigma") = 0.0,
-          py::arg("z_reach") = 0.0, py::arg("z_sigma") = 0.0, py::arg("q") = 0.5,
-          py::arg("threads") = 0);
+    m.def("cell_order", &cell_order, py::arg("x"), py::arg("y"), py::arg("x0"),
+          py::arg("y0"), py::arg("x1"), py::arg("reach"), py::arg("threads") = 0);
+    py::class_<Index>(m, "Index")
+        .def(py::init<const Doubles&, const Doubles&, py::object, py::object, double,
+                      double, double, double, int>(),
+             py::arg("x"), py::arg("y"), py::arg("z"), py::arg("values"), py::arg("x0"),
+             py::arg("y0"), py::arg("x1"), py::arg("reach"), py::arg("threads") = 0)
+        .def("query", &Index::query, py::arg("x"), py::arg("y"), py::arg("z"),
+             py::arg("same"), py::arg("mode"), py::arg("sigma") = 0.0,
+             py::arg("z_reach") = 0.0, py::arg("z_sigma") = 0.0, py::arg("q") = 0.5,
+             py::arg("threads") = 0);
 }
