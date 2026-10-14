@@ -1,5 +1,9 @@
 # SMAP → smappy: what is there, what is missing, what to port
 
+> **Snapshot of 2026-10-11, before the regions restructuring.**  The current
+> state is in `SMAP_porting_list.xlsx` (column *Update 2026-10-14*) and
+> `SMAP_porting_plan.md`.
+
 A list to make choices from, not a plan.  Compiled 2026-10-11 from `jries/SMAP`
 (`plugins/`, 345 plugin files, plus `fit3Dcspline`, `LocMoFit` and the GUI) and
 smappy at `origin/main` (`eeae43b`).

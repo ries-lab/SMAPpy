@@ -1,194 +1,160 @@
 # SMAP → smappy: work plan
 
 From your annotations in `SMAP_porting_list.xlsx`, read loosely: I went by the
-comments more than by the Decision column, and treated "change" as "work on"
-where the comment asks for work.  Row numbers (`#12`) are the `#` column of the
-spreadsheet; its new **Work package** column says where each row went.
+comments more than by the Decision column.  Row numbers (`#12`) are the `#`
+column of the spreadsheet; its **Work package** column says where each row
+went, and **Update 2026-10-14** what the regions restructuring changed.
 
-The work splits into **small plugins** you can hand out one by one (A), a few
-**projects** that need a short design first because your comments merge several
-SMAP plugins into one general tool (B–E), and **own projects** to plan from
-scratch (F–H).
+**Updated 2026-10-14** against `origin/main` `c9f650a`, after the regions
+restructuring (`docs/regions.md`).  What it settled, as far as this plan is
+concerned:
+
+* **A region is an ROI or the rows sharing an id** (`cluster_id`, `roi_id`,
+  any integer column).  A finder and a clusterer are one kind of plugin,
+  under `Analysis/Regions/Find/` (Density Peaks and NPC make ROIs, DBSCAN
+  writes `cluster_id` / `n_in_cluster`).
+* **There is no separate evaluator kind any more.**  A plugin with
+  `per_region = True` returns `Result.values` and runs on the view, in each
+  ROI, or in each cluster.  A **block** of a chain runs a list of steps in
+  every region (blocks nest: clusters inside ROIs), and *write back* / *write
+  values* bring results onto the localizations.  This was E4 of the old plan:
+  **done**.
+* **ROI management**: Sort ROIs, Filter ROIs, Regions to column (including
+  `roi_id`), Column to ROIs (an ROI per cluster, or per value of any id
+  column), and annotation with keyword lists and keys in the ROI manager.
+  Most of E1 and E2: **done**.
+* One loader (`File/Load/Auto`, with a *format* choice), and the layer
+  filters as a step, `Analysis/Process/Layers`.
+
+What follows is the plan with that taken out: what is left, and how the new
+structure changes the way it should be built.
 
 ---
 
-## A. Small plugins — P1, can start now
+## How to build a measurement now
 
-| | what | rows | notes |
+Most of what is left is a measurement: B1, B3, B4, circle fit, NPC
+geometry, Line Profile per ROI, the spatial statistics.  Under the new
+contract each is **one ordinary plugin** under `Analysis/Measure/`.  It runs on
+the view, and with `per_region = True` plus `Result.values` it also runs per
+ROI and per cluster.  Nothing is ported twice: SMAP's `X` (Analyze) and
+`X` (ROIManager/Evaluate) collapse into one.  Summaries over many regions read
+`region_results` and live under `Analysis/Regions/Summarize/`.
+
+---
+
+## A. Small plugins (P1); none of them depends on regions
+
+| | what | rows | status |
 |---|---|---|---|
-| A1 | **Export** — one plugin with a format choice: CSV/TXT, Picasso HDF5 (and SMAP `_sml.mat` as one more format, low priority); choose the fields; all or filtered | #53 #54 (#55) | You marked `SMLMsaver` *skip* but wrote "SMAP can be another export" under #54 — I read that as: no separate plugin, an optional format of this one. |
-| A2 | **Loaders**: Picasso HDF5, DECODE | #51 #52 | Small, symmetric with A1. |
-| A3 | **Fit region** (`RoiAdder`): fit only inside / exclude drawn regions of the chip | #7 | A mask on the candidates. |
-| A4 | **Histogram of any column**, per layer, with mean/median/std | #86 | |
-| A5 | **Time course**: any columns against frame (photons, locs/frame, precision, background, …), several in one graph, merged with Image Tags | #87 | Extending `image_tags.py` is the obvious home — it already draws tags against frame with locs/frame on a second axis. |
-| A6 | **Vibrations**: spectrum of x, y, z (beads), with zoom-ins and filters | #88 | You raised it to P1. Questions for when it starts: which filters (band-pass on the trace?), which zoom-ins (time window, frequency band)? |
+| A1 | **Export**: one plugin with a format choice: CSV/TXT, Picasso HDF5, and SMAP `_sml.mat` as an optional, low-priority format; choose the fields; all or filtered | #53 #54 (#55) | open. There is still only *Save smappy HDF5* and *Export Image*. |
+| A2 | **Loaders**: Picasso HDF5 and DECODE, as two more `Reader`s in `io/formats.py` (the single loader's *format* list picks them up) | #51 #52 | open. Smaller than before: a reader, not a plugin. |
+| A3 | **Fit region** (`RoiAdder`): fit only inside, or exclude, drawn regions of the chip | #7 | open |
+| A4 | **Histogram of any column**, per layer, with mean/median/std | #86 | open. *Regions/Summarize/Histograms* is the histogram over regions; the one over localizations is still missing. Make it `per_region` as well, and the same plugin gives a histogram per ROI for free. |
+| A5 | **Time course**: any columns against frame, several in one graph, merged with Image Tags | #87 | open |
+| A6 | **Vibrations**: spectrum of x, y, z, with zoom-ins and filters | #88 | open. Still needs: which filters, which zoom-ins. |
+| A7 | **Export the region table** to CSV: the user picks the columns; ROIs or clusters through `region_results` | #130 | open. A summary plugin under `Regions/Summarize/`. Nothing writes the table to CSV yet. |
 
-## B. Neighbourhood, clusters, spatial statistics — P1, one project, three plugins
+## B. Neighbourhood, clusters, spatial statistics (P1)
 
-Your comments on #70 #90–#96 #119 fit together as:
-
-| | plugin | does | rows |
+| | what | rows | status |
 |---|---|---|---|
-| B1 | **Neighbourhood** (rename of `SpatialFilterLocs`) | Looks at the neighbourhood of every localization and writes a column: number of neighbours within r (= density, `density_calculator`), mean/median/min/max/quantile of a field, Voronoi cell density. | #70 #93 (density) #94 |
-| B2 | **Cluster** | Several algorithms behind one form: DBSCAN, Voronoi threshold (SharpViSu), maybe HDBSCAN, and template-based (the ring filter the NPC segmenter uses). Writes `cluster_id`; a *shuffle colours* button that also works on an existing clustering; a per-cluster table and statistics. Runs on the selection or as an ROI evaluator. | #91 #93 (clusters) #95 #96 #120 |
-| B3 | **Spatial statistics** | Ripley K/L/H, pair correlation, 2D image auto- and cross-correlation, the cross variants between two layers, and SMAP's 1D correlation along a line. | #90 #92 #119 (structure part) |
-| B4 | **Counting / general statistics on ROIs and clusters** | Locs and blinks per cluster/site, histogram fits for protein number, labelling efficiency, re-activations. You called it a larger project: design after B2, because it runs on B2's clusters as well as on ROIs. | #98 #121 |
+| B1 | **Neighbourhood** (the renamed `SpatialFilterLocs`): per localization, the neighbours within r (density), the mean/median/quantile of a field, Voronoi cell density, written as a column | #70 #93 #94 | open. A column writer like Math Parser; not a region. |
+| B2 | **Clusterers**: DBSCAN is **done** (`Regions/Find/DBSCAN`). What is left: Voronoi threshold, maybe HDBSCAN, template-based (the NPC ring filter), and a *shuffle colours* action | #91 #93 #95 | open. **Decision for you:** your comment asked for one cluster plugin with several algorithms. The tree now has one Find plugin per algorithm (Find/DBSCAN, Find/NPC, Find/Density Peaks), all writing an id column. Adding more Find plugins fits that; one plugin with a choice would go against it. I'd follow the tree. *Shuffle colours* then belongs to the render side (a LUT option for id columns) and works for every id column, not only clusters. |
+| B2b | **Statistics on clusters**, also inside ROIs | #96 #120 | **done** by the structure: a block over `cluster_id` with Localization Statistics, nested in an ROI block if wanted. A dedicated cluster measurement (area, convex hull, radius of gyration, density) is still missing: one small `per_region` plugin. |
+| B3 | **Spatial statistics**: Ripley K/L/H, pair correlation, 2D auto- and cross-correlation between layers, the 1D correlation along a line | #90 #92 #119 | open. Make it `per_region`: then it runs in every ROI (spectrin periodicity per ROI) with no extra work. |
+| B4 | **Counting**: localizations and blinks per region, histogram fits for protein number, labelling efficiency, re-activations | #98 #121 | open, but now clear how. A `per_region` measure plugin (blinks and dark times per region) plus a `Summarize` plugin that fits the histogram, the same pair as NPC Corners and NPC labelling efficiency. It works on ROIs and on clusters alike. |
 
-Answer to "not sure what `correlation` does" (#90): it has two modes.
-**1D** along a line ROI: the profile, its autocorrelation and FFT, with a guessed
-period, averaged over many ROIs. That is for periodic structures, such as the
-~190 nm spectrin rings.
-**2D**: pair correlation of the localizations between layers.
-Both belong in B3.
-
-B2 and the unified segmenter (E3) share algorithms (template/ring filter,
-density peaks).  Write the algorithms once, as module-level functions, and let
-both plugins call them.
-
-## C. Transformations and channels — P2
-
-| | what | rows | notes |
-|---|---|---|---|
-| C1 | **Transform**: one plugin for every geometric change of a table *or an image layer*: apply a saved transformation (from Calibrate transform), shift (typed in, or taken from C2), mirror/flip, rotate, scale/pixel size | #40 #69 #74 | On "plugin or a shift option on the layer?" (#74): I'd make it a plugin, plus an *apply* button on the registration result. A shift kept on a layer only moves the picture; every analysis plugin reads the table and would see the unshifted data. |
-| C2 | **Register layers**: shift (x, y, z) between two layers — rendered images or loaded images — by cross-correlation; the result feeds C1 | #41 (second part) #119 (shift part) | Reuses `rcc.py`'s correlation. |
-| C3 | **Channel alignment over time** (diagnostic): channel 1 vs channel 2 against frame, also x1/y1 vs x2/y2 from a dual-channel fit with unlinked positions | #41 (first part) #42 | P3; it becomes more relevant if channel drift is added to the dual fitter. |
-| C4 | **AssignColors for more than 2 colours**: find more than one minimum to split at, inside the existing plugin | #47 | P2. |
-| later | single-channel fits → dual colour by pairing localizations across channels (transformation → n1, n2) | #46 | P3, your comment. |
-| later | Calibrate transform from separate camera files | #39 | When needed. |
-
-## D. Drift — P2
+## C. Transformations and channels (P2), unchanged
 
 | | what | rows |
 |---|---|---|
-| D1 | **Apply existing drift** from another file (the curve `drift_result` already stores) | #35 |
-| D2 | **Fiducial drift** (beads) | #34 |
-| D3 | **Time-dependent transformation in COMET**: magnification (and more) changing over time; RCC later if feasible | #38 |
-| later | Picasso drift file, only when requested | #36 |
+| C1 | **Transform**: apply a saved transformation, a shift (typed in, or from C2), mirror, rotate, scale; to tables and image layers | #40 #69 #74 |
+| C2 | **Register layers**: shift between layers, rendered or images, by cross-correlation; feeds C1 | #41 #119 |
+| C3 | Channel alignment against frame (diagnostic) | #41 #42 |
+| C4 | Assign colours for more than 2 colours | #47 |
+| later | single-channel fits → dual colour by pairing (#46); Calibrate transform from separate camera files (#39) | |
 
-## E. ROI manager — P1/P2
+## D. Drift (P2), unchanged
 
-**E1 Housekeeping**: small plugins, P1 first.
+D1 apply an existing drift curve from another file (#35) · D2 fiducial
+drift (#34) · D3 time-dependent transformation (magnification) in COMET
+(#38) · later: Picasso drift (#36).
 
-| what | rows | your priority |
-|---|---|---|
-| Filter sites by an expression over evaluation results (reuse `mathparse`) | #127 | P1 |
-| Sort sites (sites only, no cells) | #128 | P1 |
-| Export the site table: the user picks the columns | #130 | P1 |
-| Remove double sites | #129 | P2 |
-| Remove localizations outside sites | #107 | P2 |
-| Site number / an evaluation value → localization column | #131 | P2 — to decide: is the site number written by default? |
-| Use only the sites inside the drawn ROI | #106 | P3 |
-| Import site positions | #135 | P3 |
+## E. ROI manager and regions
 
-**E2 Annotate ROIs**: new plugin, P2 (your addition).  What SMAP's
-`SEAnnotation` does: four lists of labels, each loadable from a text file;
-the selected entry is stored on the site; with several sites selected, the
-label goes to all of them; a free comment per site; two lines drawn per site,
-shown as angle and length, with a button that reverses a line's direction.  Keys:
-←/→ go to the previous or next site, Shift+←/→ switch between lists.
+| | what | rows | status |
+|---|---|---|---|
+| E1 | Filter ROIs | #127 | **done** (`Regions/Filter ROIs`) |
+| E1 | Sort ROIs | #128 | **done** (`Regions/Sort ROIs`) |
+| E1 | Site number / an evaluation value → localization column | #131 | **done** (`Regions/Regions to column`, `roi_id` included; the block's *write values*) |
+| E1 | Export the site table | #130 | open; now A7 |
+| E1 | Remove double sites | #129 | open. A small Regions plugin (or a *Filter ROIs* mode: closer than d → keep the one with more localizations). |
+| E1 | Remove localizations outside the ROIs | #107 | open. Simplest as a third *region* choice of Remove Localizations ("all included ROIs"); for clusters, a filter on `cluster_id > 0` already does it. |
+| E1 | Use only the ROIs inside the drawn ROI | #106 | open, P3. Could be a *Filter ROIs* condition on position. |
+| E1 | Import site positions | #135 | open, P3 |
+| E1 | ROI per file (`files2sites`) | #108 | **mostly there**: *Column to ROIs* on `filenumber`. You had marked it skip anyway. |
+| E2 | **Annotate ROIs** | new | **mostly done** (`gui/roi_annotate.py`): any number of keyword lists written in the panel and saved with the project; keys 1–9 pick a keyword, 0 clears it, Tab switches lists, Up/Down moves to the next ROI, Space toggles *use*; a comment per ROI; the keywords become columns of the results table, so Filter and Sort read them. **Still missing from SMAP's version: several named lines per ROI.** There is one *direction* line now. Extending it to named lines (angle and length as values) is what E7 needs for orientation. |
+| E3 | **One segmenter with presets** | #104 #105 #109 #111 | **partly answered by the structure**: finders and clusterers are one kind (`Regions/Find/…`). Open: presets (NPC, CME, beads) and whether they are one plugin or several Find plugins (the same question as B2). *Centre all* (#116) fits as a Regions action: recentre the ROIs by a measured centre (median, circle fit), with the circle fit from E5. |
+| E4 | No distinction between evaluator and analysis plugin | #118 | **done** (`per_region`). Left: Line Profile itself is not `per_region` yet (it is `follow_roi`). Giving it `Result.values` (width, distance, AIC winner) is a small change. |
+| E5 | **Circle fit** as a `per_region` Measure plugin (#115, P2); **NPC geometry** (#114, P3; independent of LocMoFit, but better as one of its models: decide H first) | #114 #115 | open |
+| E6 | Figures of regions: montage, TIFF stack, single TIFFs, volumes, sorted by any column | #132 #133 | open, P3. Now a Summarize-style plugin that reads the ROI order (Sort ROIs) and annotations. |
+| E7 | **Average ROIs**: centre plus an orientation from a measured value or a drawn line → a new table | #134 | open, P3. Depends on the named lines in E2. |
 
-A smappy version:
-* label lists defined in the plugin's settings (name + entries) and saved with
-  the project;
-* keyboard: ←/→ for the site, number keys pick an entry of the active list, Tab
-  or Shift+arrows switch lists;
-* any number of named lines per ROI (generalising the one *Direction* the ROI
-  manager already has), each with angle and length and a reverse action;
-* labels, line angles and line lengths become columns of the site table.
-  Filter (E1), Sort, Histograms, Export and Average (E7) then use them like any
-  evaluation result.
+## F. Single-particle tracking (P1, own project)
 
-This needs keyboard focus and drawing in the ROI manager window, so it is a GUI
-change, not only a plugin: make it a panel of the ROI window (or `Plugin.window`,
-the way Bead calibration is opened).
+Unchanged, with one simplification from the structure: a **track is a
+region**.  Linking writes `track_id` (an id column, like `cluster_id`), so
+every `per_region` plugin runs per track for free, and *Column to ROIs* makes
+ROIs of tracks to review them.  What the project still needs: a linker (look
+for an optimized algorithm), then the analyses (MSD, diffusion, jump
+distances) as `per_region` measurements plus summaries over tracks, and tracks
+drawn into a movie export (#100 #101 #141).
 
-**E3 One segmenter with presets**: P2.  NPC (current), CME, beads, cluster-based
-(B2), density peaks, each preset with its own model and parameters, plus
-*centre all* (recentre the ROIs by whatever describes the centre: median, circle
-fit, template).  Rows #104 #105 #109 #111 #116.
+## G. MINFLUX (P2, own project)
 
-**E4 Drop the line between evaluator and analysis plugin**: P2.  Any analysis
-plugin can run on the ROIs of the ROI manager; an evaluator is "the same plugin,
-run per ROI".  Line Profile is the first case (#118), and B2 the second.  This is
-a framework change: the plugin contract, the evaluation pipeline,
-`docs/plugin-architecture.md`, and the CLAUDE.md lines on `scope = "site"`.  It is
-worth doing **before** E5–E7 and B2's evaluator mode, so they are written once.
+The same holds here: MINFLUX's trace id `tid` is already an id column, so
+per-trace measurements run through the regions machinery (#103 #152).  Plan
+from scratch what is needed now.  G shares the track model with F.
 
-**E5 Circle fitter** as an evaluator (#115, P2).  **NPC geometry** (#114, P3).
-Your question was whether NPC geometry is independent of LocMoFit, and it is.
-SMAP's `NPCgeomtryQuantify` has its own ring-centre fit (`fitposring`), a 3D
-template fit (`runNPC3DfittingJ`), a two-Gaussian fit of the z histogram for the
-ring distance, and an angular cross-correlation of the two rings for the twist.
-It can be ported alone, but LocMoFit's NPC model measures the same quantities
-better.  My suggestion: decide H first; if LocMoFit comes, NPC geometry is one
-of its models.
+## H. LocMoFit (P2, own project)
 
-**E6 Figures of sites**: P3.  One plugin that exports selected sites as a
-montage, a TIFF stack, individual TIFFs or 3D volumes, sorted by any column
-(#132 #133).
+Port it, or build on Weiqing's approach (#117 #138).  Under the new contract a
+model fit is a `per_region` Measure plugin: its parameters are its values, so
+Filter ROIs, Sort ROIs, Histograms and Regions to column work on them with no
+extra code.
 
-**E7 Average sites**, simple: P3.  Centre plus an orientation from any
-evaluation result or from a line drawn in E2 → a new table (#134).
+## I. Rendering and movies (P3), unchanged
 
-## F. Single-particle tracking — P1, own project
+z-stack export (#76) · Voronoi renderer (#77) · movie export (#139 #140 #141)
+· image processing for image layers (#81).
 
-One plugin, or two under the hood with the tracking callable from inside the
-analysis (#100 #101): linking (look for an optimized algorithm, not just
-nearest neighbour), then analysis options to pick and plot (MSD, diffusion
-coefficients, jump distances, …).  Tracks drawn into a movie export (#141).
-Design first: which analyses, and how users extend them.
+## J. Later / when needed, unchanged
 
-## G. MINFLUX — P2, own project
+GPU fitter (#10) · background before fitting (#6) · astigmatic z (#11) ·
+4Pi (#13) · DECODE / DECODE-plex (#15) · sCMOS maps (#22) · uiPSF robustness
+(#24) · depth-dependent aberrations (#26) · GainOffsetFFT (#27) · DHPSF (#29) ·
+Register3Dstacks (#44) · combine files (#65) · grouped table as primary (#66) ·
+rename/remove fields (#68) · alternating excitation (#71) · TIFF intensity at
+sites (#124).
 
-Stepping, dual-track analysis, tracks to movie, and the MINFLUX analysis
-plugins (#103 #152).  Plan from scratch what is needed now; take from SMAP only
-what is used.  F and G should share the track model.
-
-## H. LocMoFit — P2, own project
-
-Port SMAP's LocMoFit, or build on Weiqing's newer approach (#117 #138).  That
-decision comes first; NPC geometry (E5) and averaging by model (E7) depend on it.
-
-## I. Rendering and movies — P3
-
-| what | rows |
-|---|---|
-| Export a z-stack, from the 3D render | #76 |
-| Voronoi renderer (comes nearly free with B1/B2) | #77 |
-| Movie export: running window, raw + SR side by side (and tracks, F) | #139 #140 #141 |
-| later: simple image processing for image layers (background subtraction, local normalisation) | #81 |
-
-## J. Later / when needed
-
-GPU fitter (#10) · background estimation before fitting (#6) · astigmatic
-Gaussian z (#11) · 4Pi (#13) · DECODE and DECODE-plex integration, simplifying
-from the DECODE side (#15) · sCMOS pixel maps, potentially (#22) · uiPSF more
-robust, compare with Yiming's implementation, own project (#24) ·
-depth-dependent aberrations (#26) · GainOffsetFFT (#27) · DHPSF (#29) ·
-Register3Dstacks (#44) · combine files into one file number with continuous
-frames (#65) · grouped table as the primary one, e.g. for smaller files (#66) ·
-rename/remove fields (#68) · alternating excitation, flagged in your comment
-(#71) · intensity of a TIFF at sites, likely needed (#124).
-
-**GroupAny (#67): what is it for?**  Nothing else in SMAP calls it.  It merges
-all localizations that share a value of a chosen field (per file and channel)
-into one, through SMAP's normal grouping.  That gives one row per track, per
-cluster or per site.  In smappy that is `group.combine` with a different key.
-smappy's grouping already does exactly this for MINFLUX's trace id `tid` (`group.py`).  So it needs no
-plugin of its own: it becomes a "one row per cluster / track" option in B2 and F.
+**GroupAny (#67)**: still no plugin needed.  The regions machinery now covers
+the measuring half: a block over any id column.  What is left is collapsing
+each region into one row (one localization per cluster or track).  If ever
+wanted, that is `group.combine` keyed by the id column: an option of
+Regions to column, or a small plugin of its own.
 
 ---
 
 ## Suggested order
 
-1. **A1–A5**: independent, a day or two each, and they can run in parallel.
-2. **E1**, the P1 part (filter, sort, export).
-3. **E4**, the evaluator/analysis unification, before the ROI-heavy work.
-4. **B1 → B2 → B3**, then B4.
-5. **F**: design note, then implementation.
-6. **C1 + C2**, **D1–D3**, **E2**, **E3**.
-7. **H** decision → LocMoFit; G after F.
-8. A6 can slot in anywhere once its filters and zoom-ins are settled.
-
-Before a project (B, E3, E4, F, G, H) starts, it gets a short design note in
-NOTES.md or `docs/`.  That is where the open questions above get settled.
+1. **A1, A2, A4, A5, A7**: independent, small, and they can run in parallel.
+2. **E2 named lines** and the small E1 leftovers (remove doubles, remove
+   locs outside ROIs).
+3. **B1**, then **B3** and **B4** as `per_region` measurements, and the
+   remaining **B2** clusterers once the one-plugin-or-several question is
+   answered.
+4. **F** (design note first; tracks as an id column).
+5. **C1 + C2**, **D1–D3**, **E3 presets**, **E5**, Line Profile `per_region`.
+6. **H** decision → LocMoFit; G after F.
+7. A3 and A6 whenever they are wanted.
