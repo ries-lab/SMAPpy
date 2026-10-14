@@ -65,7 +65,7 @@ first = Session()
 locs = simulate(n_frames=500, seed=1)
 first.add_file(locs, FileInfo(name="cell1.h5", path="cell1.h5",
                               format="simulated", n=len(locs)))
-run(first, "Chain/Layers", layers=[{"grouped": False, "start": "defaults",
+run(first, "Analysis/Process/Layers", layers=[{"grouped": False, "start": "defaults",
     "bounds": [{"field": "photons", "lo": 200}]}], remove=True)
 run(first, "Analysis/Measure/Localization Statistics")
 saved = Path(tempfile.mkdtemp()) / "cell1_filtered.h5"

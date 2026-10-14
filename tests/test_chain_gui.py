@@ -34,12 +34,12 @@ def test_a_new_chain_is_built_in_its_own_panel_and_kept_inline(app):
     tab, instance, panel = new_chain_tab(app, Session(blinks()))
     assert isinstance(panel, ChainPanel) and panel.edit.isChecked()
     spec = panel.current_spec()
-    spec.steps += [Step(plugin="Chain/Layers"),
+    spec.steps += [Step(plugin="Analysis/Process/Layers"),
                    Step(plugin="Analysis/Measure/Localization Statistics",
                         values={"bins": 33})]
     assert panel._apply(spec)
     assert [s["plugin"] for s in instance.chain["steps"]] == \
-        ["Chain/Layers", "Analysis/Measure/Localization Statistics"]
+        ["Analysis/Process/Layers", "Analysis/Measure/Localization Statistics"]
     assert panel.form.value().localization_statistics.bins == 33
     # moving keeps what the form holds
     panel.form.set_values({"localization_statistics.bins": 44})

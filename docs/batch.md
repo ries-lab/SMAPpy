@@ -39,7 +39,7 @@ path: Analysis/Chains/NPC standard     # optional; see "Where chains live"
 description: filter, drift, statistics
 grouping: layer            # layer | grouped | ungrouped -- see "Grouping"
 steps:
-  - plugin: Chain/Layers
+  - plugin: Analysis/Process/Layers
     label: layers
     version: "1"
     values:
@@ -162,7 +162,7 @@ A chain can do what the ROI manager does by hand:
 * a step in a block sees the ROI with every layer's filter and grouping
   (`ROIProject.region_context`; the layer the ROI manager follows, the first
   unless changed, is its default), so its grouping choice is greyed out; a
-  `Chain/Layers` step before the block is how a chain sets that up.  What
+  `Analysis/Process/Layers` step before the block is how a chain sets that up.  What
   a block measures per region of an id column is handed back the same way,
   as `Result.id_regions` into `Session.id_regions`.
 
@@ -215,7 +215,7 @@ name of what is missing, not when the tree is built.
 
 ## Layers, filters and grouping
 
-### The `Chain/Layers` step
+### The `Analysis/Process/Layers` step
 
 A fresh file has one layer with the default bounds (`session.DEFAULT_BOUNDS`)
 and the default grouping -- the same as opening it in the GUI -- so a chain
@@ -428,7 +428,7 @@ have the code base; you do not need the GUI.
 * A step key is its label made into an identifier: `label: NPC radius` ->
   `npc_radius`; without a label it is the plugin's name (`Localization
   Statistics` -> `localization_statistics`).  Overrides use the key.
-* Without a `Chain/Layers` step every file gets the default filter
+* Without a `Analysis/Process/Layers` step every file gets the default filter
   (precision below 25 nm, `logl_rel` above -2, and so on) and is grouped.
   Say what you want explicitly; `start: empty` gives no bounds but yours.
 * Grouping: a plugin that reads `ctx.table()` gets the table the rules in

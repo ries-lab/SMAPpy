@@ -8,7 +8,7 @@ from typing import Dict, List, Optional
 
 from PySide6.QtCore import QElapsedTimer, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QAction, QKeySequence
-from PySide6.QtWidgets import (QApplication, QCheckBox, QDialog, QFileDialog, QHBoxLayout,
+from PySide6.QtWidgets import (QApplication, QCheckBox, QDialog, QFileDialog, QHBoxLayout, QMenuBar,
                                QMessageBox, QPushButton,
                                QLabel, QLineEdit,
                                QMainWindow, QMenu, QScrollArea, QSizePolicy, QTabWidget,
@@ -337,6 +337,15 @@ class ControlWindow(QMainWindow):
         self._action(help_, "Show the log folder", None, self.show_log_folder)
         self._action(view, "Reset view", "Ctrl+0", render.view.reset)
         self._action(view, "Show render window", None, render.show)
+        if sys.platform == "darwin":
+            # A Mac has one menu bar, the front window's: with the picture in
+            # front -- most of the time -- it was empty, and the Plugins menu
+            # was nowhere to be found.  A menu bar with no parent is the one
+            # shown for a window without its own; the same menus go in it.
+            self._shared_menus = QMenuBar(None)
+            for action in self.menuBar().actions():
+                if action.menu() is not None:
+                    self._shared_menus.addMenu(action.menu())
         QApplication.instance().aboutToQuit.connect(self.stop_loading)
         QApplication.instance().aboutToQuit.connect(self.release_offers)
         QApplication.instance().aboutToQuit.connect(self.save_window_state)

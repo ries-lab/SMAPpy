@@ -16,7 +16,7 @@ import traceback
 from typing import Dict, List, Optional
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import (QHBoxLayout, QLabel, QLineEdit, QInputDialog, QMenu,
+from PySide6.QtWidgets import (QHBoxLayout, QLabel, QInputDialog, QMenu,
                                QPushButton, QToolButton, QVBoxLayout,
                                QWidget)
 
@@ -102,15 +102,15 @@ class PluginTab(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
+        # No search box of its own: + searches every plugin, their pages
+        # included, and a filter over the few pinned here found less
         top = QHBoxLayout()
-        self.search = QLineEdit(placeholderText="find...")
-        self.search.setClearButtonEnabled(True)
-        self.search.textChanged.connect(self._filter)
+        top.addStretch(1)
         add = QToolButton(text="+", autoRaise=True)
-        add.setToolTip("add a plugin, or a new chain of plugins, to this tab")
+        add.setToolTip("find a plugin -- by its name or a word from its page -- "
+                       "and pin it to this tab, or start a new chain")
         add.clicked.connect(self.add_plugin)
         self.add_button = add
-        top.addWidget(self.search, 1)
         top.addWidget(add)
         layout.addLayout(top)
         # the header scrolls with the sections: as a widget of its own above
@@ -186,7 +186,6 @@ class PluginTab(QWidget):
         self.stack.addStretch(1)
         if opened:
             self.open_section(opened)
-        self._filter(self.search.text())
 
     def _toggled(self, section: CollapsibleSection, instance: Instance, on: bool) -> None:
         if not on:
@@ -208,11 +207,6 @@ class PluginTab(QWidget):
             if section.button.isChecked():
                 return instance.id
         return None
-
-    def _filter(self, text: str) -> None:
-        text = text.lower()
-        for section in self.sections:
-            section.setVisible(text in section.title.lower())
 
     # ------------------------------------------------------------- editing
     def add_plugin(self) -> None:

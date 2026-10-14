@@ -9,7 +9,7 @@ description: >-
   localizations, and fits the labelling efficiency, in one run.
 grouping: layer
 steps:
-  - plugin: Chain/Layers
+  - plugin: Analysis/Process/Layers
     label: layers
     version: "2"
     values:

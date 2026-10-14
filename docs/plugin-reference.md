@@ -126,7 +126,7 @@ the result is made, where a misspelt key of `data` used to do nothing:
 | `saved` | the table handed back is the one in `written`, so the session is not unsaved |
 | `images` | camera frames a fit kept (`smappy.rawframes`); they replace the session's raw frames, since a fit replaces the table |
 | `bounds` | `{field: (lo, hi)}`, a filter bound on every layer for a column the run has just written -- a plugin cannot set it itself, because a filter belongs to the table it was built from and the new table exists only once `Session.apply` has set it |
-| `layers` | layer set-ups, bounds and grouping per layer (`Session.set_layer_configs`; `Chain/Layers`) |
+| `layers` | layer set-ups, bounds and grouping per layer (`Session.set_layer_configs`; `Analysis/Process/Layers`) |
 | `rois` | the ROIs the run added to the ROI manager's project (`[]` when it found none; None when it adds none): the manager redraws and a preview is dropped |
 | `roi_preview` | a segmenter's proposals, drawn grey and not added (`Session.show_preview`) |
 | `roi_project` | the whole ROI project as a chain left it, loaded into the session's |

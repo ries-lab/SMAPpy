@@ -143,7 +143,7 @@ the same panel a chain has in a plugin tab, one folded section per step with
 that step's settings, so a chain is edited here as it is there; it cannot be
 run on the session from here, only saved and run over the files.  To set up
 the layers and filters every file is to get, put a
-[Chain/Layers](plugin:Chain/Layers) step first: without it each file is
+[Layers](plugin:Analysis/Process/Layers) step first: without it each file is
 filtered as a freshly opened one is.
 
 ### open...

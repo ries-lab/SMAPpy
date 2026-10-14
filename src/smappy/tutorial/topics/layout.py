@@ -325,8 +325,8 @@ def make(d) -> None:
     d.shot("The Analysis tab has a section per plugin, one open at a time.",
            spot=[d.rect(analysis)], point=_tab_button(d, "Analysis"), click=True,
            zoom=d.around(_tab_button(d, "Analysis"), 760))
-    d.shot("Find narrows the list; + pins another plugin to the tab.",
-           spot=[analysis.search], zoom=d.around(analysis.search, 640))
+    d.shot("+ finds another plugin and pins it to the tab.",
+           spot=[analysis.add_button], zoom=d.around(analysis.add_button, 640))
     section, panel = _open(d, analysis, "Localization Statistics")
     d.shot("Localization Statistics measures photons, precision and on-time.",
            spot=[d.rect(section)], zoom=d.around(section, 760))

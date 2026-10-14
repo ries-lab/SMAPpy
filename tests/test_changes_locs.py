@@ -40,8 +40,8 @@ def table(n=300):
     ("Analysis/Process/Remove Localizations", {"region": "selection",
                                                "which": "outside"}),
     ("Analysis/Measure/Localization Statistics", {}),
-    ("Chain/Layers", {"remove": False}),
-    ("Chain/Layers", {"remove": True}),
+    ("Analysis/Process/Layers", {"remove": False}),
+    ("Analysis/Process/Layers", {"remove": True}),
 ])
 def test_what_a_plugin_declares_is_what_its_run_does(path, overrides, monkeypatch,
                                                      tmp_path):

@@ -64,7 +64,7 @@ def spec(*steps, grouping="layer"):
 
 
 def test_a_chain_file_reads_back_as_it_was_written(tmp_path):
-    written = spec({"plugin": "Chain/Layers", "label": "filter",
+    written = spec({"plugin": "Analysis/Process/Layers", "label": "filter",
                     "values": {"remove": True}, "version": "1"},
                    {"plugin": "Analysis/Drift/RCC", "grouping": "ungrouped",
                     "enabled": False}, grouping="grouped")
@@ -105,7 +105,7 @@ def test_a_chain_runs_its_steps_in_order_as_one_undo_step_and_one_log_entry():
     session = Session(with_sigma(blinks()))
     before = len(session.history)
     cls = chain_class(spec(
-        {"plugin": "Chain/Layers", "label": "filter",
+        {"plugin": "Analysis/Process/Layers", "label": "filter",
          "values": {"layers": [{"grouped": False, "start": "empty",
                                 "bounds": [{"field": "xy_err_nm", "hi": 20}]}],
                     "remove": True}},
@@ -127,7 +127,7 @@ def test_a_chain_runs_its_steps_in_order_as_one_undo_step_and_one_log_entry():
     entries = session.history[before:]
     assert [e["what"] for e in entries if e["what"] != "undo"] == [cls.path]
     steps = entries[0]["steps"]
-    assert [s["plugin"] for s in steps] == ["Chain/Layers", "Analysis/Process/Math Parser",
+    assert [s["plugin"] for s in steps] == ["Analysis/Process/Layers", "Analysis/Process/Math Parser",
                                             "Test/Chain/Count"]
     assert [s["changed"] for s in steps] == [True, True, False]
 
@@ -193,7 +193,7 @@ def test_the_layers_step_resolves_quantiles_and_skips_what_the_file_lacks():
 
 def test_a_second_layer_named_by_the_step_is_made():
     session = Session(blinks())
-    cls = chain_class(spec({"plugin": "Chain/Layers", "values": {"layers": [
+    cls = chain_class(spec({"plugin": "Analysis/Process/Layers", "values": {"layers": [
         {"grouped": True, "start": "empty"},
         {"grouped": False, "start": "empty",
          "bounds": [{"field": "photons", "lo": 100}]}]}}))
@@ -244,7 +244,7 @@ def test_the_history_shows_a_chain_as_its_steps():
 
 def test_start_from_defaults_keeps_what_the_file_hides():
     """Remove Localizations' hide flag travels with the table as a kept
-    bound; Chain/Layers' 'defaults' had its own copy of the defaults without
+    bound; Analysis/Process/Layers' 'defaults' had its own copy of the defaults without
     it, and showed the hidden localizations again."""
     import numpy as np
     from smappy.locs import KEPT_BOUNDS, Localizations

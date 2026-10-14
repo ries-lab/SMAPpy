@@ -4,7 +4,7 @@ schema: smappy-chain-v1
 description: filter, RCC drift, localization statistics
 grouping: layer
 steps:
-  - plugin: Chain/Layers
+  - plugin: Analysis/Process/Layers
     label: filter
     version: "2"
     values:

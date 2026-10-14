@@ -608,7 +608,7 @@ def test_a_layer_colour_is_read_off_its_lut_and_falls_back_when_it_cannot_be():
 
 def test_a_run_is_applied_to_the_session_without_touching_its_layers():
     """Run hands its result to `Session.apply`, which once took a `data` key
-    "layers" as layer set-ups (Chain/Layers); the per-layer profiles were
+    "layers" as layer set-ups (Analysis/Process/Layers); the per-layer profiles were
     under that key, and every Run from the GUI failed there.  Layer set-ups
     are `Result.layers` now, and the profiles stay the plugin's own."""
     session = _two_channel_session()

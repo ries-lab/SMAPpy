@@ -46,7 +46,7 @@ def default_bounds(locs: Localizations) -> Dict[str, Tuple]:
 
     The defaults, then the bounds the table carries with it (`KEPT_BOUNDS`:
     Remove Localizations' hide flag), for the columns the table has.  One
-    function for a layer and for Chain/Layers' *start from defaults*, which
+    function for a layer and for Analysis/Process/Layers' *start from defaults*, which
     kept its own copy without the carried bounds and so showed what the file
     had hidden.
     """
@@ -874,7 +874,7 @@ class Session:
 
     def layer_configs(self) -> List[Dict]:
         """What each localization layer keeps and shows: bounds, grouping,
-        files.  The form a chain hands its layers back in, and `Chain/Layers`
+        files.  The form a chain hands its layers back in, and `Analysis/Process/Layers`
         reads the current bounds from."""
         out = []
         for layer in self.layers:
@@ -1601,7 +1601,7 @@ class Session:
         if bounds:
             self.changed("locs")
         # the layers a chain step set up -- bounds and grouping per layer, the
-        # Render tab's work done by a plugin (`Chain/Layers`)
+        # Render tab's work done by a plugin (`Analysis/Process/Layers`)
         if result.layers:
             self.set_layer_configs(result.layers)
         # the ROI manager's project as a chain left it: the ROIs its segmenter

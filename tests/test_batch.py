@@ -19,7 +19,7 @@ from test_batch_foundations import blinks
 
 def chain_spec(**extra):
     return ChainSpec(steps=[
-        Step(plugin="Chain/Layers", label="filter",
+        Step(plugin="Analysis/Process/Layers", label="filter",
              values={"layers": [{"grouped": False, "start": "empty",
                                  "bounds": [{"field": "xy_err_nm", "hi": 20}]}],
                      "remove": True}),
@@ -250,7 +250,7 @@ def test_the_command_line_validates_runs_and_describes(tmp_path, folder, capsys)
     assert main(["run", str(path), "--limit", "1"]) == 0
     out = capsys.readouterr().out
     assert "SMAPPY_JOBS\t1" in out and "SMAPPY_DONE\t1/1" in out
-    assert main(["describe", "Chain/Layers"]) == 0
+    assert main(["describe", "Analysis/Process/Layers"]) == 0
     assert "remove: bool" in capsys.readouterr().out
     chain.write(chain_spec(), tmp_path / "c.chain.yaml")
     assert main(["describe", str(tmp_path / "c.chain.yaml")]) == 0

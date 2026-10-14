@@ -59,16 +59,14 @@ def make(d) -> None:
            "drift, measuring, processing.",
            spot=[d.union(*titles)], point=tab_button(d, "Analysis"), click=True,
            zoom=d.around(analysis.sections[0], 760))
-    analysis.search.setText("profile")
-    d.settle()
-    d.shot("Type in find to narrow the list.",
-           spot=[analysis.search], point=analysis.search,
-           zoom=d.around(analysis.search, 760))
-    analysis.search.setText("")
-    d.settle()
+    d.shot("+ finds any plugin, by its name or a word from its page, and "
+           "pins it to the tab. Plugins, in the menu, opens one in a window "
+           "of its own.",
+           spot=[analysis.add_button], point=analysis.add_button,
+           zoom=d.around(analysis.add_button, 760))
     first = analysis.sections[0]
     d.shot("Right-click a title to rename it, duplicate it with other settings, "
-           "or remove it; + pins another plugin to the tab.",
+           "or remove it.",
            spot=[first.button], point=first.button,
            zoom=d.around(first.button, 760))
 

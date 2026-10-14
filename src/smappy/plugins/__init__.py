@@ -759,7 +759,7 @@ class Result:
     bounds: Dict[str, Tuple[float, float]] = field(default_factory=dict)
     # Layer set-ups, bounds and grouping per layer
     # (`Session.set_layer_configs`): the Render tab's work done by a plugin
-    # (`Chain/Layers`).
+    # (`Analysis/Process/Layers`).
     layers: Optional[List[Dict[str, Any]]] = None
     # The ROIs this run added to the ROI manager's project (a segmenter, or
     # *Column to ROIs*), an empty list when it found none; None for a run

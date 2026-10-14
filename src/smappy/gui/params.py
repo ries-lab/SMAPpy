@@ -265,7 +265,7 @@ class _Field(QWidget):
 
 
 class LayersField(QWidget):
-    """The `Chain/Layers` step's layers: per layer a grouping, where its bounds
+    """The `Analysis/Process/Layers` step's layers: per layer a grouping, where its bounds
     start from, and rows of field, lo, hi, quantile, required.
 
     A table of rows rather than a field per column, because which columns a

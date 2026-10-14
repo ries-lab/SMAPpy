@@ -124,7 +124,7 @@ def _describe(bounds: Dict[str, Tuple]) -> str:
     return ", ".join(parts) or "no bounds"
 
 
-@register("Chain/Layers")
+@register("Analysis/Process/Layers")
 class ChainLayers(Plugin):
     """The layers' bounds and whether they merge blinks, as the Render tab would set them."""
     Settings = LayersSettings
