@@ -146,9 +146,9 @@ def make(d) -> None:
     assert target.exists(), f"the chain was not saved to {target}"
 
     d.chapter("A batch")
-    tools = menu(d, "Tools")
+    tools = menu(d, "Plugins")
     item = menu_item(d, tools, "Batch")
-    d.shot("Tools, Batch opens the batch window.",
+    d.shot("Plugins, Batch opens the batch window.",
            spot=[item], point=item, click=True, zoom=d.around(tools, 700))
     tools.close()
     control.open_batch()
@@ -228,7 +228,7 @@ def make(d) -> None:
     d.card("What to remember",
            "<ul><li><b>+, a new chain</b> in a tab: add steps, set them, run once, "
            "save.</li>"
-           "<li><b>Tools, Batch:</b> files, a chain, an output folder, Run.</li>"
+           "<li><b>Plugins, Batch:</b> files, a chain, an output folder, Run.</li>"
            "<li>A folder per file, and <b>summary.csv</b> over all of them.</li>"
            "<li>Running again redoes only what changed.</li></ul>",
            say="That is chains and batch runs: build it once, run it on every "

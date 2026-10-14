@@ -194,10 +194,21 @@ def test_the_bead_calibration_section_opens_the_window_as_it_was_left(window):
 
 def test_the_menus_have_no_second_way_into_what_a_tab_opens(window):
     """The bead calibration is the Localize tab's, the ROI manager and the
-    per-region steps the Regions tab's; Ctrl+R still opens the manager."""
+    per-region steps the Regions tab's; Ctrl+R still opens the manager.  The
+    Plugins menu is the whole plugin tree, every plugin in it, and not
+    counted."""
     from PySide6.QtGui import QAction
     from PySide6.QtWidgets import QMenu
-    in_menus = [a.text() for m in window.findChildren(QMenu) for a in m.actions()]
+
+    def in_plugins(menu):
+        while menu is not None:
+            if menu is window.plugins_menu:
+                return True
+            menu = menu.parent() if isinstance(menu.parent(), QMenu) else None
+        return False
+
+    in_menus = [a.text() for m in window.findChildren(QMenu) if not in_plugins(m)
+                for a in m.actions()]
     assert not [t for t in in_menus if "calibration" in t.lower()
                 or "ROI manager" in t or "Per-region" in t]
     shortcuts = [a for a in window.actions() if a.shortcut().toString() == "Ctrl+R"]

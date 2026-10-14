@@ -26,7 +26,7 @@ The chain can start with a fit (a *Localize* plugin), and then the inputs are
 camera images; otherwise the inputs are localization files.  Either way one
 input is one file.
 
-It opens from **Tools > Batch...**, or on its own as `smappy-batch-gui`.  It
+It opens from **Plugins > Batch...**, or on its own as `smappy-batch-gui`.  It
 is a front end to the job file and the command `smappy-batch`: everything it
 does can be repeated from a terminal with the file it writes.
 

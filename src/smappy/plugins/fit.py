@@ -172,7 +172,7 @@ class SplineModelSettings:
     calibration: str = param("", label="calibration", kind="open_file",
                              file_filter="Bead calibrations (*.h5 *.hdf5 *_3dcal.mat *.mat)",
                              help="the bead calibration of this microscope: an "
-                                  ".h5 from Tools > Bead calibration, or a "
+                                  ".h5 from the Localize tab's Bead calibration, or a "
                                   "SMAP _3dcal.mat")
     z_start_nm: float = param(0.0, label="start z", unit="nm", advanced=True,
                               help="where each fit starts in z, relative to "

@@ -296,11 +296,13 @@ class ControlWindow(QMainWindow):
         render.toolbar.view3d_button.clicked.connect(self.toggle_3d)
         self.plugins_menu = _add_menu(self.menuBar(), "Plugins", self)
         self._plugin_windows: dict = {}
-        # filled when it is opened, from the scan rather than from imports, so
-        # the menu costs nothing at start and a plugin dropped into the folder
-        # is in it without a restart
+        # From the scan rather than from imports, so the menu costs nothing at
+        # start; again when it is opened, so a plugin dropped into the folder
+        # is in it without a restart.  Filled now as well: a Mac leaves an
+        # empty menu out of the menu bar, and this one was never seen there.
+        self.batch_window = None
+        self._fill_plugins_menu()
         self.plugins_menu.aboutToShow.connect(self._fill_plugins_menu)
-        tools = _add_menu(self.menuBar(), "Tools", self)
         # The ROI manager, the per-region steps and the bead calibration are
         # not in this menu: each has one way in where it is used (the Regions
         # tab; the Localize tab's section), and a second entry in a menu made
@@ -327,9 +329,6 @@ class ControlWindow(QMainWindow):
         # Line Profile with no line ROI offers this (`LineProfile.describe`):
         # the render window, drawing a line
         session.window_openers["draw line"] = lambda settings=None: self.draw_line()
-        tools.addSeparator()
-        self.batch_window = None
-        self._action(tools, "Batch...", None, self.open_batch)
         help_ = _add_menu(self.menuBar(), "Help", self)
         self._action(help_, "Plugin documentation", None, self.show_plugin_docs)
         help_.addSeparator()
@@ -819,6 +818,9 @@ class ControlWindow(QMainWindow):
         menu.actions()[-1].setToolTip("search every plugin by its name or a word "
                                       "from its documentation, and open it in a window")
         menu.setToolTipsVisible(True)
+        # a chain over many files: beside the plugins it runs, not in a Tools
+        # menu of its own that held nothing else
+        self._action(menu, "Batch...", None, self.open_batch)
         menu.addSeparator()
         groups = {"": menu}
 
