@@ -422,7 +422,7 @@ def test_the_form_shows_only_the_chosen_algorithm():
                          "hdbscan": algorithm == "hdbscan"}
 
 
-def test_without_scikit_learn_hdbscan_says_how_to_install_it(monkeypatch):
+def test_without_the_package_hdbscan_says_how_to_install_it(monkeypatch):
     from smappy.plugins import clusters
     monkeypatch.setattr(clusters, "hdbscan_available", lambda: False)
     settings = FindClusters.Settings(algorithm="hdbscan")
@@ -440,7 +440,7 @@ def _has_hdbscan():
     return hdbscan_available()
 
 
-@pytest.mark.skipif(not _has_hdbscan(), reason="scikit-learn >= 1.3 is not installed")
+@pytest.mark.skipif(not _has_hdbscan(), reason="the hdbscan package is not installed")
 def test_hdbscan_finds_clusters_of_different_densities_without_a_radius():
     from smappy.plugins.clusters import hdbscan_clusters
     rng = np.random.default_rng(4)
@@ -452,8 +452,8 @@ def test_hdbscan_finds_clusters_of_different_densities_without_a_radius():
     labels = hdbscan_clusters(xy, min_cluster_size=20)
     caught, stray = agreement(labels, truth)
     # both found whole; but HDBSCAN lets scattered points join the cluster
-    # they are nearest, here 14 of 60 -- which the page says
-    assert labels.max() == 2 and caught.min() > 0.85 and stray < 0.25
+    # they are nearest, here 15 of 60 (scikit-learn's: 14) -- which the page says
+    assert labels.max() == 2 and caught.min() > 0.85 and stray <= 0.3
     # one radius cannot do both: a DBSCAN radius for the tight one splits
     # the loose one or leaves most of it as noise
     narrow = dbscan(xy, 30.0, 10)
@@ -463,12 +463,12 @@ def test_hdbscan_finds_clusters_of_different_densities_without_a_radius():
 def test_a_long_hdbscan_or_voronoi_run_asks_first():
     from smappy.plugins import Context
     from smappy.plugins.clusters import expected_seconds
-    assert expected_seconds("hdbscan", [1_000_000]) > 3600      # hours
-    assert expected_seconds("hdbscan", [20_000]) < 20
+    assert 30 < expected_seconds("hdbscan", [1_000_000]) < 120  # 53 s measured
+    assert expected_seconds("hdbscan", [100_000]) < 20
     xy, _ = blobs()
     ctx = Context(locs=table(xy))
     for algorithm in ("dbscan", "voronoi", "hdbscan"):
         assert FindClusters().preflight(ctx, FindClusters.Settings(algorithm=algorithm)) is None
-    big = Context(locs=table(np.random.default_rng(0).uniform(0, 1e5, (300_000, 2))))
+    big = Context(locs=table(np.random.default_rng(0).uniform(0, 1e5, (600_000, 2))))
     question = FindClusters().preflight(big, FindClusters.Settings(algorithm="hdbscan"))
-    assert "minutes" in question and "square" in question
+    assert "30 s" in question and "Stop cannot end" in question

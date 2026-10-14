@@ -26,8 +26,8 @@ shows only the chosen one's:
   DBSCAN at every radius at once, keeping the clusters that persist over
   the widest range of radii.  It finds clusters of different densities in
   one field, which a single radius cannot.  It needs the optional package
-  scikit-learn (`pip install "smappy-smlm[clusters]"`) and is slow on large
-  data (see below).
+  hdbscan (`pip install "smappy-smlm[clusters]"`), and cannot be stopped
+  once it runs (see below).
 
 What it gives is a **name for every cluster**, written onto the table:
 `cluster_id` (1 for the largest cluster, 2 for the next, ..., 0 for a
@@ -162,8 +162,8 @@ a tree: at every radius, the clusters DBSCAN would find with it.
 
 **3. The lasting clusters.**  Of the clusters in that tree with at least
 *minimum size* localizations, those that persist over the widest range of
-radii are kept; the rest of the localizations are noise.  scikit-learn
-does all three.
+radii are kept; the rest of the localizations are noise.  The hdbscan
+package does all three.
 
 ## In detail
 
@@ -225,17 +225,26 @@ of a random one, from simulations, which is not done here.
 
 ### HDBSCAN
 
-The clusters are scikit-learn's `HDBSCAN` with *minimum size* as its
-`min_cluster_size` and *neighbours* as its `min_samples` (auto: the same as
-the minimum size), on x and y, or x, y and z with *in 3D*
-([McInnes et al. 2017](https://doi.org/10.21105/joss.00205) describes the
-algorithm as implemented).  Its labels are renumbered by size like the
-others'.
+The clusters are the hdbscan package's
+([McInnes et al. 2017](https://doi.org/10.21105/joss.00205)), with
+*minimum size* as its `min_cluster_size` and *neighbours* as its
+`min_samples` (auto: the same as the minimum size), on x and y, or x, y and
+z with *in 3D*.  Its labels are renumbered by size like the others'.
 
-It is **slow on large data**: 48 s for 100,000 localizations and nearly 8
-minutes for 300,000, growing about as the square, so a million is hours,
-and Stop cannot end it early.  A run expected to take more than 20 s asks
-first.  Merge blinks, or run it in an ROI.
+The tree of step 2 is a minimum spanning tree of the mutual reachability.
+The package builds it by Borůvka's algorithm on a k-d tree, which looks only
+at nearby localizations: 2.5 s for 100,000 localizations and about a minute
+for a million.  scikit-learn's HDBSCAN builds it by Prim's algorithm, every
+localization against every other: 48 s for 100,000 and hours for a million,
+which is why it is not used.  The exact tree is asked for
+(`approx_min_span_tree=False`, no slower here).  Many mutual reachabilities
+are equal, so several trees are equally minimal, and the two libraries
+break the ties differently: on the same data their clusters agree almost
+but not quite (an adjusted Rand index of 0.99).
+
+It is one computation that Stop cannot end early, and a run expected to
+take more than 20 s -- about 400,000 localizations -- asks first.  Merge
+blinks, or run it in an ROI, for a shorter run.
 
 **When to prefer HDBSCAN.**  When the clusters in one field have very
 different densities -- a tight cluster beside a loose one -- no single
@@ -246,8 +255,7 @@ such as one protein complex -- DBSCAN's radius says exactly that, and
 HDBSCAN's answer depends on what else is in the field.  HDBSCAN also tends
 to give scattered localizations near a cluster to it: in a test with two
 clusters and 60 scattered localizations it put about a quarter of the
-scattered ones into the clusters.  And on millions of localizations it is
-too slow.
+scattered ones into the clusters.
 
 ## Parameters
 
@@ -354,4 +362,5 @@ MIiSR version of DBSCAN ([Caetano et al. 2015](https://doi.org/10.1371/journal.p
   [doi:10.1007/978-3-642-37456-2_14](https://doi.org/10.1007/978-3-642-37456-2_14)
 * McInnes L, Healy J, Astels S. hdbscan: Hierarchical density based
   clustering. *J Open Source Softw* 2, 205 (2017).
-  [doi:10.21105/joss.00205](https://doi.org/10.21105/joss.00205)
+  [doi:10.21105/joss.00205](https://doi.org/10.21105/joss.00205) -- the
+  implementation used.
