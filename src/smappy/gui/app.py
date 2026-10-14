@@ -292,8 +292,8 @@ class ControlWindow(QMainWindow):
         view = _add_menu(self.menuBar(), "View", self)
         self.view3d_window = None
         self.calibration_window = None
-        self._action(view, "3D view", "Ctrl+3", self.show_3d)
-        render.toolbar.view3d_button.clicked.connect(self.show_3d)
+        self._action(view, "3D view", "Ctrl+3", self.toggle_3d)
+        render.toolbar.view3d_button.clicked.connect(self.toggle_3d)
         self.plugins_menu = _add_menu(self.menuBar(), "Plugins", self)
         self._plugin_windows: dict = {}
         # filled when it is opened, from the scan rather than from imports, so
@@ -1003,10 +1003,22 @@ class ControlWindow(QMainWindow):
             self.view3d_window = View3DWindow(self.session)
             window_shortcuts(self.view3d_window)
             QApplication.instance().aboutToQuit.connect(self.view3d_window.view.shutdown)
+            # the button follows the window, however it was closed
+            self.view3d_window.shown.connect(
+                self.render_window.toolbar.view3d_button.setChecked)
+            self.view3d_window.toolbar.set_border(identity.colour_hex(self.session))
             # beside the 2D picture, not over it: the two are looked at together
             place_beside(self.view3d_window, self.render_window)
         self.view3d_window.show()
         self.view3d_window.raise_()
+
+    def toggle_3d(self) -> None:
+        """Show the 3D view, or hide it if it is showing.  Hidden, not closed
+        for good: the window is kept, so the view comes back as it was left."""
+        if self.view3d_window is not None and self.view3d_window.isVisible():
+            self.view3d_window.close()
+        else:
+            self.show_3d()
 
 
     def _on_session(self, what: str) -> None:
@@ -1033,6 +1045,8 @@ class ControlWindow(QMainWindow):
             + (f" - {shown}" if shown else ""))
         colour = identity.colour_hex(self.session)
         self.render_window.toolbar.set_border(colour)
+        if self.view3d_window is not None:
+            self.view3d_window.toolbar.set_border(colour)
 
     def _shown_text(self) -> str:
         """What the render window actually draws: kept by each visible layer.

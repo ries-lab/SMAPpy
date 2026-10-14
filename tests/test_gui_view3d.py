@@ -1,4 +1,4 @@
-"""The 3D window: its ROI, its controls window, and what it draws over the image."""
+"""The 3D window: its ROI, its title bar and options, and what it draws over the image."""
 import numpy as np
 import pytest
 
@@ -26,7 +26,7 @@ def table(n=4000, seed=0):
     }, {})
 
 
-def test_the_window_opens_on_the_roi_and_its_controls_are_their_own_window(app):
+def test_the_window_opens_on_the_roi_and_is_the_picture_and_a_title_bar(app):
     from smappy.gui.view3d import View3DWindow
 
     session = Session(table())
@@ -36,11 +36,59 @@ def test_the_window_opens_on_the_roi_and_its_controls_are_their_own_window(app):
     app.processEvents()
 
     assert session.slab.size[1] == pytest.approx(250.0)      # without pressing a button
-    assert window.controls.isVisible()                        # beside, not docked
-    assert window.controls.window() is not window
-    assert window.width() > window.controls.width() * 2       # the image gets the room
+    # the options drop from the title bar; nothing else opens beside it
+    assert not window.options.isVisible() and not window.keys.isVisible()
+    texts = [b.text() for b in window.toolbar.findChildren(type(window.toolbar.keys_button))]
+    assert {"Save", "top", "front", "side", "fit", "options", "keys"} <= set(texts)
+    window.toolbar.options_button.click()
+    assert window.options.isVisible()
     window.close()
-    assert not window.controls.isVisible()
+    assert not window.options.isVisible()
+
+
+def test_hidden_and_shown_again_the_view_is_where_it_was_left(app):
+    """The 2D window's *3D* is a toggle; switching it off and on must not
+    throw away the turn and the zoom."""
+    from smappy.gui.view3d import View3DWindow
+
+    window = View3DWindow(Session(table()))
+    seen = []
+    window.shown.connect(seen.append)
+    window.show()
+    app.processEvents()
+    window.view.projection.rotate_view(30.0, 20.0)
+    window.view.projection.zoom *= 0.5
+    before = window.view.projection.matrix.copy(), window.view.projection.zoom
+    window.close()
+    window.show()
+    app.processEvents()
+    assert np.allclose(window.view.projection.matrix, before[0])
+    assert window.view.projection.zoom == pytest.approx(before[1])
+    assert seen == [True, False, True]
+    window.close()
+
+
+def test_each_look_shows_only_the_fields_it_reads(app):
+    from smappy.gui.view3d import View3DWindow
+
+    window = View3DWindow(Session(table()))
+    panel, form = window.panel, window.panel._form
+
+    def shown(widget):
+        return form.isRowVisible(widget)
+
+    assert panel.look == "auto" == window.view.projection.engine
+    assert shown(panel.opacity) and shown(panel.attenuation)
+    assert not shown(panel.point_alpha) and not shown(panel.ssao)
+
+    panel.looks.button(1).setChecked(True)                    # points
+    assert window.view.projection.engine == "points"
+    assert shown(panel.point_size) and shown(panel.point_alpha)
+    assert not shown(panel.opacity) and not shown(panel.ssao)
+
+    panel.looks.button(2).setChecked(True)                    # spheres
+    assert window.view.projection.engine == "spheres"
+    assert shown(panel.ssao) and shown(panel.point_size) and not shown(panel.point_alpha)
 
 
 def test_perspective_is_a_tick_and_a_distance_in_microns(app):
@@ -104,23 +152,28 @@ def test_the_scale_bar_and_the_axes_follow_the_view(app):
     assert not view.scalebar.isVisible() and not view.axes[0][0].isVisible()
 
 
-def test_the_controls_window_can_be_closed_and_asked_back(app):
-    """It is a window of its own, so closing it must not be a dead end."""
-    from smappy.gui.view3d import View3DWindow
+def test_the_3d_button_shows_and_hides_the_window_and_follows_it(app):
+    from smappy.gui.app import ControlWindow, RenderWindow
 
-    window = View3DWindow(Session(table()))
-    window.show()
-    app.processEvents()
-    assert window.controls.isVisible() and window.controls_action.isChecked()
-
-    window.controls.close()
-    assert not window.controls_action.isChecked()
-    window.controls_action.trigger()
-    assert window.controls.isVisible()
-
-    window.close()                              # closed together
-    assert not window.controls.isVisible()
-    window.show()                               # and back together
-    app.processEvents()
-    assert window.controls.isVisible()
-    window.close()
+    session = Session(table())
+    render = RenderWindow(session)
+    control = ControlWindow(session, render)
+    button = render.toolbar.view3d_button
+    try:
+        assert button.isCheckable() and not button.isChecked()
+        button.click()
+        app.processEvents()
+        window = control.view3d_window
+        assert window.isVisible() and button.isChecked()
+        button.click()
+        assert not window.isVisible() and not button.isChecked()
+        control.toggle_3d()                       # View > 3D view, Ctrl+3
+        assert window.isVisible() and button.isChecked()
+        assert control.view3d_window is window    # the same window, the same view
+        window.close()                            # closed by its own title bar
+        assert not button.isChecked()
+    finally:
+        if control.view3d_window is not None:
+            control.view3d_window.close()
+        render.close()
+        control.close()

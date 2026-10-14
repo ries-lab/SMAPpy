@@ -91,17 +91,16 @@ def test_the_3d_view_renders_a_snapshot_as_it_was_taken():
     projection.fit(slab, 200, 160)
     fov = projection.fov(200, 160)
     snap = snapshot_3d(session.layers)
-    rgb, hist = render_3d(snap, projection, slab, fov)
+    rgb = render_3d(snap, projection, slab, fov)
 
     session.layers[0].set_bound("photons", 2500, None)
     session.layers[0].state.settings.mode = "hist"
     session.locs = table(seed=1, shift=3000.0)
 
-    rgb2, hist2 = render_3d(snap, projection, slab, fov)
+    rgb2 = render_3d(snap, projection, slab, fov)
     np.testing.assert_array_equal(rgb, rgb2)
-    np.testing.assert_array_equal(hist, hist2)
     # session layers are snapshotted on the way in, for a script
-    rgb3, _ = render_3d(session.layers, projection, slab, fov)
+    rgb3 = render_3d(session.layers, projection, slab, fov)
     assert not np.allclose(rgb, rgb3)
 
 

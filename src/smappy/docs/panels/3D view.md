@@ -2,7 +2,7 @@
 title: 3D view
 summary: A box of the data, the slab, shown from any angle, with the Render tab's layers, filters and colours.
 widget: smappy.gui.view3d.View3DWindow
-covers: [smappy.view3d.Slab.from_region, smappy.view3d.Slab.mask, smappy.view3d.Projection.apply, smappy.view3d.Projection.preset, smappy.view3d.Projection.fit, smappy.view3d.render_layer_3d, smappy.view3d.composite_depth, smappy.view3d.render_3d, smappy.session.Session.slab_from_roi, smappy.session.Session.selects_slab]
+covers: [smappy.view3d.Slab.from_region, smappy.view3d.Slab.mask, smappy.view3d.Projection.apply, smappy.view3d.Projection.preset, smappy.view3d.Projection.fit, smappy.view3d.render_layer_3d, smappy.view3d.composite_depth, smappy.view3d.render_3d, smappy.view3d.engine_for, smappy.session.Session.slab_from_roi, smappy.session.Session.selects_slab]
 ---
 
 ## What it does
@@ -23,7 +23,7 @@ look from is new.
 
 The slab can also be the [selection](plugin:Panels/Glossary) for plugins --
 what a plugin measures: the localizations that pass the layer's filter, inside
-the drawn ROI (*plugins use the slab (while open)*).  A measurement then sees only what is inside the box, for example
+the drawn ROI (*plugins use the slab*).  A measurement then sees only what is inside the box, for example
 one ring of a pore picked out by its depth.
 
 Use it on tables with a `z_nm` column.  A 2D table can be opened too, but it
@@ -129,8 +129,7 @@ keeps up with the mouse on the machine it runs on.  When the mouse stops,
 the full image is drawn from every localization in the slab.  An image that
 is saved is always the full one.
 
-**5. The slab as the selection.**  With *plugins use the slab (while open)*
-ticked, every plugin's selection is cut to the slab, on top of the layer's
+**5. The slab as the selection.**  With *plugins use the slab* ticked, every plugin's selection is cut to the slab, on top of the layer's
 filter and the 2D ROI.  This holds only while the 3D window is open, so that
 nobody measures a box they can no longer see.
 
@@ -160,11 +159,11 @@ $(\phi, \epsilon, \rho)$ to $(0, 0, 0)$ for *top*, $(0, 90^{\circ}, 0)$ for
 *front* and $(90^{\circ}, 90^{\circ}, 0)$ for *side*, with the slab's angle subtracted from
 $\phi$ so that they are views of the slab and not of the data's axes.
 
-With *fix roll* ticked (the default) a horizontal drag changes the azimuth, a
+With *keep horizon level* ticked (the default) a horizontal drag changes the azimuth, a
 vertical one the elevation, and the roll stays zero, so the horizon stays
 level.  Unticked, the drag turns about the screen's own axes, like a
 trackball.  The mouse turns 0.4° per pixel, and the arrow keys 5° per press.
-With *rotate about the screen centre* ticked, a turn is about the point in the
+With *turn about screen centre* ticked, a turn is about the point in the
 middle of the screen rather than the slab's centre, so that after a pan the
 view does not swing away from what is being looked at.
 
@@ -182,7 +181,7 @@ localizations, so that colours and dimming do not change with the filter.
 *Dim with depth* weights each localization by
 $\exp\left(-(d_{\mathrm{front}} - v_z)/\lambda\right)$, $\lambda$ the length
 set, so that the front face is at full weight.  *Opacity* $o$ cuts the depth
-range into *slices* slabs and draws them from the back to the front: with
+range into 32 slices and draws them from the back to the front: with
 $I_k$ the image of slice $k$ and $I_{\max}$ the brightness the plain image
 is shown at, each slice covers what is behind it by
 $c_k = o \cdot \mathrm{min}(I_k / I_{\max}, 1)$,
@@ -198,10 +197,14 @@ longer than 1/27 s.  The sample is evenly spaced through the table, which is
 in acquisition order, so it is a shorter acquisition rather than a
 rearranged one.
 
-**The depth histogram.**  Under the controls is a histogram, in 64 bins, of
-the depths of up to 200 000 of the slab's localizations, over all visible
-layers.  It shows where along the line of sight the data are, for placing
-the slab.
+**Which engine draws it.**  The plain sum (*sum*) is drawn on the GPU when
+the visible layers hold at least 100 000 localizations around the slab, and
+on the CPU below that, or when there is no GPU.  The two give the same image.
+Only the speed differs: the GPU pays a fixed few milliseconds a frame to hand
+the image back, which a small slab does not earn back.  Measured, a 300 nm
+crop turned at 246 frames per second on the CPU and 117 on the GPU, and a
+10 µm crop of a 46 million localization file at 3.3 and 34.  *Points* and
+*spheres* are drawn only on the GPU; without one they fall back to the sum.
 
 **Other axes.**  When the Render tab draws one column against another (its
 *axes* section), the slab is a box in those units and is rebuilt over the
@@ -211,8 +214,8 @@ units.
 
 ## Controls
 
-The window has the image and a toolbar; the controls are a window of their
-own beside it (*controls*).
+The window is the picture and a row of buttons above it.  The settings drop
+down from *options*; the mouse and the keys are listed under *keys*.
 
 In the image: drag to turn, shift-drag (or the middle button) to pan, the
 wheel to zoom.  Alt-wheel or page up / page down moves the eye and the
@@ -222,6 +225,10 @@ it thicker or thinner along the axis nearest the line of sight.  The dots on
 the box are its faces: drag one to move that face.  Moving a face, like
 typing a range, stops the slab from following the ROI.
 
+The *3D* button on the 2D picture's title bar (or View > 3D view, Ctrl+3)
+shows and hides this window.  Hidden, it keeps its turn, zoom and slab for
+the next time.
+
 ### Save
 *PNG as displayed...* saves the picture as it is on screen.  The two TIFF
 entries ask for a pixel size and render the slab again, at full resolution,
@@ -229,7 +236,7 @@ to fit the box exactly: in colour, or as the summed intensity in floating
 point for measuring.  The TIFF records the projection and the slab.
 
 ### top
-The slab from above.  Also in the controls window.
+The slab from above.
 
 ### front
 The slab along its width: its length across the screen, z vertical.
@@ -240,8 +247,72 @@ The slab along its length: its width across the screen, z vertical.
 ### fit
 Centres the slab and zooms so that it fills the window.
 
-### controls
-Shows or hides the controls window.  Closing that window unticks it.
+### options
+Drops down the settings below.  A click outside closes it; what was set
+stays.
+
+### keys
+Lists what the mouse and the keys do in the picture.
+
+### look
+How each localization is drawn.  *sum* is the 2D renderer's blur, added
+up, and is right for nearly everything.  *points* draws each one as a small
+transparent dot, which reads well for a sparse cloud.  *spheres* draws a
+shaded ball, with the balls darkening each other where they crowd
+(ambient occlusion), which shows the shape of a dense structure.  Only the
+fields the chosen look uses are shown.
+
+### dim with depth
+The attenuation length $\lambda$; *off* at 0.  A value around the slab's
+thickness along the line of sight makes the front stand out without losing
+the back.  For *sum* and *spheres*.
+
+### opacity
+For *sum*.  0 is a plain sum and fastest.  Values of 0.3 to 0.7 give a sense
+of what is in front; 1 hides everything behind a bright slice.
+
+### size
+For *points* and *spheres*: the radius.  At 0 (*precision*), the median
+[localization precision](plugin:Panels/Glossary) (also called the CRLB) of
+what is shown.
+
+### alpha
+For *points*.  Many dots pile up on one pixel, so a useful value is small
+(the default 0.05).
+
+### occlusion
+For *spheres*: how strongly the balls shade their neighbours; 0 is off.  How
+far the shading reaches is set by itself: three ball radii, or a twentieth
+of the slab's smallest side if that is larger.
+
+### perspective
+Tick for a perspective view; the number is the eye's distance in µm.  It
+follows the slab (ten times its longest side) until a distance is typed.
+Nearer exaggerates depth; much farther is nearly orthographic.
+
+### colour by depth
+Colours every layer by its distance from the viewer, over the depth range of
+the slab's corners, in place of the layer's own colour field.  The colours
+are each layer's colour LUT from the Render tab.  It is z-colouring with z
+always pointing out of the screen, so it changes as the view turns.
+
+### show box
+Draws the slab's edges and the face dots.  The dots are needed to drag a
+face.
+
+### scale bar and axes
+The scale bar is a length in the plane of the screen.  The tripod shows the
+slab's own axes, projected like the data, so an axis pointing at the viewer
+is short.
+
+### plugins use the slab
+Off by default.  On, the selection name every plugin reports ends with the
+slab's size, so the history says that a box was used.  It holds only while
+this window is showing: hiding the window lifts the restriction, and showing
+it again restores it.
+
+### slab
+Folded.  The slab's own settings, below.
 
 ### follow 2D ROI
 The slab takes its footprint from the 2D ROI every time the ROI changes.
@@ -258,71 +329,17 @@ rows are the other two axes.  Changing one side leaves the other where it is.
 ### angle
 The slab's turn in the plane.  A line ROI sets it to the line's direction.
 
-### fix roll: turn about z, tilt z forward / back
-Keeps the data's z axis in the vertical plane of the screen, which is the
-easy way to keep one's bearings.  Untick for free rotation.
+### view
+Folded.  How a drag turns the view, below.
 
-### rotate about the screen centre
+### keep horizon level
+Keeps the data's z axis in the vertical plane of the screen, which is the
+easy way to keep one's bearings.  Untick for free rotation, like a
+trackball.
+
+### turn about screen centre
 Off, the slab's centre is always the centre of rotation, which is right as
 long as the slab is in view.
-
-### dim with depth
-The attenuation length $\lambda$; 0 is off.  A value around the slab's
-thickness along the line of sight makes the front stand out without losing
-the back.
-
-### opacity
-0 is a plain sum and fastest.  Values of 0.3 to 0.7 give a sense of what is
-in front; 1 hides everything behind a bright slice.
-
-### slices
-How many depth slices *opacity* composites.  More give a smoother result and
-cost proportionally more time.
-
-### perspective
-Tick for a perspective view; the number is the eye's distance in µm.  Nearer
-exaggerates depth; much farther is nearly orthographic.
-
-### colour by depth
-Colours every layer by the depth in the current view, over the depth range
-of the slab's corners, in place of the layer's own colour field.
-
-### engine
-*CPU* and *GPU* draw the same image; *GPU* is faster on large tables.
-*GPU points* draws each localization as a small round sprite with
-transparency, and *GPU spheres* as a shaded sphere with ambient occlusion.
-Without a usable GPU the CPU is used, and the label under the menu says so.
-The controls an engine does not use are greyed out.
-
-### point size
-For *GPU points* and *GPU spheres*: the radius in nm.  0 uses the median
-[localization precision](plugin:Panels/Glossary) (also called the CRLB) of
-what is shown.
-
-### point alpha
-For *GPU points*: how opaque one sprite is.  Many sprites pile up on one
-pixel, so a useful value is small (the default 0.05).
-
-### occlusion
-For *GPU spheres*: how strongly spheres shade their neighbours; 0 is off.
-
-### occlusion radius
-For *GPU spheres*: how far the shading reaches.  0 takes three sphere radii,
-or a twentieth of the slab's smallest side if that is larger.
-
-### show box
-Draws the slab's edges and the face handles.  The handles are needed to drag
-a face.
-
-### show scale bar and axes
-The scale bar is a length in the plane of the screen.  The tripod shows the
-slab's own axes, projected like the data, so an axis pointing at the viewer
-is short.
-
-### plugins use the slab (while open)
-Off by default.  On, the selection name every plugin reports ends with the
-slab's size, so the history says that a box was used.  Closing the window
-lifts the restriction; opening it again restores it.
 
 ## Differences from SMAP
 

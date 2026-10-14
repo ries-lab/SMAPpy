@@ -128,7 +128,8 @@ crop and ~1.2 s for the whole field.  Three things, in the order they cost:
   count (the panel hides the axis), so `depth_sample` takes `HIST_POINTS` of
   the slab's rows.  This one is paid by the GPU engines too: it runs on the CPU
   whatever `Projection.engine` says, which is why "slow in every mode" was the
-  symptom.
+  symptom.  (The histogram has since been removed from the 3D window
+  altogether, 2026-10, in the redesign of its controls.)
 * `slab_candidates` asks the index for the slab's bounding rectangle instead of
   reading every row.  The candidates are **not** sorted back into table order:
   sorting 3 M indices costs 126 ms, more than the tidier gather saves.

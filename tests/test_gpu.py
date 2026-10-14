@@ -44,9 +44,9 @@ def test_tilted_slab_matches_the_cpu_engine():
         for extra in ({}, {"depth_lambda": 200.0}, {"color_by_depth": True}, {"opacity": 0.7, "slices": 6}):
             proj = Projection(azimuth=35, elevation=50, pivot=s.slab.center, zoom=5.0, **extra)
             fov = proj.fov(200, 160)
-            cpu, _ = render_3d(s.layers, proj, s.slab, fov)
+            cpu = render_3d(s.layers, proj, s.slab, fov)
             proj.engine = "gpu"
-            gpu_, _ = render_3d(s.layers, proj, s.slab, fov, engine=ENGINE)
+            gpu_ = render_3d(s.layers, proj, s.slab, fov, engine=ENGINE)
             # hue-normalised colour at faint pixels is sensitive to which slice a
             # point at a float32 boundary lands in; elsewhere the two agree closely
             tolerance = 0.05 if (extra.get("opacity") and settings.color_field) else 0.02
@@ -57,7 +57,7 @@ def test_points_mode_draws_something():
     locs = _table(2000)
     s = Session(locs)
     proj = Projection(pivot=[500, 400, 0], zoom=5.0, engine="points", point_size=3, point_alpha=0.6)
-    rgb, _ = render_3d(s.layers, proj, None, proj.fov(200, 160), engine=ENGINE)
+    rgb = render_3d(s.layers, proj, None, proj.fov(200, 160), engine=ENGINE)
     assert rgb.shape == (160, 200, 3) and 0 < rgb.max() <= 1
 
 
@@ -68,7 +68,7 @@ def test_spheres_are_shaded_and_occlude_by_depth():
                          "z_nm": np.zeros(1, np.float32)}, {})
     s = Session(one)
     proj = Projection(pivot=[500, 500, 0], zoom=2.0, engine="spheres", point_size=100, ssao_strength=0.0)
-    rgb, _ = render_3d(s.layers, proj, None, proj.fov(200, 200), engine=ENGINE)
+    rgb = render_3d(s.layers, proj, None, proj.fov(200, 200), engine=ENGINE)
     g = rgb.max(axis=2)
     iy, ix = np.unravel_index(g.argmax(), g.shape)
     assert iy < 100 and ix < 100                          # lit from the upper left
@@ -83,7 +83,7 @@ def test_spheres_are_shaded_and_occlude_by_depth():
         s2.layers[0].state.settings = RenderSettings(color_field="z_nm", color_range=(-200, 200))
         s2.layers[0].state.display = DisplaySettings(lut="turbo")
         p2 = Projection(pivot=[510, 500, 0], zoom=2.0, engine="spheres", point_size=100, ssao_strength=0.0)
-        mid = render_3d(s2.layers, p2, None, p2.fov(200, 200), engine=ENGINE)[0][100, 100]
+        mid = render_3d(s2.layers, p2, None, p2.fov(200, 200), engine=ENGINE)[100, 100]
         assert np.abs(mid - t[-1]).sum() < np.abs(mid - t[0]).sum()
 
 
@@ -103,7 +103,7 @@ def test_ssao_darkens_a_crevice_and_not_the_open():
     def render(strength):
         p = Projection(pivot=[1000, 1000, 0], zoom=4.0, engine="spheres", point_size=20,
                        ssao_strength=strength)
-        return render_3d(s.layers, p, None, p.fov(500, 500), engine=ENGINE)[0]
+        return render_3d(s.layers, p, None, p.fov(500, 500), engine=ENGINE)
 
     on, off = render(0.9), render(0.0)
     foot, open_ = (slice(280, 300), slice(240, 260)), (slice(50, 70), slice(50, 70))
@@ -147,7 +147,7 @@ def test_the_default_occlusion_radius_is_visible_at_the_zoom_the_box_is_seen_at(
         p = Projection(azimuth=30, elevation=60, engine="spheres",
                        ssao_strength=strength, ssao_radius=radius)
         p.fit(slab, 400, 400)
-        return render_3d(s.layers, p, slab, p.fov(400, 400), engine=ENGINE)[0]
+        return render_3d(s.layers, p, slab, p.fov(400, 400), engine=ENGINE)
 
     off = render(0.0)
     lit = off.max(axis=2) > 0.02

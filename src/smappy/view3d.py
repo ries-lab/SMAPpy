@@ -11,7 +11,7 @@ from __future__ import annotations
 import math
 import time
 from dataclasses import dataclass, field, replace
-from typing import List, Optional, Sequence, Tuple
+from typing import Optional, Tuple
 
 import numpy as np
 
@@ -24,8 +24,12 @@ from .render import (DisplaySettings, FieldOfView, RenderAxes, RenderSettings,
 
 PREVIEW_POINTS = 2_000_000       # at most this many while the mouse drags
 PREVIEW_SCALE = 2                # and at this many times coarser pixels
-HIST_POINTS = 200_000            # the depth histogram is taken from this many
-HIST_BINS = 64
+# The plain sum is drawn on the GPU above this many rows in the slab, on the
+# CPU below it.  The two give the same image; what differs is the cost.  A GPU
+# frame pays ~8 ms of readback whatever it drew, so a 300 nm crop ran at 246
+# fps on the CPU and 117 on the GPU, while a 10 um crop of a 46 M file ran at
+# 3.3 and 33.6 (docs/performance.md).  The crossover was ~100k.
+AUTO_GPU_POINTS = 100_000
 
 # A drag frame draws a sample, never the whole table.  Two things bound it: what
 # can be seen, and what the machine can do in time.
@@ -199,7 +203,9 @@ class Projection:
     color_by_depth: bool = False    # override the layers' colour field
     fix_roll: bool = True           # turntable: turn about data z, tilt z forward / back
     rotate_at_centre: bool = True   # a drag turns about the screen's centre, not the slab's
-    engine: str = "cpu"             # "cpu", "gpu" (same image), "points" or "spheres" (GPU)
+    # "auto" (the sum, on the GPU when the slab is large: `engine_for`), "cpu"
+    # or "gpu" (the same image), "points" or "spheres" (GPU looks)
+    engine: str = "auto"
     point_size: float = 0.0         # points mode: radius in nm; 0 = the median precision
     point_alpha: float = 0.05       # points mode: sprite opacity
     ssao_strength: float = 0.7      # spheres mode: ambient occlusion, 0 = off
@@ -442,8 +448,8 @@ def selection_rows(locs: Localizations, select: np.ndarray, slab: Optional[Slab]
     """`slab_candidates`, memoised on the filter and the slab.
 
     A rotation changes neither -- only the projection -- so every frame of a
-    drag asks the same question, and each engine asks it more than once (the
-    render and the depth histogram both need these rows).  Answering it costs
+    drag asks the same question, and it is asked more than once a frame (the
+    engine's choice, `engine_for`, and the render).  Answering it costs
     an index query, or `np.flatnonzero` over the whole table when the slab is
     everything (31 ms at 35 M).
 
@@ -463,6 +469,25 @@ def selection_rows(locs: Localizations, select: np.ndarray, slab: Optional[Slab]
     # the mask is kept beside the rows so its id cannot be reused meanwhile
     _rows_cache[key] = (rows, select)
     return rows
+
+
+def slab_rows(layers, slab: Optional[Slab]) -> int:
+    """How many rows the visible localization layers draw from for ``slab``
+    (`selection_rows`, so memoised: the render asks the same question next)."""
+    return sum(selection_rows(layer.locs, layer.mask, slab, layer.index).size
+               for layer in layers if layer.visible and not layer.is_image)
+
+
+def engine_for(projection: Projection, layers, slab: Optional[Slab]) -> str:
+    """The engine ``projection.engine`` means for these layers: "auto" is the
+    plain sum on the GPU from `AUTO_GPU_POINTS` rows, on the CPU below.
+
+    The two draw the same image, so the switch cannot be seen, only timed --
+    which is why it is not a choice anyone is asked to make.
+    """
+    if projection.engine != "auto":
+        return projection.engine
+    return "gpu" if slab_rows(layers, slab) >= AUTO_GPU_POINTS else "cpu"
 
 
 def thinned(rows: np.ndarray, budget: Optional[int]) -> np.ndarray:
@@ -530,57 +555,6 @@ class PreviewBudget:
         rate = drawn / seconds
         self.rate = rate if self.rate is None else \
             self.smoothing * rate + (1.0 - self.smoothing) * self.rate
-
-
-def depth_sample(locs: Localizations, select: np.ndarray, projection: Projection,
-                 slab: Optional[Slab], index=None, limit: int = HIST_POINTS,
-                 axes: Optional[RenderAxes] = None) -> np.ndarray:
-    """Depths of up to ``limit`` of the slab's localizations.
-
-    Only the depth *histogram* wants this, and that histogram is a shape --
-    the panel hides its count axis -- so a sample says the same thing as every
-    row.  It used to be a second full `project_layer` per layer per frame,
-    which is the projection the render had just done and thrown away; on a
-    46 M localization file that was a second of every frame, and because it
-    runs on the CPU whatever `Projection.engine` says, the GPU engines paid it
-    too.  Sampling the candidate *rows* before touching a coordinate keeps it
-    at ``limit`` however large the table.
-    """
-    axes = axes or RenderAxes()
-    x, y = axes.coordinates(locs)
-    z = axes.depth(locs)
-    idx = selection_rows(locs, select, slab, index)
-    if index is None and slab is not None and idx.size:
-        # With an index the candidates are already the slab's own neighbourhood,
-        # so thinning them first keeps the sample inside it.  Without one they
-        # are the whole table, and a stride over that would land almost
-        # entirely outside a small slab -- so the slab has to be applied first,
-        # at the cost of the full pass the index exists to avoid.
-        idx = idx[slab.mask(x[idx], y[idx], None if z is None else z[idx])]
-    if idx.size > limit:
-        # a stride, not a draw: `choice(n, k, replace=False)` permutes n first,
-        # which is the cost this is here to avoid.  Rows are in acquisition
-        # order, which is not an order in depth.
-        idx = idx[::max(1, idx.size // limit)]
-    if not idx.size:
-        return np.empty(0, np.float32)
-    xs, ys = x[idx], y[idx]
-    zs = None if z is None else z[idx]
-    if slab is not None:
-        keep = slab.mask(xs, ys, zs)
-        xs, ys = xs[keep], ys[keep]
-        zs = None if zs is None else zs[keep]
-    return projection.apply(xs, ys, zs)[2]
-
-
-def depth_histogram(depths: Sequence[np.ndarray]) -> np.ndarray:
-    """``(HIST_BINS, 2)`` of bin centre and count, over every layer's depths."""
-    hist = np.zeros((HIST_BINS, 2), np.float64)
-    d = np.concatenate(list(depths)) if depths else np.empty(0, np.float32)
-    if d.size:
-        counts, edges = np.histogram(d, bins=HIST_BINS)
-        hist[:, 0], hist[:, 1] = (edges[:-1] + edges[1:]) / 2, counts
-    return hist
 
 
 def project_layer(locs: Localizations, select: np.ndarray, projection: Projection,
@@ -910,15 +884,14 @@ def snapshot_3d(layers) -> Tuple[LayerSnapshot, ...]:
 
 def render_3d(layers, projection: Projection, slab: Optional[Slab], fov: FieldOfView,
               preview: bool = False, engine=None,
-              budget: Optional[PreviewBudget] = None) -> Tuple[np.ndarray, np.ndarray]:
-    """Every visible localization layer, added up; also the depth histogram.
+              budget: Optional[PreviewBudget] = None) -> np.ndarray:
+    """Every visible localization layer, added up: RGB in [0, 1].
 
     ``layers`` are `LayerSnapshot`s (`snapshot_3d`), which is what a render
     thread is handed; session layers are snapshotted here first, for a
     script or a synchronous render on the thread that owns them.
-    ``engine`` is a `smappy.gpu.GPUEngine` for ``projection.engine`` "gpu"
-    or "points"; None means the CPU.  Returns the RGB image and a (64, 2)
-    array of depth-bin centres and counts over the slab's points.
+    ``engine`` is a `smappy.gpu.GPUEngine` for ``projection.engine`` "gpu",
+    "points", "spheres" or "auto" (`engine_for`); None means the CPU.
 
     ``budget`` bounds a *preview* frame and is timed by it, so a drag settles
     at `TARGET_FPS` on whatever machine it is running on; None draws every row
@@ -928,8 +901,9 @@ def render_3d(layers, projection: Projection, slab: Optional[Slab], fov: FieldOf
     if not all(isinstance(layer, LayerSnapshot) for layer in layers):
         layers = snapshot_3d(layers)
     shown = [layer for layer in layers if layer.visible and not layer.is_image]
+    if engine is not None and projection.engine == "auto":
+        projection = replace(projection, engine=engine_for(projection, shown, slab))
     rgb = np.zeros((fov.ny, fov.nx, 3), np.float32)
-    depths: List[np.ndarray] = []
     limit = budget.points(fov) if (preview and budget is not None) else None
     started, drawn = time.perf_counter(), 0
     # A final frame is timed too, though it is never thinned: it gives the first
@@ -963,16 +937,13 @@ def render_3d(layers, projection: Projection, slab: Optional[Slab], fov: FieldOf
                                        layer.settings, layer.display, preview,
                                        n_threads=layer.n_threads, index=index, budget=limit)
         rgb += image
-        depths.append(depth_sample(layer.locs, layer.mask, projection, slab, index,
-                                   axes=layer.settings.axes))
     rgb = np.clip(rgb, 0, 1)
     if any(layer.display.white_background for layer in shown):
         from .lut import on_white       # once, to the sum, as the 2D view does
         rgb = on_white(rgb)
-    out = rgb, depth_histogram(depths)
     if budget is not None:
         budget.record(drawn, time.perf_counter() - started)
-    return out
+    return rgb
 
 
 def upscale(rgb: np.ndarray, scale: int, ny: int, nx: int) -> np.ndarray:

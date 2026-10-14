@@ -156,6 +156,7 @@ class RenderView(QWidget):
         self.scalebar.setParentItem(self.view)
         self.scalebar.anchor((1, 1), (1, 1), offset=(-20, -20))
         self.axis_bars = AxisBars(self.view)
+        frame_canvas(self.graphics)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.graphics)
@@ -825,6 +826,42 @@ class _Mirror:
         graphics.removeItem(self.view)
 
 
+def toolbar_sheet(font, border: str = "") -> Tuple[str, str]:
+    """The picture toolbars' style sheet, and the size a size smaller.
+
+    Shared by the 2D and the 3D window, so the two title bars read alike:
+    framed buttons in the label's font (`RenderToolBar._style_buttons` says
+    why), and the session's colour along the bottom (`toolbar_border`).
+    """
+    points = font.pointSizeF()
+    size, small = ((f"{points:g}pt", f"{max(points - 2, 8):g}pt") if points > 0
+                   else (f"{font.pixelSize()}px", f"{font.pixelSize() - 2}px"))
+    sheet = (f"QToolButton {{ font-size: {size};"
+             " border: 1px solid palette(mid); border-radius: 4px;"
+             " padding: 1px 6px; margin: 1px 2px; background: palette(button); }"
+             " QToolButton:hover { background: palette(light); }"
+             " QToolButton:pressed, QToolButton:checked { background: palette(midlight); }"
+             " QToolButton[popupMode=\"2\"] { padding-right: 16px; }"
+             " QToolButton::menu-indicator { subcontrol-origin: padding;"
+             " subcontrol-position: right center; right: 4px; }"
+             f" QLabel {{ font-size: {size}; }}"
+             " QDoubleSpinBox { padding: 0px 2px; }"
+             + border)
+    return sheet, small
+
+
+def toolbar_border(colour: str) -> str:
+    """The session's colour along a toolbar's bottom (`gui.identity`), or none."""
+    return f" QToolBar {{ border-bottom: 4px solid {colour}; }}" if colour else ""
+
+
+def frame_canvas(graphics) -> None:
+    """A thin grey line around a picture.  The 2D and the 3D view are both
+    black, and where one window overlaps the other nothing said where the
+    one picture ended and the next began."""
+    graphics.setStyleSheet("QGraphicsView { border: 1px solid #808080; }")
+
+
 class RenderToolBar(QToolBar):
     """Save (with a menu of what to save) and, later, ROI tools."""
 
@@ -881,9 +918,11 @@ class RenderToolBar(QToolBar):
         self.addAction(QAction("Reset view", self, triggered=view.reset))
         # the 3D window is a menu item away in the control window, and the
         # picture is where one decides to look at it in 3D; ControlWindow
-        # connects it, since this toolbar does not know that window
-        self.view3d_button = QToolButton(text="3D")
-        self.view3d_button.setToolTip("open the 3D view (Ctrl+3)")
+        # connects it, since this toolbar does not know that window.  A
+        # toggle: the 2D and 3D pictures are looked at in turns
+        self.view3d_button = QToolButton(text="3D", checkable=True)
+        self.view3d_button.setToolTip("show or hide the 3D view (Ctrl+3); hidden, it "
+                                      "keeps its view for the next time")
         self.addWidget(self.view3d_button)
 
         # SMAP's *split* and *comp* ticks, as one choice of three
@@ -953,29 +992,14 @@ class RenderToolBar(QToolBar):
         the colour used to be set as the whole sheet, which silently undid
         the buttons the first time the title was written.
         """
-        font = self.width_label.font()
-        points = font.pointSizeF()
-        size, small = ((f"{points:g}pt", f"{max(points - 2, 8):g}pt") if points > 0
-                       else (f"{font.pixelSize()}px", f"{font.pixelSize() - 2}px"))
-        self.setStyleSheet(
-            f"QToolButton {{ font-size: {size};"
-            " border: 1px solid palette(mid); border-radius: 4px;"
-            " padding: 1px 6px; margin: 1px 2px; background: palette(button); }"
-            " QToolButton:hover { background: palette(light); }"
-            " QToolButton:pressed { background: palette(midlight); }"
-            " QToolButton[popupMode=\"2\"] { padding-right: 16px; }"
-            " QToolButton::menu-indicator { subcontrol-origin: padding;"
-            " subcontrol-position: right center; right: 4px; }"
-            f" QLabel {{ font-size: {size}; }}"
-            " QDoubleSpinBox { padding: 0px 2px; }"
-            + self.border)
+        sheet, small = toolbar_sheet(self.width_label.font(), self.border)
+        self.setStyleSheet(sheet)
         self.counts.setStyleSheet(f"font-size: {small}; color: gray;"
                                   " padding-left: 8px")
 
     def set_border(self, colour: str) -> None:
         """The session's colour along the bottom (`gui.identity`), or none."""
-        self.border = (f" QToolBar {{ border-bottom: 4px solid {colour}; }}"
-                       if colour else "")
+        self.border = toolbar_border(colour)
         self._style_buttons()
 
     def _update_counts(self, what: str) -> None:

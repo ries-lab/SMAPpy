@@ -241,9 +241,8 @@ def test_the_3d_view_draws_the_versatile_axes():
                                 y_scale=100.0, z_scale=10.0))
     fov = FieldOfView.from_range((0, 3000), (0, 3000), 20.0)
     slab = Slab.from_bounds(0, 3000, 0, 3000, 0, 1000)
-    rgb, hist = render_3d(session.layers, Projection(azimuth=30, elevation=20), slab, fov)
+    rgb = render_3d(session.layers, Projection(azimuth=30, elevation=20), slab, fov)
     assert rgb.shape == (fov.ny, fov.nx, 3) and rgb.max() > 0
-    assert hist[:, 1].sum() > 0
 
 
 def test_the_slab_is_rebuilt_when_the_picture_changes_quantity():
@@ -262,14 +261,14 @@ def test_the_slab_is_rebuilt_when_the_picture_changes_quantity():
     session.set_axes(RenderAxes(x="frame", y="photons", x_scale=10.0, y_scale=1000.0))
     projection = Projection()
     projection.fit(session.slab, 200, 200)
-    rgb, _ = render_3d(session.layers, projection, session.slab, projection.fov(200, 200))
+    rgb = render_3d(session.layers, projection, session.slab, projection.fov(200, 200))
     assert (rgb > 0).any(), "the 3D view came up empty on the new axes"
 
     session.set_axes(RenderAxes())          # and back to the ordinary picture
     assert tuple(np.round(session.slab.size[:2])) != (1000.0, 1000.0)
     projection = Projection()
     projection.fit(session.slab, 200, 200)
-    rgb, _ = render_3d(session.layers, projection, session.slab, projection.fov(200, 200))
+    rgb = render_3d(session.layers, projection, session.slab, projection.fov(200, 200))
     assert (rgb > 0).any()
 
 

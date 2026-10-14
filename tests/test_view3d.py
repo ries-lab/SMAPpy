@@ -111,15 +111,15 @@ def test_opacity_zero_is_the_plain_sum_and_one_hides_the_back():
     assert not np.allclose(opaque.weight[covered], back_only.weight[covered] + front_only.weight[covered])
 
 
-def test_render_3d_gives_depth_histogram_and_selection_in_slab():
+def test_render_3d_draws_the_slab_and_the_selection_is_cut_to_it():
     from smappy.session import Session
     from smappy.view3d import render_3d
     locs = _table()
     s = Session(locs)
     s.set_slab(Slab.from_bounds(0, 1000, 0, 800, -100, 100))
     proj = Projection(pivot=s.slab.center, zoom=5.0)
-    rgb, hist = render_3d(s.layers, proj, s.slab, proj.fov(200, 160))
-    assert rgb.shape == (160, 200, 3) and hist[:, 1].sum() > 0 and abs(hist[:, 0]).max() <= 100
+    rgb = render_3d(s.layers, proj, s.slab, proj.fov(200, 160))
+    assert rgb.shape == (160, 200, 3) and rgb.max() > 0
     s.select_in_slab = True
     assert np.abs(locs["z_nm"][s.selection(0).mask]).max() <= 100
 
@@ -227,43 +227,6 @@ def test_the_index_picks_the_same_rows_as_a_walk_over_the_table():
         assert np.array_equal(np.sort(a), np.sort(b)) and a.size
 
 
-def test_the_depth_histogram_is_the_slabs_depths_with_or_without_an_index():
-    """Sampling stands in for every row -- the panel hides the count axis --
-    but it has to sample the slab, not the table around it."""
-    from smappy.spatial import SpatialIndex
-    from smappy.view3d import depth_histogram, depth_sample
-    locs = _table(50_000)
-    index = SpatialIndex(np.asarray(locs["x_nm"]), np.asarray(locs["y_nm"]))
-    select = np.ones(len(locs), bool)
-    slab = Slab.from_bounds(400, 600, 300, 500, -100, 100)    # a small part of the table
-    proj = Projection(azimuth=20, elevation=50, pivot=slab.center, zoom=5.0)
-    walked = depth_sample(locs, select, proj, slab, None)
-    indexed = depth_sample(locs, select, proj, slab, index)
-    exact = project_layer(locs, select, proj, slab, RenderSettings())[0]["depth"]
-    assert walked.size == indexed.size == len(exact)          # small enough to be whole
-    assert abs(float(np.mean(indexed)) - float(np.mean(exact))) < 1e-3
-    hist = depth_histogram([indexed])
-    assert hist[:, 1].sum() == len(exact)
-    lo, hi = float(np.min(exact)), float(np.max(exact))
-    assert lo - 1 <= hist[0, 0] and hist[-1, 0] <= hi + 1
-
-
-def test_a_sampled_histogram_keeps_the_shape_of_the_whole_one():
-    from smappy.view3d import HIST_POINTS, depth_histogram, depth_sample
-    locs = _table(HIST_POINTS)                      # comfortably over the limit below
-    select = np.ones(len(locs), bool)
-    proj = Projection(azimuth=15, elevation=40, zoom=5.0)
-    limit = 20_000        # 64 bins of ~300: the sampling noise is well under the bound
-    sampled = depth_sample(locs, select, proj, None, None, limit=limit)
-    whole = project_layer(locs, select, proj, None, RenderSettings())[0]["depth"]
-    assert sampled.size <= limit < len(whole)
-    a = depth_histogram([sampled])[:, 1]
-    b = depth_histogram([np.asarray(whole)])[:, 1]
-    # same shape, different scale: compare the normalised profiles
-    a, b = a / a.sum(), b / b.sum()
-    assert np.abs(a - b).sum() < 0.15
-
-
 def test_thinning_keeps_the_count_the_order_and_the_density():
     from smappy.view3d import thinned
     rng = np.random.default_rng(3)
@@ -317,8 +280,8 @@ def test_a_preview_is_bounded_by_the_budget_and_a_final_frame_is_not():
     assert drawn.size <= limit
     whole = project_layer(st.locs, st.filter.mask, proj, slab, st.settings)[1]
     assert whole.size > limit                                 # the final frame is all of it
-    rgb, hist = render_3d(s.layers, proj, slab, proj.fov(200, 160), True, budget=budget)
-    assert rgb.shape == (160, 200, 3) and hist[:, 1].sum() > 0
+    rgb = render_3d(s.layers, proj, slab, proj.fov(200, 160), True, budget=budget)
+    assert rgb.shape == (160, 200, 3) and rgb.max() > 0
     assert budget.rate is not None                            # and it timed itself
 
 
@@ -349,3 +312,18 @@ def test_moving_along_the_sight_brings_the_middle_of_the_screen_nearer():
     assert after[2] > before[2]                         # nearer the eye
     assert abs(after[0]) > abs(before[0])               # so it looks bigger
     assert proj.apply(*proj.screen_centre())[:2] == pytest.approx((0.0, 0.0), abs=1e-6)
+
+
+def test_the_sum_is_drawn_on_the_cpu_for_a_small_slab_and_the_gpu_for_a_large_one():
+    """*auto* is the plain sum on whichever engine is faster for the slab's
+    size; a look the user chose is never changed."""
+    from smappy.session import Session
+    from smappy.view3d import AUTO_GPU_POINTS, engine_for, snapshot_3d
+    s = Session(_table(AUTO_GPU_POINTS + 1000))
+    layers = snapshot_3d(s.layers)
+    proj = Projection()
+    assert proj.engine == "auto"
+    assert engine_for(proj, layers, None) == "gpu"                   # the whole table
+    small = Slab.from_bounds(0, 50, 0, 50, -100, 100)
+    assert engine_for(proj, layers, small) == "cpu"
+    assert engine_for(Projection(engine="points"), layers, small) == "points"

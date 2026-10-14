@@ -220,25 +220,31 @@ def make(d) -> None:
     _turn(window.view, 35.0, 55.0)
     d.pump(0.5)
     d.settle()
+    bar = window.toolbar
     d.shot("Drag to turn it, scroll to zoom. Top, front and side jump to those "
-           "views; fit brings the whole box back.",
-           spot=[d.window_rect(window)])
+           "views; fit brings the whole box back. Keys lists the rest.",
+           spot=[d.union(bar.presets["top"], bar.keys_button), d.window_rect(window)],
+           point=bar.presets["front"])
     panel = window.panel
+    window.options.show_below(bar.options_button)
     panel.depth_color.setChecked(True)
     d.pump(0.5)
     d.settle()
-    d.shot("Colour by depth shows which parts are near and which are far.",
+    d.shot("Options holds how it is drawn. Colour by depth shows which parts "
+           "are near and which are far.",
            spot=[panel.depth_color, d.window_rect(window)], point=panel.depth_color)
     window._preset("top")
+    panel.slab_section.button.click()
     lo, hi = panel.ranges[2]
     lo.setValue(0.0)
     hi.setValue(150.0)
     d.pump(0.5)
     d.settle()
-    d.shot("The slab is the box that is drawn. Narrowed in z it is a thin "
-           "section; it can also follow a region drawn in 2D.",
+    d.shot("The slab is the box that is drawn. It follows the region drawn in "
+           "2D; narrowed in z it is a thin section.",
            spot=[d.union(lo, hi), d.window_rect(window)], point=lo)
-    assert any(r.isVisible() for r in (window, panel)), "the 3D view did not open"
+    window.options.hide()
+    assert window.isVisible(), "the 3D view did not open"
 
     d.chapter("Next")
     d.card("What to remember",
