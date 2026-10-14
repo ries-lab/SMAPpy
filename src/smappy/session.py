@@ -144,7 +144,7 @@ class Layer:
     def bounds(self):
         """(x0, y0, x1, y1) this layer covers, in render coordinates."""
         if self.is_image:
-            return self.image.bounds
+            return None if self.image.is_empty else self.image.bounds
         return self.state.bounds()
 
     def apply_defaults(self) -> None:
@@ -396,8 +396,25 @@ class Session:
             self._listeners.remove(callback)
 
     def changed(self, what: str) -> None:
+        # before anyone hears of the images, so a list of sources shows the
+        # one a waiting layer has just taken
+        filled = what == "images" and self._fill_empty_image_layers()
         for cb in list(self._listeners):
             cb(what)
+        if filled:
+            self.changed("layer")
+
+    def _fill_empty_image_layers(self) -> bool:
+        """Point every image layer still waiting (`ImageData.empty`) at the
+        first image there is: the kept frames, else any opened image.  True
+        if one was."""
+        waiting = [l for l in self.layers if l.is_image and l.image.is_empty]
+        sources = self.raw_images() or [im for im in self.images if not im.is_empty]
+        if not waiting or not sources:
+            return False
+        for layer in waiting:
+            layer.show_image(sources[0], 0)
+        return True
 
     def set_unsaved(self, on: bool) -> None:
         """Say whether the table differs from the file; "unsaved" when that
@@ -588,14 +605,16 @@ class Session:
 
         Without one, the layer shows the camera frames kept with the file --
         their average -- when there are any: it is what a new image layer is
-        nearly always for, the camera's view under the localizations.
+        nearly always for, the camera's view under the localizations.  Else
+        the first image opened; with neither, pass `ImageData.empty()` for a
+        layer that waits for one.
         """
         if image is None:
-            raws = self.raw_images()
-            if not raws:
+            sources = self.raw_images() or self.images
+            if not sources:
                 raise ValueError("no image: open one, or fit with raw frames kept")
-            image = raws[0]
-        if all(im is not image for im in self.images):
+            image = sources[0]
+        if not image.is_empty and all(im is not image for im in self.images):
             self.images.append(image)
             self.changed("images")
         layer = Layer.from_image(image, name)
@@ -620,7 +639,7 @@ class Session:
         """What `save` keeps: every file's raw frames, and each image a
         layer shows.  An image opened and then left is not kept: the file
         records what was looked at, not everything that was tried."""
-        shown = [l.image for l in self.layers if l.is_image]
+        shown = [l.image for l in self.layers if l.is_image and not l.image.is_empty]
         out = self.raw_images()
         for im in shown:
             if all(im is not o for o in out):
@@ -1345,6 +1364,28 @@ class Session:
         lay = self.layers[layer]
         sel = Selection(lay.filter.mask, layer=layer, name=lay.name)
         return self._clip(sel, lay.locs, layer)
+
+    def count_in_view(self, layer: int, x0: float, x1: float, y0: float,
+                      y1: float) -> int:
+        """How many of what the layer draws (`shown_selection`) lie in the
+        box: the count beside a zoomed picture, which the filter's count is
+        not.  On the usual axes the spatial index narrows it to a few cells,
+        so it costs next to nothing after every zoom; on custom ones it is a
+        pass over the table."""
+        if self.layers[layer].is_image:
+            return 0
+        lay = self.layers[layer]
+        locs = lay.locs
+        if not len(locs):
+            return 0
+        mask = self.shown_selection(layer).mask
+        axes = self.axes(layer)
+        x, y = axes.coordinates(locs)
+        if axes.is_default:
+            idx = lay.state.index.query(x0, x1, y0, y1)
+            x, y, mask = x[idx], y[idx], mask[idx]
+        return int(np.count_nonzero(mask & (x >= x0) & (x < x1)
+                                    & (y >= y0) & (y < y1)))
 
     def _clip(self, sel: Selection, locs: Localizations, layer: int) -> Selection:
         """Narrow a layer's selection to the ROI and, if asked, the slab."""

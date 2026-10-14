@@ -38,7 +38,7 @@ def test_the_plus_menu_adds_an_image_layer_on_the_kept_average(app):
     from smappy.gui.render_tab import RenderTab
     session, raw = session_with_raw_frames()
     tab = RenderTab(session)
-    image_action = [a for a in tab.strip.add.menu().actions() if a.text() == "image..."][0]
+    image_action = [a for a in tab.strip.add.menu().actions() if a.text() == "image layer"][0]
     image_action.trigger()               # used to do nothing: see LayerStrip
     layer = session.layers[-1]
     assert layer.is_image and layer.image is raw and layer.frame == 0
@@ -94,15 +94,23 @@ def test_the_source_list_offers_every_image_and_opens_a_new_one(app, tmp_path,
     assert "other.tif" in [box.itemText(i) for i in range(box.count())]
 
 
-def test_without_kept_frames_the_plus_menu_asks_for_a_file(app, monkeypatch):
-    from PySide6.QtWidgets import QFileDialog
+def test_an_image_layer_asked_for_before_any_image_waits_and_takes_the_first(app):
+    """During a live fit there are no frames yet: the layer opens drawing
+    nothing, and shows the fit's frames when they arrive."""
     from smappy.gui.render_tab import RenderTab
-    session, _ = session_with_raw_frames()
-    session.images = []
-    asked = []
-    monkeypatch.setattr(QFileDialog, "getOpenFileName",
-                        staticmethod(lambda *a, **k: asked.append(1) or ("", "")))
+    rng = np.random.default_rng(1)
+    session = Session(Localizations({"x_nm": rng.uniform(0, 3000, 50),
+                                     "y_nm": rng.uniform(0, 3000, 50),
+                                     "frame": np.arange(50)}, {}))
     tab = RenderTab(session)
-    n = len(session.layers)
-    tab.strip.add.menu().actions()[1].trigger()
-    assert asked == [1] and len(session.layers) == n     # cancelled: no layer
+    [a for a in tab.strip.add.menu().actions() if a.text() == "image layer"][0].trigger()
+    layer = session.layers[-1]
+    assert layer.is_image and layer.image.is_empty
+    assert session.images == [] and session.saved_images() == []
+    assert layer.bounds() is None
+    assert tab.image_source.currentText().startswith("none yet")
+    _, raw = session_with_raw_frames()
+    session.images.append(raw)
+    session.changed("images")
+    assert layer.image is raw and layer.name == raw.name
+    assert tab.image_source.currentText() == "a.tif: raw frames"

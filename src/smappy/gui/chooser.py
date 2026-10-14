@@ -11,12 +11,41 @@ from typing import Dict, List, Optional
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QLabel, QLineEdit,
-                               QTreeWidget, QTreeWidgetItem, QVBoxLayout)
+                               QTreeWidget, QTreeWidgetItem,
+                               QTreeWidgetItemIterator, QVBoxLayout)
 
 from .. import plugins
 from ..plugins.discovery import PluginRef
 
 _PATH = Qt.UserRole
+_PAGES: Dict[str, str] = {}        # plugin path -> its page's text
+
+
+def page_text(ref: PluginRef) -> str:
+    """The plugin's documentation page, for the search to look in.
+
+    Read once per plugin and kept: sixty-odd small files are a few
+    milliseconds, on the first letter typed, and a plugin is often known by
+    what it does -- "drift", "FRC", "Thompson" -- rather than by its name.
+    """
+    if ref.path not in _PAGES:
+        from ..docs import page_file
+        try:
+            file = page_file(ref.path, ref.origin)
+            _PAGES[ref.path] = file.read_text(encoding="utf-8") if file else ""
+        except OSError:
+            _PAGES[ref.path] = ""
+    return _PAGES[ref.path]
+
+
+def snippet(text: str, word: str, width: int = 60) -> str:
+    """A few words either side of the first ``word`` in ``text``."""
+    at = text.lower().find(word.lower())
+    if at < 0:
+        return ""
+    start, end = max(at - width, 0), min(at + len(word) + width, len(text))
+    piece = " ".join(text[start:end].split())
+    return ("..." if start else "") + piece + ("..." if end < len(text) else "")
 
 
 class PluginTree(QTreeWidget):
@@ -36,6 +65,7 @@ class PluginTree(QTreeWidget):
         self.itemActivated.connect(self._activated)
         self.itemDoubleClicked.connect(self._activated)
         self.refs: Dict[str, PluginRef] = {}
+        self.text = ""                 # what is searched for, lower case
         self.reload()
 
     def reload(self) -> None:
@@ -74,12 +104,13 @@ class PluginTree(QTreeWidget):
         return items[0].data(0, _PATH) if items else None
 
     def filter(self, text: str) -> None:
-        """Show what matches, and the branches leading to it.
+        """Show what matches -- in the name, the path, the summary or the
+        documentation page -- and the branches leading to it.
 
         With a search in place the matches are expanded; emptying the box puts
         the tree back the way it opens, collapsed.
         """
-        text = text.strip().lower()
+        self.text = text = text.strip().lower()
 
         def visit(item: QTreeWidgetItem) -> bool:
             path = item.data(0, _PATH)
@@ -87,7 +118,8 @@ class PluginTree(QTreeWidget):
             if path and text:
                 ref = self.refs[path]
                 hit = (text in ref.name.lower() or text in path.lower()
-                       or text in ref.description.lower())
+                       or text in ref.description.lower()
+                       or text in page_text(ref).lower())
             shown = hit
             for i in range(item.childCount()):
                 shown = visit(item.child(i)) or shown
@@ -116,7 +148,7 @@ class PluginChooser(QDialog):
         self.setWindowTitle(title)
         self.path: Optional[str] = None
         layout = QVBoxLayout(self)
-        self.search = QLineEdit(placeholderText="find a plugin...")
+        self.search = QLineEdit(placeholderText="find a plugin: its name, or a word from its page")
         self.search.setClearButtonEnabled(True)
         layout.addWidget(self.search)
         self.tree = PluginTree(per_region=per_region)
@@ -145,7 +177,8 @@ class PluginChooser(QDialog):
             note.setStyleSheet("color: #a05000")
             layout.addWidget(note)
 
-        self.search.textChanged.connect(self.tree.filter)
+        self.search.textChanged.connect(self._search)
+        self.search.returnPressed.connect(self._first)
         self.tree.itemSelectionChanged.connect(self._selected)
         self.tree.chosen.connect(self._accept_path)
         self.buttons.accepted.connect(self.accept)
@@ -153,10 +186,41 @@ class PluginChooser(QDialog):
         self.resize(420, 480)
         self.search.setFocus()
 
+    def _search(self, text: str) -> None:
+        """Filter, and select the first match, so Enter opens it."""
+        self.tree.filter(text)
+        if text.strip():
+            self._first(select_only=True)
+
+    def _first(self, select_only: bool = False) -> None:
+        """The best plugin left in the tree: selected, or with Enter chosen.
+
+        One whose name has the word comes before one whose page only
+        mentions it: "RCC" means RCC, not COMET, whose page compares the two.
+        """
+        found = []
+        it = QTreeWidgetItemIterator(self.tree, QTreeWidgetItemIterator.NotHidden)
+        while it.value() is not None:
+            if it.value().data(0, _PATH):
+                found.append(it.value())
+            it += 1
+        if not found:
+            return
+        word = self.tree.text
+        item = min(found, key=lambda i: word not in i.text(0).lower())
+        self.tree.setCurrentItem(item)
+        if not select_only:
+            self._accept_path(item.data(0, _PATH))
+
     def _selected(self) -> None:
         self.path = self.tree.selected()
         ref = self.tree.refs.get(self.path) if self.path else None
-        self.about.setText(ref.description or ref.path if ref else " ")
+        text = ref.description or ref.path if ref else " "
+        word = self.tree.text
+        if ref and word and word not in (ref.name + ref.path + ref.description).lower():
+            # found in the page: say where, or the match looks like a mistake
+            text += f"\n\nIn its page: {snippet(page_text(ref), word)}"
+        self.about.setText(text)
         self.buttons.button(QDialogButtonBox.Ok).setEnabled(self.path is not None)
 
     def _accept_path(self, path: str) -> None:

@@ -33,8 +33,8 @@ DEFAULT_PIXEL = 10.0  # nm per screen pixel that a click on *pixel* zooms to
 # How the layers are laid out: added up into one picture, as SMAP does by
 # default, or a picture each side by side (SMAP's *split*), with or without
 # the added-up one after them (*comp*).
-LAYOUTS = (("overlay", "overlay"), ("side", "side by side"),
-           ("side+overlay", "side by side + overlay"))
+LAYOUTS = (("overlay", "overlay"), ("side", "split"),
+           ("side+overlay", "split + overlay"))
 PANEL_LABEL = (255, 255, 255)
 PANEL_BORDER = pg.mkPen((128, 128, 128), width=1)
 # what the view says while it has nothing to show
@@ -232,6 +232,15 @@ class RenderView(QWidget):
         if self.drawing and event.type() in (QEvent.MouseButtonPress, QEvent.MouseButtonRelease,
                                              QEvent.MouseButtonDblClick):
             return self._draw_event(event)
+        if event.type() == QEvent.MouseButtonDblClick and \
+                event.button() == Qt.LeftButton:
+            # SMAP's double-click: that place to the middle, at the same zoom
+            scene = self.graphics.mapToScene(event.position().toPoint())
+            if self.view.sceneBoundingRect().contains(scene):
+                at = self.view.mapSceneToView(scene)
+                self.center_on(at.x(), at.y())
+                event.accept()
+                return True
         if event.type() == QEvent.NativeGesture and \
                 event.gestureType() == Qt.NativeGestureType.ZoomNativeGesture:
             factor = 1.0 / (1.0 + event.value())
@@ -862,7 +871,7 @@ class RenderToolBar(QToolBar):
         self.line_width = QDoubleSpinBox(minimum=0.1, maximum=1e6, decimals=1)
         self.line_width.setKeyboardTracking(False)
         self.line_width.setValue(view.line_width)
-        self.line_width.setMaximumWidth(110)
+        self.line_width.setMaximumWidth(95)
         self.line_width.setToolTip("how wide a line ROI is: the band a profile "
                                    "is taken over, and the slab's second axis "
                                    "in the 3D window")
@@ -870,13 +879,20 @@ class RenderToolBar(QToolBar):
         self.addWidget(self.line_width)
 
         self.addAction(QAction("Reset view", self, triggered=view.reset))
+        # the 3D window is a menu item away in the control window, and the
+        # picture is where one decides to look at it in 3D; ControlWindow
+        # connects it, since this toolbar does not know that window
+        self.view3d_button = QToolButton(text="3D")
+        self.view3d_button.setToolTip("open the 3D view (Ctrl+3)")
+        self.addWidget(self.view3d_button)
 
         # SMAP's *split* and *comp* ticks, as one choice of three
         self.layers_button = QToolButton(popupMode=QToolButton.InstantPopup)
-        self.layers_button.setToolTip("the layers added up into one picture, or a "
-                                      "picture each side by side (stacked when "
-                                      "the data is wide), with or without the "
-                                      "added-up one after them")
+        self.layers_button.setToolTip("layers: added up into one picture "
+                                      "(overlay), or split into a picture each, "
+                                      "side by side (stacked when the data is "
+                                      "wide), with or without the added-up one "
+                                      "after them")
         layers_menu = QMenu(self.layers_button)
         layouts = QActionGroup(layers_menu)
         self.layout_actions = {}
@@ -899,7 +915,7 @@ class RenderToolBar(QToolBar):
         self.addWidget(self.pixel_button)
         self.pixel = QDoubleSpinBox(minimum=0.01, maximum=1e6, decimals=2)
         self.pixel.setKeyboardTracking(False)
-        self.pixel.setMaximumWidth(110)
+        self.pixel.setMaximumWidth(95)
         self.pixel.setToolTip("what one screen pixel is: type a size to zoom to "
                               "it, scroll to zoom as usual")
         self.pixel.valueChanged.connect(view.set_pixel_size)
@@ -908,38 +924,64 @@ class RenderToolBar(QToolBar):
         self._show_pixel()
         self._width_unit()
 
+        # what each layer draws in the view: counted again once a zoom or a
+        # pan settles, since a count of the whole table beside a zoomed
+        # picture answers a question nobody asked
         self.counts = QLabel("")
-        self.counts.setStyleSheet("padding-left: 12px")
+        self.counts.setToolTip("localizations each layer draws in the view "
+                               "(in the ROI when one is drawn)")
         self.addWidget(self.counts)
+        self._count_timer = QTimer(self, singleShot=True, interval=150)
+        self._count_timer.timeout.connect(lambda: self._update_counts("view"))
+        view.view.sigRangeChanged.connect(lambda *_: self._count_timer.start())
         view.session.on_change(self._update_counts)
         self._update_counts("locs")
+        self.border = ""
         self._style_buttons()
 
     def _style_buttons(self) -> None:
-        """Buttons in the label's font, bold and framed, so they read as buttons.
+        """Buttons in the label's font, framed, so they read as buttons.
 
         A toolbar's buttons are frameless, and on macOS Qt gives QToolButton
         the small system font, so *Save*, *ROI* and *Reset view* came out
         smaller and fainter than the *width* and layer labels beside them --
         and looked like labels too.  The size is the label's, measured rather
-        than written down, so it follows the platform and the user's font.
+        than written down, so it follows the platform and the user's font;
+        the counts are a size smaller, being read rather than pressed.
+
+        One style sheet holds this and the session's colour (`set_border`):
+        the colour used to be set as the whole sheet, which silently undid
+        the buttons the first time the title was written.
         """
         font = self.width_label.font()
-        size = (f"{font.pointSizeF():g}pt" if font.pointSizeF() > 0
-                else f"{font.pixelSize()}px")
+        points = font.pointSizeF()
+        size, small = ((f"{points:g}pt", f"{max(points - 2, 8):g}pt") if points > 0
+                       else (f"{font.pixelSize()}px", f"{font.pixelSize() - 2}px"))
         self.setStyleSheet(
-            f"QToolButton {{ font-size: {size}; font-weight: bold;"
+            f"QToolButton {{ font-size: {size};"
             " border: 1px solid palette(mid); border-radius: 4px;"
-            " padding: 2px 8px; margin: 1px 2px; background: palette(button); }"
+            " padding: 1px 6px; margin: 1px 2px; background: palette(button); }"
             " QToolButton:hover { background: palette(light); }"
             " QToolButton:pressed { background: palette(midlight); }"
             " QToolButton[popupMode=\"2\"] { padding-right: 16px; }"
             " QToolButton::menu-indicator { subcontrol-origin: padding;"
-            " subcontrol-position: right center; right: 4px; }")
+            " subcontrol-position: right center; right: 4px; }"
+            f" QLabel {{ font-size: {size}; }}"
+            " QDoubleSpinBox { padding: 0px 2px; }"
+            + self.border)
+        self.counts.setStyleSheet(f"font-size: {small}; color: gray;"
+                                  " padding-left: 8px")
+
+    def set_border(self, colour: str) -> None:
+        """The session's colour along the bottom (`gui.identity`), or none."""
+        self.border = (f" QToolBar {{ border-bottom: 4px solid {colour}; }}"
+                       if colour else "")
+        self._style_buttons()
 
     def _update_counts(self, what: str) -> None:
-        """Localizations per layer, and inside the ROI when there is one."""
-        if what not in ("locs", "layer", "layers", "append", "roi", "roi-edited"):
+        """Localizations per layer in the view, or in the ROI when there is one."""
+        if what not in ("locs", "layer", "layers", "append", "roi", "roi-edited",
+                        "view", "regrouped"):
             return
         roi = self.view.session.roi
         if roi is not None and roi.kind == "line":
@@ -949,15 +991,17 @@ class RenderToolBar(QToolBar):
         if what in ("locs", "layer"):
             self._width_unit()
         session = self.view.session
+        rect = self.view.view.viewRect()
         parts = []
         for i, layer in enumerate(session.layers):
             if layer.is_image:
-                parts.append(f"{layer.name}: image")
                 continue
-            n = len(layer.filter)
             if session.roi is not None:
-                n = f"{len(session.shown_selection(i))} in {session.roi}"
-            parts.append(f"{layer.name}: {n}")
+                n = f"{len(session.shown_selection(i)):,} in ROI"
+            else:
+                n = f"{session.count_in_view(i, rect.left(), rect.right(), rect.top(), rect.bottom()):,}"
+            # the layer's number, as its button in the Render tab shows it
+            parts.append(f"{i + 1}: {n}" if len(session.layers) > 1 else n)
         self.counts.setText("   ".join(parts))
 
     def set_layout(self, mode: str) -> None:
@@ -967,7 +1011,7 @@ class RenderToolBar(QToolBar):
         self._layout_text()
 
     def _layout_text(self) -> None:
-        self.layers_button.setText(f"Layers: {dict(LAYOUTS)[self.view.layout_mode]}")
+        self.layers_button.setText(dict(LAYOUTS)[self.view.layout_mode])
 
     def _show_pixel(self, *_) -> None:
         """The pixel size after a zoom, written without zooming again."""

@@ -136,7 +136,7 @@ def test_a_grouped_layer_counts_blinks_inside_the_roi_as_it_does_outside(app):
     session.set_roi(Region.rect(0, 0, 10_000, 5_000))
     inside = int(((grouped["y_nm"] <= 5_000) & (grouped["y_nm"] >= 0)).sum())
     assert len(session.shown_selection(0)) == inside
-    assert f"layer 1: {inside} in" in bar.counts.text()
+    assert f"{inside:,} in ROI" in bar.counts.text()
     widget._update_count()
     assert widget.count.text().endswith(f", {inside} in ROI")
     # what the plugins get is unchanged: the ungrouped table, three per blink

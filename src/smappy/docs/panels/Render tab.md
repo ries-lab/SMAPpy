@@ -15,15 +15,19 @@ The Render tab decides what goes into that picture and how it is drawn.
 The picture is made of **layers**.  Each layer shows the localizations its own
 filter keeps, drawn its own way -- one layer per channel or per file, say, or
 the same data twice with different filters.  The visible layers are added up
-into the image in the main window, as in SMAP.  *Layers* on the picture's
-toolbar shows them *side by side* instead, a panel per layer, or *side by side
-+ overlay* with the added-up picture after them (SMAP's *split* and *comp*).
+into the image in the main window, as in SMAP.  The *overlay* button on the
+picture's toolbar shows them *split* instead, a panel per layer side by side,
+or *split + overlay* with the added-up picture after them (SMAP's *split* and
+*comp*).
 The panels go across or one above another, whichever shows the data larger in
 the window, and move and zoom together; the [ROI](plugin:Panels/Glossary)
 (region of interest: a rectangle, line or polygon drawn on the picture) is
 drawn and edited on the first and its outline is on all of them.  Beside it, *pixel* says what one
 screen pixel is: the zoom, as a number.  Type a size to zoom to it, or press
-*pixel* to go to 10 nm.  Every control below the layer strip edits one layer,
+*pixel* to go to 10 nm.  Double-click the picture to move that place to the
+middle.  At the end of the toolbar is how many localizations each layer draws
+in the view -- counted again after every zoom -- or in the ROI when one is
+drawn; *3D* opens the [3D view](plugin:Panels/3D view).  Every control below the layer strip edits one layer,
 the one selected in the strip.
 
 What a layer shows is also what the rest of the program works on.  A plugin
@@ -391,7 +395,7 @@ Draws the overview again with the current layers -- after a filter, a LUT or
 a layer has changed.
 
 ### +
-Adds a layer: *localizations* or *image...*.  The layer strip also has one
+Adds a layer: *localizations* or *image layer*.  The layer strip also has one
 button per layer: click to edit it, right-click to show or hide it without
 selecting it; bold means drawn, struck through means hidden.
 
@@ -408,11 +412,12 @@ A new localization layer on the same table, starting as a copy of the
 selected one -- its bounds, files, display and *merge blinks* -- and the tab moves
 onto it.
 
-### image...
+### image layer
 Adds an image layer.  When a file open has camera frames kept with it, the
-new layer shows their average; otherwise it asks for a TIFF or PNG.  If the
-file does not say its pixel size, a dialog asks for it and for where its
-first pixel lies.
+new layer shows their average; otherwise the first image opened.  With
+neither -- during a live fit, whose frames come when it ends -- the layer
+draws nothing and shows the first image that arrives, the fit's frames or a
+file opened with its *source*.
 
 ### -
 Removes the selected layer.  There is always at least one.

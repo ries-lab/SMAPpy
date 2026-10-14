@@ -98,6 +98,9 @@ class FilterWidget(QWidget):
         super().__init__(parent)
         self.session = session
         self.layer: Optional[Layer] = None
+        # the picture's field of view, ``() -> QRectF``, for the count in it;
+        # set by the Render tab when there is a picture
+        self.view_rect = None
         self.layer_index = 0
         self._hist_cache: Dict[Tuple[int, str], tuple] = {}
         self._shown_region = (None, None)
@@ -347,6 +350,13 @@ class FilterWidget(QWidget):
         text = f"{len(f)} / {len(self.layer.locs)}"
         if self.session is not None and self.session.roi is not None:
             text += f", {len(self.session.shown_selection(self.layer_index))} in ROI"
+        elif self.session is not None and self.view_rect is not None and len(f):
+            # zoomed in, the picture shows a part of what the filter keeps
+            r = self.view_rect()
+            n = self.session.count_in_view(self.layer_index, r.left(), r.right(),
+                                           r.top(), r.bottom())
+            if n < len(f):
+                text += f", {n} in view"
         self.count.setText(text)
         bounded = set(f.ranges)
         for n, b in self.quick.items():
@@ -439,7 +449,7 @@ class LayerStrip(QWidget):
         # second argument as a slot and *calls* it, a signal instance is not
         # callable, and the TypeError is printed and swallowed -- the menu
         # entry did nothing at all
-        menu.addAction("image...", lambda: self.add_image_requested.emit())
+        menu.addAction("image layer", lambda: self.add_image_requested.emit())
         self.add.setMenu(menu)
         self.remove = QToolButton(text="-")
         self.remove.setToolTip("remove this layer")
@@ -938,6 +948,11 @@ class RenderTab(QWidget):
         self.strip = LayerStrip(session)
         layout.addWidget(self.strip)
         self.filter = FilterWidget(session)
+        if view is not None:
+            self.filter.view_rect = view.view.viewRect
+            self._count_timer = QTimer(self, singleShot=True, interval=150)
+            self._count_timer.timeout.connect(self._count_in_view)
+            view.view.sigRangeChanged.connect(lambda *_: self._count_timer.start())
         self.filter_section = CollapsibleSection("filter", self.filter, expanded=True, **HELP)
         layout.addWidget(self.filter_section)
 
@@ -1339,7 +1354,11 @@ class RenderTab(QWidget):
         box.clear()
         for im in self.session.images:
             box.addItem(im.name or "image", im)
-        if all(im is not layer.image for im in self.session.images):
+        if layer.image.is_empty:
+            # the frames a fit keeps arrive when it ends; the layer takes the
+            # first image there is by itself (`Session.changed`)
+            box.addItem("none yet: a fit's frames, or a file", layer.image)
+        elif all(im is not layer.image for im in self.session.images):
             box.addItem(layer.image.name or "image", layer.image)
         box.addItem("open file...", None)
         box.setCurrentIndex(next(i for i in range(box.count())
@@ -1380,15 +1399,20 @@ class RenderTab(QWidget):
                 return self.session.load_image(path, px, x0, y0)
         return None
 
+    def _count_in_view(self) -> None:
+        if self.filter.layer is not None and not self.layer.is_image:
+            self.filter._update_count()
+
     def _add_image(self) -> None:
-        """*+ > image...*: the file's kept frames if it has any, else a file."""
-        if self.session.raw_images():
-            self.session.add_image()
-        else:
-            image = self._open_image_file()
-            if image is None:
-                return
-            self.session.add_image(image)
+        """*+ > image*: the file's kept frames if it has any, else an image
+        already opened, else a layer that waits for one.
+
+        It asked for a TIFF when there were no frames, which during a live
+        fit -- whose frames come with its end -- was never what was meant.
+        A file is one choice of the layer's *source*, beside the frames.
+        """
+        from ..images import ImageData
+        self.session.add_image(None if self.session.images else ImageData.empty())
         self.strip.select(len(self.session.layers) - 1)
 
     def _grouping(self) -> None:

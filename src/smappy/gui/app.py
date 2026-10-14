@@ -293,6 +293,7 @@ class ControlWindow(QMainWindow):
         self.view3d_window = None
         self.calibration_window = None
         self._action(view, "3D view", "Ctrl+3", self.show_3d)
+        render.toolbar.view3d_button.clicked.connect(self.show_3d)
         self.plugins_menu = _add_menu(self.menuBar(), "Plugins", self)
         self._plugin_windows: dict = {}
         # filled when it is opened, from the scan rather than from imports, so
@@ -806,6 +807,9 @@ class ControlWindow(QMainWindow):
             old.deleteLater()
         menu.clear()
         self._action(menu, "Find a plugin...", "Ctrl+Shift+P", self.choose_plugin_window)
+        menu.actions()[-1].setToolTip("search every plugin by its name or a word "
+                                      "from its documentation, and open it in a window")
+        menu.setToolTipsVisible(True)
         menu.addSeparator()
         groups = {"": menu}
 
@@ -1028,8 +1032,7 @@ class ControlWindow(QMainWindow):
             f"SMAPpy - {name}".strip()
             + (f" - {shown}" if shown else ""))
         colour = identity.colour_hex(self.session)
-        self.render_window.toolbar.setStyleSheet(
-            f"QToolBar {{ border-bottom: 4px solid {colour}; }}" if colour else "")
+        self.render_window.toolbar.set_border(colour)
 
     def _shown_text(self) -> str:
         """What the render window actually draws: kept by each visible layer.

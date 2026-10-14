@@ -32,10 +32,29 @@ class ImageData:
     frame: int = 0                   # for a stack: which plane is shown
     metadata: Dict = field(default_factory=dict)
     pixelsize_y: Optional[float] = None   # None: square pixels
-    # "image" (a file opened as one) or "raw" (the frames a fit kept)
+    # "image" (a file opened as one), "raw" (the frames a fit kept) or
+    # "empty" (`ImageData.empty`)
     kind: str = "image"
     # per plane: its camera frame number, -1 for an average; None for a file
     frames: Optional[np.ndarray] = None
+
+    @classmethod
+    def empty(cls) -> "ImageData":
+        """What an image layer shows before there is an image to show.
+
+        A layer asked for while a live fit runs has no frames yet -- the fit
+        hands them over when it ends -- and asking for a TIFF instead was the
+        wrong answer to that.  The layer opens on this, draws nothing, and the
+        session points it at the first image that arrives
+        (`Session.changed`).  It is no source: it is never listed, saved or
+        counted in the view's extent.
+        """
+        return cls(np.zeros((1, 1), np.float32), 1.0, name="no image yet",
+                   kind="empty")
+
+    @property
+    def is_empty(self) -> bool:
+        return self.kind == "empty"
 
     @property
     def pixelsize_xy(self) -> Tuple[float, float]:
