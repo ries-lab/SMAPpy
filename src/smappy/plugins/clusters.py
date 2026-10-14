@@ -43,11 +43,19 @@ where the data's distribution of cell areas crosses a simulated random one;
 the fixed multiple is SR-Tesseler's, simpler and with no simulation.  SMAP's
 ``ClusterVoronoi`` wrote only the density.
 
-**HDBSCAN** (Campello et al. 2013) is scikit-learn's (1.3 and later), an
-optional dependency: ``pip install "smappy-smlm[clusters]"``.  It is quadratic
-in practice -- 48 s at 100 k localizations, 7.6 min at 300 k -- and one call
-that Stop cannot interrupt, so `FindClusters.preflight` asks before a long
-run.  SMAP had none.
+**HDBSCAN** (Campello et al. 2013) is the ``hdbscan`` package's (McInnes et
+al. 2017), an optional dependency: ``pip install "smappy-smlm[clusters]"``.
+Not scikit-learn's, which builds the minimum spanning tree only by Prim's
+algorithm, every point against every other: 48 s at 100 k localizations and
+7.6 min at 300 k, a million in hours.  The package builds it by dual-tree
+Boruvka on a k-d tree, looking only at nearby points: 2.5 s at 100 k and 53 s
+at a million.  ``approx_min_span_tree=False`` asks for the exact tree, no
+slower here; the package's default approximate one agreed with scikit-learn
+at an adjusted Rand index of 0.92, the exact one 0.99 -- the rest is ties,
+the mutual reachability being a core distance for many edges at once, so
+several trees are equally minimal.  It is one call that Stop cannot
+interrupt, so `FindClusters.preflight` asks before a long run.  SMAP had
+none.
 
 All three write the same columns through `with_clusters`, numbered by size
 (`by_size`), one file at a time, blinks or localizations as the layer shows.
@@ -227,38 +235,33 @@ def voronoi_clusters(points: np.ndarray, factor: float = 2.0, min_size: int = 10
     return by_size(found), mean
 
 
-# scikit-learn added HDBSCAN in 1.3; it is an optional dependency
-HDBSCAN_NEEDS = ("HDBSCAN needs scikit-learn 1.3 or newer: "
-                 "pip install \"smappy-smlm[clusters]\" (or scikit-learn)")
+# the hdbscan package (see the module docstring); an optional dependency
+HDBSCAN_NEEDS = ("HDBSCAN needs the hdbscan package: "
+                 "pip install \"smappy-smlm[clusters]\" (or hdbscan)")
 
 
 def hdbscan_available() -> bool:
-    """Whether scikit-learn's HDBSCAN can be imported, without importing it."""
+    """Whether the hdbscan package can be imported, without importing it."""
     import importlib.util
-    if importlib.util.find_spec("sklearn") is None:
-        return False
-    try:
-        from importlib.metadata import version
-        major, minor = (int(v) for v in version("scikit-learn").split(".")[:2])
-    except Exception:                                      # noqa: BLE001 -- on a line
-        return False
-    return (major, minor) >= (1, 3)
+    return importlib.util.find_spec("hdbscan") is not None
 
 
 def hdbscan_clusters(points: np.ndarray, min_cluster_size: int = 10,
                      min_samples: Optional[int] = None) -> np.ndarray:
-    """HDBSCAN (Campello et al. 2013, as scikit-learn implements it): a cluster
-    label per point, 1, 2, ... largest first, 0 for noise.  ``min_samples``
-    None is ``min_cluster_size``, scikit-learn's default."""
+    """HDBSCAN (Campello et al. 2013, as the hdbscan package implements it): a
+    cluster label per point, 1, 2, ... largest first, 0 for noise.
+    ``min_samples`` None is ``min_cluster_size``, the package's default; it
+    counts the neighbours without the point itself (scikit-learn's counts it,
+    one more for the same clusters)."""
     if not hdbscan_available():
         raise ImportError(HDBSCAN_NEEDS)
-    from sklearn.cluster import HDBSCAN
+    from hdbscan import HDBSCAN
     points = np.asarray(points, dtype=float)
     if len(points) < max(2, min_cluster_size):
         return np.zeros(len(points), dtype=np.int64)
     found = HDBSCAN(min_cluster_size=int(min_cluster_size),
                     min_samples=None if min_samples is None else int(min_samples),
-                    copy=True).fit_predict(points)
+                    approx_min_span_tree=False).fit_predict(points)
     return by_size(found)
 
 
@@ -271,7 +274,7 @@ def expected_seconds(algorithm: str, counts) -> float:
     `FindClusters.preflight` for the measurements)."""
     counts = np.asarray(counts, dtype=float)
     if algorithm == "hdbscan":
-        return float((48.0 * (counts / 1e5) ** 2).sum())
+        return float(50e-6 * counts.sum())
     if algorithm == "voronoi":
         return float(20e-6 * counts.sum())
     return float(1e-5 * counts.sum())
@@ -347,10 +350,9 @@ class FindClusters(Plugin):
         """A question before a Voronoi or HDBSCAN run that will be long.
 
         Measured on 4 cores, clusters in a background: Voronoi about 20 us a
-        localization; scikit-learn's HDBSCAN 48 s at 100 k and 7.6 min at
-        300 k -- growing as the square, so a million is hours -- and one
-        call that Stop cannot interrupt.  DBSCAN, a second per 100 k, asks
-        nothing.
+        localization; HDBSCAN about 50 us (2.5 s at 100 k, 53 s at a
+        million), one call that Stop cannot interrupt.  DBSCAN, a second per
+        100 k, asks nothing.
         """
         if settings.algorithm == "dbscan":
             return None
@@ -366,8 +368,8 @@ class FindClusters(Plugin):
             return None
         took = (f"{seconds:.0f} s" if seconds < 90 else f"{seconds / 60:.0f} minutes"
                 if seconds < 5400 else f"{seconds / 3600:.0f} hours")
-        advice = ("HDBSCAN grows as the square of the localizations: merge blinks, "
-                  "or run it in an ROI, or use DBSCAN.  Stop cannot end it early.  "
+        advice = ("Stop cannot end HDBSCAN early: merge blinks, or run it in an "
+                  "ROI, for a shorter run.  "
                   if settings.algorithm == "hdbscan" else "")
         return (f"{int(counts.sum()):,} localizations: this will take about {took}.  "
                 + advice + "Run anyway?")
