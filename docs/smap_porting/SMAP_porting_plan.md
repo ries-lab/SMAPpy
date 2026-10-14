@@ -198,7 +198,14 @@ S ≤ a day, M a few days, L a week or more.
 | **7** ✅ | **Shuffle ids**: for any integer column (`cluster_id`, `roi_id`, `tid`, `frame`, ...), write `<column>_shuffled` with the ids permuted, so colouring by it separates neighbouring ids; a new seed per run | `Analysis/Process/Shuffle ids` | S | the permutation keeps id 0 / noise at 0; grouping keeps a blink's value (recipe with rule `max`) |
 | **8** ✅ | **Fit region**: fit only inside / exclude regions drawn on the camera frame | the fitters' detection part (`plugins/fit.py`), a mask on the candidates | S–M | candidates outside the region are dropped; the Localize tutorial still runs |
 
-### Wave 2: segmentation and local density (needs step 1)
+### Wave 2 -- the design is in `wave2_design.md` (decided 2026-10-14)
+
+Paths: `Analysis/Process/Neighbourhood` (9), `Analysis/Regions/Find clusters`
+(10, DBSCAN moved in, Voronoi, HDBSCAN optional), `Analysis/Regions/Segment
+regions` (11, NPC, density peaks and Column to ROIs moved in, presets as
+files), `Analysis/Measure/Cluster shape` (12).  No aliases for the old
+paths: chains, GUI, tests and docs are updated.  The table below is the
+first sketch; where they differ, `wave2_design.md` wins.
 
 | step | what | where | size | done when |
 |---|---|---|---|---|
