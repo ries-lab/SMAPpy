@@ -113,7 +113,10 @@ in x, y and z.
 clusters are the connected components of the graph of core points within
 $\varepsilon$ of each other -- a hundred thousand localizations take about
 a second.  Each file of the session is clustered on its own, and the
-numbers of the second file's clusters follow the first's.
+numbers of the second file's clusters follow the first's.  The panel shows
+the percentage done, and Stop ends the run and leaves the table as it
+was; on millions of localizations it can take some seconds to stop, since
+it waits for the step that is running.
 
 ## Parameters
 
