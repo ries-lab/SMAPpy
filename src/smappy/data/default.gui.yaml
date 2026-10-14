@@ -36,6 +36,7 @@ tabs:
   - plugin: Analysis/Process/Image Tags
   - plugin: Analysis/Process/Math Parser
   - plugin: Analysis/Process/Remove Localizations
+  - plugin: Analysis/Process/Shuffle ids
   - plugin: Analysis/Register/Calibrate transform
 - name: Regions
   header: roi
