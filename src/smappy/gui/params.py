@@ -520,6 +520,10 @@ class SettingsForm(QWidget):
         self.fields: Dict[str, Any] = {}          # _Field or SettingsForm
         self.labels: Dict[str, QLabel] = {}       # the row label of each field
         self.sections: Dict[str, CollapsibleSection] = {}   # each part's
+        # each row's form layout, to hide the row (`set_shown`), and the
+        # "more" section, hidden with the last of its rows
+        self.row_layouts: Dict[str, QFormLayout] = {}
+        self.more_section: Optional[CollapsibleSection] = None
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(2)
@@ -563,15 +567,18 @@ class SettingsForm(QWidget):
             self.labels[name] = label
             if spec.info.advanced:
                 more.addRow(label, w)
+                self.row_layouts[name] = more
                 continue
             if main is None:
                 main = form_layout()
                 layout.addLayout(main)
             main.addRow(label, w)
+            self.row_layouts[name] = main
         if more.rowCount():
             box = QWidget()
             box.setLayout(more)
-            layout.addWidget(CollapsibleSection("more", box, expanded=False))
+            self.more_section = CollapsibleSection("more", box, expanded=False)
+            layout.addWidget(self.more_section)
 
     def value(self):
         if self.settings_cls is None:
@@ -701,6 +708,39 @@ class SettingsForm(QWidget):
             label = target.labels.get(parts[-1])
             if label is not None:
                 label.setEnabled(bool(on))
+
+    def set_shown(self, flags: Dict[str, bool]) -> None:
+        """Hide the fields and parts the settings leave out (`FormState.shown`):
+        a row with its label, a part with its title bar, and "more" once none
+        of its rows is left.  Cosmetic, as `set_active` is: a hidden widget
+        keeps its value and still answers `value()`.  Unknown names are
+        ignored.
+        """
+        touched = set()
+        for path, on in flags.items():
+            target = self
+            parts = path.split(".")
+            try:
+                for part in parts[:-1]:
+                    target = target.fields[part]
+                name = parts[-1]
+                if name in target.sections:
+                    target.sections[name].setVisible(bool(on))
+                    continue
+                target.row_layouts[name].setRowVisible(target.fields[name], bool(on))
+            except (KeyError, AttributeError):
+                continue
+            touched.add(target)
+        for form in touched:
+            form._update_more()
+
+    def _update_more(self) -> None:
+        if self.more_section is None:
+            return
+        more = self.more_section.content
+        rows = [n for n, lay in self.row_layouts.items() if lay is more.layout()]
+        self.more_section.setVisible(any(
+            self.row_layouts[n].isRowVisible(self.fields[n]) for n in rows))
 
     def set_values(self, values: Dict[str, Any]) -> None:
         """Set some fields by dotted name, without firing `field_changed`."""

@@ -180,7 +180,8 @@ class Thing(Plugin):
 * Override `describe(ctx, settings)` to say what the form should show about
   the settings as they stand, before any run, as a `FormState`: `hints` (what
   fields on *auto* resolve to), `active` (which fields are read; the rest are
-  greyed), `choices` (lists the session decides) and a `notice` -- a line
+  greyed), `shown` (which are shown at all: the parts of the algorithms not
+  selected are hidden), `choices` (lists the session decides) and a `notice` -- a line
   under the form, and optionally a button that opens a GUI window by name
   (`Notice(text, action, window)`, the same `session.window_openers` as
   `Plugin.window`).  `ctx` is None when there is no session.  The fitters

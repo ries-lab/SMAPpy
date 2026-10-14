@@ -331,7 +331,7 @@ class PluginPanel(QWidget):
     def _describe(self) -> None:
         """Show what the plugin says about the settings as they stand
         (`Plugin.describe`): hints in the fields on *auto*, the fields it does
-        not read greyed out, the lists the session decides, and the notice.
+        not read greyed out or hidden, the lists the session decides, and the notice.
 
         Best effort on purpose: working this out may mean opening a file that
         is missing, half-written or not an image at all, and none of that is
@@ -352,6 +352,8 @@ class PluginPanel(QWidget):
             self.form.set_active(state.active)
         if state.titles:
             self.form.set_titles(state.titles)
+        if state.shown:
+            self.form.set_shown(state.shown)
         self._show_notice(state.notice)
 
     def _show_notice(self, notice) -> None:

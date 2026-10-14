@@ -165,6 +165,14 @@ and Escape cancels.
 `FormState.titles` retitles a part by its dotted name while it is folded:
 the fitters' *camera* says what it resolved to.
 
+`FormState.shown` hides fields and parts by dotted name, where `active`
+only greys them: for settings of a choice the plugin does not take at all,
+such as the part of each algorithm that is not selected.  A row goes with its
+label, a part with its title bar, and *more* goes once none of its rows is
+left.  Like greying, it is presentation only: a hidden field keeps its value.
+Grey what the current settings happen not to read, and hide what belongs to
+another choice.
+
 ## The table
 
 `Localizations` is a dataclass of `columns: Dict[str, np.ndarray]` plus
