@@ -178,8 +178,12 @@ triangulation of everything.
 **Speed.**  The neighbours are found by sorting the localizations into
 square cells one radius wide, so that each localization tests only the
 nine cells around it, in compiled code on every core.  5 million
-localizations at *radius* 50 nm take about 5 s; the Voronoi density about
-a minute.  A run expected to take more than 20 s asks first.
+localizations over 40 µm at *radius* 50 nm take about 3 s (SMAP's sweep
+along x alone tests the whole strip $2r$ wide and as tall as the field:
+23 s for the same data); *Gaussian weight* about 10 s; the Voronoi density
+about a minute.  A run expected to take more than 20 s asks first.  The
+panel shows the percentage done, and Stop ends the run and leaves the
+table as it was.
 
 **Merged blinks.**  The column is kept as a recipe with the rule *mean*:
 when blinks are merged again, a blink takes the mean of its localizations'

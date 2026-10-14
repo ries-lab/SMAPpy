@@ -41,9 +41,15 @@ Where it departs from SMAP's:
 * The search is SMAP's sweep over sorted positions made two-dimensional
   (`csrc/neighbours.cpp`): sorted by square cells a radius wide rather than
   by x alone, so a point tests the nine cells around it rather than a strip
-  as tall as the field, on every core.  5 M localizations at 50 nm take
-  about 5 s; a k-d tree took 17 s for the count and over a minute for the
-  pairs a cylinder or a statistic needs.
+  as tall as the field, on every core.  On 5 M localizations over 40 um at
+  50 nm: about 3 s, where SMAP's strip sweep, made parallel the same way,
+  takes 23 s (a strip holds 12,500 points for 25 in the circle) and a k-d
+  tree took 17 s.  The sort is the grouping's: rows by counting, then each
+  row by column on its own thread.
+* **Progress and Stop**: the points are asked about in pieces (`CHUNK`)
+  and the Voronoi cells in tiles, with the percentage done reported after
+  each; Stop ends the run there and writes nothing (`Stopped`), since a
+  column computed for part of the table is worth nothing.
 
 **Writing the column.**  The value goes onto the localizations of the
 *around* layer that pass its filter, NaN on the rest.  On a layer that shows
@@ -59,12 +65,13 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
 import numpy as np
 
 from ..locs import Localizations
-from . import Context, FormState, Notice, Plot, Plugin, Result, param, register
+from . import (Context, FormState, Notice, Plot, Plugin, Result, Stopped, param,
+               register)
 
 # the scatter of the figure shows this many points at most
 FIGURE_POINTS = 50_000
@@ -83,25 +90,54 @@ MODES = {"count": 0, "gauss": 1, "mean": 2, "median": 3, "min": 4, "max": 5,
          "std": 6, "quantile": 7}
 
 
+# the points asked about at once: a chunk is the step progress is reported
+# and a stop is honoured at, a few hundred milliseconds of work
+CHUNK = 250_000
+
+
+# the points asked about at once: a chunk is the step progress is reported
+# and a stop is honoured at, a fraction of a second of work
+CHUNK = 250_000
+
+
 def _search(around: np.ndarray, neighbours: np.ndarray, mode: str, reach: float,
             sigma: float = 0.0, z_reach: Optional[float] = None, z_sigma: float = 0.0,
             values: Optional[np.ndarray] = None, same: Optional[np.ndarray] = None,
-            q: float = 0.5) -> np.ndarray:
+            q: float = 0.5, progress: Optional[Callable[[float], None]] = None
+            ) -> np.ndarray:
     """The C++ search (`csrc/neighbours.cpp`): per around point, over the
-    neighbours laterally within ``reach`` (and within ``z_reach`` in z)."""
-    from .._neighbours import around as search
+    neighbours laterally within ``reach`` (and within ``z_reach`` in z).
+
+    The neighbours are indexed once; the around points are asked about in
+    their cell order, `CHUNK` at a time, and ``progress(fraction)`` is
+    called after each -- which may raise to stop (the plugin raises
+    `Stopped`)."""
+    from .._neighbours import Index, cell_order
     use_z = (z_reach is not None and around.shape[1] > 2 and neighbours.shape[1] > 2)
-    return search(around[:, 0], around[:, 1], around[:, 2] if use_z else None,
-                  neighbours[:, 0], neighbours[:, 1],
-                  neighbours[:, 2] if use_z else None,
-                  values, None if same is None else np.asarray(same, dtype=np.int64),
-                  MODES[mode], float(reach), float(sigma),
-                  float(z_reach) if use_z else 0.0, float(z_sigma), float(q), 0)
+    x0 = float(min(around[:, 0].min(), neighbours[:, 0].min()))
+    y0 = float(min(around[:, 1].min(), neighbours[:, 1].min()))
+    x1 = float(max(around[:, 0].max(), neighbours[:, 0].max()))
+    index = Index(neighbours[:, 0], neighbours[:, 1],
+                  neighbours[:, 2] if use_z else None, values, x0, y0, x1, float(reach))
+    order = cell_order(around[:, 0], around[:, 1], x0, y0, x1, float(reach))
+    same = None if same is None else np.asarray(same, dtype=np.int64)
+    out = np.empty(len(around))
+    for start in range(0, len(order), CHUNK):
+        rows = order[start:start + CHUNK]
+        out[rows] = index.query(around[rows, 0], around[rows, 1],
+                                around[rows, 2] if use_z else None,
+                                None if same is None else same[rows], MODES[mode],
+                                float(sigma), float(z_reach) if use_z else 0.0,
+                                float(z_sigma), float(q))
+        if progress is not None:
+            progress(min(start + CHUNK, len(order)) / len(order))
+    return out
 
 
 def count_neighbours(around: np.ndarray, neighbours: np.ndarray, radius: float,
                      z_half: Optional[float] = None, gaussian: bool = False,
-                     same: Optional[np.ndarray] = None) -> np.ndarray:
+                     same: Optional[np.ndarray] = None,
+                     progress: Optional[Callable[[float], None]] = None) -> np.ndarray:
     """How many ``neighbours`` lie around each ``around`` point.
 
     Within ``radius`` laterally (a circle), and within ``z_half`` in z when
@@ -121,14 +157,16 @@ def count_neighbours(around: np.ndarray, neighbours: np.ndarray, radius: float,
     if gaussian:
         return _search(around, neighbours, "gauss", GAUSS_CUT_XY * radius, radius,
                        None if z_half is None else GAUSS_CUT_Z * z_half,
-                       z_half or 0.0, same=same)
-    return _search(around, neighbours, "count", radius, z_reach=z_half, same=same)
+                       z_half or 0.0, same=same, progress=progress)
+    return _search(around, neighbours, "count", radius, z_reach=z_half, same=same,
+                   progress=progress)
 
 
 def neighbour_statistic(around: np.ndarray, neighbours: np.ndarray,
                         values: np.ndarray, radius: float, statistic: str = "median",
                         quantile: float = 0.5, z_half: Optional[float] = None,
-                        same: Optional[np.ndarray] = None) -> np.ndarray:
+                        same: Optional[np.ndarray] = None,
+                        progress: Optional[Callable[[float], None]] = None) -> np.ndarray:
     """A statistic of ``values`` (one per neighbour) over the neighbours of
     each around point: ``mean``, ``median``, ``min``, ``max``, ``std`` or a
     ``quantile`` (0 to 1, linear between the order statistics, as numpy's).
@@ -147,7 +185,7 @@ def neighbour_statistic(around: np.ndarray, neighbours: np.ndarray,
     if not len(around) or not len(neighbours):
         return np.full(len(around), np.nan)
     return _search(around, neighbours, statistic, radius, z_reach=z_half,
-                   values=np.asarray(values, dtype=float), q=quantile)
+                   values=np.asarray(values, dtype=float), q=quantile, progress=progress)
 
 
 def _cell_areas(p: np.ndarray, box=None, bounds=None, tree=None, ids=None):
@@ -232,8 +270,8 @@ def _cell_areas(p: np.ndarray, box=None, bounds=None, tree=None, ids=None):
 VORONOI_TILE = 50_000
 
 
-def voronoi_areas(points: np.ndarray, tile: int = VORONOI_TILE, threads: int = 0
-                  ) -> np.ndarray:
+def voronoi_areas(points: np.ndarray, tile: Optional[int] = None, threads: int = 0,
+                  progress: Optional[Callable[[float], None]] = None) -> np.ndarray:
     """The area of each point's Voronoi cell (points distinct), NaN where it
     is open at the edge of the field.
 
@@ -252,6 +290,7 @@ def voronoi_areas(points: np.ndarray, tile: int = VORONOI_TILE, threads: int = 0
     from scipy.spatial import ConvexHull, cKDTree
     p = np.asarray(points, dtype=float)[:, :2]
     n = len(p)
+    tile = tile or VORONOI_TILE
     if n <= tile * 1.5:
         return _cell_areas(p)[0]
     bounds = (*p.min(axis=0), *p.max(axis=0))
@@ -299,9 +338,23 @@ def voronoi_areas(points: np.ndarray, tile: int = VORONOI_TILE, threads: int = 0
             margin *= 2
         left.append(todo)
 
+    # tiles are also what makes a long run reportable and stoppable: one
+    # Qhull call over everything can do neither.  ``progress`` is called
+    # here, on the caller's thread, as tiles finish; if it raises, the tiles
+    # not yet begun are dropped and the ones running finish first.
+    from concurrent.futures import as_completed
     workers = threads if threads > 0 else min(8, os.cpu_count() or 1)
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        list(pool.map(one, jobs))
+        futures = [pool.submit(one, mine) for mine in jobs]
+        try:
+            for k, done in enumerate(as_completed(futures)):
+                done.result()
+                if progress is not None:
+                    progress(0.95 * (k + 1) / len(futures))
+        except BaseException:
+            for f in futures:
+                f.cancel()
+            raise
     if not left:
         return area
     todo = np.sort(np.concatenate(left))
@@ -324,7 +377,8 @@ def voronoi_areas(points: np.ndarray, tile: int = VORONOI_TILE, threads: int = 0
     return area
 
 
-def voronoi_density(points: np.ndarray) -> np.ndarray:
+def voronoi_density(points: np.ndarray,
+                    progress: Optional[Callable[[float], None]] = None) -> np.ndarray:
     """One over the area of each point's Voronoi cell, per square micrometre
     (points in nm).  NaN for a cell open at the edge of the field.
 
@@ -341,7 +395,7 @@ def voronoi_density(points: np.ndarray) -> np.ndarray:
                                          return_counts=True)
     if len(unique) < 4:
         return out
-    area = voronoi_areas(unique)
+    area = voronoi_areas(unique, progress=progress)
     with np.errstate(divide="ignore", invalid="ignore"):
         density = np.where(area > 0, repeats * 1e6 / area, np.nan)
     return density[np.ravel(inverse)]
@@ -422,11 +476,13 @@ def _files(table: Localizations) -> np.ndarray:
 
 def neighbourhood(around: Tuple[Localizations, np.ndarray],
                   neighbours: Tuple[Localizations, np.ndarray],
-                  settings: NeighbourhoodSettings, report=None) -> np.ndarray:
+                  settings: NeighbourhoodSettings,
+                  progress: Optional[Callable[[float], None]] = None) -> np.ndarray:
     """The value per row of the around table, NaN outside its mask.
 
     ``around`` and ``neighbours`` are each ``(table, mask)``: the table a
-    layer shows and its filter over it.  File by file.
+    layer shows and its filter over it.  File by file; ``progress(fraction)``
+    of the whole as it goes, which may raise to stop.
     """
     table_a, use_a = around
     table_b, use_b = neighbours
@@ -455,8 +511,10 @@ def neighbourhood(around: Tuple[Localizations, np.ndarray],
     z_half = s.z_half_nm if use_z else None
     files = np.unique(files_a[use_a])
     for k, f in enumerate(files):
-        if report:
-            report(f"file {k + 1} of {len(files)}" if len(files) > 1 else "neighbours")
+        step = None
+        if progress is not None:
+            def step(fraction, k=k):
+                progress((k + fraction) / len(files))
         rows_a = np.flatnonzero(use_a & (files_a == f))
         rows_b = np.flatnonzero(use_b & (files_b == f))
         same = None
@@ -466,14 +524,16 @@ def neighbourhood(around: Tuple[Localizations, np.ndarray],
             where[rows_b] = np.arange(len(rows_b))
             same = where[rows_a]
         if s.quantity == "voronoi":
-            out[rows_a] = voronoi_density(pa[rows_a])
+            out[rows_a] = voronoi_density(pa[rows_a], progress=step)
         elif s.quantity == "statistic":
             out[rows_a] = neighbour_statistic(pa[rows_a], pb[rows_b], values[rows_b],
                                               s.radius_nm, s.statistic, s.quantile,
-                                              z_half, same)
+                                              z_half, same, progress=step)
         else:
             out[rows_a] = count_neighbours(pa[rows_a], pb[rows_b], s.radius_nm,
-                                           z_half, s.gaussian, same)
+                                           z_half, s.gaussian, same, progress=step)
+        if progress is not None:
+            progress((k + 1) / len(files))
     return out
 
 
@@ -499,7 +559,7 @@ def per_localization(locs: Localizations, grouped: Localizations,
 def expected_seconds(n_around: int, n_neighbours: int, area_nm2: float,
                      settings: NeighbourhoodSettings) -> float:
     """A rough run time, from 5 M localizations on 4 cores: sorting and
-    reading cost about 0.5 us a point, testing a candidate 2 ns (a point
+    reading cost about 0.25 us a point, testing a candidate 2 ns (a point
     tests the nine cells a search radius wide around it), a statistic 5 ns
     more a neighbour, and the Voronoi cells 12 us a point."""
     n_a, n_b = max(n_around, 0), max(n_neighbours, 0)
@@ -509,7 +569,7 @@ def expected_seconds(n_around: int, n_neighbours: int, area_nm2: float,
                                   and settings.quantity == "count" else 1.0)
     density = n_b / max(area_nm2, 1.0)
     candidates = 9 * reach ** 2 * density
-    seconds = 0.5e-6 * (n_a + n_b) + 2e-9 * n_a * candidates
+    seconds = 0.25e-6 * (n_a + n_b) + 2e-9 * n_a * candidates
     if settings.quantity == "statistic":
         seconds += 5e-9 * n_a * np.pi * reach ** 2 * density
     return seconds
@@ -592,7 +652,13 @@ class Neighbourhood(Plugin):
         if name in whole and name not in own:
             raise ValueError(f"{name} is a column of the localizations' own: "
                              "choose another name for the new column")
-        values = neighbourhood((ta, sa.mask), (tb, sb.mask), settings, ctx.report)
+        def progress(fraction: float) -> None:
+            # a half-written column is worth nothing: a stop keeps nothing
+            if ctx.stopped:
+                raise Stopped(f"{name} stopped at {100 * fraction:.0f}%: nothing written")
+            ctx.report(f"{name}: {100 * fraction:.0f}%")
+
+        values = neighbourhood((ta, sa.mask), (tb, sb.mask), settings, progress)
         grouped = ta is not whole
         column = per_localization(whole, ta, values) if grouped else values
         out = Localizations({**whole.columns, name: column.astype(np.float32)},

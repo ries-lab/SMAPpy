@@ -282,9 +282,10 @@ filters and zoom-ins are settled) · AssignColors for more than 2 colours (C4)
   *neighbours from* layer as they show (cross-density for two), per file;
   a recipe column (`mean`), NaN outside the around layer's filter.  The
   search is SMAP's sorted sweep made 2D in C++ (`csrc/neighbours.cpp`,
-  5 M localizations in ~5 s); the Voronoi cells come from tiled Delaunay
-  triangulations checked to equal one (5 M in ~1 min); a preflight asks
-  above 20 s.
+  sorted as the grouping sorts; 5 M localizations in ~3 s); the Voronoi
+  cells come from tiled Delaunay triangulations checked to equal one (5 M
+  in ~1 min); a preflight asks above 20 s; the % done is reported and Stop
+  writes nothing.
 * **Step 12** (2026-10-14): *Analysis/Measure/Cluster shape*, `per_region`:
   per layer the number of localizations, centre, convex-hull area and
   density, radius of gyration, standard deviations along the long and the
