@@ -192,7 +192,7 @@ S ≤ a day, M a few days, L a week or more.
 | **1** ✅ | **Hide what the settings do not use.** `FormState.shown: Dict[str, bool]`, beside `active`: a part or field set False is **hidden** (`setVisible` on a part's section; `QFormLayout.setRowVisible` on a row, available from Qt 6.4 and smappy needs ≥ 6.6), not greyed. Like `active`, it is presentation only: a hidden field keeps its value, and a script ignores it. | `plugins/__init__.py` (`FormState`), `gui/params.py` (`set_shown`), `gui/plugin_panel.py`; the chain panel picks it up through the same `describe` | S | a test with a plugin whose `describe` hides a part, in the plugin panel and in a chain step; `docs/plugin-reference.md` and CLAUDE.md's `describe` bullet mention `shown` |
 | **2** ✅ | **Export localizations**: one plugin, a format choice (CSV/TXT, Picasso HDF5; SMAP `_sml.mat` as an optional later format), the fields to write, all or filtered | `File/Export/Localizations` in `plugins/file.py`; writers beside the readers in `io/formats.py` | S–M | a round trip through each format with the loaders (Picasso through step 3) |
 | **3** ✅ | **Readers**: Picasso HDF5, DECODE (h5/csv), registered as `Reader`s so *File/Load/Auto*'s *format* list offers them | `io/formats.py` | S | reading a file each format's own tool writes (a small fixture) |
-| **4** | **Histogram of any column**, per layer, with mean/median/std; `per_region`, so it also gives one per ROI or per cluster | `Analysis/Measure/Histogram` | S | test on simulated data; page |
+| **4** ✅ | **Histogram of any column**, per layer, with mean/median/std; `per_region`, so it also gives one per ROI or per cluster | `Analysis/Measure/Histogram` | S | test on simulated data; page |
 | **5** | **Time course**: any columns against frame (photons, locs per frame, precision, background), several in one graph, beside the image tags | extend `image_tags.py`, or `Analysis/Measure/Time course` sharing its drawing | S–M | test and page; Image Tags' page updated if it changes |
 | **6** | **Export the region table** to CSV: the columns chosen by the user, ROIs or clusters through `region_results` | `Analysis/Regions/Summarize/Export table` | S | a CSV of an NPC Corners run, the ROI annotations and `roi_id` included |
 | **7** | **Shuffle ids**: for any integer column (`cluster_id`, `roi_id`, `tid`, `frame`, ...), write `<column>_shuffled` with the ids permuted, so colouring by it separates neighbouring ids; a new seed per run | `Analysis/Process/Shuffle ids` | S | the permutation keeps id 0 / noise at 0; grouping keeps a blink's value (recipe with rule `max`) |
@@ -246,6 +246,10 @@ filters and zoom-ins are settled) · AssignColors for more than 2 colours (C4)
   conversions found by the headers (ThunderSTORM's and SMAP's shipped);
   *File/Load/Load*, the File tab's first line.  SMAP's `_sml.mat` export is
   left for later.
+* **Step 4** (2026-10-14): *Analysis/Measure/Histogram*: any column, a
+  histogram per visible layer on common bins, mean / median / std / mode
+  of the values in the range, per region as well.  `favorite = False` for
+  now (see the open question on `favorite`).
 
 ### Start here
 
