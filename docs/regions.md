@@ -185,7 +185,8 @@ not put the results they came from out of date.
 
 A clusterer writes **`cluster_id`** (1, 2, ... by size, 0 for none) and
 **`n_in_cluster`** onto every localization, as recipes with the rule `max`
-so a blink keeps its cluster (`plugins/clusters.py`, DBSCAN).  Filtering
+so a blink keeps its cluster (`plugins/clusters.py`, *Find clusters*: DBSCAN,
+Voronoi or HDBSCAN).  Filtering
 clusters by size is then an ordinary filter on `n_in_cluster`, and a block
 repeats over `cluster_id`.  A cluster carries no annotations: to review one,
 *Column to ROIs* makes an ROI of each id of any column -- so every clusterer
@@ -197,7 +198,8 @@ square on its centre.
 
 ```
 Analysis/Measure/...                every measurement: on the view, per ROI, per cluster
-Analysis/Regions/Find/...           Density Peaks and NPC (ROIs), DBSCAN (cluster_id)
+Analysis/Regions/Find/...           Density Peaks and NPC (ROIs)
+Analysis/Regions/Find clusters      DBSCAN, Voronoi or HDBSCAN (cluster_id)
 Analysis/Regions/Summarize/...      Histograms, NPC labelling efficiency: read a region table
 Analysis/Regions/Column to ROIs     an ROI per id of a column
 Analysis/Regions/Regions to column  what was measured per region onto the table

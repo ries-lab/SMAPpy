@@ -11,7 +11,7 @@ elongated they are and in which direction, and how densely they are packed.
 
 It is meant for [clusters](plugin:Panels/Glossary) (localizations that lie
 closer to each other than to the rest).  After
-[DBSCAN](plugin:Analysis/Regions/Find/DBSCAN) has given every localization a
+[Find clusters](plugin:Analysis/Regions/Find clusters) has given every localization a
 `cluster_id`, add this plugin to the
 [per-region steps](plugin:Panels/Glossary) over `cluster_id` and it runs once
 in every cluster, a row of numbers each: the size distribution of

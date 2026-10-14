@@ -7,7 +7,7 @@ from smappy.workspace import Instance, Tab, Workspace, load
 COMET = "Analysis/Drift/COMET"
 RCC = "Analysis/Drift/RCC"
 STATS = "Analysis/Measure/Localization Statistics"
-DBSCAN = "Analysis/Regions/Find/DBSCAN"
+FIND_CLUSTERS = "Analysis/Regions/Find clusters"
 ROI_COLUMN = "Analysis/Regions/Regions to column"
 
 
@@ -50,7 +50,7 @@ def test_the_default_workspace_is_the_shipped_gui_file():
     regions = next(t for t in ws.tabs if t.name == "Regions")
     assert regions.header == "roi"
     pinned = [i.plugin for i in regions.instances]
-    assert DBSCAN in pinned and ROI_COLUMN in pinned
+    assert FIND_CLUSTERS in pinned and ROI_COLUMN in pinned
     # every instance has an id of its own, given as it is read
     ids = [i.id for t in ws.tabs for i in t.instances]
     assert all(ids) and len(set(ids)) == len(ids)

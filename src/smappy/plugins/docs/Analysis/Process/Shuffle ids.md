@@ -7,7 +7,7 @@ covers: [smappy.plugins.shuffle_ids.shuffle_ids, smappy.plugins.shuffle_ids.Shuf
 
 Writes a copy of an integer column with its ids in a random order, for
 colouring by.  A clusterer numbers its clusters one after the other --
-[DBSCAN](plugin:Analysis/Regions/Find/DBSCAN) by size -- and coloured by
+[Find clusters](plugin:Analysis/Regions/Find clusters) by size -- and coloured by
 `cluster_id` neighbouring clusters often come out in neighbouring colours of
 the colour table ([LUT](plugin:Panels/Glossary), look-up table), so two
 touching clusters look like one.  Coloured by the shuffled column, they are

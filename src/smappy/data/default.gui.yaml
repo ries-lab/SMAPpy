@@ -43,7 +43,7 @@ tabs:
 - name: Regions
   header: roi
   instances:
-  - plugin: Analysis/Regions/Find/DBSCAN
+  - plugin: Analysis/Regions/Find clusters
   - plugin: Analysis/Regions/Find/Density Peaks
   - plugin: Analysis/Regions/Find/NPC
   - plugin: Analysis/Regions/Column to ROIs

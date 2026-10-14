@@ -9,7 +9,7 @@ Writes one number per localization that describes what is around it, as a
 new column of the table.  The column can then be filtered on (keep the
 localizations in dense places, drop the isolated ones), coloured by in the
 Render tab, or measured like any other.  It segments nothing: finding
-clusters is [DBSCAN](plugin:Analysis/Regions/Find/DBSCAN)'s job.
+clusters is [Find clusters](plugin:Analysis/Regions/Find clusters)'s job.
 
 Three *quantities*:
 

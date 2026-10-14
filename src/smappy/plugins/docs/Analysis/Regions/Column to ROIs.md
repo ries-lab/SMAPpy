@@ -11,7 +11,7 @@ the ROI manager, inside which things are measured) in the
 [region](plugin:Panels/Glossary) an id column of the table names -- usually
 every [cluster](plugin:Panels/Glossary) (localizations lying closer to each
 other than to the rest) a clusterer found (`cluster_id`, from
-[DBSCAN](plugin:Analysis/Regions/Find/DBSCAN) or any other) -- so the
+[Find clusters](plugin:Analysis/Regions/Find clusters) or any other) -- so the
 clusters can be looked at one by one, reviewed, excluded and annotated.
 
 It works on any column of whole numbers: an id of 0 or below means "in no
