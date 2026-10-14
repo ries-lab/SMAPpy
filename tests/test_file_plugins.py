@@ -29,8 +29,9 @@ def saved(tmp_path):
 def test_every_file_plugin_is_in_the_tree():
     found = plugins.refs("File/")
     assert set(found) == {
-        "File/Load/Auto", "File/Save/smappy HDF5",
-        "File/Export/Image", "File/Simulate/Blinking Structure"}
+        "File/Load/Auto", "File/Load/Load", "File/Save/smappy HDF5",
+        "File/Export/Image", "File/Export/Localizations",
+        "File/Simulate/Blinking Structure"}
 
 
 def test_the_one_loader_offers_every_format_and_reads_columns_for_a_csv_only():
@@ -39,15 +40,18 @@ def test_the_one_loader_offers_every_format_and_reads_columns_for_a_csv_only():
     assert spec.info.advanced
     assert [v for v, _ in spec.info.choices()] == ["", *formats.reader_names()]
     describe = loader().describe
-    assert describe(None, loader.Settings(path="a.csv")).active == {"mapping": True}
-    assert describe(None, loader.Settings(path="a.hdf5")).active == {"mapping": False}
-    assert describe(None, loader.Settings(path="a.dat", format="csv")).active == \
-        {"mapping": True}
+    # the csv part is shown for a csv only
+    assert describe(None, loader.Settings(path="a.csv")).shown == {"csv": True}
+    assert describe(None, loader.Settings(path="a.hdf5")).shown == {"csv": False}
+    assert describe(None, loader.Settings(path="a.dat", format="csv")).shown == \
+        {"csv": True}
 
 
 def test_the_writer_registry_mirrors_the_readers(tmp_path):
-    assert [w.name for w in formats.WRITERS] == ["smappy HDF5"]
+    assert [w.name for w in formats.WRITERS] == ["smappy HDF5", "csv", "Picasso"]
+    # a suffix says smappy's own; Picasso's is asked for by name
     assert formats.writer_for("a.hdf5").name == "smappy HDF5"
+    assert formats.writer_named("Picasso").name == "Picasso"
     with pytest.raises(ValueError, match="no writer"):
         formats.writer_for("a.xyz")
     path = formats.save(table(3), tmp_path / "w.hdf5")
@@ -97,12 +101,15 @@ def test_a_missing_file_says_so_before_reading(tmp_path):
 
 
 def test_csv_guesses_its_columns(tmp_path):
+    """ThunderSTORM's headers: x and y found by name, and its frames, which
+    count from 1, made to count from 0 (the shipped conversion)."""
     path = tmp_path / "t.csv"
-    path.write_text("x [nm],y [nm],frame\n1,2,0\n3,4,1\n")
+    path.write_text("x [nm],y [nm],frame\n1,2,1\n3,4,2\n")
     plugin = plugins.get("File/Load/Auto")()
     result = plugin.run(Context(), plugin.Settings(path=str(path)))
     locs = result.files[0][0]
     assert len(locs) == 2 and list(locs["x_nm"]) == [1.0, 3.0]
+    assert list(locs["frame"]) == [0, 1]
 
 
 def test_read_localizations_is_the_one_implementation_and_merges_nothing(saved):
@@ -206,7 +213,8 @@ def test_gui_state_can_be_cleared_and_is_never_fatal(tmp_path):
 
 # ------------------------------------------------------------------ the GUI
 
-def test_the_file_tab_ships_with_what_the_file_menu_does_not_do(tmp_path, monkeypatch):
+def test_the_file_tab_ships_with_load_first_and_what_the_file_menu_does_not_do(
+        tmp_path, monkeypatch):
     pytest.importorskip("PySide6")
     from PySide6.QtWidgets import QApplication
     monkeypatch.setenv("SMAPPY_CONFIG_DIR", str(tmp_path / "config"))
@@ -219,9 +227,13 @@ def test_the_file_tab_ships_with_what_the_file_menu_does_not_do(tmp_path, monkey
     window = ControlWindow(session, RenderWindow(session))
     assert window.tabs.tabText(0) == "File"
     pinned = [i.plugin for i in window.tabs.widget(0).tab.instances]
-    # opening and saving are the File menu's; the tree still has them, for
-    # chains and the batch
-    assert set(pinned) == {"File/Export/Image", "File/Simulate/Blinking Structure"}
+    # Load opens files as File > Open does, first; saving is the File
+    # menu's, and the tree still has it and the loader, for chains and the
+    # batch
+    assert pinned[0] == "File/Load/Load"
+    assert set(pinned) == {"File/Load/Load", "File/Export/Image",
+                           "File/Export/Localizations", "File/Simulate/Blinking Structure"}
+    assert "open files" in session.window_openers
     # the window is what supplies the state a save embeds, and it leaves
     # geometry out: machine-specific, and worthless as provenance
     state = window.plugin_state()

@@ -486,6 +486,25 @@ class Context:
 
 
 @dataclass
+class ShapeEdit:
+    """Shapes drawn with the mouse on one panel of a figure, and the setting
+    they are written back to.
+
+    A plugin cannot draw on a window -- nothing in a plugin imports Qt -- but
+    it can say that a panel of its figure takes shapes: the fit preview's
+    frame takes the region to fit in (``region.shapes``).  The GUI puts the
+    drawing tools beside that figure and sets ``on_change``, which writes the
+    shapes into the form; a script never sees any of it.  A shape is
+    ``{"kind": "include" | "exclude", "points": [[x, y], ...]}`` in the
+    panel's data coordinates.
+    """
+    field: str                                  # the dotted setting, "region.shapes"
+    panel: int = 0                              # which axis of the figure
+    shapes: list = field(default_factory=list)
+    on_change: Optional[Callable] = None        # set by the GUI
+
+
+@dataclass
 class Plot:
     """One figure a result offers, and how much room it wants.
 
@@ -505,6 +524,7 @@ class Plot:
     name: str = ""                     # "" is the main figure
     panels: int = 1                    # how many axes `draw` makes
     size: Optional[Tuple[float, float]] = None   # width, height in inches
+    edit: Optional["ShapeEdit"] = None           # a panel that takes drawn shapes
 
     def draw_into(self, figure) -> None:
         """Draw into a cleared figure, or into a subfigure of a page."""
@@ -660,6 +680,12 @@ class FormState:
       about it (`Notice`).
     * ``titles`` -- a part's title, in place of its label: a summary of what
       it holds, for a part that starts folded.
+    * ``shown`` -- the fields and parts to show; one set False is hidden,
+      not greyed.  For settings that belong to a choice the plugin does not
+      take at all -- the parts of the algorithms not selected -- where a
+      greyed form three times the length of the one in use is a form to scroll
+      past.  A hidden field keeps its value, as a greyed one does, so it
+      cannot change what a run does; what can change a run is shown.
     """
     hints: Dict[str, Any] = field(default_factory=dict)
     active: Dict[str, bool] = field(default_factory=dict)
@@ -668,6 +694,7 @@ class FormState:
     # a part's title by its dotted name, in place of its label: what the part
     # holds, said while it is folded ("camera: auto - iXon 888, ...")
     titles: Dict[str, str] = field(default_factory=dict)
+    shown: Dict[str, bool] = field(default_factory=dict)
 
     def under(self, key: str, title: str = "", settings: Any = None) -> "FormState":
         """This state as part ``key`` of a larger form -- a chain's step: the
@@ -683,7 +710,8 @@ class FormState:
             active={f"{key}.{k}": v for k, v in self.active.items()},
             choices={f"{key}.{k}": v for k, v in self.choices.items()},
             notice=notice,
-            titles={f"{key}.{k}": v for k, v in self.titles.items()})
+            titles={f"{key}.{k}": v for k, v in self.titles.items()},
+            shown={f"{key}.{k}": v for k, v in self.shown.items()})
 
     def update(self, other: "FormState") -> None:
         """Add ``other``'s parts; the first notice stays, as the panel has
@@ -691,6 +719,8 @@ class FormState:
         self.hints.update(other.hints)
         self.active.update(other.active)
         self.choices.update(other.choices)
+        self.titles.update(other.titles)
+        self.shown.update(other.shown)
         if self.notice is None:
             self.notice = other.notice
 
@@ -834,9 +864,6 @@ class Plugin:
     name: str = ""                 # set by `register` from the path's last part
     path: str = ""                 # "Analysis/Drift/COMET"
     description: str = ""
-    favorite: bool = True          # pinned in the shipped workspace; for a
-                                   # per-region plugin, in the default
-                                   # evaluation pipeline
     # Whether `run` hands back `Result.values`, and so can be run once per
     # region and kept as that region's row (`docs/regions.md`).  Not a kind
     # of plugin -- such a plugin runs on the view like any other -- but what

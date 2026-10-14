@@ -195,3 +195,80 @@ def test_a_tab_can_be_taken_out_into_its_own_window(app):
     window.detached["second"].close()            # closed: the tab comes back
     assert [window.tabs.tabText(i) for i in range(window.tabs.count())] == [
         "figure", "second", "All"]
+
+
+# A plugin with a part per algorithm, of which only the chosen one is read.
+
+from dataclasses import dataclass, field                              # noqa: E402
+
+from smappy.plugins import FormState, Plugin, Result, register        # noqa: E402
+
+
+@dataclass
+class _DBSCANPart:
+    radius_nm: float = param(50.0, label="radius")
+
+
+@dataclass
+class _VoronoiPart:
+    cut: float = param(2.0, label="cut")
+
+
+@dataclass
+class _AlgorithmSettings:
+    algorithm: str = param("dbscan", label="algorithm",
+                           choices=(("dbscan", "DBSCAN"), ("voronoi", "Voronoi")))
+    dbscan: _DBSCANPart = param(default_factory=_DBSCANPart, label="DBSCAN")
+    voronoi: _VoronoiPart = param(default_factory=_VoronoiPart, label="Voronoi")
+    min_size: int = param(10, label="at least")
+    seed: int = param(0, label="seed", advanced=True)
+
+
+@register("Test/Form/Algorithms")
+class _Algorithms(Plugin):
+    changes_locs = False
+    Settings = _AlgorithmSettings
+
+    def describe(self, ctx, settings):
+        dbscan = settings.algorithm == "dbscan"
+        return FormState(shown={"dbscan": dbscan, "voronoi": not dbscan,
+                                "min_size": dbscan, "seed": dbscan})
+
+    def run(self, ctx, settings):
+        return Result()
+
+
+def test_only_the_chosen_algorithms_settings_are_shown(app):
+    """The parts of the algorithms not chosen are hidden, not greyed, and
+    "more" goes with its last row; hiding keeps every value."""
+    from smappy.gui.plugin_panel import PluginPanel
+    panel = PluginPanel(_Algorithms, Session())
+    form = panel.form
+    # isHidden, not isVisible: the panel is never shown on screen here
+    assert not form.sections["dbscan"].isHidden()
+    assert form.sections["voronoi"].isHidden()
+    assert form.row_layouts["min_size"].isRowVisible(form.fields["min_size"])
+
+    form.fields["algorithm"].set("voronoi")
+    panel._react("algorithm")
+    assert form.sections["dbscan"].isHidden()
+    assert not form.sections["voronoi"].isHidden()
+    assert not form.row_layouts["min_size"].isRowVisible(form.fields["min_size"])
+    assert form.more_section.isHidden()
+    assert form.value().dbscan.radius_nm == 50.0 and form.value().min_size == 10
+
+    form.fields["algorithm"].set("dbscan")
+    panel._react("algorithm")
+    assert not form.sections["dbscan"].isHidden()
+    assert not form.more_section.isHidden()
+
+
+def test_a_chain_step_hides_what_its_plugin_hides(app):
+    from smappy.chain import ChainSpec, Step, chain_class
+    from smappy.gui.plugin_panel import PluginPanel
+    cls = chain_class(ChainSpec(steps=[Step(plugin="Test/Form/Algorithms",
+                                            values={"algorithm": "voronoi"})]))
+    panel = PluginPanel(cls, Session())
+    step = panel.form.fields["algorithms"]          # the step, by its title
+    assert step.sections["dbscan"].isHidden()
+    assert not step.sections["voronoi"].isHidden()

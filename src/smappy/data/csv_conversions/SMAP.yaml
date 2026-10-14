@@ -1,0 +1,6 @@
+# SMAP's export_coordinates: SMAP's own field names, frames counted from 1
+# (MATLAB's).
+headers: ["xnm", "ynm", "frame"]
+mapping: {}
+units: nm
+first_frame: 1

@@ -320,6 +320,9 @@ class ControlWindow(QMainWindow):
         # window asks single or dual itself, and opens as it was left
         session.window_openers["bead calibration"] = \
             lambda settings=None: self.open_calibration()
+        # the File tab's Load line (`Plugin.window`): File > Open, or Add
+        session.window_openers["open files"] = \
+            lambda settings=None: self.open(append=bool(getattr(settings, "append", False)))
         # a fitter whose file's camera is not in the database offers this
         # (`Plugin.describe`), opened on the file that fitter is set to
         session.window_openers["camera editor"] = self.open_camera_editor
@@ -1215,13 +1218,18 @@ class ControlWindow(QMainWindow):
 
     @staticmethod
     def _needs_mapping(path: str) -> bool:
-        """A csv whose headers do not say where x and y are."""
+        """A csv whose headers do not say where x and y are, and that no
+        saved conversion knows (`io.conversions`)."""
+        from ..io.conversions import conversion_for
         try:
             if "mapping" not in reader_for(path).needs:
                 return False
         except ValueError:
             return False
-        guessed = set(guess_csv_mapping(csv_columns(Path(path))[0]).values())
+        headers = csv_columns(Path(path))[0]
+        conv = conversion_for(headers)
+        guessed = set(guess_csv_mapping(headers).values()) \
+            | set((conv.mapping if conv else {}).values())
         return not {"x_nm", "y_nm"} <= guessed
 
     # ---------------------------------------------------------------- drops

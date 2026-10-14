@@ -16,14 +16,34 @@ TARGETS = ["-", "x_nm", "y_nm", "z_nm", "frame", "photons", "xy_err_nm",
 
 
 class CsvMappingDialog(QDialog):
-    """Which csv column is which; positions in nm or in pixels."""
+    """Which csv column is which, what the lengths are in, and the number of
+    the first frame -- and a saved conversion to do all of it by name
+    (`io.conversions`, SMAP's *conversion structure*)."""
+
+    UNITS = (("nm", "nm"), ("um", "µm"), ("mm", "mm"), ("px", "camera pixels"))
 
     def __init__(self, path, parent=None):
         super().__init__(parent)
+        from PySide6.QtWidgets import QHBoxLayout, QInputDialog, QPushButton, QSpinBox
+        from ..io.conversions import conversion_for, conversions
+        self._input = QInputDialog
         self.setWindowTitle(f"columns of {Path(path).name}")
         headers, sample, has_header = csv_columns(Path(path))
-        guess = guess_csv_mapping(headers)
+        self.headers = headers
         layout = QVBoxLayout(self)
+        top = QHBoxLayout()
+        top.addWidget(QLabel("conversion"))
+        self.conversion = QComboBox()
+        self.conversion.addItem("-", "")
+        for name in conversions():
+            self.conversion.addItem(name, name)
+        top.addWidget(self.conversion, 1)
+        save = QPushButton("save as...")
+        save.setToolTip("keep these columns, units and first frame under a name, "
+                        "found again by the headers")
+        save.clicked.connect(self._save)
+        top.addWidget(save)
+        layout.addLayout(top)
         layout.addWidget(QLabel("x and y are needed; the rest is optional.  "
                                 "Other columns are kept under their own name."))
         self.table = QTableWidget(len(headers), 3)
@@ -34,36 +54,82 @@ class CsvMappingDialog(QDialog):
             self.table.setItem(i, 1, QTableWidgetItem(v))
             combo = QComboBox()
             combo.addItems(TARGETS + [f"keep as '{h}'"])
-            combo.setCurrentText(guess.get(h, "-"))
             self.table.setCellWidget(i, 2, combo)
             self.combos.append((h, combo))
         self.table.resizeColumnsToContents()
         layout.addWidget(self.table)
         form = QFormLayout()
         self.units = QComboBox()
-        self.units.addItems(["nm", "px"])
+        for value, label in self.UNITS:
+            self.units.addItem(label, value)
         self.pixelsize = QDoubleSpinBox(minimum=0.1, maximum=10000, value=100.0, decimals=2)
-        self.pixelsize.setEnabled(False)
-        self.units.currentTextChanged.connect(lambda u: self.pixelsize.setEnabled(u == "px"))
-        form.addRow("positions in", self.units)
-        form.addRow("pixel size (nm)", self.pixelsize)
+        self.units.currentIndexChanged.connect(
+            lambda _: self.pixelsize.setEnabled(self.units.currentData() == "px"))
+        self.first_frame = QSpinBox(minimum=0, maximum=1, value=0)
+        self.first_frame.setToolTip("1 for ThunderSTORM and SMAP, 0 for smappy")
+        form.addRow("lengths in", self.units)
+        form.addRow("camera pixel (nm)", self.pixelsize)
+        form.addRow("first frame", self.first_frame)
         layout.addLayout(form)
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
-        self.resize(520, 380)
+        self.resize(520, 420)
+        self.conversion.currentIndexChanged.connect(self._apply_conversion)
+        found = conversion_for(headers)
+        if found is not None:
+            self.conversion.setCurrentIndex(self.conversion.findData(found.name))
+        self._apply_conversion()
 
-    def reader_args(self) -> Dict:
+    def _apply_conversion(self, *_) -> None:
+        """Fill the table and the units from the conversion chosen, or guess."""
+        from ..io.conversions import conversions
+        conv = conversions().get(self.conversion.currentData() or "")
+        guess = guess_csv_mapping(self.headers)
+        mapping = dict(guess, **(conv.mapping if conv else {}))
+        for h, combo in self.combos:
+            target = mapping.get(h, "-")
+            combo.setCurrentText(target if target in TARGETS else f"keep as '{h}'")
+        units = conv.units if conv else "nm"
+        self.units.setCurrentIndex(max(0, self.units.findData(units)))
+        if conv and conv.pixelsize_nm:
+            self.pixelsize.setValue(conv.pixelsize_nm)
+        self.pixelsize.setEnabled(units == "px")
+        self.first_frame.setValue(conv.first_frame if conv else 0)
+
+    def _mapping(self) -> Dict[str, str]:
         mapping = {}
         for h, combo in self.combos:
             t = combo.currentText()
             if t.startswith("keep as"):
-                mapping[h] = h
+                mapping[h] = ""                # read under its own name
             elif t != "-":
                 mapping[h] = t
-        units = self.units.currentText()
-        return {"mapping": mapping, "units": units,
+        return mapping
+
+    def _save(self) -> None:
+        from ..io.conversions import Conversion, save_conversion
+        name, ok = self._input.getText(self, "Save conversion", "name")
+        name = name.strip()
+        if not ok or not name:
+            return
+        mapping = {h: t for h, t in self._mapping().items() if t}
+        save_conversion(Conversion(
+            name=name, headers=list(self.headers), mapping=mapping,
+            units=self.units.currentData(),
+            pixelsize_nm=self.pixelsize.value() if self.units.currentData() == "px" else None,
+            first_frame=self.first_frame.value()))
+        if self.conversion.findData(name) < 0:
+            self.conversion.addItem(name, name)
+        blocked = self.conversion.blockSignals(True)
+        self.conversion.setCurrentIndex(self.conversion.findData(name))
+        self.conversion.blockSignals(blocked)
+
+    def reader_args(self) -> Dict:
+        units = self.units.currentData()
+        return {"mapping": {h: t for h, t in self._mapping().items() if t},
+                "units": units, "first_frame": self.first_frame.value(),
                 "pixelsize_nm": self.pixelsize.value() if units == "px" else None}
 
 

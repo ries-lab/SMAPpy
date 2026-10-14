@@ -31,7 +31,7 @@ from ..pipeline import FitSettings, fit_stack, provenance
 from ..psf import GaussianPSF, SplinePSF
 from ..rcc import RCCSettings
 from . import (Context, FormState, Notice, ParamInfo, Plot, Plugin, PreflightChoice,
-               PreflightQuestion, Result, param, register)
+               PreflightQuestion, Result, ShapeEdit, param, register)
 from .assign_colors import AssignColorSettings
 
 # a simulation's recipe opens as an acquisition too (`smappy.simulate.source`)
@@ -153,6 +153,94 @@ class DetectionSettings:
         cutoff = (DynamicCutoff(self.cutoff) if self.cutoff_mode == "dynamic"
                   else AbsoluteCutoff(self.cutoff))
         return PeakFinder(image_filter, cutoff, n_threads=n_threads)
+
+
+def in_region(x, y, shapes) -> np.ndarray:
+    """Which of the points ``x``, ``y`` the drawn region keeps: inside an
+    *include* shape if there is any, and inside no *exclude* shape.
+
+    SMAP's ``RoiAdder``, as shapes rather than a pixel mask: a shape is a
+    polygon (a rectangle is four corners) in the frame's pixels, so it is
+    kept in the settings, saved with a workspace or a chain, and means the
+    same on a stack of any size.  The edge counts as inside
+    (`regions.inside_polygon`), as for the ROIs.
+    """
+    from ..regions import inside_polygon
+    x, y = np.asarray(x, float), np.asarray(y, float)
+    included = [s["points"] for s in shapes or () if s.get("kind") == "include"]
+    excluded = [s["points"] for s in shapes or () if s.get("kind") == "exclude"]
+    keep = np.ones(x.shape, bool) if not included else np.zeros(x.shape, bool)
+    for points in included:
+        keep |= inside_polygon(x, y, points)
+    for points in excluded:
+        keep &= ~inside_polygon(x, y, points)
+    return keep
+
+
+class RegionFinder:
+    """A peak finder that drops the candidates outside the drawn region.
+
+    The region acts on the candidates, not on the image: the frame is
+    filtered whole -- a dynamic cutoff is set from the noise of the whole
+    frame, as without a region -- and only which peaks go on to be fitted
+    changes.  Everything else is the finder's (`__getattr__`), so a preview
+    still reads its cutoff.
+    """
+
+    def __init__(self, finder, shapes):
+        self._finder = finder
+        self.shapes = list(shapes)
+
+    def __call__(self, photons, first_frame: int = 0, **kwargs):
+        candidates, filtered = self._finder(photons, first_frame=first_frame, **kwargs)
+        return candidates[in_region(candidates.x, candidates.y, self.shapes)], filtered
+
+    def __getattr__(self, name):
+        return getattr(self._finder, name)
+
+    def __str__(self) -> str:
+        return f"{self._finder} in {len(self.shapes)} drawn shapes"
+
+
+#: how a shape of the region is drawn: what is fitted in, what is left out
+REGION_STYLE = {"include": dict(color="#2ca02c", ls="-"),
+                "exclude": dict(color="#d62728", ls="--")}
+
+
+def draw_region(ax, shapes) -> None:
+    """The region's shapes as outlines on a frame: green the parts fitted
+    in, dashed red the parts left out."""
+    for shape in shapes or ():
+        points = np.asarray(shape.get("points") or [], float)
+        if len(points) < 3:
+            continue
+        closed = np.vstack([points, points[:1]])
+        style = REGION_STYLE.get(shape.get("kind"), REGION_STYLE["include"])
+        ax.plot(closed[:, 0], closed[:, 1], lw=1.5, **style)
+
+
+@dataclass
+class FitRegionSettings:
+    """Where in the frame to fit: shapes drawn on the preview's frame."""
+    shapes: list = param(default_factory=list, label="drawn", kind="shapes",
+                         help="drawn on the Preview's frame: candidates outside "
+                              "the include shapes, or inside an exclude shape, "
+                              "are not fitted")
+    use: bool = param(True, label="use the region",
+                      help="off fits the whole frame and keeps the shapes")
+
+    def active(self) -> bool:
+        return bool(self.use and self.shapes)
+
+    def summary(self) -> str:
+        """What the folded part's title says."""
+        if not self.shapes:
+            return "fit region: the whole frame"
+        inside = sum(1 for s in self.shapes if s.get("kind") == "include")
+        outside = len(self.shapes) - inside
+        bits = ([f"{inside} to fit in"] if inside else []) + \
+            ([f"{outside} left out"] if outside else [])
+        return "fit region: " + ", ".join(bits) + ("" if self.use else " (off)")
 
 
 @dataclass
@@ -426,6 +514,15 @@ class _FitPlugin(Plugin):
         threshold each half of the split frame separately."""
         return settings.detection.finder(settings.fit.n_threads)
 
+    def region_finder(self, settings, camera: Optional[CameraMetadata] = None):
+        """`finder`, keeping only the candidates in the drawn region
+        (`FitRegionSettings`) when there is one."""
+        finder = self.finder(settings, camera)
+        region = getattr(settings, "region", None)
+        if region is not None and region.active():
+            return RegionFinder(finder, region.shapes)
+        return finder
+
     @staticmethod
     def _split_for_detection(geometry, camera) -> Optional[tuple]:
         """``(axis, position)`` in frame coordinates, for a split frame.
@@ -486,6 +583,10 @@ class _FitPlugin(Plugin):
             state.titles = {"camera": self._camera_title(settings)}
         except Exception:
             pass
+        region = getattr(settings, "region", None)
+        if region is not None:
+            state.titles["region"] = region.summary()
+            state.active["region.use"] = bool(region.shapes)
         if getattr(settings, "finish", None) is not None:
             from ..drift import merge_values
             dx, dt = merge_values(ctx.session if ctx is not None else None)
@@ -696,7 +797,7 @@ class _FitPlugin(Plugin):
             raise ValueError(f"could not read the camera from {src.path}")
         camera.require("conversion", "offset")
         fit = settings.fit
-        finder = self.finder(settings, camera)
+        finder = self.region_finder(settings, camera)
 
         raw = source.frame(index)
         photons = to_photons(raw, camera)/camera.excess_noise
@@ -757,6 +858,7 @@ class _FitPlugin(Plugin):
                                  "back-projected")
             peaks.set(title=f"frame {index}: peaks found")
             peaks.legend(fontsize=7, loc="upper right")
+            draw_region(peaks, shapes)
 
             # scaled to the cutoff, not to the brightest pixel: the question
             # this panel answers is how far the peaks sit above the threshold,
@@ -784,8 +886,13 @@ class _FitPlugin(Plugin):
                 figure.suptitle("detection only -- " + trouble, fontsize=8,
                                 color="#a05000")
 
+        # the frame panel takes the fit region, drawn with the mouse (the
+        # window's tools, `ShapeEdit`), written back into *fit region*
+        shapes = list(getattr(getattr(settings, "region", None), "shapes", []) or [])
+        edit = (ShapeEdit("region.shapes", panel=0, shapes=shapes)
+                if getattr(settings, "region", None) is not None else None)
         return Result(text=text, settings=settings,
-                      plot=Plot(draw=plot, panels=3, size=(15, 6)),
+                      plot=Plot(draw=plot, panels=3, size=(15, 6), edit=edit),
                       data={"frame": index, "candidates": len(candidates),
                             "cutoff": cutoff, "locs": locs, "error": trouble})
 
@@ -799,7 +906,7 @@ class _FitPlugin(Plugin):
         source = _open(src, watch=src.live, stop_event=ctx.stop)
         camera = settings.camera.resolve(source)
         fit = settings.fit
-        finder = self.finder(settings, camera)
+        finder = self.region_finder(settings, camera)
         model = self._model_telling(ctx, settings, camera)
         out = settings.output.resolve(src.path)
 
@@ -1023,6 +1130,9 @@ class _Reading:
     camera: CameraSettings = param(default_factory=CameraSettings, label="camera",
                                    collapsed=True)
     detection: DetectionSettings = field(default_factory=DetectionSettings)
+    # folded, its title what is drawn: most fits use the whole frame
+    region: FitRegionSettings = param(default_factory=FitRegionSettings,
+                                      label="fit region", collapsed=True)
     model: Any = None                    # each fitter's own part
 
 

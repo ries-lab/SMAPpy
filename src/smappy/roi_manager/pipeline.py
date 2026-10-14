@@ -40,16 +40,21 @@ class Step:
         return {k: v for k, v in self.as_record().items() if k != "label"}
 
 
+#: What a project's per-region steps start as.  A list, as the shipped GUI
+#: is (`workspace.DEFAULT_GUI`): which measurement every ROI gets before
+#: anyone chooses is a decision, not a property of the plugins -- NPC Corners
+#: is added when the data are pores, Histogram once a column is chosen.
+DEFAULT_REGION_STEPS = ("Analysis/Measure/Localization Statistics",)
+
+
 def default_block():
-    """What a project's block starts as: every installed per-region plugin
-    that is a `favorite`, once, with its own defaults.  A specialised one --
-    NPC Corners -- says it is not, and is added when the data call for it
-    rather than run on every site."""
+    """What a project's block starts as: `DEFAULT_REGION_STEPS` that are
+    installed, each with its own defaults."""
     from .. import plugins
     from ..chain import Block, Step as ChainStep
-    return Block(steps=[ChainStep(plugin=path)
-                        for path, ref in sorted(plugins.refs().items())
-                        if ref.per_region and ref.favorite])
+    installed = plugins.refs()
+    return Block(steps=[ChainStep(plugin=path) for path in DEFAULT_REGION_STEPS
+                        if path in installed and installed[path].per_region])
 
 
 def block_from_run(recorded: Sequence[Dict[str, Any]]):

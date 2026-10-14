@@ -30,7 +30,8 @@ def stack(tmp_path):
 
 def test_parts_show_up_as_children():
     specs = GaussianFit.specs()
-    assert set(specs) == {"source", "camera", "detection", "model", "fit", "output"}
+    assert set(specs) == {"source", "camera", "detection", "region", "model", "fit",
+                          "output"}
     assert specs["fit"].children["roisize"].info.label == "fit box"
     assert specs["source"].children["path"].info.kind == "open_file"
     assert "Localize/Spline 3D" in plugins.available("Localize/")
@@ -40,12 +41,12 @@ def test_every_fitter_shows_the_shared_parts_in_one_order_and_its_own_in_place()
     """The forms are declared in halves around the model (fit.py, "the
     forms"); a part only one fitter has sits where it always did."""
     from smappy.plugins.fit import DualGaussianFit, DualSplineFit, SplineFit
-    shared = ["source", "camera", "detection", "model", "fit", "output"]
+    shared = ["source", "camera", "detection", "region", "model", "fit", "output"]
     assert list(GaussianFit.specs()) == shared
     assert list(SplineFit.specs()) == shared
     assert list(DualSplineFit.specs()) == shared + ["finish"]
-    assert list(DualGaussianFit.specs()) == (shared[:4] + ["transform"]
-                                             + shared[4:] + ["finish"])
+    assert list(DualGaussianFit.specs()) == (shared[:5] + ["transform"]
+                                             + shared[5:] + ["finish"])
     # the model is each fitter's own, and the two-channel ones share links
     assert [list(cls.specs()["model"].children) for cls in
             (DualSplineFit, DualGaussianFit)] == [
