@@ -44,7 +44,7 @@ not bias the answer.  SMAP's analysis, the corner histogram alone, is kept as
 the *corners (SMAP)* method.
 
 The order is: find the pores with [NPC](plugin:Analysis/Regions/Find/NPC), add
-NPC Corners to the per-region steps (*Per-region steps...* in the Regions tab)
+NPC Corners to the per-region steps (*per-region steps* in the Regions tab)
 and run them, then run this.  Use data imaged until the fluorophores have
 bleached, with blinks merged -- [merge blinks](plugin:Panels/Glossary), also
 called grouping or linking, combines the localizations in consecutive frames

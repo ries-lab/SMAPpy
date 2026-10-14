@@ -14,12 +14,13 @@ mark each copy with an [ROI](plugin:Panels/Glossary) (region of interest: a
 shape -- here a circle, a square or a polygon -- around one copy of the
 structure), measure what is inside each one, and summarise the measurements.
 
-The Regions tab is where that begins.  It holds what all ROIs share -- their shape
-and size -- and opens the two windows the work is done in: the
+The Regions tab is where that begins.  It opens the
 [ROI manager](plugin:Panels/ROI manager), where ROIs are found, drawn,
-included or excluded, and looked at one by one, and the *per-region steps*
-window, where the measurements to make in every ROI are chosen and run.  Below the
-tab's own controls sit the ROI plugins pinned to it.  By default these are
+included or excluded, and looked at one by one; it holds the *per-region
+steps*, the measurements to make in every ROI, with what they measured in
+the ROI selected in the manager; and it holds what all ROIs share -- their
+shape and size.  Below the tab's own controls sit the ROI plugins pinned to
+it.  By default these are
 the ones that find ROIs -- [Density Peaks](plugin:Analysis/Regions/Find/Density Peaks)
 for any compact structure, [NPC](plugin:Analysis/Regions/Find/NPC) for nuclear
 pores -- the ones that summarise the measurements --
@@ -136,8 +137,8 @@ show(axes[3], "drawn polygon", Polygon(outline, fill=False, lw=0.8))
 roi.polygon = None
 ```
 
-**3. Measuring.**  *Per-region steps...* opens a window with a list of steps
-that run once in every included ROI of every file -- plugins that measure a
+**3. Measuring.**  *per-region steps*, at the top of the tab, is a list of
+steps that run once in every included ROI of every file -- plugins that measure a
 region and return a row of numbers for it, such as Localization Statistics,
 the same plugin as on the whole view.  One row per ROI, the rows together
 are the *results table*, which the summaries such as Histograms read.  The
@@ -146,7 +147,10 @@ pipeline or workflow: plugins run one after another as one): it can repeat
 over the [regions](plugin:Panels/Glossary) of an id column instead (a region
 is a set of localizations measured together -- an ROI, or a cluster that a
 column such as `cluster_id` names; *for each*), write columns it makes back
-into the table, and hold a block of its own.
+into the table, and hold a block of its own.  Run measures every ROI; with
+*measure the selected ROI* ticked, an ROI is also measured as soon as it is
+selected or added in the ROI manager, and its numbers appear under the
+steps.
 
 **4. What is still true.**  Each stored measurement remembers what it was made
 from: the file's data, the ROI and its geometry, the filter, the merge
@@ -154,7 +158,7 @@ settings, and the step's plugin with its version and settings.  When the data
 an ROI sees change -- a new size here, a new filter bound, a drift correction
 -- its measurements are marked out of date and left out of the results table
 until the ROIs are measured again.  A measurement belongs to its ROI, whether
-the per-region steps window or a chain made it, and steps under different
+the per-region steps or a chain made it, and steps under different
 names stand side by side in the results table.
 
 ## In detail
@@ -209,17 +213,37 @@ where each ROI is shown with what the per-region steps measured in it (also
 Ctrl+R).  Under the button, the file chosen there and
 how many of its ROIs there are and are used.
 
-### Per-region steps...
-Opens the per-region steps window: which steps run, in what order, with which
-settings; *check* to time them in a few ROIs, and Run, which measures what
-is out of date and carries the rest forward.  While it measures, Run is
-Stop: the ROI being measured is finished, the ones measured so far are kept,
-and the rest wait for the next Run.  A new list starts with the
-general measurements, once each, with their own defaults; a specialised
+### per-region steps
+Which steps run, in what order, with which settings: the same editor as any
+chain's, opened on the one block.  *check* times them in a few ROIs, and
+Run measures what is out of date and carries the rest forward.  While it
+measures, Run is Stop: the ROI being measured is finished, the ones measured
+so far are kept, and the rest wait for the next Run.  A new list starts with
+the general measurements, once each, with their own defaults; a specialised
 one, such as NPC Corners, is added there when the data call for it.  A run
-that will take more than a minute says how long before it starts.  The list is
-saved in the file with the results, because the results table's columns mean
-nothing without it, and *save as...* keeps it as a chain.
+that will take more than a minute says how long before it starts.  The list
+is saved in the file with the results, because the results table's columns
+mean nothing without it, and *save as...* keeps it as a chain.
+
+Under it, how many ROIs have a complete, current row in the results table,
+and, once an ROI is selected in the ROI manager, a table of what was
+measured on it, one line per number, marked with its state -- *(stale)*,
+say -- where the step that produced it is not current.  The keywords it was given
+in the ROI manager (*annotate*) are listed with them.
+
+### measure the selected ROI
+On by default.  An ROI selected or added in the ROI manager is measured at
+once: the steps whose result for it is missing or out of date run, and what
+they measure is stored, so the same work is not done on the next visit.
+Untick it to scroll a large project without anything being computed behind
+you; the numbers are then shown as stored.
+
+### draw its figures
+Opens the *ROI results* window beside the ROI manager (and the manager, if
+it is not open): what the steps draw for the selected ROI, a tab per
+enabled step, redrawn in place by the next ROI.  The step whose tab is open
+runs on every selection, measured or not, because a figure cannot be stored.
+Closing that window unticks it.
 
 ### geometry
 What every ROI's outline is, unless it has a polygon of its own.  Folded
@@ -249,13 +273,6 @@ ROI.
 Draw a rectangle, a line or a polygon in the 2D view first.  Useful for
 structures that are not round, or a region the automatic finder would not
 propose; the outline is kept as it is.
-
-### results
-The measurements, folded when the tab opens.  First, how many ROIs have a
-complete, current row in the results table.  Below it, once an ROI is
-selected in the ROI manager, a table of what was measured on it, one line
-per number, marked with its state -- *(stale)*, say -- where the
-step that produced it is not current.
 
 ## Differences from SMAP
 

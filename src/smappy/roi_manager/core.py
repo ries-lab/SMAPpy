@@ -14,7 +14,7 @@ from dataclasses import asdict, dataclass, field, fields, replace
 from datetime import datetime, timezone
 import hashlib
 import json
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 import numpy as np
@@ -141,6 +141,10 @@ class ROI:
     use: bool = True
     comment: str = ""
     origin: dict = field(default_factory=lambda: {"method": "manual"})
+    # what the user said of it, ``{list: keyword}`` from the project's
+    # `ROIProject.annotation_lists`; replaced, never edited in place (see
+    # `copy_rois`), and no part of what is measured, so not of a signature
+    annotations: dict = field(default_factory=dict)
 
     def region(self, shape: str, size_nm: float) -> Region:
         """This ROI's shape: its own polygon, or the project's ``shape`` of
@@ -171,6 +175,46 @@ class ROIStep:
     """One edit of the ROIs, and the ROIs as they were before it."""
     label: str
     rois: Dict[str, "ROI"]
+
+
+# The lists a new project offers: one, so that the keys do something before
+# anyone has written a list of their own.
+DEFAULT_ANNOTATION_LISTS = {"quality": ["good", "bad", "unsure"]}
+
+
+def parse_annotation_lists(text: str) -> Dict[str, List[str]]:
+    """``"quality: good, bad\nshape: ring, arc"`` -> ``{"quality": [...], ...}``.
+
+    One list a line, its name before the colon and its keywords after,
+    separated by commas -- SMAP's list file, with names.  A line without a
+    colon is a list of that name with no keywords yet; blank lines and
+    repeated keywords are dropped.
+    """
+    lists: Dict[str, List[str]] = {}
+    for line in text.splitlines():
+        name, _, words = line.partition(":")
+        name = name.strip()
+        if not name:
+            continue
+        keywords = lists.setdefault(name, [])
+        for word in words.split(","):
+            word = word.strip()
+            if word and word not in keywords:
+                keywords.append(word)
+    return lists
+
+
+def annotation_lists_text(lists: Dict[str, List[str]]) -> str:
+    """The text `parse_annotation_lists` reads back."""
+    return "\n".join(f"{name}: {', '.join(words)}" for name, words in lists.items())
+
+
+def annotation_columns(roi: ROI, values: Dict[str, Any]) -> Dict[str, str]:
+    """An ROI's keywords as columns of its row in the results table, named
+    after their lists -- ``annotation.<list>`` where a measurement already
+    has the name.  Text, so the numeric summaries pass over them."""
+    return {(name if name not in values else f"annotation.{name}"): keyword
+            for name, keyword in roi.annotations.items()}
 
 
 def copy_rois(rois: Dict[str, "ROI"]) -> Dict[str, "ROI"]:
@@ -307,6 +351,12 @@ class ROIProject:
         # which are in `tables`
         self.runs = []
         self.navigation = {}  # GUI state only; never used for extraction
+        # ROI ids in the order they are listed and their results reported
+        # (`sort`); empty: by number.  The numbers themselves never change.
+        self.order: List[str] = []
+        # the keyword lists an ROI is annotated from (`ROI.annotations`)
+        self.annotation_lists: Dict[str, List[str]] = {
+            k: list(v) for k, v in DEFAULT_ANNOTATION_LISTS.items()}
         # The per-region steps, a `chain.Block`: what the steps window edits
         # and runs, and what the ROI manager measures an ROI with.  It
         # travels with the project because the columns of a results table
@@ -392,6 +442,26 @@ class ROIProject:
     def redo(self) -> Optional[str]:
         step = self.history.redo(self.rois)
         return step.label if step else None
+
+    def annotate(self, roi_id, name: str, keyword: Optional[str]) -> None:
+        """Give an ROI ``keyword`` from list ``name``; None or "" clears it.
+        Undoable, as any edit of the ROIs."""
+        roi = self.rois[roi_id]
+        if keyword and keyword not in self.annotation_lists.get(name, ()):
+            raise ValueError(f"{keyword!r} is not in the list {name!r}")
+        if (roi.annotations.get(name) or None) == (keyword or None):
+            return
+        with self.edit(f"Annotate ROI {roi.number}"):
+            annotations = {k: v for k, v in roi.annotations.items() if k != name}
+            if keyword:
+                annotations[name] = keyword
+            roi.annotations = annotations        # replaced: see `copy_rois`
+
+    def set_annotation_lists(self, lists: Dict[str, List[str]]) -> None:
+        """New keyword lists.  An ROI keeps its keywords even where a list no
+        longer has them -- a list rewritten by mistake must not wipe a day's
+        annotation -- and they show until it is given another."""
+        self.annotation_lists = {str(k): [str(w) for w in v] for k, v in lists.items()}
 
     def add_roi(self, file_id, center, polygon=None, origin=None):
         if file_id not in self.sources:
@@ -656,7 +726,70 @@ class ROIProject:
         return out
 
     def _included(self):
-        return [i for i, roi in self.rois.items() if roi.use]
+        return [i for i in self.ordered_ids() if self.rois[i].use]
+
+    # ------------------------------------------------------------- order
+    def ordered_ids(self) -> List[str]:
+        """Every ROI id, in the order the list and the results show them:
+        as sorted (`sort`), with any ROI added since after the rest; by
+        number when unsorted.  An ROI keeps its number whatever the order."""
+        if not self.order:
+            return list(self.rois)
+        known = [i for i in self.order if i in self.rois]
+        placed = set(known)
+        return known + [i for i in self.rois if i not in placed]
+
+    def sort_rows(self) -> Dict[str, Dict[str, Any]]:
+        """What a sort or a filter reads of each ROI: the newest stored
+        values of every evaluation, current or not, named as in the results
+        table, and its keywords."""
+        from . import pipeline as pipeline_module
+        out = {}
+        for roi_id, roi in self.rois.items():
+            steps = {}
+            for label, table in self.tables.items():
+                entry = table.entry(roi_id) if roi_id in table else None
+                if entry and "values" in entry:
+                    steps[label] = entry
+            values = pipeline_module.merged_values({"steps": steps})
+            out[roi_id] = {**values, **annotation_columns(roi, values)}
+        return out
+
+    def sort_columns(self) -> List[str]:
+        """The names a sort or a filter can use: every measured column, then
+        the keyword lists."""
+        names: List[str] = []
+        for row in self.sort_rows().values():
+            for name in row:
+                if name not in names and name not in self.annotation_lists:
+                    names.append(name)
+        return sorted(names) + [n for n in self.annotation_lists if n not in names]
+
+    def sort(self, keys) -> List[str]:
+        """Order the ROIs by ``keys``, ``[(column, descending)]``
+        (`order.sort_ids`); the order, which is also kept."""
+        from .order import sort_ids
+        numbers = {i: r.number for i, r in self.rois.items()}
+        self.order = sort_ids(self.sort_rows(), keys, self.annotation_lists, numbers)
+        return list(self.order)
+
+    def unsort(self) -> None:
+        self.order = []
+
+    def filter_rois(self, text: str, roi_ids=None) -> Dict[str, bool]:
+        """Which ROIs meet ``text`` (`order.condition`), ``{id: bool}``,
+        without changing anything; a name no ROI has is refused, since it is
+        nearly always a typing error that would exclude every ROI."""
+        from .order import condition
+        test, names = condition(text)
+        rows = self.sort_rows()
+        known = set(self.sort_columns())
+        unknown = [n for n in names if n not in known]
+        if unknown:
+            raise ValueError(f"no ROI has {', '.join(map(repr, unknown))}: there is "
+                             + (", ".join(sorted(known)) or "nothing measured yet"))
+        ids = self.ordered_ids() if roi_ids is None else list(roi_ids)
+        return {i: test(rows[i]) for i in ids}
 
     def stale_steps(self, roi_id, steps=None):
         """The steps of this ROI that would have to run to be sure."""
@@ -934,14 +1067,15 @@ class ROIProject:
                 {"steps": {label: found[label][0] for label in names}})
             if values:
                 roi = self.rois[roi_id]
-                rows.append({"roi_id": roi.number, "file_id": roi.file_id, **values})
+                rows.append({"roi_id": roi.number, "file_id": roi.file_id, **values,
+                             **annotation_columns(roi, values)})
         return rows
 
     def _pipeline_results(self, steps):
         from . import pipeline as pipeline_module
         steps = self.resolved(steps)
         rows = []
-        for roi in self.rois.values():
+        for roi in (self.rois[i] for i in self.ordered_ids()):
             if not roi.use:
                 continue
             record, states = self.latest(roi.id, steps)
@@ -952,7 +1086,8 @@ class ROIProject:
                                           for step in steps}}
             values = pipeline_module.merged_values(record)
             if values:
-                rows.append({"roi_id": roi.number, "file_id": roi.file_id, **values})
+                rows.append({"roi_id": roi.number, "file_id": roi.file_id, **values,
+                             **annotation_columns(roi, values)})
         return rows
 
     def find(self, file_id, plugin=None, settings=None, parameters=None):
@@ -1207,6 +1342,8 @@ class ROIProject:
                 "size_nm": self.size_nm, "shape": self.shape,
                 "preview_nm": self.preview_nm, "tile_nm": self.tile_nm,
                 "navigation": self.navigation,
+                "annotation_lists": self.annotation_lists,
+                "order": [i for i in self.order if i in self.rois],
                 "sources": [{"id": s.id, "number": s.number, "name": s.name}
                             for s in self.sources.values()],
                 "rois": [asdict(r) for r in self.rois.values()],
@@ -1225,6 +1362,8 @@ class ROIProject:
         self.runs = []
         self.tables = {}
         self.navigation = {}
+        self.set_annotation_lists(DEFAULT_ANNOTATION_LISTS)
+        self.order = []
         from ..chain import Block
         self.block = Block()
         self.segment_preview = None
@@ -1238,6 +1377,8 @@ class ROIProject:
         self.preview_nm = float(doc.get("preview_nm", 0.0) or 0.0)
         self.set_tiles(doc.get("tile_nm", 0.0) or 0.0)
         self.navigation = dict(doc.get("navigation", {}))
+        self.set_annotation_lists(doc.get("annotation_lists", DEFAULT_ANNOTATION_LISTS))
+        self.order = [str(i) for i in doc.get("order", [])]
         # ids the file used, mapped onto the files this session has
         by_number = {s.number: s for s in self.sources.values()}
         remap = {}

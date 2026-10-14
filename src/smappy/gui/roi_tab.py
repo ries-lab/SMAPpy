@@ -3,10 +3,11 @@
 The tab itself (*Regions*) is an ordinary `PluginTab` over whatever the user
 pinned from `Analysis/Regions/*` -- the finders and the summaries, ordinary
 run-once plugins.
-What cannot be a pinned plugin sits above them, in this header: the geometry
-every ROI shares, the way into the ROI manager window where sites are chosen
-and judged, and the way into the region steps window, whose block of steps
-run once per ROI is a different object from a tab's list of pins.
+What cannot be a pinned plugin sits above them, in this header: the way into
+the ROI manager window where sites are chosen and judged, the steps run once
+per ROI (`region_steps.RegionSteps`, a block, which is a different object
+from a tab's list of pins), what they measured in the ROI selected there,
+and the geometry every ROI shares.
 """
 from __future__ import annotations
 
@@ -14,13 +15,14 @@ from typing import Dict, Optional
 
 import numpy as np
 from PySide6.QtCore import QSize
-from PySide6.QtWidgets import (QComboBox, QDoubleSpinBox, QFormLayout,
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout,
                                QHeaderView, QLabel, QMessageBox,
                                QPushButton, QTableWidget,
                                QTableWidgetItem, QVBoxLayout, QWidget)
 
 from ..session import Session
-from .widgets import CONTROL_WIDTH, CollapsibleSection, ColumnScroll
+from .widgets import CONTROL_WIDTH, CollapsibleSection
+from ..roi_manager.core import annotation_columns
 from .roi_window import COUNT_LIMIT
 
 
@@ -32,35 +34,70 @@ class ROIHeader(QWidget):
         self.session = session
         self.view = view
         self.manager: Optional[QWidget] = None     # not `window`: that is a QWidget method
-        self.evaluation: Optional[QWidget] = None
         self._loading = False
 
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
-        inner = QWidget()
-        layout = QVBoxLayout(inner)
-        outer.addWidget(ColumnScroll(inner))
-        layout.setContentsMargins(4, 4, 4, 4)
+        # In the tab's own scroll, above the plugins (`PluginTab`): it had a
+        # scroll of its own, which took half the tab whatever it held -- a
+        # gap under two folded sections, with the plugins pushed below it.
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 4)
         layout.setSpacing(4)
 
         self.open_button = QPushButton("Open ROI manager")
         self.open_button.setToolTip("the window for choosing and judging ROIs")
         self.open_button.clicked.connect(self.open_manager)
         layout.addWidget(self.open_button)
-        # beside the manager's button, out of any fold: the two windows are
-        # what this tab is for, and below them the plugins' Run buttons
-        # should be in view without scrolling
-        self.evaluate_button = QPushButton("Per-region steps...")
-        self.evaluate_button.setToolTip("the steps run once in every ROI: choose them, "
-                                        "order them and set them up; opens its own window")
-        self.evaluate_button.clicked.connect(self.open_evaluation)
-        layout.addWidget(self.evaluate_button)
 
         # which file this acts on is chosen in the manager; here it is only named
         self.file_count = QLabel("")
         self.file_count.setWordWrap(True)
         self.file_count.setStyleSheet("color: gray")
         layout.addWidget(self.file_count)
+
+        # ------------------------------------------------ per-region steps
+        # The steps, how they run on the ROI selected in the manager, and
+        # what they measured there, together: they were a window, two ticks
+        # in the manager and a folded table here, and which of the three
+        # held the answer was not obvious.
+        steps = QWidget()
+        slayout = QVBoxLayout(steps)
+        slayout.setContentsMargins(0, 0, 0, 0)
+        from .region_steps import RegionSteps
+        self.steps = RegionSteps(session)
+        self.steps.ran.connect(self._evaluated)
+        slayout.addWidget(self.steps)
+        self.measure = QCheckBox("measure the selected ROI")
+        self.measure.setToolTip(
+            "when an ROI is selected or added in the ROI manager, run the steps "
+            "whose result for it is missing or out of date, and keep what they "
+            "measure.  Off: a large project can be scrolled without computing "
+            "behind you, and the numbers are shown as stored, marked for what "
+            "they are.")
+        self.measure.toggled.connect(self._on_measure)
+        self.plot = QCheckBox("draw its figures")
+        self.plot.setToolTip(
+            "open the ROI results window: what the steps draw for the selected "
+            "ROI, a tab per step, redrawn in place by the next ROI -- so "
+            "that stepping down the list compares like with like.  Only the "
+            "tab being looked at is drawn.")
+        self.plot.toggled.connect(self._on_plot)
+        slayout.addWidget(self.measure)
+        slayout.addWidget(self.plot)
+        self.summary = QLabel("")
+        self.summary.setWordWrap(True)
+        self.summary.setStyleSheet("color: gray")
+        slayout.addWidget(self.summary)
+        self.results = QTableWidget(0, 2)
+        self.results.setHorizontalHeaderLabels(["measure", "value"])
+        self.results.verticalHeader().setVisible(False)
+        self.results.verticalHeader().setDefaultSectionSize(20)
+        self.results.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.results.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        # the table only once an ROI is selected, and as tall as its rows
+        self.results.hide()
+        slayout.addWidget(self.results)
+        layout.addWidget(CollapsibleSection("per-region steps", steps, expanded=True,
+                                            major=True))
 
         # -------------------------------------------------------- geometry
         geometry = QWidget()
@@ -87,29 +124,8 @@ class ROIHeader(QWidget):
                                     "2D view into an analysis ROI")
         self.from_region.clicked.connect(self._from_region)
         form.addRow(self.from_region)
-        # folded: set once per project, and open it pushed the plugins below
-        # out of view
+        # folded: set once per project
         layout.addWidget(CollapsibleSection("geometry", geometry, expanded=False, major=True))
-
-        # -------------------------------------------------------- evaluate
-        evaluate = QWidget()
-        elayout = QVBoxLayout(evaluate)
-        elayout.setContentsMargins(0, 0, 0, 0)
-        self.results = QTableWidget(0, 2)
-        self.results.setHorizontalHeaderLabels(["measure", "value"])
-        self.results.verticalHeader().setVisible(False)
-        self.results.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-        self.results.setFixedHeight(110)
-        self.summary = QLabel("")
-        self.summary.setWordWrap(True)
-        self.summary.setStyleSheet("color: gray")
-        elayout.addWidget(self.summary)
-        # the table only once there is something in it: 110 px of empty grid
-        # was most of what the tab showed before anything had been measured
-        elayout.addWidget(self.results)
-        self.results.hide()
-        layout.addWidget(CollapsibleSection("results", evaluate, expanded=False, major=True))
-        layout.addStretch(1)
 
         session.on_change(self._on_session)
         self.refresh(files_changed=True)
@@ -151,8 +167,6 @@ class ROIHeader(QWidget):
             # it stays with it, never into the tab's own stack
             self.manager = ROIManagerWindow(self.session, self.window())
             self.manager.changed.connect(self.refresh)
-            # one pipeline window per session, wherever it is opened from
-            self.manager.evaluation_requested.connect(self.open_evaluation)
         self.manager.show()
         self.manager.raise_()
 
@@ -169,9 +183,12 @@ class ROIHeader(QWidget):
             self.shape.setCurrentText(project.shape)
             self.size.setValue(project.size_nm)
             self.preview.setValue(project.preview_nm)
+        self.measure.setChecked(bool(project.navigation.get("re_evaluate", True)))
+        self.plot.setChecked(bool(project.navigation.get("plot_evaluation", False)))
         self._loading = False
         self._update_counts()
         self._show_result()
+        self.steps.refresh_counts()
 
     def _update_counts(self) -> None:
         project = self.project
@@ -234,20 +251,25 @@ class ROIHeader(QWidget):
         self.summary.setText(f"added the drawn {region.kind} as an ROI")
 
     # --------------------------------------------------------------- work
-    def open_evaluation(self) -> None:
-        """The region steps window, one per session, reusing what it was left
-        with.
+    def _on_measure(self, on: bool) -> None:
+        if self._loading:
+            return
+        if self.manager is not None:
+            self.manager.set_measuring(on)
+        else:
+            self.project.navigation["re_evaluate"] = bool(on)
 
-        The block itself lives on the project, not on the window: closing the
-        window must not lose the steps, and the project is what gets saved
-        into the localization file beside the results they produce.
-        """
-        from .region_steps import RegionStepsWindow
-        if self.evaluation is None:
-            self.evaluation = RegionStepsWindow(self.session, self)
-            self.evaluation.ran.connect(self._evaluated)
-        self.evaluation.show()
-        self.evaluation.raise_()
+    def _on_plot(self, on: bool) -> None:
+        """The figures are drawn for the ROI selected in the manager, so
+        asking for them opens it."""
+        if self._loading:
+            return
+        if on:
+            self.open_manager()
+        if self.manager is not None:
+            self.manager.set_plotting(on)
+        else:
+            self.project.navigation["plot_evaluation"] = bool(on)
 
     def _evaluated(self, result) -> None:
         self._update_counts()
@@ -264,10 +286,17 @@ class ROIHeader(QWidget):
         self.results.setVisible(roi is not None)
         if roi is None:
             return
+        self.results.setHorizontalHeaderLabels(
+            [f"ROI {project.numbers().get(roi.id, '')}", "value"])
         record, states = project.latest(roi.id)
         if record is None:
-            self.results.setRowCount(1)
+            noted = sorted(roi.annotations.items())
+            self.results.setRowCount(1 + len(noted))
             self.results.setItem(0, 0, QTableWidgetItem("not measured"))
+            for row, (name, keyword) in enumerate(noted, 1):
+                self.results.setItem(row, 0, QTableWidgetItem(name))
+                self.results.setItem(row, 1, QTableWidgetItem(keyword))
+            self._fit_results()
             return
         # a value is as good as the step that produced it, so the mark goes
         # per step and not on the whole row: one edited evaluator does not
@@ -282,7 +311,16 @@ class ROIHeader(QWidget):
                     text + marks.get(label, "")
             if "error" in entry:
                 values[f"{label} failed"] = entry["error"]
+        values.update(annotation_columns(roi, values))     # the keywords given it
         self.results.setRowCount(len(values))
         for row, (name, text) in enumerate(sorted(values.items())):
             self.results.setItem(row, 0, QTableWidgetItem(name))
             self.results.setItem(row, 1, QTableWidgetItem(text))
+        self._fit_results()
+
+    def _fit_results(self) -> None:
+        """As tall as its rows, up to ten: the tab scrolls, the table need not."""
+        rows = min(max(self.results.rowCount(), 1), 10)
+        self.results.setFixedHeight(self.results.horizontalHeader().height()
+                                    + rows * self.results.verticalHeader().defaultSectionSize()
+                                    + 2 * self.results.frameWidth())

@@ -27,8 +27,8 @@ turns them into the [labelling efficiency](plugin:Panels/Glossary) (also
 called degree of labelling: the fraction of the target proteins that carry a
 detected label).  Its page explains why the counts are taken this way.
 
-It is not in a new list of per-region steps by itself: add it in the
-*Per-region steps...* window when the ROIs are pores.  It needs ROIs centred
+It is not in a new list of per-region steps by itself: add it to the
+*per-region steps* in the Regions tab when the ROIs are pores.  It needs ROIs centred
 roughly on the pores, such as those of [NPC](plugin:Analysis/Regions/Find/NPC),
 pores seen face on, blinks merged -- [merge blinks](plugin:Panels/Glossary),
 also called grouping or linking, combines the localizations in consecutive

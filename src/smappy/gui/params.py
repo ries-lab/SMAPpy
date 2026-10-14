@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFontDatabase
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFormLayout,
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFormLayout, QSizePolicy,
                                QHBoxLayout, QLabel, QLineEdit, QSpinBox,
                                QToolButton, QVBoxLayout, QWidget)
 
@@ -64,6 +64,7 @@ class _Field(QWidget):
             self.widget.setFont(QFontDatabase.systemFont(QFontDatabase.FixedFont))
             self.widget.editingFinished.connect(self.changed)
             row.addWidget(self.widget, 1)
+            self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         elif info.kind in ("open_file", "save_file", "dir"):
             self.widget = QLineEdit()
             self.widget.editingFinished.connect(self.changed)
@@ -526,6 +527,10 @@ class SettingsForm(QWidget):
             form = QFormLayout()
             form.setContentsMargins(0, 0, 0, 0)
             form.setVerticalSpacing(2)
+            # macOS's default keeps every field at its size hint, so an
+            # expression got a box of 160 px in a column twice as wide; only
+            # what asks to grow does (`kind="text"`), on every platform
+            form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
             return form
         more = form_layout()
         main = None                          # the rows since the last part

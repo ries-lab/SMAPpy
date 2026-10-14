@@ -23,7 +23,7 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QRectF, Qt, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
-from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QDoubleSpinBox,
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QDoubleSpinBox,
                                QHBoxLayout, QHeaderView, QLabel, QListWidget,
                                QListWidgetItem, QMainWindow, QPushButton,
                                QSplitter, QTableView, QVBoxLayout, QWidget)
@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QDoub
 from ..regions import Region
 from ..render import FieldOfView
 from ..session import Session
+from .widgets import CollapsibleSection
 
 DRAFT_PEN = pg.mkPen("#2f7fd0", width=2, style=Qt.DashLine)
 DRAWING_PEN = pg.mkPen("#00c4ff", width=2, style=Qt.DashLine)
@@ -215,7 +216,7 @@ class ROIList(QAbstractTableModel):
     until the next `reset`, rather than for every ROI on every refresh.
     """
 
-    HEADERS = ("ROI", "file", "use")
+    HEADERS = ("ROI", "file", "use", "annotations")
 
     def __init__(self, window):
         super().__init__()
@@ -228,7 +229,7 @@ class ROIList(QAbstractTableModel):
 
     def reset(self, project) -> None:
         self.beginResetModel()
-        self.ids = list(project.rois)
+        self.ids = project.ordered_ids()        # as sorted (`ROIProject.sort`)
         self.row_of = {roi_id: i for i, roi_id in enumerate(self.ids)}
         self.numbers = project.numbers()
         self._waiting = {}
@@ -284,6 +285,16 @@ class ROIList(QAbstractTableModel):
             if role == Qt.ToolTipRole:
                 return "include this ROI when the per-region steps run (space toggles it)"
             return None
+        if column == 3:
+            # the keywords in the order of the lists, so a column reads alike
+            if role in (Qt.DisplayRole, Qt.ToolTipRole):
+                order = list(project.annotation_lists)
+                names = sorted(roi.annotations, key=lambda n: (
+                    order.index(n) if n in order else len(order), n))
+                if role == Qt.ToolTipRole:
+                    return "\n".join(f"{n}: {roi.annotations[n]}" for n in names) or None
+                return ", ".join(roi.annotations[n] for n in names)
+            return None
         if role == Qt.DisplayRole:
             return str(self.numbers.get(roi_id, "")) if column == 0 else str(
                 project.file_number(roi.file_id))
@@ -306,7 +317,6 @@ class ROIList(QAbstractTableModel):
 
 class ROIManagerWindow(QMainWindow):
     changed = Signal()          # ROIs added, removed or toggled
-    evaluation_requested = Signal()   # the pipeline window, opened by the Regions tab
 
     def __init__(self, session: Session, parent=None):
         super().__init__(parent)
@@ -394,11 +404,16 @@ class ROIManagerWindow(QMainWindow):
         # sized once, not to the contents: that would read every row
         header.setSectionResizeMode(QHeaderView.Fixed)
         header.setStretchLastSection(False)
-        for column, width in enumerate((60, 40, 40)):
+        for column, width in enumerate((50, 35, 35, 120)):
             header.resizeSection(column, width)
         self.table.verticalHeader().setDefaultSectionSize(20)
         self.table.selectionModel().selectionChanged.connect(lambda *_: self._on_select())
-        self.table.setMaximumWidth(190)          # the numbers need no more
+        # a click on a column sorts by it, again the other way; on *ROI*, back
+        # to the numbers.  The same order as Sort ROIs sets, and kept with it
+        header.setSectionsClickable(True)
+        header.sectionClicked.connect(self._sort_by_column)
+        self._sorted_column = None
+        self.table.setMaximumWidth(260)          # the numbers and a few keywords
         roi_side_list.addWidget(self.table, 1)
         side.addLayout(roi_side_list, 0)
         llayout.addLayout(side, 1)
@@ -419,6 +434,11 @@ class ROIManagerWindow(QMainWindow):
         edits.addWidget(self.undo_button)
         edits.addWidget(self.redo_button)
         llayout.addLayout(edits)
+        # what the user says of the selected ROI: a keyword from each list,
+        # a key per ROI (`roi_annotate`), and *use*
+        from .roi_annotate import AnnotationPanel
+        self.annotation = AnnotationPanel(self)
+        llayout.addWidget(CollapsibleSection("annotate", self.annotation, expanded=True))
         # shown only while a segmenter's preview is drawn: Run adds it, a
         # new preview replaces it, and this is the way to have neither
         self.clear_preview_button = QPushButton("Discard preview")
@@ -427,32 +447,6 @@ class ROIManagerWindow(QMainWindow):
         self.clear_preview_button.clicked.connect(self.session.clear_preview)
         self.clear_preview_button.setVisible(False)
         llayout.addWidget(self.clear_preview_button)
-        # the pipeline is set up in the control window's Regions tab, but it is
-        # here that its results are looked at, one site after another; the
-        # same window, opened from where the eye already is
-        self.evaluation_button = QPushButton("Per-region steps...")
-        self.evaluation_button.setToolTip("the steps run once in every ROI: choose "
-                                          "them, order them and set them up")
-        self.evaluation_button.clicked.connect(self.evaluation_requested.emit)
-        llayout.addWidget(self.evaluation_button)
-        self.evaluate_live = QCheckBox("plot the ROI's figures")
-        self.evaluate_live.setToolTip(
-            "open the ROI results window: what the steps draw for the selected "
-            "ROI, a tab per step, redrawn in place by the next ROI -- so "
-            "that stepping down the list compares like with like.  Only the "
-            "tab being looked at is drawn, and only that step runs.")
-        self.evaluate_live.toggled.connect(self._on_evaluate_live)
-        llayout.addWidget(self.evaluate_live)
-        self.re_evaluate = QCheckBox("measure again when out of date")
-        self.re_evaluate.setChecked(True)
-        self.re_evaluate.setToolTip(
-            "a selected ROI whose stored numbers were measured with data or "
-            "parameters that have since changed is measured again, and the "
-            "result kept.  Turn it off to scroll a large project without it "
-            "computing behind you: the numbers are then shown as they were "
-            "stored, marked for what they are.")
-        self.re_evaluate.toggled.connect(self._on_re_evaluate)
-        llayout.addWidget(self.re_evaluate)
         # the platform's keys, and Ctrl+Shift+Z everywhere, as the main window
         # has them; once each, since two shortcuts on one key fire neither
         keys = [(QKeySequence(QKeySequence.Undo), self.undo),
@@ -473,6 +467,10 @@ class ROIManagerWindow(QMainWindow):
             walk = QShortcut(QKeySequence(key), self)
             walk.setContext(Qt.WindowShortcut)
             walk.activated.connect(lambda step=step: self._step_tile(step))
+        for key, step in ((Qt.Key_Down, 1), (Qt.Key_Up, -1)):
+            walk = QShortcut(QKeySequence(key), self)
+            walk.setContext(Qt.WindowShortcut)
+            walk.activated.connect(lambda step=step: self.step_roi(step))
 
         roi_side = QWidget()
         rlayout = QVBoxLayout(roi_side)
@@ -577,18 +575,20 @@ class ROIManagerWindow(QMainWindow):
         self._fill_table()
         self.tiles_button.setChecked(bool(self.project.tile_nm))
         self.tile_size.setValue(self.project.tile_nm or DEFAULT_TILE_NM)
-        self.evaluate_live.setChecked(bool(project.navigation.get("plot_evaluation")))
-        self.re_evaluate.setChecked(bool(project.navigation.get("re_evaluate", True)))
         self._loading = False
         self.redraw()
 
     def _fill_table(self) -> None:
         project = self.project
+        if hasattr(self, "annotation"):
+            self.annotation.refresh(lists=not self.annotation.lists.hasFocus())
         was_loading, self._loading = self._loading, True
         self.rows.reset(project)
         row = self.rows.row_of.get(self.active)
         if row is not None:
-            self.table.selectRow(row)
+            # the current row too, not only the selection: Up and Down in the
+            # table step from the current one, and it was left on the first
+            self.table.setCurrentIndex(self.rows.index(row, 0))
             self.table.scrollTo(self.rows.index(row, 0))
         self._loading = was_loading
         used = sum(1 for r in project.rois.values() if r.use)
@@ -1118,27 +1118,73 @@ class ROIManagerWindow(QMainWindow):
         self.zoom_center = np.asarray(roi.center, float)
         if not from_table:
             self._fill_table()
+        else:
+            self.annotation.refresh()
         self.redraw()
-        if self.evaluate_live.isChecked():
-            self.evaluate_active()
+        self.evaluate_active()
+
+    def _sort_by_column(self, column: int) -> None:
+        """Order the list by one of its columns (`ROIList.HEADERS`)."""
+        project = self.project
+        descending = self._sorted_column == column
+        self._sorted_column = None if descending else column
+        if column == 0:
+            project.unsort()
+        elif column == 3:
+            names = list(project.annotation_lists)
+            project.sort([(n, descending) for n in names[:3]])
+        else:
+            def key(roi_id):
+                roi = project.rois[roi_id]
+                return (project.file_number(roi.file_id) if column == 1
+                        else not roi.use, roi.number)
+            project.order = sorted(project.rois, key=key, reverse=descending)
+        self._fill_table()
+        self.changed.emit()
+
+    def step_roi(self, by: int) -> None:
+        """The next (``by`` 1) or previous ROI in the list: Down and Up."""
+        if not self.rows.ids:
+            return
+        row = self.rows.row_of.get(self.active)
+        row = 0 if row is None else min(max(row + by, 0), len(self.rows.ids) - 1)
+        if self.rows.ids[row] != self.active:
+            self.select(self.rows.ids[row])
+
+    def annotated(self) -> None:
+        """An ROI's keywords or the lists changed: the list and the Regions
+        tab show them."""
+        self._fill_table()
+        self._update_undo()
+        self.changed.emit()
 
     # ---------------------------------------------------- the evaluation
-    def _on_evaluate_live(self, on: bool) -> None:
-        if self._loading:            # restored with the rest of the window
-            return
+    # Whether the selected ROI is measured and whether its figures are drawn
+    # are the Regions tab's ticks, beside the steps they run (`roi_tab`); they
+    # are kept in the project, so they come back with it, and read here.
+    def measuring(self) -> bool:
+        """Measure an ROI when it is selected or added: its steps that are out
+        of date run, and what they measure is kept with it."""
+        return bool(self.project.navigation.get("re_evaluate", True))
+
+    def plotting(self) -> bool:
+        """Draw the selected ROI's figures in the ROI results window."""
+        return bool(self.project.navigation.get("plot_evaluation", False))
+
+    def set_measuring(self, on: bool) -> None:
+        self.project.navigation["re_evaluate"] = bool(on)
+        if on:
+            self.evaluate_active()
+        self.changed.emit()
+
+    def set_plotting(self, on: bool) -> None:
         self.project.navigation["plot_evaluation"] = bool(on)
         if on:
             self.site_window().show()
             self.evaluate_active()
         elif self._site is not None:
             self._site.hide()
-
-    def _on_re_evaluate(self, on: bool) -> None:
-        if self._loading:
-            return
-        self.project.navigation["re_evaluate"] = bool(on)
-        if on and self.evaluate_live.isChecked():
-            self.evaluate_active()
+        self.changed.emit()
 
     def site_window(self):
         """The window the selected ROI's figures are drawn in, made once."""
@@ -1150,7 +1196,7 @@ class ROIManagerWindow(QMainWindow):
             self._site.shown.connect(lambda label: self.evaluate_active(label))
             # closed by hand: measuring for a window nobody is looking at is
             # the cost this whole arrangement exists to avoid
-            self._site.closed.connect(lambda: self.evaluate_live.setChecked(False))
+            self._site.closed.connect(lambda: self.set_plotting(False))
         return self._site
 
     def evaluate_active(self, label: Optional[str] = None) -> None:
@@ -1160,16 +1206,19 @@ class ROIManagerWindow(QMainWindow):
         hundred localizations, and a figure that arrives after the next ROI
         has been selected would be worse than a moment's wait.
 
-        What runs is decided here and nowhere else.  The evaluator whose tab
-        is open runs, because a plot is a closure over the data it drew and
-        nothing stored brings it back; the others are run only when their
-        stored result is out of date and *re-evaluate* is on, and what runs
-        is kept, so the same work is not done again on the next visit.
+        What runs is decided here and nowhere else.  With *measure* on, every
+        step whose stored result is out of date runs, and what runs is kept,
+        so the same work is not done again on the next visit; the numbers go
+        to the Regions tab.  With *draw* on, the evaluator whose tab is open
+        in the ROI results window runs as well, current or not, because a
+        plot is a closure over the data it drew and nothing stored brings it
+        back.
         """
         from ..roi_manager import pipeline as pipeline_module
         project = self.project
         roi = self._selected()
-        if roi is None or self._evaluating or not self.evaluate_live.isChecked():
+        measure, plot = self.measuring(), self.plotting()
+        if roi is None or self._evaluating or not (measure or plot):
             return
         steps = project.block_steps()
         if not steps:
@@ -1187,23 +1236,26 @@ class ROIManagerWindow(QMainWindow):
                     self.evaluate_active(label)
                 self._merge_wait = merger.after(again)
             return
-        window = self.site_window()
-        window.set_steps([step.label for step in steps])
-        label = label or window.current
         number = project.numbers().get(roi.id, "")
-        window.title_for(f"ROI {number}")
+        window = None
+        if plot:
+            window = self.site_window()
+            window.set_steps([step.label for step in steps])
+            label = label or window.current
+            window.title_for(f"ROI {number}")
         self._evaluating = True
         try:
             record, results, updated = project.evaluate_one(
-                roi.id, steps=steps, reuse=True, force=[label] if label else [],
-                store=True, run="stale" if self.re_evaluate.isChecked() else "forced")
+                roi.id, steps=steps, reuse=True,
+                force=[label] if plot and label else [],
+                store=True, run="stale" if measure else "forced")
         except Exception as error:
             self.status.showMessage(f"the measurement failed: {error}")
             return
         finally:
             self._evaluating = False
         failed = pipeline_module.errors(record)
-        for step in steps:
+        for step in steps if window is not None else ():
             result = results.get(step.label)
             if step.label in failed:
                 window.show_message(step.label, failed[step.label], failed=True)
@@ -1218,11 +1270,15 @@ class ROIManagerWindow(QMainWindow):
         drew = [label for label, result in results.items() if result is not None]
         if updated:
             self.status.showMessage(f"ROI {number}: {', '.join(updated)} measured")
-        elif drew:
+        elif drew and plot:
             self.status.showMessage(f"ROI {number}: {', '.join(drew)} drawn from "
                                     "the result already stored")
-        else:
+        elif plot:
             self.status.showMessage(f"ROI {number}: nothing to draw")
+        else:
+            self.status.showMessage(f"ROI {number}: up to date")
+        if updated:
+            self.changed.emit()          # the Regions tab shows its numbers
 
     # --------------------------------------------------------------- edits
     def _add(self) -> None:
@@ -1236,9 +1292,11 @@ class ROIManagerWindow(QMainWindow):
             step.label = f"Add ROI {self.project.numbers().get(roi.id)}"
         self.draft = self.draft_polygon = self.draft_direction = None
         self.active = roi.id
+        self.project.navigation["roi"] = roi.id
         self._fill_table()
         self.redraw()
         self.changed.emit()
+        self.evaluate_active()           # a new ROI is measured as a selected one is
 
     def _selected(self):
         return self.project.rois.get(self.active) if self.active else None

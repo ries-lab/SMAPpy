@@ -113,11 +113,16 @@ class PluginTab(QWidget):
         top.addWidget(self.search, 1)
         top.addWidget(add)
         layout.addLayout(top)
-        if header is not None:
-            layout.addWidget(header)
+        # the header scrolls with the sections: as a widget of its own above
+        # the scroll it was given half the tab, however little it held
         self.inner = QWidget()
-        self.stack = QVBoxLayout(self.inner)
+        column = QVBoxLayout(self.inner)
+        column.setContentsMargins(0, 0, 0, 0)
+        if header is not None:
+            column.addWidget(header)
+        self.stack = QVBoxLayout()
         self.stack.setContentsMargins(0, 0, 0, 0)
+        column.addLayout(self.stack, 1)
         layout.addWidget(ColumnScroll(self.inner))
         self.rebuild()
 

@@ -109,6 +109,7 @@ shape, so read the one closest to what you are writing:
 | summarises what evaluators measured | `roi.py`'s `SiteAnalysisPlugin` (an evaluator to read, a *results from* field, a preflight that asks which when there are several; under `Analysis/Regions/Summarize`) |
 | runs the ROI manager's segment, measure and analyse as one | `npc_analysis.chain.yaml` (a shipped chain: a block runs NPC Corners in every ROI before the next step; `docs/batch.md`, "ROIs: segment, measure, analyse") |
 | finds clusters and names them in the table | `clusters.py` (DBSCAN: `cluster_id` / `n_in_cluster`; ROIs of them are `region_column.py`'s *Column to ROIs*, for any id column) |
+| orders or filters the ROIs by what was measured in them | `roi_order.py` (*Sort ROIs*: `ROIProject.order`, which the list and the results follow, never the numbers; *Filter ROIs*: a parsed condition setting *use* in one undo step; `roi_manager/order.py`) |
 | writes what was measured per region onto its localizations | `region_column.py` (*Regions to column*: `region_runs.write_values`, NaN outside, never over a column of the localizations' own; a block's *write values* calls the same) |
 | runs steps once per region, writes columns back | `smappy/blocks.py` (a `chain.Block`; the regions through `region_runs.regions_of` -- ROIs or an id column, one interface; `RegionScratch`, `WriteBack`, *write values*; per-cluster results in `Session.id_regions`; the ROI project holds one, `ROIProject.block`) |
 | opens an interactive window of the GUI's | `bead_calibration.py` (`Plugin.window`: the button opens what the GUI registered in `session.window_openers`) |
@@ -157,7 +158,7 @@ class Thing(Plugin):
   column each of the region table) and `Result.arrays`, so it can run once
   per ROI -- in `ROIProject.region_context(roi)`: `ctx.locs` the ROI's rows,
   each layer's filter over them, `ctx.region` its shape -- as well as on the
-  view like any other plugin.  The per-region steps window offers these; in a chain
+  view like any other plugin.  The per-region steps (the Regions tab) offer these; in a chain
   it runs once in each region as a step of a block (`chain.Block`,
   `smappy/blocks.py`): over the ROIs or an id column such as `cluster_id`
   (`docs/regions.md`).  Its results belong to

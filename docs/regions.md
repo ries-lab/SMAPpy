@@ -74,7 +74,7 @@ A `chain.Block` is a list of steps run once in each region: `regions` is
 one measures (filter a region, then measure it), and all of it is thrown
 away afterwards.  Because of that, once one step must run in a region every
 step before it that changes the table runs too, and a step's signature
-includes the identities of those steps.  The per-region steps window
+includes the identities of those steps.  The per-region steps (Regions tab)
 (`gui/region_steps.py`) is the chain panel opened on the ROI project's own
 block (`ROIProject.block`, a `chain.Block` saved with the project);
 its Run measures what is out of date and carries the rest.

@@ -149,7 +149,7 @@ A chain can do what the ROI manager does by hand:
 * its results are **stored with the ROIs** as an evaluation run of their own,
   marked with the block (`run["chain"]`, ``block <label>``), under each
   step's name -- the
-  plugin's when the step is not renamed.  The per-region steps window's list
+  plugin's when the step is not renamed.  The per-region steps' list
   is not touched: it is the user's, set up for whatever they do next.  A
   result belongs to its ROI and says how it was made
   (`ROIProject.evaluations`: the newest result under each name that is

@@ -160,10 +160,10 @@ def test_a_pipeline_nobody_stored_is_read_back_from_the_run():
     assert states(project, ids[0]) == {"Localization Statistics": "current"}
 
 
-def test_the_region_steps_window_re_runs_only_what_changed(tmp_path):
+def test_the_region_steps_re_run_only_what_changed(tmp_path):
     pytest.importorskip("PySide6")
     from PySide6.QtWidgets import QApplication
-    from smappy.gui.region_steps import RegionStepsWindow
+    from smappy.gui.region_steps import RegionSteps
     from smappy.session import Session
     QApplication.instance() or QApplication([])
 
@@ -176,7 +176,7 @@ def test_the_region_steps_window_re_runs_only_what_changed(tmp_path):
         project.add_roi(file_id, [center, 0])
     project.block = Block(steps=[ChainStep(plugin=STATISTICS)])
 
-    window = RegionStepsWindow(session)
+    window = RegionSteps(session)
     assert "2 ROI(s) to measure" in window.status.text()
     window.run()
     assert not project.needs_evaluation()

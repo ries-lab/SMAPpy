@@ -28,7 +28,7 @@ from typing import Optional
 from typing import List, Tuple
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import (QFileDialog, QHBoxLayout, QInputDialog, QLabel,
+from PySide6.QtWidgets import (QFileDialog, QGridLayout, QHBoxLayout, QInputDialog, QLabel,
                                QMessageBox, QPushButton, QToolButton, QTreeWidget,
                                QTreeWidgetItem, QVBoxLayout, QWidget)
 
@@ -112,15 +112,20 @@ class ChainPanel(QWidget):
         self.steps.itemChanged.connect(self._ticked)
         self.steps.currentItemChanged.connect(lambda *_: self._selected())
         column.addWidget(self.steps)
-        row = QHBoxLayout()
-        for label, slot in (("add...", self.add_step), ("block...", self.add_block),
-                            ("up", lambda: self.move_step(-1)),
-                            ("down", lambda: self.move_step(1)),
-                            ("rename...", self.rename_step), ("remove", self.remove_step)):
+        # two rows of three: six in one row are wider than the control
+        # column, and were cut to "lock.." and "emove" in it
+        row = QGridLayout()
+        row.setHorizontalSpacing(4)
+        row.setVerticalSpacing(2)
+        for i, (label, slot) in enumerate((
+                ("add...", self.add_step), ("block...", self.add_block),
+                ("rename...", self.rename_step),
+                ("up", lambda: self.move_step(-1)),
+                ("down", lambda: self.move_step(1)), ("remove", self.remove_step))):
             button = QPushButton(label)
+            button.setMinimumWidth(button.fontMetrics().horizontalAdvance(label) + 20)
             button.clicked.connect(slot)
-            row.addWidget(button)
-        row.addStretch(1)
+            row.addWidget(button, *divmod(i, 3))
         column.addLayout(row)
         checking = QHBoxLayout()
         self.check_button = QPushButton("check")

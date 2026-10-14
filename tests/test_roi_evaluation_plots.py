@@ -165,7 +165,7 @@ def two_steps():
 def test_the_next_roi_redraws_in_the_window_that_is_already_open(app, monkeypatch):
     monkeypatch.setattr(pipeline_module, "block_steps", lambda block: steps(Drawing))
     window, project = a_window(app)
-    window.evaluate_live.setChecked(True)
+    window.set_plotting(True)
     ids = list(project.rois)
     window.select(ids[0])
     site = window._site
@@ -186,7 +186,7 @@ def test_every_stale_step_is_measured_but_only_the_open_one_is_drawn(app, monkey
     monkeypatch.setattr(pipeline_module, "block_steps",
                         lambda block: steps(Drawing, Other))
     window, project = a_window(app)
-    window.evaluate_live.setChecked(True)
+    window.set_plotting(True)
     window.select(list(project.rois)[0])
     site = window._site
     assert [site.tabs.tabText(i) for i in range(site.tabs.count())] == [
@@ -204,7 +204,7 @@ def test_every_stale_step_is_measured_but_only_the_open_one_is_drawn(app, monkey
 def test_an_evaluator_that_fails_says_so_on_its_tab(app, monkeypatch):
     monkeypatch.setattr(pipeline_module, "block_steps", lambda block: two_steps())
     window, project = a_window(app)
-    window.evaluate_live.setChecked(True)
+    window.set_plotting(True)
     window.select(list(project.rois)[0])
     site = window._site
     assert "not this site" in site.messages["Failing"].text()
@@ -214,7 +214,7 @@ def test_an_evaluator_that_fails_says_so_on_its_tab(app, monkeypatch):
 def test_only_the_figure_being_looked_at_is_drawn(app, monkeypatch):
     monkeypatch.setattr(pipeline_module, "block_steps", lambda block: steps(Drawing))
     window, project = a_window(app)
-    window.evaluate_live.setChecked(True)
+    window.set_plotting(True)
     window.select(list(project.rois)[0])
     figures = window._site.figures["Drawing"]
     assert [figures.tabs.tabText(i) for i in range(figures.tabs.count())] == [
@@ -224,18 +224,42 @@ def test_only_the_figure_being_looked_at_is_drawn(app, monkeypatch):
     assert figures.panes["positions"].figure.axes
 
 
-def test_nothing_runs_until_the_plots_are_asked_for(app, monkeypatch):
+def test_a_selected_roi_is_measured_without_drawing_anything(app, monkeypatch):
+    """The numbers go to the Regions tab; the window opens only for figures."""
     monkeypatch.setattr(pipeline_module, "block_steps", lambda block: steps(Drawing))
     window, project = a_window(app)
-    window.select(list(project.rois)[0])
+    first = list(project.rois)[0]
+    window.select(first)
     assert window._site is None
+    assert not project.stale_steps(first, steps(Drawing))
+    assert "Drawing measured" in window.status.currentMessage()
+
+
+def test_with_measuring_off_nothing_runs_until_the_plots_are_asked_for(app, monkeypatch):
+    monkeypatch.setattr(pipeline_module, "block_steps", lambda block: steps(Drawing))
+    window, project = a_window(app)
+    window.set_measuring(False)
+    runs = len(project.runs)
+    window.select(list(project.rois)[0])
+    assert window._site is None and len(project.runs) == runs
+
+
+def test_an_added_roi_is_measured_at_once(app, monkeypatch):
+    monkeypatch.setattr(pipeline_module, "block_steps", lambda block: steps(Drawing))
+    window, project = a_window(app)
+    window.refresh(files=True)
+    window.draft = np.array([500.0, 0.0])
+    window._add()
+    added = window.active
+    assert project.navigation["roi"] == added
+    assert not project.stale_steps(added, steps(Drawing))
 
 
 def test_what_is_current_is_not_measured_again(app, monkeypatch):
     """Scrolling back to a site already measured costs nothing."""
     monkeypatch.setattr(pipeline_module, "block_steps", lambda block: steps(Drawing))
     window, project = a_window(app)
-    window.evaluate_live.setChecked(True)
+    window.set_plotting(True)
     ids = list(project.rois)
     window.select(ids[0])
     window.select(ids[1])
@@ -248,14 +272,14 @@ def test_what_is_current_is_not_measured_again(app, monkeypatch):
 def test_with_re_evaluation_off_a_stale_step_is_left_alone(app, monkeypatch):
     monkeypatch.setattr(pipeline_module, "block_steps", lambda block: two_steps())
     window, project = a_window(app)
-    window.evaluate_live.setChecked(True)
+    window.set_plotting(True)
     ids = list(project.rois)
     window.select(ids[0])
     window._site.tabs.setCurrentIndex(1)              # both steps measured
     window._site.tabs.setCurrentIndex(0)
     assert not project.stale_steps(ids[0], two_steps())
 
-    window.re_evaluate.setChecked(False)
+    window.set_measuring(False)
     project.move_roi(ids[0], [500, 500])              # everything is stale now
     window.select(ids[0])
     stale = [step.label for step in project.stale_steps(ids[0], two_steps())]
@@ -266,40 +290,40 @@ def test_with_re_evaluation_off_a_stale_step_is_left_alone(app, monkeypatch):
 def test_an_empty_pipeline_says_so_rather_than_drawing(app):
     window, project = a_window(app)
     window.project.block = Block()
-    window.evaluate_live.setChecked(True)
+    window.set_plotting(True)
     window.select(list(project.rois)[0])
     assert "no per-region step" in window.status.currentMessage()
 
 
-def test_whether_to_plot_is_remembered_with_the_project(app):
-    window, project = a_window(app)
-    window.evaluate_live.setChecked(True)
-    assert project.navigation["plot_evaluation"] is True
-    window.refresh()
-    assert window.evaluate_live.isChecked()
-
-
-def test_the_manager_opens_the_pipeline_window(app):
-    """Below the ROI list, where the evaluation is being looked at."""
+def test_the_regions_tab_ticks_are_the_projects_and_drive_the_manager(app):
+    """Measuring and drawing are set beside the steps, in the Regions tab, and
+    kept with the project."""
     from smappy.gui.roi_tab import ROIHeader
     session = Session(table([(0, 0)]))
     session.show_grouped(0, False)
     header = ROIHeader(session)
-    header.open_manager()
-    header.manager.evaluation_button.click()
-    assert header.evaluation is not None and header.evaluation.isVisible()
+    assert header.measure.isChecked() and not header.plot.isChecked()
+    header.plot.setChecked(True)               # opens the manager, where ROIs are chosen
+    assert header.manager is not None and header.manager.plotting()
+    assert session.rois.navigation["plot_evaluation"] is True
+    header.measure.setChecked(False)
+    assert session.rois.navigation["re_evaluate"] is False
+    header.manager._site.close()               # closed by hand: the tick follows
+    assert not header.plot.isChecked()
+    header.manager.close()
 
 
-def test_closing_the_site_window_stops_the_measuring(app, monkeypatch):
-    """Nobody is looking, so nothing should be computed for it."""
+def test_closing_the_site_window_stops_the_drawing(app, monkeypatch):
+    """Nobody is looking, so no figure should be computed for it."""
     monkeypatch.setattr(pipeline_module, "block_steps", lambda block: steps(Drawing))
     window, project = a_window(app)
-    window.evaluate_live.setChecked(True)
+    window.set_measuring(False)
+    window.set_plotting(True)
     ids = list(project.rois)
     window.select(ids[0])
 
     window._site.close()
-    assert not window.evaluate_live.isChecked()
+    assert not window.plotting()
     runs = len(project.runs)
     window.select(ids[1])
     assert len(project.runs) == runs
@@ -309,7 +333,7 @@ def test_copy_takes_the_roi_pane_and_the_evaluators_figure(app, monkeypatch):
     monkeypatch.setattr(pipeline_module, "block_steps", lambda block: steps(Drawing))
     window, project = a_window(app)
     window.show()
-    window.evaluate_live.setChecked(True)
+    window.set_plotting(True)
     window.select(next(iter(project.rois)))
     app.processEvents()
     # the ROI pane, outlines and all, when the mouse is over none of them

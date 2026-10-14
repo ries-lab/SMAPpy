@@ -147,14 +147,35 @@ space bar, includes or excludes it.  An excluded ROI stays in the list, grey,
 and is left out of the per-region steps and the results.  There is no
 separate review flag: *use* is the decision, from the moment an ROI is made.
 
+**Annotating.**  Under the list, *annotate* gives the selected ROI a
+keyword from each of a few lists the user writes -- *quality: good, bad,
+unsure*, say, or the stage of a structure.  The number keys give a keyword
+of the active list (1 the first, 0 none), Tab moves to the next list, and
+Up and Down to the next and previous ROI; with *then the next ROI* ticked, a
+keyword moves on by itself, so a few hundred ROIs are a key each.  The
+keywords show in the list's *annotations* column, under the steps in the
+Regions tab, and as columns of the results table, named after their lists,
+where an analysis can read them.  They are no part of what is measured: giving
+one puts no result out of date.  An annotation is undone with the other ROI
+edits.
+
+**Order.**  The list is in the order of the ROI numbers until it is sorted:
+by [Sort ROIs](plugin:Analysis/Regions/Sort ROIs), on what was measured or
+the keywords, or by a click on a column of the list (again for the other
+way round; on *ROI*, back to the numbers).  The results table and the
+summaries follow the same order, which is saved with the ROIs.  Sorting
+never changes an ROI's number.
+
 **5. Shapes.**  All ROIs share the circle or square set in the Regions tab.  One
 ROI can have its own outline instead (*Polygon*), and a direction (*Direction*),
 an arrow that the per-region steps can read, for example as the axis of an elongated
 structure.
 
-**6. Measuring.**  *Per-region steps...* opens the window where the steps run
-in every ROI are chosen, ordered and set up, and run.  With
-*plot the ROI's figures* ticked, a second window, *ROI results*, shows what
+**6. Measuring.**  The steps run in every ROI are chosen, ordered, set up
+and run in the [Regions tab](plugin:Panels/Regions tab), under *per-region
+steps*.  An ROI selected or added here is measured at once (*measure the
+selected ROI*, there), and its numbers are shown under the steps.  With
+*draw its figures* ticked there, a second window, *ROI results*, shows what
 the steps draw for the selected ROI, one tab per step.  Stepping down the
 list redraws it in place, so that ROIs are compared like with like.
 
@@ -271,14 +292,14 @@ it, and is called `<name>.<column>` when two do.  Each
 result keeps the settings it was made with, which is what an analysis such
 as NPC labelling efficiency reads its cutoffs from.
 
-**What runs when an ROI is selected.**  With *plot the ROI's figures* on, the
-step whose tab is open is always run on the selected ROI, because a
-figure cannot be stored and has to be drawn from the data.  The other
-steps run only if their stored result is out of date and *measure again
-when out of date* is ticked; what runs then is stored as a one-ROI run, so
-the same work is not done again on the next visit.  A step re-run only
-for its figure, with an unchanged result, is not stored again.  With
-*measure again when out of date* unticked nothing else runs: stored results are
+**What runs when an ROI is selected.**  With *measure the selected ROI* on
+(the Regions tab), the steps whose stored result for the ROI is missing or
+out of date run when it is selected or added, and what runs is stored as a
+one-ROI run, so the same work is not done again on the next visit.  With
+*draw its figures* on, the step whose tab is open is run as well, current or
+not, because a figure cannot be stored and has to be drawn from the data; a
+step re-run only for its figure, with an unchanged result, is not stored
+again.  With both off, selecting an ROI computes nothing: stored results are
 shown as they are, still marked as out of date.  A step that fails costs its
 own columns, not the ROI or the other steps, and its tab turns orange with
 the error in it.
@@ -354,18 +375,24 @@ Back to the circle or square of the Regions tab.
 ### Clear line
 Removes the direction.
 
-### Per-region steps...
-The same window as the Regions tab's button of that name.  Run there measures
-only what is out of date, which after one edited parameter is one step over
-the ROIs rather than all of them.
+### annotate
+What the selected ROI is, in the user's own words.  The keys work wherever
+the window has the keyboard, except in a text field, which keeps its own:
+typing a 1 into *lists* writes a 1.
 
-### plot the ROI's figures
-Opens the *ROI results* window beside this one.  Closing that window unticks
-it.  Its tabs appear only for the per-region steps that are enabled.
+### use
+The same switch as the list's *use* box, and the space bar: whether the
+per-region steps and the results include the ROI.
 
-### measure again when out of date
-On by default.  Untick it to scroll a large project quickly: nothing is then
-computed behind you except the figure of the open tab.
+### then the next ROI
+On, a keyword selects the next ROI once given: one key an ROI.  Off, the
+ROI stays selected, for giving it keywords from several lists.
+
+### lists
+One list a line: a name, a colon, and its keywords separated by commas
+(`quality: good, bad, unsure`).  The number keys reach the first nine of a
+list.  Saved with the ROIs.  An ROI keeps a keyword its list no longer has,
+so a list rewritten by mistake loses nothing already annotated.
 
 ## Differences from SMAP
 
@@ -388,8 +415,15 @@ and a list of evaluators with a tab each are its design.
 * **Directions, not rotations.**  SMAP can turn a site by an angle.  Here a
   direction is recorded for the per-region steps, and the image is not turned.  An
   ROI can have its own polygon outline.
-* **Not ported.**  SMAP's sorting of sites (ROIs) and its annotation lists and
-  comments.
+* **Annotation lists.**  SMAP has four lists, loaded from a text file, each
+  a list box, with the arrow keys moving between lists and entries.  Here the
+  lists are written in the window, as many as wanted, with a name each, and
+  saved with the ROIs; a number key gives a keyword, and the keywords are
+  columns of the results table.
+* **Not ported.**  SMAP's free comment and its two annotation lines per
+  site.  Its sorting and filtering of sites are the plugins
+  [Sort ROIs](plugin:Analysis/Regions/Sort ROIs) and
+  [Filter ROIs](plugin:Analysis/Regions/Filter ROIs).
 
 ## References
 

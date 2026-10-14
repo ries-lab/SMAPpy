@@ -25,7 +25,7 @@ number of localizations of a nuclear pore, how much it varies, and which ROIs
 are outliers -- empty, doubled, on background -- and deserve a look before
 they go into an average.
 
-It needs results: measure the ROIs first (*Per-region steps...* in the
+It needs results: measure the ROIs first (*per-region steps* in the
 Regions tab).
 
 ## How it works

@@ -96,7 +96,7 @@ These are detection settings, separate from the analysis ROI size. Outlines are 
 and a draft is blue and dashed; a drawing in progress is a dashed cyan rubber
 line and a direction is a magenta arrow.
 
-**Run**, in the *Per-region steps...* window, runs the steps on every
+**Run**, under *per-region steps* in the Regions tab, runs the steps on every
 included ROI across all files, measuring only what is out of date or
 missing. **Localization
 Statistics** (`Analysis/Measure/Localization Statistics`, the same plugin as
@@ -168,7 +168,7 @@ session.save("localizations_rois.h5")      # the ROIs and their results go with 
 `SegmenterPlugin`, whose `propose(locs, settings, existing_centres)` returns
 the centres it found), and `project.evaluate(block)` any `chain.Block`, or a
 list of its steps; without one it runs the project's own block, which the
-per-region steps window edits.  A step is an ordinary plugin with
+per-region steps in the Regions tab edit.  A step is an ordinary plugin with
 `per_region = True`: its `run(ctx, settings)` gets the ROI's localizations in
 `ctx.locs`, its shape in `ctx.region`, and returns its numbers as
 `Result.values`, which become the ROI's row (`docs/plugin-reference.md`).

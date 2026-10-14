@@ -34,6 +34,8 @@ def test_the_region_plugins_are_registered_under_regions():
                           "Analysis/Regions/Find/DBSCAN",
                           "Analysis/Regions/Column to ROIs",
                           "Analysis/Regions/Regions to column",
+                          "Analysis/Regions/Sort ROIs",
+                          "Analysis/Regions/Filter ROIs",
                           "Analysis/Regions/Summarize/Histograms",
                           "Analysis/Regions/Summarize/NPC labelling efficiency",
                           "Analysis/Regions/Workflow/NPC Analysis"}
@@ -293,14 +295,14 @@ def test_the_evaluation_window_offers_only_evaluators(app):
     assert set(tree.refs) < set(PluginTree().refs)
 
 
-def test_the_region_steps_window_edits_the_projects_block(app, monkeypatch):
+def test_the_region_steps_edit_the_projects_block(app, monkeypatch):
     from PySide6.QtCore import Qt
     from smappy.gui import chooser
-    from smappy.gui.region_steps import RegionStepsWindow
+    from smappy.gui.region_steps import RegionSteps
     from smappy.session import Session
 
     session = Session(table([(0, 0)]))
-    window = RegionStepsWindow(session)
+    window = RegionSteps(session)
     project = session.rois
     tree = window.panel.steps.invisibleRootItem()
     assert tree.childCount() == 1                       # the block's steps, at the top
@@ -332,7 +334,7 @@ def test_a_tab_pins_a_per_region_plugin_too(app):
 
 def test_find_evaluate_and_analyse_through_the_session(app):
     """Segment, region steps, analyse -- on one session."""
-    from smappy.gui.region_steps import RegionStepsWindow
+    from smappy.gui.region_steps import RegionSteps
     from smappy.plugins.roi import DensityPeaks
     from smappy.session import Session
 
@@ -354,7 +356,7 @@ def test_find_evaluate_and_analyse_through_the_session(app):
                                                       min_count=20))
     assert len(found) == 4
 
-    window = RegionStepsWindow(session)
+    window = RegionSteps(session)
     window.run()
     assert "4 ROIs, 1 step(s)" in window.status.text()
     # the session's log says what was evaluated, with each step's settings
