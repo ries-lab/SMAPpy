@@ -14,6 +14,7 @@ work, so it is one step of the ROI undo.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import List, Tuple
 
@@ -93,6 +94,9 @@ class FilterROIsSettings:
     condition: str = param("", label="keep", kind="text",
                            help='which ROIs to use, e.g. n_corners >= 6 and '
                                 'quality == "good"')
+    insert: str = param("", label="insert", choices=no_column,
+                        help="a measured column or keyword list, added to the "
+                             "end of the condition")
     mode: str = param("narrow", label="then",
                       choices=[("narrow", "exclude the others"),
                                ("set", "use exactly these")],
@@ -110,20 +114,33 @@ class FilterROIs(Plugin):
     version = "1"
 
     def describe(self, ctx, settings) -> FormState:
-        """How many ROIs the condition keeps, as it is typed."""
+        """The columns to insert, and how many ROIs the condition keeps, as
+        it is typed."""
         project = getattr(ctx, "rois", None) if ctx is not None else None
+        found = _columns(ctx)
+        choices = {"insert": [("", "a column..." if found else
+                               "nothing measured yet")] + found}
         if project is None or not project.rois or not settings.condition.strip():
-            names = ", ".join(n for n, _ in _columns(ctx)) if project is not None else ""
-            return FormState(notice=Notice(f"columns: {names}", kind="info")
-                             if names else None)
+            return FormState(choices=choices)
         try:
             kept = new_use(project, settings)
         except ValueError as error:
-            return FormState(notice=Notice(str(error)))
+            return FormState(choices=choices, notice=Notice(str(error)))
         used = sum(kept.values())
-        return FormState(notice=Notice(f"would use {used} of {len(kept)} ROIs "
+        return FormState(choices=choices,
+                         notice=Notice(f"would use {used} of {len(kept)} ROIs "
                                        f"(now {sum(r.use for r in project.rois.values())})",
                                        kind="info"))
+
+    def react(self, changed: str, settings):
+        """A column chosen in *insert* goes onto the end of the condition --
+        in backquotes when it is no plain name -- and the list goes back."""
+        if changed != "insert" or not settings.insert:
+            return None
+        name = settings.insert
+        token = name if re.fullmatch(r"[A-Za-z_]\w*(\.[A-Za-z_]\w*)*", name) else f"`{name}`"
+        text = settings.condition.rstrip()
+        return {"condition": f"{text} {token}" if text else token, "insert": ""}
 
     def run(self, ctx: Context, settings: FilterROIsSettings) -> Result:
         project = ctx.rois

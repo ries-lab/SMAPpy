@@ -101,3 +101,18 @@ def test_a_click_on_a_column_sorts_the_list(app):
     window.table.horizontalHeader().sectionClicked.emit(0)    # back to the numbers
     assert window.rows.ids == ids
     window.close()
+
+
+def test_a_column_chosen_from_insert_goes_onto_the_condition():
+    from smappy.plugins.roi_order import FilterROIs, FilterROIsSettings
+    plugin = FilterROIs()
+    out = plugin.react("insert", FilterROIsSettings(condition="n_corners >= 6 and",
+                                                    insert="quality"))
+    assert out == {"condition": "n_corners >= 6 and quality", "insert": ""}
+    out = plugin.react("insert", FilterROIsSettings(insert="NPC Corners.n_corners"))
+    assert out["condition"] == "`NPC Corners.n_corners`"
+    session, project, ids = measured_project()
+    found = plugin.describe(Context(locs=session.locs, session=session),
+                            FilterROIsSettings()).choices["insert"]
+    assert ("n_localizations", "n_localizations") in found
+    assert ("quality", "quality (keywords)") in found

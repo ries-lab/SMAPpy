@@ -151,7 +151,7 @@ separate review flag: *use* is the decision, from the moment an ROI is made.
 keyword from each of a few lists the user writes -- *quality: good, bad,
 unsure*, say, or the stage of a structure.  The number keys give a keyword
 of the active list (1 the first, 0 none), Tab moves to the next list, and
-Up and Down to the next and previous ROI; with *then the next ROI* ticked, a
+Up and Down to the next and previous ROI; with *next ROI after a keyword* ticked, a
 keyword moves on by itself, so a few hundred ROIs are a key each.  The
 keywords show in the list's *annotations* column, under the steps in the
 Regions tab, and as columns of the results table, named after their lists,
@@ -375,6 +375,11 @@ Back to the circle or square of the Regions tab.
 ### Clear line
 Removes the direction.
 
+### show in the 2D view
+On by default.  Selecting an ROI centres the main picture on it, at the
+zoom it has, and a layer that shows other files is switched to the ROI's
+file, so the ROI is looked at where the Render tab's tools are.
+
 ### annotate
 What the selected ROI is, in the user's own words.  The keys work wherever
 the window has the keyboard, except in a text field, which keeps its own:
@@ -384,7 +389,7 @@ typing a 1 into *lists* writes a 1.
 The same switch as the list's *use* box, and the space bar: whether the
 per-region steps and the results include the ROI.
 
-### then the next ROI
+### next ROI after a keyword
 On, a keyword selects the next ROI once given: one key an ROI.  Off, the
 ROI stays selected, for giving it keywords from several lists.
 

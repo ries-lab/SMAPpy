@@ -106,8 +106,9 @@ class PluginPanel(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        self.about: Optional[QLabel] = None      # the summary line, if any
         if self.plugin.description:
-            about = QLabel(self.plugin.description)
+            about = self.about = QLabel(self.plugin.description)
             about.setWordWrap(True)
             about.setStyleSheet("color: gray")
             layout.addWidget(about)

@@ -96,8 +96,12 @@ class ROIHeader(QWidget):
         # the table only once an ROI is selected, and as tall as its rows
         self.results.hide()
         slayout.addWidget(self.results)
-        layout.addWidget(CollapsibleSection("per-region steps", steps, expanded=True,
-                                            major=True))
+        section = CollapsibleSection("per-region steps", steps, expanded=True,
+                                     major=True, helpable=True,
+                                     help_tip="what the per-region steps are, and "
+                                              "how they run")
+        section.help_requested.connect(self._steps_help)
+        layout.addWidget(section)
 
         # -------------------------------------------------------- geometry
         geometry = QWidget()
@@ -167,6 +171,9 @@ class ROIHeader(QWidget):
             # it stays with it, never into the tab's own stack
             self.manager = ROIManagerWindow(self.session, self.window())
             self.manager.changed.connect(self.refresh)
+            # the numbers of whichever ROI is selected, measured now or not:
+            # they followed only a measurement, and stood on the last ROI
+            self.manager.selected.connect(self._on_selected)
         self.manager.show()
         self.manager.raise_()
 
@@ -250,6 +257,27 @@ class ROIHeader(QWidget):
         self._notify()
         self.summary.setText(f"added the drawn {region.kind} as an ROI")
 
+    def _steps_help(self) -> None:
+        from .help_window import show_help
+        show_help("Panels/Regions tab", self.window())
+
+    def _on_selected(self, roi) -> None:
+        """An ROI was selected in the manager: its numbers here, and with
+        *show in the 2D view* the picture centred on it, on its file."""
+        self._show_result()
+        if self.view is None or roi is None or \
+                not self.project.navigation.get("follow_2d", True):
+            return
+        number = self.project.file_number(roi.file_id)
+        changed = False
+        for layer in self.session.layers:
+            if not layer.is_image and layer.files is not None and number not in layer.files:
+                layer.set_files([number])       # a layer showing another file
+                changed = True
+        if changed:
+            self.session.changed("layer")
+        self.view.center_on(*roi.center)
+
     # --------------------------------------------------------------- work
     def _on_measure(self, on: bool) -> None:
         if self._loading:
@@ -292,7 +320,9 @@ class ROIHeader(QWidget):
         if record is None:
             noted = sorted(roi.annotations.items())
             self.results.setRowCount(1 + len(noted))
-            self.results.setItem(0, 0, QTableWidgetItem("not measured"))
+            self.results.setItem(0, 0, QTableWidgetItem(
+                "not measured" if self.measure.isChecked()
+                else "not measured: tick measure, or Run"))
             for row, (name, keyword) in enumerate(noted, 1):
                 self.results.setItem(row, 0, QTableWidgetItem(name))
                 self.results.setItem(row, 1, QTableWidgetItem(keyword))

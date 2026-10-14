@@ -345,3 +345,28 @@ def test_copy_takes_the_roi_pane_and_the_evaluators_figure(app, monkeypatch):
     assert figure is not None and not figure.isNull()
     window._site.close()
     window.close()
+
+
+def test_the_regions_tab_shows_the_selected_rois_numbers_and_the_picture_goes_there(app):
+    """It followed only a measurement: selecting an ROI measured before left
+    the table on the last one."""
+    from smappy.gui.render_view import RenderView
+    from smappy.gui.roi_tab import ROIHeader
+    session = Session(table([(0, 0), (1000, 1000)]))
+    session.show_grouped(0, False)
+    project = session.rois
+    project.set_geometry(200)
+    file_id = next(iter(project.sources))
+    for center in ([0, 0], [1000, 1000]):
+        project.add_roi(file_id, center)
+    view = RenderView(session)
+    header = ROIHeader(session, view)
+    header.open_manager()
+    first, second = list(project.rois)
+    header.manager.select(first)
+    header.manager.select(second)
+    header.manager.select(first)                 # measured already: nothing new
+    assert header.results.horizontalHeaderItem(0).text() == "ROI 1"
+    centre = view.view.viewRect().center()
+    assert abs(centre.x()) < 1 and abs(centre.y()) < 1
+    header.manager.close()

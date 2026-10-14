@@ -23,7 +23,7 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QRectF, Qt, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
-from PySide6.QtWidgets import (QAbstractItemView, QApplication, QDoubleSpinBox,
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QDoubleSpinBox,
                                QHBoxLayout, QHeaderView, QLabel, QListWidget,
                                QListWidgetItem, QMainWindow, QPushButton,
                                QSplitter, QTableView, QVBoxLayout, QWidget)
@@ -317,6 +317,7 @@ class ROIList(QAbstractTableModel):
 
 class ROIManagerWindow(QMainWindow):
     changed = Signal()          # ROIs added, removed or toggled
+    selected = Signal(object)   # the ROI now selected, measured or not
 
     def __init__(self, session: Session, parent=None):
         super().__init__(parent)
@@ -430,6 +431,14 @@ class ROIManagerWindow(QMainWindow):
         self.undo_button.clicked.connect(self.undo)
         self.redo_button = QPushButton("Redo ROI edit")
         self.redo_button.clicked.connect(self.redo)
+        # the main picture goes where the ROI is, on its file: the ROI image
+        # here is small, and the 2D view is where it is worked on
+        self.follow_2d = QCheckBox("show in the 2D view")
+        self.follow_2d.setToolTip("centre the main picture on the selected ROI, "
+                                  "and show its file there")
+        self.follow_2d.toggled.connect(
+            lambda on: self.project.navigation.__setitem__("follow_2d", bool(on)))
+        edits.addWidget(self.follow_2d)
         edits.addWidget(self.remove_button, 1)
         edits.addWidget(self.undo_button)
         edits.addWidget(self.redo_button)
@@ -573,6 +582,7 @@ class ROIManagerWindow(QMainWindow):
                 row = ids.index(saved)
             self.files.setCurrentRow(max(0, min(row, self.files.count() - 1)))
         self._fill_table()
+        self.follow_2d.setChecked(bool(project.navigation.get("follow_2d", True)))
         self.tiles_button.setChecked(bool(self.project.tile_nm))
         self.tile_size.setValue(self.project.tile_nm or DEFAULT_TILE_NM)
         self._loading = False
@@ -1122,6 +1132,7 @@ class ROIManagerWindow(QMainWindow):
             self.annotation.refresh()
         self.redraw()
         self.evaluate_active()
+        self.selected.emit(roi)
 
     def _sort_by_column(self, column: int) -> None:
         """Order the list by one of its columns (`ROIList.HEADERS`)."""
@@ -1266,7 +1277,13 @@ class ROIManagerWindow(QMainWindow):
                                                 "its numbers are in the Regions tab")
         # the table first: it writes the ROI counts into the status bar, and
         # what just happened to this site is the more useful of the two
-        self._fill_table()
+        if updated:
+            # the Regions tab shows the numbers, and a form that offers the
+            # measured columns (Sort ROIs, Filter ROIs) offers the new ones;
+            # this window refreshes its table from it too
+            self.session.changed("rois")
+        else:
+            self._fill_table()
         drew = [label for label, result in results.items() if result is not None]
         if updated:
             self.status.showMessage(f"ROI {number}: {', '.join(updated)} measured")
@@ -1277,8 +1294,6 @@ class ROIManagerWindow(QMainWindow):
             self.status.showMessage(f"ROI {number}: nothing to draw")
         else:
             self.status.showMessage(f"ROI {number}: up to date")
-        if updated:
-            self.changed.emit()          # the Regions tab shows its numbers
 
     # --------------------------------------------------------------- edits
     def _add(self) -> None:
@@ -1297,6 +1312,7 @@ class ROIManagerWindow(QMainWindow):
         self.redraw()
         self.changed.emit()
         self.evaluate_active()           # a new ROI is measured as a selected one is
+        self.selected.emit(roi)
 
     def _selected(self):
         return self.project.rois.get(self.active) if self.active else None

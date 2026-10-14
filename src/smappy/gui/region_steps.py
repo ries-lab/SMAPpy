@@ -72,6 +72,10 @@ class RegionSteps(QWidget):
         # the run's log: the line under the panel says how it ended, and an
         # empty box under Run read as a gap in the tab
         inner.output.hide()
+        # what the steps are is on the Regions tab's page, behind the
+        # section's ?, rather than a paragraph above the form
+        if inner.about is not None:
+            inner.about.hide()
         try:
             inner.form.changed.connect(self.store, Qt.UniqueConnection)
             inner.ended.connect(self._ended, Qt.UniqueConnection)

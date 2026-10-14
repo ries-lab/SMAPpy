@@ -5,7 +5,7 @@ file, a value of each per site, chosen with the arrow keys.  Here the lists
 are written in the panel itself, one a line (``quality: good, bad``), as
 many as are wanted, and saved with the project; a keyword is a key, 1 to 9
 in the list that is active, so that going through a few hundred ROIs is a
-key per ROI -- with *then the next ROI*, not even the arrow.
+key per ROI -- with *next ROI after a keyword*, not even the arrow.
 
 Keys, in the whole window: 1-9 a keyword of the active list, 0 clears it,
 Tab and Shift+Tab the next and previous list, Up and Down the next and
@@ -46,7 +46,7 @@ class AnnotationPanel(QWidget):
         self.use.setToolTip("include this ROI in the per-region steps and the "
                             "results (Space)")
         self.use.toggled.connect(self._on_use)
-        self.advance = QCheckBox("then the next ROI")
+        self.advance = QCheckBox("next ROI after a keyword")
         self.advance.setToolTip("after a keyword is given, select the next ROI, "
                                 "so a list is annotated a key per ROI")
         self.advance.toggled.connect(self._on_advance)

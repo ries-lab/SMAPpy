@@ -173,7 +173,7 @@ class ChainPanel(QWidget):
         self.panel.refresh_derived()
 
     # ------------------------------------------------------------ building
-    def _build(self, cls: type) -> None:
+    def _build(self, cls: type, relist: bool = True) -> None:
         if self.panel is not None:
             self.panel.release()
             self.holder.removeWidget(self.panel)
@@ -185,7 +185,8 @@ class ChainPanel(QWidget):
         self.panel = PluginPanel(cls, self.session)
         self.holder.addWidget(self.panel)
         self._show_run_controls()
-        self._list_steps()
+        if relist:
+            self._list_steps()
         origin = cls.spec.origin
         self.where.setText(("unsaved changes" if self.instance.chain and origin else
                             "not saved" if self.instance.chain else "")
@@ -260,7 +261,7 @@ class ChainPanel(QWidget):
             settings = None              # a half-typed number: the saved values
         return self.cls.current_spec(settings)
 
-    def _apply(self, spec: ChainSpec) -> bool:
+    def _apply(self, spec: ChainSpec, relist: bool = True) -> bool:
         try:
             cls = chains.chain_class(spec, path=self.instance.plugin)
         except ChainError as error:
@@ -272,7 +273,7 @@ class ChainPanel(QWidget):
         self.instance.chain = raw
         self.instance.values = {}        # the values are in the steps now
         path = self.current_path()
-        self._build(cls)
+        self._build(cls, relist=relist)
         if path:
             self.select(path)
         self.changed.emit()
@@ -365,7 +366,11 @@ class ChainPanel(QWidget):
         path = tuple(item.data(0, PATH))
         spec = self.current_spec()
         _step_at(spec, path).enabled = item.checkState(0) == Qt.Checked
-        self._apply(spec)
+        # The list already shows the tick, and is not rebuilt: this runs
+        # inside the item's own setData, and clearing the tree here deleted
+        # the item Qt was still writing to -- a segfault, now and then, on
+        # every untick (`test_the_region_steps_edit_the_projects_block`).
+        self._apply(spec, relist=False)
 
     def check_block(self) -> None:
         """Time the selected block in a few regions and say what it found."""

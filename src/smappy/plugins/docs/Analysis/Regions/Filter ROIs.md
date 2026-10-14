@@ -45,7 +45,13 @@ undo (*Undo ROI edit*).  An ROI keeps its number and its results either way.
 
 ### condition
 Start from one column and check the count under the panel before adding
-more.  The columns the ROIs have are listed there while the field is empty.
+more.
+
+### insert
+The names to write in the condition, without typing them: the list has every
+column some ROI has a value for, and the keyword lists.  The name is added
+at the end of the condition, in backquotes where it needs them; type the
+comparison after it.
 
 ### mode
 *exclude the others* only ever excludes: a filter run after another
