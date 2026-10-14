@@ -486,6 +486,25 @@ class Context:
 
 
 @dataclass
+class ShapeEdit:
+    """Shapes drawn with the mouse on one panel of a figure, and the setting
+    they are written back to.
+
+    A plugin cannot draw on a window -- nothing in a plugin imports Qt -- but
+    it can say that a panel of its figure takes shapes: the fit preview's
+    frame takes the region to fit in (``region.shapes``).  The GUI puts the
+    drawing tools beside that figure and sets ``on_change``, which writes the
+    shapes into the form; a script never sees any of it.  A shape is
+    ``{"kind": "include" | "exclude", "points": [[x, y], ...]}`` in the
+    panel's data coordinates.
+    """
+    field: str                                  # the dotted setting, "region.shapes"
+    panel: int = 0                              # which axis of the figure
+    shapes: list = field(default_factory=list)
+    on_change: Optional[Callable] = None        # set by the GUI
+
+
+@dataclass
 class Plot:
     """One figure a result offers, and how much room it wants.
 
@@ -505,6 +524,7 @@ class Plot:
     name: str = ""                     # "" is the main figure
     panels: int = 1                    # how many axes `draw` makes
     size: Optional[Tuple[float, float]] = None   # width, height in inches
+    edit: Optional["ShapeEdit"] = None           # a panel that takes drawn shapes
 
     def draw_into(self, figure) -> None:
         """Draw into a cleared figure, or into a subfigure of a page."""

@@ -97,7 +97,7 @@ shape, so read the one closest to what you are writing:
 | a long computation with progress | `drift_comet.py`, `drift_rcc.py` |
 | loads, saves, exports, simulates | `file.py` (one loader with an advanced *format* choice, no input table -- a format is a `Reader` / `Writer` in `io/formats.py`, every column of the file kept; *Load*, a launcher of File > Open; *Export localizations*, whose column list is `kind="columns"`; the simulator's model is `smappy.simulate`) |
 | finds, measures or summarises ROIs | `roi.py` (a segmenter derives from `SegmenterPlugin`, which gives it a Preview, *replace* (`replace_param()`) and a step of the ROI undo; `per_region = True`; analyse; segmenters under `Analysis/Regions/Find`) |
-| parts, a C++ backend | `fit.py` (nested settings dataclasses; four fitters, thin subclasses of `_FitPlugin`) |
+| parts, a C++ backend | `fit.py` (nested settings dataclasses; four fitters, thin subclasses of `_FitPlugin`; the *fit region* drawn on the Preview's frame: a figure panel that takes shapes is `Plot.edit`, a `ShapeEdit`, and the figure window adds the tools) |
 | adds a derived column, no output | `math_parser.py` (an expression, kept with the table as a recipe) |
 | removes or flags localizations | `remove_locs.py` (a region, a new table or a filtered flag) |
 | fits a model to what is in a ROI | `line_profile.py` (unbinned likelihood, models compared by AIC; one fit per layer, and `follow_roi`) |

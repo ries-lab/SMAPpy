@@ -579,6 +579,51 @@ class ColumnsField(QWidget):
         return [] if len(ticked) == len(items) else ticked
 
 
+class ShapesField(QWidget):
+    """Shapes drawn elsewhere -- on a preview's figure (`ShapeEdit`) -- kept
+    as a setting: what the form shows of them is how many, and a button to
+    take them away.  The shapes themselves are drawn and seen on the figure.
+    """
+
+    changed = Signal()
+
+    def __init__(self, spec: ParamSpec):
+        super().__init__()
+        from PySide6.QtWidgets import QPushButton
+        self.spec = spec
+        row = QHBoxLayout(self)
+        row.setContentsMargins(2, 0, 6, 0)
+        self.label = QLabel("")
+        self.clear_button = QPushButton("clear")
+        self.clear_button.clicked.connect(lambda: (self.set([]), self.changed.emit()))
+        row.addWidget(self.label)
+        row.addWidget(self.clear_button)
+        row.addStretch(1)
+        if spec.info.help:
+            self.setToolTip(spec.info.help)
+        self._shapes: List[dict] = []
+        self.set([])
+
+    def set(self, value) -> None:
+        self._shapes = [dict(s) for s in (value or []) if isinstance(s, dict)]
+        inside = sum(1 for s in self._shapes if s.get("kind") == "include")
+        outside = len(self._shapes) - inside
+        self.label.setText("none: see Preview" if not self._shapes else
+                           ", ".join(bit for bit in (
+                               f"{inside} to fit in" if inside else "",
+                               f"{outside} left out" if outside else "") if bit))
+        self.clear_button.setEnabled(bool(self._shapes))
+
+    def value(self) -> List[dict]:
+        return [dict(s) for s in self._shapes]
+
+    def refresh(self) -> None:
+        pass
+
+    def set_hint(self, value) -> None:
+        pass
+
+
 class SettingsForm(QWidget):
     """The fields of a settings dataclass; ``value()`` builds the instance.
 
@@ -637,7 +682,8 @@ class SettingsForm(QWidget):
                 layout.addWidget(section)
                 continue
             w = (LayersField(spec) if spec.info.kind == "layers"
-                 else ColumnsField(spec) if spec.info.kind == "columns" else _Field(spec))
+                 else ColumnsField(spec) if spec.info.kind == "columns"
+                 else ShapesField(spec) if spec.info.kind == "shapes" else _Field(spec))
             w.changed.connect(self.changed)
             w.changed.connect(lambda n=name: self.field_changed.emit(n))
             self.fields[name] = w

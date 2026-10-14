@@ -330,6 +330,17 @@ lock held.  On a microscope whose piezo has another name, put that name (or
 part of it) here.  Every tag that changed is kept in the file whatever this
 says; Analysis/Process/Image Tags draws any of them later.
 
+### region.shapes
+To fit only part of the camera frame -- one cell of several, or everything
+but a bright bead or a dirty corner -- press *Preview* and draw on the
+frame it shows: the buttons above the figure draw a rectangle or a polygon
+to *fit in* (green) or to *leave out* (dashed red); *undo* and *clear* take
+shapes away.  With shapes to fit in, only the candidates inside one of them
+are fitted; a candidate inside a shape left out never is.  The frame is
+still filtered whole, so a dynamic cutoff is set as without a region.  The
+shapes are in the frame's pixels and kept with the settings -- in the
+workspace, a chain or a batch they apply to every file.
+
 ## Output
 
 The table has the columns of [Gaussian 2D](plugin:Localize/Gaussian 2D) with

@@ -67,6 +67,11 @@ class FigurePane(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         layout.addWidget(toolbar_cls(self.canvas, self))
+        # the drawing tools of a figure whose panel takes shapes (`ShapeEdit`);
+        # hidden for every other figure
+        from .shape_tools import ShapeTools
+        self.shape_tools = ShapeTools(self.canvas, self._redraw, self)
+        layout.addWidget(self.shape_tools)
         layout.addWidget(self.canvas, 1)
         self.plot: Optional[Plot] = None
         self.stale = True
@@ -84,6 +89,17 @@ class FigurePane(QWidget):
         self.plot.draw_into(self.figure)
         self.canvas.draw_idle()
         self.stale = False
+        self.shape_tools.attach(getattr(self.plot, "edit", None), self.figure)
+
+    def _redraw(self) -> None:
+        """Draw the figure again, keeping the zoom: the shapes changed."""
+        limits = [(ax.get_xlim(), ax.get_ylim()) for ax in self.figure.axes]
+        self.stale = True
+        self.draw()
+        for ax, (x, y) in zip(self.figure.axes, limits):
+            ax.set_xlim(x)
+            ax.set_ylim(y)
+        self.canvas.draw_idle()
 
     def clipboard_image(self):
         """The figure as a picture to paste, at twice the screen's resolution:

@@ -196,7 +196,7 @@ S ≤ a day, M a few days, L a week or more.
 | **5** ✅ | **Time course**: any columns against frame (photons, locs per frame, precision, background), several in one graph, beside the image tags | extend `image_tags.py`, or `Analysis/Measure/Time course` sharing its drawing | S–M | test and page; Image Tags' page updated if it changes |
 | **6** ✅ | **Export the region table** to CSV: the columns chosen by the user, ROIs or clusters through `region_results` | `Analysis/Regions/Summarize/Export table` | S | a CSV of an NPC Corners run, the ROI annotations and `roi_id` included |
 | **7** ✅ | **Shuffle ids**: for any integer column (`cluster_id`, `roi_id`, `tid`, `frame`, ...), write `<column>_shuffled` with the ids permuted, so colouring by it separates neighbouring ids; a new seed per run | `Analysis/Process/Shuffle ids` | S | the permutation keeps id 0 / noise at 0; grouping keeps a blink's value (recipe with rule `max`) |
-| **8** | **Fit region**: fit only inside / exclude regions drawn on the camera frame | the fitters' detection part (`plugins/fit.py`), a mask on the candidates | S–M | candidates outside the region are dropped; the Localize tutorial still runs |
+| **8** ✅ | **Fit region**: fit only inside / exclude regions drawn on the camera frame | the fitters' detection part (`plugins/fit.py`), a mask on the candidates | S–M | candidates outside the region are dropped; the Localize tutorial still runs |
 
 ### Wave 2: segmentation and local density (needs step 1)
 
@@ -263,6 +263,11 @@ filters and zoom-ins are settled) · AssignColors for more than 2 colours (C4)
 * **Step 7** (2026-10-14): *Analysis/Process/Shuffle ids*: any integer
   column's ids permuted among themselves into `<column>_shuffled` (a
   recipe, `max` for merged blinks), 0 and below kept, the seed recorded.
+* **Step 8** (2026-10-14): the fitters' *fit region*: rectangles and
+  polygons drawn on the Preview's frame (fit in / leave out), kept in the
+  settings in frame pixels, the candidates outside dropped before fitting.
+  A figure's panel declares itself drawable with `Plot.edit` (`ShapeEdit`);
+  the figure window adds the tools (`gui/shape_tools.py`).  Wave 1 done.
 
 ### Start here
 

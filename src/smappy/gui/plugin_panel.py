@@ -356,6 +356,12 @@ class PluginPanel(QWidget):
             self.form.set_shown(state.shown)
         self._show_notice(state.notice)
 
+    def _shapes_drawn(self, field: str, shapes) -> None:
+        """Shapes drawn on a preview's figure (`ShapeEdit`), into the form:
+        the next run fits with them, and the workspace keeps them."""
+        self.form.set_values({field: [dict(s) for s in shapes]})
+        self._describe()
+
     def _show_notice(self, notice) -> None:
         """The plugin's line about the settings (`Notice`), with its button
         when the GUI has the window it names."""
@@ -819,6 +825,11 @@ class PluginPanel(QWidget):
                 refused = str(e)
         else:
             self.session.show_preview(self.plugin, result)
+            # a figure whose panel takes shapes writes them into this form
+            for figure in result.figures():
+                if figure.edit is not None:
+                    figure.edit.on_change = \
+                        lambda shapes, field=figure.edit.field: self._shapes_drawn(field, shapes)
         # A follow-ROI step happens ten times a second while the ROI is dragged, so
         # it writes no line, opens no window and takes no focus: the figure
         # redrawing where it already is *is* the output.
