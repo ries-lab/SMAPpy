@@ -3,7 +3,12 @@
 From your annotations in `SMAP_porting_list.xlsx`, read loosely: I went by the
 comments more than by the Decision column.  Row numbers (`#12`) are the `#`
 column of the spreadsheet; its **Work package** column says where each row
-went, and **Update 2026-10-14** what the regions restructuring changed.
+went, **Update 2026-10-14** what the regions restructuring changed, and
+**Plan step** which numbered step of the implementation plan takes it.
+
+**To start, read [Implementation plan: where to start](#implementation-plan-where-to-start)
+at the end**: 19 numbered steps in five waves.  The sections A–J before it
+are the backlog by area.
 
 **Updated 2026-10-14** (and the segmentation/density split decided the same day) against `origin/main` `c9f650a`, after the regions
 restructuring (`docs/regions.md`).  What it settled, as far as this plan is
@@ -68,7 +73,7 @@ ROI and per cluster.  Nothing is ported twice: SMAP's `X` (Analyze) and
   * **Segment regions**: *few but well-defined* regions, usually made into
     ROIs for review and measurement.  Algorithms: NPC (ring template, there
     now), Density Peaks (there now), other templates (CME, beads, ...), each
-    with its own model and parameters, as presets.
+    with its own model and parameters, as presets; only the selected preset's settings are shown.
 * **Local density** describes each localization's neighbourhood and writes a
   column; it segments nothing.  That is **Neighbourhood** (B1).
 * **Shuffle colours** is a third, separate, small plugin, because it must
@@ -78,7 +83,7 @@ ROI and per cluster.  Nothing is ported twice: SMAP's `X` (Analyze) and
 | | what | rows | status |
 |---|---|---|---|
 | B1 | **Neighbourhood** (the renamed `SpatialFilterLocs` / `density_calculator`): per localization, the number of neighbours within r (local density), the mean/median/min/max/quantile of a field around it, and the Voronoi cell density (area⁻¹, SharpViSu). Writes columns (recipes), which can be filtered and coloured, and which Find clusters' Voronoi threshold can use. | #70 #93 (density) #94 | open |
-| B2 | **Find clusters**: one plugin with an algorithm choice. Each algorithm's settings are a part, and the others are greyed through `describe` (`FormState.active`). It replaces `Regions/Find/DBSCAN`. Writes `cluster_id` and `n_in_cluster` as now. | #91 #93 (clusters) | DBSCAN done as its own plugin, to be folded in; the other algorithms are open |
+| B2 | **Find clusters**: one plugin with an algorithm choice. Each algorithm's settings are a part; only the selected algorithm's part is **shown**, the others hidden (step 1 below adds that to the form). It replaces `Regions/Find/DBSCAN`. Writes `cluster_id` and `n_in_cluster` as now. | #91 #93 (clusters) | DBSCAN done as its own plugin, to be folded in; the other algorithms are open |
 | B2s | **Shuffle colours**: for any integer column, writes a column with the ids randomly permuted (for example `<column>_shuffled`, a recipe), so colouring by it separates neighbouring ids. A new seed on each run. | #95 | open, S |
 | B2b | Statistics on clusters, also inside ROIs | #96 #120 | done by the structure (a block over `cluster_id`). A cluster-shape measurement (area, hull, radius of gyration, density) as a small `per_region` plugin is still open. |
 | B3 | **Spatial statistics**: Ripley K/L/H, pair correlation, 2D auto- and cross-correlation between layers, the 1D correlation along a line; `per_region`, so it runs in every ROI too | #90 #92 #119 | open |
@@ -173,16 +178,65 @@ Regions to column, or a small plugin of its own.
 
 ---
 
-## Suggested order
+## Implementation plan: where to start
 
-1. **A1, A2, A4, A5, A7**: independent, small, and they can run in parallel.
-2. **E2 named lines** and the small E1 leftovers (remove doubles, remove
-   locs outside ROIs).
-3. **B2s** shuffle colours (small); **B1** Neighbourhood; **B2** *Find
-   clusters* (fold DBSCAN in, add HDBSCAN and Voronoi), and *Segment regions*
-   (fold NPC and Density Peaks in, presets) together with E3; then **B3** and
-   **B4** as `per_region` measurements.
-4. **F** (design note first; tracks as an id column).
-5. **C1 + C2**, **D1–D3**, **E3 presets**, **E5**, Line Profile `per_region`.
-6. **H** decision → LocMoFit; G after F.
-7. A3 and A6 whenever they are wanted.
+Each step is sized for one session: a module, its tests and its page, plus
+any docs and exhaustive tests the change touches, as CLAUDE.md asks.  The
+steps within a wave are independent and can run in parallel.  Sizes:
+S ≤ a day, M a few days, L a week or more.
+
+### Wave 1: foundations and small P1 plugins (all independent)
+
+| step | what | where | size | done when |
+|---|---|---|---|---|
+| **1** | **Hide what the settings do not use.** `FormState.shown: Dict[str, bool]`, beside `active`: a part or field set False is **hidden** (`setVisible` on a part's section; `QFormLayout.setRowVisible` on a row, available from Qt 6.4 and smappy needs ≥ 6.6), not greyed. Like `active`, it is presentation only: a hidden field keeps its value, and a script ignores it. | `plugins/__init__.py` (`FormState`), `gui/params.py` (`set_shown`), `gui/plugin_panel.py`; the chain panel picks it up through the same `describe` | S | a test with a plugin whose `describe` hides a part, in the plugin panel and in a chain step; `docs/plugin-reference.md` and CLAUDE.md's `describe` bullet mention `shown` |
+| **2** | **Export localizations**: one plugin, a format choice (CSV/TXT, Picasso HDF5; SMAP `_sml.mat` as an optional later format), the fields to write, all or filtered | `File/Export/Localizations` in `plugins/file.py`; writers beside the readers in `io/formats.py` | S–M | a round trip through each format with the loaders (Picasso through step 3) |
+| **3** | **Readers**: Picasso HDF5, DECODE (h5/csv), registered as `Reader`s so *File/Load/Auto*'s *format* list offers them | `io/formats.py` | S | reading a file each format's own tool writes (a small fixture) |
+| **4** | **Histogram of any column**, per layer, with mean/median/std; `per_region`, so it also gives one per ROI or per cluster | `Analysis/Measure/Histogram` | S | test on simulated data; page |
+| **5** | **Time course**: any columns against frame (photons, locs per frame, precision, background), several in one graph, beside the image tags | extend `image_tags.py`, or `Analysis/Measure/Time course` sharing its drawing | S–M | test and page; Image Tags' page updated if it changes |
+| **6** | **Export the region table** to CSV: the columns chosen by the user, ROIs or clusters through `region_results` | `Analysis/Regions/Summarize/Export table` | S | a CSV of an NPC Corners run, the ROI annotations and `roi_id` included |
+| **7** | **Shuffle ids**: for any integer column (`cluster_id`, `roi_id`, `tid`, `frame`, ...), write `<column>_shuffled` with the ids permuted, so colouring by it separates neighbouring ids; a new seed per run | `Analysis/Process/Shuffle ids` | S | the permutation keeps id 0 / noise at 0; grouping keeps a blink's value (recipe with rule `max`) |
+| **8** | **Fit region**: fit only inside / exclude regions drawn on the camera frame | the fitters' detection part (`plugins/fit.py`), a mask on the candidates | S–M | candidates outside the region are dropped; the Localize tutorial still runs |
+
+### Wave 2: segmentation and local density (needs step 1)
+
+| step | what | where | size | done when |
+|---|---|---|---|---|
+| **9** | **Neighbourhood**: per localization, neighbours within r (local density), mean/median/min/max/quantile of a field within r, Voronoi cell density; written as recipe columns | `Analysis/Process/Neighbourhood` (module-level functions on a `cKDTree` and `scipy.spatial.Voronoi`) | M | densities of a simulated uniform field match the expected count; page with figures |
+| **10** | **Find clusters**: one plugin, an algorithm choice with one part per algorithm (only the selected one shown): DBSCAN (moved from `clusters.py`), Voronoi threshold (density from step 9, then connected cells), HDBSCAN if scikit-learn ≥ 1.3 is installed (an optional dependency, asked for at Run like uiPSF) | `Analysis/Regions/Find/Find clusters`; `Find/DBSCAN` removed | M | DBSCAN's tests pass through the new plugin; Voronoi finds simulated clusters; `docs/regions.md` ("Clusters", "The plugin tree") and CLAUDE.md's shape table updated; an old chain step `Regions/Find/DBSCAN` still loads (path alias) |
+| **11** | **Segment regions**: one plugin with presets, one part each, only the selected shown: NPC (moved from `npc.py`), Density Peaks (moved from `roi.py`); a `SegmenterPlugin` as now (Preview, *replace*, ROI undo). Templates such as CME and beads come later as further presets. | `Analysis/Regions/Find/Segment regions` | M–L | NPC and Density Peaks tests pass through it; `npc_analysis.chain.yaml` and the NPC tutorial use it; old paths alias; docs as in step 10 |
+| **12** | **Cluster shape**: area, convex hull, radius of gyration, density, elongation, as a `per_region` measurement (the statistics a block over `cluster_id` does not yet give) | `Analysis/Measure/Cluster shape` | S | known shapes return their numbers |
+
+Steps 10 and 11 share the old-path aliasing and the docs: do them
+one after the other, in the same session if possible.
+
+### Wave 3: the ROI manager's remaining pieces
+
+| step | what | size | needs |
+|---|---|---|---|
+| **13** | **Named lines per ROI**: the one *direction* becomes any number of named lines, drawn in the ROI manager, each with angle and length as values in the results table, and a reverse action | M (GUI, ROI project file format) | – |
+| **14** | **Small ROI tools**: remove double ROIs (closer than d: keep the larger); remove localizations outside the included ROIs (a third *region* choice of Remove Localizations); keep the ROIs inside the drawn ROI (a *Filter ROIs* condition on position) | S | – |
+| **15** | **Line Profile `per_region`** (width, distance, AIC winner as values) and **Circle fit** (`Analysis/Measure/Circle fit`, `per_region`), with *centre ROIs* on the circle or median centre as a Regions action | S–M | – |
+| **16** | **Average ROIs**: centre plus orientation from a measured value or a named line → a new table | M | 13 |
+
+### Wave 4: analysis projects (a short design note first, in `docs/`)
+
+| step | what | size |
+|---|---|---|
+| **17** | **Spatial statistics** (B3): Ripley K/L/H, pair correlation, 2D auto- and cross-correlation between layers, 1D correlation along a line; `per_region` | M–L |
+| **18** | **Counting** (B4): per-region blinks and dark times plus a Summarize histogram fit | M |
+| **19** | **Single-particle tracking** (F): linker writing `track_id`; MSD, diffusion and jump distances as `per_region` measurements and summaries; tracks in a movie export | L |
+
+### Wave 5: when the above is in
+
+Transformations C1 + C2 (Transform, Register layers) · drift D1–D3 (apply
+existing, fiducials, magnification in COMET) · Vibrations (A6, once its
+filters and zoom-ins are settled) · AssignColors for more than 2 colours (C4)
+· figures of regions (E6) · LocMoFit decision (H) and then the port · MINFLUX
+(G), after F · rendering and movies (I).
+
+### Start here
+
+Wave 1 is eight independent sessions.  If only one runs at a time, start with
+**step 1**, because waves 2 and 3 build on it.  Then go on with 2 and 3
+(export and readers together), then 4, 6 and 7.
