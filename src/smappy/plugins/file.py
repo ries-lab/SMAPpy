@@ -23,6 +23,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+import numpy as np
+
 from ..io.formats import (FileInfo, name_filter, reader_for, reader_named,
                           save_filter, writer_for)
 from ..simulate.settings import SimulationSettings
@@ -38,6 +40,31 @@ def _format_choices():
     return [("", "auto: by the file name")] + [(name, name) for name in reader_names()]
 
 
+def _conversion_choices():
+    from ..io.conversions import conversions
+    return [("", "auto: by the headers")] + [(n, n) for n in conversions()]
+
+
+@dataclass
+class CsvSettings:
+    """How a delimited text file's columns are read; `io.formats._load_csv`."""
+    conversion: str = param("", label="conversion", choices=_conversion_choices,
+                            help="a saved conversion; auto picks the one whose "
+                                 "headers the file has")
+    mapping: str = param("", label="columns", kind="text",
+                         help="header=column pairs, e.g. X=x_nm, Y=y_nm, T=frame; "
+                              "empty means the conversion's, or a guess from the header")
+    units: str = param("", label="lengths in",
+                       choices=(("", "auto"), ("nm", "nm"), ("um", "µm"),
+                                ("mm", "mm"), ("px", "camera pixels")),
+                       help="what x, y, z and their errors are in")
+    pixelsize_nm: Optional[float] = param(None, label="camera pixel", unit="nm",
+                                          min=0.01, help="for lengths in pixels")
+    first_frame: Optional[int] = param(None, label="first frame",
+                                       help="the number the file's first frame has: "
+                                            "1 for ThunderSTORM and SMAP, 0 for smappy")
+
+
 @dataclass
 class LoadSettings:
     path: str = param("", label="file", kind="open_file", file_filter=LOCS_FILTER,
@@ -48,9 +75,8 @@ class LoadSettings:
     format: str = param("", label="format", choices=_format_choices, advanced=True,
                         help="auto: from the file's name and, where that is not "
                              "enough, its contents")
-    mapping: str = param("", label="columns", advanced=True,
-                         help="csv only: header=column pairs, e.g. X=x_nm, "
-                              "Y=y_nm, T=frame; empty means guess from the header")
+    csv: CsvSettings = param(default_factory=CsvSettings, label="csv columns",
+                             collapsed=True)
 
 
 def _reader(path: Path, settings: LoadSettings):
@@ -63,6 +89,48 @@ def _reader(path: Path, settings: LoadSettings):
     return reader_for(path)          # raises with the known formats listed
 
 
+def csv_args(csv: CsvSettings) -> Dict[str, Any]:
+    """The csv reader's arguments from the form's csv part."""
+    args: Dict[str, Any] = {}
+    if csv.mapping.strip():
+        pairs = [p.split("=", 1) for p in csv.mapping.split(",") if "=" in p]
+        args["mapping"] = {a.strip(): b.strip() for a, b in pairs}
+    if csv.conversion:
+        args["conversion"] = csv.conversion
+    if csv.units:
+        args["units"] = csv.units
+    if csv.pixelsize_nm:
+        args["pixelsize_nm"] = csv.pixelsize_nm
+    if csv.first_frame is not None:
+        args["first_frame"] = csv.first_frame
+    return args
+
+
+@dataclass
+class OpenSettings:
+    append: bool = param(False, label="add",
+                         help="add the files to the open ones instead of "
+                              "replacing them")
+
+
+@register("File/Load/Load")
+class Open(Plugin):
+    """Choose localization files and open them: the first line of the File tab."""
+
+    description = ("choose localization files in a dialog and open them, or "
+                   "add them to the open ones; any format File/Load/Auto reads")
+    Settings = OpenSettings
+    changes_locs = False          # a launcher: the window loads, not `run`
+    version = "1"
+    # the window's own File > Open: a csv no conversion knows asks for its
+    # columns there (`gui.dialogs.CsvMappingDialog`)
+    window = "open files"
+
+    def run(self, ctx: Context, settings: OpenSettings) -> Result:
+        raise ValueError("Load opens a file dialog; in a script or a chain, "
+                         "use File/Load/Auto with the file's path")
+
+
 @register("File/Load/Auto")
 class LoadAuto(Plugin):
     """Read a localization file of any known format into the session."""
@@ -71,29 +139,24 @@ class LoadAuto(Plugin):
     changes_locs = True
     # 2: no *link blinks*; a table with a trace id is grouped by trace;
     # 3: the per-format loaders are a *format* choice here, and the csv
-    # *columns* came with them
-    version = "3"
+    # *columns* came with them; 4: a csv keeps every column, and its
+    # conversion (units, first frame) is a part of its own
+    version = "4"
 
     def describe(self, ctx: Optional[Context], settings: LoadSettings) -> FormState:
-        """*columns* is read for a csv only: greyed for any other file."""
+        """The csv part is shown for a csv only."""
         csv = settings.format == "csv"
         if not settings.format and settings.path:
             try:
                 csv = reader_for(Path(settings.path)).name == "csv"
             except (ValueError, OSError):
                 csv = False
-        return FormState(active={"mapping": csv})
+        return FormState(shown={"csv": csv},
+                         active={"csv.pixelsize_nm": settings.csv.units == "px"})
 
     def reader_args(self, path: Path, reader, settings) -> Dict[str, Any]:
         """Anything the reader needs beyond the path: a csv's columns."""
-        if reader.name != "csv":
-            return {}
-        from ..io.formats import csv_columns, guess_csv_mapping
-        if settings.mapping.strip():
-            pairs = [p.split("=", 1) for p in settings.mapping.split(",") if "=" in p]
-            return {"mapping": {a.strip(): b.strip() for a, b in pairs}}
-        headers, _, _ = csv_columns(path)
-        return {"mapping": guess_csv_mapping(headers)}
+        return csv_args(settings.csv) if reader.name == "csv" else {}
 
     def run(self, ctx: Context, settings: LoadSettings) -> Result:
         from ..session import read_localizations
@@ -202,6 +265,112 @@ class Save(Plugin):
 
 
 # ------------------------------------------------------------------- export
+
+#: what the export writes, and what the file name chooses when it is left to
+#: it: a text suffix is a csv, an HDF5 one Picasso's -- smappy's own HDF5 is
+#: what *Save* writes, with everything else the session has
+EXPORT_FORMATS = (("", "by the file name"), ("csv", "csv (smappy's names)"),
+                  ("ThunderSTORM", "csv (ThunderSTORM's names)"),
+                  ("Picasso", "Picasso HDF5"),
+                  ("smappy HDF5", "smappy HDF5, the table only"))
+EXPORT_FILTER = ("Text (*.csv *.tsv *.txt);;Picasso HDF5 (*.hdf5 *.h5);;"
+                 "All files (*)")
+
+
+def export_format(settings) -> str:
+    """The format ``settings`` write: the one chosen, or the file name's."""
+    if settings.format:
+        return settings.format
+    suffix = Path(settings.path).suffix.lower() if settings.path else ""
+    return "Picasso" if suffix in (".hdf5", ".h5") else "csv"
+
+
+@dataclass
+class ExportSettings:
+    path: str = param("", label="file", kind="save_file", file_filter=EXPORT_FILTER,
+                      help="where to write; .csv, .tsv, .txt or .hdf5")
+    format: str = param("", label="format", choices=EXPORT_FORMATS,
+                        help="what to write; by the file name means a csv for a "
+                             "text suffix and Picasso's for .hdf5")
+    localizations: str = param("visible", label="localizations",
+                               choices=(("visible", "visible: filter and ROI"),
+                                        ("all", "all")),
+                               help="what the layer shows, or the whole table")
+    grouping: str = param("layer", label="table",
+                          choices=(("layer", "as the layer shows it"),
+                                   ("ungrouped", "localizations"),
+                                   ("grouped", "merged blinks")),
+                          help="the localizations, or one row per blink")
+    columns: list = param(default_factory=list, label="columns", kind="columns",
+                          help="the columns to write; all ticked writes every "
+                               "column, also those a later table adds")
+    group: str = param("", label="Picasso group",
+                       help="an integer column written as Picasso's group, "
+                            "its picks: cluster_id, roi_id, ...")
+
+
+@register("File/Export/Localizations")
+class ExportLocalizations(Plugin):
+    """Write the localizations for another program: csv, ThunderSTORM's csv,
+    or Picasso's HDF5."""
+
+    Settings = ExportSettings
+    changes_locs = False
+    logged = True          # where a file went is not visible in the file
+    version = "1"
+
+    def describe(self, ctx: Optional[Context], settings: ExportSettings) -> FormState:
+        """Columns to choose for a free-form format, a group column for
+        Picasso's fixed one; the session's columns in both lists."""
+        picasso = export_format(settings) == "Picasso"
+        state = FormState(shown={"columns": not picasso, "group": picasso})
+        if ctx is not None and ctx.session is not None and len(ctx.locs):
+            locs = ctx.locs
+            state.choices["columns"] = list(locs.keys())
+            state.choices["group"] = [("", "none")] + [
+                (n, n) for n in locs.keys()
+                if np.asarray(locs[n]).dtype.kind in "iu" and n != "frame"]
+        return state
+
+    def run(self, ctx: Context, settings: ExportSettings) -> Result:
+        import copy
+
+        from ..io.formats import writer_named
+        if not settings.path:
+            raise ValueError("choose where to write")
+        path = Path(settings.path)
+        fmt = export_format(settings)
+        view = copy.copy(ctx)
+        view.grouping = None if settings.grouping == "layer" else settings.grouping
+        locs, selection = view.table()
+        if settings.localizations == "visible":
+            locs = locs[selection.mask]
+        columns = [c for c in settings.columns if c in locs]
+        if settings.columns and not columns:
+            raise ValueError("none of the chosen columns is in the table; it has "
+                             + ", ".join(locs.keys()))
+        said = []
+        if fmt in ("csv", "ThunderSTORM"):
+            written = writer_named("csv").save(
+                locs, path, columns=columns or None,
+                names="ThunderSTORM" if fmt == "ThunderSTORM" else "smappy")
+        elif fmt == "Picasso":
+            written = writer_named("Picasso").save(
+                locs, path, group=settings.group or None, report=said.append)
+        elif fmt == "smappy HDF5":
+            if columns:
+                from ..locs import Localizations
+                locs = Localizations({c: locs[c] for c in columns}, dict(locs.metadata))
+            written = writer_named("smappy HDF5").save(locs, path)
+        else:
+            raise ValueError(f"no export format {fmt!r}")
+        for line in said:
+            ctx.warn(line)
+        text = f"{len(locs)} localizations to {written} ({fmt})"
+        if said:
+            text += "; " + "; ".join(said)
+        return Result(text=text, written=str(written), settings=settings)
+
 
 @dataclass
 class ExportImageSettings:

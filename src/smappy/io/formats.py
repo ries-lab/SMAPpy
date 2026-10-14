@@ -120,6 +120,15 @@ def writer_for(path) -> Writer:
                      + ", ".join(f"{w.name} ({' '.join(w.suffixes)})" for w in WRITERS))
 
 
+def writer_named(name: str) -> Optional[Writer]:
+    """A writer by its name: a suffix alone cannot say Picasso from smappy."""
+    return next((w for w in WRITERS if w.name == name), None)
+
+
+def writer_names() -> List[str]:
+    return [w.name for w in WRITERS]
+
+
 def save(locs, path, metadata=None, **kwargs) -> Path:
     """Write a table in whichever format the name asks for."""
     return writer_for(path).save(locs, Path(path), metadata=metadata, **kwargs)
@@ -443,13 +452,63 @@ def guess_csv_mapping(headers: Sequence[str]) -> Dict[str, str]:
     return mapping
 
 
+#: length units a delimited file may be written in, and what one is in nm;
+#: "px" is the camera pixel, given separately
+LENGTH_UNITS = {"nm": 1.0, "um": 1e3, "mm": 1e6, "px": None}
+#: the lengths a mapping can name: lateral ones are in pixels when the file
+#: is, axial ones never are (a pixel has no depth; Picasso and DECODE write z
+#: in nm whatever x and y are in)
+LATERAL_LENGTHS = ("x_nm", "y_nm", "xy_err_nm", "x_err_nm", "y_err_nm",
+                   "sigma_nm", "sigma_y_nm")
+AXIAL_LENGTHS = ("z_nm", "z_err_nm")
+INTEGER_COLUMNS = ("channel", "id")
+
+
+def column_name(header: str, index: int = 0) -> str:
+    """A header as a column name: units and anything not a word character
+    dropped, ``"chi2"`` from ``"chi2"`` and ``"bkgstd"`` from ``"bkgstd [photon]"``.
+    """
+    import re
+    name, _ = _clean(header)
+    name = re.sub(r"\W+", "_", name).strip("_")
+    return name or f"column_{index + 1}"
+
+
+def _whole(values: np.ndarray) -> bool:
+    """Whether every value is a whole number that fits a 32-bit integer."""
+    return bool(len(values)) and bool(np.all(np.isfinite(values))) \
+        and bool(np.all(values == np.round(values))) and bool(np.all(np.abs(values) < 2**31))
+
+
 def _load_csv(path: Path, mapping: Optional[Dict[str, str]] = None,
-              units: str = "nm", pixelsize_nm: Optional[float] = None
+              units: str = "nm", pixelsize_nm: Optional[float] = None,
+              first_frame: Optional[int] = None, conversion: Optional[str] = None
               ) -> Tuple[Localizations, FileInfo]:
-    """A delimited text table.  ``mapping`` is header -> smappy column; the
-    recognised names (ThunderSTORM, SMAP exports, x/y/z/frame) need none.
-    ``units`` "px" scales positions by ``pixelsize_nm``."""
+    """A delimited text table, every numeric column of it.
+
+    ``mapping`` is header -> smappy column for the ones that mean something
+    to smappy (positions, frame, photons, ...); the recognised names
+    (ThunderSTORM, SMAP exports, smappy's own) need none.  Every other column
+    is read too, under its header as a name (`column_name`): what a column
+    means is the user's business, and an export read back must have what it
+    was written with.
+
+    ``units`` is what the mapped lengths are in -- nm, um, mm, or px, which
+    needs ``pixelsize_nm`` and scales the lateral ones only.  ``first_frame``
+    is the number of the first frame in the file (ThunderSTORM and SMAP count
+    from 1, smappy from 0).  Without them, a saved `conversion` whose headers
+    the file has supplies them (`io.conversions`), and ``conversion`` names
+    one to use whatever the headers.
+    """
+    from .conversions import conversion_for, conversion_named
     headers, _, has_header = csv_columns(path)
+    conv = conversion_named(conversion) if conversion else conversion_for(headers)
+    if conv is not None:
+        mapping = mapping if mapping is not None else (dict(conv.mapping) or None)
+        if units == "nm" and conv.units != "nm":
+            units = conv.units
+        pixelsize_nm = pixelsize_nm or conv.pixelsize_nm
+        first_frame = conv.first_frame if first_frame is None else first_frame
     with open(path, encoding="utf-8-sig") as f:
         delimiter = csv_delimiter(f.readline())
     data = np.genfromtxt(path, delimiter=delimiter, skip_header=1 if has_header else 0,
@@ -457,36 +516,130 @@ def _load_csv(path: Path, mapping: Optional[Dict[str, str]] = None,
     data = np.atleast_2d(data)
     if data.shape[1] != len(headers):
         data = data.reshape(-1, len(headers))
-    mapping = dict(mapping or guess_csv_mapping(headers))
+    mapping = dict(guess_csv_mapping(headers), **(mapping or {}))
+    mapping = {h: t for h, t in mapping.items() if t}
     missing = [c for c in CSV_REQUIRED if c not in mapping.values()]
     if missing:
         raise ValueError(f"{path.name}: no column for {', '.join(missing)}; "
                          f"headers are {headers}. Pass mapping={{header: column}}.")
+    if units not in LENGTH_UNITS:
+        raise ValueError(f"units must be one of {', '.join(LENGTH_UNITS)}, not {units!r}")
+    if units == "px" and not pixelsize_nm:
+        raise ValueError("positions in pixels need pixelsize_nm")
+    lateral = pixelsize_nm if units == "px" else LENGTH_UNITS[units]
+    axial = 1.0 if units == "px" else LENGTH_UNITS[units]
     columns = {}
     for i, h in enumerate(headers):
+        values = data[:, i]
         target = mapping.get(h)
         if target is None:
-            continue
-        values = data[:, i]
+            if not np.isfinite(values).any():
+                continue                         # text, or empty
+            target = column_name(h, i)
+            while target in columns or target in mapping.values():
+                target += "_"
         if target == "frame":
-            columns[target] = np.nan_to_num(values).astype(np.int64)
-        elif target in ("channel", "id"):
+            columns[target] = (np.nan_to_num(values) - (first_frame or 0)).astype(np.int64)
+        elif target in INTEGER_COLUMNS or (h not in mapping and _whole(values)):
+            # a column of whole numbers is an id, a count or a flag -- an id
+            # column is what a region is (`docs/regions.md`), and one read
+            # back as floats would not be one
             columns[target] = np.nan_to_num(values).astype(np.int32)
         else:
-            columns[target] = values.astype(np.float32)
-    if units == "px":
-        if not pixelsize_nm:
-            raise ValueError("positions in pixels need pixelsize_nm")
-        for name in ("x_nm", "y_nm", "xy_err_nm", "sigma_nm", "sigma_y_nm"):
-            if name in columns:
-                columns[name] = columns[name] * np.float32(pixelsize_nm)
+            scale = (lateral if target in LATERAL_LENGTHS
+                     else axial if target in AXIAL_LENGTHS else 1.0)
+            columns[target] = (values * scale).astype(np.float32)
     if "frame" not in columns:
         columns["frame"] = np.zeros(len(data), np.int64)
     ok = np.isfinite(columns["x_nm"]) & np.isfinite(columns["y_nm"])
     columns = {k: v[ok] for k, v in columns.items()}
     locs = Localizations(columns, {"units": "nm", "source": str(path)})
-    return locs, FileInfo(path.name, str(path), "csv", pixelsize_nm=pixelsize_nm,
-                          metadata={"mapping": mapping, "headers": headers})
+    return locs, FileInfo(path.name, str(path), "csv",
+                          pixelsize_nm=pixelsize_nm if units == "px" else None,
+                          metadata={"mapping": mapping, "headers": headers,
+                                    "units": units, "first_frame": first_frame or 0,
+                                    "conversion": conv.name if conv else None})
+
+
+#: smappy's columns under ThunderSTORM's headers, which more programs read
+#: than any other text format; ThunderSTORM counts frames from 1
+THUNDERSTORM_NAMES = {
+    "frame": "frame", "x_nm": "x [nm]", "y_nm": "y [nm]", "z_nm": "z [nm]",
+    "sigma_nm": "sigma [nm]", "photons": "intensity [photon]",
+    "background": "offset [photon]", "xy_err_nm": "uncertainty_xy [nm]",
+    "z_err_nm": "uncertainty_z [nm]",
+}
+
+
+def _save_csv(locs, path: Path, metadata=None, columns: Optional[Sequence[str]] = None,
+              names: str = "smappy") -> Path:
+    """Every column, or ``columns``, as delimited text: a comma for .csv, a
+    tab for .tsv and .txt.  ``names`` "smappy" writes smappy's own names and
+    frames from 0; "ThunderSTORM" writes its headers and frames from 1, and
+    the other columns under their own names."""
+    columns = [c for c in (columns or locs.keys()) if c in locs]
+    if not columns:
+        raise ValueError("no columns to write")
+    thunder = names.lower() == "thunderstorm"
+    delimiter = "," if path.suffix.lower() == ".csv" else "\t"
+    headers, arrays, formats = [], [], []
+    for name in columns:
+        values = np.asarray(locs[name])
+        if values.ndim != 1:
+            continue                              # an array per row: not a column
+        if thunder:
+            headers.append(THUNDERSTORM_NAMES.get(name, name))
+            if name == "frame":
+                values = values + 1
+        else:
+            headers.append(name)
+        integer = values.dtype.kind in "iub"
+        arrays.append(values.astype(np.int64) if integer else values.astype(np.float64))
+        formats.append("%d" if integer else "%.9g")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        f.write(delimiter.join(headers) + "\n")
+        step = 200_000                            # bounded memory for any size
+        for start in range(0, len(locs), step):
+            # float64 throughout: "%d" prints an integer stored as a float
+            # exactly up to 2^53, which no frame or id comes near
+            block = np.column_stack([a[start:start + step].astype(np.float64)
+                                     for a in arrays])
+            np.savetxt(f, block, fmt=formats, delimiter=delimiter)
+    return path
 
 
 register(Reader("csv", (".csv", ".txt", ".tsv"), _load_csv, needs=("mapping",)))
+register_writer(Writer("csv", (".csv", ".tsv", ".txt"), _save_csv))
+
+
+# ------------------------------------------------- Picasso and DECODE (HDF5)
+
+def _load_picasso(path: Path):
+    from .picasso import load as load_picasso
+    return load_picasso(path)
+
+
+def _is_picasso(path: Path) -> bool:
+    from .picasso import is_picasso
+    return is_picasso(path)
+
+
+def _save_picasso(locs, path: Path, metadata=None, **kwargs) -> Path:
+    from .picasso import save as save_picasso
+    return save_picasso(locs, path, metadata, **kwargs)
+
+
+def _load_decode(path: Path):
+    from .decode import load as load_decode
+    return load_decode(path)
+
+
+def _is_decode(path: Path) -> bool:
+    from .decode import is_decode
+    return is_decode(path)
+
+
+register(Reader("Picasso", (".hdf5", ".h5"), _load_picasso, _is_picasso))
+register(Reader("DECODE", (".h5", ".hdf5"), _load_decode, _is_decode))
+register_writer(Writer("Picasso", (".hdf5", ".h5"), _save_picasso))

@@ -189,9 +189,9 @@ S ≤ a day, M a few days, L a week or more.
 
 | step | what | where | size | done when |
 |---|---|---|---|---|
-| **1** | **Hide what the settings do not use.** `FormState.shown: Dict[str, bool]`, beside `active`: a part or field set False is **hidden** (`setVisible` on a part's section; `QFormLayout.setRowVisible` on a row, available from Qt 6.4 and smappy needs ≥ 6.6), not greyed. Like `active`, it is presentation only: a hidden field keeps its value, and a script ignores it. | `plugins/__init__.py` (`FormState`), `gui/params.py` (`set_shown`), `gui/plugin_panel.py`; the chain panel picks it up through the same `describe` | S | a test with a plugin whose `describe` hides a part, in the plugin panel and in a chain step; `docs/plugin-reference.md` and CLAUDE.md's `describe` bullet mention `shown` |
-| **2** | **Export localizations**: one plugin, a format choice (CSV/TXT, Picasso HDF5; SMAP `_sml.mat` as an optional later format), the fields to write, all or filtered | `File/Export/Localizations` in `plugins/file.py`; writers beside the readers in `io/formats.py` | S–M | a round trip through each format with the loaders (Picasso through step 3) |
-| **3** | **Readers**: Picasso HDF5, DECODE (h5/csv), registered as `Reader`s so *File/Load/Auto*'s *format* list offers them | `io/formats.py` | S | reading a file each format's own tool writes (a small fixture) |
+| **1** ✅ | **Hide what the settings do not use.** `FormState.shown: Dict[str, bool]`, beside `active`: a part or field set False is **hidden** (`setVisible` on a part's section; `QFormLayout.setRowVisible` on a row, available from Qt 6.4 and smappy needs ≥ 6.6), not greyed. Like `active`, it is presentation only: a hidden field keeps its value, and a script ignores it. | `plugins/__init__.py` (`FormState`), `gui/params.py` (`set_shown`), `gui/plugin_panel.py`; the chain panel picks it up through the same `describe` | S | a test with a plugin whose `describe` hides a part, in the plugin panel and in a chain step; `docs/plugin-reference.md` and CLAUDE.md's `describe` bullet mention `shown` |
+| **2** ✅ | **Export localizations**: one plugin, a format choice (CSV/TXT, Picasso HDF5; SMAP `_sml.mat` as an optional later format), the fields to write, all or filtered | `File/Export/Localizations` in `plugins/file.py`; writers beside the readers in `io/formats.py` | S–M | a round trip through each format with the loaders (Picasso through step 3) |
+| **3** ✅ | **Readers**: Picasso HDF5, DECODE (h5/csv), registered as `Reader`s so *File/Load/Auto*'s *format* list offers them | `io/formats.py` | S | reading a file each format's own tool writes (a small fixture) |
 | **4** | **Histogram of any column**, per layer, with mean/median/std; `per_region`, so it also gives one per ROI or per cluster | `Analysis/Measure/Histogram` | S | test on simulated data; page |
 | **5** | **Time course**: any columns against frame (photons, locs per frame, precision, background), several in one graph, beside the image tags | extend `image_tags.py`, or `Analysis/Measure/Time course` sharing its drawing | S–M | test and page; Image Tags' page updated if it changes |
 | **6** | **Export the region table** to CSV: the columns chosen by the user, ROIs or clusters through `region_results` | `Analysis/Regions/Summarize/Export table` | S | a CSV of an NPC Corners run, the ROI annotations and `roi_id` included |
@@ -234,6 +234,18 @@ existing, fiducials, magnification in COMET) · Vibrations (A6, once its
 filters and zoom-ins are settled) · AssignColors for more than 2 colours (C4)
 · figures of regions (E6) · LocMoFit decision (H) and then the port · MINFLUX
 (G), after F · rendering and movies (I).
+
+### Done
+
+* **Step 1** (2026-10-14): `FormState.shown`.
+* **Steps 2 and 3** (2026-10-14): *File/Export/Localizations* (csv with
+  smappy's or ThunderSTORM's names, Picasso HDF5; visible or all, as the
+  layer or localizations or merged blinks, the columns ticked in a list);
+  readers for Picasso and DECODE; the csv reader keeps every column, reads
+  lengths in nm, µm, mm or pixels and frames from 0 or 1, and saved
+  conversions found by the headers (ThunderSTORM's and SMAP's shipped);
+  *File/Load/Load*, the File tab's first line.  SMAP's `_sml.mat` export is
+  left for later.
 
 ### Start here
 

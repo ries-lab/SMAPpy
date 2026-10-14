@@ -1,6 +1,6 @@
 ---
-version: "3"
-covers: [smappy.io.formats.reader_for, smappy.io.formats._is_smappy, smappy.io.formats._has_saveloc, smappy.session.read_localizations, smappy.io.formats._load_smappy, smappy.io.hdf5.load_localizations, smappy.io.formats._load_sml, smappy.io.formats._load_minflux, smappy.io.formats._minflux_records, smappy.io.formats._minflux_from_json, smappy.group.by_trace, smappy.io.formats._load_csv, smappy.io.formats.guess_csv_mapping, smappy.io.formats.csv_columns]
+version: "4"
+covers: [smappy.io.formats.reader_for, smappy.io.formats._is_smappy, smappy.io.formats._has_saveloc, smappy.session.read_localizations, smappy.io.formats._load_smappy, smappy.io.hdf5.load_localizations, smappy.io.formats._load_sml, smappy.io.formats._load_minflux, smappy.io.formats._minflux_records, smappy.io.formats._minflux_from_json, smappy.group.by_trace, smappy.io.formats._load_csv, smappy.io.formats.guess_csv_mapping, smappy.io.formats.csv_columns, smappy.io.formats.column_name, smappy.io.conversions.conversion_for, smappy.io.picasso.load, smappy.io.picasso.read_info, smappy.io.decode.load]
 ---
 
 ## What it does
@@ -16,10 +16,22 @@ is inside.  It is what File > Open does.  The formats:
 * **MINFLUX** -- `.npy`, `.zip`, `.json`: the localizations an Abberior
   MINFLUX microscope exports
   ([Gwosch et al. 2020](https://doi.org/10.1038/s41592-019-0688-0));
-* **csv** -- `.csv`, `.txt`, `.tsv`: a table written as text, with the
-  columns guessed from the header -- ThunderSTORM's export
+* **Picasso** -- `.hdf5`, `.h5` written by Picasso
+  ([Schnitzbauer et al. 2017](https://doi.org/10.1038/nprot.2017.024)),
+  told from this program's own HDF5 by what is inside;
+* **DECODE** -- `.h5` written by DECODE
+  ([Speiser et al. 2021](https://doi.org/10.1038/s41592-021-01236-x)), a
+  deep-learning localization program;
+* **csv** -- `.csv`, `.txt`, `.tsv`: a table written as text, every column
+  of it, with the meaning of the usual ones guessed from the header --
+  ThunderSTORM's export
   ([Ovesný et al. 2014](https://doi.org/10.1093/bioinformatics/btu202)) and
-  SMAP's names are recognised without being told.
+  SMAP's names are recognised without being told -- or taken from a saved
+  *conversion*.
+
+Every reader keeps every column of the file: the ones this program has a
+name for get that name, and the rest keep their own, so whatever the other
+program wrote can still be filtered on, coloured by or exported again.
 
 A file whose name does not say what it is -- a SMAP file not called
 `_sml.mat` -- is read by choosing its *format* by hand (under *more*).
@@ -46,6 +58,11 @@ chosen = []
 with tempfile.TemporaryDirectory() as folder:
     folder = Path(folder)
     save_localizations(folder / "fitted.hdf5", table)
+    with h5py.File(folder / "picasso.hdf5", "w") as f:
+        f.create_dataset("locs", data=np.zeros(3, dtype=[("frame", "u4"), ("x", "f4"),
+                                                         ("y", "f4")]))
+    with h5py.File(folder / "decode.h5", "w") as f:
+        f.create_group("meta"); f.create_group("data").create_dataset("xyz", data=np.zeros((1, 3)))
     with h5py.File(folder / "other_program.h5", "w") as f:
         f.create_dataset("points", data=np.zeros(3))
     saveloc = {"saveloc": {"loc": {"xnm": [1.0], "ynm": [2.0], "frame": [1.0]}}}
@@ -56,7 +73,7 @@ with tempfile.TemporaryDirectory() as folder:
     (folder / "minflux.json").write_text(json.dumps([]))
     (folder / "thunderstorm.csv").write_text("x [nm],y [nm]\n1,2\n")
     (folder / "stack.tif").write_bytes(b"")
-    for name in ("fitted.hdf5", "other_program.h5", "cells_sml.mat", "renamed.mat",
+    for name in ("fitted.hdf5", "picasso.hdf5", "decode.h5", "other_program.h5", "cells_sml.mat", "renamed.mat",
                  "calibration.mat", "minflux.npy", "minflux.json",
                  "thunderstorm.csv", "stack.tif"):
         path = folder / name
@@ -67,14 +84,15 @@ with tempfile.TemporaryDirectory() as folder:
 ```
 
 **1. By the name.**  The readers whose endings match the file's name are
-the candidates, in the order of the list above (smappy HDF5, SMAP,
-MINFLUX, csv).  Upper and lower case do
+the candidates, in the order smappy HDF5, SMAP, MINFLUX, csv, Picasso,
+DECODE.  Upper and lower case do
 not matter.
 
 **2. By the contents**, where one ending could be more than one thing:
 
-* an `.hdf5` or `.h5` file is read as this program's only if it has a
-  `/locs` group;
+* an `.hdf5` or `.h5` file is read as this program's if it has a `/locs`
+  group, as Picasso's if `/locs` is a single dataset, and as DECODE's if it
+  has a `/data` group with `xyz` and a `/meta`;
 * a `.mat` file is read as SMAP's if its name ends in `_sml.mat` or it
   holds a variable `saveloc`.
 
@@ -97,7 +115,7 @@ localization, untick *merge blinks* on the layer: the single localizations
 are always kept.
 
 ```figure Which reader Auto chose for a set of files: by the ending, and by what is inside where the ending is ambiguous.  Grey: refused.
-fig.set_size_inches(5.2, 2.6)
+fig.set_size_inches(5.2, 3.4)
 ax = fig.subplots(); ax.axis("off")
 ax.set_xlim(0, 1); ax.set_ylim(len(chosen) - 0.4, -1.2)
 ax.text(0.40, -0.9, "file", ha="right", fontsize=8, color="0.4")
@@ -145,8 +163,7 @@ as it was saved: a fit writes nanometres and the pixel size, and a file from
 an earlier version that also has camera-pixel columns (`x_pix`, ...) keeps
 them.  The GUI state that may be in the file (`/gui`)
 is left alone: File > Workspace > From data file puts it back on request.
-Only this program's HDF5 files are read: one from another program --
-Picasso's, for instance -- does not open.
+An HDF5 file from Picasso or DECODE is read by its own reader, below.
 
 **SMAP.**  SMAP keeps its table in `saveloc.loc`, one field per column.
 Each becomes a column, renamed to this program's name where there is one
@@ -197,13 +214,49 @@ one row per `tid` (its mean position, summed photons, first `frame`, and
 and a `.zip` holding either are read; MINFLUX data saved as a MATLAB `.mat`
 is not.
 
+**Picasso.**  Picasso keeps its table as one dataset of records, `/locs`,
+where this program keeps a column per dataset; that is how the two are told
+apart.  Positions, widths and precisions (`x`, `y`, `sx`, `sy`, `lpx`,
+`lpy`) are in camera pixels and become nanometres with the file's
+`Pixelsize`; `z` and `lpz` are in nanometres already:
+
+| Picasso | here | | Picasso | here |
+| --- | --- | --- | --- | --- |
+| `x`, `y` | `x_nm`, `y_nm` | | `bg` | `background` |
+| `lpx`, `lpy` | `x_err_nm`, `y_err_nm` | | `z`, `lpz` | `z_nm`, `z_err_nm` |
+| `sx`, `sy` | `sigma_nm`, `sigma_y_nm` | | `group` | `pick_id` |
+
+`xy_err_nm` is worked out from `x_err_nm` and `y_err_nm`, and the pixel
+columns are kept beside the nanometre ones.  `group` is Picasso's *pick*,
+read as `pick_id` so it is not taken for merged blinks (`group_id`); like
+any id column it can be measured per region.  Everything else
+(`photons`, `frame`, `net_gradient`, `ellipticity`, a linked table's `len`
+and `n`, ...) keeps its name; frames count from 0 in both programs.  The
+metadata is read from the `/metadata` dataset recent Picasso versions
+embed, or else from the `.yaml` file beside the `.hdf5`.  Without a pixel
+size there, the default one is assumed and the table says so.
+
+**DECODE.**  DECODE writes `/data`: `xyz`, `phot`, `bg`, `frame_ix`,
+`prob`, `id`, and where it predicted them the uncertainties `xyz_sig`,
+`phot_sig`, `bg_sig` and the Cramér-Rao bounds `xyz_cr`, `phot_cr`,
+`bg_cr`; `/meta` says whether x and y are in pixels or nanometres
+(`xy_unit`) and the pixel size (`px_size`, x and y).  z is in nanometres
+either way.  `xyz_sig` becomes `x_err_nm`, `y_err_nm`, `z_err_nm` -- the
+precision DECODE reports for each localization -- and the bounds are kept
+beside it as standard deviations (`x_crlb_nm`, ...; DECODE stores
+variances).  `phot` is `photons`, `bg` `background`, `frame_ix` `frame`
+(from 0 in both), and `prob`, the probability DECODE gives a detection, is
+kept under its name: it is the column to filter DECODE's localizations by.
+A quantity DECODE did not predict is an empty dataset in the file and
+becomes no column.
+
 **csv.**  The first line is the header if any of its cells is not a
 number; otherwise the columns are called *column 1*, *column 2*, ...  Cells
-are split by commas, or by semicolons if the first line has more of them (a
-tab-separated file is not split, and is refused as having no x and y).
-Unless *columns* says otherwise, each header is cleaned -- lower case, the
-unit in square brackets taken off, spaces made underscores -- and looked up
-(`CSV_NAMES`):
+are split by tabs, semicolons or commas, whichever the first line has most
+of.  **Every column with a number in it is read.**  Those that mean
+something to this program are found by their header -- cleaned to lower
+case, the unit in square brackets taken off, spaces made underscores, and
+looked up (`CSV_NAMES`):
 
 | column | headers |
 | --- | --- |
@@ -217,14 +270,31 @@ unit in square brackets taken off, spaces made underscores -- and looked up
 | `background_std` | `bkgstd` |
 | `channel`, `logl_rel`, `id` | `channel`; `llrel`; `id` |
 
-When two headers mean the same column the first wins; x and y must be
-found.  `frame`, `channel` and `id` are read as whole numbers, the rest as
-single precision, and a row whose x or y is missing is left out.  **Units
-are not converted**: the unit in a header is dropped unread, so `x [px]` is
-read as nanometres -- convert a table in pixels first,
-$x_{\mathrm{nm}} = x_{\mathrm{px}}\, p$ with $p$ the pixel size.  Frames are
-read as written (ThunderSTORM counts from 1); a file with no frame column
-is read as frame 0.
+-- and every other column keeps its header as its name, cleaned the same
+way (`chi2`, `cluster_id`).  When two headers mean the same column the
+first wins; x and y must be found.  `frame`, `channel` and `id` are read as
+whole numbers, the rest as single precision, and a row whose x or y is
+missing is left out.
+
+**Units and the first frame.**  The lengths -- x, y, z and their errors
+and widths -- are read as nanometres unless the file is said to be in
+micrometres, millimetres (multiplied by $10^3$ or $10^6$) or camera pixels
+(x, y and their errors and widths multiplied by the pixel size $p$,
+$x_{\mathrm{nm}} = x_{\mathrm{px}}\, p$; z is left in nanometres, as the
+programs that write pixels do).  Frames are made to count from 0: a file
+whose first frame is 1, as ThunderSTORM's and SMAP's are, has 1 taken off.
+Only the columns this program has a name for are converted; a column kept
+under its own name is read as it is.
+
+**Conversions.**  How one program's export is read -- which header is
+which, the units, the pixel size, the first frame -- can be saved under a
+name, as SMAP's *conversion structures* were, and is then found again by
+the headers: the saved conversion whose headers the file all has, the one
+with the most of them if several do.  ThunderSTORM's ("x [nm]", "y [nm]",
+"frame": frames from 1) and SMAP's export ("xnm", "ynm", "frame": frames
+from 1) come with the program; a conversion saved from the File menu's
+dialog (*save as...*) goes to the configuration folder and is offered in
+*conversion* from then on.
 
 ## Parameters
 
@@ -233,12 +303,18 @@ Leave it on *auto*.  Choose a format for a file whose name does not say
 what it is -- a SMAP file renamed, a csv saved as `.dat` -- or to make sure
 the file is read as that format and refused otherwise.
 
-### mapping
-Read only for a csv; greyed for any other file.  Needed only when the
-headers are not recognised, or to read a column the list does not know.
-Each pair is *header in the file* = *column in the table*, and only the
-columns named are read -- so name x and y too.  Opening such a file from
-the File menu asks for the mapping in a dialog instead.
+### csv.mapping
+Needed only when the headers are not recognised and no saved conversion
+fits.  Each pair is *header in the file* = *column in the table*; the
+headers not named are still read, under their own names.  Opening such a
+file from the File menu asks in a dialog instead, which can also save what
+was chosen as a conversion.
+
+### csv.first_frame
+Empty takes it from the conversion, or 0.  Set it when a program that
+counts frames from 1 is not recognised: a frame number off by one shifts
+every time-resolved analysis -- drift, merging blinks against another
+channel -- by a frame.
 
 ## Output
 
@@ -258,6 +334,10 @@ changes:
   SMAP also restores the file's history, the ROI manager's sites and the
   GUI parameters; those describe SMAP's own windows and plugins.
 * Frames count from 0, and the columns are renamed to this program's names.
+* A csv is read by `Loader_csvAndMore`'s idea -- the mapping, the units and
+  a saved conversion per program -- with two changes: every column is read,
+  not only the ones mapped, and a conversion is found by the file's headers
+  rather than chosen from a list each time.
 * A MINFLUX `.npy` or `.zip` export is read, the MATLAB `.mat` export is
   not; only the last iteration and only valid localizations are read, and
   the positions are not moved to start at zero.  The precision is
@@ -275,6 +355,15 @@ changes:
   multicolor nanometer resolution in cells. *Nat Methods* 17, 217 (2020).
   [doi:10.1038/s41592-019-0688-0](https://doi.org/10.1038/s41592-019-0688-0)
   -- the iterative scheme whose records the export holds.
+* Schnitzbauer J, Strauss MT, Schlichthaerle T, Schueder F, Jungmann R.
+  Super-resolution microscopy with DNA-PAINT. *Nat Protoc* 12, 1198 (2017).
+  [doi:10.1038/nprot.2017.024](https://doi.org/10.1038/nprot.2017.024)
+  -- Picasso, whose files this reads.
+* Speiser A, Müller LR, Hoess P, et al. Deep learning enables fast and
+  dense single-molecule localization with high accuracy. *Nat Methods* 18,
+  1082 (2021).
+  [doi:10.1038/s41592-021-01236-x](https://doi.org/10.1038/s41592-021-01236-x)
+  -- DECODE, whose files this reads.
 * Ovesný M, Křížek P, Borkovec J, Svindrych Z, Hagen GM. ThunderSTORM: a
   comprehensive ImageJ plug-in for PALM and STORM data analysis and
   super-resolution imaging. *Bioinformatics* 30, 2389 (2014).

@@ -500,6 +500,85 @@ class LayersField(QWidget):
             self.changed.emit()
 
 
+class ColumnsField(QWidget):
+    """A list of names to tick: which columns an export writes, say.
+
+    The value is the ticked names, or ``[]`` when every one is ticked: "all
+    columns" then stays all of them for a table that has more, rather than
+    becoming the list this table happened to have.  The names come from the
+    session (`FormState.choices`); a name in the value that the session does
+    not offer is kept, ticked, and marked as not there.
+    """
+
+    changed = Signal()
+
+    def __init__(self, spec: ParamSpec):
+        super().__init__()
+        from PySide6.QtWidgets import QListWidget, QPushButton
+        self.spec = spec
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(2, 0, 6, 0)
+        self.list = QListWidget()
+        self.list.setMaximumHeight(140)
+        self.list.itemChanged.connect(lambda _: self.changed.emit())
+        layout.addWidget(self.list)
+        row = QHBoxLayout()
+        for label, on in (("all", True), ("none", False)):
+            button = QPushButton(label)
+            button.clicked.connect(lambda _=False, on=on: self._tick_all(on))
+            row.addWidget(button)
+        row.addStretch(1)
+        layout.addLayout(row)
+        if spec.info.help:
+            self.setToolTip(spec.info.help)
+        self._names: List[str] = []
+        self._value: List[str] = list(spec.default() if callable(spec.default)
+                                      else spec.default or [])
+
+    def _tick_all(self, on: bool) -> None:
+        blocked = self.list.blockSignals(True)
+        for i in range(self.list.count()):
+            self.list.item(i).setCheckState(Qt.Checked if on else Qt.Unchecked)
+        self.list.blockSignals(blocked)
+        self.changed.emit()
+
+    def _fill(self, names: List[str], ticked: List[str]) -> None:
+        from PySide6.QtWidgets import QListWidgetItem
+        blocked = self.list.blockSignals(True)
+        self.list.clear()
+        everything = not ticked
+        shown = list(names) + [n for n in ticked if n not in names]
+        for name in shown:
+            item = QListWidgetItem(name if name in names else f"{name} (not there)")
+            item.setData(Qt.UserRole, name)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(Qt.Checked if everything or name in ticked else Qt.Unchecked)
+            self.list.addItem(item)
+        self.list.blockSignals(blocked)
+
+    # the interface a form expects of a field
+    def set_choices(self, choices) -> None:
+        current = self.value()
+        self._names = [c[0] if isinstance(c, tuple) else c for c in choices]
+        self._fill(self._names, current)
+
+    def refresh(self) -> None:
+        pass
+
+    def set_hint(self, value) -> None:
+        pass
+
+    def set(self, value) -> None:
+        self._fill(self._names, list(value or []))
+
+    def value(self) -> List[str]:
+        items = [self.list.item(i) for i in range(self.list.count())]
+        if not items:
+            return list(self._value)
+        ticked = [it.data(Qt.UserRole) for it in items if it.checkState() == Qt.Checked]
+        return [] if len(ticked) == len(items) else ticked
+
+
 class SettingsForm(QWidget):
     """The fields of a settings dataclass; ``value()`` builds the instance.
 
@@ -557,7 +636,8 @@ class SettingsForm(QWidget):
                 self.sections[name] = section
                 layout.addWidget(section)
                 continue
-            w = LayersField(spec) if spec.info.kind == "layers" else _Field(spec)
+            w = (LayersField(spec) if spec.info.kind == "layers"
+                 else ColumnsField(spec) if spec.info.kind == "columns" else _Field(spec))
             w.changed.connect(self.changed)
             w.changed.connect(lambda n=name: self.field_changed.emit(n))
             self.fields[name] = w
