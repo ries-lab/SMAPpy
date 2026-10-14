@@ -252,10 +252,10 @@ numbers: simulate data with known parameters and assert they come back.
 `tests/test_statistics.py` is the pattern.
 
 The discovery and workspace tests (`test_discovery.py`, `test_workspace.py`,
-`test_file_plugins.py`) check that the shipped plugins are found and that the
-tabs seed by rule -- a floor of plugins that must be there, the Analysis tab
-being every favourite under `Analysis/` but the regions, finders before
-summaries.  Adding a plugin needs no test edits unless it changes a rule.
+`test_file_plugins.py`) check that the shipped plugins are found and that
+every plugin the shipped GUI names exists.  Adding a plugin needs no test
+edits unless it is pinned in the shipped GUI or offered per region
+(`test_roi_pipeline.py` lists those).
 
 `tests/test_control_width.py` builds every shipped plugin's panel and fails if
 it is wider than the control column (`CONTROL_WIDTH`): a new plugin with a long
@@ -274,10 +274,12 @@ speak.
 exists, that its `version` is the plugin's, that every setting is explained, and that it
 renders with its maths and figures (the figures in the slow tier).
 
-Plugins reach the shipped workspace by themselves: the Analysis tab seeds from
-`Analysis/` except `Analysis/Regions/`, which seeds the Regions tab, and `favorite` defaults to True, so there is no registry to edit.
-For a `per_region` plugin, `favorite` also decides whether it is in a
-new list of per-region steps; a specialised one (`NPC Corners`) sets it False.
+A plugin is in the tree as soon as it exists; which ones a fresh install
+pins to its tabs is a list, `src/smappy/data/default.gui.yaml` -- a GUI file
+like any other (*File > Workspace > Save* writes the same format), so a new
+plugin that belongs in the shipped GUI gets a line there.  Likewise the
+per-region steps a new ROI project starts with are a list,
+`roi_manager.pipeline.DEFAULT_REGION_STEPS`.
 
 ## The plugin's page
 

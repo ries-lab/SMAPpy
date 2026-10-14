@@ -1,0 +1,49 @@
+# The GUI a fresh install opens, and File > Workspace > Reset tabs to defaults.
+# The same format File > Workspace > Save writes: to change it, arrange the
+# tabs in the program, save the GUI, and put the tabs here.  A plugin named
+# here that is not installed is left out when it is read.
+version: 1
+tabs:
+- name: File
+  instances:
+  - plugin: File/Load/Load
+  - plugin: File/Export/Image
+  - plugin: File/Export/Localizations
+  - plugin: File/Simulate/Blinking Structure
+- name: Localize
+  header: localize
+  instances:
+  - plugin: Localize/Bead calibration
+  - plugin: Localize/Gaussian 2D
+  - plugin: Localize/Gaussian 2D 2C
+  - plugin: Localize/Spline 3D
+  - plugin: Localize/Spline 3D 2C
+  - plugin: Localize/uiPSF calibration
+- name: Render
+  kind: render
+- name: Analysis
+  instances:
+  - plugin: Analysis/Drift/COMET
+  - plugin: Analysis/Drift/RCC
+  - plugin: Analysis/Dual-colour/Assign colours
+  - plugin: Analysis/Measure/Ground Truth
+  - plugin: Analysis/Measure/Line Profile
+  - plugin: Analysis/Measure/Localization Precision
+  - plugin: Analysis/Measure/Localization Statistics
+  - plugin: Analysis/Measure/Histogram
+  - plugin: Analysis/Process/History
+  - plugin: Analysis/Process/Image Tags
+  - plugin: Analysis/Process/Math Parser
+  - plugin: Analysis/Process/Remove Localizations
+  - plugin: Analysis/Register/Calibrate transform
+- name: Regions
+  header: roi
+  instances:
+  - plugin: Analysis/Regions/Find/DBSCAN
+  - plugin: Analysis/Regions/Find/Density Peaks
+  - plugin: Analysis/Regions/Find/NPC
+  - plugin: Analysis/Regions/Column to ROIs
+  - plugin: Analysis/Regions/Regions to column
+  - plugin: Analysis/Regions/Summarize/Histograms
+  - plugin: Analysis/Regions/Summarize/NPC labelling efficiency
+  - plugin: Analysis/Regions/Workflow/NPC Analysis

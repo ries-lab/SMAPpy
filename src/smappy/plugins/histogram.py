@@ -238,10 +238,6 @@ class Histogram(Plugin):
     Settings = HistogramSettings
     changes_locs = False
     per_region = True
-    # not in a new list of per-region steps: it measures nothing until a
-    # column is chosen.  `favorite` also decides the Analysis tab, so it is
-    # not pinned there either; the tree has it
-    favorite = False
     version = "1"
 
     def describe(self, ctx: Optional[Context], settings: HistogramSettings) -> FormState:

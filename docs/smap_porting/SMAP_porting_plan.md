@@ -248,8 +248,11 @@ filters and zoom-ins are settled) · AssignColors for more than 2 colours (C4)
   left for later.
 * **Step 4** (2026-10-14): *Analysis/Measure/Histogram*: any column, a
   histogram per visible layer on common bins, mean / median / std / mode
-  of the values in the range, per region as well.  `favorite = False` for
-  now (see the open question on `favorite`).
+  of the values in the range, per region as well; pinned in the Analysis
+  tab of the shipped GUI.
+* **No more `favorite`** (2026-10-14): the shipped GUI is a GUI file,
+  `data/default.gui.yaml`, and the per-region steps a project starts with
+  are `DEFAULT_REGION_STEPS`; the unused favourite star went with it.
 
 ### Start here
 

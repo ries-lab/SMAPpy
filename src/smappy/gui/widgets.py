@@ -66,10 +66,9 @@ class CollapsibleSection(QWidget):
     toggled = Signal(bool)
     detach_requested = Signal()
     help_requested = Signal()
-    starred = Signal(bool)
 
     def __init__(self, title: str, content: QWidget, expanded: bool = False,
-                 detachable: bool = False, star: Optional[bool] = None,
+                 detachable: bool = False,
                  helpable: bool = False, help_tip: Optional[str] = None,
                  major: bool = False, parent=None):
         super().__init__(parent)
@@ -86,13 +85,6 @@ class CollapsibleSection(QWidget):
         header.setContentsMargins(0, 0, 0, 0)
         header.addWidget(self.button)
         header.addStretch(1)
-        self.star_button = None
-        if star is not None:
-            self.star_button = QToolButton(checkable=True, checked=star, autoRaise=True)
-            self.star_button.setToolTip("favourite: shown without 'all'")
-            self.star_button.toggled.connect(self._on_star)
-            self._on_star(star)
-            header.addWidget(self.star_button)
         self.help_button = None
         if helpable:
             self.help_button = QToolButton(text="?", autoRaise=True)
@@ -118,10 +110,6 @@ class CollapsibleSection(QWidget):
         layout.addWidget(self.frame)
         self.button.toggled.connect(self.set_expanded)
         self.set_expanded(expanded)
-
-    def _on_star(self, on: bool) -> None:
-        self.star_button.setText("★" if on else "☆")
-        self.starred.emit(on)
 
     @property
     def title(self) -> str:

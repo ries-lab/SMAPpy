@@ -74,8 +74,8 @@ reasoning is here so that it does not have to be re-derived.
   in the session; a plugin's `Selection` is the layer's filter *inside* the
   ROI, and it is saved with the file.  A search box
   filters them; once there are many plugins a tree chooser is added for the
-  long tail.  Each plugin tab shows the favourites (the star on a section,
-  kept in QSettings) or, with *all* ticked, the whole tree.  The **Plugins**
+  long tail.  Each plugin tab shows the plugins pinned to it (the shipped
+  ones from `data/default.gui.yaml`).  The **Plugins**
   menu is the whole tree as nested submenus and opens any of them in a window
   of its own -- pinning is a decision, and this is the way in for a plugin
   used once; *Find a plugin...* (Ctrl+Shift+P) is the same chooser.

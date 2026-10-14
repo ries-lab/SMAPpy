@@ -844,9 +844,6 @@ class Plugin:
     name: str = ""                 # set by `register` from the path's last part
     path: str = ""                 # "Analysis/Drift/COMET"
     description: str = ""
-    favorite: bool = True          # pinned in the shipped workspace; for a
-                                   # per-region plugin, in the default
-                                   # evaluation pipeline
     # Whether `run` hands back `Result.values`, and so can be run once per
     # region and kept as that region's row (`docs/regions.md`).  Not a kind
     # of plugin -- such a plugin runs on the view like any other -- but what

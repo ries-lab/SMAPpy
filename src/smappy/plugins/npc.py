@@ -592,8 +592,6 @@ class NPCCorners(Plugin):
     changes_locs = False
     per_region = True
     version = "2"
-    # not in the default evaluation pipeline: added when the data are pores
-    favorite = False
 
     def run(self, ctx: Context, settings: NPCCornersSettings) -> Result:
         table, selection = ctx.table()
