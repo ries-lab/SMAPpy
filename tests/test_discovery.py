@@ -223,7 +223,7 @@ def test_refs_and_tree_do_not_import_but_available_does():
     assert set(found) >= {
         "Analysis/Drift/COMET", "Analysis/Drift/RCC",
         "Analysis/Measure/Localization Statistics",
-        "Analysis/Regions/Find/DBSCAN",
+        "Analysis/Regions/Find clusters",
         "Analysis/Regions/Workflow/NPC Analysis"}
     assert all(path.startswith("Analysis/") for path in found)
     assert isinstance(plugins.tree()["Analysis"]["Drift"]["COMET"], PluginRef)

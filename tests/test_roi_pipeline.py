@@ -31,7 +31,7 @@ def test_the_region_plugins_are_registered_under_regions():
     found = plugins.refs("Analysis/Regions/")
     assert set(found) == {"Analysis/Regions/Find/Density Peaks",
                           "Analysis/Regions/Find/NPC",
-                          "Analysis/Regions/Find/DBSCAN",
+                          "Analysis/Regions/Find clusters",
                           "Analysis/Regions/Column to ROIs",
                           "Analysis/Regions/Regions to column",
                           "Analysis/Regions/Sort ROIs",

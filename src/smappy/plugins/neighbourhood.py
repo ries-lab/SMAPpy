@@ -198,20 +198,21 @@ def _cell_areas(p: np.ndarray, box=None, bounds=None, tree=None, ids=None):
     points (``bounds``, the field's own box), since the points in the box are
     all here; the rest -- a few, along the box's edge -- are asked of
     ``tree``, a k-d tree of the whole field, in which ``p`` are the rows
-    ``ids``.
+    ``ids``.  Also the triangles, as rows of three indices into ``p``.
     """
     from scipy.spatial import Delaunay
     n = len(p)
     area = np.full(n, np.nan)
     sure = np.zeros(n, dtype=bool)
+    none = np.zeros((0, 3), dtype=np.int64)
     if n < 3:
-        return area, sure
+        return area, sure, none
     centre = p.mean(axis=0)            # circumcentres are differences of large numbers
     q = p - centre
     try:
         tri = Delaunay(q)
     except Exception:                  # noqa: BLE001 -- all on one line
-        return area, sure
+        return area, sure, none
     a, b, c = (q[tri.simplices[:, k]] for k in range(3))
     bx, by = b[:, 0] - a[:, 0], b[:, 1] - a[:, 1]
     cx, cy = c[:, 0] - a[:, 0], c[:, 1] - a[:, 1]
@@ -237,7 +238,7 @@ def _cell_areas(p: np.ndarray, box=None, bounds=None, tree=None, ids=None):
     area[hull] = np.nan                                 # open cells
     if box is None:
         sure[:] = True
-        return area, sure
+        return area, sure, tri.simplices
     radius = np.sqrt(ox * ox + oy * oy)
     x0, y0, x1, y1 = (v - o for v, o in zip(box, (centre[0], centre[1]) * 2))
     gx0, gy0, gx1, gy1 = (v - o for v, o in zip(bounds, (centre[0], centre[1]) * 2))
@@ -262,7 +263,7 @@ def _cell_areas(p: np.ndarray, box=None, bounds=None, tree=None, ids=None):
     # on the hull of the tile: open, but whether in the whole field too
     # cannot be told from here (`voronoi_areas` knows the field's hull)
     sure[hull] = False
-    return area, sure
+    return area, sure, tri.simplices
 
 
 # points per tile of the Voronoi density: Qhull takes 9 us a point at 50 k
@@ -270,10 +271,22 @@ def _cell_areas(p: np.ndarray, box=None, bounds=None, tree=None, ids=None):
 VORONOI_TILE = 50_000
 
 
+def _edges_at(simplices: np.ndarray, settled: np.ndarray, ids: np.ndarray) -> np.ndarray:
+    """The edges of ``simplices`` with an end among ``settled`` (a mask over
+    the local points), as pairs of ``ids``, the smaller first."""
+    pairs = np.concatenate([simplices[:, [0, 1]], simplices[:, [1, 2]],
+                            simplices[:, [2, 0]]])
+    pairs = pairs[settled[pairs[:, 0]] | settled[pairs[:, 1]]]
+    return np.sort(ids[pairs], axis=1)
+
+
 def voronoi_areas(points: np.ndarray, tile: Optional[int] = None, threads: int = 0,
-                  progress: Optional[Callable[[float], None]] = None) -> np.ndarray:
+                  progress: Optional[Callable[[float], None]] = None,
+                  edges: bool = False):
     """The area of each point's Voronoi cell (points distinct), NaN where it
-    is open at the edge of the field.
+    is open at the edge of the field; with ``edges``, also the pairs of
+    points whose cells touch (the Delaunay edges), each once, smaller index
+    first.
 
     The field is cut into tiles of about ``tile`` points, each triangulated
     with a margin around it, on every core (Qhull lets go of the GIL); a
@@ -284,7 +297,12 @@ def voronoi_areas(points: np.ndarray, tile: Optional[int] = None, threads: int =
     one triangulation of a band along the field's hull, widened until every
     one is certain -- at worst the whole field.  So the answer is the one a
     single triangulation gives, in a time linear in the points: 5 M in about
-    2 minutes on 4 cores where one triangulation took over 3.
+    a minute on 4 cores where one triangulation took over 3.
+
+    The edges come the same way: a point is settled when every triangle
+    around it is one of the whole field's, so its edges are too, and each
+    settled point gives its own.  An edge between two points on the field's
+    hull is left out: both cells are open.
     """
     from concurrent.futures import ThreadPoolExecutor
     from scipy.spatial import ConvexHull, cKDTree
@@ -292,7 +310,11 @@ def voronoi_areas(points: np.ndarray, tile: Optional[int] = None, threads: int =
     n = len(p)
     tile = tile or VORONOI_TILE
     if n <= tile * 1.5:
-        return _cell_areas(p)[0]
+        area, _, simplices = _cell_areas(p)
+        if not edges:
+            return area
+        found = _edges_at(simplices, np.ones(n, dtype=bool), np.arange(n))
+        return area, np.unique(found, axis=0) if len(found) else found
     bounds = (*p.min(axis=0), *p.max(axis=0))
     k = int(np.ceil(np.sqrt(n / tile)))
     # tiles of equal counts: strips by x quantiles, each cut by y quantiles
@@ -319,6 +341,7 @@ def voronoi_areas(points: np.ndarray, tile: Optional[int] = None, threads: int =
     on_hull = np.zeros(n, dtype=bool)
     on_hull[hull.vertices] = True                       # open: NaN
     left: list = []
+    found: list = []                                    # edges, per settled batch
 
     def one(mine):
         lo, hi = p[mine].min(axis=0), p[mine].max(axis=0)
@@ -329,9 +352,13 @@ def voronoi_areas(points: np.ndarray, tile: Optional[int] = None, threads: int =
             a = np.searchsorted(xs, box[0], side="left")
             near = xs_order[a:np.searchsorted(xs, box[2], side="right")]
             near = np.sort(near[(p[near, 1] >= box[1]) & (p[near, 1] <= box[3])])
-            got, sure = _cell_areas(p[near], box, bounds, tree, near)
+            got, sure, simplices = _cell_areas(p[near], box, bounds, tree, near)
             at = np.searchsorted(near, todo)
             area[todo[sure[at]]] = got[at[sure[at]]]
+            if edges:
+                settled = np.zeros(len(near), dtype=bool)
+                settled[at[sure[at]]] = True
+                found.append(_edges_at(simplices, settled, near))
             todo = todo[~sure[at]]
             if not len(todo):
                 return
@@ -355,9 +382,18 @@ def voronoi_areas(points: np.ndarray, tile: Optional[int] = None, threads: int =
             for f in futures:
                 f.cancel()
             raise
-    if not left:
+    if left:
+        _edge_band(p, n, hull, tree, np.sort(np.concatenate(left)), area,
+                   found if edges else None)
+    if not edges:
         return area
-    todo = np.sort(np.concatenate(left))
+    pairs = np.concatenate(found) if found else np.zeros((0, 2), dtype=np.int64)
+    return area, np.unique(pairs, axis=0) if len(pairs) else pairs
+
+
+def _edge_band(p, n, hull, tree, todo, area, found) -> None:
+    """The points left by the tiles, settled in one triangulation of a band
+    along the field's hull, widened until all are (`voronoi_areas`)."""
     # each point's distance to the field's edge: inside a convex hull, the
     # nearest of the lines through its edges (Qhull's facets, normal outward)
     depth = -(p @ hull.equations[:, :2].T + hull.equations[:, 2]).max(axis=1)
@@ -368,13 +404,41 @@ def voronoi_areas(points: np.ndarray, tile: Optional[int] = None, threads: int =
     everywhere = (-np.inf, -np.inf, np.inf, np.inf)
     while len(todo):
         band = np.union1d(np.flatnonzero(depth <= width), todo)
-        got, sure = _cell_areas(p[band], nowhere, everywhere, tree, band)
+        got, sure, simplices = _cell_areas(p[band], nowhere, everywhere, tree, band)
         at = np.searchsorted(band, todo)
         done = sure[at] | (len(band) == n)
         area[todo[done]] = got[at[done]]
+        if found is not None:
+            settled = np.zeros(len(band), dtype=bool)
+            settled[at[done]] = True
+            found.append(_edges_at(simplices, settled, band))
         todo = todo[~done]
         width *= 2
-    return area
+
+
+def voronoi_cells(points: np.ndarray,
+                  progress: Optional[Callable[[float], None]] = None):
+    """The Voronoi cells of ``points`` (nm, x and y): ``(cell, density,
+    edges)``.  ``cell[i]`` is the cell point ``i`` is in -- points at exactly
+    the same position share one -- ``density`` per cell is the points in it
+    per square micrometre (NaN for a cell open at the edge of the field), and
+    ``edges`` are the pairs of cells that touch.  `voronoi_density` is
+    ``density[cell]``; Find clusters' Voronoi clustering joins the dense
+    cells along ``edges``.
+    """
+    points = np.asarray(points, dtype=float)[:, :2]
+    if len(points) == 0:
+        return (np.zeros(0, dtype=np.int64), np.zeros(0),
+                np.zeros((0, 2), dtype=np.int64))
+    unique, inverse, repeats = np.unique(points, axis=0, return_inverse=True,
+                                         return_counts=True)
+    inverse = np.ravel(inverse)
+    if len(unique) < 4:
+        return inverse, np.full(len(unique), np.nan), np.zeros((0, 2), dtype=np.int64)
+    area, pairs = voronoi_areas(unique, progress=progress, edges=True)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        density = np.where(area > 0, repeats * 1e6 / area, np.nan)
+    return inverse, density, pairs
 
 
 def voronoi_density(points: np.ndarray,

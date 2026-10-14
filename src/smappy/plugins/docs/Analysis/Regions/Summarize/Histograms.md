@@ -17,7 +17,7 @@ Histograms is the simplest analysis of that table.  It draws, for each
 column, how the values are distributed over the ROIs.  The table may as
 well be one of clusters: a block of a [chain](plugin:Panels/Glossary)
 (plugins run one after another as one) over `cluster_id` -- the
-clusters [DBSCAN](plugin:Analysis/Regions/Find/DBSCAN) found -- leaves a row
+clusters [Find clusters](plugin:Analysis/Regions/Find clusters) found -- leaves a row
 per cluster, and *results from* offers it as *per cluster_id: ...*.  ROIs and
 clusters are both [regions](plugin:Panels/Glossary): sets of localizations
 measured together.  That is where a population shows itself: the typical

@@ -83,7 +83,7 @@ ROI and per cluster.  Nothing is ported twice: SMAP's `X` (Analyze) and
 | | what | rows | status |
 |---|---|---|---|
 | B1 | **Neighbourhood** (the renamed `SpatialFilterLocs` / `density_calculator`): per localization, the number of neighbours within r (local density), the mean/median/min/max/quantile of a field around it, and the Voronoi cell density (area⁻¹, SharpViSu). Writes columns (recipes), which can be filtered and coloured, and which Find clusters' Voronoi threshold can use. | #70 #93 (density) #94 | done (step 9) |
-| B2 | **Find clusters**: one plugin with an algorithm choice. Each algorithm's settings are a part; only the selected algorithm's part is **shown**, the others hidden (step 1 below adds that to the form). It replaces `Regions/Find/DBSCAN`. Writes `cluster_id` and `n_in_cluster` as now. | #91 #93 (clusters) | DBSCAN done as its own plugin, to be folded in; the other algorithms are open |
+| B2 | **Find clusters**: one plugin with an algorithm choice. Each algorithm's settings are a part; only the selected algorithm's part is **shown**, the others hidden (step 1 below adds that to the form). It replaces `Regions/Find/DBSCAN`. Writes `cluster_id` and `n_in_cluster` as now. | #91 #93 (clusters) | done (step 10): DBSCAN, Voronoi, HDBSCAN in `Regions/Find clusters` |
 | B2s | **Shuffle colours**: for any integer column, writes a column with the ids randomly permuted (for example `<column>_shuffled`, a recipe), so colouring by it separates neighbouring ids. A new seed on each run. | #95 | open, S |
 | B2b | Statistics on clusters, also inside ROIs | #96 #120 | done by the structure (a block over `cluster_id`). The cluster-shape measurement is **done** (`Measure/Cluster shape`, step 12). |
 | B3 | **Spatial statistics**: Ripley K/L/H, pair correlation, 2D auto- and cross-correlation between layers, the 1D correlation along a line; `per_region`, so it runs in every ROI too | #90 #92 #119 | open |
@@ -210,7 +210,7 @@ first sketch; where they differ, `wave2_design.md` wins.
 | step | what | where | size | done when |
 |---|---|---|---|---|
 | **9** | **Neighbourhood**: per localization, neighbours within r (local density), mean/median/min/max/quantile of a field within r, Voronoi cell density; written as recipe columns | `Analysis/Process/Neighbourhood` (module-level functions on a `cKDTree` and `scipy.spatial.Voronoi`) | M | densities of a simulated uniform field match the expected count; page with figures |
-| **10** | **Find clusters**: one plugin, an algorithm choice with one part per algorithm (only the selected one shown): DBSCAN (moved from `clusters.py`), Voronoi threshold (density from step 9, then connected cells), HDBSCAN if scikit-learn ≥ 1.3 is installed (an optional dependency, asked for at Run like uiPSF) | `Analysis/Regions/Find/Find clusters`; `Find/DBSCAN` removed | M | DBSCAN's tests pass through the new plugin; Voronoi finds simulated clusters; `docs/regions.md` ("Clusters", "The plugin tree") and CLAUDE.md's shape table updated; an old chain step `Regions/Find/DBSCAN` still loads (path alias) |
+| **10** ✅ | **Find clusters**: one plugin, an algorithm choice with one part per algorithm (only the selected one shown): DBSCAN (moved from `clusters.py`), Voronoi threshold (density from step 9, then connected cells), HDBSCAN if scikit-learn ≥ 1.3 is installed (an optional dependency, asked for at Run like uiPSF) | `Analysis/Regions/Find/Find clusters`; `Find/DBSCAN` removed | M | DBSCAN's tests pass through the new plugin; Voronoi finds simulated clusters; `docs/regions.md` ("Clusters", "The plugin tree") and CLAUDE.md's shape table updated; an old chain step `Regions/Find/DBSCAN` still loads (path alias) |
 | **11** | **Segment regions**: one plugin with presets, one part each, only the selected shown: NPC (moved from `npc.py`), Density Peaks (moved from `roi.py`); a `SegmenterPlugin` as now (Preview, *replace*, ROI undo). Templates such as CME and beads come later as further presets. | `Analysis/Regions/Find/Segment regions` | M–L | NPC and Density Peaks tests pass through it; `npc_analysis.chain.yaml` and the NPC tutorial use it; old paths alias; docs as in step 10 |
 | **12** ✅ | **Cluster shape**: area, convex hull, radius of gyration, density, elongation, as a `per_region` measurement (the statistics a block over `cluster_id` does not yet give) | `Analysis/Measure/Cluster shape` | S | known shapes return their numbers |
 
@@ -286,6 +286,15 @@ filters and zoom-ins are settled) · AssignColors for more than 2 colours (C4)
   cells come from tiled Delaunay triangulations checked to equal one (5 M
   in ~1 min); a preflight asks above 20 s; the % done is reported and Stop
   writes nothing.
+* **Step 10** (2026-10-14): *Analysis/Regions/Find clusters* replaces
+  `Regions/Find/DBSCAN` (no alias): an *algorithm* choice, one part each,
+  only the chosen one shown.  DBSCAN moved in with the same numbers;
+  Voronoi (SR-Tesseler's: dense above a multiple of the mean density,
+  dense cells that touch -- the whole field's Delaunay edges, from step 9's
+  tiled triangulation -- one cluster, a minimum size); HDBSCAN from
+  scikit-learn >= 1.3, the new extra `smappy-smlm[clusters]`, named by the
+  form and the run when missing, with a preflight question (it is
+  quadratic: 7.6 min at 300 k).  DBSCAN reports % and stops.
 * **Step 12** (2026-10-14): *Analysis/Measure/Cluster shape*, `per_region`:
   per layer the number of localizations, centre, convex-hull area and
   density, radius of gyration, standard deviations along the long and the
