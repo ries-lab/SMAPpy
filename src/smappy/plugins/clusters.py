@@ -39,12 +39,12 @@ What was measured per cluster goes back onto its localizations with
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict
+from typing import Any, Callable, Dict, Optional
 
 import numpy as np
 
 from ..locs import Localizations
-from . import Context, Plot, Plugin, Result, param, register
+from . import Context, Plot, Plugin, Result, Stopped, param, register
 
 # the rows clustered at once are this many at most in a figure: a scatter of a
 # million points is a grey square and seconds to draw
@@ -64,12 +64,24 @@ def auto_eps(points: np.ndarray, k: int) -> float:
     return (volume * k * gamma(0.5 * d + 1) / (m * pi ** (0.5 * d))) ** (1.0 / d)
 
 
-def dbscan(points: np.ndarray, eps: float, k: int) -> np.ndarray:
+# the points whose neighbours are counted at once: the step at which the
+# count reports progress and a stop is honoured
+COUNT_CHUNK = 200_000
+
+
+def dbscan(points: np.ndarray, eps: float, k: int,
+           progress: Optional[Callable[[float], None]] = None) -> np.ndarray:
     """A cluster label per point, 1, 2, ... largest first, 0 for noise.
 
     ``points`` is (n, 2) or (n, 3); a point is core when at least ``k``
     others are within ``eps``; a border point joins its nearest core point's
     cluster (see the module docstring).
+
+    ``progress(fraction)`` is called as it goes -- which may raise, to stop
+    (the plugin raises `Stopped`).  The count goes in chunks; the pairs of
+    core points, their connected components and the border points are one
+    scipy call each, so a stop waits for the one running: on 2 M
+    localizations those take 10, 13 and 2 s, the count 9 s.
     """
     from scipy.sparse import coo_matrix
     from scipy.sparse.csgraph import connected_components
@@ -81,16 +93,26 @@ def dbscan(points: np.ndarray, eps: float, k: int) -> np.ndarray:
         return labels
     if not eps > 0:
         raise ValueError("the radius must be positive")
+    def step(fraction):
+        if progress is not None:
+            progress(fraction)
+
     tree = cKDTree(points)
-    counts = tree.query_ball_point(points, eps, return_length=True)
+    counts = np.empty(n, dtype=np.int64)
+    for start in range(0, n, COUNT_CHUNK):
+        rows = slice(start, min(start + COUNT_CHUNK, n))
+        counts[rows] = tree.query_ball_point(points[rows], eps, return_length=True)
+        step(0.3 * rows.stop / n)
     core = np.flatnonzero(counts >= k + 1)          # itself and k others
     if not len(core):
         return labels
     core_tree = cKDTree(points[core])
     pairs = core_tree.query_pairs(eps, output_type="ndarray")
+    step(0.6)
     graph = coo_matrix((np.ones(len(pairs)), (pairs[:, 0], pairs[:, 1])),
                        shape=(len(core), len(core)))
     _, component = connected_components(graph, directed=False)
+    step(0.9)
     # border points: the nearest core point within eps
     rest = np.setdiff1d(np.arange(n), core)
     found = np.full(n, -1, dtype=np.int64)
@@ -174,11 +196,20 @@ class DBSCAN(Plugin):
         labels = np.zeros(len(table), dtype=np.int64)
         eps_used = []
         offset = 0
-        for f in np.unique(files[use]):
+        files_used = np.unique(files[use])
+        for i, f in enumerate(files_used):
+            def progress(fraction, i=i):
+                done = (i + fraction) / len(files_used)
+                # a half-clustered table is worth nothing: a stop keeps nothing
+                if ctx.stopped:
+                    raise Stopped(f"DBSCAN stopped at {100 * done:.0f}%: nothing written")
+                ctx.report(f"DBSCAN: {100 * done:.0f}%")
+
             rows = np.flatnonzero(use & (files == f))
             eps = settings.radius_nm or auto_eps(points[rows], settings.neighbours)
             eps_used.append(eps)
-            found = dbscan(points[rows], eps, settings.neighbours)
+            found = dbscan(points[rows], eps, settings.neighbours, progress)
+            progress(1.0)
             found[found > 0] += offset
             offset = max(offset, int(found.max(initial=0)))
             labels[rows] = found

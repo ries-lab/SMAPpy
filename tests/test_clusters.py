@@ -323,3 +323,24 @@ def test_a_cluster_with_no_hull_still_gets_an_roi_at_its_centre():
     (roi,) = session.rois.rois.values()
     assert roi.polygon is None and np.allclose(roi.center, [55, 55])
     assert "1 with no outline" in result.text
+
+
+def test_dbscan_reports_its_progress_and_a_stop_writes_nothing(monkeypatch):
+    import threading
+    from smappy.plugins import Stopped
+    from smappy.plugins import clusters
+    monkeypatch.setattr(clusters, "COUNT_CHUNK", 20)        # many steps
+    xy, _ = blobs()
+    session = Session(table(xy))
+    session.show_grouped(0, False)
+    settings = DBSCAN.Settings(radius_nm=40, neighbours=5)
+    lines = []
+    DBSCAN().run(session.context(0, progress=lines.append), settings)
+    percents = [int(line.rsplit(" ", 1)[1].rstrip("%")) for line in lines]
+    assert len(percents) > 5 and percents == sorted(percents) and percents[-1] == 100
+
+    stop = threading.Event()
+    ctx = session.context(0, progress=lambda line: stop.set(), stop=stop)
+    with pytest.raises(Stopped, match="nothing written"):
+        DBSCAN().run(ctx, settings)
+    assert "cluster_id" not in session.locs
