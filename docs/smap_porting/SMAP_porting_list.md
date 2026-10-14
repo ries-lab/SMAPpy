@@ -186,7 +186,7 @@ module chain itself is ⊘ (NOTES.md, "No module chain").
 | SMAP | does | smappy | suggestion |
 |---|---|---|---|
 | `DBSCAN_cluster` | DBSCAN, cluster id per loc + cluster table | ✗ | **P1**, S–M – `sklearn`/`scipy` KD-tree; write `cluster_id`, return a per-cluster table (n, area, radius, density). |
-| `ClusterStatistics`, `SpatialPointPattern` (and the MINFLUX copy) | Ripley's K/L/H, pair correlation (Sengupta 2011) | ✗ | **P1/P2**, M – one plugin; edge correction and a CSR envelope by simulation; in a ROI. Pair correlation needs the blinking correction to be honest – say so on the page. |
+| `ClusterStatistics`, `SpatialPointPattern` (and the MINFLUX copy) | Ripley's K/L/H, pair correlation (Sengupta 2011) | ✗ | `ClusterStatistics` computes only cluster shapes despite its description: that is ✅ `Measure/Cluster shape`. The spatial statistics: **P1/P2**, M – one plugin; edge correction and a CSR envelope by simulation; in a ROI. Pair correlation needs the blinking correction to be honest – say so on the page. |
 | `ClusterVoronoi` | Voronoi-cell density, clusters by threshold (SharpViSu) | ✗ | **P2**, M |
 | `density_calculator` | neighbours within r per loc | ✗ | **P2**, S – a column; filterable, colourable. |
 | `ShuffelClusterIndex` | random colour per cluster | ✗ | S – part of DBSCAN (write a shuffled id). |

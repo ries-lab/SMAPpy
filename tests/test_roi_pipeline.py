@@ -291,7 +291,8 @@ def app():
 def test_the_evaluation_window_offers_only_evaluators(app):
     from smappy.gui.chooser import PluginTree
     tree = PluginTree(per_region=True)
-    assert sorted(tree.refs) == ["Analysis/Measure/Histogram",
+    assert sorted(tree.refs) == ["Analysis/Measure/Cluster shape",
+                                 "Analysis/Measure/Histogram",
                                  "Analysis/Measure/Localization Statistics",
                                  "Analysis/Measure/NPC Corners"]
     assert set(tree.refs) < set(PluginTree().refs)

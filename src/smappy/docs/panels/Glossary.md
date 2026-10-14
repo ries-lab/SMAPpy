@@ -108,6 +108,10 @@ papers and in other software.
 * **per-region steps**: plugins run once in every region, what each measures
   kept as that region's row.
 * **cluster**: localizations that lie closer to each other than to the rest.
+* **convex hull**: the smallest outline without dents that contains a set
+  of localizations -- the shape a rubber band stretched around them takes.
+* **radius of gyration** (Rg): the typical distance of a cluster's
+  localizations from its centre, the root of their mean squared distance.
 * **DBSCAN** (density-based spatial clustering of applications with noise): a
   clustering in which a localization with enough neighbours within a radius
   starts or extends a cluster, and the rest are noise.
