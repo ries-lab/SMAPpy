@@ -5,7 +5,7 @@ comments more than by the Decision column.  Row numbers (`#12`) are the `#`
 column of the spreadsheet; its **Work package** column says where each row
 went, and **Update 2026-10-14** what the regions restructuring changed.
 
-**Updated 2026-10-14** against `origin/main` `c9f650a`, after the regions
+**Updated 2026-10-14** (and the segmentation/density split decided the same day) against `origin/main` `c9f650a`, after the regions
 restructuring (`docs/regions.md`).  What it settled, as far as this plan is
 concerned:
 
@@ -55,15 +55,42 @@ ROI and per cluster.  Nothing is ported twice: SMAP's `X` (Analyze) and
 | A6 | **Vibrations**: spectrum of x, y, z, with zoom-ins and filters | #88 | open. Still needs: which filters, which zoom-ins. |
 | A7 | **Export the region table** to CSV: the user picks the columns; ROIs or clusters through `region_results` | #130 | open. A summary plugin under `Regions/Summarize/`. Nothing writes the table to CSV yet. |
 
-## B. Neighbourhood, clusters, spatial statistics (P1)
+## B. Segmentation, local density, spatial statistics (P1)
+
+**Decided 2026-10-14:** two different jobs, kept apart.
+
+* **Segmentation** says which localizations belong together, and gives an id
+  or an ROI.  It comes in two plugins, by what they are usually used for:
+  * **Find clusters**: classical cluster analysis, *many* regions, written as
+    an id column (`cluster_id`, `n_in_cluster`).  Algorithms: DBSCAN (there
+    now), HDBSCAN, Voronoi threshold (density above a cut, then connected
+    cells), maybe others.
+  * **Segment regions**: *few but well-defined* regions, usually made into
+    ROIs for review and measurement.  Algorithms: NPC (ring template, there
+    now), Density Peaks (there now), other templates (CME, beads, ...), each
+    with its own model and parameters, as presets.
+* **Local density** describes each localization's neighbourhood and writes a
+  column; it segments nothing.  That is **Neighbourhood** (B1).
+* **Shuffle colours** is a third, separate, small plugin, because it must
+  work on any integer index: `cluster_id`, `roi_id`, `tid`, `track_id`,
+  `frame`.
 
 | | what | rows | status |
 |---|---|---|---|
-| B1 | **Neighbourhood** (the renamed `SpatialFilterLocs`): per localization, the neighbours within r (density), the mean/median/quantile of a field, Voronoi cell density, written as a column | #70 #93 #94 | open. A column writer like Math Parser; not a region. |
-| B2 | **Clusterers**: DBSCAN is **done** (`Regions/Find/DBSCAN`). What is left: Voronoi threshold, maybe HDBSCAN, template-based (the NPC ring filter), and a *shuffle colours* action | #91 #93 #95 | open. **Decision for you:** your comment asked for one cluster plugin with several algorithms. The tree now has one Find plugin per algorithm (Find/DBSCAN, Find/NPC, Find/Density Peaks), all writing an id column. Adding more Find plugins fits that; one plugin with a choice would go against it. I'd follow the tree. *Shuffle colours* then belongs to the render side (a LUT option for id columns) and works for every id column, not only clusters. |
-| B2b | **Statistics on clusters**, also inside ROIs | #96 #120 | **done** by the structure: a block over `cluster_id` with Localization Statistics, nested in an ROI block if wanted. A dedicated cluster measurement (area, convex hull, radius of gyration, density) is still missing: one small `per_region` plugin. |
-| B3 | **Spatial statistics**: Ripley K/L/H, pair correlation, 2D auto- and cross-correlation between layers, the 1D correlation along a line | #90 #92 #119 | open. Make it `per_region`: then it runs in every ROI (spectrin periodicity per ROI) with no extra work. |
-| B4 | **Counting**: localizations and blinks per region, histogram fits for protein number, labelling efficiency, re-activations | #98 #121 | open, but now clear how. A `per_region` measure plugin (blinks and dark times per region) plus a `Summarize` plugin that fits the histogram, the same pair as NPC Corners and NPC labelling efficiency. It works on ROIs and on clusters alike. |
+| B1 | **Neighbourhood** (the renamed `SpatialFilterLocs` / `density_calculator`): per localization, the number of neighbours within r (local density), the mean/median/min/max/quantile of a field around it, and the Voronoi cell density (area⁻¹, SharpViSu). Writes columns (recipes), which can be filtered and coloured, and which Find clusters' Voronoi threshold can use. | #70 #93 (density) #94 | open |
+| B2 | **Find clusters**: one plugin with an algorithm choice. Each algorithm's settings are a part, and the others are greyed through `describe` (`FormState.active`). It replaces `Regions/Find/DBSCAN`. Writes `cluster_id` and `n_in_cluster` as now. | #91 #93 (clusters) | DBSCAN done as its own plugin, to be folded in; the other algorithms are open |
+| B2s | **Shuffle colours**: for any integer column, writes a column with the ids randomly permuted (for example `<column>_shuffled`, a recipe), so colouring by it separates neighbouring ids. A new seed on each run. | #95 | open, S |
+| B2b | Statistics on clusters, also inside ROIs | #96 #120 | done by the structure (a block over `cluster_id`). A cluster-shape measurement (area, hull, radius of gyration, density) as a small `per_region` plugin is still open. |
+| B3 | **Spatial statistics**: Ripley K/L/H, pair correlation, 2D auto- and cross-correlation between layers, the 1D correlation along a line; `per_region`, so it runs in every ROI too | #90 #92 #119 | open |
+| B4 | **Counting**: a `per_region` measurement plus a `Summarize` histogram fit | #98 #121 | open |
+
+What this changes in the code: `Regions/Find/` becomes the home of the two
+segmenters, `Find/DBSCAN` folds into *Find clusters*, and `Find/NPC` and
+`Find/Density Peaks` fold into *Segment regions*.  That is a change to the
+tree that `docs/regions.md` ("The plugin tree", "Clusters") and CLAUDE.md's
+shape table describe, so both are updated in the same change.  Saved chains
+that name `Regions/Find/DBSCAN` or `Regions/Find/NPC` (the shipped
+`npc_analysis.chain.yaml` among them) need their step paths mapped.
 
 ## C. Transformations and channels (P2), unchanged
 
@@ -95,7 +122,7 @@ drift (#34) · D3 time-dependent transformation (magnification) in COMET
 | E1 | Import site positions | #135 | open, P3 |
 | E1 | ROI per file (`files2sites`) | #108 | **mostly there**: *Column to ROIs* on `filenumber`. You had marked it skip anyway. |
 | E2 | **Annotate ROIs** | new | **mostly done** (`gui/roi_annotate.py`): any number of keyword lists written in the panel and saved with the project; keys 1–9 pick a keyword, 0 clears it, Tab switches lists, Up/Down moves to the next ROI, Space toggles *use*; a comment per ROI; the keywords become columns of the results table, so Filter and Sort read them. **Still missing from SMAP's version: several named lines per ROI.** There is one *direction* line now. Extending it to named lines (angle and length as values) is what E7 needs for orientation. |
-| E3 | **One segmenter with presets** | #104 #105 #109 #111 | **partly answered by the structure**: finders and clusterers are one kind (`Regions/Find/…`). Open: presets (NPC, CME, beads) and whether they are one plugin or several Find plugins (the same question as B2). *Centre all* (#116) fits as a Regions action: recentre the ROIs by a measured centre (median, circle fit), with the circle fit from E5. |
+| E3 | **Segment regions** with presets (NPC, Density Peaks, CME, beads, other templates); see B | #104 #105 #109 #111 | decided: one plugin, see B. NPC and Density Peaks exist as separate Find plugins, to be folded in. *Centre all* (#116) fits as a Regions action: recentre the ROIs by a measured centre (median, circle fit), with the circle fit from E5. |
 | E4 | No distinction between evaluator and analysis plugin | #118 | **done** (`per_region`). Left: Line Profile itself is not `per_region` yet (it is `follow_roi`). Giving it `Result.values` (width, distance, AIC winner) is a small change. |
 | E5 | **Circle fit** as a `per_region` Measure plugin (#115, P2); **NPC geometry** (#114, P3; independent of LocMoFit, but better as one of its models: decide H first) | #114 #115 | open |
 | E6 | Figures of regions: montage, TIFF stack, single TIFFs, volumes, sorted by any column | #132 #133 | open, P3. Now a Summarize-style plugin that reads the ROI order (Sort ROIs) and annotations. |
@@ -151,9 +178,10 @@ Regions to column, or a small plugin of its own.
 1. **A1, A2, A4, A5, A7**: independent, small, and they can run in parallel.
 2. **E2 named lines** and the small E1 leftovers (remove doubles, remove
    locs outside ROIs).
-3. **B1**, then **B3** and **B4** as `per_region` measurements, and the
-   remaining **B2** clusterers once the one-plugin-or-several question is
-   answered.
+3. **B2s** shuffle colours (small); **B1** Neighbourhood; **B2** *Find
+   clusters* (fold DBSCAN in, add HDBSCAN and Voronoi), and *Segment regions*
+   (fold NPC and Density Peaks in, presets) together with E3; then **B3** and
+   **B4** as `per_region` measurements.
 4. **F** (design note first; tracks as an id column).
 5. **C1 + C2**, **D1–D3**, **E3 presets**, **E5**, Line Profile `per_region`.
 6. **H** decision → LocMoFit; G after F.
