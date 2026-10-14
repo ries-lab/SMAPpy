@@ -254,8 +254,9 @@ numbers: simulate data with known parameters and assert they come back.
 The discovery and workspace tests (`test_discovery.py`, `test_workspace.py`,
 `test_file_plugins.py`) check that the shipped plugins are found and that
 every plugin the shipped GUI names exists.  Adding a plugin needs no test
-edits unless it is pinned in the shipped GUI or offered per region
-(`test_roi_pipeline.py` lists those).
+edits unless it is under `Analysis/Regions/` or offered per region
+(`test_roi_pipeline.py` lists both), or a File plugin
+(`test_file_plugins.py` lists those).
 
 `tests/test_control_width.py` builds every shipped plugin's panel and fails if
 it is wider than the control column (`CONTROL_WIDTH`): a new plugin with a long

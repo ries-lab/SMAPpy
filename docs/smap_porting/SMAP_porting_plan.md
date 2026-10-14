@@ -194,7 +194,7 @@ S ≤ a day, M a few days, L a week or more.
 | **3** ✅ | **Readers**: Picasso HDF5, DECODE (h5/csv), registered as `Reader`s so *File/Load/Auto*'s *format* list offers them | `io/formats.py` | S | reading a file each format's own tool writes (a small fixture) |
 | **4** ✅ | **Histogram of any column**, per layer, with mean/median/std; `per_region`, so it also gives one per ROI or per cluster | `Analysis/Measure/Histogram` | S | test on simulated data; page |
 | **5** ✅ | **Time course**: any columns against frame (photons, locs per frame, precision, background), several in one graph, beside the image tags | extend `image_tags.py`, or `Analysis/Measure/Time course` sharing its drawing | S–M | test and page; Image Tags' page updated if it changes |
-| **6** | **Export the region table** to CSV: the columns chosen by the user, ROIs or clusters through `region_results` | `Analysis/Regions/Summarize/Export table` | S | a CSV of an NPC Corners run, the ROI annotations and `roi_id` included |
+| **6** ✅ | **Export the region table** to CSV: the columns chosen by the user, ROIs or clusters through `region_results` | `Analysis/Regions/Summarize/Export table` | S | a CSV of an NPC Corners run, the ROI annotations and `roi_id` included |
 | **7** | **Shuffle ids**: for any integer column (`cluster_id`, `roi_id`, `tid`, `frame`, ...), write `<column>_shuffled` with the ids permuted, so colouring by it separates neighbouring ids; a new seed per run | `Analysis/Process/Shuffle ids` | S | the permutation keeps id 0 / noise at 0; grouping keeps a blink's value (recipe with rule `max`) |
 | **8** | **Fit region**: fit only inside / exclude regions drawn on the camera frame | the fitters' detection part (`plugins/fit.py`), a mask on the candidates | S–M | candidates outside the region are dropped; the Localize tutorial still runs |
 
@@ -257,6 +257,9 @@ filters and zoom-ins are settled) · AssignColors for more than 2 colours (C4)
   column's median per window and the image tags against frame, time or
   file; a panel per series or one graph scaled to the maxima; a line per
   layer.  Image Tags stays, for one tag in detail beside the rate.
+* **Step 6** (2026-10-14): *Analysis/Regions/Summarize/Export table*: the
+  results table (every evaluation on the ROIs, or one, or per cluster) as
+  csv/tsv, the columns ticked, with each ROI's centre, file and comment.
 
 ### Start here
 
