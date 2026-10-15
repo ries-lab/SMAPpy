@@ -541,6 +541,26 @@ channel *Check overlay* (C3).  AssignColors for more than 2 colours (C4):
   `settings_for`).  No rotation or scale.  `smappy/layer_registration.py`;
   pinned in the Analysis tab.
 
+* **Step 5e** (2026-10-15): *Analysis/Measure/Stability*, `changes_locs =
+  False`, `per_region`, ungrouped; one approach, *vibrations* (its part
+  shown while ticked), room for long-term and dual-channel drift.  Beads by
+  an *id column* (`track_id`); *traces*: each bead, their mean, or
+  differential (each minus the first bead, each minus the others' mean),
+  precisions propagated.  One grid for all beads (frames, or the 20th
+  percentile of `time_s`'s intervals -- SMAP's, not halved); holes filled
+  linearly and counted (`n_filled`, a warning above a fifth).  A zero-phase
+  Butterworth high-pass (*high-pass*, 1 Hz) before the SD; the vibration
+  RMS is sqrt(SD^2 - precision^2).  Welch's spectrum (Hann, *segment* 1024
+  points, half overlap), scaled so a sinusoid reads its amplitude; a peak's
+  amplitude from its main lobe's power above the floor, so it does not
+  read low between bins; the cumulative RMS.  Figures each a tick (zoomed
+  trace with a running mean, whole trace, amplitude, cumulative RMS, a
+  table of peaks).  Values per axis pooled over the region's traces:
+  `x_sd_nm`, `x_precision_nm`, `x_vibration_nm`, `x_peak_hz`, `x_peak_nm`;
+  arrays the first trace's spectrum and cumulative RMS.
+  `smappy/stability.py`; pinned in the Analysis tab.  The Glossary gained
+  vibration, amplitude spectrum and RMS.
+
 ### Start here
 
 Wave 1 is eight independent sessions.  If only one runs at a time, start with

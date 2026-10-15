@@ -109,6 +109,15 @@ papers and in other software.
 * **fiducial** (also called a fiducial marker, or a bead): a bright, still
   particle on the coverslip -- a fluorescent microsphere, a gold particle --
   seen in nearly every frame, whose apparent movement is the drift.
+* **vibration** (also called jitter, or mechanical noise): fast movement of
+  the sample or the optics -- from the building, a fan, a pump -- that
+  repeats many times a second, faster than drift.
+* **amplitude spectrum** (also called the Fourier spectrum, or the FFT): a
+  signal taken apart into sinusoids, the amplitude of each against its
+  frequency; a vibration is a peak.
+* **RMS** (root mean square): the square root of the mean of the squares --
+  of a position around its mean, its standard deviation; a sinusoid of
+  amplitude A has an RMS of A / √2.
 
 ## Regions
 
