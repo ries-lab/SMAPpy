@@ -86,8 +86,8 @@ ROI and per cluster.  Nothing is ported twice: SMAP's `X` (Analyze) and
 | B2 | **Find clusters**: one plugin with an algorithm choice. Each algorithm's settings are a part; only the selected algorithm's part is **shown**, the others hidden (step 1 below adds that to the form). It replaces `Regions/Find/DBSCAN`. Writes `cluster_id` and `n_in_cluster` as now. | #91 #93 (clusters) | done (step 10): DBSCAN, Voronoi, HDBSCAN in `Regions/Find clusters` |
 | B2s | **Shuffle colours**: for any integer column, writes a column with the ids randomly permuted (for example `<column>_shuffled`, a recipe), so colouring by it separates neighbouring ids. A new seed on each run. | #95 | done (step 7): `Analysis/Process/Shuffle ids` |
 | B2b | Statistics on clusters, also inside ROIs | #96 #120 | done by the structure (a block over `cluster_id`). The cluster-shape measurement is **done** (`Measure/Cluster shape`, step 12). |
-| B3 | **Spatial statistics**: Ripley K/L/H, pair correlation, 2D auto- and cross-correlation between layers, the 1D correlation along a line; `per_region`, so it runs in every ROI too | #90 #92 #119 | open |
-| B4 | **Counting**: a `per_region` measurement plus a `Summarize` histogram fit | #98 #121 | open |
+| B3 | **Spatial statistics**: Ripley K/L/H, pair correlation, 2D auto- and cross-correlation between layers, the 1D correlation along a line; `per_region`, so it runs in every ROI too | #90 #92 #119 | decided (`wave4_design.md`): one plugin with a list of approaches, steps 17a-c |
+| B4 | **Counting**: a `per_region` measurement plus a `Summarize` histogram fit | #98 #121 | decided (`wave4_design.md`): *Blinking*, a `per_region` measurement (step 18); the counting fit later, on top of the NPC model; DNA-PAINT / qPAINT later, after looking at Picasso |
 
 What this changes in the code: `Regions/Find/` becomes the home of the two
 segmenters, `Find/DBSCAN` folds into *Find clusters*, and `Find/NPC` and
@@ -143,6 +143,12 @@ for an optimized algorithm), then the analyses (MSD, diffusion, jump
 distances) as `per_region` measurements plus summaries over tracks, and tracks
 drawn into a movie export (#100 #101 #141).
 
+**Decided 2026-10-15** (`wave4_design.md`): inside smappy, steps 19a-c --
+track simulation and a simple linker benchmarked against a global
+assignment (tracking is sparse: the problem is bridging dark frames, not
+dense linking), a *tracks* render mode, MSD and jump distances.  Step
+finding and changes of motion within a track later.
+
 ## G. MINFLUX (P2, own project)
 
 The same holds here: MINFLUX's trace id `tid` is already an id column, so
@@ -158,7 +164,9 @@ extra code.
 
 ## I. Rendering and movies (P3), unchanged
 
-z-stack export (#76) · Voronoi renderer (#77) · movie export (#139 #140 #141)
+z-stack export (#76) · Voronoi renderer (#77) · movie export (#139 #140 #141;
+with the tracks as an option: step 19b's render mode with a *tail*, over the
+raw frames)
 · image processing for image layers (#81).
 
 ## J. Later / when needed, unchanged
@@ -226,13 +234,19 @@ one after the other, in the same session if possible.
 | **15** ✅ | **Line Profile `per_region`** (width, distance, AIC winner as values) and **Circle fit** (`Analysis/Measure/Circle fit`, `per_region`), with *centre ROIs* on the circle or median centre as a Regions action | S–M | – |
 | **16** ✅ | **Average ROIs**: centre plus orientation from a measured value or a named line → a new table | M | 13 |
 
-### Wave 4: analysis projects (a short design note first, in `docs/`)
+### Wave 4 -- the design is in `wave4_design.md` (decided 2026-10-15)
 
-| step | what | size |
-|---|---|---|
-| **17** | **Spatial statistics** (B3): Ripley K/L/H, pair correlation, 2D auto- and cross-correlation between layers, 1D correlation along a line; `per_region` | M–L |
-| **18** | **Counting** (B4): per-region blinks and dark times plus a Summarize histogram fit | M |
-| **19** | **Single-particle tracking** (F): linker writing `track_id`; MSD, diffusion and jump distances as `per_region` measurements and summaries; tracks in a movie export | L |
+| step | what | size | needs |
+|---|---|---|---|
+| **17a** | **Spatial statistics, radial**: `Analysis/Measure/Spatial statistics` -- pair distances from the C++ `Index`, the window's set covariance as edge correction, g, K, L-r, H for each visible layer and each pair, CSR / *keep blinks* envelopes, `per_region` values; Neighbourhood's count *express as* local L(r) | M-L | - |
+| **17b** | **Curves summary**: `Analysis/Regions/Summarize/Curves`, mean and spread of any evaluation's curves, grouped by an ROI keyword, pooled where counts are given | S-M | 17a |
+| **17c** | **Spatial statistics, directional**: 2D correlation image, 1D correlation along a line with its period; axes x-y / x-z / y-z / z, a line or rectangle ROI's own directions | M | 17a |
+| **18** | **Frame time** per file, and **Blinking** (`Analysis/Measure/Blinking`, `per_region`: counts, bursts, on- and dark times; per-file blinking histograms) | S-M | - |
+| **19a** | **Tracks**: simulated tracks in `smappy.simulate`; `Analysis/Tracking/Link tracks` (simple and global assignment, benchmarked) writing `track_id` | M-L | - |
+| **19b** | **The *tracks* render mode**: a fifth render mode, segments drawn in C++ | M | - |
+| **19c** | **Tracking analysis**: MSD and jump distances, per track and over all, vectorised; an *id column* (`track_id`, `tid`) | M | 18, 19a |
+
+17a, 18, 19a and 19b can run in parallel.
 
 ### Wave 5: when the above is in
 
