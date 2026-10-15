@@ -3,8 +3,9 @@
 From your annotations in `SMAP_porting_list.xlsx`, read loosely: I went by the
 comments more than by the Decision column.  Row numbers (`#12`) are the `#`
 column of the spreadsheet; its **Work package** column says where each row
-went, **Update 2026-10-14** what the regions restructuring changed, and
-**Plan step** which numbered step of the implementation plan takes it.
+went, **Update 2026-10-14** what the regions restructuring changed,
+**Plan step** which numbered step of the implementation plan takes it, and
+**Status 2026-10-15** what is done.
 
 **To start, read [Implementation plan: where to start](#implementation-plan-where-to-start)
 at the end**: 19 numbered steps in five waves.  The sections A–J before it
