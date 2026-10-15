@@ -250,7 +250,8 @@ one after the other, in the same session if possible.
 
 ### Wave 5 -- designed a topic at a time in `wave5_design.md`
 
-Topics: 1. coordinates (decided 2026-10-15) · 2. vibrations (A6) ·
+Topics: 1. coordinates (decided 2026-10-15) · 2. stability (A6, decided
+2026-10-15) ·
 3. rendering and movies (I; movie export with the tracks as an option:
 step 19b's render mode with a *tail*, over the raw frames) · 4. figures of
 regions (E6) · 5. LocMoFit (H) and NPC geometry · 6. MINFLUX (G), with the
@@ -263,6 +264,7 @@ channel *Check overlay* (C3).  AssignColors for more than 2 colours (C4):
 | **5b** | **Register layers** (C2): shift by cross-correlation, z optional; hands its result to Transform | S-M | 5a |
 | **5c** | **Fiducial drift** (D2): bright long-lived tracks, one spline dx, dy (dz), a `Drift` | M | - |
 | **5d** | **Magnification over time in COMET** (D3), discussed with Jonas first | M-L | - |
+| **5e** | **Stability: vibrations** (A6): `Analysis/Measure/Stability`, approaches (vibrations now; long-term and dual-channel drift later), per bead track, differential, zoomed trace, spectrum, cumulative RMS, peaks; figures as options | M | - |
 
 ### Done
 
@@ -513,7 +515,7 @@ channel *Check overlay* (C3).  AssignColors for more than 2 colours (C4):
   x, y, z; rotate, scale, mirror about the middle of the target, the origin
   or a point; one 4x4 matrix), a named transformation
   (`Session.transformations`, through `Result.transformations`, saved with
-  the workspace and the file, recorded in `metadata["transformations"]`
+  the localization file -- not the workspace, Jonas's decision -- recorded in `metadata["transformations"]`
   when applied), a file (`_2ct.h5` converted to nm with the file's pixel
   size, affine kept affine; the new `_T.h5`, written by *write to*), or
   another file's drift (`Drift.apply(rows=)`, refused for other frames).
@@ -534,6 +536,22 @@ channel *Check overlay* (C3).  AssignColors for more than 2 colours (C4):
   passes (`Drift.then`), saved in the session and the `_driftc` file, so
   Transform's drift of another file applies it.  A second panel in ppm.
   COMET version 3.  Decisions with Jonas in `wave5_design.md`, step 5d.
+
+* **Step 5b** (2026-10-15): *Analysis/Register/Register layers*,
+  `changes_locs = False`: the shift of a target layer against a reference
+  layer -- localizations as they show, binned (*bin*, 20 nm), or image
+  layers looked up on the same grid, placement honoured -- by the
+  correlation of step 17c (`correlation._xcorr`, each picture minus its
+  mean) and RCC's peak (`rcc._peak`), refined up to three times with the
+  shift taken out of the localizations (the peak fit's pull to whole bins,
+  4 nm at 20 nm bins, down to under 1 nm); within *max shift* (2500 nm,
+  SMAP's; auto: anywhere).  z optional, off: RCC's tiled axial pass
+  (`rcc._axial_shifts`) on the reference and the laterally corrected
+  target.  Kept as a named transformation (`Result.transformations`); the
+  form's notice *Apply with Transform* opens Transform on it and on the
+  target layer's file, channel or image (`transform_target`,
+  `settings_for`).  No rotation or scale.  `smappy/layer_registration.py`;
+  pinned in the Analysis tab.
 
 ### Start here
 

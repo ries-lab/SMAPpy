@@ -65,10 +65,11 @@ ax.set_xlabel("x (nm)"); ax.set_ylabel("y (nm)")
 
 **2. A named transformation.**  The session keeps a list of transformations
 under names.  A transformation applied here is added to it with *keep
-as*, and is then applied by name.  The list is saved with the workspace (*File >
-Workspace > Save*, and the GUI part of a saved localization file) and with
-the localization file, so the map between a lab's two cameras is measured
-once and applied by name from then on.
+as*, and is then applied by name.  The list belongs to the data, not to
+the GUI: it is saved with the localization file and comes back when the
+file is opened, but a workspace (*File > Workspace*) does not carry it.  To
+use a transformation with other files, write it to a file (*write to*) and
+apply that.
 
 **3. A transformation file.**  Either a `_2ct.h5` written by
 [Calibrate transform](plugin:Analysis/Register/Calibrate transform) (or a
