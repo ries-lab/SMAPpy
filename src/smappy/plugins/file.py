@@ -617,7 +617,8 @@ class SimulateTracks(Plugin):
         ctx.report(f"simulating {settings.n_frames} frames of tracks...")
         locs = simulate_tracks(settings.model())
         info = FileInfo(name="tracks (simulation)", path="tracks (simulation)",
-                        format="simulated", n=len(locs))
+                        format="simulated", n=len(locs),
+                        frame_time_ms=settings.frame_time_ms)
         md = locs.metadata
         text = (f"{len(locs)} localizations of {md['n_tracks']} tracks over "
                 f"{settings.n_frames} frames ({settings.frame_time_ms:g} ms each); "

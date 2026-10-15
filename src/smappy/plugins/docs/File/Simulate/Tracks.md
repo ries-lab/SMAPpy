@@ -145,4 +145,5 @@ A new file, `tracks (simulation)`, with `frame`, `x_nm`, `y_nm`,
 `xy_err_nm` (and `z_nm`, `z_err_nm` in 3D), `track_id_true` and
 `state_true`, sorted by frame as a fit writes it; and a line with the
 number of localizations and tracks.  The settings are kept in the file's
-metadata (`track_simulation`), with the frame time.
+metadata (`track_simulation`), and the *frame time* is the file's
+frame time, which everything that converts frames into seconds reads.

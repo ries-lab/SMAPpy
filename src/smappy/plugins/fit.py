@@ -93,6 +93,11 @@ class CameraSettings:
                                           min=0, advanced=True,
                                           help="rms per pixel; auto: 1 without "
                                                "EM gain (an sCMOS), 0 with it")
+    frame_time_ms: Optional[float] = param(None, label="frame time", unit="ms",
+                                           min=0, advanced=True,
+                                           help="from one frame to the next, kept "
+                                                "with the table; auto: from the "
+                                                "file, else the exposure")
 
     def overrides(self) -> Dict[str, Any]:
         """What the user set, to win over the file's metadata."""

@@ -187,6 +187,10 @@ def test_simulated_drift_records_the_truth():
     assert "drift_truth" in result.files[0][0].metadata
 
 
+def simulate_tracks_table(plugin, settings):
+    return plugin.run(Context(), settings).files[0][0]
+
+
 def test_simulate_tracks_adds_tracks_with_their_truth():
     session = Session()
     plugin = plugins.get("File/Simulate/Tracks")()
@@ -199,6 +203,10 @@ def test_simulate_tracks_adds_tracks_with_their_truth():
             "state_true"} <= set(locs.keys())
     assert set(np.unique(locs["state_true"])) == {0, 1}
     assert "tracks" in result.text
+    # the file's frame time is the one simulated
+    from smappy.metadata import table_frame_time
+    assert table_frame_time(simulate_tracks_table(plugin, settings)) == 10.0
+    assert session.files[0].frame_time_ms == 10.0
     # a second state's fields are greyed while it has no time
     plain = plugin.describe(None, plugin.Settings())
     assert plain.active["diffusion.d2_um2_s"] is False

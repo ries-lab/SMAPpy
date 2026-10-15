@@ -26,6 +26,12 @@
 // around in pieces, so the caller can report progress and stop between them;
 // `cell_order` puts those points in the same cell order, so that neighbouring
 // queries read the same memory.
+//
+// `pair_histogram` is the same search with nothing written per point: the
+// distances of every pair closer than the cell size, binned, one histogram
+// per thread summed at the end -- the pair counts of Spatial statistics'
+// g(r) and K(r) (`smappy.plugins.spatial_statistics`).  No pair is ever
+// stored, so 10^9 pairs cost a second, not 16 GB.
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
 
@@ -451,6 +457,76 @@ public:
         return out;
     }
 
+    // The histogram of the distances from each point asked about to the
+    // indexed points within the cell size, in ``bins`` bins of ``dr`` from 0:
+    // a pair at distance d is in bin floor(d / dr).  ``same[i]`` is the
+    // indexed point that is point i itself, or -1, and is left out: a point
+    // is not its own pair.  Each ordered pair counts once, so a set against
+    // itself counts every pair twice.  Lateral only.
+    py::array_t<double> pair_histogram(const Doubles& ax, const Doubles& ay,
+                                       py::object same_obj, double dr, int64_t bins,
+                                       int threads) const {
+        const int64_t na = ax.size();
+        if (ay.size() != na) throw std::invalid_argument("x and y must match");
+        if (!(dr > 0) || bins <= 0) throw std::invalid_argument("dr and bins must be positive");
+        Ints same;
+        const bool have_same = !same_obj.is_none();
+        if (have_same) {
+            same = same_obj.cast<Ints>();
+            if (same.size() != na) throw std::invalid_argument("same must match");
+        }
+        py::array_t<double> out(bins);
+        double* res = out.mutable_data();
+        std::fill_n(res, bins, 0.0);
+        if (na == 0 || key_.empty()) return out;
+        const double* pax = ax.data();
+        const double* pay = ay.data();
+        const int64_t* ps = have_same ? same.data() : nullptr;
+        const double r2 = grid_.cell * grid_.cell, inv = 1.0 / dr;
+        const int n_threads = smappy::resolve_threads(threads, na);
+        // integer counts per thread: a double would lose a count past 2^53,
+        // and they are added once at the end
+        std::vector<std::vector<int64_t>> local(n_threads, std::vector<int64_t>(bins, 0));
+
+        {
+            py::gil_scoped_release release;
+            smappy::parallel_ranges(na, n_threads, [&](long long begin, long long end, int t) {
+                std::vector<int64_t>& h = local[t];
+                int64_t last_x = std::numeric_limits<int64_t>::min(), last_y = 0;
+                int64_t run_lo[3] = {0, 0, 0}, run_hi[3] = {0, 0, 0};
+                for (long long i = begin; i < end; ++i) {
+                    const double x = pax[i], y = pay[i];
+                    const int64_t self = ps ? ps[i] : -1;
+                    const int64_t ix = grid_.cx(x), iy = grid_.cy(y);
+                    if (ix != last_x || iy != last_y) {
+                        for (int64_t dy = -1; dy <= 1; ++dy) {
+                            auto lo = std::lower_bound(key_.begin(), key_.end(),
+                                                       grid_.key(ix - 1, iy + dy));
+                            auto hi = std::upper_bound(lo, key_.end(),
+                                                       grid_.key(ix + 1, iy + dy));
+                            run_lo[dy + 1] = lo - key_.begin();
+                            run_hi[dy + 1] = hi - key_.begin();
+                        }
+                        last_x = ix;
+                        last_y = iy;
+                    }
+                    for (int run = 0; run < 3; ++run) {
+                        for (int64_t s = run_lo[run], e = run_hi[run]; s < e; ++s) {
+                            const double ddx = x_[s] - x, ddy = y_[s] - y;
+                            const double d2 = ddx * ddx + ddy * ddy;
+                            if (d2 >= r2 || index_[s] == self) continue;
+                            const int64_t b = static_cast<int64_t>(std::sqrt(d2) * inv);
+                            if (b < bins) ++h[b];
+                        }
+                    }
+                }
+            });
+        }
+        for (const auto& h : local)
+            for (int64_t b = 0; b < bins; ++b) res[b] += static_cast<double>(h[b]);
+        return out;
+    }
+
 private:
     Grid grid_;
     bool has_z_ = false, has_values_ = false;
@@ -500,6 +576,8 @@ PYBIND11_MODULE(_neighbours, m) {
              py::arg("threads") = 0)
         .def("pairs", &Index::pairs, py::arg("x"), py::arg("y"), py::arg("z"),
              py::arg("use_z") = false, py::arg("threads") = 0)
+        .def("pair_histogram", &Index::pair_histogram, py::arg("x"), py::arg("y"),
+             py::arg("same"), py::arg("dr"), py::arg("bins"), py::arg("threads") = 0)
         .def("dbscan_join", &Index::dbscan_join, py::arg("core"), py::arg("use_z"),
              py::arg("threads") = 0);
 }

@@ -150,7 +150,8 @@ def simulate_tracks(settings: Optional[TrackSimulationSettings] = None,
     columns["state_true"] = state[order].astype(np.int32)
     metadata = {"units": "nm", "simulation": "smappy tracks", "seed": s.seed,
                 "n_frames": s.n_frames, "n_tracks": n, "n_localizations": m,
-                "frame_time_ms": s.frame_time_ms,
+                # where every reader of seconds looks (`metadata.file_frame_time`)
+                "camera": {"frame_time_ms": s.frame_time_ms},
                 "track_simulation": _plain(asdict(s))}
     return Localizations(columns, metadata)
 

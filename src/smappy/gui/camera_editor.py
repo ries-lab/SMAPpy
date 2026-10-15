@@ -42,6 +42,7 @@ ROWS = (("conversion", "conversion", "e-/ADU"),
         ("em_on", "EM gain on", ""),
         ("emgain", "EM gain", ""),
         ("exposure_ms", "exposure", "ms"),
+        ("frame_time_ms", "frame time", "ms"),
         ("roi", "camera ROI", "px"))
 
 SOURCES = (("fixed", "fixed"), ("tag", "from a tag"),
@@ -158,6 +159,8 @@ _VALUE_HELP = {
                     "two numbers for x and y if they differ",
     "em_on": "yes or no",
     "roi": "x, y, width, height on the chip",
+    "frame_time_ms": "from one frame to the next: the exposure plus the "
+                     "camera's dead time; not set, the exposure",
 }
 
 

@@ -86,7 +86,7 @@ ROI and per cluster.  Nothing is ported twice: SMAP's `X` (Analyze) and
 | B2 | **Find clusters**: one plugin with an algorithm choice. Each algorithm's settings are a part; only the selected algorithm's part is **shown**, the others hidden (step 1 below adds that to the form). It replaces `Regions/Find/DBSCAN`. Writes `cluster_id` and `n_in_cluster` as now. | #91 #93 (clusters) | done (step 10): DBSCAN, Voronoi, HDBSCAN in `Regions/Find clusters` |
 | B2s | **Shuffle colours**: for any integer column, writes a column with the ids randomly permuted (for example `<column>_shuffled`, a recipe), so colouring by it separates neighbouring ids. A new seed on each run. | #95 | done (step 7): `Analysis/Process/Shuffle ids` |
 | B2b | Statistics on clusters, also inside ROIs | #96 #120 | done by the structure (a block over `cluster_id`). The cluster-shape measurement is **done** (`Measure/Cluster shape`, step 12). |
-| B3 | **Spatial statistics**: Ripley K/L/H, pair correlation, 2D auto- and cross-correlation between layers, the 1D correlation along a line; `per_region`, so it runs in every ROI too | #90 #92 #119 | decided (`wave4_design.md`): one plugin with a list of approaches, steps 17a-c |
+| B3 | **Spatial statistics**: Ripley K/L/H, pair correlation, 2D auto- and cross-correlation between layers, the 1D correlation along a line; `per_region`, so it runs in every ROI too | #90 #92 #119 | decided (`wave4_design.md`): one plugin with a list of approaches, steps 17a-c; the radial approaches **done** (`Measure/Spatial statistics`, step 17a) |
 | B4 | **Counting**: a `per_region` measurement plus a `Summarize` histogram fit | #98 #121 | decided (`wave4_design.md`): *Blinking*, a `per_region` measurement (step 18); the counting fit later, on top of the NPC model; DNA-PAINT / qPAINT later, after looking at Picasso |
 
 What this changes in the code: `Regions/Find/` becomes the home of the two
@@ -238,7 +238,7 @@ one after the other, in the same session if possible.
 
 | step | what | size | needs |
 |---|---|---|---|
-| **17a** | **Spatial statistics, radial**: `Analysis/Measure/Spatial statistics` -- pair distances from the C++ `Index`, the window's set covariance as edge correction, g, K, L-r, H for each visible layer and each pair, CSR / *keep blinks* envelopes, `per_region` values; Neighbourhood's count *express as* local L(r) | M-L | - |
+| **17a** ✅ | **Spatial statistics, radial**: `Analysis/Measure/Spatial statistics` -- pair distances from the C++ `Index`, the window's set covariance as edge correction, g, K, L-r, H for each visible layer and each pair, CSR / *keep blinks* envelopes, `per_region` values; Neighbourhood's count *express as* local L(r) | M-L | - |
 | **17b** | **Curves summary**: `Analysis/Regions/Summarize/Curves`, mean and spread of any evaluation's curves, grouped by an ROI keyword, pooled where counts are given | S-M | 17a |
 | **17c** | **Spatial statistics, directional**: 2D correlation image, 1D correlation along a line with its period; axes x-y / x-z / y-z / z, a line or rectangle ROI's own directions | M | 17a |
 | **18** | **Frame time** per file, and **Blinking** (`Analysis/Measure/Blinking`, `per_region`: counts, bursts, on- and dark times; per-file blinking histograms) | S-M | - |
@@ -374,6 +374,50 @@ filters and zoom-ins are settled) · AssignColors for more than 2 colours (C4)
   the settings ask for are left out and counted.  SMAP's AverageSites and
   its kinetochore, window and NPC variants in one; LocMoFit's model not
   ported.
+* **Step 17a** (2026-10-15): *Analysis/Measure/Spatial statistics*,
+  `per_region`: the radial approaches (g(r), Ripley's K(r), L(r) - r),
+  ticked on or off, of every visible layer as it shows and every pair.
+  Pair distances from a new mode of the C++ `Index`
+  (`Index.pair_histogram`, per file, no self-pairs; 10^6 localizations to
+  500 nm in ~1.6 s on 4 cores), normalised by the window's set covariance
+  (the FFT autocorrelation of its raster: Ohser's translation correction,
+  Veatch's normalisation, any shape).  The window is the region's shape,
+  the drawn ROI, or the occupied area (200 nm bins, closed) or bounding
+  box.  Monte Carlo envelopes (99, pointwise band plus the MAD test on
+  L - r), null CSR or *keep blinks* (whole blinks moved through
+  `group_id`); a cross-correlation keeps layer A and moves B.  Values: the
+  first maximum of g and L - r, both at chosen distances, the test's p and
+  whether the curve leaves the global envelope; arrays: r, the curves, the
+  pair and expected counts, the bands.  A preflight above 5 s offers the
+  run without the envelope or with 19 simulations.  *Neighbourhood*
+  (version 2): the count gains *express as* count, local L(r)
+  (Getis-Franklin) or relative to the mean density, edge-corrected by the
+  circle's area inside the window (`window_coverage`).  "H" is L - r, the
+  name most papers give it, not a fourth curve.
+* **Step 18** (2026-10-15): a frame time per file and
+  *Analysis/Measure/Blinking*.  The frame time is `CameraMetadata.frame_time_ms`
+  (so `metadata["camera"]["frame_time_ms"]`, beside the exposure, by the
+  same three sources: the camera database, the file, the user), and per
+  file in a session `FileInfo.frame_time_ms`, saved in `metadata["files"]`;
+  `metadata.frame_time_ms` falls back to the exposure, and
+  `file_frame_time` / `table_frame_time` are what every reader of seconds
+  calls (tracking, 19c, too).  Read from Micro-Manager's
+  `<camera>-ActualInterval-ms`, a time-lapse `Interval_ms` longer than the
+  exposure, and SMAP's `timediff`; set in the camera editor (a *frame time*
+  row; the database's `frame_interval_ms` is now `frame_time_ms`, the old
+  name still read) and the fitters' camera part (*frame time*, advanced).
+  Time Course (v2) and Localization Statistics' on-time (v5, `on_time_s`
+  per region; its *exposure* setting became *frame time*) read it.
+  *Blinking*, `per_region`: per region the localizations, the blinks as the
+  layer merges them (else runs of consecutive frames), the bursts at a
+  *dark time* T (SMAP's `locsdf`, a dark time over T frames splits), the
+  mean on- and dark time in frames and seconds; on the view, per file,
+  molecules linked by `group.connect` across T dark frames, and the
+  histograms of on-times, dark times and blinks per molecule (SMAP's
+  `dyeblinking`).  Tested on `simulate.kinetics` with known rates.  Also
+  fixed: an ROI's context cut its localizations before the merging it
+  triggered wrote `group_id`, so the first ROI measured on a merged layer
+  could not trace its blinks.
 * **Step 19a** (2026-10-15): tracks.  `simulate.simulate_tracks`: Brownian
   particles in one or more diffusive states with switching, blinking (dark
   runs inside a track), a precision, a density and spurious localizations,

@@ -1475,6 +1475,14 @@ class ROIProject:
         found = rows_in(ungrouped.locs, ungrouped.index, region)
         in_file = self._file_mask(session.locs, source.number)
         rows = found if in_file is None else np.flatnonzero(in_file)[found]
+        # linked here if a layer shows blinks and nothing defers it;
+        # otherwise offered only where it is current.  Before the rows are
+        # cut: linking writes `group_id` onto the localizations, and a cut
+        # taken first lacked it, so the blinks could not be traced back
+        locsets = {i: (session.tables.available() if lay.grouped else
+                       session.tables.peek_grouped() if session.tables.is_current
+                       else None)
+                   for i, lay in enumerate(session.layers) if not lay.is_image}
         locs = session.locs[rows]
         tables = {}
         for i, lay in enumerate(session.layers):
@@ -1483,10 +1491,7 @@ class ROIProject:
             mask = np.asarray(lay.selection(i).mask, dtype=bool)
             entry = {"ungrouped": (locs, Selection(mask[rows], layer=i, roi=region,
                                                    name=f"{lay.name}, {region}"))}
-            # linked here if a layer shows blinks and nothing defers it;
-            # otherwise offered only where it is current
-            locset = (session.tables.available() if lay.grouped else
-                      session.tables.peek_grouped() if session.tables.is_current else None)
+            locset = locsets[i]
             if locset is not None:
                 keep = self._file_mask(locset.locs, source.number)
                 g = rows_in(locset.locs, locset.index, region, keep)
