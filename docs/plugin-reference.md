@@ -223,6 +223,15 @@ changed, per frame: `smappy.frametags`) and `metadata["acquisition"]` (the
 Micro-Manager summary, devices and comment); both are written beside `/locs`,
 not in the metadata attribute.
 
+**Time.**  A frame is turned into seconds by the file's frame time:
+`metadata.file_frame_time(locs.metadata, filenumber)` -- the session's
+record of that file (`metadata["files"]`), else the camera's
+`metadata["camera"]["frame_time_ms"]`, else its `exposure_ms` -- or
+`metadata.table_frame_time(locs)` for the files a table's rows come from
+(None when they differ).  A plugin that speaks of seconds reads it there and
+offers a *frame time* setting on *auto* to override it (Time Course,
+Blinking); MINFLUX's `time_s` is a clock of its own.
+
 ## What the picture's axes are
 
 The render grid is normally the table's positions, and usually a plugin can

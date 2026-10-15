@@ -134,9 +134,9 @@ def test_every_value_says_where_it_came_from():
 
 def test_only_what_the_fit_reads_becomes_camera_metadata():
     camera = a_camera()
-    camera.parameters["frame_interval_ms"] = Parameter(fixed=17.0)
+    camera.parameters["temperature_c"] = Parameter(fixed=-70.0)
     resolution = camera.resolve(a_file())
-    assert resolution.values["frame_interval_ms"] == 17.0
+    assert resolution.values["temperature_c"] == -70.0
     metadata = resolution.camera_metadata()
     assert isinstance(metadata, CameraMetadata)
     assert metadata.conversion == 6.7 and metadata.emgain == 200.0

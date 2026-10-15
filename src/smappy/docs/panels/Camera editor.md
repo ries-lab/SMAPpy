@@ -134,9 +134,9 @@ above the list narrows it.
 ### parameters
 Where each value comes from.  The conversion and the offset are usually *per
 readout mode*; the pixel size *fixed* (two numbers, x and y, if the pixels
-are not square); the EM gain and its switch, the exposure and the camera ROI
-*from a tag*.  A parameter the entry does not set is read from the file the
-way any file is.
+are not square); the EM gain and its switch, the exposure, the frame time and
+the camera ROI *from a tag*.  A parameter the entry does not set is read from
+the file the way any file is.
 
 ### conversion (e-/ADU)
 Photoelectrons per count, for this file's readout mode.  From the camera's
@@ -149,6 +149,17 @@ readout mode.
 ### pixel size (µm)
 The size of a camera pixel in the sample: the physical pixel divided by the
 total magnification.
+
+### frame time (ms)
+The time from one frame to the next -- the
+[frame time](plugin:Panels/Glossary): the exposure plus the time the camera
+needs between frames.  Everything that speaks of seconds reads it (*Time
+Course*, *Blinking*, the on-time of *Localization Statistics*).  A camera
+that records its own cycle time (Micro-Manager's `ActualInterval-ms`, which
+a draft takes *from a tag*) needs nothing here; *fixed* suits a camera that
+always runs at one rate.  *Not set*, a file's frame time is the time-lapse
+interval it records, if it is longer than the exposure, and else the
+exposure.
 
 ### this file, read with this entry
 What the entry, as it stands, makes of the file: value and source of every

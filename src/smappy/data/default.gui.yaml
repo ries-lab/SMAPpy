@@ -35,6 +35,7 @@ tabs:
   - plugin: Analysis/Measure/Circle fit
   - plugin: Analysis/Measure/Spatial statistics
   - plugin: Analysis/Measure/Time Course
+  - plugin: Analysis/Measure/Blinking
   - plugin: Analysis/Process/History
   - plugin: Analysis/Process/Image Tags
   - plugin: Analysis/Process/Math Parser

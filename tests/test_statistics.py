@@ -129,9 +129,10 @@ def test_the_on_time_fit_finds_the_lifetime():
     locs = simulate()
     stats = ontime_decay(locs["n_in_group"])
     assert stats["tau"] == pytest.approx(TAU, rel=0.05)
-    dist = ontime_distribution(locs["n_in_group"], exposure_ms=20.0)
+    dist = ontime_distribution(locs["n_in_group"], frame_time_ms=20.0)
     assert dist.log_y and dist.edges[0] == 0.5      # one bin per frame count
     assert "ms" in dist.summary
+    assert dist.stats["tau_ms"] == pytest.approx(20.0 * dist.stats["tau"])
 
 
 def test_a_single_frame_on_time_has_no_decay_to_fit():

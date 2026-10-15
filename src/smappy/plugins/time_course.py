@@ -33,8 +33,8 @@ own largest value, SMAP's "all" axis: the shapes compare, the numbers do not,
 which is what the panels are for.
 
 **Time.**  *x* in seconds is the frame times the *frame time*, which defaults
-to the camera's exposure recorded with the fit -- the exposure, not the
-cycle time, which smappy is not told; set it when the two differ.  A table
+to the file's (`metadata.file_frame_time`: the cycle time where the file
+recorded one, else the exposure); set it when neither is right.  A table
 with its own clock (MINFLUX's `time_s`) uses that instead.
 """
 from __future__ import annotations
@@ -217,7 +217,7 @@ class TimeCourseSettings:
                          help="how many equal parts the acquisition is cut into")
     frame_time_ms: Optional[float] = param(None, label="frame time", unit="ms",
                                            min=0.001,
-                                           help="auto: the exposure the fit recorded")
+                                           help="auto: the file's, else its exposure")
     draw: str = param("panels", label="draw",
                       choices=(("panels", "a panel per series"),
                                ("one", "one graph, each to its maximum")),
@@ -230,12 +230,11 @@ def _tags(locs) -> Dict[str, np.ndarray]:
 
 
 def _frame_time(locs, settings: TimeCourseSettings) -> Optional[float]:
-    """The frame time in ms: the setting, or the camera's exposure."""
+    """The frame time in ms: the setting, or the first file's."""
     if settings.frame_time_ms:
         return float(settings.frame_time_ms)
-    camera = (locs.metadata or {}).get("camera")
-    exposure = camera.get("exposure_ms") if isinstance(camera, dict) else None
-    return float(exposure) if exposure else None
+    from ..metadata import file_frame_time
+    return file_frame_time(locs.metadata)
 
 
 def _layers(ctx: Context):
@@ -266,7 +265,8 @@ class TimeCourse(Plugin):
 
     Settings = TimeCourseSettings
     changes_locs = False
-    version = "1"
+    # 2: on auto, the file's frame time, where it took the exposure
+    version = "2"
 
     def describe(self, ctx: Optional[Context], settings: TimeCourseSettings) -> FormState:
         """The series there are: the rate, the numeric columns, the tags."""
@@ -306,8 +306,9 @@ class TimeCourse(Plugin):
         elif settings.x == "seconds":
             ms = _frame_time(reference, settings)
             if not ms:
-                raise ValueError("no frame time: the fit recorded no exposure, "
-                                 "so set the frame time")
+                raise ValueError("no frame time: the file records neither a "
+                                 "frame time nor an exposure, so set the "
+                                 "frame time")
             clock, xlabel, scale = "frame", "time (s)", ms / 1000.0
         else:
             clock, xlabel = "frame", "frame"

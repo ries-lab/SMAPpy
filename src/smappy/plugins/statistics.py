@@ -31,7 +31,8 @@ the point of printing them side by side.
 **On-time.**  How many frames a fluorophore stays on before it blinks off, from
 ``n_in_group``, one value per blink.  A constant off-rate makes it geometric,
 ``P(t) = (1 - q) q^(t-1)``, a straight line on a log axis, and the mean
-on-time is ``tau = -1 / ln(q)`` frames.
+on-time is ``tau = -1 / ln(q)`` frames -- and in seconds with the file's
+frame time (`metadata.table_frame_time`), or the *frame time* set here.
 
 The photon and on-time fits are maximum likelihood on the localizations, so
 the bin width is a drawing choice and changes no number.  The precision is the
@@ -64,6 +65,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 from ..locs import Localizations
+from ..metadata import table_frame_time
 from . import Context, Plot, Plugin, Result, param, register
 
 # the precision columns, in the order they are looked for
@@ -448,8 +450,10 @@ def precision_distribution(precision, bins: int = 100, key: str = "precision",
                  f"sigma_c = {stats['sigma_c']:.1f}"))
 
 
-def ontime_distribution(frames, exposure_ms: float = 0.0) -> Distribution:
-    """The on-time histogram, one bin per frame, with its geometric fit."""
+def ontime_distribution(frames, frame_time_ms: Optional[float] = None
+                        ) -> Distribution:
+    """The on-time histogram, one bin per frame, with its geometric fit, and
+    ``tau`` in ms too (``stats["tau_ms"]``) with a frame time."""
     t = np.asarray(frames, dtype=float)
     t = t[np.isfinite(t) & (t >= 1)]
     stats = ontime_decay(t)
@@ -458,7 +462,9 @@ def ontime_distribution(frames, exposure_ms: float = 0.0) -> Distribution:
     counts, edges = np.histogram(t, bins=edges)
     tau = stats["tau"]
     curve = model_curve("on_time", stats, edges)
-    time = f", {tau * exposure_ms:.0f} ms" if exposure_ms > 0 and np.isfinite(tau) else ""
+    known = bool(frame_time_ms) and frame_time_ms > 0
+    stats["tau_ms"] = tau * frame_time_ms if known else float("nan")
+    time = f", {stats['tau_ms']:.0f} ms" if known and np.isfinite(tau) else ""
     return Distribution(
         key="on_time", label="on-time", unit="frames", counts=counts, edges=edges,
         stats=stats, curve=curve, log_y=True,
@@ -504,7 +510,7 @@ def model_curve(key: str, stats: Dict[str, float], edges: np.ndarray
 
 def statistics(locs: Localizations, bins: int = 100, photon_start: float = 0.0,
                on_time: Optional[Sequence[float]] = None,
-               exposure_ms: float = 0.0,
+               frame_time_ms: Optional[float] = None,
                precision_fit: str = "histogram") -> List[Distribution]:
     """Every distribution the table can supply, in reading order.
 
@@ -532,7 +538,7 @@ def statistics(locs: Localizations, bins: int = 100, photon_start: float = 0.0,
     if on_time is None and "n_in_group" in locs:
         on_time = locs["n_in_group"]
     if on_time is not None and len(on_time):
-        found.append(ontime_distribution(on_time, exposure_ms))
+        found.append(ontime_distribution(on_time, frame_time_ms))
     return found
 
 
@@ -543,7 +549,8 @@ def statistics_values(locs: Localizations, found: Sequence[Distribution]
     The count, then per distribution its centre and its fitted parameter:
     the photons' mean, median and ``N0``; the precision's mean, median and
     ``sigma_c`` (NaN when the model was not fitted), in the column's unit;
-    the on-time's ``tau`` and the blinks it was counted over.
+    the on-time's ``tau``, in frames and in seconds (NaN without a frame
+    time), and the blinks it was counted over.
     """
     out: Dict[str, float] = {"n_localizations": len(locs)}
     by_key = {d.key: d for d in found}
@@ -566,7 +573,9 @@ def statistics_values(locs: Localizations, found: Sequence[Distribution]
         out[f"sigma_c_{suffix}{unit}"] = stats["sigma_c"]
     if "on_time" in by_key:
         stats = by_key["on_time"].stats
-        out.update(on_time_frames=stats["tau"], n_blinks=stats["n"])
+        out.update(on_time_frames=stats["tau"],
+                   on_time_s=stats.get("tau_ms", float("nan")) / 1000.0,
+                   n_blinks=stats["n"])
     return {k: (float(v) if not isinstance(v, (int, np.integer)) else int(v))
             for k, v in out.items()}
 
@@ -641,9 +650,11 @@ class StatisticsSettings:
                                      "0: at the maximum of the histogram, below "
                                      "which the detection threshold has eaten the "
                                      "dim localizations")
-    exposure_ms: float = param(0.0, label="exposure", unit="ms", min=0.0,
-                               advanced=True,
-                               help="0: the on-time is reported in frames only")
+    frame_time_ms: Optional[float] = param(None, label="frame time", unit="ms",
+                                           min=0.001, advanced=True,
+                                           help="for the on-time in seconds; "
+                                                "auto: the file's, else its "
+                                                "exposure")
 
 
 def blink_on_times(locs: Localizations) -> np.ndarray:
@@ -718,7 +729,9 @@ class LocalizationStatistics(Plugin):
     # 3: finds a SMAPpy 3D fit's z precision, z_err_nm
     # 4: *precision fit* none / histogram / MLE, one choice; a region fits the
     # model as the view does, where it used to start without it
-    version = "4"
+    # 5: the on-time in seconds with the file's frame time, unasked, where it
+    # took an exposure typed in; and on_time_s in a region's row
+    version = "5"
 
     def run(self, ctx: Context, settings: StatisticsSettings) -> Result:
         table, selection = ctx.table()
@@ -745,7 +758,8 @@ class LocalizationStatistics(Plugin):
         # the region's: no on-time unless the region's own table has it
         found = statistics(locs, bins=settings.bins,
                            photon_start=settings.photon_start, on_time=on_time,
-                           exposure_ms=settings.exposure_ms,
+                           frame_time_ms=(settings.frame_time_ms
+                                          or table_frame_time(locs)),
                            precision_fit=settings.precision_fit)
         if not found:
             raise ValueError("the table has no photons, precision or on-time: "

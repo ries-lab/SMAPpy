@@ -57,6 +57,9 @@ class CameraMetadata:
     emgain: Optional[float] = None  # EM multiplication gain
     roi: Optional[Sequence[int]] = None  # (x, y, width, height) on the chip
     exposure_ms: Optional[float] = None
+    # the time from one frame to the next, the exposure plus any dead time:
+    # what a frame is in seconds (`frame_time`)
+    frame_time_ms: Optional[float] = None
     # rms read noise, e-; None: the default of `readout_variance`
     read_noise_e: Optional[float] = None
     camera_name: Optional[str] = None
@@ -108,6 +111,11 @@ class CameraMetadata:
             return 0.0
         noise = 1.0 if self.read_noise_e is None else float(self.read_noise_e)
         return (noise / self.excess_noise) ** 2
+
+    @property
+    def frame_time(self) -> Optional[float]:
+        """The frame time in ms: the file's, else its exposure (`frame_time_ms`)."""
+        return frame_time_ms(self)
 
     @property
     def pixelsize_um_xy(self) -> Optional[Tuple[float, float]]:
@@ -200,6 +208,61 @@ class CameraMetadata:
         return (f"{self.camera_name or 'camera'}: conversion="
                 f"{self.conversion} e-/ADU, offset={self.offset} ADU, "
                 f"pixel {px}, {em}, roi={list(self.roi) if self.roi is not None else None}")
+
+
+def frame_time_ms(camera) -> Optional[float]:
+    """The time one frame stands for, in ms; None when nothing says.
+
+    `camera` is a `CameraMetadata` or its dict (``metadata["camera"]``).  The
+    frame time where the file recorded one -- the cycle time, the exposure
+    plus the camera's dead time -- and the exposure otherwise, which is the
+    same on a camera streaming as fast as it can and short by the dead time
+    on one that is not.  Everything that turns frames into seconds reads it
+    here, so that they cannot disagree about what a frame is.
+    """
+    if camera is None:
+        return None
+    get = camera.get if isinstance(camera, dict) else (
+        lambda name: getattr(camera, name, None))
+    for name in ("frame_time_ms", "exposure_ms"):
+        try:
+            value = float(get(name))
+        except (TypeError, ValueError):
+            continue
+        if value > 0 and value == value:
+            return value
+    return None
+
+
+def file_frame_time(metadata, filenumber: int = 0) -> Optional[float]:
+    """The frame time in ms of file ``filenumber`` of a table's metadata.
+
+    A session records each file's (``metadata["files"]``, `FileInfo`); a
+    table on its own -- a fit, a script's -- has its camera's.  None when
+    neither says, and the caller asks for one.
+    """
+    metadata = metadata or {}
+    files = metadata.get("files") or []
+    if 0 <= int(filenumber) < len(files) and isinstance(files[int(filenumber)], dict):
+        value = files[int(filenumber)].get("frame_time_ms")
+        if value is not None and float(value) > 0:
+            return float(value)
+    return frame_time_ms(metadata.get("camera"))
+
+
+def table_frame_time(locs) -> Optional[float]:
+    """The frame time in ms of the files a table's rows come from.
+
+    None when it is not known, or when the files' frame times differ: one
+    number then describes none of them, and the caller converts frame by
+    frame (`file_frame_time`) or says it cannot.
+    """
+    import numpy as np
+    files = [0]
+    if "filenumber" in locs and len(locs):
+        files = np.unique(np.asarray(locs["filenumber"])).tolist()
+    times = {file_frame_time(locs.metadata, int(f)) for f in files}
+    return times.pop() if len(times) == 1 else None
 
 
 def _is_unset(value, name: str) -> bool:

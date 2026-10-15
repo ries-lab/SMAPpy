@@ -191,7 +191,7 @@ module chain itself is ⊘ (NOTES.md, "No module chain").
 | `density_calculator` | neighbours within r per loc | ✗ | **P2**, S – a column; filterable, colourable. |
 | `ShuffelClusterIndex` | random colour per cluster | ✗ | S – part of DBSCAN (write a shuffled id). |
 | `clusterAnalysis` (ROI evaluator) | DBSCAN/k-means/GMM per site | ✗ | **P2**, S once DBSCAN exists – one evaluator, DBSCAN and GMM only. |
-| `dyeblinking` | | ✗ | skip |
+| `dyeblinking` | on-times, off-times, blinks per molecule, per file | ✅ | `Measure/Blinking` (step 18): the three histograms per file; the photons and on-time against a series of dark times, the on-fraction and the molecule's duration left out. |
 
 ## 10. Counting (molecules per cluster)
 

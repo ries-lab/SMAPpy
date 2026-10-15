@@ -35,7 +35,7 @@
           "tag": "{prefix}-Exposure",
           "read": "number"
         },
-        "frame_interval_ms": {
+        "frame_time_ms": {
           "tag": "{prefix}-ActualInterval-ms",
           "read": "number"
         }
@@ -295,7 +295,7 @@
           "tag": "{prefix}-Exposure",
           "read": "number"
         },
-        "frame_interval_ms": {
+        "frame_time_ms": {
           "tag": "{prefix}-ActualInterval-ms",
           "read": "number"
         }
@@ -359,7 +359,7 @@
           "tag": "{prefix}-Exposure",
           "read": "number"
         },
-        "frame_interval_ms": {
+        "frame_time_ms": {
           "tag": "{prefix}-ActualInterval-ms",
           "read": "number"
         }
@@ -396,7 +396,7 @@
           "tag": "{prefix}-Exposure",
           "read": "number"
         },
-        "frame_interval_ms": {
+        "frame_time_ms": {
           "tag": "{prefix}-Exposure",
           "read": "number"
         }
@@ -436,7 +436,7 @@
           "tag": "{prefix}-Exposure",
           "read": "number"
         },
-        "frame_interval_ms": {
+        "frame_time_ms": {
           "tag": "{prefix}-Exposure",
           "read": "number"
         }
