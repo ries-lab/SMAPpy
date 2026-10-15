@@ -241,30 +241,32 @@ one after the other, in the same session if possible.
 | **17a** ✅ | **Spatial statistics, radial**: `Analysis/Measure/Spatial statistics` -- pair distances from the C++ `Index`, the window's set covariance as edge correction, g, K, L-r, H for each visible layer and each pair, CSR / *keep blinks* envelopes, `per_region` values; Neighbourhood's count *express as* local L(r) | M-L | - |
 | **17b** ✅ | **Curves summary**: `Analysis/Regions/Summarize/Curves`, mean and spread of any evaluation's curves, grouped by an ROI keyword, pooled where counts are given | S-M | 17a |
 | **17c** ✅ | **Spatial statistics, directional**: 2D correlation image, 1D correlation along a line with its period; axes x-y / x-z / y-z / z, a line or rectangle ROI's own directions | M | 17a |
-| **18** | **Frame time** per file, and **Blinking** (`Analysis/Measure/Blinking`, `per_region`: counts, bursts, on- and dark times; per-file blinking histograms) | S-M | - |
-| **19a** | **Tracks**: simulated tracks in `smappy.simulate`; `Analysis/Tracking/Link tracks` (simple and global assignment, benchmarked) writing `track_id` | M-L | - |
-| **19b** | **The *tracks* render mode**: a fifth render mode, segments drawn in C++ | M | - |
-| **19c** | **Tracking analysis**: MSD and jump distances, per track and over all, vectorised; an *id column* (`track_id`, `tid`) | M | 18, 19a |
+| **18** ✅ | **Frame time** per file, and **Blinking** (`Analysis/Measure/Blinking`, `per_region`: counts, bursts, on- and dark times; per-file blinking histograms) | S-M | - |
+| **19a** ✅ | **Tracks**: simulated tracks in `smappy.simulate`; `Analysis/Tracking/Link tracks` (simple and global assignment, benchmarked) writing `track_id` | M-L | - |
+| **19b** ✅ | **The *tracks* render mode**: a fifth render mode, segments drawn in C++ | M | - |
+| **19c** ✅ | **Tracking analysis**: MSD and jump distances, per track and over all, vectorised; an *id column* (`track_id`, `tid`) | M | 18, 19a |
 
 17a, 18, 19a and 19b can run in parallel.
 
 ### Wave 5 -- designed a topic at a time in `wave5_design.md`
 
-Topics: 1. coordinates (decided 2026-10-15) · 2. stability (A6, decided
-2026-10-15) ·
-3. rendering and movies (I; movie export with the tracks as an option:
-step 19b's render mode with a *tail*, over the raw frames) · 4. figures of
+Topics: 1. coordinates (decided 2026-10-15, done) · 2. stability (A6,
+decided 2026-10-15, done) · 3. rendering and movies (I, decided 2026-10-15) · 4. figures of
 regions (E6) · 5. LocMoFit (H) and NPC geometry · 6. MINFLUX (G), with the
 channel *Check overlay* (C3).  AssignColors for more than 2 colours (C4):
 **done** (`assign_colors.py`, up to six).
 
 | step | what | size | needs |
 |---|---|---|---|
-| **5a** | **Transform** (C1, D1): typed, named, from a file, or another file's drift; localizations (default) or an image layer's placement; named transformations in the session, written to files; a drift *reference* (first / last frame) | M | - |
-| **5b** | **Register layers** (C2): shift by cross-correlation, z optional; hands its result to Transform | S-M | 5a |
-| **5c** | **Fiducial drift** (D2): bright long-lived tracks, one spline dx, dy (dz), a `Drift` | M | - |
-| **5d** | **Magnification over time in COMET** (D3), discussed with Jonas first | M-L | - |
-| **5e** | **Stability: vibrations** (A6): `Analysis/Measure/Stability`, approaches (vibrations now; long-term and dual-channel drift later), per bead track, differential, zoomed trace, spectrum, cumulative RMS, peaks; figures as options | M | - |
+| **5a** ✅ | **Transform** (C1, D1): typed, named, from a file, or another file's drift; localizations (default) or an image layer's placement; named transformations in the session, written to files; a drift *reference* (first / last frame) | M | - |
+| **5b** ✅ | **Register layers** (C2): shift by cross-correlation, z optional; hands its result to Transform | S-M | 5a |
+| **5c** ✅ | **Fiducial drift** (D2): bright long-lived tracks, one spline dx, dy (dz), a `Drift` | M | - |
+| **5d** ✅ | **Magnification over time in COMET** (D3), discussed with Jonas first | M-L | - |
+| **5e** ✅ | **Stability: vibrations** (A6): `Analysis/Measure/Stability`, approaches (vibrations now; long-term and dual-channel drift later), per bead track, differential, zoomed trace, spectrum, cumulative RMS, peaks; figures as options | M | - |
+| **6a** | **Export Image**: one renderer of the view for the plugin and the window's *Save*; as the view, composite, or each layer (in colour or grey), or float intensity; scale bar, colour bars, labels; settings in the file | M | - |
+| **6b** | **Export Stack**: movies (step, window, cumulative) and z-stacks; the raw frames beside; a *tail* for tracks; TIFF, MP4 (H.264, target quality, size shown), GIF | M | 6a |
+| **6c** | **Voronoi render mode** (SharpViSu) | S | - |
+| **6d** | **Process image**: background subtraction, local contrast normalisation of an image layer | S | - |
 
 ### Done
 
