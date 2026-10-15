@@ -811,6 +811,14 @@ class Result:
     # ``(name, plugin path)`` of the evaluations this run left on the
     # regions, so that a later step of a chain reads them without asking.
     evaluations: Sequence[Tuple[str, str]] = ()
+    # Images moved, ``{layer index: placement}`` (`ImageData.placement`, a
+    # 3x3 affine in nm): Transform's image target.  One undo step with the
+    # table, logged as a table change is.
+    placements: Dict[int, Any] = field(default_factory=dict)
+    # Named transformations to keep in the session's list,
+    # ``{name: Transformation}`` (`Session.transformations`): Transform's
+    # *keep as*, and what Register layers measures.
+    transformations: Dict[str, Any] = field(default_factory=dict)
     # The table change as a recipe (`ColumnRecipe`), which can follow a table
     # a fit is still appending to; `locs` is then the recipe applied.
     recipe: Optional["ColumnRecipe"] = None

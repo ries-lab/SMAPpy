@@ -174,6 +174,10 @@ class Edit:
     label: str
     locs: Localizations
     text: str = ""
+    # where each image was (`ImageData.placement`), as (image, placement)
+    # pairs: Transform moves an image without touching the table, and the
+    # step that undoes it is the same kind of step as a table change
+    placements: tuple = ()
 
     def nbytes(self, seen: Optional[set] = None) -> int:
         return table_bytes(self.locs, seen)

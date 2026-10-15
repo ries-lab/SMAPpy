@@ -5,6 +5,14 @@ An `ImageData` sits at ``(x0, y0)`` in the coordinates of the table with a
 pixel of ``pixelsize`` (nm), and can be resampled onto any `FieldOfView`, so
 a viewer treats it like a rendered layer: the same LUT, contrast and gamma.
 
+Its **placement** moves it further: an affine map (3x3, nm) applied after
+that grid, which *Transform* sets (`smappy.transformation`) when an image
+rather than the localizations should move -- rotated, scaled, mirrored or
+shifted.  The pixels are never resampled for it: the view looks each of its
+pixels up through the inverse, so a move is lossless and undone exactly.
+``x0``, ``y0`` and the pixel size stay what the file says, and the Render
+tab's fields still set them.
+
 The camera frames a fit keeps (`smappy.rawframes`) are one of these too, with
 ``kind = "raw"`` and each plane's frame number in ``frames``: the session
 lists them beside any TIFF it has opened, and an image layer shows whichever
@@ -37,6 +45,9 @@ class ImageData:
     kind: str = "image"
     # per plane: its camera frame number, -1 for an average; None for a file
     frames: Optional[np.ndarray] = None
+    # an affine map of the table's x, y (3x3, nm) after the grid above; None
+    # is where the grid puts it.  Set by Transform, never by resampling.
+    placement: Optional[np.ndarray] = None
 
     @classmethod
     def empty(cls) -> "ImageData":
@@ -89,11 +100,31 @@ class ImageData:
         return tuple(self.data.shape[-2:])
 
     @property
+    def grid(self) -> np.ndarray:
+        """Pixel (column, row) -- the outer edge of pixel (0, 0) at (0, 0) --
+        to table x, y: the grid and then the placement, as one 3x3."""
+        px, py = self.pixelsize_xy
+        m = np.array([[px, 0.0, self.x0], [0.0, py, self.y0], [0.0, 0.0, 1.0]])
+        return m if self.placement is None else np.asarray(self.placement) @ m
+
+    def place(self, matrix: np.ndarray) -> None:
+        """Move the image by ``matrix`` (3x3 affine, nm) after where it is."""
+        current = np.eye(3) if self.placement is None else np.asarray(self.placement)
+        moved = np.asarray(matrix, float) @ current
+        self.placement = None if np.allclose(moved, np.eye(3), atol=1e-12) else moved
+
+    @property
     def bounds(self) -> Tuple[float, float, float, float]:
-        """(x0, y0, x1, y1) covered by the pixels."""
+        """(x0, y0, x1, y1) covered by the pixels -- of the placed corners,
+        when the placement turns the image."""
         ny, nx = self.shape
         px, py = self.pixelsize_xy
-        return (self.x0, self.y0, self.x0 + nx * px, self.y0 + ny * py)
+        if self.placement is None:
+            return (self.x0, self.y0, self.x0 + nx * px, self.y0 + ny * py)
+        corners = self.grid @ np.array([[0, nx, 0, nx], [0, 0, ny, ny], [1, 1, 1, 1]],
+                                       float)
+        return (float(corners[0].min()), float(corners[1].min()),
+                float(corners[0].max()), float(corners[1].max()))
 
     def resample(self, fov: FieldOfView, frame: Optional[int] = None) -> RenderedImage:
         """Nearest-neighbour onto ``fov``; outside the image is zero.
@@ -111,6 +142,8 @@ class ImageData:
         px, py = self.pixelsize_xy
         xs = fov.x0 + (np.arange(fov.nx) + 0.5) * fov.pixelsize
         ys = fov.y0 + (np.arange(fov.ny) + 0.5) * fov.pixelsize
+        if self.placement is not None:
+            return RenderedImage(fov, self._placed(plane, xs, ys), None, n_locs=0)
         ix = np.floor((xs - self.x0) / px).astype(np.int64)
         iy = np.floor((ys - self.y0) / py).astype(np.int64)
         okx, oky = (ix >= 0) & (ix < nx), (iy >= 0) & (iy < ny)
@@ -119,6 +152,23 @@ class ImageData:
             sub = plane[np.ix_(iy[oky], ix[okx])].astype(np.float32)
             out[np.ix_(oky, okx)] = sub
         return RenderedImage(fov, out, None, n_locs=0)
+
+    def _placed(self, plane: np.ndarray, xs: np.ndarray, ys: np.ndarray) -> np.ndarray:
+        """Nearest neighbour through the placement: each view pixel's centre
+        taken back to the image's pixels, the grid no longer separable."""
+        ny, nx = plane.shape
+        back = np.linalg.inv(self.grid)
+        u0 = back[0, 0] * xs[None, :] + back[0, 1] * ys[:, None] + back[0, 2]
+        v0 = back[1, 0] * xs[None, :] + back[1, 1] * ys[:, None] + back[1, 2]
+        ix, iy = np.floor(u0).astype(np.int64), np.floor(v0).astype(np.int64)
+        ok = (ix >= 0) & (ix < nx) & (iy >= 0) & (iy < ny)
+        out = np.zeros(ix.shape, np.float32)
+        if ok.any():
+            # only the rows that are needed are read: a plane may be on disk
+            rows = np.unique(iy[ok])
+            sub = np.asarray(plane[rows.min():rows.max() + 1], np.float32)
+            out[ok] = sub[iy[ok] - rows.min(), ix[ok]]
+        return out
 
 
 def load_image(path, pixelsize: Optional[float] = None, x0: float = 0.0,

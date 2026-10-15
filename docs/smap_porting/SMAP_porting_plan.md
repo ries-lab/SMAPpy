@@ -503,6 +503,26 @@ channel *Check overlay* (C3).  AssignColors for more than 2 colours (C4):
   is zero at the first frame -- a Lagrange row in `fiducials.fit_drift`,
   where 5a's first / last frame goes.  In the shipped GUI's Analysis tab.
 
+* **Step 5a** (2026-10-15): *Analysis/Process/Transform* replaces SMAP's
+  ApplyTransform, TransformLocsManually, Mirror and ChangeCamPixelsize.
+  The target is a file's localizations (one `channel`, or all; logged, one
+  undo step) or an image layer, moved by a new affine
+  `ImageData.placement` that the resampling looks pixels up through -- not
+  resampled, saved with the file, undone exactly; images refuse the
+  projective and polynomial maps and a z shift.  The source: typed (shift
+  x, y, z; rotate, scale, mirror about the middle of the target, the origin
+  or a point; one 4x4 matrix), a named transformation
+  (`Session.transformations`, through `Result.transformations`, saved with
+  the workspace and the file, recorded in `metadata["transformations"]`
+  when applied), a file (`_2ct.h5` converted to nm with the file's pixel
+  size, affine kept affine; the new `_T.h5`, written by *write to*), or
+  another file's drift (`Drift.apply(rows=)`, refused for other frames).
+  `Drift` gained a *reference* -- as estimated (unchanged: RCC zero mean,
+  COMET close to it, Fiducials zero at the first frame), first or last
+  frame -- in COMET, RCC and Fiducials (5c); no version moved.  `smappy/transformation.py`; Register layers (5b) opens it with
+  `settings_for(name)` through the GUI's `"transform"` window.  Pinned in
+  the Analysis tab of the shipped GUI.
+
 ### Start here
 
 Wave 1 is eight independent sessions.  If only one runs at a time, start with

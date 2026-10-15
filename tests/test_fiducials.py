@@ -167,3 +167,12 @@ def test_more_than_one_file_is_refused():
     locs = Localizations({**locs.columns, "filenumber": files}, dict(locs.metadata))
     with pytest.raises(ValueError, match="2 files"):
         FiducialDrift().run(Context(locs=locs), FiducialSettings())
+
+
+def test_referenced_to_the_last_frame_the_drift_is_zero_there():
+    """Step 5a's *reference*: the same curve, moved to be zero at the end."""
+    locs = without_z(beads_with_trouble(smooth_drift()))
+    first, _, _ = estimate_drift_fiducials(locs, FiducialSettings())
+    last, _, _ = estimate_drift_fiducials(locs, FiducialSettings(reference="last frame"))
+    assert np.allclose(last.drift[-1], 0.0)
+    assert np.allclose(last.drift, first.drift - first.drift[-1])
