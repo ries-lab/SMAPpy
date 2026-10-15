@@ -165,7 +165,7 @@ module chain itself is ⊘ (NOTES.md, "No module chain").
 | `Show_Raw_Data`, `DisplayImageTags(Tiff)` | raw frames, image tags | ✅ raw frames, Image Tags | – |
 | `SetTiffLocation` | re-point to moved raw data | ◐ | **P3**, S |
 | `ImageIntensities2Locs`, `intensityTiff` | TIFF intensity at each loc / site | ✗ | **P3**, S – a column from an image layer; trivial once asked for. |
-| `Tiff_remove_BG` | | ✗ | skip |
+| `Tiff_remove_BG` | | ✅ Process image (wave 5, step 6d) | – |
 
 ## 8. Measurement and quality control
 

@@ -43,6 +43,7 @@ tabs:
   - plugin: Analysis/Process/Image Tags
   - plugin: Analysis/Process/Math Parser
   - plugin: Analysis/Process/Neighbourhood
+  - plugin: Analysis/Process/Process image
   - plugin: Analysis/Process/Remove Localizations
   - plugin: Analysis/Process/Shuffle ids
   - plugin: Analysis/Process/Transform

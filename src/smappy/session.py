@@ -1627,6 +1627,8 @@ class Session:
             self.set_unsaved(not result.saved)
         if result.placements:
             self._place_images(plugin, result)
+        for image in result.image_layers or ():
+            self.add_image(image)
         for name, transformation in (result.transformations or {}).items():
             self.add_transformation(name, transformation)
         # The camera frames a fit kept (`smappy.rawframes`), with the table it
