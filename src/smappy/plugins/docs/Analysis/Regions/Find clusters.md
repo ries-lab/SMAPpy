@@ -186,14 +186,16 @@ for a cell in a mostly empty field it is far too large.
 **3D.**  With *in 3D* ticked and `z_nm` in the table, distances are measured
 in x, y and z.
 
-**How it is computed.**  The neighbours are found with a k-d tree, and the
-clusters are the connected components of the graph of core points within
-$\varepsilon$ of each other -- a hundred thousand localizations take about
-a second.  Each file of the session is clustered on its own, and the
+**How it is computed.**  The localizations are sorted into square cells
+$\varepsilon$ wide, so each one looks for its neighbours only in the nine
+cells around it, on every processor core -- the search of
+[Neighbourhood](plugin:Analysis/Process/Neighbourhood).  Core points within
+$\varepsilon$ of each other are joined into clusters while the cells are
+scanned again, without listing the pairs first.  Two million localizations
+take about 2 s.  Each file of the session is clustered on its own, and the
 numbers of the second file's clusters follow the first's.  The panel shows
 the percentage done, and Stop ends the run and leaves the table as it
-was; on millions of localizations it can take some seconds to stop, since
-it waits for the step that is running.
+was.
 
 ### Voronoi
 
