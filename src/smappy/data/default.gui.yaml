@@ -8,6 +8,7 @@ tabs:
   instances:
   - plugin: File/Load/Load
   - plugin: File/Export/Image
+  - plugin: File/Export/Stack
   - plugin: File/Export/Localizations
   - plugin: File/Simulate/Blinking Structure
   - plugin: File/Simulate/Tracks

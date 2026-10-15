@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QDoubleSpi
                                QVBoxLayout, QWidget)
 
 from ..layer_state import LayerSnapshot
-from ..picture import ViewFrame
+from ..picture import FrameSource, ViewFrame
 from ..render import FieldOfView, axis_unit
 from ..session import Session
 from . import folders
@@ -145,8 +145,9 @@ class View3D(QWidget):
         self.graphics.setFocusPolicy(Qt.StrongFocus)
         self.graphics.viewport().installEventFilter(self)
         session.on_change(self._on_session)
-        from .render_view import _weak_frame
-        session.view_frames["3D"] = _weak_frame(self)
+        # what *Export Image* frames its picture on (`picture.FrameSource`)
+        self.frame_source = FrameSource()
+        session.view_frames["3D"] = self.frame_source
 
     # ------------------------------------------------------------ session
     def _on_session(self, what: str) -> None:
@@ -193,6 +194,7 @@ class View3D(QWidget):
             self._timer.start()
 
     def render(self, preview: bool = False) -> None:
+        self.refresh_frame()
         if not len(self.session.locs):
             self.image.clear()
             return
@@ -416,6 +418,13 @@ class View3D(QWidget):
         self._draw_box()
         self.changed.emit()
         self.schedule()
+
+    def refresh_frame(self) -> None:
+        """Hand the session what the view shows now (`frame_source`)."""
+        try:
+            self.frame_source.frame = self.view_frame()
+        except Exception:                 # half built, or being torn down
+            pass
 
     def view_frame(self) -> ViewFrame:
         """What this window shows, for *Export Image*: the projection, the
@@ -930,6 +939,7 @@ class View3DWindow(QMainWindow):
     def _save_image(self) -> None:
         """*File/Export/Image* in its window, set to this view's projection."""
         from ..plugins.file import image_settings_for
+        self.view.refresh_frame()
         opener = self.view.session.window_openers.get("export image")
         if opener is not None:
             opener(image_settings_for(self.view.session, "3D"))

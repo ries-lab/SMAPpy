@@ -450,7 +450,7 @@ class ExportImage(Plugin):
         if frame is not None:
             hints["pixelsize_nm"] = round(frame.pixelsize, 3)
         try:
-            fov = _image_fov(session, frame, settings)
+            fov = _image_fov(session, frame, settings.region, settings.pixelsize_nm)
             hints["scale_bar_nm"] = auto_bar(fov.x1 - fov.x0)
             if settings.what != "intensity":
                 notice = Notice(f"{fov.nx} x {fov.ny} pixels per panel", kind="info")
@@ -476,11 +476,11 @@ class ExportImage(Plugin):
                       data={"files": [str(p) for p in written]}, settings=settings)
 
 
-def _image_fov(session, frame, settings: ExportImageSettings):
+def _image_fov(session, frame, region: str, pixelsize_nm: Optional[float]):
     from ..picture import frame_fov
     roi = getattr(session, "roi", None)
     everything = session.full_view() if session is not None and session.layers else None
-    return frame_fov(frame, settings.region, settings.pixelsize_nm,
+    return frame_fov(frame, region, pixelsize_nm,
                      roi_bounds=roi.bounds if roi is not None else None,
                      everything=everything)
 
@@ -504,31 +504,31 @@ def export_image(ctx: Context, settings: ExportImageSettings):
     return written
 
 
-def image_pictures(ctx: Context, settings: ExportImageSettings):
-    """The pictures *Export Image* describes, the layer snapshots they were
-    drawn from and the window's frame: ``(pictures, layers, frame)``.
+def picture_setup(ctx: Context, view: str = "2D", region: str = "view",
+                  pixelsize_nm: Optional[float] = None):
+    """What a picture of the view is drawn from: ``(layers, fov, frame)``.
 
     The layers are a snapshot of the session's (`snapshot_layers`, what the
     windows render), framed by the window's `ViewFrame`
     (`Session.view_frames`).  Without a session -- a script -- the context's
     table is the one layer, drawn with the default settings, over its
-    selection.  What the render window copies is the first picture.
+    selection.  *Export Image* and *Export Stack* both start here.
     """
     from ..layer_state import LayerSnapshot, snapshot_layers
-    from ..picture import frame_fov, render_picture
+    from ..picture import frame_fov
     from ..render import RenderSettings
     session = ctx.session
     frame = None
     if session is not None and session.layers:
         frames = getattr(session, "view_frames", {}) or {}
-        maker = frames.get(settings.view)
+        maker = frames.get(view)
         frame = maker() if maker is not None else None
-        if settings.view == "3D" and (frame is None or frame.projection is None):
+        if view == "3D" and (frame is None or frame.projection is None):
             raise ValueError("the 3D view's picture needs the 3D window open")
         from ..view3d import snapshot_3d
-        layers = (snapshot_3d(session.layers) if settings.view == "3D"
+        layers = (snapshot_3d(session.layers) if view == "3D"
                   else snapshot_layers(session.layers))
-        fov = _image_fov(session, frame, settings)
+        fov = _image_fov(session, frame, region, pixelsize_nm)
     else:
         locs, selection = ctx.table()
         if not len(locs):
@@ -541,7 +541,7 @@ def image_pictures(ctx: Context, settings: ExportImageSettings):
             raise ValueError("nothing selected to render")
         everything = ((float(np.min(x)), float(np.max(x))),
                       (float(np.min(y)), float(np.max(y))))
-        fov = frame_fov(None, "all", settings.pixelsize_nm, everything=everything)
+        fov = frame_fov(None, "all", pixelsize_nm, everything=everything)
     shown = [l for l in layers if l.visible]
     if not shown:
         raise ValueError("no layer is visible")
@@ -551,6 +551,16 @@ def image_pictures(ctx: Context, settings: ExportImageSettings):
             # what the window shows
             raise ValueError("nothing selected to render: the filter or the "
                              "ROI leaves no localization")
+    return layers, fov, frame
+
+
+def image_pictures(ctx: Context, settings: ExportImageSettings):
+    """The pictures *Export Image* describes, the layer snapshots they were
+    drawn from and the window's frame: ``(pictures, layers, frame)``.
+    What the render window copies is the first picture."""
+    from ..picture import render_picture
+    layers, fov, frame = picture_setup(ctx, settings.view, settings.region,
+                                       settings.pixelsize_nm)
     panels = frame.panels if frame is not None else ("overlay",)
     pictures = render_picture(
         layers, fov, what=settings.what, panels=panels,
@@ -560,6 +570,261 @@ def image_pictures(ctx: Context, settings: ExportImageSettings):
         projection=frame.projection if frame is not None else None,
         slab=frame.slab if frame is not None else None)
     return pictures, layers, frame
+
+
+# -------------------------------------------------------------------- stack
+
+@dataclass
+class StackFramesSettings:
+    step: int = param(1000, label="step", unit="frames", min=1,
+                      help="camera frames from one movie frame to the next")
+    window: Optional[int] = param(None, label="window", unit="frames", min=1,
+                                  help="the camera frames each movie frame "
+                                       "shows; auto: the step")
+    cumulative: bool = param(False, label="cumulative",
+                             help="each movie frame shows everything from the "
+                                  "first camera frame on")
+    tail: Optional[int] = param(None, label="track tail", unit="frames", min=1,
+                                help="a layer in the tracks mode: the frames "
+                                     "before now a track is drawn for; auto: "
+                                     "the frames the others show")
+
+
+@dataclass
+class StackZSettings:
+    step_nm: float = param(50.0, label="step", unit="nm", min=0.1,
+                           help="from one slice to the next")
+    thickness_nm: Optional[float] = param(None, label="thickness", unit="nm", min=0.1,
+                                          help="of each slice; auto: the step")
+    z_min_nm: Optional[float] = param(None, label="from", unit="nm",
+                                      help="the first slice's lower edge; auto: "
+                                           "the lowest z shown")
+    z_max_nm: Optional[float] = param(None, label="to", unit="nm",
+                                      help="where the last slice ends; auto: the "
+                                           "highest z shown")
+
+
+_ALONG = (("frames", "frames: a movie"), ("z", "z: slices"))
+_LAYOUTS = (("view", "as the view"), ("composite", "composite only"),
+            ("raw", "camera frames beside"))
+_QUALITIES = (("high", "high"), ("medium", "medium"), ("low", "small file"))
+
+
+@dataclass
+class ExportStackSettings:
+    path: str = param("", label="file", kind="save_file",
+                      file_filter="TIFF stack (*.tif);;MP4 (*.mp4);;GIF (*.gif)",
+                      help="the stack; its extension (.tif, .mp4, .gif) is its format")
+    along: str = param("frames", choices=_ALONG,
+                       help="what moves from one frame of the stack to the next")
+    frames: StackFramesSettings = param(default_factory=StackFramesSettings,
+                                        label="frames")
+    z: StackZSettings = param(default_factory=StackZSettings, label="z")
+    layout: str = param("view", choices=_LAYOUTS,
+                        help="the panels as the window shows them, the layers "
+                             "added up, or the camera frames the fit kept on "
+                             "the left of the composite")
+    region: str = param("view", label="area", choices=_REGIONS,
+                        help="what the window shows, the drawn ROI's box, or "
+                             "all the data")
+    pixelsize_nm: Optional[float] = param(None, label="pixel", unit="nm", min=0.01,
+                                          help="the picture's pixel; auto: as "
+                                               "the window displays it")
+    fps: float = param(10.0, label="frame rate", unit="1/s", min=0.1, max=120.0,
+                       help="frames per second of the movie")
+    quality: str = param("medium", choices=_QUALITIES,
+                         help="MP4: how faithful, against how large")
+    stamp: bool = param(True, label="write time / z",
+                        help="the frames or seconds, or the z range, on each frame")
+    scale_bar: bool = param(True, label="scale bar",
+                            help="a bar of a round length, bottom right")
+    colour_bars: bool = param(True, label="colour bars",
+                              help="the colour scale of each layer coloured by "
+                                   "a column, top right")
+    labels: bool = param(True, label="labels",
+                         help="each panel's name, top left")
+
+
+@register("File/Export/Stack")
+class ExportStack(Plugin):
+    """A movie along the frames, or a stack of z slices: the view rendered
+    step by step, as a TIFF stack, an MP4 or a GIF."""
+
+    Settings = ExportStackSettings
+    changes_locs = False
+    logged = True
+    version = "1"
+
+    def describe(self, ctx: Optional[Context], settings: ExportStackSettings) -> FormState:
+        from ..movie import estimate_size, has_encoder, kind_of
+        frames = settings.along == "frames"
+        try:
+            kind = kind_of(settings.path) if settings.path else "tiff"
+        except ValueError:
+            kind = "tiff"
+        notice = None
+        if kind == "mp4" and not has_encoder():
+            notice = Notice("an MP4 needs imageio-ffmpeg: pip install imageio-ffmpeg "
+                            "(or smappy-smlm[movie]); TIFF and GIF need nothing",
+                            kind="warning")
+        elif ctx is not None and ctx.session is not None and ctx.session.layers:
+            try:
+                plan = stack_plan(ctx, settings)
+                h, w = plan.shape
+                size = estimate_size(kind, h, w, len(plan.steps), settings.quality)
+                about = "" if kind == "tiff" else "about "
+                notice = Notice(f"{len(plan.steps)} frames of {w} x {h}: "
+                                f"{about}{_megabytes(size)}", kind="info")
+            except Exception:
+                pass
+        return FormState(
+            notice=notice,
+            shown={"frames": frames, "z": not frames,
+                   "quality": kind == "mp4", "fps": kind != "tiff"})
+
+    def preflight(self, ctx: Context, settings: ExportStackSettings):
+        """The number of frames and how long they will take: one is rendered
+        here and timed, and a stack of more than a minute is asked about."""
+        import time
+        plan = stack_plan(ctx, settings)
+        started = time.perf_counter()
+        next(iter(plan.frames(plan.steps[len(plan.steps) // 2:][:1])))
+        seconds = (time.perf_counter() - started) * len(plan.steps)
+        text = f"{len(plan.steps)} frames, about {_duration(seconds)} to render"
+        ctx.report(text)
+        if seconds > 60:
+            return text + ".  Make it?"
+        return None
+
+    def run(self, ctx: Context, settings: ExportStackSettings) -> Result:
+        from ..movie import kind_of, write_stack
+        from ..picture import describe_view, description_text, Picture
+        from . import Stopped
+        if not settings.path:
+            raise ValueError("choose where to save")
+        kind_of(settings.path)
+        plan = stack_plan(ctx, settings)
+        n = len(plan.steps)
+
+        def frames():
+            for k, image in enumerate(plan.frames(plan.steps)):
+                if ctx.stopped:
+                    raise Stopped()
+                ctx.report(f"frame {k + 1} of {n}")
+                yield image
+
+        described = describe_view(ctx.session, plan.layers, settings,
+                                  Picture(np.zeros((1, 1), np.uint8), plan.fov), plan.frame)
+        described["stack"] = {"along": settings.along, "column": plan.column,
+                              "steps": [[s.lo, s.hi] for s in plan.steps]}
+        path = Path(settings.path)
+        try:
+            written = write_stack(path, frames(), n, fps=settings.fps,
+                                  quality=settings.quality, pixel_nm=plan.fov.pixelsize,
+                                  interval=plan.interval, along=settings.along,
+                                  description=description_text(described))
+        except BaseException:
+            path.unlink(missing_ok=True)       # half a movie is no movie
+            raise
+        return Result(text=f"{n} frames written to {written.name}", written=str(written),
+                      data={"frames": n}, settings=settings)
+
+
+@dataclass
+class StackPlan:
+    """What *Export Stack* renders: the layers, the grid, the steps, and
+    how one frame is made (`frames`)."""
+
+    layers: tuple
+    fov: object
+    frame: object
+    steps: list
+    column: str
+    settings: ExportStackSettings
+    raw: list
+    shape: tuple                 # (height, width) of a frame
+    interval: Optional[float]    # seconds between frames, or the z step in nm
+    frame_time_ms: Optional[float]
+
+    def frames(self, steps):
+        from ..movie import stack_frames
+        s = self.settings
+        tail = s.frames.tail if s.along == "frames" else None
+        panels = self.frame.panels if self.frame is not None else ("overlay",)
+        return stack_frames(
+            self.layers, self.fov, steps, column=self.column,
+            what="composite" if s.layout != "view" else "view", panels=panels,
+            stacked=self.frame.stacked if self.frame is not None else False,
+            tail=tail, raw=self.raw, scale_bar=s.scale_bar,
+            colour_bars=s.colour_bars, labels=s.labels,
+            text=self.text if s.stamp else None)
+
+    def text(self, step) -> str:
+        if self.column != "frame":
+            return f"z {step.lo:g} to {step.hi:g} nm"
+        if self.frame_time_ms:
+            return f"{step.hi * self.frame_time_ms / 1000:.1f} s"
+        return f"frames {step.lo:.0f}-{step.hi - 1:.0f}"
+
+
+def stack_plan(ctx: Context, settings: ExportStackSettings) -> StackPlan:
+    """The layers, grid and steps of a stack, from the view (`picture_setup`)."""
+    from ..metadata import file_frame_time
+    from ..movie import frame_steps, shown_range, z_steps
+    layers, fov, frame = picture_setup(ctx, "2D", settings.region, settings.pixelsize_nm)
+    raw = []
+    if settings.along == "frames":
+        column = "frame"
+        first, last = shown_range(layers, column)
+        f = settings.frames
+        steps = frame_steps(first, last, f.step, f.window, f.cumulative)
+        session = ctx.session
+        locs = session.locs if session is not None else ctx.locs
+        frame_time = file_frame_time(getattr(locs, "metadata", None))
+        interval = f.step * frame_time / 1000.0 if frame_time else None
+        if settings.layout == "raw":
+            raw = session.raw_images() if session is not None else []
+            if not raw:
+                raise ValueError("no camera frames are kept with this table: a fit "
+                                 "keeps them (Localize, raw frames), and the "
+                                 "localization file it wrote has them")
+    else:
+        column = "z_nm"
+        if settings.layout == "raw":
+            raise ValueError("the camera frames go beside a movie along frames, "
+                             "not a stack along z")
+        z = settings.z
+        lo, hi = shown_range(layers, column)
+        z0 = lo if z.z_min_nm is None else z.z_min_nm
+        z1 = hi if z.z_max_nm is None else z.z_max_nm
+        if not z1 > z0:
+            raise ValueError(f"z from {z0:g} to {z1:g} nm is no range")
+        steps = z_steps(z0, z1, z.step_nm, z.thickness_nm)
+        interval, frame_time = z.step_nm, None
+    if settings.layout == "view" and frame is not None and len(frame.panels) > 1:
+        n = len(frame.panels)
+        shape = ((fov.ny * n + 2 * (n - 1), fov.nx) if frame.stacked
+                 else (fov.ny, fov.nx * n + 2 * (n - 1)))
+    elif raw:
+        shape = (fov.ny, 2 * fov.nx + 2)
+    else:
+        shape = (fov.ny, fov.nx)
+    return StackPlan(layers, fov, frame, steps, column, settings, raw, shape,
+                     interval, frame_time)
+
+
+def _megabytes(size: float) -> str:
+    if size < 1e6:
+        return f"{size / 1e3:.0f} kB"
+    return f"{size / 1e6:.1f} MB" if size < 1e9 else f"{size / 1e9:.2f} GB"
+
+
+def _duration(seconds: float) -> str:
+    if seconds < 90:
+        return f"{seconds:.0f} s"
+    if seconds < 5400:
+        return f"{seconds / 60:.0f} min"
+    return f"{seconds / 3600:.1f} h"
 
 
 # ----------------------------------------------------------------- simulate

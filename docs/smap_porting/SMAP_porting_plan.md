@@ -264,7 +264,7 @@ channel *Check overlay* (C3).  AssignColors for more than 2 colours (C4):
 | **5d** ✅ | **Magnification over time in COMET** (D3), discussed with Jonas first | M-L | - |
 | **5e** ✅ | **Stability: vibrations** (A6): `Analysis/Measure/Stability`, approaches (vibrations now; long-term and dual-channel drift later), per bead track, differential, zoomed trace, spectrum, cumulative RMS, peaks; figures as options | M | - |
 | **6a** ✅ | **Export Image**: one renderer of the view for the plugin and the window's *Save*; as the view, composite, or each layer (in colour or grey), or float intensity; scale bar, colour bars, labels; settings in the file | M | - |
-| **6b** | **Export Stack**: movies (step, window, cumulative) and z-stacks; the raw frames beside; a *tail* for tracks; TIFF, MP4 (H.264, target quality, size shown), GIF | M | 6a |
+| **6b** ✅ | **Export Stack**: movies (step, window, cumulative) and z-stacks; the raw frames beside; a *tail* for tracks; TIFF, MP4 (H.264, target quality, size shown), GIF | M | 6a |
 | **6c** ✅ | **Voronoi render mode** (SharpViSu) | S | - |
 | **6d** ✅ | **Process image**: background subtraction, local contrast normalisation of an image layer | S | - |
 
@@ -628,6 +628,29 @@ channel *Check overlay* (C3).  AssignColors for more than 2 colours (C4):
   its PNG keeps the screen's pixels (the GPU looks), *Save image...* the
   plugin on its projection, drawn on the CPU.  `render.save_image` writes
   through it as well.
+
+* **Step 6b** (2026-10-15): *File/Export/Stack* (`smappy.movie`), pinned
+  in the File tab beside Export Image.  The view rendered once per step by
+  6a's `render_picture`, every layer narrowed to the step (`restrict`):
+  *along frames* (SMAP's MovieRunningWindow: *step*, *window* -- auto the
+  step -- and *cumulative*) or *along z* (slices of a *thickness* every
+  *step*, *from*/*to* auto the z shown).  A *track tail* for layers in the
+  tracks mode: the frames before the window's end a track is drawn for.
+  Layouts: as the view, the composite, or the *camera frames beside*
+  (SMAP's BlinkingMoviePresentation) -- the kept raw frame nearest each
+  window's end, never the average, in grey from its 1st to 99.9th
+  percentile; refused without kept frames.  Each frame its own brightness
+  (it equals 6a's picture of its window).  *Write time / z* on each frame
+  (seconds when the frame time is known).  Written frame by frame: an
+  ImageJ hyperstack TIFF (T or Z, the pixel size, `finterval` or
+  `spacing`, the description in *Info*), MP4 H.264 through
+  `imageio-ffmpeg` (the new `movie` extra; CRF 18 / 23 / 28, sides made
+  even; the form names the extra when missing) or a GIF (Pillow).  The form
+  shows the frame count and size (TIFF exact, MP4 / GIF from measured
+  rates); the preflight times one frame and asks above a minute; Stop
+  leaves no file.  The windows' frames are now kept as plain data
+  (`picture.FrameSource`, refreshed on the GUI thread as the view moves),
+  so a plugin's worker never reads a widget.
 
 ### Start here
 

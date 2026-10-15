@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (QDoubleSpinBox, QFileDialog, QGraphicsPathItem,
                                QVBoxLayout, QWidget)
 
 from ..layer_state import LayerSnapshot, render_panels, snapshot_layers
-from ..picture import (ViewFrame, bar_label, colour_bar_labels, colour_scales,
+from ..picture import (FrameSource, ViewFrame, bar_label, colour_bar_labels, colour_scales,
                        nice_below, nice_step)
 from ..regions import Region
 from ..render import FieldOfView, axis_unit
@@ -182,14 +182,16 @@ class RenderView(QWidget):
         self._merger.status.connect(self._show_merge_hint)
         # what the colours mean, when layers are coloured by a column
         self.colour_bars = ColourBars(self)
-        # what *Export Image* frames its picture on; through a weak reference,
-        # so the session does not keep a closed window alive
-        session.view_frames["2D"] = _weak_frame(self)
+        # what *Export Image* frames its picture on, kept as plain data for
+        # a plugin's worker to read (`picture.FrameSource`)
+        self.frame_source = FrameSource()
+        session.view_frames["2D"] = self.frame_source
 
         # pan/zoom fires many range changes; render once they settle
         self._timer = QTimer(singleShot=True, interval=40)
         self._timer.timeout.connect(self.render)
         self.view.sigRangeChanged.connect(self.schedule)
+        self.view.sigRangeChanged.connect(self.refresh_frame)
         session.on_change(self._on_session)
         # side by side: the first panel is this view, which keeps the ROI
         # tools; the others are `_Mirror`s linked to it, which pan and zoom
@@ -344,6 +346,7 @@ class RenderView(QWidget):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
+        self.refresh_frame()
         self.empty_hint.setGeometry(self.rect())
         self.merge_hint.setGeometry(self.rect())
         self.colour_bars.place()
@@ -371,6 +374,7 @@ class RenderView(QWidget):
         self.graphics.ci.layout.activate()
         self._name_panels()
         self._mirror_roi()
+        self.refresh_frame()
 
     def _name_panels(self) -> None:
         names = [self._panel_name(spec) for spec in self.panels]
@@ -747,9 +751,17 @@ class RenderView(QWidget):
         return ViewFrame((fov.x0, fov.x1), (fov.y0, fov.y1), fov.pixelsize,
                          tuple(self.panels), self.stacked)
 
+    def refresh_frame(self, *_) -> None:
+        """Hand the session what the view shows now (`frame_source`)."""
+        try:
+            self.frame_source.frame = self.view_frame()
+        except Exception:                 # half built, or being torn down
+            pass
+
     def quick_settings(self, path: str = ""):
         """*Export Image* as the quick PNG uses it: the view, as displayed,
         with what the window draws over it."""
+        self.refresh_frame()
         from ..plugins.file import image_settings_for
         return image_settings_for(self.session, "2D", str(path))
 
@@ -769,22 +781,6 @@ class RenderView(QWidget):
         h, w, _ = rgb.shape
         # a copy: the QImage would otherwise point into an array about to go
         return QImage(rgb.data, w, h, 3 * w, QImage.Format_RGB888).copy()
-
-
-def _weak_frame(view):
-    """``view.view_frame`` without keeping the view alive: None once gone."""
-    import weakref
-    ref = weakref.ref(view)
-
-    def frame():
-        alive = ref()
-        if alive is None:
-            return None
-        try:
-            return alive.view_frame()
-        except RuntimeError:             # the widget is deleted
-            return None
-    return frame
 
 
 def _panel_label(view) -> pg.TextItem:
