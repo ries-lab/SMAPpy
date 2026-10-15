@@ -131,7 +131,7 @@ drift (#34) · D3 time-dependent transformation (magnification) in COMET
 | E4 | No distinction between evaluator and analysis plugin | #118 | **done** (`per_region`; Line Profile too, step 15) |
 | E5 | **Circle fit** as a `per_region` Measure plugin (#115, P2); **NPC geometry** (#114, P3; independent of LocMoFit, but better as one of its models: decide H first) | #114 #115 | Circle fit **done** (`Measure/Circle fit`, step 15); NPC geometry open |
 | E6 | Figures of regions: montage, TIFF stack, single TIFFs, volumes, sorted by any column | #132 #133 | open, P3. Now a Summarize-style plugin that reads the ROI order (Sort ROIs) and annotations. |
-| E7 | **Average ROIs**: centre plus an orientation from a measured value or a drawn line → a new table | #134 | open, P3. Depends on the named lines in E2. |
+| E7 | **Average ROIs**: centre plus an orientation from a measured value or a drawn line → a new table | #134 | **done** (step 16, `Regions/Average ROIs`) |
 
 ## F. Single-particle tracking (P1, own project)
 
@@ -224,7 +224,7 @@ one after the other, in the same session if possible.
 | **13** ✅ | **Named lines per ROI**: the one *direction* becomes any number of named lines, drawn in the ROI manager, each with angle and length as values in the results table, and a reverse action | M (GUI, ROI project file format) | – |
 | **14** ✅ | **Small ROI tools**: remove double ROIs (closer than d: keep the larger); remove localizations outside the included ROIs (a third *region* choice of Remove Localizations); keep the ROIs inside the drawn ROI (a *Filter ROIs* condition on position) | S | – |
 | **15** ✅ | **Line Profile `per_region`** (width, distance, AIC winner as values) and **Circle fit** (`Analysis/Measure/Circle fit`, `per_region`), with *centre ROIs* on the circle or median centre as a Regions action | S–M | – |
-| **16** | **Average ROIs**: centre plus orientation from a measured value or a named line → a new table | M | 13 |
+| **16** ✅ | **Average ROIs**: centre plus orientation from a measured value or a named line → a new table | M | 13 |
 
 ### Wave 4: analysis projects (a short design note first, in `docs/`)
 
@@ -350,6 +350,16 @@ filters and zoom-ins are settled) · AssignColors for more than 2 colours (C4)
   plugin rather than an ROI-manager button, so a chain can centre between
   segmenting and measuring.  Circle fit in the Analysis tab, Centre ROIs in
   the Regions tab of the shipped GUI.
+* **Step 16** (2026-10-15): *Analysis/Regions/Average ROIs*: every used
+  ROI centred (its centre, measured x and y values, or the start, middle
+  or end of a named line) and turned (none, a named line, a measured
+  angle) by SMAP's `rotcoord`, superimposed into one table added as a
+  file (or replacing the table), centred on (0, 0), with `roi_id`; each
+  ROI's frames moved past the previous one's so merging blinks never
+  joins two ROIs (`frame_in_file` keeps the file's).  ROIs lacking what
+  the settings ask for are left out and counted.  SMAP's AverageSites and
+  its kinetochore, window and NPC variants in one; LocMoFit's model not
+  ported.
 
 ### Start here
 
