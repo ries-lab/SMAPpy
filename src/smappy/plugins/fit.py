@@ -1248,7 +1248,8 @@ class GaussianFit(_FitPlugin):
     Settings = GaussianFitSettings
     # 2: the camera's read noise in the likelihood (1 e- without EM gain)
     # 3: nm columns only; the pixel ones (`x_pix`, ...) are no longer written
-    version = "3"
+    # 4: the dynamic cutoff's quantiles nearest-rank, as SMAP takes them
+    version = "4"
 
     def model(self, settings, camera):
         return settings.model.model()
@@ -1263,7 +1264,8 @@ class SplineFit(_FitPlugin):
     # 3: a SMAP calibration is x-flipped only if SMAP flipped its beads
     #    (`EMon`), no longer for any non-zero `emmirror` ("no mirror" is 2)
     # 4: nm columns only; the pixel ones (`x_pix`, ...) are no longer written
-    version = "4"
+    # 5: the dynamic cutoff's quantiles nearest-rank, as SMAP takes them
+    version = "5"
 
     def model(self, settings, camera):
         return settings.model.model(camera, roisize=settings.fit.roisize)
@@ -1392,7 +1394,8 @@ class DualSplineFit(_TwoChannelFit):
     #    shares from the light before clipping
     # 6: nm columns only; the pixel ones (`x_pix`, `dx_pix_ch1`, ...) are no
     #    longer written
-    version = "6"
+    # 7: the dynamic cutoff's quantiles nearest-rank, as SMAP takes them
+    version = "7"
     Settings = DualSplineFitSettings
 
     def registration_path(self, settings) -> str:
@@ -1641,7 +1644,8 @@ class DualGaussianFit(_TwoChannelFit):
     # 3: the camera's read noise in the likelihood (1 e- without EM gain)
     # 4: nm columns only; the pixel ones (`x_pix`, `sigma_pix_ch0`, ...) are
     #    no longer written
-    version = "4"
+    # 5: the dynamic cutoff's quantiles nearest-rank, as SMAP takes them
+    version = "5"
     Settings = DualGaussianFitSettings
 
     def model(self, settings, camera):
