@@ -84,7 +84,7 @@ ROI and per cluster.  Nothing is ported twice: SMAP's `X` (Analyze) and
 |---|---|---|---|
 | B1 | **Neighbourhood** (the renamed `SpatialFilterLocs` / `density_calculator`): per localization, the number of neighbours within r (local density), the mean/median/min/max/quantile of a field around it, and the Voronoi cell density (area⁻¹, SharpViSu). Writes columns (recipes), which can be filtered and coloured, and which Find clusters' Voronoi threshold can use. | #70 #93 (density) #94 | done (step 9) |
 | B2 | **Find clusters**: one plugin with an algorithm choice. Each algorithm's settings are a part; only the selected algorithm's part is **shown**, the others hidden (step 1 below adds that to the form). It replaces `Regions/Find/DBSCAN`. Writes `cluster_id` and `n_in_cluster` as now. | #91 #93 (clusters) | done (step 10): DBSCAN, Voronoi, HDBSCAN in `Regions/Find clusters` |
-| B2s | **Shuffle colours**: for any integer column, writes a column with the ids randomly permuted (for example `<column>_shuffled`, a recipe), so colouring by it separates neighbouring ids. A new seed on each run. | #95 | open, S |
+| B2s | **Shuffle colours**: for any integer column, writes a column with the ids randomly permuted (for example `<column>_shuffled`, a recipe), so colouring by it separates neighbouring ids. A new seed on each run. | #95 | done (step 7): `Analysis/Process/Shuffle ids` |
 | B2b | Statistics on clusters, also inside ROIs | #96 #120 | done by the structure (a block over `cluster_id`). The cluster-shape measurement is **done** (`Measure/Cluster shape`, step 12). |
 | B3 | **Spatial statistics**: Ripley K/L/H, pair correlation, 2D auto- and cross-correlation between layers, the 1D correlation along a line; `per_region`, so it runs in every ROI too | #90 #92 #119 | open |
 | B4 | **Counting**: a `per_region` measurement plus a `Summarize` histogram fit | #98 #121 | open |
@@ -126,7 +126,7 @@ drift (#34) · D3 time-dependent transformation (magnification) in COMET
 | E1 | Use only the ROIs inside the drawn ROI | #106 | **done** (*Filter ROIs*: `in_drawn_roi`, step 14) |
 | E1 | Import site positions | #135 | open, P3 |
 | E1 | ROI per file (`files2sites`) | #108 | **mostly there**: *Column to ROIs* on `filenumber`. You had marked it skip anyway. |
-| E2 | **Annotate ROIs** | new | **mostly done** (`gui/roi_annotate.py`): any number of keyword lists written in the panel and saved with the project; keys 1–9 pick a keyword, 0 clears it, Tab switches lists, Up/Down moves to the next ROI, Space toggles *use*; a comment per ROI; the keywords become columns of the results table, so Filter and Sort read them. **Still missing from SMAP's version: several named lines per ROI.** There is one *direction* line now. Extending it to named lines (angle and length as values) is what E7 needs for orientation. |
+| E2 | **Annotate ROIs** | new | **done** (`gui/roi_annotate.py`; the named lines step 13): any number of keyword lists written in the panel and saved with the project; keys 1–9 pick a keyword, 0 clears it, Tab switches lists, Up/Down moves to the next ROI, Space toggles *use*; a comment per ROI; the keywords become columns of the results table, so Filter and Sort read them. Any number of named lines per ROI (step 13): drawn in the ROI manager, reversed, `<name>_angle_deg` and `<name>_length_nm` columns of the results table. |
 | E3 | **Segment regions** with presets (NPC, Density Peaks, CME, beads, other templates); see B | #104 #105 #109 #111 | decided: one plugin, see B. NPC and Density Peaks exist as separate Find plugins, to be folded in. *Centre all* (#116) fits as a Regions action: recentre the ROIs by a measured centre (median, circle fit), with the circle fit from E5. |
 | E4 | No distinction between evaluator and analysis plugin | #118 | **done** (`per_region`). Left: Line Profile itself is not `per_region` yet (it is `follow_roi`). Giving it `Result.values` (width, distance, AIC winner) is a small change. |
 | E5 | **Circle fit** as a `per_region` Measure plugin (#115, P2); **NPC geometry** (#114, P3; independent of LocMoFit, but better as one of its models: decide H first) | #114 #115 | open |
@@ -210,18 +210,18 @@ first sketch; where they differ, `wave2_design.md` wins.
 | step | what | where | size | done when |
 |---|---|---|---|---|
 | **9** ✅ | **Neighbourhood**: per localization, neighbours within r (local density), mean/median/min/max/quantile of a field within r, Voronoi cell density; written as recipe columns | `Analysis/Process/Neighbourhood` (module-level functions on a `cKDTree` and `scipy.spatial.Voronoi`) | M | densities of a simulated uniform field match the expected count; page with figures |
-| **10** ✅ | **Find clusters**: one plugin, an algorithm choice with one part per algorithm (only the selected one shown): DBSCAN (moved from `clusters.py`), Voronoi threshold (density from step 9, then connected cells), HDBSCAN if scikit-learn ≥ 1.3 is installed (an optional dependency, asked for at Run like uiPSF) | `Analysis/Regions/Find/Find clusters`; `Find/DBSCAN` removed | M | DBSCAN's tests pass through the new plugin; Voronoi finds simulated clusters; `docs/regions.md` ("Clusters", "The plugin tree") and CLAUDE.md's shape table updated; an old chain step `Regions/Find/DBSCAN` still loads (path alias) |
-| **11** ✅ | **Segment regions**: one plugin with presets, one part each, only the selected shown: NPC (moved from `npc.py`), Density Peaks (moved from `roi.py`); a `SegmenterPlugin` as now (Preview, *replace*, ROI undo). Templates such as CME and beads come later as further presets. | `Analysis/Regions/Find/Segment regions` | M–L | NPC and Density Peaks tests pass through it; `npc_analysis.chain.yaml` and the NPC tutorial use it; old paths alias; docs as in step 10 |
+| **10** ✅ | **Find clusters**: one plugin, an algorithm choice with one part per algorithm (only the selected one shown): DBSCAN (moved from `clusters.py`), Voronoi threshold (density from step 9, then connected cells), HDBSCAN if scikit-learn ≥ 1.3 is installed (an optional dependency, asked for at Run like uiPSF) | `Analysis/Regions/Find/Find clusters`; `Find/DBSCAN` removed | M | DBSCAN's tests pass through the new plugin; Voronoi finds simulated clusters; `docs/regions.md` ("Clusters", "The plugin tree") and CLAUDE.md's shape table updated; the old path `Regions/Find/DBSCAN` removed, with no alias (`wave2_design.md`) |
+| **11** ✅ | **Segment regions**: one plugin with presets, one part each, only the selected shown: NPC (moved from `npc.py`), Density Peaks (moved from `roi.py`); a `SegmenterPlugin` as now (Preview, *replace*, ROI undo). Templates such as CME and beads come later as further presets. | `Analysis/Regions/Find/Segment regions` | M–L | NPC and Density Peaks tests pass through it; `npc_analysis.chain.yaml` and the NPC tutorial use it; the old paths removed, no aliases; docs as in step 10 |
 | **12** ✅ | **Cluster shape**: area, convex hull, radius of gyration, density, elongation, as a `per_region` measurement (the statistics a block over `cluster_id` does not yet give) | `Analysis/Measure/Cluster shape` | S | known shapes return their numbers |
 
-Steps 10 and 11 share the old-path aliasing and the docs: do them
+Steps 10 and 11 share the docs and the moves out of the old paths: do them
 one after the other, in the same session if possible.
 
 ### Wave 3: the ROI manager's remaining pieces
 
 | step | what | size | needs |
 |---|---|---|---|
-| **13** | **Named lines per ROI**: the one *direction* becomes any number of named lines, drawn in the ROI manager, each with angle and length as values in the results table, and a reverse action | M (GUI, ROI project file format) | – |
+| **13** ✅ | **Named lines per ROI**: the one *direction* becomes any number of named lines, drawn in the ROI manager, each with angle and length as values in the results table, and a reverse action | M (GUI, ROI project file format) | – |
 | **14** ✅ | **Small ROI tools**: remove double ROIs (closer than d: keep the larger); remove localizations outside the included ROIs (a third *region* choice of Remove Localizations); keep the ROIs inside the drawn ROI (a *Filter ROIs* condition on position) | S | – |
 | **15** | **Line Profile `per_region`** (width, distance, AIC winner as values) and **Circle fit** (`Analysis/Measure/Circle fit`, `per_region`), with *centre ROIs* on the circle or median centre as a Regions action | S–M | – |
 | **16** | **Average ROIs**: centre plus orientation from a measured value or a named line → a new table | M | 13 |
@@ -325,6 +325,17 @@ filters and zoom-ins are settled) · AssignColors for more than 2 colours (C4)
   shape in its file).  *Filter ROIs* (and *Sort ROIs*) read each ROI's
   centre, `roi_x_nm` / `roi_y_nm`, and `in_drawn_roi`: the condition
   `in_drawn_roi` is SMAP's UseSitesInROI.
+* **Step 13** (2026-10-15): named lines per ROI.  The one *direction*
+  became `ROI.lines`, ``{name: [start, end]}``, under names the project
+  keeps (`ROIProject.line_names`, written under *line names* in the
+  annotation panel, `direction` to start with).  The ROI manager draws the
+  chosen line (*line*, *Draw line*, L), reverses it (*Reverse*, R) and
+  clears it; Shift+L or a click on a line chooses it; each name has a
+  colour and its label at the tip.  Each line is `<name>_angle_deg`
+  (SMAP's `atan2(dy, dx)`) and `<name>_length_nm` in the results row, so
+  Filter, Sort, the summaries and *Regions to column* (with or without an
+  evaluation) read them.  An old file's `direction` opens as the line
+  `direction`, and the signatures of its results still match.
 
 ### Start here
 

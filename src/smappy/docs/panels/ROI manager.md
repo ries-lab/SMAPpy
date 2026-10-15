@@ -2,7 +2,7 @@
 title: ROI manager
 summary: The window where ROIs are found, looked at one by one, kept or excluded, and measured.
 widget: smappy.gui.roi_window.ROIManagerWindow
-covers: [smappy.gui.roi_window.ROIManagerWindow.evaluate_active, smappy.gui.roi_window.ROIList, smappy.gui.roi_window.ROIManagerWindow._in_view, smappy.regions.Region.rim_distance, smappy.regions.Region.outline, smappy.roi_manager.core.ROIProject.tiles, smappy.roi_manager.core.ROIProject.indices, smappy.roi_manager.core.ROIProject.inputs, smappy.roi_manager.core.ROIProject.entries, smappy.roi_manager.core.ROIProject.needs_evaluation, smappy.roi_manager.core.ROIProject.results, smappy.roi_manager.core.ROIProject.evaluate_one, smappy.roi_manager.core.ROIProject.sync, smappy.roi_manager.core.ROIProject._fingerprint, smappy.roi_manager.core.ROIProject.propose, smappy.plugins.roi.SegmenterPlugin.found, smappy.roi_manager.core.ROIHistory, smappy.roi_manager.core.ROIProject.edit]
+covers: [smappy.gui.roi_window.ROIManagerWindow.evaluate_active, smappy.gui.roi_window.ROIList, smappy.gui.roi_window.ROIManagerWindow._in_view, smappy.regions.Region.rim_distance, smappy.regions.Region.outline, smappy.roi_manager.core.ROIProject.tiles, smappy.roi_manager.core.ROIProject.indices, smappy.roi_manager.core.ROIProject.inputs, smappy.roi_manager.core.ROIProject.entries, smappy.roi_manager.core.ROIProject.needs_evaluation, smappy.roi_manager.core.ROIProject.results, smappy.roi_manager.core.ROIProject.evaluate_one, smappy.roi_manager.core.ROIProject.sync, smappy.roi_manager.core.ROIProject._fingerprint, smappy.roi_manager.core.ROIProject.propose, smappy.plugins.roi.SegmenterPlugin.found, smappy.roi_manager.core.ROIHistory, smappy.roi_manager.core.ROIProject.edit, smappy.roi_manager.core.ROIProject.set_line, smappy.roi_manager.core.ROIProject.reverse_line, smappy.roi_manager.core.line_angle_length, smappy.roi_manager.core.ROIProject.geometry]
 ---
 
 ## What it does
@@ -57,7 +57,7 @@ from smappy.session import Session
 from smappy.render import FieldOfView
 from smappy.chain import Block, Step
 from smappy.gui.roi_window import (arrow, OTHER_PEN, EXCLUDED_PEN, ROI_PEN,
-                                   DRAFT_PEN, TILE_PEN, TILE_HERE_PEN, DIRECTION_PEN,
+                                   DRAFT_PEN, TILE_PEN, TILE_HERE_PEN, LINE_PENS,
                                    STALE_COLOUR)
 sim = SimulationSettings(n_frames=3000, seed=3,
                          structure=StructureSettings(preset="npc"),
@@ -106,15 +106,15 @@ step the zoom from one square to the next, row by row, so that every part of
 the data is looked at once, in a fixed order, and not only where the eye
 happened to land.
 
-```figure Simulated nuclear pores (Nup96, 60 % labelling) after Density Peaks, with ROIs of 200 nm.  Left: the file, every ROI found (amber) and a grid of 2.5 µm tiles, the current one in cyan.  Middle: the zoom on that tile, with an ROI excluded from use (grey), the selected ROI (green) and a draft not yet added (blue, dashed).  Right: the ROI image of the selected ROI, three ROI widths across, with a direction drawn on it (magenta).
+```figure Simulated nuclear pores (Nup96, 60 % labelling) after Density Peaks, with ROIs of 200 nm.  Left: the file, every ROI found (amber) and a grid of 2.5 µm tiles, the current one in cyan.  Middle: the zoom on that tile, with an ROI excluded from use (grey), the selected ROI (green) and a draft not yet added (blue, dashed).  Right: the ROI image of the selected ROI, three ROI widths across, with a line called *direction* drawn on it (magenta).
 x0, y0, x1, y1 = state.index.bounds
 here = 5
 tx0, ty0, tx1, ty1 = tiles[here]
 mine = [r for r in found if tx0 <= r.center[0] < tx1 and ty0 <= r.center[1] < ty1]
 excluded, selected = mine[0], mine[1]
 excluded.use = False
-selected.direction = [[selected.center[0] - 70, selected.center[1] + 50],
-                      [selected.center[0] + 70, selected.center[1] - 50]]
+selected.lines = {"direction": [[selected.center[0] - 70, selected.center[1] + 50],
+                                [selected.center[0] + 70, selected.center[1] - 50]]}
 draft = ROI(source.id, [tx0 + 0.25 * (tx1 - tx0), ty0 + 0.8 * (ty1 - ty0)])
 fig.set_size_inches(7.5, 2.7)
 a, b, c = fig.subplots(1, 3)
@@ -136,8 +136,8 @@ half = project.size_nm * 1.5
 cx, cy = selected.center
 image(c, cx - half, cx + half, cy - half, cy + half)
 ring(c, selected, pen(ROI_PEN), 1.5)
-dx, dy = arrow(selected.direction)
-c.plot(dx, dy, color=pen(DIRECTION_PEN), lw=1.5)
+dx, dy = arrow(selected.lines["direction"])
+c.plot(dx, dy, color=pen(LINE_PENS[0]), lw=1.5)
 c.set_title("ROI", fontsize=9)
 ```
 
@@ -166,10 +166,25 @@ way round; on *ROI*, back to the numbers).  The results table and the
 summaries follow the same order, which is saved with the ROIs.  Sorting
 never changes an ROI's number.
 
-**5. Shapes.**  All ROIs share the circle or square set in the Regions tab.  One
-ROI can have its own outline instead (*Polygon*), and a direction (*Direction*),
-an arrow that the per-region steps can read, for example as the axis of an elongated
-structure.
+**5. Shapes and lines.**  All ROIs share the circle or square set in the
+Regions tab.  One ROI can have its own outline instead (*Polygon*).
+
+An ROI can also carry lines drawn by hand, each under a name: the axis of
+an elongated structure, the direction a filament runs, the distance between
+two spots.  The names are written once for the project, under *line names*
+(*direction* to start with), and each ROI can have one line of each name.
+Pick the name under *line*, then *Draw line* and two clicks, the start and
+then the end.  A line is an arrow, so it has a direction; *Reverse* turns
+it round.  Each name has its own colour, and its name is written at the
+arrow's tip.
+
+Each line gives two numbers in the ROI's row of the results table:
+`<name>_angle_deg`, its angle, and `<name>_length_nm`, its length.  So
+[Filter ROIs](plugin:Analysis/Regions/Filter ROIs),
+[Sort ROIs](plugin:Analysis/Regions/Sort ROIs), the summaries and
+[Regions to column](plugin:Analysis/Regions/Regions to column) read them
+like anything measured.  The keys: L draws the chosen line, Shift+L chooses
+the next name, R reverses it.
 
 **6. Measuring.**  The steps run in every ROI are chosen, ordered, set up
 and run in the [Regions tab](plugin:Panels/Regions tab), under *per-region
@@ -191,7 +206,7 @@ so.
 
 ```figure The first 14 numbers of the ROI list, and the size of the results table, through four edits: after measuring with Localization Statistics everything is current (black); moving ROI 3 by 40 nm puts only that ROI out of date (orange) and out of the results; excluding ROI 6 greys it and takes it out of the results; editing a parameter of the step puts every included ROI out of date, while the results made with the old setting stay until they are replaced.
 for r in found:
-    r.use, r.direction = True, None
+    r.use, r.lines = True, {}
 project.block = Block(steps=[Step(plugin="Analysis/Measure/Localization Statistics", values={"precision_fit": "none"})])
 project.evaluate()
 
@@ -239,6 +254,15 @@ square and a polygon the distance to the nearest edge.  A click on a tile's
 edge in the file image (also within 6 pixels) jumps to that tile; a click
 inside a tile just centres the zoom.
 
+**A line's numbers.**  A line from $(x_0, y_0)$ to $(x_1, y_1)$ has the
+angle $\mathrm{atan2}(y_1 - y_0, x_1 - x_0)$ in degrees, from $-180$ to
+$180$, counted from $+x$ towards $+y$ -- SMAP's convention.  The images show
+$y$ downwards, so a positive angle turns clockwise on the screen.  Its length
+is $\sqrt{(x_1 - x_0)^2 + (y_1 - y_0)^2}$ in nm.  Where a step already
+writes a column of the same name, the line's is called
+`annotation.<name>_angle_deg`.  An old file's one *direction* opens as the
+line called `direction`, and its stored results stay current.
+
 **Many ROIs.**  Thousands of ROIs -- every [cluster](plugin:Panels/Glossary)
 (localizations lying closer to each other than to the rest) of a cell, made by
 [Segment regions](plugin:Analysis/Regions/Segment regions) from `cluster_id` -- cost what is on
@@ -264,7 +288,7 @@ the result is stored with a signature, a hash of
   names, and the rounded positions of up to 512 localizations spread through
   it, so that a drift correction or a refit changes it and a rename does not;
 * the geometry: the centre, and the global shape and size or the ROI's own
-  polygon, and the direction;
+  polygon, and its lines, since a step may read them;
 * the layer's filter ranges, whether blinks are merged, and the merge
   settings when they are;
 * the step's plugin, its version and all its parameters, but not the name of
@@ -319,7 +343,8 @@ when included, grey when excluded and green when selected.
 ### ROI
 The selected ROI or the draft, as wide as the Regions tab's *ROI view* (three ROI
 sizes by default); the wheel here changes that width for all ROIs.  A click
-moves a draft.  It is also where *Polygon* and *Direction* are drawn.
+moves a draft, and a click on one of the ROI's lines chooses it.  It is
+also where *Polygon* and *Draw line* are drawn.
 
 ### Tiles
 Covers the file with a grid of squares of the size beside it and puts the
@@ -328,7 +353,7 @@ step to the previous and next tile.  A tile about ten times the size of a
 structure keeps each step to a few dozen ROIs.
 
 ### Add
-Stores the draft as an ROI, with its polygon and direction if it has them.
+Stores the draft as an ROI, with its polygon and lines if it has them.
 Enter does the same.
 
 ### Remove
@@ -342,7 +367,7 @@ brings a removed ROI back under its own number.
 ### Undo ROI edit
 Takes back the last edit of the ROIs: a segmenter's run (all the ROIs it
 added, and any it replaced), an ROI added, removed, included or excluded,
-an outline or a direction.  Ctrl+Z in this window does the same.  The button
+an outline, a line drawn, reversed or cleared.  Ctrl+Z in this window does the same.  The button
 names the edit it would undo -- *Undo remove ROI 3*, *Undo Density Peaks* --
 where the main window's *Edit > Undo* names a change of the table (*Undo
 RCC*).  This is the ROI manager's own undo, apart
@@ -365,15 +390,28 @@ Click once per vertex in the ROI image; clicking near the first vertex
 again, after at least three, closes the outline, and Escape abandons it.  The ROI's centre moves to the
 mean of the vertices.  On a draft, the outline goes with it when it is added.
 
-### Direction
-Two clicks, the start and then the end.  The arrow is stored with the ROI
-and handed to the per-region steps; it does not turn the image or the ROI.
-
 ### Clear shape
 Back to the circle or square of the Regions tab.
 
+### line
+Which of the line names *Draw line*, *Reverse* and *Clear line* act on.
+The list holds the project's names, and any name the shown ROI has a line
+of besides.  Shift+L chooses the next one; a click on a line in the ROI
+image chooses that one.
+
+### Draw line
+Two clicks in the ROI image, the start and then the end (L).  Drawing a
+line the ROI already has replaces it.  A line does not turn the image or
+the ROI.  It goes into the ROI's signature, so drawing one puts the ROI's
+results out of date, as moving the ROI would.
+
+### Reverse
+Swaps the chosen line's start and end (R): its angle turns by 180°, its
+length stays.  For a line drawn the wrong way round, when the direction
+matters, as for averaging ROIs.
+
 ### Clear line
-Removes the direction.
+Removes the chosen line from the ROI.
 
 ### show in the 2D view
 Off by default.  Ticked, selecting an ROI centres the main picture on it, at the
@@ -399,6 +437,12 @@ One list a line: a name, a colon, and its keywords separated by commas
 list.  Saved with the ROIs.  An ROI keeps a keyword its list no longer has,
 so a list rewritten by mistake loses nothing already annotated.
 
+### line names
+The names an ROI's lines are drawn under, separated by commas
+(`direction, axis`).  Each is the start of two column names, so spaces
+become `_` and other signs are dropped.  Saved with the ROIs.  Removing a
+name keeps the lines already drawn under it.
+
 ## Differences from SMAP
 
 Based on SMAP's ROI manager, the *site explorer*
@@ -417,16 +461,19 @@ and a list of evaluators with a tab each are its design.
   the signature of its data, geometry, filters and parameters, results that
   no longer match are marked and left out of the table, and only the
   step being looked at is run on selection.
-* **Directions, not rotations.**  SMAP can turn a site by an angle.  Here a
-  direction is recorded for the per-region steps, and the image is not turned.  An
-  ROI can have its own polygon outline.
+* **Named lines, not rotations.**  SMAP can turn a site by an angle, and
+  has two fixed lines per site, *line 1* and *line 2*, each with a button to
+  reverse it.  Here a site has any number of lines, each under a name the
+  project defines, and the image is not turned.  The angle is SMAP's,
+  `atan2(dy, dx)` in degrees; the lines' angles and lengths are columns of
+  the results table, where SMAP keeps them in the site's annotation for
+  evaluators to read.  An ROI can have its own polygon outline.
 * **Annotation lists.**  SMAP has four lists, loaded from a text file, each
   a list box, with the arrow keys moving between lists and entries.  Here the
   lists are written in the window, as many as wanted, with a name each, and
   saved with the ROIs; a number key gives a keyword, and the keywords are
   columns of the results table.
-* **Not ported.**  SMAP's free comment and its two annotation lines per
-  site.  Its sorting and filtering of sites are the plugins
+* **Not ported.**  SMAP's free comment.  Its sorting and filtering of sites are the plugins
   [Sort ROIs](plugin:Analysis/Regions/Sort ROIs) and
   [Filter ROIs](plugin:Analysis/Regions/Filter ROIs).
 
