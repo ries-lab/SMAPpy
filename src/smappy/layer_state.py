@@ -742,7 +742,8 @@ def snapshot_layers(layers) -> Tuple[LayerSnapshot, ...]:
 
 
 def render_panels(layers: Sequence[LayerSnapshot], fov: FieldOfView,
-                  panels: Sequence = ("overlay",)
+                  panels: Sequence = ("overlay",), planes: Optional[dict] = None,
+                  draw: Optional[Callable] = None
                   ) -> Tuple[List[np.ndarray], np.ndarray]:
     """An RGB image per panel on ``fov``, and the summed intensity planes.
 
@@ -751,6 +752,12 @@ def render_panels(layers: Sequence[LayerSnapshot], fov: FieldOfView,
     whatever the panels, so the overlay of side-by-side panels is exactly
     their sum.  A panel of a layer that is not there, or not visible, is
     black.  This is the whole render, and runs on any thread.
+
+    ``planes``, a dict, is given each layer's `RenderedImage` by position:
+    what an export of grey intensities per layer reads (`smappy.picture`).
+    ``draw(layer, fov)`` renders one layer as ``(rgb, planes)`` instead of
+    `LayerSnapshot.image` -- the 3D view's projection -- or returns None to
+    leave it out; the panels are put together the same way either way.
     """
     images = {}
     total = np.zeros((fov.ny, fov.nx, 3), np.float32)
@@ -760,11 +767,19 @@ def render_panels(layers: Sequence[LayerSnapshot], fov: FieldOfView,
     for i, layer in enumerate(layers):
         if not layer.visible:
             continue
+        if draw is None:
+            image, rendered = layer.image(fov, white_background=False)
+        else:
+            drawn = draw(layer, fov)
+            if drawn is None:
+                continue
+            image, rendered = drawn
         white = layer.display.white_background
         white_any = white_any or white
-        image, rendered = layer.image(fov, white_background=False)
         total += image
         weight += rendered.weight
+        if planes is not None:
+            planes[i] = rendered
         if i in wanted:
             image = np.clip(image, 0, 1)
             images[i] = luts.on_white(image) if white else image

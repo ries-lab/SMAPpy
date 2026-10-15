@@ -179,8 +179,8 @@ def make(d) -> None:
     from PySide6.QtCore import QPoint
     save_menu.popup(save.mapToGlobal(QPoint(0, save.height())))
     d.settle()
-    d.shot("Save keeps a PNG as you see it, or renders a TIFF at a pixel size "
-           "you choose: in colour, or as intensities to measure.",
+    d.shot("Save keeps a PNG as you see it. Save image renders it again at "
+           "a pixel size you choose, for a figure or to measure.",
            spot=[d.rect(save_menu)], zoom=d.around(save_menu, 800))
     save_menu.close()
     d.settle()
@@ -252,7 +252,7 @@ def make(d) -> None:
            "exactly what is there.</li>"
            "<li><b>Contrast, LUT, white background:</b> how it looks, never "
            "what it is.</li>"
-           "<li><b>Save:</b> a PNG as shown, or a TIFF at a chosen pixel size.</li>"
+           "<li><b>Save:</b> a PNG as shown, or Save image at a chosen pixel size.</li>"
            "<li><b>3D view:</b> the same layers, turned, with a slab.</li></ul>",
            say="That is rendering. Next: plugins, which measure what is drawn.")
 

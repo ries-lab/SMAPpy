@@ -372,56 +372,194 @@ class ExportLocalizations(Plugin):
         return Result(text=text, written=str(written), settings=settings)
 
 
+# The picture's choices, as `smappy.picture` names them; written out here so
+# that discovery and the form need nothing imported
+_WHAT = (("view", "as the view"), ("composite", "composite only"),
+         ("layers", "each layer, colour"), ("layers grey", "each layer, grey"),
+         ("intensity", "intensity, 32-bit"))
+_REGIONS = (("view", "the view"), ("roi", "the ROI"), ("all", "everything"))
+IMAGE_PATH = "File/Export/Image"
+
+
 @dataclass
 class ExportImageSettings:
     path: str = param("", label="file", kind="save_file",
                       file_filter="PNG (*.png);;TIFF (*.tif);;JPEG (*.jpg)",
                       help="the picture; its extension (.png, .tif, .jpg) is its format")
-    pixelsize_nm: float = param(10.0, label="pixel", unit="nm", min=0.01,
-                                help="the rendered pixel, in the table's units")
+    what: str = param("view", choices=_WHAT,
+                      help="the panels as the window shows them, the layers "
+                           "added up, a file per layer, or the summed intensity "
+                           "as numbers (a TIFF)")
+    region: str = param("view", label="area", choices=_REGIONS,
+                        help="what the window shows, the drawn ROI's box, or "
+                             "all the data")
+    pixelsize_nm: Optional[float] = param(None, label="pixel", unit="nm", min=0.01,
+                                          help="the picture's pixel; auto: as "
+                                               "the window displays it")
+    scale_bar: bool = param(True, label="scale bar",
+                            help="a bar of a round length, bottom right")
+    scale_bar_nm: Optional[float] = param(None, label="bar length", unit="nm", min=0.0,
+                                          help="auto: a round fifth of the width, "
+                                               "as the window's")
+    colour_bars: bool = param(True, label="colour bars",
+                              help="the colour scale of each layer coloured by "
+                                   "a column, top right")
+    labels: bool = param(True, label="labels",
+                         help="each panel's or layer's name, top left")
+    view: str = param("2D", label="window", choices=(("2D", "2D picture"),
+                                                     ("3D", "3D view")),
+                      help="which window's picture: the 3D view's is its "
+                           "projection")
+
+
+def image_settings_for(session, view: str = "2D", path: str = "",
+                       **values) -> ExportImageSettings:
+    """*Export Image* filled from a window: what its *Save image...* opens
+    with, and what its quick PNG writes (``path`` given)."""
+    settings = ExportImageSettings(path=path, view=view, **values)
+    if not settings.path and session is not None and session.path:
+        p = Path(session.path)
+        suffix = "_3d" if view == "3D" else ""
+        settings.path = str(p.with_name(f"{p.stem}{suffix}_image.png"))
+    return settings
 
 
 @register("File/Export/Image")
 class ExportImage(Plugin):
-    """Render the localizations to a picture file, with no window."""
+    """Save the picture as the window shows it -- its layers, panels, scale
+    bar and colour bars -- at a pixel size, with how it was made written into
+    the file."""
 
     Settings = ExportImageSettings
     changes_locs = False
     logged = True          # which picture came from this table, and how
     # 2: the colours scaled to 8 bits (the file was black); the layer's
-    #    grouped table when it shows blinks; an empty selection refused
-    version = "2"
+    #    grouped table when it shows blinks; an empty selection refused.
+    # 3: the window's picture -- every visible layer, the panels, the scale
+    #    bar and colour bars -- not one layer's; each layer, or the summed
+    #    intensity; the area and the settings written into the file
+    version = "3"
+
+    def describe(self, ctx: Optional[Context], settings: ExportImageSettings) -> FormState:
+        from ..picture import auto_bar
+        session = ctx.session if ctx is not None else None
+        frames = getattr(session, "view_frames", {}) or {}
+        frame = frames.get(settings.view)
+        frame = frame() if callable(frame) else None
+        hints, notice = {}, None
+        if frame is not None:
+            hints["pixelsize_nm"] = round(frame.pixelsize, 3)
+        try:
+            fov = _image_fov(session, frame, settings)
+            hints["scale_bar_nm"] = auto_bar(fov.x1 - fov.x0)
+            if settings.what != "intensity":
+                notice = Notice(f"{fov.nx} x {fov.ny} pixels per panel", kind="info")
+        except Exception:
+            pass
+        looks = settings.what != "intensity"
+        if settings.what == "intensity" and Path(settings.path).suffix.lower() not in (
+                ".tif", ".tiff", ""):
+            notice = Notice("the intensity is numbers: written as a TIFF", kind="info")
+        return FormState(
+            hints=hints, notice=notice,
+            active={"scale_bar": looks, "scale_bar_nm": looks and settings.scale_bar,
+                    "colour_bars": looks and settings.what != "layers grey",
+                    "labels": looks},
+            shown={"view": "3D" in frames})
 
     def run(self, ctx: Context, settings: ExportImageSettings) -> Result:
-        from ..render import save_image
-        if not settings.path:
-            raise ValueError("choose where to save")
-        if not len(ctx.locs):
-            raise ValueError("nothing to render")
-        # the picture should look like the window does: the layer's render
-        # and display settings, and its table -- the grouped one when the
-        # layer shows blinks, which drawn ungrouped was a localization per
-        # frame -- cut to what it selects
-        render = display = None
+        written = export_image(ctx, settings)
+        if not written:
+            raise ValueError("nothing to save")
+        names = ", ".join(p.name for p in written)
+        return Result(text=f"written: {names}", written=str(written[0]),
+                      data={"files": [str(p) for p in written]}, settings=settings)
+
+
+def _image_fov(session, frame, settings: ExportImageSettings):
+    from ..picture import frame_fov
+    roi = getattr(session, "roi", None)
+    everything = session.full_view() if session is not None and session.layers else None
+    return frame_fov(frame, settings.region, settings.pixelsize_nm,
+                     roi_bounds=roi.bounds if roi is not None else None,
+                     everything=everything)
+
+
+def export_image(ctx: Context, settings: ExportImageSettings):
+    """Render and write the picture *Export Image* describes; the paths.
+
+    The one function behind the plugin and both windows' *Save*
+    (`image_pictures`), each picture with how it was made written into it.
+    """
+    from ..picture import describe_view, description_text, file_paths, write_picture
+    if not settings.path:
+        raise ValueError("choose where to save")
+    pictures, layers, frame = image_pictures(ctx, settings)
+    written = []
+    for picture, path in zip(pictures, file_paths(settings.path, pictures)):
+        ctx.report(f"writing {path.name}...")
+        text = description_text(describe_view(ctx.session, layers, settings,
+                                              picture, frame))
+        written.append(write_picture(picture, path, text))
+    return written
+
+
+def image_pictures(ctx: Context, settings: ExportImageSettings):
+    """The pictures *Export Image* describes, the layer snapshots they were
+    drawn from and the window's frame: ``(pictures, layers, frame)``.
+
+    The layers are a snapshot of the session's (`snapshot_layers`, what the
+    windows render), framed by the window's `ViewFrame`
+    (`Session.view_frames`).  Without a session -- a script -- the context's
+    table is the one layer, drawn with the default settings, over its
+    selection.  What the render window copies is the first picture.
+    """
+    from ..layer_state import LayerSnapshot, snapshot_layers
+    from ..picture import frame_fov, render_picture
+    from ..render import RenderSettings
+    session = ctx.session
+    frame = None
+    if session is not None and session.layers:
+        frames = getattr(session, "view_frames", {}) or {}
+        maker = frames.get(settings.view)
+        frame = maker() if maker is not None else None
+        if settings.view == "3D" and (frame is None or frame.projection is None):
+            raise ValueError("the 3D view's picture needs the 3D window open")
+        from ..view3d import snapshot_3d
+        layers = (snapshot_3d(session.layers) if settings.view == "3D"
+                  else snapshot_layers(session.layers))
+        fov = _image_fov(session, frame, settings)
+    else:
         locs, selection = ctx.table()
-        if ctx.session is not None and ctx.session.layers:
-            index = ctx.layer
-            if not 0 <= index < len(ctx.session.layers) or \
-                    ctx.session.layers[index].is_image:
-                index = ctx.session.first_locs_layer()
-            layer = ctx.session.layers[index]
-            render, display = layer.state.settings, layer.get_display()
-        if not len(selection):
-            # an empty selection drew the whole table, which is not what the
-            # window shows
+        if not len(locs):
+            raise ValueError("nothing to render")
+        mask = np.asarray(selection.mask, bool)
+        layers = (LayerSnapshot(name="localizations", locs=locs, mask=mask,
+                                settings=RenderSettings()),)
+        x, y = RenderSettings().axes.coordinates(locs, np.flatnonzero(mask))
+        if not len(x):
+            raise ValueError("nothing selected to render")
+        everything = ((float(np.min(x)), float(np.max(x))),
+                      (float(np.min(y)), float(np.max(y))))
+        fov = frame_fov(None, "all", settings.pixelsize_nm, everything=everything)
+    shown = [l for l in layers if l.visible]
+    if not shown:
+        raise ValueError("no layer is visible")
+    if all(l.mask is not None and not l.mask.any() for l in shown if not l.is_image):
+        if not any(l.is_image for l in shown):
+            # an empty selection used to draw the whole table, which is not
+            # what the window shows
             raise ValueError("nothing selected to render: the filter or the "
                              "ROI leaves no localization")
-        written = save_image(locs, settings.path,
-                             pixelsize=settings.pixelsize_nm,
-                             settings=render, display=display,
-                             select=selection.mask)
-        return Result(text=f"written to {written}", written=str(written),
-                      settings=settings)
+    panels = frame.panels if frame is not None else ("overlay",)
+    pictures = render_picture(
+        layers, fov, what=settings.what, panels=panels,
+        stacked=frame.stacked if frame is not None else False,
+        scale_bar=settings.scale_bar, scale_bar_length=settings.scale_bar_nm or None,
+        colour_bars=settings.colour_bars, labels=settings.labels,
+        projection=frame.projection if frame is not None else None,
+        slab=frame.slab if frame is not None else None)
+    return pictures, layers, frame
 
 
 # ----------------------------------------------------------------- simulate

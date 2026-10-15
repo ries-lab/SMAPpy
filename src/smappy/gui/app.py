@@ -335,6 +335,9 @@ class ControlWindow(QMainWindow):
         # Transform with given settings: Register layers' *apply*, with the
         # named transformation it measured (`transform.settings_for`)
         session.window_openers["transform"] = self.open_transform
+        # the picture windows' *Save image...*: Export Image, set to the
+        # window it was asked from (`plugins.file.image_settings_for`)
+        session.window_openers["export image"] = self.open_export_image
         help_ = _add_menu(self.menuBar(), "Help", self)
         self._action(help_, "Plugin documentation", None, self.show_plugin_docs)
         help_.addSeparator()
@@ -857,6 +860,23 @@ class ControlWindow(QMainWindow):
         window = self.open_plugin_window(PATH)
         if window is not None and settings is not None:
             window.panel.form.set(settings)
+
+    def open_export_image(self, settings=None) -> None:
+        """*Export Image* in its window, for the picture window ``settings``
+        names.  Opened the first time it takes them whole; after that it
+        keeps what was chosen in it -- what to save, the bars, the pixel --
+        and takes only the window, and the file if it had none."""
+        from ..plugins.file import IMAGE_PATH
+        fresh = IMAGE_PATH not in self._plugin_windows
+        window = self.open_plugin_window(IMAGE_PATH)
+        if window is None or settings is None:
+            return
+        if not fresh:
+            current = window.panel.form.value()
+            current.view = settings.view
+            current.path = current.path or settings.path
+            settings = current
+        window.panel.form.set(settings)
 
     def open_plugin_window(self, path: str):
         """One plugin in a window of its own, without pinning it to a tab.

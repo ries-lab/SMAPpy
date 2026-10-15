@@ -65,8 +65,8 @@ def test_colouring_by_a_column_shows_its_scale_and_intensity_shows_none(app):
     assert title == "layer 1: z_nm"
     assert top == f"{hi:.4g} nm" and bottom == f"{lo:.4g} nm"
     # a large count is written out, not as 2e+04
-    from smappy.gui.render_view import _bar_number
-    assert _bar_number(20000.0) == "20000" and _bar_number(-299.3456) == "-299.3"
+    from smappy.picture import bar_number
+    assert bar_number(20000.0) == "20000" and bar_number(-299.3456) == "-299.3"
     # the range typed in the tab is the range on the bar
     tab.color_lo.setText("-100")
     tab.color_hi.setText("250")

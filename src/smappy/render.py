@@ -828,7 +828,7 @@ def save_image(locs, path, pixelsize: float = 10.0,
     from pathlib import Path as _Path
 
     try:
-        from PIL import Image
+        import PIL  # noqa: F401
     except ImportError:            # pragma: no cover - depends on the install
         raise ImportError("save_image writes the file with Pillow: "
                           "pip install pillow") from None
@@ -841,17 +841,29 @@ def save_image(locs, path, pixelsize: float = 10.0,
         x, y = (settings or RenderSettings()).axes.coordinates(
             locs, getattr(select, "indices", select))
         fov = FieldOfView.around(x, y, pixelsize=pixelsize, margin=margin)
-    rendered = render_locs(locs, fov, settings, display, select=select)
-    rgb = (display or DisplaySettings()).apply(rendered)
+    # drawn and written as *Export Image* draws and writes the window's
+    # picture (`smappy.picture`): one layer, nothing over it
+    from .layer_state import LayerSnapshot
+    from .picture import render_picture, write_picture
+    layer = LayerSnapshot(name="localizations", locs=locs, mask=_select_mask(select, len(locs)),
+                          settings=settings or RenderSettings(),
+                          display=display or DisplaySettings())
+    (picture,) = render_picture((layer,), fov, what="composite", scale_bar=False,
+                                colour_bars=False, labels=False)
+    return write_picture(picture, _Path(path))
 
-    path = _Path(path)
-    # the display's colours are in [0, 1]; cast as they were, every pixel was
-    # 0 or 1 of 255 and the file was black
-    rgb = np.asarray(rgb)
-    if np.issubdtype(rgb.dtype, np.floating):
-        rgb = np.round(np.clip(rgb, 0.0, 1.0) * 255.0)
-    Image.fromarray(rgb.astype(np.uint8)).save(path)
-    return path
+
+def _select_mask(select, n: int) -> np.ndarray:
+    """A selection as `render_locs` takes it -- None, a filter, a mask or
+    rows -- as a mask."""
+    if select is None:
+        return np.ones(n, bool)
+    select = np.asarray(getattr(select, "mask", select))
+    if select.dtype == bool:
+        return select
+    mask = np.zeros(n, bool)
+    mask[select.astype(np.int64)] = True
+    return mask
 
 
 # ------------------------------------------------------------------- tracks

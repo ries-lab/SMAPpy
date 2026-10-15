@@ -263,7 +263,7 @@ channel *Check overlay* (C3).  AssignColors for more than 2 colours (C4):
 | **5c** ✅ | **Fiducial drift** (D2): bright long-lived tracks, one spline dx, dy (dz), a `Drift` | M | - |
 | **5d** ✅ | **Magnification over time in COMET** (D3), discussed with Jonas first | M-L | - |
 | **5e** ✅ | **Stability: vibrations** (A6): `Analysis/Measure/Stability`, approaches (vibrations now; long-term and dual-channel drift later), per bead track, differential, zoomed trace, spectrum, cumulative RMS, peaks; figures as options | M | - |
-| **6a** | **Export Image**: one renderer of the view for the plugin and the window's *Save*; as the view, composite, or each layer (in colour or grey), or float intensity; scale bar, colour bars, labels; settings in the file | M | - |
+| **6a** ✅ | **Export Image**: one renderer of the view for the plugin and the window's *Save*; as the view, composite, or each layer (in colour or grey), or float intensity; scale bar, colour bars, labels; settings in the file | M | - |
 | **6b** | **Export Stack**: movies (step, window, cumulative) and z-stacks; the raw frames beside; a *tail* for tracks; TIFF, MP4 (H.264, target quality, size shown), GIF | M | 6a |
 | **6c** | **Voronoi render mode** (SharpViSu) | S | - |
 | **6d** ✅ | **Process image**: background subtraction, local contrast normalisation of an image layer | S | - |
@@ -590,6 +590,31 @@ channel *Check overlay* (C3).  AssignColors for more than 2 colours (C4):
   the session), the original's pixel size, corner and placement; never the
   original replaced.  `smappy/image_processing.py`; pinned in the Analysis
   tab.
+
+* **Step 6a** (2026-10-15): *File/Export/Image* (version 3) is the one
+  renderer of the view, `smappy.picture.render_picture` over the window's
+  own render (`layer_state.render_panels`, which gained `planes` and a
+  `draw` for the 3D projection).  *What*: as the view (the panels as laid
+  out, a 2-pixel grey line between), the composite, each visible layer in
+  its colour or as grey intensity (`_layer1`, ...), or the summed intensity
+  as a float32 TIFF.  Drawn over it, each a tick: the scale bar (auto: the
+  window's round fifth of the width, or set; length / pixel in pixels;
+  none on custom axes), the colour bars of layers coloured by a column
+  (`picture.colour_scales`, which the window's bars now use too), the
+  labels; text in DejaVu Sans, sized with the picture.  *Area*: the view,
+  the ROI's box or everything; *pixel* auto = as displayed.  The windows
+  hand the session a `ViewFrame` (`Session.view_frames`, "2D" and "3D").
+  PNG, TIFF, JPEG; the pixel size in the resolution tags (TIFF per cm, as
+  SMAP; PNG pHYs), and the files, merging and per layer its filter, files,
+  grouping and render and display settings as YAML in the TIFF's
+  description, the PNG's *Description* text or the JPEG's comment
+  (`picture.read_description`).  The render window's *Save*: *PNG as
+  displayed...* is the plugin at its defaults (Copy the same picture),
+  *Save image...* opens the plugin filled from the view (the GUI's
+  `"export image"` window); the TIFF entries went.  The 3D view's *Save*:
+  its PNG keeps the screen's pixels (the GPU looks), *Save image...* the
+  plugin on its projection, drawn on the CPU.  `render.save_image` writes
+  through it as well.
 
 ### Start here
 
