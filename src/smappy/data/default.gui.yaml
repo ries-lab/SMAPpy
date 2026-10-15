@@ -26,6 +26,7 @@ tabs:
   instances:
   - plugin: Analysis/Drift/COMET
   - plugin: Analysis/Drift/RCC
+  - plugin: Analysis/Drift/Fiducials
   - plugin: Analysis/Dual-colour/Assign colours
   - plugin: Analysis/Measure/Ground Truth
   - plugin: Analysis/Measure/Line Profile

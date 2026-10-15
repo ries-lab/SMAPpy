@@ -19,11 +19,14 @@ fitted from its frames by changing nothing but the output:
 
 Single-particle tracks are a model of their own (`tracks`): Brownian
 particles with diffusive states and blinking, the truth in ``track_id_true``.
+Fiducial beads too (`beads`): bright, still but for the drift, with gaps and
+late arrivals, the truth in ``bead_true``.
 
 In the package rather than in ``scripts/`` because it is also a plugin
 (``File/Simulate/Blinking Structure``): something to try the whole pipeline
 on without a microscope.
 """
+from .beads import simulate_beads, with_beads
 from .camera import (ASTIGMATISM, ISOLATED_NM, astigmatic_sigmas, bead_stacks,
                      camera_frames, camera_truth, dual_bead_stacks, dual_camera_frames,
                      dual_transformation, render)
@@ -45,4 +48,5 @@ __all__ = [
     "LocalizationOutputSettings", "OpticsSettings", "SimulationSettings",
     "StructureSettings", "Labels", "Structure", "load_structure", "presets",
     "TrackSimulationSettings", "jump_nm", "simulate_tracks", "spacing_nm",
+    "simulate_beads", "with_beads",
 ]

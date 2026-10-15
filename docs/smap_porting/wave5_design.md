@@ -63,6 +63,8 @@ and ChangeCamPixelsize.
   (first frame / last frame / as now -- read what "as now" is in
   `drift.py`) to the `Drift` result and to COMET and RCC (and 5c uses it).
   Bump their versions if the default changes numbers (it should not).
+  *Fiducials* (5c, done first) fixes its curve to zero at the first frame
+  (`fiducials.fit_drift`, the constraint row): give it the same choice.
 
 Tests: each typed operation and their composition against hand-computed
 coordinates; a `_2ct.h5` applied to the second channel of a simulated

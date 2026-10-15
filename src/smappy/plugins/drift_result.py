@@ -1,6 +1,6 @@
-"""What the two drift plugins keep in the file, and how they draw it again.
+"""What the drift plugins keep in the file, and how they draw it again.
 
-COMET and RCC differ in how they find the curve and in nothing else afterwards,
+COMET, RCC and the fiducial fit differ in how they find the curve and in nothing else afterwards,
 so what is worth saving -- the curve itself -- and how it is drawn belong to
 neither of them.  The mixin is what a plugin adds to say "my result is a
 drift", and is the model for any other tool with a figure worth keeping.
@@ -22,7 +22,10 @@ class KeepsDrift:
 
     def restore(self, saved: Dict[str, Any]) -> Optional[Result]:
         try:
-            drift = Drift.from_dict(saved.get("drift") or {})
+            # the settings as the plugin's own class: COMET's, or the
+            # fiducial fit's; RCC keeps none
+            drift = Drift.from_dict(saved.get("drift") or {},
+                                    getattr(self, "Settings", None))
         except (TypeError, ValueError):
             return None
         if not len(drift):

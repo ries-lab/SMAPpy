@@ -402,20 +402,23 @@ class Drift:
                                     else [int(w) for w in self.flagged_windows])}
 
     @classmethod
-    def from_dict(cls, saved: dict) -> "Drift":
+    def from_dict(cls, saved: dict, settings_class=None) -> "Drift":
         """Read back what `to_dict` wrote.
 
-        The settings come back as a `DriftSettings` when they still fit one:
-        a curve saved by a newer version may carry a field this one has never
-        heard of, and that is a reason to drop the settings, not the curve.
+        The settings come back as a ``settings_class`` (default
+        `DriftSettings`, COMET's; the fiducial fit passes its own) when they
+        still fit one: a curve saved by a newer version may carry a field
+        this one has never heard of, and that is a reason to drop the
+        settings, not the curve.
         """
+        settings_class = settings_class or DriftSettings
         values = saved.get("settings")
         settings = None
         if isinstance(values, dict):
-            known = {f.name for f in dataclass_fields(DriftSettings)}
+            known = {f.name for f in dataclass_fields(settings_class)}
             try:
-                settings = DriftSettings(**{k: v for k, v in values.items()
-                                            if k in known})
+                settings = settings_class(**{k: v for k, v in values.items()
+                                             if k in known})
             except TypeError:
                 settings = None
         flagged = saved.get("flagged_windows")
