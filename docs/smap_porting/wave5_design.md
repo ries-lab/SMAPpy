@@ -7,8 +7,8 @@ its tests and its page, run `--slow`, update the plan's *Done* list,
 commit, push, open a PR and merge it.
 
 Topics: **1. coordinates** (decided 2026-10-15, below) · **2. stability**
-(decided 2026-10-15, below) ·
-3. rendering and movies · 4. figures of regions · 5. LocMoFit and NPC
+(decided 2026-10-15, below) · **3. rendering and movies** (decided
+2026-10-15, below) · 4. figures of regions · 5. LocMoFit and NPC
 geometry · 6. MINFLUX.  AssignColors for more than two colours (C4) was
 found done: `assign_colors.py` takes up to six colours with both methods.
 
@@ -225,3 +225,102 @@ Tests: a simulated bead with a known sinusoidal vibration (frequency,
 amplitude) plus localization noise gives the peak and its amplitude, and
 the RMS; the differential mode cancels a vibration common to two beads;
 gaps are filled and counted.
+
+---
+
+## Topic 3: rendering and movies
+
+**What was there.**  Two ways to save a picture that share no code: the
+render window's *Save* menu (`gui/render_view.py`: PNG as displayed, the
+panels side by side; TIFF colour or 32-bit intensity of the visible layers
+re-rendered at a pixel size, the 3D view a copy of it) and *File/Export/
+Image* (one layer, with that layer's settings, not the composite).
+Neither draws a scale bar or a colour bar.  SMAP's *TifSaver* chose
+between "rendered image with scalebar", "rendered image", "layer 1-3 as
+RGB" and "layer 1 as grayscale", and wrote its full render settings into
+the TIFF's description.
+
+Order: 6a first; 6b after it; 6c and 6d any time.  Moved to topic 4: a
+movie per ROI (SMAP's mkMovieByFilter).  Later: a 3D movie, and 3D plus
+time, with key frames set by hand and interpolated between.
+
+### Step 6a -- Export Image, one renderer of the view
+
+One module-level function renders **what the window shows** -- the visible
+layers, the panels as they are arranged, on a field of view at a pixel size
+(`layer_state.render_panels`) -- with what is drawn over it.  *File/Export/
+Image* and the window's *Save* both call it; nothing renders a picture a
+second way.
+
+* **What**: as the view (panels side by side and the composite, as shown:
+  the suggested choice), the composite only, or **each layer as its own
+  file, in two ways**: in its colour, or grey intensity.  Or the summed
+  intensity as 32-bit float (for numbers, not looks).
+* **Drawn over it**, each shown or hidden: the **scale bar** (length auto or
+  set), the **colour bars** of layers coloured by a field, the panel
+  labels.
+* **Where and how fine**: the view, the drawn ROI or all of it; the pixel
+  size as displayed or set.  PNG, TIFF or JPEG.
+* **The picture says how it was made**, as SMAP's did: the pixel size in
+  the resolution tags, and the files, layers, render settings, filters and
+  grouping as text in the description (TIFF) or a text chunk (PNG).
+* **The window's *Save***: keeps a quick "PNG as displayed"; "Save
+  image..." opens the plugin's dialog filled from the view.  The 3D view's
+  *Save* the same.
+* Bump the plugin's version (it now exports the composite); its page
+  rewritten.
+
+Tests: the composite equals the window's render; each layer's file in
+colour and in grey; the scale bar's length in pixels is its length over the
+pixel size; the description round-trips the settings; the toolbar and the
+plugin give the same file.
+
+### Step 6b -- Export Stack: movies and z-stacks
+
+`File/Export/Stack`, built on 6a's renderer.  A movie and a z-stack are one
+operation: the view rendered while one coordinate moves in steps.
+
+* **Along frames** (SMAP's MovieRunningWindow): *step*, *window*,
+  *cumulative*.  **Along z** (the useful part of SMAP's volume3D): slices
+  of a thickness every step, z limited to a range.
+* **Layouts**: the view; or the **raw frames beside it** (SMAP's
+  BlinkingMoviePresentation: the camera on one side, the super-resolution
+  image building up on the other), which needs the frames the fit kept
+  (`rawframes`).
+* **Tracks** come through the *tracks* render mode (step 19b).  New here: a
+  *tail* for that mode -- the frames before "now" a track is drawn for -- so
+  a movie shows each track up to the current frame; without it a window
+  cuts each track to the window.
+* **Output, each a choice**: a TIFF stack (lossless, with the pixel size
+  and the step, for Fiji), **MP4 with H.264** (plays in slides and
+  browsers; through `imageio-ffmpeg`, an optional extra named by the form
+  when missing) with a **target quality** and the **approximate file size**
+  shown before the run, and GIF (pillow).  A frame rate; the time or z
+  written on each frame, optionally.
+* A preflight with the number of frames and the time it will take.
+
+Tests: a stack along frames has the expected number of frames and each
+equals the 6a render of its window; cumulative grows; along z each slice
+holds only its z range; a track with a tail; MP4 and GIF written (skipped
+when the encoder is missing).
+
+### Step 6c -- Voronoi render mode
+
+A sixth render mode, *voronoi* (SharpViSu, Andronov et al. 2016; SMAP's
+VoronoiRenderer): each pixel coloured by the density (1 / area) of the
+Voronoi cell it lies in, from Neighbourhood's `voronoi_areas` (open cells
+at the edge left empty).  A raster, so exports, overlays and movies work
+unchanged.  The Render tab's page gets the mode with a figure.
+
+Tests: a uniform field gives a flat image at its density; a dense cluster
+is brighter by its density ratio.
+
+### Step 6d -- Process image
+
+`Analysis/Process/Process image` on an image layer (SMAP's Tiff_remove_BG):
+**background subtraction** (a Gaussian high-pass or rolling ball; SMAP's
+wavelet as an option) and **local contrast normalisation**, the result a
+new image layer beside the original.  More operations later.
+
+Tests: a constant plus a slope is removed; a spot on a background keeps its
+height.
