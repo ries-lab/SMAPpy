@@ -5,7 +5,7 @@ import pytest
 
 from smappy.locs import Localizations
 from smappy.group import GroupSettings
-from smappy.roi_manager import DensityPeaks, Histograms
+from smappy.roi_manager import Histograms
 from smappy.roi_manager.pipeline import Step, errors, merged_values
 from smappy.plugins.roi import HistogramSettings, histograms
 from test_roi_session import rois_of, set_bounds              # noqa: E402

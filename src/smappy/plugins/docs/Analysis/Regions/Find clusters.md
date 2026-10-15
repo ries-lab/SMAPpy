@@ -43,7 +43,7 @@ cluster has).  With them
   keeps a row of numbers per cluster, which the block's *write values* or
   [Regions to column](plugin:Analysis/Regions/Regions to column) puts back
   onto the localizations, to filter or colour by;
-* [Column to ROIs](plugin:Analysis/Regions/Column to ROIs) makes an
+* [Segment regions](plugin:Analysis/Regions/Segment regions), *from an id column*, makes an
   [ROI](plugin:Panels/Glossary) (region of interest) of each cluster, to look at, review and annotate in the
   [ROI manager](plugin:Panels/ROI manager).
 

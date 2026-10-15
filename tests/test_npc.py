@@ -15,6 +15,15 @@ from smappy.simulate.settings import (BlinkingSettings, LabellingSettings,
                                       SimulationSettings, StructureSettings)
 from test_roi_session import rois_of                          # noqa: E402
 
+SEGMENT = "Analysis/Regions/Segment regions"
+
+
+def ring(replace=True, **values):
+    """Segment regions' settings for the ring template with these values."""
+    from smappy.plugins.segment import SegmentSettings
+    return SegmentSettings(method="ring", ring=NPCSegmentSettings(**values),
+                           replace=replace)
+
 R = 53.7
 
 
@@ -122,7 +131,7 @@ def test_the_far_test_is_off_without_a_precision():
 
 
 def test_rejected_candidates_become_unused_rois_only_when_asked():
-    from smappy.plugins.npc import NPCSegment
+    from smappy.plugins.segment import SegmentRegions
     rng = np.random.default_rng(3)
     good = corners_at(range(8), rng, center=(1000, 1000), sd=4)
     filled = disc(rng, center=(3000, 1000))
@@ -133,11 +142,12 @@ def test_rejected_candidates_become_unused_rois_only_when_asked():
     for keep, expected in ((False, 1), (True, 2)):
         project, source = rois_of(locs)
         file_id = source.id
-        found = project.find(file_id, plugin=NPCSegment(),
-                             settings=NPCSegmentSettings(keep_rejected=keep))
+        found = project.find(file_id, plugin=SegmentRegions(),
+                             settings=ring(keep_rejected=keep))
         assert len(found) >= expected and found[0].use
         assert np.hypot(*(np.asarray(found[0].center) - 1000)) < 3
-        assert found[0].origin["method"] == "Analysis/Regions/Find/NPC"
+        assert found[0].origin["method"] == SEGMENT
+        assert found[0].origin["segment"] == "ring"
         assert abs(found[0].origin["radius_nm"] - R) < 3
         assert all(not roi.use for roi in found[1:])
     assert all(roi.origin["failed"] for roi in found[1:])
@@ -270,7 +280,7 @@ def test_segment_evaluate_and_analyse_through_the_session():
     from smappy.chain import Block, Step as ChainStep
     session = Session(pores(0.5, seed=2))
     session.show_grouped(0, True)
-    found = plugins.get("Analysis/Regions/Find/NPC")()(ctx=session.context())
+    found = plugins.get(SEGMENT)()(ctx=session.context(), settings=ring())
     assert "pores of" in found.text and found.plots["checks"].panels == 3
     project = session.rois
     assert len(project.rois) == len(found.data["centers"]) > 140
@@ -359,7 +369,7 @@ def two_corner_counts():
     session = Session(pores(0.5, seed=2))
     session.show_grouped(0, True)
     project = session.rois
-    plugins.get("Analysis/Regions/Find/NPC")()(ctx=session.context())
+    plugins.get(SEGMENT)()(ctx=session.context(), settings=ring())
     project.evaluate([ChainStep(plugin="Analysis/Measure/NPC Corners")])
     project.evaluate([ChainStep(plugin="Analysis/Measure/NPC Corners", label="strict",
                                values={"precision_nm": 12.0})])
@@ -435,11 +445,11 @@ def test_the_segmenter_replaces_only_its_own_pores_by_default():
     project = session.rois
     file_id = next(iter(project.sources))
     drawn = project.add_roi(file_id, (100.0, 100.0))
-    segment = plugins.get("Analysis/Regions/Find/NPC")
-    first = len(segment()(ctx=session.context()).rois)
-    kept = NPCSegmentSettings(replace=False)
+    segment = plugins.get(SEGMENT)
+    first = len(segment()(ctx=session.context(), settings=ring()).rois)
+    kept = ring(replace=False)
     assert len(segment()(ctx=session.context(), settings=kept).rois) == 0  # all suppressed
-    again = segment()(ctx=session.context())
+    again = segment()(ctx=session.context(), settings=ring())
     assert len(again.rois) == first
     assert len(project.rois) == first + 1 and drawn.id in project.rois
 
@@ -453,10 +463,10 @@ def test_a_replacing_preview_proposes_what_the_run_adds_and_changes_nothing():
     project = session.rois
     file_id = next(iter(project.sources))
     drawn = project.add_roi(file_id, (100.0, 100.0))
-    segment = plugins.get("Analysis/Regions/Find/NPC")()
-    first = segment(ctx=session.context()).rois
+    segment = plugins.get(SEGMENT)()
+    first = segment(ctx=session.context(), settings=ring()).rois
     before = set(project.rois)
-    settings = NPCSegmentSettings(replace=True)
+    settings = ring(replace=True)
     preview = segment.preview(session.context(), settings)
     proposed = preview.roi_preview
     assert preview.text.startswith("preview: ")
@@ -475,7 +485,7 @@ def test_the_analysis_says_when_the_layer_is_not_grouped():
     session = Session(pores(0.5, seed=4))
     session.show_grouped(0, False)
     project = session.rois
-    plugins.get("Analysis/Regions/Find/NPC")()(ctx=session.context())
+    plugins.get(SEGMENT)()(ctx=session.context(), settings=ring())
     project.evaluate([ChainStep(plugin="Analysis/Measure/NPC Corners")])
     result = plugins.get("Analysis/Regions/Summarize/NPC labelling efficiency")()(
         ctx=session.context())
@@ -507,7 +517,7 @@ def test_results_from_offers_the_evaluations_on_the_rois():
     assert entries(field) == [("", "auto")]                  # nothing yet
 
     project = session.rois
-    plugins.get("Analysis/Regions/Find/NPC")()(ctx=session.context())
+    plugins.get(SEGMENT)()(ctx=session.context(), settings=ring())
     project.evaluate([ChainStep(plugin="Analysis/Measure/NPC Corners")])
     session.changed("rois")
     assert entries(field) == [("", "auto (NPC Corners)"), ("NPC Corners", "NPC Corners")]

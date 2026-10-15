@@ -211,7 +211,7 @@ first sketch; where they differ, `wave2_design.md` wins.
 |---|---|---|---|---|
 | **9** | **Neighbourhood**: per localization, neighbours within r (local density), mean/median/min/max/quantile of a field within r, Voronoi cell density; written as recipe columns | `Analysis/Process/Neighbourhood` (module-level functions on a `cKDTree` and `scipy.spatial.Voronoi`) | M | densities of a simulated uniform field match the expected count; page with figures |
 | **10** ✅ | **Find clusters**: one plugin, an algorithm choice with one part per algorithm (only the selected one shown): DBSCAN (moved from `clusters.py`), Voronoi threshold (density from step 9, then connected cells), HDBSCAN if scikit-learn ≥ 1.3 is installed (an optional dependency, asked for at Run like uiPSF) | `Analysis/Regions/Find/Find clusters`; `Find/DBSCAN` removed | M | DBSCAN's tests pass through the new plugin; Voronoi finds simulated clusters; `docs/regions.md` ("Clusters", "The plugin tree") and CLAUDE.md's shape table updated; an old chain step `Regions/Find/DBSCAN` still loads (path alias) |
-| **11** | **Segment regions**: one plugin with presets, one part each, only the selected shown: NPC (moved from `npc.py`), Density Peaks (moved from `roi.py`); a `SegmenterPlugin` as now (Preview, *replace*, ROI undo). Templates such as CME and beads come later as further presets. | `Analysis/Regions/Find/Segment regions` | M–L | NPC and Density Peaks tests pass through it; `npc_analysis.chain.yaml` and the NPC tutorial use it; old paths alias; docs as in step 10 |
+| **11** ✅ | **Segment regions**: one plugin with presets, one part each, only the selected shown: NPC (moved from `npc.py`), Density Peaks (moved from `roi.py`); a `SegmenterPlugin` as now (Preview, *replace*, ROI undo). Templates such as CME and beads come later as further presets. | `Analysis/Regions/Find/Segment regions` | M–L | NPC and Density Peaks tests pass through it; `npc_analysis.chain.yaml` and the NPC tutorial use it; old paths alias; docs as in step 10 |
 | **12** ✅ | **Cluster shape**: area, convex hull, radius of gyration, density, elongation, as a `per_region` measurement (the statistics a block over `cluster_id` does not yet give) | `Analysis/Measure/Cluster shape` | S | known shapes return their numbers |
 
 Steps 10 and 11 share the old-path aliasing and the docs: do them
@@ -297,6 +297,16 @@ filters and zoom-ins are settled) · AssignColors for more than 2 colours (C4)
   `smappy-smlm[clusters]`, named by the form and the run when missing,
   with a preflight question.  DBSCAN reports % and stops, and runs on
   Neighbourhood's C++ cell search with union-find (2 M in 2 s, was 28 s).
+* **Step 11** (2026-10-15): *Analysis/Regions/Segment regions* replaces
+  `Find/NPC`, `Find/Density Peaks` and `Column to ROIs` (no aliases): one
+  `SegmenterPlugin` (`plugins/segment.py`), a *method* part each -- ring
+  template, density peaks, from an id column -- only the chosen one shown;
+  the code moved, the algorithms where they were, the tests on the new
+  path.  A *preset* (YAML in `data/segment_presets`, `NPC` shipped, the
+  user's under the config directory) fills the settings; each ROI's
+  `origin["segment"]` names its method, so *replace* removes that method's
+  only.  The id-column method gained a Preview, and is refused in a block
+  when the chain is made, as every segmenter.  One page for the three.
 * **Step 12** (2026-10-14): *Analysis/Measure/Cluster shape*, `per_region`:
   per layer the number of localizations, centre, convex-hull area and
   density, radius of gyration, standard deviations along the long and the

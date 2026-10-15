@@ -44,9 +44,7 @@ tabs:
   header: roi
   instances:
   - plugin: Analysis/Regions/Find clusters
-  - plugin: Analysis/Regions/Find/Density Peaks
-  - plugin: Analysis/Regions/Find/NPC
-  - plugin: Analysis/Regions/Column to ROIs
+  - plugin: Analysis/Regions/Segment regions
   - plugin: Analysis/Regions/Regions to column
   - plugin: Analysis/Regions/Summarize/Histograms
   - plugin: Analysis/Regions/Summarize/Export table

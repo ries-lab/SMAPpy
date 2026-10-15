@@ -20,7 +20,7 @@ The work goes in four steps:
 
 1. **Find** candidate ROIs, with a segmentation plugin in the
    [Regions tab](plugin:Panels/Regions tab) such as
-   [Density Peaks](plugin:Analysis/Regions/Find/Density Peaks), or by clicking
+   [Segment regions](plugin:Analysis/Regions/Segment regions), or by clicking
    them in the zoom.
 2. **Review** them: step through the list, look at each ROI, and untick
    *use* for the ones that are not what they should be.
@@ -241,7 +241,7 @@ inside a tile just centres the zoom.
 
 **Many ROIs.**  Thousands of ROIs -- every [cluster](plugin:Panels/Glossary)
 (localizations lying closer to each other than to the rest) of a cell, made by
-[Column to ROIs](plugin:Analysis/Regions/Column to ROIs) -- cost what is on
+[Segment regions](plugin:Analysis/Regions/Segment regions) from `cluster_id` -- cost what is on
 screen, not what is in the project.  A pane draws only the ROIs that reach
 into its view, and when more than 1000 do, a dot at each centre instead of
 the outlines, with the selected ROI still outlined; the pane's title says

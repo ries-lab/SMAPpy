@@ -7,6 +7,12 @@ from smappy.locs import Localizations
 from smappy.plugins import Context, settings_from, settings_values
 from smappy.plugins.roi import (DensityPeakSettings, HistogramSettings, Histograms,
                                 density_peaks, histograms)
+from smappy.plugins.segment import SegmentRegions, SegmentSettings
+
+
+def peaks(**values):
+    """Segment regions' settings for density peaks with these values."""
+    return SegmentSettings(method="peaks", peaks=DensityPeakSettings(**values))
 from smappy.plugins.statistics import LocalizationStatistics, StatisticsSettings
 from smappy.roi_manager import pipeline as pipeline_module
 from smappy.chain import Block, Step as ChainStep
@@ -29,10 +35,8 @@ def table(centers, per=10, seed=0):
 
 def test_the_region_plugins_are_registered_under_regions():
     found = plugins.refs("Analysis/Regions/")
-    assert set(found) == {"Analysis/Regions/Find/Density Peaks",
-                          "Analysis/Regions/Find/NPC",
+    assert set(found) == {"Analysis/Regions/Segment regions",
                           "Analysis/Regions/Find clusters",
-                          "Analysis/Regions/Column to ROIs",
                           "Analysis/Regions/Regions to column",
                           "Analysis/Regions/Sort ROIs",
                           "Analysis/Regions/Filter ROIs",
@@ -43,15 +47,17 @@ def test_the_region_plugins_are_registered_under_regions():
     found = {**found, **plugins.refs("Analysis/Measure/")}
     # per_region is what marks an evaluator, not the folder it sits in
     assert found["Analysis/Measure/NPC Corners"].per_region
-    assert not found["Analysis/Regions/Find/Density Peaks"].per_region
+    assert not found["Analysis/Regions/Segment regions"].per_region
 
 
 def test_the_defaults_dict_became_a_typed_settings_class():
-    specs = plugins.get("Analysis/Regions/Find/Density Peaks").specs()
-    assert set(specs) == {"bin_nm", "sigma_nm", "separation_nm",
-                          "count_radius_nm", "min_count", "replace"}
-    assert specs["bin_nm"].type is float and specs["bin_nm"].info.unit == "nm"
-    assert specs["min_count"].type is int and specs["min_count"].info.min == 1
+    specs = plugins.get("Analysis/Regions/Segment regions").specs()
+    assert set(specs) == {"preset", "method", "ring", "peaks", "ids", "replace"}
+    peak = specs["peaks"].children
+    assert set(peak) == {"bin_nm", "sigma_nm", "separation_nm",
+                         "count_radius_nm", "min_count"}
+    assert peak["bin_nm"].type is float and peak["bin_nm"].info.unit == "nm"
+    assert peak["min_count"].type is int and peak["min_count"].info.min == 1
 
 
 def test_statistics_measures_one_site_through_the_context():
@@ -183,12 +189,11 @@ def test_a_renamed_field_costs_that_field_and_not_the_pipeline():
 
 
 def test_a_segmenter_preview_proposes_what_run_adds_and_adds_nothing():
-    from smappy.plugins.roi import DensityPeaks
     from smappy.session import Session
     session = Session(table([(0, 0), (3000, 0), (0, 3000)], per=40))
     session.show_grouped(0, False)
-    settings = DensityPeakSettings(separation_nm=1000.0, min_count=20)
-    finder = DensityPeaks()
+    settings = peaks(separation_nm=1000.0, min_count=20)
+    finder = SegmentRegions()
     preview = finder.preview(session.context(), settings)
     assert session.rois.rois == {}
     sites = preview.roi_preview["sites"]
@@ -208,10 +213,11 @@ def test_a_segmenter_preview_proposes_what_run_adds_and_adds_nothing():
 def test_propose_is_find_without_the_adding():
     project, source = rois_of(table([(0, 0), (3000, 0)], per=40))
     project.set_geometry(300)
-    settings = DensityPeakSettings(separation_nm=1000.0, min_count=20)
+    settings = peaks(separation_nm=1000.0, min_count=20)
     origin, proposals = project.propose(source.id, settings=settings)
     assert project.rois == {} and len(proposals) == 2
-    assert origin["method"] == "Analysis/Regions/Find/Density Peaks"
+    assert origin["method"] == "Analysis/Regions/Segment regions"
+    assert all(p["origin"]["segment"] == "peaks" for p in proposals)
     found = project.find(source.id, settings=settings)
     assert [r.center for r in found] == [p["center"] for p in proposals]
     # the found ROIs are what a second proposal keeps its distance from,
@@ -251,15 +257,14 @@ def test_the_roi_undo_keeps_twenty_steps():
 
 
 def test_a_replacing_run_is_one_undo_step_that_brings_the_old_rois_back_with_their_results():
-    from smappy.plugins.roi import DensityPeaks
     from smappy.session import Session
     session = Session(table([(0, 0), (3000, 0), (0, 3000)], per=40))
     session.show_grouped(0, False)
     project = session.rois
     file_id = next(iter(project.sources))
     drawn = project.add_roi(file_id, (1500.0, 1500.0))
-    finder = DensityPeaks()
-    settings = DensityPeakSettings(separation_nm=1000.0, min_count=20)
+    finder = SegmentRegions()
+    settings = peaks(separation_nm=1000.0, min_count=20)
     first = finder.run(session.context(), settings).rois
     assert len(first) == 3
     project.evaluate([ChainStep(plugin="Analysis/Measure/Localization Statistics")])
@@ -269,12 +274,12 @@ def test_a_replacing_run_is_one_undo_step_that_brings_the_old_rois_back_with_the
     import dataclasses
     assert finder.run(session.context(),
                       dataclasses.replace(settings, replace=False)).rois == []
-    assert project.history.undo_label == "Density Peaks: 3 ROIs"
+    assert project.history.undo_label == "Segment regions: 3 ROIs"
 
     again = finder.run(session.context(), settings).rois     # replace: the default
     assert len(again) == 3 and drawn.id in project.rois
     assert not {r.id for r in first} & set(project.rois)
-    assert project.undo() == "Density Peaks: 3 ROIs for 3"
+    assert project.undo() == "Segment regions: 3 ROIs for 3"
     assert set(project.rois) == {drawn.id} | {r.id for r in first}
     assert len(project.results()) == 4          # the numbers came back too
 
@@ -332,13 +337,12 @@ def test_a_tab_pins_a_per_region_plugin_too(app):
     """One that can run per region runs on the view as well."""
     from smappy.gui.chooser import PluginTree
     assert "Analysis/Measure/Localization Statistics" in PluginTree().refs
-    assert "Analysis/Regions/Find/Density Peaks" in PluginTree().refs
+    assert "Analysis/Regions/Segment regions" in PluginTree().refs
 
 
 def test_find_evaluate_and_analyse_through_the_session(app):
     """Segment, region steps, analyse -- on one session."""
     from smappy.gui.region_steps import RegionSteps
-    from smappy.plugins.roi import DensityPeaks
     from smappy.session import Session
 
     rng = np.random.default_rng(1)
@@ -353,10 +357,9 @@ def test_find_evaluate_and_analyse_through_the_session(app):
     project.set_geometry(400)
     file_id = next(iter(project.sources))
 
-    found = project.find(file_id, plugin=DensityPeaks(),
-                         settings=DensityPeakSettings(sigma_nm=60.0,
-                                                      separation_nm=1000.0,
-                                                      min_count=20))
+    found = project.find(file_id, plugin=SegmentRegions(),
+                         settings=peaks(sigma_nm=60.0, separation_nm=1000.0,
+                                        min_count=20))
     assert len(found) == 4
 
     window = RegionSteps(session)
@@ -387,8 +390,9 @@ def test_the_manager_draws_a_preview_and_run_turns_it_into_rois(app):
     session = Session(table([(0, 0), (3000, 0), (0, 3000), (3000, 3000)], per=40))
     session.show_grouped(0, False)
     header = ROIHeader(session)
-    panel = PluginPanel(plugins.get("Analysis/Regions/Find/Density Peaks"), session)
-    panel.form.restore({"separation_nm": 1000.0, "min_count": 20})
+    panel = PluginPanel(plugins.get("Analysis/Regions/Segment regions"), session)
+    panel.form.restore({"method": "peaks", "peaks.separation_nm": 1000.0,
+                        "peaks.min_count": 20})
 
     def wait(start):
         loop = QEventLoop()
@@ -407,11 +411,11 @@ def test_the_manager_draws_a_preview_and_run_turns_it_into_rois(app):
     assert window.clear_preview_button.isVisibleTo(window)
     assert "previewing 4" in window.status.currentMessage()
 
-    panel.form.restore({"min_count": 1000})
+    panel.form.restore({"peaks.min_count": 1000})
     wait(panel.preview)
     assert session.rois.segment_preview["sites"] == []
 
-    panel.form.restore({"min_count": 20})
+    panel.form.restore({"peaks.min_count": 20})
     wait(panel.run)
     assert len(session.rois.rois) == 4 and window.table.model().rowCount() == 4
     assert session.rois.segment_preview is None

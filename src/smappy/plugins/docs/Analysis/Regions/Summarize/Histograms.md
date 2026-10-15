@@ -7,7 +7,7 @@ covers: [smappy.plugins.roi.histograms, smappy.roi_manager.core.ROIProject.resul
 
 The ROI manager works in three steps: [ROIs](plugin:Panels/Glossary)
 (regions of interest, one around each copy of a structure) are found
-([Density Peaks](plugin:Analysis/Regions/Find/Density Peaks), or by hand), each
+([Segment regions](plugin:Analysis/Regions/Segment regions), or by hand), each
 ROI is measured by the per-region steps, plugins that run once per ROI (such as
 [Localization Statistics](plugin:Analysis/Measure/Localization Statistics)), and the collection of
 results is analysed.  The per-region steps leave a *results table*: one row
