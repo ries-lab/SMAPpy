@@ -128,6 +128,17 @@ def test_the_plugin_takes_the_files_frame_time():
 
 
 def test_the_plugin_says_how_to_get_tracks():
+    from smappy.locs import Localizations
     locs = simulate_tracks(n_frames=50, seed=1)
+    bare = Localizations({c: locs[c] for c in ("x_nm", "y_nm", "frame")},
+                         dict(locs.metadata))
     with pytest.raises(ValueError, match="Link tracks"):
-        TrackingAnalysis().run(Context(locs=locs), TrackingAnalysis.Settings())
+        TrackingAnalysis().run(Context(locs=bare), TrackingAnalysis.Settings())
+
+
+def test_auto_takes_a_simulations_truth_when_nothing_is_linked():
+    locs = simulate_tracks(n_frames=300, density_um2=0.03, d_um2_s=(0.2,), seed=6)
+    result = TrackingAnalysis().run(Context(locs=locs),
+                                    TrackingAnalysis.Settings(jumps=False))
+    assert "(track_id_true)" in result.text
+    assert result.values["msd_D_um2_per_s"] == pytest.approx(0.2, rel=0.08)

@@ -229,6 +229,15 @@ appears near its end.  0 cuts a track at every missed frame.
 an MSD needs several steps per track, so 5 or more.  It
 changes nothing about the links, only which tracks get an id.
 
+### column
+`track_id` unless there is a reason: link a second time with other
+settings into `track_id_strict`, say, to compare the two, or link a MINFLUX
+file without touching its `tid`.  The lengths go to the same name with
+`_length` for `_id` (`track_id_strict_length`).  It writes a new column,
+`track_id`, or one it wrote before -- never over a column of the table's
+own, so a typo cannot overwrite `frame`.  What reads tracks (the *tracks*
+render mode, Tracking analysis) has a *track id* to choose the column.
+
 ## Output
 
 The table with `track_id` and `track_length`, a line with the number of

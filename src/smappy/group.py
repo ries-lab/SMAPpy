@@ -124,7 +124,15 @@ COMBINE_MODES: Dict[str, str] = {
     "frame": "min",
     "iterations": "max",
     "tid": "min",           # one trace per group: its id, kept an integer
+    # a track simulation's truth (`simulate.tracks`): ids, which a mean turns
+    # into another track's id when one blink merged two particles passing
+    # close -- the tracks render mode then joined it to that track, across
+    # the field
+    "track_id_true": "min", "state_true": "min",
 }
+
+# Ids: integers after merging too, so they compare and draw as ids
+INTEGER_COLUMNS = ("tid", "track_id_true", "state_true")
 
 # Columns that have no meaningful group value; see the module docstring.
 DROP_ON_GROUPING = ("logl",)
@@ -559,6 +567,9 @@ def combine(locs: Localizations, group_index: np.ndarray,
         if name in columns:
             columns[name] = columns[name].astype(np.int64 if name == "frame"
                                                  else np.int32)
+    for name in INTEGER_COLUMNS:
+        if name in columns:
+            columns[name] = columns[name].astype(np.int64)
     for name in lateral:
         columns[name] = xy_err(columns[name.replace("xy_", "x_")],
                                columns[name.replace("xy_", "y_")])

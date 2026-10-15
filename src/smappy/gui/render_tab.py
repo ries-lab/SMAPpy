@@ -1004,8 +1004,8 @@ class RenderTab(QWidget):
         # the tracks mode's two settings, shown only while it is chosen
         self.track_column = QComboBox()
         self.track_column.setToolTip("the id column whose localizations are one "
-                                     "track: track_id from Link tracks, tid from "
-                                     "MINFLUX")
+                                     "track; auto: track_id, else tid (MINFLUX), "
+                                     "else track_id_true (a simulation)")
         self.line_width = QDoubleSpinBox(minimum=0.2, maximum=20, singleStep=0.5,
                                          decimals=1)
         self.line_width.setToolTip("the tracks' lines, in pixels of the picture")
@@ -1274,7 +1274,7 @@ class RenderTab(QWidget):
         state.settings = dataclasses.replace(
             state.settings, mode=mode, sigma=self.sigma.value(), sigma_y=sigma_y,
             sigma_settings=sigmas, line_width=self.line_width.value(),
-            track_column=self.track_column.currentText() or state.settings.track_column)
+            track_column=self._chosen_track_column(state.settings.track_column))
         self._show_track_rows(mode == "tracks")
         self.session.changed("layer")
 
@@ -1282,20 +1282,30 @@ class RenderTab(QWidget):
         for widget in (self.track_column, self.line_width):
             self._display_form.setRowVisible(widget, shown)
 
+    def _chosen_track_column(self, fallback: str) -> str:
+        """The column the list says: "" for *auto*; ``fallback`` while the
+        list is empty (being refilled)."""
+        if self.track_column.count() == 0:
+            return fallback
+        return self.track_column.currentData() or ""
+
     def _fill_track_columns(self, layer: Layer) -> None:
-        """The integer columns a track could be named by, the chosen one
-        first among them even before the table has it."""
+        """*auto* -- saying what it resolves to -- then the integer columns a
+        track could be named by; a chosen column the table lacks stays in the
+        list, so the error says what is wrong rather than the choice
+        silently changing (`tracking.columns`)."""
+        from ..tracking.columns import track_column_choices
         locs = layer.locs
-        names = [n for n in locs if np.asarray(locs[n]).dtype.kind in "iu"
-                 and np.asarray(locs[n]).ndim == 1]
-        chosen = layer.state.settings.track_column
-        if chosen not in names:
-            names.insert(0, chosen)
+        choices = track_column_choices(locs)
+        chosen = layer.state.settings.track_column or ""
+        if chosen and chosen not in [key for key, _ in choices]:
+            choices.append((chosen, chosen))
         blocked = self.track_column.signalsBlocked()
         self.track_column.blockSignals(True)
         self.track_column.clear()
-        self.track_column.addItems(names)
-        self.track_column.setCurrentText(chosen)
+        for key, text in choices:
+            self.track_column.addItem(text, key)
+        self.track_column.setCurrentIndex(max(0, self.track_column.findData(chosen)))
         self.track_column.blockSignals(blocked)
 
     def _on_color(self) -> None:
