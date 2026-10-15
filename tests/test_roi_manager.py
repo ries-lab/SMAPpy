@@ -73,12 +73,12 @@ def test_statistics_use_and_stale_results():
 def test_polygon_ignores_global_size_but_translation_moves_all_geometry():
     p, s = rois_of(table([0, 10, 1000]))
     roi = p.add_roi(s.id, [0, 0], polygon=[[-20, -20], [20, -20], [20, 20], [-20, 20]])
-    roi.direction = [[0, 0], [10, 0]]
+    roi.lines = {"direction": [[0, 0], [10, 0]]}
     p.evaluate()
     p.set_geometry(500, 'square')
     assert not p.stale_steps(roi.id)
     p.move_roi(roi.id, [1000, 0])
-    assert roi.direction == [[1000, 0], [1010, 0]]
+    assert roi.lines == {"direction": [[1000, 0], [1010, 0]]}
     assert p.indices(roi).tolist() == [2]
     assert p.stale_steps(roi.id)
 

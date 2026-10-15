@@ -9,8 +9,13 @@ key per ROI -- with *next ROI after a keyword*, not even the arrow.
 
 Keys, in the whole window: 1-9 a keyword of the active list, 0 clears it,
 Tab and Shift+Tab the next and previous list, Up and Down the next and
-previous ROI, Space *use*.  A text field keeps its own keys: typing a 1 into
-the lists is a 1.
+previous ROI, Space *use*; L draws the chosen line, Shift+L chooses the next
+and R reverses it (`roi_window`).  A text field keeps its own keys: typing a
+1 into the lists is a 1.
+
+The names the lines are drawn under (`ROIProject.line_names`) are written
+here too, beside the lists, because they are the same kind of thing: what
+the user says of an ROI by hand, a column of the results table.
 """
 from __future__ import annotations
 
@@ -18,10 +23,11 @@ from typing import List, Optional
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QKeySequence, QShortcut
-from PySide6.QtWidgets import (QCheckBox, QGridLayout, QLabel, QPlainTextEdit,
+from PySide6.QtWidgets import (QCheckBox, QGridLayout, QLabel, QLineEdit, QPlainTextEdit,
                                QPushButton, QVBoxLayout, QWidget)
 
-from ..roi_manager.core import annotation_lists_text, parse_annotation_lists
+from ..roi_manager.core import (annotation_lists_text, parse_annotation_lists,
+                                parse_line_names)
 from .widgets import CollapsibleSection
 
 MAX_KEYS = 9                     # keywords per list a number key reaches
@@ -58,7 +64,8 @@ class AnnotationPanel(QWidget):
         self.grid.setHorizontalSpacing(2)
         self.grid.setVerticalSpacing(2)
         layout.addLayout(self.grid)
-        self.keys = QLabel("1-9 keyword, 0 none, Tab next list, Up/Down next ROI")
+        self.keys = QLabel("1-9 keyword, 0 none, Tab next list, Up/Down next ROI; "
+                           "L draw line, Shift+L next line, R reverse")
         self.keys.setStyleSheet("color: gray")
         self.keys.setWordWrap(True)
         layout.addWidget(self.keys)
@@ -71,6 +78,12 @@ class AnnotationPanel(QWidget):
         self._apply_timer.timeout.connect(self.apply_lists)
         self.lists.textChanged.connect(self._apply_timer.start)
         layout.addWidget(CollapsibleSection("lists", self.lists, expanded=False))
+        self.line_names = QLineEdit()
+        self.line_names.setToolTip("the lines an ROI can have, separated by commas "
+                                   "-- direction, axis; each gives the columns "
+                                   "<name>_angle_deg and <name>_length_nm")
+        self.line_names.editingFinished.connect(self.apply_line_names)
+        layout.addWidget(CollapsibleSection("line names", self.line_names, expanded=False))
 
         for key in range(10):
             shortcut = QShortcut(QKeySequence(str(key)), window)
@@ -95,6 +108,8 @@ class AnnotationPanel(QWidget):
             blocked = self.lists.blockSignals(True)
             self.lists.setPlainText(annotation_lists_text(project.annotation_lists))
             self.lists.blockSignals(blocked)
+        if not self.line_names.hasFocus():         # not under the typing
+            self.line_names.setText(", ".join(project.line_names))
         names = list(project.annotation_lists)
         shape = [(n, project.annotation_lists[n][:MAX_KEYS]) for n in names]
         if shape != self._built:
@@ -182,6 +197,14 @@ class AnnotationPanel(QWidget):
             self.project.set_annotation_lists(lists)
             self.window.annotated()
             self.refresh()
+
+    def apply_line_names(self) -> None:
+        """The line names as typed, into the project."""
+        names = parse_line_names(self.line_names.text())
+        if names != self.project.line_names:
+            self.project.set_line_names(names)
+            self.window.redraw()
+        self.line_names.setText(", ".join(self.project.line_names))
 
     def _on_use(self, on: bool) -> None:
         roi = self.window._selected()

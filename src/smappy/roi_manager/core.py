@@ -137,7 +137,11 @@ class ROI:
     # uuid stays the key the results are stored under.
     number: int = 0
     polygon: Optional[list] = None
-    direction: Optional[list] = None  # two absolute xy endpoints
+    # named lines, ``{name: [[x0, y0], [x1, y1]]}`` in absolute nm, start
+    # then end: an orientation or a distance drawn by hand (SMAP's ``line1``
+    # and ``line2``, with names).  Replaced, never edited in place, as
+    # `annotations` is
+    lines: dict = field(default_factory=dict)
     use: bool = True
     comment: str = ""
     origin: dict = field(default_factory=lambda: {"method": "manual"})
@@ -157,12 +161,18 @@ class ROI:
     def from_dict(cls, saved: dict) -> "ROI":
         """An ROI as a file kept it.  Files from before the review flag went
         carry ``reviewed``: it was never shown in the GUI, where every ROI
-        counted as reviewed, so it is dropped and ``use`` alone decides."""
+        counted as reviewed, so it is dropped and ``use`` alone decides.
+        Files from before the named lines carry one ``direction``: it is the
+        line called ``direction``."""
         names = {f.name for f in fields(cls)}
         roi = cls(**{k: v for k, v in saved.items() if k in names})
         point(roi.center)
         if roi.polygon is not None:
             polygon_vertices(roi.polygon)
+        lines = {str(k): line_points(v) for k, v in (roi.lines or {}).items()}
+        if saved.get("direction") is not None and DIRECTION not in lines:
+            lines[DIRECTION] = line_points(saved["direction"])
+        roi.lines = lines
         return roi
 
 
@@ -175,6 +185,53 @@ class ROIStep:
     """One edit of the ROIs, and the ROIs as they were before it."""
     label: str
     rois: Dict[str, "ROI"]
+
+
+# The line a new project offers, and the name an old file's one line had.
+DIRECTION = "direction"
+
+
+def line_points(line) -> list:
+    """``[[x0, y0], [x1, y1]]`` as floats, or a ValueError."""
+    a = np.asarray(line, dtype=float)
+    if a.shape != (2, 2) or not np.all(np.isfinite(a)):
+        raise ValueError(f"a line is two points, start and end: {line!r}")
+    return a.tolist()
+
+
+def line_angle_length(line) -> tuple:
+    """A line's angle in degrees, start to end, and its length in nm.
+
+    The angle is SMAP's (``pos2angle``): ``atan2(dy, dx)``, -180 to 180,
+    counted from +x towards +y.  The images show y downwards, so a positive
+    angle turns clockwise on the screen."""
+    (x0, y0), (x1, y1) = np.asarray(line, dtype=float)
+    return (float(np.degrees(np.arctan2(y1 - y0, x1 - x0))),
+            float(np.hypot(x1 - x0, y1 - y0)))
+
+
+def line_columns(roi: "ROI") -> Dict[str, float]:
+    """An ROI's lines as numbers of its row: ``<name>_angle_deg`` and
+    ``<name>_length_nm``."""
+    out = {}
+    for name, line in roi.lines.items():
+        angle, length = line_angle_length(line)
+        out[f"{name}_angle_deg"] = angle
+        out[f"{name}_length_nm"] = length
+    return out
+
+
+def parse_line_names(text: str) -> List[str]:
+    """``"direction, axis"`` -> ``["direction", "axis"]``: commas or new
+    lines, repeats and blanks dropped.  A name is a column's prefix, so it
+    keeps to letters, digits and ``_`` (a space becomes ``_``)."""
+    names: List[str] = []
+    for word in text.replace("\n", ",").split(","):
+        word = "_".join(word.split())
+        word = "".join(c for c in word if c.isalnum() or c == "_")
+        if word and word not in names:
+            names.append(word)
+    return names
 
 
 # The lists a new project offers: one, so that the keys do something before
@@ -209,12 +266,17 @@ def annotation_lists_text(lists: Dict[str, List[str]]) -> str:
     return "\n".join(f"{name}: {', '.join(words)}" for name, words in lists.items())
 
 
-def annotation_columns(roi: ROI, values: Dict[str, Any]) -> Dict[str, str]:
-    """An ROI's keywords as columns of its row in the results table, named
-    after their lists -- ``annotation.<list>`` where a measurement already
-    has the name.  Text, so the numeric summaries pass over them."""
-    return {(name if name not in values else f"annotation.{name}"): keyword
-            for name, keyword in roi.annotations.items()}
+def annotation_columns(roi: ROI, values: Dict[str, Any]) -> Dict[str, Any]:
+    """What was said of an ROI by hand, as columns of its row in the results
+    table: its keywords, named after their lists -- ``annotation.<list>``
+    where a measurement already has the name -- as text, so the numeric
+    summaries pass over them; and its lines' angles and lengths
+    (`line_columns`), numbers, so Filter, Sort and the summaries read them."""
+    out: Dict[str, Any] = {(name if name not in values else f"annotation.{name}"): keyword
+                           for name, keyword in roi.annotations.items()}
+    out.update({(name if name not in values else f"annotation.{name}"): value
+                for name, value in line_columns(roi).items()})
+    return out
 
 
 def copy_rois(rois: Dict[str, "ROI"]) -> Dict[str, "ROI"]:
@@ -357,6 +419,8 @@ class ROIProject:
         # the keyword lists an ROI is annotated from (`ROI.annotations`)
         self.annotation_lists: Dict[str, List[str]] = {
             k: list(v) for k, v in DEFAULT_ANNOTATION_LISTS.items()}
+        # the names a line is drawn under (`ROI.lines`)
+        self.line_names: List[str] = [DIRECTION]
         # The per-region steps, a `chain.Block`: what the steps window edits
         # and runs, and what the ROI manager measures an ROI with.  It
         # travels with the project because the columns of a results table
@@ -463,6 +527,35 @@ class ROIProject:
         annotation -- and they show until it is given another."""
         self.annotation_lists = {str(k): [str(w) for w in v] for k, v in lists.items()}
 
+    def set_line_names(self, names: List[str]) -> None:
+        """New line names.  An ROI keeps a line whose name went, as it keeps
+        a keyword whose list went."""
+        self.line_names = parse_line_names(",".join(str(n) for n in names))
+
+    def set_line(self, roi_id, name: str, line) -> None:
+        """Draw the line ``name`` of an ROI; None removes it.  Undoable."""
+        roi = self.rois[roi_id]
+        line = None if line is None else line_points(line)
+        if roi.lines.get(name) == line:
+            return
+        verb = "Clear" if line is None else "Draw"
+        with self.edit(f"{verb} {name} of ROI {roi.number}"):
+            lines = {k: v for k, v in roi.lines.items() if k != name}
+            if line is not None:
+                lines[name] = line
+            roi.lines = lines                     # replaced: see `copy_rois`
+
+    def reverse_line(self, roi_id, name: str) -> bool:
+        """Swap a line's start and end (its angle turns by 180 degrees);
+        False when the ROI has no such line."""
+        line = self.rois[roi_id].lines.get(name)
+        if line is None:
+            return False
+        roi = self.rois[roi_id]
+        with self.edit(f"Reverse {name} of ROI {roi.number}"):
+            roi.lines = {**roi.lines, name: [line[1], line[0]]}
+        return True
+
     def add_roi(self, file_id, center, polygon=None, origin=None):
         if file_id not in self.sources:
             raise KeyError(file_id)
@@ -502,21 +595,30 @@ class ROIProject:
         self.next_number = start
 
     def move_roi(self, roi_id, center):
-        """Translate the entire ROI, including its polygon and direction line."""
+        """Translate the entire ROI, including its polygon and lines."""
         roi = self.rois[roi_id]
         center = point(center)
         delta = np.asarray(center) - roi.center
-        for name in ("polygon", "direction"):
-            if getattr(roi, name) is not None:
-                setattr(roi, name, (np.asarray(getattr(roi, name)) + delta).tolist())
+        if roi.polygon is not None:
+            roi.polygon = (np.asarray(roi.polygon) + delta).tolist()
+        roi.lines = {name: (np.asarray(line) + delta).tolist()
+                     for name, line in roi.lines.items()}
         roi.center = center
 
     def geometry(self, roi):
+        """The ROI's shape and lines, as its measurements' signature takes
+        them.  The line called ``direction`` keeps the key the one direction
+        had, and the others go under ``lines`` only when there are any, so
+        the signatures saved before named lines still match."""
         if roi.polygon is not None:
-            return {"center": roi.center, "polygon": roi.polygon,
-                    "direction": roi.direction}
-        return {"center": roi.center, "shape": self.shape, "size_nm": self.size_nm,
-                "direction": roi.direction}
+            out = {"center": roi.center, "polygon": roi.polygon}
+        else:
+            out = {"center": roi.center, "shape": self.shape, "size_nm": self.size_nm}
+        out["direction"] = roi.lines.get(DIRECTION)
+        others = {k: v for k, v in roi.lines.items() if k != DIRECTION}
+        if others:
+            out["lines"] = others
+        return out
 
     def region(self, roi) -> Region:
         """The ROI's shape, with this project's shared shape and size."""
@@ -1405,6 +1507,7 @@ class ROIProject:
                 "preview_nm": self.preview_nm, "tile_nm": self.tile_nm,
                 "navigation": self.navigation,
                 "annotation_lists": self.annotation_lists,
+                "line_names": self.line_names,
                 "order": [i for i in self.order if i in self.rois],
                 "sources": [{"id": s.id, "number": s.number, "name": s.name}
                             for s in self.sources.values()],
@@ -1425,6 +1528,7 @@ class ROIProject:
         self.tables = {}
         self.navigation = {}
         self.set_annotation_lists(DEFAULT_ANNOTATION_LISTS)
+        self.line_names = [DIRECTION]
         self.order = []
         from ..chain import Block
         self.block = Block()
@@ -1440,6 +1544,7 @@ class ROIProject:
         self.set_tiles(doc.get("tile_nm", 0.0) or 0.0)
         self.navigation = dict(doc.get("navigation", {}))
         self.set_annotation_lists(doc.get("annotation_lists", DEFAULT_ANNOTATION_LISTS))
+        self.set_line_names(doc.get("line_names", [DIRECTION]))
         self.order = [str(i) for i in doc.get("order", [])]
         # ids the file used, mapped onto the files this session has
         by_number = {s.number: s for s in self.sources.values()}

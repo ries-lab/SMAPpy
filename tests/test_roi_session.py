@@ -318,28 +318,28 @@ def test_a_drawn_polygon_becomes_the_roi_and_selects_by_it(tmp_path):
     assert roi.polygon is None
 
 
-def test_direction_takes_two_clicks_and_is_saved_with_the_file(tmp_path):
+def test_a_line_takes_two_clicks_and_is_saved_with_the_file(tmp_path):
     session, window = _manager(tmp_path)
     file_id = next(iter(session.rois.sources))
     roi = session.rois.add_roi(file_id, [2000, 2000])
     window.refresh()
     window.select(roi.id)
 
-    window._start_drawing("direction")
+    window._start_drawing("line")
     window._roi_clicked(1900.0, 2000.0)
-    assert roi.direction is None                    # one click is not a direction
+    assert roi.lines == {}                          # one click is not a line
     window._roi_clicked(2100.0, 2050.0)
-    assert roi.direction == [[1900.0, 2000.0], [2100.0, 2050.0]]
+    assert roi.lines == {"direction": [[1900.0, 2000.0], [2100.0, 2050.0]]}
     assert window.drawing is None
 
     out = session.save(tmp_path / "with_direction.hdf5")
     back = Session()
     back.load(out)
     restored = next(iter(back.rois.rois.values()))
-    assert restored.direction == roi.direction
+    assert restored.lines == roi.lines
 
     window._clear_line()
-    assert roi.direction is None
+    assert roi.lines == {}
 
 
 def test_escape_abandons_a_half_drawn_polygon(tmp_path):

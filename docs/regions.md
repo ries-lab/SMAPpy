@@ -17,8 +17,11 @@ annotates and organises ROIs; it is not the only place they can be measured.
   session).  Its shape is a `regions.Region` (rect, polygon, line, circle):
   its own polygon, or the project's circle or square of `size_nm` round its
   centre, worked out when asked for (`ROI.region`) so that changing the
-  project's shape is one edit for every ROI.  *direction*, *use*,
-  *comment* and *origin* are annotations beside it.  The ROIs a run covers
+  project's shape is one edit for every ROI.  Its named *lines*
+  (`ROI.lines`, names from `ROIProject.line_names`), keywords, *use*,
+  *comment* and *origin* are annotations beside it; the lines' angles and
+  lengths and the keywords are columns of its results row
+  (`core.annotation_columns`).  The ROIs a run covers
   are the **included** ones: *use* ticked.  `ROI.number`
   is given once and never reused, so ROI 5 stays 5 in the list, in a
   `roi_id` column and in the results after ROI 3 is deleted.
