@@ -46,6 +46,7 @@ tabs:
   - plugin: Analysis/Process/Shuffle ids
   - plugin: Analysis/Process/Transform
   - plugin: Analysis/Register/Calibrate transform
+  - plugin: Analysis/Register/Register layers
   - plugin: Analysis/Tracking/Link tracks
   - plugin: Analysis/Tracking/Tracking analysis
 - name: Regions

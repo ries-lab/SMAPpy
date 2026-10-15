@@ -523,6 +523,22 @@ channel *Check overlay* (C3).  AssignColors for more than 2 colours (C4):
   `settings_for(name)` through the GUI's `"transform"` window.  Pinned in
   the Analysis tab of the shipped GUI.
 
+* **Step 5b** (2026-10-15): *Analysis/Register/Register layers*,
+  `changes_locs = False`: the shift of a target layer against a reference
+  layer -- localizations as they show, binned (*bin*, 20 nm), or image
+  layers looked up on the same grid, placement honoured -- by the
+  correlation of step 17c (`correlation._xcorr`, each picture minus its
+  mean) and RCC's peak (`rcc._peak`), refined up to three times with the
+  shift taken out of the localizations (the peak fit's pull to whole bins,
+  4 nm at 20 nm bins, down to under 1 nm); within *max shift* (2500 nm,
+  SMAP's; auto: anywhere).  z optional, off: RCC's tiled axial pass
+  (`rcc._axial_shifts`) on the reference and the laterally corrected
+  target.  Kept as a named transformation (`Result.transformations`); the
+  form's notice *Apply with Transform* opens Transform on it and on the
+  target layer's file, channel or image (`transform_target`,
+  `settings_for`).  No rotation or scale.  `smappy/layer_registration.py`;
+  pinned in the Analysis tab.
+
 ### Start here
 
 Wave 1 is eight independent sessions.  If only one runs at a time, start with

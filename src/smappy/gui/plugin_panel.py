@@ -249,9 +249,11 @@ class PluginPanel(QWidget):
         self.session.off_change(self._on_session)
 
     def _on_session(self, what: str) -> None:
-        if what in ("locs", "rois") or (what == "roi" and self.plugin.follow_roi):
+        if what in ("locs", "rois", "transformations") \
+                or (what == "roi" and self.plugin.follow_roi):
             # the lists of evaluations; a save says what it would leave out;
-            # a measurement of the ROI says whether there is one to measure
+            # a measurement of the ROI says whether there is one to measure;
+            # Register layers offers to apply what it measured
             # (only those: a fitter's description opens its file)
             self._describe()
         if what in ("locs", "results"):
