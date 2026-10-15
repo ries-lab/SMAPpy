@@ -624,6 +624,8 @@ def max_sigma(settings: RenderSettings, locs: Localizations, median_precision: f
     beyond the view a localization can still reach into it."""
     if settings.mode == "hist":
         return 0.0
+    if settings.mode == "tracks":
+        return 0.5 * settings.line_width * pixelsize
     if settings.mode == "gauss":
         return settings.sigma
     if settings.mode == "dl":
@@ -690,6 +692,10 @@ class LayerSnapshot:
     def select(self, fov: FieldOfView) -> np.ndarray:
         """The localizations that can contribute to this view, after filtering."""
         if self.index is None:
+            return self.indices
+        if self.settings.mode == "tracks":
+            # a segment across the view can have both ends outside it: the
+            # tracks are culled whole, by their boxes (`render.render_tracks`)
             return self.indices
         margin = self.settings.roi_sigma * self.max_sigma(fov.pixelsize)
         candidates = self.index.query(fov.x0, fov.x1, fov.y0, fov.y1, margin)

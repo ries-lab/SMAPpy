@@ -479,6 +479,16 @@ channel *Check overlay* (C3).  AssignColors for more than 2 colours (C4):
   Vectorised: 1 M localizations in 54 k tracks in ~10 s.  Tested on
   `simulate_tracks` with known D, states and precision.  In the Analysis
   tab of the shipped GUI.  Frame time from step 18.
+* **Step 19b** (2026-10-15): the *tracks* render mode, the fifth: each
+  track of an id column (*track id*, `track_id` by default) drawn as
+  antialiased lines through its localizations in time order, *line width*
+  pixels wide, coloured as any layer (by frame, by `track_D_um2_per_s`);
+  the C++ kernel `render_segments` (length x width per segment), tracks
+  culled whole by their boxes since a segment across the view can have
+  both ends outside it (`LayerSnapshot.select` skips its point culling in
+  this mode).  A raster: exports and overlays unchanged.  The 3D view draws
+  such a layer as points.  1 M localizations in 0.3 s.  The Render tab's
+  page has the mode, its two controls and a figure.  Step 19 done.
 
 ### Start here
 

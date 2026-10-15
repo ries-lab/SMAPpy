@@ -570,7 +570,7 @@ class RenderSettings:
     that axis.
     """
 
-    mode: str = "precision"     # "hist", "gauss" (one sigma), "precision", "dl"
+    mode: str = "precision"     # "hist", "gauss" (one sigma), "precision", "dl", "tracks"
     sigma: float = 10.0         # native units of the x axis, for mode="gauss"
     sigma_y: Optional[float] = None      # None: `sigma`, where that means anything
     sigma_settings: "SigmaSettings" = field(default_factory=lambda: SigmaSettings())
@@ -579,6 +579,10 @@ class RenderSettings:
     color_range: Optional[Tuple[float, float]] = None
     weight_field: Optional[str] = None   # None: one count per localization
     axes: RenderAxes = field(default_factory=RenderAxes)
+    # mode="tracks": the id column whose localizations are one track, and the
+    # lines' width in pixels of the picture
+    track_column: str = "track_id"
+    line_width: float = 1.0
 
 
 @dataclass
@@ -639,7 +643,7 @@ def render_sigmas(locs: Localizations, settings: "RenderSettings", fov: FieldOfV
     * ``sigma_y`` unset means the same width as x where the two axes are the
       same quantity, and zero -- plain binning -- where they are not.
     """
-    if settings.mode == "hist":
+    if settings.mode in ("hist", "tracks"):
         return None, None
     if settings.mode == "dl":
         return psf_sigmas(locs, select)
@@ -692,6 +696,9 @@ def render_locs(locs: Localizations, fov: FieldOfView,
     if not len(locs):
         return RenderedImage(fov, np.zeros((fov.ny, fov.nx)))
 
+    if settings.mode == "tracks":
+        return render_tracks(locs, fov, settings, display, select, n_threads,
+                             use_extension)
     x, y = settings.axes.coordinates(locs, select)
     sigma, sigma_y = render_sigmas(locs, settings, fov, select)
 
@@ -733,7 +740,7 @@ def render_locs(locs: Localizations, fov: FieldOfView,
 # (and `sigma_y_nm`, astigmatic), and one camera pixel where the fit left no
 # usable width.
 
-MODES = ("hist", "gauss", "precision", "dl")
+MODES = ("hist", "gauss", "precision", "dl", "tracks")
 DL_PIXELSIZE_NM = 100.0     # a camera pixel, when the table records none
 DL_MAX_SIGMA_NM = 1500.0    # SMAP's: a wider fitted PSF is a failed fit
 
@@ -845,3 +852,136 @@ def save_image(locs, path, pixelsize: float = 10.0,
         rgb = np.round(np.clip(rgb, 0.0, 1.0) * 255.0)
     Image.fromarray(rgb.astype(np.uint8)).save(path)
     return path
+
+
+# ------------------------------------------------------------------- tracks
+#
+# The fifth mode: each track drawn as the line through its localizations in
+# time order -- a track is the localizations sharing an id column's value
+# above 0 (`track_id` from Link tracks, MINFLUX's `tid`).  A raster like the
+# others, so the export, the overlays and the sum of layers need nothing new;
+# a vector layer was rejected because the exports would miss it.  The view
+# draws each track whole within the rows the layer's filter keeps; its
+# localizations are not culled to the view first (`LayerSnapshot.select`), as
+# a segment crossing the view can have both ends outside it -- whole tracks
+# are culled instead, by their bounding boxes.
+
+
+def track_segments(locs: Localizations, settings: "RenderSettings", select=None
+                   ) -> Tuple[np.ndarray, np.ndarray]:
+    """The segments of every track among the rows ``select`` keeps: the
+    rows of their two ends, ``(a, b)``, consecutive in time within a track."""
+    column = settings.track_column
+    if column not in locs:
+        raise KeyError(f"no column {column!r} to draw tracks by: link the "
+                       "tracks first (Analysis/Tracking/Link tracks), or choose "
+                       "the id column")
+    rows = (np.arange(len(locs)) if select is None
+            else np.asarray(select) if np.asarray(select).dtype != bool
+            else np.flatnonzero(select))
+    ids = np.asarray(locs[column])[rows]
+    keep = ids > 0
+    rows, ids = rows[keep], ids[keep]
+    time = np.asarray(locs["time_s"] if "time_s" in locs else locs["frame"])[rows]
+    order = np.lexsort((time, ids))
+    rows, ids = rows[order], ids[order]
+    same = ids[1:] == ids[:-1]
+    return rows[:-1][same], rows[1:][same]
+
+
+def _cull_tracks(a, b, ids, xa, ya, xb, yb, fov: FieldOfView, reach: float):
+    """The segments of tracks whose bounding box reaches into ``fov``."""
+    if not len(a):
+        return np.zeros(0, bool)
+    starts = np.concatenate([[0], np.flatnonzero(ids[1:] != ids[:-1]) + 1])
+    lo_x = np.minimum.reduceat(np.minimum(xa, xb), starts)
+    hi_x = np.maximum.reduceat(np.maximum(xa, xb), starts)
+    lo_y = np.minimum.reduceat(np.minimum(ya, yb), starts)
+    hi_y = np.maximum.reduceat(np.maximum(ya, yb), starts)
+    seen = ((hi_x >= fov.x0 - reach) & (lo_x <= fov.x1 + reach)
+            & (hi_y >= fov.y0 - reach) & (lo_y <= fov.y1 + reach))
+    track = np.cumsum(np.isin(np.arange(len(a)), starts)) - 1
+    return seen[track]
+
+
+def render_tracks(locs: Localizations, fov: FieldOfView, settings: "RenderSettings",
+                  display: Optional["DisplaySettings"] = None, select=None,
+                  n_threads: int = 0, use_extension: bool = True) -> RenderedImage:
+    """Every track as antialiased lines ``settings.line_width`` pixels wide.
+
+    A segment weighs one (or the mean of its ends' ``weight_field``) and,
+    coloured by a field, takes the mean of its ends' values: a track coloured
+    by time changes colour along itself.
+    """
+    display = display or DisplaySettings()
+    a, b = track_segments(locs, settings, select)
+    x, y = settings.axes.coordinates(locs)
+    x = np.asarray(x, np.float64)
+    y = np.asarray(y, np.float64)
+    ids = np.asarray(locs[settings.track_column])[a]
+    reach = (0.5 * settings.line_width + 1.0) * fov.pixelsize
+    seen = _cull_tracks(a, b, ids, x[a], y[a], x[b], y[b], fov, reach)
+    a, b = a[seen], b[seen]
+    weights = None
+    if settings.weight_field is not None:
+        w = np.asarray(locs[settings.weight_field], np.float64)
+        weights = 0.5 * (w[a] + w[b])
+    colors = None
+    if settings.color_field is not None:
+        values = np.asarray(locs[settings.color_field], np.float64)
+        mid = 0.5 * (values[a] + values[b])
+        lo, hi = settings.color_range or (float(np.nanmin(values)),
+                                          float(np.nanmax(values)))
+        colors = luts.colors(mid, display.lut, lo, hi, display.invert)
+    out = render_segments(x[a], y[a], x[b], y[b], fov, settings.line_width, weights,
+                          colors, n_threads, use_extension)
+    drawn = np.zeros(len(locs), bool)          # the localizations the lines join
+    drawn[a] = drawn[b] = True
+    out.n_locs = int(drawn.sum())
+    return out
+
+
+def render_segments(xa, ya, xb, yb, fov: FieldOfView, width: float = 1.0,
+                    weights=None, colors=None, n_threads: int = 0,
+                    use_extension: bool = True) -> RenderedImage:
+    """Accumulate line segments from (xa, ya) to (xb, yb) into ``fov``,
+    ``width`` pixels wide, antialiased (``csrc/render.cpp``)."""
+    xa, ya, xb, yb = (np.ascontiguousarray(v, np.float32) for v in (xa, ya, xb, yb))
+    w = (np.ones(1, np.float32) if weights is None
+         else np.ascontiguousarray(weights, np.float32).reshape(-1))
+    c = (np.zeros((0, 3), np.float32) if colors is None
+         else np.ascontiguousarray(colors, np.float32).reshape(-1, 3))
+    if use_extension and _render is not None:
+        weight, color = _render.render_segments(xa, ya, xb, yb, w, c, fov.x0, fov.y0,
+                                                fov.pixelsize, fov.nx, fov.ny,
+                                                float(width), n_threads)
+        return RenderedImage(fov, weight, color, len(xa))
+    return _segments_numpy(xa, ya, xb, yb, fov, float(width), w, c)
+
+
+def _segments_numpy(xa, ya, xb, yb, fov, width, weights, colors) -> RenderedImage:
+    """Reference implementation of `render_segments`: every pixel of each
+    segment's bounding box, the same coverage rule."""
+    weight = np.zeros(fov.shape, np.float64)
+    color = np.zeros((fov.ny, fov.nx, 3), np.float64) if colors.size else None
+    reach = 0.5 * max(width, 0.0) + 0.5
+    for i in range(len(xa)):
+        ax, ay = fov.to_pixels(xa[i], ya[i])
+        bx, by = fov.to_pixels(xb[i], yb[i])
+        c0 = max(0, int(np.floor(min(ax, bx) - reach)))
+        c1 = min(fov.nx - 1, int(np.floor(max(ax, bx) + reach)))
+        r0 = max(0, int(np.floor(min(ay, by) - reach)))
+        r1 = min(fov.ny - 1, int(np.floor(max(ay, by) + reach)))
+        if c0 > c1 or r0 > r1:
+            continue
+        cc, rr = np.meshgrid(np.arange(c0, c1 + 1) + 0.5, np.arange(r0, r1 + 1) + 0.5)
+        dx, dy = bx - ax, by - ay
+        len2 = dx * dx + dy * dy
+        t = np.clip(((cc - ax) * dx + (rr - ay) * dy) / len2, 0, 1) if len2 > 0 else 0.0
+        d = np.hypot(ax + t * dx - cc, ay + t * dy - rr)
+        cover = np.clip(reach - d, 0, 1) * (weights[0] if weights.size == 1 else weights[i])
+        weight[r0:r1 + 1, c0:c1 + 1] += cover
+        if color is not None:
+            color[r0:r1 + 1, c0:c1 + 1] += cover[..., None] * colors[i]
+    return RenderedImage(fov, weight.astype(np.float32),
+                         None if color is None else color.astype(np.float32), len(xa))
