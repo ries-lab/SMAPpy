@@ -63,11 +63,13 @@ _POSITION_COLUMNS = {"x_nm": 0, "x_pix": 0,
                      "z_nm": 2}
 
 # The linear transformations COMET can fit per frame besides the shift: for
-# each, how many of x, y, z it transforms (`k`: the cost compares a pair's
-# difference in those after dividing out the frames' linear scales) and its
-# generators -- A(t) = I + sum_p theta_p(t) E_p, each theta_p a spline.  The
-# generators are orthonormal up to a factor, so theta is read back from any A
-# of the model by projection (`Drift.parameters`).
+# each, which scales the cost divides out of a pair's difference (`_SCALES`)
+# and its generators -- A(t) = I + sum_p theta_p(t) E_p, each theta_p a
+# spline.  The generators are orthonormal up to a factor, so theta is read
+# back from any A of the model by projection (`Drift.parameters`).  Nothing
+# turns about x or y: a sample or a lens does not tilt, so the step after
+# the xy models leaves z decoupled -- the xy affine map with a scale of z of
+# its own -- before the full 3D one.
 def _unit(r, c):
     e = np.zeros((3, 3))
     e[r, c] = 1.0
@@ -76,16 +78,24 @@ def _unit(r, c):
 
 _SCALE_XY = np.diag([1.0, 1.0, 0.0])
 _ROTATION_XY = _unit(1, 0) - _unit(0, 1)
+_AFFINE_XY = tuple((f"a_{'xy'[r]}{'xy'[c]}", _unit(r, c))
+                   for r in range(2) for c in range(2))
 TRANSFORMATIONS = {
-    "shift": (0, ()),
-    "xy scale": (2, (("scale", _SCALE_XY),)),
-    "xy scale + rotation": (2, (("scale", _SCALE_XY),
-                                ("rotation", _ROTATION_XY))),
-    "xy affine": (2, tuple((f"a_{'xy'[r]}{'xy'[c]}", _unit(r, c))
-                           for r in range(2) for c in range(2))),
-    "3D affine": (3, tuple((f"a_{'xyz'[r]}{'xyz'[c]}", _unit(r, c))
-                           for r in range(3) for c in range(3))),
+    "shift": ("", ()),
+    "xy scale": ("xy", (("scale", _SCALE_XY),)),
+    "xy scale + rotation": ("xy", (("scale", _SCALE_XY),
+                                   ("rotation", _ROTATION_XY))),
+    "xy affine": ("xy", _AFFINE_XY),
+    "xy affine + z scale": ("xy+z", _AFFINE_XY + (("z_scale", _unit(2, 2)),)),
+    "3D affine": ("3d", tuple((f"a_{'xyz'[r]}{'xyz'[c]}", _unit(r, c))
+                              for r in range(3) for c in range(3))),
 }
+# How the cost measures a pair's difference (`csrc/drift.hpp`,
+# `transformed_cost_and_gradient`): x and y in units of the xy part's
+# scale, det(A_xy)^(1/2), and z in units of z's -- 1 where z is only
+# shifted, A_zz where it is scaled on its own, and det(A)^(1/3) for both
+# where the map mixes them.
+_SCALES = ("xy", "xy+z", "3d")
 
 # What a drift curve is zero at (`Drift.referenced`): left as the estimator
 # made it, or the first or the last frame.
@@ -303,6 +313,14 @@ class DriftSettings:
         None, label="transformation knots", unit="frames", min=10,
         help="frames between the transformation's spline coefficients; "
              "auto: the knot spacing",
+        advanced=True)
+    # A pull towards no change, for parameters the data say little about:
+    # the z entries over a few hundred nm of depth, or any of them in a
+    # sparse selection.  0 is none; see `_TransformationFit` for the units.
+    transformation_penalty: float = param(
+        0.0, label="transformation penalty", min=0,
+        help="pulls the transformation towards none where the data say "
+             "little; 0 is none",
         advanced=True)
     use_z: Optional[bool] = param(None, label="correct z",
                                   help="auto: if the table has z")
@@ -1114,7 +1132,8 @@ class _TransformationFit:
     """The transformation half of the spline fit (`DriftSettings.transformation`).
 
     A(t) = I + sum_p theta_p(t) E_p over the model's generators, each theta_p
-    a cubic B-spline with its own knots.  Two choices keep the fit well posed:
+    a cubic B-spline with its own knots.  Three choices keep the fit well
+    posed:
 
     * **Zero mean.**  The overlap only sees how the transformation *changes*
       -- the cost divides out a transformation common to both frames of a
@@ -1122,29 +1141,41 @@ class _TransformationFit:
       constant theta is free, as a constant drift is.  The coefficients are
       kept to zero mean by optimising in an orthonormal basis of the
       zero-sum vectors, rather than left to wander along that direction.
-    * **Units of nm.**  theta is ~1e-4 where the drift coefficients are tens
-      of nm; L-BFGS-B steps both with one scale.  So the variables are theta
-      times the half-width of the data -- how far the edge of the field
-      moves -- and the drift's bounds apply to them too.
+    * **Units of nm, per axis.**  theta is ~1e-4 where the drift
+      coefficients are tens of nm; L-BFGS-B steps both with one scale.  So
+      each variable is theta times the half-width of the data along the axis
+      its generator multiplies -- how far it moves the outermost
+      localizations.  Along z that is a few hundred nm, not the field's ten
+      um: an entry acting on z was otherwise free to swing by thousands of
+      ppm for a nanometre of movement, which the overlap cannot see.
+    * **A pull towards no change** (*transformation penalty*), in those
+      units: lambda S / (n sigma^2) times the sum of the squared variables,
+      S the overlap at the start of the width step and n the number of
+      variables.  Moving every variable by sigma costs lambda times the
+      overlap, so a parameter the data pin down hardly feels it, and one
+      they say little about stays near none.
     """
 
     def __init__(self, settings: DriftSettings, coords: np.ndarray,
                  n_frames: int, display: bool, progress):
         from scipy.linalg import null_space
 
-        k, generators = TRANSFORMATIONS[settings.transformation]
+        scales, generators = TRANSFORMATIONS[settings.transformation]
         positions = np.asarray(coords, dtype=np.float64)
-        if k == 3 and not np.any(positions[:, 2]):
-            raise ValueError("a 3D affine transformation needs z: the table "
+        if scales != "xy" and not np.any(positions[:, 2]):
+            raise ValueError(f"{settings.transformation} needs z: the table "
                              "has no z_nm, or correct z is off")
         lo, hi = positions.min(axis=0), positions.max(axis=0)
         # the midpoint of the data, as SMAP: the shift is free, so the centre
         # only decides how the correction splits into shift and transformation
         self.centre = (lo + hi) / 2.0
         self.coords = np.ascontiguousarray(positions - self.centre, dtype=np.float32)
-        self.k = k
+        self.scales = scales
         self.generators = np.stack([e for _, e in generators])
-        self.radius = max(float(np.max((hi - lo)[:k])) / 2.0, 1.0)
+        half = np.maximum((hi - lo) / 2.0, 1.0)
+        # the half-width along the axes each generator multiplies (its columns)
+        self.radius = np.array([half[np.any(e != 0, axis=0)].max()
+                                for e in self.generators])
         knots = settings.transformation_knot_frames or settings.spline_knot_frames
         self.n_coefficients = _n_coefficients(n_frames, knots)
         self.basis = _spline_basis(np.arange(n_frames), self.n_coefficients,
@@ -1152,21 +1183,68 @@ class _TransformationFit:
         self.basis_t = self.basis.T.tocsr()
         self.zero_mean = null_space(np.ones((1, self.n_coefficients)))
         self.n_variables = len(self.generators) * (self.n_coefficients - 1)
+        self.curvature = None
         if settings.spline_penalty:
             d2 = np.diff(np.eye(self.n_coefficients), 2, axis=0)
             self.curvature = d2.T @ d2
+        self.prior = float(settings.transformation_penalty)
+        # the pull is on the relative change, theta, in units of the widest
+        # axis's: (radius_max / radius_p)^2 on the nm variables, so an entry
+        # acting on a thin z is held a thousand times harder than one acting
+        # across the field -- a change of a few hundred nm of depth is what
+        # the data say least about
+        self.prior_weights = (self.radius.max() / self.radius) ** 2
+        self._overlap = {}    # sigma -> the overlap at the step's first evaluation
         _log(display, f"{settings.transformation}: {len(self.generators)} "
                       f"parameter(s), {self.n_coefficients} coefficients each, "
                       f"about ({self.centre[0]:.0f}, {self.centre[1]:.0f}) nm",
              progress)
 
+    def _variables(self, flat):
+        """(n_gen, n_coefficients - 1) in the zero-sum basis, nm."""
+        return flat.reshape(len(self.generators), self.n_coefficients - 1)
+
     def _theta_coefficients(self, flat):
-        q = flat.reshape(len(self.generators), self.n_coefficients - 1)
-        return (self.zero_mean @ q.T) / self.radius    # (n_coefficients, n_gen)
+        return (self.zero_mean @ self._variables(flat).T) / self.radius
 
     def matrices(self, flat) -> np.ndarray:
         theta = self.basis @ self._theta_coefficients(flat)
         return np.eye(3) + np.einsum("fp,pij->fij", theta, self.generators)
+
+    def _scale_factors(self, matrix):
+        """g_xy, g_z per frame (the inverse scales the kernel divides out),
+        and a function of their gradients that gives the gradient with
+        respect to the matrix; None where a frame's transformation is no
+        physical one."""
+        xy = matrix[:, :2, :2]
+        if self.scales == "3d":
+            det = np.linalg.det(matrix)
+            if np.any(det <= 0):
+                return None
+            g = det ** (-1.0 / 3.0)
+
+            def chain(d_gxy, d_gz):
+                # g = det(A)^(-1/3): dg/dA = -g/3 A^-T
+                d = np.zeros_like(matrix)
+                d += (((d_gxy + d_gz) * g / -3.0)[:, None, None]
+                      * np.linalg.inv(matrix).transpose(0, 2, 1))
+                return d
+            return g, g, chain
+        det = np.linalg.det(xy)
+        zz = matrix[:, 2, 2]
+        if np.any(det <= 0) or np.any(zz <= 0):
+            return None
+        g_xy = det ** -0.5
+        g_z = 1.0 / zz if self.scales == "xy+z" else np.ones_like(zz)
+
+        def chain(d_gxy, d_gz):
+            d = np.zeros_like(matrix)
+            d[:, :2, :2] = ((d_gxy * g_xy / -2.0)[:, None, None]
+                            * np.linalg.inv(xy).transpose(0, 2, 1))
+            if self.scales == "xy+z":
+                d[:, 2, 2] = -d_gz / zz ** 2
+            return d
+        return g_xy, g_z, chain
 
     def cost(self, flat, mu, frames, idx_i, idx_j, sigma, factor, penalty):
         """(cost, d/d mu per frame, d/d the transformation's variables), signs
@@ -1174,32 +1252,35 @@ class _TransformationFit:
         from . import _drift
         from ._comet.core.cpu_wrapper import CUTOFF_SIGMAS
 
-        k = self.k
         matrix = self.matrices(flat)
-        block = matrix[:, :k, :k]
-        det = np.linalg.det(block)
-        if np.any(det <= 0):    # beyond any physical transformation
+        scales = self._scale_factors(matrix)
+        if scales is None:     # beyond any physical transformation
             return np.inf, np.zeros(mu.size), np.zeros(flat.size)
-        g = det ** (-1.0 / k)
+        g_xy, g_z, chain = scales
         params = np.ascontiguousarray(np.column_stack(
-            [matrix.reshape(-1, 9), mu, g]))
+            [matrix.reshape(-1, 9), mu, g_xy, g_z]))
         total, gradient = _drift.transformed_cost_and_gradient(
-            self.coords, frames, idx_i, idx_j, params, k, float(sigma),
+            self.coords, frames, idx_i, idx_j, params, float(sigma),
             float(factor), float(CUTOFF_SIGMAS))
         gradient = -gradient
-        d_matrix = gradient[:, :9].reshape(-1, 3, 3).copy()
-        # g = det(B)^(-1/k): dg/dB = -g/k B^-T
-        d_matrix[:, :k, :k] += ((gradient[:, 12] * g * (-1.0 / k))[:, None, None]
-                                * np.linalg.inv(block).transpose(0, 2, 1))
+        d_matrix = (gradient[:, :9].reshape(-1, 3, 3)
+                    + chain(gradient[:, 12], gradient[:, 13]))
         d_theta = np.einsum("fij,pij->fp", d_matrix, self.generators)
-        d_coefficients = self.basis_t @ d_theta              # (n_coef, n_gen)
+        # to the variables: theta coefficients = Z q / radius
+        d_flat = (self.zero_mean.T @ (self.basis_t @ d_theta)).T / self.radius[:, None]
         value = -float(total)
-        if penalty:
-            c = self._theta_coefficients(flat) * self.radius
+        q = self._variables(flat)
+        if penalty and self.curvature is not None:
+            c = self.zero_mean @ q.T                         # (n_coef, n_gen), nm
             value += penalty * float((c * (self.curvature @ c)).sum())
-            d_coefficients = d_coefficients + 2.0 * penalty * (
-                self.curvature @ c) * self.radius
-        d_flat = (self.zero_mean.T @ d_coefficients).T / self.radius
+            d_flat = d_flat + 2.0 * penalty * (self.zero_mean.T
+                                               @ (self.curvature @ c)).T
+        if self.prior:
+            overlap = self._overlap.setdefault(float(sigma), abs(value))
+            weight = (self.prior * overlap / (self.n_variables * sigma ** 2)
+                      * self.prior_weights[:, None])
+            value += float((weight * q * q).sum())
+            d_flat = d_flat + 2.0 * weight * q
         return value, gradient[:, 9:12], d_flat.ravel()
 
 

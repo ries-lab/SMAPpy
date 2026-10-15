@@ -134,7 +134,8 @@ def test_the_kernels_gradient_is_the_costs_derivative():
         if name == "shift":
             continue
         fit = _TransformationFit(settings(name, spline_knot_frames=10,
-                                          spline_penalty=0.1),
+                                          spline_penalty=0.1,
+                                          transformation_penalty=0.5),
                                  coords, n_frames, False, None)
         idx_i, idx_j, _ = pair_indices_kdtree(fit.coords, 300)
         flat = rng.normal(0, 3, fit.n_variables)
@@ -166,11 +167,11 @@ def test_with_identity_matrices_the_kernel_is_the_plain_one():
     idx_j = rng.integers(0, n, 20000).astype(np.int32)
     mu = rng.normal(0, 30, (n_frames, 3))
     params = np.column_stack([np.tile(np.eye(3).ravel(), (n_frames, 1)), mu,
-                              np.ones(n_frames)])
+                              np.ones(n_frames), np.ones(n_frames)])
     plain, gradient = _drift.cost_and_gradient(coords, frames, idx_i, idx_j, mu,
                                                80.0, 1.0)
     total, full = _drift.transformed_cost_and_gradient(
-        coords, frames, idx_i, idx_j, params, 2, 80.0, 1.0)
+        coords, frames, idx_i, idx_j, params, 80.0, 1.0)
     assert total == pytest.approx(plain, rel=1e-12)
     np.testing.assert_allclose(full[:, 9:12], gradient, rtol=1e-9, atol=1e-12)
 
@@ -284,3 +285,71 @@ def test_the_comet_plugin_shows_the_transformation_under_the_drift():
     plot.draw_into(figure)
     assert figure.axes[1].get_ylabel() == "transformation (ppm)"
     assert "xy scale" in result.text and "ppm" in result.text
+
+
+def simulate_z(z_scale, seed=1, per_frame=150, n_points=3000, noise=8.0,
+               depth=600.0):
+    """As `simulate`, with no rotation, and z scaled by ``z_scale`` over
+    the movie, linearly, about z = 0: a focus-dependent axial scale."""
+    rng = np.random.default_rng(seed)
+    structure = rng.random((n_points, 3)) * [FIELD, FIELD, depth] - [0, 0, depth / 2]
+    t = np.arange(N_FRAMES)
+    base = (3 * np.sin(t / 60 + .37) + t / 50) * 10.0
+    drift = np.column_stack([base, 0.7 * base, -0.5 * base])
+    s = 5e-3 * np.sin(np.pi * t / N_FRAMES)
+    matrix = np.repeat(np.eye(3)[None], N_FRAMES, 0)
+    matrix[:, 0, 0] += s
+    matrix[:, 1, 1] += s
+    matrix[:, 2, 2] += z_scale * t / N_FRAMES
+    frame = np.repeat(t, per_frame)
+    rng.shuffle(frame)
+    true = structure[rng.integers(0, n_points, frame.size)]
+    centre = np.array([FIELD / 2, FIELD / 2, 0.0])
+    seen = (centre + np.einsum("fij,fj->fi", matrix[frame], true - centre)
+            + drift[frame] + rng.normal(0, noise, true.shape))
+    locs = Localizations({"frame": frame.astype(np.int64),
+                          **{name: seen[:, i].astype(np.float32)
+                             for i, name in enumerate(("x_nm", "y_nm", "z_nm"))}},
+                         {"units": "nm"})
+    return locs, true
+
+
+def z_residual_nm(locs, true):
+    xyz = np.column_stack([np.asarray(locs[k], float)
+                           for k in ("x_nm", "y_nm", "z_nm")])
+    design = np.column_stack([true, np.ones(len(true))])
+    coefficients, *_ = np.linalg.lstsq(design, xyz, rcond=None)
+    return np.sqrt(((xyz - design @ coefficients)[:, 2] ** 2).mean())
+
+
+def test_a_scale_of_z_is_fitted_apart_from_the_xy_map():
+    # 5% over 600 nm of depth: 15 nm at the top and bottom, against 8 nm noise
+    locs, true = simulate_z(0.05)
+    plain = estimate_drift(locs, settings("xy affine"))
+    with_z = estimate_drift(locs, settings("xy affine + z scale",
+                                           reference="first frame"))
+    assert set(with_z.parameters()) == {"a_xx", "a_xy", "a_yx", "a_yy", "z_scale"}
+    assert z_residual_nm(with_z.apply(locs), true) < 7.95
+    assert z_residual_nm(plain.apply(locs), true) > 8.3
+    # in nm, z is as well determined as x and y: a few thousand ppm of a
+    # 300 nm half-depth is a nanometre
+    assert np.abs(with_z.parameters()["z_scale"]
+                  - 0.05 * np.arange(N_FRAMES) / N_FRAMES).max() < 5e-3
+    # nothing turns about x or y in this model
+    np.testing.assert_allclose(with_z.matrix[:, :2, 2], 0.0)
+    np.testing.assert_allclose(with_z.matrix[:, 2, :2], 0.0)
+
+
+def test_the_transformation_penalty_holds_the_z_entries_near_none():
+    locs, true = simulate_z(0.0)
+    free = estimate_drift(locs, settings("3D affine", reference="first frame"))
+    held = estimate_drift(locs, settings("3D affine", reference="first frame",
+                                         transformation_penalty=1e-3))
+    z_entries = ("a_xz", "a_yz", "a_zz")
+    wander = max(np.abs(free.parameters()[k]).max() for k in z_entries)
+    kept = max(np.abs(held.parameters()[k]).max() for k in z_entries)
+    assert wander > 2e-3 and kept < 1e-3
+    # while the scale of x and y, which the field pins down, is still found
+    scale = 5e-3 * np.sin(np.pi * np.arange(N_FRAMES) / N_FRAMES)
+    for k in ("a_xx", "a_yy"):
+        assert np.abs(held.parameters()[k] - scale).max() < TOLERANCE

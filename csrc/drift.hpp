@@ -188,27 +188,28 @@ SegmentOverlap overlap_per_segment(
 // what fits a sample that expands, or optics whose magnification drifts, in
 // `smappy.drift` (the *transformation* setting).
 //
-// `params` is (n_frames, 13) per frame: A row major (9), d (3) and
-// g = det(A_k)^(-1/k), where A_k is the leading k x k block, k = `scaled`
-// (2: x and y are transformed, z only shifted; 3: all three).  The pair's
-// difference in those k components is multiplied by sqrt(g_i g_j), the
-// geometric mean of the two frames' inverse linear scales.  Without it the
-// overlap grows when everything shrinks and the fit collapses the image;
-// with it a transformation common to both frames of a pair cancels, so
-// only the change of the transformation is measured -- as only the change
-// of the drift is.  g is an input, not computed here, so that its
-// derivative with respect to A (one 3x3 inverse per frame) is the caller's:
-// the gradient returns d(total)/dg alongside d/dA and d/dd.
+// `params` is (n_frames, 14) per frame: A row major (9), d (3), and two
+// scale factors, g_xy for x and y and g_z for z: the inverse linear scale
+// of the frame's transformation in those axes (the caller's choice, e.g.
+// det(A_xy)^(-1/2), and 1 for a z that is only shifted).  A pair's
+// difference in x and y is multiplied by sqrt(g_xy,i g_xy,j), in z by
+// sqrt(g_z,i g_z,j): the geometric mean of the two frames' scales.  Without
+// it the overlap grows when everything shrinks and the fit collapses the
+// image; with it a transformation common to both frames of a pair cancels,
+// so only the change of the transformation is measured -- as only the
+// change of the drift is.  The g are inputs, not computed here, so that
+// their derivatives with respect to A are the caller's: the gradient
+// returns d(total)/dg alongside d/dA and d/dd.
 struct TransformedCost {
     double total = 0.0;
-    std::vector<double> gradient;   // (n_frames, 13), row major, as `params`
+    std::vector<double> gradient;   // (n_frames, 14), row major, as `params`
 };
 
 template <class Coord, class Index>
 TransformedCost transformed_cost_and_gradient(
         const Coord* coords, const Index* times, const Index* idx_i,
         const Index* idx_j, const double* params, int64_t n_pairs,
-        int64_t n_frames, int scaled, double sigma, double sigma_factor,
+        int64_t n_frames, double sigma, double sigma_factor,
         double cutoff_sigmas, int n_threads) {
     const double s_eff = sigma * sigma_factor;
     const double inv_sigma_sq = 1.0 / ((2.0 * s_eff) * (2.0 * s_eff));
@@ -216,7 +217,7 @@ TransformedCost transformed_cost_and_gradient(
     const double cutoff_sq =
         cutoff_sigmas > 0.0 ? (cutoff_sigmas * s_eff) * (cutoff_sigmas * s_eff) : 0.0;
     const bool use_cutoff = cutoff_sigmas > 0.0;
-    constexpr int W = 13;
+    constexpr int W = 14;
 
     const int threads = resolve_threads(n_threads, n_pairs);
     const std::size_t width = static_cast<std::size_t>(n_frames) * W;
@@ -238,7 +239,10 @@ TransformedCost transformed_cost_and_gradient(
             const double xj[3] = {double(coords[3 * j]), double(coords[3 * j + 1]),
                                   double(coords[3 * j + 2])};
 
-            const double h = std::sqrt(pi[12] * pj[12]);
+            // the scale of x and y (h[0], h[1]) and of z (h[2])
+            const double hxy = std::sqrt(pi[12] * pj[12]);
+            const double hz = std::sqrt(pi[13] * pj[13]);
+            const double h[3] = {hxy, hxy, hz};
             double D[3], Dn[3];
             double diff_sq = 0.0;
             for (int r = 0; r < 3; ++r) {
@@ -247,7 +251,7 @@ TransformedCost transformed_cost_and_gradient(
                 const double cj = pj[3 * r] * xj[0] + pj[3 * r + 1] * xj[1] +
                                   pj[3 * r + 2] * xj[2] - pj[9 + r];
                 D[r] = ci - cj;
-                Dn[r] = r < scaled ? h * D[r] : D[r];
+                Dn[r] = h[r] * D[r];
                 diff_sq += Dn[r] * Dn[r];
             }
             if (use_cutoff && diff_sq > cutoff_sq) continue;
@@ -257,11 +261,10 @@ TransformedCost transformed_cost_and_gradient(
 
             const double weight = 2.0 * val * inv_sigma_sq;
             double G[3];          // d val / d D
-            double dvdh = 0.0;    // d val / d h
-            for (int r = 0; r < 3; ++r) {
-                G[r] = -weight * Dn[r] * (r < scaled ? h : 1.0);
-                if (r < scaled) dvdh -= weight * Dn[r] * D[r];
-            }
+            for (int r = 0; r < 3; ++r) G[r] = -weight * Dn[r] * h[r];
+            // d val / d h, for the xy and the z scale
+            const double dvdhxy = -weight * (Dn[0] * D[0] + Dn[1] * D[1]);
+            const double dvdhz = -weight * Dn[2] * D[2];
             double* gi = deri + W * ti;
             double* gj = deri + W * tj;
             for (int r = 0; r < 3; ++r) {
@@ -273,8 +276,10 @@ TransformedCost transformed_cost_and_gradient(
                 gj[9 + r] += G[r];
             }
             // h = sqrt(g_i g_j): dh/dg_i = h / (2 g_i)
-            gi[12] += dvdh * h / (2.0 * pi[12]);
-            gj[12] += dvdh * h / (2.0 * pj[12]);
+            gi[12] += dvdhxy * hxy / (2.0 * pi[12]);
+            gj[12] += dvdhxy * hxy / (2.0 * pj[12]);
+            gi[13] += dvdhz * hz / (2.0 * pi[13]);
+            gj[13] += dvdhz * hz / (2.0 * pj[13]);
         }
         totals[static_cast<std::size_t>(t)] = local;
     });

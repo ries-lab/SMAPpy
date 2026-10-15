@@ -140,6 +140,17 @@ rotation can happen too.
   correlated pairwise and splined afterwards, and no shift with it; here
   shift and transformation are one fit, in COMET's spline fit only (the
   legacy time-window fit refuses a transformation).
+* **Then, with Jonas**: nothing turns about x or y, so *xy affine + z
+  scale* -- the xy map with a scale of z of its own -- sits between *xy
+  affine* and *3D affine*; the cost divides x, y and z by their own scales.
+  Each parameter's variable is in nm at the edge of the data *along its
+  own axis* (a z entry over the few hundred nm of depth, not the field's
+  width).  A *transformation penalty* (advanced, 0 by default) pulls the
+  relative change theta towards none, so the z entries stay near 1 on a
+  thin sample.  Measured: z is as well determined as xy in nm (thousands
+  of ppm of 300 nm is a nanometre); 1e-3 keeps z below 700 ppm on
+  unchanging data and leaves xy alone, but also flattens a real 5% z
+  change over 600 nm, so it is not on by default.
 * **Time**: the same cubic B-spline as the drift by default; an advanced
   *transformation knots* setting gives it its own (coarser) spacing, for a
   transformation that varies much more slowly than the drift.

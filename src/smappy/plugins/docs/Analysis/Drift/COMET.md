@@ -33,8 +33,9 @@ A sample that **changes shape** during imaging -- it expands, or creeps
 differently in different places -- or optics whose magnification drifts
 with temperature or focus, cannot be corrected by one shift per frame: a
 correction that is right in the middle of the field is wrong at its edges.
-For these, *transformation* fits a change of scale, a rotation or a full
-[affine](plugin:Panels/Glossary) transformation over time alongside the
+For these, *transformation* fits a change of scale, a rotation, an
+[affine](plugin:Panels/Glossary) transformation of x and y (with a scale
+of z of its own if wanted) or a full 3D one over time alongside the
 drift.  The default is the shift alone.
 
 In the comparisons made while it was developed, COMET was slightly the more
@@ -304,24 +305,40 @@ correction, only how it is split between drift and transformation.  The
 matrix is $A(t) = I + \sum_p \theta_p(t)\, E_p$ over the model's
 generators $E_p$: for *xy scale* the identity on x and y; for *xy scale +
 rotation* that and the rotation generator, which together make $A$ exactly
-a scaled rotation; for *xy affine* the four entries of x and y; for *3D
-affine* all nine.  In the xy models z is only shifted.  Each $\theta_p$ is a
+a scaled rotation; for *xy affine* the four entries of x and y; for *xy
+affine + z scale* those and $A_{zz}$, so that nothing turns about the x or
+y axis, which neither a sample nor a lens does; for *3D affine* all nine.
+In the xy models z is only shifted.  Each $\theta_p$ is a
 clamped cubic B-spline like the drift's, over *transformation knots* frames
 (the drift's knot spacing on auto).
 
-In the cost, the difference of a pair's corrected positions in the $k$
-transformed axes ($k$ = 2, or 3 for *3D affine*) is divided by
-$(\det A_k(t_i) \det A_k(t_j))^{1/2k}$, the geometric mean of the two
-frames' linear scales, with $A_k$ the leading $k \times k$ block.  Without
+In the cost, the difference of a pair's corrected positions is divided,
+in x and y, by $(\det A_{xy}(t_i) \det A_{xy}(t_j))^{1/4}$, the geometric
+mean of the two frames' scales in the plane ($A_{xy}$ the 2 x 2 block),
+and in z by the same mean of z's scale: 1 where z is only shifted,
+$A_{zz}$ in *xy affine + z scale*.  In *3D affine*, where the matrix mixes
+the axes, all three are divided by the mean of $(\det A)^{1/3}$.  Without
 it the overlap grows as everything shrinks, and the optimum is the image
 collapsed onto its middle.  With it, a transformation common to both frames
 of a pair cancels from the scale, and only its change between frames is
 measured, as only the change of the drift is.  So the spline coefficients
 of every $\theta_p$ are kept at zero sum, by optimising in an orthonormal
-basis of the zero-sum vectors.  For L-BFGS-B the variables are $\theta$
-times the half-width of the data, how far it moves the edge of the field
-in nm, so that they and the drift's coefficients are of one size; they
-share the drift's bound $\pm 2R$ and the *spline penalty*.  The kernel
+basis of the zero-sum vectors.  For L-BFGS-B the variables are each
+$\theta_p$ times the half-width of the data along the axis its generator
+multiplies -- how far it moves the outermost localizations, in nm -- so
+that they and the drift's coefficients are of one size; they share the
+drift's bound $\pm 2R$ and the *spline penalty*.  Along z that half-width
+is a few hundred nm, not the field's ten µm.
+
+A *transformation penalty* $\lambda$ adds
+$\lambda\, \frac{S}{n \sigma^2} \sum_p (r_\mathrm{max}/r_p)^2 \sum_k u_{pk}^2$
+to the cost, with $u_{pk}$ the variables in nm, $r_p$ the half-width of
+parameter $p$'s axis and $r_\mathrm{max}$ the largest, $S$ the overlap at
+the first evaluation of the width step, $n$ the number of variables.  It
+is a pull on the relative change $\theta$, the same for every parameter,
+towards no change: in nm an entry acting on a thin z is held
+$(r_\mathrm{max}/r_z)^2$ -- a thousand times, for 600 nm of depth in a 20
+µm field -- harder than one acting across the field.  The kernel
 returns the gradient with respect to $A$, $\mathbf{d}$ and the scale factor
 of every frame, and the chain rule through $\det$ and the splines is done
 per frame.  A frame whose $\det A_k \leq 0$ is refused (its cost is
@@ -384,9 +401,24 @@ where the global one does not.  Start with the fewest parameters that
 describe the change.  On a simulated 20 µm field with 30 000
 localizations, scale and rotation came back to within 150 ppm (1.5 nm at
 the edge of the field); the more parameters, the more an uneven density
-of localizations can pull on them, and the z entries of *3D affine* are
-poorly determined by a few hundred nanometres of depth.  The fit costs
-about twice as long as the shift alone.
+of localizations can pull on them.  For a sample that changes along z
+too, *xy affine + z scale* is the first step beyond the xy models, *3D
+affine* the most free; on a few hundred nanometres of depth, z's entries
+are determined to about a nanometre, which in ppm is thousands (see
+*transformation penalty*).  The fit costs about twice as long as the
+shift alone.
+
+### transformation_penalty
+For a thin sample in *xy affine + z scale* or *3D affine*.  Measured in nm,
+z is as well determined as x and y: the z entries wander by a few
+thousand ppm of a few hundred nm of depth, which is a nanometre, and the
+correction is as good with them as without.  The penalty keeps them near
+1 when that matters to the reading: on a simulated 600 nm deep, 20 µm
+wide sample, $10^{-3}$ took the z entries of *3D affine* from 2300-4600
+ppm to below 700 and left the xy scale as found.  It cannot tell noise
+from a real change, though: a 5% change of z's scale over that depth --
+15 nm at the top and bottom -- was mostly held back by it too.  Above
+$10^{-2}$ it starts to pull on the xy entries as well.
 
 ### transformation_knot_frames
 A change of the optics is slow, often much slower than the drift of the

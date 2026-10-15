@@ -524,7 +524,8 @@ channel *Check overlay* (C3).  AssignColors for more than 2 colours (C4):
   the Analysis tab of the shipped GUI.
 * **Step 5d** (2026-10-15): a transformation over time in COMET, beside
   the drift (*transformation*: shift, the default and unchanged; xy scale;
-  xy scale + rotation; xy affine; 3D affine), each parameter a spline with
+  xy scale + rotation; xy affine; xy affine + z scale; 3D affine; a
+  *transformation penalty* towards none), each parameter a spline with
   the drift's knots or its own (*transformation knots*), about the middle
   of the data, fitted with the drift in one overlap whose pair differences
   are divided by the frames' linear scales (a new kernel,
