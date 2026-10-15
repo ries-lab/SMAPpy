@@ -154,7 +154,6 @@ class ControlWindow(QMainWindow):
         if missing:
             print("workspace: dropped pins for plugins that are not installed: "
                   + ", ".join(sorted(set(missing))))
-        self._adopt_transformations()
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
         self.plugin_tabs: List[PluginTab] = []
@@ -557,7 +556,6 @@ class ControlWindow(QMainWindow):
             return
         self.workspace = Workspace.from_dict(state)
         missing = self.workspace.prune(list(plugins.refs()))
-        self._adopt_transformations()
         self.build_tabs()
         self._update_title(f"from {Path(path).name}")
         if missing:
@@ -580,13 +578,7 @@ class ControlWindow(QMainWindow):
                 if which:
                     opened[tab.name] = which
         self.workspace.layout = {"open": opened}
-        self.workspace.transformations = self.session.transformation_dicts()
         return self.workspace
-
-    def _adopt_transformations(self) -> None:
-        """The named transformations a workspace just loaded carries join the
-        session's (`Workspace.transformations`)."""
-        self.session.take_transformations(self.workspace.transformations)
 
     def _update_title(self, name: Optional[str] = None) -> None:
         """Say whose workspace this is, so nobody saves over somebody else's --
@@ -690,7 +682,6 @@ class ControlWindow(QMainWindow):
         if gui:
             self.workspace = Workspace.from_dict(gui)
             self.workspace.prune(list(plugins.refs()))
-            self._adopt_transformations()
             self.build_tabs()
             self._update_title("handed over")
         view = state.get("view")
@@ -777,7 +768,6 @@ class ControlWindow(QMainWindow):
         """
         self.workspace = workspace_module.load(path)
         missing = self.workspace.prune(list(plugins.refs()))
-        self._adopt_transformations()
         self.tabs.clear()               # start on File, not on the tab one was on
         self.build_tabs()
         workspace_module.remember(self.workspace.path)

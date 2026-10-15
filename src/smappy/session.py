@@ -329,8 +329,9 @@ class Session:
         # back when it is opened.  See `Plugin.keep`.
         self.results: Dict[str, Dict] = {}
         # named transformations (`smappy.transformation`), by name: what
-        # Transform applies by name and Register layers measures.  Saved with
-        # the workspace and with the file (`file_metadata`).
+        # Transform applies by name and Register layers measures.  They are
+        # the data's, not the GUI's: saved with the localization file
+        # (`file_metadata`), never in a workspace.
         self.transformations: Dict[str, Any] = {}
         # every table this session replaced, newest last; see `smappy.undo`
         self.undo_stack = undo_stack()
@@ -619,7 +620,7 @@ class Session:
         return {name: t.to_dict() for name, t in self.transformations.items()}
 
     def take_transformations(self, saved) -> None:
-        """Add the named transformations of a file or a workspace, as
+        """Add the named transformations a file kept, as
         `transformation_dicts` wrote them; one that does not read is left out."""
         if not isinstance(saved, dict) or not saved:
             return

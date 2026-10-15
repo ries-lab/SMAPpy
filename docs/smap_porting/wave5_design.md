@@ -50,7 +50,9 @@ and ChangeCamPixelsize.
   file** (`_2ct.h5` and the new transformation file below), or **the drift
   of another file** (D1).
 * **Named transformations**: the session keeps a list, saved with the
-  workspace and recorded in the table's metadata when applied.  *Register
+  localization file (decided after 5a: not in the workspace, the GUI file --
+  a transformation belongs to the data) and recorded in the table's
+  metadata when applied.  *Register
   layers* (5b) adds its result there; Transform chooses one by name.  A
   transformation can also be **written to a file** (and read back), so
   explicit transform files exist for scripts and other sessions.
