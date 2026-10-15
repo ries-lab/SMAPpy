@@ -130,9 +130,8 @@ an ImageJ hyperstack (frames along T, slices along Z), with the pixel size
 in µm and how it was made in its *Info* (Fiji: *Image > Show Info*).  An
 MP4 is H.264 at a constant quality -- *high*, *medium* and *small file*
 are x264's rate factors 18, 23 and 28 -- with both sides made even, as the
-format needs; it needs the `imageio-ffmpeg` package
-(`pip install imageio-ffmpeg`, or the `movie` extra), and the form says so
-when it is missing.  A GIF has 256 colours per frame, which is fine for a
+format needs; it is written by the `imageio-ffmpeg` package, installed
+with smappy, and the form says so if it is missing.  A GIF has 256 colours per frame, which is fine for a
 picture on black and coarse for smooth colour scales.  The sizes the form
 shows for MP4 and GIF are rates measured on simulated movies; a dense
 picture makes a larger file.

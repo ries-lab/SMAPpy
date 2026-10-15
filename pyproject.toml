@@ -58,6 +58,12 @@ dependencies = [
     # OpenType maths font, pure Python (~3.5 MB with the font).  Optional in
     # practice -- without it `smappy.docs` falls back on matplotlib's mathtext
     "ziamath>=0.13",
+    # Export Stack's MP4: H.264 through the ffmpeg binary it ships (a 29 MB
+    # wheel).  A default, not an extra, for the same reason as the GUI: a
+    # movie export that fails until something else is installed is not the
+    # whole story.  ffmpeg runs as a separate program, so the licence of
+    # its build does not reach smappy's.
+    "imageio-ffmpeg>=0.4",
 ]
 
 [project.urls]
@@ -68,9 +74,9 @@ Source = "https://github.com/ries-lab/SMAPpy"
 # matplotlib is a base dependency now, so `drift` is satisfied by a plain
 # install; it stays because the docs name it.
 image = ["pillow>=9.0"]        # save_image, for a picture without a window
-# Export Stack's MP4: H.264 through the ffmpeg binary imageio-ffmpeg ships.
-# TIFF stacks and GIFs need nothing beyond the base install.
-movie = ["imageio-ffmpeg>=0.4"]
+# Empty: imageio-ffmpeg is in `dependencies` above; kept so that
+# `smappy-smlm[movie]`, written down while it was an extra, still installs.
+movie = []
 # Drift correction itself needs nothing: COMET is vendored and its cost function
 # is compiled with the package.  This extra is only COMET's diagnostic plots,
 # which are all behind flags.

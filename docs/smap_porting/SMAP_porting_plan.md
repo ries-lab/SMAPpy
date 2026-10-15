@@ -645,7 +645,7 @@ channel *Check overlay* (C3).  AssignColors for more than 2 colours (C4):
   (seconds when the frame time is known).  Written frame by frame: an
   ImageJ hyperstack TIFF (T or Z, the pixel size, `finterval` or
   `spacing`, the description in *Info*), MP4 H.264 through
-  `imageio-ffmpeg` (the new `movie` extra; CRF 18 / 23 / 28, sides made
+  `imageio-ffmpeg` (a dependency since 2026-10-15, first the `movie` extra; CRF 18 / 23 / 28, sides made
   even; the form names the extra when missing) or a GIF (Pillow).  The form
   shows the frame count and size (TIFF exact, MP4 / GIF from measured
   rates); the preflight times one frame and asks above a minute; Stop
