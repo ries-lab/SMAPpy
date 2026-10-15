@@ -740,10 +740,11 @@ class ROIProject:
         return known + [i for i in self.rois if i not in placed]
 
     def sort_rows(self) -> Dict[str, Dict[str, Any]]:
-        """What a sort or a filter reads of each ROI: the newest stored
-        values of every evaluation, current or not, named as in the results
-        table, and its keywords."""
+        """What a sort or a filter reads of each ROI: where it is (its
+        centre, ``roi_x_nm`` and ``roi_y_nm``, and ``in_drawn_roi``), the newest stored values of every evaluation,
+        current or not, named as in the results table, and its keywords."""
         from . import pipeline as pipeline_module
+        inside = self.in_drawn_roi()
         out = {}
         for roi_id, roi in self.rois.items():
             steps = {}
@@ -752,8 +753,66 @@ class ROIProject:
                 if entry and "values" in entry:
                     steps[label] = entry
             values = pipeline_module.merged_values({"steps": steps})
-            out[roi_id] = {**values, **annotation_columns(roi, values)}
+            place = {"roi_x_nm": float(roi.center[0]), "roi_y_nm": float(roi.center[1]),
+                     "in_drawn_roi": None if inside is None else inside[roi_id]}
+            out[roi_id] = {**place, **values, **annotation_columns(roi, values)}
         return out
+
+    def drawn_roi(self) -> Optional[Region]:
+        """The ROI drawn in the render window, where an ROI's centre can be
+        tested against it: None when nothing is drawn, or when the picture
+        is of other columns than the positions (photons against frame), on
+        which the ROIs' centres mean nothing."""
+        session = self.session
+        drawn = getattr(session, "roi", None)
+        if not isinstance(drawn, Region):
+            return None
+        axes = getattr(session, "axes", None)
+        if axes is not None and not getattr(axes(self.layer), "is_default", True):
+            return None
+        return drawn
+
+    def in_drawn_roi(self) -> Optional[Dict[str, bool]]:
+        """``{roi id: centre inside the drawn ROI}`` -- SMAP's UseSitesInROI
+        -- or None when there is no drawn ROI to test (`drawn_roi`).  An ROI
+        of a file the layer does not show is outside, whatever its centre:
+        files share coordinates, and the drawn ROI was drawn on the files
+        the picture shows."""
+        drawn = self.drawn_roi()
+        if drawn is None:
+            return None
+        shown = None
+        layers = getattr(self.session, "layers", None) or []
+        if layers:
+            lay = layers[min(self.layer, len(layers) - 1)]
+            shown = getattr(getattr(lay, "state", None), "files", None)
+        ids = list(self.rois)
+        if not ids:
+            return {}
+        centers = np.array([self.rois[i].center for i in ids], dtype=float)
+        inside = np.asarray(drawn.mask(centers[:, 0], centers[:, 1]), dtype=bool)
+        out = {}
+        for roi_id, ok in zip(ids, inside):
+            source = self.sources.get(self.rois[roi_id].file_id)
+            if shown is not None and (source is None or source.number not in shown):
+                ok = False
+            out[roi_id] = bool(ok)
+        return out
+
+    def rows_of(self, roi_ids) -> np.ndarray:
+        """Which rows of the session's table lie in any of these ROIs, as a
+        mask: each ROI's shape in its own file, through that file's index,
+        no filter deciding membership (`docs/regions.md`)."""
+        locs = self.session.locs
+        inside = np.zeros(len(locs), dtype=bool)
+        for roi_id in roi_ids:
+            roi = self.rois[roi_id]
+            source = self.sources[roi.file_id]
+            ungrouped = self.state(roi.file_id).tables.ungrouped
+            found = rows_in(ungrouped.locs, ungrouped.index, self.region(roi))
+            in_file = self._file_mask(locs, source.number)
+            inside[found if in_file is None else np.flatnonzero(in_file)[found]] = True
+        return inside
 
     def sort_columns(self) -> List[str]:
         """The names a sort or a filter can use: every measured column, then
@@ -782,6 +841,9 @@ class ROIProject:
         nearly always a typing error that would exclude every ROI."""
         from .order import condition
         test, names = condition(text)
+        if "in_drawn_roi" in names and self.drawn_roi() is None:
+            raise ValueError("in_drawn_roi needs an ROI drawn in the render window, "
+                             "on the picture of positions")
         rows = self.sort_rows()
         known = set(self.sort_columns())
         unknown = [n for n in names if n not in known]

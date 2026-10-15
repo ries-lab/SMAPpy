@@ -1,5 +1,6 @@
-"""Sort ROIs and Filter ROIs: SMAP's SortROIs and FilterSites, on the results
-table's columns -- what the steps measured and the keywords ROIs were given.
+"""Sort ROIs, Filter ROIs and Remove double ROIs: SMAP's SortROIs,
+FilterSites and RemoveDoubleSites, on the results table's columns -- what the
+steps measured, the keywords ROIs were given and where they are.
 
 The work is the project's (`ROIProject.sort`, `ROIProject.filter_rois`) and
 `roi_manager.order`'s, which say why it is done as it is; these are the
@@ -11,6 +12,13 @@ results and *use* -- and the ROI list, the results table and every summary
 that reads it follow.  It is not an undo step: the order holds no work, and
 *sort by* left empty puts it back by number.  Filtering sets *use*, which is
 work, so it is one step of the ROI undo.
+
+Removing doubles is a plugin of its own rather than a mode of Filter ROIs:
+a filter tests each ROI's own row, a double is a pair, and its one setting
+(the distance) would be a field the filter shows and reads in one mode only.
+It excludes rather than deletes, as Filter ROIs does: the one with fewer
+localizations is not always the worse of the two, and *use* can be ticked
+again.
 """
 from __future__ import annotations
 
@@ -168,3 +176,68 @@ def new_use(project, settings: FilterROIsSettings) -> dict:
     if settings.mode == "set":
         return passed
     return {i: ok and project.rois[i].use for i, ok in passed.items()}
+
+
+@dataclass
+class RemoveDoubleSettings:
+    distance_nm: float = param(100.0, label="closer than", unit="nm", min=0.0,
+                               help="two used ROIs of one file whose centres are "
+                                    "closer than this are doubles")
+
+
+@register("Analysis/Regions/Remove double ROIs")
+class RemoveDoubleROIs(Plugin):
+    """Of two used ROIs closer than a distance, keeps the one with more
+    localizations and excludes the other."""
+
+    Settings = RemoveDoubleSettings
+    changes_locs = False
+    version = "1"
+
+    def describe(self, ctx, settings) -> FormState:
+        """How many it would exclude, as the distance is typed: the count of
+        localizations per ROI is the expensive part, a few ms per ROI."""
+        project = getattr(ctx, "rois", None) if ctx is not None else None
+        if project is None or not project.rois or len(project.rois) > 2000:
+            return FormState()
+        try:
+            going = double_ids(project, settings.distance_nm)
+        except Exception as error:                   # noqa: BLE001 -- a hint only
+            return FormState(notice=Notice(str(error)))
+        used = sum(r.use for r in project.rois.values())
+        return FormState(notice=Notice(f"would exclude {len(going)} of {used} used ROIs",
+                                       kind="info"))
+
+    def run(self, ctx: Context, settings: RemoveDoubleSettings) -> Result:
+        project = ctx.rois
+        if project is None or not project.rois:
+            raise ValueError("there are no ROIs")
+        going = double_ids(project, settings.distance_nm)
+        with project.edit(f"{self.name}: closer than {settings.distance_nm:g} nm"):
+            for roi_id in going:
+                project.rois[roi_id].use = False
+        used = sum(r.use for r in project.rois.values())
+        numbers = ", ".join(str(project.rois[i].number) for i in going[:20])
+        more = f" and {len(going) - 20} more" if len(going) > 20 else ""
+        return Result(text=(f"excluded {len(going)} double ROIs"
+                            + (f" ({numbers}{more})" if going else "")
+                            + f"; {used} used"),
+                      settings=settings, rois=[],
+                      values={"excluded": len(going), "used": used})
+
+
+def double_ids(project, distance_nm: float) -> List[str]:
+    """The used ROIs `order.doubles` would exclude, in the project's order.
+    An ROI's size is the localizations it shows -- the layer's filter and
+    grouping, as in the ROI manager -- so a double of a bright site is the
+    dimmer one."""
+    from ..roi_manager.order import doubles
+    ids = [i for i in project.ordered_ids() if project.rois[i].use]
+    if len(ids) < 2:
+        return []
+    rois = [project.rois[i] for i in ids]
+    counts = [len(project.indices(r)) for r in rois]
+    files = [project.file_number(r.file_id) for r in rois]
+    double = doubles([r.center for r in rois], counts, distance_nm, files)
+    return [i for i, d in zip(ids, double) if d]
+

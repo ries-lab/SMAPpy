@@ -116,3 +116,96 @@ def test_a_column_chosen_from_insert_goes_onto_the_condition():
                             FilterROIsSettings()).choices["insert"]
     assert ("n_localizations", "n_localizations") in found
     assert ("quality", "quality (keywords)") in found
+
+
+# ------------------------------------------------------- double ROIs
+
+def test_of_two_close_rois_the_one_with_more_localizations_stays():
+    from smappy.roi_manager.order import doubles
+    centers = [(0, 0), (60, 0), (1000, 0), (1000, 90), (1000, 180), (5000, 0)]
+    counts = [10, 30, 50, 5, 50, 1]
+    # 0 and 1 are doubles: 1 has more; 2-3-4 a chain: the middle goes
+    assert doubles(centers, counts, 100).tolist() == [True, False, False, True, False, False]
+    # closer than: 100 apart exactly is not a double
+    assert not doubles([(0, 0), (100, 0)], [1, 2], 100).any()
+    # other files: never doubles
+    assert not doubles([(0, 0), (10, 0)], [1, 2], 100, groups=[1, 2]).any()
+
+
+def blobs_project(centers, counts):
+    """ROIs on blobs of known sizes, one ROI per centre."""
+    from smappy.session import Session
+    from test_roi_evaluation_plots import table
+    rng = np.random.default_rng(0)
+    xs, ys = [], []
+    for (cx, cy), n in zip(centers, counts):
+        xs.append(rng.normal(cx, 10, n))
+        ys.append(rng.normal(cy, 10, n))
+    from smappy.locs import Localizations
+    n = sum(counts)
+    locs = Localizations({"x_nm": np.concatenate(xs), "y_nm": np.concatenate(ys),
+                          "frame": np.arange(n), "photons": np.full(n, 500.0),
+                          "xy_err_nm": np.full(n, 10.0)})
+    session = Session(locs)
+    session.show_grouped(0, False)
+    project = session.rois
+    project.set_geometry(100)
+    file_id = next(iter(project.sources))
+    ids = [project.add_roi(file_id, list(c)).id for c in centers]
+    return session, project, ids
+
+
+def test_remove_double_rois_excludes_the_dimmer_of_a_pair_as_one_undo_step():
+    from smappy.plugins.roi_order import RemoveDoubleROIs, RemoveDoubleSettings
+    # ROIs 1 and 2 sit on one blob of 40 (2 a little off it, so it shows
+    # fewer); ROI 3 on a blob of 20 far away
+    session, project, ids = blobs_project([(0, 0), (40, 0), (2000, 0)], [40, 1, 20])
+    ctx = Context(locs=session.locs, session=session)
+    shown = [len(project.indices(project.rois[i])) for i in ids]
+    assert shown[0] > shown[1]
+    settings = RemoveDoubleSettings(distance_nm=100)
+    assert "would exclude 1 of 3" in RemoveDoubleROIs().describe(ctx, settings).notice.text
+    result = RemoveDoubleROIs().run(ctx, settings)
+    assert [project.rois[i].use for i in ids] == [True, False, True]
+    assert result.values == {"excluded": 1, "used": 2}
+    # an excluded ROI takes no part the next time
+    project.rois[ids[0]].use = False
+    RemoveDoubleROIs().run(ctx, settings)
+    assert [project.rois[i].use for i in ids] == [False, False, True]
+    project.rois[ids[0]].use = True
+    project.undo()
+    assert all(project.rois[i].use for i in ids)
+
+
+# --------------------------------------------- inside the drawn ROI
+
+def test_the_rois_inside_the_drawn_roi_are_kept_by_a_condition_on_position():
+    from smappy.plugins.roi_order import FilterROIs, FilterROIsSettings
+    from smappy.regions import Region
+    session, project = project_with_rois(4)          # centres at 0, 1000, 2000, 3000
+    ids = list(project.rois)
+    ctx = Context(locs=session.locs, session=session)
+    settings = FilterROIsSettings(condition="in_drawn_roi")
+    with pytest.raises(ValueError, match="needs an ROI drawn"):
+        FilterROIs().run(ctx, settings)
+    session.set_roi(Region.rect(500, -500, 2500, 500))
+    FilterROIs().run(ctx, settings)
+    assert [project.rois[i].use for i in ids] == [False, True, True, False]
+    # the centres are columns too
+    FilterROIs().run(ctx, FilterROIsSettings(condition="roi_x_nm < 1500"))
+    assert [project.rois[i].use for i in ids] == [False, True, False, False]
+
+
+def test_an_roi_of_a_file_the_layer_does_not_show_is_not_in_the_drawn_roi():
+    from smappy.regions import Region
+    from test_roi_session import rois_of
+    from test_roi_evaluation_plots import table
+    project, first = rois_of(table([(0, 0)]), table([(0, 0)]))
+    second = project.source_of(1)
+    a = project.add_roi(first.id, [0, 0])
+    b = project.add_roi(second.id, [0, 0])
+    session = project.session
+    session.set_roi(Region.rect(-100, -100, 100, 100))
+    assert project.in_drawn_roi() == {a.id: True, b.id: True}
+    session.layers[0].state.set_files([1])
+    assert project.in_drawn_roi() == {a.id: False, b.id: True}
