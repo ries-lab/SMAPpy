@@ -791,8 +791,8 @@ class Result:
     # (`Session.set_layer_configs`): the Render tab's work done by a plugin
     # (`Analysis/Process/Layers`).
     layers: Optional[List[Dict[str, Any]]] = None
-    # The ROIs this run added to the ROI manager's project (a segmenter, or
-    # *Column to ROIs*), an empty list when it found none; None for a run
+    # The ROIs this run added to the ROI manager's project (a segmenter: in
+    # the shipped tree, Segment regions), an empty list when it found none; None for a run
     # that adds no ROIs.  The manager redraws, and a preview is dropped.
     rois: Optional[List[Any]] = None
     # A segmenter's preview: the ROIs it would add, shown grey in the

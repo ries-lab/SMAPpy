@@ -4,8 +4,8 @@
 ``cluster_id`` -- 1, 2, ... by size, 0 for a localization in no cluster -- and
 ``n_in_cluster``, the localizations of its cluster, onto every row; the table
 then names its regions, and a block repeats over them (`blocks.py`), a filter
-on ``n_in_cluster`` keeps the large ones, and *Column to ROIs*
-(`region_column.py`) makes an ROI of each to review and annotate -- of any
+on ``n_in_cluster`` keeps the large ones, and *Segment regions* (`segment.py`,
+*from an id column*) makes an ROI of each to review and annotate -- of any
 clusterer's id, not only this one's.  Both columns are recipes with the rule
 ``max`` for the grouped table (`mathparse.remember`), so a blink keeps its
 cluster.

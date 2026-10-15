@@ -272,8 +272,9 @@ def four_sites():
     return session
 
 
-SEGMENT = {"plugin": "Analysis/Regions/Find/Density Peaks", "label": "find",
-           "values": {"sigma_nm": 60.0, "separation_nm": 1000.0, "min_count": 20}}
+SEGMENT = {"plugin": "Analysis/Regions/Segment regions", "label": "find",
+           "values": {"method": "peaks", "peaks.sigma_nm": 60.0,
+                      "peaks.separation_nm": 1000.0, "peaks.min_count": 20}}
 
 
 def each_roi(*steps, label="sites"):
@@ -303,7 +304,7 @@ def test_an_evaluator_step_runs_on_every_site_before_the_next_step():
     assert project.labels() == ["stats"]
     # and the log says so, step by step
     assert [s["plugin"] for s in session.history[-1]["steps"]] == [
-        "Analysis/Regions/Find/Density Peaks", "Chain/Block",
+        "Analysis/Regions/Segment regions", "Chain/Block",
         "Analysis/Regions/Summarize/Histograms"]
     assert session.history[-1]["steps"][1]["grouping"] == "layer"
 

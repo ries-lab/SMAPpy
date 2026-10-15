@@ -189,8 +189,8 @@ so a blink keeps its cluster (`plugins/clusters.py`, *Find clusters*: DBSCAN,
 Voronoi or HDBSCAN).  Filtering
 clusters by size is then an ordinary filter on `n_in_cluster`, and a block
 repeats over `cluster_id`.  A cluster carries no annotations: to review one,
-*Column to ROIs* makes an ROI of each id of any column -- so every clusterer
-gets it and none makes ROIs itself -- with at least 10 localizations by
+*Segment regions* (*from an id column*) makes an ROI of each id of any
+column -- so every clusterer gets it and none makes ROIs itself -- with at least 10 localizations by
 default, shaped as the cluster's convex hull, or the project's circle or
 square on its centre.
 
@@ -198,10 +198,9 @@ square on its centre.
 
 ```
 Analysis/Measure/...                every measurement: on the view, per ROI, per cluster
-Analysis/Regions/Find/...           Density Peaks and NPC (ROIs)
+Analysis/Regions/Segment regions    ROIs: a ring template, density peaks, or an id column
 Analysis/Regions/Find clusters      DBSCAN, Voronoi or HDBSCAN (cluster_id)
 Analysis/Regions/Summarize/...      Histograms, NPC labelling efficiency: read a region table
-Analysis/Regions/Column to ROIs     an ROI per id of a column
 Analysis/Regions/Regions to column  what was measured per region onto the table
 Analysis/Regions/Workflow/...       NPC Analysis, a shipped chain with a block
 ```

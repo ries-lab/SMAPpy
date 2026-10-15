@@ -1116,9 +1116,9 @@ class ROIProject:
         preview of a replacing run proposes what the run will add.
         """
         from ..plugins import settings_from, settings_values
-        from ..plugins.roi import DensityPeaks
+        from ..plugins.segment import SegmentRegions
         if plugin is None:
-            plugin = DensityPeaks()
+            plugin = SegmentRegions()
         if settings is None:
             settings = settings_from(plugin.Settings, parameters or {})
         state = self.state(file_id)

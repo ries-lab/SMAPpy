@@ -46,12 +46,13 @@ def test_a_save_says_it_leaves_out_the_region_results_before_and_after(tmp_path)
 
 
 def test_a_save_without_figure_data_counts_the_results_that_kept_some():
-    from smappy.plugins.region_column import ColumnToROIs
+    from smappy.plugins.region_column import ColumnROIsSettings
+    from smappy.plugins.segment import SegmentRegions
     session = clusters(3)
     settings = Save.Settings(region_figures=False)
     measured_per_cluster(session)            # an id column's regions keep none
     assert left_out(session, settings) is None
-    session.run(ColumnToROIs(), ColumnToROIs.Settings())
+    session.run(SegmentRegions(), SegmentRegions.Settings(method="ids"))
     measured_per_cluster(session, regions="rois")       # an ROI keeps its own
     assert left_out(session, settings).startswith(
         "The figure data of 3 region results will not be saved")
@@ -79,10 +80,11 @@ def test_the_save_panel_shows_the_notice_once_there_are_results(app):
 
 def test_past_the_limit_a_pane_draws_centres_and_the_selected_outline(app, monkeypatch):
     from smappy.gui import roi_window
-    from smappy.plugins.region_column import ColumnToROIs
+    from smappy.plugins.region_column import ColumnROIsSettings
+    from smappy.plugins.segment import SegmentRegions
     monkeypatch.setattr(roi_window, "OUTLINE_LIMIT", 20)
     session = clusters(40)
-    session.run(ColumnToROIs(), ColumnToROIs.Settings(min_size=1))
+    session.run(SegmentRegions(), SegmentRegions.Settings(method="ids", ids=ColumnROIsSettings(min_size=1)))
     window = roi_window.ROIManagerWindow(session)
     pane = window.file_pane
     xs, _ = pane.shapes["centres"].getData()
@@ -101,10 +103,11 @@ def test_past_the_limit_a_pane_draws_centres_and_the_selected_outline(app, monke
 
 def test_the_list_makes_a_row_only_when_it_is_shown(app, monkeypatch):
     from smappy.gui import roi_window
-    from smappy.plugins.region_column import ColumnToROIs
+    from smappy.plugins.region_column import ColumnROIsSettings
+    from smappy.plugins.segment import SegmentRegions
     monkeypatch.setattr(roi_window, "COUNT_LIMIT", 10)
     session = clusters(30)
-    session.run(ColumnToROIs(), ColumnToROIs.Settings(min_size=1))
+    session.run(SegmentRegions(), SegmentRegions.Settings(method="ids", ids=ColumnROIsSettings(min_size=1)))
     checked = []
     original = session.rois.stale_steps
     monkeypatch.setattr(session.rois, "stale_steps",

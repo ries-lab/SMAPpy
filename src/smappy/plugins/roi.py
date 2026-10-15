@@ -4,7 +4,9 @@ Three kinds, all ordinary plugins:
 
 * **Segment** proposes candidate ROIs on a whole file.  It runs once, and
   derives from `SegmenterPlugin`, which gives it a Preview: the same
-  proposals, drawn in the ROI manager and not added.
+  proposals, drawn in the ROI manager and not added.  The one shipped is
+  *Segment regions* (`segment.py`); the density-peaks finder it offers is
+  here, `density_peaks`.
 * **Evaluate** measures *one* ROI and returns that site's row in
   `Result.values`.  It declares ``per_region = True``, which is what the
   evaluation window offers -- a property of the plugin, not of its folder, so
@@ -63,7 +65,6 @@ class DensityPeakSettings:
                                         "the minimum count")
     min_count: int = param(10, label="minimum count", min=1,
                            help="a peak with fewer localizations is not made an ROI")
-    replace: bool = replace_param()
 
 
 def density_peaks(locs, settings: DensityPeakSettings,
@@ -188,36 +189,6 @@ class SegmenterPlugin(Plugin):
         sites = [{"center": p["center"], "use": p["use"]} for p in proposals]
         return sites, {"roi_preview": {"file_id": file_id, "method": self.path,
                                        "sites": sites, "replaces": list(replaced)}}
-
-
-@register("Analysis/Regions/Find/Density Peaks")
-class DensityPeaks(SegmenterPlugin):
-    """Proposes ROIs where localizations pile up, after a Gaussian blur."""
-
-    Settings = DensityPeakSettings
-    changes_locs = False
-    version = "1"
-
-    def propose(self, locs, settings: DensityPeakSettings,
-                existing: Sequence = ()) -> List[List[float]]:
-        """The centres alone.  `ROIProject.find` calls this and records the
-        provenance, so `run` can go through the project without recursing."""
-        return density_peaks(locs, settings, existing)
-
-    def segment(self, ctx: Context, settings: DensityPeakSettings,
-                commit: bool) -> Result:
-        project = ctx.rois
-        if project is None:                 # no session: just report the centres
-            centers = density_peaks(ctx.locs, settings)
-            return Result(text=f"{len(centers)} candidates",
-                          data={"centers": centers}, settings=settings)
-        file_id = current_file(project)
-        if file_id is None:
-            raise ValueError("no file to search: load localizations first")
-        sites, effect = self.found(project, file_id, settings, commit)
-        text = f"{len(sites)} candidates " + ("found" if commit else "previewed")
-        return Result(text=text, settings=settings,
-                      data={"centers": [s["center"] for s in sites]}, **effect)
 
 
 def current_file(project) -> Optional[str]:

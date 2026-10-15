@@ -1,0 +1,19 @@
+# Nuclear pore complexes: the ring template at their size -- an eight-cornered
+# ring of 55 nm radius -- with the checks that a candidate looks like a pore
+# (`plugins/npc.py`, `studies/npc_le` for why the values are these).  A preset
+# is any of Segment regions' settings, by name; a lab adds its own structure as
+# a file like this one under the config directory's segment_presets.
+method: ring
+ring:
+  radius_nm: 55.0
+  ring_width_nm: 15.0
+  min_locs: 4
+  precision_nm: 20.0
+  min_radius_nm: 40.0
+  max_radius_nm: 70.0
+  max_far: 0.01
+  radial_alpha: 0.05
+  radial_extra_nm: 5.0
+  window_nm: 100.0
+  separation_nm: 120.0
+  bin_nm: 10.0

@@ -5,8 +5,9 @@ Three plugins, one for each step of the ROI manager, ported from SMAP's
 ``segmentNPC`` with ``NPCsegmentCleanup``, ``NPCLabelingQuantify_s`` and
 ``NPCLabelingEfficiency`` (Thevathasan et al. 2019):
 
-* **Segment/NPC** filters a density image with a ring, fits a circle to every
-  candidate and keeps the ones that look like a pore.
+* **Segment regions**' ring template (`segment.py`, preset ``NPC``) filters
+  a density image with a ring, fits a circle to every candidate and keeps
+  the ones that look like a pore: `segment_npcs`, here.
 * **Evaluate/NPC Corners** counts, per pore, the corners seen with the
   precise localizations and the localizations it has -- and SMAP's corner
   count beside them.
@@ -65,9 +66,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 from . import Context, Plot, Plugin, Result, param, register, settings_from
-from .roi import (EVALUATION_HELP, MAX_FINDER_PIXELS, SegmenterPlugin,
-                  SiteAnalysisPlugin, replace_param,
-                  auto_only, current_file)
+from .roi import EVALUATION_HELP, MAX_FINDER_PIXELS, SiteAnalysisPlugin, auto_only
 
 # SMAP's NPCLabelingQuantify counts a localization towards a corner only when
 # its precision is below 0.4 of the arc between two corners (15.7 nm at 50 nm)
@@ -169,7 +168,6 @@ class NPCSegmentSettings:
     keep_rejected: bool = param(False, label="keep rejected",
                                 help="add candidates that fail the checks as ROIs "
                                      "that are not used, to look at them")
-    replace: bool = replace_param("pores")
     radial_alpha: float = param(0.05, label="far test level", min=1e-6, max=0.5,
                                 advanced=True,
                                 help="a candidate fails when its far ones are this "
@@ -393,78 +391,11 @@ def draw_sites(ax, xy: np.ndarray, sites: Sequence[Dict[str, Any]],
     ax.set_ylabel("y (nm)")
 
 
-SEGMENTER = "Analysis/Regions/Find/NPC"
-
-
 def npc_rois(project, file_id) -> List[Any]:
-    """The ROIs the NPC segmenter made in this file."""
+    """The ROIs the ring template of *Segment regions* made in this file."""
+    from .segment import made_by
     return [roi for roi in project.rois.values()
-            if roi.file_id == file_id and (roi.origin or {}).get("method") == SEGMENTER]
-
-
-@register("Analysis/Regions/Find/NPC")
-class NPCSegment(SegmenterPlugin):
-    """Finds nuclear pores with a ring filter, fits a circle to each and keeps
-    those that look like a pore."""
-
-    Settings = NPCSegmentSettings
-    changes_locs = False
-    version = "2"
-
-    def propose(self, locs, settings: NPCSegmentSettings,
-                existing: Sequence = ()) -> List[Dict[str, Any]]:
-        """The sites for `ROIProject.find`: centre, whether used, and the
-        checks' numbers, which go into the ROI's origin."""
-        sites = segment_npcs(locs, settings, existing)
-        # every candidate, for `run`'s text and figures: `find` keeps only
-        # the ROIs it made, and the rejected ones are what the checks are for
-        self.last = sites
-        keep = [s for s in sites if s["use"] or settings.keep_rejected]
-        return [{"center": s["center"], "use": s["use"],
-                 "origin": {k: s[k] for k in ("radius_nm", "n_ring", "n_precise",
-                                              "far_fraction", "failed")}}
-                for s in keep]
-
-    def segment(self, ctx: Context, settings: NPCSegmentSettings,
-                commit: bool) -> Result:
-        project = ctx.rois
-        effect: Dict[str, Any] = {}
-        if project is None:
-            locs = ctx.locs
-            sites = segment_npcs(locs, settings)
-            data = {"sites": sites,
-                    "centers": [s["center"] for s in sites if s["use"]]}
-        else:
-            file_id = current_file(project)
-            if file_id is None:
-                raise ValueError("no file to search: load localizations first")
-            state = project.state(file_id)
-            locs = state.locs[state.filter.indices]
-            self.last = []
-            proposed, effect = self.found(project, file_id, settings, commit)
-            sites = self.last
-            data = {"sites": sites,
-                    "centers": [p["center"] for p in proposed if p["use"]]}
-        kept = sum(s["use"] for s in sites)
-        text = f"{kept} pores of {len(sites)} candidates"
-        if precision_column(locs) is None:
-            text += " (no precision column: the far test is off)"
-        if sites and kept < len(sites):
-            reasons: Dict[str, int] = {}
-            for s in sites:
-                for f in s["failed"]:
-                    reasons[f] = reasons.get(f, 0) + 1
-            text += "; rejected for " + ", ".join(f"{k} ({v})" for k, v in
-                                                  sorted(reasons.items()))
-        if not commit:
-            text = "preview: " + text
-        xy = np.column_stack((np.asarray(locs["x_nm"], dtype=float),
-                              np.asarray(locs["y_nm"], dtype=float)))
-        return Result(text=text, settings=settings, data=data, **effect,
-                      plot=(lambda ax: draw_sites(ax, xy, sites, settings))
-                      if sites else None,
-                      plots={"checks": Plot(lambda f: draw_quality(f, sites, settings),
-                                            panels=3, size=(8, 2.8))} if sites else {})
+            if roi.file_id == file_id and made_by(roi, "ring")]
 
 
 # ---------------------------------------------------------------- corners
@@ -960,7 +891,8 @@ class NPCLabelingEfficiency(SiteAnalysisPlugin):
                 f"the joint model needs the ROIs' files, for the precisions of the "
                 f"whole field, and {str(ev)!r} was counted per region of "
                 f"{ev.source}, not in ROIs: use the corners (SMAP) method, or make "
-                f"ROIs of the clusters (Column to ROIs) and count their corners there")
+                f"ROIs of the clusters (Segment regions, from an id column) and count "
+                f"their corners there")
         result = self.analyse(project, rows, settings, count, label)
         if per_cluster and ctx.locs.metadata.get("simulation_settings"):
             result.text += ("; not compared with the simulation's labelled corners, "

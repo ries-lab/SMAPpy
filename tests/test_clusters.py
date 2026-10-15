@@ -5,9 +5,10 @@ import pytest
 
 from smappy.locs import Localizations
 from smappy.mathparse import recipes
+from smappy.plugins.segment import SegmentRegions
 from smappy.plugins.clusters import (DBSCANSettings, FindClusters, auto_eps, dbscan,
                                      sizes_of)
-from smappy.plugins.region_column import (ColumnToROIs, RegionsToColumn, column_regions,
+from smappy.plugins.region_column import (ColumnROIsSettings, RegionsToColumn, column_regions,
                                           hull)
 from smappy.region_runs import roi_numbers, values_onto
 from smappy.session import Session
@@ -24,6 +25,12 @@ def blobs(sizes=SIZES, noise=30, seed=0, spread=15.0):
     truth = np.concatenate([np.full(n, k + 1) for k, n in enumerate(sizes)]
                            + [np.zeros(noise, int)])
     return xy, truth
+
+
+def by_ids(replace=True, **values):
+    """Segment regions' settings for an ROI per id of a column."""
+    return SegmentRegions.Settings(method="ids", ids=ColumnROIsSettings(**values),
+                                   replace=replace)
 
 
 def by_dbscan(**values):
@@ -113,16 +120,16 @@ def test_an_roi_per_cluster_outlines_it_and_replace_makes_them_again():
     session = Session(table(xy))
     session.show_grouped(0, False)
     session.run(FindClusters(), by_dbscan(radius_nm=40, neighbours=5))
-    result = session.run(ColumnToROIs(), ColumnToROIs.Settings(min_size=30))
+    result = session.run(SegmentRegions(), by_ids(min_size=30))
     project = session.rois
     assert len(project.rois) == 2 and len(result.rois) == 2   # 25 < 30
     for roi in project.rois.values():
         inside = project.region(roi).mask(xy[:, 0], xy[:, 1])
         k = roi.origin["cluster"]
         assert inside[truth == k].all()                 # the hull holds its cluster
-    session.run(ColumnToROIs(), ColumnToROIs.Settings(min_size=1))
+    session.run(SegmentRegions(), by_ids(min_size=1))
     assert len(project.rois) == 3                       # replace: the default
-    session.run(ColumnToROIs(), ColumnToROIs.Settings(min_size=1, replace=False))
+    session.run(SegmentRegions(), by_ids(min_size=1, replace=False))
     assert len(project.rois) == 6                       # without replace, beside them
 
 
@@ -131,7 +138,7 @@ def test_any_id_column_makes_rois_and_without_outline_only_the_centre():
     session = Session(table(xy, mine=truth * 7))
     session.show_grouped(0, False)
     session.rois.set_geometry(400)
-    session.run(ColumnToROIs(), ColumnToROIs.Settings(column="mine", outline=False))
+    session.run(SegmentRegions(), by_ids(column="mine", outline=False))
     rois = list(session.rois.rois.values())
     assert sorted(r.origin["cluster"] for r in rois) == [7, 14, 21]
     assert all(r.polygon is None for r in rois)
@@ -148,15 +155,12 @@ def test_column_regions_refuses_a_column_that_is_not_an_id():
 
 
 def test_rois_cannot_be_made_inside_a_block():
-    from smappy.chain import Block, ChainSpec, Step, chain_class
-    xy, truth = blobs()
-    session = Session(table(xy, cluster_id=truth))
-    session.show_grouped(0, False)
-    cls = chain_class(ChainSpec(steps=[Block(regions="cluster_id", steps=[
-        Step(plugin="Analysis/Regions/Column to ROIs")])]))
-    result = session.run(cls(), cls.Settings())
-    table_ = session.id_regions["cluster_id"]["Column to ROIs"]
-    assert all("cannot be made inside a block" in e for e in table_.errors)
+    from smappy.chain import Block, ChainError, ChainSpec, Step, chain_class
+    # refused when the chain is made, as every segmenter is (it used to fail
+    # in each region, when Column to ROIs was a plugin of its own)
+    with pytest.raises(ChainError, match="finds ROIs"):
+        chain_class(ChainSpec(steps=[Block(regions="cluster_id", steps=[
+            Step(plugin="Analysis/Regions/Segment regions", values={"method": "ids"})])]))
 
 
 def test_a_block_repeats_over_the_clusters_dbscan_wrote():
@@ -325,7 +329,7 @@ def test_a_cluster_with_no_hull_still_gets_an_roi_at_its_centre():
     xy = np.column_stack((np.arange(12.0) * 10, np.arange(12.0) * 10))   # a line
     session = Session(table(xy, cluster_id=np.ones(12, dtype=np.int64)))
     session.show_grouped(0, False)
-    result = session.run(ColumnToROIs(), ColumnToROIs.Settings())
+    result = session.run(SegmentRegions(), by_ids())
     (roi,) = session.rois.rois.values()
     assert roi.polygon is None and np.allclose(roi.center, [55, 55])
     assert "1 with no outline" in result.text

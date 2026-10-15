@@ -192,8 +192,9 @@ startup, and a workspace naming plugins that have gone is pruned with a line
 saying which.
 
 The Regions tab -- *Regions* since 2026-10-11, `docs/regions.md` -- is one of
-these, holding `Analysis/Regions/Find/*` and `Analysis/Regions/Summarize/*`
-pins (`ROIManager/Segment/*` and `ROIManager/Analyze/*` until then) --
+these, holding `Analysis/Regions/Segment regions` and `Analysis/Regions/Summarize/*`
+pins (`ROIManager/Segment/*` and `ROIManager/Analyze/*` until 2026-10-11,
+`Analysis/Regions/Find/*` until 2026-10-15) --
 ordinary run-once plugins -- plus its header,
 which carries the geometry every ROI shares and the ways into the two windows.
 

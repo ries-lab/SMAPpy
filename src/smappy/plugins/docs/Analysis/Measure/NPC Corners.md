@@ -29,7 +29,7 @@ detected label).  Its page explains why the counts are taken this way.
 
 It is not in a new list of per-region steps by itself: add it to the
 *per-region steps* in the Regions tab when the ROIs are pores.  It needs ROIs centred
-roughly on the pores, such as those of [NPC](plugin:Analysis/Regions/Find/NPC),
+roughly on the pores, such as those of [Segment regions](plugin:Analysis/Regions/Segment regions)'s ring template,
 pores seen face on, blinks merged -- [merge blinks](plugin:Panels/Glossary),
 also called grouping or linking, combines the localizations in consecutive
 frames that come from one blinking event into one -- and the
@@ -99,7 +99,7 @@ localization per blink.
 **The centre** minimises $\sum_i \rho(d_i - R)$ over the precise
 localizations, $d_i$ the distance of localization $i$ from the centre, $R$
 the *radius*, and $\rho$ the soft-L1 loss with the *ring width* as its scale
-(see [NPC](plugin:Analysis/Regions/Find/NPC)); then twice more over those within
+(see [Segment regions](plugin:Analysis/Regions/Segment regions)); then twice more over those within
 $R + 2\Delta R$ of the answer, $\Delta R$ the *ring width*.  With fewer than 3
 precise localizations, all of them are used.
 
