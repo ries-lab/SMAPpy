@@ -106,6 +106,9 @@ papers and in other software.
   picture of each time window and cross-correlates every pair of them.
 * **COMET**: a drift correction that finds the drift curve under which the
   localizations from different times overlap best, without making pictures.
+* **fiducial** (also called a fiducial marker, or a bead): a bright, still
+  particle on the coverslip -- a fluorescent microsphere, a gold particle --
+  seen in nearly every frame, whose apparent movement is the drift.
 
 ## Regions
 
