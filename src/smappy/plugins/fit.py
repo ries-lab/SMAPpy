@@ -807,8 +807,15 @@ class _FitPlugin(Plugin):
         raw = source.frame(index)
         photons = to_photons(raw, camera)/camera.excess_noise
         candidates, filtered = finder(photons[None], first_frame=index)
-        maxima = filtered[0][filtered[0] > np.percentile(filtered[0], 99)]
-        cutoff = float(finder.cutoff(maxima)) if maxima.size else float("nan")
+        # what detection applied to this frame, from the finder's own code:
+        # one number, or one per half of a split frame
+        cutoffs = tuple(float(c) for c in finder.cutoffs(filtered)[0])
+        split = getattr(finder, "split", None)
+        halves = (None if len(cutoffs) == 1 else
+                  ("top", "bottom") if split[0] == 0 else ("left", "right"))
+        said = (f"{cutoffs[0]:.3g}" if halves is None else
+                ", ".join(f"{c:.3g} {h}" for c, h in zip(cutoffs, halves)))
+        top_cutoff = max(cutoffs)
 
         try:
             projected = self.back_projected(settings, camera, candidates)
@@ -825,7 +832,7 @@ class _FitPlugin(Plugin):
             trouble = f"{type(error).__name__}: {error}"
 
         lines = [f"frame {index} of {source.n_frames}: {len(candidates)} candidates, "
-                 f"cutoff {cutoff:.3g} on the filtered image"]
+                 f"cutoff {said} on the filtered image"]
         if locs is not None:
             lines.append(f"{len(locs)} fitted")
         if trouble:
@@ -868,14 +875,21 @@ class _FitPlugin(Plugin):
             # scaled to the cutoff, not to the brightest pixel: the question
             # this panel answers is how far the peaks sit above the threshold,
             # and a single bright molecule would otherwise flatten the rest
-            top = float(cutoff*2) if np.isfinite(cutoff) and cutoff > 0 else None
+            top = (2*top_cutoff if np.isfinite(top_cutoff) and top_cutoff > 0
+                   else None)
             image = filtered_ax.imshow(filtered[0], cmap="viridis", vmin=0, vmax=top)
             bar = figure.colorbar(image, ax=filtered_ax, fraction=0.046)
             if top is not None:
-                bar.ax.axhline(cutoff, color="red", lw=1.5)
+                # a split frame: the first half's line solid, the second's dashed
+                for value, style in zip(cutoffs, ("-", "--")):
+                    bar.ax.axhline(value, color="red", lw=1.5, ls=style)
             filtered_ax.plot(candidates.x, candidates.y, ".", color="red", ms=3)
-            filtered_ax.set(title=f"{settings.detection.filter} filtered; red "
-                                  f"line at the cutoff, {cutoff:.3g}")
+            if halves is None:
+                line = f"red line at the cutoff, {said}"
+            else:
+                line = (f"cutoffs {cutoffs[0]:.3g} {halves[0]} (red), "
+                        f"{cutoffs[1]:.3g} {halves[1]} (dashed)")
+            filtered_ax.set(title=f"{settings.detection.filter} filtered; {line}")
 
             fits.imshow(photons, cmap="gray", vmax=shown)
             if fitted is not None:
@@ -899,7 +913,8 @@ class _FitPlugin(Plugin):
         return Result(text=text, settings=settings,
                       plot=Plot(draw=plot, panels=3, size=(15, 6), edit=edit),
                       data={"frame": index, "candidates": len(candidates),
-                            "cutoff": cutoff, "locs": locs, "error": trouble})
+                            "cutoff": cutoffs[0] if halves is None else cutoffs,
+                            "halves": halves, "locs": locs, "error": trouble})
 
     def run(self, ctx: Context, settings) -> Result:
         from ..io.hdf5 import LocalizationWriter

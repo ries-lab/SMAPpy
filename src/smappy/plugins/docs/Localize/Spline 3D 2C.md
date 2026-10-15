@@ -482,7 +482,9 @@ What to check, beyond the checks of [Spline 3D](plugin:Localize/Spline 3D)
 * **The preview** draws the secondary half's peaks mapped onto the main half
   with the calibration's transformation (cyan crosses); a cross on its
   partner's circle means the calibration fits this data.  A calibration made
-  with a different split, camera ROI or splitter alignment misses.
+  with a different split, camera ROI or splitter alignment misses.  The
+  filtered image's title gives each half's own cutoff on that frame (solid
+  and dashed lines on the colour bar).
 * **The ratio histogram** should show one peak per dye, and should not change
   with z: a ratio that drifts with height means the two PSFs do not describe
   the two halves at the same z.

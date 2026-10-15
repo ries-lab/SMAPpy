@@ -39,7 +39,9 @@ database and whose numbers are not typed in is said in a line under the
 settings, and asked about once more at Run: *Open camera editor* adds it
 (and does not run), *Cancel* -- the default -- leaves the numbers to be typed
 into the camera fields.  **Preview** runs detection on one frame and shows it, which is the
-way to set the detection threshold.
+way to set the detection threshold.  The red line on the filtered image's
+colour bar, and the number in its title, is the cutoff detection applied to
+that frame -- for a dynamic cutoff, worked out from that frame's local maxima.
 
 ## How it works
 

@@ -257,30 +257,62 @@ def find_candidates(filtered: np.ndarray, cutoff,
         return Candidates(frames, cols.astype(np.int32), rows.astype(np.int32),
                           values)
 
-    # maxima come out sorted by frame, so each frame is a contiguous slice
-    keep = np.zeros(frames.size, dtype=bool)
-    n_frames = filtered.shape[0]
-    bounds = np.searchsorted(frames, np.arange(n_frames + 1))
-    side = None
-    if split is not None:
-        axis, position = split
-        side = (rows if axis == 0 else cols) >= position
-    for start, stop in zip(bounds[:-1], bounds[1:]):
-        if stop <= start:
-            continue
-        block = values[start:stop]
-        if side is None:
-            keep[start:stop] = block > cutoff(block)
-            continue
-        here = side[start:stop]
-        for half in (here, ~here):
-            if half.any():
-                keep[start:stop][half] = block[half] > cutoff(block[half])
-
+    side = _halves(rows, cols, split)
+    applied = _cutoffs(frames, values, side, filtered.shape[0], cutoff,
+                       1 if split is None else 2)
+    keep = values > applied[frames, side]
     return Candidates(frame=frames[keep].astype(np.int64),
                       x=cols[keep].astype(np.int32),
                       y=rows[keep].astype(np.int32),
                       value=values[keep])
+
+
+def frame_cutoffs(filtered: np.ndarray, cutoff, n_threads: int = 0,
+                  split=None) -> np.ndarray:
+    """The cutoff :func:`find_candidates` applies to each frame, ``(n_frames,
+    halves)``: one column, or two on a split frame -- the half below
+    ``position`` first.
+
+    The same maxima and the same per-frame code as the search itself, so what
+    a preview reports is what detection did.  A percentile of all pixels, say,
+    is a different and much larger number (322 against 8 on a test frame):
+    the maxima are mostly noise peaks, which is what a dynamic cutoff is about.
+    """
+    filtered = np.asarray(filtered, dtype=np.float32)
+    if filtered.ndim == 2:
+        filtered = filtered[None]
+    n_halves = 1 if split is None else 2
+    if isinstance(cutoff, AbsoluteCutoff):
+        return np.full((filtered.shape[0], n_halves), cutoff(np.empty(0)))
+    frames, rows, cols, values = local_maxima(filtered, n_threads=n_threads)
+    return _cutoffs(frames, values, _halves(rows, cols, split),
+                    filtered.shape[0], cutoff, n_halves)
+
+
+def _halves(rows, cols, split) -> np.ndarray:
+    """Which half of a split frame each maximum is in: 0 below the position,
+    1 at or above it; all 0 without a split."""
+    if split is None:
+        return np.zeros(rows.size, dtype=np.intp)
+    axis, position = split
+    return ((rows if axis == 0 else cols) >= position).astype(np.intp)
+
+
+def _cutoffs(frames, values, side, n_frames, cutoff, n_halves) -> np.ndarray:
+    """The cutoff of each frame and half, from that frame's (half's) maxima.
+
+    A frame or half with no maxima gets what the cutoff makes of none; nothing
+    there is held to it.  Each is rounded to float32, as the filtered image
+    is: a Python float compared with it is taken as one, and so must this be.
+    """
+    out = np.empty((n_frames, n_halves))
+    # maxima come out sorted by frame, so each frame is a contiguous slice
+    bounds = np.searchsorted(frames, np.arange(n_frames + 1))
+    for f, (start, stop) in enumerate(zip(bounds[:-1], bounds[1:])):
+        block, here = values[start:stop], side[start:stop]
+        for half in range(n_halves):
+            out[f, half] = np.float32(cutoff(block[here == half]))
+    return out
 
 
 @dataclass
@@ -307,3 +339,11 @@ class PeakFinder:
     def __str__(self) -> str:
         halves = "" if self.split is None else ", each half on its own"
         return f"PeakFinder({self.filter}, {self.cutoff}{halves})"
+
+    def cutoffs(self, filtered: np.ndarray,
+                n_threads: Optional[int] = None) -> np.ndarray:
+        """The cutoff applied to each frame of ``filtered`` (and each half, on
+        a split frame): :func:`frame_cutoffs`."""
+        threads = self.n_threads if n_threads is None else n_threads
+        return frame_cutoffs(filtered, self.cutoff, n_threads=threads,
+                             split=self.split)

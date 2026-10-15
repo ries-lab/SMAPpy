@@ -488,3 +488,45 @@ def test_a_mirrored_splitter_keeps_its_colour(mirrored):
         assert mine.sum() == 30
         assert np.median(np.abs(x[mine] - x0)) < 0.1
         assert np.median(np.abs(y[mine] - y0)) < 0.1
+
+
+def test_a_split_preview_reports_each_halfs_own_cutoff(tmp_path):
+    """The halves of a split frame are thresholded apart, and the preview says
+    both: the dim half's cutoff is its own, far below the bright one's."""
+    import tifffile
+    from smappy.detect import DynamicCutoff, find_candidates, local_maxima
+    from smappy.plugins.fit import DualSplineFit
+
+    rng = np.random.default_rng(6)
+    cal = dual_calibration(ratio=0.1)
+    frame = split_frame([(25.0, 15.0), (42.0, 21.0)], 24.0, 9000., 0.1, 30., rng, cal)
+    frame[SPLIT:] *= 0.2                          # a much dimmer lower half
+    tifffile.imwrite(tmp_path / "split.tif", (frame[None] + 100).astype(np.uint16))
+    plugin = DualSplineFit()
+    settings = plugin.Settings()
+    settings.source.path = str(tmp_path / "split.tif")
+    settings.camera.conversion, settings.camera.offset = 1.0, 100.0
+    settings.camera.pixelsize_um = 0.1
+    settings.model.calibration = str(_dual_calibration_file(tmp_path / "dual.h5", cal))
+    settings.fit.roisize = 13
+
+    result = plugin.preview(Context(), settings, frame=0)
+    assert result.data["halves"] == ("top", "bottom")
+    upper, lower = result.data["cutoff"]
+
+    # computed here, from the maxima of each half
+    camera = plugin._camera(settings)
+    finder = plugin.finder(settings, camera)
+    assert finder.split == (0, SPLIT)
+    photons = tifffile.imread(tmp_path / "split.tif").astype(np.float32) - 100
+    filtered = finder.filter(photons.reshape(1, *photons.shape[-2:]))
+    _, rows, _, values = local_maxima(filtered, use_extension=False)
+    cutoff = DynamicCutoff(settings.detection.cutoff)
+    assert upper == pytest.approx(cutoff(values[rows < SPLIT]), rel=1e-6)
+    assert lower == pytest.approx(cutoff(values[rows >= SPLIT]), rel=1e-6)
+    assert lower < 0.5*upper
+    # and they are what detection held each half to
+    kept = find_candidates(filtered, finder.cutoff, split=finder.split)
+    for half, value in ((kept.y < SPLIT, upper), (kept.y >= SPLIT, lower)):
+        assert half.any() and np.all(kept.value[half] > value)
+    assert f"{upper:.3g} top, {lower:.3g} bottom" in result.text
