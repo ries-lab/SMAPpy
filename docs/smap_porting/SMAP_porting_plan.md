@@ -489,6 +489,19 @@ channel *Check overlay* (C3).  AssignColors for more than 2 colours (C4):
   this mode).  A raster: exports and overlays unchanged.  The 3D view draws
   such a layer as points.  1 M localizations in 0.3 s.  The Render tab's
   page has the mode, its two controls and a figure.  Step 19 done.
+* **Step 5c** (2026-10-15): *Analysis/Drift/Fiducials*, a `Drift` like
+  COMET's and RCC's (the same figure, kept with the file; `method`
+  "fiducials").  Beads: the localizations above *min photons* (5000) of the
+  selection, linked with *Link tracks*' simple linker (memory 50 frames,
+  jump 150 nm), seen in at least *min length* (a quarter) of the frames.
+  One linear least-squares fit of every bead's offset and one cubic B-spline
+  (COMET's `_spline_basis`, a coefficient every 100 frames) for x, y and z,
+  a small second-difference penalty bridging stretches no bead covers.  All
+  beads used, equal weights; beads stay in the table; one file at a time.
+  `smappy.simulate.simulate_beads` / `with_beads` (gaps, late beads) for the
+  tests and the page.  **The reference**: 5a had not landed, so the curve
+  is zero at the first frame -- a Lagrange row in `fiducials.fit_drift`,
+  where 5a's first / last frame goes.  In the shipped GUI's Analysis tab.
 
 ### Start here
 
