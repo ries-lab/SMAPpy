@@ -47,7 +47,7 @@ using Ints = py::array_t<int64_t, py::array::c_style | py::array::forcecast>;
 using Pair = std::pair<int64_t, int64_t>;          // (cell key, index)
 
 enum Mode { Count = 0, Gauss = 1, Mean = 2, Median = 3, Min = 4, Max = 5, Std = 6,
-            Quantile = 7 };
+            Quantile = 7, Ball = 8 };
 
 struct Grid {
     double x0, y0, cell;
@@ -179,7 +179,7 @@ public:
         const int64_t na = ax.size();
         if (ay.size() != na) throw std::invalid_argument("x and y must match");
         const bool use_z = z_reach > 0 && has_z_ && !az_obj.is_none();
-        const bool stat = mode >= Mean;
+        const bool stat = mode >= Mean && mode != Ball;
         if (stat && !has_values_) throw std::invalid_argument("a statistic needs values");
         Doubles az;
         Ints same;
@@ -240,6 +240,7 @@ public:
                             dz2 = ddz * ddz;
                             if (dz2 > z2) continue;
                         }
+                        if (mode == Ball && d2 + dz2 > r2) continue;  // a sphere
                         if (stat) {
                             const double v = v_[s];
                             if (std::isfinite(v)) found.push_back(v);
@@ -272,6 +273,110 @@ public:
         return out;
     }
 
+    // DBSCAN's clusters, given which of the indexed points are core points
+    // (`core`, in the order the points were given): per point the cluster it
+    // is in, -1 for none.  Core points within the cell size of each other --
+    // in 3D a sphere, with `use_z` -- are one cluster, found by union-find
+    // while scanning the cells, so the pairs are never stored; a point that
+    // is not core joins the cluster of its nearest core point within reach.
+    // Clusters are numbered in the order of their lowest index, as
+    // scipy.sparse.csgraph.connected_components numbers them.
+    Ints dbscan_join(const py::array_t<bool, py::array::c_style | py::array::forcecast>& core,
+                     bool use_z, int threads) const {
+        const int64_t n = static_cast<int64_t>(key_.size());
+        if (core.size() != n) throw std::invalid_argument("core must match the points");
+        if (use_z && !has_z_) throw std::invalid_argument("no z to cluster in");
+        Ints out(n);
+        int64_t* res = out.mutable_data();
+        std::fill_n(res, n, int64_t(-1));
+        if (n == 0) return out;
+        const bool* pc = core.data();
+        const double r2 = grid_.cell * grid_.cell;
+
+        py::gil_scoped_release release;
+        std::vector<char> is_core(n);              // by sorted position
+        for (int64_t s = 0; s < n; ++s) is_core[s] = pc[index_[s]];
+        std::vector<int64_t> parent(n);
+        for (int64_t s = 0; s < n; ++s) parent[s] = s;
+        auto find = [&](int64_t a) {
+            while (parent[a] != a) {
+                parent[a] = parent[parent[a]];        // path halving
+                a = parent[a];
+            }
+            return a;
+        };
+        auto near = [&](int64_t a, int64_t b) {
+            const double dx = x_[a] - x_[b], dy = y_[a] - y_[b];
+            double d2 = dx * dx + dy * dy;
+            if (use_z) { const double dz = z_[a] - z_[b]; d2 += dz * dz; }
+            return d2;
+        };
+        // the runs of the sorted list around position s: the cells of the
+        // rows above, at and below it, three each
+        auto runs = [&](int64_t s, int64_t* lo, int64_t* hi) {
+            const int64_t ix = key_[s] % grid_.width, iy = key_[s] / grid_.width;
+            for (int64_t dy = -1; dy <= 1; ++dy) {
+                auto a = std::lower_bound(key_.begin(), key_.end(), grid_.key(ix - 1, iy + dy));
+                auto b = std::upper_bound(a, key_.end(), grid_.key(ix + 1, iy + dy));
+                lo[dy + 1] = a - key_.begin();
+                hi[dy + 1] = b - key_.begin();
+            }
+        };
+        // core pairs: union-find, each pair once (the later of the two)
+        int64_t lo[3], hi[3], last = -1;
+        for (int64_t s = 0; s < n; ++s) {
+            if (!is_core[s]) continue;
+            if (last < 0 || key_[s] != key_[last]) runs(s, lo, hi);
+            last = s;
+            for (int run = 0; run < 3; ++run)
+                for (int64_t t = lo[run]; t < hi[run]; ++t) {
+                    if (t >= s || !is_core[t] || near(s, t) > r2) continue;
+                    int64_t a = find(s), b = find(t);
+                    if (a != b) parent[std::max(a, b)] = std::min(a, b);
+                }
+        }
+        // each cluster numbered by its lowest index
+        std::vector<int64_t> lowest(n, std::numeric_limits<int64_t>::max());
+        for (int64_t s = 0; s < n; ++s)
+            if (is_core[s]) {
+                const int64_t r = find(s);
+                lowest[r] = std::min(lowest[r], index_[s]);
+            }
+        std::vector<int64_t> roots;
+        for (int64_t s = 0; s < n; ++s)
+            if (is_core[s] && parent[s] == s) roots.push_back(s);
+        std::sort(roots.begin(), roots.end(),
+                  [&](int64_t a, int64_t b) { return lowest[a] < lowest[b]; });
+        std::vector<int64_t> label(n, -1);
+        for (size_t c = 0; c < roots.size(); ++c) label[roots[c]] = static_cast<int64_t>(c);
+        std::vector<int64_t> cluster(n, -1);    // by sorted position
+        for (int64_t s = 0; s < n; ++s)
+            if (is_core[s]) cluster[s] = label[find(s)];
+        // border points: the nearest core point within reach, on every core
+        smappy::parallel_ranges(n, threads, [&](long long b, long long e, int) {
+            int64_t lo[3], hi[3], last = -1;
+            for (long long s = b; s < e; ++s) {
+                if (is_core[s]) { res[index_[s]] = cluster[s]; continue; }
+                if (last < 0 || key_[s] != key_[last]) runs(s, lo, hi);
+                last = s;
+                double best = r2;
+                int64_t found = -1;
+                for (int run = 0; run < 3; ++run)
+                    for (int64_t t = lo[run]; t < hi[run]; ++t) {
+                        if (!is_core[t]) continue;
+                        const double d2 = near(s, t);
+                        if (d2 <= best && (found < 0 || d2 < best ||
+                                           index_[t] < index_[found])) {
+                            best = d2;
+                            found = t;
+                        }
+                    }
+                res[index_[s]] = found < 0 ? -1 : cluster[found];
+            }
+        });
+        return out;
+    }
+
 private:
     Grid grid_;
     bool has_z_ = false, has_values_ = false;
@@ -293,5 +398,7 @@ PYBIND11_MODULE(_neighbours, m) {
         .def("query", &Index::query, py::arg("x"), py::arg("y"), py::arg("z"),
              py::arg("same"), py::arg("mode"), py::arg("sigma") = 0.0,
              py::arg("z_reach") = 0.0, py::arg("z_sigma") = 0.0, py::arg("q") = 0.5,
+             py::arg("threads") = 0)
+        .def("dbscan_join", &Index::dbscan_join, py::arg("core"), py::arg("use_z"),
              py::arg("threads") = 0);
 }

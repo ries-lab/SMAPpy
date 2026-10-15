@@ -295,7 +295,8 @@ filters and zoom-ins are settled) · AssignColors for more than 2 colours (C4)
   hdbscan package (Boruvka spanning tree: 53 s at a million, where
   scikit-learn's Prim's takes hours), the new extra
   `smappy-smlm[clusters]`, named by the form and the run when missing,
-  with a preflight question.  DBSCAN reports % and stops.
+  with a preflight question.  DBSCAN reports % and stops, and runs on
+  Neighbourhood's C++ cell search with union-find (2 M in 2 s, was 28 s).
 * **Step 12** (2026-10-14): *Analysis/Measure/Cluster shape*, `per_region`:
   per layer the number of localizations, centre, convex-hull area and
   density, radius of gyration, standard deviations along the long and the

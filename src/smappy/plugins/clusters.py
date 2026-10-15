@@ -25,9 +25,9 @@ SMAP's:
   is the radius of a ball holding *k* points at the mean density of the
   whole field: in a cell, mostly empty, that is hundreds of nanometres and
   merges everything (0 still asks for it);
-* the search is a k-d tree (`scipy.spatial.cKDTree`) and the clusters the
-  connected components of the core points' graph, rather than SMAP's sweep
-  over x -- the same clusters, a million localizations in seconds;
+* the search is SMAP's sweep over sorted positions made two-dimensional
+  (`csrc/neighbours.cpp`, as Neighbourhood's) and the clusters are joined by
+  union-find during it -- the same clusters, 2 M localizations in 2 s;
 * each **file** of the session is clustered on its own, so two files'
   positions are never mixed;
 * on a **grouped** layer the blinks are clustered, and every localization
@@ -104,51 +104,45 @@ def dbscan(points: np.ndarray, eps: float, k: int,
     others are within ``eps``; a border point joins its nearest core point's
     cluster (see the module docstring).
 
+    The search is the Neighbourhood one (`csrc/neighbours.cpp`): the points
+    sorted into square cells ``eps`` wide, each testing the nine cells around
+    it, on every core.  The core points are then joined by union-find while
+    their cells are scanned again (`Index.dbscan_join`), so the pairs within
+    ``eps`` are never stored.  On 2 M localizations, 28 s became 2 s: scipy's
+    k-d tree took 9 s to count, but 23 s went on writing out the 26 M core
+    pairs, making a sparse graph of them and walking it.  The clusters are
+    the same, numbered alike (tests/test_clusters.py keeps the scipy version
+    to check).
+
     ``progress(fraction)`` is called as it goes -- which may raise, to stop
-    (the plugin raises `Stopped`).  The count goes in chunks; the pairs of
-    core points, their connected components and the border points are one
-    scipy call each, so a stop waits for the one running: on 2 M
-    localizations those take 10, 13 and 2 s, the count 9 s.
+    (the plugin raises `Stopped`): after each `COUNT_CHUNK` points counted,
+    and after the join, which is one call of about a second on 2 M.
     """
-    from scipy.sparse import coo_matrix
-    from scipy.sparse.csgraph import connected_components
-    from scipy.spatial import cKDTree
+    from .._neighbours import Index, cell_order
     points = np.asarray(points, dtype=float)
     n = len(points)
-    labels = np.zeros(n, dtype=np.int64)
     if n == 0:
-        return labels
+        return np.zeros(0, dtype=np.int64)
     if not eps > 0:
         raise ValueError("the radius must be positive")
-    def step(fraction):
-        if progress is not None:
-            progress(fraction)
-
-    tree = cKDTree(points)
-    counts = np.empty(n, dtype=np.int64)
+    use_z = points.shape[1] > 2
+    x, y = points[:, 0], points[:, 1]
+    z = points[:, 2] if use_z else None
+    x0, y0, x1 = float(x.min()), float(y.min()), float(x.max())
+    index = Index(x, y, z, None, x0, y0, x1, float(eps))
+    order = cell_order(x, y, x0, y0, x1, float(eps))
+    counts = np.empty(n)
     for start in range(0, n, COUNT_CHUNK):
-        rows = slice(start, min(start + COUNT_CHUNK, n))
-        counts[rows] = tree.query_ball_point(points[rows], eps, return_length=True)
-        step(0.3 * rows.stop / n)
-    core = np.flatnonzero(counts >= k + 1)          # itself and k others
-    if not len(core):
-        return labels
-    core_tree = cKDTree(points[core])
-    pairs = core_tree.query_pairs(eps, output_type="ndarray")
-    step(0.6)
-    graph = coo_matrix((np.ones(len(pairs)), (pairs[:, 0], pairs[:, 1])),
-                       shape=(len(core), len(core)))
-    _, component = connected_components(graph, directed=False)
-    step(0.9)
-    # border points: the nearest core point within eps
-    rest = np.setdiff1d(np.arange(n), core)
-    found = np.full(n, -1, dtype=np.int64)
-    found[core] = component
-    if len(rest):
-        distance, nearest = core_tree.query(points[rest], distance_upper_bound=eps)
-        near = np.isfinite(distance)
-        found[rest[near]] = component[nearest[near]]
-    step(1.0)
+        rows = order[start:start + COUNT_CHUNK]
+        # mode 8: within eps in x, y (and z), a sphere; itself counted
+        counts[rows] = index.query(x[rows], y[rows], None if z is None else z[rows],
+                                   None, 8, 0.0, float(eps) if use_z else 0.0)
+        if progress is not None:
+            progress(0.7 * min(start + COUNT_CHUNK, n) / n)
+    core = counts >= k + 1                        # itself and k others
+    found = np.asarray(index.dbscan_join(core, use_z))
+    if progress is not None:
+        progress(1.0)
     return by_size(found)
 
 

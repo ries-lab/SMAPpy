@@ -472,3 +472,48 @@ def test_a_long_hdbscan_or_voronoi_run_asks_first():
     big = Context(locs=table(np.random.default_rng(0).uniform(0, 1e5, (600_000, 2))))
     question = FindClusters().preflight(big, FindClusters.Settings(algorithm="hdbscan"))
     assert "30 s" in question and "Stop cannot end" in question
+
+
+def scipy_dbscan(points, eps, k):
+    """DBSCAN as it was computed before the C++ search: a k-d tree, the core
+    pairs and their connected components -- the reference the C++ must match,
+    numbers included."""
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import connected_components
+    from scipy.spatial import cKDTree
+    from smappy.plugins.clusters import by_size
+    points = np.asarray(points, dtype=float)
+    n = len(points)
+    counts = cKDTree(points).query_ball_point(points, eps, return_length=True)
+    core = np.flatnonzero(counts >= k + 1)
+    found = np.full(n, -1, dtype=np.int64)
+    if len(core):
+        core_tree = cKDTree(points[core])
+        pairs = core_tree.query_pairs(eps, output_type="ndarray")
+        graph = coo_matrix((np.ones(len(pairs)), (pairs[:, 0], pairs[:, 1])),
+                           shape=(len(core), len(core)))
+        _, component = connected_components(graph, directed=False)
+        found[core] = component
+        rest = np.setdiff1d(np.arange(n), core)
+        if len(rest):
+            distance, nearest = core_tree.query(points[rest], distance_upper_bound=eps)
+            near = np.isfinite(distance)
+            found[rest[near]] = component[nearest[near]]
+    return by_size(found)
+
+
+def test_the_cpp_dbscan_gives_the_clusters_scipy_gives_numbers_and_all():
+    rng = np.random.default_rng(0)
+    for trial in range(60):
+        d = 3 if trial % 2 else 2
+        n = int(rng.integers(5, 2000))
+        side = rng.uniform(200, 5000)
+        pts = rng.uniform(0, side, (n, d))
+        if trial % 3 == 0:                                  # clusters
+            c = rng.uniform(0, side, (max(1, n // 50), d))
+            pts = np.vstack([pts[: n // 2], c[rng.integers(0, len(c), n - n // 2)]
+                             + rng.normal(0, 20, (n - n // 2, d))])
+        if trial % 7 == 0:                                  # duplicates
+            pts = np.vstack([pts, pts[: n // 5]])
+        eps, k = float(rng.uniform(10, 120)), int(rng.integers(1, 15))
+        assert np.array_equal(dbscan(pts, eps, k), scipy_dbscan(pts, eps, k)), trial
