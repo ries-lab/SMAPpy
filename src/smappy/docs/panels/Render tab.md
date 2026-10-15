@@ -557,8 +557,8 @@ colour bar in the render window's top right corner: the LUT over the
 *colour range*, its ends in the column's unit, and above it the layer and
 the column (*layer 2: z_nm*).  Each scale has its own bar, stacked one
 under the other; layers with the same column, LUT, inversion and range
-share one, labelled with all of them.  The bars are not part of a saved or
-copied picture.
+share one, labelled with all of them.  A picture saved or copied from the
+render window draws the same bars into it (*Export Image*).
 
 ### colour range
 The values that get the two ends of the LUT.  Narrow it to spread the

@@ -345,6 +345,10 @@ class Session:
         # set by the GUI: the windows a plugin may open (`Plugin.window`), by
         # name, each called with the plugin's settings
         self.window_openers: Dict[str, Callable[[Any], None]] = {}
+        # set by the GUI: what each picture window shows, by name ("2D",
+        # "3D"), as a `picture.ViewFrame` -- where it looks, how fine, its
+        # panels -- for *Export Image* to frame its picture on
+        self.view_frames: Dict[str, Callable[[], Any]] = {}
         # False in a chain's scratch copy: the chain keeps one record and one
         # undo step for all its steps, so the copy keeps neither (`scratch`)
         self.recording = True
@@ -995,6 +999,7 @@ class Session:
         copy.select_in_slab = self.select_in_slab
         copy.slab_shown = self.slab_shown
         copy.projection = self.projection
+        copy.view_frames = self.view_frames     # the windows', framing an export
         copy.layers = []
         for layer in self.layers:
             if layer.is_image:
