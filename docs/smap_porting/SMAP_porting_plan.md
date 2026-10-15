@@ -513,7 +513,7 @@ channel *Check overlay* (C3).  AssignColors for more than 2 colours (C4):
   x, y, z; rotate, scale, mirror about the middle of the target, the origin
   or a point; one 4x4 matrix), a named transformation
   (`Session.transformations`, through `Result.transformations`, saved with
-  the workspace and the file, recorded in `metadata["transformations"]`
+  the localization file -- not the workspace, Jonas's decision -- recorded in `metadata["transformations"]`
   when applied), a file (`_2ct.h5` converted to nm with the file's pixel
   size, affine kept affine; the new `_T.h5`, written by *write to*), or
   another file's drift (`Drift.apply(rows=)`, refused for other frames).

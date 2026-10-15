@@ -176,17 +176,14 @@ def test_the_plugin_writes_and_keeps_what_it_applied(tmp_path):
     assert session.locs.metadata["transformations"][-1]["name"] == "ten"
 
 
-def test_named_transformations_are_saved_with_the_workspace_and_the_file(tmp_path):
-    from smappy.workspace import Workspace
+def test_named_transformations_are_saved_with_the_file_and_not_the_workspace(tmp_path):
     session = Session(points())
     session.add_transformation("cam2", typed((5, 0, 0)))
-    space = Workspace(transformations=session.transformation_dicts())
-    back = Workspace.from_dict(space.to_dict())
-    other = Session(points())
-    other.take_transformations(back.transformations)
+    path = session.save(tmp_path / "kept.hdf5")
+    other = Session()
+    other.load(path)
     np.testing.assert_allclose(other.transformations["cam2"].matrix,
                                session.transformations["cam2"].matrix)
-    assert "cam2" in session.file_metadata()["named_transformations"]
 
 
 # ------------------------------------------------------------------ images
@@ -339,6 +336,6 @@ def test_the_main_window_opens_transform_on_a_named_transformation(app, tmp_path
                                          values)
     assert (2, "image layer 2: wf") in state.choices["target"]
     assert state.choices["named"] == [("cam2", "cam2")]
-    # the workspace the window saves carries the named transformation
-    assert "cam2" in window.collect_workspace().to_dict()["transformations"]
+    # the data's, not the GUI's: the workspace does not carry it
+    assert "transformations" not in window.collect_workspace().to_dict()
     window.close()
