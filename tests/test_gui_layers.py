@@ -252,7 +252,7 @@ def test_render_modes_read_in_words_and_store_the_short_key(app):
     tab = RenderTab(session)
     shown = [tab.mode.itemText(i) for i in range(tab.mode.count())]
     assert shown == ["Gaussian (precision)", "Gaussian (fixed)", "histogram",
-                     "diffraction-limited", "tracks"]
+                     "diffraction-limited", "tracks", "Voronoi density"]
     tab.mode.setCurrentText("histogram")             # as a click on the list
     assert session.layers[0].state.settings.mode == "hist"
     tab.set_mode("gauss")
