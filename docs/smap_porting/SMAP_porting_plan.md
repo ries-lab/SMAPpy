@@ -447,6 +447,17 @@ filters and zoom-ins are settled) · AssignColors for more than 2 colours (C4)
   of the shipped GUI.  The simulation is also *File/Simulate/Tracks*, a
   plugin of its own (the structure simulator shares almost none of its
   settings), pinned in the File tab.
+* **Step 19c** (2026-10-15): *Analysis/Tracking/Tracking analysis*,
+  `per_region`, of any id column (`track_id`, MINFLUX's `tid` on its
+  `time_s` clock): the MSD per track and pooled, the offset from the
+  precisions (or fitted), the number of lags Michalet's optimum computed
+  exactly from the MSD's covariance (Isserlis) since his formula could not
+  be checked; D and alpha; per-track `track_D_um2_per_s` / `track_alpha`
+  on a tick.  Jump distances at a lag as 1-3 diffusive states with the
+  localizations' errors, by EM (at most 200 000 jumps), BIC to compare.
+  Vectorised: 1 M localizations in 54 k tracks in ~10 s.  Tested on
+  `simulate_tracks` with known D, states and precision.  In the Analysis
+  tab of the shipped GUI.  Frame time from step 18.
 
 ### Start here
 
