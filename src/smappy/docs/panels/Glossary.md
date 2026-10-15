@@ -115,6 +115,16 @@ papers and in other software.
 * **DBSCAN** (density-based spatial clustering of applications with noise): a
   clustering in which a localization with enough neighbours within a radius
   starts or extends a cluster, and the rest are noise.
+* **complete spatial randomness** (CSR, also called a Poisson pattern):
+  positions placed independently, every place in the window equally likely
+  -- what "not clustered" means in a test.
+* **pair correlation** (g(r), also called the pair correlation function or
+  radial distribution function): the number of pairs of localizations at
+  distance r, over what complete spatial randomness gives -- 1 for random
+  positions, above 1 at the distances where they cluster.
+* **Ripley's K** (and **L(r) - r**, also called H(r)): the mean number of
+  neighbours within r over the density, and the same made a straight line,
+  0 for random positions.
 * **local density**: how many localizations lie within a radius of a
   localization -- a number per localization, not a region.
 * **Voronoi tessellation** (also called a Voronoi diagram): the division of

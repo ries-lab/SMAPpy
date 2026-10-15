@@ -51,6 +51,20 @@ Where it departs from SMAP's:
   each; Stop ends the run there and writes nothing (`Stopped`), since a
   column computed for part of the table is worth nothing.
 
+**Expressed as** (the count only): the count itself; the **local L(r)** of
+Getis and Franklin (1987), sqrt(|W| n / (pi (N - 1))) -- the radius a
+circle would need to hold n neighbours at the mean density, r in a uniform
+field, more where it is dense; or the count **relative to the mean
+density**, n over what the mean density puts in the circle, 1 in a uniform
+field.  Both divide by what complete spatial randomness expects around that
+localization: (N - 1) / |W| times the area of the circle *inside the
+window* (`spatial_statistics.window_coverage`), so a localization at the
+window's edge is not called sparse for having half a circle of data around
+it.  The window is Spatial statistics': the drawn ROI, else the occupied
+area or the bounding box, per file.  Lateral only.  DBSCAN thresholds the
+same count (*neighbours* within *radius*), so a threshold on local L is a
+threshold DBSCAN could draw; the column lets one see it before clustering.
+
 **Writing the column.**  The value goes onto the localizations of the
 *around* layer that pass its filter, NaN on the rest.  On a layer that shows
 merged blinks, the blink's value goes onto each of its localizations through
@@ -500,6 +514,16 @@ class NeighbourhoodSettings:
     gaussian: bool = param(False, label="Gaussian weight",
                            help="weight each neighbour by a Gaussian of its "
                                 "distance rather than counting a sharp circle")
+    express_as: str = param("count", label="express as",
+                            choices=(("count", "count"),
+                                     ("local_l", "local L(r)"),
+                                     ("relative", "relative to the mean density")),
+                            help="the count, the radius that count needs at the "
+                                 "mean density, or the count over the mean density's")
+    window: str = param("occupied", label="window",
+                        choices=(("occupied", "the occupied area"),
+                                 ("box", "the bounding box")),
+                        help="where the mean density is taken, without a drawn ROI")
     column: str = param("", label="column", choices=lambda: [("", "-")],
                         help="the column whose statistic is taken")
     statistic: str = param("median", label="statistic",
@@ -522,7 +546,9 @@ def default_name(settings: NeighbourhoodSettings) -> str:
         stat = (f"q{settings.quantile * 100:g}" if settings.statistic == "quantile"
                 else settings.statistic)
         return f"{settings.column or 'column'}_{stat}_{r}{other}"
-    return f"density_{'gauss_' if settings.gaussian else ''}{r}{other}"
+    stem = {"local_l": "local_l", "relative": "density_rel"}.get(
+        settings.express_as, "density")
+    return f"{stem}_{'gauss_' if settings.gaussian else ''}{r}{other}"
 
 
 def _points(table: Localizations, use_z: bool) -> np.ndarray:
@@ -538,15 +564,40 @@ def _files(table: Localizations) -> np.ndarray:
             else np.zeros(len(table), dtype=np.int64))
 
 
+def express(counts: np.ndarray, coverage: np.ndarray, n_others: np.ndarray,
+            area: float, radius: float, how: str) -> np.ndarray:
+    """A count of neighbours as *how* says: ``"count"`` as it is,
+    ``"relative"`` over what the mean density expects -- ``n_others`` /
+    ``area`` times ``coverage``, the circle's area inside the window --
+    and ``"local_l"`` Getis and Franklin's local L, ``radius`` times the
+    square root of the relative count (sqrt(A n / (pi (N - 1))) away from
+    the edge).  NaN where nothing is expected."""
+    counts = np.asarray(counts, dtype=float)
+    if how == "count":
+        return counts
+    expected = np.asarray(n_others, float) / max(area, 1e-300) * np.asarray(coverage, float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        relative = np.where(expected > 0, counts / expected, np.nan)
+    if how == "relative":
+        return relative
+    if how == "local_l":
+        return radius * np.sqrt(relative)
+    raise ValueError(f"no express as {how!r}: count, local_l or relative")
+
+
 def neighbourhood(around: Tuple[Localizations, np.ndarray],
                   neighbours: Tuple[Localizations, np.ndarray],
                   settings: NeighbourhoodSettings,
-                  progress: Optional[Callable[[float], None]] = None) -> np.ndarray:
+                  progress: Optional[Callable[[float], None]] = None,
+                  region=None) -> np.ndarray:
     """The value per row of the around table, NaN outside its mask.
 
     ``around`` and ``neighbours`` are each ``(table, mask)``: the table a
     layer shows and its filter over it.  File by file; ``progress(fraction)``
-    of the whole as it goes, which may raise to stop.
+    of the whole as it goes, which may raise to stop.  ``region``, the
+    drawn ROI, is the window a count *expressed as* local L or relative
+    density is normalised by; without it, the occupied area or the bounding
+    box of each file's localizations (``settings.window``).
     """
     table_a, use_a = around
     table_b, use_b = neighbours
@@ -557,7 +608,9 @@ def neighbourhood(around: Tuple[Localizations, np.ndarray],
         raise ValueError("Voronoi density is of one layer's own localizations: "
                          "set *neighbours from* to the *around* layer, or count "
                          "neighbours within r for a cross-density")
-    use_z = s.use_z and s.quantity != "voronoi" and "z_nm" in table_a and "z_nm" in table_b
+    expressed = s.quantity == "count" and s.express_as != "count"
+    use_z = (s.use_z and s.quantity != "voronoi" and not expressed
+             and "z_nm" in table_a and "z_nm" in table_b)
     pa = _points(table_a, use_z)
     pb = _points(table_b, use_z)
     use_a &= np.isfinite(pa).all(axis=1)
@@ -594,11 +647,31 @@ def neighbourhood(around: Tuple[Localizations, np.ndarray],
                                               s.radius_nm, s.statistic, s.quantile,
                                               z_half, same, progress=step)
         else:
-            out[rows_a] = count_neighbours(pa[rows_a], pb[rows_b], s.radius_nm,
-                                           z_half, s.gaussian, same, progress=step)
+            counts = count_neighbours(pa[rows_a], pb[rows_b], s.radius_nm,
+                                      z_half, s.gaussian, same, progress=step)
+            if expressed:
+                counts = _expressed(counts, pa[rows_a], pb[rows_b], same, region, s)
+            out[rows_a] = counts
         if progress is not None:
             progress((k + 1) / len(files))
     return out
+
+
+def _expressed(counts, pa, pb, same, region, s: NeighbourhoodSettings) -> np.ndarray:
+    """One file's counts as local L or relative density (`express`)."""
+    from .spatial_statistics import (OCCUPIED_BIN_NM, window_coverage, window_of_points,
+                                     window_of_region)
+    if region is not None:
+        window = window_of_region(region)
+    else:
+        xy = np.concatenate([pa[:, :2], pb[:, :2]])
+        window = window_of_points(xy[:, 0], xy[:, 1], s.window, OCCUPIED_BIN_NM)
+    coverage = window_coverage(window, pa[:, 0], pa[:, 1], s.radius_nm, s.gaussian)
+    # a point that is also among the neighbours has N - 1 others
+    n_others = np.full(len(pa), float(len(pb)))
+    if same is not None:
+        n_others -= np.asarray(same) >= 0
+    return express(counts, coverage, n_others, window.area, s.radius_nm, s.express_as)
 
 
 def per_localization(locs: Localizations, grouped: Localizations,
@@ -646,7 +719,7 @@ class Neighbourhood(Plugin):
 
     Settings = NeighbourhoodSettings
     changes_locs = True
-    version = "1"
+    version = "2"
 
     def describe(self, ctx: Optional[Context], settings: NeighbourhoodSettings
                  ) -> FormState:
@@ -655,9 +728,13 @@ class Neighbourhood(Plugin):
         state = FormState(shown={
             "radius_nm": lateral, "use_z": lateral,
             "z_half_nm": lateral, "gaussian": q == "count",
+            "express_as": q == "count",
+            "window": q == "count" and settings.express_as != "count",
             "column": q == "statistic", "statistic": q == "statistic",
             "quantile": q == "statistic" and settings.statistic == "quantile"})
-        state.active["z_half_nm"] = settings.use_z
+        lateral_only = q == "count" and settings.express_as != "count"
+        state.active["use_z"] = not lateral_only
+        state.active["z_half_nm"] = settings.use_z and not lateral_only
         state.hints["name"] = default_name(settings)
         layers = _layer_names(ctx)
         if layers:
@@ -722,7 +799,10 @@ class Neighbourhood(Plugin):
                 raise Stopped(f"{name} stopped at {100 * fraction:.0f}%: nothing written")
             ctx.report(f"{name}: {100 * fraction:.0f}%")
 
-        values = neighbourhood((ta, sa.mask), (tb, sb.mask), settings, progress)
+        from ..regions import Region
+        roi = getattr(ctx.session, "roi", None)
+        region = roi if isinstance(roi, Region) and sa.roi is not None else None
+        values = neighbourhood((ta, sa.mask), (tb, sb.mask), settings, progress, region)
         grouped = ta is not whole
         column = per_localization(whole, ta, values) if grouped else values
         out = Localizations({**whole.columns, name: column.astype(np.float32)},
@@ -733,7 +813,9 @@ class Neighbourhood(Plugin):
         if finite.any():
             data.update(median=float(np.median(values[finite])),
                         mean=float(np.mean(values[finite])))
-        what = {"count": "neighbours", "statistic": settings.statistic,
+        what = {"count": {"count": "neighbours", "local_l": "local L (nm)",
+                          "relative": "density relative to the mean"}[settings.express_as],
+                "statistic": settings.statistic,
                 "voronoi": "Voronoi density (/um^2)"}[settings.quantity]
         text = (f"{name}: {what} for {data['n']} "
                 + ("blinks" if grouped else "localizations")
