@@ -36,7 +36,10 @@ of twice.
 
 from __future__ import annotations
 
+import hashlib
 import math
+import threading
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Optional, Tuple, Union
 
@@ -570,7 +573,7 @@ class RenderSettings:
     that axis.
     """
 
-    mode: str = "precision"     # "hist", "gauss" (one sigma), "precision", "dl", "tracks"
+    mode: str = "precision"     # "hist", "gauss" (one sigma), "precision", "dl", "tracks", "voronoi"
     sigma: float = 10.0         # native units of the x axis, for mode="gauss"
     sigma_y: Optional[float] = None      # None: `sigma`, where that means anything
     sigma_settings: "SigmaSettings" = field(default_factory=lambda: SigmaSettings())
@@ -643,7 +646,7 @@ def render_sigmas(locs: Localizations, settings: "RenderSettings", fov: FieldOfV
     * ``sigma_y`` unset means the same width as x where the two axes are the
       same quantity, and zero -- plain binning -- where they are not.
     """
-    if settings.mode in ("hist", "tracks"):
+    if settings.mode in ("hist", "tracks", "voronoi"):
         return None, None
     if settings.mode == "dl":
         return psf_sigmas(locs, select)
@@ -699,6 +702,8 @@ def render_locs(locs: Localizations, fov: FieldOfView,
     if settings.mode == "tracks":
         return render_tracks(locs, fov, settings, display, select, n_threads,
                              use_extension)
+    if settings.mode == "voronoi":
+        return render_voronoi(locs, fov, settings, display, select, n_threads)
     x, y = settings.axes.coordinates(locs, select)
     sigma, sigma_y = render_sigmas(locs, settings, fov, select)
 
@@ -740,7 +745,7 @@ def render_locs(locs: Localizations, fov: FieldOfView,
 # (and `sigma_y_nm`, astigmatic), and one camera pixel where the fit left no
 # usable width.
 
-MODES = ("hist", "gauss", "precision", "dl", "tracks")
+MODES = ("hist", "gauss", "precision", "dl", "tracks", "voronoi")
 DL_PIXELSIZE_NM = 100.0     # a camera pixel, when the table records none
 DL_MAX_SIGMA_NM = 1500.0    # SMAP's: a wider fitted PSF is a failed fit
 
@@ -997,3 +1002,177 @@ def _segments_numpy(xa, ya, xb, yb, fov, width, weights, colors) -> RenderedImag
             color[r0:r1 + 1, c0:c1 + 1] += cover[..., None] * colors[i]
     return RenderedImage(fov, weight.astype(np.float32),
                          None if color is None else color.astype(np.float32), len(xa))
+
+
+# ------------------------------------------------------------------ voronoi
+#
+# The sixth mode (SharpViSu, Andronov et al. 2016; SMAP's VoronoiRenderer):
+# each pixel takes the density, one over the area, of the Voronoi cell it
+# lies in -- the cell of the localization nearest to it -- so a dense
+# structure is bright and flat rather than a pile of spots, with no width to
+# choose.  The cells are Neighbourhood's (`voronoi_areas`): open cells, along
+# the edge of the field, have no area and are left empty.  A raster like the
+# others, so exports, overlays and movies need nothing new.
+#
+# The cells are of every localization the layer's filter keeps, never of
+# the ones in view: culled first, the cells along the view's edge would
+# change with every pan.  They take about 12 us a localization, so they are
+# cached per table and filter (`voronoi_cells_for`) and a pan or a zoom only
+# rasterises: the pixels are culled to the view, the localizations are not.
+#
+# Zoomed out, a pixel holds many cells and a sample at its centre would pick
+# one of them at random -- a picture of noise.  The mean density over the
+# pixel is what is wanted, and a cell's density times its area is its
+# localizations: so cells smaller than a pixel are counted into the pixel
+# their localization is in (a histogram, over the pixel's area), and the
+# rest of the pixel's area takes the density of the cell its centre lies
+# in.  Zoomed in, that is SharpViSu's picture exactly; zoomed out, the
+# histogram in localizations per area.
+
+VORONOI_CACHE_SIZE = 4      # tables and filters whose cells are kept
+VORONOI_CHUNK = 1 << 20     # pixel centres looked up at a time
+
+
+@dataclass
+class VoronoiCells:
+    """The Voronoi cells of a set of localizations, in render units.
+
+    ``sites`` are the distinct positions, ``cell`` the site of each
+    localization (positions repeated share a cell, each of them counted, as
+    SMAP's ``VorArea``), ``area`` each cell's area (NaN open) and
+    ``density`` its localizations over its area per 10^6 square units: per
+    square micrometre for positions in nm.
+    """
+
+    sites: np.ndarray
+    cell: np.ndarray
+    repeats: np.ndarray
+    area: np.ndarray
+    density: np.ndarray
+    _tree: object = field(default=None, repr=False)
+
+    @classmethod
+    def of(cls, x, y) -> "VoronoiCells":
+        from .plugins.neighbourhood import voronoi_areas
+        points = np.column_stack([np.asarray(x, np.float64), np.asarray(y, np.float64)])
+        if not len(points):
+            empty = np.zeros(0)
+            return cls(np.zeros((0, 2)), np.zeros(0, np.int64), empty, empty, empty)
+        sites, cell, repeats = np.unique(points, axis=0, return_inverse=True,
+                                         return_counts=True)
+        area = (voronoi_areas(sites) if len(sites) >= 4
+                else np.full(len(sites), np.nan))
+        with np.errstate(divide="ignore", invalid="ignore"):
+            density = np.where(area > 0, repeats * 1e6 / area, np.nan)
+        area = np.where(area > 0, area, np.nan)
+        return cls(sites, np.ravel(cell), repeats, area, density)
+
+    def tree(self):
+        if self._tree is None:
+            from scipy.spatial import cKDTree
+            self._tree = cKDTree(self.sites)
+        return self._tree
+
+
+_voronoi_cache: "OrderedDict[tuple, VoronoiCells]" = OrderedDict()
+_voronoi_lock = threading.Lock()
+
+
+def _voronoi_key(x: np.ndarray, y: np.ndarray) -> tuple:
+    """What the cells depend on, cheaply: the count, the sums and a strided
+    sample of the positions.  Hashing every byte took a quarter of a second
+    at 10 M localizations, on every pan; a different filter or table that
+    agrees on all of these is not one that occurs."""
+    step = max(1, len(x) // 65536)
+    digest = hashlib.blake2b(digest_size=16)
+    digest.update(np.ascontiguousarray(x[::step]).tobytes())
+    digest.update(np.ascontiguousarray(y[::step]).tobytes())
+    return (len(x), float(np.sum(x)), float(np.sum(y)), digest.hexdigest())
+
+
+def voronoi_cells_for(x, y) -> VoronoiCells:
+    """`VoronoiCells.of`, kept for the last `VORONOI_CACHE_SIZE` sets of
+    positions: a view panned, zoomed or exported reuses them."""
+    x = np.asarray(x, np.float64)
+    y = np.asarray(y, np.float64)
+    key = _voronoi_key(x, y)
+    with _voronoi_lock:
+        found = _voronoi_cache.get(key)
+        if found is not None:
+            _voronoi_cache.move_to_end(key)
+            return found
+    # outside the lock: two threads may both compute it, neither waits
+    cells = VoronoiCells.of(x, y)
+    with _voronoi_lock:
+        _voronoi_cache[key] = cells
+        while len(_voronoi_cache) > VORONOI_CACHE_SIZE:
+            _voronoi_cache.popitem(last=False)
+    return cells
+
+
+def render_voronoi(locs: Localizations, fov: FieldOfView, settings: "RenderSettings",
+                   display: Optional["DisplaySettings"] = None, select=None,
+                   n_threads: int = 0) -> RenderedImage:
+    """Each pixel the mean density of the Voronoi cells over it, in
+    localizations per 10^6 square units (per square micrometre in nm).
+
+    A cell smaller than a pixel is counted into the pixel of its
+    localizations; the rest of a pixel's area is the cell its centre lies
+    in, empty for an open one.  Coloured by a field, a counted localization
+    brings its own colour and a cell the mean of its localizations'.  A
+    weight column is not used: the density is of localizations.
+    """
+    display = display or DisplaySettings()
+    x, y = settings.axes.coordinates(locs, select)
+    x = np.asarray(x, np.float64)
+    y = np.asarray(y, np.float64)
+    cells = voronoi_cells_for(x, y)
+    pixel_area = fov.pixelsize ** 2
+    per_area = 1e6 / pixel_area
+    values = None
+    if settings.color_field is not None:
+        values = np.asarray(locs[settings.color_field], np.float64)
+        values = values if select is None else values[select]
+        lo, hi = settings.color_range or (float(np.nanmin(values)),
+                                          float(np.nanmax(values)))
+
+    # the cells smaller than a pixel, counted where their localizations are
+    small = np.isfinite(cells.area) & (cells.area < pixel_area)
+    counted = small[cells.cell] if len(cells.cell) else np.zeros(0, bool)
+    colors = (None if values is None else
+              luts.colors(values[counted], display.lut, lo, hi, display.invert))
+    mass = render_histogram(x[counted], y[counted], fov, colors=colors)
+    share = cells.area[cells.cell[counted]] / cells.repeats[cells.cell[counted]]
+    covered = render_histogram(x[counted], y[counted], fov, weights=share).weight
+    weight = mass.weight.astype(np.float64) * per_area
+    color = None if mass.color is None else mass.color.astype(np.float64) * per_area
+
+    # the rest of each pixel: the cell its centre is in
+    open_pixels = np.flatnonzero(covered.ravel() < pixel_area)
+    if len(open_pixels) and len(cells.sites):
+        tree = cells.tree()
+        site_values = None
+        if values is not None:
+            site_values = (np.bincount(cells.cell, weights=values,
+                                       minlength=len(cells.sites)) / cells.repeats)
+        flat_w = weight.ravel()
+        flat_c = None if color is None else color.reshape(-1, 3)
+        rest = 1.0 - covered.ravel() / pixel_area
+        for start in range(0, len(open_pixels), VORONOI_CHUNK):
+            chunk = open_pixels[start:start + VORONOI_CHUNK]
+            row, col = np.divmod(chunk, fov.nx)
+            centres = np.column_stack([fov.x0 + (col + 0.5) * fov.pixelsize,
+                                       fov.y0 + (row + 0.5) * fov.pixelsize])
+            _, site = tree.query(centres, workers=n_threads if n_threads > 0 else -1)
+            rho = cells.density[site]
+            # a centre in a small cell is already counted, an open one is empty
+            use = np.isfinite(rho) & ~small[site]
+            add = rho[use] * rest[chunk[use]]
+            flat_w[chunk[use]] += add
+            if flat_c is not None:
+                flat_c[chunk[use]] += add[:, None] * luts.colors(
+                    site_values[site[use]], display.lut, lo, hi, display.invert)
+    inside = ((x >= fov.x0) & (x < fov.x1) & (y >= fov.y0) & (y < fov.y1))
+    return RenderedImage(fov, weight.astype(np.float32),
+                         None if color is None else color.astype(np.float32),
+                         int(inside.sum()))
