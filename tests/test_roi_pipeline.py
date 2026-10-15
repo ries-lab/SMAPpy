@@ -41,6 +41,7 @@ def test_the_region_plugins_are_registered_under_regions():
                           "Analysis/Regions/Sort ROIs",
                           "Analysis/Regions/Filter ROIs",
                           "Analysis/Regions/Remove double ROIs",
+                          "Analysis/Regions/Centre ROIs",
                           "Analysis/Regions/Summarize/Histograms",
                           "Analysis/Regions/Summarize/Export table",
                           "Analysis/Regions/Summarize/NPC labelling efficiency",
@@ -297,8 +298,10 @@ def app():
 def test_the_evaluation_window_offers_only_evaluators(app):
     from smappy.gui.chooser import PluginTree
     tree = PluginTree(per_region=True)
-    assert sorted(tree.refs) == ["Analysis/Measure/Cluster shape",
+    assert sorted(tree.refs) == ["Analysis/Measure/Circle fit",
+                                 "Analysis/Measure/Cluster shape",
                                  "Analysis/Measure/Histogram",
+                                 "Analysis/Measure/Line Profile",
                                  "Analysis/Measure/Localization Statistics",
                                  "Analysis/Measure/NPC Corners"]
     assert set(tree.refs) < set(PluginTree().refs)

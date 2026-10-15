@@ -1,6 +1,6 @@
 ---
 version: "7"
-covers: [smappy.plugins.line_profile.project, smappy.plugins.line_profile.profiles, smappy.plugins.line_profile.fit_profile, smappy.plugins.line_profile.fit_models, smappy.plugins.line_profile.determined, smappy.plugins.line_profile.verdict, smappy.plugins.line_profile.em_two_gaussians, smappy.plugins.line_profile.bootstrap, smappy.plugins.line_profile.gauss_density, smappy.plugins.line_profile.step_density, smappy.plugins.line_profile.arc_density, smappy.plugins.line_profile.smoothed_profile, smappy.plugins.line_profile.fit_layers, smappy.plugins.line_profile.draw_profile]
+covers: [smappy.plugins.line_profile.project, smappy.plugins.line_profile.profiles, smappy.plugins.line_profile.fit_profile, smappy.plugins.line_profile.fit_models, smappy.plugins.line_profile.determined, smappy.plugins.line_profile.verdict, smappy.plugins.line_profile.em_two_gaussians, smappy.plugins.line_profile.bootstrap, smappy.plugins.line_profile.gauss_density, smappy.plugins.line_profile.step_density, smappy.plugins.line_profile.arc_density, smappy.plugins.line_profile.smoothed_profile, smappy.plugins.line_profile.fit_layers, smappy.plugins.line_profile.draw_profile, smappy.plugins.line_profile.profile_values, smappy.plugins.line_profile.region_line]
 ---
 
 ## What it does
@@ -57,6 +57,17 @@ the text says so.
 The fit takes tens of milliseconds, so the plugin offers a *follow ROI* tick: the
 profile is refitted while the line is dragged, which makes it a tool one can
 aim with.
+
+**In every ROI.**  It is a measurement like the others, so it also runs
+once in every ROI of the [ROI manager](plugin:Panels/ROI manager), or in
+every [cluster](plugin:Panels/Glossary), as one of the
+[per-region steps](plugin:Panels/Glossary): the distance between the two
+membranes in each of a hundred ROIs, a row each in the results table.  The
+line in an ROI is one of its named lines, drawn in it in the ROI manager
+(*ROI line*), as wide as the ROI; an ROI without lines is measured along x,
+along a horizontal line through its middle across the whole ROI.  A cluster has no
+line and is measured along x as well.  (An ROI that is itself a line
+is its own line.)  What each row keeps is under *Output*.
 
 ## How it works
 
@@ -466,6 +477,14 @@ Gaussians take around ten seconds, and *follow ROI* becomes slow with it on.
 The automatic bin follows the Freedman-Diaconis rule, $2\,\mathrm{IQR}/N^{1/3}$,
 kept between 1/200 and 1/5 of the window.
 
+### roi_line
+Only read in the ROIs of the ROI manager.  *the first it has* takes, in each
+ROI, the first of the project's line names (*line names* in the ROI
+manager's annotation panel) the ROI has a line for, so ROIs with different
+lines are each measured along theirs.  Name a line when the ROIs carry
+several -- an axis and a cross-section -- and the profile is along one of
+them; an ROI without that line is then refused, and its row says why.
+
 ### length_nm
 Also useful to keep a long line's profile to the part around the structure.
 
@@ -489,6 +508,16 @@ Also useful to keep a long line's profile to the part around the structure.
   z, when there is one) against along.  A projection hides things -- a
   filament that leaves the ROI half way, two structures that cross -- and the
   scatter shows them.
+* **Per region**, the numbers kept in each ROI's (or cluster's) row, for
+  each layer (the second layer's with `_L2`, and so on): `n_locs`; for each
+  model fitted its width `<model>_sigma_nm` -- and for two Gaussians the
+  distance `two_gauss_distance_nm`, for a disk or a ring the radius -- each
+  with its error (`_err_nm`), NaN where the data did not determine it, and
+  its `<model>_aic`; and `best_model`, the model AIC prefers among those
+  that determined every parameter (empty when none did).  In a table in
+  pixels the units are `_px`.  Positions -- a peak's centre, an edge -- are
+  not kept: they are in the line's coordinates, which differ from ROI to
+  ROI.  On the view the same numbers are the run's values.
 * **The bootstrap**, when it was run: the resampled values of each parameter
   of each layer's best model, with the fit and the interval -- one tab per
   layer.

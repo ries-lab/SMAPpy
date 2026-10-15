@@ -1529,6 +1529,10 @@ class LineProfileSettings:
     bin_nm: float = param(0.0, label="bin", unit="nm", min=0.0,
                           help="0: chosen from the data.  Drawing only: "
                                "no fitted number depends on it")
+    roi_line: str = param("", label="ROI line",
+                          choices=lambda: [("", "the first it has")],
+                          help="in an ROI of the ROI manager, which of its "
+                               "named lines the profile is taken along")
     length_nm: float = param(0.0, label="length", unit="nm", min=0.0,
                              advanced=True,
                              help="0: the ROI's own length.  Otherwise a "
@@ -1556,16 +1560,21 @@ class LineProfile(Plugin):
         with a button that starts drawing one (the GUI's ``"draw line"``)."""
         if ctx is None or ctx.session is None:
             return FormState()
+        project = getattr(ctx, "rois", None)
+        names = list(getattr(project, "line_names", None) or [])
+        choices = {"roi_line": [("", "the first it has")] + [(n, n) for n in names]}
         try:
             _line_roi(ctx)
         except ValueError as e:
-            return FormState(notice=Notice(f"{e}.", action="Draw line",
+            return FormState(choices=choices,
+                             notice=Notice(f"{e}.", action="Draw line",
                                            window="draw line", kind="info"))
-        return FormState()
+        return FormState(choices=choices)
 
     def run(self, ctx: Context, settings: LineProfileSettings) -> Result:
-        region = _line_roi(ctx)
+        region = _line_roi(ctx, settings.roi_line)
         layers = fit_layers(ctx, settings, region)
+        values = profile_values(layers)
 
         lines = []
         for layer in layers:
@@ -1611,7 +1620,7 @@ class LineProfile(Plugin):
             return found[layers[0].name] if len(layers) == 1 else found
 
         return Result(
-            text="\n".join(lines), settings=settings,
+            text="\n".join(lines), settings=settings, values=values,
             # one profile per layer, each with its fits
             data={"layer_profiles": layers,
                   "fits": per_layer(lambda l: {f.model: f for f in l.fits}),
@@ -1629,6 +1638,46 @@ class LineProfile(Plugin):
     # preview: `run` changes nothing, so a preview would be the same as Run,
     # and Run draws the figures.
     follow_roi = True
+    # in an ROI the line is the ROI's own (`region_line`); the numbers are
+    # `profile_values`
+    per_region = True
+
+
+# the parameters that are a width or a distance, by model: what a region's
+# row keeps.  Positions (a centre, an edge) are in the line's own coordinates,
+# which differ from ROI to ROI, so a column of them would compare nothing.
+REGION_PARAMETERS = {"gauss": ("sigma",), "two_gauss": ("distance", "sigma"),
+                     "step": ("sigma",), "disk": ("radius", "sigma"),
+                     "ring": ("radius", "sigma")}
+
+
+def profile_values(layers: Sequence["LayerProfile"]) -> Dict[str, object]:
+    """A region's numbers, per layer (the first plain, the others ``_L2``,
+    ``_L3`` as Histogram and Cluster shape name them): the localizations
+    fitted, each model's width -- and distance, radius -- with its error and
+    its AIC, and the model AIC prefers among those that determined every
+    parameter (`verdict`), empty when none did.  A parameter the data did
+    not fix is NaN, as its error is: a number on its bound is no
+    measurement."""
+    values: Dict[str, object] = {}
+    for i, layer in enumerate(layers):
+        suffix = "" if i == 0 else f"_L{i + 1}"
+        unit = layer.profile.unit
+        values[f"n_locs{suffix}"] = len(layer.profile.values)
+        for fit in layer.fits:
+            ok = (np.ones(len(fit.params), bool) if fit.determined is None
+                  else np.asarray(fit.determined, bool))
+            for name in REGION_PARAMETERS.get(fit.model, ()):
+                k = fit.names.index(name)
+                good = bool(ok[k])
+                values[f"{fit.model}_{name}_{unit}{suffix}"] = (
+                    float(fit.params[k]) if good else float("nan"))
+                values[f"{fit.model}_{name}_err_{unit}{suffix}"] = (
+                    float(fit.errors[k]) if good else float("nan"))
+            values[f"{fit.model}_aic{suffix}"] = float(fit.aic)
+        best = [f for f in layer.fits if not f.degenerate]
+        values[f"best_model{suffix}"] = best[0].model if best else ""
+    return values
 
 
 def fit_layers(ctx: Context, settings: LineProfileSettings,
@@ -1713,8 +1762,11 @@ def _groups(ctx: Context, settings: LineProfileSettings):
              ctx.selection.apply(ctx.locs))]
 
 
-def _line_roi(ctx: Context) -> Region:
-    """The line ROI this plugin measures, refused clearly when there is none."""
+def _line_roi(ctx: Context, name: str = "") -> Region:
+    """The line ROI this plugin measures, refused clearly when there is none.
+    In a region of a run over many, the region's line (`region_line`)."""
+    if ctx.per_region or ctx.region is not None:
+        return region_line(ctx, name)
     roi = getattr(ctx.session, "roi", None)
     if not isinstance(roi, Region):
         found = getattr(ctx.selection, "roi", None)
@@ -1728,6 +1780,48 @@ def _line_roi(ctx: Context) -> Region:
         raise ValueError("the line ROI has no width: widen it to take in "
                          "localizations")
     return roi
+
+
+def region_line(ctx: Context, name: str = "") -> Region:
+    """The line a profile is taken along in one region.
+
+    The region itself when it is a line; else the ROI's line called
+    ``name`` (`ROI.lines`, drawn in the ROI manager) -- with no name, the
+    first of the project's line names the ROI has -- as wide as the ROI so
+    that only the ROI's edge narrows it; else a horizontal line through the
+    region's middle, across its whole bounding box -- the profile along it
+    is then the distribution in x.  A named line an ROI lacks is refused
+    rather than replaced, since a profile along x would be a different
+    measurement under the same column.  A cluster has no shape, so its
+    localizations' bounding box stands in for it.
+    """
+    region = ctx.region
+    if isinstance(region, Region) and region.kind == "line" and region.width > 0:
+        return region
+    if isinstance(region, Region):
+        x0, y0, x1, y1 = (float(v) for v in region.bounds)
+    else:
+        x, y = positions(ctx.locs)
+        if not len(x):
+            raise ValueError("no localizations in the region")
+        x0, y0, x1, y1 = (float(np.min(x)), float(np.min(y)),
+                          float(np.max(x)), float(np.max(y)))
+    project = ctx.rois
+    roi = (project.rois.get(ctx.region_id) if project is not None
+           and ctx.region_id is not None else None)
+    lines = dict(getattr(roi, "lines", None) or {})
+    if name and roi is not None and name not in lines:
+        raise ValueError(f"ROI {roi.number} has no line {name!r}: draw it in the "
+                         "ROI manager, or choose another ROI line")
+    if not name:
+        order = list(getattr(project, "line_names", None) or []) + list(lines)
+        name = next((n for n in order if n in lines), "")
+    if name:
+        p0, p1 = (np.asarray(p, float) for p in lines[name])
+        if np.hypot(*(p1 - p0)) > 0:
+            return Region.line(p0, p1, float(np.hypot(x1 - x0, y1 - y0)) or 1.0)
+    middle = 0.5 * (y0 + y1)
+    return Region.line((x0, middle), (x1, middle), max(y1 - y0, 1e-6))
 
 
 def _z_window(ctx: Context) -> Optional[Tuple[Optional[float], Optional[float]]]:

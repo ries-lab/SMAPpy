@@ -127,9 +127,9 @@ drift (#34) · D3 time-dependent transformation (magnification) in COMET
 | E1 | Import site positions | #135 | open, P3 |
 | E1 | ROI per file (`files2sites`) | #108 | **mostly there**: *Column to ROIs* on `filenumber`. You had marked it skip anyway. |
 | E2 | **Annotate ROIs** | new | **done** (`gui/roi_annotate.py`; the named lines step 13): any number of keyword lists written in the panel and saved with the project; keys 1–9 pick a keyword, 0 clears it, Tab switches lists, Up/Down moves to the next ROI, Space toggles *use*; a comment per ROI; the keywords become columns of the results table, so Filter and Sort read them. Any number of named lines per ROI (step 13): drawn in the ROI manager, reversed, `<name>_angle_deg` and `<name>_length_nm` columns of the results table. |
-| E3 | **Segment regions** with presets (NPC, Density Peaks, CME, beads, other templates); see B | #104 #105 #109 #111 | decided: one plugin, see B. NPC and Density Peaks exist as separate Find plugins, to be folded in. *Centre all* (#116) fits as a Regions action: recentre the ROIs by a measured centre (median, circle fit), with the circle fit from E5. |
-| E4 | No distinction between evaluator and analysis plugin | #118 | **done** (`per_region`). Left: Line Profile itself is not `per_region` yet (it is `follow_roi`). Giving it `Result.values` (width, distance, AIC winner) is a small change. |
-| E5 | **Circle fit** as a `per_region` Measure plugin (#115, P2); **NPC geometry** (#114, P3; independent of LocMoFit, but better as one of its models: decide H first) | #114 #115 | open |
+| E3 | **Segment regions** with presets (NPC, Density Peaks, CME, beads, other templates); see B | #104 #105 #109 #111 | decided: one plugin, see B. NPC and Density Peaks exist as separate Find plugins, to be folded in. *Centre all* (#116): **done** (`Regions/Centre ROIs`, step 15). |
+| E4 | No distinction between evaluator and analysis plugin | #118 | **done** (`per_region`; Line Profile too, step 15) |
+| E5 | **Circle fit** as a `per_region` Measure plugin (#115, P2); **NPC geometry** (#114, P3; independent of LocMoFit, but better as one of its models: decide H first) | #114 #115 | Circle fit **done** (`Measure/Circle fit`, step 15); NPC geometry open |
 | E6 | Figures of regions: montage, TIFF stack, single TIFFs, volumes, sorted by any column | #132 #133 | open, P3. Now a Summarize-style plugin that reads the ROI order (Sort ROIs) and annotations. |
 | E7 | **Average ROIs**: centre plus an orientation from a measured value or a drawn line → a new table | #134 | open, P3. Depends on the named lines in E2. |
 
@@ -223,7 +223,7 @@ one after the other, in the same session if possible.
 |---|---|---|---|
 | **13** ✅ | **Named lines per ROI**: the one *direction* becomes any number of named lines, drawn in the ROI manager, each with angle and length as values in the results table, and a reverse action | M (GUI, ROI project file format) | – |
 | **14** ✅ | **Small ROI tools**: remove double ROIs (closer than d: keep the larger); remove localizations outside the included ROIs (a third *region* choice of Remove Localizations); keep the ROIs inside the drawn ROI (a *Filter ROIs* condition on position) | S | – |
-| **15** | **Line Profile `per_region`** (width, distance, AIC winner as values) and **Circle fit** (`Analysis/Measure/Circle fit`, `per_region`), with *centre ROIs* on the circle or median centre as a Regions action | S–M | – |
+| **15** ✅ | **Line Profile `per_region`** (width, distance, AIC winner as values) and **Circle fit** (`Analysis/Measure/Circle fit`, `per_region`), with *centre ROIs* on the circle or median centre as a Regions action | S–M | – |
 | **16** | **Average ROIs**: centre plus orientation from a measured value or a named line → a new table | M | 13 |
 
 ### Wave 4: analysis projects (a short design note first, in `docs/`)
@@ -336,6 +336,20 @@ filters and zoom-ins are settled) · AssignColors for more than 2 colours (C4)
   Filter, Sort, the summaries and *Regions to column* (with or without an
   evaluation) read them.  An old file's `direction` opens as the line
   `direction`, and the signatures of its results still match.
+
+* **Step 15** (2026-10-15): *Analysis/Measure/Line Profile* is
+  `per_region` (version unchanged, the numbers are the same): in an ROI the
+  line is one of its named lines (step 13; *ROI line*, the first it has by
+  default), as wide as the ROI, else a horizontal line across it; the row keeps per layer each model's width (and distance,
+  radius) with its error and AIC, and the AIC winner.
+  *Analysis/Measure/Circle fit*, `per_region` and *follow ROI*: the NPC
+  segmenter's soft-L1 `fit_circle`, with the covariance's errors, the rms
+  distance and the reduced chi-square, per layer.
+  *Analysis/Regions/Centre ROIs*: every used ROI onto its circle's centre
+  or its localizations' median, iterated, one ROI undo step; a Regions
+  plugin rather than an ROI-manager button, so a chain can centre between
+  segmenting and measuring.  Circle fit in the Analysis tab, Centre ROIs in
+  the Regions tab of the shipped GUI.
 
 ### Start here
 

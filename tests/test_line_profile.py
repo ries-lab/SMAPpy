@@ -695,3 +695,77 @@ def test_with_no_line_the_form_offers_to_draw_one():
     assert state.notice.action == "Draw line" and state.notice.kind == "info"
     session.set_roi(ROI)
     assert LineProfile().describe(session.context(), LineProfileSettings()).notice is None
+
+
+# ------------------------------------------------------------ per region
+
+def two_lines_project(distances, vertical=True, n=150, sigma=6.0):
+    """Pairs of parallel lines ``distances`` apart, a pair every 2 um, and a
+    square ROI of 400 nm on each pair."""
+    from smappy.session import Session
+    rng = np.random.default_rng(5)
+    xs, ys = [], []
+    for k, d in enumerate(distances):
+        cx = 2000.0 * k
+        for side in (-0.5, 0.5):
+            across = cx + side * d + rng.normal(0, sigma, n)
+            along = rng.uniform(-150, 150, n)
+            xs.append(across if vertical else cx + along)
+            ys.append(along if vertical else across - cx)
+    x, y = np.concatenate(xs), np.concatenate(ys)
+    m = len(x)
+    session = Session(Localizations({"x_nm": x, "y_nm": y, "frame": np.arange(m),
+                                     "photons": np.full(m, 1000.0),
+                                     "xy_err_nm": np.full(m, sigma)}))
+    session.show_grouped(0, False)
+    project = session.rois
+    project.set_geometry(400, "square")
+    file_id = next(iter(project.sources))
+    rois = [project.add_roi(file_id, [2000.0 * k, 0.0]) for k in range(len(distances))]
+    return session, project, rois
+
+
+def test_two_known_lines_give_their_distance_in_each_roi():
+    session, project, rois = two_lines_project([80.0, 140.0])
+    settings = LineProfileSettings(model="all")
+    for roi, d in zip(rois, (80.0, 140.0)):
+        values = LineProfile().run(project.region_context(roi), settings).values
+        assert values["best_model"] == "two_gauss"
+        assert values["two_gauss_distance_nm"] == pytest.approx(d, abs=4)
+        assert values["two_gauss_sigma_nm"] < 4          # the precision taken out
+        assert values["n_locs"] == 300
+        assert np.isfinite(values["gauss_sigma_nm"]) and "ring_aic" in values
+
+
+def test_in_an_roi_with_a_line_the_profile_is_along_it():
+    session, project, rois = two_lines_project([100.0], vertical=False)
+    roi = rois[0]
+    # without a direction the profile runs along x, along the lines: no pair
+    flat = LineProfile().run(project.region_context(roi),
+                             LineProfileSettings(model="two_gauss")).values
+    assert abs(flat["two_gauss_distance_nm"] - 100.0) > 20 or not np.isfinite(
+        flat["two_gauss_distance_nm"])
+    roi.lines = {"axis": [[0.0, -180.0], [0.0, 180.0]]}
+    values = LineProfile().run(project.region_context(roi),
+                               LineProfileSettings(model="two_gauss")).values
+    assert values["two_gauss_distance_nm"] == pytest.approx(100.0, abs=4)
+    named = LineProfile().run(project.region_context(roi),
+                              LineProfileSettings(model="two_gauss", roi_line="axis"))
+    assert named.values["two_gauss_distance_nm"] == values["two_gauss_distance_nm"]
+    with pytest.raises(ValueError, match="has no line 'direction'"):
+        LineProfile().run(project.region_context(roi),
+                          LineProfileSettings(model="two_gauss", roi_line="direction"))
+
+
+def test_line_profile_runs_as_a_per_region_step_of_the_rois():
+    from smappy.chain import Block, Step
+    from smappy.plugins import get
+    session, project, rois = two_lines_project([80.0, 140.0])
+    plugin = get("Analysis/Measure/Line Profile")
+    assert plugin.per_region and plugin.follow_roi
+    project.block = Block(steps=[Step(plugin="Analysis/Measure/Line Profile",
+                                      values={"model": "two_gauss"})])
+    project.evaluate()
+    rows = {r["roi_id"]: r for r in project.results()}
+    found = [rows[r.number]["two_gauss_distance_nm"] for r in rois]
+    assert found == pytest.approx([80.0, 140.0], abs=4)
