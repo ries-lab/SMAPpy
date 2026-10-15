@@ -156,6 +156,16 @@ papers and in other software.
 * **memory** (also called gap closing, or the gap frames): how many frames
   in a row a particle may go unseen -- dark, dim or badly fitted -- and its
   track still continue.
+* **MSD** (mean squared displacement): how far a particle has moved after a
+  lag of k frames, squared and averaged over the track; a straight line in
+  the lag for free diffusion.
+* **diffusion coefficient** (D, in µm²/s): how fast a particle spreads by
+  random motion -- the MSD grows by 4 D per second in two dimensions.
+* **anomalous exponent** (α, alpha): how the MSD grows with the lag, as
+  lag^α: 1 for free diffusion, below 1 for confined or hindered motion,
+  above 1 for directed motion.
+* **diffusive state**: a population of particles, or a phase of one
+  particle's track, with one diffusion coefficient -- bound and free, say.
 
 ## Two colours
 

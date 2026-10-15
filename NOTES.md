@@ -1454,6 +1454,35 @@ a moving one.
   blink keeps its track.  The plugin links localizations, never blinks:
   merging would join a slow particle's whole track.
 
+### Tracking analysis
+
+*Tracking analysis* (`smappy/tracking/analysis.py`, step 19c): MSD and
+jump distances of an id column, per track and pooled, `per_region`.
+
+* **Vectorised.**  The table is sorted by track then time once; the MSD's
+  sums and counts per (track, lag) are `bincount`s over row offsets 1..50
+  (a pair k frames apart is at most k rows apart).  1 M localizations in
+  54 k tracks: about 10 s, most of it the MSD sums.
+* **The offset from the precisions** by default (`xy_err_nm`^2, mean per
+  track), so D is the slope through it; *fitted* is Michalet's case.
+* **The number of lags, computed rather than looked up.**  Michalet (2010)
+  gives an empirical formula for the optimal number of MSD points, but the
+  equations are missing from every text reachable from these sessions
+  (PubMed's full text of his paper and of Michalet & Berglund 2012), so the
+  optimum is computed from the model: the MSD points' covariance for a
+  Brownian track with Gaussian errors follows exactly from Isserlis'
+  theorem (`msd_covariance`, against 20 000 simulated tracks within a few
+  percent), and the variance of either estimator of D for each p from it.
+  The x-independent sums are cached per track length (lengths bucketed by
+  1.25 beyond 40, capped at 2000), the optimum tabulated over x, and
+  Michalet's iteration runs on all tracks at once.  With the offset known
+  the optimum is 1 lag for x << 1 and grows to ~35 at x = 100, N = 50.
+* **Jumps by EM**, not a general optimiser: one minute became under a
+  second for a million jumps.  EM crawls when two states are fitted to one
+  population, so at most 200 000 jumps are fitted (a fixed random subset).
+* **MINFLUX's clock**: `time_s` put on a grid of the median within-track
+  interval.  Not checked on real MINFLUX data.
+
 ## Open questions
 
 * Fitted x sits ~0.24 px from the peak-finder position, and the sign flips with

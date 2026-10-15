@@ -45,6 +45,7 @@ tabs:
   - plugin: Analysis/Process/Shuffle ids
   - plugin: Analysis/Register/Calibrate transform
   - plugin: Analysis/Tracking/Link tracks
+  - plugin: Analysis/Tracking/Tracking analysis
 - name: Regions
   header: roi
   instances:
