@@ -101,3 +101,48 @@ def test_hints_are_silent_when_there_is_nothing_to_resolve():
     settings = plugin.Settings()
     settings.source.path = "/nowhere/at/all.tif"
     assert not plugin.describe(None, settings).hints
+
+
+def _maxima_of_frame(plugin, settings, path, index):
+    """The frame's strict 3x3 maxima in the filtered image, computed here and
+    not by the code under test, and the candidates detection kept."""
+    import tifffile
+    from smappy.detect import find_candidates, local_maxima
+    camera = plugin._camera(settings)
+    photons = ((tifffile.imread(path)[index].astype(float) - camera.offset)
+               / camera.conversion)
+    finder = plugin.finder(settings, camera)
+    filtered = finder.filter(photons[None].astype(np.float32))
+    values = local_maxima(filtered, use_extension=False)[3]
+    kept = find_candidates(filtered, finder.cutoff).value
+    return values, kept
+
+
+@pytest.mark.parametrize("mode, value", [("dynamic", 1.7), ("absolute", 20.0)])
+def test_the_reported_cutoff_is_the_one_detection_applied(stack, mode, value):
+    """Once a percentile of every pixel was reported: 322 where detection held
+    the frame's maxima to 8.2."""
+    from smappy.detect import DynamicCutoff
+    plugin = GaussianFit()
+    settings = settings_for(plugin, stack)
+    settings.detection.cutoff_mode, settings.detection.cutoff = mode, value
+    result = plugin.preview(Session().context(), settings, frame=1)
+    cutoff = result.data["cutoff"]
+
+    values, kept = _maxima_of_frame(plugin, settings, stack, 1)
+    expected = DynamicCutoff(value)(values) if mode == "dynamic" else value
+    assert cutoff == pytest.approx(expected, rel=1e-6)
+    if mode == "absolute":
+        assert cutoff == value                  # the fixed number, as typed
+    assert cutoff < 50                          # not the brightest pixels'
+    # the threshold that split kept from dropped
+    assert np.all(kept > cutoff) and not np.any(np.setdiff1d(values, kept) > cutoff)
+    assert len(kept) == result.data["candidates"] == 4
+    assert f"cutoff {cutoff:.3g} on the filtered image" in result.text
+
+    figure = plt.figure()
+    result.plot.draw_into(figure)
+    bar = figure.axes[-1]
+    lines = [line.get_ydata()[0] for line in bar.lines]
+    assert lines == [pytest.approx(cutoff)]
+    plt.close(figure)

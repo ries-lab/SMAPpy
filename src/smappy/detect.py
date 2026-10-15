@@ -303,42 +303,71 @@ def find_candidates(filtered: np.ndarray, cutoff,
         return Candidates(frames, cols.astype(np.int32), rows.astype(np.int32),
                           values)
 
-    # maxima come out sorted by frame, so each frame is a contiguous slice
-    keep = np.zeros(frames.size, dtype=bool)
-    n_frames = filtered.shape[0]
-    bounds = np.searchsorted(frames, np.arange(n_frames + 1))
-    side = None
-    if split is not None:
-        axis, position = split
-        side = (rows if axis == 0 else cols) >= position
-    if isinstance(cutoff, DynamicCutoff):
-        # each half is still sorted by frame, so its frames are segments too
-        for part in ((slice(None),) if side is None else (side, ~side)):
-            index = np.arange(frames.size)[part]
-            starts = np.searchsorted(frames[index], np.arange(n_frames + 1))
-            limit = np.repeat(cutoff.thresholds(values[index], starts, n_threads),
-                              np.diff(starts))
-            keep[index] = values[index] > limit
-        return Candidates(frame=frames[keep].astype(np.int64),
-                          x=cols[keep].astype(np.int32),
-                          y=rows[keep].astype(np.int32),
-                          value=values[keep])
-    for start, stop in zip(bounds[:-1], bounds[1:]):
-        if stop <= start:
-            continue
-        block = values[start:stop]
-        if side is None:
-            keep[start:stop] = block > cutoff(block)
-            continue
-        here = side[start:stop]
-        for half in (here, ~here):
-            if half.any():
-                keep[start:stop][half] = block[half] > cutoff(block[half])
-
+    side = _halves(rows, cols, split)
+    applied = _cutoffs(frames, values, side, filtered.shape[0], cutoff,
+                       1 if split is None else 2, n_threads)
+    keep = values > applied[frames, side]
     return Candidates(frame=frames[keep].astype(np.int64),
                       x=cols[keep].astype(np.int32),
                       y=rows[keep].astype(np.int32),
                       value=values[keep])
+
+
+def frame_cutoffs(filtered: np.ndarray, cutoff, n_threads: int = 0,
+                  split=None) -> np.ndarray:
+    """The cutoff :func:`find_candidates` applies to each frame, ``(n_frames,
+    halves)``: one column, or two on a split frame -- the half below
+    ``position`` first.  NaN where a dynamic cutoff had no maxima to set it.
+
+    The same maxima and the same code as the search itself, so what a preview
+    reports is what detection did.  A percentile of all pixels, which the
+    preview once reported, is a different and much larger number (322 against
+    8 on a test frame): the maxima are mostly noise peaks, and those are what
+    a dynamic cutoff is set from.
+    """
+    filtered = np.asarray(filtered, dtype=np.float32)
+    if filtered.ndim == 2:
+        filtered = filtered[None]
+    n_halves = 1 if split is None else 2
+    if isinstance(cutoff, AbsoluteCutoff):
+        return np.full((filtered.shape[0], n_halves), cutoff(np.empty(0)))
+    frames, rows, cols, values = local_maxima(filtered, n_threads=n_threads)
+    return _cutoffs(frames, values, _halves(rows, cols, split),
+                    filtered.shape[0], cutoff, n_halves, n_threads)
+
+
+def _halves(rows, cols, split) -> np.ndarray:
+    """Which half of a split frame each maximum is in: 0 below the position,
+    1 at or above it; all 0 without a split."""
+    if split is None:
+        return np.zeros(rows.size, dtype=np.intp)
+    axis, position = split
+    return ((rows if axis == 0 else cols) >= position).astype(np.intp)
+
+
+def _cutoffs(frames, values, side, n_frames, cutoff, n_halves,
+             n_threads: int = 0) -> np.ndarray:
+    """The cutoff of each frame and half, from that frame's (half's) maxima,
+    NaN where there are none.
+
+    Each is a float32 value, as the filtered image is: a Python float compared
+    with a float32 array is rounded to float32 first, and so must this be for
+    ``values > cutoff`` to keep what it always kept.
+    """
+    out = np.full((n_frames, n_halves), np.nan)
+    for half in range(n_halves):
+        # maxima come out sorted by frame, and so does each half's share:
+        # each frame is a contiguous segment of it
+        index = np.flatnonzero(side == half)
+        part = values[index]
+        starts = np.searchsorted(frames[index], np.arange(n_frames + 1))
+        if isinstance(cutoff, DynamicCutoff):
+            out[:, half] = cutoff.thresholds(part, starts, n_threads)
+            continue
+        for f, (start, stop) in enumerate(zip(starts[:-1], starts[1:])):
+            if stop > start:
+                out[f, half] = np.float32(cutoff(part[start:stop]))
+    return out
 
 
 @dataclass
@@ -365,3 +394,11 @@ class PeakFinder:
     def __str__(self) -> str:
         halves = "" if self.split is None else ", each half on its own"
         return f"PeakFinder({self.filter}, {self.cutoff}{halves})"
+
+    def cutoffs(self, filtered: np.ndarray,
+                n_threads: Optional[int] = None) -> np.ndarray:
+        """The cutoff applied to each frame of ``filtered`` (and each half, on
+        a split frame): :func:`frame_cutoffs`."""
+        threads = self.n_threads if n_threads is None else n_threads
+        return frame_cutoffs(filtered, self.cutoff, n_threads=threads,
+                             split=self.split)

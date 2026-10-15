@@ -490,7 +490,10 @@ What to check:
 * **The preview.**  It draws the peaks found in both halves, and the
   secondary half's peaks mapped back onto the main half with the
   transformation (cyan crosses).  A cross that sits on its partner's circle is
-  a good registration; a cross beside it shows the error directly.
+  a good registration; a cross beside it shows the error directly.  The
+  filtered image's title gives the cutoff of each half, the one detection
+  applied to that frame: the first half's line on the colour bar is solid,
+  the second's dashed.
 * **The ratio histogram** should show one clear peak per dye.  Peaks that
   merge mean too few photons or dyes too alike; a pile-up at 0 or 1 is
   molecules whose partner fit box held only background -- a dye that sends almost
