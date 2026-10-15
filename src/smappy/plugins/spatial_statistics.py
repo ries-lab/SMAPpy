@@ -95,9 +95,13 @@ PLACEMENT_TRIES = 30
 ASK_ABOVE_S = 5.0
 # the points drawn in the window's figure
 FIGURE_POINTS = 30_000
+# the occupied area's pixel when nobody chooses one (Neighbourhood, the
+# directional approaches)
+OCCUPIED_BIN_NM = 200.0
 
 APPROACHES = (("pair_correlation", "g(r)"), ("ripley_k", "K(r)"),
               ("ripley_l", "L(r) - r"))
+DIRECTIONAL = (("image", "correlation image"), ("line", "correlation along a line"))
 
 
 # --------------------------------------------------------------- the window
@@ -424,6 +428,7 @@ class Points:
     groups: Optional[np.ndarray] = None
     rows: Optional[np.ndarray] = None
     table: Any = None
+    z: Optional[np.ndarray] = None
 
 
 @dataclass
@@ -655,6 +660,75 @@ def draw_window(ax, window: Window, points: Sequence[Tuple[np.ndarray, str]]) ->
     ax.set_ylabel("y (nm)")
 
 
+def _axis_label(axis: str, turned: bool) -> str:
+    if axis == "z":
+        return "shift in z (nm)"
+    if turned:
+        return f"shift {'along' if axis == 'x' else 'across'} (nm)"
+    return f"shift in {axis} (nm)"
+
+
+def draw_images(figure, found, jobs, turned: bool = False) -> None:
+    """Each correlation image, g in colour, shift 0 in the middle."""
+    rows, across = int(np.ceil(len(jobs) / 3)), min(len(jobs), 3)
+    axes = figure.subplots(rows, across, squeeze=False).ravel()
+    lim = float(found.lags[-1])
+    a, b = found.image_axes
+    for ax, (i, j) in zip(axes, jobs):
+        g = found.images[(i, j)]
+        finite = g[np.isfinite(g)]
+        top = float(np.percentile(finite, 99.5)) if len(finite) else 1.0
+        shown = ax.imshow(g.T, origin="lower", extent=(-lim, lim, -lim, lim),
+                          cmap="magma", vmin=0, vmax=max(top, 1.0),
+                          interpolation="nearest")
+        figure.colorbar(shown, ax=ax, shrink=0.8, label="g")
+        name = found.names[i] if i == j else f"{found.names[i]} x {found.names[j]}"
+        ax.set_title(name, fontsize=9)
+        ax.set_xlabel(_axis_label(a, turned), fontsize=8)
+        ax.set_ylabel(_axis_label(b, turned), fontsize=8)
+        ax.tick_params(labelsize=7)
+    for ax in axes[len(jobs):]:
+        ax.set_visible(False)
+
+
+def draw_line(figure, found, colours: Sequence[str], turned: bool = False) -> None:
+    """The profiles, the correlations with their periods marked, and the
+    spectra."""
+    prof, corr, spec = figure.subplots(1, 3)
+    axis = found.line_axis
+    for i, (x, counts) in enumerate(found.profiles):
+        if len(x):
+            prof.stairs(counts, np.r_[x - found.bin / 2, x[-1] + found.bin / 2],
+                        color=colours[i], label=found.names[i])
+    for (i, j), g in found.line.items():
+        colour = colours[i] if i == j else "0.3"
+        at, height = found.periods[(i, j)]
+        label = (f"{found.names[i]}: {at:.0f} nm" if i == j
+                 else f"{found.names[i]} x {found.names[j]}: {at:.0f} nm")
+        corr.plot(found.lags, g, "-" if i == j else "--", color=colour, linewidth=1.1,
+                  label=label)
+        if np.isfinite(at):
+            corr.plot([at], [height], "o", color=colour, markersize=4)
+    corr.axhline(1.0, color="k", linewidth=0.5)
+    for i, (f, mag) in enumerate(found.spectra):
+        if len(f) > 1:
+            spec.plot(f[1:] * 1000, mag[1:], color=colours[i], linewidth=1.0)
+            p, m = found.fft_periods[i]
+            if np.isfinite(p):
+                spec.plot([1000 / p], [m], "o", color=colours[i], markersize=4)
+    where = ("along the line" if turned and axis == "x" else
+             "across the line" if turned and axis == "y" else axis)
+    prof.set_xlabel(f"{where} (nm)", fontsize=8)
+    prof.set_ylabel("localizations per bin", fontsize=8)
+    corr.set_xlabel(_axis_label(axis, turned), fontsize=8)
+    corr.set_ylabel("g", fontsize=8)
+    spec.set_xlabel("frequency (1/µm)", fontsize=8)
+    spec.set_ylabel("magnitude", fontsize=8)
+    corr.legend(fontsize=7, frameon=False)
+    for ax in (prof, corr, spec):
+        ax.tick_params(labelsize=7)
+
+
 # ---------------------------------------------------------------- the plugin
 
 @dataclass
@@ -693,6 +767,37 @@ class RadialSettings:
                       help="of the random placements")
 
 
+def _roi_lines():
+    return [("", "the first it has")]
+
+
+@dataclass
+class DirectionalSettings:
+    plane: str = param("xy", label="image plane",
+                       choices=(("xy", "x-y"), ("xz", "x-z"), ("yz", "y-z")),
+                       help="x along a line ROI, y across it; z from z_nm")
+    axis: str = param("x", label="line along", choices=(("x", "x"), ("y", "y"),
+                                                       ("z", "z")),
+                      help="x along a line ROI, y across it; z from z_nm")
+    bin_nm: float = param(5.0, label="bin", unit="nm", min=0.1,
+                          help="the localizations are counted in bins this wide")
+    max_shift_nm: float = param(500.0, label="shifts up to", unit="nm", min=1.0,
+                                help="the largest shift correlated")
+    period_nm: float = param(0.0, label="period guess", unit="nm", min=0.0,
+                             help="the peak nearest it is the period; 0: the "
+                                  "first strong one")
+    cross: bool = param(True, label="cross-correlations",
+                        help="also every pair of visible layers")
+    window: str = param("occupied", label="without an ROI",
+                        choices=(("occupied", "the occupied area"),
+                                 ("box", "the bounding box")),
+                        help="the window when neither a region nor a drawn ROI "
+                             "gives one")
+    roi_line: str = param("", label="ROI line", choices=_roi_lines,
+                          help="in an ROI of the ROI manager, which of its named "
+                               "lines x runs along")
+
+
 @dataclass
 class SpatialStatisticsSettings:
     pair_correlation: bool = param(True, label="pair correlation g(r)",
@@ -703,6 +808,18 @@ class SpatialStatisticsSettings:
                            help="K made linear: 0 for random, above it clustered")
     radial: RadialSettings = param(default_factory=RadialSettings,
                                    label="radial approaches")
+    image: bool = param(False, label="correlation image",
+                        help="the 2D auto- and cross-correlation, every "
+                             "direction apart")
+    line: bool = param(False, label="along a line",
+                       help="the correlation along one axis, its period "
+                            "and spectrum")
+    directional: DirectionalSettings = param(default_factory=DirectionalSettings,
+                                             label="directional approaches")
+
+
+def _directional(settings: SpatialStatisticsSettings) -> List[str]:
+    return [key for key, _ in DIRECTIONAL if getattr(settings, key)]
 
 
 def _approaches(settings: SpatialStatisticsSettings) -> List[str]:
@@ -719,16 +836,24 @@ class SpatialStatistics(Plugin):
     Settings = SpatialStatisticsSettings
     changes_locs = False
     per_region = True
-    version = "1"
+    version = "2"
 
     def describe(self, ctx: Optional[Context], settings: SpatialStatisticsSettings
                  ) -> FormState:
         s = settings.radial
-        state = FormState(shown={"radial": bool(_approaches(settings))})
+        state = FormState(shown={"radial": bool(_approaches(settings)),
+                                 "directional": bool(_directional(settings))})
         sims = s.null != "none"
         state.shown.update({"radial.simulations": sims, "radial.level": sims,
                             "radial.seed": sims,
-                            "radial.occupied_bin_nm": s.window == "occupied"})
+                            "radial.occupied_bin_nm": s.window == "occupied",
+                            "directional.plane": settings.image,
+                            "directional.axis": settings.line,
+                            "directional.period_nm": settings.line})
+        project = getattr(ctx, "rois", None) if ctx is not None else None
+        names = list(getattr(project, "line_names", None) or [])
+        state.choices["directional.roi_line"] = ([("", "the first it has")]
+                                                 + [(n, n) for n in names])
         return state
 
     # -- reading the layers
@@ -750,9 +875,11 @@ class SpatialStatistics(Plugin):
             return roi
         return None
 
-    def _gather(self, ctx: Context, settings: SpatialStatisticsSettings):
-        """``(names, colours, layers[i][f] Points, windows[f], files)``."""
-        s = settings.radial
+    def _gather(self, ctx: Context, how: str = "occupied",
+                bin_nm: float = OCCUPIED_BIN_NM):
+        """``(names, colours, layers[i][f] Points, windows[f], files, shape)``:
+        the windows from the drawn shape, else the localizations (``how``,
+        `window_of_points`)."""
         found = self._layers(ctx)
         names, colours, columns = [], [], []
         shape = None
@@ -770,9 +897,10 @@ class SpatialStatistics(Plugin):
                      else np.zeros(len(rows), dtype=np.int64))
             groups = (np.asarray(table["group_id"])[rows] if "group_id" in table
                       else None)
+            z = np.asarray(table["z_nm"], dtype=float)[rows] if "z_nm" in table else None
             names.append(name)
             colours.append(colour)
-            columns.append((table, rows, x[rows], y[rows], files, groups))
+            columns.append((table, rows, x[rows], y[rows], files, groups, z))
             if shape is None:
                 shape = self._drawn_roi(ctx, selection)
         all_files = np.unique(np.concatenate([c[4] for c in columns])) if columns else []
@@ -781,18 +909,18 @@ class SpatialStatistics(Plugin):
         used_files = []
         for f in all_files:
             per = []
-            for table, rows, x, y, files, groups in columns:
+            for table, rows, x, y, files, groups, z in columns:
                 here = files == f
                 per.append(Points(np.column_stack([x[here], y[here]]),
                                   None if groups is None else groups[here],
-                                  rows[here], table))
+                                  rows[here], table, None if z is None else z[here]))
             if not any(len(p.xy) for p in per):
                 continue
             if shape is not None:
                 window = window_of_region(shape)
             else:
                 xy = np.concatenate([p.xy for p in per])
-                window = window_of_points(xy[:, 0], xy[:, 1], s.window, s.occupied_bin_nm)
+                window = window_of_points(xy[:, 0], xy[:, 1], how, bin_nm)
             for i, p in enumerate(per):
                 layers[i].append(p)
             windows.append(window)
@@ -863,14 +991,34 @@ class SpatialStatistics(Plugin):
                  + f": about {took}.  A smaller r is faster.", choices=choices)
 
     def run(self, ctx: Context, settings: SpatialStatisticsSettings) -> Result:
-        approaches = _approaches(settings)
-        if not approaches:
+        """The radial approaches, then the directional ones, as one result."""
+        radial, directional = _approaches(settings), _directional(settings)
+        if not radial and not directional:
             raise ValueError("tick an approach")
+        parts = []
+        if radial:
+            parts.append(self._run_radial(ctx, settings))
+        if directional:
+            parts.append(self._run_directional(ctx, settings))
+        if len(parts) == 1:
+            return parts[0]
+        first, second = parts
+        plots = dict(first.plots)
+        plots[second.plot.name or "directional"] = second.plot
+        plots.update(second.plots)
+        return Result(text=first.text + "\n" + second.text, plot=first.plot, plots=plots,
+                      values={**first.values, **second.values},
+                      arrays={**first.arrays, **second.arrays}, settings=settings,
+                      data={**first.data, **second.data}, title="spatial statistics")
+
+    def _run_radial(self, ctx: Context, settings: SpatialStatisticsSettings) -> Result:
+        approaches = _approaches(settings)
         s = settings.radial
         if s.dr_nm <= 0 or s.r_max_nm < s.dr_nm:
             raise ValueError("up to r must be at least one bin width")
         at = parse_distances(s.at_nm)
-        names, colours, layers, windows, files, shape = self._gather(ctx, settings)
+        names, colours, layers, windows, files, shape = self._gather(
+            ctx, s.window, s.occupied_bin_nm)
         if not windows:
             if ctx.per_region:
                 return Result(values={}, settings=settings)
@@ -941,6 +1089,123 @@ class SpatialStatistics(Plugin):
                             "area_nm2": area, "files": list(files)},
                       title="spatial statistics")
 
+    def _frame(self, ctx: Context, d: "DirectionalSettings", shape):
+        """``(frame, shape)``: the coordinates x and y are taken in, and the
+        window's shape.  A line -- the drawn line ROI, the region when it is
+        a line, else the ROI's named line (Line Profile's `region_line`) --
+        turns x along it and y across; anything else leaves x and y the
+        table's."""
+        from ..correlation import Frame
+        from ..regions import Region
+        from .line_profile import line_ends, region_line
+        if ctx.per_region:
+            region = ctx.region if isinstance(ctx.region, Region) else None
+            if region is not None and (region.kind == "line" or d.roi_line
+                                       or self._has_lines(ctx)):
+                p0, p1, _ = line_ends(region_line(ctx, d.roi_line))
+                return Frame.of_line(p0, p1), region
+            return Frame(), region
+        if shape is not None and shape.kind == "line":
+            p0, p1, _ = line_ends(shape)
+            return Frame.of_line(p0, p1), shape
+        return Frame(), shape
+
+    @staticmethod
+    def _has_lines(ctx: Context) -> bool:
+        project = ctx.rois
+        roi = (project.rois.get(ctx.region_id) if project is not None
+               and ctx.region_id is not None else None)
+        return bool(getattr(roi, "lines", None))
+
+    def _run_directional(self, ctx: Context, settings: SpatialStatisticsSettings
+                         ) -> Result:
+        from ..correlation import directional, lateral_mask
+        d = settings.directional
+        if d.max_shift_nm < d.bin_nm:
+            raise ValueError("shifts up to must be at least one bin")
+        names, colours, layers, windows, files, shape = self._gather(
+            ctx, d.window, OCCUPIED_BIN_NM)
+        if not windows:
+            if ctx.per_region:
+                return Result(values={}, settings=settings)
+            raise ValueError("no localizations to measure")
+        frame, shape = self._frame(ctx, d, shape)
+        masks, framed = [], [[] for _ in layers]
+        for f, window in enumerate(windows):
+            if shape is not None:
+                masks.append(lateral_mask(shape, frame, d.bin_nm))
+            else:
+                x0, y0, x1, y1 = window.extent
+                u, v = frame.to([x0, x1, x1, x0], [y0, y0, y1, y1])
+                masks.append(lateral_mask(None, frame, d.bin_nm, window.contains,
+                                          (u.min(), v.min(), u.max(), v.max())))
+            for i, per in enumerate(layers):
+                p = per[f]
+                u, v = frame.to(p.xy[:, 0], p.xy[:, 1])
+                one = {"u": u, "v": v}
+                if p.z is not None:
+                    one["z"] = p.z
+                framed[i].append(one)
+        image = d.plane if settings.image else None
+        line = d.axis if settings.line else None
+        found = directional(framed, masks, d.bin_nm, d.max_shift_nm, image, line,
+                            d.cross, d.period_nm, names)
+        values: Dict[str, float] = {}
+        arrays: Dict[str, np.ndarray] = {}
+        lines = [self._directional_head(found, frame, shape, image, line)]
+        keys = {}
+        for (i, j) in (found.line or found.images):
+            keys[(i, j)] = ("" if i == 0 else f"_L{i + 1}") if i == j else \
+                f"_L{i + 1}xL{j + 1}"
+        if line:
+            arrays["lag_nm"] = found.lags
+            for (i, j), g in found.line.items():
+                k = keys[(i, j)]
+                arrays[f"line_g{k}"] = g
+                at, height = found.periods[(i, j)]
+                if i == j:
+                    fp, fm = found.fft_periods[i]
+                    values.update({f"period_nm{k}": at, f"period_g{k}": height,
+                                   f"period_fft_nm{k}": fp, f"period_fft_mag{k}": fm})
+                    lines.append(f"{names[i]}: period {at:.4g} nm (g {height:.3g}); "
+                                 f"spectrum {fp:.4g} nm")
+                else:
+                    values.update({f"shift_nm{k}": at, f"shift_g{k}": height})
+                    lines.append(f"{names[i]} x {names[j]}: strongest at "
+                                 f"{at:.4g} nm (g {height:.3g})")
+        plots: Dict[str, Any] = {}
+        first = None
+        cols = [colours[i] for i in range(len(names))]
+        if image:
+            jobs = list(found.images)
+            p = Plot(lambda fig: draw_images(fig, found, jobs, frame.turned),
+                     name="correlation image", panels=len(jobs),
+                     size=(3.2 * min(len(jobs), 3), 3.0 * int(np.ceil(len(jobs) / 3))))
+            first = p
+        if line:
+            p = Plot(lambda fig: draw_line(fig, found, cols, frame.turned),
+                     name="along a line", panels=3, size=(9.6, 3.0))
+            if first is None:
+                first = p
+            else:
+                plots["along a line"] = p
+        return Result(text="\n".join(lines), plot=first, plots=plots, values=values,
+                      arrays=arrays, settings=settings,
+                      data={"directional": found, "frame": frame},
+                      title="spatial statistics")
+
+    @staticmethod
+    def _directional_head(found, frame, shape, image, line) -> str:
+        axes = ("x along the line, y across it" if frame.turned else "x and y")
+        parts = [f"{axes}; bins of {found.bin:g} nm, shifts to {found.lags[-1]:g} nm"]
+        if found.z is not None:
+            parts.append(f"z from {found.z[0]:.0f} to {found.z[1]:.0f} nm")
+        if image:
+            parts.append(f"image {image[0]}-{image[1]}")
+        if line:
+            parts.append(f"line along {line}")
+        return "directional: " + "; ".join(parts)
+
     @staticmethod
     def _line(curve: Curve, mid: np.ndarray, approaches, r_min: float) -> str:
         parts = []
@@ -961,8 +1226,6 @@ class SpatialStatistics(Plugin):
 
 # ---------------------------------------- what Neighbourhood's count expects
 
-# the occupied area's pixel when nobody chooses one (Neighbourhood)
-OCCUPIED_BIN_NM = 200.0
 # Gauss-Legendre nodes per pixel column for the points near the window's
 # edge (`window_coverage`), and points done at once
 COVERAGE_NODES = 8
