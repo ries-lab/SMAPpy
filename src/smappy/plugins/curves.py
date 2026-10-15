@@ -54,8 +54,8 @@ from .roi import (AmbiguousEvaluation, EVALUATION_HELP, SiteAnalysisPlugin, auto
 # to the grid's span (rounding in a saved table, not another setting)
 GRID_TOLERANCE = 1e-6
 # names an x axis is recognised by, first match wins (*x* on auto)
-X_NAMES = ("r_nm", "x_nm", "distance_nm", "lag_s", "lag_frames", "t_s", "time_s",
-           "frame")
+X_NAMES = ("r_nm", "lag_nm", "x_nm", "distance_nm", "lag_s", "lag_frames", "t_s",
+           "time_s", "frame")
 NO_GROUP = "(none)"
 # what a panel is called, for the curves of the shipped evaluators (a layer's
 # suffix, `_L2`, kept after it); any other by its name and unit

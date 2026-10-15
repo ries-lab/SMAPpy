@@ -1,6 +1,6 @@
 ---
-version: "1"
-covers: [smappy.plugins.spatial_statistics.pair_counts, smappy.plugins.spatial_statistics.expected_counts, smappy.plugins.spatial_statistics.curves_of, smappy.plugins.spatial_statistics.window_of_region, smappy.plugins.spatial_statistics.window_of_points, smappy.plugins.spatial_statistics.Window.covariance, smappy.plugins.spatial_statistics.keep_blinks, smappy.plugins.spatial_statistics.mad_test, smappy.plugins.spatial_statistics.pointwise_band, smappy.plugins.spatial_statistics.first_maximum, smappy.plugins.spatial_statistics.spatial_statistics, smappy.plugins.spatial_statistics.curve_values, smappy.plugins.spatial_statistics.SpatialStatistics.run, smappy.plugins.spatial_statistics.SpatialStatistics.preflight]
+version: "2"
+covers: [smappy.plugins.spatial_statistics.pair_counts, smappy.plugins.spatial_statistics.expected_counts, smappy.plugins.spatial_statistics.curves_of, smappy.plugins.spatial_statistics.window_of_region, smappy.plugins.spatial_statistics.window_of_points, smappy.plugins.spatial_statistics.Window.covariance, smappy.plugins.spatial_statistics.keep_blinks, smappy.plugins.spatial_statistics.mad_test, smappy.plugins.spatial_statistics.pointwise_band, smappy.plugins.spatial_statistics.first_maximum, smappy.plugins.spatial_statistics.spatial_statistics, smappy.plugins.spatial_statistics.curve_values, smappy.plugins.spatial_statistics.SpatialStatistics.run, smappy.plugins.spatial_statistics.SpatialStatistics.preflight, smappy.plugins.spatial_statistics.SpatialStatistics._frame, smappy.plugins.spatial_statistics.SpatialStatistics._run_directional, smappy.correlation.directional, smappy.correlation.correlate, smappy.correlation.window_weights, smappy.correlation.lateral_mask, smappy.correlation.z_range, smappy.correlation.period_of, smappy.correlation.spectrum, smappy.correlation.spectrum_period]
 ---
 
 ## What it does
@@ -23,9 +23,30 @@ straight, $L(r) - r$ is 0 for random positions and above 0 for clusters
 which distances matter; L - r adds up all the distances below *r*, which
 makes it smoother and is why its maximum is the usual estimate of a
 cluster's size ([Kiskowski et al. 2009](https://doi.org/10.1016/j.bpj.2009.05.039)).
-These are the *approaches*; tick the ones to see.  More are to come
-(a correlation image, a correlation along a line), each with its own
-settings.
+These are the *radial* approaches: they average every direction into one
+curve.
+
+Two *directional* approaches keep the direction, for what is periodic along
+one -- rings of spectrin every 190 nm along an axon, the bands of a
+sarcomere, layers in z -- or shifted between two channels:
+
+* the **correlation image**: the same correlation for every shift in x and
+  y (or x and z, y and z) on its own, a picture with the shift 0 in the
+  middle, where a structure periodic in one direction shows as stripes
+  across it, a lattice as a grid of spots, and a shift between two
+  channels as a spot away from the middle;
+* the **correlation along a line**: the localizations counted along one
+  axis (a *profile*), its correlation with itself at every shift, the
+  **period** (the peak nearest a guess, or the first strong one) and the
+  profile's spectrum, as SMAP's `correlationtools`; two layers'
+  cross-correlation peaks at the shift between them.
+
+With a line ROI -- drawn, or one of an ROI's named lines in the ROI manager
+-- x runs along the line and y across it, so a structure is measured in its
+own directions however it lies.
+
+Tick the approaches to see; each has its own settings, shown while it is
+on.
 
 Every visible layer is measured as it shows -- with its filter, with or
 without [merged blinks](plugin:Panels/Glossary) -- and with two or more,
@@ -44,8 +65,8 @@ which blinks the way the data do -- and still remember that a molecule
 that blinks again after a long dark time is two blinks.
 
 Use it on a region with a uniform background -- a patch of membrane, a
-nucleus -- or on every ROI or cluster as a per-region step.  It is lateral
-(x and y) only.
+nucleus -- or on every ROI or cluster as a per-region step.  The radial
+approaches are lateral (x and y) only; the directional ones can use z.
 
 ## How it works
 
@@ -94,6 +115,25 @@ _, (blink_csr,) = spatial_statistics([[Points(scattered, scattered_blinks)]], [w
                                      300, 5, null="csr", n_sims=19)
 _, (blink_kept,) = spatial_statistics([[Points(scattered, scattered_blinks)]], [window_s],
                                       300, 5, null="keep_blinks", n_sims=19)
+
+# rings across an axon every 190 nm, the axon at 35 degrees
+from smappy.correlation import Frame, directional, lateral_mask
+from smappy.plugins.spatial_statistics import draw_images, draw_line
+from smappy.regions import Region
+angle = np.radians(35)
+c, s_ = np.cos(angle), np.sin(angle)
+def along(u, v):                         # axon coordinates -> x, y
+    return [float(1000 + u * c - v * s_), float(1000 + u * s_ + v * c)]
+rings = [{"line": [along(190 * k, -200) + [0], along(190 * k, 200) + [0]],
+          "density": 0.06, "width": 30} for k in range(21)]
+axon = {"polygon": [along(0, -200), along(4000, -200), along(4000, 200),
+                    along(0, 200)], "density": 2e-4}
+ring_xy, _ = simulated([{"elements": rings + [axon]}], seed=7)
+line_roi = Region.line(along(0, 0), along(4000, 0), 400)
+frame = Frame.of_line(along(0, 0), along(4000, 0))
+u, v = frame.to(ring_xy[:, 0], ring_xy[:, 1])
+axon_found = directional([[{"u": u, "v": v}]], [lateral_mask(line_roi, frame, 10)],
+                         10, 800, image="xy", line="x", names=["rings"])
 ```
 
 **1. The window.**  Where localizations could have been: the region's
@@ -145,6 +185,32 @@ draw_curves(left, mid, [blink_csr], "L_r", ["C0"])
 draw_curves(right, mid, [blink_kept], "L_r", ["C0"])
 left.set_title("envelope: random (CSR)", fontsize=9)
 right.set_title("envelope: random, keep blinks", fontsize=9)
+```
+
+**The directional approaches** take the same layers and window, in the
+frame of a line ROI when there is one (x along it, y across).
+
+**1. Binning.**  The localizations are counted in bins of *bin* on the
+axes measured: an image of x and y (or x and z, y and z) for the
+correlation image, a profile along x, y or z for the line.  z runs over the
+range the data have -- from their 0.5th to their 99.5th percentile, clipped
+to -500 .. 500 nm -- so a few far-out mislocalizations do not stretch it.
+
+**2. Correlating.**  For every shift up to *shifts up to*, the pairs of
+localizations that far apart (by Fourier transform), divided by what the
+same number placed at random in the window would give at that shift: 1
+for random positions, in every direction.
+
+**3. The period.**  Along a line, the peaks of the correlation at positive
+shifts: the one nearest the *period guess*, or without a guess the first
+that is at least half as high as the highest.  The spectrum of the profile
+gives a second estimate, from its strongest frequency.
+
+```figure Rings every 190 nm across an axon that runs at 35° to x, measured along a line ROI on it. The correlation image (left) shows them as stripes every 190 nm along the axon, the same all across it (beyond 400 nm across, the axon has no width left: no value). Along the line (right): the profile, its correlation with a peak at 190 nm (the peak at 0 is each molecule's own blinks), and the spectrum's peak at 5.3 per µm.
+fig.set_size_inches(10.0, 2.9)
+left, right = fig.subfigures(1, 2, width_ratios=[1, 2.6])
+draw_images(left, axon_found, [(0, 0)], turned=True)
+draw_line(right, axon_found, ["C3"], turned=True)
 ```
 
 ## In detail
@@ -239,6 +305,41 @@ random value (1 for g, 0 for L - r) as the highest one does.  So a small
 bump of noise before the real peak is passed over, and of two equal peaks
 -- rings of a periodic structure -- the first is taken.
 
+**The directional normalisation.**  With $h_a$ and $h_b$ the two layers'
+counts in the bins and $w$ the window's weight in each, the correlation at
+a shift $k$ (a vector of whole bins) is
+
+$$g(k) = \frac{\sum_x h_a(x) \, h_b(x + k)}{\frac{n_a n_b}{W^2} \sum_x w(x) \, w(x + k)} , \quad W = \sum_x w(x) ,$$
+
+by FFT with enough padding that nothing wraps.  It is 17a's estimator not
+averaged over directions: the window's autocorrelation in place of its set
+covariance, as in Veatch's normalisation before its radial sum.  For an
+x-y image $w$ is the window's mask; for x-z it is the window's width across
+x at each x, times 1 inside the z range; along x alone, that width; along z
+alone, the window's area in each z bin.  An auto-correlation leaves out
+each localization's pair with itself ($n$ at $k = 0$); its numerator is
+$n (n - 1)$.  A shift at which the window overlaps itself in less than a
+thousandth of its largest overlap is NaN.  Files are counted apart, and
+their numerators and denominators added.
+
+**The frame.**  A drawn line ROI turns x along it (from its first end) and
+y across (positive to the left), and its rectangle is the window.  In an ROI
+of the ROI manager, its named line *ROI line* (the first it has when left
+on that) turns the axes and the ROI's shape is the window; an ROI without
+lines and a cluster keep the table's x and y.  The window is binned at
+*bin* in the frame, a bin in when its centre is; without a region or drawn
+ROI it is the occupied area or the bounding box, as for the radial ones.
+
+**The period** is read off the correlation at positive shifts: its local
+maxima beyond 2 bins, each refined by a parabola through it and its two
+neighbours; with a *period guess* the nearest, else the first whose height
+above 1 is at least half the highest's.  The spectrum is the one-sided
+magnitude of the profile's Fourier transform, $|X(f)| / N$ doubled between
+0 and the Nyquist frequency, and its period $1 / f$ at the peak chosen the
+same way (zero frequency and periods under 2 bins left out).  A
+cross-correlation's *shift* is the position of its highest point, refined
+the same way.
+
 ## Parameters
 
 ### pair_correlation
@@ -302,6 +403,45 @@ the first maximum and test only at the distances above it.
 ### radial.seed
 The same seed gives the same envelope.
 
+### image
+Needs a few hundred localizations per period in the window to show rows of
+spots; for a weak structure the line, which adds up a whole direction, sees
+more.
+
+### line
+With a line ROI along the structure: rings, bands or a filament's repeat.
+Along z, a structure stacked in layers.
+
+### directional.plane
+x-z or y-z for 3D data: layers or a tilt show as spots above and below the
+middle.
+
+### directional.axis
+*x* is along a line ROI; *y* across it, for the width of a stripe pattern.
+
+### directional.bin_nm
+A tenth of the period or less, and not below the precision: finer bins
+only add noise to each.
+
+### directional.max_shift_nm
+A few periods; the longer, the more peaks the spectrum resolves, but past
+half the ROI's length the overlap is thin and the correlation noisy.
+
+### directional.period_nm
+The expected period (190 nm for spectrin): the nearest peak is taken, so a
+guess picks the first harmonic rather than the second.  0 takes the first
+strong peak.
+
+### directional.cross
+Off for only each layer with itself.
+
+### directional.window
+As *without an ROI* of the radial approaches.
+
+### directional.roi_line
+Draw the line along the structure in each ROI first (the ROI manager's
+lines); the first it has is used when this is left alone.
+
 ## Output
 
 **Figures**: one per approach ticked -- each layer's curve in its colour,
@@ -322,7 +462,17 @@ with no suffix, then `_L2`, ..., and `_L1xL2` for a pair):
 * `p_csr` -- the global test's p, and `leaves_envelope` 1 when the curve
   leaves the global band (p at most 1 - *level*), else 0.
 
-**Arrays per region**: `r_nm` (the bin centres), and per curve `pairs`
+From the directional approaches, per layer: `period_nm` and `period_g`
+(the period from the correlation along the line, and the correlation
+there), `period_fft_nm` and `period_fft_mag` (from the spectrum); per pair
+`shift_nm_L1xL2` and `shift_g_L1xL2`, where the cross-correlation is
+highest.  The *correlation image* figure is one image per layer and pair;
+the *along a line* figure the profiles, the correlations with each period
+marked, and the spectra.
+
+**Arrays per region**: from the line, `lag_nm` (the shifts) and `line_g`
+(per layer and pair, with their suffixes), so *Curves* averages them over
+the ROIs.  From the radial approaches, `r_nm` (the bin centres), and per curve `pairs`
 and `expected` (the counts, so a summary over regions can pool them as
 the sum of the pairs over the sum of the expectations), `g`, `K_nm2`,
 `lr_nm`, and the bands `g_lo`, `g_hi`, `lr_nm_lo`, `lr_nm_hi`.
@@ -359,6 +509,18 @@ Based on SMAP's `SpatialPointPattern` with its helper `myRipleysK`, and the
   count of pairs, one end in each layer, as in `correlation`.
 * Every visible layer and every pair, per file, and per region; SMAP had
   one or two layers chosen in the dialog.
+* **The line correlation** (`correlationtools`) divided the profile's
+  autocorrelation by its mean squared, so it fell off with the shift as the
+  profile overlapped itself less, and its peaks were found after a
+  quadratic detrend.  Here it is divided by the window's own correlation:
+  1 for random positions at every shift, no detrend.  Without a period
+  guess SMAP took the highest peak, which on a regular structure is as
+  often two periods as one; here the first strong one.  SMAP's
+  three-round "multi-correlation" filter is not ported.  Its *Add* button,
+  averaging lines one by one, is the per-region run with *Curves* here.
+* **The 2D pair correlation** of `correlation` was always summed over
+  rings; the correlation image keeps the directions.  Both axes follow a
+  line ROI, and z can be one of them, over a robust z range.
 
 ## References
 
