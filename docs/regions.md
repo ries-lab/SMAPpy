@@ -121,6 +121,14 @@ signature its freshness is checked by, and the error that took its place
 where the step failed.  `Result.data` and the figures stay with the run that
 made them.
 
+A step whose arrays are curves on one x axis is summarised over regions by
+*Summarize/Curves* (`plugins/curves.py`): the mean and spread per x, a line
+per ROI keyword.  A curve that is a ratio of counts should be pooled, not
+averaged; a plugin that hands back the numerator and denominator among its
+arrays implements `Plugin.pool(sums, x)`, which gets every array summed over
+the regions and returns the curves made from those sums (Spatial statistics:
+g, K and L - r from pairs and expected pairs).
+
 ### Figures
 
 A row of an ROI also keeps what `Plugin.keep` returns, and `Plugin.restore`

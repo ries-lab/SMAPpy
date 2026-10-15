@@ -44,6 +44,7 @@ def test_the_region_plugins_are_registered_under_regions():
                           "Analysis/Regions/Centre ROIs",
                           "Analysis/Regions/Average ROIs",
                           "Analysis/Regions/Summarize/Histograms",
+                          "Analysis/Regions/Summarize/Curves",
                           "Analysis/Regions/Summarize/Export table",
                           "Analysis/Regions/Summarize/NPC labelling efficiency",
                           "Analysis/Regions/Workflow/NPC Analysis"}
