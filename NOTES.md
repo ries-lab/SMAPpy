@@ -1410,6 +1410,50 @@ saving) is the price of keeping it out of that window.
   `io.h5.load` (hdfdict on main, h5py on the branch) read them back alike.
   The worker drives uiPSF from before #17 as well.
 
+## Tracking
+
+*Link tracks* (`smappy/tracking/link.py`, wave 4 step 19a) writes
+`track_id` and `track_length`.  Single-particle tracking here is fitted from
+single molecules, so it is sparse: a jump comparable to the distance between
+molecules would mean motion blur or spots that cannot be fitted.  Linking is
+not hard; bridging the frames where the fluorophore was dark, dim or badly
+fitted is what matters -- which is why u-track was never used.  Not
+`group.py`'s linker: that one follows a running mean position and takes the
+first match in a box, right for one blink of a still molecule and wrong for
+a moving one.
+
+* **Candidates from one index.**  Neighbourhood's C++ cell index got a
+  `pairs` query (`csrc/neighbours.cpp`).  x is shifted by the frame times a
+  stride wider than the field plus twice the jump, so one index holds every
+  frame and a query shifted by a lag meets only that lag's frame: memory + 1
+  queries, no loop over frames.
+* **Two linkers.**  *simple*: the candidates in the order (frame, distance,
+  gap) and a link taken when both ends are free -- frame by frame, nearest
+  first, in one C++ loop (`greedy_links`).  *global*: per frame the least
+  sum of squared jumps with an unlinked end costing R^2, Crocker and Grier's
+  criterion (SMAP's `mytrack.m`, trackpy), by `linear_sum_assignment` on each
+  group of competing candidates.  The same R for a gap as for one frame, as
+  theirs.  The design's optional cost scaled by the precisions was left out:
+  where the linkers differ at all, both are already unreliable.
+* **The benchmark** (`studies/tracking/bench.py`; tracks from
+  `simulate.simulate_tracks`, 10% dark frames of 1.5 on average, 20 nm
+  precision, memory 3, R three times the measured rms jump; 0.02 to 1
+  particles per um^2, jumps 50 to 400 nm).  Below a jump of 0.1 of the
+  nearest-neighbour spacing the two find 98.6-99.6% of the true links, the
+  same to 0.3%, and whole tracks within 1.6%; at 0.1-0.4 global finds 0.3-3%
+  more links; above that both are wrong on 20-40% of links.  Global gave
+  exactly trackpy 0.7's links; trackpy raised `SubnetOversizeException`
+  from 0.4 on.  Speed: simple 1.4-2.5 us per localization, global 4-31 us,
+  trackpy 7-25 us; 880 k localizations over 4000 frames: 2.3 s, 4.6 s,
+  5.5 s.  **The default is simple**: the same tracks where SPT of single
+  molecules is possible, faster, and easier to reason about.  Global stays
+  as the option for the crowded case, and as SMAP's behaviour.
+* **Ids.**  0 for a localization in no track and for a track below the
+  minimum length; 1, 2, ... in the order tracks start; files always and
+  channels optionally linked apart; recipes with the rule `max`, so a merged
+  blink keeps its track.  The plugin links localizations, never blinks:
+  merging would join a slow particle's whole track.
+
 ## Open questions
 
 * Fitted x sits ~0.24 px from the peak-finder position, and the sign flips with

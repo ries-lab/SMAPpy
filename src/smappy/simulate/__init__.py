@@ -17,6 +17,9 @@ fitted from its frames by changing nothing but the output:
    spots, astigmatic if asked, on a flat background with shot and read noise,
    nothing removed (`camera`), saved as a recipe a fitter opens (`source`).
 
+Single-particle tracks are a model of their own (`tracks`): Brownian
+particles with diffusive states and blinking, the truth in ``track_id_true``.
+
 In the package rather than in ``scripts/`` because it is also a plugin
 (``File/Simulate/Blinking Structure``): something to try the whole pipeline
 on without a microscope.
@@ -31,6 +34,7 @@ from .settings import (BlinkingSettings, CameraOutputSettings, LabellingSettings
                        LocalizationOutputSettings, OpticsSettings, SimulationSettings,
                        StructureSettings)
 from .structure import Labels, Structure, load_structure, presets
+from .tracks import TrackSimulationSettings, jump_nm, simulate_tracks, spacing_nm
 
 __all__ = [
     "ASTIGMATISM", "ISOLATED_NM", "astigmatic_sigmas", "bead_stacks", "camera_frames",
@@ -40,4 +44,5 @@ __all__ = [
     "unresolvable", "BlinkingSettings", "CameraOutputSettings", "LabellingSettings",
     "LocalizationOutputSettings", "OpticsSettings", "SimulationSettings",
     "StructureSettings", "Labels", "Structure", "load_structure", "presets",
+    "TrackSimulationSettings", "jump_nm", "simulate_tracks", "spacing_nm",
 ]
