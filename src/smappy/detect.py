@@ -17,6 +17,7 @@ Differences to SMAP's ``ImageFilter`` / ``PeakFinder``:
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Optional, Protocol
 
@@ -143,9 +144,19 @@ class AbsoluteCutoff:
 class DynamicCutoff:
     """Threshold derived from the distribution of local-maximum intensities.
 
-    Follows SMAP: the cutoff is the median of the maxima plus ``factor`` times
-    the slope of their 20-80 % quantile range.  Computed per frame, so it
-    adapts to changing background without needing the whole movie.
+    SMAP's ``getdynamiccutoff``: the cutoff is the median of the maxima plus
+    ``factor`` times the slope of their 20-80 % quantile range.  Computed per
+    frame, so it adapts to changing background without needing the whole
+    movie.
+
+    A quantile is the ceil(n p)-th smallest maximum, as SMAP's
+    ``myquantilefast`` takes it.  Up to 0.3.1 it was ``np.quantile``'s linear
+    interpolation -- numpy's default, and nothing records choosing it.  The
+    two differ in most frames, by 0.04 % of the cutoff at 1500 maxima a frame
+    and about 1 % at 140, and nearest rank is the higher -- it drops 0.01-0.14 %
+    of the candidates, the ones at the threshold, and adds none.  Matching SMAP
+    is the point of the port, and the kernel that computes it in C++ is the
+    simpler for it (no interpolation to reproduce to the last bit).
     """
 
     factor: float = 1.7
@@ -156,9 +167,44 @@ class DynamicCutoff:
             return 0.0
         if n < 10:
             return float(np.mean(maxima_values) * self.factor)
-        q20, q50, q80 = np.quantile(maxima_values, (0.2, 0.5, 0.8))
-        slope = (q80 - q20) / 0.6
-        return float(q50 + slope * self.factor)
+        ranks = [math.ceil(n * p) - 1 for p in (0.2, 0.5, 0.8)]
+        q20, q50, q80 = (float(q) for q in np.partition(maxima_values, ranks)[ranks])
+        # 0.8 - 0.2 is what SMAP divides by, and 0.6000000000000001 in double
+        slope = (q80 - q20) / (0.8 - 0.2)
+        return q50 + slope * self.factor
+
+    def thresholds(self, values: np.ndarray, starts: np.ndarray,
+                   n_threads: int = 0) -> np.ndarray:
+        """The cutoff of every segment ``values[starts[i]:starts[i+1]]`` at once.
+
+        The same numbers as calling the cutoff once per segment, bit for bit,
+        returned as float32 because that is what ``values > cutoff`` compared
+        in: a Python float against a float32 array is rounded to float32 first.
+
+        Called per frame, the cutoff was a Python loop in detection -- three
+        quantiles a frame, 80 % of it numpy's dispatch: 9.3 ms for 200
+        frames of 1500 maxima.  One lexsort over the block, the obvious
+        vectorisation, is slower than that (52 ms, a comparison sort over
+        300 k values), and sorting a padded frames x maxima array along its
+        rows is 5.2 ms, most of it the sort.  A cutoff needs three order
+        statistics, not a sort: `csrc/cutoff.hpp` finds them with nth_element,
+        frames split over threads, in 1.1 ms.  Without the extension each
+        segment goes through `__call__`, which is the definition anyway.
+        """
+        values = np.ascontiguousarray(values, dtype=np.float32)
+        starts = np.ascontiguousarray(starts, dtype=np.int64)
+        counts = np.diff(starts)
+        kernel = getattr(_fit3d, "segment_cutoffs", None)
+        if kernel is not None:
+            out = kernel(values, starts, float(self.factor), 10, n_threads)
+            # below ten maxima the rule is a mean, which the kernel leaves NaN
+            rest = np.flatnonzero(np.isnan(out) & (counts > 0))
+        else:
+            out = np.full(counts.size, np.nan, np.float32)
+            rest = np.flatnonzero(counts > 0)
+        for i in rest:
+            out[i] = self(values[starts[i]:starts[i + 1]])
+        return out
 
     def __str__(self) -> str:
         return f"dynamic(factor={self.factor:g})"
@@ -259,7 +305,7 @@ def find_candidates(filtered: np.ndarray, cutoff,
 
     side = _halves(rows, cols, split)
     applied = _cutoffs(frames, values, side, filtered.shape[0], cutoff,
-                       1 if split is None else 2)
+                       1 if split is None else 2, n_threads)
     keep = values > applied[frames, side]
     return Candidates(frame=frames[keep].astype(np.int64),
                       x=cols[keep].astype(np.int32),
@@ -271,12 +317,13 @@ def frame_cutoffs(filtered: np.ndarray, cutoff, n_threads: int = 0,
                   split=None) -> np.ndarray:
     """The cutoff :func:`find_candidates` applies to each frame, ``(n_frames,
     halves)``: one column, or two on a split frame -- the half below
-    ``position`` first.
+    ``position`` first.  NaN where a dynamic cutoff had no maxima to set it.
 
-    The same maxima and the same per-frame code as the search itself, so what
-    a preview reports is what detection did.  A percentile of all pixels, say,
-    is a different and much larger number (322 against 8 on a test frame):
-    the maxima are mostly noise peaks, which is what a dynamic cutoff is about.
+    The same maxima and the same code as the search itself, so what a preview
+    reports is what detection did.  A percentile of all pixels, which the
+    preview once reported, is a different and much larger number (322 against
+    8 on a test frame): the maxima are mostly noise peaks, and those are what
+    a dynamic cutoff is set from.
     """
     filtered = np.asarray(filtered, dtype=np.float32)
     if filtered.ndim == 2:
@@ -286,7 +333,7 @@ def frame_cutoffs(filtered: np.ndarray, cutoff, n_threads: int = 0,
         return np.full((filtered.shape[0], n_halves), cutoff(np.empty(0)))
     frames, rows, cols, values = local_maxima(filtered, n_threads=n_threads)
     return _cutoffs(frames, values, _halves(rows, cols, split),
-                    filtered.shape[0], cutoff, n_halves)
+                    filtered.shape[0], cutoff, n_halves, n_threads)
 
 
 def _halves(rows, cols, split) -> np.ndarray:
@@ -298,20 +345,28 @@ def _halves(rows, cols, split) -> np.ndarray:
     return ((rows if axis == 0 else cols) >= position).astype(np.intp)
 
 
-def _cutoffs(frames, values, side, n_frames, cutoff, n_halves) -> np.ndarray:
-    """The cutoff of each frame and half, from that frame's (half's) maxima.
+def _cutoffs(frames, values, side, n_frames, cutoff, n_halves,
+             n_threads: int = 0) -> np.ndarray:
+    """The cutoff of each frame and half, from that frame's (half's) maxima,
+    NaN where there are none.
 
-    A frame or half with no maxima gets what the cutoff makes of none; nothing
-    there is held to it.  Each is rounded to float32, as the filtered image
-    is: a Python float compared with it is taken as one, and so must this be.
+    Each is a float32 value, as the filtered image is: a Python float compared
+    with a float32 array is rounded to float32 first, and so must this be for
+    ``values > cutoff`` to keep what it always kept.
     """
-    out = np.empty((n_frames, n_halves))
-    # maxima come out sorted by frame, so each frame is a contiguous slice
-    bounds = np.searchsorted(frames, np.arange(n_frames + 1))
-    for f, (start, stop) in enumerate(zip(bounds[:-1], bounds[1:])):
-        block, here = values[start:stop], side[start:stop]
-        for half in range(n_halves):
-            out[f, half] = np.float32(cutoff(block[here == half]))
+    out = np.full((n_frames, n_halves), np.nan)
+    for half in range(n_halves):
+        # maxima come out sorted by frame, and so does each half's share:
+        # each frame is a contiguous segment of it
+        index = np.flatnonzero(side == half)
+        part = values[index]
+        starts = np.searchsorted(frames[index], np.arange(n_frames + 1))
+        if isinstance(cutoff, DynamicCutoff):
+            out[:, half] = cutoff.thresholds(part, starts, n_threads)
+            continue
+        for f, (start, stop) in enumerate(zip(starts[:-1], starts[1:])):
+            if stop > start:
+                out[f, half] = np.float32(cutoff(part[start:stop]))
     return out
 
 
