@@ -304,7 +304,8 @@ def test_the_evaluation_window_offers_only_evaluators(app):
                                  "Analysis/Measure/Histogram",
                                  "Analysis/Measure/Line Profile",
                                  "Analysis/Measure/Localization Statistics",
-                                 "Analysis/Measure/NPC Corners"]
+                                 "Analysis/Measure/NPC Corners",
+                                 "Analysis/Measure/Spatial statistics"]
     assert set(tree.refs) < set(PluginTree().refs)
 
 
