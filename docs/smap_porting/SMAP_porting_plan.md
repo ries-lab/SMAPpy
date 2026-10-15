@@ -104,7 +104,7 @@ that name `Regions/Find/DBSCAN` or `Regions/Find/NPC` (the shipped
 | C1 | **Transform**: apply a saved transformation, a shift (typed in, or from C2), mirror, rotate, scale; to tables and image layers | #40 #69 #74 |
 | C2 | **Register layers**: shift between layers, rendered or images, by cross-correlation; feeds C1 | #41 #119 |
 | C3 | Channel alignment against frame (diagnostic) | #41 #42 |
-| C4 | Assign colours for more than 2 colours | #47 |
+| C4 | Assign colours for more than 2 colours (**done**: up to six) | #47 |
 | later | single-channel fits → dual colour by pairing (#46); Calibrate transform from separate camera files (#39) | |
 
 ## D. Drift (P2), unchanged
@@ -248,13 +248,21 @@ one after the other, in the same session if possible.
 
 17a, 18, 19a and 19b can run in parallel.
 
-### Wave 5: when the above is in
+### Wave 5 -- designed a topic at a time in `wave5_design.md`
 
-Transformations C1 + C2 (Transform, Register layers) · drift D1–D3 (apply
-existing, fiducials, magnification in COMET) · Vibrations (A6, once its
-filters and zoom-ins are settled) · AssignColors for more than 2 colours (C4)
-· figures of regions (E6) · LocMoFit decision (H) and then the port · MINFLUX
-(G), after F · rendering and movies (I).
+Topics: 1. coordinates (decided 2026-10-15) · 2. vibrations (A6) ·
+3. rendering and movies (I; movie export with the tracks as an option:
+step 19b's render mode with a *tail*, over the raw frames) · 4. figures of
+regions (E6) · 5. LocMoFit (H) and NPC geometry · 6. MINFLUX (G), with the
+channel *Check overlay* (C3).  AssignColors for more than 2 colours (C4):
+**done** (`assign_colors.py`, up to six).
+
+| step | what | size | needs |
+|---|---|---|---|
+| **5a** | **Transform** (C1, D1): typed, named, from a file, or another file's drift; localizations (default) or an image layer's placement; named transformations in the session, written to files; a drift *reference* (first / last frame) | M | - |
+| **5b** | **Register layers** (C2): shift by cross-correlation, z optional; hands its result to Transform | S-M | 5a |
+| **5c** | **Fiducial drift** (D2): bright long-lived tracks, one spline dx, dy (dz), a `Drift` | M | - |
+| **5d** | **Magnification over time in COMET** (D3), discussed with Jonas first | M-L | - |
 
 ### Done
 
