@@ -14,7 +14,8 @@ import argparse
 
 import sys
 
-from ..drift import (DriftSettings, correct_drift, drift_corrected_path,
+from ..drift import (TRANSFORMATIONS, DriftSettings, correct_drift,
+                     drift_corrected_path,
                      estimate_cost, save_drift_corrected)
 from ..rcc import RCCSettings, estimate_drift_rcc
 from ..filter import LocFilter
@@ -73,6 +74,10 @@ def main() -> None:
                         "blink (slower, and measurably noisier)")
     p.add_argument("--knot-frames", type=int, default=DriftSettings.spline_knot_frames,
                    help="spline coefficient spacing in frames (default %(default)d)")
+    p.add_argument("--transformation", default="shift",
+                   choices=list(TRANSFORMATIONS),
+                   help="what changes over time besides the position, each "
+                        "parameter a spline (default %(default)s)")
     p.add_argument("--two-stage", action="store_true",
                    help="grouped pass, then an ungrouped one over a small "
                         "radius: ~9x faster for ~99%% of the improvement")
@@ -107,7 +112,7 @@ def main() -> None:
         backend=a.backend, use_z=False if a.no_z else None,
         optimizer_ftol=a.ftol, group=not a.ungrouped, quality_control=a.qc,
         two_stage=a.two_stage, spline=not a.per_window,
-        spline_knot_frames=a.knot_frames)
+        spline_knot_frames=a.knot_frames, transformation=a.transformation)
 
     if a.rcc:
         drift = estimate_drift_rcc(

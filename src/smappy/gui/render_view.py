@@ -18,10 +18,12 @@ import pyqtgraph as pg
 from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QAction, QActionGroup, QColor, QImage, QPainter
 from PySide6.QtWidgets import (QDoubleSpinBox, QFileDialog, QGraphicsPathItem,
-                               QInputDialog, QLabel, QMenu, QToolBar, QToolButton,
+                               QLabel, QMenu, QToolBar, QToolButton,
                                QVBoxLayout, QWidget)
 
 from ..layer_state import LayerSnapshot, render_panels, snapshot_layers
+from ..picture import (FrameSource, ViewFrame, bar_label, colour_bar_labels, colour_scales,
+                       nice_below, nice_step)
 from ..regions import Region
 from ..render import FieldOfView, axis_unit
 from ..session import Session
@@ -180,11 +182,16 @@ class RenderView(QWidget):
         self._merger.status.connect(self._show_merge_hint)
         # what the colours mean, when layers are coloured by a column
         self.colour_bars = ColourBars(self)
+        # what *Export Image* frames its picture on, kept as plain data for
+        # a plugin's worker to read (`picture.FrameSource`)
+        self.frame_source = FrameSource()
+        session.view_frames["2D"] = self.frame_source
 
         # pan/zoom fires many range changes; render once they settle
         self._timer = QTimer(singleShot=True, interval=40)
         self._timer.timeout.connect(self.render)
         self.view.sigRangeChanged.connect(self.schedule)
+        self.view.sigRangeChanged.connect(self.refresh_frame)
         session.on_change(self._on_session)
         # side by side: the first panel is this view, which keeps the ROI
         # tools; the others are `_Mirror`s linked to it, which pan and zoom
@@ -339,6 +346,7 @@ class RenderView(QWidget):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
+        self.refresh_frame()
         self.empty_hint.setGeometry(self.rect())
         self.merge_hint.setGeometry(self.rect())
         self.colour_bars.place()
@@ -366,6 +374,7 @@ class RenderView(QWidget):
         self.graphics.ci.layout.activate()
         self._name_panels()
         self._mirror_roi()
+        self.refresh_frame()
 
     def _name_panels(self) -> None:
         names = [self._panel_name(spec) for spec in self.panels]
@@ -735,48 +744,43 @@ class RenderView(QWidget):
         self.session.roi_edited(region)            # no redraw: the item is the truth
 
     # ------------------------------------------------------------- saving
+    def view_frame(self) -> ViewFrame:
+        """What this window shows, for *Export Image*: the view at its pixel
+        size, the panels and how they are laid out."""
+        fov = self.current_fov()
+        return ViewFrame((fov.x0, fov.x1), (fov.y0, fov.y1), fov.pixelsize,
+                         tuple(self.panels), self.stacked)
+
+    def refresh_frame(self, *_) -> None:
+        """Hand the session what the view shows now (`frame_source`)."""
+        try:
+            self.frame_source.frame = self.view_frame()
+        except Exception:                 # half built, or being torn down
+            pass
+
+    def quick_settings(self, path: str = ""):
+        """*Export Image* as the quick PNG uses it: the view, as displayed,
+        with what the window draws over it."""
+        self.refresh_frame()
+        from ..plugins.file import image_settings_for
+        return image_settings_for(self.session, "2D", str(path))
+
     def save_png(self, path) -> None:
-        """The view as displayed, 8-bit RGB: the panels side by side, if they are."""
-        self.qimage().save(str(path))
+        """The view as displayed: the panels side by side, if they are, with
+        the scale bar, the colour bars and the panels' names -- *Export
+        Image* at its defaults, so the menu and the plugin write one file."""
+        from ..plugins.file import export_image
+        export_image(self.session.context(), self.quick_settings(path))
 
     def qimage(self) -> QImage:
-        """The view as displayed, as a QImage: what Save PNG writes and Copy copies."""
-        panels = self.panel_images(self.current_fov())
-        if len(panels) > 1:
-            # a grey line between panels, as SMAP draws it
-            h, w, _ = panels[0].shape
-            line = np.full((h, 2, 3) if not self.stacked else (2, w, 3), 0.5,
-                           np.float32)
-            joined = []
-            for n, panel in enumerate(panels):
-                joined += ([line] if n else []) + [panel]
-            rgb = np.concatenate(joined, axis=0 if self.stacked else 1)
-        else:
-            rgb = panels[0]
-        rgb = (np.ascontiguousarray(rgb) * 255).astype(np.uint8)
+        """The view as displayed, as a QImage: what Copy copies, the picture
+        Save PNG writes."""
+        from ..plugins.file import image_pictures
+        pictures, _, _ = image_pictures(self.session.context(), self.quick_settings())
+        rgb = np.ascontiguousarray(pictures[0].image)
         h, w, _ = rgb.shape
         # a copy: the QImage would otherwise point into an array about to go
         return QImage(rgb.data, w, h, 3 * w, QImage.Format_RGB888).copy()
-
-    def save_tiff(self, path, pixelsize: float, what: str = "rgb") -> None:
-        """Re-render the current field of view at ``pixelsize`` (data units).
-
-        ``what`` is "rgb" (8-bit colour, as displayed) or "intensity" (32-bit
-        float, the summed weights, for quantitative use).  Written as an ImageJ
-        TIFF with the pixel size in its resolution tags.
-        """
-        import tifffile
-        rect = self.view.viewRect()
-        fov = FieldOfView.from_range((rect.left(), rect.right()),
-                                     (rect.top(), rect.bottom()), pixelsize)
-        (rgb,), weight = render_panels(self.snapshot(), fov)
-        data = ((rgb * 255).astype(np.uint8) if what == "rgb"
-                else weight.astype(np.float32))
-        px_um = pixelsize / 1000.0
-        tifffile.imwrite(str(path), data, imagej=True,
-                         resolution=(1 / px_um, 1 / px_um),
-                         metadata={"unit": "um", "pixelsize_nm": pixelsize,
-                                   "x0": fov.x0, "y0": fov.y0})
 
 
 def _panel_label(view) -> pg.TextItem:
@@ -873,9 +877,7 @@ class RenderToolBar(QToolBar):
         save = QToolButton(text="Save", popupMode=QToolButton.InstantPopup)
         menu = QMenu(save)
         menu.addAction("PNG as displayed...", self._png)
-        menu.addAction("TIFF, colour at pixel size...", lambda: self._tiff("rgb"))
-        menu.addAction("TIFF, intensity (float) at pixel size...",
-                       lambda: self._tiff("intensity"))
+        menu.addAction("Save image...", self._save_image)
         save.setMenu(menu)
         self.addWidget(save)
 
@@ -1081,17 +1083,11 @@ class RenderToolBar(QToolBar):
             folders.remember(path)
             self.view.save_png(path)
 
-    def _tiff(self, what: str) -> None:
-        current = self.view.fov.pixelsize if self.view.fov else 10.0
-        pixelsize, ok = QInputDialog.getDouble(self, "Pixel size", "nm per pixel:",
-                                               round(current, 2), 0.1, 10000, 2)
-        if not ok:
-            return
-        path, _ = QFileDialog.getSaveFileName(self, "Save TIFF", self._default(".tif"),
-                                              "TIFF (*.tif *.tiff)")
-        if path:
-            folders.remember(path)
-            self.view.save_tiff(path, pixelsize, what)
+    def _save_image(self) -> None:
+        """*File/Export/Image* in its window, filled from this view."""
+        opener = self.view.session.window_openers.get("export image")
+        if opener is not None:
+            opener(self.view.quick_settings())
 
 
 class ColourBar(QWidget):
@@ -1119,11 +1115,7 @@ class ColourBar(QWidget):
     def labels(self) -> Tuple[str, str, str]:
         """The title, the top and the bottom label: "layer 1: z_nm", "300 nm",
         "-300 nm"."""
-        unit = axis_unit(self.field)
-        unit = "" if unit == self.field else f" {unit}"
-        lo, hi = self.range
-        return (f"{', '.join(self.layers)}: {self.field}",
-                f"{_bar_number(hi)}{unit}", f"{_bar_number(lo)}{unit}")
+        return colour_bar_labels(self.layers, self.field, self.range)
 
     def paintEvent(self, event) -> None:          # noqa: N802 (Qt's name)
         title, top, bottom = self.labels()
@@ -1158,8 +1150,9 @@ class ColourBars(QWidget):
     by one column through two LUTs or over two ranges, read differently and
     need a key each; layers that agree on the column, the colours and the
     range share one bar, labelled with all of them.  Widgets over the
-    picture rather than items in it: they are read, not panned, and they stay
-    out of what Save and Copy take, which are the picture alone.  Plain
+    picture rather than items in it: they are read, not panned.  What Save
+    and Copy take draws the same bars into the picture (`smappy.picture`,
+    `colour_scales`), scaled to its size.  Plain
     intensity has no bar: its LUT is brightness, which the picture shows.
     """
 
@@ -1174,31 +1167,9 @@ class ColourBars(QWidget):
     @staticmethod
     def scales(layers) -> List[tuple]:
         """``(layer names, column, (lo, hi), LUT table)`` per distinct scale,
-        in the layers' order."""
-        from .. import lut as luts
-        found: dict = {}
-        for layer in layers:
-            if layer.is_image or not layer.visible or layer.state is None:
-                continue
-            settings, display = layer.state.settings, layer.state.display
-            field = settings.color_field
-            if field is None or field not in layer.locs:
-                continue
-            lo, hi = settings.color_range or _finite_range(layer.locs[field])
-            try:
-                table = luts.get(display.lut, display.invert)
-            except (KeyError, ValueError):
-                continue
-            if display.white_background:
-                table = luts.on_white(table)
-            # the colours themselves, not the LUT's name: an inverted LUT and
-            # its plain one share a name and not a scale
-            key = (field, float(lo), float(hi), table.tobytes())
-            if key in found:
-                found[key][0].append(layer.name)
-            else:
-                found[key] = ([layer.name], field, (float(lo), float(hi)), table)
-        return list(found.values())
+        in the layers' order: the exported picture's bars too
+        (`picture.colour_scales`)."""
+        return colour_scales(snapshot_layers(layers))
 
     def show_for(self, layers) -> None:
         scales = self.scales(layers)
@@ -1224,18 +1195,6 @@ class ColourBars(QWidget):
         parent = self.parentWidget()
         if parent is not None:
             self.move(parent.width() - self.width() - 8, 8)
-
-
-def _bar_number(value: float) -> str:
-    """Four digits, but a frame number of 20000 as itself, not 2e+04."""
-    return f"{value:.0f}" if 1e4 <= abs(value) < 1e9 else f"{value:.4g}"
-
-
-def _finite_range(values) -> Tuple[float, float]:
-    """What the renderer colours over when no range is set: min to max."""
-    values = np.asarray(values, np.float64)
-    finite = values[np.isfinite(values)]
-    return (float(finite.min()), float(finite.max())) if finite.size else (0.0, 1.0)
 
 
 class AxisBars:
@@ -1297,31 +1256,3 @@ class AxisBars:
                 line.setData([cx, cx], [cy, cy + length])
                 text.setPos(cx, cy + length / 2)
             text.setText(bar_label(native, axis_unit(names[i])))
-
-
-def bar_label(value: float, unit: str) -> str:
-    """"500 nm", "2 µm", "2000 photons"."""
-    if unit == "nm" and value >= 1000:
-        return f"{value / 1000:g} µm"
-    return f"{value:g} {unit}"
-
-
-def nice_below(span: float) -> float:
-    """A round 1 / 2 / 5 x 10^k at or below ``span``.
-
-    `nice_step` rounds up, which is what a bar of "at least this much" wants;
-    a bar that must not eat a third of the picture wants the other direction.
-    """
-    if not span or not np.isfinite(span):
-        return 1.0
-    decade = 10.0 ** np.floor(np.log10(abs(span)))
-    return float(max((m * decade for m in (1, 2, 5) if m * decade <= abs(span)),
-                     default=decade))
-
-
-def nice_step(span: float) -> float:
-    decade = 10 ** np.floor(np.log10(span))
-    for m in (1, 2, 5, 10):
-        if m * decade >= span:
-            return float(m * decade)
-    return float(decade)

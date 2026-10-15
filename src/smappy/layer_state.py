@@ -622,8 +622,10 @@ def max_sigma(settings: RenderSettings, locs: Localizations, median_precision: f
               pixelsize: float) -> float:
     """The largest rendering sigma at this zoom, in data units: how far
     beyond the view a localization can still reach into it."""
-    if settings.mode == "hist":
+    if settings.mode in ("hist", "voronoi"):
         return 0.0
+    if settings.mode == "tracks":
+        return 0.5 * settings.line_width * pixelsize
     if settings.mode == "gauss":
         return settings.sigma
     if settings.mode == "dl":
@@ -691,6 +693,14 @@ class LayerSnapshot:
         """The localizations that can contribute to this view, after filtering."""
         if self.index is None:
             return self.indices
+        if self.settings.mode == "tracks":
+            # a segment across the view can have both ends outside it: the
+            # tracks are culled whole, by their boxes (`render.render_tracks`)
+            return self.indices
+        if self.settings.mode == "voronoi":
+            # the cells are of everything the filter keeps, or they would
+            # change along the view's edge with every pan (`render.render_voronoi`)
+            return self.indices
         margin = self.settings.roi_sigma * self.max_sigma(fov.pixelsize)
         candidates = self.index.query(fov.x0, fov.x1, fov.y0, fov.y1, margin)
         if candidates.size == self.index.n_localizations:
@@ -736,7 +746,8 @@ def snapshot_layers(layers) -> Tuple[LayerSnapshot, ...]:
 
 
 def render_panels(layers: Sequence[LayerSnapshot], fov: FieldOfView,
-                  panels: Sequence = ("overlay",)
+                  panels: Sequence = ("overlay",), planes: Optional[dict] = None,
+                  draw: Optional[Callable] = None
                   ) -> Tuple[List[np.ndarray], np.ndarray]:
     """An RGB image per panel on ``fov``, and the summed intensity planes.
 
@@ -745,6 +756,12 @@ def render_panels(layers: Sequence[LayerSnapshot], fov: FieldOfView,
     whatever the panels, so the overlay of side-by-side panels is exactly
     their sum.  A panel of a layer that is not there, or not visible, is
     black.  This is the whole render, and runs on any thread.
+
+    ``planes``, a dict, is given each layer's `RenderedImage` by position:
+    what an export of grey intensities per layer reads (`smappy.picture`).
+    ``draw(layer, fov)`` renders one layer as ``(rgb, planes)`` instead of
+    `LayerSnapshot.image` -- the 3D view's projection -- or returns None to
+    leave it out; the panels are put together the same way either way.
     """
     images = {}
     total = np.zeros((fov.ny, fov.nx, 3), np.float32)
@@ -754,11 +771,19 @@ def render_panels(layers: Sequence[LayerSnapshot], fov: FieldOfView,
     for i, layer in enumerate(layers):
         if not layer.visible:
             continue
+        if draw is None:
+            image, rendered = layer.image(fov, white_background=False)
+        else:
+            drawn = draw(layer, fov)
+            if drawn is None:
+                continue
+            image, rendered = drawn
         white = layer.display.white_background
         white_any = white_any or white
-        image, rendered = layer.image(fov, white_background=False)
         total += image
         weight += rendered.weight
+        if planes is not None:
+            planes[i] = rendered
         if i in wanted:
             image = np.clip(image, 0, 1)
             images[i] = luts.on_white(image) if white else image

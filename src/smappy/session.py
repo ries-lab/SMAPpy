@@ -16,6 +16,7 @@ from .filter import LocFilter
 from .group import GROUP_COLUMNS, GroupSettings
 from .images import ImageData, load_image
 from .locs import KEPT_BOUNDS, Localizations, concat
+from .metadata import frame_time_ms
 from .plugins import Context, Plugin, Result, Selection, refuse_grouped_table
 from .io.formats import FileInfo, load as load_any
 from .regions import Region
@@ -327,6 +328,11 @@ class Session:
         # enough to draw their figures again, saved with the file and read
         # back when it is opened.  See `Plugin.keep`.
         self.results: Dict[str, Dict] = {}
+        # named transformations (`smappy.transformation`), by name: what
+        # Transform applies by name and Register layers measures.  They are
+        # the data's, not the GUI's: saved with the localization file
+        # (`file_metadata`), never in a workspace.
+        self.transformations: Dict[str, Any] = {}
         # every table this session replaced, newest last; see `smappy.undo`
         self.undo_stack = undo_stack()
         self._live = False                 # the table is being appended to
@@ -339,6 +345,10 @@ class Session:
         # set by the GUI: the windows a plugin may open (`Plugin.window`), by
         # name, each called with the plugin's settings
         self.window_openers: Dict[str, Callable[[Any], None]] = {}
+        # set by the GUI: what each picture window shows, by name ("2D",
+        # "3D"), as a `picture.ViewFrame` -- where it looks, how fine, its
+        # panels -- for *Export Image* to frame its picture on
+        self.view_frames: Dict[str, Callable[[], Any]] = {}
         # False in a chain's scratch copy: the chain keeps one record and one
         # undo step for all its steps, so the copy keeps neither (`scratch`)
         self.recording = True
@@ -498,6 +508,8 @@ class Session:
             # opened as one stays, as its layer does
             self.images = [im for im in self.images if im.kind != "raw"]
         number = len(self.files)
+        if info.frame_time_ms is None:
+            info.frame_time_ms = frame_time_ms(locs.metadata.get("camera"))
         self.files.append(info)
         self._take_images(self._file_images(info), number)
         columns = dict(locs.columns)
@@ -521,6 +533,7 @@ class Session:
             # writing only what the session has, used to drop it
             self.results = self._file_results(info)
             self.changed("results")
+            self.take_transformations(self.locs.metadata.get("named_transformations"))
             saved = self.locs.metadata.get("roi")
             self.set_roi(Region.from_dict(saved) if saved else None)
             # a name belongs to the dataset it was given to: a new file takes
@@ -597,6 +610,31 @@ class Session:
         self.set_locs(locs, undoable=True, keep_layers=True,
                       label=f"remove {removed.name}")
         self.log("remove file", removed.name, changed=True)
+
+    # ----------------------------------------------------- transformations
+    def add_transformation(self, name: str, transformation) -> None:
+        """Keep ``transformation`` under ``name``, replacing one of that name."""
+        name = str(name).strip()
+        if not name:
+            raise ValueError("a named transformation needs a name")
+        self.transformations[name] = transformation
+        self.changed("transformations")
+
+    def transformation_dicts(self) -> Dict[str, Dict]:
+        return {name: t.to_dict() for name, t in self.transformations.items()}
+
+    def take_transformations(self, saved) -> None:
+        """Add the named transformations a file kept, as
+        `transformation_dicts` wrote them; one that does not read is left out."""
+        if not isinstance(saved, dict) or not saved:
+            return
+        from .transformation import Transformation
+        for name, value in saved.items():
+            try:
+                self.transformations[str(name)] = Transformation.from_dict(value)
+            except (KeyError, TypeError, ValueError):
+                continue
+        self.changed("transformations")
 
     # -------------------------------------------------------------- images
     def add_image(self, image: Optional[ImageData] = None,
@@ -680,6 +718,10 @@ class Session:
             metadata["roi"] = self.roi.to_dict()
         else:
             metadata.pop("roi", None)
+        if self.transformations:
+            metadata["named_transformations"] = self.transformation_dicts()
+        else:
+            metadata.pop("named_transformations", None)
         if self.name or self.colour:
             metadata["session"] = {"name": self.name, "colour": self.colour}
         else:
@@ -957,6 +999,7 @@ class Session:
         copy.select_in_slab = self.select_in_slab
         copy.slab_shown = self.slab_shown
         copy.projection = self.projection
+        copy.view_frames = self.view_frames     # the windows', framing an export
         copy.layers = []
         for layer in self.layers:
             if layer.is_image:
@@ -1108,11 +1151,22 @@ class Session:
         """Remember the table as it is now, under the name of what replaces it."""
         if not self.recording:
             return
-        self.undo_stack.push(Edit(label=label, locs=self.locs, text=text))
+        self.undo_stack.push(self._here(label, text))
 
     def _here(self, label: str, text: str = "") -> Edit:
         """The current state as a step, for the other side of the stack."""
-        return Edit(label=label, locs=self.locs, text=text)
+        return Edit(label=label, locs=self.locs, text=text,
+                    placements=self._placements())
+
+    def _placements(self) -> tuple:
+        """Every image there is with where it is: a few numbers each."""
+        images = list(self.images)
+        for layer in self.layers:
+            image = layer.image if layer.is_image else None
+            if image is not None and all(image is not im for im in images):
+                images.append(image)
+        return tuple((im, None if im.placement is None else np.array(im.placement))
+                     for im in images)
 
     def _restore(self, edit: Edit) -> None:
         """Put a remembered table back, rebinding every layer onto it.
@@ -1124,6 +1178,10 @@ class Session:
         self._take_tables(self._new_tables(edit.locs, self._group_settings))
         self.files = [FileInfo(**{k: v for k, v in f.items() if k != "n"})
                       for f in self.locs.metadata.get("files", [])] or self.files
+        for image, placement in edit.placements:
+            image.placement = None if placement is None else np.array(placement)
+        if edit.placements:
+            self.changed("layer")
 
     @property
     def can_undo(self) -> bool:
@@ -1542,7 +1600,8 @@ class Session:
         # is what changed them -- a measurement can be repeated from the file
         # and would only record that somebody looked.  `Plugin.logged`
         # overrides the rule either way; see it for when that is right.
-        changed = result.locs is not None or bool(result.files)
+        changed = (result.locs is not None or bool(result.files)
+                   or bool(result.placements))
         for n, (locs, info, grouped) in enumerate(result.files or ()):
             # the first replaces unless the plugin asked to append; the rest
             # always join, or opening three files would keep only the last
@@ -1571,6 +1630,12 @@ class Session:
         if result.locs is not None:
             # a correction is in no file yet; a fit that wrote its table is
             self.set_unsaved(not result.saved)
+        if result.placements:
+            self._place_images(plugin, result)
+        for image in result.image_layers or ():
+            self.add_image(image)
+        for name, transformation in (result.transformations or {}).items():
+            self.add_transformation(name, transformation)
         # The camera frames a fit kept (`smappy.rawframes`), with the table it
         # has just set.  A fit replaces the whole table, so these are all the
         # raw frames there are now -- including any just read back from the
@@ -1623,6 +1688,25 @@ class Session:
         # last: a plugin that opened a file has just cleared the session, this
         # one included, and what it worked out belongs to the file it opened
         self.remember(plugin, result)
+
+    def _place_images(self, plugin: Plugin, result: Result) -> None:
+        """Move the image layers a result moved, as one undo step -- with the
+        table change, when the same result made one (`set_locs` pushed the
+        step already, with the placements as they were)."""
+        images = []
+        for index in result.placements:
+            layer = (self.layers[int(index)]
+                     if 0 <= int(index) < len(self.layers) else None)
+            if layer is None or not layer.is_image or layer.image.is_empty:
+                raise ValueError(f"layer {int(index) + 1} shows no image")
+            images.append(layer.image)
+        if result.locs is None:
+            self._push_undo(plugin.path.rsplit("/", 1)[-1], result.text or "")
+        for image, placement in zip(images, result.placements.values()):
+            image.placement = (None if placement is None
+                               else np.array(placement, np.float64))
+        self.changed("layer")
+        self.set_unsaved(True)
 
     def show_preview(self, plugin: Plugin, result: Result) -> None:
         """What a preview has to show beyond its figures, put in place here,

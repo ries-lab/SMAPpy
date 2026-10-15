@@ -110,6 +110,15 @@ ext_modules = [
         extra_link_args=extra_link_args,
     ),
     Pybind11Extension(
+        "smappy._neighbours",
+        ["csrc/neighbours.cpp"],
+        depends=HEADERS,
+        include_dirs=["csrc"],
+        cxx_std=17,
+        extra_compile_args=extra_compile_args,
+        extra_link_args=extra_link_args,
+    ),
+    Pybind11Extension(
         "smappy._render",
         ["csrc/render.cpp"],
         depends=HEADERS,

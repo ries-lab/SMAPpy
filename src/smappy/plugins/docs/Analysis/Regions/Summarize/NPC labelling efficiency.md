@@ -43,7 +43,7 @@ fewer are the ones a segmentation is likely to miss, and junk rarely shows
 not bias the answer.  SMAP's analysis, the corner histogram alone, is kept as
 the *corners (SMAP)* method.
 
-The order is: find the pores with [NPC](plugin:Analysis/Regions/Find/NPC), add
+The order is: find the pores with [Segment regions](plugin:Analysis/Regions/Segment regions) (preset *NPC*), add
 NPC Corners to the per-region steps (*per-region steps* in the Regions tab)
 and run them, then run this.  Use data imaged until the fluorophores have
 bleached, with blinks merged -- [merge blinks](plugin:Panels/Glossary), also
@@ -203,7 +203,7 @@ method.  The joint model needs the precisions of every localization of the
 files the pores are in, and a cluster has no file of its own in the ROI
 manager: it refuses, and says so.  Neither is a cluster's pore found in the
 simulation's truth.  For either, make ROIs of the clusters
-([Column to ROIs](plugin:Analysis/Regions/Column to ROIs)) and count their
+([Segment regions](plugin:Analysis/Regions/Segment regions), *from an id column*) and count their
 corners there.
 
 **Simulated data.**  When the pores come from a simulated table, the plugin

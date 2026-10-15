@@ -97,7 +97,9 @@ value can be written from the same results.
 
 ### values
 The names are those of the results' columns, as *Summarize/Histograms*
-shows them.  Writing every number of a set of results adds a column for each:
+shows them.  The lines drawn on the ROIs in the ROI manager give
+`<line>_angle_deg` and `<line>_length_nm` with or without *results from*:
+they are the ROIs' own, as `roi_id` is, and need no measurement.  Writing every number of a set of results adds a column for each:
 name the few you will filter or colour by.
 
 ### prefix

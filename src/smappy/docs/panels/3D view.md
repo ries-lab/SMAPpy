@@ -230,10 +230,14 @@ shows and hides this window.  Hidden, it keeps its turn, zoom and slab for
 the next time.
 
 ### Save
-*PNG as displayed...* saves the picture as it is on screen.  The two TIFF
-entries ask for a pixel size and render the slab again, at full resolution,
-to fit the box exactly: in colour, or as the summed intensity in floating
-point for measuring.  The TIFF records the projection and the slab.
+*PNG as displayed...* saves the picture as it is on screen, whichever
+engine drew it.  *Save image...* opens
+[Export Image](plugin:File/Export/Image) set to this window: the projection
+rendered again at a pixel size of your choice -- over the canvas, or the
+slab's box -- in colour or as the summed intensity in floating point for
+measuring, with a scale bar and colour bars, and the projection and the
+slab written into the file.  It is drawn on the processor, the summed look
+of the *auto*, *cpu* and *gpu* engines.
 
 ### top
 The slab from above.

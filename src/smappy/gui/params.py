@@ -500,6 +500,130 @@ class LayersField(QWidget):
             self.changed.emit()
 
 
+class ColumnsField(QWidget):
+    """A list of names to tick: which columns an export writes, say.
+
+    The value is the ticked names, or ``[]`` when every one is ticked: "all
+    columns" then stays all of them for a table that has more, rather than
+    becoming the list this table happened to have.  The names come from the
+    session (`FormState.choices`); a name in the value that the session does
+    not offer is kept, ticked, and marked as not there.
+    """
+
+    changed = Signal()
+
+    def __init__(self, spec: ParamSpec):
+        super().__init__()
+        from PySide6.QtWidgets import QListWidget, QPushButton
+        self.spec = spec
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(2, 0, 6, 0)
+        self.list = QListWidget()
+        self.list.setMaximumHeight(140)
+        self.list.itemChanged.connect(lambda _: self.changed.emit())
+        layout.addWidget(self.list)
+        row = QHBoxLayout()
+        for label, on in (("all", True), ("none", False)):
+            button = QPushButton(label)
+            button.clicked.connect(lambda _=False, on=on: self._tick_all(on))
+            row.addWidget(button)
+        row.addStretch(1)
+        layout.addLayout(row)
+        if spec.info.help:
+            self.setToolTip(spec.info.help)
+        self._names: List[str] = []
+        self._value: List[str] = list(spec.default() if callable(spec.default)
+                                      else spec.default or [])
+
+    def _tick_all(self, on: bool) -> None:
+        blocked = self.list.blockSignals(True)
+        for i in range(self.list.count()):
+            self.list.item(i).setCheckState(Qt.Checked if on else Qt.Unchecked)
+        self.list.blockSignals(blocked)
+        self.changed.emit()
+
+    def _fill(self, names: List[str], ticked: List[str]) -> None:
+        from PySide6.QtWidgets import QListWidgetItem
+        blocked = self.list.blockSignals(True)
+        self.list.clear()
+        everything = not ticked
+        shown = list(names) + [n for n in ticked if n not in names]
+        for name in shown:
+            item = QListWidgetItem(name if name in names else f"{name} (not there)")
+            item.setData(Qt.UserRole, name)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(Qt.Checked if everything or name in ticked else Qt.Unchecked)
+            self.list.addItem(item)
+        self.list.blockSignals(blocked)
+
+    # the interface a form expects of a field
+    def set_choices(self, choices) -> None:
+        current = self.value()
+        self._names = [c[0] if isinstance(c, tuple) else c for c in choices]
+        self._fill(self._names, current)
+
+    def refresh(self) -> None:
+        pass
+
+    def set_hint(self, value) -> None:
+        pass
+
+    def set(self, value) -> None:
+        self._fill(self._names, list(value or []))
+
+    def value(self) -> List[str]:
+        items = [self.list.item(i) for i in range(self.list.count())]
+        if not items:
+            return list(self._value)
+        ticked = [it.data(Qt.UserRole) for it in items if it.checkState() == Qt.Checked]
+        return [] if len(ticked) == len(items) else ticked
+
+
+class ShapesField(QWidget):
+    """Shapes drawn elsewhere -- on a preview's figure (`ShapeEdit`) -- kept
+    as a setting: what the form shows of them is how many, and a button to
+    take them away.  The shapes themselves are drawn and seen on the figure.
+    """
+
+    changed = Signal()
+
+    def __init__(self, spec: ParamSpec):
+        super().__init__()
+        from PySide6.QtWidgets import QPushButton
+        self.spec = spec
+        row = QHBoxLayout(self)
+        row.setContentsMargins(2, 0, 6, 0)
+        self.label = QLabel("")
+        self.clear_button = QPushButton("clear")
+        self.clear_button.clicked.connect(lambda: (self.set([]), self.changed.emit()))
+        row.addWidget(self.label)
+        row.addWidget(self.clear_button)
+        row.addStretch(1)
+        if spec.info.help:
+            self.setToolTip(spec.info.help)
+        self._shapes: List[dict] = []
+        self.set([])
+
+    def set(self, value) -> None:
+        self._shapes = [dict(s) for s in (value or []) if isinstance(s, dict)]
+        inside = sum(1 for s in self._shapes if s.get("kind") == "include")
+        outside = len(self._shapes) - inside
+        self.label.setText("none: see Preview" if not self._shapes else
+                           ", ".join(bit for bit in (
+                               f"{inside} to fit in" if inside else "",
+                               f"{outside} left out" if outside else "") if bit))
+        self.clear_button.setEnabled(bool(self._shapes))
+
+    def value(self) -> List[dict]:
+        return [dict(s) for s in self._shapes]
+
+    def refresh(self) -> None:
+        pass
+
+    def set_hint(self, value) -> None:
+        pass
+
+
 class SettingsForm(QWidget):
     """The fields of a settings dataclass; ``value()`` builds the instance.
 
@@ -520,6 +644,10 @@ class SettingsForm(QWidget):
         self.fields: Dict[str, Any] = {}          # _Field or SettingsForm
         self.labels: Dict[str, QLabel] = {}       # the row label of each field
         self.sections: Dict[str, CollapsibleSection] = {}   # each part's
+        # each row's form layout, to hide the row (`set_shown`), and the
+        # "more" section, hidden with the last of its rows
+        self.row_layouts: Dict[str, QFormLayout] = {}
+        self.more_section: Optional[CollapsibleSection] = None
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(2)
@@ -553,7 +681,9 @@ class SettingsForm(QWidget):
                 self.sections[name] = section
                 layout.addWidget(section)
                 continue
-            w = LayersField(spec) if spec.info.kind == "layers" else _Field(spec)
+            w = (LayersField(spec) if spec.info.kind == "layers"
+                 else ColumnsField(spec) if spec.info.kind == "columns"
+                 else ShapesField(spec) if spec.info.kind == "shapes" else _Field(spec))
             w.changed.connect(self.changed)
             w.changed.connect(lambda n=name: self.field_changed.emit(n))
             self.fields[name] = w
@@ -563,15 +693,18 @@ class SettingsForm(QWidget):
             self.labels[name] = label
             if spec.info.advanced:
                 more.addRow(label, w)
+                self.row_layouts[name] = more
                 continue
             if main is None:
                 main = form_layout()
                 layout.addLayout(main)
             main.addRow(label, w)
+            self.row_layouts[name] = main
         if more.rowCount():
             box = QWidget()
             box.setLayout(more)
-            layout.addWidget(CollapsibleSection("more", box, expanded=False))
+            self.more_section = CollapsibleSection("more", box, expanded=False)
+            layout.addWidget(self.more_section)
 
     def value(self):
         if self.settings_cls is None:
@@ -701,6 +834,39 @@ class SettingsForm(QWidget):
             label = target.labels.get(parts[-1])
             if label is not None:
                 label.setEnabled(bool(on))
+
+    def set_shown(self, flags: Dict[str, bool]) -> None:
+        """Hide the fields and parts the settings leave out (`FormState.shown`):
+        a row with its label, a part with its title bar, and "more" once none
+        of its rows is left.  Cosmetic, as `set_active` is: a hidden widget
+        keeps its value and still answers `value()`.  Unknown names are
+        ignored.
+        """
+        touched = set()
+        for path, on in flags.items():
+            target = self
+            parts = path.split(".")
+            try:
+                for part in parts[:-1]:
+                    target = target.fields[part]
+                name = parts[-1]
+                if name in target.sections:
+                    target.sections[name].setVisible(bool(on))
+                    continue
+                target.row_layouts[name].setRowVisible(target.fields[name], bool(on))
+            except (KeyError, AttributeError):
+                continue
+            touched.add(target)
+        for form in touched:
+            form._update_more()
+
+    def _update_more(self) -> None:
+        if self.more_section is None:
+            return
+        more = self.more_section.content
+        rows = [n for n, lay in self.row_layouts.items() if lay is more.layout()]
+        self.more_section.setVisible(any(
+            self.row_layouts[n].isRowVisible(self.fields[n]) for n in rows))
 
     def set_values(self, values: Dict[str, Any]) -> None:
         """Set some fields by dotted name, without firing `field_changed`."""

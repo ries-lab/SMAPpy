@@ -1,6 +1,6 @@
 ---
-version: "4"
-covers: [smappy.plugins.statistics.statistics, smappy.plugins.statistics.statistics_values, smappy.plugins.statistics.precision_model, smappy.plugins.statistics.photon_decay, smappy.plugins.statistics.ontime_decay]
+version: "5"
+covers: [smappy.metadata.table_frame_time, smappy.plugins.statistics.statistics, smappy.plugins.statistics.statistics_values, smappy.plugins.statistics.precision_model, smappy.plugins.statistics.photon_decay, smappy.plugins.statistics.ontime_decay]
 ---
 
 ## What it does
@@ -154,7 +154,10 @@ plugin reports the equivalent exponential lifetime
 
 $$\tau = -\frac{1}{\ln q}$$
 
-in frames, and in milliseconds if the *exposure* is given.  $\tau$ is what the
+in frames, and in milliseconds with the file's
+[frame time](plugin:Panels/Glossary) -- the time from one frame to the next,
+which the file records, or else its exposure -- or the *frame time* set
+here.  $\tau$ is what the
 curve decays with, which makes it comparable to a switching or bleaching time
 measured some other way.
 
@@ -226,7 +229,9 @@ meaningful fit anyway.
   `median_precision_nm` and `sigma_c_nm` (`sigma_c` NaN when the model was
   not fitted); for 3D data the same with
   `z_` (`median_z_precision_nm`, ...); and where the ROI's table carries
-  `n_in_group`, `on_time_frames` ($\tau$) and `n_blinks`.  The on-time of an
+  `n_in_group`, `on_time_frames` ($\tau$), `on_time_s` ($\tau$ in
+  seconds; NaN without a frame time, or when the ROI's files have different
+  ones) and `n_blinks`.  The on-time of an
   ROI comes from its own rows only: the session's merged blinks, which the
   view falls back on, are the whole field's.  Each ROI also keeps its
   histograms and fitted numbers (about 2 kB), so its figure is drawn again

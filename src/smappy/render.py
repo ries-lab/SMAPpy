@@ -36,7 +36,10 @@ of twice.
 
 from __future__ import annotations
 
+import hashlib
 import math
+import threading
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Optional, Tuple, Union
 
@@ -570,7 +573,7 @@ class RenderSettings:
     that axis.
     """
 
-    mode: str = "precision"     # "hist", "gauss" (one sigma), "precision", "dl"
+    mode: str = "precision"     # "hist", "gauss" (one sigma), "precision", "dl", "tracks", "voronoi"
     sigma: float = 10.0         # native units of the x axis, for mode="gauss"
     sigma_y: Optional[float] = None      # None: `sigma`, where that means anything
     sigma_settings: "SigmaSettings" = field(default_factory=lambda: SigmaSettings())
@@ -579,6 +582,10 @@ class RenderSettings:
     color_range: Optional[Tuple[float, float]] = None
     weight_field: Optional[str] = None   # None: one count per localization
     axes: RenderAxes = field(default_factory=RenderAxes)
+    # mode="tracks": the id column whose localizations are one track, and the
+    # lines' width in pixels of the picture
+    track_column: str = "track_id"
+    line_width: float = 1.0
 
 
 @dataclass
@@ -639,7 +646,7 @@ def render_sigmas(locs: Localizations, settings: "RenderSettings", fov: FieldOfV
     * ``sigma_y`` unset means the same width as x where the two axes are the
       same quantity, and zero -- plain binning -- where they are not.
     """
-    if settings.mode == "hist":
+    if settings.mode in ("hist", "tracks", "voronoi"):
         return None, None
     if settings.mode == "dl":
         return psf_sigmas(locs, select)
@@ -692,6 +699,11 @@ def render_locs(locs: Localizations, fov: FieldOfView,
     if not len(locs):
         return RenderedImage(fov, np.zeros((fov.ny, fov.nx)))
 
+    if settings.mode == "tracks":
+        return render_tracks(locs, fov, settings, display, select, n_threads,
+                             use_extension)
+    if settings.mode == "voronoi":
+        return render_voronoi(locs, fov, settings, display, select, n_threads)
     x, y = settings.axes.coordinates(locs, select)
     sigma, sigma_y = render_sigmas(locs, settings, fov, select)
 
@@ -733,7 +745,7 @@ def render_locs(locs: Localizations, fov: FieldOfView,
 # (and `sigma_y_nm`, astigmatic), and one camera pixel where the fit left no
 # usable width.
 
-MODES = ("hist", "gauss", "precision", "dl")
+MODES = ("hist", "gauss", "precision", "dl", "tracks", "voronoi")
 DL_PIXELSIZE_NM = 100.0     # a camera pixel, when the table records none
 DL_MAX_SIGMA_NM = 1500.0    # SMAP's: a wider fitted PSF is a failed fit
 
@@ -821,7 +833,7 @@ def save_image(locs, path, pixelsize: float = 10.0,
     from pathlib import Path as _Path
 
     try:
-        from PIL import Image
+        import PIL  # noqa: F401
     except ImportError:            # pragma: no cover - depends on the install
         raise ImportError("save_image writes the file with Pillow: "
                           "pip install pillow") from None
@@ -834,14 +846,333 @@ def save_image(locs, path, pixelsize: float = 10.0,
         x, y = (settings or RenderSettings()).axes.coordinates(
             locs, getattr(select, "indices", select))
         fov = FieldOfView.around(x, y, pixelsize=pixelsize, margin=margin)
-    rendered = render_locs(locs, fov, settings, display, select=select)
-    rgb = (display or DisplaySettings()).apply(rendered)
+    # drawn and written as *Export Image* draws and writes the window's
+    # picture (`smappy.picture`): one layer, nothing over it
+    from .layer_state import LayerSnapshot
+    from .picture import render_picture, write_picture
+    layer = LayerSnapshot(name="localizations", locs=locs, mask=_select_mask(select, len(locs)),
+                          settings=settings or RenderSettings(),
+                          display=display or DisplaySettings())
+    (picture,) = render_picture((layer,), fov, what="composite", scale_bar=False,
+                                colour_bars=False, labels=False)
+    return write_picture(picture, _Path(path))
 
-    path = _Path(path)
-    # the display's colours are in [0, 1]; cast as they were, every pixel was
-    # 0 or 1 of 255 and the file was black
-    rgb = np.asarray(rgb)
-    if np.issubdtype(rgb.dtype, np.floating):
-        rgb = np.round(np.clip(rgb, 0.0, 1.0) * 255.0)
-    Image.fromarray(rgb.astype(np.uint8)).save(path)
-    return path
+
+def _select_mask(select, n: int) -> np.ndarray:
+    """A selection as `render_locs` takes it -- None, a filter, a mask or
+    rows -- as a mask."""
+    if select is None:
+        return np.ones(n, bool)
+    select = np.asarray(getattr(select, "mask", select))
+    if select.dtype == bool:
+        return select
+    mask = np.zeros(n, bool)
+    mask[select.astype(np.int64)] = True
+    return mask
+
+
+# ------------------------------------------------------------------- tracks
+#
+# The fifth mode: each track drawn as the line through its localizations in
+# time order -- a track is the localizations sharing an id column's value
+# above 0 (`track_id` from Link tracks, MINFLUX's `tid`).  A raster like the
+# others, so the export, the overlays and the sum of layers need nothing new;
+# a vector layer was rejected because the exports would miss it.  The view
+# draws each track whole within the rows the layer's filter keeps; its
+# localizations are not culled to the view first (`LayerSnapshot.select`), as
+# a segment crossing the view can have both ends outside it -- whole tracks
+# are culled instead, by their bounding boxes.
+
+
+def track_segments(locs: Localizations, settings: "RenderSettings", select=None
+                   ) -> Tuple[np.ndarray, np.ndarray]:
+    """The segments of every track among the rows ``select`` keeps: the
+    rows of their two ends, ``(a, b)``, consecutive in time within a track."""
+    column = settings.track_column
+    if column not in locs:
+        raise KeyError(f"no column {column!r} to draw tracks by: link the "
+                       "tracks first (Analysis/Tracking/Link tracks), or choose "
+                       "the id column")
+    rows = (np.arange(len(locs)) if select is None
+            else np.asarray(select) if np.asarray(select).dtype != bool
+            else np.flatnonzero(select))
+    ids = np.asarray(locs[column])[rows]
+    keep = ids > 0
+    rows, ids = rows[keep], ids[keep]
+    time = np.asarray(locs["time_s"] if "time_s" in locs else locs["frame"])[rows]
+    order = np.lexsort((time, ids))
+    rows, ids = rows[order], ids[order]
+    same = ids[1:] == ids[:-1]
+    return rows[:-1][same], rows[1:][same]
+
+
+def _cull_tracks(a, b, ids, xa, ya, xb, yb, fov: FieldOfView, reach: float):
+    """The segments of tracks whose bounding box reaches into ``fov``."""
+    if not len(a):
+        return np.zeros(0, bool)
+    starts = np.concatenate([[0], np.flatnonzero(ids[1:] != ids[:-1]) + 1])
+    lo_x = np.minimum.reduceat(np.minimum(xa, xb), starts)
+    hi_x = np.maximum.reduceat(np.maximum(xa, xb), starts)
+    lo_y = np.minimum.reduceat(np.minimum(ya, yb), starts)
+    hi_y = np.maximum.reduceat(np.maximum(ya, yb), starts)
+    seen = ((hi_x >= fov.x0 - reach) & (lo_x <= fov.x1 + reach)
+            & (hi_y >= fov.y0 - reach) & (lo_y <= fov.y1 + reach))
+    track = np.cumsum(np.isin(np.arange(len(a)), starts)) - 1
+    return seen[track]
+
+
+def render_tracks(locs: Localizations, fov: FieldOfView, settings: "RenderSettings",
+                  display: Optional["DisplaySettings"] = None, select=None,
+                  n_threads: int = 0, use_extension: bool = True) -> RenderedImage:
+    """Every track as antialiased lines ``settings.line_width`` pixels wide.
+
+    A segment weighs one (or the mean of its ends' ``weight_field``) and,
+    coloured by a field, takes the mean of its ends' values: a track coloured
+    by time changes colour along itself.
+    """
+    display = display or DisplaySettings()
+    a, b = track_segments(locs, settings, select)
+    x, y = settings.axes.coordinates(locs)
+    x = np.asarray(x, np.float64)
+    y = np.asarray(y, np.float64)
+    ids = np.asarray(locs[settings.track_column])[a]
+    reach = (0.5 * settings.line_width + 1.0) * fov.pixelsize
+    seen = _cull_tracks(a, b, ids, x[a], y[a], x[b], y[b], fov, reach)
+    a, b = a[seen], b[seen]
+    weights = None
+    if settings.weight_field is not None:
+        w = np.asarray(locs[settings.weight_field], np.float64)
+        weights = 0.5 * (w[a] + w[b])
+    colors = None
+    if settings.color_field is not None:
+        values = np.asarray(locs[settings.color_field], np.float64)
+        mid = 0.5 * (values[a] + values[b])
+        lo, hi = settings.color_range or (float(np.nanmin(values)),
+                                          float(np.nanmax(values)))
+        colors = luts.colors(mid, display.lut, lo, hi, display.invert)
+    out = render_segments(x[a], y[a], x[b], y[b], fov, settings.line_width, weights,
+                          colors, n_threads, use_extension)
+    drawn = np.zeros(len(locs), bool)          # the localizations the lines join
+    drawn[a] = drawn[b] = True
+    out.n_locs = int(drawn.sum())
+    return out
+
+
+def render_segments(xa, ya, xb, yb, fov: FieldOfView, width: float = 1.0,
+                    weights=None, colors=None, n_threads: int = 0,
+                    use_extension: bool = True) -> RenderedImage:
+    """Accumulate line segments from (xa, ya) to (xb, yb) into ``fov``,
+    ``width`` pixels wide, antialiased (``csrc/render.cpp``)."""
+    xa, ya, xb, yb = (np.ascontiguousarray(v, np.float32) for v in (xa, ya, xb, yb))
+    w = (np.ones(1, np.float32) if weights is None
+         else np.ascontiguousarray(weights, np.float32).reshape(-1))
+    c = (np.zeros((0, 3), np.float32) if colors is None
+         else np.ascontiguousarray(colors, np.float32).reshape(-1, 3))
+    if use_extension and _render is not None:
+        weight, color = _render.render_segments(xa, ya, xb, yb, w, c, fov.x0, fov.y0,
+                                                fov.pixelsize, fov.nx, fov.ny,
+                                                float(width), n_threads)
+        return RenderedImage(fov, weight, color, len(xa))
+    return _segments_numpy(xa, ya, xb, yb, fov, float(width), w, c)
+
+
+def _segments_numpy(xa, ya, xb, yb, fov, width, weights, colors) -> RenderedImage:
+    """Reference implementation of `render_segments`: every pixel of each
+    segment's bounding box, the same coverage rule."""
+    weight = np.zeros(fov.shape, np.float64)
+    color = np.zeros((fov.ny, fov.nx, 3), np.float64) if colors.size else None
+    reach = 0.5 * max(width, 0.0) + 0.5
+    for i in range(len(xa)):
+        ax, ay = fov.to_pixels(xa[i], ya[i])
+        bx, by = fov.to_pixels(xb[i], yb[i])
+        c0 = max(0, int(np.floor(min(ax, bx) - reach)))
+        c1 = min(fov.nx - 1, int(np.floor(max(ax, bx) + reach)))
+        r0 = max(0, int(np.floor(min(ay, by) - reach)))
+        r1 = min(fov.ny - 1, int(np.floor(max(ay, by) + reach)))
+        if c0 > c1 or r0 > r1:
+            continue
+        cc, rr = np.meshgrid(np.arange(c0, c1 + 1) + 0.5, np.arange(r0, r1 + 1) + 0.5)
+        dx, dy = bx - ax, by - ay
+        len2 = dx * dx + dy * dy
+        t = np.clip(((cc - ax) * dx + (rr - ay) * dy) / len2, 0, 1) if len2 > 0 else 0.0
+        d = np.hypot(ax + t * dx - cc, ay + t * dy - rr)
+        cover = np.clip(reach - d, 0, 1) * (weights[0] if weights.size == 1 else weights[i])
+        weight[r0:r1 + 1, c0:c1 + 1] += cover
+        if color is not None:
+            color[r0:r1 + 1, c0:c1 + 1] += cover[..., None] * colors[i]
+    return RenderedImage(fov, weight.astype(np.float32),
+                         None if color is None else color.astype(np.float32), len(xa))
+
+
+# ------------------------------------------------------------------ voronoi
+#
+# The sixth mode (SharpViSu, Andronov et al. 2016; SMAP's VoronoiRenderer):
+# each pixel takes the density, one over the area, of the Voronoi cell it
+# lies in -- the cell of the localization nearest to it -- so a dense
+# structure is bright and flat rather than a pile of spots, with no width to
+# choose.  The cells are Neighbourhood's (`voronoi_areas`): open cells, along
+# the edge of the field, have no area and are left empty.  A raster like the
+# others, so exports, overlays and movies need nothing new.
+#
+# The cells are of every localization the layer's filter keeps, never of
+# the ones in view: culled first, the cells along the view's edge would
+# change with every pan.  They take about 12 us a localization, so they are
+# cached per table and filter (`voronoi_cells_for`) and a pan or a zoom only
+# rasterises: the pixels are culled to the view, the localizations are not.
+#
+# Zoomed out, a pixel holds many cells and a sample at its centre would pick
+# one of them at random -- a picture of noise.  The mean density over the
+# pixel is what is wanted, and a cell's density times its area is its
+# localizations: so cells smaller than a pixel are counted into the pixel
+# their localization is in (a histogram, over the pixel's area), and the
+# rest of the pixel's area takes the density of the cell its centre lies
+# in.  Zoomed in, that is SharpViSu's picture exactly; zoomed out, the
+# histogram in localizations per area.
+
+VORONOI_CACHE_SIZE = 4      # tables and filters whose cells are kept
+VORONOI_CHUNK = 1 << 20     # pixel centres looked up at a time
+
+
+@dataclass
+class VoronoiCells:
+    """The Voronoi cells of a set of localizations, in render units.
+
+    ``sites`` are the distinct positions, ``cell`` the site of each
+    localization (positions repeated share a cell, each of them counted, as
+    SMAP's ``VorArea``), ``area`` each cell's area (NaN open) and
+    ``density`` its localizations over its area per 10^6 square units: per
+    square micrometre for positions in nm.
+    """
+
+    sites: np.ndarray
+    cell: np.ndarray
+    repeats: np.ndarray
+    area: np.ndarray
+    density: np.ndarray
+    _tree: object = field(default=None, repr=False)
+
+    @classmethod
+    def of(cls, x, y) -> "VoronoiCells":
+        from .plugins.neighbourhood import voronoi_areas
+        points = np.column_stack([np.asarray(x, np.float64), np.asarray(y, np.float64)])
+        if not len(points):
+            empty = np.zeros(0)
+            return cls(np.zeros((0, 2)), np.zeros(0, np.int64), empty, empty, empty)
+        sites, cell, repeats = np.unique(points, axis=0, return_inverse=True,
+                                         return_counts=True)
+        area = (voronoi_areas(sites) if len(sites) >= 4
+                else np.full(len(sites), np.nan))
+        with np.errstate(divide="ignore", invalid="ignore"):
+            density = np.where(area > 0, repeats * 1e6 / area, np.nan)
+        area = np.where(area > 0, area, np.nan)
+        return cls(sites, np.ravel(cell), repeats, area, density)
+
+    def tree(self):
+        if self._tree is None:
+            from scipy.spatial import cKDTree
+            self._tree = cKDTree(self.sites)
+        return self._tree
+
+
+_voronoi_cache: "OrderedDict[tuple, VoronoiCells]" = OrderedDict()
+_voronoi_lock = threading.Lock()
+
+
+def _voronoi_key(x: np.ndarray, y: np.ndarray) -> tuple:
+    """What the cells depend on, cheaply: the count, the sums and a strided
+    sample of the positions.  Hashing every byte took a quarter of a second
+    at 10 M localizations, on every pan; a different filter or table that
+    agrees on all of these is not one that occurs."""
+    step = max(1, len(x) // 65536)
+    digest = hashlib.blake2b(digest_size=16)
+    digest.update(np.ascontiguousarray(x[::step]).tobytes())
+    digest.update(np.ascontiguousarray(y[::step]).tobytes())
+    return (len(x), float(np.sum(x)), float(np.sum(y)), digest.hexdigest())
+
+
+def voronoi_cells_for(x, y) -> VoronoiCells:
+    """`VoronoiCells.of`, kept for the last `VORONOI_CACHE_SIZE` sets of
+    positions: a view panned, zoomed or exported reuses them."""
+    x = np.asarray(x, np.float64)
+    y = np.asarray(y, np.float64)
+    key = _voronoi_key(x, y)
+    with _voronoi_lock:
+        found = _voronoi_cache.get(key)
+        if found is not None:
+            _voronoi_cache.move_to_end(key)
+            return found
+    # outside the lock: two threads may both compute it, neither waits
+    cells = VoronoiCells.of(x, y)
+    with _voronoi_lock:
+        _voronoi_cache[key] = cells
+        while len(_voronoi_cache) > VORONOI_CACHE_SIZE:
+            _voronoi_cache.popitem(last=False)
+    return cells
+
+
+def render_voronoi(locs: Localizations, fov: FieldOfView, settings: "RenderSettings",
+                   display: Optional["DisplaySettings"] = None, select=None,
+                   n_threads: int = 0) -> RenderedImage:
+    """Each pixel the mean density of the Voronoi cells over it, in
+    localizations per 10^6 square units (per square micrometre in nm).
+
+    A cell smaller than a pixel is counted into the pixel of its
+    localizations; the rest of a pixel's area is the cell its centre lies
+    in, empty for an open one.  Coloured by a field, a counted localization
+    brings its own colour and a cell the mean of its localizations'.  A
+    weight column is not used: the density is of localizations.
+    """
+    display = display or DisplaySettings()
+    x, y = settings.axes.coordinates(locs, select)
+    x = np.asarray(x, np.float64)
+    y = np.asarray(y, np.float64)
+    cells = voronoi_cells_for(x, y)
+    pixel_area = fov.pixelsize ** 2
+    per_area = 1e6 / pixel_area
+    values = None
+    if settings.color_field is not None:
+        values = np.asarray(locs[settings.color_field], np.float64)
+        values = values if select is None else values[select]
+        lo, hi = settings.color_range or (float(np.nanmin(values)),
+                                          float(np.nanmax(values)))
+
+    # the cells smaller than a pixel, counted where their localizations are
+    small = np.isfinite(cells.area) & (cells.area < pixel_area)
+    counted = small[cells.cell] if len(cells.cell) else np.zeros(0, bool)
+    colors = (None if values is None else
+              luts.colors(values[counted], display.lut, lo, hi, display.invert))
+    mass = render_histogram(x[counted], y[counted], fov, colors=colors)
+    share = cells.area[cells.cell[counted]] / cells.repeats[cells.cell[counted]]
+    covered = render_histogram(x[counted], y[counted], fov, weights=share).weight
+    weight = mass.weight.astype(np.float64) * per_area
+    color = None if mass.color is None else mass.color.astype(np.float64) * per_area
+
+    # the rest of each pixel: the cell its centre is in
+    open_pixels = np.flatnonzero(covered.ravel() < pixel_area)
+    if len(open_pixels) and len(cells.sites):
+        tree = cells.tree()
+        site_values = None
+        if values is not None:
+            site_values = (np.bincount(cells.cell, weights=values,
+                                       minlength=len(cells.sites)) / cells.repeats)
+        flat_w = weight.ravel()
+        flat_c = None if color is None else color.reshape(-1, 3)
+        rest = 1.0 - covered.ravel() / pixel_area
+        for start in range(0, len(open_pixels), VORONOI_CHUNK):
+            chunk = open_pixels[start:start + VORONOI_CHUNK]
+            row, col = np.divmod(chunk, fov.nx)
+            centres = np.column_stack([fov.x0 + (col + 0.5) * fov.pixelsize,
+                                       fov.y0 + (row + 0.5) * fov.pixelsize])
+            _, site = tree.query(centres, workers=n_threads if n_threads > 0 else -1)
+            rho = cells.density[site]
+            # a centre in a small cell is already counted, an open one is empty
+            use = np.isfinite(rho) & ~small[site]
+            add = rho[use] * rest[chunk[use]]
+            flat_w[chunk[use]] += add
+            if flat_c is not None:
+                flat_c[chunk[use]] += add[:, None] * luts.colors(
+                    site_values[site[use]], display.lut, lo, hi, display.invert)
+    inside = ((x >= fov.x0) & (x < fov.x1) & (y >= fov.y0) & (y < fov.y1))
+    return RenderedImage(fov, weight.astype(np.float32),
+                         None if color is None else color.astype(np.float32),
+                         int(inside.sum()))

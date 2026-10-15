@@ -38,26 +38,11 @@ GUI_SUFFIX = ".gui.yaml"
 WINDOW_NAME = "window.yaml"          # the window's geometry, and nothing else
 REMEMBERED = "gui"                   # config key: the GUI last saved or loaded
 
-# What a fresh install shows.  `seed` is used *once*, to generate the workspace
-# from whatever plugins are actually installed; afterwards the workspace is
-# data and a tab is whatever the user made of it.
-DEFAULT_TABS = (
-    # not Load and Save, which the File menu does (they stay in the tree:
-    # a chain and a batch save through `File/Save`)
-    {"name": "File", "kind": "plugins", "seed": ("File/Export/", "File/Simulate/")},
-    {"name": "Localize", "kind": "plugins", "header": "localize", "seed": "Localize/"},
-    {"name": "Render", "kind": "render"},
-    # the regions have a tab of their own (docs/regions.md), so the Analysis
-    # tab leaves their branch out
-    {"name": "Analysis", "kind": "plugins", "seed": "Analysis/",
-     "exclude": ("Analysis/Regions/",)},
-    # a tuple seeds in the order given: finding regions comes before
-    # summarising them
-    {"name": "Regions", "kind": "plugins", "header": "roi",
-     "seed": ("Analysis/Regions/Find/", "Analysis/Regions/Column to ROIs",
-              "Analysis/Regions/Regions to column",
-              "Analysis/Regions/Summarize/", "Analysis/Regions/Workflow/")},
-)
+#: What a fresh install shows, and *Reset tabs to defaults*: a GUI file like
+#: any other, made by arranging the tabs and saving them.  A list rather than
+#: a rule -- the plugins that "ask to be pinned" -- because which plugins a
+#: lab sees first is a choice about the lab, not a property of a plugin.
+DEFAULT_GUI = Path(__file__).resolve().parent / "data" / "default.gui.yaml"
 
 
 @dataclass
@@ -119,28 +104,19 @@ class Workspace:
     # ------------------------------------------------------------ defaults
     @classmethod
     def default(cls, refs: Optional[Dict[str, Any]] = None) -> "Workspace":
-        """The shipped workspace, seeded from the plugins actually installed.
+        """The shipped GUI (`DEFAULT_GUI`), without the plugins not installed.
 
         A blank window on a fresh install would make every new user's first
-        task the chooser dialog, so the tabs start with the plugins that ask to
-        be pinned.  A tab the *user* adds still starts empty.
+        task the chooser dialog, so the tabs start with the plugins the
+        shipped file names.  A tab the *user* adds still starts empty.
         """
         if refs is None:
             from . import plugins
             refs = plugins.refs()
-        tabs = []
-        for spec in DEFAULT_TABS:
-            seed = spec.get("seed") or ()
-            prefixes = (seed,) if isinstance(seed, str) else tuple(seed)
-            exclude = tuple(spec.get("exclude") or ())
-            instances = [Instance(plugin=path)
-                         for prefix in prefixes
-                         for path, ref in sorted(refs.items())
-                         if path.startswith(prefix) and ref.favorite
-                         and not (exclude and path.startswith(exclude))]
-            tabs.append(Tab(name=spec["name"], kind=spec.get("kind", "plugins"),
-                            header=spec.get("header", ""), instances=instances))
-        return cls(tabs=tabs)
+        data = yaml.safe_load(DEFAULT_GUI.read_text(encoding="utf-8")) or {}
+        workspace = cls.from_dict(data)
+        workspace.prune(list(refs))
+        return workspace
 
     # ----------------------------------------------------------- as data
     def to_dict(self) -> Dict[str, Any]:

@@ -133,6 +133,9 @@ the result is made, where a misspelt key of `data` used to do nothing:
 | `id_regions` | what was measured per region of an id column, added to `Session.id_regions` |
 | `region_tables` | a block's tables per region, kept by a block around it as its region's children |
 | `evaluations` | `(name, plugin path)` of the evaluations the run left, so a later step of a chain reads them without asking |
+| `placements` | `{layer index: 3x3 affine}`, image layers moved (`ImageData.placement`, nm): *Transform*'s image target, one undo step and a log line like a table change |
+| `image_layers` | new images (`ImageData`), each added as a source and an image layer after the others (`Session.add_image`): *Process image*'s result; not an undo step and not logged |
+| `transformations` | `{name: Transformation}` (`smappy.transformation`) added to the session's named transformations (`Session.transformations`), saved with the localization file (not the workspace) |
 | `recipe` | the table change as a `ColumnRecipe`, which follows a table a fit is still appending to |
 | `stopped` | the run was stopped and this is what it had: the panel says "stopped" |
 
@@ -165,6 +168,14 @@ and Escape cancels.
 `FormState.titles` retitles a part by its dotted name while it is folded:
 the fitters' *camera* says what it resolved to.
 
+`FormState.shown` hides fields and parts by dotted name, where `active`
+only greys them: for settings of a choice the plugin does not take at all,
+such as the part of each algorithm that is not selected.  A row goes with its
+label, a part with its title bar, and *more* goes once none of its rows is
+left.  Like greying, it is presentation only: a hidden field keeps its value.
+Grey what the current settings happen not to read, and hide what belongs to
+another choice.
+
 ## The table
 
 `Localizations` is a dataclass of `columns: Dict[str, np.ndarray]` plus
@@ -181,7 +192,9 @@ the fitters' *camera* says what it resolved to.
 | `z_err_nm` | axial precision, when the fit produced one |
 | `n_in_group` | **on-time in frames** (for a table with a trace id, `tid`, the localizations in the trace); grouping writes it onto both tables |
 | `group_id` | which group a localization was linked into, 1-based; on the grouped table, its own row |
-| `cluster_id`, `n_in_cluster` | which cluster, 1-based, 0 for none, and the localizations in it -- written by `Analysis/Regions/Find/DBSCAN` (`plugins/clusters.py`) |
+| `cluster_id`, `n_in_cluster` | which cluster, 1-based, 0 for none, and the localizations in it -- written by `Analysis/Regions/Find clusters` (`plugins/clusters.py`) |
+| `track_id`, `track_length` | which track, 1-based, 0 for none (and for a track below the minimum length), and the localizations in it -- written by `Analysis/Tracking/Link tracks` (`plugins/link_tracks.py`); a simulation's truth is `track_id_true` |
+| `track_D_um2_per_s`, `track_alpha` | a track's diffusion coefficient and anomalous exponent from its MSD, NaN for none -- written by `Analysis/Tracking/Tracking analysis` with *write per track* |
 | `sigma_nm`, `sigma_y_nm`, `logl_rel` | PSF width and fit quality |
 | `filenumber`, `channel` | which file, which channel |
 
@@ -214,6 +227,15 @@ A fitted table also carries `metadata["frame_tags"]` (the image tags that
 changed, per frame: `smappy.frametags`) and `metadata["acquisition"]` (the
 Micro-Manager summary, devices and comment); both are written beside `/locs`,
 not in the metadata attribute.
+
+**Time.**  A frame is turned into seconds by the file's frame time:
+`metadata.file_frame_time(locs.metadata, filenumber)` -- the session's
+record of that file (`metadata["files"]`), else the camera's
+`metadata["camera"]["frame_time_ms"]`, else its `exposure_ms` -- or
+`metadata.table_frame_time(locs)` for the files a table's rows come from
+(None when they differ).  A plugin that speaks of seconds reads it there and
+offers a *frame time* setting on *auto* to override it (Time Course,
+Blinking); MINFLUX's `time_s` is a clock of its own.
 
 ## What the picture's axes are
 

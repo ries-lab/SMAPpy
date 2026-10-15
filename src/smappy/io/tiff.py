@@ -235,6 +235,14 @@ def _generic_values(tags: Dict[str, str]) -> Dict[str, object]:
     em_on = bool(port is not None
                  and str(port).strip() not in ("Normal", "Conventional"))
     pixelsize = _to_float(tags.get("PixelSizeUm"))
+    exposure = _to_float(tags.get("Exposure-ms")) or _to_float(dev("Exposure"))
+    # the frame time: the camera's own measure of its cycle, else the
+    # interval a time-lapse was set to -- which Micro-Manager also writes,
+    # as 0 or below the exposure, when it ran as fast as it could, and then
+    # says nothing (the exposure stands in for it: `metadata.frame_time_ms`)
+    interval = _to_float(tags.get("Interval_ms"))
+    if not (interval and exposure and interval > exposure):
+        interval = None
     return {
         "em_on": em_on,
         "emgain": (_to_float(dev("MultiplierGain")) or _to_float(dev("Gain"))
@@ -243,8 +251,8 @@ def _generic_values(tags: Dict[str, str]) -> Dict[str, object]:
         # MM reports 0.0 for a pixel size nobody calibrated
         "pixelsize_um": pixelsize or None,
         "roi": _parse_roi(tags.get("ROI")),
-        "exposure_ms": (_to_float(tags.get("Exposure-ms"))
-                        or _to_float(dev("Exposure"))),
+        "exposure_ms": exposure,
+        "frame_time_ms": _to_float(dev("ActualInterval-ms")) or interval,
         "camera_name": device or None,
     }
 

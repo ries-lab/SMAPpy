@@ -1,0 +1,6 @@
+# ThunderSTORM's "Export results": positions in nm, frames counted from 1.
+# Its headers carry their units ("x [nm]"), which the column guess reads.
+headers: ["x [nm]", "y [nm]", "frame"]
+mapping: {}
+units: nm
+first_frame: 1

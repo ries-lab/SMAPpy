@@ -486,6 +486,25 @@ class Context:
 
 
 @dataclass
+class ShapeEdit:
+    """Shapes drawn with the mouse on one panel of a figure, and the setting
+    they are written back to.
+
+    A plugin cannot draw on a window -- nothing in a plugin imports Qt -- but
+    it can say that a panel of its figure takes shapes: the fit preview's
+    frame takes the region to fit in (``region.shapes``).  The GUI puts the
+    drawing tools beside that figure and sets ``on_change``, which writes the
+    shapes into the form; a script never sees any of it.  A shape is
+    ``{"kind": "include" | "exclude", "points": [[x, y], ...]}`` in the
+    panel's data coordinates.
+    """
+    field: str                                  # the dotted setting, "region.shapes"
+    panel: int = 0                              # which axis of the figure
+    shapes: list = field(default_factory=list)
+    on_change: Optional[Callable] = None        # set by the GUI
+
+
+@dataclass
 class Plot:
     """One figure a result offers, and how much room it wants.
 
@@ -505,6 +524,7 @@ class Plot:
     name: str = ""                     # "" is the main figure
     panels: int = 1                    # how many axes `draw` makes
     size: Optional[Tuple[float, float]] = None   # width, height in inches
+    edit: Optional["ShapeEdit"] = None           # a panel that takes drawn shapes
 
     def draw_into(self, figure) -> None:
         """Draw into a cleared figure, or into a subfigure of a page."""
@@ -660,6 +680,12 @@ class FormState:
       about it (`Notice`).
     * ``titles`` -- a part's title, in place of its label: a summary of what
       it holds, for a part that starts folded.
+    * ``shown`` -- the fields and parts to show; one set False is hidden,
+      not greyed.  For settings that belong to a choice the plugin does not
+      take at all -- the parts of the algorithms not selected -- where a
+      greyed form three times the length of the one in use is a form to scroll
+      past.  A hidden field keeps its value, as a greyed one does, so it
+      cannot change what a run does; what can change a run is shown.
     """
     hints: Dict[str, Any] = field(default_factory=dict)
     active: Dict[str, bool] = field(default_factory=dict)
@@ -668,6 +694,7 @@ class FormState:
     # a part's title by its dotted name, in place of its label: what the part
     # holds, said while it is folded ("camera: auto - iXon 888, ...")
     titles: Dict[str, str] = field(default_factory=dict)
+    shown: Dict[str, bool] = field(default_factory=dict)
 
     def under(self, key: str, title: str = "", settings: Any = None) -> "FormState":
         """This state as part ``key`` of a larger form -- a chain's step: the
@@ -683,7 +710,8 @@ class FormState:
             active={f"{key}.{k}": v for k, v in self.active.items()},
             choices={f"{key}.{k}": v for k, v in self.choices.items()},
             notice=notice,
-            titles={f"{key}.{k}": v for k, v in self.titles.items()})
+            titles={f"{key}.{k}": v for k, v in self.titles.items()},
+            shown={f"{key}.{k}": v for k, v in self.shown.items()})
 
     def update(self, other: "FormState") -> None:
         """Add ``other``'s parts; the first notice stays, as the panel has
@@ -691,6 +719,8 @@ class FormState:
         self.hints.update(other.hints)
         self.active.update(other.active)
         self.choices.update(other.choices)
+        self.titles.update(other.titles)
+        self.shown.update(other.shown)
         if self.notice is None:
             self.notice = other.notice
 
@@ -761,8 +791,8 @@ class Result:
     # (`Session.set_layer_configs`): the Render tab's work done by a plugin
     # (`Analysis/Process/Layers`).
     layers: Optional[List[Dict[str, Any]]] = None
-    # The ROIs this run added to the ROI manager's project (a segmenter, or
-    # *Column to ROIs*), an empty list when it found none; None for a run
+    # The ROIs this run added to the ROI manager's project (a segmenter: in
+    # the shipped tree, Segment regions), an empty list when it found none; None for a run
     # that adds no ROIs.  The manager redraws, and a preview is dropped.
     rois: Optional[List[Any]] = None
     # A segmenter's preview: the ROIs it would add, shown grey in the
@@ -781,6 +811,18 @@ class Result:
     # ``(name, plugin path)`` of the evaluations this run left on the
     # regions, so that a later step of a chain reads them without asking.
     evaluations: Sequence[Tuple[str, str]] = ()
+    # Images moved, ``{layer index: placement}`` (`ImageData.placement`, a
+    # 3x3 affine in nm): Transform's image target.  One undo step with the
+    # table, logged as a table change is.
+    placements: Dict[int, Any] = field(default_factory=dict)
+    # New image layers (`ImageData`), each added as a source and a layer of
+    # its own after the others: Process image's result.  Not a table change,
+    # so not an undo step nor logged; the layer is removed like any other.
+    image_layers: Sequence = ()
+    # Named transformations to keep in the session's list,
+    # ``{name: Transformation}`` (`Session.transformations`): Transform's
+    # *keep as*, and what Register layers measures.
+    transformations: Dict[str, Any] = field(default_factory=dict)
     # The table change as a recipe (`ColumnRecipe`), which can follow a table
     # a fit is still appending to; `locs` is then the recipe applied.
     recipe: Optional["ColumnRecipe"] = None
@@ -834,9 +876,6 @@ class Plugin:
     name: str = ""                 # set by `register` from the path's last part
     path: str = ""                 # "Analysis/Drift/COMET"
     description: str = ""
-    favorite: bool = True          # pinned in the shipped workspace; for a
-                                   # per-region plugin, in the default
-                                   # evaluation pipeline
     # Whether `run` hands back `Result.values`, and so can be run once per
     # region and kept as that region's row (`docs/regions.md`).  Not a kind
     # of plugin -- such a plugin runs on the view like any other -- but what
@@ -1005,6 +1044,22 @@ class Plugin:
         a file that fails to open.
         """
         return None
+
+    def pool(self, sums: Dict[str, np.ndarray], x: np.ndarray
+             ) -> Dict[str, np.ndarray]:
+        """Curves of many regions as one, from their arrays summed.
+
+        A per-region plugin whose curve is a ratio -- pairs found over pairs
+        expected -- hands back numerator and denominator among its
+        `Result.arrays`; the mean of the regions' ratios weighs a region with
+        ten pairs as much as one with ten thousand, and the ratio of the sums
+        does not.  ``sums`` is every array summed over the regions (on the
+        common grid ``x``), and this returns the curves made from them, under
+        the names the regions' own curves have.  *Curves*
+        (`plugins.curves`) draws these in place of the mean.  The default
+        pools nothing.
+        """
+        return {}
 
     def describe(self, ctx: Optional["Context"], settings) -> FormState:
         """What the form should show about ``settings`` beyond their values:

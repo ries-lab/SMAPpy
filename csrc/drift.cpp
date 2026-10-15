@@ -86,6 +86,36 @@ py::tuple overlap_per_segment(const Array<Coord>& coords, const Array<Index>& ti
 }
 
 template <class Coord, class Index>
+py::tuple transformed_cost_and_gradient(
+        const Array<Coord>& coords, const Array<Index>& times,
+        const Array<Index>& idx_i, const Array<Index>& idx_j,
+        const Doubles& params, double sigma, double sigma_factor,
+        double cutoff_sigmas, int n_threads) {
+    if (coords.ndim() != 2 || coords.shape(1) != 3)
+        throw std::invalid_argument("coords must be (n, 3)");
+    if (params.ndim() != 2 || params.shape(1) != 14)
+        throw std::invalid_argument("params must be (n_frames, 14)");
+    if (times.ndim() != 1 || times.shape(0) != coords.shape(0))
+        throw std::invalid_argument("times must be (n,), one per localization");
+    if (idx_i.ndim() != 1 || idx_j.ndim() != 1 || idx_i.size() != idx_j.size())
+        throw std::invalid_argument("idx_i and idx_j must be matching 1-D arrays");
+    const int64_t n_frames = params.shape(0);
+    const int64_t n_pairs = idx_i.size();
+
+    smappy::TransformedCost result;
+    {
+        py::gil_scoped_release release;
+        result = smappy::transformed_cost_and_gradient<Coord, Index>(
+            coords.data(), times.data(), idx_i.data(), idx_j.data(), params.data(),
+            n_pairs, n_frames, sigma, sigma_factor, cutoff_sigmas,
+            n_threads);
+    }
+    py::array_t<double> gradient(std::vector<py::ssize_t>{n_frames, 14});
+    std::copy(result.gradient.begin(), result.gradient.end(), gradient.mutable_data());
+    return py::make_tuple(result.total, gradient);
+}
+
+template <class Coord, class Index>
 void bind(py::module_& m) {
     m.def("cost_and_gradient", &cost_and_gradient<Coord, Index>, py::arg("coords"),
           py::arg("times"), py::arg("idx_i"), py::arg("idx_j"), py::arg("mu"),
@@ -97,6 +127,12 @@ void bind(py::module_& m) {
           py::arg("mu"), py::arg("sigma"), py::arg("sigma_factor"),
           py::arg("n_threads") = 0,
           "(observed, null, counts) per time window, for quality control.");
+    m.def("transformed_cost_and_gradient",
+          &transformed_cost_and_gradient<Coord, Index>, py::arg("coords"),
+          py::arg("times"), py::arg("idx_i"), py::arg("idx_j"), py::arg("params"),
+          py::arg("sigma"), py::arg("sigma_factor"),
+          py::arg("cutoff_sigmas") = 0.0, py::arg("n_threads") = 0,
+          "Pair overlap and its gradient with a linear transformation per frame.");
 }
 
 }  // namespace

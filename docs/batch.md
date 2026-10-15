@@ -137,7 +137,7 @@ default `skip`: the file is skipped and the report says why).
 Decided 2026-10-05, and since 2026-10-11 through blocks (`docs/regions.md`).
 A chain can do what the ROI manager does by hand:
 
-* a **segmenter** (`Analysis/Regions/Find/...`) is an ordinary step; the ROIs it
+* a **segmenter** (`Analysis/Regions/Segment regions`) is an ordinary step; the ROIs it
   finds go into the scratch session's ROI project;
 * a **block over the ROIs** runs its steps in *every* ROI the project
   includes -- ticked *use*, whoever made it -- with
@@ -174,7 +174,8 @@ as for the table, nothing reaches the ROI manager until the whole chain has
 succeeded.  Undo does not take the ROIs back: the ROI manager has no undo.
 
 The shipped `Analysis/Regions/Workflow/NPC Analysis` is such a chain
-(`src/smappy/plugins/npc_analysis.chain.yaml`): group, NPC segmenter, NPC
+(`src/smappy/plugins/npc_analysis.chain.yaml`): group, Segment regions'
+ring template (preset NPC), NPC
 Corners, NPC labelling efficiency, which takes the counts by the plugin that
 made them and its cutoffs from their settings.
 

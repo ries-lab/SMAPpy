@@ -35,7 +35,7 @@ def test_folders_name_the_plugin(tmp_path):
     assert ref.name == "My Drift" and ref.attr == "MyDrift"
     assert ref.description == "the one line that wins over the docstring"
     assert ref.group == "Analysis/Drift" and ref.parts[0] == "Analysis"
-    assert ref.per_region is False and ref.favorite
+    assert ref.per_region is False
 
 
 def test_docstring_is_the_description_when_nothing_else_says(tmp_path):
@@ -223,7 +223,7 @@ def test_refs_and_tree_do_not_import_but_available_does():
     assert set(found) >= {
         "Analysis/Drift/COMET", "Analysis/Drift/RCC",
         "Analysis/Measure/Localization Statistics",
-        "Analysis/Regions/Find/DBSCAN",
+        "Analysis/Regions/Find clusters",
         "Analysis/Regions/Workflow/NPC Analysis"}
     assert all(path.startswith("Analysis/") for path in found)
     assert isinstance(plugins.tree()["Analysis"]["Drift"]["COMET"], PluginRef)

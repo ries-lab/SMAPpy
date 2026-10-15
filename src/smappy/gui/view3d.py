@@ -23,11 +23,12 @@ from PySide6.QtCore import QEvent, QPoint, QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QImage
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QDoubleSpinBox,
                                QFileDialog, QFormLayout, QFrame, QGridLayout,
-                               QHBoxLayout, QInputDialog, QLabel, QMainWindow, QMenu,
+                               QHBoxLayout, QLabel, QMainWindow, QMenu,
                                QPushButton, QRadioButton, QToolBar, QToolButton,
                                QVBoxLayout, QWidget)
 
 from ..layer_state import LayerSnapshot
+from ..picture import FrameSource, ViewFrame
 from ..render import FieldOfView, axis_unit
 from ..session import Session
 from . import folders
@@ -144,6 +145,9 @@ class View3D(QWidget):
         self.graphics.setFocusPolicy(Qt.StrongFocus)
         self.graphics.viewport().installEventFilter(self)
         session.on_change(self._on_session)
+        # what *Export Image* frames its picture on (`picture.FrameSource`)
+        self.frame_source = FrameSource()
+        session.view_frames["3D"] = self.frame_source
 
     # ------------------------------------------------------------ session
     def _on_session(self, what: str) -> None:
@@ -190,6 +194,7 @@ class View3D(QWidget):
             self._timer.start()
 
     def render(self, preview: bool = False) -> None:
+        self.refresh_frame()
         if not len(self.session.locs):
             self.image.clear()
             return
@@ -414,30 +419,22 @@ class View3D(QWidget):
         self.changed.emit()
         self.schedule()
 
-    def render_at(self, pixelsize: float, what: str = "rgb") -> np.ndarray:
-        """Synchronous: the slab at ``pixelsize`` nm per pixel, for saving."""
+    def refresh_frame(self) -> None:
+        """Hand the session what the view shows now (`frame_source`)."""
+        try:
+            self.frame_source.frame = self.view_frame()
+        except Exception:                 # half built, or being torn down
+            pass
+
+    def view_frame(self) -> ViewFrame:
+        """What this window shows, for *Export Image*: the projection, the
+        slab, the canvas at the zoom.  The picture is drawn on the CPU, the
+        summed look of the *auto*, *cpu* and *gpu* engines."""
         proj = copy.deepcopy(self.projection)
-        slab = self.session.slab
-        c = slab.corners() if slab is not None else None
-        if c is not None:
-            xv, yv, _ = proj.apply(c[:, 0], c[:, 1], c[:, 2])
-            proj.offset = np.array([(xv.min() + xv.max()) / 2, (yv.min() + yv.max()) / 2])
-            nx, ny = int(np.ptp(xv) / pixelsize) + 2, int(np.ptp(yv) / pixelsize) + 2
-        else:
-            size = self.graphics.size()
-            nx, ny = size.width(), size.height()
-        proj.zoom = pixelsize
-        fov = proj.fov(nx, ny)
-        if what == "rgb":
-            return render_3d(self.session.layers, proj, slab, fov)
-        weight = np.zeros((fov.ny, fov.nx), np.float32)
-        from ..view3d import render_layer_3d
-        for layer in snapshot_3d(self.session.layers):
-            if layer.visible and not layer.is_image:
-                weight += render_layer_3d(layer.locs, layer.mask, proj, slab, fov,
-                                          layer.settings, layer.display,
-                                          index=layer.index)[1].weight
-        return weight
+        size = self.graphics.size()
+        fov = proj.fov(max(size.width(), 16), max(size.height(), 16))
+        return ViewFrame((fov.x0, fov.x1), (fov.y0, fov.y1), fov.pixelsize,
+                         projection=proj, slab=self.session.slab)
 
     def move_along_sight(self, steps: float) -> None:
         """Fly in (positive) or out: a tenth of the eye's distance a step in
@@ -860,9 +857,7 @@ class View3DToolBar(QToolBar):
         save = QToolButton(text="Save", popupMode=QToolButton.InstantPopup)
         menu = QMenu(save)
         menu.addAction("PNG as displayed...", window._save)
-        menu.addAction("TIFF, colour at pixel size...", lambda: window._tiff("rgb"))
-        menu.addAction("TIFF, intensity (float) at pixel size...",
-                       lambda: window._tiff("intensity"))
+        menu.addAction("Save image...", window._save_image)
         save.setMenu(menu)
         self.addWidget(save)
         tips = {"top": "look down z", "front": "along the slab's width: z up",
@@ -941,25 +936,13 @@ class View3DWindow(QMainWindow):
             folders.remember(path)
             image.save(path)
 
-    def _tiff(self, what: str) -> None:
-        pixelsize, ok = QInputDialog.getDouble(self, "Pixel size", "nm per pixel:",
-                                               round(self.view.projection.zoom, 2), 0.1, 10000, 2)
-        if not ok:
-            return
-        path, _ = QFileDialog.getSaveFileName(self, "Save 3D TIFF", folders.start(),
-                                              "TIFF (*.tif *.tiff)")
-        if not path:
-            return
-        folders.remember(path)
-        import tifffile
-        data = self.view.render_at(pixelsize, what)
-        data = (data * 255).astype(np.uint8) if what == "rgb" else data.astype(np.float32)
-        px_um = pixelsize / 1000.0
-        tifffile.imwrite(path, data, imagej=True, resolution=(1 / px_um, 1 / px_um),
-                         metadata={"unit": "um", "pixelsize_nm": pixelsize,
-                                   "projection": str(self.view.projection.to_dict()),
-                                   "slab": str(self.view.session.slab.to_dict()
-                                               if self.view.session.slab else None)})
+    def _save_image(self) -> None:
+        """*File/Export/Image* in its window, set to this view's projection."""
+        from ..plugins.file import image_settings_for
+        self.view.refresh_frame()
+        opener = self.view.session.window_openers.get("export image")
+        if opener is not None:
+            opener(image_settings_for(self.view.session, "3D"))
 
     def _slab_shown(self, shown: bool) -> None:
         """The slab restricts plugins only while it can be seen (`Session.slab_shown`)."""

@@ -383,6 +383,11 @@ def projected_settings(locs: Localizations, settings: RenderSettings
     * anything else -- photons against frame -- cannot keep a width per axis
       once they are mixed, so the two explicit widths are averaged into one.
     """
+    if settings.mode in ("tracks", "voronoi"):
+        # tracks are lines on the 2D picture, and Voronoi cells are of its
+        # plane; turned in 3D their localizations are drawn as points, by
+        # their precision where the table has one
+        settings = replace(settings, mode="precision" if "xy_err_nm" in locs else "hist")
     if settings.mode == "dl":
         # a turned view was never seen by a camera: its pixels and its PSF
         # have no direction to lie in, so the nearest thing is one Gaussian

@@ -13,8 +13,13 @@ papers and in other software.
 * **localization** (also called a spot, an event or a detection): one
   molecule's position, fitted in one camera frame -- one row of the table.
 * **frame**: one camera image of the movie.
-* **blink** (also called an on-event or a burst): the consecutive frames in
-  which one fluorophore stays on.
+* **blink** (also called an on-event): the consecutive frames in which one
+  fluorophore stays on.
+* **dark time** (also called the off-time): how many frames a fluorophore
+  stays dark between two blinks.
+* **burst** (also called a dark-time-merged count, SMAP's `locsdf`): the
+  blinks joined across dark times up to a set length -- with the length
+  chosen well, the blinks of one molecule.
 * **merge blinks** (also called grouping or linking): combine the
   localizations in consecutive frames that come from one blinking event into
   one localization, with the photons added and a better precision.
@@ -68,6 +73,9 @@ papers and in other software.
   through its own amplifier.
 * **camera ROI** (also called the readout region or crop): the part of the
   chip the camera read out.
+* **frame time** (also called the cycle time or frame interval): the time
+  from one frame to the next -- the exposure plus the camera's dead time;
+  where the file does not record it, the exposure stands in for it.
 
 ## The picture
 
@@ -98,6 +106,18 @@ papers and in other software.
   picture of each time window and cross-correlates every pair of them.
 * **COMET**: a drift correction that finds the drift curve under which the
   localizations from different times overlap best, without making pictures.
+* **fiducial** (also called a fiducial marker, or a bead): a bright, still
+  particle on the coverslip -- a fluorescent microsphere, a gold particle --
+  seen in nearly every frame, whose apparent movement is the drift.
+* **vibration** (also called jitter, or mechanical noise): fast movement of
+  the sample or the optics -- from the building, a fan, a pump -- that
+  repeats many times a second, faster than drift.
+* **amplitude spectrum** (also called the Fourier spectrum, or the FFT): a
+  signal taken apart into sinusoids, the amplitude of each against its
+  frequency; a vibration is a peak.
+* **RMS** (root mean square): the square root of the mean of the squares --
+  of a position around its mean, its standard deviation; a sinusoid of
+  amplitude A has an RMS of A / √2.
 
 ## Regions
 
@@ -108,15 +128,56 @@ papers and in other software.
 * **per-region steps**: plugins run once in every region, what each measures
   kept as that region's row.
 * **cluster**: localizations that lie closer to each other than to the rest.
+* **convex hull**: the smallest outline without dents that contains a set
+  of localizations -- the shape a rubber band stretched around them takes.
+* **radius of gyration** (Rg): the typical distance of a cluster's
+  localizations from its centre, the root of their mean squared distance.
 * **DBSCAN** (density-based spatial clustering of applications with noise): a
   clustering in which a localization with enough neighbours within a radius
   starts or extends a cluster, and the rest are noise.
+* **complete spatial randomness** (CSR, also called a Poisson pattern):
+  positions placed independently, every place in the window equally likely
+  -- what "not clustered" means in a test.
+* **pair correlation** (g(r), also called the pair correlation function or
+  radial distribution function): the number of pairs of localizations at
+  distance r, over what complete spatial randomness gives -- 1 for random
+  positions, above 1 at the distances where they cluster.
+* **Ripley's K** (and **L(r) - r**, also called H(r)): the mean number of
+  neighbours within r over the density, and the same made a straight line,
+  0 for random positions.
+* **local density**: how many localizations lie within a radius of a
+  localization -- a number per localization, not a region.
+* **Voronoi tessellation** (also called a Voronoi diagram): the division of
+  the plane into one cell per localization, the part of the plane closer to
+  it than to any other; a small cell means a dense neighbourhood.
 * **NPC** (nuclear pore complex): the eight-cornered ring of proteins in the
   nuclear envelope, a standard structure for testing labelling and
   resolution.
 * **labelling efficiency** (also called degree of labelling, or effective
   labelling efficiency): the fraction of the target proteins that carry a
   label which is detected.
+
+## Tracking
+
+* **single-particle tracking** (SPT): following single molecules from frame
+  to frame as they move, to measure how they move.
+* **track** (also called a trajectory): the localizations of one particle in
+  time order -- `track_id` names them once they are linked.
+* **jump** (also called a step or a displacement): how far a particle moved
+  between two frames it was seen in.
+* **memory** (also called gap closing, or the gap frames): how many frames
+  in a row a particle may go unseen -- dark, dim or badly fitted -- and its
+  track still continue.
+* **MSD** (mean squared displacement): how far a particle has moved after a
+  lag of k frames, squared and averaged over the track; a straight line in
+  the lag for free diffusion.
+* **diffusion coefficient** (D, in µm²/s): how fast a particle spreads by
+  random motion -- the MSD grows by 4 D per second in two dimensions.
+* **anomalous exponent** (α, alpha): how the MSD grows with the lag, as
+  lag^α: 1 for free diffusion, below 1 for confined or hindered motion,
+  above 1 for directed motion.
+* **diffusive state**: a population of particles, or a phase of one
+  particle's track, with one diffusion coefficient -- bound and free, say.
 
 ## Two colours
 
@@ -128,6 +189,12 @@ papers and in other software.
 * **registration** (also called channel alignment, mapping or chromatic
   correction): the transformation -- shift, rotation, scale and distortion --
   that takes a position in one half to the same place in the other.
+* **affine transformation**: one that keeps straight lines straight and
+  parallel lines parallel -- any mix of shift, rotation, scale, mirror and
+  shear.
+* **projective transformation** (also called a homography): an affine one
+  plus a perspective, which can make parallel lines meet; what *Calibrate
+  transform* fits between two cameras or halves of a chip.
 
 ## Running things
 

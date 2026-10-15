@@ -2,7 +2,7 @@
 title: Render tab
 summary: The layers of the picture -- which localizations each one shows, and how it is drawn.
 widget: smappy.gui.render_tab.RenderTab
-covers: [smappy.session.Layer, smappy.session.default_bounds, smappy.filter.LocFilter, smappy.group.group, smappy.group.connect, smappy.group.combine, smappy.render.render_locs, smappy.render.render_sigmas, smappy.render.psf_sigmas, smappy.render.camera_pixelsize_nm, smappy.render.camera_grid, smappy.render.SigmaSettings, smappy.render.to_rgb, smappy.render.RenderAxes, smappy.lut.on_white, smappy.lut.invert_sum, smappy.lut.complement]
+covers: [smappy.session.Layer, smappy.session.default_bounds, smappy.filter.LocFilter, smappy.group.group, smappy.group.connect, smappy.group.combine, smappy.render.render_locs, smappy.render.render_sigmas, smappy.render.psf_sigmas, smappy.render.camera_pixelsize_nm, smappy.render.camera_grid, smappy.render.SigmaSettings, smappy.render.to_rgb, smappy.render.RenderAxes, smappy.render.render_tracks, smappy.render.track_segments, smappy.render.render_segments, smappy.render.render_voronoi, smappy.render.VoronoiCells, smappy.render.voronoi_cells_for, smappy.lut.on_white, smappy.lut.invert_sum, smappy.lut.complement]
 ---
 
 ## What it does
@@ -157,7 +157,23 @@ the picture shows how well each position is known.  *diffraction-limited*
 draws what the camera saw instead: each localization as a spot as
 wide as its fitted [PSF](plugin:Panels/Glossary) (point spread function: the
 image one molecule makes on the camera), on the camera's own pixels -- the widefield picture
-of the same molecules, to set beside the super-resolved one.
+of the same molecules, to set beside the super-resolved one.  *tracks* draws
+[tracks](plugin:Panels/Glossary) instead of spots: each track -- the
+localizations sharing a value of the *track id* column, `track_id` from
+[Link tracks](plugin:Analysis/Tracking/Link tracks) -- as the line through
+its localizations in time order, *line width* pixels wide.  Coloured by a
+column, the line takes the colour of each step: by `frame`, a track runs
+through the LUT as it goes on; by `track_D_um2_per_s` from
+[Tracking analysis](plugin:Analysis/Tracking/Tracking analysis), slow tracks
+and fast ones stand apart.  *Voronoi density* (SharpViSu,
+[Andronov et al. 2016](https://doi.org/10.1093/bioinformatics/btw123))
+divides the plane into a cell per localization -- its
+[Voronoi tessellation](plugin:Panels/Glossary): the part of the plane closer
+to it than to any other -- and colours each cell by its density, one over
+its area.  A dense structure is evenly bright and sparse background is dim,
+with no spot width to choose: the cells are as large as the gaps between
+the localizations.  The cells along the edge of the field are open, and
+are left empty.
 
 ```figure The crossing of the two lines, 800 nm across, drawn with each of the three super-resolution modes.
 fig.set_size_inches(7.5, 2.6)
@@ -167,11 +183,38 @@ draw(axes[1], "Gaussian (fixed), sigma 10 nm", mode="gauss", sigma=10.0)
 draw(axes[2], "Gaussian (precision), factor 0.5")
 ```
 
+```figure The crossing in *Gaussian (precision)* and *Voronoi density*, and the whole field in *Voronoi density* (contrast 2): each cell is as bright as it is small, so the lines are filled with a mosaic of bright cells, with no gaps between the spots, and the scattered background is dim.
+fig.set_size_inches(7.5, 2.6)
+axes = fig.subplots(1, 3)
+draw(axes[0], "Gaussian (precision)")
+draw(axes[1], "Voronoi density", mode="voronoi", contrast=2.0)
+draw(axes[2], "Voronoi density, whole field", fov=whole, mode="voronoi", contrast=2.0)
+```
+
 ```figure The whole field, 10 µm across, in *Gaussian (precision)* and *diffraction-limited*: on 100 nm camera pixels the ring and the lines are as wide as the PSF, as the camera saw them.
 fig.set_size_inches(5.2, 2.6)
 axes = fig.subplots(1, 2)
 draw(axes[0], "Gaussian (precision)", fov=whole)
 draw(axes[1], "diffraction-limited", fov=whole, mode="dl")
+```
+
+```figure Simulated tracks, 6 µm across, drawn as *tracks*: left in one colour, right coloured by frame, so each track runs from blue to red as it goes on and a crossing of two tracks at different times is told apart.
+from smappy.simulate import simulate_tracks
+from smappy.render import RenderSettings, DisplaySettings
+moving = simulate_tracks(n_frames=200, field_um=6.0, density_um2=0.1,
+                         d_um2_s=(0.3,), track_frames=40.0, seed=2)
+view = FieldOfView.from_range((0, 6000), (0, 6000), 15.0)
+fig.set_size_inches(5.2, 2.6)
+axes = fig.subplots(1, 2)
+for ax, colour in zip(axes, (None, "frame")):
+    settings = RenderSettings(mode="tracks", track_column="track_id_true",
+                              line_width=1.0, color_field=colour)
+    display = DisplaySettings(lut="hot" if colour is None else "jet", contrast=1.5)
+    ax.imshow(display.apply(render_locs(moving, view, settings, display)),
+              extent=view.extent)
+    ax.set_title("one colour" if colour is None else "coloured by frame", fontsize=8)
+    ax.set_xticks([])
+    ax.set_yticks([])
 ```
 
 **5. Brightness and colour.**  A super-resolution image has a few very bright
@@ -275,6 +318,60 @@ stay visible.  A width that is missing, not positive or above 1500 nm (a
 failed fit) is one camera pixel.  It needs the positions on both axes; the
 3D view, whose turned picture no camera saw, draws it as *Gaussian (fixed)* at the
 median PSF width.
+
+**The *tracks* mode.**  The rows the layer's filter keeps with an id above
+0 are sorted by id and then by `frame` (by `time_s` where the table has
+it); each two consecutive ones of a track are a segment.  A pixel takes
+from a segment the share of it a line of width $w$ pixels covers,
+approximated by the distance $d$ of the pixel's centre from the segment:
+$\min(1, \max(0, w/2 + 1/2 - d))$, so the line is antialiased and its
+ends are round.  Two segments of a track meet at a shared localization, so
+over a pixel or so a joint is up to twice as bright.  A segment weighs one
+(or the mean of its ends' weight column) and, coloured by a column, takes
+the mean of its two ends' values.  The view culls whole tracks by their
+bounding boxes rather than localizations by position, since a segment
+across the view can have both ends outside it.  The line width is in
+pixels of the picture, so an exported picture at a finer pixel size has
+thinner lines in nanometres.  The 3D view draws the localizations of a
+*tracks* layer as points, as *Gaussian (precision)* where the table has
+precisions.
+
+**The *Voronoi density* mode.**  The cells are those of every localization
+the layer's filter keeps, from the same Delaunay triangulation as
+[Neighbourhood](plugin:Analysis/Process/Neighbourhood)'s Voronoi density:
+localizations at exactly the same position share a cell and are each
+counted, and a cell open at the edge of the field has no area.  A cell
+$i$ of area $A_i$ holding $n_i$ localizations has the density
+$\rho_i = n_i / A_i$, in localizations per µm² (per $10^6$ square units on
+axes that are not nm).  A pixel of area $a$ takes the mean density over
+it.  Where the cell its centre lies in -- the cell of the localization
+nearest to the centre -- is larger than the pixel, that is the cell's
+density, SharpViSu's picture.  Cells smaller than the pixel are counted
+into the pixel their localizations are in instead, since
+$\rho_i A_i = n_i$: zoomed out, where a pixel holds many cells, the
+picture is the histogram over the pixel's area rather than one cell picked
+at random, which would be noise.  With $N$ the localizations of the small
+cells in the pixel and $S$ their areas,
+
+$$v = \frac{N + \rho_c \max(a - S, 0)}{a},$$
+
+where $\rho_c$ is the density of the cell at the centre if it is larger
+than the pixel, and 0 if it is small or open.  On a uniform field the
+picture is flat at the field's density at any zoom.  Coloured by a column,
+a counted localization brings its own colour and a cell the mean of its
+localizations' values.  The *weight* column is not used: the density is of
+localizations.
+
+The cells are computed once for a layer's table and filter (about 12 µs a
+localization on 4 cores: two million in half a minute) and kept for the
+last four, so panning, zooming and exporting only look the pixels up, a
+few tenths of a second for a million pixels.  A filter changed, or a fit
+still adding localizations, computes them again.  The cells are never of
+the localizations in view only, as those along the view's edge would
+change with every pan.  Just outside the field's edge, a cell that closes
+beyond it is long and thin, so of low density; further out the open cells
+leave the picture empty.  The 3D view draws a *Voronoi density* layer as
+points, as *Gaussian (precision)* where the table has precisions.
 
 **Contrast and gamma.**  With $I$ the rendered intensity of a pixel and $c$
 the *contrast*, the pixel value that becomes full scale is the quantile
@@ -494,7 +591,19 @@ every spot should look alike, e.g. to compare layers of different quality;
 *histogram* for counting, or at a pixel size well above the precision.
 *diffraction-limited* for the widefield picture:
 zoomed out it looks like the average of the raw frames, which is a check that
-the fit found what was there.
+the fit found what was there.  *tracks* for single-particle tracking, once
+the tracks are linked.  *Voronoi density* to see structures of very
+different densities at once, or to judge densities by eye; the picture of
+a layer with millions of localizations takes a while the first time.
+
+### track id
+The id column of the tracks, in *tracks* only: `track_id` from Link tracks,
+`tid` from a MINFLUX file, or any id column -- the clusters' `cluster_id`
+draws each cluster's localizations joined in time order.
+
+### line width
+1 pixel is crisp at any zoom; 2 to 3 for a figure at a coarse pixel size, or
+to make sparse tracks visible zoomed out.
 
 ### colour by
 *intensity* colours by brightness through the LUT; *field* colours by the
@@ -503,8 +612,8 @@ colour bar in the render window's top right corner: the LUT over the
 *colour range*, its ends in the column's unit, and above it the layer and
 the column (*layer 2: z_nm*).  Each scale has its own bar, stacked one
 under the other; layers with the same column, LUT, inversion and range
-share one, labelled with all of them.  The bars are not part of a saved or
-copied picture.
+share one, labelled with all of them.  A picture saved or copied from the
+render window draws the same bars into it (*Export Image*).
 
 ### colour range
 The values that get the two ends of the LUT.  Narrow it to spread the
@@ -623,6 +732,12 @@ Based on SMAP's layer panel (`gui.GuiChannel`), its renderer
   its *DL* is *diffraction-limited* (stored as `precision`, `gauss` and `dl`
   in a layer's settings), with
   the same widths and fallback.  SMAP's tiff, raw and Other modes and its intensity coding (photons, blinks) are not in the tab.
+* **Voronoi density is a mode**, as SMAP's VoronoiRenderer plugin, which
+  ran SharpViSu's code on the localizations in view.  Here the cells are of
+  everything the filter keeps, so the edge of the view is no edge of the
+  cells, and cells smaller than a pixel are counted rather than sampled.
+* **Tracks are a mode.**  SMAP had no track renderer: tracks were points
+  coloured by their id, or lines in a plugin's own figure.
 * **The width from the precision.**  SMAP draws at 0.4 times the precision,
   with a floor of 3 nm or 0.7 pixels and a cap at 400 nm; here the factor is
   0.5, the floor is 0.7 pixels alone, and the cap is ten times the median
@@ -649,6 +764,11 @@ Based on SMAP's layer panel (`gui.GuiChannel`), its renderer
 
 ## References
 
+* Andronov L, Lutz Y, Vonesch JL, Klaholz BP. SharpViSu: integrated
+  analysis and segmentation of super-resolution microscopy data.
+  *Bioinformatics* 32, 2239-2241 (2016).
+  [doi:10.1093/bioinformatics/btw123](https://doi.org/10.1093/bioinformatics/btw123)
+  -- the Voronoi rendering.
 * Baddeley D, Cannell MB, Soeller C. Visualization of localization
   microscopy data. *Microsc Microanal* 16, 64 (2010).
   [doi:10.1017/S143192760999122X](https://doi.org/10.1017/S143192760999122X)

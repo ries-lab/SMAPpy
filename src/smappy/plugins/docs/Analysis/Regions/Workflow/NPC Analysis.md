@@ -1,6 +1,6 @@
 ---
 version: "1"
-covers: [smappy.chain.ChainPlugin.run, smappy.blocks.BlockPlugin.run, smappy.plugins.npc.NPCSegment.run, smappy.plugins.npc.npc_rois, smappy.roi_manager.core.ROIProject.evaluate, smappy.roi_manager.core.ROIProject.evaluations]
+covers: [smappy.chain.ChainPlugin.run, smappy.blocks.BlockPlugin.run, smappy.plugins.segment.SegmentRegions.run, smappy.plugins.npc.npc_rois, smappy.roi_manager.core.ROIProject.evaluate, smappy.roi_manager.core.ROIProject.evaluations]
 ---
 
 ## What it does
@@ -15,7 +15,7 @@ window.
 It is a [chain](plugin:Panels/Glossary) (also called a pipeline or
 workflow) -- the plugins it runs, one after the other, each with its own
 settings in a section of this panel -- rather than a plugin of its own:
-[NPC](plugin:Analysis/Regions/Find/NPC),
+[Segment regions](plugin:Analysis/Regions/Segment regions) (its ring template, preset *NPC*),
 [NPC Corners](plugin:Analysis/Measure/NPC Corners) and
 [NPC labelling efficiency](plugin:Analysis/Regions/Summarize/NPC labelling efficiency).
 Their pages explain the methods; this one only what running them together

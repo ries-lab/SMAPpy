@@ -137,7 +137,11 @@ class ROI:
     # uuid stays the key the results are stored under.
     number: int = 0
     polygon: Optional[list] = None
-    direction: Optional[list] = None  # two absolute xy endpoints
+    # named lines, ``{name: [[x0, y0], [x1, y1]]}`` in absolute nm, start
+    # then end: an orientation or a distance drawn by hand (SMAP's ``line1``
+    # and ``line2``, with names).  Replaced, never edited in place, as
+    # `annotations` is
+    lines: dict = field(default_factory=dict)
     use: bool = True
     comment: str = ""
     origin: dict = field(default_factory=lambda: {"method": "manual"})
@@ -157,12 +161,18 @@ class ROI:
     def from_dict(cls, saved: dict) -> "ROI":
         """An ROI as a file kept it.  Files from before the review flag went
         carry ``reviewed``: it was never shown in the GUI, where every ROI
-        counted as reviewed, so it is dropped and ``use`` alone decides."""
+        counted as reviewed, so it is dropped and ``use`` alone decides.
+        Files from before the named lines carry one ``direction``: it is the
+        line called ``direction``."""
         names = {f.name for f in fields(cls)}
         roi = cls(**{k: v for k, v in saved.items() if k in names})
         point(roi.center)
         if roi.polygon is not None:
             polygon_vertices(roi.polygon)
+        lines = {str(k): line_points(v) for k, v in (roi.lines or {}).items()}
+        if saved.get("direction") is not None and DIRECTION not in lines:
+            lines[DIRECTION] = line_points(saved["direction"])
+        roi.lines = lines
         return roi
 
 
@@ -175,6 +185,53 @@ class ROIStep:
     """One edit of the ROIs, and the ROIs as they were before it."""
     label: str
     rois: Dict[str, "ROI"]
+
+
+# The line a new project offers, and the name an old file's one line had.
+DIRECTION = "direction"
+
+
+def line_points(line) -> list:
+    """``[[x0, y0], [x1, y1]]`` as floats, or a ValueError."""
+    a = np.asarray(line, dtype=float)
+    if a.shape != (2, 2) or not np.all(np.isfinite(a)):
+        raise ValueError(f"a line is two points, start and end: {line!r}")
+    return a.tolist()
+
+
+def line_angle_length(line) -> tuple:
+    """A line's angle in degrees, start to end, and its length in nm.
+
+    The angle is SMAP's (``pos2angle``): ``atan2(dy, dx)``, -180 to 180,
+    counted from +x towards +y.  The images show y downwards, so a positive
+    angle turns clockwise on the screen."""
+    (x0, y0), (x1, y1) = np.asarray(line, dtype=float)
+    return (float(np.degrees(np.arctan2(y1 - y0, x1 - x0))),
+            float(np.hypot(x1 - x0, y1 - y0)))
+
+
+def line_columns(roi: "ROI") -> Dict[str, float]:
+    """An ROI's lines as numbers of its row: ``<name>_angle_deg`` and
+    ``<name>_length_nm``."""
+    out = {}
+    for name, line in roi.lines.items():
+        angle, length = line_angle_length(line)
+        out[f"{name}_angle_deg"] = angle
+        out[f"{name}_length_nm"] = length
+    return out
+
+
+def parse_line_names(text: str) -> List[str]:
+    """``"direction, axis"`` -> ``["direction", "axis"]``: commas or new
+    lines, repeats and blanks dropped.  A name is a column's prefix, so it
+    keeps to letters, digits and ``_`` (a space becomes ``_``)."""
+    names: List[str] = []
+    for word in text.replace("\n", ",").split(","):
+        word = "_".join(word.split())
+        word = "".join(c for c in word if c.isalnum() or c == "_")
+        if word and word not in names:
+            names.append(word)
+    return names
 
 
 # The lists a new project offers: one, so that the keys do something before
@@ -209,12 +266,17 @@ def annotation_lists_text(lists: Dict[str, List[str]]) -> str:
     return "\n".join(f"{name}: {', '.join(words)}" for name, words in lists.items())
 
 
-def annotation_columns(roi: ROI, values: Dict[str, Any]) -> Dict[str, str]:
-    """An ROI's keywords as columns of its row in the results table, named
-    after their lists -- ``annotation.<list>`` where a measurement already
-    has the name.  Text, so the numeric summaries pass over them."""
-    return {(name if name not in values else f"annotation.{name}"): keyword
-            for name, keyword in roi.annotations.items()}
+def annotation_columns(roi: ROI, values: Dict[str, Any]) -> Dict[str, Any]:
+    """What was said of an ROI by hand, as columns of its row in the results
+    table: its keywords, named after their lists -- ``annotation.<list>``
+    where a measurement already has the name -- as text, so the numeric
+    summaries pass over them; and its lines' angles and lengths
+    (`line_columns`), numbers, so Filter, Sort and the summaries read them."""
+    out: Dict[str, Any] = {(name if name not in values else f"annotation.{name}"): keyword
+                           for name, keyword in roi.annotations.items()}
+    out.update({(name if name not in values else f"annotation.{name}"): value
+                for name, value in line_columns(roi).items()})
+    return out
 
 
 def copy_rois(rois: Dict[str, "ROI"]) -> Dict[str, "ROI"]:
@@ -357,6 +419,8 @@ class ROIProject:
         # the keyword lists an ROI is annotated from (`ROI.annotations`)
         self.annotation_lists: Dict[str, List[str]] = {
             k: list(v) for k, v in DEFAULT_ANNOTATION_LISTS.items()}
+        # the names a line is drawn under (`ROI.lines`)
+        self.line_names: List[str] = [DIRECTION]
         # The per-region steps, a `chain.Block`: what the steps window edits
         # and runs, and what the ROI manager measures an ROI with.  It
         # travels with the project because the columns of a results table
@@ -463,6 +527,35 @@ class ROIProject:
         annotation -- and they show until it is given another."""
         self.annotation_lists = {str(k): [str(w) for w in v] for k, v in lists.items()}
 
+    def set_line_names(self, names: List[str]) -> None:
+        """New line names.  An ROI keeps a line whose name went, as it keeps
+        a keyword whose list went."""
+        self.line_names = parse_line_names(",".join(str(n) for n in names))
+
+    def set_line(self, roi_id, name: str, line) -> None:
+        """Draw the line ``name`` of an ROI; None removes it.  Undoable."""
+        roi = self.rois[roi_id]
+        line = None if line is None else line_points(line)
+        if roi.lines.get(name) == line:
+            return
+        verb = "Clear" if line is None else "Draw"
+        with self.edit(f"{verb} {name} of ROI {roi.number}"):
+            lines = {k: v for k, v in roi.lines.items() if k != name}
+            if line is not None:
+                lines[name] = line
+            roi.lines = lines                     # replaced: see `copy_rois`
+
+    def reverse_line(self, roi_id, name: str) -> bool:
+        """Swap a line's start and end (its angle turns by 180 degrees);
+        False when the ROI has no such line."""
+        line = self.rois[roi_id].lines.get(name)
+        if line is None:
+            return False
+        roi = self.rois[roi_id]
+        with self.edit(f"Reverse {name} of ROI {roi.number}"):
+            roi.lines = {**roi.lines, name: [line[1], line[0]]}
+        return True
+
     def add_roi(self, file_id, center, polygon=None, origin=None):
         if file_id not in self.sources:
             raise KeyError(file_id)
@@ -502,21 +595,30 @@ class ROIProject:
         self.next_number = start
 
     def move_roi(self, roi_id, center):
-        """Translate the entire ROI, including its polygon and direction line."""
+        """Translate the entire ROI, including its polygon and lines."""
         roi = self.rois[roi_id]
         center = point(center)
         delta = np.asarray(center) - roi.center
-        for name in ("polygon", "direction"):
-            if getattr(roi, name) is not None:
-                setattr(roi, name, (np.asarray(getattr(roi, name)) + delta).tolist())
+        if roi.polygon is not None:
+            roi.polygon = (np.asarray(roi.polygon) + delta).tolist()
+        roi.lines = {name: (np.asarray(line) + delta).tolist()
+                     for name, line in roi.lines.items()}
         roi.center = center
 
     def geometry(self, roi):
+        """The ROI's shape and lines, as its measurements' signature takes
+        them.  The line called ``direction`` keeps the key the one direction
+        had, and the others go under ``lines`` only when there are any, so
+        the signatures saved before named lines still match."""
         if roi.polygon is not None:
-            return {"center": roi.center, "polygon": roi.polygon,
-                    "direction": roi.direction}
-        return {"center": roi.center, "shape": self.shape, "size_nm": self.size_nm,
-                "direction": roi.direction}
+            out = {"center": roi.center, "polygon": roi.polygon}
+        else:
+            out = {"center": roi.center, "shape": self.shape, "size_nm": self.size_nm}
+        out["direction"] = roi.lines.get(DIRECTION)
+        others = {k: v for k, v in roi.lines.items() if k != DIRECTION}
+        if others:
+            out["lines"] = others
+        return out
 
     def region(self, roi) -> Region:
         """The ROI's shape, with this project's shared shape and size."""
@@ -740,10 +842,11 @@ class ROIProject:
         return known + [i for i in self.rois if i not in placed]
 
     def sort_rows(self) -> Dict[str, Dict[str, Any]]:
-        """What a sort or a filter reads of each ROI: the newest stored
-        values of every evaluation, current or not, named as in the results
-        table, and its keywords."""
+        """What a sort or a filter reads of each ROI: where it is (its
+        centre, ``roi_x_nm`` and ``roi_y_nm``, and ``in_drawn_roi``), the newest stored values of every evaluation,
+        current or not, named as in the results table, and its keywords."""
         from . import pipeline as pipeline_module
+        inside = self.in_drawn_roi()
         out = {}
         for roi_id, roi in self.rois.items():
             steps = {}
@@ -752,8 +855,66 @@ class ROIProject:
                 if entry and "values" in entry:
                     steps[label] = entry
             values = pipeline_module.merged_values({"steps": steps})
-            out[roi_id] = {**values, **annotation_columns(roi, values)}
+            place = {"roi_x_nm": float(roi.center[0]), "roi_y_nm": float(roi.center[1]),
+                     "in_drawn_roi": None if inside is None else inside[roi_id]}
+            out[roi_id] = {**place, **values, **annotation_columns(roi, values)}
         return out
+
+    def drawn_roi(self) -> Optional[Region]:
+        """The ROI drawn in the render window, where an ROI's centre can be
+        tested against it: None when nothing is drawn, or when the picture
+        is of other columns than the positions (photons against frame), on
+        which the ROIs' centres mean nothing."""
+        session = self.session
+        drawn = getattr(session, "roi", None)
+        if not isinstance(drawn, Region):
+            return None
+        axes = getattr(session, "axes", None)
+        if axes is not None and not getattr(axes(self.layer), "is_default", True):
+            return None
+        return drawn
+
+    def in_drawn_roi(self) -> Optional[Dict[str, bool]]:
+        """``{roi id: centre inside the drawn ROI}`` -- SMAP's UseSitesInROI
+        -- or None when there is no drawn ROI to test (`drawn_roi`).  An ROI
+        of a file the layer does not show is outside, whatever its centre:
+        files share coordinates, and the drawn ROI was drawn on the files
+        the picture shows."""
+        drawn = self.drawn_roi()
+        if drawn is None:
+            return None
+        shown = None
+        layers = getattr(self.session, "layers", None) or []
+        if layers:
+            lay = layers[min(self.layer, len(layers) - 1)]
+            shown = getattr(getattr(lay, "state", None), "files", None)
+        ids = list(self.rois)
+        if not ids:
+            return {}
+        centers = np.array([self.rois[i].center for i in ids], dtype=float)
+        inside = np.asarray(drawn.mask(centers[:, 0], centers[:, 1]), dtype=bool)
+        out = {}
+        for roi_id, ok in zip(ids, inside):
+            source = self.sources.get(self.rois[roi_id].file_id)
+            if shown is not None and (source is None or source.number not in shown):
+                ok = False
+            out[roi_id] = bool(ok)
+        return out
+
+    def rows_of(self, roi_ids) -> np.ndarray:
+        """Which rows of the session's table lie in any of these ROIs, as a
+        mask: each ROI's shape in its own file, through that file's index,
+        no filter deciding membership (`docs/regions.md`)."""
+        locs = self.session.locs
+        inside = np.zeros(len(locs), dtype=bool)
+        for roi_id in roi_ids:
+            roi = self.rois[roi_id]
+            source = self.sources[roi.file_id]
+            ungrouped = self.state(roi.file_id).tables.ungrouped
+            found = rows_in(ungrouped.locs, ungrouped.index, self.region(roi))
+            in_file = self._file_mask(locs, source.number)
+            inside[found if in_file is None else np.flatnonzero(in_file)[found]] = True
+        return inside
 
     def sort_columns(self) -> List[str]:
         """The names a sort or a filter can use: every measured column, then
@@ -782,6 +943,9 @@ class ROIProject:
         nearly always a typing error that would exclude every ROI."""
         from .order import condition
         test, names = condition(text)
+        if "in_drawn_roi" in names and self.drawn_roi() is None:
+            raise ValueError("in_drawn_roi needs an ROI drawn in the render window, "
+                             "on the picture of positions")
         rows = self.sort_rows()
         known = set(self.sort_columns())
         unknown = [n for n in names if n not in known]
@@ -1116,9 +1280,9 @@ class ROIProject:
         preview of a replacing run proposes what the run will add.
         """
         from ..plugins import settings_from, settings_values
-        from ..plugins.roi import DensityPeaks
+        from ..plugins.segment import SegmentRegions
         if plugin is None:
-            plugin = DensityPeaks()
+            plugin = SegmentRegions()
         if settings is None:
             settings = settings_from(plugin.Settings, parameters or {})
         state = self.state(file_id)
@@ -1311,6 +1475,14 @@ class ROIProject:
         found = rows_in(ungrouped.locs, ungrouped.index, region)
         in_file = self._file_mask(session.locs, source.number)
         rows = found if in_file is None else np.flatnonzero(in_file)[found]
+        # linked here if a layer shows blinks and nothing defers it;
+        # otherwise offered only where it is current.  Before the rows are
+        # cut: linking writes `group_id` onto the localizations, and a cut
+        # taken first lacked it, so the blinks could not be traced back
+        locsets = {i: (session.tables.available() if lay.grouped else
+                       session.tables.peek_grouped() if session.tables.is_current
+                       else None)
+                   for i, lay in enumerate(session.layers) if not lay.is_image}
         locs = session.locs[rows]
         tables = {}
         for i, lay in enumerate(session.layers):
@@ -1319,10 +1491,7 @@ class ROIProject:
             mask = np.asarray(lay.selection(i).mask, dtype=bool)
             entry = {"ungrouped": (locs, Selection(mask[rows], layer=i, roi=region,
                                                    name=f"{lay.name}, {region}"))}
-            # linked here if a layer shows blinks and nothing defers it;
-            # otherwise offered only where it is current
-            locset = (session.tables.available() if lay.grouped else
-                      session.tables.peek_grouped() if session.tables.is_current else None)
+            locset = locsets[i]
             if locset is not None:
                 keep = self._file_mask(locset.locs, source.number)
                 g = rows_in(locset.locs, locset.index, region, keep)
@@ -1343,6 +1512,7 @@ class ROIProject:
                 "preview_nm": self.preview_nm, "tile_nm": self.tile_nm,
                 "navigation": self.navigation,
                 "annotation_lists": self.annotation_lists,
+                "line_names": self.line_names,
                 "order": [i for i in self.order if i in self.rois],
                 "sources": [{"id": s.id, "number": s.number, "name": s.name}
                             for s in self.sources.values()],
@@ -1363,6 +1533,7 @@ class ROIProject:
         self.tables = {}
         self.navigation = {}
         self.set_annotation_lists(DEFAULT_ANNOTATION_LISTS)
+        self.line_names = [DIRECTION]
         self.order = []
         from ..chain import Block
         self.block = Block()
@@ -1378,6 +1549,7 @@ class ROIProject:
         self.set_tiles(doc.get("tile_nm", 0.0) or 0.0)
         self.navigation = dict(doc.get("navigation", {}))
         self.set_annotation_lists(doc.get("annotation_lists", DEFAULT_ANNOTATION_LISTS))
+        self.set_line_names(doc.get("line_names", [DIRECTION]))
         self.order = [str(i) for i in doc.get("order", [])]
         # ids the file used, mapped onto the files this session has
         by_number = {s.number: s for s in self.sources.values()}

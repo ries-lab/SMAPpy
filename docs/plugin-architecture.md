@@ -59,7 +59,7 @@ that is ever wanted it is one more root, not a new mechanism.
 
 At startup the scanner walks the roots and *parses* each `.py` with `ast`
 without executing it, reading the class name, its `@register` argument, and any
-literal `name`, `description`, `favorite` and `per_region` assignments -- falling
+literal `name`, `description` and `per_region` assignments -- falling
 back to the first line of the docstring for the description.  The result is a
 `PluginRef`:
 
@@ -110,8 +110,8 @@ because the GUI builds the context on its thread and hands it to a worker --
 reading them later would race a live fit rebinding them.  A processor still returns `Result(locs=...)`; a
 loader calls `ctx.session.add_file(...)`; an ROI finder returns
 `Result(data={"rois": [...]})`.  One base class, one panel widget, one tree --
-so loaders, savers, the simulator and the ROI plugins all get favourites,
-parameter forms, validation and state saving for free.
+so loaders, savers, the simulator and the ROI plugins all get a place in
+the tabs, parameter forms, validation and state saving for free.
 
 Plugins that can be called once per ROI say so with a class attribute rather
 than a different base class:
@@ -159,14 +159,17 @@ calibration buttons -- so File and Analysis are nothing but ordinary tabs, and a
 special one costs a header, not a class.
 
 Because a fresh install would otherwise be a blank window, SMAPpy ships a
-default workspace.  It is *seeded* rather than listed: each shipped tab names a
-path prefix used once, at first run, to pin the installed plugins that ask for
-it (`Plugin.favorite`).  So the defaults adapt to what is installed, and after
-that run the workspace is data and a tab is whatever the user made of it -- the
-prefix has no further meaning.  *Empty by default* applies to tabs the user
-adds.  This also gives *Reset tabs to defaults* for free.
+default workspace: `data/default.gui.yaml`, a GUI file like any the user
+saves, read whenever there is no GUI file to open and by *Reset tabs to
+defaults*, less the plugins that are not installed.  It used to be *seeded* --
+each shipped tab a path prefix, filled with the installed plugins that asked
+to be pinned (`Plugin.favorite`) -- and that was dropped (2026-10): which
+plugins a lab sees first is a choice about the lab, not a property a plugin
+declares, and a list is the one thing anybody can read and change.  A new
+plugin is in the tree at once and in the shipped tabs when the file names
+it.  *Empty by default* applies to tabs the user adds.
 
-### The tab shows favourites; a chooser shows the tree
+### The tab shows the pinned plugins; a chooser shows the tree
 
 The tab widget has one mode: the curated list, as collapsible sections in the
 user's order, one open at a time, showing only the plugin's main parameters
@@ -189,8 +192,9 @@ startup, and a workspace naming plugins that have gone is pruned with a line
 saying which.
 
 The Regions tab -- *Regions* since 2026-10-11, `docs/regions.md` -- is one of
-these, holding `Analysis/Regions/Find/*` and `Analysis/Regions/Summarize/*`
-pins (`ROIManager/Segment/*` and `ROIManager/Analyze/*` until then) --
+these, holding `Analysis/Regions/Segment regions` and `Analysis/Regions/Summarize/*`
+pins (`ROIManager/Segment/*` and `ROIManager/Analyze/*` until 2026-10-11,
+`Analysis/Regions/Find/*` until 2026-10-15) --
 ordinary run-once plugins -- plus its header,
 which carries the geometry every ROI shares and the ways into the two windows.
 

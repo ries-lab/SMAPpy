@@ -7,7 +7,7 @@ covers: [smappy.plugins.roi.histograms, smappy.roi_manager.core.ROIProject.resul
 
 The ROI manager works in three steps: [ROIs](plugin:Panels/Glossary)
 (regions of interest, one around each copy of a structure) are found
-([Density Peaks](plugin:Analysis/Regions/Find/Density Peaks), or by hand), each
+([Segment regions](plugin:Analysis/Regions/Segment regions), or by hand), each
 ROI is measured by the per-region steps, plugins that run once per ROI (such as
 [Localization Statistics](plugin:Analysis/Measure/Localization Statistics)), and the collection of
 results is analysed.  The per-region steps leave a *results table*: one row
@@ -17,7 +17,7 @@ Histograms is the simplest analysis of that table.  It draws, for each
 column, how the values are distributed over the ROIs.  The table may as
 well be one of clusters: a block of a [chain](plugin:Panels/Glossary)
 (plugins run one after another as one) over `cluster_id` -- the
-clusters [DBSCAN](plugin:Analysis/Regions/Find/DBSCAN) found -- leaves a row
+clusters [Find clusters](plugin:Analysis/Regions/Find clusters) found -- leaves a row
 per cluster, and *results from* offers it as *per cluster_id: ...*.  ROIs and
 clusters are both [regions](plugin:Panels/Glossary): sets of localizations
 measured together.  That is where a population shows itself: the typical

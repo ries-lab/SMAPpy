@@ -37,11 +37,16 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from .metadata import CameraMetadata
 
-#: parameters that end up in `CameraMetadata` and so reach the fit.  Anything
-#: else in the database is carried, shown and ignored by the fitter -- a frame
-#: interval is worth knowing and is not something the fit reads.
+#: parameters that end up in `CameraMetadata`, and so reach the fit and the
+#: table's ``metadata["camera"]``.  Anything else in the database is carried,
+#: shown and ignored.  The exposure and the frame time are not read by the
+#: fit; they are kept with the table, where everything in seconds reads them.
 FITTING_PARAMETERS = ("conversion", "offset", "pixelsize_um", "em_on", "emgain",
-                      "exposure_ms", "roi")
+                      "exposure_ms", "frame_time_ms", "roi")
+
+#: names a parameter was stored under before, read as the current one: a
+#: user's ``cameras.json`` written before the frame time had its name
+RENAMED = {"frame_interval_ms": "frame_time_ms"}
 
 DATA = Path(__file__).resolve().parent / "data"
 SHIPPED = DATA / "cameras.json"
@@ -264,7 +269,7 @@ class Camera:
                       Parameter(tag=str(identify.get("tag", "")),
                                 read=str(identify.get("match", "exact")),
                                 argument=identify.get("value", ""))),
-            parameters={str(k): Parameter.from_dict(v)
+            parameters={RENAMED.get(str(k), str(k)): Parameter.from_dict(v)
                         for k, v in (raw.get("parameters") or {}).items()},
             states=[State.from_dict(s) for s in (raw.get("states") or [])],
         )
@@ -503,9 +508,9 @@ MODE_TAGS = ("ReadoutMode", "ReadoutRate", "Readout Rate", "PixelReadoutRate",
              "Sensitivity/DynamicRange", "ScanMode", "ReadoutSpeed")
 
 #: the parameters the editor shows, in its order; anything else an entry
-#: carries (a frame interval) is kept as it is
+#: carries is kept as it is
 EDITED = ("conversion", "offset", "pixelsize_um", "em_on", "emgain",
-          "exposure_ms", "roi")
+          "exposure_ms", "frame_time_ms", "roi")
 
 
 def device_of(metadata: Dict[str, Any]) -> str:
@@ -579,6 +584,9 @@ def draft(metadata: Dict[str, Any], name: str = "") -> Camera:
         parameters["exposure_ms"] = Parameter(tag="Exposure-ms", read="number")
     elif has("Exposure"):
         parameters["exposure_ms"] = Parameter(tag="{prefix}-Exposure", read="number")
+    if has("ActualInterval-ms"):
+        parameters["frame_time_ms"] = Parameter(tag="{prefix}-ActualInterval-ms",
+                                                read="number")
     if "ROI" in metadata:
         parameters["roi"] = Parameter(tag="ROI", read="numbers")
 

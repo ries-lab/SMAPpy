@@ -58,6 +58,12 @@ dependencies = [
     # OpenType maths font, pure Python (~3.5 MB with the font).  Optional in
     # practice -- without it `smappy.docs` falls back on matplotlib's mathtext
     "ziamath>=0.13",
+    # Export Stack's MP4: H.264 through the ffmpeg binary it ships (a 29 MB
+    # wheel).  A default, not an extra, for the same reason as the GUI: a
+    # movie export that fails until something else is installed is not the
+    # whole story.  ffmpeg runs as a separate program, so the licence of
+    # its build does not reach smappy's.
+    "imageio-ffmpeg>=0.4",
 ]
 
 [project.urls]
@@ -68,6 +74,9 @@ Source = "https://github.com/ries-lab/SMAPpy"
 # matplotlib is a base dependency now, so `drift` is satisfied by a plain
 # install; it stays because the docs name it.
 image = ["pillow>=9.0"]        # save_image, for a picture without a window
+# Empty: imageio-ffmpeg is in `dependencies` above; kept so that
+# `smappy-smlm[movie]`, written down while it was an extra, still installs.
+movie = []
 # Drift correction itself needs nothing: COMET is vendored and its cost function
 # is compiled with the package.  This extra is only COMET's diagnostic plots,
 # which are all behind flags.
@@ -87,6 +96,11 @@ gpu = ["wgpu>=0.19"]
 # --voice: Piper, an offline neural voice; the voice model is a download of
 # its own (see smappy.tutorial.voice).
 tutorial = ["playwright>=1.40", "piper-tts>=1.2"]
+# HDBSCAN in Find clusters (`plugins/clusters.py`): the hdbscan package, whose
+# Boruvka spanning tree is 20x faster than scikit-learn's Prim's at 100 k
+# localizations and scales where it does not.  DBSCAN and Voronoi need
+# nothing beyond the base.
+clusters = ["hdbscan>=0.8.44"]
 # What the test suite needs beyond the package: `pip install -e .[test]`.
 # pytest-xdist is for the whole suite before a PR: `pytest tests --slow -n auto`.
 test = ["pytest>=7", "pytest-timeout>=2.1", "pytest-xdist>=3"]
@@ -122,7 +136,8 @@ where = ["src"]
 # the camera database: a file that is read at run time, so it has to be in the
 # wheel and not only in the checkout
 # and the simulator's built-in structures, likewise, and the window icon
-"smappy" = ["data/*.json", "data/structures/*.yaml", "data/microscopes/*.yaml",
+"smappy" = ["data/*.json", "data/*.gui.yaml", "data/structures/*.yaml", "data/microscopes/*.yaml",
+            "data/csv_conversions/*.yaml", "data/segment_presets/*.yaml",
             "data/icons/*.svg", "data/icons/*.png"]
 # the plugins' pages, read by the Help window (`smappy.docs`), one folder per
 # level of the menu tree

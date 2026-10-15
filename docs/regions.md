@@ -17,8 +17,11 @@ annotates and organises ROIs; it is not the only place they can be measured.
   session).  Its shape is a `regions.Region` (rect, polygon, line, circle):
   its own polygon, or the project's circle or square of `size_nm` round its
   centre, worked out when asked for (`ROI.region`) so that changing the
-  project's shape is one edit for every ROI.  *direction*, *use*,
-  *comment* and *origin* are annotations beside it.  The ROIs a run covers
+  project's shape is one edit for every ROI.  Its named *lines*
+  (`ROI.lines`, names from `ROIProject.line_names`), keywords, *use*,
+  *comment* and *origin* are annotations beside it; the lines' angles and
+  lengths and the keywords are columns of its results row
+  (`core.annotation_columns`).  The ROIs a run covers
   are the **included** ones: *use* ticked.  `ROI.number`
   is given once and never reused, so ROI 5 stays 5 in the list, in a
   `roi_id` column and in the results after ROI 3 is deleted.
@@ -118,6 +121,14 @@ signature its freshness is checked by, and the error that took its place
 where the step failed.  `Result.data` and the figures stay with the run that
 made them.
 
+A step whose arrays are curves on one x axis is summarised over regions by
+*Summarize/Curves* (`plugins/curves.py`): the mean and spread per x, a line
+per ROI keyword.  A curve that is a ratio of counts should be pooled, not
+averaged; a plugin that hands back the numerator and denominator among its
+arrays implements `Plugin.pool(sums, x)`, which gets every array summed over
+the regions and returns the curves made from those sums (Spatial statistics:
+g, K and L - r from pairs and expected pairs).
+
 ### Figures
 
 A row of an ROI also keeps what `Plugin.keep` returns, and `Plugin.restore`
@@ -185,11 +196,12 @@ not put the results they came from out of date.
 
 A clusterer writes **`cluster_id`** (1, 2, ... by size, 0 for none) and
 **`n_in_cluster`** onto every localization, as recipes with the rule `max`
-so a blink keeps its cluster (`plugins/clusters.py`, DBSCAN).  Filtering
+so a blink keeps its cluster (`plugins/clusters.py`, *Find clusters*: DBSCAN,
+Voronoi or HDBSCAN).  Filtering
 clusters by size is then an ordinary filter on `n_in_cluster`, and a block
 repeats over `cluster_id`.  A cluster carries no annotations: to review one,
-*Column to ROIs* makes an ROI of each id of any column -- so every clusterer
-gets it and none makes ROIs itself -- with at least 10 localizations by
+*Segment regions* (*from an id column*) makes an ROI of each id of any
+column -- so every clusterer gets it and none makes ROIs itself -- with at least 10 localizations by
 default, shaped as the cluster's convex hull, or the project's circle or
 square on its centre.
 
@@ -197,10 +209,11 @@ square on its centre.
 
 ```
 Analysis/Measure/...                every measurement: on the view, per ROI, per cluster
-Analysis/Regions/Find/...           Density Peaks and NPC (ROIs), DBSCAN (cluster_id)
+Analysis/Regions/Segment regions    ROIs: a ring template, density peaks, or an id column
+Analysis/Regions/Find clusters      DBSCAN, Voronoi or HDBSCAN (cluster_id)
 Analysis/Regions/Summarize/...      Histograms, NPC labelling efficiency: read a region table
-Analysis/Regions/Column to ROIs     an ROI per id of a column
 Analysis/Regions/Regions to column  what was measured per region onto the table
+Analysis/Regions/Average ROIs       the used ROIs centred, turned and superimposed: a new file
 Analysis/Regions/Workflow/...       NPC Analysis, a shipped chain with a block
 ```
 

@@ -320,6 +320,9 @@ class ControlWindow(QMainWindow):
         # window asks single or dual itself, and opens as it was left
         session.window_openers["bead calibration"] = \
             lambda settings=None: self.open_calibration()
+        # the File tab's Load line (`Plugin.window`): File > Open, or Add
+        session.window_openers["open files"] = \
+            lambda settings=None: self.open(append=bool(getattr(settings, "append", False)))
         # a fitter whose file's camera is not in the database offers this
         # (`Plugin.describe`), opened on the file that fitter is set to
         session.window_openers["camera editor"] = self.open_camera_editor
@@ -329,6 +332,12 @@ class ControlWindow(QMainWindow):
         # Line Profile with no line ROI offers this (`LineProfile.describe`):
         # the render window, drawing a line
         session.window_openers["draw line"] = lambda settings=None: self.draw_line()
+        # Transform with given settings: Register layers' *apply*, with the
+        # named transformation it measured (`transform.settings_for`)
+        session.window_openers["transform"] = self.open_transform
+        # the picture windows' *Save image...*: Export Image, set to the
+        # window it was asked from (`plugins.file.image_settings_for`)
+        session.window_openers["export image"] = self.open_export_image
         help_ = _add_menu(self.menuBar(), "Help", self)
         self._action(help_, "Plugin documentation", None, self.show_plugin_docs)
         help_.addSeparator()
@@ -845,6 +854,30 @@ class ControlWindow(QMainWindow):
         if path:
             self.open_plugin_window(path)
 
+    def open_transform(self, settings=None) -> None:
+        """*Transform* in its window, set to ``settings`` when given."""
+        from ..plugins.transform import PATH
+        window = self.open_plugin_window(PATH)
+        if window is not None and settings is not None:
+            window.panel.form.set(settings)
+
+    def open_export_image(self, settings=None) -> None:
+        """*Export Image* in its window, for the picture window ``settings``
+        names.  Opened the first time it takes them whole; after that it
+        keeps what was chosen in it -- what to save, the bars, the pixel --
+        and takes only the window, and the file if it had none."""
+        from ..plugins.file import IMAGE_PATH
+        fresh = IMAGE_PATH not in self._plugin_windows
+        window = self.open_plugin_window(IMAGE_PATH)
+        if window is None or settings is None:
+            return
+        if not fresh:
+            current = window.panel.form.value()
+            current.view = settings.view
+            current.path = current.path or settings.path
+            settings = current
+        window.panel.form.set(settings)
+
     def open_plugin_window(self, path: str):
         """One plugin in a window of its own, without pinning it to a tab.
 
@@ -1215,13 +1248,18 @@ class ControlWindow(QMainWindow):
 
     @staticmethod
     def _needs_mapping(path: str) -> bool:
-        """A csv whose headers do not say where x and y are."""
+        """A csv whose headers do not say where x and y are, and that no
+        saved conversion knows (`io.conversions`)."""
+        from ..io.conversions import conversion_for
         try:
             if "mapping" not in reader_for(path).needs:
                 return False
         except ValueError:
             return False
-        guessed = set(guess_csv_mapping(csv_columns(Path(path))[0]).values())
+        headers = csv_columns(Path(path))[0]
+        conv = conversion_for(headers)
+        guessed = set(guess_csv_mapping(headers).values()) \
+            | set((conv.mapping if conv else {}).values())
         return not {"x_nm", "y_nm"} <= guessed
 
     # ---------------------------------------------------------------- drops

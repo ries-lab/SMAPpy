@@ -52,7 +52,7 @@ from typing import Optional, Tuple
 
 import numpy as np
 
-from .drift import Drift, _grouped, _positions_nm, _selection
+from .drift import REFERENCES, Drift, _grouped, _positions_nm, _selection
 from .locs import Localizations
 from .params import param
 
@@ -132,6 +132,13 @@ class RCCSettings:
                                    help="leave the zero-shift sample out of "
                                         "the axial peak search",
                                    advanced=True)
+    # "as estimated" is zero mean over the time windows (`_solve`'s gauge);
+    # see `DriftSettings.reference`
+    reference: str = param("as estimated", label="reference",
+                           choices=REFERENCES,
+                           help="the frame the drift is zero at; first or "
+                                "last frame for consecutive files",
+                           advanced=True)
 
 
 def estimate_drift_rcc(locs: Localizations, settings: Optional[RCCSettings] = None,
@@ -186,7 +193,8 @@ def estimate_drift_rcc(locs: Localizations, settings: Optional[RCCSettings] = No
 
     per_window = np.column_stack([dx, dy, dz])
     drift = _to_frames(centres[occupied], per_window, n_frames)
-    return Drift(drift, None, n_used=len(x), method="rcc")
+    return Drift(drift, None, n_used=len(x), method="rcc").referenced(
+        settings.reference)
 
 
 # ------------------------------------------------------------------- correlating

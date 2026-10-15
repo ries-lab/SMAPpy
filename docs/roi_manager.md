@@ -77,9 +77,10 @@ blinks.  The merge settings are session-wide, under *merge settings...* beside
 
 ## Find, review, measure, histogram
 
-Candidates are found by the **Density Peaks** segmenter
-(`Analysis/Regions/Find/Density Peaks`, pinned in the Regions tab), which operates on
-the current file's filtered localizations. It
+Candidates are found by **Segment regions** (`Analysis/Regions/Segment
+regions`, pinned in the Regions tab; its other methods are a ring template
+for nuclear pores and an ROI per id of a column).  Its *density peaks*
+method, the default, operates on the current file's filtered localizations. It
 bins coordinates into a density image, smooths it, finds local peaks, recenters
 on nearby localizations, and suppresses nearby centers. Defaults target compact
 structures of about 100 nm diameter:

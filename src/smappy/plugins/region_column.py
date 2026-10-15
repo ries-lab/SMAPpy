@@ -15,9 +15,12 @@ columns itself at the end of its run (*write values*), so a chain keeps them
 current; this plugin is for results already there.
 
 The ROIs' own numbers (`roi_id`, what *ROI to column* used to write) are one
-of the values: of the ROIs, with or without an evaluation.
+of the values: of the ROIs, with or without an evaluation.  So are their
+lines' angles and lengths (`direction_angle_deg`, ...), drawn by hand and no
+evaluation's: they need none named in *results from*.
 
-**Column to ROIs** is the other direction: an ROI of the ROI manager for every
+**Column to ROIs** -- now *Segment regions*' method *from an id column*
+(`segment.py`), with `column_regions` here -- is the other direction: an ROI of the ROI manager for every
 id of a column (a cluster, whoever found it) with enough localizations, to
 look at, review and annotate.  It used to be part of DBSCAN; on its own, any
 clusterer -- a plugin dropped in, or ids read from a file -- gets it.  By
@@ -37,7 +40,7 @@ import numpy as np
 
 from . import Context, FormState, Plugin, Result, param, register
 from ..region_runs import VALUE_RULES
-from .roi import auto_only, replace_param
+from .roi import auto_only
 
 # what *results from* is when it is empty: the ROIs, without an evaluation
 NUMBERS = "the ROIs' numbers"
@@ -50,7 +53,8 @@ class RegionColumnSettings:
                              "an id column; empty: the ROIs, for their numbers")
     values: str = param("", label="values",
                         help="comma separated; empty: every number the "
-                             "measurement has; roi_id: the ROI's number")
+                             "measurement has; roi_id: the ROI's number; "
+                             "<line>_angle_deg, <line>_length_nm: its lines")
     prefix: str = param("", label="prefix", advanced=True,
                         help="put before each column's name")
     merge: str = param("last", label="overlaps", choices=VALUE_RULES, advanced=True,
@@ -71,6 +75,19 @@ def rows_values(rows: List[Dict[str, Any]], names: List[str]) -> Dict[str, Dict[
                          f"there is {', '.join(numeric) or 'none'}")
     return {k: {str(r["roi_id"]): r[k] for r in rows
                 if isinstance(r.get(k), (int, float))} for k in wanted}
+
+
+def own_rows(project) -> List[Dict[str, Any]]:
+    """The numbers the included ROIs carry themselves, with no evaluation:
+    their lines' angles and lengths (`core.line_columns`)."""
+    from ..roi_manager.core import line_columns
+    out = []
+    for roi_id in project.ordered_ids():
+        roi = project.rois[roi_id]
+        if roi.use and roi.lines:
+            out.append({"roi_id": roi.number, "file_id": roi.file_id,
+                        **line_columns(roi)})
+    return out
 
 
 @register("Analysis/Regions/Regions to column")
@@ -117,8 +134,15 @@ class RegionsToColumn(Plugin):
                 if measured or not names:
                     values = rows_values(region_results.rows(ctx, ev), measured)
             elif measured:
-                raise ValueError(f"{', '.join(measured)}: name the measurement that "
-                                 "measured them in *results from*")
+                own = own_rows(ctx.rois)
+                drawn = {k for r in own for k in r if k not in ("roi_id", "file_id")}
+                unknown = [n for n in measured if n not in drawn]
+                if unknown:
+                    raise ValueError(f"{', '.join(unknown)}: name the measurement "
+                                     "that measured them in *results from*"
+                                     + (f"; the ROIs' lines give {', '.join(sorted(drawn))}"
+                                        if drawn else ""))
+                values = rows_values(own, measured)
         out, members = write_values(ctx, ctx.locs, regions, values, settings.merge,
                                     {"source": source or NUMBERS}, settings.prefix,
                                     numbers=numbers)
@@ -147,7 +171,6 @@ class ColumnROIsSettings:
     outline: bool = param(True, label="the cluster's own outline",
                           help="each ROI the convex hull of its cluster; off: only "
                                "the centre, with the ROI manager's circle or square")
-    replace: bool = replace_param()
 
 
 def hull(xy: np.ndarray) -> Optional[List[List[float]]]:
@@ -194,55 +217,3 @@ def column_regions(locs, column: str, min_size: int = 1, outline: bool = True
                     "polygon": hull(xy) if outline else None,
                     "file": int(files[members[0]])})
     return out
-
-
-@register("Analysis/Regions/Column to ROIs")
-class ColumnToROIs(Plugin):
-    """Makes an ROI of every region an id column names, such as each cluster."""
-
-    Settings = ColumnROIsSettings
-    changes_locs = False
-    # an id column is the localizations', and so is a region's outline
-    grouping = "ungrouped"
-    version = "1"
-
-    def run(self, ctx: Context, settings: ColumnROIsSettings) -> Result:
-        if ctx.per_region:
-            raise ValueError("ROIs cannot be made inside a block: make them of "
-                             "the column after it")
-        project = ctx.rois
-        if project is None:
-            raise ValueError("there is no ROI manager project to add ROIs to")
-        sources = {getattr(s, "number", 0): s.id for s in project.sources.values()}
-        if not sources:
-            raise ValueError("the ROI manager has no file to add ROIs to")
-        column = settings.column.strip()
-        outline = settings.outline
-        found = column_regions(ctx.locs, column, settings.min_size, outline)
-        made, flat = [], 0
-        with project.edit(f"{self.name}: ROIs") as step:
-            replaced = []
-            if settings.replace:
-                replaced = [r.id for r in project.rois.values()
-                            if (r.origin or {}).get("method") == self.path
-                            and (r.origin or {}).get("column") == column]
-                for roi_id in replaced:
-                    project.rois.pop(roi_id, None)
-            for region in found:
-                if outline and region["polygon"] is None:
-                    flat += 1                   # no hull: the centre, as without
-                file_id = sources.get(region["file"], next(iter(sources.values())))
-                made.append(project.add_roi(
-                    file_id, region["center"], polygon=region["polygon"],
-                    origin={"method": self.path, "column": column,
-                            "cluster": region["id"],
-                            "localizations": int(len(region["rows"]))}))
-            step.label = f"{self.name}: {len(made)} ROIs" + (
-                f" for {len(replaced)}" if replaced else "")
-        text = f"{len(made)} ROIs of {column}, from {settings.min_size} localizations"
-        if replaced:
-            text += f", replacing {len(replaced)}"
-        if flat:
-            text += f"; {flat} with no outline (on a line) got the ROI manager's shape"
-        return Result(text=text, settings=settings, rois=made,
-                      values={"rois": len(made)})

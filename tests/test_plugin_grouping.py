@@ -118,8 +118,11 @@ def test_a_loader_on_a_grouped_layer_is_not_refused_its_new_table():
 
 def test_dbscan_on_blinks_still_writes_onto_every_localization():
     session = a_session()
-    cls = plugins.get("Analysis/Regions/Find/DBSCAN")
-    session.run(cls(), cls.Settings(radius_nm=60.0, neighbours=5, use_z=False))
+    cls = plugins.get("Analysis/Regions/Find clusters")
+    settings = cls.Settings()
+    settings.dbscan.radius_nm, settings.dbscan.neighbours = 60.0, 5
+    settings.dbscan.use_z = False
+    session.run(cls(), settings)
     assert "cluster_id" in session.locs and "(blinks)" in session.history[-1]["text"]
     assert len(session.locs["cluster_id"]) == len(session.locs)
     # a blink's localizations share its cluster
@@ -132,8 +135,8 @@ def test_dbscan_on_blinks_still_writes_onto_every_localization():
 def test_every_shipped_plugin_that_changes_the_table_reads_the_localizations():
     """A table change from the grouped table is refused, so a plugin that
     makes one either asks for the ungrouped table or maps blinks back
-    itself -- DBSCAN, through `Context.ungrouped`."""
-    maps_back = {"Analysis/Regions/Find/DBSCAN"}
+    itself -- Find clusters and Neighbourhood, through `Context.ungrouped`."""
+    maps_back = {"Analysis/Regions/Find clusters", "Analysis/Process/Neighbourhood"}
     for path, ref in plugins.refs().items():
         cls = plugins.get(path)
         takes_input = not path.startswith(plugins.SOURCES)

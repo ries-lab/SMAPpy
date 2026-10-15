@@ -5,7 +5,7 @@ import pytest
 
 from smappy.locs import Localizations
 from smappy.group import GroupSettings
-from smappy.roi_manager import DensityPeaks, Histograms
+from smappy.roi_manager import Histograms
 from smappy.roi_manager.pipeline import Step, errors, merged_values
 from smappy.plugins.roi import HistogramSettings, histograms
 from test_roi_session import rois_of, set_bounds              # noqa: E402
@@ -73,12 +73,12 @@ def test_statistics_use_and_stale_results():
 def test_polygon_ignores_global_size_but_translation_moves_all_geometry():
     p, s = rois_of(table([0, 10, 1000]))
     roi = p.add_roi(s.id, [0, 0], polygon=[[-20, -20], [20, -20], [20, 20], [-20, 20]])
-    roi.direction = [[0, 0], [10, 0]]
+    roi.lines = {"direction": [[0, 0], [10, 0]]}
     p.evaluate()
     p.set_geometry(500, 'square')
     assert not p.stale_steps(roi.id)
     p.move_roi(roi.id, [1000, 0])
-    assert roi.direction == [[1000, 0], [1010, 0]]
+    assert roi.lines == {"direction": [[1000, 0], [1010, 0]]}
     assert p.indices(roi).tolist() == [2]
     assert p.stale_steps(roi.id)
 
@@ -231,7 +231,7 @@ def test_the_default_histograms_draw_every_number_the_statistics_gave():
     drawn = histograms(p.results(), HistogramSettings(bins=10))
     assert set(drawn) == {'n_localizations', 'mean_photons', 'median_photons',
                           'photons_n0', 'mean_precision_nm', 'median_precision_nm',
-                          'sigma_c_nm', 'on_time_frames', 'n_blinks'}
+                          'sigma_c_nm', 'on_time_frames', 'on_time_s', 'n_blinks'}
 
 
 def test_results_live_in_a_table_per_evaluation_and_runs_are_only_a_log():

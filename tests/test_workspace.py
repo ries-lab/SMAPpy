@@ -7,7 +7,7 @@ from smappy.workspace import Instance, Tab, Workspace, load
 COMET = "Analysis/Drift/COMET"
 RCC = "Analysis/Drift/RCC"
 STATS = "Analysis/Measure/Localization Statistics"
-DBSCAN = "Analysis/Regions/Find/DBSCAN"
+FIND_CLUSTERS = "Analysis/Regions/Find clusters"
 ROI_COLUMN = "Analysis/Regions/Regions to column"
 
 
@@ -39,31 +39,43 @@ def test_moving_stops_at_the_ends():
     assert not tab.move(first.id, 1)
 
 
-def test_the_default_workspace_is_seeded_from_what_is_installed():
-    """By rule, not by list: a new plugin lands in its tab without a line here."""
+def test_the_default_workspace_is_the_shipped_gui_file():
+    """A list, not a rule: the tabs and pins of data/default.gui.yaml."""
     ws = Workspace.default()
     assert [t.name for t in ws.tabs] == ["File", "Localize", "Render", "Analysis", "Regions"]
-    refs = plugins.refs()
-    favourites = {path for path, ref in refs.items() if ref.favorite}
-    # the Analysis tab is every favourite under Analysis/ but the regions
     analysis = next(t for t in ws.tabs if t.name == "Analysis")
-    assert {i.plugin for i in analysis.instances} == {
-        path for path in favourites
-        if path.startswith("Analysis/") and not path.startswith("Analysis/Regions/")}
-    assert {COMET, RCC, STATS} <= {i.plugin for i in analysis.instances}
+    assert {COMET, RCC, STATS, "Analysis/Measure/Histogram"} <= \
+        {i.plugin for i in analysis.instances}
     assert next(t for t in ws.tabs if t.name == "Render").kind == "render"
-    # the regions have their tab, finding before summarising
     regions = next(t for t in ws.tabs if t.name == "Regions")
+    assert regions.header == "roi"
     pinned = [i.plugin for i in regions.instances]
-    assert DBSCAN in pinned and ROI_COLUMN in pinned
-    stage = ("Analysis/Regions/Find/", "Analysis/Regions/Column to ROIs",
-             "Analysis/Regions/Regions to column", "Analysis/Regions/Summarize/",
-             "Analysis/Regions/Workflow/")
-    ranks = [next(k for k, prefix in enumerate(stage) if path.startswith(prefix))
-             for path in pinned]
-    assert ranks == sorted(ranks)
-    # a tab the *user* adds starts empty; only the shipped ones are seeded
+    assert FIND_CLUSTERS in pinned and ROI_COLUMN in pinned
+    # every instance has an id of its own, given as it is read
+    ids = [i.id for t in ws.tabs for i in t.instances]
+    assert all(ids) and len(set(ids)) == len(ids)
+    # a tab the *user* adds starts empty
     assert Tab(name="Mine").instances == []
+
+
+def test_every_plugin_the_shipped_gui_names_is_shipped():
+    """The file is checked against the tree, so a renamed plugin is not
+    silently missing from a fresh install."""
+    import yaml
+    from smappy.workspace import DEFAULT_GUI
+    named = [i["plugin"] for t in yaml.safe_load(DEFAULT_GUI.read_text())["tabs"]
+             for i in t.get("instances") or []]
+    assert set(named) <= set(plugins.refs())
+    assert sum(len(t.instances) for t in Workspace.default().tabs) == len(named)
+
+
+def test_a_plugin_that_is_not_installed_is_left_out_of_the_default():
+    refs = dict(plugins.refs())
+    del refs[COMET]
+    ws = Workspace.default(refs)
+    analysis = next(t for t in ws.tabs if t.name == "Analysis")
+    assert COMET not in {i.plugin for i in analysis.instances}
+    assert RCC in {i.plugin for i in analysis.instances}
 
 
 def test_a_tab_is_not_a_branch_of_the_tree():

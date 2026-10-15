@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 # attributes we read off the class body when they are plain literals
-_READ = ("name", "description", "favorite", "per_region")
+_READ = ("name", "description", "per_region")
 
 
 @dataclass
@@ -56,7 +56,6 @@ class PluginRef:
     root: str                       # the root it came from, for the UI and errors
     attr: Optional[str] = None      # the class; None for a chain
     per_region: bool = False        # hands back Result.values: can run per region
-    favorite: bool = True
     kind: str = "plugin"            # "plugin": a class in a .py.  "chain": a .chain.yaml
 
     @property
@@ -252,7 +251,6 @@ def _refs_in_file(origin: Path, path_prefix: str, root: str
             origin=origin, root=root,
             attr=cls.name,
             per_region=attrs.get("per_region") is True,
-            favorite=bool(attrs.get("favorite", True)),
         )
 
     # 1. explicit @register wins, and is the only way to get several from one file

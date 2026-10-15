@@ -1,12 +1,14 @@
-"""Clusters as regions: DBSCAN's cluster_id and ROIs, and what was measured
-per region written back onto the table."""
+"""Clusters as regions: Find clusters' cluster_id (DBSCAN, Voronoi, HDBSCAN)
+and ROIs, and what was measured per region written back onto the table."""
 import numpy as np
 import pytest
 
 from smappy.locs import Localizations
 from smappy.mathparse import recipes
-from smappy.plugins.clusters import DBSCAN, auto_eps, dbscan, sizes_of
-from smappy.plugins.region_column import (ColumnToROIs, RegionsToColumn, column_regions,
+from smappy.plugins.segment import SegmentRegions
+from smappy.plugins.clusters import (DBSCANSettings, FindClusters, auto_eps, dbscan,
+                                     sizes_of)
+from smappy.plugins.region_column import (ColumnROIsSettings, RegionsToColumn, column_regions,
                                           hull)
 from smappy.region_runs import roi_numbers, values_onto
 from smappy.session import Session
@@ -23,6 +25,17 @@ def blobs(sizes=SIZES, noise=30, seed=0, spread=15.0):
     truth = np.concatenate([np.full(n, k + 1) for k, n in enumerate(sizes)]
                            + [np.zeros(noise, int)])
     return xy, truth
+
+
+def by_ids(replace=True, **values):
+    """Segment regions' settings for an ROI per id of a column."""
+    return SegmentRegions.Settings(method="ids", ids=ColumnROIsSettings(**values),
+                                   replace=replace)
+
+
+def by_dbscan(**values):
+    """Find clusters' settings for DBSCAN with these values."""
+    return FindClusters.Settings(dbscan=DBSCANSettings(**values))
 
 
 def table(xy, **extra):
@@ -66,7 +79,7 @@ def test_the_plugin_writes_cluster_id_and_its_size_with_a_rule_for_blinks():
     xy, truth = blobs()
     session = Session(table(xy))
     session.show_grouped(0, False)
-    result = session.run(DBSCAN(), DBSCAN.Settings(radius_nm=40, neighbours=5))
+    result = session.run(FindClusters(), by_dbscan(radius_nm=40, neighbours=5))
     ids = np.asarray(session.locs["cluster_id"])
     assert np.array_equal(ids, truth)
     assert np.asarray(session.locs["n_in_cluster"])[truth == 2][0] == 40
@@ -82,7 +95,7 @@ def test_only_the_selected_localizations_are_clustered_and_each_file_alone():
     session = Session(table(xy, filenumber=files))
     session.show_grouped(0, False)
     session.layers[0].set_bound("photons", 1500.0, None)
-    session.run(DBSCAN(), DBSCAN.Settings(radius_nm=40, neighbours=3))
+    session.run(FindClusters(), by_dbscan(radius_nm=40, neighbours=3))
     ids = np.asarray(session.locs["cluster_id"])
     dim = np.asarray(session.locs["photons"]) < 1500
     assert (ids[dim] == 0).all()                        # filtered out: in none
@@ -98,7 +111,7 @@ def test_on_a_grouped_layer_the_blinks_are_clustered():
         np.arange(len(xy) // 2) * 10, 2)
     session = Session(locs)
     session.show_grouped(0, True)
-    session.run(DBSCAN(), DBSCAN.Settings(radius_nm=40, neighbours=5))
+    session.run(FindClusters(), by_dbscan(radius_nm=40, neighbours=5))
     assert np.array_equal(np.asarray(session.locs["cluster_id"]), truth)
 
 
@@ -106,17 +119,17 @@ def test_an_roi_per_cluster_outlines_it_and_replace_makes_them_again():
     xy, truth = blobs()
     session = Session(table(xy))
     session.show_grouped(0, False)
-    session.run(DBSCAN(), DBSCAN.Settings(radius_nm=40, neighbours=5))
-    result = session.run(ColumnToROIs(), ColumnToROIs.Settings(min_size=30))
+    session.run(FindClusters(), by_dbscan(radius_nm=40, neighbours=5))
+    result = session.run(SegmentRegions(), by_ids(min_size=30))
     project = session.rois
     assert len(project.rois) == 2 and len(result.rois) == 2   # 25 < 30
     for roi in project.rois.values():
         inside = project.region(roi).mask(xy[:, 0], xy[:, 1])
         k = roi.origin["cluster"]
         assert inside[truth == k].all()                 # the hull holds its cluster
-    session.run(ColumnToROIs(), ColumnToROIs.Settings(min_size=1))
+    session.run(SegmentRegions(), by_ids(min_size=1))
     assert len(project.rois) == 3                       # replace: the default
-    session.run(ColumnToROIs(), ColumnToROIs.Settings(min_size=1, replace=False))
+    session.run(SegmentRegions(), by_ids(min_size=1, replace=False))
     assert len(project.rois) == 6                       # without replace, beside them
 
 
@@ -125,7 +138,7 @@ def test_any_id_column_makes_rois_and_without_outline_only_the_centre():
     session = Session(table(xy, mine=truth * 7))
     session.show_grouped(0, False)
     session.rois.set_geometry(400)
-    session.run(ColumnToROIs(), ColumnToROIs.Settings(column="mine", outline=False))
+    session.run(SegmentRegions(), by_ids(column="mine", outline=False))
     rois = list(session.rois.rois.values())
     assert sorted(r.origin["cluster"] for r in rois) == [7, 14, 21]
     assert all(r.polygon is None for r in rois)
@@ -142,15 +155,12 @@ def test_column_regions_refuses_a_column_that_is_not_an_id():
 
 
 def test_rois_cannot_be_made_inside_a_block():
-    from smappy.chain import Block, ChainSpec, Step, chain_class
-    xy, truth = blobs()
-    session = Session(table(xy, cluster_id=truth))
-    session.show_grouped(0, False)
-    cls = chain_class(ChainSpec(steps=[Block(regions="cluster_id", steps=[
-        Step(plugin="Analysis/Regions/Column to ROIs")])]))
-    result = session.run(cls(), cls.Settings())
-    table_ = session.id_regions["cluster_id"]["Column to ROIs"]
-    assert all("cannot be made inside a block" in e for e in table_.errors)
+    from smappy.chain import Block, ChainError, ChainSpec, Step, chain_class
+    # refused when the chain is made, as every segmenter is (it used to fail
+    # in each region, when Column to ROIs was a plugin of its own)
+    with pytest.raises(ChainError, match="finds ROIs"):
+        chain_class(ChainSpec(steps=[Block(regions="cluster_id", steps=[
+            Step(plugin="Analysis/Regions/Segment regions", values={"method": "ids"})])]))
 
 
 def test_a_block_repeats_over_the_clusters_dbscan_wrote():
@@ -159,8 +169,8 @@ def test_a_block_repeats_over_the_clusters_dbscan_wrote():
     session = Session(table(xy))
     session.show_grouped(0, False)
     cls = chain_class(ChainSpec(steps=[
-        Step(plugin="Analysis/Regions/Find/DBSCAN", values={"radius_nm": 40,
-                                                            "neighbours": 5}),
+        Step(plugin="Analysis/Regions/Find clusters",
+             values={"dbscan.radius_nm": 40, "dbscan.neighbours": 5}),
         Block(regions="cluster_id", steps=[
             Step(plugin="Analysis/Measure/Localization Statistics")])]))
     session.run(cls(), cls.Settings())
@@ -319,7 +329,195 @@ def test_a_cluster_with_no_hull_still_gets_an_roi_at_its_centre():
     xy = np.column_stack((np.arange(12.0) * 10, np.arange(12.0) * 10))   # a line
     session = Session(table(xy, cluster_id=np.ones(12, dtype=np.int64)))
     session.show_grouped(0, False)
-    result = session.run(ColumnToROIs(), ColumnToROIs.Settings())
+    result = session.run(SegmentRegions(), by_ids())
     (roi,) = session.rois.rois.values()
     assert roi.polygon is None and np.allclose(roi.center, [55, 55])
     assert "1 with no outline" in result.text
+
+
+def test_dbscan_reports_its_progress_and_a_stop_writes_nothing(monkeypatch):
+    import threading
+    from smappy.plugins import Stopped
+    from smappy.plugins import clusters
+    monkeypatch.setattr(clusters, "COUNT_CHUNK", 20)        # many steps
+    xy, _ = blobs()
+    session = Session(table(xy))
+    session.show_grouped(0, False)
+    settings = by_dbscan(radius_nm=40, neighbours=5)
+    lines = []
+    FindClusters().run(session.context(0, progress=lines.append), settings)
+    percents = [int(line.rsplit(" ", 1)[1].rstrip("%")) for line in lines]
+    assert len(percents) > 5 and percents == sorted(percents) and percents[-1] == 100
+
+    stop = threading.Event()
+    ctx = session.context(0, progress=lambda line: stop.set(), stop=stop)
+    with pytest.raises(Stopped, match="nothing written"):
+        FindClusters().run(ctx, settings)
+    assert "cluster_id" not in session.locs
+
+
+# ------------------------------------------------------- Voronoi and HDBSCAN
+
+def clusters_in_background(n_clusters=25, per=50, spread=20.0, background=3000,
+                           side=10_000.0, seed=3):
+    """Gaussian clusters on a grid, far apart, in a uniform background."""
+    rng = np.random.default_rng(seed)
+    k = int(np.ceil(np.sqrt(n_clusters)))
+    grid = (np.arange(k) + 0.5) * side / k
+    centres = np.array([(x, y) for x in grid for y in grid])[:n_clusters]
+    xy = np.vstack([rng.normal(c, spread, (per, 2)) for c in centres]
+                   + [rng.uniform(0, side, (background, 2))])
+    truth = np.concatenate([np.full(per, i + 1) for i in range(n_clusters)]
+                           + [np.zeros(background, int)])
+    return xy, truth
+
+
+def agreement(labels, truth):
+    """Per true cluster, the share of its points in its commonest found
+    cluster; and the share of background points put in any."""
+    found = []
+    for t in np.unique(truth[truth > 0]):
+        mine = labels[truth == t]
+        found.append(np.bincount(mine[mine > 0]).max() / len(mine) if (mine > 0).any() else 0)
+    return np.array(found), (labels[truth == 0] > 0).mean()
+
+
+def test_voronoi_finds_simulated_clusters_in_a_background():
+    from smappy.plugins.clusters import voronoi_clusters
+    xy, truth = clusters_in_background()
+    labels, mean = voronoi_clusters(xy, factor=2.0, min_size=10)
+    from scipy.spatial import ConvexHull
+    assert mean == pytest.approx(len(xy) / (ConvexHull(xy).volume / 1e6))
+    assert labels.max() == 25                               # one each, none merged
+    caught, stray = agreement(labels, truth)
+    assert caught.min() > 0.8 and stray < 0.05
+    # each found cluster is mostly one true cluster
+    for c in range(1, labels.max() + 1):
+        assert np.bincount(truth[labels == c]).max() / (labels == c).sum() > 0.8
+
+
+def test_voronoi_drops_small_clusters_and_keeps_one_position_together():
+    from smappy.plugins.clusters import voronoi_clusters
+    xy, truth = clusters_in_background(per=12)
+    few, _ = voronoi_clusters(xy, factor=2.0, min_size=20)
+    assert few.max() == 0                                  # all below 20
+    twice = np.vstack([xy, xy[:5]])                        # five at one position
+    labels, _ = voronoi_clusters(twice, factor=2.0, min_size=5)
+    assert (labels[:5] == labels[-5:]).all()
+
+
+def test_the_plugin_runs_voronoi_and_names_the_clusters():
+    xy, truth = clusters_in_background()
+    session = Session(table(xy))
+    session.show_grouped(0, False)
+    result = session.run(FindClusters(), FindClusters.Settings(algorithm="voronoi"))
+    ids = np.asarray(session.locs["cluster_id"])
+    assert ids.max() == 25 and "Voronoi" in result.text
+    sizes = np.bincount(ids)[1:]
+    assert (np.diff(sizes) <= 0).all()                     # numbered by size
+    assert {r["field"]: r["grouped"] for r in recipes(session.locs)}["cluster_id"] == "max"
+
+
+def test_the_form_shows_only_the_chosen_algorithm():
+    plugin = FindClusters()
+    for algorithm in ("dbscan", "voronoi", "hdbscan"):
+        shown = plugin.describe(None, FindClusters.Settings(algorithm=algorithm)).shown
+        assert shown == {"dbscan": algorithm == "dbscan", "voronoi": algorithm == "voronoi",
+                         "hdbscan": algorithm == "hdbscan"}
+
+
+def test_without_the_package_hdbscan_says_how_to_install_it(monkeypatch):
+    from smappy.plugins import clusters
+    monkeypatch.setattr(clusters, "hdbscan_available", lambda: False)
+    settings = FindClusters.Settings(algorithm="hdbscan")
+    notice = FindClusters().describe(None, settings).notice
+    assert notice is not None and "smappy-smlm[clusters]" in notice.text
+    xy, _ = blobs()
+    session = Session(table(xy))
+    with pytest.raises(ValueError, match=r"smappy-smlm\[clusters\]"):
+        session.run(FindClusters(), settings)
+    assert "cluster_id" not in session.locs
+
+
+def _has_hdbscan():
+    from smappy.plugins.clusters import hdbscan_available
+    return hdbscan_available()
+
+
+@pytest.mark.skipif(not _has_hdbscan(), reason="the hdbscan package is not installed")
+def test_hdbscan_finds_clusters_of_different_densities_without_a_radius():
+    from smappy.plugins.clusters import hdbscan_clusters
+    rng = np.random.default_rng(4)
+    tight = rng.normal((2000, 2000), 15, (80, 2))          # dense
+    loose = rng.normal((6000, 2000), 120, (80, 2))         # eight times wider
+    noise = rng.uniform(0, 8000, (60, 2)) + [0, 4000]      # well away
+    xy = np.vstack([tight, loose, noise])
+    truth = np.repeat([1, 2, 0], [80, 80, 60])
+    labels = hdbscan_clusters(xy, min_cluster_size=20)
+    caught, stray = agreement(labels, truth)
+    # both found whole; but HDBSCAN lets scattered points join the cluster
+    # they are nearest, here 15 of 60 (scikit-learn's: 14) -- which the page says
+    assert labels.max() == 2 and caught.min() > 0.85 and stray <= 0.3
+    # one radius cannot do both: a DBSCAN radius for the tight one splits
+    # the loose one or leaves most of it as noise
+    narrow = dbscan(xy, 30.0, 10)
+    assert agreement(narrow, truth)[0].min() < 0.85
+
+
+def test_a_long_hdbscan_or_voronoi_run_asks_first():
+    from smappy.plugins import Context
+    from smappy.plugins.clusters import expected_seconds
+    assert 30 < expected_seconds("hdbscan", [1_000_000]) < 120  # 53 s measured
+    assert expected_seconds("hdbscan", [100_000]) < 20
+    xy, _ = blobs()
+    ctx = Context(locs=table(xy))
+    for algorithm in ("dbscan", "voronoi", "hdbscan"):
+        assert FindClusters().preflight(ctx, FindClusters.Settings(algorithm=algorithm)) is None
+    big = Context(locs=table(np.random.default_rng(0).uniform(0, 1e5, (600_000, 2))))
+    question = FindClusters().preflight(big, FindClusters.Settings(algorithm="hdbscan"))
+    assert "30 s" in question and "Stop cannot end" in question
+
+
+def scipy_dbscan(points, eps, k):
+    """DBSCAN as it was computed before the C++ search: a k-d tree, the core
+    pairs and their connected components -- the reference the C++ must match,
+    numbers included."""
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import connected_components
+    from scipy.spatial import cKDTree
+    from smappy.plugins.clusters import by_size
+    points = np.asarray(points, dtype=float)
+    n = len(points)
+    counts = cKDTree(points).query_ball_point(points, eps, return_length=True)
+    core = np.flatnonzero(counts >= k + 1)
+    found = np.full(n, -1, dtype=np.int64)
+    if len(core):
+        core_tree = cKDTree(points[core])
+        pairs = core_tree.query_pairs(eps, output_type="ndarray")
+        graph = coo_matrix((np.ones(len(pairs)), (pairs[:, 0], pairs[:, 1])),
+                           shape=(len(core), len(core)))
+        _, component = connected_components(graph, directed=False)
+        found[core] = component
+        rest = np.setdiff1d(np.arange(n), core)
+        if len(rest):
+            distance, nearest = core_tree.query(points[rest], distance_upper_bound=eps)
+            near = np.isfinite(distance)
+            found[rest[near]] = component[nearest[near]]
+    return by_size(found)
+
+
+def test_the_cpp_dbscan_gives_the_clusters_scipy_gives_numbers_and_all():
+    rng = np.random.default_rng(0)
+    for trial in range(60):
+        d = 3 if trial % 2 else 2
+        n = int(rng.integers(5, 2000))
+        side = rng.uniform(200, 5000)
+        pts = rng.uniform(0, side, (n, d))
+        if trial % 3 == 0:                                  # clusters
+            c = rng.uniform(0, side, (max(1, n // 50), d))
+            pts = np.vstack([pts[: n // 2], c[rng.integers(0, len(c), n - n // 2)]
+                             + rng.normal(0, 20, (n - n // 2, d))])
+        if trial % 7 == 0:                                  # duplicates
+            pts = np.vstack([pts, pts[: n // 5]])
+        eps, k = float(rng.uniform(10, 120)), int(rng.integers(1, 15))
+        assert np.array_equal(dbscan(pts, eps, k), scipy_dbscan(pts, eps, k)), trial

@@ -140,6 +140,23 @@ def check_field(field: str, locs: Optional[Localizations] = None) -> str:
     return name
 
 
+def included_rois_mask(ctx: Context) -> Tuple[np.ndarray, str]:
+    """Which localizations lie in any included ROI of the ROI manager (*use*
+    ticked), each ROI in its own file -- SMAP's RemoveLocsOutsideSites, which
+    "can dramatically reduce file size" -- and how to name them.  Membership
+    is the ROIs' shapes alone, as for a measurement in them: the layer's
+    filter does not decide it."""
+    project = ctx.rois
+    used = [] if project is None else [i for i, r in project.rois.items() if r.use]
+    if not used:
+        raise ValueError("no included ROIs: make some in the ROI manager, or "
+                         "tick their use")
+    if ctx.session is None or len(ctx.session.locs) != len(ctx.locs):
+        raise ValueError("the ROIs are over the session's table, which this "
+                         "table is not")
+    return project.rows_of(used), f"the {len(used)} included ROIs"
+
+
 # --------------------------------------------------------------- the plugin
 
 @dataclass
@@ -150,9 +167,10 @@ class RemoveSettings:
                        help="which side of the region goes")
     region: str = param("roi", label="region",
                         choices=(("roi", "the drawn ROI"),
-                                 ("selection", "the selection (filter, ROI, slab)")),
-                        help="the ROI on its own, or everything that decides "
-                             "what is on screen")
+                                 ("selection", "the selection (filter, ROI, slab)"),
+                                 ("rois", "all included ROIs")),
+                        help="the drawn ROI on its own, everything that decides "
+                             "what is on screen, or the ROI manager's used ROIs")
     action: str = param("remove", label="action",
                         choices=(("remove", "remove them from the table"),
                                  ("hide", "keep them, flagged and filtered out")),
@@ -184,6 +202,8 @@ class RemoveLocalizations(Plugin):
         if settings.region == "selection":
             inside = np.asarray(ctx.selection.mask, dtype=bool)
             where = str(ctx.selection)
+        elif settings.region == "rois":
+            inside, where = included_rois_mask(ctx)
         else:
             roi = current_roi(ctx)
             if roi is None:

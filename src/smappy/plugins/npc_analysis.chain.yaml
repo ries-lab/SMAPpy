@@ -1,7 +1,8 @@
 # The labelling efficiency of nuclear pores, as the ROI manager does it by
 # hand: group, find the pores, count every pore's corners and localizations,
 # fit the efficiency to all of them.  Shipped as a chain rather than a plugin
-# -- the steps are the three NPC plugins with their own settings.
+# -- the steps are Segment regions' ring template and the two NPC plugins,
+# each with its own settings.
 schema: smappy-chain-v1
 path: Analysis/Regions/Workflow/NPC Analysis
 description: >-
@@ -18,10 +19,12 @@ steps:
           start: keep              # the filter as the Render tab has it
           bounds: []
       remove: false
-  - plugin: Analysis/Regions/Find/NPC
+  - plugin: Analysis/Regions/Segment regions
     label: find the pores
-    version: "2"
-    values:
+    version: "1"
+    values:                        # the NPC preset's values are the defaults
+      preset: NPC
+      method: ring
       replace: true
   - block: each pore                            # once in each pore found
     regions: rois

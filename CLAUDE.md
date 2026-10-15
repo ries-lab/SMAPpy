@@ -95,21 +95,35 @@ shape, so read the one closest to what you are writing:
 | measures the selection and draws it | `statistics.py` (settings, selection, several figures in one window) |
 | rewrites the table and hands it back | `assign_colors.py` (`Result.locs`, a preview) |
 | a long computation with progress | `drift_comet.py`, `drift_rcc.py` |
-| loads, saves, exports, simulates | `file.py` (one loader with an advanced *format* choice, no input table; the simulator's model is `smappy.simulate`) |
-| finds, measures or summarises ROIs | `roi.py` (a segmenter derives from `SegmenterPlugin`, which gives it a Preview, *replace* (`replace_param()`) and a step of the ROI undo; `per_region = True`; analyse; segmenters under `Analysis/Regions/Find`) |
-| parts, a C++ backend | `fit.py` (nested settings dataclasses; four fitters, thin subclasses of `_FitPlugin`) |
+| measures drift from beads, a `Drift` the others' way | `drift_fiducials.py` (*Fiducials*: tracks of the bright localizations from *Link tracks*' linker, one linear fit of each bead's offset and COMET's spline in `smappy/fiducials.py`; `KeepsDrift` keeps the curve; beads simulated by `smappy.simulate.simulate_beads`) |
+| loads, saves, exports, simulates | `file.py` (one loader with an advanced *format* choice, no input table -- a format is a `Reader` / `Writer` in `io/formats.py`, every column of the file kept; *Load*, a launcher of File > Open; *Export localizations*, whose column list is `kind="columns"`; *Export Image*, the one renderer of the view -- `smappy.picture`, framed by the windows' `Session.view_frames`, which the render and 3D windows' *Save* call too; *Export Stack*, movies and z-stacks on the same renderer, `smappy.movie`; the simulator's model is `smappy.simulate`) |
+| finds, measures or summarises ROIs | `roi.py` (a segmenter derives from `SegmenterPlugin`, which gives it a Preview, *replace* (`replace_param()`) and a step of the ROI undo; `per_region = True`; analyse) |
+| finds ROIs by one of several methods, with presets | `segment.py` (*Segment regions*: one `SegmenterPlugin`, a *method* part each -- ring template (`npc.segment_npcs`), density peaks (`roi.density_peaks`), from an id column (`region_column.column_regions`); a *preset* is a YAML file in `data/segment_presets` or the config directory that fills the settings through `react`; each ROI's `origin["segment"]` names its method, so *replace* removes that method's only) |
+| parts, a C++ backend | `fit.py` (nested settings dataclasses; four fitters, thin subclasses of `_FitPlugin`; the *fit region* drawn on the Preview's frame: a figure panel that takes shapes is `Plot.edit`, a `ShapeEdit`, and the figure window adds the tools) |
 | adds a derived column, no output | `math_parser.py` (an expression, kept with the table as a recipe) |
 | removes or flags localizations | `remove_locs.py` (a region, a new table or a filtered flag) |
-| fits a model to what is in a ROI | `line_profile.py` (unbinned likelihood, models compared by AIC; one fit per layer, and `follow_roi`) |
+| fits a model to what is in a ROI | `line_profile.py` (unbinned likelihood, models compared by AIC; one fit per layer, `follow_roi` and `per_region`: in an ROI the line is one of its named lines, `region_line`); `circle_fit.py` (the NPC segmenter's `fit_circle` with errors) |
+| moves the ROIs onto what was measured in them | `roi_centre.py` (*Centre ROIs*: `ROIProject.move_roi` in one ROI undo step) |
+| counts in time: blinks, dark times, bursts | `blinking.py` (one region on one time line, the view linked into molecules per file; seconds from the file's frame time, `metadata.file_frame_time`) |
 | reads the session and reports | `history.py` (the log, with an optional export) |
 | sets up layers and filters from settings | `chain_layers.py` (bounds as rows per layer, `Result.layers`) |
 | scores a fit against a simulation | `ground_truth.py` (the truth redrawn from the recipe, matched per frame) |
 | draws what the microscope recorded per frame | `image_tags.py` (the fit's `metadata["frame_tags"]`) |
-| finds a structure by its shape and judges it, then counts it | `npc.py` (a ring filter and circle fit in the segmenter, a per-site count, and a model of whole pores in `smappy/npc.py` fitted to the site table) |
+| finds a structure by its shape and judges it, then counts it | `npc.py` (a ring filter and circle fit, the ring template of *Segment regions*, a per-site count, and a model of whole pores in `smappy/npc.py` fitted to the site table) |
 | summarises what evaluators measured | `roi.py`'s `SiteAnalysisPlugin` (an evaluator to read, a *results from* field, a preflight that asks which when there are several; under `Analysis/Regions/Summarize`) |
+| summarises curves over the regions | `curves.py` (*Curves*: a `SiteAnalysisPlugin` reading each region's `Result.arrays` from its stored entry; groups by an ROI keyword list; pools through the evaluator's `Plugin.pool` where it hands back counts) |
 | runs the ROI manager's segment, measure and analyse as one | `npc_analysis.chain.yaml` (a shipped chain: a block runs NPC Corners in every ROI before the next step; `docs/batch.md`, "ROIs: segment, measure, analyse") |
-| finds clusters and names them in the table | `clusters.py` (DBSCAN: `cluster_id` / `n_in_cluster`; ROIs of them are `region_column.py`'s *Column to ROIs*, for any id column) |
-| orders or filters the ROIs by what was measured in them | `roi_order.py` (*Sort ROIs*: `ROIProject.order`, which the list and the results follow, never the numbers; *Filter ROIs*: a parsed condition setting *use* in one undo step; `roi_manager/order.py`) |
+| links localizations into tracks | `link_tracks.py` (*Link tracks*: an id column, `track_id` / `track_length`, of the localizations whatever the layer shows; two linkers, an *algorithm* choice, in `smappy/tracking/link.py`; candidates from `csrc/neighbours.cpp`'s `Index.pairs`, a simple linker's loop in C++ (`greedy_links`); tracks simulated by `smappy.simulate.simulate_tracks` -- in the GUI *File/Simulate/Tracks*, a plugin of its own beside *Blinking Structure* -- scored by `tracking.score`) |
+| measures how tracks move, per track and pooled | `tracking_analysis.py` (*Tracking analysis*: approaches ticked as in *Spatial statistics*, a part each shown while ticked; an *id column*; vectorised over the whole table in `smappy/tracking/analysis.py`; `per_region`, and per-track columns only on a tick, `changes_locs_for`) |
+| diagnoses the instrument from beads, approaches to come | `stability.py` (*Stability*: *vibrations* ticked, its part shown while on; beads by an *id column*, each, their mean or differential; a regular grid with gaps filled and counted, Welch's spectrum, the cumulative RMS and peaks in `smappy/stability.py`; each figure a tick; `per_region`, values pooled over the region's traces) |
+| writes a number per localization from what is around it | `neighbourhood.py` (two layers as they show, *around* and *neighbours from*; a recipe column, NaN outside the filter, a blink's value through `group_id`; the search in C++, `csrc/neighbours.cpp`) |
+| measures curves over pair distances, with envelopes | `spatial_statistics.py` (*Spatial statistics*: approaches ticked on or off, each one's part shown only while on; pair distances from `Index.pair_histogram` in `csrc/neighbours.cpp`, normalised by the window's set covariance; Monte Carlo envelopes; per region, curves as `Result.arrays` with their numerator and denominator; the directional approaches -- a correlation image, a correlation along a line in a line ROI's own axes -- in `smappy/correlation.py`) |
+| finds clusters and names them in the table | `clusters.py` (*Find clusters*: an *algorithm* choice, a part per algorithm, only the chosen one shown -- DBSCAN, Voronoi, HDBSCAN with an optional dependency -- all writing `cluster_id` / `n_in_cluster`; DBSCAN on the C++ cell search of `csrc/neighbours.cpp`, `Index.dbscan_join`; ROIs of them are *Segment regions*' method *from an id column*, for any id column) |
+| orders or filters the ROIs by what was measured in them | `roi_order.py` (*Sort ROIs*: `ROIProject.order`, which the list and the results follow, never the numbers; *Filter ROIs*: a parsed condition setting *use* in one undo step, on the measured columns, the keywords and each ROI's place (`roi_x_nm`, `in_drawn_roi`); *Remove double ROIs*: a pair closer than d, the larger kept; `roi_manager/order.py`) |
+| superimposes the ROIs into a new table | `average_rois.py` (*Average ROIs*: a centre and a turn per ROI from its centre, its lines (`ROI.lines`) or its results row; one table added as a file through `Result.files` with `append`, each ROI's frames moved apart so merging blinks never joins two) |
+| moves a file's localizations or an image layer | `transform.py` (*Transform*: the target -- a file and channel, or an image layer's placement, `ImageData.placement`, never resampled -- and the source -- typed, a named transformation (`Session.transformations`, added through `Result.transformations`), a file (`_2ct.h5`, `_T.h5`) or another file's drift (`Drift.apply(rows=)`); the maths in `smappy/transformation.py`; Register layers opens it with `settings_for(name)` through the GUI's `"transform"` window) |
+| makes a new image layer from another | `process_image.py` (*Process image*: background subtraction and local contrast, ticked operations in a list, `_STEPS`; the maths on arrays in `smappy/image_processing.py`; the new image keeps the original's placement and goes back through `Result.image_layers`) |
+| measures and hands its result to another plugin | `register_layers.py` (*Register layers*: the shift of a layer against another, localizations or images, by `correlation._xcorr` and RCC's `_peak` -- no third correlation -- in `smappy/layer_registration.py`; kept as a named transformation through `Result.transformations`, and a `Notice` with `window="transform"` and `transform.settings_for` opens Transform on it) |
 | writes what was measured per region onto its localizations | `region_column.py` (*Regions to column*: `region_runs.write_values`, NaN outside, never over a column of the localizations' own; a block's *write values* calls the same) |
 | runs steps once per region, writes columns back | `smappy/blocks.py` (a `chain.Block`; the regions through `region_runs.regions_of` -- ROIs or an id column, one interface; `RegionScratch`, `WriteBack`, *write values*; per-cluster results in `Session.id_regions`; the ROI project holds one, `ROIProject.block`) |
 | opens an interactive window of the GUI's | `bead_calibration.py` (`Plugin.window`: the button opens what the GUI registered in `session.window_openers`) |
@@ -180,7 +194,8 @@ class Thing(Plugin):
 * Override `describe(ctx, settings)` to say what the form should show about
   the settings as they stand, before any run, as a `FormState`: `hints` (what
   fields on *auto* resolve to), `active` (which fields are read; the rest are
-  greyed), `choices` (lists the session decides) and a `notice` -- a line
+  greyed), `shown` (which are shown at all: the parts of the algorithms not
+  selected are hidden), `choices` (lists the session decides) and a `notice` -- a line
   under the form, and optionally a button that opens a GUI window by name
   (`Notice(text, action, window)`, the same `session.window_openers` as
   `Plugin.window`).  `ctx` is None when there is no session.  The fitters
@@ -251,10 +266,11 @@ numbers: simulate data with known parameters and assert they come back.
 `tests/test_statistics.py` is the pattern.
 
 The discovery and workspace tests (`test_discovery.py`, `test_workspace.py`,
-`test_file_plugins.py`) check that the shipped plugins are found and that the
-tabs seed by rule -- a floor of plugins that must be there, the Analysis tab
-being every favourite under `Analysis/` but the regions, finders before
-summaries.  Adding a plugin needs no test edits unless it changes a rule.
+`test_file_plugins.py`) check that the shipped plugins are found and that
+every plugin the shipped GUI names exists.  Adding a plugin needs no test
+edits unless it is under `Analysis/Regions/` or offered per region
+(`test_roi_pipeline.py` lists both), or a File plugin
+(`test_file_plugins.py` lists those).
 
 `tests/test_control_width.py` builds every shipped plugin's panel and fails if
 it is wider than the control column (`CONTROL_WIDTH`): a new plugin with a long
@@ -273,10 +289,12 @@ speak.
 exists, that its `version` is the plugin's, that every setting is explained, and that it
 renders with its maths and figures (the figures in the slow tier).
 
-Plugins reach the shipped workspace by themselves: the Analysis tab seeds from
-`Analysis/` except `Analysis/Regions/`, which seeds the Regions tab, and `favorite` defaults to True, so there is no registry to edit.
-For a `per_region` plugin, `favorite` also decides whether it is in a
-new list of per-region steps; a specialised one (`NPC Corners`) sets it False.
+A plugin is in the tree as soon as it exists; which ones a fresh install
+pins to its tabs is a list, `src/smappy/data/default.gui.yaml` -- a GUI file
+like any other (*File > Workspace > Save* writes the same format), so a new
+plugin that belongs in the shipped GUI gets a line there.  Likewise the
+per-region steps a new ROI project starts with are a list,
+`roi_manager.pipeline.DEFAULT_REGION_STEPS`.
 
 ## The plugin's page
 

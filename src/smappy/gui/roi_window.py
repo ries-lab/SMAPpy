@@ -23,7 +23,8 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QRectF, Qt, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
-from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QDoubleSpinBox,
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboBox,
+                               QDoubleSpinBox,
                                QHBoxLayout, QHeaderView, QLabel, QListWidget,
                                QListWidgetItem, QMainWindow, QPushButton,
                                QSplitter, QTableView, QVBoxLayout, QWidget)
@@ -35,7 +36,10 @@ from .widgets import CollapsibleSection
 
 DRAFT_PEN = pg.mkPen("#2f7fd0", width=2, style=Qt.DashLine)
 DRAWING_PEN = pg.mkPen("#00c4ff", width=2, style=Qt.DashLine)
-DIRECTION_PEN = pg.mkPen("#e05fd0", width=2)
+# a colour per line, by the place of its name in the project's line names;
+# a name no longer in the list takes the last
+LINE_COLOURS = ("#e05fd0", "#00b8d4", "#ff8a00", "#9ccc65", "#ffee58", "#b388ff")
+LINE_PENS = [pg.mkPen(c, width=2) for c in LINE_COLOURS]
 ROI_PEN = pg.mkPen("#2e9e4f", width=2)          # the selected ROI
 EXCLUDED_PEN = pg.mkPen("#8a8a8a", width=1)     # not used
 EXCLUDED_ACTIVE_PEN = pg.mkPen("#8a8a8a", width=2)
@@ -59,9 +63,9 @@ OUTLINE_LIMIT = 1000
 COUNT_LIMIT = 2000
 
 
-def arrow(direction):
-    """A line with a small head at its end, for a direction."""
-    (x0, y0), (x1, y1) = np.asarray(direction, float)
+def arrow(line):
+    """A line with a small head at its end, which shows which way it goes."""
+    (x0, y0), (x1, y1) = np.asarray(line, float)
     d = np.array([x1 - x0, y1 - y0])
     length = float(np.hypot(*d)) or 1.0
     unit = d / length
@@ -113,7 +117,8 @@ class ImagePane(QWidget):
                                          ("others", OTHER_PEN), ("excluded", EXCLUDED_PEN),
                                          ("excluded_active", EXCLUDED_ACTIVE_PEN),
                                          ("roi", ROI_PEN), ("draft", DRAFT_PEN),
-                                         ("direction", DIRECTION_PEN),
+                                         *((f"line{i}", pen)
+                                           for i, pen in enumerate(LINE_PENS)),
                                          ("drawing", DRAWING_PEN), ("frame", FRAME_PEN),
                                          ("tiles", TILE_PEN), ("tile", TILE_HERE_PEN))}
         for name, colour in (("centres", OTHER_PEN.color()),
@@ -123,6 +128,7 @@ class ImagePane(QWidget):
         for item in self.shapes.values():
             self.view.addItem(item)
         layout.addWidget(self.graphics)
+        self.texts: list = []          # the lines' names, at their ends
         self.title = title
         self.width_nm = DETAIL_NM
         self.zoomable = zoomable
@@ -195,6 +201,22 @@ class ImagePane(QWidget):
         self.fov = None
         for item in self.shapes.values():
             item.setData([], [])
+        self.label_lines([])
+
+    def label_lines(self, labels) -> None:
+        """Names at the lines' ends: ``[(x, y, text, colour, bold)]``."""
+        for item in self.texts:
+            self.view.removeItem(item)
+        self.texts = []
+        for x, y, text, colour, bold in labels:
+            item = pg.TextItem(text, color=colour, anchor=(0, 1))
+            if bold:
+                font = item.textItem.font()
+                font.setBold(True)
+                item.setFont(font)
+            item.setPos(x, y)
+            self.view.addItem(item)
+            self.texts.append(item)
 
     def draw(self, name: str, xs=None, ys=None) -> None:
         item = self.shapes[name]
@@ -329,8 +351,9 @@ class ROIManagerWindow(QMainWindow):
         self.active: Optional[str] = None
         self.draft: Optional[np.ndarray] = None
         self.draft_polygon: Optional[list] = None
-        self.draft_direction: Optional[list] = None
-        self.drawing: Optional[str] = None       # "polygon" or "direction"
+        self.draft_lines: dict = {}              # the draft's, as `ROI.lines`
+        self._filling_lines = False              # the line list being refilled
+        self.drawing: Optional[str] = None       # "polygon" or "line"
         self._points: list = []
         self._hover: Optional[np.ndarray] = None
         self.zoom_center: Optional[np.ndarray] = None
@@ -492,19 +515,39 @@ class ROIManagerWindow(QMainWindow):
                                        "vertex, a click on the first vertex closes it, "
                                        "Escape cancels")
         self.polygon_button.clicked.connect(lambda: self._start_drawing("polygon"))
-        self.direction_button = QPushButton("Direction")
-        self.direction_button.setCheckable(True)
-        self.direction_button.setToolTip("two clicks, start then end: an arrow the "
-                                         "analysis plugins can read")
-        self.direction_button.clicked.connect(lambda: self._start_drawing("direction"))
         self.clear_shape_button = QPushButton("Clear shape")
         self.clear_shape_button.setToolTip("back to the global circle or square")
         self.clear_shape_button.clicked.connect(self._clear_shape)
+        # the named lines (`ROI.lines`): which one, then draw, reverse, clear
+        self.line_box = QComboBox()
+        self.line_box.setToolTip("the line that Draw line, Reverse and Clear line "
+                                 "act on (Shift+L the next); the names are "
+                                 "written under *line names*")
+        self.line_box.currentTextChanged.connect(self._on_line_name)
+        self.line_button = QPushButton("Draw line")
+        self.line_button.setCheckable(True)
+        self.line_button.setToolTip("two clicks, start then end: the chosen line, "
+                                    "its angle and length a column of the results (L)")
+        self.line_button.clicked.connect(lambda: self._start_drawing("line"))
+        self.reverse_button = QPushButton("Reverse")
+        self.reverse_button.setToolTip("swap the chosen line's start and end (R)")
+        self.reverse_button.clicked.connect(self._reverse_line)
         self.clear_line_button = QPushButton("Clear line")
+        self.clear_line_button.setToolTip("remove the chosen line")
         self.clear_line_button.clicked.connect(self._clear_line)
-        for b in (self.polygon_button, self.direction_button,
-                  self.clear_shape_button, self.clear_line_button):
+        for b in (self.polygon_button, self.clear_shape_button):
             tools.addWidget(b)
+        tools.addSpacing(8)
+        tools.addWidget(QLabel("line"))
+        for b in (self.line_box, self.line_button, self.reverse_button,
+                  self.clear_line_button):
+            tools.addWidget(b)
+        for key, slot in (("L", lambda: self._start_drawing("line")),
+                          ("Shift+L", lambda: self.next_line(1)),
+                          ("R", self._reverse_line)):
+            shortcut = QShortcut(QKeySequence(key), self)
+            shortcut.setContext(Qt.WindowShortcut)
+            shortcut.activated.connect(slot)
         # the tools that say what to draw sit above the image they draw into;
         # *Add*, the one button that is pressed over and over, sits directly
         # under it, where the eye already is after judging the ROI
@@ -722,7 +765,8 @@ class ROIManagerWindow(QMainWindow):
         self.project.navigation["tile"] = index
         self.zoom_center = np.array([(x0 + x1) / 2, (y0 + y1) / 2])
         self.zoom_pane.width_nm = max(x1 - x0, y1 - y0)
-        self.draft = self.draft_polygon = self.draft_direction = None
+        self.draft = self.draft_polygon = None
+        self.draft_lines = {}
         self.redraw()
         self.status.showMessage(f"tile {index + 1} of {len(tiles)}")
 
@@ -764,13 +808,32 @@ class ROIManagerWindow(QMainWindow):
                 xs.extend(list(ox) + [np.nan])
                 ys.extend(list(oy) + [np.nan])
             pane.draw(name, xs, ys)
-        dx, dy = [], []
-        for roi in rois:
-            if roi.direction:
-                ax, ay = arrow(roi.direction)
-                dx.extend(list(ax) + [np.nan])
-                dy.extend(list(ay) + [np.nan])
-        pane.draw("direction", dx, dy)
+        self._draw_lines(pane, [roi.lines for roi in rois])
+
+    def _line_slot(self, name: str) -> int:
+        """Which colour a line takes: its name's place in the project's."""
+        names = self.project.line_names
+        return names.index(name) % len(LINE_PENS) if name in names else len(LINE_PENS) - 1
+
+    def _draw_lines(self, pane, lines, labels: bool = False) -> None:
+        """Arrows for ``lines``, a list of `ROI.lines`; with ``labels`` the
+        names at their ends, the chosen line's in bold."""
+        xs = [[] for _ in LINE_PENS]
+        ys = [[] for _ in LINE_PENS]
+        texts = []
+        for named in lines:
+            for name, line in named.items():
+                slot = self._line_slot(name)
+                ax, ay = arrow(line)
+                xs[slot].extend(list(ax) + [np.nan])
+                ys[slot].extend(list(ay) + [np.nan])
+                if labels:
+                    texts.append((line[1][0], line[1][1], name, LINE_COLOURS[slot],
+                                  name == self.line_name))
+        for slot in range(len(LINE_PENS)):
+            pane.draw(f"line{slot}", xs[slot], ys[slot])
+        if labels:
+            pane.label_lines(texts)
 
     def _reach(self, roi) -> float:
         """How far an ROI's outline reaches from its centre: the project's
@@ -815,13 +878,14 @@ class ROIManagerWindow(QMainWindow):
                              centre[1] - half, centre[1] + half)
         drafted = self.draft is not None
         polygon = self.draft_polygon if drafted else (roi.polygon if roi is not None else None)
-        direction = self.draft_direction if drafted else (roi.direction if roi is not None else None)
+        lines = self.draft_lines if drafted else (roi.lines if roi is not None else {})
         xs, ys = Region.site(centre, project.shape, project.size_nm, polygon).outline()
         used = drafted or roi is None or roi.use
         for name in ("draft", "roi", "excluded_active"):
             self.roi_pane.draw(name)
         self.roi_pane.draw("draft" if drafted else ("roi" if used else "excluded_active"), xs, ys)
-        self.roi_pane.draw("direction", *(arrow(direction) if direction else ([], [])))
+        self._draw_lines(self.roi_pane, [lines], labels=True)
+        self._fill_line_box(lines)
         self.roi_pane.label.setText("ROI (draft)" if drafted else "ROI")
         self.add_button.setEnabled(drafted)
 
@@ -890,7 +954,8 @@ class ROIManagerWindow(QMainWindow):
             self.select(hit.id)
             return
         self.draft = np.array([x, y])
-        self.draft_polygon = self.draft_direction = None
+        self.draft_polygon = None
+        self.draft_lines = {}
         self.redraw()
 
     def _roi_clicked(self, x: float, y: float) -> None:
@@ -900,6 +965,10 @@ class ROIManagerWindow(QMainWindow):
             return
         if self.drawing:
             self._place(x, y)
+            return
+        line = self._line_at(x, y)
+        if line is not None:
+            self.set_line_name(line)
             return
         hit = self._roi_at(x, y, self.roi_pane)
         if hit is not None and self.draft is None:
@@ -913,9 +982,70 @@ class ROIManagerWindow(QMainWindow):
             self._hover = np.array([x, y])
             self._draw_in_progress()
 
-    # ----------------------------------------------- polygon and direction
+    # ------------------------------------------------- polygon and lines
+    @property
+    def line_name(self) -> str:
+        """The line Draw line, Reverse and Clear line act on."""
+        names = self.project.line_names
+        name = self.project.navigation.get("line")
+        return name if name else (names[0] if names else "")
+
+    def set_line_name(self, name: str) -> None:
+        self.project.navigation["line"] = str(name)
+        self.redraw()
+
+    def next_line(self, step: int) -> None:
+        """The next line name (Shift+L), round the list."""
+        names = [self.line_box.itemText(i) for i in range(self.line_box.count())]
+        if names:
+            here = names.index(self.line_name) if self.line_name in names else -1
+            self.set_line_name(names[(here + step) % len(names)])
+
+    def _on_line_name(self, name: str) -> None:
+        if name and name != self.line_name and not self._filling_lines:
+            self.set_line_name(name)
+
+    def _fill_line_box(self, lines) -> None:
+        """The project's line names, and those the shown ROI has besides."""
+        names = list(self.project.line_names)
+        names += [n for n in lines if n not in names]
+        if self.line_name not in names:
+            names.append(self.line_name)
+        names = [n for n in names if n]
+        current = [self.line_box.itemText(i) for i in range(self.line_box.count())]
+        self._filling_lines = True
+        if names != current:
+            self.line_box.clear()
+            self.line_box.addItems(names)
+        if self.line_name in names:
+            self.line_box.setCurrentIndex(names.index(self.line_name))
+        self._filling_lines = False
+
+    def _shown_lines(self) -> dict:
+        roi = self._selected()
+        if self.draft is not None:
+            return self.draft_lines
+        return roi.lines if roi is not None else {}
+
+    def _line_at(self, x: float, y: float) -> Optional[str]:
+        """The name of the shown line a click landed on, if any."""
+        fov = self.roi_pane.fov
+        if fov is None:
+            return None
+        near = fov.pixelsize * RIM_PIXELS
+        p = np.array([x, y], float)
+        best, found = near, None
+        for name, line in self._shown_lines().items():
+            a, b = np.asarray(line, float)
+            d = b - a
+            t = float(np.clip(np.dot(p - a, d) / max(np.dot(d, d), 1e-12), 0, 1))
+            distance = float(np.hypot(*(a + t * d - p)))
+            if distance <= best:
+                best, found = distance, name
+        return found
+
     def _start_drawing(self, kind: str) -> None:
-        """Draw an outline or a direction in the ROI image."""
+        """Draw an outline or the chosen line in the ROI image."""
         if self.drawing == kind:
             self._cancel_drawing()
             return
@@ -928,10 +1058,10 @@ class ROIManagerWindow(QMainWindow):
         self._hover = None
         self.roi_pane.set_tracking(True)
         self.polygon_button.setChecked(kind == "polygon")
-        self.direction_button.setChecked(kind == "direction")
+        self.line_button.setChecked(kind == "line")
         self.status.showMessage("a click per vertex; a click on the first vertex "
                                 "closes it, Escape cancels" if kind == "polygon"
-                                else "click the start, then the end")
+                                else f"{self.line_name}: click the start, then the end")
 
     def _cancel_drawing(self) -> None:
         self.drawing = None
@@ -939,16 +1069,16 @@ class ROIManagerWindow(QMainWindow):
         self._hover = None
         self.roi_pane.set_tracking(False)
         self.polygon_button.setChecked(False)
-        self.direction_button.setChecked(False)
+        self.line_button.setChecked(False)
         self.roi_pane.draw("drawing")
         self.redraw()
 
     def _place(self, x: float, y: float) -> None:
         point = np.array([x, y], float)
-        if self.drawing == "direction":
+        if self.drawing == "line":
             self._points.append(point)
             if len(self._points) == 2:
-                self._finish_direction()
+                self._finish_line()
             else:
                 self._draw_in_progress()
             return
@@ -1034,18 +1164,36 @@ class ROIManagerWindow(QMainWindow):
             self.changed.emit()
         self.redraw()
 
-    def _finish_direction(self) -> None:
+    def _finish_line(self) -> None:
         line = [[float(p[0]), float(p[1])] for p in self._points]
         self._cancel_drawing()
+        name = self.line_name
+        if not name:
+            self.status.showMessage("no line names: write some under *line names*")
+            return
         roi = self._selected()
         if self.draft is not None or roi is None:
             if self.draft is None:
                 self.draft = np.asarray(line, float).mean(axis=0)
-            self.draft_direction = line
+            self.draft_lines = {**self.draft_lines, name: line}
         else:
-            with self._edit("Direction of"):
-                roi.direction = line
-            self.changed.emit()
+            self.project.set_line(roi.id, name, line)
+            self.annotated()
+        self.redraw()
+
+    def _reverse_line(self) -> None:
+        """Swap the chosen line's start and end (R)."""
+        name = self.line_name
+        if self.draft is not None:
+            line = self.draft_lines.get(name)
+            if line is not None:
+                self.draft_lines = {**self.draft_lines, name: [line[1], line[0]]}
+        else:
+            roi = self._selected()
+            if roi is None or not self.project.reverse_line(roi.id, name):
+                self.status.showMessage(f"this ROI has no line {name!r} to reverse")
+                return
+            self.annotated()
         self.redraw()
 
     def _clear_shape(self) -> None:
@@ -1061,14 +1209,15 @@ class ROIManagerWindow(QMainWindow):
         self.redraw()
 
     def _clear_line(self) -> None:
+        """Remove the chosen line."""
         self._cancel_drawing()
+        name = self.line_name
         if self.draft is not None:
-            self.draft_direction = None
+            self.draft_lines = {k: v for k, v in self.draft_lines.items() if k != name}
         roi = self._selected()
-        if roi is not None and self.draft is None:
-            with self._edit("Clear line of"):
-                roi.direction = None
-            self.changed.emit()
+        if roi is not None and self.draft is None and name in roi.lines:
+            self.project.set_line(roi.id, name, None)
+            self.annotated()
         self.redraw()
 
     def _roi_at(self, x: float, y: float, pane=None):
@@ -1116,7 +1265,8 @@ class ROIManagerWindow(QMainWindow):
         if roi is None:
             return
         self.active = roi_id
-        self.draft = self.draft_polygon = self.draft_direction = None
+        self.draft = self.draft_polygon = None
+        self.draft_lines = {}
         project.navigation["roi"] = roi_id
         if roi.file_id != self.current_file():
             ids = list(project.sources)
@@ -1303,9 +1453,10 @@ class ROIManagerWindow(QMainWindow):
         with self.project.edit("Add ROI") as step:
             roi = self.project.add_roi(file_id, [float(self.draft[0]), float(self.draft[1])],
                                        polygon=self.draft_polygon)
-            roi.direction = self.draft_direction
+            roi.lines = dict(self.draft_lines)
             step.label = f"Add ROI {self.project.numbers().get(roi.id)}"
-        self.draft = self.draft_polygon = self.draft_direction = None
+        self.draft = self.draft_polygon = None
+        self.draft_lines = {}
         self.active = roi.id
         self.project.navigation["roi"] = roi.id
         self._fill_table()
