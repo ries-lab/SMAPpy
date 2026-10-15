@@ -815,6 +815,10 @@ class Result:
     # 3x3 affine in nm): Transform's image target.  One undo step with the
     # table, logged as a table change is.
     placements: Dict[int, Any] = field(default_factory=dict)
+    # New image layers (`ImageData`), each added as a source and a layer of
+    # its own after the others: Process image's result.  Not a table change,
+    # so not an undo step nor logged; the layer is removed like any other.
+    image_layers: Sequence = ()
     # Named transformations to keep in the session's list,
     # ``{name: Transformation}`` (`Session.transformations`): Transform's
     # *keep as*, and what Register layers measures.

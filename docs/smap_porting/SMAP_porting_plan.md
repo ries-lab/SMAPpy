@@ -266,7 +266,7 @@ channel *Check overlay* (C3).  AssignColors for more than 2 colours (C4):
 | **6a** | **Export Image**: one renderer of the view for the plugin and the window's *Save*; as the view, composite, or each layer (in colour or grey), or float intensity; scale bar, colour bars, labels; settings in the file | M | - |
 | **6b** | **Export Stack**: movies (step, window, cumulative) and z-stacks; the raw frames beside; a *tail* for tracks; TIFF, MP4 (H.264, target quality, size shown), GIF | M | 6a |
 | **6c** | **Voronoi render mode** (SharpViSu) | S | - |
-| **6d** | **Process image**: background subtraction, local contrast normalisation of an image layer | S | - |
+| **6d** ✅ | **Process image**: background subtraction, local contrast normalisation of an image layer | S | - |
 
 ### Done
 
@@ -574,6 +574,22 @@ channel *Check overlay* (C3).  AssignColors for more than 2 colours (C4):
   arrays the first trace's spectrum and cumulative RMS.
   `smappy/stability.py`; pinned in the Analysis tab.  The Glossary gained
   vibration, amplitude spectrum and RMS.
+
+* **Step 6d** (2026-10-15): *Analysis/Process/Process image* (SMAP's
+  Tiff_remove_BG) on an image layer, `changes_locs = False`.  Operations
+  are a list (`_STEPS`), each a tick with its part shown while ticked,
+  applied in order: *subtract background* -- a Gaussian, a rolling ball
+  (ImageJ's: the 3 x 3 pre-smoothing and the shrinking for large balls) or
+  SMAP's wavelet, as the a trous B3 transform instead of the dual-tree
+  complex one; the Gaussian and the wavelet refined in rounds that replace
+  pixels three robust SDs above the background by it -- then *normalise
+  contrast* (local mean and SD over a Gaussian window, a floor at a
+  fraction of the median SD).  Edges continued by point reflection, so a
+  slope is removed to the edge.  Settings in nm, the plane shown or every
+  plane.  The result a new image layer (`Result.image_layers`, added by
+  the session), the original's pixel size, corner and placement; never the
+  original replaced.  `smappy/image_processing.py`; pinned in the Analysis
+  tab.
 
 ### Start here
 
