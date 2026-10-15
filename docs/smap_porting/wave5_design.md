@@ -6,7 +6,8 @@ starts, so this file grows.  Each step is one session: read this file,
 its tests and its page, run `--slow`, update the plan's *Done* list,
 commit, push, open a PR and merge it.
 
-Topics: **1. coordinates** (decided 2026-10-15, below) · 2. vibrations ·
+Topics: **1. coordinates** (decided 2026-10-15, below) · **2. stability**
+(decided 2026-10-15, below) ·
 3. rendering and movies · 4. figures of regions · 5. LocMoFit and NPC
 geometry · 6. MINFLUX.  AssignColors for more than two colours (C4) was
 found done: `assign_colors.py` takes up to six colours with both methods.
@@ -127,3 +128,52 @@ rotation too; how it varies in time -- a spline like the drift; about which
 centre; 2D only or 3D), then implements: the model, the cost, the `Drift`
 result carrying it (and Transform applying it, 5a), the page, a simulated
 test with a known magnification change.
+
+---
+
+## Topic 2: stability
+
+SMAP's *Vibrations* (one bead in the ROI: x, y, z against time, their SD
+beside the mean precision, the amplitude spectrum 2|FFT|/L with its highest
+peak) becomes the first approach of a diagnostic plugin, **Stability**:
+later approaches are long-term drift (how a bead wanders over the
+acquisition) and the dual-channel drift (*Check overlay*, topic 1, may land
+here as an approach rather than a plugin of its own -- decide with topic 6).
+It stays apart from fiducial drift correction (5c): that corrects, this
+diagnoses; they share only the bead tracks.
+
+### Step 5e -- Stability: vibrations
+
+`Analysis/Measure/Stability`, `changes_locs = False`, `per_region`, with
+approaches ticked on or off and each one's part shown only while on, as
+*Spatial statistics* and *Tracking analysis* do; this step builds
+*vibrations*.  An *id column* (`track_id` by default, from *Link tracks*), so
+it runs on one bead in an ROI or on every bead track.
+
+* **Input**: per bead, and the mean over beads; optionally **differential**
+  -- two beads' difference, or each bead minus the mean of the others -- so
+  motion common to the sample (stage, drift) cancels and what is left is
+  relative motion and noise.  Frames where a bead is missing are filled by
+  interpolation for the spectrum, and counted.  Time is the file's frame
+  time (`metadata.file_frame_time`); MINFLUX's irregular times are
+  interpolated onto a regular grid, as SMAP did.
+* **Output per axis** (x, y, z), **each figure an option** (a tick), since
+  there is a lot of it:
+  * the **trace zoomed in time**, the first second or so (about 1000
+    points, a setting), with a smoothed overlay -- where one sees the
+    vibration directly; and the whole trace with slow drift removed (a
+    high-pass above a chosen frequency), its SD beside the mean precision
+    (SD^2 - precision^2 is the vibration's variance);
+  * the **amplitude spectrum** in nm, as SMAP's, averaged over segments
+    (Welch) so the peaks stand out;
+  * the **cumulative RMS against frequency**: which band holds how much of
+    the jitter;
+  * a **table of the main peaks**, frequency and amplitude.
+* **Values per region**: per axis the SD, the vibration RMS, and the
+  largest peak's frequency and amplitude, so Histograms and Curves
+  summarise many beads.
+
+Tests: a simulated bead with a known sinusoidal vibration (frequency,
+amplitude) plus localization noise gives the peak and its amplitude, and
+the RMS; the differential mode cancels a vibration common to two beads;
+gaps are filled and counted.
