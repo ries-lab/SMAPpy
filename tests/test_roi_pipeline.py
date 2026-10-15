@@ -97,7 +97,7 @@ def test_a_step_of_the_projects_block_is_a_chains_step():
     instance = ChainStep(plugin="Analysis/Measure/Localization Statistics",
                          values={"bins": 40})
     step, = pipeline_module.block_steps(Block(steps=[instance]))
-    assert step.label == "Localization Statistics" and step.version == "4"
+    assert step.label == "Localization Statistics" and step.version == "5"
     assert step.settings.bins == 40
     assert step.as_record()["plugin"] == "Analysis/Measure/Localization Statistics"
 
