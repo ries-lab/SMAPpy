@@ -394,6 +394,30 @@ filters and zoom-ins are settled) · AssignColors for more than 2 colours (C4)
   (Getis-Franklin) or relative to the mean density, edge-corrected by the
   circle's area inside the window (`window_coverage`).  "H" is L - r, the
   name most papers give it, not a fourth curve.
+* **Step 18** (2026-10-15): a frame time per file and
+  *Analysis/Measure/Blinking*.  The frame time is `CameraMetadata.frame_time_ms`
+  (so `metadata["camera"]["frame_time_ms"]`, beside the exposure, by the
+  same three sources: the camera database, the file, the user), and per
+  file in a session `FileInfo.frame_time_ms`, saved in `metadata["files"]`;
+  `metadata.frame_time_ms` falls back to the exposure, and
+  `file_frame_time` / `table_frame_time` are what every reader of seconds
+  calls (tracking, 19c, too).  Read from Micro-Manager's
+  `<camera>-ActualInterval-ms`, a time-lapse `Interval_ms` longer than the
+  exposure, and SMAP's `timediff`; set in the camera editor (a *frame time*
+  row; the database's `frame_interval_ms` is now `frame_time_ms`, the old
+  name still read) and the fitters' camera part (*frame time*, advanced).
+  Time Course (v2) and Localization Statistics' on-time (v5, `on_time_s`
+  per region; its *exposure* setting became *frame time*) read it.
+  *Blinking*, `per_region`: per region the localizations, the blinks as the
+  layer merges them (else runs of consecutive frames), the bursts at a
+  *dark time* T (SMAP's `locsdf`, a dark time over T frames splits), the
+  mean on- and dark time in frames and seconds; on the view, per file,
+  molecules linked by `group.connect` across T dark frames, and the
+  histograms of on-times, dark times and blinks per molecule (SMAP's
+  `dyeblinking`).  Tested on `simulate.kinetics` with known rates.  Also
+  fixed: an ROI's context cut its localizations before the merging it
+  triggered wrote `group_id`, so the first ROI measured on a merged layer
+  could not trace its blinks.
 
 ### Start here
 

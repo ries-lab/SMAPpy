@@ -16,6 +16,7 @@ from .filter import LocFilter
 from .group import GROUP_COLUMNS, GroupSettings
 from .images import ImageData, load_image
 from .locs import KEPT_BOUNDS, Localizations, concat
+from .metadata import frame_time_ms
 from .plugins import Context, Plugin, Result, Selection, refuse_grouped_table
 from .io.formats import FileInfo, load as load_any
 from .regions import Region
@@ -498,6 +499,8 @@ class Session:
             # opened as one stays, as its layer does
             self.images = [im for im in self.images if im.kind != "raw"]
         number = len(self.files)
+        if info.frame_time_ms is None:
+            info.frame_time_ms = frame_time_ms(locs.metadata.get("camera"))
         self.files.append(info)
         self._take_images(self._file_images(info), number)
         columns = dict(locs.columns)

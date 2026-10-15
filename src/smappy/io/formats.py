@@ -31,10 +31,14 @@ class FileInfo:
     n: int = 0
     pixelsize_nm: Optional[float] = None
     metadata: Dict = field(default_factory=dict)
+    # the file's frame time in ms (`metadata.frame_time_ms`), kept here and
+    # not only in the table's camera metadata, which is the first file's
+    # once several are open together
+    frame_time_ms: Optional[float] = None
 
     def to_dict(self) -> Dict:
         return {"name": self.name, "path": self.path, "format": self.format, "n": self.n,
-                "pixelsize_nm": self.pixelsize_nm}
+                "pixelsize_nm": self.pixelsize_nm, "frame_time_ms": self.frame_time_ms}
 
 
 @dataclass
@@ -251,7 +255,8 @@ def _load_sml(path: Path) -> Tuple[Localizations, FileInfo]:
                 px = _h5_scalar(inf, "cam_pixelsize_um")
                 if px is not None and px.dtype.kind == "f":
                     info["pixelsize_um"] = float(px[0])
-                for k in ("numberOfFrames", "conversion", "offset", "emgain"):
+                for k in ("numberOfFrames", "conversion", "offset", "emgain",
+                          "exposure", "timediff"):
                     v = _h5_scalar(inf, k)
                     if v is not None and v.dtype.kind == "f":
                         info[k] = float(v[0])
@@ -268,7 +273,10 @@ def _load_sml(path: Path) -> Tuple[Localizations, FileInfo]:
             first = files[0] if isinstance(files, np.ndarray) else files
             px = np.atleast_1d(first.info.cam_pixelsize_um)
             info["pixelsize_um"] = float(px[0])
-        except AttributeError:
+            for k in ("exposure", "timediff"):
+                if hasattr(first.info, k):
+                    info[k] = float(np.atleast_1d(getattr(first.info, k))[0])
+        except (AttributeError, TypeError, ValueError):
             pass
     if "frame" in columns:
         columns["frame"] = (np.asarray(columns["frame"]) - 1).astype(np.int64)  # MATLAB is 1-based
@@ -279,9 +287,31 @@ def _load_sml(path: Path) -> Tuple[Localizations, FileInfo]:
         if values.dtype == np.float64:
             columns[name] = values.astype(np.float32)
     px = info.get("pixelsize_um")
-    locs = Localizations(columns, {"units": "nm", "source": str(path), "smap": info})
+    metadata = {"units": "nm", "source": str(path), "smap": info}
+    camera = _sml_camera(info)
+    if camera:
+        metadata["camera"] = camera
+    locs = Localizations(columns, metadata)
     return locs, FileInfo(path.name, str(path), "SMAP",
                           pixelsize_nm=px * 1000 if px else None, metadata=info)
+
+
+def _sml_camera(info: Dict) -> Dict:
+    """The exposure and the frame time of a SMAP file, as smappy keeps them.
+
+    SMAP's ``timediff`` is the frame time it measured from the timestamps of
+    the first and last frames -- or 1, a placeholder some of its loaders
+    write, or the exposure.  A frame cannot be shorter than its exposure, so
+    a ``timediff`` below it is the placeholder and is dropped.
+    """
+    camera = {}
+    exposure = info.get("exposure")
+    if exposure is not None and exposure > 0:
+        camera["exposure_ms"] = float(exposure)
+    cycle = info.get("timediff")
+    if cycle is not None and cycle > 0 and cycle >= camera.get("exposure_ms", np.inf):
+        camera["frame_time_ms"] = float(cycle)
+    return camera
 
 
 register(Reader("SMAP", ("_sml.mat", ".mat"), _load_sml,

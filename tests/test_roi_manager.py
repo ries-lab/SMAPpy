@@ -231,7 +231,7 @@ def test_the_default_histograms_draw_every_number_the_statistics_gave():
     drawn = histograms(p.results(), HistogramSettings(bins=10))
     assert set(drawn) == {'n_localizations', 'mean_photons', 'median_photons',
                           'photons_n0', 'mean_precision_nm', 'median_precision_nm',
-                          'sigma_c_nm', 'on_time_frames', 'n_blinks'}
+                          'sigma_c_nm', 'on_time_frames', 'on_time_s', 'n_blinks'}
 
 
 def test_results_live_in_a_table_per_evaluation_and_runs_are_only_a_log():

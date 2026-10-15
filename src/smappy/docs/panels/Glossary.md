@@ -13,8 +13,13 @@ papers and in other software.
 * **localization** (also called a spot, an event or a detection): one
   molecule's position, fitted in one camera frame -- one row of the table.
 * **frame**: one camera image of the movie.
-* **blink** (also called an on-event or a burst): the consecutive frames in
-  which one fluorophore stays on.
+* **blink** (also called an on-event): the consecutive frames in which one
+  fluorophore stays on.
+* **dark time** (also called the off-time): how many frames a fluorophore
+  stays dark between two blinks.
+* **burst** (also called a dark-time-merged count, SMAP's `locsdf`): the
+  blinks joined across dark times up to a set length -- with the length
+  chosen well, the blinks of one molecule.
 * **merge blinks** (also called grouping or linking): combine the
   localizations in consecutive frames that come from one blinking event into
   one localization, with the photons added and a better precision.
@@ -68,6 +73,9 @@ papers and in other software.
   through its own amplifier.
 * **camera ROI** (also called the readout region or crop): the part of the
   chip the camera read out.
+* **frame time** (also called the cycle time or frame interval): the time
+  from one frame to the next -- the exposure plus the camera's dead time;
+  where the file does not record it, the exposure stands in for it.
 
 ## The picture
 
