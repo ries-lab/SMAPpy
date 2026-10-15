@@ -51,6 +51,7 @@ tabs:
   - plugin: Analysis/Regions/Centre ROIs
   - plugin: Analysis/Regions/Regions to column
   - plugin: Analysis/Regions/Summarize/Histograms
+  - plugin: Analysis/Regions/Summarize/Curves
   - plugin: Analysis/Regions/Summarize/Export table
   - plugin: Analysis/Regions/Summarize/NPC labelling efficiency
   - plugin: Analysis/Regions/Workflow/NPC Analysis
