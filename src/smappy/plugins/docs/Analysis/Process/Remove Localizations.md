@@ -1,6 +1,6 @@
 ---
 version: "1"
-covers: [smappy.plugins.remove_locs.region_mask, smappy.plugins.remove_locs.current_roi, smappy.plugins.remove_locs.drop, smappy.plugins.remove_locs.hide, smappy.plugins.remove_locs.check_field, smappy.regions.Region.mask]
+covers: [smappy.plugins.remove_locs.region_mask, smappy.plugins.remove_locs.current_roi, smappy.plugins.remove_locs.drop, smappy.plugins.remove_locs.hide, smappy.plugins.remove_locs.check_field, smappy.plugins.remove_locs.included_rois_mask, smappy.roi_manager.core.ROIProject.rows_of, smappy.regions.Region.mask]
 ---
 
 ## What it does
@@ -68,6 +68,14 @@ and the 3D slab while the 3D window is set to have plugins use it.  This is
 the way to say "keep exactly what I see" (*remove* the localizations
 *outside* the selection), or to remove the localizations a filter already
 hides.
+
+With *region* set to *all included ROIs*, "inside" means inside any ROI
+of the [ROI manager](plugin:Panels/ROI manager) whose *use* is ticked, each
+ROI in its own file, by its shape alone (the layer's filter does not
+narrow it, as for a measurement in the ROI).  *remove* the localizations
+*outside* them and a field of a few hundred segmented pores shrinks to the
+pores, which makes a much smaller file; for clusters, a filter on
+`cluster_id` $\geq$ 1 does the same without the ROI manager.
 
 **2. Which side goes.**  The setting *remove* chooses: *the localizations
 inside* empties the region, *the localizations outside* keeps it and nothing
@@ -137,8 +145,9 @@ column the table already has, unless it is a flag itself: hiding writes 0 and
 screen and nothing else.
 
 ### region
-*the drawn ROI* needs an ROI in the render window; the plugin refuses to run
-without one.
+*the drawn ROI* needs an ROI in the render window, *all included ROIs* at
+least one used ROI in the ROI manager; the plugin refuses to run without
+them.
 
 ### action
 Prefer *hide* while deciding; *remove* makes a smaller table and file, which
@@ -178,6 +187,11 @@ Based on SMAP's `Process/Modify/RemoveLocs`
   the filter is set on it so the hidden localizations actually disappear, and
   it carries the rule *all* for merging blinks, so nothing is merged again
   unless a layer merges blinks.
+* **The ROIs.**  SMAP's *RemoveLocsOutsideSites*, a plugin of the ROI
+  manager, keeps the localizations in a square of the site size around each
+  site, whatever the sites' shape, and only deletes.  Here it is *region* =
+  *all included ROIs*: each ROI's own shape, the used ROIs only, and it can
+  hide as well as remove, and remove the inside instead.
 
 ## References
 

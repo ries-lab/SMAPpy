@@ -121,9 +121,9 @@ drift (#34) · D3 time-dependent transformation (magnification) in COMET
 | E1 | Sort ROIs | #128 | **done** (`Regions/Sort ROIs`) |
 | E1 | Site number / an evaluation value → localization column | #131 | **done** (`Regions/Regions to column`, `roi_id` included; the block's *write values*) |
 | E1 | Export the site table | #130 | open; now A7 |
-| E1 | Remove double sites | #129 | open. A small Regions plugin (or a *Filter ROIs* mode: closer than d → keep the one with more localizations). |
-| E1 | Remove localizations outside the ROIs | #107 | open. Simplest as a third *region* choice of Remove Localizations ("all included ROIs"); for clusters, a filter on `cluster_id > 0` already does it. |
-| E1 | Use only the ROIs inside the drawn ROI | #106 | open, P3. Could be a *Filter ROIs* condition on position. |
+| E1 | Remove double sites | #129 | **done** (`Regions/Remove double ROIs`, step 14) |
+| E1 | Remove localizations outside the ROIs | #107 | **done** (Remove Localizations, *region* = *all included ROIs*, step 14); for clusters, a filter on `cluster_id > 0` |
+| E1 | Use only the ROIs inside the drawn ROI | #106 | **done** (*Filter ROIs*: `in_drawn_roi`, step 14) |
 | E1 | Import site positions | #135 | open, P3 |
 | E1 | ROI per file (`files2sites`) | #108 | **mostly there**: *Column to ROIs* on `filenumber`. You had marked it skip anyway. |
 | E2 | **Annotate ROIs** | new | **mostly done** (`gui/roi_annotate.py`): any number of keyword lists written in the panel and saved with the project; keys 1–9 pick a keyword, 0 clears it, Tab switches lists, Up/Down moves to the next ROI, Space toggles *use*; a comment per ROI; the keywords become columns of the results table, so Filter and Sort read them. **Still missing from SMAP's version: several named lines per ROI.** There is one *direction* line now. Extending it to named lines (angle and length as values) is what E7 needs for orientation. |
@@ -222,7 +222,7 @@ one after the other, in the same session if possible.
 | step | what | size | needs |
 |---|---|---|---|
 | **13** | **Named lines per ROI**: the one *direction* becomes any number of named lines, drawn in the ROI manager, each with angle and length as values in the results table, and a reverse action | M (GUI, ROI project file format) | – |
-| **14** | **Small ROI tools**: remove double ROIs (closer than d: keep the larger); remove localizations outside the included ROIs (a third *region* choice of Remove Localizations); keep the ROIs inside the drawn ROI (a *Filter ROIs* condition on position) | S | – |
+| **14** ✅ | **Small ROI tools**: remove double ROIs (closer than d: keep the larger); remove localizations outside the included ROIs (a third *region* choice of Remove Localizations); keep the ROIs inside the drawn ROI (a *Filter ROIs* condition on position) | S | – |
 | **15** | **Line Profile `per_region`** (width, distance, AIC winner as values) and **Circle fit** (`Analysis/Measure/Circle fit`, `per_region`), with *centre ROIs* on the circle or median centre as a Regions action | S–M | – |
 | **16** | **Average ROIs**: centre plus orientation from a measured value or a named line → a new table | M | 13 |
 
@@ -315,6 +315,16 @@ filters and zoom-ins are settled) · AssignColors for more than 2 colours (C4)
   tested on a disc, ellipses, a line and a cylinder; in the Analysis tab of
   the shipped GUI, not in `DEFAULT_REGION_STEPS`.  SMAP's `boundary` area
   and *skip first* left out.
+
+* **Step 14** (2026-10-15): small ROI tools.  *Analysis/Regions/Remove
+  double ROIs*: of used ROIs of one file closer than a distance, the one
+  with more localizations (as the ROI manager shows them) stays, the other
+  is excluded, one ROI undo step -- a plugin of its own, not a mode of
+  *Filter ROIs*, since a double is a pair and a filter tests one ROI's row.
+  Remove Localizations' *region* gained *all included ROIs* (each ROI's
+  shape in its file).  *Filter ROIs* (and *Sort ROIs*) read each ROI's
+  centre, `roi_x_nm` / `roi_y_nm`, and `in_drawn_roi`: the condition
+  `in_drawn_roi` is SMAP's UseSitesInROI.
 
 ### Start here
 

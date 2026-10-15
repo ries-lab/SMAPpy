@@ -173,3 +173,42 @@ def _name(node) -> str:
     if isinstance(node, ast.Attribute):
         return f"{_name(node.value)}.{node.attr}"
     raise ValueError(type(node).__name__)
+
+
+def doubles(centers, counts, distance: float, groups=None) -> "np.ndarray":
+    """Which ROIs are doubles of another: SMAP's RemoveDoubleSites, keeping
+    the one with more localizations.
+
+    ``centers`` (n x 2, nm), ``counts`` the localizations each ROI shows,
+    ``groups`` which file each belongs to (ROIs of different files are never
+    doubles, whatever their coordinates).  The ROIs are taken from the most
+    localizations down, ties by their order here; one is kept unless a kept
+    ROI of its file is closer than ``distance``.  So of a pair the larger
+    stays, and of a chain a-b-c where only neighbours are close the ends
+    stay and the middle goes, whatever the order of the list.
+
+    SMAP walks the list in its order and deletes whatever lies near the
+    current site, so which of two doubles survived was the one segmented
+    first -- often the worse-centred one.  Returns a mask, True for a double.
+    """
+    import numpy as np
+    from scipy.spatial import cKDTree
+    centers = np.asarray(centers, dtype=float).reshape(-1, 2)
+    counts = np.asarray(counts, dtype=float)
+    n = len(centers)
+    double = np.zeros(n, dtype=bool)
+    if n < 2 or not distance > 0:
+        return double
+    groups = np.zeros(n, dtype=int) if groups is None else np.asarray(groups)
+    for g in np.unique(groups):
+        members = np.flatnonzero(groups == g)
+        tree = cKDTree(centers[members])
+        kept = np.zeros(len(members), dtype=bool)
+        # stable: of two with the same count, the earlier in the list stays
+        for k in np.argsort(-counts[members], kind="stable"):
+            near = tree.query_ball_point(centers[members[k]], distance - 1e-9)
+            if any(kept[j] for j in near if j != k):
+                double[members[k]] = True
+            else:
+                kept[k] = True
+    return double

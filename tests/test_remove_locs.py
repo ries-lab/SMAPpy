@@ -203,3 +203,47 @@ def test_a_flag_is_not_written_over_a_measured_column():
         check_field("photons", locs)
     flagged = hide(locs, np.array([True, False, True, True]))
     assert check_field("use", flagged) == "use"       # an earlier run's flag
+
+
+# ------------------------------------------------ the included ROIs
+
+def test_removing_outside_the_included_rois_keeps_what_the_used_rois_cover():
+    from smappy.session import Session
+    session = Session(table())
+    session.show_grouped(0, False)
+    project = session.rois
+    project.set_geometry(250)                       # a circle of radius 125
+    file_id = next(iter(project.sources))
+    project.add_roi(file_id, [300, 0])              # 200, 300, 400
+    project.add_roi(file_id, [1500, 0])             # 1400, 1500, 1600
+    unused = project.add_roi(file_id, [1000, 0])
+    unused.use = False
+    ctx = Context(locs=session.locs, session=session)
+    settings = RemoveSettings(which="outside", region="rois")
+    assert "would remove 14 of 20" in RemoveLocalizations().preview(ctx, settings).text
+    result = RemoveLocalizations().run(ctx, settings)
+    assert np.asarray(result.locs["x_nm"]).tolist() == [200, 300, 400, 1400, 1500, 1600]
+    assert "the 2 included ROIs" in result.text
+    # hiding instead flags the same rows
+    hidden = RemoveLocalizations().run(ctx, RemoveSettings(which="outside", region="rois",
+                                                           action="hide"))
+    assert int(np.asarray(hidden.locs["use"]).sum()) == 6
+
+
+def test_without_included_rois_the_roi_region_is_refused():
+    from smappy.session import Session
+    session = Session(table())
+    ctx = Context(locs=session.locs, session=session)
+    with pytest.raises(ValueError, match="no included ROIs"):
+        RemoveLocalizations().run(ctx, RemoveSettings(which="outside", region="rois"))
+
+
+def test_an_included_roi_covers_its_own_file_only():
+    from test_roi_session import rois_of
+    project, first = rois_of(table(), table())
+    project.set_geometry(250)
+    project.add_roi(project.source_of(1).id, [300, 0])
+    session = project.session
+    keep = project.rows_of(list(project.rois))
+    assert np.asarray(session.locs["filenumber"])[keep].tolist() == [1, 1, 1]
+    assert np.asarray(session.locs["x_nm"])[keep].tolist() == [200, 300, 400]

@@ -23,7 +23,8 @@ whether it is used; *Filter ROIs* is the plugin that includes and excludes.
 **What it reads.**  For each ROI, the newest stored values of every
 measurement made in it -- whatever ran it: the per-region steps, a chain or
 a script -- named as in the results table, and its keywords, one column per
-list.  A result that is out of date still counts, so the order does not
+list.  Its centre is there too, as `roi_x_nm` and `roi_y_nm`, to walk
+through the ROIs from left to right.  A result that is out of date still counts, so the order does not
 change under the user while the ROIs are measured again.
 
 **The order.**  ROIs are ordered by *sort by*, those with equal values by

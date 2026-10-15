@@ -1,6 +1,6 @@
 ---
 version: "1"
-covers: [smappy.plugins.roi_order.FilterROIs.run, smappy.plugins.roi_order.new_use, smappy.roi_manager.order.condition, smappy.roi_manager.core.ROIProject.filter_rois]
+covers: [smappy.plugins.roi_order.FilterROIs.run, smappy.plugins.roi_order.new_use, smappy.roi_manager.order.condition, smappy.roi_manager.core.ROIProject.filter_rois, smappy.roi_manager.core.ROIProject.in_drawn_roi, smappy.roi_manager.core.ROIProject.drawn_roi]
 ---
 
 ## What it does
@@ -10,7 +10,8 @@ shapes kept in the [ROI manager](plugin:Panels/ROI manager), inside which
 things are measured) by a condition on what was measured in them and the
 keywords they were given in the ROI manager (*annotate*): keep the nuclear
 pores with six corners or more, the clusters of more than 50 localizations,
-the sites annotated *good*.  It sets each ROI's *use*, which is what the
+the sites annotated *good*, the sites inside a cell drawn around in the
+render window.  It sets each ROI's *use*, which is what the
 per-region steps, the results table and the summaries respect.  Use it in
 place of excluding ROIs one by one, and in a chain, after the ROIs were
 measured.
@@ -30,7 +31,15 @@ name has spaces in it -- `NPC Corners.n_corners`, when two steps write
 
 **What it reads.**  For each ROI, the newest stored values of every
 measurement made in it, current or not, and its keywords, as Sort ROIs reads
-them.  An ROI with no value for a name fails every comparison with it: an
+them -- and where it is:
+
+* `roi_x_nm`, `roi_y_nm` -- the ROI's centre, in nm.
+* `in_drawn_roi` -- true when the ROI's centre is inside the ROI drawn in
+  the render window: the condition `in_drawn_roi` keeps the ROIs in one
+  cell out of a field of many.  An ROI of a file the layer does not show is
+  never inside, since the files share coordinates.  Without a drawn ROI, or
+  while the picture shows other columns than the positions, a condition
+  that reads it is refused.  An ROI with no value for a name fails every comparison with it: an
 unmeasured ROI is left out by `n_corners >= 6`.  A name no ROI has is
 refused, since it is nearly always a typing error that would exclude
 everything.
@@ -75,6 +84,10 @@ Ported from SMAP's *FilterSites* ([Ries 2020](https://doi.org/10.1038/s41592-020
   and only comparisons, logic and arithmetic are allowed.
 * **Undoable, and narrowing by default.**  SMAP overwrites *use* for every
   site.
+* **The drawn ROI is a condition.**  SMAP's *UseSitesInROI*, a plugin of its
+  own that sets *use* to whether the site is in the drawn ROI, is
+  `in_drawn_roi` here, and combines with the rest (`in_drawn_roi and
+  n_corners >= 6`).
 
 ## References
 
