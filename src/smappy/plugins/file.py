@@ -664,8 +664,8 @@ class ExportStack(Plugin):
             kind = "tiff"
         notice = None
         if kind == "mp4" and not has_encoder():
-            notice = Notice("an MP4 needs imageio-ffmpeg: pip install imageio-ffmpeg "
-                            "(or smappy-smlm[movie]); TIFF and GIF need nothing",
+            notice = Notice("an MP4 needs imageio-ffmpeg: pip install imageio-ffmpeg; "
+                            "TIFF and GIF need nothing",
                             kind="warning")
         elif ctx is not None and ctx.session is not None and ctx.session.layers:
             try:

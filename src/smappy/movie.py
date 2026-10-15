@@ -25,8 +25,7 @@ frame equals the picture of its window, and a cumulative movie stays
 visible from its first frame rather than starting black.
 
 Written as a TIFF stack (lossless, with the pixel size and the step, which
-Fiji reads), an MP4 with H.264 (through ``imageio-ffmpeg``, the ``movie``
-extra) or a GIF (Pillow), frame by frame, so a movie longer than memory
+Fiji reads), an MP4 with H.264 (through ``imageio-ffmpeg``, a dependency) or a GIF (Pillow), frame by frame, so a movie longer than memory
 can be written.
 """
 from __future__ import annotations
@@ -289,7 +288,7 @@ def _write_mp4(path: Path, frames, shape, fps, quality, description) -> None:
         import imageio_ffmpeg
     except ImportError:
         raise ImportError("an MP4 is written by imageio-ffmpeg: pip install "
-                          "imageio-ffmpeg (or smappy-smlm[movie])") from None
+                          "imageio-ffmpeg") from None
     h, w = shape[:2]
     H, W = h + h % 2, w + w % 2           # H.264 in yuv420p wants even sides
     params = ["-crf", str(QUALITY[quality]), "-preset", "medium",
