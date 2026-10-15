@@ -30,7 +30,7 @@ def test_every_file_plugin_is_in_the_tree():
     found = plugins.refs("File/")
     assert set(found) == {
         "File/Load/Auto", "File/Load/Load", "File/Save/smappy HDF5",
-        "File/Export/Image", "File/Export/Localizations",
+        "File/Export/Image", "File/Export/Stack", "File/Export/Localizations",
         "File/Simulate/Blinking Structure", "File/Simulate/Tracks"}
 
 
@@ -256,7 +256,7 @@ def test_the_file_tab_ships_with_load_first_and_what_the_file_menu_does_not_do(
     # menu's, and the tree still has it and the loader, for chains and the
     # batch
     assert pinned[0] == "File/Load/Load"
-    assert set(pinned) == {"File/Load/Load", "File/Export/Image",
+    assert set(pinned) == {"File/Load/Load", "File/Export/Image", "File/Export/Stack",
                            "File/Export/Localizations", "File/Simulate/Blinking Structure",
                            "File/Simulate/Tracks"}
     assert "open files" in session.window_openers

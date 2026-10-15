@@ -68,6 +68,9 @@ Source = "https://github.com/ries-lab/SMAPpy"
 # matplotlib is a base dependency now, so `drift` is satisfied by a plain
 # install; it stays because the docs name it.
 image = ["pillow>=9.0"]        # save_image, for a picture without a window
+# Export Stack's MP4: H.264 through the ffmpeg binary imageio-ffmpeg ships.
+# TIFF stacks and GIFs need nothing beyond the base install.
+movie = ["imageio-ffmpeg>=0.4"]
 # Drift correction itself needs nothing: COMET is vendored and its cost function
 # is compiled with the package.  This extra is only COMET's diagnostic plots,
 # which are all behind flags.

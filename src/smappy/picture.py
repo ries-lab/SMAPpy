@@ -65,6 +65,22 @@ class ViewFrame:
     slab: Any = None
 
 
+class FrameSource:
+    """A window's `ViewFrame` as the session holds it (`Session.view_frames`).
+
+    The window writes ``frame`` on its own thread whenever the view moves,
+    and a plugin reads it from its worker: plain data, so no widget is ever
+    read, or its last reference dropped, off the GUI thread
+    (`gui.collector`).  Calling it gives the frame, None before the first.
+    """
+
+    def __init__(self, frame: Optional[ViewFrame] = None):
+        self.frame = frame
+
+    def __call__(self) -> Optional[ViewFrame]:
+        return self.frame
+
+
 @dataclass
 class Picture:
     """One file's worth: the pixels, what they cover, and what was drawn."""
@@ -396,6 +412,23 @@ def _decorate(pixels: np.ndarray, fov: FieldOfView, label: str, bar: float, unit
     return np.asarray(image), n_bar
 
 
+def stamp(pixels: np.ndarray, text: str, white: bool = False) -> np.ndarray:
+    """``text`` written in the bottom left corner, the size the labels are:
+    a movie's time or depth on each of its frames."""
+    if not text:
+        return pixels
+    from PIL import Image, ImageDraw
+    grey = pixels.ndim == 2
+    image = Image.fromarray(np.ascontiguousarray(pixels), "L" if grey else "RGB")
+    h, w = pixels.shape[:2]
+    size = text_size(h, w)
+    ink = 255 if grey else ((0, 0, 0) if white else (255, 255, 255))
+    margin = max(4, size // 2)
+    ImageDraw.Draw(image).text((margin, h - margin), text, fill=ink,
+                               font=_font(size), anchor="ls")
+    return np.asarray(image)
+
+
 def _colour_bars(image, scales, size: int, font, white: bool):
     """The window's colour bars, stacked in the top right corner: on a
     darkened (or, on white paper, lightened) box, the LUT upwards, the
@@ -515,6 +548,8 @@ def read_description(path) -> Dict[str, Any]:
         import tifffile
         with tifffile.TiffFile(str(path)) as tif:
             text = tif.pages[0].description
+            if tif.is_imagej:            # a stack: ImageJ's own, ours in *Info*
+                text = (tif.imagej_metadata or {}).get("Info")
     else:
         from PIL import Image
         with Image.open(path) as image:
