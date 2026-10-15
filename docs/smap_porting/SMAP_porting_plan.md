@@ -250,7 +250,8 @@ one after the other, in the same session if possible.
 
 ### Wave 5 -- designed a topic at a time in `wave5_design.md`
 
-Topics: 1. coordinates (decided 2026-10-15) · 2. vibrations (A6) ·
+Topics: 1. coordinates (decided 2026-10-15) · 2. stability (A6, decided
+2026-10-15) ·
 3. rendering and movies (I; movie export with the tracks as an option:
 step 19b's render mode with a *tail*, over the raw frames) · 4. figures of
 regions (E6) · 5. LocMoFit (H) and NPC geometry · 6. MINFLUX (G), with the
@@ -263,6 +264,7 @@ channel *Check overlay* (C3).  AssignColors for more than 2 colours (C4):
 | **5b** | **Register layers** (C2): shift by cross-correlation, z optional; hands its result to Transform | S-M | 5a |
 | **5c** | **Fiducial drift** (D2): bright long-lived tracks, one spline dx, dy (dz), a `Drift` | M | - |
 | **5d** | **Magnification over time in COMET** (D3), discussed with Jonas first | M-L | - |
+| **5e** | **Stability: vibrations** (A6): `Analysis/Measure/Stability`, approaches (vibrations now; long-term and dual-channel drift later), per bead track, differential, zoomed trace, spectrum, cumulative RMS, peaks; figures as options | M | - |
 
 ### Done
 
