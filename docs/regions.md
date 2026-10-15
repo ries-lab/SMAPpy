@@ -205,6 +205,7 @@ Analysis/Regions/Segment regions    ROIs: a ring template, density peaks, or an 
 Analysis/Regions/Find clusters      DBSCAN, Voronoi or HDBSCAN (cluster_id)
 Analysis/Regions/Summarize/...      Histograms, NPC labelling efficiency: read a region table
 Analysis/Regions/Regions to column  what was measured per region onto the table
+Analysis/Regions/Average ROIs       the used ROIs centred, turned and superimposed: a new file
 Analysis/Regions/Workflow/...       NPC Analysis, a shipped chain with a block
 ```
 
