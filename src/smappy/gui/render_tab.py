@@ -50,6 +50,7 @@ RENDER_MODES: Tuple[Tuple[str, str], ...] = (
     ("gauss", "Gaussian (fixed)"),
     ("hist", "histogram"),
     ("dl", "diffraction-limited"),
+    ("tracks", "tracks"),
 )
 QUICK_PER_ROW = 4
 HIST_BINS = 120
@@ -997,7 +998,16 @@ class RenderTab(QWidget):
             self.mode.addItem(text, key)
         self.mode.setToolTip("how a localization is drawn: a Gaussian as wide as "
                              "its precision, one of a fixed width, a count per "
-                             "pixel, or the spot the camera saw")
+                             "pixel, the spot the camera saw, or the lines of "
+                             "its track")
+        # the tracks mode's two settings, shown only while it is chosen
+        self.track_column = QComboBox()
+        self.track_column.setToolTip("the id column whose localizations are one "
+                                     "track: track_id from Link tracks, tid from "
+                                     "MINFLUX")
+        self.line_width = QDoubleSpinBox(minimum=0.2, maximum=20, singleStep=0.5,
+                                         decimals=1)
+        self.line_width.setToolTip("the tracks' lines, in pixels of the picture")
         self.color = QComboBox()
         self.color.addItem("intensity", None)
         self.color.addItem("field", "field")
@@ -1050,6 +1060,9 @@ class RenderTab(QWidget):
         self.grouped.setToolTip("one entry per blink instead of one per frame; "
                                 "merges the table on first use")
         form.addRow("render", self.mode)
+        form.addRow("track id", self.track_column)
+        form.addRow("line width", self.line_width)
+        self._display_form = form
         form.addRow("colour by", color_row)
         form.addRow("colour range", self.color_range_row)
         form.addRow("LUT", lut_row)
@@ -1112,6 +1125,8 @@ class RenderTab(QWidget):
         self.strip.add_image_requested.connect(self._add_image)
         self.filter.changed.connect(lambda: session.changed("layer"))
         self.mode.currentIndexChanged.connect(self._on_render_settings)
+        self.track_column.currentIndexChanged.connect(self._on_render_settings)
+        self.line_width.valueChanged.connect(self._on_render_settings)
         self.sigma.valueChanged.connect(self._on_render_settings)
         self.sigma_y.editingFinished.connect(self._on_render_settings)
         self.factor.valueChanged.connect(self._on_render_settings)
@@ -1180,7 +1195,8 @@ class RenderTab(QWidget):
         """Point every control at one layer, without firing their signals."""
         layer = self.session.layers[index]
         self.filter.layer_index = index
-        widgets = (self.mode, self.sigma, self.sigma_y, self.factor, self.color, self.color_field,
+        widgets = (self.mode, self.track_column, self.line_width,
+                   self.sigma, self.sigma_y, self.factor, self.color, self.color_field,
                    self.lut, self.invert, self.invert_mode, self.white,
                    self.contrast, self.gamma,
                    self.grouped,
@@ -1193,6 +1209,7 @@ class RenderTab(QWidget):
         for w in (self.mode, self.color, self.color_field, self.grouped, self.sigma, self.factor):
             w.setEnabled(not layer.is_image)
         if layer.is_image:
+            self._show_track_rows(False)
             img = layer.image
             self._fill_image_sources(layer)
             self.image_pixelsize.setValue(img.pixelsize)
@@ -1222,6 +1239,9 @@ class RenderTab(QWidget):
         self.color_lo.set(lo)
         self.color_hi.set(hi)
         self.set_mode(settings.mode)
+        self._fill_track_columns(layer)
+        self.line_width.setValue(settings.line_width)
+        self._show_track_rows(settings.mode == "tracks" and not layer.is_image)
         self.sigma.setValue(settings.sigma)
         self.sigma_y.set(settings.sigma_y)
         self.factor.setValue(settings.sigma_settings.factor)
@@ -1249,10 +1269,33 @@ class RenderTab(QWidget):
             sigma_y = self.sigma_y.value()
         except ValueError:                       # half-typed; the old one stands
             sigma_y = state.settings.sigma_y
-        state.settings = dataclasses.replace(state.settings, mode=self.mode.currentData(),
-                                             sigma=self.sigma.value(), sigma_y=sigma_y,
-                                             sigma_settings=sigmas)
+        mode = self.mode.currentData()
+        state.settings = dataclasses.replace(
+            state.settings, mode=mode, sigma=self.sigma.value(), sigma_y=sigma_y,
+            sigma_settings=sigmas, line_width=self.line_width.value(),
+            track_column=self.track_column.currentText() or state.settings.track_column)
+        self._show_track_rows(mode == "tracks")
         self.session.changed("layer")
+
+    def _show_track_rows(self, shown: bool) -> None:
+        for widget in (self.track_column, self.line_width):
+            self._display_form.setRowVisible(widget, shown)
+
+    def _fill_track_columns(self, layer: Layer) -> None:
+        """The integer columns a track could be named by, the chosen one
+        first among them even before the table has it."""
+        locs = layer.locs
+        names = [n for n in locs if np.asarray(locs[n]).dtype.kind in "iu"
+                 and np.asarray(locs[n]).ndim == 1]
+        chosen = layer.state.settings.track_column
+        if chosen not in names:
+            names.insert(0, chosen)
+        blocked = self.track_column.signalsBlocked()
+        self.track_column.blockSignals(True)
+        self.track_column.clear()
+        self.track_column.addItems(names)
+        self.track_column.setCurrentText(chosen)
+        self.track_column.blockSignals(blocked)
 
     def _on_color(self) -> None:
         state = self.layer.state

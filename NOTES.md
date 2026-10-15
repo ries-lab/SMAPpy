@@ -1483,6 +1483,30 @@ jump distances of an id column, per track and pooled, `per_region`.
 * **MINFLUX's clock**: `time_s` put on a grid of the median within-track
   interval.  Not checked on real MINFLUX data.
 
+### The tracks render mode
+
+`RenderSettings(mode="tracks")` (step 19b): each track of an id column
+(`track_column`, `track_id` by default) drawn as antialiased segments
+between its localizations in time order, `line_width` pixels wide
+(`render.render_tracks`, the kernel `render_segments` in `csrc/render.cpp`).
+
+* **A raster, not a vector layer**, so exports, overlays and the sum of
+  layers needed nothing; the design's choice.
+* **Culled per track, not per localization.**  `LayerSnapshot.select` culls
+  points to the view with the spatial index, which would drop a segment
+  whose ends are both outside it; in this mode it hands over the filter's
+  rows and `render_tracks` drops tracks whose bounding boxes miss the view.
+* **The kernel's work is a segment's length times its width**: each row it
+  can reach is visited only between where it enters and leaves that row's
+  band.  Coverage is `clamp(w/2 + 1/2 - d)`, round ends; a joint is up to
+  twice as bright over a pixel (summing, not taking the larger, which
+  would need to know which segments are one track's).  1 M localizations
+  in 54 k tracks: 0.3 s for the whole field at 1000 x 1000 pixels, 0.12 s
+  zoomed in; counting the drawn localizations with `union1d` had been
+  0.8 s of it.
+* The 3D view draws a tracks layer's localizations as points (precision
+  where there is one).  The movie export's *tail* is wave 5's.
+
 ## Open questions
 
 * Fitted x sits ~0.24 px from the peak-finder position, and the sign flips with
