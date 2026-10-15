@@ -163,3 +163,20 @@ def test_merged_blinks_keep_their_track_so_no_line_crosses_the_field():
     a, b = track_segments(locs, TRACKS, snap.indices)
     jump = np.hypot(locs["x_nm"][a] - locs["x_nm"][b], locs["y_nm"][a] - locs["y_nm"][b])
     assert jump.max() < 2000
+
+
+def test_choosing_tracks_unticks_merge_blinks_once():
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    from smappy.gui.render_tab import RenderTab
+    from smappy.session import Session
+    session = Session(tracks_table([(5, 5), (35, 5)], [1, 1], [0, 1]))
+    tab = RenderTab(session)
+    assert session.layers[0].grouped and tab.grouped.isChecked()
+    tab.set_mode("tracks")
+    assert not session.layers[0].grouped and not tab.grouped.isChecked()
+    # ticked again by hand, it stays while other track settings change
+    tab.grouped.setChecked(True)
+    tab.line_width.setValue(2.0)
+    assert session.layers[0].grouped

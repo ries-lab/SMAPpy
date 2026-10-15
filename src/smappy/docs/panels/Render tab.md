@@ -597,6 +597,11 @@ the tracks are linked.  *Voronoi density* to see structures of very
 different densities at once, or to judge densities by eye; the picture of
 a layer with millions of localizations takes a while the first time.
 
+Choosing *tracks* unticks *merge blinks* on that layer: merging joins a
+slow particle's localizations in consecutive frames into one, and the line
+through the blinks is coarser than the track.  Tick it again to draw the
+blinks.
+
 ### track id
 The id column of the tracks, in *tracks* only.  *auto* takes the first of
 `track_id`, `tid` and `track_id_true` the table has, and says which; any

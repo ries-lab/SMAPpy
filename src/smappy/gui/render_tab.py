@@ -1271,11 +1271,21 @@ class RenderTab(QWidget):
         except ValueError:                       # half-typed; the old one stands
             sigma_y = state.settings.sigma_y
         mode = self.mode.currentData()
+        entering_tracks = mode == "tracks" and state.settings.mode != "tracks"
         state.settings = dataclasses.replace(
             state.settings, mode=mode, sigma=self.sigma.value(), sigma_y=sigma_y,
             sigma_settings=sigmas, line_width=self.line_width.value(),
             track_column=self._chosen_track_column(state.settings.track_column))
         self._show_track_rows(mode == "tracks")
+        if entering_tracks and self.layer.grouped:
+            # a track is drawn through its localizations: merged blinks join a
+            # slow particle's steps into one point and draw a coarser line.
+            # Only on choosing the mode, so ticking it again afterwards stays
+            self.grouped.blockSignals(True)
+            self.grouped.setChecked(False)
+            self.grouped.blockSignals(False)
+            self._on_grouped(False)
+            return                               # that announced the change
         self.session.changed("layer")
 
     def _show_track_rows(self, shown: bool) -> None:
