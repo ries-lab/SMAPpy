@@ -86,7 +86,7 @@ ROI and per cluster.  Nothing is ported twice: SMAP's `X` (Analyze) and
 | B2 | **Find clusters**: one plugin with an algorithm choice. Each algorithm's settings are a part; only the selected algorithm's part is **shown**, the others hidden (step 1 below adds that to the form). It replaces `Regions/Find/DBSCAN`. Writes `cluster_id` and `n_in_cluster` as now. | #91 #93 (clusters) | done (step 10): DBSCAN, Voronoi, HDBSCAN in `Regions/Find clusters` |
 | B2s | **Shuffle colours**: for any integer column, writes a column with the ids randomly permuted (for example `<column>_shuffled`, a recipe), so colouring by it separates neighbouring ids. A new seed on each run. | #95 | done (step 7): `Analysis/Process/Shuffle ids` |
 | B2b | Statistics on clusters, also inside ROIs | #96 #120 | done by the structure (a block over `cluster_id`). The cluster-shape measurement is **done** (`Measure/Cluster shape`, step 12). |
-| B3 | **Spatial statistics**: Ripley K/L/H, pair correlation, 2D auto- and cross-correlation between layers, the 1D correlation along a line; `per_region`, so it runs in every ROI too | #90 #92 #119 | decided (`wave4_design.md`): one plugin with a list of approaches, steps 17a-c; the radial approaches **done** (`Measure/Spatial statistics`, step 17a) |
+| B3 | **Spatial statistics**: Ripley K/L/H, pair correlation, 2D auto- and cross-correlation between layers, the 1D correlation along a line; `per_region`, so it runs in every ROI too | #90 #92 #119 | decided (`wave4_design.md`): one plugin with a list of approaches, steps 17a-c; the radial approaches **done** (`Measure/Spatial statistics`, step 17a), their summary over regions too (`Summarize/Curves`, step 17b) |
 | B4 | **Counting**: a `per_region` measurement plus a `Summarize` histogram fit | #98 #121 | decided (`wave4_design.md`): *Blinking*, a `per_region` measurement (step 18); the counting fit later, on top of the NPC model; DNA-PAINT / qPAINT later, after looking at Picasso |
 
 What this changes in the code: `Regions/Find/` becomes the home of the two
@@ -239,7 +239,7 @@ one after the other, in the same session if possible.
 | step | what | size | needs |
 |---|---|---|---|
 | **17a** ✅ | **Spatial statistics, radial**: `Analysis/Measure/Spatial statistics` -- pair distances from the C++ `Index`, the window's set covariance as edge correction, g, K, L-r, H for each visible layer and each pair, CSR / *keep blinks* envelopes, `per_region` values; Neighbourhood's count *express as* local L(r) | M-L | - |
-| **17b** | **Curves summary**: `Analysis/Regions/Summarize/Curves`, mean and spread of any evaluation's curves, grouped by an ROI keyword, pooled where counts are given | S-M | 17a |
+| **17b** ✅ | **Curves summary**: `Analysis/Regions/Summarize/Curves`, mean and spread of any evaluation's curves, grouped by an ROI keyword, pooled where counts are given | S-M | 17a |
 | **17c** | **Spatial statistics, directional**: 2D correlation image, 1D correlation along a line with its period; axes x-y / x-z / y-z / z, a line or rectangle ROI's own directions | M | 17a |
 | **18** | **Frame time** per file, and **Blinking** (`Analysis/Measure/Blinking`, `per_region`: counts, bursts, on- and dark times; per-file blinking histograms) | S-M | - |
 | **19a** | **Tracks**: simulated tracks in `smappy.simulate`; `Analysis/Tracking/Link tracks` (simple and global assignment, benchmarked) writing `track_id` | M-L | - |
@@ -418,6 +418,19 @@ filters and zoom-ins are settled) · AssignColors for more than 2 colours (C4)
   fixed: an ROI's context cut its localizations before the merging it
   triggered wrote `group_id`, so the first ROI measured on a merged layer
   could not trace its blinks.
+* **Step 17b** (2026-10-15): *Analysis/Regions/Summarize/Curves*, a
+  `SiteAnalysisPlugin` over the evaluations that kept arrays: per x the
+  mean of the regions' curves with their SD or SEM, a line per keyword of
+  an ROI keyword list (*group by*; an id column's regions are one group),
+  and the per-group mean of every value in the text.  Where the evaluator
+  hands back numerator and denominator it pools: a new hook,
+  `Plugin.pool(sums, x)`, gets every array summed over the group and
+  returns the curves made from them -- Spatial statistics' g, K and L - r
+  from the summed pairs and expected pairs, the g of the regions measured
+  together.  Regions on different x grids are refused, naming the region,
+  not interpolated: another grid is another setting, and counts summed
+  across rings of different widths are wrong.  In the Regions tab of the
+  shipped GUI.
 * **Step 19a** (2026-10-15): tracks.  `simulate.simulate_tracks`: Brownian
   particles in one or more diffusive states with switching, blinking (dark
   runs inside a track), a precision, a density and spurious localizations,

@@ -799,6 +799,29 @@ class SpatialStatistics(Plugin):
             used_files.append(f)
         return names, colours, layers, windows, used_files, shape
 
+    def pool(self, sums: Dict[str, np.ndarray], x: np.ndarray) -> Dict[str, np.ndarray]:
+        """g, K and L - r of many regions from their pair counts and expected
+        counts summed (`Plugin.pool`): the regions' pairs over the pairs CSR
+        expects in all of them, which is g of their union when their windows
+        do not overlap -- each curve's numerator and denominator are sums
+        over files already, and regions are pooled the same way."""
+        x = np.asarray(x, dtype=float)
+        if len(x) < 1:
+            return {}
+        dr = 2.0 * x[0]                       # the centres start half a bin in
+        edges = np.concatenate([[0.0], x + dr / 2])
+        out: Dict[str, np.ndarray] = {}
+        for name in sums:
+            if not name.startswith("pairs"):
+                continue
+            k = name[len("pairs"):]
+            if f"expected{k}" not in sums:
+                continue
+            c = curves_of(np.asarray(sums[name], float),
+                          np.asarray(sums[f"expected{k}"], float), edges)
+            out.update({f"g{k}": c["g"], f"K_nm2{k}": c["K"], f"lr_nm{k}": c["L_r"]})
+        return out
+
     def preflight(self, ctx: Context, settings: SpatialStatisticsSettings):
         if not _approaches(settings) or ctx.per_region:
             return None

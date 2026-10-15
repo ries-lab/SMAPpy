@@ -1033,6 +1033,22 @@ class Plugin:
         """
         return None
 
+    def pool(self, sums: Dict[str, np.ndarray], x: np.ndarray
+             ) -> Dict[str, np.ndarray]:
+        """Curves of many regions as one, from their arrays summed.
+
+        A per-region plugin whose curve is a ratio -- pairs found over pairs
+        expected -- hands back numerator and denominator among its
+        `Result.arrays`; the mean of the regions' ratios weighs a region with
+        ten pairs as much as one with ten thousand, and the ratio of the sums
+        does not.  ``sums`` is every array summed over the regions (on the
+        common grid ``x``), and this returns the curves made from them, under
+        the names the regions' own curves have.  *Curves*
+        (`plugins.curves`) draws these in place of the mean.  The default
+        pools nothing.
+        """
+        return {}
+
     def describe(self, ctx: Optional["Context"], settings) -> FormState:
         """What the form should show about ``settings`` beyond their values:
         hints for the fields on *auto*, which fields are read, the lists that
