@@ -622,7 +622,7 @@ def max_sigma(settings: RenderSettings, locs: Localizations, median_precision: f
               pixelsize: float) -> float:
     """The largest rendering sigma at this zoom, in data units: how far
     beyond the view a localization can still reach into it."""
-    if settings.mode == "hist":
+    if settings.mode in ("hist", "voronoi"):
         return 0.0
     if settings.mode == "tracks":
         return 0.5 * settings.line_width * pixelsize
@@ -696,6 +696,10 @@ class LayerSnapshot:
         if self.settings.mode == "tracks":
             # a segment across the view can have both ends outside it: the
             # tracks are culled whole, by their boxes (`render.render_tracks`)
+            return self.indices
+        if self.settings.mode == "voronoi":
+            # the cells are of everything the filter keeps, or they would
+            # change along the view's edge with every pan (`render.render_voronoi`)
             return self.indices
         margin = self.settings.roi_sigma * self.max_sigma(fov.pixelsize)
         candidates = self.index.query(fov.x0, fov.x1, fov.y0, fov.y1, margin)

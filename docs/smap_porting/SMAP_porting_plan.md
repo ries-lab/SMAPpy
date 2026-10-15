@@ -265,7 +265,7 @@ channel *Check overlay* (C3).  AssignColors for more than 2 colours (C4):
 | **5e** ✅ | **Stability: vibrations** (A6): `Analysis/Measure/Stability`, approaches (vibrations now; long-term and dual-channel drift later), per bead track, differential, zoomed trace, spectrum, cumulative RMS, peaks; figures as options | M | - |
 | **6a** | **Export Image**: one renderer of the view for the plugin and the window's *Save*; as the view, composite, or each layer (in colour or grey), or float intensity; scale bar, colour bars, labels; settings in the file | M | - |
 | **6b** | **Export Stack**: movies (step, window, cumulative) and z-stacks; the raw frames beside; a *tail* for tracks; TIFF, MP4 (H.264, target quality, size shown), GIF | M | 6a |
-| **6c** | **Voronoi render mode** (SharpViSu) | S | - |
+| **6c** ✅ | **Voronoi render mode** (SharpViSu) | S | - |
 | **6d** ✅ | **Process image**: background subtraction, local contrast normalisation of an image layer | S | - |
 
 ### Done
@@ -574,6 +574,19 @@ channel *Check overlay* (C3).  AssignColors for more than 2 colours (C4):
   arrays the first trace's spectrum and cumulative RMS.
   `smappy/stability.py`; pinned in the Analysis tab.  The Glossary gained
   vibration, amplitude spectrum and RMS.
+* **Step 6c** (2026-10-15): the *voronoi* render mode, the sixth
+  (*Voronoi density* in the list; SharpViSu, SMAP's VoronoiRenderer): each
+  pixel the density of the Voronoi cell it lies in, per µm², the cells
+  Neighbourhood's `voronoi_areas` of everything the layer's filter keeps
+  (`LayerSnapshot.select` does not cull, as for tracks), open cells empty.
+  Cached per table and filter (`render.voronoi_cells_for`, the last four),
+  so a pan or zoom only looks up the pixel centres in a k-d tree: 2 M
+  localizations ~20 s the first time, then ~0.3 s a megapixel.  Cells
+  smaller than a pixel are counted into it instead of sampled, so zoomed
+  out the picture is the histogram per area, not noise; flat on a uniform
+  field at any zoom.  A raster: exports, overlays and movies unchanged; the
+  3D view draws such a layer as points.  The Render tab's page has the
+  mode, the rule and a figure.
 
 * **Step 6d** (2026-10-15): *Analysis/Process/Process image* (SMAP's
   Tiff_remove_BG) on an image layer, `changes_locs = False`.  Operations

@@ -51,6 +51,7 @@ RENDER_MODES: Tuple[Tuple[str, str], ...] = (
     ("hist", "histogram"),
     ("dl", "diffraction-limited"),
     ("tracks", "tracks"),
+    ("voronoi", "Voronoi density"),
 )
 QUICK_PER_ROW = 4
 HIST_BINS = 120
@@ -998,8 +999,8 @@ class RenderTab(QWidget):
             self.mode.addItem(text, key)
         self.mode.setToolTip("how a localization is drawn: a Gaussian as wide as "
                              "its precision, one of a fixed width, a count per "
-                             "pixel, the spot the camera saw, or the lines of "
-                             "its track")
+                             "pixel, the spot the camera saw, the lines of "
+                             "its track, or the density of its Voronoi cell")
         # the tracks mode's two settings, shown only while it is chosen
         self.track_column = QComboBox()
         self.track_column.setToolTip("the id column whose localizations are one "
