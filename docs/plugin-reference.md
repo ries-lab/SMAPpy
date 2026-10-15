@@ -190,6 +190,7 @@ another choice.
 | `n_in_group` | **on-time in frames** (for a table with a trace id, `tid`, the localizations in the trace); grouping writes it onto both tables |
 | `group_id` | which group a localization was linked into, 1-based; on the grouped table, its own row |
 | `cluster_id`, `n_in_cluster` | which cluster, 1-based, 0 for none, and the localizations in it -- written by `Analysis/Regions/Find clusters` (`plugins/clusters.py`) |
+| `track_id`, `track_length` | which track, 1-based, 0 for none (and for a track below the minimum length), and the localizations in it -- written by `Analysis/Tracking/Link tracks` (`plugins/link_tracks.py`); a simulation's truth is `track_id_true` |
 | `sigma_nm`, `sigma_y_nm`, `logl_rel` | PSF width and fit quality |
 | `filenumber`, `channel` | which file, which channel |
 

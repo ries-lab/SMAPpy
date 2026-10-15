@@ -431,6 +431,22 @@ filters and zoom-ins are settled) · AssignColors for more than 2 colours (C4)
   not interpolated: another grid is another setting, and counts summed
   across rings of different widths are wrong.  In the Regions tab of the
   shipped GUI.
+* **Step 19a** (2026-10-15): tracks.  `simulate.simulate_tracks`: Brownian
+  particles in one or more diffusive states with switching, blinking (dark
+  runs inside a track), a precision, a density and spurious localizations,
+  the truth in `track_id_true` and `state_true`.  *Analysis/Tracking/Link
+  tracks* (`smappy/tracking/link.py`): `track_id` (0 for unlinked and
+  short tracks) and `track_length`, recipes with `max`; maximum jump,
+  memory, minimum length, 3D, per channel (files always apart); the
+  candidates from a new `Index.pairs` with x shifted per frame; *simple*
+  (nearest first, one C++ pass; the default) and *global assignment*
+  (Crocker-Grier by `linear_sum_assignment`, trackpy's links exactly).
+  Benchmarked with trackpy (`studies/tracking/bench.py`; NOTES.md,
+  "Tracking"): the same links below a jump of 0.1 of the spacing, global
+  0.3-3% better from 0.1 to 0.4, simple 2-10x faster.  In the Analysis tab
+  of the shipped GUI.  The simulation is also *File/Simulate/Tracks*, a
+  plugin of its own (the structure simulator shares almost none of its
+  settings), pinned in the File tab.
 
 ### Start here
 

@@ -145,6 +145,18 @@ papers and in other software.
   labelling efficiency): the fraction of the target proteins that carry a
   label which is detected.
 
+## Tracking
+
+* **single-particle tracking** (SPT): following single molecules from frame
+  to frame as they move, to measure how they move.
+* **track** (also called a trajectory): the localizations of one particle in
+  time order -- `track_id` names them once they are linked.
+* **jump** (also called a step or a displacement): how far a particle moved
+  between two frames it was seen in.
+* **memory** (also called gap closing, or the gap frames): how many frames
+  in a row a particle may go unseen -- dark, dim or badly fitted -- and its
+  track still continue.
+
 ## Two colours
 
 * **splitter** (also called a dual-view or image splitter): optics that put

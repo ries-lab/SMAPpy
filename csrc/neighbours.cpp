@@ -1,6 +1,7 @@
 // What is around each localization: the neighbours within a radius (a circle,
 // a cylinder, or Gaussian-weighted) and a statistic of a column over them.
-// The Python side is `smappy.plugins.neighbourhood`.
+// The Python side is `smappy.plugins.neighbourhood`; DBSCAN (`clusters.py`)
+// and the tracking linker (`smappy.tracking.link`) use the same index.
 //
 // SMAP's countneighbours*.c and SpatialFilterLocs sort the points by x and,
 // for each point, test every point of the strip [x - r, x + r]: no pairs are
@@ -279,6 +280,79 @@ public:
         return out;
     }
 
+    // Every indexed point within the cell size of each point asked about --
+    // in 3D a sphere, with `use_z` -- as three arrays: the point asked about,
+    // the indexed point (in the order the points were given) and the squared
+    // distance, grouped by the point asked about in the order asked.  The
+    // tracking linker's candidates (`smappy.tracking.link`), which asks with
+    // points shifted by a frame lag, so the pairs are stored here: they are
+    // few, a handful per point, where a count over a dense field is not.
+    py::tuple pairs(const Doubles& ax, const Doubles& ay, py::object az_obj, bool use_z,
+                    int threads) const {
+        const int64_t na = ax.size();
+        if (ay.size() != na) throw std::invalid_argument("x and y must match");
+        if (use_z && (!has_z_ || az_obj.is_none()))
+            throw std::invalid_argument("no z to pair in");
+        Doubles az;
+        if (use_z) {
+            az = az_obj.cast<Doubles>();
+            if (az.size() != na) throw std::invalid_argument("z must match");
+        }
+        const double* pax = ax.data();
+        const double* pay = ay.data();
+        const double* paz = use_z ? az.data() : nullptr;
+        const double r2 = grid_.cell * grid_.cell;
+        const int nt = smappy::resolve_threads(threads, std::max<int64_t>(na, 1));
+        std::vector<std::vector<int64_t>> asked(nt), found(nt);
+        std::vector<std::vector<double>> dist(nt);
+        {
+            py::gil_scoped_release release;
+            if (na > 0 && !key_.empty())
+            smappy::parallel_ranges(na, nt, [&](long long begin, long long end, int t) {
+                int64_t last_x = std::numeric_limits<int64_t>::min(), last_y = 0;
+                int64_t run_lo[3] = {0, 0, 0}, run_hi[3] = {0, 0, 0};
+                for (long long i = begin; i < end; ++i) {
+                    const double x = pax[i], y = pay[i];
+                    const int64_t ix = grid_.cx(x), iy = grid_.cy(y);
+                    if (ix != last_x || iy != last_y) {
+                        for (int64_t dy = -1; dy <= 1; ++dy) {
+                            auto lo = std::lower_bound(key_.begin(), key_.end(),
+                                                       grid_.key(ix - 1, iy + dy));
+                            auto hi = std::upper_bound(lo, key_.end(),
+                                                       grid_.key(ix + 1, iy + dy));
+                            run_lo[dy + 1] = lo - key_.begin();
+                            run_hi[dy + 1] = hi - key_.begin();
+                        }
+                        last_x = ix;
+                        last_y = iy;
+                    }
+                    for (int run = 0; run < 3; ++run)
+                        for (int64_t s = run_lo[run], e = run_hi[run]; s < e; ++s) {
+                            const double ddx = x_[s] - x, ddy = y_[s] - y;
+                            double d2 = ddx * ddx + ddy * ddy;
+                            if (use_z) { const double ddz = z_[s] - paz[i]; d2 += ddz * ddz; }
+                            if (d2 > r2) continue;
+                            asked[t].push_back(i);
+                            found[t].push_back(index_[s]);
+                            dist[t].push_back(d2);
+                        }
+                }
+            });
+        }
+        size_t total = 0;
+        for (const auto& a : asked) total += a.size();
+        Ints out_a(total), out_f(total);
+        py::array_t<double> out_d(total);
+        size_t at = 0;
+        for (int t = 0; t < nt; ++t) {          // the threads' chunks are in order
+            std::copy(asked[t].begin(), asked[t].end(), out_a.mutable_data() + at);
+            std::copy(found[t].begin(), found[t].end(), out_f.mutable_data() + at);
+            std::copy(dist[t].begin(), dist[t].end(), out_d.mutable_data() + at);
+            at += asked[t].size();
+        }
+        return py::make_tuple(out_a, out_f, out_d);
+    }
+
     // DBSCAN's clusters, given which of the indexed points are core points
     // (`core`, in the order the points were given): per point the cluster it
     // is in, -1 for none.  Core points within the cell size of each other --
@@ -460,12 +534,37 @@ private:
     std::vector<double> x_, y_, z_, v_;
 };
 
+// The simple tracking linker's matching (`smappy.tracking.link`): the
+// candidate links (from, to) visited in the order given -- by frame, nearest
+// first -- each taken when `from` has no successor yet and `to` no
+// predecessor.  Per point its successor, -1 for none.  A loop that numpy
+// cannot write: every link taken changes which of the later ones may be.
+Ints greedy_links(const Ints& from, const Ints& to, int64_t n) {
+    const int64_t m = from.size();
+    if (to.size() != m) throw std::invalid_argument("from and to must match");
+    Ints out(n);
+    int64_t* next = out.mutable_data();
+    std::fill_n(next, n, int64_t(-1));
+    std::vector<char> taken(n, 0);
+    const int64_t* pf = from.data();
+    const int64_t* pt = to.data();
+    for (int64_t k = 0; k < m; ++k) {
+        const int64_t a = pf[k], b = pt[k];
+        if (a < 0 || a >= n || b < 0 || b >= n) throw std::out_of_range("a point out of range");
+        if (next[a] >= 0 || taken[b]) continue;
+        next[a] = b;
+        taken[b] = 1;
+    }
+    return out;
+}
+
 }  // namespace
 
 PYBIND11_MODULE(_neighbours, m) {
     m.doc() = "Neighbours within a radius and statistics over them (neighbourhood.py)";
     m.def("cell_order", &cell_order, py::arg("x"), py::arg("y"), py::arg("x0"),
           py::arg("y0"), py::arg("x1"), py::arg("reach"), py::arg("threads") = 0);
+    m.def("greedy_links", &greedy_links, py::arg("from_"), py::arg("to"), py::arg("n"));
     py::class_<Index>(m, "Index")
         .def(py::init<const Doubles&, const Doubles&, py::object, py::object, double,
                       double, double, double, int>(),
@@ -475,6 +574,8 @@ PYBIND11_MODULE(_neighbours, m) {
              py::arg("same"), py::arg("mode"), py::arg("sigma") = 0.0,
              py::arg("z_reach") = 0.0, py::arg("z_sigma") = 0.0, py::arg("q") = 0.5,
              py::arg("threads") = 0)
+        .def("pairs", &Index::pairs, py::arg("x"), py::arg("y"), py::arg("z"),
+             py::arg("use_z") = false, py::arg("threads") = 0)
         .def("pair_histogram", &Index::pair_histogram, py::arg("x"), py::arg("y"),
              py::arg("same"), py::arg("dr"), py::arg("bins"), py::arg("threads") = 0)
         .def("dbscan_join", &Index::dbscan_join, py::arg("core"), py::arg("use_z"),

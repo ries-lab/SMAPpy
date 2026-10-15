@@ -10,6 +10,7 @@ tabs:
   - plugin: File/Export/Image
   - plugin: File/Export/Localizations
   - plugin: File/Simulate/Blinking Structure
+  - plugin: File/Simulate/Tracks
 - name: Localize
   header: localize
   instances:
@@ -43,6 +44,7 @@ tabs:
   - plugin: Analysis/Process/Remove Localizations
   - plugin: Analysis/Process/Shuffle ids
   - plugin: Analysis/Register/Calibrate transform
+  - plugin: Analysis/Tracking/Link tracks
 - name: Regions
   header: roi
   instances:
