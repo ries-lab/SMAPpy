@@ -62,6 +62,10 @@ _POSITION_COLUMNS = {"x_nm": 0, "x_pix": 0,
                      "y_nm": 1, "y_pix": 1,
                      "z_nm": 2}
 
+# What a drift curve is zero at (`Drift.referenced`): left as the estimator
+# made it, or the first or the last frame.
+REFERENCES = ("as estimated", "first frame", "last frame")
+
 
 @dataclass
 class DriftSettings:
@@ -258,6 +262,19 @@ class DriftSettings:
                                   advanced=True)
     use_z: Optional[bool] = param(None, label="correct z",
                                   help="auto: if the table has z")
+    # Which frame the curve is zero at (`Drift.referenced`).  "as estimated"
+    # changes nothing: the overlap cost does not see a constant offset, so
+    # its gradient never moves the mean of what the optimizer starts at zero
+    # -- the spline's coefficients, or the time windows' drifts -- and the
+    # curve comes out close to zero mean.  The first or last frame is
+    # for consecutive files corrected separately (SMAP's reference choice):
+    # the earlier one referenced to its last frame and the later one to its
+    # first meet where they join.
+    reference: str = param("as estimated", label="reference",
+                           choices=REFERENCES,
+                           help="the frame the drift is zero at; first or "
+                                "last frame for consecutive files",
+                           advanced=True)
 
 
 class Drift:
@@ -270,7 +287,7 @@ class Drift:
     def __init__(self, drift_nm: np.ndarray, settings: Optional[DriftSettings] = None,
                  n_used: Optional[int] = None,
                  flagged_windows: Optional[np.ndarray] = None,
-                 method: str = "comet"):
+                 method: str = "comet", reference: str = "as estimated"):
         drift = np.asarray(drift_nm, dtype=np.float64)
         if drift.ndim != 2 or drift.shape[1] != 3:
             raise ValueError(f"drift must be (n_frames, 3), got {drift.shape}")
@@ -283,6 +300,26 @@ class Drift:
         # which estimator made it -- "comet", "rcc", or "rcc+comet" for the
         # prepass -- so a table's metadata and a saved curve say so
         self.method = method
+        # which frame the curve is zero at (`REFERENCES`)
+        self.reference = reference
+
+    def referenced(self, reference: str) -> "Drift":
+        """The curve shifted to be zero at the first or the last frame.
+
+        Only differences of drift are measured, so a constant may be added
+        freely; it moves the whole file and nothing within it.  Two
+        consecutive files corrected separately, the first to its last frame
+        and the second to its first, then meet where one ended and the other
+        began.  ``"as estimated"`` returns the curve as it is.
+        """
+        if reference not in REFERENCES:
+            raise ValueError(f"the reference is one of {', '.join(REFERENCES)}, "
+                             f"not {reference!r}")
+        if reference == "as estimated" or not len(self):
+            return self
+        at = self.drift[0] if reference == "first frame" else self.drift[-1]
+        return Drift(self.drift - at, self.settings, self.n_used,
+                     self.flagged_windows, self.method, reference)
 
     def __len__(self) -> int:
         return self.drift.shape[0]
@@ -301,9 +338,18 @@ class Drift:
         return text
 
     def apply(self, locs: Localizations,
-              pixelsize_nm: Optional[float] = None) -> Localizations:
-        """Return a copy of the whole table with the drift subtracted."""
+              pixelsize_nm: Optional[float] = None, rows=None) -> Localizations:
+        """Return a copy of the whole table with the drift subtracted.
+
+        ``rows`` (a mask) limits it to part of the table -- one file of
+        several, for *Transform*'s "drift of another file" -- and then the
+        table's ``drift_correction`` record, which speaks for the whole
+        table, is left to the caller.
+        """
+        mask = None if rows is None else np.asarray(rows, bool)
         frames = np.asarray(locs["frame"], dtype=np.int64)
+        if mask is not None:
+            frames = frames[mask]
         if len(frames) and (frames.min() < 0 or frames.max() >= len(self)):
             raise ValueError(
                 f"the table spans frames {frames.min()}..{frames.max()} but the "
@@ -318,11 +364,17 @@ class Drift:
             shift = self.drift[frames, axis]
             if name.endswith("_pix"):
                 shift = shift / _pixelsize_nm(locs, pixelsize_nm)
-            values = np.asarray(columns[name], dtype=np.float64) - shift
+            values = np.asarray(columns[name], dtype=np.float64).copy()
+            if mask is None:
+                values -= shift
+            else:
+                values[mask] -= shift
             columns[name] = values.astype(np.asarray(columns[name]).dtype)
             corrected.append(name)
 
         metadata = dict(locs.metadata)
+        if mask is not None:
+            return Localizations(columns, metadata)
         metadata["drift_correction"] = {
             "method": self.method,
             "columns": corrected,
@@ -330,6 +382,7 @@ class Drift:
             "n_localizations_used": self.n_used,
             "flagged_windows": (None if self.flagged_windows is None
                                 else [int(w) for w in self.flagged_windows]),
+            "reference": self.reference,
             "settings": asdict(self.settings) if self.settings else None,
         }
         return Localizations(columns, metadata)
@@ -342,6 +395,7 @@ class Drift:
         from are in the file already.
         """
         return {"drift_nm": self.drift.tolist(), "method": self.method,
+                "reference": self.reference,
                 "settings": asdict(self.settings) if self.settings else None,
                 "n_used": None if self.n_used is None else int(self.n_used),
                 "flagged_windows": (None if self.flagged_windows is None
@@ -369,7 +423,8 @@ class Drift:
                    settings=settings, n_used=saved.get("n_used"),
                    flagged_windows=None if flagged is None
                    else np.asarray(flagged, dtype=np.int64),
-                   method=str(saved.get("method") or "comet"))
+                   method=str(saved.get("method") or "comet"),
+                   reference=str(saved.get("reference") or "as estimated"))
 
     def plot(self, ax=None):
         """Drift vs frame, the standard sanity check."""
@@ -632,6 +687,19 @@ def estimate_drift(locs: Localizations, settings: Optional[DriftSettings] = None
                    select=None, pixelsize_nm: Optional[float] = None,
                    display: bool = False,
                    progress: Optional[Progress] = None, stop=None) -> Drift:
+    """Estimate drift from the selected localizations, zero where the
+    settings' *reference* says (`Drift.referenced`); the rest is
+    `_estimate_drift`'s."""
+    settings = settings or DriftSettings()
+    drift = _estimate_drift(locs, settings, select, pixelsize_nm, display,
+                            progress, stop)
+    return drift.referenced(settings.reference)
+
+
+def _estimate_drift(locs: Localizations, settings: Optional[DriftSettings] = None,
+                    select=None, pixelsize_nm: Optional[float] = None,
+                    display: bool = False,
+                    progress: Optional[Progress] = None, stop=None) -> Drift:
     """Estimate drift from the selected localizations.
 
     ``select`` is what to estimate *from*: a `LocFilter`, a boolean mask, an
@@ -937,6 +1005,7 @@ def save_drift_corrected(path, locs: Localizations, drift: Drift) -> Path:
         for axis, name in enumerate(("x_nm", "y_nm", "z_nm")):
             group.create_dataset(name, data=drift.drift[:, axis].astype(np.float32))
         group.create_dataset("frame", data=drift.frames.astype(np.int64))
+        group.attrs["reference"] = drift.reference
         # the estimator is somebody else's published method: say so in the file,
         # so a result can be traced -- and cited -- back to it
         if "comet" in drift.method:
@@ -958,9 +1027,10 @@ def load_drift(path) -> Drift:
                                  for name in ("x_nm", "y_nm", "z_nm")])
         method = str(group.attrs.get("method", ""))
         prepass = "prepass" in group.attrs
+        reference = str(group.attrs.get("reference", "as estimated"))
     name = ("rcc+comet" if prepass else "rcc" if method.startswith("RCC")
             else "comet")
-    return Drift(drift, method=name)
+    return Drift(drift, method=name, reference=reference)
 
 
 # ---------------------------------------------------------------------- helpers

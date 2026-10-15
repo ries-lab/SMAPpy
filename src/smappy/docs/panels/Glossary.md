@@ -177,6 +177,12 @@ papers and in other software.
 * **registration** (also called channel alignment, mapping or chromatic
   correction): the transformation -- shift, rotation, scale and distortion --
   that takes a position in one half to the same place in the other.
+* **affine transformation**: one that keeps straight lines straight and
+  parallel lines parallel -- any mix of shift, rotation, scale, mirror and
+  shear.
+* **projective transformation** (also called a homography): an affine one
+  plus a perspective, which can make parallel lines meet; what *Calibrate
+  transform* fits between two cameras or halves of a chip.
 
 ## Running things
 

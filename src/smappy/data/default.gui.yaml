@@ -43,6 +43,7 @@ tabs:
   - plugin: Analysis/Process/Neighbourhood
   - plugin: Analysis/Process/Remove Localizations
   - plugin: Analysis/Process/Shuffle ids
+  - plugin: Analysis/Process/Transform
   - plugin: Analysis/Register/Calibrate transform
   - plugin: Analysis/Tracking/Link tracks
   - plugin: Analysis/Tracking/Tracking analysis

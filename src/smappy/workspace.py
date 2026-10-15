@@ -100,6 +100,11 @@ class Workspace:
     layout: Dict[str, Any] = field(default_factory=dict)
     version: int = VERSION
     path: Optional[Path] = None            # where it was read from, if anywhere
+    # The session's named transformations (`Session.transformations`), as
+    # `Transformation.to_dict` writes them: the map between a lab's two
+    # cameras belongs to the setup, so it travels with the GUI file and is
+    # added to the session whenever the workspace is loaded.
+    transformations: Dict[str, Any] = field(default_factory=dict)
 
     # ------------------------------------------------------------ defaults
     @classmethod
@@ -125,7 +130,10 @@ class Workspace:
             for instance in tab["instances"]:
                 if instance.get("chain") is None:
                     instance.pop("chain", None)
-        return {"version": self.version, "tabs": tabs, "layout": dict(self.layout)}
+        out = {"version": self.version, "tabs": tabs, "layout": dict(self.layout)}
+        if self.transformations:
+            out["transformations"] = dict(self.transformations)
+        return out
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any], path: Optional[Path] = None) -> "Workspace":
@@ -153,8 +161,10 @@ class Workspace:
             tabs.append(Tab(name=str(raw["name"]), kind=str(raw.get("kind") or "plugins"),
                             header=str(raw.get("header") or ""), instances=instances))
         layout = data.get("layout")
+        named = data.get("transformations")
         return cls(tabs=tabs, layout=layout if isinstance(layout, dict) else {},
-                   version=int(data.get("version") or VERSION), path=path)
+                   version=int(data.get("version") or VERSION), path=path,
+                   transformations=named if isinstance(named, dict) else {})
 
     # ------------------------------------------------------------ the file
     def save(self, path=None) -> Path:

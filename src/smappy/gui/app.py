@@ -154,6 +154,7 @@ class ControlWindow(QMainWindow):
         if missing:
             print("workspace: dropped pins for plugins that are not installed: "
                   + ", ".join(sorted(set(missing))))
+        self._adopt_transformations()
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
         self.plugin_tabs: List[PluginTab] = []
@@ -332,6 +333,9 @@ class ControlWindow(QMainWindow):
         # Line Profile with no line ROI offers this (`LineProfile.describe`):
         # the render window, drawing a line
         session.window_openers["draw line"] = lambda settings=None: self.draw_line()
+        # Transform with given settings: Register layers' *apply*, with the
+        # named transformation it measured (`transform.settings_for`)
+        session.window_openers["transform"] = self.open_transform
         help_ = _add_menu(self.menuBar(), "Help", self)
         self._action(help_, "Plugin documentation", None, self.show_plugin_docs)
         help_.addSeparator()
@@ -553,6 +557,7 @@ class ControlWindow(QMainWindow):
             return
         self.workspace = Workspace.from_dict(state)
         missing = self.workspace.prune(list(plugins.refs()))
+        self._adopt_transformations()
         self.build_tabs()
         self._update_title(f"from {Path(path).name}")
         if missing:
@@ -575,7 +580,13 @@ class ControlWindow(QMainWindow):
                 if which:
                     opened[tab.name] = which
         self.workspace.layout = {"open": opened}
+        self.workspace.transformations = self.session.transformation_dicts()
         return self.workspace
+
+    def _adopt_transformations(self) -> None:
+        """The named transformations a workspace just loaded carries join the
+        session's (`Workspace.transformations`)."""
+        self.session.take_transformations(self.workspace.transformations)
 
     def _update_title(self, name: Optional[str] = None) -> None:
         """Say whose workspace this is, so nobody saves over somebody else's --
@@ -679,6 +690,7 @@ class ControlWindow(QMainWindow):
         if gui:
             self.workspace = Workspace.from_dict(gui)
             self.workspace.prune(list(plugins.refs()))
+            self._adopt_transformations()
             self.build_tabs()
             self._update_title("handed over")
         view = state.get("view")
@@ -765,6 +777,7 @@ class ControlWindow(QMainWindow):
         """
         self.workspace = workspace_module.load(path)
         missing = self.workspace.prune(list(plugins.refs()))
+        self._adopt_transformations()
         self.tabs.clear()               # start on File, not on the tab one was on
         self.build_tabs()
         workspace_module.remember(self.workspace.path)
@@ -847,6 +860,13 @@ class ControlWindow(QMainWindow):
         path = choose_plugin(self, title="Open a plugin")
         if path:
             self.open_plugin_window(path)
+
+    def open_transform(self, settings=None) -> None:
+        """*Transform* in its window, set to ``settings`` when given."""
+        from ..plugins.transform import PATH
+        window = self.open_plugin_window(PATH)
+        if window is not None and settings is not None:
+            window.panel.form.set(settings)
 
     def open_plugin_window(self, path: str):
         """One plugin in a window of its own, without pinning it to a tab.

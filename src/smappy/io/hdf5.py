@@ -366,6 +366,9 @@ def save_images(path, images) -> None:
                             "path": str(im.path or ""),
                             "metadata": json.dumps(im.metadata or {},
                                                    default=_json_default)})
+            if im.placement is not None:
+                # where Transform moved it (`ImageData.placement`)
+                g.attrs["placement"] = np.asarray(im.placement, np.float64)
 
 
 class StoredStack:
@@ -429,7 +432,9 @@ def load_images(path) -> List:
                     name=str(a.get("name", "")), path=str(a.get("path", "")) or None,
                     kind=str(a.get("kind", "image")),
                     frames=g["frames"][()] if "frames" in g else None,
-                    metadata=json.loads(a.get("metadata", "{}"))))
+                    metadata=json.loads(a.get("metadata", "{}")),
+                    placement=(np.asarray(a["placement"], np.float64)
+                               if "placement" in a else None)))
     except (OSError, KeyError, ValueError, TypeError):
         return out
     return out
