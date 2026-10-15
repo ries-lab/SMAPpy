@@ -518,8 +518,8 @@ channel *Check overlay* (C3).  AssignColors for more than 2 colours (C4):
   size, affine kept affine; the new `_T.h5`, written by *write to*), or
   another file's drift (`Drift.apply(rows=)`, refused for other frames).
   `Drift` gained a *reference* -- as estimated (unchanged: RCC zero mean,
-  COMET close to it), first or last frame -- in COMET and RCC; no version
-  moved.  `smappy/transformation.py`; Register layers (5b) opens it with
+  COMET close to it, Fiducials zero at the first frame), first or last
+  frame -- in COMET, RCC and Fiducials (5c); no version moved.  `smappy/transformation.py`; Register layers (5b) opens it with
   `settings_for(name)` through the GUI's `"transform"` window.  Pinned in
   the Analysis tab of the shipped GUI.
 

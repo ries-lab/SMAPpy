@@ -37,8 +37,7 @@ coefficients are fitted together in one least-squares problem.  So:
   half without being lined up with anything by hand;
 * the problem has one degeneracy -- a constant can move from every offset
   into the curve -- which the *reference* fixes: the drift is zero at the
-  first frame.  (Step 5a adds the choice of first or last frame to the
-  `Drift` result; this is where it goes.)
+  first frame, or the last with *reference* (`Drift.referenced`).
 
 A small penalty on the coefficients' second differences (1e-3 of the mean
 data weight per coefficient, `_PENALTY`) keeps the system solvable where no
@@ -57,7 +56,7 @@ from typing import Optional
 
 import numpy as np
 
-from .drift import Drift, _spline_basis
+from .drift import REFERENCES, Drift, _spline_basis
 from .locs import Localizations
 from .params import param
 
@@ -91,6 +90,12 @@ class FiducialSettings:
                                          "coefficients")
     use_z: Optional[bool] = param(None, label="correct z",
                                   help="auto: if the table has z")
+    # `Drift.referenced`; "as estimated" is the fit's own gauge, d(0) = 0
+    reference: str = param("as estimated", label="reference",
+                           choices=REFERENCES,
+                           help="the frame the drift is zero at; first or "
+                                "last frame for consecutive files",
+                           advanced=True)
 
 
 @dataclass
@@ -246,7 +251,8 @@ def estimate_drift_fiducials(locs: Localizations,
     positions = np.column_stack([x, y] + ([z] if use_z else []))
     fit = fit_drift(frame, positions, beads.bead, n_frames,
                     settings.spline_knot_frames)
-    drift = Drift(fit.drift_nm, settings, n_used=len(fit.rows), method="fiducials")
+    drift = Drift(fit.drift_nm, settings, n_used=len(fit.rows),
+                  method="fiducials").referenced(settings.reference)
     return drift, beads, fit
 
 

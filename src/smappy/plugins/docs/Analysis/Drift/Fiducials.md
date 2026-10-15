@@ -143,7 +143,10 @@ for later.
 **The reference.**  A constant can move from every offset into the curve
 without changing the fit: only how the beads moved is measured, not where
 the sample was.  The curve is fixed by setting it to zero at the first
-frame, $d(0) = 0$.
+frame, $d(0) = 0$.  *reference* can move that zero to the last frame
+afterwards, by subtracting the curve's last value from all of it: for two
+consecutive files corrected separately, the first referenced to its last
+frame and the second to its first meet where they join.
 
 **The penalty.**  The second term keeps the system solvable where no bead
 was seen at all: there the curve runs straight from one side of the gap to
