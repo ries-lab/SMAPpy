@@ -143,3 +143,36 @@ def test_the_plugin_refuses_a_table_without_frames():
     locs = Localizations({"x_nm": np.zeros(3), "y_nm": np.zeros(3)}, {})
     with pytest.raises(ValueError, match="frame"):
         LinkTracks().run(Context(locs=locs), LinkTracks.Settings())
+
+
+def test_track_columns_resolve_in_order_and_any_integer_column_can_be_chosen():
+    from smappy.tracking.columns import track_column, track_column_choices
+    base = {"x_nm": np.zeros(2), "frame": np.arange(2)}
+    both = Localizations({**base, "tid": np.ones(2, int),
+                          "track_id_true": np.ones(2, int)}, {})
+    assert track_column(both) == "tid"
+    assert track_column(both, "frame") == "frame"
+    assert track_column_choices(both)[0] == ("", "auto (tid)")
+    with pytest.raises(ValueError, match="frame, tid, track_id_true"):
+        track_column(both, "group_id")
+    # group_id is never auto: nearly every table has one
+    with pytest.raises(ValueError, match="none of"):
+        track_column(Localizations({**base, "group_id": np.ones(2, int)}, {}))
+
+
+def test_link_tracks_writes_where_it_is_told_and_never_over_a_column_of_its_own():
+    locs = simulate_tracks(n_frames=100, density_um2=0.05, d_um2_s=(0.2,), seed=2)
+    first = LinkTracks().run(Context(locs=locs), LinkTracks.Settings(max_jump_nm=250.0))
+    second = LinkTracks().run(Context(locs=first.locs),
+                              LinkTracks.Settings(max_jump_nm=100.0, memory=0,
+                                                  column="track_id_strict"))
+    out = second.locs
+    assert {"track_id", "track_length", "track_id_strict",
+            "track_id_strict_length"} <= set(out.keys())
+    assert out["track_id_strict"].max() > out["track_id"].max()  # stricter: more, shorter
+    # again into its own column is fine; over the table's own is refused
+    LinkTracks().run(Context(locs=out), LinkTracks.Settings(column="track_id_strict"))
+    with pytest.raises(ValueError, match="table's own"):
+        LinkTracks().run(Context(locs=out), LinkTracks.Settings(column="track_id_true"))
+    with pytest.raises(ValueError, match="table's own"):
+        LinkTracks().run(Context(locs=out), LinkTracks.Settings(column="frame"))

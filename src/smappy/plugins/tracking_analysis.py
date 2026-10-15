@@ -13,8 +13,10 @@ from, rewritten rather than ported (`wave4_research.md`: partly broken):
 * SMAP fitted a lognormal to the histogram of D; here the jump distances
   are fitted with one to three diffusive states by maximum likelihood,
   which gives the states' D and fractions without a histogram's bins;
-* the *id column* is any integer column -- `track_id` from Link tracks,
-  MINFLUX's `tid` (on its own clock, `time_s`), a cluster's id.
+* the *track id* is any integer column -- `track_id` from Link tracks,
+  MINFLUX's `tid` (on its own clock, `time_s`), a cluster's id -- and on
+  *auto*, the default, the first of those the table has
+  (`tracking.columns`).
 
 ``per_region``: in an ROI, or per track as a block over `track_id`, the
 values go to the region table.  Per-track D and alpha can be written onto
@@ -24,7 +26,7 @@ filtered by them.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 import numpy as np
 
@@ -32,13 +34,10 @@ from . import Context, FormState, Plot, Plugin, Result, Stopped, param, register
 from ..locs import Localizations
 
 
-def _integer_columns(locs) -> List[str]:
-    return [n for n in locs.keys() if np.asarray(locs[n]).ndim == 1
-            and np.asarray(locs[n]).dtype.kind in "iu"]
-
-
 def _id_choices():
-    return [("track_id", "track_id"), ("tid", "tid")]
+    """Without a table: *auto* and the names it looks for."""
+    from ..tracking.columns import AUTO, TRACK_COLUMNS
+    return [(AUTO, "auto")] + [(c, c) for c in TRACK_COLUMNS]
 
 
 @dataclass
@@ -71,8 +70,9 @@ class TrackingAnalysisSettings:
     msd: bool = param(True, label="MSD", help="the mean squared displacement over lag")
     jumps: bool = param(True, label="jump distances",
                         help="the distribution of jumps, as diffusive states")
-    id_column: str = param("track_id", label="id column", choices=_id_choices,
-                           help="which localizations are one track")
+    id_column: str = param("", label="track id", choices=_id_choices,
+                           help="the column naming the tracks; auto: track_id, "
+                                "else tid, else track_id_true")
     use_z: bool = param(True, label="in 3D", help="x, y and z when the table has z_nm")
     frame_time_ms: Optional[float] = param(None, label="frame time", unit="ms",
                                            min=0.001, advanced=True,
@@ -102,8 +102,8 @@ class TrackingAnalysis(Plugin):
         state = FormState(shown={"msd_fit": settings.msd, "jump_fit": settings.jumps})
         if ctx is not None and ctx.session is not None and len(ctx.locs):
             locs = ctx.locs
-            columns = _integer_columns(locs)
-            state.choices["id_column"] = [(c, c) for c in columns] or _id_choices()
+            from ..tracking.columns import track_column_choices
+            state.choices["id_column"] = track_column_choices(locs)
             state.active["use_z"] = "z_nm" in locs
             if "time_s" in locs:
                 state.hints["frame_time_ms"] = "time_s"
@@ -121,11 +121,8 @@ class TrackingAnalysis(Plugin):
         if not (settings.msd or settings.jumps):
             raise ValueError("tick MSD or jump distances")
         locs = ctx.locs
-        column = settings.id_column
-        if column not in locs:
-            raise ValueError(f"no column {column!r}: link the tracks first "
-                             "(Analysis/Tracking/Link tracks), or choose one of "
-                             + ", ".join(_integer_columns(locs)))
+        from ..tracking.columns import track_column
+        column = track_column(locs, settings.id_column)
         for c in ("x_nm", "y_nm", "frame"):
             if c not in locs:
                 raise ValueError(f"tracking needs {c}: the table has "

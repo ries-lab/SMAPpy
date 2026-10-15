@@ -159,8 +159,9 @@ wide as its fitted [PSF](plugin:Panels/Glossary) (point spread function: the
 image one molecule makes on the camera), on the camera's own pixels -- the widefield picture
 of the same molecules, to set beside the super-resolved one.  *tracks* draws
 [tracks](plugin:Panels/Glossary) instead of spots: each track -- the
-localizations sharing a value of the *track id* column, `track_id` from
-[Link tracks](plugin:Analysis/Tracking/Link tracks) -- as the line through
+localizations sharing a value of the *track id* column, on *auto*
+`track_id` from [Link tracks](plugin:Analysis/Tracking/Link tracks), else
+MINFLUX's `tid`, else a simulation's `track_id_true` -- as the line through
 its localizations in time order, *line width* pixels wide.  Coloured by a
 column, the line takes the colour of each step: by `frame`, a track runs
 through the LUT as it goes on; by `track_D_um2_per_s` from
@@ -597,9 +598,11 @@ different densities at once, or to judge densities by eye; the picture of
 a layer with millions of localizations takes a while the first time.
 
 ### track id
-The id column of the tracks, in *tracks* only: `track_id` from Link tracks,
-`tid` from a MINFLUX file, or any id column -- the clusters' `cluster_id`
-draws each cluster's localizations joined in time order.
+The id column of the tracks, in *tracks* only.  *auto* takes the first of
+`track_id`, `tid` and `track_id_true` the table has, and says which; any
+integer column can be chosen instead -- a second linking, `group_id` to
+join each blink's localizations, `cluster_id` for each cluster's in time
+order.  When the column is missing the picture says so over the view.
 
 ### line width
 1 pixel is crisp at any zoom; 2 to 3 for a figure at a coarse pixel size, or

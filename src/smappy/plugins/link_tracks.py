@@ -24,6 +24,13 @@ a memory of dark frames, a minimum length, 2D or 3D.  Where it departs:
   the rest get 0.  Always the localizations, never merged blinks: merging
   would join a slow particle's whole track into one blink.
 
+The ids go to ``track_id`` unless *output column* names another -- to link
+twice and compare, or to keep a MINFLUX ``tid`` beside a relinking.  It
+writes a new column, ``track_id`` or one it wrote before (listed in
+``metadata["track_columns"]``), never over a column of the table's own.
+Everything that reads tracks takes them from any column, by default the
+first of ``track_id``, ``tid``, ``track_id_true`` (`tracking.columns`).
+
 A track is a region: ``track_id`` is an id column like ``cluster_id``, so
 every ``per_region`` plugin runs per track, and *Segment regions* (*from an
 id column*) makes ROIs of tracks.  Both columns are recipes with the rule
@@ -61,6 +68,35 @@ class LinkTracksSettings:
                                                   "table has z_nm")
     per_channel: bool = param(True, label="per channel",
                               help="link each channel on its own")
+    column: str = param("track_id", label="output column", advanced=True,
+                        help="where the ids go; the lengths go to the same name "
+                             "with _length for _id")
+
+
+# the columns Link tracks wrote, so that it overwrites them and nothing else
+WRITTEN = "track_columns"
+
+
+def length_column(column: str) -> str:
+    """Where a track id column's lengths go: ``track_id`` -> ``track_length``,
+    ``track_id_strict`` -> ``track_id_strict_length``."""
+    return column[:-3] + "_length" if column.endswith("_id") else column + "_length"
+
+
+def check_output(locs, column: str) -> str:
+    """The output column, if Link tracks may write it: a new name, ``track_id``
+    or one it wrote before -- never a column of the table's own, such as a
+    MINFLUX trace (``tid``) or ``frame``."""
+    column = (column or "").strip()
+    if not column.isidentifier():
+        raise ValueError(f"output column {column!r}: a name of letters, digits "
+                         "and underscores")
+    ours = set(locs.metadata.get(WRITTEN, [])) | {"track_id"}
+    for name in (column, length_column(column)):
+        if name in locs and column not in ours:
+            raise ValueError(f"{name!r} is a column of the table's own; choose a "
+                             "new output column")
+    return column
 
 
 @register("Analysis/Tracking/Link tracks")
@@ -87,6 +123,8 @@ class LinkTracks(Plugin):
         from ..mathparse import remember
         from ..tracking import link_tracks
         locs = ctx.locs
+        column = check_output(locs, settings.column)
+        lengths_to = length_column(column)
         missing = [c for c in ("x_nm", "y_nm", "frame") if c not in locs]
         if missing:
             raise ValueError(f"linking needs {', '.join(missing)}: the table has "
@@ -112,16 +150,17 @@ class LinkTracks(Plugin):
             locs["z_nm"] if in_3d else None, max_jump_nm=settings.max_jump_nm,
             memory=settings.memory, min_length=settings.min_length,
             algorithm=settings.algorithm, groups=groups, progress=progress)
-        out = Localizations({**locs.columns, "track_id": track, "track_length": length},
-                            dict(locs.metadata))
-        remember(out, "track_id", "", grouped="max")
-        remember(out, "track_length", "", grouped="max")
+        metadata = dict(locs.metadata)
+        metadata[WRITTEN] = sorted(set(metadata.get(WRITTEN, [])) | {column})
+        out = Localizations({**locs.columns, column: track, lengths_to: length}, metadata)
+        remember(out, column, "", grouped="max")
+        remember(out, lengths_to, "", grouped="max")
 
         n_tracks = int(track.max(initial=0))
         tracked = int((track > 0).sum())
         lengths = np.bincount(track)[1:] if n_tracks else np.zeros(0, np.int64)
         mean = float(lengths.mean()) if n_tracks else 0.0
-        text = (f"{n_tracks} tracks of {tracked} localizations (mean length "
+        text = (f"{column}: {n_tracks} tracks of {tracked} localizations (mean length "
                 f"{mean:.1f}), {int(use.sum()) - tracked} in none; "
                 f"{settings.algorithm}, maximum jump {settings.max_jump_nm:g} nm, "
                 f"memory {settings.memory}" + (", 3D" if in_3d else ""))

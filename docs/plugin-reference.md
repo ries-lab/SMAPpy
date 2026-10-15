@@ -193,7 +193,7 @@ another choice.
 | `n_in_group` | **on-time in frames** (for a table with a trace id, `tid`, the localizations in the trace); grouping writes it onto both tables |
 | `group_id` | which group a localization was linked into, 1-based; on the grouped table, its own row |
 | `cluster_id`, `n_in_cluster` | which cluster, 1-based, 0 for none, and the localizations in it -- written by `Analysis/Regions/Find clusters` (`plugins/clusters.py`) |
-| `track_id`, `track_length` | which track, 1-based, 0 for none (and for a track below the minimum length), and the localizations in it -- written by `Analysis/Tracking/Link tracks` (`plugins/link_tracks.py`); a simulation's truth is `track_id_true` |
+| `track_id`, `track_length` | which track, 1-based, 0 for none (and for a track below the minimum length), and the localizations in it -- written by `Analysis/Tracking/Link tracks` (`plugins/link_tracks.py`, or into its *output column*); a simulation's truth is `track_id_true`, MINFLUX's traces `tid`.  Nothing that reads tracks names one: each has a *track id*, on *auto* the first of `track_id`, `tid`, `track_id_true` the table has (`tracking.columns.track_column`) |
 | `track_D_um2_per_s`, `track_alpha` | a track's diffusion coefficient and anomalous exponent from its MSD, NaN for none -- written by `Analysis/Tracking/Tracking analysis` with *write per track* |
 | `sigma_nm`, `sigma_y_nm`, `logl_rel` | PSF width and fit quality |
 | `filenumber`, `channel` | which file, which channel |

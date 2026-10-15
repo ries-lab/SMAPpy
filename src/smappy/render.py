@@ -582,9 +582,9 @@ class RenderSettings:
     color_range: Optional[Tuple[float, float]] = None
     weight_field: Optional[str] = None   # None: one count per localization
     axes: RenderAxes = field(default_factory=RenderAxes)
-    # mode="tracks": the id column whose localizations are one track, and the
-    # lines' width in pixels of the picture
-    track_column: str = "track_id"
+    # mode="tracks": the id column whose localizations are one track ("":
+    # auto, `tracking.columns`), and the lines' width in pixels of the picture
+    track_column: str = ""
     line_width: float = 1.0
 
 
@@ -888,11 +888,8 @@ def track_segments(locs: Localizations, settings: "RenderSettings", select=None
                    ) -> Tuple[np.ndarray, np.ndarray]:
     """The segments of every track among the rows ``select`` keeps: the
     rows of their two ends, ``(a, b)``, consecutive in time within a track."""
-    column = settings.track_column
-    if column not in locs:
-        raise KeyError(f"no column {column!r} to draw tracks by: link the "
-                       "tracks first (Analysis/Tracking/Link tracks), or choose "
-                       "the id column")
+    from .tracking.columns import track_column
+    column = track_column(locs, settings.track_column)
     rows = (np.arange(len(locs)) if select is None
             else np.asarray(select) if np.asarray(select).dtype != bool
             else np.flatnonzero(select))
@@ -935,7 +932,8 @@ def render_tracks(locs: Localizations, fov: FieldOfView, settings: "RenderSettin
     x, y = settings.axes.coordinates(locs)
     x = np.asarray(x, np.float64)
     y = np.asarray(y, np.float64)
-    ids = np.asarray(locs[settings.track_column])[a]
+    from .tracking.columns import track_column
+    ids = np.asarray(locs[track_column(locs, settings.track_column)])[a]
     reach = (0.5 * settings.line_width + 1.0) * fov.pixelsize
     seen = _cull_tracks(a, b, ids, x[a], y[a], x[b], y[b], fov, reach)
     a, b = a[seen], b[seen]

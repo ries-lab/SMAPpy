@@ -83,9 +83,25 @@ def test_a_wider_line_weighs_more_and_colour_follows_the_column():
 
 def test_a_table_without_tracks_says_how_to_get_them():
     locs = tracks_table([(5, 5), (35, 5)], [1, 1], [0, 1])
-    with pytest.raises(KeyError, match="Link tracks"):
+    with pytest.raises(ValueError, match="Link tracks"):
         render_locs(locs, FieldOfView(0, 0, 1.0, 40, 30),
                     dataclasses.replace(TRACKS, track_column="tid"))
+    bare = Localizations({c: locs[c] for c in ("x_nm", "y_nm", "frame")}, {})
+    with pytest.raises(ValueError, match="none of track_id, tid, track_id_true"):
+        render_locs(bare, FieldOfView(0, 0, 1.0, 40, 30), TRACKS)
+
+
+def test_auto_draws_a_simulation_and_a_minflux_trace_without_a_choice():
+    from smappy.simulate import simulate_tracks
+    simulated = simulate_tracks(n_frames=50, seed=1)
+    assert "track_id" not in simulated
+    fov = FieldOfView(0, 0, 50.0, 400, 400)
+    assert render_locs(simulated, fov, TRACKS).weight.sum() > 0
+    minflux = tracks_table([(5.5, 5.5), (35.5, 5.5)], [0, 0], [0, 1])
+    minflux = Localizations({**{c: minflux[c] for c in ("x_nm", "y_nm", "frame")},
+                             "tid": np.array([7, 7])}, {})
+    image = render_locs(minflux, FieldOfView(0, 0, 1.0, 40, 30), TRACKS).weight
+    assert image[5, 10:30].min() == pytest.approx(1.0)
 
 
 def test_the_3d_view_draws_a_tracks_layer_as_points():
@@ -111,4 +127,39 @@ def test_the_render_tab_shows_the_track_controls_only_for_tracks():
     assert form.isRowVisible(tab.track_column) and form.isRowVisible(tab.line_width)
     tab.line_width.setValue(2.5)
     assert session.layers[0].state.settings.line_width == 2.5
-    assert tab.track_column.currentText() == "track_id"
+    assert tab.track_column.currentText() == "auto (track_id)"
+    assert session.layers[0].state.settings.track_column == ""
+    tab.track_column.setCurrentIndex(tab.track_column.findData("frame"))
+    assert session.layers[0].state.settings.track_column == "frame"
+
+
+def test_the_view_says_why_a_picture_could_not_be_drawn():
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    from smappy.gui.render_view import RenderView
+    from smappy.session import Session
+    view = RenderView(Session(tracks_table([(5, 5), (35, 5)], [1, 1], [0, 1])))
+    view._on_render_failed("ValueError: no column 'tid' to take the tracks from", 0)
+    assert not view.error_hint.isHidden()
+    assert view.error_hint.text().endswith("no column 'tid' to take the tracks from")
+    assert "ValueError" not in view.error_hint.text()
+    view._busy = True
+    view._on_rendered([], -1)                # any answer from the renderer
+    assert view.error_hint.isHidden()
+
+
+def test_merged_blinks_keep_their_track_so_no_line_crosses_the_field():
+    # merging used to average track_id_true: one blink of two particles
+    # passing close took a third track's id, and was joined to it
+    from smappy.session import Session
+    from smappy.simulate import simulate_tracks
+    session = Session(simulate_tracks(n_frames=300, seed=0))
+    layer = session.layers[0]
+    assert layer.grouped
+    snap = layer.state.snapshot()
+    locs = snap.locs
+    assert locs["track_id_true"].dtype.kind == "i"
+    a, b = track_segments(locs, TRACKS, snap.indices)
+    jump = np.hypot(locs["x_nm"][a] - locs["x_nm"][b], locs["y_nm"][a] - locs["y_nm"][b])
+    assert jump.max() < 2000

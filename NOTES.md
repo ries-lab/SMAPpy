@@ -1507,6 +1507,26 @@ between its localizations in time order, `line_width` pixels wide
 * The 3D view draws a tracks layer's localizations as points (precision
   where there is one).  The movie export's *tail* is wave 5's.
 
+### Which column names the tracks
+
+Nothing that reads tracks hardcodes `track_id` (2026-10, after the tracks
+render mode drew nothing on a simulation, which has only `track_id_true`,
+and the view kept the old picture in silence).  `tracking.columns`: a
+*track id* field everywhere (the Render tab's tracks mode, Tracking
+analysis; the movie export and step finding to come), `""` meaning *auto*,
+the first of `track_id`, `tid`, `track_id_true` the table has, said in the
+list; any integer column by choice.  `group_id` and `cluster_id` are never
+*auto*: nearly every table has a `group_id`.  Link tracks gained an
+*output column* and writes only new columns or ones it wrote before
+(`metadata["track_columns"]`).  A render that fails now says why over the
+view (`RenderView.error_hint`), not only in the status line.
+Found on the way: merging blinks averaged `track_id_true` (no rule, so
+*mean*), so a blink of two particles passing close took a third track's
+id and the tracks mode drew a line across the field to it.  The truth's
+ids now merge by `min` and stay integers (`group.COMBINE_MODES`,
+`INTEGER_COLUMNS`), as `tid` did; `track_id` was already a recipe with
+`max`.
+
 ## Open questions
 
 * Fitted x sits ~0.24 px from the peak-finder position, and the sign flips with

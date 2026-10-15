@@ -6,9 +6,10 @@ covers: [smappy.tracking.analysis.gather, smappy.tracking.analysis.steps_of, sma
 ## What it does
 
 Measures how [tracks](plugin:Panels/Glossary) move.  It needs tracks, an
-id column that says which localizations belong to one particle:
-`track_id` from [Link tracks](plugin:Analysis/Tracking/Link tracks), or
-MINFLUX's `tid`.  Two analyses, each ticked on or off:
+id column that says which localizations belong to one particle -- the
+*track id*: on *auto*, `track_id` from
+[Link tracks](plugin:Analysis/Tracking/Link tracks), else MINFLUX's `tid`,
+else a simulation's `track_id_true`.  Two analyses, each ticked on or off:
 
 * **MSD** ([mean squared displacement](plugin:Panels/Glossary)): how far a
   particle has moved, squared and averaged, after 1, 2, 3, ... frames.  For
@@ -213,8 +214,10 @@ consecutive localizations of a track, each at the nearest step.
 ## Parameters
 
 ### id_column
-Any integer column: `track_id` from Link tracks, `tid` from a MINFLUX
-file, or the id of a block's regions.  Id 0 and below is no track.
+*auto* takes the first of `track_id`, `tid` and `track_id_true` the table
+has, and the list says which.  Choose another integer column to compare
+two linkings (Link tracks' *output column*), or `group_id` to treat each
+merged blink as a track.  Id 0 and below is no track.
 
 ### msd_fit.offset
 *from the precisions* when the fitter's precisions are trustworthy (the

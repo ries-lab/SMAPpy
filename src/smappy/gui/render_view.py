@@ -177,6 +177,16 @@ class RenderView(QWidget):
         self.merge_hint.setStyleSheet("color: rgb(170, 170, 170); font-size: 15px;")
         self.merge_hint.setAttribute(Qt.WA_TransparentForMouseEvents)
         self.merge_hint.hide()
+        # why the picture could not be drawn -- a layer asking for a column
+        # the table lacks, say -- over the last good picture, which otherwise
+        # stays as if nothing had been asked; gone with the next good render
+        self.error_hint = QLabel("", self)
+        self.error_hint.setAlignment(Qt.AlignCenter)
+        self.error_hint.setWordWrap(True)
+        self.error_hint.setStyleSheet("color: rgb(255, 170, 60); font-size: 14px; "
+                                      "background: rgba(0, 0, 0, 160); padding: 12px;")
+        self.error_hint.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.error_hint.hide()
         from .merging import merger_for
         self._merger = merger_for(session, self)
         self._merger.status.connect(self._show_merge_hint)
@@ -349,6 +359,7 @@ class RenderView(QWidget):
         self.refresh_frame()
         self.empty_hint.setGeometry(self.rect())
         self.merge_hint.setGeometry(self.rect())
+        self._place_error_hint()
         self.colour_bars.place()
         if len(self.panels) > 1:
             self._arrange()
@@ -517,8 +528,31 @@ class RenderView(QWidget):
         self._job = PanelJob(self.snapshot(), tile, tuple(self.panels))
         self.render_requested.emit(self._job, self._generation)
 
+    def _place_error_hint(self) -> None:
+        """Across the middle of the view, a band as tall as its text."""
+        rect = self.rect()
+        width = max(200, rect.width() - 80)
+        height = self.error_hint.heightForWidth(width)
+        self.error_hint.setGeometry(rect.x() + (rect.width() - width) // 2,
+                                    rect.y() + (rect.height() - height) // 2,
+                                    width, max(height, 40))
+
+    def _show_error(self, message: str) -> None:
+        """The render's error over the picture, or nothing ("")."""
+        self.error_hint.setVisible(bool(message))
+        if message:
+            # the reader wants the message, not the exception's class
+            head, _, rest = message.partition(": ")
+            if rest and head.isidentifier() and head.endswith(("Error", "Exception")):
+                message = rest
+            self.error_hint.setText("The picture could not be drawn:\n" + message)
+            self._place_error_hint()
+            self.error_hint.raise_()
+
     def _on_rendered(self, rgb, generation: int) -> None:
         self._busy = False
+        if not self.error_hint.isHidden():   # `last_error` stays: the last one
+            self._show_error("")
         job, self._job = self._job, None
         fov = job.fov if job is not None else None
         self._keep_indices(job)
@@ -557,6 +591,10 @@ class RenderView(QWidget):
         self._busy = False
         self._job = None
         self.last_error = message
+        try:
+            self._show_error(message)
+        except Exception:                     # a slot must not raise into Qt
+            traceback.print_exc()
         self.render_failed.emit(message)
         if self._pending:
             self._pending = False
