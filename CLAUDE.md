@@ -101,7 +101,8 @@ shape, so read the one closest to what you are writing:
 | parts, a C++ backend | `fit.py` (nested settings dataclasses; four fitters, thin subclasses of `_FitPlugin`; the *fit region* drawn on the Preview's frame: a figure panel that takes shapes is `Plot.edit`, a `ShapeEdit`, and the figure window adds the tools) |
 | adds a derived column, no output | `math_parser.py` (an expression, kept with the table as a recipe) |
 | removes or flags localizations | `remove_locs.py` (a region, a new table or a filtered flag) |
-| fits a model to what is in a ROI | `line_profile.py` (unbinned likelihood, models compared by AIC; one fit per layer, and `follow_roi`) |
+| fits a model to what is in a ROI | `line_profile.py` (unbinned likelihood, models compared by AIC; one fit per layer, `follow_roi` and `per_region`: in an ROI the line is one of its named lines, `region_line`); `circle_fit.py` (the NPC segmenter's `fit_circle` with errors) |
+| moves the ROIs onto what was measured in them | `roi_centre.py` (*Centre ROIs*: `ROIProject.move_roi` in one ROI undo step) |
 | reads the session and reports | `history.py` (the log, with an optional export) |
 | sets up layers and filters from settings | `chain_layers.py` (bounds as rows per layer, `Result.layers`) |
 | scores a fit against a simulation | `ground_truth.py` (the truth redrawn from the recipe, matched per frame) |
