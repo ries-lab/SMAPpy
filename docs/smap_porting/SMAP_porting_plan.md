@@ -524,6 +524,18 @@ channel *Check overlay* (C3).  AssignColors for more than 2 colours (C4):
   frame -- in COMET, RCC and Fiducials (5c); no version moved.  `smappy/transformation.py`; Register layers (5b) opens it with
   `settings_for(name)` through the GUI's `"transform"` window.  Pinned in
   the Analysis tab of the shipped GUI.
+* **Step 5d** (2026-10-15): a transformation over time in COMET, beside
+  the drift (*transformation*: shift, the default and unchanged; xy scale;
+  xy scale + rotation; xy affine; xy affine + z scale; 3D affine; a
+  *transformation penalty* towards none), each parameter a spline with
+  the drift's knots or its own (*transformation knots*), about the middle
+  of the data, fitted with the drift in one overlap whose pair differences
+  are divided by the frames' linear scales (a new kernel,
+  `transformed_cost_and_gradient` in `csrc/drift.hpp`).  `Drift` carries
+  the per-frame matrix and centre: applied, referenced, composed over two
+  passes (`Drift.then`), saved in the session and the `_driftc` file, so
+  Transform's drift of another file applies it.  A second panel in ppm.
+  COMET version 3.  Decisions with Jonas in `wave5_design.md`, step 5d.
 
 * **Step 5b** (2026-10-15): *Analysis/Register/Register layers*,
   `changes_locs = False`: the shift of a target layer against a reference

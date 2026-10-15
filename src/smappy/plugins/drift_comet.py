@@ -21,8 +21,9 @@ class CometDrift(KeepsDrift, Plugin):
     grouping = "ungrouped"
     Settings = DriftSettings
     # 2: "RCC first" and "two stage" run under the spline fit (the default)
-    # rather than being skipped by it
-    version = "2"
+    # rather than being skipped by it.  3: a transformation besides the shift
+    # (off by default: the shift alone gives the numbers it gave)
+    version = "3"
 
     # Longer than this and the run is worth agreeing to first.  Five minutes
     # is where waiting stops being waiting and starts being a decision.
@@ -73,9 +74,15 @@ class CometDrift(KeepsDrift, Plugin):
 
     def describe(self, ctx, settings) -> FormState:
         """What *within* and *dark frames* on auto take: the session's merge
-        settings."""
+        settings; and the transformation's knots are read only when there is
+        a transformation, which only the spline fit has."""
         dx, dt = merge_values(ctx.session if ctx is not None else None)
-        return FormState(hints={"group_dx_nm": dx, "group_dt": dt})
+        return FormState(
+            hints={"group_dx_nm": dx, "group_dt": dt,
+                   "transformation_knot_frames": settings.spline_knot_frames},
+            active={"transformation": settings.spline,
+                    "transformation_knot_frames":
+                        settings.spline and settings.transformation != "shift"})
 
     def run(self, ctx: Context, settings: DriftSettings) -> Result:
         settings = merge_from_session(settings, ctx.session)
@@ -84,5 +91,5 @@ class CometDrift(KeepsDrift, Plugin):
         corrected, drift = correct_drift(ctx.locs, settings,
                                          select=ctx.selection.mask,
                                          progress=ctx.report, stop=ctx.stop)
-        return Result(locs=corrected, text=str(drift), plot=drift.plot,
+        return Result(locs=corrected, text=str(drift), plot=drift.figure(),
                       data={"drift": drift}, settings=settings)

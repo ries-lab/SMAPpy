@@ -134,7 +134,8 @@ def test_the_drift_plugins_merge_blinks_as_the_session_does_unless_told_otherwis
         assert (own.group_dx_nm, own.group_dt) == (80.0, 0)
     for plugin, settings in ((CometDrift(), DriftSettings()), (RCCDrift(), RCCSettings())):
         hints = plugin.describe(session.context(), settings).hints
-        assert hints == {"group_dx_nm": 30.0, "group_dt": 3}
+        assert {k: hints[k] for k in ("group_dx_nm", "group_dt")} == \
+            {"group_dx_nm": 30.0, "group_dt": 3}
     # and in a two-colour fit's own drift step, which runs after the fit
     from smappy import plugins
     fit = plugins.get("Localize/Gaussian 2D 2C")()

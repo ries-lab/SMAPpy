@@ -401,7 +401,9 @@ class Transform(Plugin):
         span = drift.drift.max(axis=0) - drift.drift.min(axis=0)
         text = (f"{which}: {int(rows.sum()):,} localizations corrected by the "
                 f"drift of {name} ({drift.method}, {len(drift)} frames, range "
-                f"x {span[0]:.0f}, y {span[1]:.0f}, z {span[2]:.0f} nm)")
+                f"x {span[0]:.0f}, y {span[1]:.0f}, z {span[2]:.0f} nm"
+                + ("" if drift.matrix is None
+                   else f", and its {drift.transformation}") + ")")
         return moved, text, drift
 
     @staticmethod
