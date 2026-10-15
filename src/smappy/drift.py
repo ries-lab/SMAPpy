@@ -46,7 +46,7 @@ from contextlib import contextmanager
 from dataclasses import asdict, dataclass, replace
 from dataclasses import fields as dataclass_fields
 from pathlib import Path
-from typing import Callable, Optional, Tuple
+from typing import Callable, Dict, Optional, Tuple
 
 import numpy as np
 
@@ -61,6 +61,31 @@ from .params import param
 _POSITION_COLUMNS = {"x_nm": 0, "x_pix": 0,
                      "y_nm": 1, "y_pix": 1,
                      "z_nm": 2}
+
+# The linear transformations COMET can fit per frame besides the shift: for
+# each, how many of x, y, z it transforms (`k`: the cost compares a pair's
+# difference in those after dividing out the frames' linear scales) and its
+# generators -- A(t) = I + sum_p theta_p(t) E_p, each theta_p a spline.  The
+# generators are orthonormal up to a factor, so theta is read back from any A
+# of the model by projection (`Drift.parameters`).
+def _unit(r, c):
+    e = np.zeros((3, 3))
+    e[r, c] = 1.0
+    return e
+
+
+_SCALE_XY = np.diag([1.0, 1.0, 0.0])
+_ROTATION_XY = _unit(1, 0) - _unit(0, 1)
+TRANSFORMATIONS = {
+    "shift": (0, ()),
+    "xy scale": (2, (("scale", _SCALE_XY),)),
+    "xy scale + rotation": (2, (("scale", _SCALE_XY),
+                                ("rotation", _ROTATION_XY))),
+    "xy affine": (2, tuple((f"a_{'xy'[r]}{'xy'[c]}", _unit(r, c))
+                           for r in range(2) for c in range(2))),
+    "3D affine": (3, tuple((f"a_{'xyz'[r]}{'xyz'[c]}", _unit(r, c))
+                           for r in range(3) for c in range(3))),
+}
 
 # What a drift curve is zero at (`Drift.referenced`): left as the estimator
 # made it, or the first or the last frame.
@@ -260,6 +285,25 @@ class DriftSettings:
                                   help="extra penalty on the curve's "
                                        "bending; 0 is none",
                                   advanced=True)
+    # A linear transformation per frame besides the shift, each of its
+    # parameters a spline in time: for a sample that expands or creeps
+    # differently in different places, or optics whose magnification
+    # drifts (SMAP's driftcorrectionM fitted the scale alone).  The models,
+    # from the least to the most free, are `TRANSFORMATIONS`; which of them
+    # a dataset supports is for simulations and the data to say -- the more
+    # parameters, the more an uneven density can pull on them.
+    transformation: str = param("shift", label="transformation",
+                                choices=tuple(TRANSFORMATIONS),
+                                help="what changes over time besides the "
+                                     "position; spline fit only")
+    # None: the drift's own knots.  A transformation of the optics changes
+    # far more slowly than the stage drifts, and a coarser spline is fewer
+    # parameters for the same data.
+    transformation_knot_frames: Optional[int] = param(
+        None, label="transformation knots", unit="frames", min=10,
+        help="frames between the transformation's spline coefficients; "
+             "auto: the knot spacing",
+        advanced=True)
     use_z: Optional[bool] = param(None, label="correct z",
                                   help="auto: if the table has z")
     # Which frame the curve is zero at (`Drift.referenced`).  "as estimated"
@@ -282,12 +326,21 @@ class Drift:
 
     ``drift[f]`` is ``(dx, dy, dz)``: how far the sample had moved in frame
     ``f``, so correcting a localization *subtracts* it.
+
+    With a *transformation* (`DriftSettings.transformation`) each frame also
+    has a matrix: ``matrix[f]`` is the 3x3 A_f, ``centre_nm`` the point it
+    acts about, and a localization at x in frame f is corrected to
+    ``centre + A_f (x - centre) - drift[f]``.  Without one ``matrix`` is None
+    and the correction is the plain shift.
     """
 
     def __init__(self, drift_nm: np.ndarray, settings: Optional[DriftSettings] = None,
                  n_used: Optional[int] = None,
                  flagged_windows: Optional[np.ndarray] = None,
-                 method: str = "comet", reference: str = "as estimated"):
+                 method: str = "comet", reference: str = "as estimated",
+                 matrix: Optional[np.ndarray] = None,
+                 centre_nm: Optional[np.ndarray] = None,
+                 transformation: str = "shift"):
         drift = np.asarray(drift_nm, dtype=np.float64)
         if drift.ndim != 2 or drift.shape[1] != 3:
             raise ValueError(f"drift must be (n_frames, 3), got {drift.shape}")
@@ -302,6 +355,20 @@ class Drift:
         self.method = method
         # which frame the curve is zero at (`REFERENCES`)
         self.reference = reference
+        if matrix is not None:
+            matrix = np.asarray(matrix, dtype=np.float64).reshape(-1, 3, 3)
+            if len(matrix) != len(drift):
+                raise ValueError(f"{len(matrix)} matrices for {len(drift)} frames")
+        self.matrix = matrix
+        self.centre_nm = (np.zeros(3) if centre_nm is None
+                          else np.asarray(centre_nm, dtype=np.float64).reshape(3))
+        # the model `matrix` was fitted with (`TRANSFORMATIONS`)
+        self.transformation = transformation if matrix is not None else "shift"
+
+    def _like(self, drift, matrix, centre, reference=None) -> "Drift":
+        return Drift(drift, self.settings, self.n_used, self.flagged_windows,
+                     self.method, reference or self.reference, matrix, centre,
+                     self.transformation)
 
     def referenced(self, reference: str) -> "Drift":
         """The curve shifted to be zero at the first or the last frame.
@@ -310,16 +377,63 @@ class Drift:
         freely; it moves the whole file and nothing within it.  Two
         consecutive files corrected separately, the first to its last frame
         and the second to its first, then meet where one ended and the other
-        began.  ``"as estimated"`` returns the curve as it is.
+        began.  ``"as estimated"`` returns the curve as it is.  A
+        transformation is made the identity there too: the correction
+        becomes the one of that frame undone after it, A_r^-1 (A x - d + d_r).
         """
         if reference not in REFERENCES:
             raise ValueError(f"the reference is one of {', '.join(REFERENCES)}, "
                              f"not {reference!r}")
         if reference == "as estimated" or not len(self):
             return self
-        at = self.drift[0] if reference == "first frame" else self.drift[-1]
-        return Drift(self.drift - at, self.settings, self.n_used,
-                     self.flagged_windows, self.method, reference)
+        r = 0 if reference == "first frame" else -1
+        if self.matrix is None:
+            return self._like(self.drift - self.drift[r], None, None, reference)
+        undo = np.linalg.inv(self.matrix[r])
+        matrix = undo @ self.matrix
+        drift = (self.drift - self.drift[r]) @ undo.T
+        return self._like(drift, matrix, self.centre_nm, reference)
+
+    def affine(self):
+        """The correction as ``x -> A x + b`` per frame: (A, b), (n, 3, 3)
+        and (n, 3); A is the identity without a transformation."""
+        if self.matrix is None:
+            return np.broadcast_to(np.eye(3), (len(self), 3, 3)), -self.drift
+        c = self.centre_nm
+        return self.matrix, c - self.matrix @ c - self.drift
+
+    def then(self, other: "Drift", **kwargs) -> "Drift":
+        """This correction followed by ``other``, one curve: the prepass and
+        the two-stage fit, whose passes are drift of the same sample measured
+        in sequence.  Without transformations the curves add."""
+        kwargs.setdefault("reference", other.reference)
+        if self.matrix is None and other.matrix is None:
+            return Drift(self.drift + other.drift, **kwargs)
+        a1, b1 = self.affine()
+        a2, b2 = other.affine()
+        matrix = a2 @ a1
+        b = np.einsum("fij,fj->fi", a2, b1) + b2
+        c = other.centre_nm if other.matrix is not None else self.centre_nm
+        drift = c - matrix @ c - b
+        kwargs.setdefault("transformation", other.transformation
+                          if other.matrix is not None else self.transformation)
+        return Drift(drift, matrix=matrix, centre_nm=c, **kwargs)
+
+    def parameters(self) -> Dict[str, np.ndarray]:
+        """The transformation the sample underwent, per frame, by name
+        (`TRANSFORMATIONS`): ``scale`` the relative change of its size (an
+        expansion is positive), ``rotation`` the angle in radians,
+        anticlockwise (for the small angles a drift has), ``a_xy`` an entry
+        of the matrix minus the identity.  As the drift is how far the
+        sample moved, this is the inverse of the correction ``matrix``.
+        Empty without a transformation."""
+        if self.matrix is None:
+            return {}
+        _, generators = TRANSFORMATIONS.get(self.transformation,
+                                            TRANSFORMATIONS["3D affine"])
+        delta = np.linalg.inv(self.matrix) - np.eye(3)
+        return {name: np.einsum("fij,ij->f", delta, e) / float((e * e).sum())
+                for name, e in generators}
 
     def __len__(self) -> int:
         return self.drift.shape[0]
@@ -332,6 +446,12 @@ class Drift:
         span = self.drift.max(axis=0) - self.drift.min(axis=0)
         text = (f"drift over {len(self)} frames, range "
                 f"x {span[0]:.0f} nm, y {span[1]:.0f} nm, z {span[2]:.0f} nm")
+        parameters = self.parameters()
+        if parameters:
+            ranges = ", ".join(f"{name} {np.ptp(values) * 1e6:.0f}"
+                               for name, values in parameters.items())
+            text += (f"; {self.transformation} about ({self.centre_nm[0]:.0f}, "
+                     f"{self.centre_nm[1]:.0f}) nm, range {ranges} ppm")
         if self.flagged_windows is not None and len(self.flagged_windows):
             text += (f"; {len(self.flagged_windows)} time window(s) flagged and "
                      f"interpolated over: {list(self.flagged_windows)}")
@@ -357,18 +477,38 @@ class Drift:
                 f"different acquisition")
 
         columns = dict(locs.columns)
+        # how far each localization moves, in nm: the drift alone, or with a
+        # transformation the corrected position minus the old one, which
+        # needs every axis's position at once
+        move = -self.drift[frames]
+        if self.matrix is not None:
+            positions = np.zeros((len(frames), 3))
+            for axis, names in enumerate((("x_nm", "x_pix"), ("y_nm", "y_pix"),
+                                          ("z_nm",))):
+                for name in names:
+                    if name in columns:
+                        values = np.asarray(columns[name], dtype=np.float64)
+                        if mask is not None:
+                            values = values[mask]
+                        if name.endswith("_pix"):
+                            values = values * _pixelsize_nm(locs, pixelsize_nm)
+                        positions[:, axis] = values
+                        break
+            relative = positions - self.centre_nm
+            move = move + np.einsum("fij,fj->fi", self.matrix[frames],
+                                    relative) - relative
         corrected = []
         for name, axis in _POSITION_COLUMNS.items():
             if name not in columns:
                 continue
-            shift = self.drift[frames, axis]
+            shift = move[:, axis]
             if name.endswith("_pix"):
                 shift = shift / _pixelsize_nm(locs, pixelsize_nm)
             values = np.asarray(columns[name], dtype=np.float64).copy()
             if mask is None:
-                values -= shift
+                values += shift
             else:
-                values[mask] -= shift
+                values[mask] += shift
             columns[name] = values.astype(np.asarray(columns[name]).dtype)
             corrected.append(name)
 
@@ -383,8 +523,11 @@ class Drift:
             "flagged_windows": (None if self.flagged_windows is None
                                 else [int(w) for w in self.flagged_windows]),
             "reference": self.reference,
+            "transformation": self.transformation,
             "settings": asdict(self.settings) if self.settings else None,
         }
+        if self.matrix is not None:
+            metadata["drift_correction"]["centre_nm"] = self.centre_nm.tolist()
         return Localizations(columns, metadata)
 
     def to_dict(self) -> dict:
@@ -394,12 +537,17 @@ class Drift:
         the curve readable a week later, and the localizations it was made
         from are in the file already.
         """
-        return {"drift_nm": self.drift.tolist(), "method": self.method,
-                "reference": self.reference,
-                "settings": asdict(self.settings) if self.settings else None,
-                "n_used": None if self.n_used is None else int(self.n_used),
-                "flagged_windows": (None if self.flagged_windows is None
-                                    else [int(w) for w in self.flagged_windows])}
+        saved = {"drift_nm": self.drift.tolist(), "method": self.method,
+                 "reference": self.reference,
+                 "settings": asdict(self.settings) if self.settings else None,
+                 "n_used": None if self.n_used is None else int(self.n_used),
+                 "flagged_windows": (None if self.flagged_windows is None
+                                     else [int(w) for w in self.flagged_windows])}
+        if self.matrix is not None:
+            saved.update(matrix=self.matrix.reshape(-1, 9).tolist(),
+                         centre_nm=self.centre_nm.tolist(),
+                         transformation=self.transformation)
+        return saved
 
     @classmethod
     def from_dict(cls, saved: dict, settings_class=None) -> "Drift":
@@ -422,12 +570,17 @@ class Drift:
             except TypeError:
                 settings = None
         flagged = saved.get("flagged_windows")
+        matrix = saved.get("matrix")
         return cls(np.asarray(saved.get("drift_nm", []), dtype=np.float64),
                    settings=settings, n_used=saved.get("n_used"),
                    flagged_windows=None if flagged is None
                    else np.asarray(flagged, dtype=np.int64),
                    method=str(saved.get("method") or "comet"),
-                   reference=str(saved.get("reference") or "as estimated"))
+                   reference=str(saved.get("reference") or "as estimated"),
+                   matrix=None if matrix is None
+                   else np.asarray(matrix, dtype=np.float64),
+                   centre_nm=saved.get("centre_nm"),
+                   transformation=str(saved.get("transformation") or "shift"))
 
     def plot(self, ax=None):
         """Drift vs frame, the standard sanity check."""
@@ -446,6 +599,33 @@ class Drift:
         ax.set_ylabel("drift (nm)")
         ax.legend()
         return ax
+
+    def plot_transformation(self, ax):
+        """The transformation's parameters vs frame, in ppm: nm of movement
+        per mm from the centre, which is what a scale change of 1e-6 and a
+        rotation of a microradian both are."""
+        for name, values in self.parameters().items():
+            ax.plot(self.frames, values * 1e6, label=name)
+        ax.axhline(0.0, color="0.7", lw=0.8, zorder=0)
+        ax.set_xlabel("frame")
+        ax.set_ylabel("transformation (ppm)")
+        ax.legend()
+        return ax
+
+    def figure(self):
+        """What a result shows: the drift, and under it the transformation
+        when there is one (a `plugins.Plot` of two panels)."""
+        if self.matrix is None:
+            return self.plot
+        from .plugins import Plot
+
+        def draw(figure):
+            top, bottom = figure.subplots(2, 1, sharex=True)
+            self.plot(top)
+            top.set_xlabel("")
+            self.plot_transformation(bottom)
+
+        return Plot(draw, panels=2, size=(6.0, 6.0))
 
 
 # ------------------------------------------------------------- what it will cost
@@ -739,6 +919,10 @@ def _estimate_drift(locs: Localizations, settings: Optional[DriftSettings] = Non
     if settings.spline:
         return _estimate_spline(locs, settings, select, pixelsize_nm, display,
                                 progress, stop)
+    if settings.transformation != "shift":
+        raise ValueError("a transformation is fitted as a spline in time; "
+                         "the time-window fit has only the shift (fit spline "
+                         "on, or transformation shift)")
 
     # Opt in to the two changes made to the vendored COMET (docs/drift.md); its
     # own defaults are untouched for anyone importing it directly.
@@ -850,11 +1034,15 @@ def _estimate_spline(locs: Localizations, settings: DriftSettings, select,
         raise MemoryError("the neighbour search ran out of memory; reduce "
                           "max_drift_nm or use group=True")
 
-    n_coefficients = max(4, int(round(n_frames / settings.spline_knot_frames)) + 3)
+    n_coefficients = _n_coefficients(n_frames, settings.spline_knot_frames)
     basis = _spline_basis(np.arange(n_frames), n_coefficients, 0.0, n_frames - 1.0)
     basis_t = basis.T.tocsr()
     _log(display, f"spline drift: {n_coefficients} coefficients over {n_frames} "
                   f"frames, {len(idx_i):,} pairs", progress)
+    transformed = settings.transformation != "shift"
+    if transformed:
+        model = _TransformationFit(settings, coords, n_frames, display, progress)
+        coords = model.coords
 
     penalty = float(settings.spline_penalty)
     if penalty:
@@ -871,23 +1059,31 @@ def _estimate_spline(locs: Localizations, settings: DriftSettings, select,
     def objective(flat, sigma, factor):
         # raising here is how the optimizer is left: it has no stop of its own
         _check_stop(stop, f"at sigma {sigma:.0f} nm")
-        c = flat.reshape(n_coefficients, 3)
+        c = flat[:n_coefficients * 3].reshape(n_coefficients, 3)
         mu = np.ascontiguousarray(basis @ c)
-        value, gradient = cpu_wrapper_chunked_approx(
-            mu, coords, frames, idx_i, idx_j, sigma, factor)
+        if transformed:
+            value, gradient, extra = model.cost(
+                flat[n_coefficients * 3:], mu, frames, idx_i, idx_j, sigma,
+                factor, penalty)
+        else:
+            value, gradient = cpu_wrapper_chunked_approx(
+                mu, coords, frames, idx_i, idx_j, sigma, factor)
         gradient = basis_t @ gradient.reshape(n_frames, 3)
         if penalty:
             value += penalty * float((c * (curvature @ c)).sum())
             gradient = gradient + 2.0 * penalty * (curvature @ c)
         state["evaluations"] += 1
         _report_evaluation(progress, state, expected, sigma)
+        if transformed:
+            return value, np.concatenate([gradient.ravel(), extra])
         return value, gradient.ravel()
 
     sigma = (settings.initial_sigma_nm if settings.initial_sigma_nm is not None
              else settings.max_drift_nm / 3.0)
     target = settings.target_sigma_nm
     bound = settings.max_drift_nm * 2.0
-    coefficients = np.zeros(n_coefficients * 3)
+    coefficients = np.zeros(n_coefficients * 3
+                            + (model.n_variables if transformed else 0))
     while True:
         result = minimize(objective, coefficients, args=(sigma, 1.0), jac=True,
                           method="L-BFGS-B", bounds=[(-bound, bound)] * coefficients.size,
@@ -901,8 +1097,110 @@ def _estimate_spline(locs: Localizations, settings: DriftSettings, select,
             break
         sigma = max(sigma / 1.5, target)
 
-    drift = np.asarray(basis @ coefficients.reshape(n_coefficients, 3))
-    return Drift(drift, settings, n_used=len(coords))
+    drift = np.asarray(basis @ coefficients[:n_coefficients * 3]
+                       .reshape(n_coefficients, 3))
+    if not transformed:
+        return Drift(drift, settings, n_used=len(coords))
+    return Drift(drift, settings, n_used=len(coords),
+                 matrix=model.matrices(coefficients[n_coefficients * 3:]),
+                 centre_nm=model.centre, transformation=settings.transformation)
+
+
+def _n_coefficients(n_frames: int, knot_frames: int) -> int:
+    return max(4, int(round(n_frames / knot_frames)) + 3)
+
+
+class _TransformationFit:
+    """The transformation half of the spline fit (`DriftSettings.transformation`).
+
+    A(t) = I + sum_p theta_p(t) E_p over the model's generators, each theta_p
+    a cubic B-spline with its own knots.  Two choices keep the fit well posed:
+
+    * **Zero mean.**  The overlap only sees how the transformation *changes*
+      -- the cost divides out a transformation common to both frames of a
+      pair (`csrc/drift.hpp`, `transformed_cost_and_gradient`) -- so a
+      constant theta is free, as a constant drift is.  The coefficients are
+      kept to zero mean by optimising in an orthonormal basis of the
+      zero-sum vectors, rather than left to wander along that direction.
+    * **Units of nm.**  theta is ~1e-4 where the drift coefficients are tens
+      of nm; L-BFGS-B steps both with one scale.  So the variables are theta
+      times the half-width of the data -- how far the edge of the field
+      moves -- and the drift's bounds apply to them too.
+    """
+
+    def __init__(self, settings: DriftSettings, coords: np.ndarray,
+                 n_frames: int, display: bool, progress):
+        from scipy.linalg import null_space
+
+        k, generators = TRANSFORMATIONS[settings.transformation]
+        positions = np.asarray(coords, dtype=np.float64)
+        if k == 3 and not np.any(positions[:, 2]):
+            raise ValueError("a 3D affine transformation needs z: the table "
+                             "has no z_nm, or correct z is off")
+        lo, hi = positions.min(axis=0), positions.max(axis=0)
+        # the midpoint of the data, as SMAP: the shift is free, so the centre
+        # only decides how the correction splits into shift and transformation
+        self.centre = (lo + hi) / 2.0
+        self.coords = np.ascontiguousarray(positions - self.centre, dtype=np.float32)
+        self.k = k
+        self.generators = np.stack([e for _, e in generators])
+        self.radius = max(float(np.max((hi - lo)[:k])) / 2.0, 1.0)
+        knots = settings.transformation_knot_frames or settings.spline_knot_frames
+        self.n_coefficients = _n_coefficients(n_frames, knots)
+        self.basis = _spline_basis(np.arange(n_frames), self.n_coefficients,
+                                   0.0, n_frames - 1.0)
+        self.basis_t = self.basis.T.tocsr()
+        self.zero_mean = null_space(np.ones((1, self.n_coefficients)))
+        self.n_variables = len(self.generators) * (self.n_coefficients - 1)
+        if settings.spline_penalty:
+            d2 = np.diff(np.eye(self.n_coefficients), 2, axis=0)
+            self.curvature = d2.T @ d2
+        _log(display, f"{settings.transformation}: {len(self.generators)} "
+                      f"parameter(s), {self.n_coefficients} coefficients each, "
+                      f"about ({self.centre[0]:.0f}, {self.centre[1]:.0f}) nm",
+             progress)
+
+    def _theta_coefficients(self, flat):
+        q = flat.reshape(len(self.generators), self.n_coefficients - 1)
+        return (self.zero_mean @ q.T) / self.radius    # (n_coefficients, n_gen)
+
+    def matrices(self, flat) -> np.ndarray:
+        theta = self.basis @ self._theta_coefficients(flat)
+        return np.eye(3) + np.einsum("fp,pij->fij", theta, self.generators)
+
+    def cost(self, flat, mu, frames, idx_i, idx_j, sigma, factor, penalty):
+        """(cost, d/d mu per frame, d/d the transformation's variables), signs
+        as the optimizer minimises them."""
+        from . import _drift
+        from ._comet.core.cpu_wrapper import CUTOFF_SIGMAS
+
+        k = self.k
+        matrix = self.matrices(flat)
+        block = matrix[:, :k, :k]
+        det = np.linalg.det(block)
+        if np.any(det <= 0):    # beyond any physical transformation
+            return np.inf, np.zeros(mu.size), np.zeros(flat.size)
+        g = det ** (-1.0 / k)
+        params = np.ascontiguousarray(np.column_stack(
+            [matrix.reshape(-1, 9), mu, g]))
+        total, gradient = _drift.transformed_cost_and_gradient(
+            self.coords, frames, idx_i, idx_j, params, k, float(sigma),
+            float(factor), float(CUTOFF_SIGMAS))
+        gradient = -gradient
+        d_matrix = gradient[:, :9].reshape(-1, 3, 3).copy()
+        # g = det(B)^(-1/k): dg/dB = -g/k B^-T
+        d_matrix[:, :k, :k] += ((gradient[:, 12] * g * (-1.0 / k))[:, None, None]
+                                * np.linalg.inv(block).transpose(0, 2, 1))
+        d_theta = np.einsum("fij,pij->fp", d_matrix, self.generators)
+        d_coefficients = self.basis_t @ d_theta              # (n_coef, n_gen)
+        value = -float(total)
+        if penalty:
+            c = self._theta_coefficients(flat) * self.radius
+            value += penalty * float((c * (self.curvature @ c)).sum())
+            d_coefficients = d_coefficients + 2.0 * penalty * (
+                self.curvature @ c) * self.radius
+        d_flat = (self.zero_mean.T @ d_coefficients).T / self.radius
+        return value, gradient[:, 9:12], d_flat.ravel()
 
 
 # What a caller is told while this runs.  The GUI passes the plugin panel's
@@ -939,8 +1237,9 @@ def _two_stage(locs: Localizations, settings: DriftSettings, select,
                 initial_sigma_nm=radius / 3.0, target_sigma_nm=radius / 5.0),
         select, pixelsize_nm, display, progress, stop)
     # the two are drift of the same sample measured in sequence, so they add
-    return Drift(coarse.drift + fine.drift, settings, n_used=fine.n_used,
-                 flagged_windows=fine.flagged_windows)
+    # -- or, with a transformation, compose
+    return coarse.then(fine, settings=settings, n_used=fine.n_used,
+                       flagged_windows=fine.flagged_windows)
 
 
 def _rcc_prepass(locs: Localizations, settings: DriftSettings, select,
@@ -967,8 +1266,8 @@ def _rcc_prepass(locs: Localizations, settings: DriftSettings, select,
     fine = estimate_drift(coarse.apply(locs, pixelsize_nm),
                           replace(settings, rcc_prepass=False),
                           select, pixelsize_nm, display, progress, stop)
-    return Drift(coarse.drift + fine.drift, settings, n_used=fine.n_used,
-                 flagged_windows=fine.flagged_windows, method="rcc+comet")
+    return coarse.then(fine, settings=settings, n_used=fine.n_used,
+                       flagged_windows=fine.flagged_windows, method="rcc+comet")
 
 
 def correct_drift(locs: Localizations, settings: Optional[DriftSettings] = None,
@@ -1009,6 +1308,11 @@ def save_drift_corrected(path, locs: Localizations, drift: Drift) -> Path:
             group.create_dataset(name, data=drift.drift[:, axis].astype(np.float32))
         group.create_dataset("frame", data=drift.frames.astype(np.int64))
         group.attrs["reference"] = drift.reference
+        if drift.matrix is not None:
+            # the correction's matrix per frame and the point it acts about
+            group.create_dataset("matrix", data=drift.matrix)
+            group.attrs["centre_nm"] = drift.centre_nm
+            group.attrs["transformation"] = drift.transformation
         # the estimator is somebody else's published method: say so in the file,
         # so a result can be traced -- and cited -- back to it
         if "comet" in drift.method:
@@ -1031,9 +1335,13 @@ def load_drift(path) -> Drift:
         method = str(group.attrs.get("method", ""))
         prepass = "prepass" in group.attrs
         reference = str(group.attrs.get("reference", "as estimated"))
+        matrix = group["matrix"][()] if "matrix" in group else None
+        centre = group.attrs.get("centre_nm")
+        transformation = str(group.attrs.get("transformation", "shift"))
     name = ("rcc+comet" if prepass else "rcc" if method.startswith("RCC")
             else "comet")
-    return Drift(drift, method=name, reference=reference)
+    return Drift(drift, method=name, reference=reference, matrix=matrix,
+                 centre_nm=centre, transformation=transformation)
 
 
 # ---------------------------------------------------------------------- helpers

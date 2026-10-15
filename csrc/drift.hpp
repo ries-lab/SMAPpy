@@ -182,4 +182,111 @@ SegmentOverlap overlap_per_segment(
     return out;
 }
 
+// The same cost when each frame also has a linear transformation: the
+// corrected position of a localization in frame f is A_f x - d_f, with x
+// measured from the centre of the data (the caller subtracts it).  This is
+// what fits a sample that expands, or optics whose magnification drifts, in
+// `smappy.drift` (the *transformation* setting).
+//
+// `params` is (n_frames, 13) per frame: A row major (9), d (3) and
+// g = det(A_k)^(-1/k), where A_k is the leading k x k block, k = `scaled`
+// (2: x and y are transformed, z only shifted; 3: all three).  The pair's
+// difference in those k components is multiplied by sqrt(g_i g_j), the
+// geometric mean of the two frames' inverse linear scales.  Without it the
+// overlap grows when everything shrinks and the fit collapses the image;
+// with it a transformation common to both frames of a pair cancels, so
+// only the change of the transformation is measured -- as only the change
+// of the drift is.  g is an input, not computed here, so that its
+// derivative with respect to A (one 3x3 inverse per frame) is the caller's:
+// the gradient returns d(total)/dg alongside d/dA and d/dd.
+struct TransformedCost {
+    double total = 0.0;
+    std::vector<double> gradient;   // (n_frames, 13), row major, as `params`
+};
+
+template <class Coord, class Index>
+TransformedCost transformed_cost_and_gradient(
+        const Coord* coords, const Index* times, const Index* idx_i,
+        const Index* idx_j, const double* params, int64_t n_pairs,
+        int64_t n_frames, int scaled, double sigma, double sigma_factor,
+        double cutoff_sigmas, int n_threads) {
+    const double s_eff = sigma * sigma_factor;
+    const double inv_sigma_sq = 1.0 / ((2.0 * s_eff) * (2.0 * s_eff));
+    const double inv_sigma = 1.0 / s_eff;
+    const double cutoff_sq =
+        cutoff_sigmas > 0.0 ? (cutoff_sigmas * s_eff) * (cutoff_sigmas * s_eff) : 0.0;
+    const bool use_cutoff = cutoff_sigmas > 0.0;
+    constexpr int W = 13;
+
+    const int threads = resolve_threads(n_threads, n_pairs);
+    const std::size_t width = static_cast<std::size_t>(n_frames) * W;
+    std::vector<double> buffers(static_cast<std::size_t>(threads) * width, 0.0);
+    std::vector<double> totals(static_cast<std::size_t>(threads), 0.0);
+
+    parallel_ranges(n_pairs, threads, [&](long long begin, long long end, int t) {
+        double* deri = buffers.data() + static_cast<std::size_t>(t) * width;
+        double local = 0.0;
+        for (long long p = begin; p < end; ++p) {
+            const int64_t i = static_cast<int64_t>(idx_i[p]);
+            const int64_t j = static_cast<int64_t>(idx_j[p]);
+            const int64_t ti = static_cast<int64_t>(times[i]);
+            const int64_t tj = static_cast<int64_t>(times[j]);
+            const double* pi = params + W * ti;
+            const double* pj = params + W * tj;
+            const double xi[3] = {double(coords[3 * i]), double(coords[3 * i + 1]),
+                                  double(coords[3 * i + 2])};
+            const double xj[3] = {double(coords[3 * j]), double(coords[3 * j + 1]),
+                                  double(coords[3 * j + 2])};
+
+            const double h = std::sqrt(pi[12] * pj[12]);
+            double D[3], Dn[3];
+            double diff_sq = 0.0;
+            for (int r = 0; r < 3; ++r) {
+                const double ci = pi[3 * r] * xi[0] + pi[3 * r + 1] * xi[1] +
+                                  pi[3 * r + 2] * xi[2] - pi[9 + r];
+                const double cj = pj[3 * r] * xj[0] + pj[3 * r + 1] * xj[1] +
+                                  pj[3 * r + 2] * xj[2] - pj[9 + r];
+                D[r] = ci - cj;
+                Dn[r] = r < scaled ? h * D[r] : D[r];
+                diff_sq += Dn[r] * Dn[r];
+            }
+            if (use_cutoff && diff_sq > cutoff_sq) continue;
+
+            const double val = std::exp(-diff_sq * inv_sigma_sq) * inv_sigma;
+            local += val;
+
+            const double weight = 2.0 * val * inv_sigma_sq;
+            double G[3];          // d val / d D
+            double dvdh = 0.0;    // d val / d h
+            for (int r = 0; r < 3; ++r) {
+                G[r] = -weight * Dn[r] * (r < scaled ? h : 1.0);
+                if (r < scaled) dvdh -= weight * Dn[r] * D[r];
+            }
+            double* gi = deri + W * ti;
+            double* gj = deri + W * tj;
+            for (int r = 0; r < 3; ++r) {
+                for (int c = 0; c < 3; ++c) {
+                    gi[3 * r + c] += G[r] * xi[c];
+                    gj[3 * r + c] -= G[r] * xj[c];
+                }
+                gi[9 + r] -= G[r];
+                gj[9 + r] += G[r];
+            }
+            // h = sqrt(g_i g_j): dh/dg_i = h / (2 g_i)
+            gi[12] += dvdh * h / (2.0 * pi[12]);
+            gj[12] += dvdh * h / (2.0 * pj[12]);
+        }
+        totals[static_cast<std::size_t>(t)] = local;
+    });
+
+    TransformedCost out;
+    out.gradient.assign(width, 0.0);
+    for (int t = 0; t < threads; ++t) {
+        const double* buf = buffers.data() + static_cast<std::size_t>(t) * width;
+        for (std::size_t k = 0; k < width; ++k) out.gradient[k] += buf[k];
+        out.total += totals[static_cast<std::size_t>(t)];
+    }
+    return out;
+}
+
 }  // namespace smappy

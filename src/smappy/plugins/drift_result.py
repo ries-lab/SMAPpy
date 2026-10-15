@@ -30,5 +30,5 @@ class KeepsDrift:
             return None
         if not len(drift):
             return None
-        return Result(text=str(drift), plot=drift.plot, data={"drift": drift},
+        return Result(text=str(drift), plot=drift.figure(), data={"drift": drift},
                       settings=drift.settings)
