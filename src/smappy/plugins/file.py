@@ -503,3 +503,123 @@ class SimulateBlinks(Plugin):
                                      n=len(locs)), None)]
         return Result(files=files, text=text, data=data, written=str(path),
                       settings=settings)
+
+
+@dataclass
+class TrackDiffusionSettings:
+    d_um2_s: float = param(0.5, label="D", unit="µm²/s", min=0.0,
+                           help="the diffusion coefficient of the first state")
+    slow_fraction: float = param(0.0, label="second state", min=0.0, max=1.0,
+                                 help="the fraction of the time in a second state; "
+                                      "0: one state")
+    d2_um2_s: float = param(0.02, label="D of the second", unit="µm²/s", min=0.0,
+                            help="the diffusion coefficient of the second state")
+    switch_probability: float = param(0.0, label="switching", min=0.0, max=1.0,
+                                      help="per frame: the state is drawn again")
+
+
+@dataclass
+class TrackBlinkingSettings:
+    p_dark: float = param(0.1, label="going dark", min=0.0, max=1.0,
+                          help="per frame: the probability that a bright "
+                               "fluorophore goes dark")
+    dark_frames: float = param(1.5, label="dark frames", min=1.0,
+                               help="the mean length of a dark run")
+
+
+@dataclass
+class TrackLocalizationSettings:
+    precision_nm: float = param(20.0, label="precision", unit="nm", min=0.0,
+                                help="the localization error per lateral axis")
+    use_z: bool = param(False, label="3D", help="diffusion and an error in z too")
+    z_precision_nm: float = param(50.0, label="z precision", unit="nm", min=0.0,
+                                  help="the localization error in z")
+    z_range_nm: float = param(800.0, label="z range", unit="nm", min=0.0,
+                              advanced=True, help="where the particles start in z")
+    noise_density_um2: float = param(0.0, label="spurious", unit="/µm²", min=0.0,
+                                     help="localizations in no track, per µm² "
+                                          "and frame")
+
+
+@dataclass
+class SimulateTracksSettings:
+    n_frames: int = param(1000, label="frames", min=1, help="the length of the movie")
+    frame_time_ms: float = param(10.0, label="frame time", unit="ms", min=0.001,
+                                 help="the time between frames")
+    field_um: float = param(20.0, label="field", unit="µm", min=0.1,
+                            help="the side of the square field the particles "
+                                 "start in")
+    density_um2: float = param(0.05, label="density", unit="/µm²", min=0.0,
+                               help="particles present in a frame, per µm²")
+    track_frames: float = param(20.0, label="track length", unit="frames", min=1.0,
+                                help="the mean frames a particle lasts before it "
+                                     "bleaches")
+    seed: int = param(0, label="seed", min=0,
+                      help="the same seed and settings give the same tracks")
+    diffusion: TrackDiffusionSettings = param(default_factory=TrackDiffusionSettings,
+                                              label="diffusion")
+    blinking: TrackBlinkingSettings = param(default_factory=TrackBlinkingSettings,
+                                            label="blinking")
+    localizations: TrackLocalizationSettings = param(
+        default_factory=TrackLocalizationSettings, label="localizations",
+        collapsed=True)
+
+    def model(self):
+        """The `smappy.simulate.TrackSimulationSettings` these stand for: a
+        second state only when it has time in it."""
+        from ..simulate import TrackSimulationSettings
+        d, b, loc = self.diffusion, self.blinking, self.localizations
+        two = d.slow_fraction > 0
+        return TrackSimulationSettings(
+            n_frames=self.n_frames, field_um=self.field_um,
+            density_um2=self.density_um2, track_frames=self.track_frames,
+            frame_time_ms=self.frame_time_ms,
+            d_um2_s=(d.d_um2_s, d.d2_um2_s) if two else (d.d_um2_s,),
+            fractions=(1 - d.slow_fraction, d.slow_fraction) if two else (1.0,),
+            switch_probability=d.switch_probability, p_dark=b.p_dark,
+            dark_frames=b.dark_frames, precision_nm=loc.precision_nm,
+            use_z=loc.use_z, z_range_nm=loc.z_range_nm,
+            z_precision_nm=loc.z_precision_nm,
+            noise_density_um2=loc.noise_density_um2, seed=self.seed)
+
+
+@register("File/Simulate/Tracks")
+class SimulateTracks(Plugin):
+    """Single-particle tracks: Brownian particles with diffusive states and
+    blinking, the truth in track_id_true (`smappy.simulate.simulate_tracks`)."""
+
+    name = "Simulate tracks"
+    Settings = SimulateTracksSettings
+    changes_locs = True
+    version = "1"
+
+    def describe(self, ctx: Optional[Context], settings: SimulateTracksSettings
+                 ) -> FormState:
+        """The second state's fields are read only when it has time in it,
+        z's only in 3D; the jump and the spacing, to set Link tracks by."""
+        from ..simulate import jump_nm, spacing_nm
+        d, loc = settings.diffusion, settings.localizations
+        two = d.slow_fraction > 0
+        state = FormState(active={"diffusion.d2_um2_s": two,
+                                  "diffusion.switch_probability": two,
+                                  "localizations.z_precision_nm": loc.use_z,
+                                  "localizations.z_range_nm": loc.use_z})
+        dims = 3 if loc.use_z else 2
+        jump = jump_nm(max(d.d_um2_s, d.d2_um2_s if two else 0.0),
+                       settings.frame_time_ms, dims)
+        state.notice = Notice(
+            f"rms jump {jump:.0f} nm, molecules {spacing_nm(settings.density_um2):.0f} "
+            f"nm apart", kind="info")
+        return state
+
+    def run(self, ctx: Context, settings: SimulateTracksSettings) -> Result:
+        from ..simulate import simulate_tracks
+        ctx.report(f"simulating {settings.n_frames} frames of tracks...")
+        locs = simulate_tracks(settings.model())
+        info = FileInfo(name="tracks (simulation)", path="tracks (simulation)",
+                        format="simulated", n=len(locs))
+        md = locs.metadata
+        text = (f"{len(locs)} localizations of {md['n_tracks']} tracks over "
+                f"{settings.n_frames} frames ({settings.frame_time_ms:g} ms each); "
+                f"the truth in track_id_true and state_true")
+        return Result(files=[(locs, info, None)], text=text, settings=settings)

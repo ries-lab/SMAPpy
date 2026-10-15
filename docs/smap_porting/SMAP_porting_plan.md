@@ -387,7 +387,9 @@ filters and zoom-ins are settled) · AssignColors for more than 2 colours (C4)
   Benchmarked with trackpy (`studies/tracking/bench.py`; NOTES.md,
   "Tracking"): the same links below a jump of 0.1 of the spacing, global
   0.3-3% better from 0.1 to 0.4, simple 2-10x faster.  In the Analysis tab
-  of the shipped GUI.
+  of the shipped GUI.  The simulation is also *File/Simulate/Tracks*, a
+  plugin of its own (the structure simulator shares almost none of its
+  settings), pinned in the File tab.
 
 ### Start here
 
