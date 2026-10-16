@@ -40,6 +40,7 @@ valid rows, m -> nm, `eco` as photons, precision 150/sqrt(N).  Gaps:
 | [jonatanalvelid/etMINFLUX-analysis-public](https://github.com/jonatanalvelid/etMINFLUX-analysis-public) | analysis of the etMINFLUX paper; vendors `obf_support.py` (MIT); 29 real `.msr` + 58 `.npy` example files | Python | **none** (all rights reserved) | read only; data not redistributable |
 | [Zatyrus/parameter-optimization-for-iterative-minflux-microscopy](https://github.com/Zatyrus/parameter-optimization-for-iterative-minflux-microscopy) | data release with small export helpers | Python | GPL-3.0 | – |
 | [Nuka-Kola/MFX_data_analysis](https://github.com/Nuka-Kola/MFX_data_analysis) (private) | N. Sergeev, T. Engelhardt: single-molecule *tracking* workflow -- `.msr` through specpy from PyPI (`data_analysis_utils/io.py` `msr_to_df`), the sequence's per-iteration parameters joined onto every row, `sta` abort reasons per trace, trace metrics, track rotation, tail labelling, CFR post-hoc trace cutting, step finding with bnp-step, MBM bead traces (`MBM_analysis.py`), building sequences | Python | **none** | read only; ask the authors |
+| [FReina/MFX_data_analysis](https://github.com/FReina/MFX_data_analysis) (private; read from a zip of `master`, 2026-10-15) | a fork of an *older* Nuka-Kola state (Python 3.9; no `fit_steps`, no parallel bnp-step) that adds a **specpy-free `.msr` importer**: `data_analysis_utils/msr_utils.py` `MsrImporter` (datasets, images, `to_df`/`to_npy`/`to_mat`/`to_tiff`) on pyMINFLUX's OBF parser vendored as `_msr_reader.py` (Apache-2.0, unchanged but for blank lines), and a beginner's guide to the format, `MSR_file_structure.md` | Python | **none** (the vendored reader Apache-2.0) | read only; ask the authors |
 | [lumasullo/p-minflux](https://github.com/lumasullo/p-minflux) | p-MINFLUX (pulsed, TCSPC) analysis and simulation -- a different instrument | Python | GPL-3.0 | – |
 | [ries-lab/SimuFLUX](https://github.com/ries-lab/SimuFLUX) | MINFLUX simulator ([bioRxiv 2025](https://doi.org/10.1101/2025.04.08.647786)) | MATLAB/Python | – | simulated data for tests and pages |
 
@@ -73,10 +74,12 @@ Not public or not found:
 ## The `.msr` file
 
 `.msr` is Imspector's OBF container.  The MINFLUX data is a zarr v2 store
-packed into one OBF stack.  Read without specpy only by minflux-viewer
-(`msr/mfxdta.py`, `msr/zarr2.py`, using `msr-reader` for the OBF layer);
-pyMINFLUX's `reader/_msr_reader.py` is a full pure-Python OBF parser but
-returns images only.  Verified against the real m2205 files in
+packed into one OBF stack.  Read without specpy by minflux-viewer
+(`msr/mfxdta.py`, `msr/zarr2.py`, using `msr-reader` for the OBF layer) and
+by the FReina fork of MFX_data_analysis (`msr_utils.py` `MsrImporter`, about
+100 lines on top of pyMINFLUX's OBF parser); pyMINFLUX's
+`reader/_msr_reader.py` itself is a full pure-Python OBF parser but returns
+images only.  Verified against the real m2205 files in
 etMINFLUX-analysis-public.
 
 **OBF** (little-endian):
@@ -104,6 +107,10 @@ etMINFLUX-analysis-public.
 start with `b"MFXDTA"` (`minflux-viewer msr/mfxdta.py:257-280`).  Its tag
 dictionary has a key `minflux` holding JSON with the data set's `did`,
 `sid` and `label` (rendered MINFLUX images carry a `display` JSON instead).
+In the newer files the FReina fork reads, that JSON also has a `type`:
+`data` for localizations, `trace` and `value` for Imspector's preview
+renderings (`msr_utils.py` `MsrImporter.__init__`) -- the simplest test where
+it exists.
 
 **MFXDTA** (`msr/mfxdta.py:20-37,122-173`):
 
@@ -118,7 +125,14 @@ zero padding, then records:
 
 Keys under `zarr\` form a plain zarr v2 key -> bytes store (`sync\...` are
 empty placeholders).  `mfx` is the localization array: 1-D structured,
-chunks of 10000, Blosc lz4 level 5 with shuffle.  **zarr-python 3 cannot open
+chunks of 10000, Blosc lz4 level 5 with shuffle in the m2205 files.  The
+FReina fork, written for files of 2026 (labels `2607..`/`2608..`, `/` keys),
+decompresses every chunk with plain **zlib**
+(`msr_utils.py` `_read_mfx_from_entries`), so the compressor differs between
+Imspector versions: a reader must take it from `.zarray`'s `compressor`, not
+assume one.  (*Unverified*: no such file is in any repository.)  The same
+reader builds the dtype only for flat fields and ignores the `fill_value`
+padding of the last chunk by trimming to `shape`.  **zarr-python 3 cannot open
 these structured dtypes**; napari-storm and minflux-viewer pin `zarr<3`, and
 minflux-viewer wrote its own ~540-line v2 reader on numcodecs.  For SMAPpy,
 a small reader of our own (`.zarray` JSON -> dtype; Blosc via `numcodecs`, or
@@ -188,7 +202,10 @@ row.  A 2D trace runs `itr 0 1 2 3 4 3 4 3 4 ...`, `fnl` on each 4.
 * **Layout, recent Imspector** (2026 builds, *unverified* beyond one script):
   numbered groups, `grd/mbm_0/points` and `mbm/mbm_0.attrs["used"]`
   (MFX_data_analysis `MBM_analysis.py:26-27`) -- so a reader should look for
-  `mbm*` groups rather than a fixed path.
+  `mbm*` groups rather than a fixed path.  Beside it the FReina fork's notes
+  list `grd/search_0/points` with `gri` and xyz, which they call the "MBM
+  grid"; the name suggests the positions of the search grid instead
+  (`MSR_file_structure.md`, *unverified*).
 * **Layout, m2205**: one array per bead, `grd/mbm/<R-name>`, fields `tim`,
   `pos(3)`, `str`, `tid`; `used` on the group (minflux-viewer
   `msr/legacy_mbm.py`).  MBM-inspector's `assets/*.npz` are this.
