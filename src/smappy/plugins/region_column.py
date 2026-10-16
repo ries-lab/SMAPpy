@@ -53,8 +53,10 @@ class RegionColumnSettings:
                              "an id column; empty: the ROIs, for their numbers")
     values: str = param("", label="values",
                         help="comma separated; empty: every number the "
-                             "measurement has; roi_id: the ROI's number; "
-                             "<line>_angle_deg, <line>_length_nm: its lines")
+                             "measurement has (no measurement: roi_id and the "
+                             "keywords); roi_id: the ROI's number; "
+                             "<line>_angle_deg, <line>_length_nm: its lines; "
+                             "<list>_keyword: its keyword's number")
     prefix: str = param("", label="prefix", advanced=True,
                         help="put before each column's name")
     merge: str = param("last", label="overlaps", choices=VALUE_RULES, advanced=True,
@@ -77,16 +79,33 @@ def rows_values(rows: List[Dict[str, Any]], names: List[str]) -> Dict[str, Dict[
                 if isinstance(r.get(k), (int, float))} for k in wanted}
 
 
+KEYWORD = "_keyword"     # a keyword list's column: ``<list>_keyword``
+
+
+def keyword_columns(project, roi) -> Dict[str, int]:
+    """An ROI's keywords as numbers, ``{<list>_keyword: k}``: its keyword's
+    place in the list, from 1, so a layer filter can keep the localizations
+    of the ROIs called *good* (``quality_keyword`` 1) -- a column holds
+    numbers, not words.  A keyword its list no longer has is left out."""
+    out = {}
+    for name, keyword in roi.annotations.items():
+        words = project.annotation_lists.get(name, [])
+        if keyword in words and (name + KEYWORD).isidentifier():
+            out[name + KEYWORD] = words.index(keyword) + 1
+    return out
+
+
 def own_rows(project) -> List[Dict[str, Any]]:
     """The numbers the included ROIs carry themselves, with no evaluation:
-    their lines' angles and lengths (`core.line_columns`)."""
+    their lines' angles and lengths (`core.line_columns`) and their
+    keywords (`keyword_columns`)."""
     from ..roi_manager.core import line_columns
     out = []
     for roi_id in project.ordered_ids():
         roi = project.rois[roi_id]
-        if roi.use and roi.lines:
-            out.append({"roi_id": roi.number, "file_id": roi.file_id,
-                        **line_columns(roi)})
+        own = {**line_columns(roi), **keyword_columns(project, roi)} if roi.use else {}
+        if own:
+            out.append({"roi_id": roi.number, "file_id": roi.file_id, **own})
     return out
 
 
@@ -98,7 +117,9 @@ class RegionsToColumn(Plugin):
     changes_locs = True
     # the values go onto the localizations
     grouping = "ungrouped"
-    version = "2"         # 2: roi_id is the ROI's own number, kept when others go
+    # 2: roi_id is the ROI's own number, kept when others go; 3: with nothing
+    # named, the ROIs' keywords too (`keyword_columns`)
+    version = "3"
 
     def describe(self, ctx, settings) -> FormState:
         """*results from*: the evaluations the session has."""
@@ -133,6 +154,13 @@ class RegionsToColumn(Plugin):
             if source:
                 if measured or not names:
                     values = rows_values(region_results.rows(ctx, ev), measured)
+            elif not names:
+                # the numbers, and what the user said of the ROIs: which are
+                # used is `roi_id` above 0, the keywords a column a list
+                own = own_rows(ctx.rois)
+                said = sorted({k for r in own for k in r if k.endswith(KEYWORD)})
+                if said:
+                    values = rows_values(own, said)
             elif measured:
                 own = own_rows(ctx.rois)
                 drawn = {k for r in own for k in r if k not in ("roi_id", "file_id")}
@@ -171,6 +199,18 @@ class ColumnROIsSettings:
     outline: bool = param(True, label="the cluster's own outline",
                           help="each ROI the convex hull of its cluster; off: only "
                                "the centre, with the ROI manager's circle or square")
+    membership: str = param("shape", label="an ROI holds",
+                            choices=[("shape", "what is in its shape"),
+                                     ("id", "its id alone")],
+                            help="its shape: every localization inside, whatever its "
+                                 "id; its id: that id's localizations only, as a "
+                                 "track whose path others cross")
+    draw: str = param("auto", label="draw it as",
+                      choices=[("auto", "auto"), ("track", "a track"),
+                               ("outline", "an outline")],
+                      help="in the ROI manager: a line through its localizations "
+                           "in frame order, or the hull round them; auto: a track "
+                           "for a track column")
 
 
 def hull(xy: np.ndarray) -> Optional[List[List[float]]]:

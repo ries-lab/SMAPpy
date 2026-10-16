@@ -143,12 +143,7 @@ class Region:
             q = np.abs(p - middle) - np.array([x1 - x0, y1 - y0]) / 2
             inside = min(max(q[0], q[1]), 0.0)       # signed distance to the box
             return abs(float(np.linalg.norm(np.maximum(q, 0.0)) + inside))
-        v = self.points
-        a, b = v, np.roll(v, -1, axis=0)
-        ab = b - a
-        t = np.clip(np.einsum("ij,ij->i", p - a, ab) / np.maximum((ab ** 2).sum(1), 1e-12),
-                    0, 1)
-        return float(np.min(np.linalg.norm(a + t[:, None] * ab - p, axis=1)))
+        return polyline_distance(self.points, x, y, closed=True)
 
     def to_dict(self) -> Dict:
         d = {"kind": self.kind, "points": self.points.tolist(), "width": self.width}
@@ -166,6 +161,23 @@ class Region:
     def __str__(self) -> str:
         x0, y0, x1, y1 = self.bounds
         return f"{self.kind} ROI {x1 - x0:.0f} x {y1 - y0:.0f}"
+
+
+def polyline_distance(points, x: float, y: float, closed: bool = False) -> float:
+    """Distance from a point to the line through ``points`` ((n, 2)), in
+    data units; ``closed`` joins the last point to the first.  A single
+    point is its own distance."""
+    v = np.asarray(points, float).reshape(-1, 2)
+    p = np.array([x, y], float)
+    if len(v) == 0:
+        return float("inf")
+    if len(v) == 1:
+        return float(np.hypot(*(p - v[0])))
+    a, b = (v, np.roll(v, -1, axis=0)) if closed else (v[:-1], v[1:])
+    ab = b - a
+    t = np.clip(np.einsum("ij,ij->i", p - a, ab) / np.maximum((ab ** 2).sum(1), 1e-12),
+                0, 1)
+    return float(np.min(np.linalg.norm(a + t[:, None] * ab - p, axis=1)))
 
 
 def inside_polygon(x, y, vertices) -> np.ndarray:

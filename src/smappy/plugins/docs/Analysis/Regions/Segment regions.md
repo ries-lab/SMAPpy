@@ -1,6 +1,6 @@
 ---
 version: "1"
-covers: [smappy.plugins.segment.SegmentRegions.run, smappy.plugins.segment.SegmentRegions.react, smappy.plugins.segment.SegmentRegions.replaced, smappy.plugins.segment.presets, smappy.plugins.segment.made_by, smappy.plugins.npc.segment_npcs, smappy.plugins.npc.ring_kernel, smappy.plugins.npc.ring_filtered, smappy.plugins.npc.ring_quality, smappy.plugins.npc.fit_circle, smappy.plugins.roi.density_peaks, smappy.plugins.region_column.column_regions, smappy.plugins.region_column.hull, smappy.roi_manager.core.ROIProject.find]
+covers: [smappy.plugins.segment.SegmentRegions.run, smappy.plugins.segment.SegmentRegions.react, smappy.plugins.segment.SegmentRegions.replaced, smappy.plugins.segment.presets, smappy.plugins.segment.made_by, smappy.plugins.segment.draw_as, smappy.roi_manager.core.ROIProject.draws_track, smappy.plugins.npc.segment_npcs, smappy.plugins.npc.ring_kernel, smappy.plugins.npc.ring_filtered, smappy.plugins.npc.ring_quality, smappy.plugins.npc.fit_circle, smappy.plugins.roi.density_peaks, smappy.plugins.region_column.column_regions, smappy.plugins.region_column.hull, smappy.roi_manager.core.ROIProject.find]
 ---
 
 ## What it does
@@ -109,6 +109,15 @@ localizations.  Use it when the clusters need a person's eye or a note; to
 measure every cluster, a block of a [chain](plugin:Panels/Glossary) (plugins
 run one after another as one) repeating over `cluster_id` does it without
 ROIs, and is much faster for thousands of clusters.
+
+It is also how **tracks** are explored.  With *an ROI holds* set to *its id
+alone* and the column `track_id` (from
+[Link tracks](plugin:Analysis/Tracking/Link tracks)), each
+[track](plugin:Panels/Glossary) becomes an ROI that holds that track's
+localizations and nothing else -- not the other tracks that cross its path,
+which any shape drawn round it would take in.  The ROI manager draws it as
+its line, selects it by a click on the line, and lists it beside the other
+ROIs, with *use*, keywords, and a frame range and z range of its own.
 
 ## How it works
 
@@ -323,6 +332,16 @@ cluster whose localizations all lie on one line has no hull; it gets the
 centre and the Regions tab's shape even with the outline ticked, and the
 text says how many did.
 
+**Its id alone.**  With *an ROI holds* set to *its id alone*, the ROI has
+no shape: it holds the localizations with its id, wherever they are, and
+the outline settings do not apply.  The ROI manager draws it from its
+localizations -- with *draw it as* a track, a line through them in frame
+order; as an outline, the hull round them.  On *auto* a column whose name
+contains `track` (or MINFLUX's `tid`) is drawn as tracks and any other as
+outlines.  Drawing a polygon on such an ROI in the ROI manager makes it the
+part of its id inside the polygon; *Clear shape* makes it the whole id
+again.
+
 **The ROI.**  Its centre is the mean position of the cluster's
 localizations, its file the one its localizations came from, and it
 remembers the column, the id and the number of localizations (`origin`).
@@ -449,6 +468,13 @@ settings, the filters and the merge settings.
 column is theirs, and a region's outline is drawn round all of its
 localizations.
 
+**An ROI of its id alone** keeps `{column: id}` (`ROI.ids`) with its shape
+switched off (`ROI.spatial`).  Its rows are found through one sort of the
+column, kept while the column is unchanged, so thousands of such ROIs cost
+a binary search each rather than a pass over the table.  On a layer that
+merges blinks, it holds the blinks its localizations belong to, through
+`group_id`.
+
 ## Parameters
 
 ### replace
@@ -533,7 +559,19 @@ table.
 ### ids.outline
 The hull follows each cluster but makes ROIs of different sizes; the circle
 or square makes them all alike, cutting off any cluster larger than it, and
-taking in the localizations around a smaller one.
+taking in the localizations around a smaller one.  Read only when *an ROI
+holds* is *what is in its shape*.
+
+### ids.membership
+*Its id alone* for tracks, and for clusters that overlap, where a shape would
+mix two of them; *what is in its shape* where the area is the point -- the
+localizations of every kind near a cluster, measured in the same window
+round each.
+
+### ids.draw
+Read only for *its id alone*.  A track's line shows its direction and its
+steps; an outline is the better picture of a cluster, whose localizations
+have no order.
 
 ## Output
 

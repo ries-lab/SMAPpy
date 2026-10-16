@@ -84,6 +84,10 @@ class AnnotationPanel(QWidget):
                                    "<name>_angle_deg and <name>_length_nm")
         self.line_names.editingFinished.connect(self.apply_line_names)
         layout.addWidget(CollapsibleSection("line names", self.line_names, expanded=False))
+        # the part of the ROI that is measured: a frame range and a z range
+        from .roi_ranges import RangePanel
+        self.ranges = RangePanel(window)
+        layout.addWidget(CollapsibleSection("frames and z", self.ranges, expanded=False))
 
         for key in range(10):
             shortcut = QShortcut(QKeySequence(str(key)), window)
@@ -117,6 +121,7 @@ class AnnotationPanel(QWidget):
             self._built = shape
         self.active = min(self.active, max(len(names) - 1, 0))
         roi = self.window._selected()
+        self.ranges.refresh()
         blocked = self.use.blockSignals(True)
         self.use.setChecked(bool(roi is not None and roi.use))
         self.use.setEnabled(roi is not None)

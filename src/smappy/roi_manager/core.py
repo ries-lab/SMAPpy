@@ -499,6 +499,9 @@ class ROIProject:
         self._file_masks: Dict[tuple, np.ndarray] = {}
         # (id of a column array, column) -> its `IdLookup`, for ROIs of an id
         self._lookups: Dict[tuple, IdLookup] = {}
+        # an ROI of an id's positions in frame order (`trace`), by what they
+        # depend on: drawing a few hundred tracks per redraw finds each once
+        self._traces: Dict[tuple, np.ndarray] = {}
         self.sources: Dict[str, Source] = {}
         self.rois: Dict[str, ROI] = {}
         self.size_nm = 300.0  # circle diameter or square side length
@@ -811,6 +814,94 @@ class ROIProject:
                 self._lookups.clear()
             found = self._lookups[key] = IdLookup(values)
         return found
+
+    # ------------------------------------------- what an ROI of an id looks like
+    def draws_track(self, roi) -> bool:
+        """Is this ROI drawn as a track -- a line through its localizations
+        in frame order -- rather than an outline?  Only an ROI of an id
+        alone, as its origin says (`ColumnROIsSettings.draw`), and, where it
+        says nothing, when its id column names tracks."""
+        if roi.spatial:
+            return False
+        draw = (roi.origin or {}).get("draw")
+        if draw in ("track", "outline"):
+            return draw == "track"
+        from ..tracking.columns import TRACK_COLUMNS
+        return any(c in TRACK_COLUMNS or "track" in c for c in roi.ids)
+
+    def trace(self, roi) -> np.ndarray:
+        """The positions of the localizations an ROI holds, ``(n, 2)``, in
+        frame order: what an ROI of an id is drawn through, and where it is.
+        Of every localization of its file, no filter applied: membership
+        alone, as an ROI's outline does not change with the filters."""
+        ungrouped = self.state(roi.file_id).tables.ungrouped
+        locs = ungrouped.locs
+        key = (roi.id, id(locs), json_text([roi.ids, roi.frames, roi.z, roi.spatial,
+                                            roi.center, roi.polygon]))
+        found = self._traces.get(key)
+        if found is None:
+            rows = self.members(roi, locs, ungrouped.index)
+            if "frame" in locs:
+                rows = rows[np.argsort(np.asarray(locs["frame"])[rows], kind="stable")]
+            found = np.column_stack((np.asarray(locs["x_nm"], float)[rows],
+                                     np.asarray(locs["y_nm"], float)[rows]))
+            if len(self._traces) > 20000:
+                self._traces.clear()
+            self._traces[key] = found
+        return found
+
+    def outline(self, roi):
+        """``(xs, ys)`` to draw an ROI by: its shape's outline; for an ROI of
+        an id, its track or the convex hull round its localizations."""
+        if roi.spatial:
+            return self.region(roi).outline()
+        xy = self.trace(roi)
+        if not self.draws_track(roi) and len(xy) >= 3:
+            from ..plugins.region_column import hull
+            vertices = hull(xy)
+            if vertices is not None:
+                v = np.asarray(vertices + vertices[:1])
+                return v[:, 0], v[:, 1]
+        return xy[:, 0], xy[:, 1]
+
+    def rim_distance(self, roi, x: float, y: float) -> float:
+        """How far a point is from what the ROI is drawn as: its outline, or
+        its track's line -- which the ROI manager selects a track by."""
+        if roi.spatial:
+            return self.region(roi).rim_distance(x, y)
+        from ..regions import polyline_distance
+        xs, ys = self.outline(roi)
+        return polyline_distance(np.column_stack((xs, ys)), x, y)
+
+    def extent(self, roi):
+        """``(centre, half width)``: the square, in nm, an ROI's preview
+        should show -- its shape's bounds, or its localizations'."""
+        if roi.spatial:
+            x0, y0, x1, y1 = self.region(roi).bounds
+        else:
+            xy = self.trace(roi)
+            if not len(xy):
+                return np.asarray(roi.center, float), self.size_nm / 2
+            (x0, y0), (x1, y1) = xy.min(axis=0), xy.max(axis=0)
+        return (np.array([(x0 + x1) / 2, (y0 + y1) / 2]),
+                max(x1 - x0, y1 - y0) / 2)
+
+    def summary(self, roi) -> str:
+        """A line on what an ROI holds: how many localizations over which
+        frames, and for a track its path's length -- what the ROI manager
+        says over the ROI's image."""
+        ungrouped = self.state(roi.file_id).tables.ungrouped
+        locs = ungrouped.locs
+        rows = self.members(roi, locs, ungrouped.index)
+        parts = [self.describe(roi), f"{len(rows)} localizations"]
+        if len(rows) and "frame" in locs:
+            f = np.asarray(locs["frame"])[rows]
+            parts[-1] += f" in frames {int(f.min())}\u2013{int(f.max())}"
+        if self.draws_track(roi) and len(rows) > 1:
+            steps = np.hypot(*np.diff(self.trace(roi), axis=0).T)
+            parts.append(f"path {steps.sum():.0f} nm, steps {np.median(steps):.0f} nm "
+                         "(median)")
+        return ", ".join(parts)
 
     def indices(self, roi):
         state = self.state(roi.file_id)

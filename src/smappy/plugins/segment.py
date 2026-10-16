@@ -127,6 +127,13 @@ class SegmentSettings:
     replace: bool = replace_param()
 
 
+def draw_as(column: str) -> str:
+    """How an ROI of this id column alone is drawn on *auto*: a track for a
+    column that names tracks, an outline for any other (a cluster)."""
+    from ..tracking.columns import TRACK_COLUMNS
+    return "track" if column in TRACK_COLUMNS or "track" in column else "outline"
+
+
 def made_by(roi, method: str) -> bool:
     """Whether Segment regions made this ROI with this method."""
     origin = roi.origin or {}
@@ -150,6 +157,11 @@ class SegmentRegions(SegmenterPlugin):
         """Only the chosen method's part; the presets there are."""
         state = FormState(shown={key: settings.method == key for key, _ in METHODS})
         state.choices["preset"] = preset_choices()
+        by_id = settings.ids.membership == "id"
+        state.active["ids.outline"] = not by_id
+        state.active["ids.draw"] = by_id
+        if by_id and settings.ids.draw == "auto":
+            state.hints["ids.draw"] = draw_as(settings.ids.column.strip())
         return state
 
     def react(self, changed: str, settings: SegmentSettings) -> Optional[Dict[str, Any]]:
@@ -270,7 +282,13 @@ class SegmentRegions(SegmenterPlugin):
             raise ValueError("the ROI manager has no file to add ROIs to")
         ids = settings.ids
         column = ids.column.strip()
-        outline = ids.outline
+        by_id = ids.membership == "id"
+        if ids.membership not in ("shape", "id"):
+            raise ValueError(f"an ROI holds 'shape' or 'id', not {ids.membership!r}")
+        draw = (ids.draw if ids.draw in ("track", "outline") else draw_as(column))
+        # an ROI of its id alone is drawn from its own localizations, so it
+        # needs no hull of its own
+        outline = ids.outline and not by_id
         found = column_regions(ctx.locs, column, ids.min_size, outline)
 
         def ours(r) -> bool:
@@ -299,12 +317,18 @@ class SegmentRegions(SegmenterPlugin):
                 if outline and region["polygon"] is None:
                     flat += 1                   # no hull: the centre, as without
                 file_id = sources.get(region["file"], next(iter(sources.values())))
-                made.append(project.add_roi(
-                    file_id, region["center"], polygon=region["polygon"],
-                    origin={"method": self.path, "segment": "ids",
-                            "parameters": settings_values(settings), "column": column,
-                            "cluster": region["id"],
-                            "localizations": int(len(region["rows"]))}))
+                origin = {"method": self.path, "segment": "ids",
+                          "parameters": settings_values(settings), "column": column,
+                          "cluster": region["id"],
+                          "localizations": int(len(region["rows"]))}
+                if by_id:
+                    origin["draw"] = draw
+                    made.append(project.add_roi(
+                        file_id, region["center"], origin=origin,
+                        ids={column: region["id"]}, spatial=False))
+                else:
+                    made.append(project.add_roi(file_id, region["center"],
+                                                polygon=region["polygon"], origin=origin))
             step.label = f"{self.name}: {len(made)} ROIs" + (
                 f" for {len(replaced)}" if replaced else "")
         text = f"{len(made)} ROIs of {column}, from {ids.min_size} localizations"

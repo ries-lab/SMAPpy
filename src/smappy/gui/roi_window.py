@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComb
                                QDoubleSpinBox,
                                QHBoxLayout, QHeaderView, QLabel, QListWidget,
                                QListWidgetItem, QMainWindow, QPushButton,
-                               QSplitter, QTableView, QVBoxLayout, QWidget)
+                               QSizePolicy, QSplitter, QTableView, QVBoxLayout, QWidget)
 
 from ..regions import Region
 from ..render import FieldOfView
@@ -105,6 +105,8 @@ class ImagePane(QWidget):
         layout.setSpacing(1)
         self.label = QLabel(title)
         self.label.setStyleSheet("color: gray; font-weight: bold")
+        # a long summary (an ROI of a track) is cut, never widens the pane
+        self.label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         layout.addWidget(self.label)
         self.graphics = pg.GraphicsLayoutWidget()
         self.view = self.graphics.addViewBox(lockAspect=True, invertY=True, enableMenu=False,
@@ -252,6 +254,10 @@ class ROIList(QAbstractTableModel):
     def reset(self, project) -> None:
         self.beginResetModel()
         self.ids = project.ordered_ids()        # as sorted (`ROIProject.sort`)
+        kind = getattr(self.window, "kind", "all")
+        if kind != "all":
+            # shapes, or the ROIs of an id (tracks, clusters) alone
+            self.ids = [i for i in self.ids if project.rois[i].spatial == (kind == "shapes")]
         self.row_of = {roi_id: i for i, roi_id in enumerate(self.ids)}
         self.numbers = project.numbers()
         self._waiting = {}
@@ -416,7 +422,20 @@ class ROIManagerWindow(QMainWindow):
         side.addLayout(file_side, 1)
         roi_side_list = QVBoxLayout()
         roi_side_list.setSpacing(1)
-        roi_side_list.addWidget(QLabel("<b>ROIs</b>"))
+        heading = QHBoxLayout()
+        heading.setSpacing(3)
+        heading.addWidget(QLabel("<b>ROIs</b>"))
+        # tracks beside shapes in one project: the list shows either, or both
+        self.kind = "all"
+        self.kind_box = QComboBox()
+        for value, text in (("all", "all"), ("shapes", "shapes"), ("ids", "of an id")):
+            self.kind_box.addItem(text, value)
+        self.kind_box.setToolTip("which ROIs the list shows: all, those of a shape, "
+                                 "or those of an id alone (a track)")
+        self.kind_box.currentIndexChanged.connect(self._on_kind)
+        heading.addWidget(self.kind_box)
+        heading.addStretch(1)
+        roi_side_list.addLayout(heading)
         self.table = QTableView()
         self.rows = ROIList(self)
         self.table.setModel(self.rows)
@@ -516,7 +535,8 @@ class ROIManagerWindow(QMainWindow):
                                        "Escape cancels")
         self.polygon_button.clicked.connect(lambda: self._start_drawing("polygon"))
         self.clear_shape_button = QPushButton("Clear shape")
-        self.clear_shape_button.setToolTip("back to the global circle or square")
+        self.clear_shape_button.setToolTip("back to the global circle or square; "
+                                           "an ROI of an id, back to its id alone")
         self.clear_shape_button.clicked.connect(self._clear_shape)
         # the named lines (`ROI.lines`): which one, then draw, reverse, clear
         self.line_box = QComboBox()
@@ -804,7 +824,7 @@ class ROIManagerWindow(QMainWindow):
         for name, chosen in groups.items():
             xs, ys = [], []
             for roi in chosen:
-                ox, oy = project.region(roi).outline()
+                ox, oy = project.outline(roi)       # a shape, or a track's line
                 xs.extend(list(ox) + [np.nan])
                 ys.extend(list(oy) + [np.nan])
             pane.draw(name, xs, ys)
@@ -838,6 +858,11 @@ class ROIManagerWindow(QMainWindow):
     def _reach(self, roi) -> float:
         """How far an ROI's outline reaches from its centre: the project's
         size, or its polygon's -- kept until the polygon is replaced."""
+        if not roi.spatial:
+            # an ROI of an id reaches as far as its localizations do
+            centre, half = self.project.extent(roi)
+            return float(np.hypot(*(centre - np.asarray(roi.center, float)))
+                         + half * np.sqrt(2))
         if roi.polygon is None:
             return float(self.project.size_nm)
         cache = self._reaches
@@ -872,21 +897,37 @@ class ROIManagerWindow(QMainWindow):
         if centre is None:
             self.roi_pane.clear()
             return
-        half = project.preview_width / 2
-        self.roi_pane.width_nm = project.preview_width
+        drafted = self.draft is not None
+        width = project.preview_width
+        if not drafted and not roi.spatial:
+            # an ROI of an id is where its localizations are, as large as
+            # they reach, and never smaller than a shape's preview
+            centre, half = project.extent(roi)
+            width = project.preview_nm or max(2.4 * half, project.size_nm)
+        half = width / 2
+        self.roi_pane.width_nm = width
         self.roi_pane.render(state, centre[0] - half, centre[0] + half,
                              centre[1] - half, centre[1] + half)
-        drafted = self.draft is not None
         polygon = self.draft_polygon if drafted else (roi.polygon if roi is not None else None)
         lines = self.draft_lines if drafted else (roi.lines if roi is not None else {})
-        xs, ys = Region.site(centre, project.shape, project.size_nm, polygon).outline()
+        if drafted or roi.spatial:
+            xs, ys = Region.site(centre, project.shape, project.size_nm, polygon).outline()
+        else:
+            xs, ys = project.outline(roi)
         used = drafted or roi is None or roi.use
         for name in ("draft", "roi", "excluded_active"):
             self.roi_pane.draw(name)
         self.roi_pane.draw("draft" if drafted else ("roi" if used else "excluded_active"), xs, ys)
         self._draw_lines(self.roi_pane, [lines], labels=True)
         self._fill_line_box(lines)
-        self.roi_pane.label.setText("ROI (draft)" if drafted else "ROI")
+        text = "ROI (draft)"
+        if not drafted:
+            try:
+                text = f"ROI {roi.number}: {project.summary(roi)}"
+            except Exception:        # a summary is a courtesy, never a failure
+                text = f"ROI {roi.number}"
+        self.roi_pane.label.setText(text)
+        self.roi_pane.label.setToolTip(text)
         self.add_button.setEnabled(drafted)
 
     # --------------------------------------------------------- interaction
@@ -1161,6 +1202,8 @@ class ROIManagerWindow(QMainWindow):
             with self._edit("Outline"):
                 roi.polygon = polygon
                 roi.center = [float(centre[0]), float(centre[1])]
+                # an ROI of an id drawn round: that id inside the outline
+                roi.spatial = True
             self.changed.emit()
         self.redraw()
 
@@ -1205,6 +1248,8 @@ class ROIManagerWindow(QMainWindow):
         if roi is not None and self.draft is None:
             with self._edit("Clear shape of"):
                 roi.polygon = None
+                if roi.ids:              # an ROI of an id: back to the id alone
+                    roi.spatial = False
             self.changed.emit()
         self.redraw()
 
@@ -1233,7 +1278,7 @@ class ROIManagerWindow(QMainWindow):
         near = self._near(project.rois_of(self.current_file()), x - tolerance,
                           x + tolerance, y - tolerance, y + tolerance)
         for roi in near:
-            d = project.region(roi).rim_distance(x, y)
+            d = project.rim_distance(roi, x, y)
             if d <= tolerance and d < best_d:
                 best, best_d = roi, d
         return best
@@ -1284,6 +1329,10 @@ class ROIManagerWindow(QMainWindow):
         self.evaluate_active()
         self.selected.emit(roi)
 
+    def _on_kind(self) -> None:
+        self.kind = self.kind_box.currentData() or "all"
+        self._fill_table()
+
     def _sort_by_column(self, column: int) -> None:
         """Order the list by one of its columns (`ROIList.HEADERS`)."""
         project = self.project
@@ -1311,6 +1360,15 @@ class ROIManagerWindow(QMainWindow):
         row = 0 if row is None else min(max(row + by, 0), len(self.rows.ids) - 1)
         if self.rows.ids[row] != self.active:
             self.select(self.rows.ids[row])
+
+    def ranges_changed(self) -> None:
+        """An ROI's frame or z range changed: what it holds did, so its
+        outline (a track's line), the list's out-of-date marks and the
+        plots follow."""
+        self._fill_table()
+        self._update_undo()
+        self.redraw()
+        self.changed.emit()
 
     def annotated(self) -> None:
         """An ROI's keywords or the lists changed: the list and the Regions

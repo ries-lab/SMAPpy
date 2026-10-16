@@ -25,6 +25,18 @@ annotates and organises ROIs; it is not the only place they can be measured.
   are the **included** ones: *use* ticked.  `ROI.number`
   is given once and never reused, so ROI 5 stays 5 in the list, in a
   `roi_id` column and in the results after ROI 3 is deleted.
+  An ROI is a filter more than a shape: its rows are its shape narrowed by
+  `ROI.ids` (``{column: id}``), `ROI.frames` and `ROI.z` (``[low, high]``,
+  either end open) -- or, with `ROI.spatial` off, its id alone, which is
+  how a track is an ROI (*Segment regions*, *from an id column*, *its id
+  alone*): its localizations, and not the tracks crossing its path, which a
+  shape round it would take in (`ROIProject.members`, `core.narrow`; the
+  id through `core.IdLookup`, one sort per column array).  A shapeless ROI
+  has no `ctx.region`, as a cluster has none; the ROI manager draws it as
+  its track's line or its hull (`ROIProject.outline`, `draws_track`).  The
+  id and the ranges are in its signature, and a project holding such ROIs
+  is saved as format 2, which an older smappy refuses rather than reading a
+  track as a circle.
 * **An id column** (`region_runs.ColumnRegions`; `ROIRegions` is the same
   interface over the ROIs, and `regions_of` picks one): one sort splits the table
   (`split_ids`).  Any integer column serves -- `cluster_id`, `roi_id`,

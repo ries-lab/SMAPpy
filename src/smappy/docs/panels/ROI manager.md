@@ -2,7 +2,7 @@
 title: ROI manager
 summary: The window where ROIs are found, looked at one by one, kept or excluded, and measured.
 widget: smappy.gui.roi_window.ROIManagerWindow
-covers: [smappy.gui.roi_window.ROIManagerWindow.evaluate_active, smappy.gui.roi_window.ROIList, smappy.gui.roi_window.ROIManagerWindow._in_view, smappy.regions.Region.rim_distance, smappy.regions.Region.outline, smappy.roi_manager.core.ROIProject.tiles, smappy.roi_manager.core.ROIProject.indices, smappy.roi_manager.core.ROIProject.inputs, smappy.roi_manager.core.ROIProject.entries, smappy.roi_manager.core.ROIProject.needs_evaluation, smappy.roi_manager.core.ROIProject.results, smappy.roi_manager.core.ROIProject.evaluate_one, smappy.roi_manager.core.ROIProject.sync, smappy.roi_manager.core.ROIProject._fingerprint, smappy.roi_manager.core.ROIProject.propose, smappy.plugins.roi.SegmenterPlugin.found, smappy.roi_manager.core.ROIHistory, smappy.roi_manager.core.ROIProject.edit, smappy.roi_manager.core.ROIProject.set_line, smappy.roi_manager.core.ROIProject.reverse_line, smappy.roi_manager.core.line_angle_length, smappy.roi_manager.core.ROIProject.geometry]
+covers: [smappy.gui.roi_window.ROIManagerWindow.evaluate_active, smappy.gui.roi_window.ROIList, smappy.gui.roi_window.ROIManagerWindow._in_view, smappy.regions.Region.rim_distance, smappy.regions.Region.outline, smappy.roi_manager.core.ROIProject.tiles, smappy.roi_manager.core.ROIProject.indices, smappy.roi_manager.core.ROIProject.inputs, smappy.roi_manager.core.ROIProject.entries, smappy.roi_manager.core.ROIProject.needs_evaluation, smappy.roi_manager.core.ROIProject.results, smappy.roi_manager.core.ROIProject.evaluate_one, smappy.roi_manager.core.ROIProject.sync, smappy.roi_manager.core.ROIProject._fingerprint, smappy.roi_manager.core.ROIProject.propose, smappy.plugins.roi.SegmenterPlugin.found, smappy.roi_manager.core.ROIHistory, smappy.roi_manager.core.ROIProject.edit, smappy.roi_manager.core.ROIProject.set_line, smappy.roi_manager.core.ROIProject.reverse_line, smappy.roi_manager.core.line_angle_length, smappy.roi_manager.core.ROIProject.geometry, smappy.roi_manager.core.ROIProject.members, smappy.roi_manager.core.narrow, smappy.roi_manager.core.ROIProject.set_ranges, smappy.roi_manager.core.ROIProject.outline, smappy.roi_manager.core.ROIProject.rim_distance, smappy.roi_manager.core.ROIProject.summary, smappy.gui.roi_ranges.RangePanel]
 ---
 
 ## What it does
@@ -30,6 +30,20 @@ The work goes in four steps:
    ROI's row.
 4. **Analyse** the table, for example with
    [Histograms](plugin:Analysis/Regions/Summarize/Histograms) in the Regions tab.
+
+An ROI need not be a shape.  [Segment
+regions](plugin:Analysis/Regions/Segment regions)' *from an id column*, set
+to *its id alone*, makes an ROI of each id of a column -- each
+[track](plugin:Panels/Glossary) of `track_id`, say -- which holds that
+track's localizations and none of the tracks crossing it.  Such an ROI is
+drawn as its track's line, selected by a click on the line, and reviewed,
+kept and annotated like any other.  The list shows *all* ROIs, only the
+*shapes*, or only those *of an id*.
+
+Any ROI can also be cut in time and in depth: a frame range and a z range,
+set under *frames and z* in *annotate*, are part of what the ROI holds, so
+what is measured in it -- and what *Regions to column* writes -- is that
+part only.  Every frame and every z, the default, is no cut.
 
 What the Regions tab holds is what an ROI *is*: its shape and size, shared by all
 ROIs, and the plugins that find and summarise.  This window is for choosing
@@ -342,7 +356,11 @@ when included, grey when excluded and green when selected.
 
 ### ROI
 The selected ROI or the draft, as wide as the Regions tab's *ROI view* (three ROI
-sizes by default); the wheel here changes that width for all ROIs.  A click
+sizes by default); the wheel here changes that width for all ROIs.  An ROI of
+an id is shown as wide as its localizations reach, unless *ROI view* is set.
+The title says what the ROI holds: its shape or id, its range, how many
+localizations over which frames, and for a track the length of its path
+and its median step.  A click
 moves a draft, and a click on one of the ROI's lines chooses it.  It is
 also where *Polygon* and *Draw line* are drawn.
 
@@ -391,7 +409,8 @@ again, after at least three, closes the outline, and Escape abandons it.  The RO
 mean of the vertices.  On a draft, the outline goes with it when it is added.
 
 ### Clear shape
-Back to the circle or square of the Regions tab.
+Back to the circle or square of the Regions tab.  An ROI of an id with a
+polygon drawn on it (its id inside the polygon) goes back to its id alone.
 
 ### line
 Which of the line names *Draw line*, *Reverse* and *Clear line* act on.
@@ -436,6 +455,30 @@ One list a line: a name, a colon, and its keywords separated by commas
 (`quality: good, bad, unsure`).  The number keys reach the first nine of a
 list.  Saved with the ROIs.  An ROI keeps a keyword its list no longer has,
 so a list rewritten by mistake loses nothing already annotated.
+
+### frames and z
+The selected ROI's frame range and z range: the part of it that is
+measured.  Two plots show the ROI as it is without them: its localizations
+per frame, and its side view, z against x -- or against the distance along
+its *direction* line, when it has one, so a tilted structure is seen edge
+on.  The green band is the range; drag it, or its edges, to set it.  A band
+let go at the edge of the data leaves that end open.  Each change is one
+step of the ROI undo, and puts the ROI's results out of date.  The side view
+is hidden for a table without `z_nm`, where a z range cuts nothing.
+
+### frames
+The first and last frame kept, both included.  Blank is an open end: from
+the start, or to the end.
+
+### z
+The lowest and highest z kept, in nm, both included.  Blank is an open end.
+
+### All frames and z
+Clears both ranges of the selected ROI.
+
+### To all used
+Gives every ROI ticked *use* the selected ROI's frame and z range, in one
+undo step: for a range that should be the same everywhere, set once.
 
 ### line names
 The names an ROI's lines are drawn under, separated by commas

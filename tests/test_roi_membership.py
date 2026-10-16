@@ -137,3 +137,133 @@ def test_value_range_and_the_id_lookup():
     assert lookup.rows(3).tolist() == [0, 2, 5]
     assert lookup.rows([1, 2]).tolist() == [1, 3, 4]
     assert lookup.rows([7]).tolist() == []
+
+
+def test_segment_regions_makes_an_roi_per_track_drawn_as_its_line():
+    from smappy.plugins.region_column import ColumnROIsSettings
+    from smappy.plugins.segment import SegmentRegions, SegmentSettings
+    from smappy.session import Session
+    session = Session(crossing_tracks())
+    session.show_grouped(0, False)
+    settings = SegmentSettings(method="ids", ids=ColumnROIsSettings(
+        column="track_id", min_size=5, membership="id"))
+    made = SegmentRegions().run(session.context(), settings).rois
+    project = session.rois
+    assert sorted(r.ids["track_id"] for r in made) == [1, 2]
+    assert all(not r.spatial and project.draws_track(r) for r in made)
+    along_x = next(r for r in made if r.ids["track_id"] == 1)
+    xs, ys = project.outline(along_x)
+    assert np.allclose(xs, (np.arange(10) - 4.5) * 20) and np.allclose(ys, 0)
+    # selected by the line, not by a rim round it
+    assert project.rim_distance(along_x, 35, 3) == pytest.approx(3)
+    centre, half = project.extent(along_x)
+    assert np.allclose(centre, [0, 0]) and half == pytest.approx(90)
+    # a cluster column is drawn round, as its hull
+    settings.ids.draw = "outline"
+    settings.replace = True
+    hulls = SegmentRegions().run(session.context(), settings).rois
+    assert not any(project.draws_track(r) for r in hulls)
+
+
+def test_segment_regions_by_shape_is_as_before():
+    from smappy.plugins.region_column import ColumnROIsSettings
+    from smappy.plugins.segment import SegmentRegions, SegmentSettings
+    from smappy.session import Session
+    session = Session(crossing_tracks())
+    session.show_grouped(0, False)
+    settings = SegmentSettings(method="ids", ids=ColumnROIsSettings(column="track_id",
+                                                                    min_size=5))
+    made = SegmentRegions().run(session.context(), settings).rois
+    assert all(r.spatial and not r.ids for r in made)
+    # a hull round a line has no area: the ROI manager's shape round its centre
+    assert all(r.polygon is None for r in made)
+
+
+@pytest.fixture(scope="module")
+def app():
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication
+    return QApplication.instance() or QApplication([])
+
+
+def track_window():
+    from smappy.gui.roi_window import ROIManagerWindow
+    from smappy.plugins.region_column import ColumnROIsSettings
+    from smappy.plugins.segment import SegmentRegions, SegmentSettings
+    from smappy.session import Session
+    session = Session(crossing_tracks())
+    session.show_grouped(0, False)
+    SegmentRegions().run(session.context(), SegmentSettings(
+        method="ids", ids=ColumnROIsSettings(column="track_id", min_size=5,
+                                             membership="id")))
+    window = ROIManagerWindow(session)
+    window.set_measuring(False)
+    return session, session.rois, window
+
+
+def test_a_track_is_selected_by_a_click_on_its_line_in_the_manager(app):
+    session, project, window = track_window()
+    along_x, along_y = sorted(project.rois.values(), key=lambda r: r.ids["track_id"])
+    window.zoom_pane.render(project.state(along_x.file_id), -200, 200, -200, 200)
+    assert window._roi_at(60, 1) is along_x
+    assert window._roi_at(1, -60) is along_y
+    assert window._roi_at(60, 60) is None
+    window.select(along_y.id)
+    xs, ys = window.roi_pane.shapes["roi"].getData()
+    assert np.allclose(xs, 0) and len(ys) == 10           # its line, not a box
+    assert "track_id 2, 10 localizations in frames 0\u20139, path 180 nm" in \
+        window.roi_pane.label.text()
+    project.add_roi(along_x.file_id, [500, 500])
+    window.kind_box.setCurrentIndex(window.kind_box.findData("ids"))
+    assert len(window.rows.ids) == 2
+    window.kind_box.setCurrentIndex(window.kind_box.findData("shapes"))
+    assert len(window.rows.ids) == 1
+    window.close()
+
+
+def test_the_frame_and_z_range_are_typed_or_dragged_and_undone(app):
+    session, project, window = track_window()
+    along_x = next(r for r in project.rois.values() if r.ids["track_id"] == 1)
+    window.select(along_x.id)
+    ranges = window.annotation.ranges
+    ranges.fields[("frames", 0)].setText("3")
+    ranges.fields[("frames", 0)].editingFinished.emit()
+    assert project.rois[along_x.id].frames == [3.0, None]
+    assert project.indices(project.rois[along_x.id]).tolist() == list(range(3, 10))
+    # the band, let go between frames 2 and 6, its far end at the data's edge
+    band = ranges.frame_plot.band
+    band.setRegion((2.2, 10))
+    band.sigRegionChangeFinished.emit(band)
+    assert project.rois[along_x.id].frames == [2.0, None]
+    band = ranges.side_plot.band
+    band.setRegion((20, 60))
+    band.sigRegionChangeFinished.emit(band)
+    assert project.rois[along_x.id].z == [20.0, 60.0]
+    ranges._to_all()
+    assert all(r.z == [20.0, 60.0] for r in project.rois.values())
+    window.undo()
+    assert [r.z for r in project.rois.values()].count(None) == 1
+    ranges._clear()
+    assert project.rois[along_x.id].frames is None and project.rois[along_x.id].z is None
+    window.close()
+
+
+def test_regions_to_column_writes_the_used_tracks_their_range_and_keywords():
+    from smappy.plugins.region_column import RegionColumnSettings, RegionsToColumn
+    from smappy.session import Session
+    session = Session(crossing_tracks())
+    session.show_grouped(0, False)
+    project = session.rois
+    file_id = next(iter(project.sources))
+    one = project.add_roi(file_id, [0, 0], ids={"track_id": 1}, spatial=False,
+                          frames=[2, 6])
+    two = project.add_roi(file_id, [0, 0], ids={"track_id": 2}, spatial=False)
+    project.set_annotation_lists({"quality": ["good", "bad"]})
+    project.annotate(one.id, "quality", "bad")
+    project.rois[two.id].use = False                  # not used: in no region
+    result = RegionsToColumn().run(session.context(), RegionColumnSettings())
+    locs = result.locs
+    roi_id = np.asarray(locs["roi_id"])
+    assert roi_id.tolist() == [0, 0] + [one.number] * 5 + [0] * 13
+    keyword = np.asarray(locs["quality_keyword"])
+    assert np.all(keyword[2:7] == 2) and np.isnan(keyword[[0, 1, 7, 12]]).all()

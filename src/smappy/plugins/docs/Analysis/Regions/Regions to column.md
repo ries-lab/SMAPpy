@@ -1,6 +1,6 @@
 ---
-version: "2"
-covers: [smappy.plugins.region_column.RegionsToColumn.run, smappy.plugins.region_column.rows_values, smappy.region_runs.write_values, smappy.region_runs.roi_numbers, smappy.region_runs.region_members, smappy.region_runs.values_onto, smappy.region_runs.merge_pieces, smappy.region_runs.with_region_columns]
+version: "3"
+covers: [smappy.plugins.region_column.RegionsToColumn.run, smappy.plugins.region_column.rows_values, smappy.plugins.region_column.keyword_columns, smappy.plugins.region_column.own_rows, smappy.region_runs.write_values, smappy.region_runs.roi_numbers, smappy.region_runs.region_members, smappy.region_runs.values_onto, smappy.region_runs.merge_pieces, smappy.region_runs.with_region_columns]
 ---
 
 ## What it does
@@ -30,6 +30,18 @@ and kept when others are removed, and the results' rows name the ROI by the
 same number, so ROI 5 in the list, in the column and in the results is the
 same ROI.
 
+What you said of the ROIs reaches the table the same way.  Only ROIs ticked
+*use* are written, so `roi_id` above 0 is "in a used ROI": a filter on it
+keeps the tracks or sites you kept and drops the rest, for any plugin that
+runs on the view afterwards.  An ROI's frame range and z range (set under
+*frames and z* in the ROI manager's *annotate*) are part of what it holds,
+so a localization outside them gets 0 too.  And each list of keywords
+becomes a column, `<list>_keyword`, holding the keyword's place in its list
+-- with the lists *quality: good, bad*, `quality_keyword` is 1 on the
+localizations of the ROIs called *good* and 2 on the *bad* ones.  With
+nothing in *results from* and *values*, the plugin writes `roi_id` and every
+keyword column some used ROI has.
+
 The results must be there first: the ROIs measured (by the
 [per-region steps](plugin:Panels/Regions tab), or a block of a
 [chain](plugin:Panels/Glossary) -- plugins run one after another as one --
@@ -47,8 +59,10 @@ to date.  The run is written into the table's history.
 
 **Which localizations.**  A region holds the localizations inside its
 outline -- whatever the layers' filters -- or, for an id column, the rows
-with its id: membership is the region alone, as when a block runs.  Only the
-ROIs ticked *use* are written.
+with its id: membership is the region alone, as when a block runs.  An ROI
+of an id alone (a track) holds that id's localizations, and an ROI's frame
+range and z range narrow what it holds.  Only the ROIs ticked *use* are
+written.
 
 **The values.**  Each region's number is written over its rows.  A
 localization in no region, or in a region with no result (the measurement
@@ -99,7 +113,9 @@ value can be written from the same results.
 The names are those of the results' columns, as *Summarize/Histograms*
 shows them.  The lines drawn on the ROIs in the ROI manager give
 `<line>_angle_deg` and `<line>_length_nm` with or without *results from*:
-they are the ROIs' own, as `roi_id` is, and need no measurement.  Writing every number of a set of results adds a column for each:
+they are the ROIs' own, as `roi_id` is, and need no measurement; so are the
+keyword columns, `<list>_keyword`.  A keyword its list no longer has is not
+written (the ROI keeps it, but it has no number).  Writing every number of a set of results adds a column for each:
 name the few you will filter or colour by.
 
 ### prefix

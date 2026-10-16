@@ -103,6 +103,7 @@ shape, so read the one closest to what you are writing:
 | parts, a C++ backend | `fit.py` (nested settings dataclasses; four fitters, thin subclasses of `_FitPlugin`; the *fit region* drawn on the Preview's frame: a figure panel that takes shapes is `Plot.edit`, a `ShapeEdit`, and the figure window adds the tools) |
 | adds a derived column, no output | `math_parser.py` (an expression, kept with the table as a recipe) |
 | removes or flags localizations | `remove_locs.py` (a region, a new table or a filtered flag) |
+| makes an ROI that is not a shape | `segment.py`'s *from an id column*, *its id alone* (an ROI of one track: `ROI.ids` with `spatial` off, drawn as its line; any ROI's `frames` / `z` range set in the ROI manager's *annotate*, `gui/roi_ranges.py`; membership in `ROIProject.members`, never `rows_in` alone) |
 | fits a model to what is in a ROI | `line_profile.py` (unbinned likelihood, models compared by AIC; one fit per layer, `follow_roi` and `per_region`: in an ROI the line is one of its named lines, `region_line`); `circle_fit.py` (the NPC segmenter's `fit_circle` with errors) |
 | moves the ROIs onto what was measured in them | `roi_centre.py` (*Centre ROIs*: `ROIProject.move_roi` in one ROI undo step) |
 | counts in time: blinks, dark times, bursts | `blinking.py` (one region on one time line, the view linked into molecules per file; seconds from the file's frame time, `metadata.file_frame_time`) |
