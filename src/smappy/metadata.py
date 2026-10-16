@@ -234,6 +234,19 @@ def frame_time_ms(camera) -> Optional[float]:
     return None
 
 
+def file_metadata(metadata, filenumber: int = 0) -> dict:
+    """The metadata of file ``filenumber`` of a table: its own, as
+    `Session.add_file` kept it (``metadata["files"][n]["metadata"]``), else
+    the table's -- which is the first file's once several are open."""
+    metadata = metadata or {}
+    files = metadata.get("files") or []
+    if 0 <= int(filenumber) < len(files) and isinstance(files[int(filenumber)], dict):
+        own = files[int(filenumber)].get("metadata")
+        if isinstance(own, dict) and own:
+            return own
+    return metadata
+
+
 def file_frame_time(metadata, filenumber: int = 0) -> Optional[float]:
     """The frame time in ms of file ``filenumber`` of a table's metadata.
 

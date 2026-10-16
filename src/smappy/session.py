@@ -18,7 +18,7 @@ from .images import ImageData, load_image
 from .locs import KEPT_BOUNDS, Localizations, concat
 from .metadata import frame_time_ms
 from .plugins import Context, Plugin, Result, Selection, refuse_grouped_table
-from .io.formats import FileInfo, load as load_any
+from .io.formats import FileInfo, load as load_any, own_metadata
 from .regions import Region
 from .view3d import Projection, Slab
 from .render import DisplaySettings, RenderAxes, RenderSettings, SigmaSettings
@@ -284,6 +284,29 @@ def read_localizations(path, progress: Optional[Callable[[str], None]] = None,
     return load_any(path, reader=reader, **reader_args)
 
 
+def _saved_files(locs: Localizations, info: FileInfo) -> Optional[List[FileInfo]]:
+    """The files of a session saved with several, as they were saved; None
+    for a table that is one file.
+
+    A smappy HDF5 file written from a session of three files holds their
+    entries (``metadata["files"]``, each with its own metadata) and the
+    `filenumber` of every row.  Opened again, they are three files again --
+    the rows numbered as they were, each with its name, frame time and
+    metadata -- and no longer one file whose second and third had lost what
+    they were.
+    """
+    if info.format != "smappy" or "filenumber" not in locs:
+        return None
+    entries = locs.metadata.get("files")
+    if not isinstance(entries, list) or len(entries) < 2 \
+            or not all(isinstance(e, dict) for e in entries):
+        return None
+    numbers = np.asarray(locs["filenumber"])
+    if len(numbers) and (numbers.min() < 0 or numbers.max() >= len(entries)):
+        return None
+    return [FileInfo.from_dict(e) for e in entries]
+
+
 class Session:
     def __init__(self, locs: Optional[Localizations] = None, path=None):
         # how localizations are linked into blinks: the session's, for every
@@ -483,7 +506,9 @@ class Session:
                 im.metadata["filenumber"] = number + saved.index(
                     int(im.metadata.get("filenumber", 0)))
             elif im.path and any(o.kind != "raw" and o.path == im.path
-                                 and o.shape == im.shape for o in self.images):
+                                 and o.name == im.name and o.shape == im.shape
+                                 for o in self.images):
+                # (by name too: an `.msr` holds many images of one size)
                 continue
             self.images.append(im)
         if images:
@@ -508,17 +533,33 @@ class Session:
             # opened as one stays, as its layer does
             self.images = [im for im in self.images if im.kind != "raw"]
         number = len(self.files)
-        if info.frame_time_ms is None:
-            info.frame_time_ms = frame_time_ms(locs.metadata.get("camera"))
-        self.files.append(info)
+        saved = _saved_files(locs, info)
+        if saved:
+            # a session of several files, saved: each comes back as the file
+            # it was, its rows keeping their number, rather than as one file
+            infos = saved
+            numbers = np.asarray(locs["filenumber"], np.int32) + number
+        else:
+            # the file's own metadata, kept with it: the table's becomes the
+            # first file's once another joins it
+            info.metadata = own_metadata({**locs.metadata, **info.metadata})
+            infos = [info]
+            numbers = np.full(len(locs), number, np.int32)
+        for each in infos:
+            if each.frame_time_ms is None:
+                each.frame_time_ms = frame_time_ms(
+                    (each.metadata or {}).get("camera") or locs.metadata.get("camera"))
+        self.files.extend(infos)
         self._take_images(self._file_images(info), number)
         columns = dict(locs.columns)
-        columns["filenumber"] = np.full(len(locs), number, np.int32)
+        columns["filenumber"] = numbers
         locs = Localizations(columns, dict(locs.metadata))
         if number == 0:
             if grouped is not None:      # the same column, on the linked table
                 gc = dict(grouped.columns)
-                gc["filenumber"] = np.full(len(grouped), number, np.int32)
+                gc["filenumber"] = (np.full(len(grouped), number, np.int32)
+                                    if not saved or "filenumber" not in grouped
+                                    else np.asarray(grouped["filenumber"], np.int32))
                 grouped = Localizations(gc, dict(grouped.metadata))
             self.set_locs(locs, undoable=False, grouped=grouped)
             # the file's own log continues rather than starting again: what
@@ -1176,7 +1217,7 @@ class Session:
         correction has to show what it showed before, filters and all.
         """
         self._take_tables(self._new_tables(edit.locs, self._group_settings))
-        self.files = [FileInfo(**{k: v for k, v in f.items() if k != "n"})
+        self.files = [FileInfo.from_dict(f)
                       for f in self.locs.metadata.get("files", [])] or self.files
         for image, placement in edit.placements:
             image.placement = None if placement is None else np.array(placement)

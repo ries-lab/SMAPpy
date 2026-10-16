@@ -1,6 +1,6 @@
 ---
-version: "4"
-covers: [smappy.io.formats.reader_for, smappy.io.formats._is_smappy, smappy.io.formats._has_saveloc, smappy.session.read_localizations, smappy.io.formats._load_smappy, smappy.io.hdf5.load_localizations, smappy.io.formats._load_sml, smappy.io.formats._load_minflux, smappy.io.formats._minflux_records, smappy.io.formats._minflux_from_json, smappy.group.by_trace, smappy.io.formats._load_csv, smappy.io.formats.guess_csv_mapping, smappy.io.formats.csv_columns, smappy.io.formats.column_name, smappy.io.conversions.conversion_for, smappy.io.picasso.load, smappy.io.picasso.read_info, smappy.io.decode.load]
+version: "5"
+covers: [smappy.io.formats.reader_for, smappy.io.formats._is_smappy, smappy.io.formats._has_saveloc, smappy.session.read_localizations, smappy.io.formats._load_smappy, smappy.io.hdf5.load_localizations, smappy.io.formats._load_sml, smappy.io.formats._load_minflux, smappy.io.minflux.records, smappy.io.minflux.from_json, smappy.io.minflux.table, smappy.io.minflux._fields, smappy.io.minflux._cfr_iteration, smappy.io.minflux._joined, smappy.io.minflux.sequence, smappy.io.msr.contents, smappy.io.msr.load, smappy.io.msr.read_files, smappy.io.msr.read_measurement, smappy.io.msr.select, smappy.io.msr.merge, smappy.io.msr.image, smappy.io.obf.stacks, smappy.io.obf.read_stack, smappy.io.zarr_lite.archive_files, smappy.io.zarr_lite.read_array, smappy.io.blosc.decode, smappy.io.blosc.lz4_block, smappy.session._saved_files, smappy.group.by_trace, smappy.io.formats._load_csv, smappy.io.formats.guess_csv_mapping, smappy.io.formats.csv_columns, smappy.io.formats.column_name, smappy.io.conversions.conversion_for, smappy.io.picasso.load, smappy.io.picasso.read_info, smappy.io.decode.load]
 ---
 
 ## What it does
@@ -15,7 +15,15 @@ is inside.  It is what File > Open does.  The formats:
   ([Ries 2020](https://doi.org/10.1038/s41592-020-0938-1));
 * **MINFLUX** -- `.npy`, `.zip`, `.json`: the localizations an Abberior
   MINFLUX microscope exports
-  ([Gwosch et al. 2020](https://doi.org/10.1038/s41592-019-0688-0));
+  ([Gwosch et al. 2020](https://doi.org/10.1038/s41592-019-0688-0)), from
+  either version of Imspector (m2205 and m2410);
+* **Abberior MSR** -- `.msr`: Imspector's own file, which holds a whole
+  session -- several MINFLUX measurements, the confocal or STED images they
+  were aimed on, the beads that stabilised them and every acquisition
+  setting.  File > Open lists what is in it and asks which to open; each
+  measurement becomes a file of its own (or all of them one, with
+  *merge into one file*), and each image an image layer in the same
+  coordinates as the localizations;
 * **Picasso** -- `.hdf5`, `.h5` written by Picasso
   ([Schnitzbauer et al. 2017](https://doi.org/10.1038/nprot.2017.024)),
   told from this program's own HDF5 by what is inside;
@@ -73,8 +81,9 @@ with tempfile.TemporaryDirectory() as folder:
     (folder / "minflux.json").write_text(json.dumps([]))
     (folder / "thunderstorm.csv").write_text("x [nm],y [nm]\n1,2\n")
     (folder / "stack.tif").write_bytes(b"")
+    (folder / "imspector.msr").write_bytes(b"")
     for name in ("fitted.hdf5", "picasso.hdf5", "decode.h5", "other_program.h5", "cells_sml.mat", "renamed.mat",
-                 "calibration.mat", "minflux.npy", "minflux.json",
+                 "calibration.mat", "minflux.npy", "minflux.json", "imspector.msr",
                  "thunderstorm.csv", "stack.tif"):
         path = folder / name
         try:
@@ -84,7 +93,7 @@ with tempfile.TemporaryDirectory() as folder:
 ```
 
 **1. By the name.**  The readers whose endings match the file's name are
-the candidates, in the order smappy HDF5, SMAP, MINFLUX, csv, Picasso,
+the candidates, in the order smappy HDF5, SMAP, MINFLUX, Abberior MSR, csv, Picasso,
 DECODE.  Upper and lower case do
 not matter.
 
@@ -115,7 +124,7 @@ localization, untick *merge blinks* on the layer: the single localizations
 are always kept.
 
 ```figure Which reader Auto chose for a set of files: by the ending, and by what is inside where the ending is ambiguous.  Grey: refused.
-fig.set_size_inches(5.2, 3.4)
+fig.set_size_inches(5.2, 3.6)
 ax = fig.subplots(); ax.axis("off")
 ax.set_xlim(0, 1); ax.set_ylim(len(chosen) - 0.4, -1.2)
 ax.text(0.40, -0.9, "file", ha="right", fontsize=8, color="0.4")
@@ -192,15 +201,41 @@ A `.mat` without `saveloc` is refused; one that held several SMAP files is
 read as one table.
 
 **MINFLUX.**  MINFLUX ([Balzarotti et al. 2017](https://doi.org/10.1126/science.aak9913))
-takes no camera frames: it records every iteration of every localization.
-Of each, only the last -- the most precise -- is read, and only where the
-instrument marked it valid (`vld`) and it has a position.  Positions go from
-metres to nanometres and are not shifted to start at zero.  There are no
-frames, so the localizations are sorted by their time (`tim`, kept as
-`time_s`) and `frame` is the rank in that order; the trace is `tid`, and
-`efo`, `cfr`, `dcr`, `efc`, `ecc`, `fbg` and the iteration number come
-across where the export has them.  The photons are the last iteration's
-`eco`, and the precision, which the export does not give, is set from them,
+takes no camera frames: it homes in on a molecule in a few iterations, each
+with a smaller beam pattern, and records every one.  Imspector has written
+the records in two ways.  Up to version m2205 a row is one attempt at a
+localization, with its iterations inside it; from m2410 a row is one
+iteration, and the last iteration of a localization is marked final
+(`fnl`).  Either way, only the final iteration -- the most precise -- is
+read, and only where the instrument marked it valid (`vld`) and it has a
+position.  Positions go from metres to nanometres and are not shifted to
+start at zero; z is multiplied by the *z scale*.  There are no frames, so
+the localizations are sorted by their time (`tim`, kept as `time_s`) and
+`frame` is the rank in that order; the trace -- the localizations of one
+molecule while it was on -- is `tid`.
+
+The final iteration's `efo`, `efc`, `ecc`, `fbg`, the iteration number
+(`iteration`), why the iteration ended (`sta`), the grid point, thread and
+sequence (`gri`, `thi`, `sqi`) come across where the records have them.
+`dcr`, the fraction of photons on the first detector, is m2410's first of two
+ratios; the second, the fraction on the second detector, is `dcr2`.  `cfr`,
+the centre-frequency ratio that tells a single molecule from two, is not
+measured in the final iteration: Imspector measures it in one earlier
+iteration -- found as the last one whose `cfr` varies -- and writes 0 into
+the others.  A localization's `cfr` is that iteration's *of the same
+localization*.  How often it is measured depends on the sequence: before
+every localization in the 3D sequences looked at, once at the start of a
+trace in the 2D ones -- so in a 2D measurement only the first localization
+of each trace has a `cfr`, and the others have none (NaN, not a number).
+They are not given their trace's: a value they were not measured with would
+read as if they had been.  Statistics, histograms and filters leave NaN out,
+so a mean of `cfr` is the mean over the localizations that have one.  The
+position Imspector corrected with its beam monitoring (MBM, beads followed
+during the acquisition) is `x_nm`, `y_nm`, `z_nm`; where the uncorrected one
+differs it is kept beside it as `x_nc_nm`, `y_nc_nm`, `z_nc_nm`.
+
+The photons are the final iteration's `eco`, and the precision, which the
+records do not give, is set from them,
 
 $$\sigma_{xy} = \frac{150\,\mathrm{nm}}{\sqrt{N}} ,$$
 
@@ -213,6 +248,28 @@ one row per `tid` (its mean position, summed photons, first `frame`, and
 `n_in_group`), rather than by distance and frame.  The `.npy`, the `.json`
 and a `.zip` holding either are read; MINFLUX data saved as a MATLAB `.mat`
 is not.
+
+**Abberior MSR.**  An `.msr` is a container of *stacks*: images, and a
+stack of bytes per MINFLUX measurement, which holds the measurement's
+records and settings as Imspector's export to *ZARR* writes them.  Listing
+the file reads the stacks' headers and unpacks each measurement's settings,
+a tenth of a second for a file of ten; the records are decoded only for the
+measurements opened.  A measurement is read as above, and keeps with it,
+in the file's metadata: its label, date, version and dimension, the counts,
+its **sequence** (every iteration's parameters: pattern, laser and power,
+photon limit, dwell time, ...), the lasers and detectors, the region it was
+taken in, and its **MBM beads** -- which were used, and their positions as
+recorded.  The measurements chosen are a file each; with *merge into one
+file* they are one table, one after another in time: each one's `time_s`
+is moved by when it started after the first one did (to the second, from
+its date), its traces are numbered after the last one's so that every `tid`
+is one trace, and a `measurement` column says which it was.  **Images** --
+confocal and STED channels -- become image layers, placed in nanometres by
+the stack's own offset and pixel size, in the frame the localizations are
+in: no registration is needed to lay one on the other.  What Imspector drew
+of a measurement (its density and trace renders) is listed, and not opened
+unless ticked: the localizations draw it again.  Stacks Imspector writes in
+chunks, for very large acquisitions, are not read yet, and say so.
 
 **Picasso.**  Picasso keeps its table as one dataset of records, `/locs`,
 where this program keeps a column per dataset; that is how the two are told
@@ -303,6 +360,25 @@ Leave it on *auto*.  Choose a format for a file whose name does not say
 what it is -- a SMAP file renamed, a csv saved as `.dat` -- or to make sure
 the file is read as that format and refused otherwise.
 
+### msr.measurements
+The GUI asks in a dialog, with every measurement and image listed and the
+selected one's sequence shown beside it; this field is for a chain or a
+batch.  `2, 5` opens the second and the fifth, `150915` the one whose label
+has that in it.
+
+### msr.merge
+Merge measurements of one sample taken one after another -- ten of 30 s
+each, say -- to analyse them as one, keeping `measurement` to tell them
+apart.  Leave it off to compare measurements, or when they were taken with
+different sequences.
+
+### msr.z_scale
+The positions in z are those Imspector computed, which do not correct for
+the refractive index mismatch between the immersion oil and the sample: an
+axial distance in water is measured too long.  Values of 0.7 to 0.8 are used
+for imaging in aqueous samples with oil objectives.  It has no effect on 2D
+measurements.
+
 ### csv.mapping
 Needed only when the headers are not recognised and no saved conversion
 fits.  Each pair is *header in the file* = *column in the table*; the
@@ -320,6 +396,10 @@ channel -- by a frame.
 
 The table, added to the session as a file of its own, or joined to the open
 ones with *add to the open files* (a `filenumber` column tells them apart).
+An `.msr` gives a file per measurement (or one, merged) and an image layer
+per image.  Each file keeps its own metadata -- its camera, its acquisition,
+a measurement's sequence and beads -- however many are open, and a session
+of several files saved and opened again opens as those files.
 The text says how many localizations were read, and in which format.  The
 load is written into the history with
 its settings, after the entries an HDF5 file brought with it.
@@ -338,8 +418,10 @@ changes:
   a saved conversion per program -- with two changes: every column is read,
   not only the ones mapped, and a conversion is found by the file's headers
   rather than chosen from a list each time.
-* A MINFLUX `.npy` or `.zip` export is read, the MATLAB `.mat` export is
-  not; only the last iteration and only valid localizations are read, and
+* A MINFLUX `.npy` or `.zip` export is read, and Imspector's `.msr` with
+  its images; the MATLAB `.mat` export is not.  Only the last iteration
+  is read and, unless *keep invalid* is ticked, only valid localizations;
+  `cfr` is taken from the iteration that measures it, and
   the positions are not moved to start at zero.  The precision is
   $150\,\mathrm{nm}/\sqrt{N}$ for every export, where SMAP works it out from
   the beam pattern for a `.mat` export.

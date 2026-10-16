@@ -40,11 +40,12 @@ def test_the_one_loader_offers_every_format_and_reads_columns_for_a_csv_only():
     assert spec.info.advanced
     assert [v for v, _ in spec.info.choices()] == ["", *formats.reader_names()]
     describe = loader().describe
-    # the csv part is shown for a csv only
-    assert describe(None, loader.Settings(path="a.csv")).shown == {"csv": True}
-    assert describe(None, loader.Settings(path="a.hdf5")).shown == {"csv": False}
-    assert describe(None, loader.Settings(path="a.dat", format="csv")).shown == \
-        {"csv": True}
+    # the csv part is shown for a csv only, the MSR part for an .msr only
+    shown = lambda **kw: describe(None, loader.Settings(**kw)).shown
+    assert shown(path="a.csv") == {"csv": True, "msr": False}
+    assert shown(path="a.hdf5") == {"csv": False, "msr": False}
+    assert shown(path="a.dat", format="csv") == {"csv": True, "msr": False}
+    assert shown(path="a.msr") == {"csv": False, "msr": True}
 
 
 def test_the_writer_registry_mirrors_the_readers(tmp_path):

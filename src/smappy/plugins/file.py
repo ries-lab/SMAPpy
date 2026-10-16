@@ -30,7 +30,8 @@ from ..io.formats import (FileInfo, name_filter, reader_for, reader_named,
 from ..simulate.settings import SimulationSettings
 from . import Context, FormState, Notice, Plugin, Result, param, register
 
-LOCS_FILTER = "Localizations (*.hdf5 *.h5 *.mat *.csv *.npy *.zip *.json)"
+MSR = "Abberior MSR"          # the reader's name (`io.formats`)
+LOCS_FILTER = "Localizations (*.hdf5 *.h5 *.mat *.csv *.npy *.zip *.json *.msr)"
 
 
 # --------------------------------------------------------------------- load
@@ -66,6 +67,28 @@ class CsvSettings:
 
 
 @dataclass
+class MsrSettings:
+    """What of an Abberior `.msr` is read; `io.msr`.  The GUI's File > Open
+    asks in a dialog instead (`gui.dialogs.MsrImportDialog`)."""
+    measurements: str = param("", label="measurements",
+                              help="empty: all; numbers from 1, labels or a "
+                                   "pattern of the labels, separated by commas")
+    merge: bool = param(False, label="merge into one file",
+                        help="one table for all of them, one after another in "
+                             "time, with a measurement column; otherwise a "
+                             "file each")
+    keep_invalid: bool = param(False, label="keep invalid",
+                               help="every final iteration, with vld and sta, "
+                                    "not only the valid ones")
+    z_scale: float = param(1.0, label="z scale", min=0.01, max=10.0,
+                           help="multiplies z: the refractive index correction; "
+                                "1 keeps Imspector's numbers")
+    images: bool = param(True, label="images",
+                         help="open the file's confocal and STED images as "
+                              "image layers, placed in nm")
+
+
+@dataclass
 class LoadSettings:
     path: str = param("", label="file", kind="open_file", file_filter=LOCS_FILTER,
                       help="the localization file to read")
@@ -76,6 +99,8 @@ class LoadSettings:
                         help="auto: from the file's name and, where that is not "
                              "enough, its contents")
     csv: CsvSettings = param(default_factory=CsvSettings, label="csv columns",
+                             collapsed=True)
+    msr: MsrSettings = param(default_factory=MsrSettings, label="Abberior MSR",
                              collapsed=True)
 
 
@@ -140,18 +165,20 @@ class LoadAuto(Plugin):
     # 2: no *link blinks*; a table with a trace id is grouped by trace;
     # 3: the per-format loaders are a *format* choice here, and the csv
     # *columns* came with them; 4: a csv keeps every column, and its
-    # conversion (units, first frame) is a part of its own
-    version = "4"
+    # conversion (units, first frame) is a part of its own; 5: Abberior
+    # `.msr` files, m2410 MINFLUX exports, and a MINFLUX localization's cfr
+    # from the iteration that measures it
+    version = "5"
 
     def describe(self, ctx: Optional[Context], settings: LoadSettings) -> FormState:
-        """The csv part is shown for a csv only."""
-        csv = settings.format == "csv"
-        if not settings.format and settings.path:
+        """The csv part is shown for a csv only, the MSR part for an `.msr`."""
+        name = settings.format
+        if not name and settings.path:
             try:
-                csv = reader_for(Path(settings.path)).name == "csv"
+                name = reader_for(Path(settings.path)).name
             except (ValueError, OSError):
-                csv = False
-        return FormState(shown={"csv": csv},
+                name = ""
+        return FormState(shown={"csv": name == "csv", "msr": name == MSR},
                          active={"csv.pixelsize_nm": settings.csv.units == "px"})
 
     def reader_args(self, path: Path, reader, settings) -> Dict[str, Any]:
@@ -167,6 +194,8 @@ class LoadAuto(Plugin):
             raise FileNotFoundError(f"no such file: {path}")
         reader = _reader(path, settings)
         ctx.report(f"reading {path.name} as {reader.name}")
+        if reader.name == MSR:
+            return self._run_msr(ctx, path, settings)
         locs, info = read_localizations(path, progress=ctx.report, reader=reader,
                                         **self.reader_args(path, reader, settings))
         text = f"{len(locs)} localizations from {path.name} ({info.format})"
@@ -174,6 +203,23 @@ class LoadAuto(Plugin):
         # the GUI in the background once the file is open
         return Result(files=[(locs, info, None)], text=text,
                       append=settings.append, data={"info": info}, settings=settings)
+
+    def _run_msr(self, ctx: Context, path: Path, settings: LoadSettings) -> Result:
+        """An `.msr`: a file per measurement (or one for all), and its images."""
+        from ..io import msr
+        m = settings.msr
+        found = msr.contents(path)
+        files = msr.read_files(path, m.measurements or None, m.merge,
+                               not m.keep_invalid, m.z_scale, ctx.report, found)
+        images = [msr.image(path, im) for im in found.images
+                  if not im.render] if m.images else []
+        n = sum(len(locs) for locs, _ in files)
+        text = (f"{n} localizations from {path.name} (Abberior MSR): "
+                f"{len(files)} file{'s' * (len(files) != 1)}"
+                + (f", {len(images)} images" if images else ""))
+        return Result(files=[(locs, info, None) for locs, info in files],
+                      image_layers=images, text=text, append=settings.append,
+                      data={"info": [info for _, info in files]}, settings=settings)
 
 
 # --------------------------------------------------------------------- save

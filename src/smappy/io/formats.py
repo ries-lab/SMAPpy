@@ -23,6 +23,19 @@ import numpy as np
 from ..locs import Localizations
 
 
+# What a table's metadata says about the session rather than about the
+# acquisition of one file: a file's own metadata is everything else
+# (`own_metadata`).  Kept out of `FileInfo.metadata`, which would otherwise
+# hold a saved session's history and file list inside each of its files.
+SESSION_KEYS = ("files", "history", "roi", "roi_project", "id_regions", "session",
+                "named_transformations", "gui", "bounds", "derived", "grouped")
+
+
+def own_metadata(metadata: Optional[Dict]) -> Dict:
+    return {k: v for k, v in (metadata or {}).items()
+            if k not in SESSION_KEYS and not str(k).startswith("_")}
+
+
 @dataclass
 class FileInfo:
     name: str
@@ -30,6 +43,11 @@ class FileInfo:
     format: str
     n: int = 0
     pixelsize_nm: Optional[float] = None
+    # The file's own metadata -- its camera, its fit, a MINFLUX measurement's
+    # sequence -- which `Session.add_file` fills from the file's table.  The
+    # table's metadata is the first file's once several are open together;
+    # this is where the second file's is kept, saved with the session
+    # (``metadata["files"]``) and restored by the undo with the file list.
     metadata: Dict = field(default_factory=dict)
     # the file's frame time in ms (`metadata.frame_time_ms`), kept here and
     # not only in the table's camera metadata, which is the first file's
@@ -37,8 +55,19 @@ class FileInfo:
     frame_time_ms: Optional[float] = None
 
     def to_dict(self) -> Dict:
-        return {"name": self.name, "path": self.path, "format": self.format, "n": self.n,
-                "pixelsize_nm": self.pixelsize_nm, "frame_time_ms": self.frame_time_ms}
+        out = {"name": self.name, "path": self.path, "format": self.format, "n": self.n,
+               "pixelsize_nm": self.pixelsize_nm, "frame_time_ms": self.frame_time_ms}
+        own = own_metadata(self.metadata)
+        if own:
+            out["metadata"] = own
+        return out
+
+    @classmethod
+    def from_dict(cls, d: Dict) -> "FileInfo":
+        """Back from `to_dict`; keys an older or newer version wrote that
+        this one does not have are left out rather than refused."""
+        known = {"name", "path", "format", "pixelsize_nm", "metadata", "frame_time_ms"}
+        return cls(**{k: v for k, v in d.items() if k in known})
 
 
 @dataclass
@@ -332,87 +361,23 @@ def _has_saveloc(path: Path) -> bool:
 
 
 # ---------------------------------------------------------------- MINFLUX
-MINFLUX_PSF_NM = 150.0     # for the precision proxy, SMAP's number
+# the records and both of Imspector's layouts: `io.minflux`; the `.msr`
+# container with its images and beads: `io.msr`
+
+def _load_minflux(path: Path, valid_only: bool = True, z_scale: float = 1.0):
+    from .minflux import load as load_minflux
+    return load_minflux(path, valid_only, z_scale)
 
 
-def _minflux_records(path: Path) -> np.ndarray:
-    """The structured array Abberior's export holds: .npy, or a .zip of one/json."""
-    if path.suffix.lower() == ".npy":
-        return np.load(path, allow_pickle=True)
-    if path.suffix.lower() == ".zip":
-        with zipfile.ZipFile(path) as z:
-            names = z.namelist()
-            npy = [n for n in names if n.lower().endswith(".npy")]
-            if npy:
-                return np.load(io.BytesIO(z.read(npy[0])), allow_pickle=True)
-            js = [n for n in names if n.lower().endswith(".json")]
-            if js:
-                return _minflux_from_json(json.loads(z.read(js[0])))
-        raise ValueError(f"{path.name}: no .npy or .json inside")
-    if path.suffix.lower() == ".json":
-        return _minflux_from_json(json.loads(path.read_text()))
-    raise ValueError(f"not a MINFLUX export: {path.name}")
-
-
-def _minflux_from_json(records: list) -> np.ndarray:
-    """The json export is a list of dicts with the same nesting as the npy."""
-    n = len(records)
-    itr = [r["itr"][-1] if isinstance(r["itr"], list) else r["itr"] for r in records]
-    dt_itr = [("loc", "f8", (3,)), ("efo", "f8"), ("cfr", "f8"), ("dcr", "f8"),
-              ("eco", "f8"), ("itr", "i4")]
-    out = np.zeros(n, dtype=[("itr", dt_itr), ("tim", "f8"), ("tid", "i8"),
-                             ("vld", "?")])
-    for i, (r, it) in enumerate(zip(records, itr)):
-        out["itr"][i]["loc"] = it.get("loc", [np.nan] * 3)
-        for k in ("efo", "cfr", "dcr", "eco", "itr"):
-            if k in it:
-                out["itr"][i][k] = it[k]
-        out["tim"][i], out["tid"][i], out["vld"][i] = r.get("tim", 0), r.get("tid", 0), r.get("vld", True)
-    return out
-
-
-def _load_minflux(path: Path, valid_only: bool = True) -> Tuple[Localizations, FileInfo]:
-    """Last iteration of every valid localization; positions m -> nm.
-
-    ``frame`` is the localization's rank in time, since MINFLUX has no
-    frames; ``time_s`` keeps the clock, ``tid`` the trace.  Photons are the
-    last iteration's ``eco``; the precision is SMAP's proxy 150 / sqrt(N).
-    """
-    rec = _minflux_records(path)
-    itr = rec["itr"]
-    last = itr[:, -1] if itr.ndim == 2 else itr
-    keep = np.ones(len(rec), dtype=bool)
-    if valid_only and "vld" in rec.dtype.names:
-        keep &= rec["vld"].astype(bool)
-    loc = np.asarray(last["loc"], dtype=np.float64) * 1e9
-    keep &= np.isfinite(loc[:, 0]) & np.isfinite(loc[:, 1])
-    loc, last, rec = loc[keep], last[keep], rec[keep]
-    order = np.argsort(rec["tim"], kind="stable") if "tim" in rec.dtype.names else np.arange(len(rec))
-    loc, last, rec = loc[order], last[order], rec[order]
-    n = len(rec)
-    columns = {"x_nm": loc[:, 0].astype(np.float32), "y_nm": loc[:, 1].astype(np.float32),
-               "frame": np.arange(n, dtype=np.int64)}
-    if np.any(np.abs(loc[:, 2]) > 0):
-        columns["z_nm"] = loc[:, 2].astype(np.float32)
-    photons = (np.asarray(last["eco"], np.float32) if "eco" in last.dtype.names
-               else np.full(n, np.nan, np.float32))
-    columns["photons"] = photons
-    columns["xy_err_nm"] = (MINFLUX_PSF_NM / np.sqrt(np.maximum(photons, 1))).astype(np.float32)
-    columns["sigma_nm"] = np.full(n, MINFLUX_PSF_NM, np.float32)
-    for name in ("efo", "cfr", "dcr", "efc", "ecc", "fbg"):
-        if name in last.dtype.names:
-            columns[name] = np.asarray(last[name], np.float32)
-    if "itr" in last.dtype.names:
-        columns["iteration"] = np.asarray(last["itr"], np.int32)
-    for name, dtype in (("tim", np.float64), ("tid", np.int64)):
-        if name in rec.dtype.names:
-            columns["time_s" if name == "tim" else name] = np.asarray(rec[name], dtype)
-    locs = Localizations(columns, {"units": "nm", "source": str(path), "minflux": True})
-    return locs, FileInfo(path.name, str(path), "MINFLUX", pixelsize_nm=100.0,
-                          metadata={"n_raw": len(keep), "n_valid": n})
+def _load_msr(path: Path, measurements=None, valid_only: bool = True,
+              z_scale: float = 1.0):
+    from .msr import load as load_msr
+    return load_msr(path, measurements, valid_only, z_scale)
 
 
 register(Reader("MINFLUX", (".npy", ".zip", ".json"), _load_minflux))
+# `needs`: the GUI asks which measurements and images (`MsrImportDialog`)
+register(Reader("Abberior MSR", (".msr",), _load_msr, needs=("measurements",)))
 
 
 # -------------------------------------------------------------------- csv

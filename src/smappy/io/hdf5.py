@@ -134,10 +134,12 @@ class LocalizationWriter:
 # HDF5 attribute is bounded by the object header, about 64 kB -- and are
 # written beside the table instead: the image tags (`smappy.frametags`), a
 # column per tag over the frames, and the acquisition's static metadata, a
-# Micro-Manager summary and device list of about 40 kB.  They are read back
+# Micro-Manager summary and device list of about 40 kB -- and the files'
+# entries, each with its own metadata (`FileInfo.metadata`), which for ten
+# MINFLUX measurements or ten fitted stacks is ten such.  They are read back
 # into `metadata` under the same keys, so nothing else knows the difference.
 
-LARGE = ("frame_tags", "acquisition")
+LARGE = ("frame_tags", "acquisition", "files")
 
 
 def _write_large(f, key: str, value) -> None:

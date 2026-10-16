@@ -251,9 +251,24 @@ def register(name: str, table: np.ndarray) -> None:
 
 def colors(values: np.ndarray, lut: LUT, vmin: float, vmax: float,
            invert: bool = False) -> np.ndarray:
-    """Map field values to ``(n, 3)`` colours, clamped to the range."""
+    """Map field values to ``(n, 3)`` colours, clamped to the range.
+
+    A value that is not a number -- a MINFLUX localization's `cfr` where its
+    iterations did not measure one -- is drawn grey (`NO_VALUE`), not in a
+    colour of the table: converted to an index it was the first colour on
+    ARM and an index out of range on x86, and either way a value it is not.
+    """
     table = get(lut, invert)
     scale = (len(table) - 1) / (vmax - vmin) if vmax > vmin else 0.0
-    index = np.clip((np.asarray(values, dtype=np.float32) - vmin) * scale,
+    values = np.asarray(values, dtype=np.float32)
+    missing = ~np.isfinite(values)
+    index = np.clip((np.where(missing, vmin, values) - vmin) * scale,
                     0, len(table) - 1).astype(np.int32)
-    return table[index]
+    out = table[index]
+    if missing.any():
+        out[missing] = np.asarray(NO_VALUE, np.float64) * (255 if out.dtype == np.uint8 else 1)
+    return out
+
+
+# the colour of a localization whose colour column has no value: grey
+NO_VALUE = (0.5, 0.5, 0.5)

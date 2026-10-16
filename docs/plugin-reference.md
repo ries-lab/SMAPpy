@@ -228,6 +228,15 @@ changed, per frame: `smappy.frametags`) and `metadata["acquisition"]` (the
 Micro-Manager summary, devices and comment); both are written beside `/locs`,
 not in the metadata attribute.
 
+**Several files.**  The table's metadata is the first file's once several
+are open.  Each file's own -- its camera, its acquisition, a MINFLUX
+measurement's sequence and beads (`metadata["minflux"]`, `io.msr`) -- is
+`metadata.file_metadata(locs.metadata, filenumber)`: the file's entry in
+`metadata["files"]` (`FileInfo.metadata`, without what belongs to the
+session: `io.formats.SESSION_KEYS`), saved with the session and put back by
+the undo.  A plugin that reads a file's acquisition reads it there, not from
+the table's metadata.
+
 **Time.**  A frame is turned into seconds by the file's frame time:
 `metadata.file_frame_time(locs.metadata, filenumber)` -- the session's
 record of that file (`metadata["files"]`), else the camera's

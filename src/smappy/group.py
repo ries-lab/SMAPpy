@@ -535,6 +535,8 @@ def combine(locs: Localizations, group_index: np.ndarray,
     def reduce_column(name: str) -> np.ndarray:
         values = locs[name]
         mode = _mode(name)
+        if np.asarray(values).dtype.kind == "f" and np.isnan(values).any():
+            return reduce_finite(np.asarray(values, np.float64), mode, name)
         if mode == "mean":
             w, sum_w = weighting(name)
             return accumulate(values, 1, w) / sum_w
@@ -545,6 +547,33 @@ def combine(locs: Localizations, group_index: np.ndarray,
         if mode in ACCUMULATE:
             return accumulate(values, ACCUMULATE[mode])
         raise ValueError(f"unknown combine mode {mode!r} for {name!r}")
+
+    def reduce_finite(values: np.ndarray, mode: str, name: str) -> np.ndarray:
+        """A column with NaN in it, reduced over the rows that have a value.
+
+        A MINFLUX localization whose iterations did not measure its `cfr` has
+        none, and a blink of five with one measured is that one's value, not
+        NaN; a blink with none measured has none.  Kept apart from the plain
+        path: the extra passes are paid only by a column that needs them.
+        """
+        finite = np.isfinite(values)
+        counted = accumulate(finite.astype(np.float64), 0)
+        with np.errstate(invalid="ignore", divide="ignore"):  # a blink with none
+            if mode == "mean":
+                w = weighting(name)[0] * finite
+                out = accumulate(np.where(finite, values, 0.0), 1, w) / accumulate(w, 0)
+            elif mode == "precision":
+                out = 1.0 / np.sqrt(accumulate(np.where(finite, values, np.inf), 2))
+            elif mode == "quad":
+                out = np.sqrt(accumulate(np.where(finite, values, 0.0), 3))
+            elif mode in ("min", "max"):
+                fill = np.inf if mode == "min" else -np.inf
+                out = accumulate(np.where(finite, values, fill), ACCUMULATE[mode])
+            elif mode in ACCUMULATE:
+                out = accumulate(np.where(finite, values, 0.0), ACCUMULATE[mode])
+            else:
+                raise ValueError(f"unknown combine mode {mode!r} for {name!r}")
+            return np.where(counted > 0, out, np.nan)
 
     # One column at a time, on purpose.  The columns are independent and numpy
     # drops the GIL inside bincount, so threading them looks free and is not:

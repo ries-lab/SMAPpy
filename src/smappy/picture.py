@@ -33,7 +33,7 @@ import numpy as np
 
 from . import lut as luts
 from .layer_state import LayerSnapshot, render_panels
-from .render import FieldOfView, axis_unit, normalize
+from .render import FieldOfView, axis_unit, finite_range, normalize
 
 # what a picture is made of: (value, label), the plugin's choices
 WHAT = (("view", "as the view"), ("composite", "composite only"),
@@ -126,13 +126,6 @@ def bar_label(value: float, unit: str) -> str:
 def bar_number(value: float) -> str:
     """Four digits, but a frame number of 20000 as itself, not 2e+04."""
     return f"{value:.0f}" if 1e4 <= abs(value) < 1e9 else f"{value:.4g}"
-
-
-def finite_range(values) -> Tuple[float, float]:
-    """What the renderer colours over when no range is set: min to max."""
-    values = np.asarray(values, np.float64)
-    finite = values[np.isfinite(values)]
-    return (float(finite.min()), float(finite.max())) if finite.size else (0.0, 1.0)
 
 
 def auto_bar(width: float) -> float:

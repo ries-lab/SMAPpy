@@ -48,6 +48,14 @@ import numpy as np
 from . import lut as luts
 from .locs import Localizations
 
+
+def finite_range(values) -> Tuple[float, float]:
+    """What the renderer colours over when no range is set: min to max of
+    the values there are -- NaN left out, (0, 1) when there are none."""
+    values = np.asarray(values, np.float64)
+    finite = values[np.isfinite(values)]
+    return (float(finite.min()), float(finite.max())) if finite.size else (0.0, 1.0)
+
 try:
     from . import _render
 except ImportError:  # pure-Python fallback if the extension is not built
@@ -716,8 +724,7 @@ def render_locs(locs: Localizations, fov: FieldOfView,
     if settings.color_field is not None:
         values = locs[settings.color_field]
         values = values if select is None else values[select]
-        lo, hi = settings.color_range or (float(np.nanmin(values)),
-                                          float(np.nanmax(values)))
+        lo, hi = settings.color_range or finite_range(values)
         colors = luts.colors(values, display.lut, lo, hi, display.invert)
 
     if settings.mode == "dl":
@@ -945,8 +952,7 @@ def render_tracks(locs: Localizations, fov: FieldOfView, settings: "RenderSettin
     if settings.color_field is not None:
         values = np.asarray(locs[settings.color_field], np.float64)
         mid = 0.5 * (values[a] + values[b])
-        lo, hi = settings.color_range or (float(np.nanmin(values)),
-                                          float(np.nanmax(values)))
+        lo, hi = settings.color_range or finite_range(values)
         colors = luts.colors(mid, display.lut, lo, hi, display.invert)
     out = render_segments(x[a], y[a], x[b], y[b], fov, settings.line_width, weights,
                           colors, n_threads, use_extension)
@@ -1131,8 +1137,7 @@ def render_voronoi(locs: Localizations, fov: FieldOfView, settings: "RenderSetti
     if settings.color_field is not None:
         values = np.asarray(locs[settings.color_field], np.float64)
         values = values if select is None else values[select]
-        lo, hi = settings.color_range or (float(np.nanmin(values)),
-                                          float(np.nanmax(values)))
+        lo, hi = settings.color_range or finite_range(values)
 
     # the cells smaller than a pixel, counted where their localizations are
     small = np.isfinite(cells.area) & (cells.area < pixel_area)

@@ -1138,16 +1138,56 @@ class ControlWindow(QMainWindow):
         folders.remember(paths)      # however it came: dialog, drop, command line
         if paths:
             self.load_error.hide()   # the last failure is old news
-        for i, path in enumerate(paths):
-            args = {}
+        queued = 0
+        for path in paths:
+            loads = [{}]
             if self._needs_mapping(path):
                 dialog = CsvMappingDialog(path, self)
                 if dialog.exec() != QDialog.Accepted:
                     continue
-                args = dialog.reader_args()
-            self._queue.append((str(path), args, append or i > 0,
-                                reset_view and i == 0))
+                loads = [dialog.reader_args()]
+            elif self._needs_parts(path):
+                loads = self._ask_parts(path)
+                if loads is None:
+                    continue
+            for args in loads:
+                self._queue.append((str(path), args, append or queued > 0,
+                                    reset_view and queued == 0))
+                queued += 1
         self._start_next()
+
+    @staticmethod
+    def _needs_parts(path: str) -> bool:
+        """A file that holds more than one thing to open: an `.msr`."""
+        try:
+            return "measurements" in reader_for(path).needs
+        except ValueError:
+            return False
+
+    def _ask_parts(self, path):
+        """Which measurements and images of an `.msr` (`MsrImportDialog`):
+        the loader's arguments, one per file to open; None if cancelled.
+        The images are opened once the files are."""
+        from .msr_import import MsrImportDialog
+        from ..io import msr
+        try:
+            dialog = MsrImportDialog(path, self)
+        except Exception as e:                   # a damaged file is not a crash
+            self._loading_name = Path(path).name
+            self._load_failed(message_of(e), traceback.format_exc())
+            return None
+        if dialog.exec() != QDialog.Accepted:
+            return None
+        choice = dialog.choice()
+        for im in choice["images"]:
+            try:
+                self._pending_images.append(msr.image(path, im))
+            except Exception as e:
+                self._loading_name = f"{Path(path).name}: {im.name}"
+                self._load_failed(message_of(e), traceback.format_exc())
+        if not choice["loads"] and self._task is None and not self._queue:
+            self._open_pending_images()
+        return choice["loads"]
 
     def _start_next(self) -> None:
         if self._task is not None:            # one at a time: each one replaces
@@ -1379,7 +1419,11 @@ class ControlWindow(QMainWindow):
 
     def open_image_path(self, path) -> None:
         """An image as a layer of its own, asking its pixel size if the file
-        does not say it."""
+        does not say it.  An image already read (an `.msr`'s) is added."""
+        from ..images import ImageData
+        if isinstance(path, ImageData):
+            self.session.add_image(path)
+            return
         try:
             self.session.open_image(str(path))
         except ValueError:                                  # no pixel size in the file

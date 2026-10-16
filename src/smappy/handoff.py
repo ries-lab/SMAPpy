@@ -341,8 +341,7 @@ def apply_state(session, locs: Localizations, state: Dict[str, Any],
         session.set_group_settings(settings)
     session.add_file(locs, FileInfo(name=name, path="", format="snapshot",
                                     n=len(locs)), grouped=grouped)
-    files = [FileInfo(**{k: v for k, v in f.items() if k != "n"})
-             for f in state.get("files") or []]
+    files = [FileInfo.from_dict(f) for f in state.get("files") or []]
     if files:
         session.files = files
         session.locs.metadata["files"] = [f.to_dict() for f in files]
