@@ -192,8 +192,9 @@ def read_measurement(path, m: Measurement, valid_only: bool = True,
     """One measurement's table, and what is known about it."""
     files = _archive(path, m.stack)
     rec = zarr_lite.read_array(files, "zarr/mfx")
+    seq = minflux.sequence(m.attrs)
     locs, counts = minflux.table(rec, valid_only, z_scale, m.dimensionality,
-                                 source=str(path))
+                                 source=str(path), sequence=seq)
     meta = {"label": m.label, "did": m.did, "file": Path(path).name,
             "acquisition_date": m.date, "layout": m.layout,
             "dimensionality": m.dimensionality, "zarr_version": m.attrs.get("version"),
@@ -201,7 +202,7 @@ def read_measurement(path, m: Measurement, valid_only: bool = True,
             **counts,
             "duration_s": (float(np.ptp(locs["time_s"])) if len(locs) and "time_s" in locs
                            else 0.0),
-            "sequence": minflux.sequence(m.attrs), "instrument": minflux.instrument(m.attrs),
+            "sequence": seq, "instrument": minflux.instrument(m.attrs),
             "roi": _roi(files), "mbm": _beads(files)}
     return locs, meta
 

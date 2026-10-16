@@ -50,7 +50,8 @@ def test_minflux_npy_and_zip(tmp_path):
     locs, info = load(tmp_path / "m.npy")
     assert len(locs) == n - 1 and "z_nm" not in locs and info.format == "MINFLUX"
     assert locs["x_nm"].max() < 1000 and np.all(np.diff(locs["time_s"]) >= 0)
-    assert np.allclose(locs["xy_err_nm"], 150 / np.sqrt(400))
+    # no sequence in an export: the bound for the default 100 nm pattern
+    assert np.allclose(locs["xy_err_nm"], 100 / (2 * np.sqrt(2 * 400)))
     with zipfile.ZipFile(tmp_path / "m.zip", "w") as z:
         z.write(tmp_path / "m.npy", "export.npy")
     assert len(load(tmp_path / "m.zip")[0]) == n - 1

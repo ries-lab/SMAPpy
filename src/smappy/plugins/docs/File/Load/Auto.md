@@ -1,6 +1,6 @@
 ---
-version: "5"
-covers: [smappy.io.formats.reader_for, smappy.io.formats._is_smappy, smappy.io.formats._has_saveloc, smappy.session.read_localizations, smappy.io.formats._load_smappy, smappy.io.hdf5.load_localizations, smappy.io.formats._load_sml, smappy.io.formats._load_minflux, smappy.io.minflux.records, smappy.io.minflux.from_json, smappy.io.minflux.table, smappy.io.minflux._fields, smappy.io.minflux._cfr_iteration, smappy.io.minflux._joined, smappy.io.minflux.sequence, smappy.io.msr.contents, smappy.io.msr.load, smappy.io.msr.read_files, smappy.io.msr.read_measurement, smappy.io.msr.select, smappy.io.msr.merge, smappy.io.msr.image, smappy.io.obf.stacks, smappy.io.obf.read_stack, smappy.io.zarr_lite.archive_files, smappy.io.zarr_lite.read_array, smappy.io.blosc.decode, smappy.io.blosc.lz4_block, smappy.session._saved_files, smappy.group.by_trace, smappy.io.formats._load_csv, smappy.io.formats.guess_csv_mapping, smappy.io.formats.csv_columns, smappy.io.formats.column_name, smappy.io.conversions.conversion_for, smappy.io.picasso.load, smappy.io.picasso.read_info, smappy.io.decode.load]
+version: "6"
+covers: [smappy.io.formats.reader_for, smappy.io.formats._is_smappy, smappy.io.formats._has_saveloc, smappy.session.read_localizations, smappy.io.formats._load_smappy, smappy.io.hdf5.load_localizations, smappy.io.formats._load_sml, smappy.io.formats._load_minflux, smappy.io.minflux.records, smappy.io.minflux.from_json, smappy.io.minflux.table, smappy.io.minflux._fields, smappy.io.minflux._cfr_iteration, smappy.io.minflux._joined, smappy.io.minflux.crlb_xy, smappy.io.minflux.crlb_z, smappy.io.minflux.photon_split, smappy.io.minflux.pattern_sizes, smappy.io.minflux._bound, smappy.io.minflux.sequence, smappy.io.msr.contents, smappy.io.msr.load, smappy.io.msr.read_files, smappy.io.msr.read_measurement, smappy.io.msr.select, smappy.io.msr.merge, smappy.io.msr.image, smappy.io.obf.stacks, smappy.io.obf.read_stack, smappy.io.zarr_lite.archive_files, smappy.io.zarr_lite.read_array, smappy.io.blosc.decode, smappy.io.blosc.lz4_block, smappy.session._saved_files, smappy.group.by_trace, smappy.io.formats._load_csv, smappy.io.formats.guess_csv_mapping, smappy.io.formats.csv_columns, smappy.io.formats.column_name, smappy.io.conversions.conversion_for, smappy.io.picasso.load, smappy.io.picasso.read_info, smappy.io.decode.load]
 ---
 
 ## What it does
@@ -234,16 +234,44 @@ position Imspector corrected with its beam monitoring (MBM, beads followed
 during the acquisition) is `x_nm`, `y_nm`, `z_nm`; where the uncorrected one
 differs it is kept beside it as `x_nc_nm`, `y_nc_nm`, `z_nc_nm`.
 
-The photons are the final iteration's `eco`, and the precision, which the
-records do not give, is set from them,
+The photons are the final iteration's `eco`.  The records give no
+[localization precision](plugin:Panels/Glossary) (also called the CRLB,
+the Cramér-Rao lower bound: the best precision any estimator can reach with
+these photons), so `xy_err_nm` is that bound worked out from the photons,
+as a camera fitter's is.  It is not the scatter of the localizations, which
+the precision plugins measure.  MINFLUX probes a molecule with the zero of a
+doughnut placed at K points on a circle of diameter L (the pattern size,
+`patGeoFactor` × 360 nm in the sequence) and counts the photons there:
+$N_s$ from the molecule and $N_b$ from background.  Near the zero the
+intensity grows as the square of the distance, and for a molecule at the
+centre of the pattern the bound per axis is
 
-$$\sigma_{xy} = \frac{150\,\mathrm{nm}}{\sqrt{N}} ,$$
+$$\sigma_{xy} = \frac{L}{2\sqrt{2N_s}} \sqrt{1 + \frac{N_b}{N_s}} .$$
 
-SMAP's number for the json export -- a stand-in so rendering and the
-precision filter have something to work with, usually several times worse
-than a MINFLUX localization really is.  `sigma_nm` is 150 nm for all.  With
-the default 25 nm filter on `xy_err_nm`, localizations of fewer than 36
-photons are hidden when the file opens.  Merging blinks goes **by trace**:
+Without background it is the bound of Balzarotti et al. 2017; with it, the
+2D form of [Marin & Ries 2024](https://doi.org/10.48550/arXiv.2410.12427)'s
+equation for out-of-focus background.  It does not depend on K -- a
+triangle, a square or a hexagon -- nor on an exposure at the centre, which
+adds no information there.  A molecule away from the centre is localized
+worse than this, and the records do not say where it was.  L is the
+sequence's last lateral iteration's: 101 nm for the common 2D sequence
+(`patGeoFactor` 0.28), where 25 photons without background give 7 nm.
+
+The background is Imspector's: `eco` is split into $N_s$ and $N_b$ in the
+ratio `fbg`/`efo`, its background rate over its photon rate.  This assumes
+that `efo` includes the background and that `fbg` is a rate at the same
+positions in the same units -- Abberior does not document either.  When
+Imspector's background sensing is off, `fbg` is 0 and so is $N_b$; that was
+so in every file looked at.  At most 90 % of the photons are taken as
+background.
+
+In 3D, z gets the bound of a line of two offsets,
+$L_z/(4\sqrt{N_s})\sqrt{1 + N_b/N_s}$ with the last axial (`zline`)
+iteration's L, times the *z scale*, as `z_err_nm`.  A 3D sequence
+alternates lateral and axial iterations, so `xy_err_nm` uses the photons of
+the localization's own last lateral iteration, not of the final one (which
+`photons` shows).  An export without its sequence (`.npy`, `.json`, `.zip`)
+gets L = 100 nm and no `z_err_nm`.  `sigma_nm` is 150 nm for all.  Merging blinks goes **by trace**:
 one row per `tid` (its mean position, summed photons, first `frame`, and
 `n_in_group`), rather than by distance and frame.  The `.npy`, the `.json`
 and a `.zip` holding either are read; MINFLUX data saved as a MATLAB `.mat`
@@ -422,9 +450,10 @@ changes:
   its images; the MATLAB `.mat` export is not.  Only the last iteration
   is read and, unless *keep invalid* is ticked, only valid localizations;
   `cfr` is taken from the iteration that measures it, and
-  the positions are not moved to start at zero.  The precision is
-  $150\,\mathrm{nm}/\sqrt{N}$ for every export, where SMAP works it out from
-  the beam pattern for a `.mat` export.
+  the positions are not moved to start at zero.  The precision is the
+  Cramér-Rao bound from the photons, the pattern size of the sequence and
+  Imspector's background estimate; SMAP gives a json export
+  $150\,\mathrm{nm}/\sqrt{N}$ and takes a `.mat` export's own bound.
 
 ## References
 
@@ -433,6 +462,11 @@ changes:
   *Science* 355, 606 (2017).
   [doi:10.1126/science.aak9913](https://doi.org/10.1126/science.aak9913)
   -- MINFLUX.
+* Marin Z, Ries J. Approximations of MINFLUX localization precision with
+  background. arXiv:2410.12427 (2024).
+  [doi:10.48550/arXiv.2410.12427](https://doi.org/10.48550/arXiv.2410.12427)
+  -- the bound with background photons, and its equivalence with
+  Balzarotti's.
 * Gwosch KC, Pape JK, Balzarotti F, et al. MINFLUX nanoscopy delivers 3D
   multicolor nanometer resolution in cells. *Nat Methods* 17, 217 (2020).
   [doi:10.1038/s41592-019-0688-0](https://doi.org/10.1038/s41592-019-0688-0)

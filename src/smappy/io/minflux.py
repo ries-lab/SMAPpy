@@ -40,8 +40,40 @@ What is the same for both:
 
 There are no camera frames: ``frame`` is the rank in time (``time_s``,
 Imspector's ``tim``), the trace is ``tid``, and merging blinks merges a trace
-(`group.by_trace`).  The photons are the final iteration's ``eco`` and the
-precision SMAP's stand-in, 150 nm / sqrt(N): the records give none.
+(`group.by_trace`).  The photons are the final iteration's ``eco``.
+
+The records give no precision, so ``xy_err_nm`` is the Cramér-Rao bound at
+the centre of the beam pattern -- a number from the photons, as a camera
+fitter's CRLB is, and not the spread that is measured, which is the
+precision plugins' job.  In the quadratic approximation of the doughnut's
+zero, with Ns photons from the molecule and Nb from background counted at
+the pattern's K >= 3 offsets on a circle of diameter L (`crlb_xy`),
+
+    sigma_xy = L / (2 sqrt(2 Ns)) * sqrt(1 + Nb / Ns)
+
+whatever K, and with or without a centre exposure, which at the centre adds
+no information.  Without background it is Balzarotti et al. 2017's Eq. S27
+(Marin & Ries 2024, Eq. 45); with it, the 2D form of Marin & Ries's Eq. 33,
+derived the same way (the multinomial Fisher information of the counts), and
+equal to their Eq. 44 for K = 3 with a centre, which is written with the
+total photons and the SBR.  Along z, two offsets on a line, it is
+L / (4 sqrt(Ns)) * sqrt(1 + Nb / Ns) (`crlb_z`; Eq. 33 with only the
+offsets' background).  It is the bound for a molecule at the centre; one off
+it is localized worse, by 1 + (2r/L)^2 along a line, and the records do not
+say where it was.
+
+L is the pattern size of the sequence's last lateral iteration,
+``patGeoFactor`` x 360 nm (`pattern_sizes`; Abberior's guide pairs 0.21,
+0.28 and 0.42 with 75, 100 and 150 nm), and of its last axial (``zline``)
+one for z.  A 3D sequence alternates the two, so the lateral photons are the
+last lateral iteration's of the same localization, joined as the cfr is.
+The photons ``eco`` are split into Ns and Nb by ``fbg``/``efo`` (`photon_split`),
+Imspector's background rate over its photon rate -- *assuming* ``efo``
+includes the background and ``fbg`` is a rate at the offsets in the same
+units, which nothing Abberior publishes says.  With background sensing off,
+as in every file looked at, ``fbg`` is 0 and Nb is 0.  An export without its
+sequence (`.npy`, `.json`) gets L = 100 nm, the 2D default, and no z
+precision.
 """
 from __future__ import annotations
 
@@ -55,7 +87,63 @@ import numpy as np
 
 from ..locs import Localizations
 
-MINFLUX_PSF_NM = 150.0     # for the precision proxy, SMAP's number
+MINFLUX_PSF_NM = 150.0      # sigma_nm, SMAP's number
+PATTERN_UNIT_NM = 360.0     # L for a patGeoFactor of 1
+DEFAULT_PATTERN_NM = 100.0  # L when the sequence is not known: Abberior's 2D final
+MAX_BACKGROUND_FRACTION = 0.9  # beyond it the photons are background, not a bound
+
+
+# --------------------------------------------------------------- precision
+
+def _with_background(n_signal, n_background):
+    ns = np.maximum(np.asarray(n_signal, np.float64), 1.0)
+    return ns, np.sqrt(1.0 + np.maximum(np.nan_to_num(np.asarray(n_background, np.float64)),
+                                        0.0) / ns)
+
+
+def crlb_xy(pattern_nm, n_signal, n_background=0.0) -> np.ndarray:
+    """The lateral Cramér-Rao bound at the pattern's centre, per axis:
+    L / (2 sqrt(2 Ns)) sqrt(1 + Nb/Ns), for Ns signal and Nb background
+    photons counted at the offsets."""
+    ns, factor = _with_background(n_signal, n_background)
+    return np.asarray(pattern_nm, np.float64) / (2.0 * np.sqrt(2.0 * ns)) * factor
+
+
+def crlb_z(pattern_nm, n_signal, n_background=0.0) -> np.ndarray:
+    """The axial bound at the centre of a line of two offsets:
+    L / (4 sqrt(Ns)) sqrt(1 + Nb/Ns)."""
+    ns, factor = _with_background(n_signal, n_background)
+    return np.asarray(pattern_nm, np.float64) / (4.0 * np.sqrt(ns)) * factor
+
+
+def photon_split(eco, efo, fbg) -> Tuple[np.ndarray, np.ndarray]:
+    """The counts ``eco`` as (signal, background), in the ratio of
+    Imspector's background rate ``fbg`` to its photon rate ``efo`` -- if
+    ``efo`` includes the background and ``fbg`` is in its units, which is
+    assumed, not documented.  No background where ``fbg`` is 0 or missing."""
+    eco = np.nan_to_num(np.asarray(eco, np.float64))
+    efo = np.asarray(efo, np.float64)
+    fbg = np.nan_to_num(np.asarray(fbg, np.float64))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        b = fbg / efo
+    b = np.clip(np.where(np.isfinite(b), b, 0.0), 0.0, MAX_BACKGROUND_FRACTION)
+    return eco * (1.0 - b), eco * b
+
+
+def pattern_sizes(seq: Optional[Dict[str, Any]]) -> Dict[str, Tuple[int, float]]:
+    """The last lateral and the last axial iteration of a `sequence`, each
+    with its pattern size L in nm: ``{"xy": (k, L), "z": (k, L)}``, a key
+    left out where the sequence has no such iteration."""
+    out: Dict[str, Tuple[int, float]] = {}
+    for k, it in enumerate((seq or {}).get("iterations") or []):
+        geo = it.get("patGeoFactor")
+        if isinstance(geo, (list, tuple)):      # a coarse zline's two: never the last
+            geo = geo[0] if geo else None
+        if geo is None or "Mode.pattern" not in it:
+            continue
+        axial = str(it["Mode.pattern"]).lower().startswith("z")
+        out["z" if axial else "xy"] = (k, float(geo) * PATTERN_UNIT_NM)
+    return out
 
 
 # ------------------------------------------------------------------ sources
@@ -158,9 +246,15 @@ def _joined(rec: np.ndarray, rows: np.ndarray, source: np.ndarray,
     return back[rows]
 
 
-def _fields(rec: np.ndarray, valid_only: bool) -> Tuple[Dict[str, np.ndarray], int]:
+PER_ITERATION = ("eco", "efo", "fbg")   # what the precision reads, of its iteration
+
+
+def _fields(rec: np.ndarray, valid_only: bool, iterations: Tuple[int, ...] = ()
+            ) -> Tuple[Dict[str, np.ndarray], int]:
     """The final iteration of every localization, as plain arrays, from
-    either layout; and how many attempts there were."""
+    either layout; and how many attempts there were.  For each of
+    ``iterations``, also ``PER_ITERATION`` of that iteration of the same
+    localization, as ``"eco@k"``: NaN where it has none."""
     names = rec.dtype.names or ()
     if is_flat(rec):
         final = rec["fnl"].astype(bool) if "fnl" in names else np.ones(len(rec), bool)
@@ -175,6 +269,11 @@ def _fields(rec: np.ndarray, valid_only: bool) -> Tuple[Dict[str, np.ndarray], i
             last = int(rec["itr"][rows].max()) if len(rows) else None
             if k is not None and k != last:
                 out["cfr"] = _joined(rec, rows, rec["itr"] == k, cfr)
+        for k in iterations:
+            for name in PER_ITERATION:
+                if name in names:
+                    out[f"{name}@{k}"] = _joined(rec, rows, rec["itr"] == k,
+                                                 np.asarray(rec[name], np.float32))
         return out, int(rec["fnl"].sum()) if "fnl" in names else len(rec)
     itr = rec["itr"]
     last = itr[:, -1] if itr.ndim == 2 else itr
@@ -191,19 +290,43 @@ def _fields(rec: np.ndarray, valid_only: bool) -> Tuple[Dict[str, np.ndarray], i
         varying = [j for j, s in enumerate(spread) if s > 0]
         if varying:
             out["cfr"] = cfr[:, varying[-1]]
+    if itr.ndim == 2:
+        for k in iterations:
+            for name in PER_ITERATION:
+                if name in itr.dtype.names and k < itr.shape[1]:
+                    out[f"{name}@{k}"] = np.asarray(itr[name][keep, k], np.float32)
     return out, len(rec)
 
 
+def _at_iteration(f: Dict[str, np.ndarray], name: str, k: Optional[int]) -> np.ndarray:
+    """``name`` of iteration ``k`` of each localization; the final
+    iteration's where there is no k, or the localization has none."""
+    n = len(f["loc"])
+    final = np.asarray(f[name], np.float64) if name in f else np.full(n, np.nan)
+    if k is None or f"{name}@{k}" not in f:
+        return final
+    value = np.asarray(f[f"{name}@{k}"], np.float64)
+    return np.where(np.isfinite(value), value, final)
+
+
+def _bound(f: Dict[str, np.ndarray], k: Optional[int], pattern_nm: float, crlb) -> np.ndarray:
+    signal, background = photon_split(*(_at_iteration(f, name, k) for name in PER_ITERATION))
+    return crlb(pattern_nm, signal, background).astype(np.float32)
+
+
 def table(rec: np.ndarray, valid_only: bool = True, z_scale: float = 1.0,
-          dimensionality: Optional[int] = None, source: str = ""
+          dimensionality: Optional[int] = None, source: str = "",
+          sequence: Optional[Dict[str, Any]] = None
           ) -> Tuple[Localizations, Dict[str, int]]:
     """The localizations of a MINFLUX record array, either layout, sorted by
     time; and the counts (attempts, localizations).
 
     ``dimensionality`` (2 or 3, from the measurement's metadata) decides
     whether there is a z; without it, a z that is not zero everywhere.
+    ``sequence`` (`sequence`) gives the pattern sizes of the precision.
     """
-    f, attempts = _fields(rec, valid_only)
+    sizes = pattern_sizes(sequence)
+    f, attempts = _fields(rec, valid_only, tuple(k for k, _ in sizes.values()))
     loc = np.asarray(f["loc"], np.float64) * 1e9
     keep = np.isfinite(loc[:, 0]) & np.isfinite(loc[:, 1])
     if "tim" in f:
@@ -229,7 +352,11 @@ def table(rec: np.ndarray, valid_only: bool = True, z_scale: float = 1.0,
     photons = (np.asarray(f["eco"], np.float32) if "eco" in f
                else np.full(n, np.nan, np.float32))
     columns["photons"] = photons
-    columns["xy_err_nm"] = (MINFLUX_PSF_NM / np.sqrt(np.maximum(photons, 1))).astype(np.float32)
+    k_xy, pattern_xy = sizes.get("xy", (None, DEFAULT_PATTERN_NM))
+    columns["xy_err_nm"] = _bound(f, k_xy, pattern_xy, crlb_xy)
+    if with_z and "z" in sizes:
+        k_z, pattern_z = sizes["z"]
+        columns["z_err_nm"] = _bound(f, k_z, pattern_z * z_scale, crlb_z)
     columns["sigma_nm"] = np.full(n, MINFLUX_PSF_NM, np.float32)
     for name in ("efo", "cfr", "efc", "ecc", "fbg"):
         if name in f:

@@ -167,8 +167,9 @@ class LoadAuto(Plugin):
     # *columns* came with them; 4: a csv keeps every column, and its
     # conversion (units, first frame) is a part of its own; 5: Abberior
     # `.msr` files, m2410 MINFLUX exports, and a MINFLUX localization's cfr
-    # from the iteration that measures it
-    version = "5"
+    # from the iteration that measures it; 6: a MINFLUX localization's
+    # precision is the Cramér-Rao bound of its pattern, not 150 nm / sqrt(N)
+    version = "6"
 
     def describe(self, ctx: Optional[Context], settings: LoadSettings) -> FormState:
         """The csv part is shown for a csv only, the MSR part for an `.msr`."""
