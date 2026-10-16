@@ -1504,8 +1504,16 @@ between its localizations in time order, `line_width` pixels wide
   in 54 k tracks: 0.3 s for the whole field at 1000 x 1000 pixels, 0.12 s
   zoomed in; counting the drawn localizations with `union1d` had been
   0.8 s of it.
-* The 3D view draws a tracks layer's localizations as points (precision
-  where there is one).  The movie export's *tail* is wave 5's.
+* The 3D view draws a tracks layer as lines in the volume
+  (`view3d.render_tracks_3d`, 2026-10; it had drawn the localizations as
+  points): the segments found once over the filter's rows and cached, only
+  their ends projected per frame, a segment shown when both ends are in the
+  slab.  Always on the CPU, whichever engine draws the points -- the GPU
+  engines have no lines, and a tracks table is small.  Image layers are a
+  plane at the pivot's z (`render_image_3d`), each screen pixel's ray
+  intersected with it; a volume render of a stack would need the planes'
+  z, which `ImageData` does not carry yet.  The movie export's *tail* is
+  wave 5's.
 
 ### Which column names the tracks
 

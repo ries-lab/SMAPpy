@@ -327,3 +327,74 @@ def test_the_sum_is_drawn_on_the_cpu_for_a_small_slab_and_the_gpu_for_a_large_on
     small = Slab.from_bounds(0, 50, 0, 50, -100, 100)
     assert engine_for(proj, layers, small) == "cpu"
     assert engine_for(Projection(engine="points"), layers, small) == "points"
+
+
+def _track_along_z(n=21):
+    """One track up the z axis at x = y = 0, from -200 to 200 nm."""
+    return Localizations({"x_nm": np.zeros(n, np.float32), "y_nm": np.zeros(n, np.float32),
+                          "z_nm": np.linspace(-200, 200, n).astype(np.float32),
+                          "frame": np.arange(n), "track_id": np.ones(n, np.int64)}, {})
+
+
+def test_a_track_along_z_is_a_point_from_above_and_a_vertical_line_from_the_front():
+    from smappy.view3d import render_tracks_3d
+    locs, keep = _track_along_z(), np.ones(21, bool)
+    fov = FieldOfView(-250, -250, 10.0, 50, 50)
+    settings, display = RenderSettings(mode="tracks"), DisplaySettings()
+    _, top = render_tracks_3d(locs, keep, Projection(), None, fov, settings, display)
+    assert (top.weight > 0).sum() <= 4                 # end on: one pixel's corner
+    _, front = render_tracks_3d(locs, keep, Projection(elevation=90), None, fov,
+                                settings, display)
+    rows, cols = np.nonzero(front.weight > 0.5)
+    assert set(cols) <= {24, 25}
+    assert rows.min() == 6 and rows.max() == 43        # 400 nm tall, at 10 nm a pixel
+    # a slab 200 nm deep cuts it to the segments with both ends inside
+    _, cut = render_tracks_3d(locs, keep, Projection(elevation=90),
+                              Slab([0, 0, 0], [1000, 1000, 200]), fov, settings, display)
+    rows, _ = np.nonzero(cut.weight > 0.5)
+    assert rows.min() == 16 and rows.max() == 33
+
+
+def test_a_tracks_layer_is_drawn_as_lines_by_render_3d():
+    from smappy.layer_state import LayerSnapshot
+    from smappy.view3d import render_3d
+    locs = _track_along_z()
+    layer = LayerSnapshot(name="t", locs=locs, mask=np.ones(len(locs), bool),
+                          settings=RenderSettings(mode="tracks"))
+    rgb = render_3d([layer], Projection(elevation=90), None,
+                    FieldOfView(-250, -250, 10.0, 50, 50))
+    lit = np.nonzero(rgb.sum(axis=2) > 0.5)
+    assert lit[0].max() - lit[0].min() >= 38 and lit[1].max() - lit[1].min() <= 2
+
+
+@pytest.mark.parametrize("focal", [None, 3000.0])
+def test_each_pixel_of_an_image_plane_projects_back_onto_itself(focal):
+    from smappy.view3d import image_plane_points
+    proj = Projection(azimuth=30, elevation=40, focal=focal, pivot=[100, -50, 30])
+    fov = proj.fov(60, 40)
+    x, y, ok = image_plane_points(proj, fov, 30.0)
+    assert ok.all()
+    xv, yv, _ = proj.apply(x, y, np.full(x.shape, 30.0))
+    u = fov.x0 + (np.arange(fov.nx) + 0.5) * fov.pixelsize
+    v = fov.y0 + (np.arange(fov.ny) + 0.5) * fov.pixelsize
+    assert np.allclose(xv, u[None, :], atol=1e-6) and np.allclose(yv, v[:, None], atol=1e-6)
+
+
+def test_an_image_layer_lies_flat_at_the_pivots_height():
+    from smappy.images import ImageData
+    from smappy.view3d import render_image_3d
+    image = ImageData(np.tile(np.arange(10, dtype=np.float32), (10, 1)), 100.0, -500, -500)
+    fov = FieldOfView(-250, -250, 10.0, 50, 50)
+    display = DisplaySettings()
+    _, top = render_image_3d(image, 0, display, Projection(), None, fov)
+    assert np.allclose(top.weight[25, ::10], [2, 3, 4, 5, 6])    # the 2D picture
+    _, edge = render_image_3d(image, 0, display, Projection(elevation=90), None, fov)
+    assert edge.weight.max() == 0                                  # seen edge on
+    # a pivot above the slab's top: the plane is outside it and not shown
+    above = Projection(pivot=[0, 0, 500])
+    _, gone = render_image_3d(image, 0, display, above, Slab([0, 0, 0], [1000, 1000, 400]), fov)
+    assert gone.weight.max() == 0
+    # tilted, its brightness is the plane's, not what the screen shows of it
+    rgb_top, _ = render_image_3d(image, 0, display, Projection(), None, fov)
+    rgb_tilt, _ = render_image_3d(image, 0, display, Projection(elevation=60), None, fov)
+    assert rgb_tilt.max() <= rgb_top.max() + 1e-6

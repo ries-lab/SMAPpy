@@ -1,5 +1,5 @@
 ---
-version: "3"
+version: "4"
 covers: [smappy.plugins.file.export_image, smappy.plugins.file.image_pictures, smappy.picture.render_picture, smappy.picture.frame_fov, smappy.picture.colour_scales, smappy.picture.write_picture, smappy.picture.describe_view, smappy.picture.read_description, smappy.layer_state.render_panels, smappy.render.normalize]
 ---
 
@@ -149,7 +149,9 @@ before the extension, numbered as the Render tab numbers the layers.
 **The 3D view.**  Asked from the 3D window (*window* is *3D view*), the
 picture is its projection: the turn, the zoom and the slab as they are.
 *The view* is the window's canvas; *the ROI* and *everything* are the
-slab's box on the screen.  It is drawn on the processor, which gives the
+slab's box on the screen.  A tracks layer is drawn as lines through the
+volume and an image layer as a flat plane at the height of the centre of
+rotation, as the window draws them.  It is drawn on the processor, which gives the
 picture of the *auto*, *cpu* and *gpu* engines; the *points* and *spheres*
 looks are the graphics card's own, and its *PNG as displayed...* keeps
 the screen's pixels instead.

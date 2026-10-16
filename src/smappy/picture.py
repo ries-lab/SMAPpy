@@ -239,7 +239,7 @@ def render_picture(layers: Sequence[LayerSnapshot], fov: FieldOfView,
     elif what == "composite" or what == "intensity":
         specs = ["overlay"]
     else:
-        specs = [i for i in shown if not (projection is not None and layers[i].is_image)]
+        specs = shown
     planes: Dict[int, Any] = {}
     draw = None if projection is None else _draw_3d(projection, slab)
     images, weight = render_panels(layers, fov, specs, planes=planes, draw=draw)
@@ -291,15 +291,11 @@ def render_picture(layers: Sequence[LayerSnapshot], fov: FieldOfView,
 
 def _draw_3d(projection, slab):
     """One layer through the 3D view's projection, as `render_3d` draws it on
-    the CPU; an image layer is not in the 3D view."""
-    from .view3d import render_layer_3d
+    the CPU: localizations, tracks as lines, an image as a plane."""
+    from .view3d import render_any_3d
 
     def draw(layer, fov):
-        if layer.is_image:
-            return None
-        return render_layer_3d(layer.locs, layer.mask, projection, slab, fov,
-                               layer.settings, layer.display,
-                               n_threads=layer.n_threads, index=layer.index)
+        return render_any_3d(layer, projection, slab, fov, index=layer.index)
     return draw
 
 

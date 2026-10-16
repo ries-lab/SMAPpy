@@ -485,7 +485,7 @@ class ExportImage(Plugin):
     # 3: the window's picture -- every visible layer, the panels, the scale
     #    bar and colour bars -- not one layer's; each layer, or the summed
     #    intensity; the area and the settings written into the file
-    version = "3"
+    version = "4"
 
     def describe(self, ctx: Optional[Context], settings: ExportImageSettings) -> FormState:
         from ..picture import auto_bar

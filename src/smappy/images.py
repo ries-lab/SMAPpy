@@ -156,10 +156,23 @@ class ImageData:
     def _placed(self, plane: np.ndarray, xs: np.ndarray, ys: np.ndarray) -> np.ndarray:
         """Nearest neighbour through the placement: each view pixel's centre
         taken back to the image's pixels, the grid no longer separable."""
+        return self.values_at(xs[None, :], ys[:, None], plane=plane)
+
+    def values_at(self, x, y, frame: Optional[int] = None,
+                  plane: Optional[np.ndarray] = None) -> np.ndarray:
+        """The pixel each table point ``(x, y)`` lies in, nearest neighbour,
+        zero outside the image; ``x`` and ``y`` broadcast against each other.
+
+        For points that are no grid -- the 3D view's, where the image is a
+        plane seen at an angle and every screen pixel lands somewhere else
+        on it."""
+        if plane is None:
+            plane = self.plane_at(self.frame if frame is None else frame)
         ny, nx = plane.shape
         back = np.linalg.inv(self.grid)
-        u0 = back[0, 0] * xs[None, :] + back[0, 1] * ys[:, None] + back[0, 2]
-        v0 = back[1, 0] * xs[None, :] + back[1, 1] * ys[:, None] + back[1, 2]
+        x, y = np.asarray(x, np.float64), np.asarray(y, np.float64)
+        u0 = back[0, 0] * x + back[0, 1] * y + back[0, 2]
+        v0 = back[1, 0] * x + back[1, 1] * y + back[1, 2]
         ix, iy = np.floor(u0).astype(np.int64), np.floor(v0).astype(np.int64)
         ok = (ix >= 0) & (ix < nx) & (iy >= 0) & (iy < ny)
         out = np.zeros(ix.shape, np.float32)

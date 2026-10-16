@@ -2,7 +2,7 @@
 title: 3D view
 summary: A box of the data, the slab, shown from any angle, with the Render tab's layers, filters and colours.
 widget: smappy.gui.view3d.View3DWindow
-covers: [smappy.view3d.Slab.from_region, smappy.view3d.Slab.mask, smappy.view3d.Projection.apply, smappy.view3d.Projection.preset, smappy.view3d.Projection.fit, smappy.view3d.render_layer_3d, smappy.view3d.composite_depth, smappy.view3d.render_3d, smappy.view3d.engine_for, smappy.session.Session.slab_from_roi, smappy.session.Session.selects_slab]
+covers: [smappy.view3d.Slab.from_region, smappy.view3d.Slab.mask, smappy.view3d.Projection.apply, smappy.view3d.Projection.preset, smappy.view3d.Projection.fit, smappy.view3d.render_layer_3d, smappy.view3d.render_tracks_3d, smappy.view3d.render_image_3d, smappy.view3d.image_plane_points, smappy.view3d.composite_depth, smappy.view3d.render_3d, smappy.view3d.engine_for, smappy.session.Session.slab_from_roi, smappy.session.Session.selects_slab]
 ---
 
 ## What it does
@@ -123,13 +123,46 @@ for ax, p, title in zip(axes, (top, front, tilted),
     view(ax, p, title)
 ```
 
-**4. While the mouse moves.**  A drag draws a quick preview: at half the
+**4. Tracks and images.**  A layer the Render tab draws as *tracks* is
+drawn as tracks here too: each track is the line through its localizations
+in time order, now running through the volume.  A segment is shown when both
+of its ends are inside the slab, so a track is cut where it leaves the box
+and starts again where it comes back.  An **image layer** (a wide-field
+image under the localizations, say) is a flat picture.  It is laid in the
+plane of constant z through the centre of rotation, the point the view turns
+about, and turns with the localizations around it.  Moving the centre of
+rotation along the line of sight (alt-wheel) carries the image up or down
+through the data; it is shown only where it is inside the slab.
+
+```figure Simulated 3D tracks (Brownian particles diffusing at 0.5 µm²/s) over an image layer, from the top and tilted by 70°.  From the top the image lies under the tracks as in the 2D view; tilted, it is a plane through the middle of the volume and the tracks wander above and below it.
+from smappy.simulate import simulate_tracks
+from smappy.images import ImageData
+from smappy.view3d import render_tracks_3d, render_image_3d
+tracks = simulate_tracks(use_z=True, field_um=3.0, density_um2=0.4, n_frames=120,
+                         z_range_nm=800.0, seed=1)
+picture = ImageData(np.add.outer(np.sin(np.arange(30) / 3.0), np.cos(np.arange(30) / 4.0)
+                                 ).astype(np.float32) + 2.0, 100.0, 0.0, 0.0)
+box = Slab.from_bounds(0, 3000, 0, 3000, -600, 600)
+fig.set_size_inches(7.0, 2.8)
+for ax, elevation, title in zip(fig.subplots(1, 2), (0.0, 70.0), ("top", "tilted by 70°")):
+    p = Projection(elevation=elevation, azimuth=20.0 if elevation else 0.0)
+    p.fit(box, 360, 260)
+    fov = p.fov(360, 260)
+    under, _ = render_image_3d(picture, 0, DisplaySettings(lut="gray", imax=4.5), p, box, fov)
+    lines, _ = render_tracks_3d(tracks, np.ones(len(tracks), bool), p, box, fov,
+                                RenderSettings(mode="tracks", line_width=1.5),
+                                DisplaySettings(contrast=0.5))
+    ax.imshow(np.clip(0.5 * under + lines, 0, 1), extent=(fov.x0, fov.x1, fov.y1, fov.y0))
+    ax.set_xticks([]); ax.set_yticks([]); ax.set_title(title, fontsize=9)
+```
+
+**5. While the mouse moves.**  A drag draws a quick preview: at half the
 resolution, and from a sample of the localizations sized so that the picture
 keeps up with the mouse on the machine it runs on.  When the mouse stops,
 the full image is drawn from every localization in the slab.  An image that
 is saved is always the full one.
 
-**5. The slab as the selection.**  With *plugins use the slab* ticked, every plugin's selection is cut to the slab, on top of the layer's
+**6. The slab as the selection.**  With *plugins use the slab* ticked, every plugin's selection is cut to the slab, on top of the layer's
 filter and the 2D ROI.  This holds only while the 3D window is open, so that
 nobody measures a box they can no longer see.
 
@@ -190,6 +223,30 @@ $$I \leftarrow I\,(1 - c_k) + I_k .$$
 
 At $o = 0$ this is the plain sum.  The same compositing is done for the
 colour.
+
+**Tracks.**  The segments are found once over every localization the
+layer's filter keeps -- consecutive in time within a track, as in the 2D
+view -- and a turn only projects their two ends.  Finding them over the slab
+instead would join a track's points on either side of an excursion out of
+it.  A segment's weight and colour are the mean of its ends' (its depth's
+with *colour by depth*), *dim with depth* weights it by its mean depth, and
+the line keeps the layer's width in pixels of the picture.  *Opacity* does
+not apply to lines: they are added to the sum.  Tracks are always drawn on
+the processor, whichever engine draws the localizations.
+
+**An image layer.**  The screen pixel at $(U, V)$ sees the plane
+$z = q_z$ (the pivot's height) at the depth $d$ that solves
+$R_{02} U + R_{12} V + R_{22} d = 0$, orthographic; in perspective the view
+coordinates are $(U, V)\,t$ with $t = 1 - d/f$, and the plane fixes
+
+$$t = \frac{R_{22} f}{R_{22} f - (R_{02} U + R_{12} V)} .$$
+
+The data point $\mathbf{q} + R^{T} \mathbf{v}$ is then looked up in the
+image, nearest pixel, through the image's own placement.  A plane seen edge
+on ($R_{22} = 0$), or behind the eye ($t \leq 0.05$), is not drawn.  A
+stack shows the plane the layer has chosen: its planes carry no z.  The
+brightness is scaled on the whole plane, not on what the screen shows of
+it, so the image does not brighten as it turns edge on.
 
 **The preview.**  While dragging, the grid is two times coarser and at most
 about 13 localizations per pixel are drawn, fewer if the last frames took

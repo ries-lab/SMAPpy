@@ -15,6 +15,7 @@ from typing import Optional, Tuple
 
 import numpy as np
 
+from . import lut as luts
 from .layer_state import LayerSnapshot, snapshot_layers
 from .locs import Localizations
 from .regions import Region
@@ -384,9 +385,10 @@ def projected_settings(locs: Localizations, settings: RenderSettings
       once they are mixed, so the two explicit widths are averaged into one.
     """
     if settings.mode in ("tracks", "voronoi"):
-        # tracks are lines on the 2D picture, and Voronoi cells are of its
-        # plane; turned in 3D their localizations are drawn as points, by
-        # their precision where the table has one
+        # Voronoi cells are of the 2D picture's plane; turned in 3D their
+        # localizations are drawn as points, by their precision where the
+        # table has one.  Tracks are lines in 3D (`render_tracks_3d`), and
+        # come here only on an engine that draws points (the GPU's)
         settings = replace(settings, mode="precision" if "xy_err_nm" in locs else "hist")
     if settings.mode == "dl":
         # a turned view was never seen by a camera: its pixels and its PSF
@@ -476,11 +478,19 @@ def selection_rows(locs: Localizations, select: np.ndarray, slab: Optional[Slab]
     return rows
 
 
+def draws_points(layer) -> bool:
+    """Whether a layer is drawn as localizations, by an engine: not an image,
+    which is a plane (`render_image_3d`), nor tracks, which are lines
+    (`render_tracks_3d`) -- both on the CPU whatever the engine."""
+    return (layer.visible and not layer.is_image and layer.settings is not None
+            and layer.settings.mode != "tracks")
+
+
 def slab_rows(layers, slab: Optional[Slab]) -> int:
-    """How many rows the visible localization layers draw from for ``slab``
+    """How many rows the visible point layers draw from for ``slab``
     (`selection_rows`, so memoised: the render asks the same question next)."""
     return sum(selection_rows(layer.locs, layer.mask, slab, layer.index).size
-               for layer in layers if layer.visible and not layer.is_image)
+               for layer in layers if draws_points(layer))
 
 
 def engine_for(projection: Projection, layers, slab: Optional[Slab]) -> str:
@@ -875,6 +885,188 @@ def render_layer_gpu(engine, locs: Localizations, select: np.ndarray, projection
     return display.apply(whole, white_background=False), whole
 
 
+# ---------------------------------------------------------------- tracks
+_segments_cache: dict = {}
+
+
+def _track_segments(locs: Localizations, select: np.ndarray, settings: RenderSettings):
+    """`render.track_segments` over the filter's rows, memoised on the filter.
+
+    Over the filter, not the slab: the slab only decides which segments are
+    shown, and a track that leaves it and comes back must not be joined
+    across the gap.  A rotation changes neither, so a drag sorts once."""
+    from .render import track_segments
+    key = _table_key(locs, id(select), settings.track_column)
+    hit = _segments_cache.get(key)
+    if hit is not None and hit[1] is select:
+        return hit[0]
+    found = track_segments(locs, settings, select)
+    if len(_segments_cache) > 4:
+        _segments_cache.clear()
+    _segments_cache[key] = (found, select)    # the mask kept so its id is not reused
+    return found
+
+
+def render_tracks_3d(locs: Localizations, select: np.ndarray, projection: Projection,
+                     slab: Optional[Slab], fov: FieldOfView, settings: RenderSettings,
+                     display: DisplaySettings, preview: bool = False,
+                     n_threads: int = 0, budget: Optional[int] = None
+                     ) -> Tuple[np.ndarray, RenderedImage]:
+    """A tracks layer turned in 3D: each track the line through its
+    localizations in time order, as the 2D view draws it, with both ends of
+    each segment projected.
+
+    A segment is shown when both its ends are in the slab, so a track is cut
+    where it leaves the box and resumes where it comes back.  Its weight and
+    colour are the mean of its ends', as in 2D; *colour by depth* colours it
+    by its depth and the attenuation dims it by it.  The width stays the
+    layer's, in pixels of the picture (on the coarser grid of a drag too).
+    The opacity's slices are not applied: a line hides nothing behind it.
+    """
+    from .render import render_segments
+    a, b = _track_segments(locs, select, settings)
+    x, y = settings.axes.coordinates(locs)
+    z = settings.axes.depth(locs)
+
+    def coords(rows):
+        return x[rows], y[rows], None if z is None else z[rows]
+
+    if slab is not None and a.size:
+        keep = slab.mask(*coords(a)) & slab.mask(*coords(b))
+        a, b = a[keep], b[keep]
+    if budget is not None and a.size > budget:
+        pick = thinned(np.arange(a.size), budget)
+        a, b = a[pick], b[pick]
+    xa, ya, da = projection.apply(*coords(a))
+    xb, yb, db = projection.apply(*coords(b))
+    depth = 0.5 * (np.asarray(da, np.float64) + np.asarray(db, np.float64))
+    front, drange = _depth_front_and_range(projection, slab, locs, settings.axes)
+    weights = None
+    if settings.weight_field is not None and settings.weight_field in locs:
+        w = np.asarray(locs[settings.weight_field], np.float64)
+        weights = 0.5 * (w[a] + w[b])
+    if projection.depth_lambda:
+        fade = np.exp(-(front - depth) / projection.depth_lambda)
+        weights = fade if weights is None else weights * fade
+    colors = None
+    if projection.color_by_depth:
+        lo, hi = settings.color_range or drange
+        colors = luts.colors(depth, display.lut, lo, hi, display.invert)
+    elif settings.color_field and settings.color_field in locs:
+        values = np.asarray(locs[settings.color_field], np.float64)
+        lo, hi = settings.color_range or column_range(locs, settings.color_field)
+        colors = luts.colors(0.5 * (values[a] + values[b]), display.lut, lo, hi,
+                             display.invert)
+    # the width is in pixels of the full picture: a drag's grid is coarser
+    width = settings.line_width * projection.zoom / fov.pixelsize
+    rendered = render_segments(xa, ya, xb, yb, fov, width, weights, colors, n_threads)
+    drawn = np.zeros(len(locs), bool)          # not union1d: 0.8 s at 1 M (NOTES.md)
+    drawn[a] = drawn[b] = True
+    rendered.n_locs = int(drawn.sum())
+    return display.apply(rendered, white_background=False), rendered
+
+
+# ----------------------------------------------------------------- images
+_imax_cache: dict = {}
+
+
+def _plane_imax(image, frame: int, display: DisplaySettings) -> Optional[float]:
+    """The brightness an image's plane is shown at, from the whole plane.
+
+    From the plane and not from what the screen shows of it, which changes
+    with every turn: seen at a slant the plane covers less of the picture,
+    and a contrast taken from the picture would brighten it as it turned
+    edge on."""
+    if display.imax is not None:
+        return display.imax
+    key = (id(image.data), int(frame), display.contrast)
+    hit = _imax_cache.get(key)
+    if hit is not None and hit[1] is image.data:
+        return hit[0]
+    _, imax = normalize(np.asarray(image.plane_at(frame), np.float32), None, display.contrast)
+    if len(_imax_cache) > 8:
+        _imax_cache.clear()
+    _imax_cache[key] = (imax, image.data)
+    return imax
+
+
+def image_plane_points(projection: Projection, fov: FieldOfView, z: float
+                       ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Where each pixel of ``fov`` looks at the plane ``z`` = const: the data
+    ``(x, y)`` it sees there, and whether it sees it at all.
+
+    A pixel at view ``(U, V)`` looks along the depth axis.  Orthographic,
+    its point is ``pivot + R^T (U, V, d)`` for the depth ``d`` that puts it
+    on the plane; in perspective the view coordinates are ``(U, V) t`` with
+    ``t = 1 - d / f`` (`Projection.apply`), and the plane fixes ``t``.  A
+    plane seen edge on, or one behind the eye, is seen by no pixel.
+    """
+    R = projection.matrix
+    U = (fov.x0 + (np.arange(fov.nx) + 0.5) * fov.pixelsize)[None, :]
+    V = (fov.y0 + (np.arange(fov.ny) + 0.5) * fov.pixelsize)[:, None]
+    k = float(z) - float(projection.pivot[2])
+    a = R[0, 2] * U + R[1, 2] * V            # data z of view (U, V, 0), from the pivot
+    c = R[2, 2]
+    shape = (fov.ny, fov.nx)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        if projection.focal:
+            f = float(projection.focal)
+            # (a t + c d = k with d = f (1 - t)):  t (a - c f) = k - c f
+            t = np.broadcast_to((k - c * f) / (a - c * f), shape)
+            ok = np.isfinite(t) & (t > 0.05)
+            d = f * (1.0 - t)
+            xv, yv = U * t, V * t
+        else:
+            if abs(c) < 1e-9:
+                return np.zeros(shape), np.zeros(shape), np.zeros(shape, bool)
+            d = (k - a) / c
+            ok = np.ones(shape, bool)
+            xv, yv = np.broadcast_to(U, shape), np.broadcast_to(V, shape)
+    x = projection.pivot[0] + R[0, 0] * xv + R[1, 0] * yv + R[2, 0] * d
+    y = projection.pivot[1] + R[0, 1] * xv + R[1, 1] * yv + R[2, 1] * d
+    return np.where(ok, x, 0.0), np.where(ok, y, 0.0), ok
+
+
+def render_image_3d(image, frame: int, display: DisplaySettings, projection: Projection,
+                    slab: Optional[Slab], fov: FieldOfView
+                    ) -> Tuple[np.ndarray, RenderedImage]:
+    """An image layer in the 3D view: its plane laid flat at the height of the
+    centre of rotation (the pivot, which the view turns about and zooms to),
+    and seen through the projection like the localizations around it.
+
+    The layer's own plane is shown -- a stack's z is not known, so which
+    plane is at which height is not either -- and only where it is inside the
+    slab, which hides it once the pivot leaves the slab's z range.  It is
+    added to the sum like any other layer.
+    """
+    x, y, ok = image_plane_points(projection, fov, float(projection.pivot[2]))
+    if slab is not None:
+        ok &= slab.mask(x, y, np.full(x.shape, float(projection.pivot[2])))
+    weight = np.zeros((fov.ny, fov.nx), np.float32)
+    if ok.any():
+        weight[ok] = image.values_at(x[ok], y[ok], frame=frame)
+    rendered = RenderedImage(fov, weight, None, n_locs=0)
+    shown = replace(display, imax=_plane_imax(image, frame, display))
+    return shown.apply(rendered, white_background=False), rendered
+
+
+def render_any_3d(layer: LayerSnapshot, projection: Projection, slab: Optional[Slab],
+                  fov: FieldOfView, preview: bool = False, index=None,
+                  budget: Optional[int] = None) -> Tuple[np.ndarray, RenderedImage]:
+    """One layer on the CPU, whatever it is: an image as a plane, tracks as
+    lines, localizations by engine A.  The export draws every layer this way."""
+    if layer.is_image:
+        return render_image_3d(layer.image_data, layer.frame, layer.display, projection,
+                               slab, fov)
+    if layer.settings.mode == "tracks":
+        return render_tracks_3d(layer.locs, layer.mask, projection, slab, fov,
+                                layer.settings, layer.display, preview,
+                                n_threads=layer.n_threads, budget=budget)
+    return render_layer_3d(layer.locs, layer.mask, projection, slab, fov, layer.settings,
+                           layer.display, preview, n_threads=layer.n_threads,
+                           index=index, budget=budget)
+
+
 def snapshot_3d(layers) -> Tuple[LayerSnapshot, ...]:
     """Session layers as `render_3d` takes them, frozen on the calling thread.
 
@@ -883,14 +1075,16 @@ def snapshot_3d(layers) -> Tuple[LayerSnapshot, ...]:
     """
     for layer in layers:
         if layer.visible and not layer.is_image:
-            table_token(layer.state.locs)
+            table_token(layer.state.locs)       # tracks' segments are cached on it too
     return snapshot_layers(layers)
 
 
 def render_3d(layers, projection: Projection, slab: Optional[Slab], fov: FieldOfView,
               preview: bool = False, engine=None,
               budget: Optional[PreviewBudget] = None) -> np.ndarray:
-    """Every visible localization layer, added up: RGB in [0, 1].
+    """Every visible layer, added up: RGB in [0, 1].  Localizations go through
+    the engine; tracks (`render_tracks_3d`) and image layers
+    (`render_image_3d`) are drawn on the CPU whatever it is.
 
     ``layers`` are `LayerSnapshot`s (`snapshot_3d`), which is what a render
     thread is handed; session layers are snapshotted here first, for a
@@ -905,7 +1099,9 @@ def render_3d(layers, projection: Projection, slab: Optional[Slab], fov: FieldOf
     """
     if not all(isinstance(layer, LayerSnapshot) for layer in layers):
         layers = snapshot_3d(layers)
-    shown = [layer for layer in layers if layer.visible and not layer.is_image]
+    shown = [layer for layer in layers if draws_points(layer)]
+    others = [layer for layer in layers if layer.visible and not draws_points(layer)
+              and (layer.is_image or layer.settings is not None)]
     if engine is not None and projection.engine == "auto":
         projection = replace(projection, engine=engine_for(projection, shown, slab))
     rgb = np.zeros((fov.ny, fov.nx, 3), np.float32)
@@ -942,8 +1138,14 @@ def render_3d(layers, projection: Projection, slab: Optional[Slab], fov: FieldOf
                                        layer.settings, layer.display, preview,
                                        n_threads=layer.n_threads, index=index, budget=limit)
         rgb += image
+    for layer in others:
+        if not layer.is_image:
+            drawn += min(_track_segments(layer.locs, layer.mask, layer.settings)[0].size,
+                         limit if limit is not None else np.iinfo(np.int64).max)
+        image, _ = render_any_3d(layer, projection, slab, fov, preview, budget=limit)
+        rgb += image
     rgb = np.clip(rgb, 0, 1)
-    if any(layer.display.white_background for layer in shown):
+    if any(layer.display.white_background for layer in shown + others):
         from .lut import on_white       # once, to the sum, as the 2D view does
         rgb = on_white(rgb)
     if budget is not None:
