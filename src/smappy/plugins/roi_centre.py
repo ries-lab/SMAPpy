@@ -61,6 +61,11 @@ class CentreROIs(Plugin):
         used = [i for i in project.ordered_ids() if project.rois[i].use]
         if not used:
             raise ValueError("no ROI is used: tick use for the ROIs to centre")
+        # an ROI of an id alone (a track) has no shape to move
+        shapeless = sum(not project.rois[i].spatial for i in used)
+        used = [i for i in used if project.rois[i].spatial]
+        if not used:
+            raise ValueError("the used ROIs are all of an id, with no shape to centre")
         how = "circle fit" if settings.centre == "circle" else "median"
         moved, kept, shifts = 0, 0, []
         with project.edit(f"{self.name}: {how}"):
@@ -83,6 +88,8 @@ class CentreROIs(Plugin):
             text += f", by {np.median(shifts):.1f} nm (median), {max(shifts):.1f} nm at most"
         if kept:
             text += f"; {kept} left: too few localizations, or the centre outside the ROI"
+        if shapeless:
+            text += f"; {shapeless} of an id alone, with no shape, not moved"
         return Result(text=text, settings=settings, rois=[],
                       values={"moved": moved, "median_shift_nm":
                               float(np.median(shifts)) if shifts else 0.0})

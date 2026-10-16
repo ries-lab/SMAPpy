@@ -149,6 +149,23 @@ class ROI:
     # `ROIProject.annotation_lists`; replaced, never edited in place (see
     # `copy_rois`), and no part of what is measured, so not of a signature
     annotations: dict = field(default_factory=dict)
+    # Membership besides the shape (`docs/regions.md`).  ``ids``,
+    # ``{column: id}``, keeps only the rows with that id -- a track, a
+    # cluster; with ``spatial`` off the shape takes no part and the id alone
+    # decides, since a shape drawn round one track also takes in every track
+    # that crosses it.  ``frames`` and ``z`` are ``[low, high]``, inclusive,
+    # either end None for open, the whole None for all: a frame range and a
+    # z range kept with the ROI, so what is measured in it is that part.
+    ids: dict = field(default_factory=dict)
+    spatial: bool = True
+    frames: Optional[list] = None
+    z: Optional[list] = None
+
+    @property
+    def narrowed(self) -> bool:
+        """Is anything but the shape part of its membership?"""
+        return bool(self.ids) or not self.spatial or self.frames is not None \
+            or self.z is not None
 
     def region(self, shape: str, size_nm: float) -> Region:
         """This ROI's shape: its own polygon, or the project's ``shape`` of
@@ -173,7 +190,88 @@ class ROI:
         if saved.get("direction") is not None and DIRECTION not in lines:
             lines[DIRECTION] = line_points(saved["direction"])
         roi.lines = lines
+        roi.ids = id_values(roi.ids)
+        roi.frames = value_range(roi.frames, "frame range")
+        roi.z = value_range(roi.z, "z range")
+        if not roi.spatial and not roi.ids:
+            raise ValueError("an ROI that is not a shape needs an id")
         return roi
+
+
+def id_values(ids) -> dict:
+    """``{column: id}`` with whole-number ids, or a ValueError."""
+    out = {}
+    for column, value in (ids or {}).items():
+        v = float(value)
+        if not np.isfinite(v) or v != int(v):
+            raise ValueError(f"an id is a whole number: {column} = {value!r}")
+        out[str(column)] = int(v)
+    return out
+
+
+def value_range(bounds, name: str = "range") -> Optional[list]:
+    """``[low, high]`` as floats, either None for an open end; None when
+    both are open (all of it), or a ValueError."""
+    if bounds is None:
+        return None
+    if len(bounds) != 2:
+        raise ValueError(f"a {name} is two values, low and high: {bounds!r}")
+    out = [None if b is None else float(b) for b in bounds]
+    if any(b is not None and not np.isfinite(b) for b in out):
+        raise ValueError(f"a {name}'s ends are finite numbers or open: {bounds!r}")
+    if out[0] is not None and out[1] is not None and out[0] > out[1]:
+        raise ValueError(f"a {name} runs from low to high: {bounds!r}")
+    return None if out == [None, None] else out
+
+
+def narrow(roi: "ROI", locs, rows: np.ndarray) -> np.ndarray:
+    """The rows among ``rows`` of ``locs`` that the ROI's ids, frame range
+    and z range keep.  A table without the id column has none of the ROI's
+    rows; one without ``frame`` or ``z_nm`` has nothing to cut, so the range
+    is not applied (a z range on 2D data)."""
+    rows = np.asarray(rows, dtype=np.int64)
+    if not len(rows) or not roi.narrowed:
+        return rows
+    keep = np.ones(len(rows), dtype=bool)
+    for column, value in roi.ids.items():
+        if column not in locs:
+            return rows[:0]
+        keep &= np.asarray(locs[column])[rows] == value
+    for column, bounds in (("frame", roi.frames), ("z_nm", roi.z)):
+        if bounds is None or column not in locs:
+            continue
+        v = np.asarray(locs[column])[rows]
+        if bounds[0] is not None:
+            keep &= v >= bounds[0]
+        if bounds[1] is not None:
+            keep &= v <= bounds[1]
+    return rows[keep]
+
+
+class IdLookup:
+    """The rows of each value of an id column, by one sort kept while the
+    column is the same array: an ROI of a track finds its rows without a
+    pass over the table, which over 10^4 track ROIs is the difference
+    between a list that scrolls and one that does not."""
+
+    def __init__(self, values):
+        self.values = values          # held, so the identity it is keyed on stays
+        v = np.asarray(values)
+        self.order = np.argsort(v, kind="stable")
+        self.sorted = v[self.order]
+
+    def rows(self, wanted) -> np.ndarray:
+        """The rows holding any of ``wanted``, sorted."""
+        wanted = np.atleast_1d(np.asarray(wanted))
+        lo = np.searchsorted(self.sorted, wanted, side="left")
+        hi = np.searchsorted(self.sorted, wanted, side="right")
+        n = hi - lo
+        total = int(n.sum())
+        if not total:
+            return np.zeros(0, dtype=np.int64)
+        # every [lo, hi) run end to end, without a loop over the runs
+        starts = np.repeat(lo - np.concatenate(([0], np.cumsum(n)[:-1])), n)
+        return np.sort(self.order[starts + np.arange(total)])
 
 
 # Past this nobody is walking back through a list of edits.
@@ -189,6 +287,12 @@ class ROIStep:
 
 # The line a new project offers, and the name an old file's one line had.
 DIRECTION = "direction"
+
+
+def range_text(bounds, unit: str = "") -> str:
+    """``[low, high]`` as ``low-high``, an open end left blank."""
+    lo, hi = (("" if b is None else f"{b:g}") for b in bounds)
+    return f"{lo}\u2013{hi}{unit}"
 
 
 def line_points(line) -> list:
@@ -349,7 +453,7 @@ class ROIHistory:
         self._redo.clear()
 
 
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
 
 # Columns the session writes onto the table itself, rather than the data
 # bringing them: `Session.load` adds `filenumber`, and grouping adds the group
@@ -393,6 +497,8 @@ class ROIProject:
         # (id and length of a table, file number) -> that file's rows of it:
         # computed once, not once per ROI measured
         self._file_masks: Dict[tuple, np.ndarray] = {}
+        # (id of a column array, column) -> its `IdLookup`, for ROIs of an id
+        self._lookups: Dict[tuple, IdLookup] = {}
         self.sources: Dict[str, Source] = {}
         self.rois: Dict[str, ROI] = {}
         self.size_nm = 300.0  # circle diameter or square side length
@@ -532,6 +638,28 @@ class ROIProject:
         a keyword whose list went."""
         self.line_names = parse_line_names(",".join(str(n) for n in names))
 
+    def set_ranges(self, roi_ids, frames=..., z=...) -> None:
+        """Set the frame range and/or the z range of these ROIs, in one undo
+        step; ``...`` leaves one as it is, None clears it (all frames, all
+        z).  What is measured in an ROI is that part of it, so its results
+        go out of date."""
+        frames = frames if frames is ... else value_range(frames, "frame range")
+        z = z if z is ... else value_range(z, "z range")
+        roi_ids = [i for i in roi_ids if i in self.rois]
+        what = " and ".join(n for n, v in (("frames", frames), ("z range", z))
+                            if v is not ...)
+        if not roi_ids or not what:
+            return
+        label = (f"Set {what} of ROI {self.rois[roi_ids[0]].number}" if len(roi_ids) == 1
+                 else f"Set {what} of {len(roi_ids)} ROIs")
+        with self.edit(label):
+            for roi_id in roi_ids:
+                roi = self.rois[roi_id]
+                if frames is not ...:
+                    roi.frames = frames
+                if z is not ...:
+                    roi.z = z
+
     def set_line(self, roi_id, name: str, line) -> None:
         """Draw the line ``name`` of an ROI; None removes it.  Undoable."""
         roi = self.rois[roi_id]
@@ -556,11 +684,18 @@ class ROIProject:
             roi.lines = {**roi.lines, name: [line[1], line[0]]}
         return True
 
-    def add_roi(self, file_id, center, polygon=None, origin=None):
+    def add_roi(self, file_id, center, polygon=None, origin=None, ids=None,
+                spatial=True, frames=None, z=None):
+        """A new ROI, numbered.  ``ids``, ``spatial``, ``frames`` and ``z``
+        narrow what it holds beyond its shape (`ROI.ids`)."""
         if file_id not in self.sources:
             raise KeyError(file_id)
         roi = ROI(file_id, point(center), polygon=(None if polygon is None else
-                  polygon_vertices(polygon)))
+                  polygon_vertices(polygon)), ids=id_values(ids),
+                  spatial=bool(spatial), frames=value_range(frames, "frame range"),
+                  z=value_range(z, "z range"))
+        if not roi.spatial and not roi.ids:
+            raise ValueError("an ROI that is not a shape needs an id")
         if origin is not None:
             roi.origin = json.loads(json_text(origin))
         roi.number = self.next_number
@@ -595,8 +730,13 @@ class ROIProject:
         self.next_number = start
 
     def move_roi(self, roi_id, center):
-        """Translate the entire ROI, including its polygon and lines."""
+        """Translate the entire ROI, including its polygon and lines.  An ROI
+        of an id alone (``spatial`` off) has no place to move: its rows are
+        its id's wherever they are."""
         roi = self.rois[roi_id]
+        if not roi.spatial:
+            raise ValueError(f"ROI {roi.number} is {self.describe(roi)}, not a shape: "
+                             "it cannot be moved")
         center = point(center)
         delta = np.asarray(center) - roi.center
         if roi.polygon is not None:
@@ -610,7 +750,9 @@ class ROIProject:
         them.  The line called ``direction`` keeps the key the one direction
         had, and the others go under ``lines`` only when there are any, so
         the signatures saved before named lines still match."""
-        if roi.polygon is not None:
+        if not roi.spatial:
+            out = {"spatial": False}
+        elif roi.polygon is not None:
             out = {"center": roi.center, "polygon": roi.polygon}
         else:
             out = {"center": roi.center, "shape": self.shape, "size_nm": self.size_nm}
@@ -618,16 +760,62 @@ class ROIProject:
         others = {k: v for k, v in roi.lines.items() if k != DIRECTION}
         if others:
             out["lines"] = others
+        # only when set, so an ROI of a shape alone keeps the signature it
+        # had before an ROI could be anything else
+        for name in ("ids", "frames", "z"):
+            if getattr(roi, name):
+                out[name] = getattr(roi, name)
         return out
 
-    def region(self, roi) -> Region:
-        """The ROI's shape, with this project's shared shape and size."""
+    def region(self, roi) -> Optional[Region]:
+        """The ROI's shape, with this project's shared shape and size; None
+        for an ROI of an id alone, which has none (as a region of an id
+        column has none)."""
+        if not roi.spatial:
+            return None
         return roi.region(self.shape, self.size_nm)
+
+    def describe(self, roi) -> str:
+        """What the ROI is, in a few words: its shape, or its id."""
+        parts = [str(self.region(roi))] if roi.spatial else []
+        parts += [f"{column} {value}" for column, value in roi.ids.items()]
+        if roi.frames is not None:
+            parts.append("frames " + range_text(roi.frames))
+        if roi.z is not None:
+            parts.append("z " + range_text(roi.z, " nm"))
+        return ", ".join(parts)
+
+    def members(self, roi, locs, index=None, keep=None) -> np.ndarray:
+        """The rows of ``locs`` (a table of the ROI's file, ``index`` its
+        spatial index) the ROI holds, sorted: inside its shape -- or with its
+        id, for an ROI of an id alone -- and kept by its ids and ranges
+        (`narrow`).  ``keep``, over the whole table, narrows them first."""
+        if roi.spatial:
+            rows = rows_in(locs, index, self.region(roi), keep)
+        else:
+            column = next(iter(roi.ids))
+            if column not in locs:
+                return np.zeros(0, dtype=np.int64)
+            rows = self.lookup(locs, column).rows(roi.ids[column])
+            if keep is not None:
+                rows = rows[np.asarray(keep)[rows]]
+        return narrow(roi, locs, rows)
+
+    def lookup(self, locs, column: str) -> IdLookup:
+        """The `IdLookup` of ``locs[column]``, made once per column array."""
+        values = locs[column]
+        key = (id(values), column)
+        found = self._lookups.get(key)
+        if found is None or found.values is not values:
+            if len(self._lookups) > 16:
+                self._lookups.clear()
+            found = self._lookups[key] = IdLookup(values)
+        return found
 
     def indices(self, roi):
         state = self.state(roi.file_id)
-        return rows_in(state.locs, state.index, self.region(roi),
-                       keep=np.asarray(state.filter.mask))
+        return self.members(roi, state.locs, state.index,
+                            keep=np.asarray(state.filter.mask))
 
     def extract(self, roi):
         """What the ROI shows: the shown table's filtered rows inside it."""
@@ -911,7 +1099,7 @@ class ROIProject:
             roi = self.rois[roi_id]
             source = self.sources[roi.file_id]
             ungrouped = self.state(roi.file_id).tables.ungrouped
-            found = rows_in(ungrouped.locs, ungrouped.index, self.region(roi))
+            found = self.members(roi, ungrouped.locs, ungrouped.index)
             in_file = self._file_mask(locs, source.number)
             inside[found if in_file is None else np.flatnonzero(in_file)[found]] = True
         return inside
@@ -1472,7 +1660,7 @@ class ROIProject:
         session = self.session
         source = self.sources[roi.file_id]
         ungrouped = self.state(roi.file_id).tables.ungrouped
-        found = rows_in(ungrouped.locs, ungrouped.index, region)
+        found = self.members(roi, ungrouped.locs, ungrouped.index)
         in_file = self._file_mask(session.locs, source.number)
         rows = found if in_file is None else np.flatnonzero(in_file)[found]
         # linked here if a layer shows blinks and nothing defers it;
@@ -1485,29 +1673,50 @@ class ROIProject:
                    for i, lay in enumerate(session.layers) if not lay.is_image}
         locs = session.locs[rows]
         tables = {}
+        where = self.describe(roi)
         for i, lay in enumerate(session.layers):
             if lay.is_image:
                 continue
             mask = np.asarray(lay.selection(i).mask, dtype=bool)
             entry = {"ungrouped": (locs, Selection(mask[rows], layer=i, roi=region,
-                                                   name=f"{lay.name}, {region}"))}
+                                                   name=f"{lay.name}, {where}"))}
             locset = locsets[i]
             if locset is not None:
                 keep = self._file_mask(locset.locs, source.number)
-                g = rows_in(locset.locs, locset.index, region, keep)
+                g = self._blinks(roi, region, locset, keep, rows)
                 entry["grouped"] = (locset.locs[g], Selection(
                     np.asarray(lay.state.filter_for(locset).mask, dtype=bool)[g],
-                    layer=i, roi=region, name=f"{lay.name}, blinks merged, {region}"))
+                    layer=i, roi=region, name=f"{lay.name}, blinks merged, {where}"))
             tables[i] = entry
         layer = min(self.layer, len(session.layers) - 1)
         if session.layers[layer].is_image:
             layer = session.first_locs_layer()
         return tables, rows, layer, session
 
+    def _blinks(self, roi, region, locset, keep, rows) -> np.ndarray:
+        """The grouped table's rows of an ROI.  Of a shape alone, the blinks
+        inside it, as before; of an id or a range, the blinks its
+        localizations (``rows`` of the session's table) belong to, through
+        ``group_id`` -- a blink's merged values (a mean of the ids, its first
+        frame) would decide membership otherwise -- so a blink half in the
+        frame range is in it, as a blink across two regions is in both."""
+        if not roi.narrowed:
+            return rows_in(locset.locs, locset.index, region, keep)
+        locs = self.session.locs
+        if "group_id" not in locs or "group_id" not in locset.locs:
+            return self.members(roi, locset.locs, locset.index, keep)
+        wanted = np.unique(np.asarray(locs["group_id"])[rows])
+        g = self.lookup(locset.locs, "group_id").rows(wanted)
+        return g if keep is None else g[np.asarray(keep)[g]]
+
     # --------------------------------------------------------- persistence
     def to_dict(self) -> dict:
         """The project as JSON-compatible data, for the localization file."""
-        return {"format_version": FORMAT_VERSION,
+        # an ROI of an id or a range is written as format 2, which a smappy
+        # from before refuses rather than reading it as the circle round its
+        # centre; a project of shapes alone stays 1, readable by either
+        narrowed = any(r.narrowed for r in self.rois.values())
+        return {"format_version": FORMAT_VERSION if narrowed else 1,
                 "size_nm": self.size_nm, "shape": self.shape,
                 "preview_nm": self.preview_nm, "tile_nm": self.tile_nm,
                 "navigation": self.navigation,
