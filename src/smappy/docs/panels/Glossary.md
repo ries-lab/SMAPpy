@@ -95,6 +95,10 @@ papers and in other software.
 * **LUT** (lookup table, also called a colour map): the colours that pixel
   values are drawn in, from low to high.
 * **slab**: a slice of the sample of fixed thickness in z, in the 3D view.
+* **z-stack** (also called a focus series or a volume): camera images of
+  the same field taken with the focus stepped in z, one plane per step.
+* **MIP** (maximum-intensity projection): a stack seen as one picture, each
+  pixel the brightest value along its line of sight through the planes.
 
 ## Drift
 

@@ -1511,9 +1511,8 @@ between its localizations in time order, `line_width` pixels wide
   slab.  Always on the CPU, whichever engine draws the points -- the GPU
   engines have no lines, and a tracks table is small.  Image layers are a
   plane at the pivot's z (`render_image_3d`), each screen pixel's ray
-  intersected with it; a volume render of a stack would need the planes'
-  z, which `ImageData` does not carry yet.  The movie export's *tail* is
-  wave 5's.
+  intersected with it; a z-stack is drawn as a volume (see "Image
+  stacks").  The movie export's *tail* is wave 5's.
 
 ### Which column names the tracks
 
@@ -1534,6 +1533,43 @@ id and the tracks mode drew a line across the field to it.  The truth's
 ids now merge by `min` and stay integers (`group.COMBINE_MODES`,
 `INTEGER_COLUMNS`), as `tid` did; `track_id` was already a recipe with
 `max`.
+
+## Image stacks
+
+2026-10.  A multi-page image is a stack of planes, and what the planes are
+is kept in `ImageData.metadata` -- `axis` "z" (with `z0_nm`, the first
+plane's centre, and `z_step_nm`), "t" (`frame_time_s`) or "" -- so that it
+is saved with the image (`io/hdf5.save_images` writes the metadata) and
+seen by every shallow copy a render thread is handed, with no new field
+for the reader, the saver or the snapshot to carry.
+
+* **Channels are split when a file is opened, never an axis.**  A layer
+  has one LUT, and localization channels are layers already; a channel
+  axis inside an image would have needed a channel chooser on every image
+  layer and in every plugin that reads one.  `images.load_images` returns
+  an image per channel (and per time point of a stack in both z and t),
+  and `Session.open_images` a layer each, coloured `CHANNEL_LUTS`.
+* **A file that does not say is asked about** (`gui/dialogs.StackAxesDialog`
+  on `axes_unknown`), not guessed: two interleaved channels taken for a
+  z-stack still make a picture, wrong every other plane, and nothing would
+  say so.  The axis and the step can be corrected in the Render tab; the
+  channels only by opening the file again.  Read from the file: ImageJ
+  hyperstacks (slices, frames, channels, *spacing*, *finterval*), OME
+  (dimension order, PhysicalSizeZ), Micro-Manager's z step, `.msr` stacks.
+* **2D**: a slice, or a max / mean / sum over a range of planes, cached on
+  the image per range (`ImageData.projection`); *follow z filter* resolves
+  the plane in `snapshot_layers` from the first localization layer's z
+  bounds (`layer_state.focus_z`), so the render threads see a plain plane.
+* **3D**: *plane* (the plane at the pivot's z), *max* or *volume*
+  (`view3d.render_volume_3d`): rays marched in numpy with
+  `map_coordinates`, linear, about two samples per voxel up to 30 M
+  samples a frame (3 M dragging) -- 1.3 s for 700 x 530 and 0.1 s
+  dragging, bead stack 81 x 96 x 96.  *volume* subtracts the stack's
+  median first: a bead stack's camera background, summed along the rays,
+  was a fog brighter at the box's edges than the beads.  A GPU ray-marcher
+  (wgpu, a 3D texture) is the next step; the CPU one is its reference.
+  Plugins that read an image layer (Process image, Register layers) still
+  read its plane `frame`, not its projection.
 
 ## Open questions
 

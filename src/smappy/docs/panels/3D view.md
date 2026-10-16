@@ -2,7 +2,7 @@
 title: 3D view
 summary: A box of the data, the slab, shown from any angle, with the Render tab's layers, filters and colours.
 widget: smappy.gui.view3d.View3DWindow
-covers: [smappy.view3d.Slab.from_region, smappy.view3d.Slab.mask, smappy.view3d.Projection.apply, smappy.view3d.Projection.preset, smappy.view3d.Projection.fit, smappy.view3d.render_layer_3d, smappy.view3d.render_tracks_3d, smappy.view3d.render_image_3d, smappy.view3d.image_plane_points, smappy.view3d.composite_depth, smappy.view3d.render_3d, smappy.view3d.engine_for, smappy.session.Session.slab_from_roi, smappy.session.Session.selects_slab]
+covers: [smappy.view3d.Slab.from_region, smappy.view3d.Slab.mask, smappy.view3d.Projection.apply, smappy.view3d.Projection.preset, smappy.view3d.Projection.fit, smappy.view3d.render_layer_3d, smappy.view3d.render_tracks_3d, smappy.view3d.render_image_3d, smappy.view3d.image_plane_points, smappy.view3d.render_volume_3d, smappy.view3d.composite_depth, smappy.view3d.render_3d, smappy.view3d.engine_for, smappy.session.Session.slab_from_roi, smappy.session.Session.selects_slab]
 ---
 
 ## What it does
@@ -134,6 +134,7 @@ about, and turns with the localizations around it.  Moving the centre of
 rotation along the line of sight (alt-wheel) carries the image up or down
 through the data; it is shown only where it is inside the slab.
 
+
 ```figure Simulated 3D tracks (Brownian particles diffusing at 0.5 µm²/s) over an image layer, from the top and tilted by 70°.  From the top the image lies under the tracks as in the 2D view; tilted, it is a plane through the middle of the volume and the tracks wander above and below it.
 from smappy.simulate import simulate_tracks
 from smappy.images import ImageData
@@ -156,13 +157,48 @@ for ax, elevation, title in zip(fig.subplots(1, 2), (0.0, 70.0), ("top", "tilted
     ax.set_xticks([]); ax.set_yticks([]); ax.set_title(title, fontsize=9)
 ```
 
-**5. While the mouse moves.**  A drag draws a quick preview: at half the
+**5. Z-stacks.**  An image layer that is a
+[z-stack](plugin:Panels/Glossary) -- camera images of the same field with
+the focus stepped in z, its planes a known step apart (the Render tab's
+*planes are*) -- has a height for every plane, and the Render tab's *in 3D*
+says how it is drawn.  As a *plane* it is the plane at the height of the
+centre of rotation, so moving that along the line of sight steps through
+the stack.  As *max (MIP)* each pixel of the picture shows the brightest
+value on its line of sight through the stack: the stack's
+[MIP](plugin:Panels/Glossary), seen from any angle.  As a *volume* the
+values along the line of sight are added up, after the stack's background
+is taken off, and the *opacity* lets what is near hide what is behind it.
+Either way only what is inside the slab is drawn, and the localizations sit
+in the same box: a bead and the localizations fitted from it should be in
+the same place.
+
+```figure A simulated z-stack of astigmatic beads (each spot stretched one way below focus and the other way above it), from the top and tilted, as *max (MIP)* and as *volume*.  From the top the MIP is the beads' flat picture; tilted, each bead is a column through the stack, its two stretched ends at the two sides of focus.
+from smappy.simulate.camera import bead_stacks
+from smappy.images import ImageData
+from smappy.view3d import render_volume_3d
+stacks, zs = bead_stacks(1, z_range_nm=(-600.0, 600.0), dz_nm=40.0, size_px=64)
+beads = ImageData(stacks[0].astype(np.float32), 100.0)
+beads.axis, beads.z0_nm, beads.z_step_nm = "z", float(zs[0]), 40.0
+box = Slab.from_bounds(0, 6400, 0, 6400, -620, 620)
+fig.set_size_inches(7.0, 2.4)
+views = (("top, max", 0.0, 0.0, "max"), ("tilted, max", 25.0, 65.0, "max"),
+         ("tilted, volume", 25.0, 65.0, "volume"))
+for ax, (title, az, el, mode) in zip(fig.subplots(1, 3), views):
+    p = Projection(azimuth=az, elevation=el, opacity=0.3)
+    p.fit(box, 240, 200)
+    fov = p.fov(240, 200)
+    rgb, _ = render_volume_3d(beads, DisplaySettings(lut="gray"), p, box, fov, mode)
+    ax.imshow(rgb, extent=(fov.x0, fov.x1, fov.y1, fov.y0))
+    ax.set_xticks([]); ax.set_yticks([]); ax.set_title(title, fontsize=9)
+```
+
+**6. While the mouse moves.**  A drag draws a quick preview: at half the
 resolution, and from a sample of the localizations sized so that the picture
 keeps up with the mouse on the machine it runs on.  When the mouse stops,
 the full image is drawn from every localization in the slab.  An image that
 is saved is always the full one.
 
-**6. The slab as the selection.**  With *plugins use the slab* ticked, every plugin's selection is cut to the slab, on top of the layer's
+**7. The slab as the selection.**  With *plugins use the slab* ticked, every plugin's selection is cut to the slab, on top of the layer's
 filter and the 2D ROI.  This holds only while the 3D window is open, so that
 nobody measures a box they can no longer see.
 
@@ -244,9 +280,32 @@ $$t = \frac{R_{22} f}{R_{22} f - (R_{02} U + R_{12} V)} .$$
 The data point $\mathbf{q} + R^{T} \mathbf{v}$ is then looked up in the
 image, nearest pixel, through the image's own placement.  A plane seen edge
 on ($R_{22} = 0$), or behind the eye ($t \leq 0.05$), is not drawn.  A
-stack shows the plane the layer has chosen: its planes carry no z.  The
-brightness is scaled on the whole plane, not on what the screen shows of
-it, so the image does not brighten as it turns edge on.
+z-stack shows its plane nearest $q_z$, and nothing when $q_z$ is more than
+half a step beyond its first or last plane; any other image shows what the
+layer shows in 2D (its plane, or its projection).  The brightness is scaled
+on the whole plane -- for a z-stack on its MIP, so every plane is on one
+scale -- not on what the screen shows of it, so the image does not brighten
+as it turns edge on.
+
+**A z-stack as a volume.**  Each screen pixel's line of sight,
+$\mathbf{q} + R^{T} \left( U t, V t, d \right)$, is sampled at evenly
+spaced depths $d$ between where it meets the stack's box and the slab, about
+two samples per voxel -- the smaller of the pixel size and the z step --
+and at most 30 million samples for the frame (3 million while dragging).
+The stack is interpolated linearly between voxel centres, and is zero
+outside.  *max (MIP)* keeps the largest sample.  *volume* goes from the
+back to the front over the samples $v_k$ above the stack's median $b$ (its
+background, from up to a million voxels), each a fraction $s$ of a voxel
+long:
+
+$$I \leftarrow I \left( 1 - c_k \right) + s \left( v_k - b \right), \qquad c_k = 1 - \left( 1 - o \cdot \mathrm{min}\left( \frac{v_k - b}{I_{\max}}, 1 \right) \right)^{s} ,$$
+
+with $o$ the *opacity* and $I_{\max}$ the brightness the MIP is shown at.
+At $o = 0$ it is the sum along the line of sight in voxels.  The exponent
+$s$ makes the hiding the same per length of the sample however finely it is
+sampled.  A volume is drawn on the processor, about 1.3 s for a frame of
+700 x 530 pixels and 0.1 s while dragging, whichever engine draws the
+localizations.
 
 **The preview.**  While dragging, the grid is two times coarser and at most
 about 13 localizations per pixel are drawn, fewer if the last frames took
@@ -329,7 +388,7 @@ thickness along the line of sight makes the front stand out without losing
 the back.  For *sum* and *spheres*.
 
 ### opacity
-For *sum*.  0 is a plain sum and fastest.  Values of 0.3 to 0.7 give a sense
+For *sum*, and for a z-stack drawn as a *volume*.  0 is a plain sum and fastest.  Values of 0.3 to 0.7 give a sense
 of what is in front; 1 hides everything behind a bright slice.
 
 ### size

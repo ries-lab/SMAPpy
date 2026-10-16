@@ -18,7 +18,7 @@ from .. import plugins, workspace as workspace_module
 from ..io.formats import (csv_columns, guess_csv_mapping, load as load_any,
                           name_filter, reader_for)
 from . import drops, folders
-from .dialogs import CsvMappingDialog, PixelSizeDialog
+from .dialogs import CsvMappingDialog
 from ..session import Session, read_localizations
 from ..workspace import Workspace
 from .plugin_tab import PluginTab
@@ -1418,20 +1418,17 @@ class ControlWindow(QMainWindow):
             self.open_image_path(path)
 
     def open_image_path(self, path) -> None:
-        """An image as a layer of its own, asking its pixel size if the file
-        does not say it.  An image already read -- an `.msr`'s -- is kept
+        """An image as a layer of its own -- a layer per channel -- asking its
+        pixel size and what its planes are if the file does not say.  An image already read -- an `.msr`'s -- is kept
         as a source, for an image layer to choose, without a layer."""
         from ..images import ImageData
         if isinstance(path, ImageData):
             self.session.add_source(path)
             return
-        try:
-            self.session.open_image(str(path))
-        except ValueError:                                  # no pixel size in the file
-            dialog = PixelSizeDialog(Path(path).name, parent=self)
-            if dialog.exec() == QDialog.Accepted:
-                px, x0, y0 = dialog.values()
-                self.session.open_image(str(path), px, x0, y0)
+        from .dialogs import read_image_file
+        images = read_image_file(str(path), parent=self)
+        if images:
+            self.session.open_images(images)
 
     def save(self) -> None:
         from ..io.formats import writer_for

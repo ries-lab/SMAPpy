@@ -309,7 +309,8 @@ def test_an_image_is_placed_in_nm_with_its_first_row_at_its_offset(two):
     assert np.isclose(image.pixelsize, 40) and image.pixelsize_y is None
     assert np.isclose(image.x0, 1000) and np.isclose(image.y0, 2000)
     render = msr.image(two, found.renders[0])
-    assert render.data.shape == (3, 5, 4) and np.isclose(render.metadata["z0_nm"], -10)
+    assert render.data.shape == (3, 5, 4) and render.is_zstack
+    assert np.isclose(render.z_range()[0], -10)          # the first plane's outer edge
 
 
 def test_an_obf_file_is_listed_from_its_headers_and_damage_is_refused(two, tmp_path):

@@ -208,6 +208,102 @@ class PixelSizeDialog(QDialog):
         return self.pixelsize.value(), self.x0.value(), self.y0.value()
 
 
+class StackAxesDialog(QDialog):
+    """A stack of pages whose file does not say what they are: ask.
+
+    Asked when the file is opened rather than guessed, because a wrong guess
+    is silent -- two channels taken for a z-stack still show a picture, one
+    that is wrong every other plane.  The answer can be corrected afterwards
+    in the Render tab (*planes are*), all but the channels, which are split
+    into images here.
+    """
+
+    def __init__(self, name: str, n_planes: int, shape, parent=None):
+        super().__init__(parent)
+        from PySide6.QtWidgets import QLabel, QSpinBox
+        self.n_planes = int(n_planes)
+        self.setWindowTitle(f"the planes of {name}")
+        form = QFormLayout(self)
+        form.addRow(QLabel(f"{n_planes} planes of {shape[1]} x {shape[0]} pixels, "
+                           "and the file does not say what they are."))
+        self.channels = QSpinBox(minimum=1, maximum=max(1, self.n_planes), value=1)
+        self.channels.setToolTip("how many channels the planes hold")
+        self.order = QComboBox()
+        self.order.addItem("interleaved: c1, c2, c1, c2, ...", True)
+        self.order.addItem("in blocks: all of c1, then c2", False)
+        self.axis = QComboBox()
+        self.axis.addItem("z-slices", "z")
+        self.axis.addItem("time frames", "t")
+        self.axis.addItem("neither", "")
+        # a stack of thousands of planes is a movie; a z-stack is a few dozen
+        self.axis.setCurrentIndex(1 if self.n_planes > 500 else 0)
+        self.step = QDoubleSpinBox(minimum=0.0, maximum=1e9, decimals=3)
+        self.step_label = QLabel()
+        self.error = QLabel("")
+        self.error.setStyleSheet("color: #b00020")
+        form.addRow("channels", self.channels)
+        form.addRow("channel order", self.order)
+        form.addRow("planes are", self.axis)
+        form.addRow(self.step_label, self.step)
+        form.addRow(self.error)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self._accept)
+        buttons.rejected.connect(self.reject)
+        form.addRow(buttons)
+        self.axis.currentIndexChanged.connect(self._axis_changed)
+        self.channels.valueChanged.connect(self._axis_changed)
+        self._axis_changed()
+
+    def _axis_changed(self) -> None:
+        axis = self.axis.currentData()
+        self.order.setEnabled(self.channels.value() > 1)
+        self.step.setEnabled(bool(axis))
+        self.step_label.setText("frame time (s)" if axis == "t" else "z step (nm)")
+        if axis == "z" and self.step.value() <= 0 or axis == "t" and self.step.value() > 60:
+            self.step.setValue(100.0 if axis == "z" else 0.0)
+        self.error.setText("" if self.n_planes % self.channels.value() == 0 else
+                           f"{self.n_planes} planes do not divide into "
+                           f"{self.channels.value()} channels")
+
+    def _accept(self) -> None:
+        if self.n_planes % self.channels.value() == 0:
+            self.accept()
+
+    def values(self) -> Dict:
+        """The keywords of `images.assign_axes`."""
+        axis = self.axis.currentData()
+        return {"axis": axis, "n_channels": self.channels.value(),
+                "interleaved": bool(self.order.currentData()),
+                "z_step_nm": self.step.value() if axis == "z" else None,
+                "frame_time_s": self.step.value() if axis == "t" else None}
+
+
+def read_image_file(path, parent=None):
+    """A file's images (`images.load_images`), asking what the file does not
+    say: its pixel size (`PixelSizeDialog`), and what its pages are
+    (`StackAxesDialog`).  None if either is cancelled."""
+    from ..images import assign_axes, load_images
+    name = Path(path).name
+    try:
+        images = load_images(path)
+    except ValueError:                                  # no pixel size in the file
+        dialog = PixelSizeDialog(name, parent=parent)
+        if dialog.exec() != QDialog.Accepted:
+            return None
+        px, x0, y0 = dialog.values()
+        images = load_images(path, px, x0, y0)
+    out = []
+    for image in images:
+        if not image.axes_unknown:
+            out.append(image)
+            continue
+        dialog = StackAxesDialog(image.name or name, image.n_frames, image.shape, parent)
+        if dialog.exec() != QDialog.Accepted:
+            return None
+        out.extend(assign_axes(image, **dialog.values()))
+    return out
+
+
 class CopyLayerDialog(QDialog):
     """Which layer to copy from, and which of its settings to take.
 

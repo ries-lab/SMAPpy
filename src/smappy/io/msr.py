@@ -331,8 +331,10 @@ def image(path, im: Image):
     s = im.stack
     meta: Dict[str, Any] = {"source": Path(path).name, "stack": s.name}
     if data.ndim == 3 and len(s.res) > 2:
-        meta["z0_nm"] = s.offset_m[2] * 1e9
-        meta["z_pixelsize_nm"] = s.length_m[2] / max(s.res[2], 1) * 1e9
+        # a z-stack (`ImageData.axis`): the offset is the outer edge of the
+        # first plane, as it is of the first pixel, and z0 that plane's centre
+        step = s.length_m[2] / max(s.res[2], 1) * 1e9
+        meta.update(axis="z", z_step_nm=step, z0_nm=s.offset_m[2] * 1e9 + 0.5 * step)
     py = im.pixelsize_y_nm
     return ImageData(np.ascontiguousarray(data), im.pixelsize_nm,
                      x0=s.offset_m[0] * 1e9, y0=s.offset_m[1] * 1e9 if len(s.offset_m) > 1 else 0.0,

@@ -969,24 +969,32 @@ def render_tracks_3d(locs: Localizations, select: np.ndarray, projection: Projec
 # ----------------------------------------------------------------- images
 _imax_cache: dict = {}
 
+# A volume's frame is ray-marched in numpy: about 10 ms per million samples
+# (`scipy.ndimage.map_coordinates`, linear).  The samples per ray follow the
+# voxels -- two per voxel along the ray -- up to these totals for the frame,
+# so a final frame stays near a second and a drag frame near a tenth.
+VOLUME_SAMPLES = 30_000_000
+PREVIEW_VOLUME_SAMPLES = 3_000_000
 
-def _plane_imax(image, frame: int, display: DisplaySettings) -> Optional[float]:
+
+def _plane_imax(plane: np.ndarray, display: DisplaySettings) -> Optional[float]:
     """The brightness an image's plane is shown at, from the whole plane.
 
     From the plane and not from what the screen shows of it, which changes
     with every turn: seen at a slant the plane covers less of the picture,
     and a contrast taken from the picture would brighten it as it turned
-    edge on."""
+    edge on.  A z-stack is handed its projection, so that every plane and
+    the volume are shown on one scale."""
     if display.imax is not None:
         return display.imax
-    key = (id(image.data), int(frame), display.contrast)
+    key = (id(plane), display.contrast)
     hit = _imax_cache.get(key)
-    if hit is not None and hit[1] is image.data:
+    if hit is not None and hit[1] is plane:
         return hit[0]
-    _, imax = normalize(np.asarray(image.plane_at(frame), np.float32), None, display.contrast)
+    _, imax = normalize(np.asarray(plane, np.float32), None, display.contrast)
     if len(_imax_cache) > 8:
         _imax_cache.clear()
-    _imax_cache[key] = (imax, image.data)
+    _imax_cache[key] = (imax, plane)          # the plane kept so its id is not reused
     return imax
 
 
@@ -1028,36 +1036,148 @@ def image_plane_points(projection: Projection, fov: FieldOfView, z: float
 
 
 def render_image_3d(image, frame: int, display: DisplaySettings, projection: Projection,
-                    slab: Optional[Slab], fov: FieldOfView
+                    slab: Optional[Slab], fov: FieldOfView,
+                    plane: Optional[np.ndarray] = None
                     ) -> Tuple[np.ndarray, RenderedImage]:
-    """An image layer in the 3D view: its plane laid flat at the height of the
-    centre of rotation (the pivot, which the view turns about and zooms to),
-    and seen through the projection like the localizations around it.
+    """An image layer in the 3D view as a plane: laid flat at the height of
+    the centre of rotation (the pivot, which the view turns about and zooms
+    to), and seen through the projection like the localizations around it.
 
-    The layer's own plane is shown -- a stack's z is not known, so which
-    plane is at which height is not either -- and only where it is inside the
-    slab, which hides it once the pivot leaves the slab's z range.  It is
-    added to the sum like any other layer.
+    A z-stack shows the plane that is at that height, and nothing once the
+    pivot is above or below the stack; any other image shows ``plane`` (what
+    the layer shows in 2D, `LayerSnapshot.shown_plane`), or its plane
+    ``frame``.  Only what is inside the slab is drawn, and it is added to the
+    sum like any other layer.
     """
-    x, y, ok = image_plane_points(projection, fov, float(projection.pivot[2]))
-    if slab is not None:
-        ok &= slab.mask(x, y, np.full(x.shape, float(projection.pivot[2])))
+    z = float(projection.pivot[2])
+    scale = None
+    if image.is_zstack:
+        index = image.index_at_z(z)
+        plane = None if index is None else image.plane_at(index)
+        scale = image.projection("max")
+    elif plane is None:
+        plane = image.plane_at(frame)
     weight = np.zeros((fov.ny, fov.nx), np.float32)
-    if ok.any():
-        weight[ok] = image.values_at(x[ok], y[ok], frame=frame)
+    if plane is not None:
+        x, y, ok = image_plane_points(projection, fov, z)
+        if slab is not None:
+            ok &= slab.mask(x, y, np.full(x.shape, z))
+        if ok.any():
+            weight[ok] = image.values_at(x[ok], y[ok], plane=plane)
     rendered = RenderedImage(fov, weight, None, n_locs=0)
-    shown = replace(display, imax=_plane_imax(image, frame, display))
+    reference = scale if scale is not None else plane
+    shown = display if reference is None else replace(display, imax=_plane_imax(reference, display))
     return shown.apply(rendered, white_background=False), rendered
+
+
+def _volume_box(image) -> np.ndarray:
+    """The 8 corners of what a z-stack covers, (8, 3)."""
+    x0, y0, x1, y1 = image.bounds
+    z0, z1 = image.z_range()
+    return np.array([[a, b, c] for a in (x0, x1) for b in (y0, y1) for c in (z0, z1)])
+
+
+def render_volume_3d(image, display: DisplaySettings, projection: Projection,
+                     slab: Optional[Slab], fov: FieldOfView, mode: str = "max",
+                     preview: bool = False) -> Tuple[np.ndarray, RenderedImage]:
+    """A z-stack seen through the projection as a volume: each screen pixel
+    looks along its ray through the stack, inside the slab.
+
+    ``mode`` "max" keeps the brightest value on the ray -- a maximum-intensity
+    projection (MIP) from the view's direction, which from the top is the
+    stack's own MIP.  "volume" adds the values up from the back to the front,
+    each step hiding what is behind it by the 3D view's *opacity* times its
+    brightness on the stack's scale (`composite_depth`'s rule, per voxel):
+    at opacity 0 it is the sum along the ray, at 1 the near beads hide the far.
+    The sum is of what stands above the stack's median, its background:
+    a camera's offset and background otherwise add up along every ray into
+    a fog, brightest where a ray crosses the most of the box.
+
+    The ray is sampled about twice per voxel (the smaller of the pixel and
+    the z step) between where it meets the stack's box and the slab, up to
+    `VOLUME_SAMPLES` for the frame (`PREVIEW_VOLUME_SAMPLES` while dragging),
+    and the voxels are interpolated linearly; outside the stack is zero.
+    """
+    from scipy.ndimage import map_coordinates
+    volume = image.volume()
+    weight = np.zeros((fov.ny, fov.nx), np.float32)
+    mip = image.projection("max")
+    imax = _plane_imax(mip, display) or 1.0
+    floor = 0.0
+    if mode == "volume":
+        floor = image.background()
+        imax = max(imax - floor, 1e-12)
+
+    def finish(w):
+        rendered = RenderedImage(fov, w, None, n_locs=0)
+        shown = replace(display, imax=imax) if mode == "max" else display
+        return shown.apply(rendered, white_background=False), rendered
+
+    # the depths the stack (and the slab) occupy along the line of sight
+    corners = _volume_box(image)
+    _, _, d = projection.apply(corners[:, 0], corners[:, 1], corners[:, 2])
+    d_lo, d_hi = float(d.min()), float(d.max())
+    if slab is not None:
+        c = slab.corners()
+        _, _, ds = projection.apply(c[:, 0], c[:, 1], c[:, 2])
+        d_lo, d_hi = max(d_lo, float(ds.min())), min(d_hi, float(ds.max()))
+    if projection.focal:
+        d_hi = min(d_hi, 0.95 * float(projection.focal))     # not behind the eye
+    if d_hi <= d_lo:
+        return finish(weight)
+    voxel = min(abs(image.z_step_nm), *image.pixelsize_xy)
+    n_pixels = fov.nx * fov.ny
+    budget = PREVIEW_VOLUME_SAMPLES if preview else VOLUME_SAMPLES
+    n = int(np.clip(np.ceil(2.0 * (d_hi - d_lo) / voxel) + 1, 2, max(2, budget // n_pixels)))
+    depths = np.linspace(d_lo, d_hi, n)                       # from the back
+    step = (d_hi - d_lo) / (n - 1)
+    R, pivot = projection.matrix, projection.pivot
+    U = (fov.x0 + (np.arange(fov.nx) + 0.5) * fov.pixelsize)[None, :]
+    V = (fov.y0 + (np.arange(fov.ny) + 0.5) * fov.pixelsize)[:, None]
+    # data = pivot + R^T (U t, V t, d): the screen's part, times t in perspective
+    sx, sy, sz = (R[0, i] * U + R[1, i] * V for i in range(3))
+    back = np.linalg.inv(image.grid)
+    opacity = float(np.clip(projection.opacity, 0.0, 1.0))
+    per_voxel = step / voxel                  # how much of a voxel one sample is
+    for depth in depths:
+        t = 1.0 - depth / projection.focal if projection.focal else 1.0
+        x = pivot[0] + t * sx + R[2, 0] * depth
+        y = pivot[1] + t * sy + R[2, 1] * depth
+        z = pivot[2] + t * sz + R[2, 2] * depth
+        x, y, z = np.broadcast_arrays(x, y, z)
+        # the voxel indices, linear: pixel j covers [j, j + 1) of the grid
+        u = back[0, 0] * x + back[0, 1] * y + back[0, 2] - 0.5
+        v = back[1, 0] * x + back[1, 1] * y + back[1, 2] - 0.5
+        w = (z - image.z0_nm) / image.z_step_nm
+        values = map_coordinates(volume, [w.ravel(), v.ravel(), u.ravel()], order=1,
+                                 mode="constant", cval=0.0, prefilter=False
+                                 ).reshape(weight.shape).astype(np.float32)
+        if slab is not None:
+            values *= slab.mask(x, y, z)
+        if mode == "max":
+            np.maximum(weight, values, out=weight)
+            continue
+        values = np.maximum(values - np.float32(floor), 0.0)
+        if opacity > 0:
+            cover = 1.0 - (1.0 - opacity * np.clip(values / imax, 0.0, 1.0)) ** per_voxel
+            weight *= (1.0 - cover).astype(np.float32)
+        weight += values * np.float32(per_voxel)
+    return finish(weight)
 
 
 def render_any_3d(layer: LayerSnapshot, projection: Projection, slab: Optional[Slab],
                   fov: FieldOfView, preview: bool = False, index=None,
                   budget: Optional[int] = None) -> Tuple[np.ndarray, RenderedImage]:
-    """One layer on the CPU, whatever it is: an image as a plane, tracks as
-    lines, localizations by engine A.  The export draws every layer this way."""
+    """One layer on the CPU, whatever it is: an image as a plane or a z-stack
+    as a volume, tracks as lines, localizations by engine A.  The export
+    draws every layer this way."""
     if layer.is_image:
-        return render_image_3d(layer.image_data, layer.frame, layer.display, projection,
-                               slab, fov)
+        image = layer.image_data
+        if image.is_zstack and layer.image_3d in ("max", "volume"):
+            return render_volume_3d(image, layer.display, projection, slab, fov,
+                                    layer.image_3d, preview)
+        return render_image_3d(image, layer.frame, layer.display, projection, slab, fov,
+                               plane=None if image.is_zstack else layer.shown_plane())
     if layer.settings.mode == "tracks":
         return render_tracks_3d(layer.locs, layer.mask, projection, slab, fov,
                                 layer.settings, layer.display, preview,

@@ -2,7 +2,7 @@
 title: Render tab
 summary: The layers of the picture -- which localizations each one shows, and how it is drawn.
 widget: smappy.gui.render_tab.RenderTab
-covers: [smappy.session.Layer, smappy.session.default_bounds, smappy.filter.LocFilter, smappy.group.group, smappy.group.connect, smappy.group.combine, smappy.render.render_locs, smappy.render.render_sigmas, smappy.render.psf_sigmas, smappy.render.camera_pixelsize_nm, smappy.render.camera_grid, smappy.render.SigmaSettings, smappy.render.to_rgb, smappy.render.RenderAxes, smappy.render.render_tracks, smappy.render.track_segments, smappy.render.render_segments, smappy.render.render_voronoi, smappy.render.VoronoiCells, smappy.render.voronoi_cells_for, smappy.lut.on_white, smappy.lut.invert_sum, smappy.lut.complement]
+covers: [smappy.session.Layer, smappy.session.default_bounds, smappy.filter.LocFilter, smappy.group.group, smappy.group.connect, smappy.group.combine, smappy.render.render_locs, smappy.render.render_sigmas, smappy.render.psf_sigmas, smappy.render.camera_pixelsize_nm, smappy.render.camera_grid, smappy.render.SigmaSettings, smappy.render.to_rgb, smappy.render.RenderAxes, smappy.render.render_tracks, smappy.render.track_segments, smappy.render.render_segments, smappy.render.render_voronoi, smappy.render.VoronoiCells, smappy.render.voronoi_cells_for, smappy.lut.on_white, smappy.lut.invert_sum, smappy.lut.complement, smappy.images.load_images, smappy.images.assign_axes, smappy.images.ImageData.projection, smappy.layer_state.focus_z]
 ---
 
 ## What it does
@@ -77,6 +77,17 @@ localizations by its pixel size and position: the camera frames the fit kept
 with the file (their average, and a few single frames), or a widefield or
 diffraction-limited picture of the same cells.  The layers are drawn one by one
 and their colours added.
+
+An image file with several pages is a **stack**, and what its pages are is
+read from the file where it says: a z-stack (the planes at heights a step
+apart), a time series, or several channels.  Each channel becomes an image
+layer of its own, in its own colour, as two channels of localizations are two
+layers.  A file that does not say -- a plain multi-page TIFF -- is asked
+about when it is opened: how many channels, in which order, and whether the
+rest are z-slices or time frames, with the step between them.  A stack layer
+shows one plane, or the planes of a range taken together: their maximum
+(a maximum-intensity projection, [MIP](plugin:Panels/Glossary)), mean or
+sum.  In the [3D view](plugin:Panels/3D view) a z-stack can be a volume.
 
 **2. The filter.**  A [filter](plugin:Panels/Glossary) (also called bounds)
 is a range per column: keep the localizations
@@ -577,10 +588,44 @@ Adjust it (and *y0*) to register the image to the localizations.
 ### y0 (nm)
 Where the image's first pixel lies in y.
 
+### planes are
+What the planes of a stack are: *z-slices*, *time frames*, or *planes* when
+that is not known (the frames a fit kept are these).  Beside it the step
+between them: nm between z-slices, seconds between frames.  Read from the
+file, or given when it was opened; correct it here if it is wrong.  Only a
+z-stack with a step has heights, which *follow z filter* and the 3D view
+need.  Channels cannot be set here: they were split into layers when the
+file was opened, so open it again to split it differently.
+
+### show
+*slice* shows one plane, chosen by *frame*.  *max*, *mean* and *sum* show
+the planes from the first number to the second (counted from 1) taken
+together, pixel by pixel: the maximum is a maximum-intensity projection,
+the usual flat view of a z-stack of beads or cells, and the mean of a
+time series smooths its noise.  A projection is computed once per range
+and kept.
+
+### follow z filter
+For a z-stack shown as a slice: the plane at the middle of the z range the
+first visible localization layer's filter keeps, so that narrowing z to a
+slab of localizations shows the image plane they are in.  Without both
+ends of a z range set, the layer keeps its own plane.
+
 ### frame
-For a stack, which frame is shown; the label beside it says which --
-*average of 2000 frames*, or *frame 17*, the number the `frame` column uses.
-Each layer has its own, so two layers can show the average and one frame.
+For a stack shown as a slice, which plane is shown; the label beside it
+says which -- *z 250 nm* in a z-stack, *t 1.5 s* in a time series,
+*average of 2000 frames* or *frame 17* (the number the `frame` column uses)
+for the frames a fit kept.  Each layer has its own, so two layers can show
+the average and one frame.
+
+### in 3D
+How the [3D view](plugin:Panels/3D view) draws a z-stack.  *plane*: the
+plane at the height of the centre of rotation, flat among the
+localizations.  *max (MIP)*: along each line of sight the brightest value
+in the stack -- from the top this is the stack's own MIP.  *volume*: what
+stands above the stack's background added up along each line of sight,
+the front hiding the back as far as the 3D view's *opacity* says.  Any
+other image is always a plane.
 
 ### display
 How the selected layer is drawn.  An image layer uses only the LUT, contrast,

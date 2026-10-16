@@ -14,7 +14,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from .filter import LocFilter
 from .group import GROUP_COLUMNS, GroupSettings
-from .images import ImageData, load_image
+from .images import ImageData, load_images
 from .locs import KEPT_BOUNDS, Localizations, concat
 from .metadata import frame_time_ms
 from .plugins import Context, Plugin, Result, Selection, refuse_grouped_table
@@ -24,6 +24,9 @@ from .view3d import Projection, Slab
 from .render import DisplaySettings, RenderAxes, RenderSettings, SigmaSettings
 from .undo import Edit, configured as undo_stack
 from .layer_state import Tables, ViewState
+
+# the LUTs of a file's channels opened as image layers, in order
+CHANNEL_LUTS = ("green", "magenta", "cyan", "yellow", "red", "blue")
 
 # The bounds a layer opens with: what is thrown away is on screen, not hidden.
 DEFAULT_BOUNDS: Dict[str, Tuple[Optional[float], Optional[float]]] = {
@@ -109,7 +112,25 @@ class Layer:
         # the layer's own plane, not the image's: two layers may show the
         # average and one frame of the same kept stack
         layer.frame = int(image.frame)
+        layer.set_image_view()
         return layer
+
+    def set_image_view(self, show: str = "slice", planes=None, follow_z: bool = False,
+                       in_3d: str = "plane") -> None:
+        """How an image layer shows a stack: ``show`` one plane ("slice") or a
+        projection of the planes ``planes`` (first, last; None: all) --
+        "max", "mean" or "sum"; with ``follow_z`` the slice is the plane at
+        the height the localization layers' z filter is centred on; and
+        ``in_3d`` how the 3D view draws a z-stack -- "plane", "max" (a
+        maximum-intensity projection along each ray) or "volume"."""
+        self.image_show, self.image_planes = show, planes
+        self.follow_z, self.image_3d = bool(follow_z), in_3d
+
+    def shown_plane(self, frame: Optional[int] = None) -> np.ndarray:
+        """The pixels an image layer shows in 2D (`ImageData.shown_plane`)."""
+        return self.image.shown_plane(self.image_show,
+                                      self.frame if frame is None else frame,
+                                      self.image_planes)
 
     def show_image(self, image: ImageData, frame: int = 0) -> None:
         """Point an image layer at another image: the source it shows.  A
@@ -117,6 +138,7 @@ class Layer:
         if self.image is not None and self.name == (self.image.name or "image"):
             self.name = image.name or "image"
         self.image, self.frame = image, int(frame)
+        self.image_planes = None             # a range of the old stack's planes
 
     @property
     def is_image(self) -> bool:
@@ -138,7 +160,7 @@ class Layer:
         layers up turns the sum over once rather than every layer.
         """
         if self.is_image:
-            rendered = self.image.resample(fov, self.frame)
+            rendered = self.image.resample(fov, plane=self.shown_plane())
             return self.display.apply(rendered, white_background), rendered
         return self.state.image(fov, white_background)
 
@@ -714,15 +736,28 @@ class Session:
 
     def open_image(self, path, pixelsize: Optional[float] = None,
                    x0: float = 0.0, y0: float = 0.0) -> Layer:
-        return self.add_image(load_image(path, pixelsize, x0, y0))
+        """A file's images, a layer each (`open_images`); the first layer."""
+        return self.open_images(load_images(path, pixelsize, x0, y0))[0]
+
+    def open_images(self, images: Sequence[ImageData]) -> List[Layer]:
+        """A layer for each image -- a file's channels, `images.load_images`
+        -- the channels in the colours two localization channels would get,
+        a single image in grey."""
+        luts_ = CHANNEL_LUTS if len(images) > 1 else ("gray",)
+        layers = []
+        for i, image in enumerate(images):
+            layer = self.add_image(image)
+            layer.display = DisplaySettings(lut=luts_[i % len(luts_)])
+            layers.append(layer)
+        return layers
 
     def load_image(self, path, pixelsize: Optional[float] = None,
                    x0: float = 0.0, y0: float = 0.0) -> ImageData:
-        """Open an image as a source, without a layer of its own."""
-        image = load_image(path, pixelsize, x0, y0)
-        self.images.append(image)
-        self.changed("images")
-        return image
+        """Open a file's images as sources, without layers; the first."""
+        images = load_images(path, pixelsize, x0, y0)
+        for image in images:
+            self.add_source(image)
+        return images[0]
 
     def saved_images(self) -> List[ImageData]:
         """What `save` keeps: every file's raw frames, and each image a

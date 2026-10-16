@@ -114,3 +114,59 @@ def test_an_image_layer_asked_for_before_any_image_waits_and_takes_the_first(app
     session.changed("images")
     assert layer.image is raw and layer.name == raw.name
     assert tab.image_source.currentText() == "a.tif: raw frames"
+
+
+def _zstack_session():
+    session = Session(Localizations({"x_nm": np.zeros(3), "y_nm": np.zeros(3),
+                                     "z_nm": np.array([-100.0, 0.0, 100.0])}, {}))
+    stack = ImageData(np.arange(5)[:, None, None] * np.ones((5, 8, 8), np.float32), 100.0)
+    stack.axis, stack.z_step_nm, stack.z0_nm = "z", 50.0, -100.0
+    layer = session.add_image(stack)
+    return session, layer
+
+
+def test_the_image_rows_set_what_a_stack_shows_and_how_3d_draws_it(app):
+    from smappy.gui.render_tab import RenderTab
+    session, layer = _zstack_session()
+    tab = RenderTab(session)
+    tab.strip.select(len(session.layers) - 1)
+    assert tab.image_axis.currentData() == "z" and tab.image_step.value() == 50.0
+    assert tab.image_3d.isEnabled() and tab.image_frame_label.text() == "z -100 nm"
+    tab.image_show.setCurrentIndex(tab.image_show.findData("max"))
+    tab.image_from.setValue(2)
+    tab.image_to.setValue(4)
+    assert layer.image_show == "max" and layer.image_planes == (1, 3)
+    assert np.allclose(layer.shown_plane(), 3.0)              # planes 1..3: max is 3
+    assert not tab.image_frame.isEnabled()                   # a projection has no slice
+    tab.image_3d.setCurrentIndex(tab.image_3d.findData("volume"))
+    assert layer.image_3d == "volume"
+    # called time frames, it is no z-stack: the 3D view has no volume of it
+    tab.image_axis.setCurrentIndex(tab.image_axis.findData("t"))
+    assert layer.image.axis == "t" and not tab.image_3d.isEnabled()
+
+
+def test_a_stack_the_file_does_not_describe_is_asked_about_and_split(app, tmp_path, monkeypatch):
+    import tifffile
+    from PySide6.QtWidgets import QDialog
+    from smappy.gui import dialogs
+    path = tmp_path / "pages.tif"
+    tifffile.imwrite(path, np.zeros((8, 6, 6), np.float32), photometric="minisblack",
+                     resolution=(10, 10), resolutionunit="CENTIMETER")
+
+    def answer(self):
+        if isinstance(self, dialogs.PixelSizeDialog):
+            return QDialog.Accepted
+        self.channels.setValue(2)
+        self.axis.setCurrentIndex(self.axis.findData("z"))
+        self.step.setValue(25.0)
+        return QDialog.Accepted
+
+    monkeypatch.setattr(QDialog, "exec", answer)
+    images = dialogs.read_image_file(path)
+    assert [im.n_frames for im in images] == [4, 4]
+    assert all(im.is_zstack and im.z_step_nm == 25.0 for im in images)
+    # three channels do not divide eight planes: OK is refused, not guessed at
+    dialog = dialogs.StackAxesDialog("pages.tif", 8, (6, 6))
+    dialog.channels.setValue(3)
+    dialog._accept()
+    assert dialog.result() != QDialog.Accepted and "do not divide" in dialog.error.text()

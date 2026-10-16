@@ -18,7 +18,7 @@ from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog,
                                QFormLayout, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
                                QListWidget, QListWidgetItem, QMenu, QPushButton,
-                               QSlider, QToolButton, QVBoxLayout, QWidget)
+                               QSlider, QSpinBox, QToolButton, QVBoxLayout, QWidget)
 
 from .. import lut as luts
 from ..render import FieldOfView, RenderAxes, axis_unit, is_position
@@ -29,6 +29,12 @@ from . import folders
 from .merging import merger_for
 from .render_view import nice_below
 from .widgets import CollapsibleSection, ColumnScroll, detach_to_window
+
+# an image layer's stack: what its planes are, what it shows of them, and how
+# the 3D view draws a z-stack (`session.Layer.set_image_view`)
+IMAGE_AXES = (("z", "z-slices"), ("t", "time frames"), ("", "planes"))
+IMAGE_SHOW = (("slice", "slice"), ("max", "max"), ("mean", "mean"), ("sum", "sum"))
+IMAGE_3D = (("plane", "plane"), ("max", "max (MIP)"), ("volume", "volume"))
 
 # the fields with a quick button, best-named alternative first.  In words,
 # not the columns' abbreviations: the tooltip names the column
@@ -977,17 +983,63 @@ class RenderTab(QWidget):
         frame_row.setContentsMargins(0, 0, 0, 0)
         frame_row.addWidget(self.image_frame, 1)
         frame_row.addWidget(self.image_frame_label)
+        # what the planes of a stack are, and how much apart: a file that did
+        # not say is asked when it is opened (`gui.image_open`), and this is
+        # where a wrong answer, or a wrong step, is put right
+        self.image_axis = QComboBox()
+        for key, text in IMAGE_AXES:
+            self.image_axis.addItem(text, key)
+        self.image_axis.setToolTip("what the planes of the stack are")
+        self.image_step = QDoubleSpinBox(minimum=0.0, maximum=1e9, decimals=3)
+        self.image_step.setToolTip("the z step between planes (nm), or the time "
+                                   "between frames (s)")
+        axis_row = QHBoxLayout()
+        axis_row.setContentsMargins(0, 0, 0, 0)
+        axis_row.addWidget(self.image_axis)
+        axis_row.addWidget(self.image_step, 1)
+        # one plane, or a projection over a range of them
+        self.image_show = QComboBox()
+        for key, text in IMAGE_SHOW:
+            self.image_show.addItem(text, key)
+        self.image_show.setToolTip("one plane, or the planes from-to taken together")
+        self.image_from = QSpinBox(minimum=1)
+        self.image_to = QSpinBox(minimum=1)
+        self.image_from.setToolTip("the first plane of the projection")
+        self.image_to.setToolTip("the last plane of the projection")
+        self.image_follow = QCheckBox("follow z filter")
+        self.image_follow.setToolTip("show the plane at the middle of the localization "
+                                     "layers' z filter")
+        show_row = QHBoxLayout()
+        show_row.setContentsMargins(0, 0, 0, 0)
+        show_row.addWidget(self.image_show)
+        show_row.addWidget(self.image_from)
+        show_row.addWidget(self.image_to)
+        show_row.addWidget(self.image_follow, 1)
+        self.image_3d = QComboBox()
+        for key, text in IMAGE_3D:
+            self.image_3d.addItem(text, key)
+        self.image_3d.setToolTip("how the 3D view draws a z-stack: the plane at the "
+                                 "centre of rotation, the brightest value along each "
+                                 "line of sight, or the volume added up")
         image_form.addRow("source", self.image_source)
         image_form.addRow("pixel size (nm)", self.image_pixelsize)
         image_form.addRow("x0 (nm)", self.image_x0)
         image_form.addRow("y0 (nm)", self.image_y0)
+        image_form.addRow("planes are", axis_row)
+        image_form.addRow("show", show_row)
         image_form.addRow("frame", frame_row)
+        image_form.addRow("in 3D", self.image_3d)
         self.image_section = CollapsibleSection("image", image, expanded=True, **HELP)
         self.image_section.hide()
         layout.addWidget(self.image_section)
-        for w in (self.image_pixelsize, self.image_x0, self.image_y0):
+        for w in (self.image_pixelsize, self.image_x0, self.image_y0, self.image_step):
             w.valueChanged.connect(self._on_image)
         self.image_frame.valueChanged.connect(self._on_image)
+        for w in (self.image_from, self.image_to):
+            w.valueChanged.connect(self._on_image)
+        for w in (self.image_axis, self.image_show, self.image_3d):
+            w.currentIndexChanged.connect(self._on_image)
+        self.image_follow.toggled.connect(self._on_image)
         self.image_source.activated.connect(self._on_image_source)
 
         display = QWidget()
@@ -1202,7 +1254,9 @@ class RenderTab(QWidget):
                    self.contrast, self.gamma,
                    self.grouped,
                    self.image_source, self.image_pixelsize, self.image_x0,
-                   self.image_y0, self.image_frame)
+                   self.image_y0, self.image_frame, self.image_axis, self.image_step,
+                   self.image_show, self.image_from, self.image_to, self.image_follow,
+                   self.image_3d)
         for w in widgets:
             w.blockSignals(True)
         self.filter_section.setVisible(not layer.is_image)
@@ -1218,8 +1272,18 @@ class RenderTab(QWidget):
             self.image_y0.setValue(img.y0)
             self.image_frame.setRange(0, img.n_frames - 1)
             self.image_frame.setValue(layer.frame)
-            self.image_frame.setEnabled(img.n_frames > 1)
             self.image_frame_label.setText(img.label(layer.frame))
+            self._set_combo(self.image_axis, img.axis)
+            self.image_step.setValue((img.z_step_nm if img.axis == "z" else
+                                      img.frame_time_s if img.axis == "t" else 0.0) or 0.0)
+            self._set_combo(self.image_show, getattr(layer, "image_show", "slice"))
+            planes = getattr(layer, "image_planes", None) or (0, img.n_frames - 1)
+            for w, value in ((self.image_from, planes[0]), (self.image_to, planes[1])):
+                w.setMaximum(img.n_frames)
+                w.setValue(int(value) + 1)
+            self.image_follow.setChecked(bool(getattr(layer, "follow_z", False)))
+            self._set_combo(self.image_3d, getattr(layer, "image_3d", "plane"))
+            self._enable_image_rows(img)
             display = layer.get_display()
             self.lut.setCurrentText(display.lut if isinstance(display.lut, str) else "gray")
             self._show_invert(display.invert)
@@ -1406,9 +1470,47 @@ class RenderTab(QWidget):
         if img.pixelsize_y is not None:
             img.pixelsize_y = img.pixelsize * ratio
         img.x0, img.y0 = self.image_x0.value(), self.image_y0.value()
+        axis = self.image_axis.currentData() or ""
+        if img.n_frames > 1 and axis != img.axis:
+            img.axis = axis
+            # the step of the old meaning is not one of the new
+            blocked = self.image_step.blockSignals(True)
+            self.image_step.setValue((img.z_step_nm if axis == "z" else
+                                      img.frame_time_s if axis == "t" else 0.0) or 0.0)
+            self.image_step.blockSignals(blocked)
+        elif axis == "z":
+            img.z_step_nm = self.image_step.value() or None
+        elif axis == "t":
+            img.frame_time_s = self.image_step.value() or None
+        img.metadata.pop("axes_unknown", None)
         layer.frame = self.image_frame.value()
+        layer.set_image_view(self.image_show.currentData() or "slice",
+                             (self.image_from.value() - 1, self.image_to.value() - 1),
+                             self.image_follow.isChecked(),
+                             self.image_3d.currentData() or "plane")
         self.image_frame_label.setText(img.label(layer.frame))
+        self._enable_image_rows(img)
         self.session.changed("layer")
+
+    def _enable_image_rows(self, img) -> None:
+        """Only what applies to this image, as it is set, can be changed."""
+        stack, zstack = img.n_frames > 1, img.is_zstack
+        slice_ = (self.image_show.currentData() or "slice") == "slice"
+        self.image_axis.setEnabled(stack)
+        self.image_step.setEnabled(stack and img.axis in ("z", "t"))
+        self.image_step.setSuffix(" nm" if img.axis == "z" else " s" if img.axis == "t" else "")
+        self.image_show.setEnabled(stack)
+        for w in (self.image_from, self.image_to):
+            w.setVisible(stack and not slice_)
+        self.image_follow.setVisible(zstack and slice_)
+        self.image_frame.setEnabled(stack and slice_ and not
+                                    (zstack and self.image_follow.isChecked()))
+        self.image_3d.setEnabled(zstack)
+
+    @staticmethod
+    def _set_combo(box: QComboBox, key) -> None:
+        i = box.findData(key)
+        box.setCurrentIndex(max(i, 0))
 
     def _fill_image_sources(self, layer: Layer) -> None:
         """Every image the session has, the layer's own chosen, and *open
@@ -1446,22 +1548,18 @@ class RenderTab(QWidget):
 
     def _open_image_file(self):
         """Ask for an image file and open it as a source; None if cancelled."""
-        from .dialogs import PixelSizeDialog
-        from PySide6.QtWidgets import QDialog
-        from pathlib import Path
+        from .dialogs import read_image_file
         path, _ = QFileDialog.getOpenFileName(self, "Open image", folders.start(),
                                               "Images (*.tif *.tiff *.png)")
         if not path:
             return None
         folders.remember(path)
-        try:
-            return self.session.load_image(path)
-        except ValueError:
-            dialog = PixelSizeDialog(Path(path).name, parent=self)
-            if dialog.exec() == QDialog.Accepted:
-                px, x0, y0 = dialog.values()
-                return self.session.load_image(path, px, x0, y0)
-        return None
+        images = read_image_file(path, parent=self)
+        if not images:
+            return None
+        for image in images:                    # every channel a source
+            self.session.add_source(image)
+        return images[0]
 
     def _count_in_view(self) -> None:
         if self.filter.layer is not None and not self.layer.is_image:

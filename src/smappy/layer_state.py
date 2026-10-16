@@ -668,6 +668,11 @@ class LayerSnapshot:
     n_threads: int = 0
     image_data: object = None                    # an `ImageData`, for an image layer
     frame: int = 0
+    # an image layer's view of a stack (`session.Layer.set_image_view`): the
+    # plane, or a projection over ``image_planes``; and the 3D view's way
+    image_show: str = "slice"
+    image_planes: Optional[Tuple[int, int]] = None
+    image_3d: str = "plane"
     # what the render thread computed and the GUI thread may keep (`indices`)
     memo: dict = dataclass_field(default_factory=dict, compare=False, repr=False)
 
@@ -714,9 +719,13 @@ class LayerSnapshot:
     def render(self, fov: FieldOfView) -> RenderedImage:
         """The planes on ``fov``: accumulated, or an image resampled."""
         if self.is_image:
-            return self.image_data.resample(fov, self.frame)
+            return self.image_data.resample(fov, plane=self.shown_plane())
         return render_locs(self.locs, fov, self.settings, self.display,
                            select=self.select(fov), n_threads=self.n_threads)
+
+    def shown_plane(self) -> np.ndarray:
+        """An image layer's pixels in 2D: its plane, or its projection."""
+        return self.image_data.shown_plane(self.image_show, self.frame, self.image_planes)
 
     def image(self, fov: FieldOfView, white_background=None
               ) -> Tuple[np.ndarray, RenderedImage]:
@@ -726,23 +735,48 @@ class LayerSnapshot:
         return self.display.apply(rendered, white_background), rendered
 
 
-def snapshot_layer(layer) -> LayerSnapshot:
-    """A session `Layer`'s snapshot, of either kind."""
+def snapshot_layer(layer, focus_z: Optional[float] = None) -> LayerSnapshot:
+    """A session `Layer`'s snapshot, of either kind.  ``focus_z`` is the
+    height an image layer that follows the z filter shows (`focus_z`)."""
     if not layer.visible:
         return LayerSnapshot(name=layer.name, visible=False)
     if layer.is_image:
         # a copy of the record, so that a plane chosen or a registration
         # moved meanwhile is not seen half-way; the pixels are shared, and
         # are replaced rather than written when they change
-        return LayerSnapshot(name=layer.name, image_data=copy.copy(layer.image),
-                             frame=int(layer.frame),
-                             display=copy.deepcopy(layer.display))
+        image, frame = layer.image, int(layer.frame)
+        if getattr(layer, "follow_z", False) and focus_z is not None:
+            found = image.index_at_z(focus_z)
+            frame = frame if found is None else found
+        return LayerSnapshot(name=layer.name, image_data=copy.copy(image),
+                             frame=frame, display=copy.deepcopy(layer.display),
+                             image_show=getattr(layer, "image_show", "slice"),
+                             image_planes=getattr(layer, "image_planes", None),
+                             image_3d=getattr(layer, "image_3d", "plane"))
     return layer.state.snapshot(name=layer.name)
+
+
+def focus_z(layers) -> Optional[float]:
+    """The height the localizations are looked at in: the middle of the
+    first visible localization layer's z filter, if it has both ends.
+
+    What an image layer that follows z shows the plane at -- a z-stack under
+    a slab of 3D localizations then shows the plane they are in.  None when
+    no layer limits z on both sides, and the layer keeps its own plane.
+    """
+    for layer in layers:
+        if layer.visible and not layer.is_image:
+            lo, hi = layer.ranges.get("z_nm", (None, None))
+            if lo is not None and hi is not None:
+                return 0.5 * (float(lo) + float(hi))
+    return None
 
 
 def snapshot_layers(layers) -> Tuple[LayerSnapshot, ...]:
     """Every layer of a session, in order, as `snapshot_layer` takes it."""
-    return tuple(snapshot_layer(layer) for layer in layers)
+    z = focus_z(layers) if any(layer.is_image and getattr(layer, "follow_z", False)
+                               for layer in layers) else None
+    return tuple(snapshot_layer(layer, z) for layer in layers)
 
 
 def render_panels(layers: Sequence[LayerSnapshot], fov: FieldOfView,
