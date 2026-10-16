@@ -5,7 +5,8 @@ measurements of one cell, the confocal images each was aimed on, and what
 Imspector drew of them.  Opening it means choosing, so File > Open (and a drop)
 asks here before anything is read -- the list costs a tenth of a second
 (`io.msr.contents`) -- and hands the choice back to the window, which queues
-the measurements as files on its loader and opens the images as layers.
+the measurements as files on its loader and keeps the images as sources an
+image layer can show -- not a layer each: an `.msr` holds a dozen.
 """
 from __future__ import annotations
 
@@ -13,6 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QFontDatabase
 from PySide6.QtWidgets import (QCheckBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
                                QFormLayout, QHBoxLayout, QLabel, QPlainTextEdit,
                                QSplitter, QTreeWidget, QTreeWidgetItem, QVBoxLayout)
@@ -46,7 +48,7 @@ class MsrImportDialog(QDialog):
             dim = f"{m.dimensionality}D" if m.dimensionality else "?"
             beads = f", MBM {m.n_beads} beads" if m.n_beads else ""
             self._item(mf, m.label, f"{dim}, {m.rows} records{beads}", m, True)
-        images = self._group("Images", True)
+        images = self._group("Images, for image layers", True)
         renders = self._group("Imspector's renders", False)
         for im in self.found.images:
             size = " x ".join(str(k) for k in im.shape[::-1])
@@ -58,14 +60,18 @@ class MsrImportDialog(QDialog):
             if not top.childCount():
                 self.tree.invisibleRootItem().removeChild(top)
         self.tree.resizeColumnToContents(0)
+        self.tree.resizeColumnToContents(1)
         self.tree.currentItemChanged.connect(lambda item, _old: self._show(item))
         self.tree.itemChanged.connect(lambda *_: self._update())
         split.addWidget(self.tree)
         self.details = QPlainTextEdit(readOnly=True)
         self.details.setObjectName("msr details")
         self.details.setLineWrapMode(QPlainTextEdit.NoWrap)
+        # the sequence is a table in text: its columns line up only in a
+        # fixed-width font
+        self.details.setFont(QFontDatabase.systemFont(QFontDatabase.FixedFont))
         split.addWidget(self.details)
-        split.setSizes([360, 340])
+        split.setSizes([620, 340])
         layout.addWidget(split, 1)
 
         options = QFormLayout()
@@ -83,15 +89,19 @@ class MsrImportDialog(QDialog):
         options.addRow(row)
         self.z_scale = QDoubleSpinBox(minimum=0.01, maximum=10.0, value=1.0,
                                       decimals=3, singleStep=0.01)
+        self.z_scale.setMaximumWidth(110)
         self.z_scale.setToolTip("multiplies z: the refractive index correction; "
                                 "1 keeps Imspector's numbers")
         options.addRow("z scale", self.z_scale)
+        # shown for a file with a 3D measurement, greyed while none is ticked
+        self._any_3d = any(m.dimensionality == 3 for m in self.found.measurements)
+        options.setRowVisible(self.z_scale, self._any_3d)
         layout.addLayout(options)
         self.buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
         layout.addWidget(self.buttons)
-        self.resize(760, 460)
+        self.resize(980, 480)
         first = mf.child(0) if mf.childCount() else None
         if first is not None:
             self.tree.setCurrentItem(first)
@@ -159,7 +169,7 @@ class MsrImportDialog(QDialog):
         """What to open: the loader's arguments per file, and the images."""
         chosen = self._ticked(msr.Measurement)
         args = {"valid_only": not self.keep_invalid.isChecked(),
-                "z_scale": self.z_scale.value() if self.z_scale.isEnabled() else 1.0}
+                "z_scale": self.z_scale.value() if self._any_3d else 1.0}
         numbers = [m.number + 1 for m in chosen]
         if self.merge.isChecked() and len(numbers) > 1:
             loads = [{"measurements": numbers, **args}]

@@ -353,7 +353,9 @@ def test_the_loader_plugin_opens_files_and_images_kept_through_a_save(two, tmp_p
     result = plugin.run(Context(session=session), settings)
     session.apply(plugin, result)
     assert [f.name for f in session.files] == ["cell: first", "cell: second"]
-    assert sum(1 for l in session.layers if l.is_image) == 1           # not the render
+    # the image is a source for an image layer, not a layer of its own
+    assert not any(l.is_image for l in session.layers)
+    assert [im.name for im in session.images] == ["cell: Ch1 {0}"]        # not the render
     label = lambda m, n: file_metadata(m, n)["minflux"]["measurements"][0]["label"]
     assert label(session.locs.metadata, 1) == "second"
     saved = tmp_path / "cell.h5"
@@ -362,7 +364,7 @@ def test_the_loader_plugin_opens_files_and_images_kept_through_a_save(two, tmp_p
     again.load(saved)
     assert [f.name for f in again.files] == ["cell: first", "cell: second"]
     assert label(again.locs.metadata, 0) == "first" and label(again.locs.metadata, 1) == "second"
-    assert len(again.images) == 1
+    assert again.images == []          # an image no layer showed is not saved
 
 
 @pytest.mark.skipif(not os.environ.get("SMAPPY_TEST_MSR"),
@@ -389,7 +391,7 @@ def test_the_open_dialog_queues_what_is_ticked_and_opens_its_images(two, monkeyp
     from smappy.session import Session
     app = QApplication.instance() or QApplication([])
     dialog = MsrImportDialog(two)
-    assert dialog.merge.isEnabled() and not dialog.z_scale.isEnabled()    # 2D only
+    assert dialog.merge.isEnabled() and dialog.z_scale.isHidden()         # 2D only
     choice = dialog.choice()
     assert [a["measurements"] for a in choice["loads"]] == [[1], [2]]
     assert [im.name for im in choice["images"]] == ["Ch1 {0}"]            # not the render
@@ -411,4 +413,5 @@ def test_the_open_dialog_queues_what_is_ticked_and_opens_its_images(two, monkeyp
     done.start(10)
     app.exec()
     assert [f.name for f in session.files] == ["cell: first", "cell: second"]
-    assert [l.image.name for l in session.layers if l.is_image] == ["cell: Ch1 {0}"]
+    assert not any(l.is_image for l in session.layers)
+    assert [im.name for im in session.images] == ["cell: Ch1 {0}"]

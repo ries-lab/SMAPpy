@@ -449,7 +449,8 @@ def iteration_table(seq: Dict[str, Any], keys: Optional[List[str]] = None) -> st
                     "bgcThreshold"]
     rows = seq.get("iterations", [])
     keys = [k for k in keys if any(k in r for r in rows)]
-    lines = ["itr  " + "  ".join(keys)]
-    for i, r in enumerate(rows):
-        lines.append(f"{i:<4} " + "  ".join(str(r.get(k, "")) for k in keys))
-    return "\n".join(lines)
+    names = ["itr"] + [k.split(".")[-1].lstrip("_") for k in keys]
+    cells = [[str(i)] + [str(r.get(k, "")) for k in keys] for i, r in enumerate(rows)]
+    widths = [max(len(c[j]) for c in [names] + cells) for j in range(len(names))]
+    return "\n".join("  ".join(c[j].ljust(widths[j]) for j in range(len(names))).rstrip()
+                     for c in [names] + cells)

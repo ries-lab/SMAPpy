@@ -22,8 +22,8 @@ is inside.  It is what File > Open does.  The formats:
   were aimed on, the beads that stabilised them and every acquisition
   setting.  File > Open lists what is in it and asks which to open; each
   measurement becomes a file of its own (or all of them one, with
-  *merge into one file*), and each image an image layer in the same
-  coordinates as the localizations;
+  *merge into one file*), and its images are read, in the same
+  coordinates as the localizations, for an image layer to show;
 * **Picasso** -- `.hdf5`, `.h5` written by Picasso
   ([Schnitzbauer et al. 2017](https://doi.org/10.1038/nprot.2017.024)),
   told from this program's own HDF5 by what is inside;
@@ -292,9 +292,12 @@ file* they are one table, one after another in time: each one's `time_s`
 is moved by when it started after the first one did (to the second, from
 its date), its traces are numbered after the last one's so that every `tid`
 is one trace, and a `measurement` column says which it was.  **Images** --
-confocal and STED channels -- become image layers, placed in nanometres by
-the stack's own offset and pixel size, in the frame the localizations are
-in: no registration is needed to lay one on the other.  What Imspector drew
+confocal and STED channels -- are read and kept in the session's list of
+images, placed in nanometres by the stack's own offset and pixel size, in
+the frame the localizations are in: no registration is needed to lay one on
+the other.  They get no layer of their own -- an `.msr` holds a dozen -- so
+add an image layer and choose the image in it.  Like any image, one is saved
+with the session only once a layer shows it.  What Imspector drew
 of a measurement (its density and trace renders) is listed, and not opened
 unless ticked: the localizations draw it again.  Stacks Imspector writes in
 chunks, for very large acquisitions, are not read yet, and say so.
@@ -424,8 +427,9 @@ channel -- by a frame.
 
 The table, added to the session as a file of its own, or joined to the open
 ones with *add to the open files* (a `filenumber` column tells them apart).
-An `.msr` gives a file per measurement (or one, merged) and an image layer
-per image.  Each file keeps its own metadata -- its camera, its acquisition,
+An `.msr` gives a file per measurement (or one, merged), and its images for
+the image layers to choose from.  Each file keeps its own metadata -- its
+camera, its acquisition,
 a measurement's sequence and beads -- however many are open, and a session
 of several files saved and opened again opens as those files.
 The text says how many localizations were read, and in which format.  The

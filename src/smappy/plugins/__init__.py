@@ -819,6 +819,9 @@ class Result:
     # its own after the others: Process image's result.  Not a table change,
     # so not an undo step nor logged; the layer is removed like any other.
     image_layers: Sequence = ()
+    # Images to keep as sources an image layer can show, without a layer
+    # each (`Session.add_source`): the confocal channels of an `.msr`.
+    image_sources: Sequence = ()
     # Named transformations to keep in the session's list,
     # ``{name: Transformation}`` (`Session.transformations`): Transform's
     # *keep as*, and what Register layers measures.

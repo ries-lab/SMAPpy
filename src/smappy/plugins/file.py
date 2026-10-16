@@ -84,8 +84,8 @@ class MsrSettings:
                            help="multiplies z: the refractive index correction; "
                                 "1 keeps Imspector's numbers")
     images: bool = param(True, label="images",
-                         help="open the file's confocal and STED images as "
-                              "image layers, placed in nm")
+                         help="read the file's confocal and STED images, placed "
+                              "in nm, for an image layer to show")
 
 
 @dataclass
@@ -219,7 +219,7 @@ class LoadAuto(Plugin):
                 f"{len(files)} file{'s' * (len(files) != 1)}"
                 + (f", {len(images)} images" if images else ""))
         return Result(files=[(locs, info, None) for locs, info in files],
-                      image_layers=images, text=text, append=settings.append,
+                      image_sources=images, text=text, append=settings.append,
                       data={"info": [info for _, info in files]}, settings=settings)
 
 

@@ -702,6 +702,16 @@ class Session:
         self.changed("layers")
         return layer
 
+    def add_source(self, image: ImageData) -> ImageData:
+        """An image the image layers can show, without a layer of its own:
+        an `.msr` holds a dozen, of which one or two are wanted on screen.
+        Like any image, it is saved with the session only once a layer
+        shows it (`saved_images`)."""
+        if all(im is not image for im in self.images):
+            self.images.append(image)
+            self.changed("images")
+        return image
+
     def open_image(self, path, pixelsize: Optional[float] = None,
                    x0: float = 0.0, y0: float = 0.0) -> Layer:
         return self.add_image(load_image(path, pixelsize, x0, y0))
@@ -1675,6 +1685,8 @@ class Session:
             self._place_images(plugin, result)
         for image in result.image_layers or ():
             self.add_image(image)
+        for image in result.image_sources or ():
+            self.add_source(image)
         for name, transformation in (result.transformations or {}).items():
             self.add_transformation(name, transformation)
         # The camera frames a fit kept (`smappy.rawframes`), with the table it

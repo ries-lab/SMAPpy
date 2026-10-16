@@ -1419,10 +1419,11 @@ class ControlWindow(QMainWindow):
 
     def open_image_path(self, path) -> None:
         """An image as a layer of its own, asking its pixel size if the file
-        does not say it.  An image already read (an `.msr`'s) is added."""
+        does not say it.  An image already read -- an `.msr`'s -- is kept
+        as a source, for an image layer to choose, without a layer."""
         from ..images import ImageData
         if isinstance(path, ImageData):
-            self.session.add_image(path)
+            self.session.add_source(path)
             return
         try:
             self.session.open_image(str(path))
