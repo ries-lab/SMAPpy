@@ -263,10 +263,14 @@ public:
                 double r = 0.0;
                 switch (mode) {
                 case Mean: case Std: {
-                    double sum = 0.0, sq = 0.0;
-                    for (double v : found) { sum += v; sq += v * v; }
+                    double sum = 0.0;
+                    for (double v : found) sum += v;
                     const double mean = sum / n;
-                    r = mode == Mean ? mean : std::sqrt(std::max(sq / n - mean * mean, 0.0));
+                    if (mode == Mean) { r = mean; break; }
+                    // two passes: E[v^2] - mean^2 cancels, leaving ~1e-8 for one value
+                    double sq = 0.0;
+                    for (double v : found) sq += (v - mean) * (v - mean);
+                    r = std::sqrt(sq / n);
                     break;
                 }
                 case Min: r = *std::min_element(found.begin(), found.end()); break;
