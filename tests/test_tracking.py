@@ -176,3 +176,16 @@ def test_link_tracks_writes_where_it_is_told_and_never_over_a_column_of_its_own(
         LinkTracks().run(Context(locs=out), LinkTracks.Settings(column="track_id_true"))
     with pytest.raises(ValueError, match="table's own"):
         LinkTracks().run(Context(locs=out), LinkTracks.Settings(column="frame"))
+
+
+def test_linked_tracks_merged_into_blinks_keep_integer_ids():
+    from smappy.group import combine
+    locs = simulate_tracks(n_frames=60, density_um2=0.05, d_um2_s=(0.2,), seed=3)
+    out = LinkTracks().run(Context(locs=locs), LinkTracks.Settings(
+        max_jump_nm=250.0, column="linked_id")).locs
+    pairs = np.arange(len(out)) // 2 + 1           # every two rows one "blink"
+    merged = combine(out, pairs)
+    for name in ("linked_id", "linked_length"):
+        assert merged[name].dtype.kind == "i"
+        expected = np.maximum.reduceat(np.asarray(out[name]), np.arange(0, len(out), 2))
+        assert merged[name].tolist() == expected.tolist()

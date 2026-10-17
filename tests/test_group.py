@@ -586,3 +586,27 @@ def test_linking_by_precision_without_a_precision_falls_back_to_the_box():
         _, ids = group(locs, GroupSettings(link="precision"), attach_columns=False)
     _, box = group(locs, GroupSettings(), attach_columns=False)
     assert np.array_equal(ids, box)
+
+
+def test_a_track_id_stays_a_whole_number_when_a_blink_merges_two_tracks():
+    # one blink of two localizations from tracks 1 and 2 passing close, as a
+    # file brings them (no recipe): the id is one of theirs, an integer
+    big = 2 ** 24 + 1                  # past what float32 holds exactly
+    locs = Localizations({"x_nm": np.array([0.0, 5.0]), "y_nm": np.zeros(2),
+                          "frame": np.array([0, 1]), "xy_err_nm": np.full(2, 5.0),
+                          "photons": np.full(2, 500.0),
+                          "track_id": np.array([big, big + 1]),
+                          "track_length": np.array([30, 12])}, {})
+    merged = combine(locs, np.array([1, 1]))
+    assert merged["track_id"].dtype.kind == "i"
+    assert merged["track_id"].tolist() == [big + 1]
+    assert merged["track_length"].tolist() == [30]
+    assert COMBINE_MODES["track_id"] == "max"
+
+
+def test_link_tracks_output_columns_stay_whole_numbers_when_merged():
+    from smappy.group import id_columns
+    locs = Localizations({"x_nm": np.zeros(2), "y_nm": np.zeros(2),
+                          "linked_id": np.array([3, 4]), "linked_length": np.array([5, 6])},
+                         {"track_columns": ["linked_id"]})
+    assert id_columns(locs) == {"linked_id": "max", "linked_length": "max"}

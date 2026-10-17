@@ -44,6 +44,7 @@ from typing import Optional
 import numpy as np
 
 from . import Context, FormState, Plot, Plugin, Result, Stopped, param, register
+from ..group import TRACK_COLUMNS_KEY, length_column
 from ..locs import Localizations
 
 # tracks drawn in the figure at most: more is a tangle and seconds to draw
@@ -73,14 +74,10 @@ class LinkTracksSettings:
                              "with _length for _id")
 
 
-# the columns Link tracks wrote, so that it overwrites them and nothing else
-WRITTEN = "track_columns"
-
-
-def length_column(column: str) -> str:
-    """Where a track id column's lengths go: ``track_id`` -> ``track_length``,
-    ``track_id_strict`` -> ``track_id_strict_length``."""
-    return column[:-3] + "_length" if column.endswith("_id") else column + "_length"
+# the columns Link tracks wrote, so that it overwrites them and nothing else,
+# and merging blinks keeps them whole numbers (`group.id_columns`); with the
+# rule their lengths are named by
+WRITTEN = TRACK_COLUMNS_KEY
 
 
 def check_output(locs, column: str) -> str:

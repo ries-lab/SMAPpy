@@ -129,10 +129,41 @@ COMBINE_MODES: Dict[str, str] = {
     # close -- the tracks render mode then joined it to that track, across
     # the field
     "track_id_true": "min", "state_true": "min",
+    # Link tracks' ids, for the same reason: a mean of two tracks' ids, where
+    # a blink merged two particles passing close, is a third track's id or
+    # none, and an ROI of one track then lost the blink.  "max", the rule
+    # Link tracks gives the recipes it writes them as (`link_tracks.py`), so
+    # a track_id read from a file merges as one linked here does
+    "track_id": "max", "track_length": "max",
 }
 
 # Ids: integers after merging too, so they compare and draw as ids
-INTEGER_COLUMNS = ("tid", "track_id_true", "state_true")
+INTEGER_COLUMNS = ("tid", "track_id_true", "state_true", "track_id", "track_length")
+
+# Where Link tracks lists the id columns it wrote under another name than
+# `track_id` (its *output column*, `plugins/link_tracks.py`)
+TRACK_COLUMNS_KEY = "track_columns"
+
+
+def length_column(column: str) -> str:
+    """Where a track id column's lengths go: ``track_id`` -> ``track_length``,
+    ``track_id_strict`` -> ``track_id_strict_length``."""
+    return column[:-3] + "_length" if column.endswith("_id") else column + "_length"
+
+
+def id_columns(locs) -> Dict[str, str]:
+    """``{column: mode}`` for the columns of ``locs`` that are ids or counts
+    and stay whole numbers when blinks merge: `INTEGER_COLUMNS`, and the
+    track ids Link tracks wrote under a name of its choosing with their
+    lengths (`length_column`)."""
+    out = {n: COMBINE_MODES[n] for n in INTEGER_COLUMNS if n in locs}
+    for column in locs.metadata.get(TRACK_COLUMNS_KEY, ()) or ():
+        if column in locs:
+            out[column] = "max"
+        length = length_column(column)
+        if length in locs:
+            out[length] = "max"
+    return out
 
 # Columns that have no meaningful group value; see the module docstring.
 DROP_ON_GROUPING = ("logl",)
@@ -532,9 +563,11 @@ def combine(locs: Localizations, group_index: np.ndarray,
         column = weight_column(name)
         return weights[column], sums[column]
 
+    ids = id_columns(locs)
+
     def reduce_column(name: str) -> np.ndarray:
         values = locs[name]
-        mode = _mode(name)
+        mode = ids.get(name) or _mode(name)
         if np.asarray(values).dtype.kind == "f" and np.isnan(values).any():
             return reduce_finite(np.asarray(values, np.float64), mode, name)
         if mode == "mean":
@@ -590,15 +623,18 @@ def combine(locs: Localizations, group_index: np.ndarray,
     for i, name in enumerate(names):
         if progress is not None:
             progress(f"combine ({i + 1}/{len(names)})", i / len(names))
-        columns[name] = reduce_column(name).astype(np.float32)
+        if name in ids:
+            # straight to integers, never through float32, which holds ids
+            # only up to 2^24; a blink with no value is in no track (0)
+            v = reduce_column(name)
+            columns[name] = np.where(np.isfinite(v), v, 0).astype(np.int64)
+        else:
+            columns[name] = reduce_column(name).astype(np.float32)
 
     for name in ("frame", "iterations"):
         if name in columns:
             columns[name] = columns[name].astype(np.int64 if name == "frame"
                                                  else np.int32)
-    for name in INTEGER_COLUMNS:
-        if name in columns:
-            columns[name] = columns[name].astype(np.int64)
     for name in lateral:
         columns[name] = xy_err(columns[name.replace("xy_", "x_")],
                                columns[name.replace("xy_", "y_")])
@@ -634,7 +670,11 @@ def combine(locs: Localizations, group_index: np.ndarray,
         else:
             reduced = accumulate(values, ACCUMULATE[rule])
         reduced = np.where(counted > 0, reduced, np.nan)
-        columns[recipe["field"]] = np.asarray(reduced, np.float32)
+        if recipe["field"] in ids:          # Link tracks' ids: whole numbers
+            columns[recipe["field"]] = np.where(np.isfinite(reduced), reduced,
+                                                0).astype(np.int64)
+        else:
+            columns[recipe["field"]] = np.asarray(reduced, np.float32)
 
     metadata = dict(locs.metadata)
     metadata["grouped"] = True
