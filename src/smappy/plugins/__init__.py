@@ -20,16 +20,14 @@ from ..params import _META, ParamInfo, param  # noqa: F401  (re-exported)
 from .discovery import Diagnostic, PluginRef, scan
 
 def settings_hints(settings_cls: type) -> Dict[str, Any]:
-    """`typing.get_type_hints`, with the one failure a plugin author meets
-    explained: under ``from __future__ import annotations``, Python 3.9
-    cannot evaluate ``X | None``, and a form built from guesses at the text
-    would be wrong in ways nobody sees."""
+    """`typing.get_type_hints`, naming the settings class when its annotations
+    cannot be evaluated: a form built from guesses at the text would be wrong
+    in ways nobody sees, and the bare error does not say whose they are."""
     try:
         return typing.get_type_hints(settings_cls)
     except TypeError as exc:
         raise TypeError(f"{settings_cls.__name__}: its annotations cannot be "
-                        f"evaluated ({exc}); on Python 3.9 write Optional[X] "
-                        "rather than X | None") from exc
+                        f"evaluated ({exc})") from exc
 
 
 def _unwrap_optional(tp) -> Tuple[Any, bool]:
