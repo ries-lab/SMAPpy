@@ -71,6 +71,15 @@ def test_the_extension_draws_what_the_reference_draws():
         assert np.allclose(fast.color, slow.color, atol=1e-4)
 
 
+def test_an_extension_built_before_the_tracks_mode_still_draws_tracks(monkeypatch):
+    import types
+    from smappy import render
+    monkeypatch.setattr(render, "_render", types.SimpleNamespace())
+    fov = FieldOfView(0, 0, 1.0, 100, 100)
+    image = render_segments([10.0], [50.5], [90.0], [50.5], fov).weight
+    assert image[50, 20:80].min() == pytest.approx(1.0)
+
+
 def test_a_wider_line_weighs_more_and_colour_follows_the_column():
     locs = tracks_table([(5, 15), (35, 15)], [1, 1], [0, 10])
     fov = FieldOfView(0, 0, 1.0, 40, 30)

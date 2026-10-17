@@ -972,7 +972,8 @@ def render_segments(xa, ya, xb, yb, fov: FieldOfView, width: float = 1.0,
          else np.ascontiguousarray(weights, np.float32).reshape(-1))
     c = (np.zeros((0, 3), np.float32) if colors is None
          else np.ascontiguousarray(colors, np.float32).reshape(-1, 3))
-    if use_extension and _render is not None:
+    # an extension built before the tracks mode lacks the kernel: draw, slowly
+    if use_extension and hasattr(_render, "render_segments"):
         weight, color = _render.render_segments(xa, ya, xb, yb, w, c, fov.x0, fov.y0,
                                                 fov.pixelsize, fov.nx, fov.ny,
                                                 float(width), n_threads)
