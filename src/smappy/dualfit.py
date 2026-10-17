@@ -158,6 +158,35 @@ def secondary_to_reference(x: np.ndarray, y: np.ndarray,
     return calibration.to_reference(np.c_[x + ox, y + oy]) - (ox, oy)
 
 
+def region_counterparts(shapes, calibration: DualColorCalibration,
+                        origin: Tuple[float, float] = (0.0, 0.0)) -> list:
+    """Each shape of a fit region drawn in one half, mapped into the other.
+
+    A molecule is seen in both halves, and its two peaks are found apart and
+    paired afterwards (`combine_peaks`), so a region drawn on one half alone
+    would keep the peaks of that half and leave the other's to be fitted,
+    or not, on their own: an excluded bead still fitted from its partner,
+    the dim channel's lone peaks lost from an included cell.  With its
+    counterpart beside it, a shape means the same area of the sample in both.
+    A shape is in the half its centre is in, and is carried through the
+    registration point by point -- for a splitter, nearly a translation, so
+    a polygon stays one.
+    """
+    out = []
+    ox, oy = origin
+    for shape in shapes or ():
+        points = np.asarray(shape.get("points") or [], float)
+        if len(points) < 3:
+            continue
+        chip = points + (ox, oy)
+        centre = chip.mean(axis=0)
+        in_reference = bool(which_channel(centre[:1], centre[1:], calibration.geometry)[0])
+        mapped = (calibration.to_secondary(chip) if in_reference
+                  else calibration.to_reference(chip)) - (ox, oy)
+        out.append({**shape, "points": [[float(x), float(y)] for x, y in mapped]})
+    return out
+
+
 # ------------------------------------------------------------------ combining
 def combine_peaks(candidates: Candidates, calibration: DualColorCalibration,
                   image_shape: Tuple[int, int], roisize: int,

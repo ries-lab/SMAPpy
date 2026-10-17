@@ -41,6 +41,7 @@ ROWS = (("conversion", "conversion", "e-/ADU"),
         ("pixelsize_um", "pixel size", "µm"),
         ("em_on", "EM gain on", ""),
         ("emgain", "EM gain", ""),
+        ("read_noise_e", "read noise", "e-"),
         ("exposure_ms", "exposure", "ms"),
         ("frame_time_ms", "frame time", "ms"),
         ("roi", "camera ROI", "px"))
@@ -50,7 +51,10 @@ SOURCES = (("fixed", "fixed"), ("tag", "from a tag"),
 
 READS = (("number", "a number"), ("numbers", "numbers"), ("boolean", "yes / no"),
          ("positive", "above zero"), ("equals", "equals"),
-         ("not_equals", "is not"), ("text", "text"))
+         ("not_equals", "is not"), ("map", "per value"), ("text", "text"))
+
+#: how a ``map`` reading is typed: what the tag reads, a colon, the value
+MAP_HINT = "In: 0.127 0.116; Out: 0.127"
 
 NEW = "a new camera, from this file"
 
@@ -91,12 +95,18 @@ class _Row:
 
     def shown(self) -> None:
         kind = self.kind
-        self.value.setVisible(kind in ("fixed", "state"))
-        self.value.setPlaceholderText("this file's mode" if kind == "state" else "value")
+        read = self.read.currentData()
+        # a value read from a tag has a default, for a file without the tag
+        self.value.setVisible(kind in ("fixed", "state")
+                              or (kind == "tag" and read == "map"))
+        self.value.setPlaceholderText("this file's mode" if kind == "state" else
+                                      "default" if kind == "tag" else "value")
         self.tag.setVisible(kind == "tag")
         self.read.setVisible(kind == "tag")
         self.argument.setVisible(kind == "tag"
-                                 and self.read.currentData() in ("equals", "not_equals"))
+                                 and read in ("equals", "not_equals", "map"))
+        self.argument.setPlaceholderText(MAP_HINT if read == "map" else "compared with")
+        self.argument.setMaximumWidth(16777215 if read == "map" else 110)
 
     def set(self, parameter: Optional[Parameter], prefix: str, value: Any) -> None:
         """Show `parameter`; `value` is this file's mode's, for a modal one."""
@@ -109,12 +119,16 @@ class _Row:
         else:
             kind = "fixed"
             value = parameter.fixed
+        if kind == "tag":
+            value = parameter.fixed                     # the default
         self.source.setCurrentIndex(self.source.findData(kind))
         self.value.setText(_text(value))
         if parameter is not None and parameter.tag:
             self.tag.setCurrentText(expand(parameter.tag, prefix))
             self.read.setCurrentIndex(max(self.read.findData(parameter.read), 0))
-            self.argument.setText("" if parameter.argument is None
+            self.argument.setText("" if parameter.argument is None else
+                                  _map_text(parameter.argument)
+                                  if isinstance(parameter.argument, dict)
                                   else str(parameter.argument))
         else:
             self.tag.setCurrentText("")
@@ -128,15 +142,21 @@ class _Row:
         if kind == "state":
             return Parameter(state=True)
         if kind == "tag":
-            compares = self.read.currentData() in ("equals", "not_equals")
-            argument = self.argument.text().strip() if compares else None
+            read = self.read.currentData()
+            argument = (self.argument.text().strip() if read in ("equals", "not_equals")
+                        else None)
+            default = None
+            if read == "map":
+                argument = self._map()
+                default = self.number()
             return Parameter(tag=generalise(self.tag.currentText().strip(), prefix),
-                             read=self.read.currentData(), argument=argument or None)
+                             read=read, argument=argument or None, fixed=default)
         return Parameter(fixed=self.number())
 
-    def number(self) -> Any:
-        """The value field, read as this parameter needs it; None if empty."""
-        text = self.value.text().strip()
+    def number(self, text: Optional[str] = None) -> Any:
+        """The value field (or ``text``), read as this parameter needs it;
+        None if empty."""
+        text = (self.value.text() if text is None else text).strip()
         if not text:
             return None
         if self.name == "em_on":
@@ -151,6 +171,24 @@ class _Row:
         return camera_db.read_number(text)
 
 
+    def _map(self) -> Dict[str, Any]:
+        """``In: 0.127 0.116; Out: 0.127`` -> {"In": [0.127, 0.116], "Out": 0.127}.
+
+        Split at the last colon, so a tag that reads ``Label: In`` still
+        maps; an entry without a value is left out."""
+        out: Dict[str, Any] = {}
+        for entry in self.argument.text().split(";"):
+            key, colon, value = entry.rpartition(":")
+            found = self.number(value) if colon else None
+            if key.strip() and found is not None:
+                out[key.strip()] = found
+        return out
+
+
+def _map_text(table: Dict[str, Any]) -> str:
+    return "; ".join(f"{key}: {_text(value)}" for key, value in table.items())
+
+
 _VALUE_HELP = {
     "conversion": "photoelectrons per count, from the data sheet or a "
                   "calibration of this readout mode",
@@ -158,6 +196,8 @@ _VALUE_HELP = {
     "pixelsize_um": "the pixel's size in the sample, after the magnification; "
                     "two numbers for x and y if they differ",
     "em_on": "yes or no",
+    "read_noise_e": "rms per pixel, in electrons: about 1 for an sCMOS; "
+                    "not set, 1 -- and with EM gain on it is not used",
     "roi": "x, y, width, height on the chip",
     "frame_time_ms": "from one frame to the next: the exposure plus the "
                      "camera's dead time; not set, the exposure",

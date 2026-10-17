@@ -2,7 +2,7 @@
 title: Render tab
 summary: The layers of the picture -- which localizations each one shows, and how it is drawn.
 widget: smappy.gui.render_tab.RenderTab
-covers: [smappy.session.Layer, smappy.session.default_bounds, smappy.filter.LocFilter, smappy.group.group, smappy.group.connect, smappy.group.combine, smappy.render.render_locs, smappy.render.render_sigmas, smappy.render.psf_sigmas, smappy.render.camera_pixelsize_nm, smappy.render.camera_grid, smappy.render.SigmaSettings, smappy.render.to_rgb, smappy.render.RenderAxes, smappy.render.render_tracks, smappy.render.track_segments, smappy.render.render_segments, smappy.render.render_voronoi, smappy.render.VoronoiCells, smappy.render.voronoi_cells_for, smappy.lut.on_white, smappy.lut.invert_sum, smappy.lut.complement, smappy.images.load_images, smappy.images.assign_axes, smappy.images.ImageData.projection, smappy.layer_state.focus_z]
+covers: [smappy.session.Layer, smappy.session.default_bounds, smappy.filter.LocFilter, smappy.group.group, smappy.group.connect, smappy.group.combine, smappy.render.render_locs, smappy.render.render_sigmas, smappy.render.psf_sigmas, smappy.render.camera_pixelsize_nm, smappy.render.camera_grid, smappy.render.SigmaSettings, smappy.render.to_rgb, smappy.render.absolute_imax, smappy.render.DisplaySettings, smappy.render.RenderAxes, smappy.render.render_tracks, smappy.render.track_segments, smappy.render.render_segments, smappy.render.render_voronoi, smappy.render.VoronoiCells, smappy.render.voronoi_cells_for, smappy.lut.on_white, smappy.lut.invert_sum, smappy.lut.complement, smappy.images.load_images, smappy.images.assign_axes, smappy.images.ImageData.projection, smappy.layer_state.focus_z]
 ---
 
 ## What it does
@@ -234,7 +234,9 @@ pixels -- a long blink, a fiducial bead -- and a great many faint ones, so its
 brightest pixel is a useless scale.  *contrast* instead saturates a fixed
 fraction of the pixels: at contrast 3 the brightest one in a thousand are
 white, at 2 one in a hundred (brighter), at 4 one in ten thousand (darker).
-*gamma* below 1 lifts the faint parts further.  The *LUT* (look-up table,
+Switched from *quantile* to *absolute*, full scale is instead a set density,
+in localizations per µm², which keeps a structure equally bright as one
+zooms and from one dataset to the next of the same kind.  *gamma* below 1 lifts the faint parts further.  The *LUT* (look-up table,
 also called a colour map) is the colour scale brightness is shown in.  Instead of brightness alone, the
 colour can also encode a column (*colour by*, e.g. z), with the brightness
 still showing density.
@@ -334,11 +336,18 @@ median PSF width.
 **The *tracks* mode.**  The rows the layer's filter keeps with an id above
 0 are sorted by id and then by `frame` (by `time_s` where the table has
 it); each two consecutive ones of a track are a segment.  A pixel takes
-from a segment the share of it a line of width $w$ pixels covers,
-approximated by the distance $d$ of the pixel's centre from the segment:
-$\min(1, \max(0, w/2 + 1/2 - d))$, so the line is antialiased and its
-ends are round.  Two segments of a track meet at a shared localization, so
-over a pixel or so a joint is up to twice as bright.  A segment weighs one
+from a segment the share of it a line of width $w$ pixels covers: across
+the line, from the distance $d$ of the pixel's centre from it,
+$\min(1, \max(0, w/2 + 1/2 - d))$, so the line is antialiased; along it,
+the part of a stretch one pixel long about the centre that lies on the
+segment.  The ends are square and soft, so the segments of a track tile it:
+a straight line is one along its length whether it is one segment or a
+thousand.  Zoomed out, a track's steps are shorter than a pixel and each adds
+only its length.  (With round ends, as before 2026-10, each step added a
+whole line, a slow track piled up into a blob hundreds of times brighter than
+a line, and the quantile contrast, set by those blobs, dimmed every other
+track.)  A segment of no length -- a track along the line of sight in the 3D
+view -- is a round dot.  A segment weighs one
 (or the mean of its ends' weight column) and, coloured by a column, takes
 the mean of its two ends' values.  The view culls whole tracks by their
 bounding boxes rather than localizations by position, since a segment
@@ -394,7 +403,26 @@ that is, $10^{-c}$ of the pixels are saturated (if that quantile is zero, as
 in a very sparse image, the maximum is used).  The displayed value is
 $v = \min(I / I_{\mathrm{max}}, 1)^{\gamma}$ with $\gamma$ the *gamma*, and
 $v$ picks one of the LUT's 256 colours.  Contrast and gamma change only this
-last step, so moving them does not render again.
+last step, so moving them does not render again.  The quantile is SMAP's,
+over every pixel of the view, empty ones included.
+
+**The absolute scale.**  SMAP's other choice, an absolute $I_{\mathrm{max}}$,
+is a number of localizations per pixel, so it holds for one zoom only: a
+pixel twice as wide holds four times as many, and the picture saturates.
+Here the *absolute* maximum $M$ is a density, in localizations per µm², and
+for pixels $p$ nm wide
+
+$$I_{\mathrm{max}} = M \, \frac{p^2}{10^6},$$
+
+so a structure keeps its brightness as one zooms -- except where the width it
+is drawn with changes with the pixel: *Gaussian (precision)* never draws a
+spot narrower than 0.7 pixels, and a histogram's few localizations per pixel
+when zoomed in are each bright on their own.  *Voronoi density* is a density
+already and is compared with $M$ as it is, and *DL* counts over the camera's
+pixels.  A *tracks* line is one wherever it passes, so there $M$ is the
+number of lines over one pixel, and for an image layer one of its own
+values.  Switching from *quantile* to *absolute* sets $M$ to the value that
+shows the view as it is, so the picture does not jump.
 
 **Colour by a column.**  Each localization gets the LUT colour of its value
 $u$ in the *colour range* $[u_{\mathrm{lo}}, u_{\mathrm{hi}}]$ (values outside
@@ -687,10 +715,13 @@ white), *grey* so that a layer over its inverse goes grey where they overlap.
 For black on white, pick the gray_inverted LUT or *white background* instead.
 
 ### contrast
-3 is a good start.  Too low, and the structure saturates into white bands;
-too high, and all but the brightest spots disappear.  The same number
-transfers between datasets, because it is a fraction of pixels, not a
-brightness.
+*quantile*: 3 is a good start.  Too low, and the structure saturates into
+white bands; too high, and all but the brightest spots disappear.  The same
+number transfers between datasets, because it is a fraction of pixels, not
+a brightness.  *absolute*: for comparing the brightness of several datasets
+or regions, or zooming without the picture rescaling itself.  Switch to it
+where the picture looks right, and the maximum starts there; a dense
+structure is typically thousands of localizations per µm².
 
 ### merge blinks
 Draws one localization per blink; on by default.  The table is merged the

@@ -180,3 +180,17 @@ def test_choosing_tracks_unticks_merge_blinks_once():
     tab.grouped.setChecked(True)
     tab.line_width.setValue(2.0)
     assert session.layers[0].grouped
+
+
+def test_a_line_is_as_bright_however_finely_it_is_cut_into_segments():
+    # with round ends every short step added a whole line: zoomed out, a
+    # slow track was a blob that set the quantile and dimmed every other track
+    fov = FieldOfView(0, 0, 10.0, 100, 100)
+    for n in (1, 2, 10, 100, 1000):
+        xs = np.linspace(100, 900, n + 1)
+        ys = 503.0 + np.linspace(0, 30, n + 1)
+        for fast in (True, False):
+            image = render_segments(xs[:-1], ys[:-1], xs[1:], ys[1:], fov, 1.0,
+                                    use_extension=fast).weight
+            across = image[:, 20:80].sum(axis=0)
+            assert across == pytest.approx(1.0, abs=0.01)

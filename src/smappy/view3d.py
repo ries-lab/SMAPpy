@@ -686,7 +686,7 @@ def composite_depth(whole: RenderedImage, slices: int, render_slice, display: Di
     (largest depth, towards the viewer).  Each slice hides what is already
     there behind it by ``opacity`` x its coverage on the scale the plain image
     is shown at, and adds itself on top."""
-    _, imax = normalize(whole.weight, display.imax, display.contrast)
+    _, imax = normalize(whole.weight, display.pixel_max(whole), display.contrast)
     if imax <= 0:
         return whole
     fov = whole.fov
@@ -987,6 +987,8 @@ def _plane_imax(plane: np.ndarray, display: DisplaySettings) -> Optional[float]:
     the volume are shown on one scale."""
     if display.imax is not None:
         return display.imax
+    if display.absolute:
+        return display.maximum        # an image's values do not count over an area
     key = (id(plane), display.contrast)
     hit = _imax_cache.get(key)
     if hit is not None and hit[1] is plane:

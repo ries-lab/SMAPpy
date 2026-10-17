@@ -59,10 +59,6 @@ window, or from *Help → Plugin documentation*. The same pages are online at
 [docs/](docs/) holds design notes on the plugin system and individual
 algorithms. [NOTES.md](NOTES.md) records design decisions and measurements.
 
-## Tests
-
-    SMAPPY_TEST_CAL=/path/to/_3dcal.mat python -m pytest tests/
-
 ## License
 
 SMAPpy is released under the BSD 3-Clause license; see [LICENSE](LICENSE) and

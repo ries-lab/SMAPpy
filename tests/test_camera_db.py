@@ -235,3 +235,45 @@ def test_nm_coordinates_use_each_axis_pixel_size():
 def test_the_shipped_camera_with_two_pixel_sizes_keeps_both():
     camera = database(reload=True).get("M5 Fusion BT")
     assert camera.parameters["pixelsize_um"].fixed == [0.102, 0.103]
+
+
+# ------------------------------------------------------- per value of a tag
+
+def a_lens_camera() -> Camera:
+    # the pixel size follows a cylindrical lens, not the readout mode
+    return a_camera(parameters={**a_camera().parameters,
+                                "pixelsize_um": Parameter(
+                                    tag="Lens-Label", read="map", fixed=0.127,
+                                    argument={"In": [0.127, 0.116], "Out": 0.127})})
+
+
+def test_a_pixel_size_can_follow_a_lens_in_the_light_path():
+    camera = a_lens_camera()
+    lens_in = camera.resolve(a_file(**{"Lens-Label": "In"}))
+    assert lens_in.values["pixelsize_um"] == [0.127, 0.116]
+    assert str(lens_in.sources["pixelsize_um"]) == "metadata: Lens-Label = In"
+    assert lens_in.values["conversion"] == 6.7          # the readout mode, untouched
+    assert camera.resolve(a_file(**{"Lens-Label": "Out"})).values["pixelsize_um"] == 0.127
+
+
+def test_a_file_without_the_tag_takes_the_default_and_says_so():
+    camera = a_lens_camera()
+    for extra in ({}, {"Lens-Label": "Half"}):
+        resolution = camera.resolve(a_file(**extra))
+        assert resolution.values["pixelsize_um"] == 0.127
+        assert str(resolution.sources["pixelsize_um"]).startswith("fixed: the default")
+
+
+def test_a_per_value_parameter_round_trips_through_json():
+    camera = a_lens_camera()
+    again = Camera.from_dict(json.loads(json.dumps(camera.to_dict())))
+    assert again.parameters["pixelsize_um"] == camera.parameters["pixelsize_um"]
+
+
+def test_the_read_noise_in_the_database_reaches_the_fit():
+    camera = a_camera()
+    camera.parameters["read_noise_e"] = Parameter(fixed=1.6)
+    metadata = camera.resolve(a_file(**{"Cam-Port": "Normal"})).camera_metadata()
+    assert metadata.read_noise_e == 1.6
+    assert metadata.readout_variance == pytest.approx(1.6 ** 2)
+    assert CameraMetadata().readout_variance == 1.0             # not set: 1 e-

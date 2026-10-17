@@ -2,7 +2,7 @@
 title: Camera editor
 summary: Adds the camera of the file being fitted to your camera database -- or gives a known camera a readout mode it lacked -- so that the next file it takes is converted to photons without typing anything.
 widget: smappy.gui.camera_editor.CameraEditor
-covers: [smappy.camera_db.draft, smappy.camera_db.with_mode, smappy.camera_db.problems, smappy.camera_db.save_camera, smappy.camera_db.CameraDatabase.joined_with, smappy.camera_db.Camera.resolve, smappy.plugins.fit._FitPlugin._notice, smappy.gui.camera_editor.CameraEditor]
+covers: [smappy.camera_db.draft, smappy.camera_db.read_map, smappy.camera_db.with_mode, smappy.camera_db.problems, smappy.camera_db.save_camera, smappy.camera_db.CameraDatabase.joined_with, smappy.camera_db.Camera.resolve, smappy.plugins.fit._FitPlugin._notice, smappy.gui.camera_editor.CameraEditor]
 ---
 
 ## What it does
@@ -67,7 +67,8 @@ calibrated `PixelSizeUm` becomes the fixed pixel size.
 
 **2. Editing.**  Each parameter comes from one of four places: *fixed* (the
 same in every file), *from a tag* (read from the file, as a number, a list of
-numbers, yes or no, or compared with a value), *per readout mode* (a number
+numbers, yes or no, compared with a value, or *per value*: a table from what
+the tag reads to the value, with a default), *per readout mode* (a number
 for this file's mode), or *not set*.  The readout mode is what the ticked
 tags read in this file.
 
@@ -148,7 +149,21 @@ readout mode.
 
 ### pixel size (µm)
 The size of a camera pixel in the sample: the physical pixel divided by the
-total magnification.
+total magnification.  Where it depends on something in the light path rather
+than on the camera, read it *from a tag*, *per value*: the tag of the device
+that switches it, and what each of its states means, typed as
+`In: 0.127 0.116; Out: 0.127`.  On the Ries lab's M2 the cylindrical lens of
+the astigmatic 3D path stretches the image in one direction: 127 x 116 nm
+with the lens in, 127 nm square without.  The value beside the table is the
+default, for a file that does not record the tag (one taken before the
+device was in Micro-Manager) or reads a state the table does not list.
+
+### read noise (e-)
+The camera's read noise, rms per pixel, in electrons.  The fit adds its
+square to the Poisson noise of every pixel, which also keeps a pixel with
+almost no signal from dominating the fit.  A modern sCMOS reads 0.7 to
+1.4 e-, a CCD several; *not set* is 1.  With EM gain on it is not used: the
+gain makes it a fraction of an electron.
 
 ### frame time (ms)
 The time from one frame to the next -- the

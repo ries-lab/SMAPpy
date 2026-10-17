@@ -345,14 +345,15 @@ def test_a_track_along_z_is_a_point_from_above_and_a_vertical_line_from_the_fron
     assert (top.weight > 0).sum() <= 4                 # end on: one pixel's corner
     _, front = render_tracks_3d(locs, keep, Projection(elevation=90), None, fov,
                                 settings, display)
-    rows, cols = np.nonzero(front.weight > 0.5)
+    # on the boundary between two columns: half a line in each
+    rows, cols = np.nonzero(front.weight > 0.4)
     assert set(cols) <= {24, 25}
-    assert rows.min() == 6 and rows.max() == 43        # 400 nm tall, at 10 nm a pixel
+    assert rows.min() == 5 and rows.max() == 44        # 400 nm tall, at 10 nm a pixel
     # a slab 200 nm deep cuts it to the segments with both ends inside
     _, cut = render_tracks_3d(locs, keep, Projection(elevation=90),
                               Slab([0, 0, 0], [1000, 1000, 200]), fov, settings, display)
-    rows, _ = np.nonzero(cut.weight > 0.5)
-    assert rows.min() == 16 and rows.max() == 33
+    rows, _ = np.nonzero(cut.weight > 0.4)
+    assert rows.min() == 15 and rows.max() == 34
 
 
 def test_a_tracks_layer_is_drawn_as_lines_by_render_3d():

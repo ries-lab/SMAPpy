@@ -40,7 +40,7 @@ import hashlib
 import math
 import threading
 from collections import OrderedDict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Optional, Tuple, Union
 
 import numpy as np
@@ -154,6 +154,14 @@ class RenderedImage:
     weight: np.ndarray                      # (ny, nx)
     color: Optional[np.ndarray] = None      # (ny, nx, 3), colour-weighted
     n_locs: int = 0
+    # the area a pixel's value is counted over, in squared data units: what
+    # makes an absolute maximum per um^2 (`DisplaySettings.maximum`) the same
+    # brightness at every zoom.  None is the pixel's own area -- a histogram
+    # or a Gaussian render counts localizations per pixel, so a pixel twice
+    # as wide holds four times as many.  `PER_UM2` is a value that does not
+    # grow with the pixel: a Voronoi density (already per um^2), a track's
+    # line (one wherever it passes) or a camera image.
+    count_area: Optional[float] = None
 
     @property
     def is_colored(self) -> bool:
@@ -200,6 +208,10 @@ def render_histogram(x, y, fov: FieldOfView, weights=None, colors=None
 DEFAULT_CONTRAST = 3.0
 
 
+#: squared data units in a um^2 (nm axes): the area an absolute maximum is per
+PER_UM2 = 1e6
+
+
 def saturated_fraction(contrast: float) -> float:
     """The fraction of pixels driven to full scale: 10^-p."""
     return 10.0 ** -float(contrast)
@@ -220,6 +232,23 @@ def normalize(image: np.ndarray, imax: Optional[float] = None,
     if imax <= 0:
         return np.zeros_like(image), 0.0
     return np.clip(image / imax, 0.0, 1.0), imax
+
+
+def absolute_imax(rendered: RenderedImage, maximum: float) -> float:
+    """The pixel value an absolute maximum per um^2 comes to on this render.
+
+    SMAP's absolute Imax is in localizations per pixel, so it is tied to one
+    zoom: a pixel twice as wide holds four times the localizations and the
+    picture saturates.  Given as a density instead, it is scaled here by the
+    area a pixel's value counts over (`RenderedImage.count_area`), and a
+    structure keeps its brightness as one zooms -- save where the rendering
+    width itself changes with the pixel (the precision mode's floor of 0.7
+    pixels).
+    """
+    area = rendered.count_area
+    if area is None:
+        area = rendered.fov.pixelsize ** 2
+    return float(maximum) * area / PER_UM2
 
 
 def to_rgb(rendered: RenderedImage, lut: luts.LUT = "hot", invert=False,
@@ -608,7 +637,15 @@ class DisplaySettings:
     # not choose, means `lut.DEFAULT_INVERSION`.
     invert: Union[bool, str] = False
     contrast: float = DEFAULT_CONTRAST   # saturate 10^-contrast of the pixels
-    imax: Optional[float] = None         # an absolute scale, overriding contrast
+    # SMAP's toggle between the quantile and an absolute scale: with
+    # ``absolute`` the picture is full scale at ``maximum`` localizations per
+    # um^2, the same at every zoom (`absolute_imax`); ``contrast`` is kept
+    # for when it is switched back
+    absolute: bool = False
+    maximum: float = 1000.0
+    # the value that is full scale, in the planes' own units, overriding both:
+    # what the 3D view sets to show every slice on one scale
+    imax: Optional[float] = None
     gamma: float = 1.0
     # the picture on white paper, whatever the LUT.  A property of the picture
     # rather than of one layer -- what sums several of them turns the sum over
@@ -619,8 +656,26 @@ class DisplaySettings:
     def apply(self, rendered: RenderedImage,
               white_background: Optional[bool] = None) -> np.ndarray:
         white = self.white_background if white_background is None else white_background
-        return to_rgb(rendered, self.lut, self.invert, self.imax, self.contrast,
-                      self.gamma, white)
+        return to_rgb(rendered, self.lut, self.invert, self.pixel_max(rendered),
+                      self.contrast, self.gamma, white)
+
+    def pixel_max(self, rendered: RenderedImage) -> Optional[float]:
+        """The value shown at full scale on this render, or None for the
+        quantile (`normalize`)."""
+        if self.imax is not None:
+            return self.imax
+        if self.absolute:
+            return absolute_imax(rendered, self.maximum)
+        return None
+
+    def as_absolute(self, rendered: RenderedImage) -> "DisplaySettings":
+        """These settings on the absolute scale, at the maximum that shows
+        ``rendered`` as they do now: SMAP's toggle, which starts the absolute
+        Imax at the one the quantile had found."""
+        _, imax = normalize(rendered.weight, self.pixel_max(rendered), self.contrast)
+        per_pixel = absolute_imax(rendered, 1.0)
+        maximum = imax / per_pixel if imax > 0 and per_pixel > 0 else self.maximum
+        return replace(self, absolute=True, maximum=float(maximum))
 
 
 def explicit_sigmas(locs: Localizations, settings: "RenderSettings") -> Tuple[float, float]:
@@ -821,7 +876,9 @@ def resample_nearest(image: RenderedImage, fov: FieldOfView) -> RenderedImage:
     iy = np.clip(np.floor((ys - src.y0) / src.pixelsize).astype(np.int64), 0, src.ny - 1)
     weight = image.weight[np.ix_(iy, ix)]
     color = None if image.color is None else image.color[np.ix_(iy, ix)]
-    return RenderedImage(fov, weight, color, image.n_locs)
+    # counted over the source's pixels, however finely they are shown
+    area = image.count_area if image.count_area is not None else src.pixelsize ** 2
+    return RenderedImage(fov, weight, color, image.n_locs, count_area=area)
 
 
 def save_image(locs, path, pixelsize: float = 10.0,
@@ -930,7 +987,9 @@ def render_tracks(locs: Localizations, fov: FieldOfView, settings: "RenderSettin
                   n_threads: int = 0, use_extension: bool = True) -> RenderedImage:
     """Every track as antialiased lines ``settings.line_width`` pixels wide.
 
-    A segment weighs one (or the mean of its ends' ``weight_field``) and,
+    A line is one wherever it passes, at every zoom (`render_segments`), so
+    its pixels do not count over an area (`RenderedImage.count_area`): an
+    absolute maximum is lines over a pixel.  A segment weighs one (or the mean of its ends' ``weight_field``) and,
     coloured by a field, takes the mean of its ends' values: a track coloured
     by time changes colour along itself.
     """
@@ -966,7 +1025,21 @@ def render_segments(xa, ya, xb, yb, fov: FieldOfView, width: float = 1.0,
                     weights=None, colors=None, n_threads: int = 0,
                     use_extension: bool = True) -> RenderedImage:
     """Accumulate line segments from (xa, ya) to (xb, yb) into ``fov``,
-    ``width`` pixels wide, antialiased (``csrc/render.cpp``)."""
+    ``width`` pixels wide, antialiased (``csrc/render.cpp``).
+
+    A pixel takes from a segment its coverage across the line -- 1 within
+    ``width / 2 - 0.5`` of it, falling to 0 at ``width / 2 + 0.5`` -- times
+    how much of a pixel-long stretch about the pixel's centre, along the
+    segment, lies on the segment.  The ends are square and soft, so the
+    segments of a track tile it: a straight line is one along its length
+    however many segments it is cut into.  With round ends, as before
+    2026-10, every segment added a whole line over its ends, and zoomed out
+    -- a track's steps shorter than a pixel -- a slow track piled up into a
+    blob hundreds of times brighter than a line, the quantile contrast was
+    set by those blobs, and every other track went dim.  A segment of no
+    length -- a track along the line of sight, in a projection -- is a
+    round dot.
+    """
     xa, ya, xb, yb = (np.ascontiguousarray(v, np.float32) for v in (xa, ya, xb, yb))
     w = (np.ones(1, np.float32) if weights is None
          else np.ascontiguousarray(weights, np.float32).reshape(-1))
@@ -976,7 +1049,7 @@ def render_segments(xa, ya, xb, yb, fov: FieldOfView, width: float = 1.0,
         weight, color = _render.render_segments(xa, ya, xb, yb, w, c, fov.x0, fov.y0,
                                                 fov.pixelsize, fov.nx, fov.ny,
                                                 float(width), n_threads)
-        return RenderedImage(fov, weight, color, len(xa))
+        return RenderedImage(fov, weight, color, len(xa), count_area=PER_UM2)
     return _segments_numpy(xa, ya, xb, yb, fov, float(width), w, c)
 
 
@@ -997,15 +1070,22 @@ def _segments_numpy(xa, ya, xb, yb, fov, width, weights, colors) -> RenderedImag
             continue
         cc, rr = np.meshgrid(np.arange(c0, c1 + 1) + 0.5, np.arange(r0, r1 + 1) + 0.5)
         dx, dy = bx - ax, by - ay
-        len2 = dx * dx + dy * dy
-        t = np.clip(((cc - ax) * dx + (rr - ay) * dy) / len2, 0, 1) if len2 > 0 else 0.0
-        d = np.hypot(ax + t * dx - cc, ay + t * dy - rr)
-        cover = np.clip(reach - d, 0, 1) * (weights[0] if weights.size == 1 else weights[i])
+        length = np.hypot(dx, dy)
+        if length > 0:
+            along = ((cc - ax) * dx + (rr - ay) * dy) / length
+            across = np.abs((cc - ax) * dy - (rr - ay) * dx) / length
+            on = np.clip(np.minimum(along + 0.5, length) - np.maximum(along - 0.5, 0.0),
+                         0, 1)
+        else:                                   # along the line of sight: a dot
+            across, on = np.hypot(cc - ax, rr - ay), 1.0
+        cover = (np.clip(reach - across, 0, 1) * on
+                 * (weights[0] if weights.size == 1 else weights[i]))
         weight[r0:r1 + 1, c0:c1 + 1] += cover
         if color is not None:
             color[r0:r1 + 1, c0:c1 + 1] += cover[..., None] * colors[i]
     return RenderedImage(fov, weight.astype(np.float32),
-                         None if color is None else color.astype(np.float32), len(xa))
+                         None if color is None else color.astype(np.float32), len(xa),
+                         count_area=PER_UM2)
 
 
 # ------------------------------------------------------------------ voronoi
@@ -1178,4 +1258,4 @@ def render_voronoi(locs: Localizations, fov: FieldOfView, settings: "RenderSetti
     inside = ((x >= fov.x0) & (x < fov.x1) & (y >= fov.y0) & (y < fov.y1))
     return RenderedImage(fov, weight.astype(np.float32),
                          None if color is None else color.astype(np.float32),
-                         int(inside.sum()))
+                         int(inside.sum()), count_area=PER_UM2)

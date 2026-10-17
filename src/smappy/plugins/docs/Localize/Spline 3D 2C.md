@@ -1,6 +1,6 @@
 ---
-version: "7"
-covers: [smappy.psf.GlobalSplinePSF, smappy.dualfit.combine_peaks, smappy.dualfit.build_link, smappy.dualfit.cut_paired_rois, smappy.dualfit.paired_to_localizations, smappy.dualfit.DualChannelEngine, smappy.calibrate.dual.build_dual_calibration, smappy.calibrate.dual.fit_dual_transform, smappy.calibrate.core.positive_pair_models, smappy.calibrate.dual.load_dual_color_calibration, smappy.plugins.fit.DualSplineFit, smappy.plugins.fit.finish_localizations]
+version: "8"
+covers: [smappy.dualfit.region_counterparts, smappy.psf.GlobalSplinePSF, smappy.dualfit.combine_peaks, smappy.dualfit.build_link, smappy.dualfit.cut_paired_rois, smappy.dualfit.paired_to_localizations, smappy.dualfit.DualChannelEngine, smappy.calibrate.dual.build_dual_calibration, smappy.calibrate.dual.fit_dual_transform, smappy.calibrate.core.positive_pair_models, smappy.calibrate.dual.load_dual_color_calibration, smappy.plugins.fit.DualSplineFit, smappy.plugins.fit.finish_localizations]
 ---
 
 ## What it does
@@ -452,7 +452,13 @@ shapes away.  With shapes to fit in, only the candidates inside one of them
 are fitted; a candidate inside a shape left out never is.  The frame is
 still filtered whole, so a dynamic cutoff is set as without a region.  The
 shapes are in the frame's pixels and kept with the settings -- in the
-workspace, a chain or a batch they apply to every file -- and are drawn on the whole frame, both halves.
+workspace, a chain or a batch they apply to every file.  Draw on either
+half: a shape applies to both, because the two halves are one sample.  Each
+shape is carried through the registration into the other half, where the
+Preview draws it dotted, and both halves' peaks are kept or left out by it
+before they are paired -- so a bead left out on one half is not fitted from
+its partner on the other, and the dim channel's own peaks inside a cell are
+kept.  Before a registration is chosen, a shape acts on its own half only.
 
 ## Output
 
