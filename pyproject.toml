@@ -28,13 +28,18 @@ classifiers = [
 ]
 # Floors only, no caps: smappy has to install into an environment that already
 # pins these (microclaw asks for numpy>=1.26, scipy>=1.12, tifffile>=2024.1.1),
-# so anything tighter here would force a downgrade there.
+# so anything tighter here would force a downgrade there.  Each floor is the
+# lowest release the whole suite (--slow) passes with on Python 3.12, checked
+# with `uv pip install --resolution lowest-direct`: the compiled ones at their
+# first CPython 3.12 wheels, tifffile for imwrite's resolutionunit,
+# PySide6 6.6.1 for QTimer.singleShot(ms, context, callable), pyqtgraph
+# 0.13.3 for its LabelItem under PySide6 6.6.
 dependencies = [
-    "numpy>=1.22",
-    "scipy>=1.8",
-    "tifffile>=2022.5",
-    "h5py>=3.6",
-    "pyyaml>=5.4",      # camera configs: CameraMetadata.from_yaml
+    "numpy>=1.26",
+    "scipy>=1.11.2",
+    "tifffile>=2022.7.28",
+    "h5py>=3.10",
+    "pyyaml>=6.0.1",    # camera configs: CameraMetadata.from_yaml
     # The GUI is how smappy is used, so it installs by default: `pip install
     # smappy-smlm` has to be the whole story, and an extra is opt-in by
     # definition -- there is no "on unless excluded" in the metadata, and uv
@@ -50,9 +55,9 @@ dependencies = [
     # collector deleting the QScreen (`gui/collector.keep_screens`) and an
     # exception from matplotlib's queued redraw left pending in processEvents
     # (`gui/canvas.py`).  Tested on 6.8.3, 6.9.3 and 6.10.3.
-    "PySide6-Essentials>=6.6",
-    "pyqtgraph>=0.13",
-    "matplotlib>=3.4",  # the render LUTs, and the plugins' result plots
+    "PySide6-Essentials>=6.6.1",
+    "pyqtgraph>=0.13.3",
+    "matplotlib>=3.7.3",  # the render LUTs, and the plugins' result plots
     # the plugins' pages set their maths with it: TeX's layout from an
     # OpenType maths font, pure Python (~3.5 MB with the font).  Optional in
     # practice -- without it `smappy.docs` falls back on matplotlib's mathtext
@@ -72,18 +77,18 @@ Source = "https://github.com/ries-lab/SMAPpy"
 [project.optional-dependencies]
 # matplotlib is a base dependency now, so `drift` is satisfied by a plain
 # install; it stays because the docs name it.
-image = ["pillow>=9.0"]        # save_image, for a picture without a window
+image = ["pillow>=10.0"]       # save_image, for a picture without a window
 # Empty: imageio-ffmpeg is in `dependencies` above; kept so that
 # `smappy-smlm[movie]`, written down while it was an extra, still installs.
 movie = []
 # Drift correction itself needs nothing: COMET is vendored and its cost function
 # is compiled with the package.  This extra is only COMET's diagnostic plots,
 # which are all behind flags.
-drift = ["matplotlib>=3.4"]
+drift = ["matplotlib>=3.7.3"]
 # COMET's GPU backend is written in numba-CUDA, so numba is needed only to use
 # an NVIDIA GPU.  The CPU path is compiled either way and is what runs without
 # this: 1:17 for a 46k-frame dataset, 5 s at the grouped spline default.
-cuda = ["numba>=0.57"]
+cuda = ["numba>=0.59"]
 # Empty: the GUI is in `dependencies` above.  `smappy-smlm[gui]` is kept
 # working for anyone who wrote it down while it was an extra.
 gui = []
@@ -102,7 +107,7 @@ tutorial = ["playwright>=1.40", "piper-tts>=1.2"]
 clusters = ["hdbscan>=0.8.44"]
 # What the test suite needs beyond the package: `pip install -e .[test]`.
 # pytest-xdist is for the whole suite before a PR: `pytest tests --slow -n auto`.
-test = ["pytest>=7", "pytest-timeout>=2.1", "pytest-xdist>=3"]
+test = ["pytest>=8.4", "pytest-timeout>=2.1", "pytest-xdist>=3.2"]
 
 [tool.pytest.ini_options]
 # Every test has a limit, so a hung one fails with its name and a traceback
