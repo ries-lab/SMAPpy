@@ -160,3 +160,11 @@ skip = "pp* *-musllinux_*"
 # with a known emitter in it, so a wheel whose compiler produced subtly wrong
 # code fails here rather than in a lab.
 test-command = "python {project}/ci/smoke.py"
+
+# PySide6 has no wheel for Python 3.14 on manylinux_2_28: 6.9 stops at 3.13 and
+# 6.10 onwards needs glibc 2.34.  So the cp314 Linux wheel is built (and its
+# test installs PySide6) on manylinux_2_34, which a 3.14 user on Linux needs
+# for the GUI anyway; cp312 and cp313 stay on 2_28 for older systems.
+[[tool.cibuildwheel.overrides]]
+select = "cp314-manylinux_x86_64"
+manylinux-x86_64-image = "manylinux_2_34"
