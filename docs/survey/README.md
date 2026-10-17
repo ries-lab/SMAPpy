@@ -5,8 +5,7 @@ repositories were cloned and their code read; nothing was run.  Facts carry
 `path:line` in each tool's repository and the commit read; claims from a
 paper, a README or memory are marked *(unverified)* or *(from the paper)*.
 ThunderSTORM and DECODE were left out by request, and the MINFLUX tools are
-in a survey of their own (`docs/minflux/survey.md`, on the branch
-`claude/keen-archimedes-eu88tw`).
+in a survey of their own, [minflux.md](minflux.md).
 
 | file | area | tools read |
 | --- | --- | --- |
@@ -14,6 +13,7 @@ in a survey of their own (`docs/minflux/survey.md`, on the branch
 | [tracking.md](tracking.md) | tracking and track analysis | TrackMate, trackpy, laptrack, u-track, Spot-On, saSPT, vbSPT, ExTrack, AutoStepFinder, BNP-Step, andi_datasets |
 | [clustering.md](clustering.md) | clusters, spatial statistics, counting, colocalisation | Locan, PoCA / SR-Tesseler, ClusterViSu, Clus-DoC, RSMLM, BaClAva, FOCAL3D, SMoLR, pointpats, the Nieves 2023 benchmark |
 | [platforms.md](platforms.md) | large platforms and user experience | PYME, GDSC SMLM, locan / napari-locan, viewers, commercial tools (documentation only) |
+| [minflux.md](minflux.md) | MINFLUX: readers, MBM, trace analysis (written earlier, 2026-10) | PYME-extra, MBM-inspector, pyMINFLUX, minflux-viewer, minflux-analysis, napari-storm, Pyflux, matFLUX, MFX_data_analysis, ... |
 | [drift_averaging_fitting.md](drift_averaging_fitting.md) | drift, registration, resolution, averaging, model fitting, fitting | DME / photonpy, NanoJ, ImDecorr, smlm_datafusion2d/3d, smlm_classification2d, LocMoFit, fit3Dcspline, storm-analysis, ZOLA-3D, Gpufit, PERPL |
 
 Each file has the same sections: the software (licence, port route), worth
