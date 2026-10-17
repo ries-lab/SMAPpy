@@ -16,6 +16,8 @@ in a survey of their own, [minflux.md](minflux.md).
 | [minflux.md](minflux.md) | MINFLUX: readers, MBM, trace analysis (written earlier, 2026-10) | PYME-extra, MBM-inspector, pyMINFLUX, minflux-viewer, minflux-analysis, napari-storm, Pyflux, matFLUX, MFX_data_analysis, ... |
 | [drift_averaging_fitting.md](drift_averaging_fitting.md) | drift, registration, resolution, averaging, model fitting, fitting | DME / photonpy, NanoJ, ImDecorr, smlm_datafusion2d/3d, smlm_classification2d, LocMoFit, fit3Dcspline, storm-analysis, ZOLA-3D, Gpufit, PERPL |
 
+[candidates.md](candidates.md) lists every candidate from all the files in one table.
+
 Each file has the same sections: the software (licence, port route), worth
 porting (ranked), better than SMAPpy's own, user experience, licence-restricted
 (re-implement only), not worth it, references.  Where two files cover the
