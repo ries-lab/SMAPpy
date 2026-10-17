@@ -1109,6 +1109,25 @@ class RenderTab(QWidget):
         lut_row.addWidget(self.invert)
         lut_row.addWidget(self.invert_mode)
         self.contrast = QDoubleSpinBox(minimum=0, maximum=6, singleStep=0.1, decimals=2)
+        self.contrast.setToolTip("saturate 10^-p of the pixels: 2 is bright, 4 dark")
+        # SMAP's toggle: the quantile, or a set maximum -- here a density, so
+        # that the picture keeps its brightness as one zooms (`absolute_imax`)
+        self.scale = QComboBox()
+        self.scale.addItem("quantile", False)
+        self.scale.addItem("absolute", True)
+        self.scale.setToolTip(
+            "quantile: full scale where 10^-p of the pixels saturate, whatever "
+            "the data.\nabsolute: full scale at a set density, the same at every "
+            "zoom; switching to it starts from what the view shows now")
+        self.maximum = QDoubleSpinBox(minimum=1e-6, maximum=1e12, decimals=3)
+        self.maximum.setStepType(QDoubleSpinBox.AdaptiveDecimalStepType)
+        self.maximum.setToolTip("full scale, in localizations per µm²; for tracks, "
+                                "lines over one pixel; for an image, its own values")
+        contrast_row = QHBoxLayout()
+        contrast_row.setContentsMargins(0, 0, 0, 0)
+        contrast_row.addWidget(self.scale)
+        contrast_row.addWidget(self.contrast, 1)
+        contrast_row.addWidget(self.maximum, 1)
         self.grouped = QCheckBox("merge blinks")
         self.grouped.setToolTip("one entry per blink instead of one per frame; "
                                 "merges the table on first use")
@@ -1119,7 +1138,7 @@ class RenderTab(QWidget):
         form.addRow("colour by", color_row)
         form.addRow("colour range", self.color_range_row)
         form.addRow("LUT", lut_row)
-        form.addRow("contrast", self.contrast)
+        form.addRow("contrast", contrast_row)
         # the linking settings sit beside the switch that uses them; they are
         # the session's, not the layer's, so OK regroups every grouped layer
         self.grouping_button = QPushButton("merge settings...")
@@ -1190,6 +1209,8 @@ class RenderTab(QWidget):
         self.invert_mode.currentIndexChanged.connect(self._on_display)
         self.white.toggled.connect(self._on_white)
         self.contrast.valueChanged.connect(self._on_display)
+        self.maximum.valueChanged.connect(self._on_display)
+        self.scale.currentIndexChanged.connect(self._on_scale)
         self.gamma.valueChanged.connect(self._on_display)
         self.grouped.toggled.connect(self._on_grouped)
         self._appended = 0
@@ -1251,7 +1272,7 @@ class RenderTab(QWidget):
         widgets = (self.mode, self.track_column, self.line_width,
                    self.sigma, self.sigma_y, self.factor, self.color, self.color_field,
                    self.lut, self.invert, self.invert_mode, self.white,
-                   self.contrast, self.gamma,
+                   self.contrast, self.scale, self.maximum, self.gamma,
                    self.grouped,
                    self.image_source, self.image_pixelsize, self.image_x0,
                    self.image_y0, self.image_frame, self.image_axis, self.image_step,
@@ -1288,7 +1309,7 @@ class RenderTab(QWidget):
             self.lut.setCurrentText(display.lut if isinstance(display.lut, str) else "gray")
             self._show_invert(display.invert)
             self.white.setChecked(display.white_background)
-            self.contrast.setValue(display.contrast)
+            self._show_scale(display)
             self.gamma.setValue(display.gamma)
             for w in widgets:
                 w.blockSignals(False)
@@ -1313,7 +1334,7 @@ class RenderTab(QWidget):
         self.lut.setCurrentText(display.lut if isinstance(display.lut, str) else "hot")
         self._show_invert(display.invert)
         self.white.setChecked(display.white_background)
-        self.contrast.setValue(display.contrast)
+        self._show_scale(display)
         self.gamma.setValue(display.gamma)
         self.grouped.setChecked(layer.grouped)
         for w in widgets:
@@ -1455,8 +1476,48 @@ class RenderTab(QWidget):
                                               invert=self.invert_mode.currentData() if on
                                               else False,
                                               contrast=self.contrast.value(),
+                                              absolute=bool(self.scale.currentData()),
+                                              maximum=self.maximum.value(),
                                               gamma=self.gamma.value()))
         self.session.changed("layer")
+
+    def _show_scale(self, display) -> None:
+        """The quantile or the absolute maximum, whichever the layer uses."""
+        self.contrast.setValue(display.contrast)
+        self.maximum.setValue(display.maximum)
+        self.scale.setCurrentIndex(1 if display.absolute else 0)
+        self.contrast.setVisible(not display.absolute)
+        self.maximum.setVisible(display.absolute)
+
+    def _on_scale(self) -> None:
+        """Switch between the quantile and an absolute maximum.  As SMAP's
+        toggle, the absolute one starts at the brightness the view has now,
+        so the picture does not jump: the layer is rendered once on the view."""
+        absolute = bool(self.scale.currentData())
+        if absolute:
+            found = self._current_maximum()
+            if found is not None:
+                self.maximum.blockSignals(True)
+                self.maximum.setValue(found)
+                self.maximum.blockSignals(False)
+        self.contrast.setVisible(not absolute)
+        self.maximum.setVisible(absolute)
+        self._on_display()
+
+    def _current_maximum(self) -> Optional[float]:
+        """The absolute maximum that shows the layer as the view does now."""
+        source = self.session.view_frames.get("2D")
+        frame = source() if source is not None else None
+        if frame is None or not frame.pixelsize > 0:
+            return None
+        try:
+            fov = FieldOfView.from_range(frame.xrange, frame.yrange, frame.pixelsize)
+            display = self.layer.get_display()
+            _, rendered = self.layer.render(fov)
+            return display.as_absolute(rendered).maximum
+        except Exception:                # a picture that cannot be made keeps the value
+            traceback.print_exc()
+            return None
 
     def _on_image(self) -> None:
         layer = self.layer

@@ -286,3 +286,27 @@ def test_the_quick_filter_buttons_are_words_and_all_eight_fit_the_column(app):
                        "sigma_nm": "PSF", "channel": "channel", "filenumber": "file"}
     assert tab.filter.quick["logl_rel"].toolTip() == "logl_rel"
     assert tab.filter.minimumSizeHint().width() <= CONTROL_WIDTH
+
+
+def test_the_contrast_switches_to_an_absolute_maximum_where_the_view_was(app):
+    from smappy.gui.render_tab import RenderTab
+    from smappy.picture import FrameSource, ViewFrame
+    from smappy.render import FieldOfView, normalize
+    session = two_files()
+    source = FrameSource()
+    source.frame = ViewFrame((0.0, 10_000.0), (0.0, 10_000.0), 20.0)
+    session.view_frames["2D"] = source
+    tab = RenderTab(session)
+    assert not tab.maximum.isVisibleTo(tab) and tab.contrast.isVisibleTo(tab)
+    tab.scale.setCurrentIndex(tab.scale.findData(True))
+    display = session.layers[0].get_display()
+    assert display.absolute and tab.maximum.isVisibleTo(tab)
+    # full scale where the quantile had it: the picture does not jump
+    _, rendered = session.layers[0].render(
+        FieldOfView.from_range((0.0, 10_000.0), (0.0, 10_000.0), 20.0))
+    quantile = dataclasses.replace(display, absolute=False)
+    assert display.pixel_max(rendered) == pytest.approx(
+        normalize(rendered.weight, None, quantile.contrast)[1], rel=1e-3)
+    tab.scale.setCurrentIndex(tab.scale.findData(False))
+    assert not session.layers[0].get_display().absolute
+    assert session.layers[0].get_display().maximum == pytest.approx(display.maximum)

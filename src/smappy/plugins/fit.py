@@ -212,16 +212,20 @@ REGION_STYLE = {"include": dict(color="#2ca02c", ls="-"),
                 "exclude": dict(color="#d62728", ls="--")}
 
 
-def draw_region(ax, shapes) -> None:
+def draw_region(ax, shapes, counterparts=()) -> None:
     """The region's shapes as outlines on a frame: green the parts fitted
-    in, dashed red the parts left out."""
-    for shape in shapes or ():
-        points = np.asarray(shape.get("points") or [], float)
-        if len(points) < 3:
-            continue
-        closed = np.vstack([points, points[:1]])
-        style = REGION_STYLE.get(shape.get("kind"), REGION_STYLE["include"])
-        ax.plot(closed[:, 0], closed[:, 1], lw=1.5, **style)
+    in, dashed red the parts left out; their counterparts in the other half
+    of a split frame (`dualfit.region_counterparts`) thin and dotted."""
+    for drawn, mirrored in ((shapes, False), (counterparts, True)):
+        for shape in drawn or ():
+            points = np.asarray(shape.get("points") or [], float)
+            if len(points) < 3:
+                continue
+            closed = np.vstack([points, points[:1]])
+            style = dict(REGION_STYLE.get(shape.get("kind"), REGION_STYLE["include"]))
+            if mirrored:
+                style["ls"] = ":"
+            ax.plot(closed[:, 0], closed[:, 1], lw=1.0 if mirrored else 1.5, **style)
 
 
 @dataclass
@@ -525,8 +529,15 @@ class _FitPlugin(Plugin):
         finder = self.finder(settings, camera)
         region = getattr(settings, "region", None)
         if region is not None and region.active():
-            return RegionFinder(finder, region.shapes)
+            return RegionFinder(finder, list(region.shapes)
+                                + self.region_counterparts(settings, camera,
+                                                           region.shapes))
         return finder
+
+    def region_counterparts(self, settings, camera, shapes) -> list:
+        """The region's shapes as they fall on the frame's other half, for a
+        split frame whose halves are one sample; none for one channel."""
+        return []
 
     @staticmethod
     def _split_for_detection(geometry, camera) -> Optional[tuple]:
@@ -822,6 +833,13 @@ class _FitPlugin(Plugin):
         except Exception:
             projected = None      # no calibration: the fit will say so below
 
+        # the region as drawn, and where it falls on the other half of a split
+        # frame: read now, while this preview's registration is at hand
+        region = getattr(settings, "region", None)
+        shapes = list(getattr(region, "shapes", []) or [])
+        counterparts = (self.region_counterparts(settings, camera, shapes)
+                        if region is not None and region.active() else [])
+
         locs, trouble = None, ""
         try:
             model = self._model_telling(ctx, settings, camera)
@@ -870,7 +888,7 @@ class _FitPlugin(Plugin):
                                  "back-projected")
             peaks.set(title=f"frame {index}: peaks found")
             peaks.legend(fontsize=7, loc="upper right")
-            draw_region(peaks, shapes)
+            draw_region(peaks, shapes, counterparts)
 
             # scaled to the cutoff, not to the brightest pixel: the question
             # this panel answers is how far the peaks sit above the threshold,
@@ -907,7 +925,6 @@ class _FitPlugin(Plugin):
 
         # the frame panel takes the fit region, drawn with the mouse (the
         # window's tools, `ShapeEdit`), written back into *fit region*
-        shapes = list(getattr(getattr(settings, "region", None), "shapes", []) or [])
         edit = (ShapeEdit("region.shapes", panel=0, shapes=shapes)
                 if getattr(settings, "region", None) is not None else None)
         return Result(text=text, settings=settings,
@@ -1353,6 +1370,18 @@ class _TwoChannelFit(_FitPlugin):
             settings, lambda: super(_TwoChannelFit, self).preview(ctx, settings,
                                                                   frame))
 
+    def region_counterparts(self, settings, camera, shapes) -> list:
+        """A shape drawn on one half applies to both (`dualfit.region_counterparts`).
+        Without a registration yet -- a preview before one is chosen -- the
+        shapes act on the half they are drawn on."""
+        from ..dualfit import region_counterparts
+        try:
+            registration = self.registration(settings)
+        except Exception:
+            return []
+        origin = camera.roi_offset if camera is not None else (0, 0)
+        return region_counterparts(shapes, registration, origin)
+
     def back_projected(self, settings, camera, candidates):
         from ..dualfit import secondary_to_reference, which_channel
         registration = self.registration(settings)
@@ -1410,7 +1439,8 @@ class DualSplineFit(_TwoChannelFit):
     # 6: nm columns only; the pixel ones (`x_pix`, `dx_pix_ch1`, ...) are no
     #    longer written
     # 7: the dynamic cutoff's quantiles nearest-rank, as SMAP takes them
-    version = "7"
+    # 8: a fit region drawn on one half applies to both
+    version = "8"
     Settings = DualSplineFitSettings
 
     def registration_path(self, settings) -> str:
@@ -1660,7 +1690,8 @@ class DualGaussianFit(_TwoChannelFit):
     # 4: nm columns only; the pixel ones (`x_pix`, `sigma_pix_ch0`, ...) are
     #    no longer written
     # 5: the dynamic cutoff's quantiles nearest-rank, as SMAP takes them
-    version = "5"
+    # 6: a fit region drawn on one half applies to both
+    version = "6"
     Settings = DualGaussianFitSettings
 
     def model(self, settings, camera):

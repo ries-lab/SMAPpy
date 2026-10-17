@@ -327,7 +327,7 @@ def _grey(rendered, layer: LayerSnapshot) -> np.ndarray:
     display scales it (contrast, or a set maximum, and gamma), without its
     colours -- for a channel to take apart elsewhere."""
     display = layer.display
-    norm, _ = normalize(rendered.weight, display.imax, display.contrast)
+    norm, _ = normalize(rendered.weight, display.pixel_max(rendered), display.contrast)
     if display.gamma != 1.0:
         norm = norm ** display.gamma
     return np.round(norm * 255).astype(np.uint8)

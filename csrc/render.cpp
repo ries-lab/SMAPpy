@@ -93,12 +93,15 @@ py::tuple render(const Array& x, const Array& y, const Array& sigma_x,
 // Line segments, antialiased, for the tracks render mode (`render.py`,
 // `render_tracks`).  A pixel takes from a segment its coverage -- how much of
 // a line `width` pixels wide passes over it, approximated by the distance of
-// its centre from the segment: 1 within width / 2 - 0.5, falling linearly to
-// 0 at width / 2 + 0.5 -- times the segment's weight (and colour).  Ends are
-// round.  Consecutive segments of a track overlap at their shared point, so
-// a joint is up to twice as bright over a pixel or so; at a width of a pixel
-// or two that is not seen, and taking the larger rather than the sum would
-// need to know which segments are one track's.
+// its centre from the line: 1 within width / 2 - 0.5, falling linearly to
+// 0 at width / 2 + 0.5 -- times how much of a pixel-long stretch about the
+// centre's projection lies on the segment, times the segment's weight (and
+// colour).  The ends are square and soft, so consecutive segments of a track
+// tile it: a straight line is one along its length however finely it is cut,
+// and a step shorter than a pixel adds its length, not a whole line.  (Round
+// ends, as before, made a slow track zoomed out a blob hundreds of times
+// brighter than a line, which set the quantile contrast for every track.)
+// A segment of no length, a track along the line of sight, is a round dot.
 //
 // The work per segment is its length times its width, not its bounding box:
 // each row the segment can reach is visited, and in it only the columns
@@ -157,7 +160,8 @@ py::tuple render_segments(const Array& xa, const Array& ya, const Array& xb,
                         std::floor(std::max(ay, by) + reach)));
                     if (r0 > r1) continue;
                     const double dx = bx - ax, dy = by - ay;
-                    const double len2 = dx * dx + dy * dy;
+                    // no length -- a track along the line of sight -- is a dot
+                    const double length = std::sqrt(dx * dx + dy * dy);
                     const float w = pw[wstride * i];
                     for (int r = r0; r <= r1; ++r) {
                         const double yc = r + 0.5;
@@ -180,11 +184,18 @@ py::tuple render_segments(const Array& xa, const Array& ya, const Array& xb,
                             std::floor(std::max(xa_, xb_) + reach)));
                         for (int c = c0; c <= c1; ++c) {
                             const double xc = c + 0.5;
-                            double t = len2 > 0 ? ((xc - ax) * dx + (yc - ay) * dy) / len2 : 0.0;
-                            t = std::min(1.0, std::max(0.0, t));
-                            const double ex = ax + t * dx - xc, ey = ay + t * dy - yc;
-                            const double d = std::sqrt(ex * ex + ey * ey);
-                            const double cover = std::min(1.0, std::max(0.0, reach - d));
+                            double across, on = 1.0;
+                            if (length > 0) {
+                                const double along =
+                                    ((xc - ax) * dx + (yc - ay) * dy) / length;
+                                across = std::abs((xc - ax) * dy - (yc - ay) * dx) / length;
+                                on = std::min(1.0, std::max(0.0, std::min(along + 0.5, length)
+                                                                - std::max(along - 0.5, 0.0)));
+                            } else {
+                                across = std::sqrt((xc - ax) * (xc - ax) + (yc - ay) * (yc - ay));
+                            }
+                            const double cover =
+                                std::min(1.0, std::max(0.0, reach - across)) * on;
                             if (cover <= 0) continue;
                             const float v = static_cast<float>(cover) * w;
                             const size_t k = static_cast<size_t>(r) * nx + c;

@@ -530,3 +530,24 @@ def test_a_split_preview_reports_each_halfs_own_cutoff(tmp_path):
     for half, value in ((kept.y < SPLIT, upper), (kept.y >= SPLIT, lower)):
         assert half.any() and np.all(kept.value[half] > value)
     assert f"{upper:.3g} top, {lower:.3g} bottom" in result.text
+
+
+def test_a_fit_region_drawn_on_one_half_applies_to_the_other_too():
+    from smappy.dualfit import region_counterparts
+    from smappy.plugins.fit import in_region
+    cal = dual_calibration()
+    box = {"kind": "exclude", "points": [[10, 10], [20, 10], [20, 20], [10, 20]]}
+    mirrored = region_counterparts([box], cal)
+    # the main half's box, where the secondary half sees the same sample
+    np.testing.assert_allclose(mirrored[0]["points"][0], [10 + 0.37, 10 + SPLIT - 0.21])
+    assert mirrored[0]["kind"] == "exclude"
+    # and one drawn on the secondary half comes back onto the main one
+    back = region_counterparts(mirrored, cal)
+    np.testing.assert_allclose(back[0]["points"], box["points"], atol=1e-9)
+    # a bead excluded on the main half is excluded in both: neither peak is fitted
+    x, y = np.array([15.0, 15.37, 40.0]), np.array([15.0, 15.0 + SPLIT - 0.21, 40.0])
+    assert in_region(x, y, [box]).tolist() == [False, True, True]
+    assert in_region(x, y, [box] + mirrored).tolist() == [False, False, True]
+    # with an offset camera ROI, shapes in the frame's pixels still land right
+    shifted = region_counterparts([box], cal, origin=(4.0, 6.0))
+    np.testing.assert_allclose(shifted[0]["points"], mirrored[0]["points"])

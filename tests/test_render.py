@@ -281,3 +281,31 @@ def test_dl_draws_a_failed_or_missing_psf_one_camera_pixel_wide():
     sx, sy = psf_sigmas(locs)
     np.testing.assert_allclose(sx, [120.0, 127.0, 127.0])
     assert sy is None
+
+
+def test_an_absolute_maximum_keeps_a_structure_as_bright_at_every_zoom():
+    # SMAP's absolute Imax is per pixel, so a zoom out saturates the picture;
+    # given per um^2 it is scaled by the pixel's area instead
+    from smappy.render import DisplaySettings, normalize
+    rng = np.random.default_rng(3)
+    x, y = rng.uniform(0, 2000, 20000), rng.uniform(0, 2000, 20000)   # 5000 / um^2
+    display = DisplaySettings(absolute=True, maximum=10000.0)
+    for pixelsize in (5.0, 10.0, 20.0, 40.0):
+        n = int(2000 / pixelsize)
+        rendered = render(x, y, FieldOfView(0, 0, pixelsize, n, n), sigma=30.0)
+        shown, _ = normalize(rendered.weight, display.pixel_max(rendered))
+        inner = shown[n // 4: 3 * n // 4, n // 4: 3 * n // 4]
+        assert inner.mean() == pytest.approx(0.5, rel=0.05)
+
+
+def test_switching_to_the_absolute_scale_starts_where_the_quantile_was():
+    from smappy.render import DisplaySettings, normalize
+    rng = np.random.default_rng(4)
+    fov = FieldOfView(0, 0, 10.0, 200, 200)
+    rendered = render(rng.normal(1000, 300, 5000), rng.normal(1000, 300, 5000), fov,
+                      sigma=20.0)
+    quantile = DisplaySettings(contrast=2.5)
+    absolute = quantile.as_absolute(rendered)
+    assert absolute.absolute and absolute.contrast == 2.5
+    assert absolute.pixel_max(rendered) == pytest.approx(
+        normalize(rendered.weight, None, 2.5)[1])

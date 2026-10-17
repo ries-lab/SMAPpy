@@ -10,7 +10,8 @@ microscope, kept where the group shares it, with the values uiPSF's own
     NA: 1.43
     refractive_index: {immersion: 1.516, medium: 1.335, coverslip: 1.516}
     emission_wavelength_nm: 680
-    pixelsize_um: [0.127, 0.116]     # optional: else from the camera
+    pixelsize_um: [0.127, 0.116]     # optional: else from the camera (here with
+                                     # the cylindrical lens in; 0.127 without)
     roi_size_px: 25                  # the model's lateral size
     dual:                            # a split camera; omit for one channel
       layout: up-down mirrored       # as the bead calibration: smappy.calibrate.dual.LAYOUTS

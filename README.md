@@ -61,7 +61,17 @@ algorithms. [NOTES.md](NOTES.md) records design decisions and measurements.
 
 ## Tests
 
-    SMAPPY_TEST_CAL=/path/to/_3dcal.mat python -m pytest tests/
+The tests are for developers working from a checkout. Install the test extras
+and run them in parallel:
+
+    pip install -e .[test]
+    python -m pytest tests -q -n auto            # about a minute
+    python -m pytest tests -q -n auto --slow     # everything, a few minutes
+
+They run on simulated data and need no files of their own. A few check that
+a 3D bead calibration made by SMAP (a `..._3dcal.mat` file) is read
+correctly; they need such a file, so they are skipped unless
+`SMAPPY_TEST_CAL` points at one.
 
 ## License
 

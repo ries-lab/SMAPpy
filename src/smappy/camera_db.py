@@ -12,7 +12,9 @@ number, a camera ID -- and each carrying, per parameter, where its value comes
 from.  Three sources:
 
 * ``fixed``: the same whatever the acquisition (a pixel size, usually);
-* ``metadata``: read this tag out of the file and interpret it this way;
+* ``metadata``: read this tag out of the file and interpret it this way --
+  as a number, a yes or no, or through a table from what the tag reads to
+  the value (``map``), with a default for a file without the tag;
 * ``state``: it depends on the readout mode, and the mode is recognised by a
   set of tags that must all match.
 
@@ -42,7 +44,7 @@ from .metadata import CameraMetadata
 #: shown and ignored.  The exposure and the frame time are not read by the
 #: fit; they are kept with the table, where everything in seconds reads them.
 FITTING_PARAMETERS = ("conversion", "offset", "pixelsize_um", "em_on", "emgain",
-                      "exposure_ms", "frame_time_ms", "roi")
+                      "read_noise_e", "exposure_ms", "frame_time_ms", "roi")
 
 #: names a parameter was stored under before, read as the current one: a
 #: user's ``cameras.json`` written before the frame time had its name
@@ -81,6 +83,24 @@ def read_boolean(text: str) -> Optional[bool]:
     return None if number is None else number > 0
 
 
+def read_map(text: str, table: Any) -> Any:
+    """The value `table` gives for what the tag reads, or None.
+
+    For what depends on a device that is not the camera's readout mode: on
+    the Ries lab's M2 the cylindrical lens of the astigmatic 3D path is in or
+    out, and with it the pixel is 127 x 116 nm or 127 nm square.  A readout
+    mode (`State`) could carry it too, but every mode would then be entered
+    twice, once with the lens and once without.
+    """
+    if not isinstance(table, dict):
+        return None
+    wanted = str(text).strip()
+    for key, value in table.items():
+        if str(key).strip() == wanted:
+            return value
+    return None
+
+
 READERS = {
     "text": lambda text, argument: str(text).strip(),
     "number": lambda text, argument: read_number(text),
@@ -90,6 +110,7 @@ READERS = {
                                         else read_number(text) > 0),
     "equals": lambda text, argument: str(text).strip() == str(argument).strip(),
     "not_equals": lambda text, argument: str(text).strip() != str(argument).strip(),
+    "map": read_map,
 }
 
 
@@ -111,7 +132,11 @@ class Source:
 
 @dataclass
 class Parameter:
-    """Where one camera parameter comes from."""
+    """Where one camera parameter comes from.
+
+    `fixed` is the value, or -- for one read from a tag -- the default for a
+    file that does not carry the tag or reads a value the map does not have.
+    """
     fixed: Any = None
     tag: str = ""
     read: str = "text"
@@ -126,7 +151,7 @@ class Parameter:
             return cls(state=True)
         if "tag" in raw:
             return cls(tag=str(raw["tag"]), read=str(raw.get("read", "text")),
-                       argument=raw.get("value"))
+                       argument=raw.get("value"), fixed=raw.get("default"))
         return cls(fixed=raw.get("fixed"))
 
     def to_dict(self) -> Any:
@@ -136,6 +161,8 @@ class Parameter:
             out: Dict[str, Any] = {"tag": self.tag, "read": self.read}
             if self.argument is not None:
                 out["value"] = self.argument
+            if self.fixed is not None:
+                out["default"] = self.fixed
             return out
         return {"fixed": self.fixed}
 
@@ -146,10 +173,15 @@ class Parameter:
         if self.tag:
             tag = expand(self.tag, prefix)
             if tag not in metadata:
+                if self.fixed is not None:
+                    return self.fixed, Source("fixed", f"the default: no tag {tag}")
                 return None, Source("missing", f"no tag {tag}")
             reader = READERS.get(self.read, READERS["text"])
             value = reader(metadata[tag], self.argument)
             if value is None:
+                if self.fixed is not None:
+                    return self.fixed, Source(
+                        "fixed", f"the default: {tag} is {metadata[tag]!r}")
                 return None, Source("missing", f"{tag} is {metadata[tag]!r}")
             return value, Source("metadata", f"{tag} = {metadata[tag]}")
         return self.fixed, Source("fixed", "in the database")
@@ -510,7 +542,7 @@ MODE_TAGS = ("ReadoutMode", "ReadoutRate", "Readout Rate", "PixelReadoutRate",
 #: the parameters the editor shows, in its order; anything else an entry
 #: carries is kept as it is
 EDITED = ("conversion", "offset", "pixelsize_um", "em_on", "emgain",
-          "exposure_ms", "frame_time_ms", "roi")
+          "read_noise_e", "exposure_ms", "frame_time_ms", "roi")
 
 
 def device_of(metadata: Dict[str, Any]) -> str:
@@ -580,6 +612,9 @@ def draft(metadata: Dict[str, Any], name: str = "") -> Camera:
 
     pixelsize = read_number(metadata.get("PixelSizeUm", ""))
     parameters["pixelsize_um"] = Parameter(fixed=pixelsize or None)
+    # a typical sCMOS, said out loud so it can be changed; with EM gain the
+    # fit ignores it (`CameraMetadata.readout_variance`)
+    parameters["read_noise_e"] = Parameter(fixed=1.0)
     if "Exposure-ms" in metadata:
         parameters["exposure_ms"] = Parameter(tag="Exposure-ms", read="number")
     elif has("Exposure"):

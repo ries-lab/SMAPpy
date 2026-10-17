@@ -35,7 +35,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
-from .render import FieldOfView, RenderedImage
+from .render import PER_UM2, FieldOfView, RenderedImage
 
 
 @dataclass
@@ -294,7 +294,8 @@ class ImageData:
         xs = fov.x0 + (np.arange(fov.nx) + 0.5) * fov.pixelsize
         ys = fov.y0 + (np.arange(fov.ny) + 0.5) * fov.pixelsize
         if self.placement is not None:
-            return RenderedImage(fov, self._placed(plane, xs, ys), None, n_locs=0)
+            return RenderedImage(fov, self._placed(plane, xs, ys), None, n_locs=0,
+                                 count_area=PER_UM2)
         ix = np.floor((xs - self.x0) / px).astype(np.int64)
         iy = np.floor((ys - self.y0) / py).astype(np.int64)
         okx, oky = (ix >= 0) & (ix < nx), (iy >= 0) & (iy < ny)
@@ -302,7 +303,9 @@ class ImageData:
         if okx.any() and oky.any():
             sub = plane[np.ix_(iy[oky], ix[okx])].astype(np.float32)
             out[np.ix_(oky, okx)] = sub
-        return RenderedImage(fov, out, None, n_locs=0)
+        # a camera's values are as they are at every zoom: an absolute
+        # maximum is one of them, not a density (`render.absolute_imax`)
+        return RenderedImage(fov, out, None, n_locs=0, count_area=PER_UM2)
 
     def _placed(self, plane: np.ndarray, xs: np.ndarray, ys: np.ndarray) -> np.ndarray:
         """Nearest neighbour through the placement: each view pixel's centre
