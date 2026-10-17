@@ -18,7 +18,7 @@ readme = "README.md"
 license = "BSD-3-Clause"
 license-files = ["LICENSE"]
 authors = [{name = "Jonas Ries", email = "ries@embl.de"}]
-requires-python = ">=3.9"
+requires-python = ">=3.12"
 keywords = ["SMLM", "super-resolution", "localization microscopy", "PALM", "STORM"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -46,7 +46,6 @@ dependencies = [
     # QtGui and QtWidgets and nothing else, and pyqtgraph is happy with them.
     # The PySide6 meta-package additionally pulls PySide6-Addons (QtWebEngine,
     # Qt3D, Multimedia, ...), which measures 800 MB installed for nothing.
-    # 6.11 dropped to cp310-abi3 wheels, so Python 3.9 resolves to 6.10.3.
     # 6.9 and 6.10 crashed until two PySide bugs were worked around: the
     # collector deleting the QScreen (`gui/collector.keep_screens`) and an
     # exception from matplotlib's queued redraw left pending in processEvents
@@ -150,7 +149,7 @@ where = ["src"]
 # pybind11/numpy.h, which carries its own ABI declarations and binds to numpy at
 # run time, so one wheel serves numpy 1.x and 2.x alike.  The test command below
 # is what proves that rather than assuming it.
-build = "cp39-* cp310-* cp311-* cp312-* cp313-*"
+build = "cp312-* cp313-* cp314-*"
 skip = "pp* *-musllinux_*"
 # Importing the modules proves only that they load.  ci/smoke.py fits a frame
 # with a known emitter in it, so a wheel whose compiler produced subtly wrong

@@ -17,7 +17,7 @@ def app():
 
 
 def test_settings_forms_cover_both_dataclasses_on_this_python():
-    """`int | None` cannot be evaluated before 3.10; the form must not care."""
+    """`int | None` in a settings dataclass is read as an optional int."""
     single = param_specs(CalibrationSettings)
     dual = param_specs(DualColorSettings)
     assert set(single) == {f.name for f in CalibrationSettings.__dataclass_fields__.values()}

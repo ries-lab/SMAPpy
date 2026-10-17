@@ -9,7 +9,7 @@ a Python port of [SMAP](https://github.com/jries/SMAP).
 
     pip install smappy-smlm
 
-The GUI is included. Binary wheels are available for Python 3.9-3.13 on macOS,
+The GUI is included. Binary wheels are available for Python 3.12-3.14 on macOS,
 Linux and Windows, so nothing needs to be compiled. The package is called
 `smappy-smlm` on PyPI; in Python you `import smappy`.
 
