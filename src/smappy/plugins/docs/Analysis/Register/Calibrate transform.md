@@ -1,5 +1,5 @@
 ---
-version: "2"
+version: "3"
 covers: [smappy.plugins.registration.chip_pixels, smappy.plugins.registration.default_transform_path, smappy.plugins.registration._draw_vote, smappy.plugins.registration._draw_residuals, smappy.plugins.registration._draw_coverage, smappy.calibrate.transform.register_channels, smappy.calibrate.transform.find_alignment, smappy.calibrate.transform._vote, smappy.calibrate.transform._orient, smappy.calibrate.transform._split_estimate, smappy.calibrate.transform._pair, smappy.calibrate.transform._refit, smappy.calibrate.transform.pair_weights, smappy.calibrate.transform.fit_polynomial, smappy.calibrate.transform._polynomial_round, smappy.calibrate.transform.save_channel_transform, smappy.calibrate.dual.fit_dual_transform, smappy.calibrate.dual.robust_projective, smappy.calibrate.dual.fit_projective, smappy.calibrate.dual.refine_projective]
 ---
 
@@ -157,7 +157,10 @@ the two-colour fit's *transformation* reads.
 
 **Which table.**  The localizations, whatever the layer shows: the
 pairs are one molecule seen in both halves of the same frame, and the
-selection is the layer's bounds applied to each localization.
+selection is the layer's bounds applied to each localization.  With several
+files selected, a pair is of one frame of one file (their frame numbers are
+moved apart, `frames_apart`), so bead files recorded at several positions
+pool into one registration.
 
 **The vote.**  For each frame, every ordered pair $(i, j)$ of its
 localizations gives a feature vector: $(x_j - x_i,\, y_j - y_i)$ for an

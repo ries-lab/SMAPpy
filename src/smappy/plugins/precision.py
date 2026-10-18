@@ -185,7 +185,7 @@ import numpy as np
 
 from ..frc import (FPC, FRC, THRESHOLD as THRESHOLD_LINE, blur_envelope,
                    envelope_resolution, fpc_resolution, frc_resolution)
-from ..locs import Localizations
+from ..locs import Localizations, frames_apart
 from . import Context, Plot, Plugin, Result, param, register
 from .statistics import (MIN_FOR_FIT, PRECISION_FIELDS, PRECISION_Z_FIELDS,
                          precision_density, precision_model)
@@ -765,7 +765,8 @@ def measure(locs: Localizations, name: str = "", reach: float = 0.0,
     out.displacements = displacement_pairs(
         np.asarray(locs[x_name], dtype=float),
         np.asarray(locs[y_name], dtype=float),
-        np.asarray(locs["frame"]), reach, z=z,
+        # files opened together share frame numbers: a pair is of one file
+        frames_apart(locs), reach, z=z,
         dz_max=reach_z if z is not None else None, gaps=gaps,
         precision=None if precision_name is None else locs[precision_name],
         precision_z=(None if precision_z_name is None or z is None
@@ -1415,11 +1416,12 @@ class LocalizationPrecision(Plugin):
     changes_locs = False
     # NeNA pairs a localization with the next frame's: the repeats grouping merges
     grouping = "ungrouped"
-    version = "4"        # 2: finds a SMAPpy 3D fit's z precision, z_err_nm
+    version = "5"        # 2: finds a SMAPpy 3D fit's z precision, z_err_nm
     #                      3: a filter cut honoured by the CRLB fit; the FRC's
     #                         automatic pixel on a large field; motion only
     #                         when the slope is significant
     #                      4: the selection only, never the whole table beside it
+    #                      5: NeNA pairs within one file, never across two
 
     def run(self, ctx: Context, settings: PrecisionSettings) -> Result:
         if not (settings.pairwise or settings.crlb or settings.frc

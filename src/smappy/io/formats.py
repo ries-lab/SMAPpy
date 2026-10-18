@@ -53,10 +53,19 @@ class FileInfo:
     # not only in the table's camera metadata, which is the first file's
     # once several are open together
     frame_time_ms: Optional[float] = None
+    # the columns the file had when it was read (`Session.add_file`).  Files
+    # opened together are one table, in which a column one of them lacks is
+    # padding in its rows -- NaN, or 0 for an integer column, which for an id
+    # reads "in none" -- so this is what tells "file 2 has no z_nm" from
+    # "file 2's z is not a number".  None: not known (a session saved before
+    # it was kept).
+    columns: Optional[List[str]] = None
 
     def to_dict(self) -> Dict:
         out = {"name": self.name, "path": self.path, "format": self.format, "n": self.n,
                "pixelsize_nm": self.pixelsize_nm, "frame_time_ms": self.frame_time_ms}
+        if self.columns is not None:
+            out["columns"] = list(self.columns)
         own = own_metadata(self.metadata)
         if own:
             out["metadata"] = own
@@ -66,8 +75,12 @@ class FileInfo:
     def from_dict(cls, d: Dict) -> "FileInfo":
         """Back from `to_dict`; keys an older or newer version wrote that
         this one does not have are left out rather than refused."""
-        known = {"name", "path", "format", "pixelsize_nm", "metadata", "frame_time_ms"}
-        return cls(**{k: v for k, v in d.items() if k in known})
+        known = {"name", "path", "format", "pixelsize_nm", "metadata", "frame_time_ms",
+                 "columns"}
+        out = cls(**{k: v for k, v in d.items() if k in known})
+        if out.columns is not None:
+            out.columns = [str(c) for c in out.columns]
+        return out
 
 
 @dataclass

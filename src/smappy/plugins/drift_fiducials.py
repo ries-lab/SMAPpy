@@ -34,22 +34,28 @@ class FiducialDrift(KeepsDrift, Plugin):
     grouping = "ungrouped"
     Settings = FiducialSettings
     name = "Fiducials drift correction"
-    version = "1"
+    version = "2"        # 2: the other files of the table keep their positions
 
     def run(self, ctx: Context, settings: FiducialSettings) -> Result:
         locs = ctx.locs
         mask = np.asarray(ctx.selection.mask, bool)
+        rows = None
         if "filenumber" in locs:
-            files = np.unique(np.asarray(locs["filenumber"])[mask])
+            numbers = np.asarray(locs["filenumber"])
+            files = np.unique(numbers[mask])
             if len(files) > 1:
                 raise ValueError(
                     f"the selection holds {len(files)} files; drift is of one "
                     f"acquisition: show one file in the layer and run it per file")
+            # the curve is that file's: the others keep their positions
+            if len(files) and len(np.unique(numbers)) > 1:
+                rows = numbers == files[0]
         ctx.report(f"finding beads in {ctx.selection}")
         drift, beads, fit = estimate_drift_fiducials(locs, settings, select=mask)
         frame = np.asarray(locs["frame"], np.int64)[fit.rows]
         residuals, bead, curve = fit.residuals_nm, fit.bead, fit.drift_nm
-        return Result(locs=drift.apply(locs), text=describe(drift, beads, fit),
+        return Result(locs=drift.apply(locs, rows=rows),
+                      text=describe(drift, beads, fit),
                       plot=drift.plot, settings=settings,
                       plots={"beads": Plot(
                           lambda figure: draw_beads(figure, frame, residuals,

@@ -17,7 +17,7 @@ steps:
       remove: false
   - plugin: Analysis/Drift/RCC
     label: drift
-    version: "1"
+    version: "2"
     values:
       n_timepoints: 10
       pixelsize_nm: 20.0

@@ -5,11 +5,11 @@ from typing import Optional
 
 from dataclasses import replace
 
-from ..drift import (DriftSettings, correct_drift, estimate_cost, merge_from_session,
+from ..drift import (DriftSettings, estimate_cost, estimate_drift, merge_from_session,
                      merge_values)
 from . import (Context, FormState, ParamInfo, Plugin, PreflightChoice,
                PreflightQuestion, Result, register)
-from .drift_result import KeepsDrift
+from .drift_result import KeepsDrift, drift_result, per_file
 
 
 @register("Analysis/Drift/COMET")
@@ -23,8 +23,9 @@ class CometDrift(KeepsDrift, Plugin):
     name = "COMET drift correction"
     # 2: "RCC first" and "two stage" run under the spline fit (the default)
     # rather than being skipped by it.  3: a transformation besides the shift
-    # (off by default: the shift alone gives the numbers it gave)
-    version = "3"
+    # (off by default: the shift alone gives the numbers it gave).  4: each
+    # file of the selection corrected by a curve of its own
+    version = "4"
 
     # Longer than this and the run is worth agreeing to first.  Five minutes
     # is where waiting stops being waiting and starts being a decision.
@@ -89,8 +90,7 @@ class CometDrift(KeepsDrift, Plugin):
         settings = merge_from_session(settings, ctx.session)
         ctx.selection.require(5000, ctx.warn, "a drift estimate")
         ctx.report(f"estimating drift from {ctx.selection}")
-        corrected, drift = correct_drift(ctx.locs, settings,
-                                         select=ctx.selection.mask,
-                                         progress=ctx.report, stop=ctx.stop)
-        return Result(locs=corrected, text=str(drift), plot=drift.figure(),
-                      data={"drift": drift}, settings=settings)
+        # each file of the selection gets a curve of its own (`per_file`)
+        corrected, drifts = per_file(ctx, lambda select: estimate_drift(
+            ctx.locs, settings, select=select, progress=ctx.report, stop=ctx.stop))
+        return drift_result(corrected, drifts, settings, lambda d: d.figure())

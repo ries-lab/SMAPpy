@@ -1,5 +1,5 @@
 ---
-version: "1"
+version: "2"
 covers: [smappy.fiducials.find_beads, smappy.fiducials.fit_drift, smappy.fiducials.estimate_drift_fiducials, smappy.tracking.link.link_tracks, smappy.drift._spline_basis, smappy.drift.Drift.apply, smappy.simulate.beads.simulate_beads]
 ---
 
@@ -16,7 +16,7 @@ move, the sample moved.
 
 This plugin finds the beads among the localizations, follows each one
 through the frames, and fits one smooth drift curve to all of them.  It
-then subtracts that curve from every localization of the table, the beads
+then subtracts that curve from every localization of the file, the beads
 included.
 
 Use it when the sample has beads that stay in focus over the whole
@@ -122,7 +122,9 @@ axes[-1].set_xlabel("frame")
 
 **Which table.**  The localizations, whatever the layer shows.  The beads
 are found among those the layer's filter and the ROI select; the correction
-is applied to every localization of the table.
+is applied to every localization of their file.  With several files open,
+the others keep their positions: their frame numbers are their own, and the
+curve says nothing about them.
 
 **The fit.**  With $B_k(t)$ the cubic B-spline basis on knots evenly spaced
 over the frames, $K$ of them for $N$ frames,
