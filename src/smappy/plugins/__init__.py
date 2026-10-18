@@ -934,6 +934,10 @@ class Plugin:
     # its bead table -- and which a form and a Run button cannot be; the
     # plugin is what lets it sit in a tab, and it imports no Qt to do so.
     window: Optional[str] = None
+    # More buttons beside *Open*, each ``(label, window)``: another window of
+    # the GUI's, opened the same way.  *Load*'s *Add* is the window's File >
+    # Open adding rather than replacing.
+    window_buttons: Tuple[Tuple[str, str], ...] = ()
 
     def __init_subclass__(cls, **kwargs):
         # At definition, not at the first run: a dropped-in plugin that does

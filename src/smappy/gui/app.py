@@ -337,8 +337,12 @@ class ControlWindow(QMainWindow):
         session.window_openers["bead calibration"] = \
             lambda settings=None: self.open_calibration()
         # the File tab's Load line (`Plugin.window`): File > Open, or Add
+        # *Load*'s two buttons (`plugins.file.Open`): each says what it does,
+        # so neither asks, as File > Open does
         session.window_openers["open files"] = \
-            lambda settings=None: self.open()
+            lambda settings=None: self.open(append=False)
+        session.window_openers["add files"] = \
+            lambda settings=None: self.open(append=True)
         # a fitter whose file's camera is not in the database offers this
         # (`Plugin.describe`), opened on the file that fitter is set to
         session.window_openers["camera editor"] = self.open_camera_editor
@@ -1146,7 +1150,8 @@ class ControlWindow(QMainWindow):
     def open(self, append: Optional[bool] = None) -> None:
         """*File > Open*: localization tables, images and stacks, sorted by
         `open_dropped` as a drop is -- a table loads, an image is a layer, a
-        long stack goes to a fitter.
+        long stack goes to a fitter.  ``append`` None asks, when a table is
+        open, whether the new ones replace it or join it.
 
         The reading and the linking happen in a `LoadTask`, one file at a time,
         so the window stays alive and says what it is doing.  Anything that
@@ -1154,8 +1159,8 @@ class ControlWindow(QMainWindow):
         runs; everything else -- panning, the filters, the other windows --
         keeps working on the file that is already open.
         """
-        paths, _ = QFileDialog.getOpenFileNames(self, "Open", folders.start(),
-                                                open_filter())
+        paths, _ = QFileDialog.getOpenFileNames(self, "Add" if append else "Open",
+                                                folders.start(), open_filter())
         if paths:
             self.open_dropped(paths, append=append)
 

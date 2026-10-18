@@ -8,6 +8,7 @@ the status "stopped".  A plugin that never checks runs to the end.
 """
 from __future__ import annotations
 
+import dataclasses
 import threading
 import traceback
 from typing import Optional, Type
@@ -221,6 +222,23 @@ class PluginPanel(QWidget):
             self.result_button.hide()
             self.output.hide()
             self.run_button.clicked.connect(self.open_window)
+            self.window_buttons = []
+            for label, window in self.plugin.window_buttons:
+                extra = QPushButton(label)
+                extra.setMinimumWidth(
+                    extra.fontMetrics().horizontalAdvance(label) + 20)
+                extra.clicked.connect(lambda _=False, w=window: self.open_window(w))
+                buttons.insertWidget(buttons.indexOf(self.run_button) + 1
+                                     + len(self.window_buttons), extra)
+                self.window_buttons.append(extra)
+            if not dataclasses.fields(plugin_cls.Settings):
+                # nothing to set: the buttons are the panel, one row, and the
+                # summary is their tooltip rather than lines above them
+                self.form.hide()
+                if self.about is not None:
+                    self.about.hide()
+                    for button in [self.run_button] + self.window_buttons:
+                        button.setToolTip(self.plugin.description)
         else:
             self.run_button.clicked.connect(self._run_or_stop)
         self.result_button.clicked.connect(self.show_result)
@@ -442,16 +460,18 @@ class PluginPanel(QWidget):
         self.run_button.setEnabled(False)
         self.status.setText("stopping...")
 
-    def open_window(self) -> None:
-        """Hand the settings to the window the plugin names (`Plugin.window`)."""
+    def open_window(self, window: Optional[str] = None) -> None:
+        """Hand the settings to the window the plugin names (`Plugin.window`,
+        or one of its `window_buttons`)."""
+        window = window or self.plugin.window
         try:
             settings = self.form.value()
         except ValueError as e:
             self.status.setText(str(e))
             return
-        opener = self.session.window_openers.get(self.plugin.window)
+        opener = self.session.window_openers.get(window)
         if opener is None:
-            self.status.setText(f"no {self.plugin.window} window in this program")
+            self.status.setText(f"no {window} window in this program")
             return
         self.status.setText("")
         opener(settings)

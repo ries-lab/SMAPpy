@@ -282,3 +282,20 @@ def test_the_file_tab_ships_with_load_first_and_what_the_file_menu_does_not_do(
     assert [t["name"] for t in state["tabs"]][0] == "File"
     assert "geometry" not in state["layout"]
     assert session.gui_state_provider is not None
+
+
+def test_load_is_one_row_whose_open_replaces_and_add_adds():
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    from smappy.gui.plugin_panel import PluginPanel
+    session = Session()
+    opened = []
+    session.window_openers["open files"] = lambda settings=None: opened.append("open")
+    session.window_openers["add files"] = lambda settings=None: opened.append("add")
+    panel = PluginPanel(plugins.get("File/Load/Load"), session)
+    assert panel.form.isHidden() and panel.about.isHidden()
+    assert [b.text() for b in panel.window_buttons] == ["Add"]
+    panel.run_button.click()
+    panel.window_buttons[0].click()
+    assert opened == ["open", "add"]

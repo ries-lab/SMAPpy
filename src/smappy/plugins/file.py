@@ -133,24 +133,24 @@ def csv_args(csv: CsvSettings) -> Dict[str, Any]:
 
 @dataclass
 class OpenSettings:
-    """Nothing to set: whether the files replace the open ones or join them is
-    asked when there are open ones, which a tick set beforehand got wrong as
-    often as not."""
+    """Nothing to set: replacing or adding is which button is clicked."""
 
 
 @register("File/Load/Load")
 class Open(Plugin):
     """Choose files and open them: the first line of the File tab."""
 
-    description = ("choose files in a dialog and open them: localization tables "
-                   "in any format Load from path reads, images as image layers")
+    description = ("Open: choose files and open them in place of the open ones; "
+                   "Add: add them as more files.  Localization tables in any "
+                   "format Load from path reads; images as image layers")
     Settings = OpenSettings
     changes_locs = False          # a launcher: the window loads, not `run`
-    version = "2"
-    # the window's own File > Open: a csv no conversion knows asks for its
-    # columns there (`gui.dialogs.CsvMappingDialog`), and replace or add is
-    # asked there when a table is open
+    version = "3"
+    # the window's own File > Open, told which: a csv no conversion knows asks
+    # for its columns there (`gui.dialogs.CsvMappingDialog`).  Two buttons
+    # that say what they do, one row -- the menu's Open asks instead
     window = "open files"
+    window_buttons = (("Add", "add files"),)
 
     def run(self, ctx: Context, settings: OpenSettings) -> Result:
         raise ValueError("Load opens a file dialog; in a script or a chain, "
