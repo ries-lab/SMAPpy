@@ -247,7 +247,8 @@ class Layer:
         linking it if it is not current (``progress(text, fraction)``) --
         or ``locset``, a grouped table already in hand."""
         if locset is None:
-            locset = self.state.tables.grouped(progress=progress)
+            # the files this layer shows, linked if they are not yet
+            locset = self.state.tables.grouped(progress=progress, files=self.state.files)
         f = self.state.filter_for(locset)
         mask = f.mask_without(*without) if without else f.mask
         return locset.locs, Selection(mask, layer=index, name=f"{self.name}, blinks merged")
@@ -565,6 +566,7 @@ class Session:
             # the file's own metadata, kept with it: the table's becomes the
             # first file's once another joins it
             info.metadata = own_metadata({**locs.metadata, **info.metadata})
+            info.columns = [c for c in locs.columns if c != "filenumber"]
             infos = [info]
             numbers = np.full(len(locs), number, np.int32)
         for each in infos:
@@ -605,6 +607,9 @@ class Session:
             self._rois = None            # this file's own ROIs, read on first use
             self._id_regions = None      # and its own per-cluster results
             self.changed("rois")
+            if len(infos) > 1:
+                # a session of several files opens on the first (below)
+                self._on_files(range(1))
         else:
             merged = concat([self.locs, locs])
             merged.metadata = dict(self.locs.metadata)
@@ -616,6 +621,7 @@ class Session:
                 merged.columns.pop(column, None)
             self.set_locs(merged, undoable=True, keep_layers=True,
                           label=f"add {info.name}", text=str(info.path))
+            self._on_files(range(number))
         self.locs.metadata["files"] = [f.to_dict() for f in self.files]
         self.log("load", str(info.path), append=append)
         # a file opened is the table as saved; one added to it makes a table
@@ -623,8 +629,59 @@ class Session:
         self.set_unsaved(number > 0)
         return info
 
+    def _follow_files(self) -> None:
+        """Take the file list of a table change that changed how many files
+        there are -- *Combine files* -- from its ``metadata["files"]``, as the
+        undo does (`_restore`).
+
+        A plugin cannot touch the session, and the table's entries are the
+        record of its files anyway.  Only a change of count is taken: every
+        other plugin hands back the entries it was given, and a list that
+        merely differs in a detail is not worth trusting over the session's.
+        The layers' file choices and the files' camera frames were numbers
+        into the old list, so a layer shows every file again, and the frames
+        of files that are gone go -- the first file's stay, its frames being
+        where they were.
+        """
+        entries = self.locs.metadata.get("files")
+        if not isinstance(entries, list) or len(entries) == len(self.files) \
+                or not all(isinstance(e, dict) for e in entries):
+            return
+        self.files = [FileInfo.from_dict(e) for e in entries]
+        for layer in self.layers:
+            if not layer.is_image and layer.files is not None:
+                layer.set_files(None)
+        kept = [im for im in self.images if im.kind != "raw"
+                or int(im.metadata.get("filenumber", 0)) < len(self.files)]
+        if len(kept) != len(self.images):
+            self.images = kept
+            self.changed("images")
+
+    def _on_files(self, numbers) -> None:
+        """Layers that showed every file show ``numbers`` -- the files there
+        were before one was added, or the first of a session reopened.
+
+        A layer of a session of several files starts on one file, as in SMAP,
+        and ticks the others in the Render tab: shown together, every file is
+        filtered and linked into blinks before anything is drawn -- 86 s and
+        13 GB for ten files of 10 M, where one takes 6 s (`docs/performance.md`,
+        "Large tables") -- and files opened together are as often two cells
+        as one.  A layer that had chosen its files keeps them.
+        """
+        for layer in self.layers:
+            if not layer.is_image and layer.files is None:
+                layer.set_files(list(numbers))
+
     def file_names(self) -> List[str]:
         return [f.name for f in self.files]
+
+    def files_without(self, column: str) -> List[int]:
+        """The files read without ``column``: in the one table their rows
+        hold padding there (NaN, or 0 in an integer column) unless a plugin
+        has written it since.  Files whose columns are not known (a session
+        saved before they were kept) are never listed."""
+        return [k for k, f in enumerate(self.files)
+                if f.columns is not None and column not in f.columns]
 
     @property
     def display_name(self) -> str:
@@ -853,8 +910,9 @@ class Session:
         if any(l.grouped for l in self.layers if not l.is_image):
             # a layer shows blinks: the file gets each localization's
             # `group_id` and `n_in_group`, merged now where that is allowed
-            # (not while the GUI merges a large table in its worker)
-            self.tables.available()
+            # (not while the GUI merges a large table in its worker) -- every
+            # file, not only those a layer shows: the file keeps all of them
+            self.tables.available(files=self.tables.ungrouped.files)
         metadata = without_results(self.file_metadata(), region_results, region_figures)
         # read before the file is started again: frames opened from it are
         # read from it a plane at a time (`StoredStack`)
@@ -1713,6 +1771,7 @@ class Session:
             # after the plugin rather than after the fact that a table changed
             self.set_locs(result.locs, label=plugin.path.rsplit("/", 1)[-1],
                           text=result.text or "")
+            self._follow_files()
         if result.locs is not None:
             # a correction is in no file yet; a fit that wrote its table is
             self.set_unsaved(not result.saved)

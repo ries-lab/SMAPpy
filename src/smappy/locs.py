@@ -362,3 +362,25 @@ def concat(tables: "Sequence[Localizations]") -> Localizations:
                          else np.full(len(t), fill, dtype=dtype))
         columns[name] = np.concatenate(parts)
     return Localizations(columns, dict(tables[0].metadata))
+
+
+def frames_apart(locs: Localizations) -> np.ndarray:
+    """``frame``, shifted per file so that no two files share a frame.
+
+    Files opened together keep their own frame numbers, so frame 120 of one
+    and frame 121 of another look consecutive to anything that pairs
+    localizations across frames (NeNA's displacements, the bead pairs of a
+    channel registration) -- and since both files are in the same camera
+    coordinates, such a pair is a plausible-looking wrong one.  File ``k``'s
+    frames move up by ``k`` times twice the longest file, so a frame gap
+    shorter than a file never crosses into the next one, and within a file
+    every gap is what it was.  A table of one file comes back unchanged.
+    """
+    frame = np.asarray(locs["frame"], np.int64)
+    if "filenumber" not in locs or not len(frame):
+        return frame
+    files = np.asarray(locs["filenumber"], np.int64)
+    if files.min() == files.max():
+        return frame
+    stride = 2 * (int(frame.max()) - min(int(frame.min()), 0) + 1)
+    return frame + files * stride

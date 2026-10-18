@@ -1571,6 +1571,72 @@ for the reader, the saver or the snapshot to carry.
   Plugins that read an image layer (Process image, Register layers) still
   read its plane `frame`, not its projection.
 
+## Several files in one table
+
+Files opened together are one table with a `filenumber` column, not a table
+per file.  A table per file was weighed again (2026-10) for what it would
+give -- columns of their own, no padding, filtering one file without a pass
+over the others -- and kept as it is.  Each of those has a cheaper answer
+inside one table, and splitting would cost every reader:
+
+* **Columns of their own.**  A column one file lacks is NaN in its rows (0
+  in an integer column, which for an id is "in none", the convention of
+  `cluster_id` and `track_id`).  What was missing is knowing it is padding:
+  `FileInfo.columns` is what each file had when it was read, and
+  `Session.files_without` the files without a column.
+* **Size.**  On disk the padding is a constant column under LZF, close to
+  nothing; in memory it is 4-8 bytes a row per padded column, which matters
+  only for files that are different datasets (MINFLUX beside a camera fit),
+  and those belong in separate sessions anyway.
+* **Speed.**  The file mask is one `np.isin` over `filenumber`: measured in
+  `docs/performance.md` ("Large tables") with what else a plugin and a
+  render pay for, which is where the time goes.
+* **The cost of splitting.**  Almost every reader wants the files together,
+  so a combined table would be a cached concatenation beside the files: a
+  second copy and an invalidation problem -- the kind `layer_state.Tables`
+  removed (the grouped table shared between layers, bounds copied between
+  filters in five places).  Rows are also addressed by their index into the
+  one table: the undo, ROI membership, `group_id`, recipes, the handoff.
+
+What one table does get wrong is **time**: files keep their own frame
+numbers, so frame 120 of one and 121 of another look consecutive, and in
+the same camera coordinates.  So whatever works along time works per file:
+linking and *Link tracks* block by `filenumber`; the drift plugins estimate
+and correct each file of the selection on its own (`drift_result.per_file`
+-- they used to estimate one curve over all the selected files and move the
+whole table by it, files outside the selection included); NeNA and the
+channel registration pair within a file (`locs.frames_apart`).  Files that
+*are* one acquisition saved in pieces are made one by *Combine files*,
+frames and time continued, ids kept apart.
+
+What one table cost at 10^8 rows (`docs/performance.md`, "Large tables")
+was paid in two places, and both now pay for the files shown rather than
+for the table:
+
+* **The filter.**  Every bound and the file choice was a pass over every
+  row.  A file is one block of rows (`add_file` appends; `LocSet.file_rows`
+  finds the blocks in one pass and says None when a plugin has reordered
+  them), so a layer showing some files restricts its filter to their spans
+  (`LocFilter.restrict`): the ranges are tested there and the rest of the
+  mask is zeros nobody writes.  The masks stay as long as the table, so
+  nothing that combines them with an ROI or a slab changed.
+* **Linking.**  The grouped table was linked whole before a layer showing
+  blinks drew anything -- 86 s and 13 GB at 10^8.  `Tables` now links a
+  table of several files one file at a time, only the files the layers
+  showing blinks show, and keeps what it linked while the layers move
+  between files.  Linking never joined two files, so the blinks are the
+  same; the cost is that the grouped table is a different object each time
+  a file joins it, and that `group_id` on the localizations of a file not
+  linked yet is 0.  The ids run on from file to file, in the order the
+  files were linked, so they stay the grouped table's ids as files are
+  added -- every reader looks them up by value (`IdLookup`, `searchsorted`),
+  none by row.  A save links every file, as the file keeps all the ids.
+
+So that the default view pays for one file, a session of several files
+opens on the first, as in SMAP, and a file added keeps the layers on the
+files they showed (`Session._on_files`); the others are ticked in the Render
+tab.
+
 ## Open questions
 
 * Fitted x sits ~0.24 px from the peak-finder position, and the sign flips with

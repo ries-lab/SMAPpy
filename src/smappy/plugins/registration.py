@@ -33,7 +33,7 @@ from typing import Optional
 import numpy as np
 
 from ..calibrate.transform import RegisterSettings, register_channels
-from ..locs import in_pixels
+from ..locs import frames_apart, in_pixels
 from . import Context, ParamInfo, Plot, Plugin, Result, param, register
 
 TRANSFORM_FILTER = "Channel transformation (*_2ct.h5 *.h5 *.hdf5)"
@@ -102,7 +102,8 @@ class CalibrateChannelTransform(Plugin):
     # bead pairs are matched frame by frame
     grouping = "ungrouped"
     # 2: a table in nm is weighted by its xy_err_nm too (it was unweighted)
-    version = "2"
+    # 3: pairs within one frame of one file, never across two files
+    version = "3"
     Settings = RegisterLocsSettings
     preview_help = ("run the registration and draw it -- the vote, the "
                     "residual scatter and where the pairs are -- without "
@@ -127,7 +128,9 @@ class CalibrateChannelTransform(Plugin):
         precision = None
         if "xy_err_nm" in locs or "xy_err_pix" in locs:
             precision = in_pixels(locs, "xy_err_pix")
-        return register_channels(x, y, np.asarray(locs["frame"]), shape, roi,
+        # a pair is two channels of one frame of one file: files opened
+        # together share frame numbers, and beads from several files pool
+        return register_channels(x, y, frames_apart(locs), shape, roi,
                                  settings=settings.registration,
                                  progress=ctx.report, precision=precision), locs
 

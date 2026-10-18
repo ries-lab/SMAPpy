@@ -1,5 +1,5 @@
 ---
-version: "3"
+version: "4"
 covers: [smappy.drift.estimate_drift, smappy.drift._estimate_spline, smappy.drift._spline_basis, smappy.drift._two_stage, smappy.drift._rcc_prepass, smappy.drift._grouped, smappy.drift.merge_from_session, smappy.drift.estimate_cost, smappy.drift._sigma_levels, smappy.drift.Drift.apply, smappy.drift.Drift.referenced, smappy.drift.Drift.then, smappy.drift.Drift.parameters, smappy.drift._TransformationFit, smappy._comet.core.drift_optimizer.comet_run_kd, smappy._comet.core.drift_optimizer.optimize_3d_chunked_better_moving_avg_kd, smappy._comet.core.cpu_wrapper.cpu_wrapper_chunked_approx, smappy._comet.core.segmenter.segmentation_wrapper, smappy._comet.core.interpolation.interpolate_drift, smappy._comet.core.qc_utils.flag_flawed_segments_by_lift]
 ---
 
@@ -202,7 +202,17 @@ drift in seconds, then COMET within 50 nm of what is left.
 **Which table.**  The localizations, whatever the layer shows.  The
 estimate is made from those the layer's filter and the ROI select -- the
 bounds applied to each localization, also on a layer that merges blinks -- and the
-correction is applied to every localization of the table, selected or not.
+correction is applied to every localization of the file, selected or not.
+
+**Several files.**  Files opened together keep their own frame numbers, so
+one curve over two of them would average frame 100 of one with frame 100
+of the other.  Each file the selection holds gets a drift curve of its own,
+estimated from its localizations and subtracted from its localizations
+only.  A file the selection does not hold (the layer shows only the
+others) is left as it was.  The result then draws a curve per file, under
+its name.  To correct pieces of one acquisition with one curve, make them
+one file first with [Combine files](plugin:Analysis/Process/Combine files).
+
 The blinks the estimate merges for itself (*merge blinks*) are merged with
 the session's merge settings -- the distance and dark frames of the Render
 tab's *merge settings...* -- unless *within* and *dark frames* are set here;
@@ -485,7 +495,8 @@ and the run refuses the combination.
   fit at its next step and leaves the table as it was: a curve refined half
   way is not one to subtract.
 * **The drift curve**, x, y and z against frame (*Show result*); an axis
-  with no drift at all is not drawn.  It is saved with the file and drawn
+  with no drift at all is not drawn.  One curve per file when the selection
+  holds several.  It is saved with the file and drawn
   again when it is reopened.
 * **The transformation**, with *transformation*, in a second panel under the
   drift curve: each of its parameters against frame, in ppm -- nm of

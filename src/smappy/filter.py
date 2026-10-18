@@ -16,6 +16,16 @@ table.
 NaN is excluded by any range, because a comparison against NaN is false.  That
 is deliberate: a localization with no z should not appear in a z slab.
 
+**Spans.**  A filter can be restricted to row spans (`restrict`): every
+range is then tested on those rows only and the rest are False, without
+reading them.  It is what a layer showing one file of several does
+(`layer_state.ViewState`): a file is one contiguous block of rows, and on a
+table of 10 files of 10 M a slider costs what it costs on the file alone --
+0.02 s instead of 0.28 s (`docs/performance.md`, "Large tables").  The masks
+stay as long as the table, so everything that combines them with other
+selections is unchanged; the rows outside the spans are zeros that are never
+written (``np.zeros`` takes them from the system untouched).
+
 Not ported from SMAP: ROI/polygon masks and the grouped-localization filters.
 ``set_mask`` takes an arbitrary boolean array under a name, which is where such
 a selection -- or the viewer's "inside the field of view" -- would plug in.
@@ -23,7 +33,7 @@ a selection -- or the viewer's "inside the field of view" -- would plug in.
 
 from __future__ import annotations
 
-from typing import Dict, Iterator, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -33,13 +43,16 @@ from .locs import Localizations
 class LocFilter:
     """Cached range filters over the fields of a :class:`Localizations` table."""
 
-    def __init__(self, locs: Localizations, **ranges: Tuple[float, float]):
+    def __init__(self, locs: Localizations,
+                 spans: Optional[Sequence[Tuple[int, int]]] = None,
+                 **ranges: Tuple[float, float]):
         self._locs = locs
         self._n = len(locs)
         self._ranges: Dict[str, Tuple[Optional[float], Optional[float]]] = {}
         self._masks: Dict[str, np.ndarray] = {}
         self._combined: Optional[np.ndarray] = None
         self._indices: Optional[np.ndarray] = None
+        self._spans: Optional[List[Tuple[int, int]]] = self._clean(spans)
         for field, (lo, hi) in ranges.items():
             self.set(field, lo, hi)
 
@@ -56,14 +69,40 @@ class LocFilter:
 
     def _range_mask(self, field: str, lo: Optional[float], hi: Optional[float],
                     start: int = 0) -> np.ndarray:
-        """The mask for one range, over the rows from ``start`` on."""
-        values = self._locs[field][start:]  # raises if the column does not exist
-        mask = np.ones(values.shape[0], dtype=bool)
-        if lo is not None:
-            mask &= values >= lo
-        if hi is not None:
-            mask &= values <= hi
-        return mask
+        """The mask for one range, over the rows from ``start`` on -- inside
+        the spans only, when the filter is restricted to some."""
+        column = self._locs[field]          # raises if the column does not exist
+        if self._spans is not None:
+            mask = np.zeros(len(column) - start, dtype=bool)
+            for a, b in self._spans:
+                a, b = max(a, start), b
+                if a < b:
+                    mask[a - start:b - start] = _in_range(column[a:b], lo, hi)
+            return mask
+        return _in_range(column[start:], lo, hi)
+
+    @staticmethod
+    def _clean(spans) -> Optional[List[Tuple[int, int]]]:
+        if spans is None:
+            return None
+        return [(int(a), int(b)) for a, b in sorted(spans) if int(b) > int(a)]
+
+    def restrict(self, spans: Optional[Sequence[Tuple[int, int]]]) -> "LocFilter":
+        """Keep only rows inside these ``(start, stop)`` spans, and test the
+        ranges on those rows alone; None lifts it.  Every range is tested
+        again; a hand-set mask (`set_mask`) is kept as it is."""
+        spans = self._clean(spans)
+        if spans == self._spans:
+            return self
+        self._spans = spans
+        for name, (lo, hi) in self._ranges.items():
+            self._masks[name] = self._range_mask(name, lo, hi)
+        return self._invalidate()
+
+    @property
+    def spans(self) -> Optional[List[Tuple[int, int]]]:
+        """The row spans the filter is restricted to; None for every row."""
+        return None if self._spans is None else list(self._spans)
 
     def append(self, n_new: int) -> "LocFilter":
         """Take in ``n_new`` rows appended to the table since the last call.
@@ -79,8 +118,10 @@ class LocFilter:
             raise ValueError(f"the table has {len(self._locs)} rows, "
                              f"expected {self._n} after appending {n_new}")
         for name, mask in self._masks.items():
+            # rows past the spans are outside them, as rows a hand-set mask
+            # has no rule for are
             tail = (self._range_mask(name, *self._ranges[name], start=start)
-                    if name in self._ranges
+                    if name in self._ranges and self._spans is None
                     else np.zeros(int(n_new), dtype=bool))
             self._masks[name] = np.concatenate([mask, tail])
         return self._invalidate()
@@ -114,10 +155,11 @@ class LocFilter:
     def mask(self) -> np.ndarray:
         """Boolean array over the table: the intersection of every filter."""
         if self._combined is None:
-            if not self._masks:
-                self._combined = np.ones(self._n, dtype=bool)
-            else:
-                self._combined = np.logical_and.reduce(list(self._masks.values()))
+            self._combined = self._and(list(self._masks.values()))
+            if self._spans is not None:
+                # compacted per span now, while the spans are known: the
+                # renderer would otherwise find them in a pass over every row
+                self._indices = self._span_indices(self._combined)
         return self._combined
 
     def mask_without(self, *names: str) -> np.ndarray:
@@ -126,16 +168,31 @@ class LocFilter:
         For a plugin that must see what a filter hides: a layer set to one
         colour still has to hand both colours to the colour assignment.
         """
-        kept = [m for name, m in self._masks.items() if name not in names]
-        if not kept:
-            return np.ones(self._n, dtype=bool)
-        return np.logical_and.reduce(kept)
+        return self._and([m for name, m in self._masks.items() if name not in names])
+
+    def _and(self, masks: List[np.ndarray]) -> np.ndarray:
+        """The AND of ``masks`` over every row, or inside the spans only."""
+        if self._spans is None:
+            if not masks:
+                return np.ones(self._n, dtype=bool)
+            return np.logical_and.reduce(masks)
+        out = np.zeros(self._n, dtype=bool)
+        for a, b in self._spans:
+            out[a:b] = (np.logical_and.reduce([m[a:b] for m in masks]) if masks
+                        else True)
+        return out
+
+    def _span_indices(self, mask: np.ndarray) -> np.ndarray:
+        parts = [a + np.flatnonzero(mask[a:b]) for a, b in self._spans]
+        return np.concatenate(parts) if parts else np.zeros(0, np.int64)
 
     @property
     def indices(self) -> np.ndarray:
         """The positions of the kept localizations; what the renderer indexes with."""
         if self._indices is None:
-            self._indices = np.flatnonzero(self.mask)
+            mask = self.mask
+            if self._indices is None:
+                self._indices = np.flatnonzero(mask)
         return self._indices
 
     @property
@@ -159,6 +216,8 @@ class LocFilter:
         return dict(self._ranges)
 
     def __len__(self) -> int:
+        if self._spans is not None:
+            return int(len(self.indices))
         return int(self.mask.sum())
 
     @property
@@ -182,6 +241,9 @@ class LocFilter:
         What a GUI shows next to each slider, and the quickest way to see which
         filter is doing the cutting.
         """
+        if self._spans is not None:
+            return {name: sum(int(mask[a:b].sum()) for a, b in self._spans)
+                    for name, mask in self._masks.items()}
         return {name: int(mask.sum()) for name, mask in self._masks.items()}
 
     def __str__(self) -> str:
@@ -197,6 +259,15 @@ class LocFilter:
             else:
                 parts.append(f"{name} (mask)")
         return (f"{len(self)} of {self._n} localizations: " + ", ".join(parts))
+
+
+def _in_range(values: np.ndarray, lo: Optional[float], hi: Optional[float]) -> np.ndarray:
+    mask = np.ones(values.shape[0], dtype=bool)
+    if lo is not None:
+        mask &= values >= lo
+    if hi is not None:
+        mask &= values <= hi
+    return mask
 
 
 def histogram_range(values: np.ndarray) -> Tuple[float, float]:

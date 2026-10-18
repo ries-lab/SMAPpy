@@ -237,6 +237,29 @@ session: `io.formats.SESSION_KEYS`), saved with the session and put back by
 the undo.  A plugin that reads a file's acquisition reads it there, not from
 the table's metadata.
 
+A column one file lacks is padding in its rows: NaN, or 0 in an integer
+column (for an id, "in none").  `FileInfo.columns` is what each file had
+when it was read, and `Session.files_without(column)` the files read
+without one -- for a plugin that would rather say "file 2 has no `z_nm`"
+than compute on the padding.
+
+**Frames.**  Files opened together keep their own frame numbers, so frame
+120 of one file and frame 121 of another look consecutive.  Anything that
+works along time works per file: linking and *Link tracks* block by
+`filenumber`, the drift plugins estimate and correct each file on its own
+(`drift_result.per_file`), and what pairs localizations across frames
+(NeNA, the channel registration) reads `locs.frames_apart(locs)`, frames
+moved apart per file.  *Combine files* makes several files one acquisition,
+frames continued.
+
+**Blinks of several files.**  A table of several files is linked one file at
+a time, and only the files the layers showing blinks show
+(`layer_state.Tables`).  The grouped table holds the files linked so far;
+`group_id` on the localizations of a file not linked yet is 0, and the ids
+of the others run on from file to file -- look a blink up by its id, never
+by its row.  `Session.table(layer, "grouped")` links the files that layer
+shows; `session.tables.grouped(files=[...])` the ones named.
+
 **Time.**  A frame is turned into seconds by the file's frame time:
 `metadata.file_frame_time(locs.metadata, filenumber)` -- the session's
 record of that file (`metadata["files"]`), else the camera's

@@ -1,5 +1,5 @@
 ---
-version: "1"
+version: "2"
 covers: [smappy.rcc.estimate_drift_rcc, smappy.drift.merge_from_session, smappy.rcc._pair_shifts, smappy.rcc._axial_shifts, smappy.rcc._solve]
 ---
 
@@ -136,7 +136,7 @@ the correlation to lock onto.
 
 **7. Per frame.**  The drift per window is interpolated to every frame with a
 smooth curve that does not overshoot between the windows (PCHIP), and
-subtracted from every localization -- of the whole table, not only of the
+subtracted from every localization -- of the whole file, not only of the
 selection it was measured on.
 
 ```figure The drift estimated from the simulation (coloured) against the drift that was put in (grey).  Only differences between windows are measured, so the curves are compared after removing their mean.
@@ -158,7 +158,17 @@ ax.legend(frameon=False, fontsize=8)
 **Which table.**  The localizations, whatever the layer shows.  The
 images are made from those the layer's filter and the ROI select -- the
 bounds applied to each localization, also on a layer that merges blinks -- and the
-correction is applied to every localization of the table, selected or not.
+correction is applied to every localization of the file, selected or not.
+
+**Several files.**  Files opened together keep their own frame numbers, so
+one curve over two of them would average frame 100 of one with frame 100
+of the other.  Each file the selection holds gets a drift curve of its own,
+estimated from its localizations and subtracted from its localizations
+only.  A file the selection does not hold (the layer shows only the
+others) is left as it was.  The result then draws a curve per file, under
+its name.  To correct pieces of one acquisition with one curve, make them
+one file first with [Combine files](plugin:Analysis/Process/Combine files).
+
 The blinks it merges before the images are made (*merge blinks*) are
 merged with the session's merge settings -- the distance and dark frames of
 the Render tab's *merge settings...* -- unless *within* and *dark frames* are
@@ -259,7 +269,8 @@ See *In detail*.
 * **The table**, with the drift subtracted from `x_nm`, `y_nm` and `z_nm` (or
   the pixel columns) of every localization.  The correction is recorded in the
   file's history and can be undone.
-* **The drift curve**, x, y and z against frame (*Show result*).  It is
+* **The drift curve**, x, y and z against frame (*Show result*), one per
+  file when the selection holds several.  It is
   saved with the file and drawn again when it is reopened.
 * **The text** gives the range of the drift in x, y and z.
 

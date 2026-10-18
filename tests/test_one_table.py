@@ -160,7 +160,7 @@ def test_the_roi_manager_follows_the_sessions_link_settings():
     state = project.state(file_id)
     state.use_grouped = True
     # the file's blinks are the session's blinks of that file: nothing relinked
-    whole = session.tables.grouped().locs
+    whole = session.tables.grouped(files=[0, 1]).locs
     mine = np.asarray(whole["filenumber"]) == 1
     assert len(state.locs) == int(mine.sum())
     np.testing.assert_array_equal(np.asarray(state.locs["x_nm"]),

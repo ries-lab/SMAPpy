@@ -4,7 +4,7 @@ from __future__ import annotations
 from ..drift import merge_from_session, merge_values
 from ..rcc import RCCSettings, estimate_drift_rcc
 from . import Context, FormState, ParamInfo, Plugin, Result, register
-from .drift_result import KeepsDrift
+from .drift_result import KeepsDrift, drift_result, per_file
 
 
 @register("Analysis/Drift/RCC")
@@ -16,6 +16,8 @@ class RCCDrift(KeepsDrift, Plugin):
     grouping = "ungrouped"
     Settings = RCCSettings
     name = "RCC drift correction"
+    # 2: each file of the selection corrected by a curve of its own
+    version = "2"
 
     def describe(self, ctx, settings) -> FormState:
         """What *within* and *dark frames* on auto take: the session's merge
@@ -28,8 +30,8 @@ class RCCDrift(KeepsDrift, Plugin):
         ctx.selection.require(5000, ctx.warn, "a drift estimate")
         ctx.report(f"correlating {ctx.selection}")
         # Stop ends it between time windows with `Stopped`: half the pairs
-        # make no drift curve, so the table is left as it was
-        drift = estimate_drift_rcc(ctx.locs, settings, select=ctx.selection.mask,
-                                   stop=ctx.stop)
-        return Result(locs=drift.apply(ctx.locs), text=str(drift), plot=drift.plot,
-                      data={"drift": drift}, settings=settings)
+        # make no drift curve, so the table is left as it was.  Each file of
+        # the selection gets a curve of its own (`per_file`)
+        corrected, drifts = per_file(ctx, lambda select: estimate_drift_rcc(
+            ctx.locs, settings, select=select, stop=ctx.stop))
+        return drift_result(corrected, drifts, settings, lambda d: d.plot)

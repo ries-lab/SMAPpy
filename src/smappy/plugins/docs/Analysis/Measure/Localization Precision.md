@@ -1,5 +1,5 @@
 ---
-version: "4"
+version: "5"
 covers: [smappy.plugins.precision.measure, smappy.plugins.precision.displacement_pairs, smappy.plugins.precision.fit_radial, smappy.plugins.precision.fit_axis, smappy.plugins.precision.radial_density, smappy.plugins.precision.axis_density, smappy.plugins.precision.drift_free_sigma, smappy.plugins.precision.sigma_at_photons, smappy.plugins.precision.crlb_statistics, smappy.plugins.precision.summary, smappy.plugins.precision.draw_radial, smappy.plugins.precision.draw_gaps, smappy.plugins.precision.draw_crlb, smappy.plugins.precision.draw_frc, smappy.frc.frc_resolution, smappy.frc.blur_envelope, smappy.frc.envelope_resolution]
 ---
 
@@ -219,6 +219,13 @@ draw_frc(fig.subplots(), [found])
 ```
 
 ## In detail
+
+**Several files.**  Files opened together keep their own frame numbers, and
+lie in the same camera coordinates, so frame 120 of one file and frame 121
+of another would make pairs of two different molecules.  A pair is
+therefore always of one file: each file's frames are moved apart from the
+others' before the pairs are found (`frames_apart`), and the pairs of all
+the selected files are pooled.
 
 **The pair model.**  Two localizations of one molecule are at the same true
 place, so their displacement is the difference of two independent errors: a
