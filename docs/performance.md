@@ -392,6 +392,6 @@ kept rows' indices are now compacted with the mask, span by span -- the
 renderer needs them, and found them before in a pass over every row.
 Linking every file one by one costs what linking the table cost: the gain
 is in not linking the files nobody looks at, and in keeping a file linked
-while the layers move.  A layer that shows every file -- every new layer
-does -- still links every file.  Opening (the spatial index, 19 s) and a
+while the layers move.  A layer that shows every file still links every file,
+so a session of several files opens on the first (`Session._on_files`).  Opening (the spatial index, 19 s) and a
 full-field render of every file (20 s) are as they were.

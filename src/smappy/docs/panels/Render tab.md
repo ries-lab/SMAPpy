@@ -579,6 +579,11 @@ edit it, × to remove it, so a bound on a column not on show is not
 forgotten.  The status bar says how much the filters hide.  The count reads
 *shown / all*, and how many are in the ROI when one is drawn.  For `filenumber` the histogram is replaced by a
 list of the files to tick; right-click a file to remove it from the session.
+A session of several files opens on the first: tick the others to see them
+too.  A file added to a session keeps the layers on the files they showed.
+Shown together, every file is filtered and its blinks merged before the
+picture is drawn, which for large files takes a while; one file at a time
+is quick.
 
 ### min
 The lower bound; empty is none.

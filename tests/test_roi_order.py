@@ -206,6 +206,7 @@ def test_an_roi_of_a_file_the_layer_does_not_show_is_not_in_the_drawn_roi():
     b = project.add_roi(second.id, [0, 0])
     session = project.session
     session.set_roi(Region.rect(-100, -100, 100, 100))
+    session.layers[0].state.set_files(None)       # both files: the first only, opened
     assert project.in_drawn_roi() == {a.id: True, b.id: True}
     session.layers[0].state.set_files([1])
     assert project.in_drawn_roi() == {a.id: False, b.id: True}

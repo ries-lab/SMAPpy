@@ -353,3 +353,24 @@ def test_a_worker_links_the_wanted_files_one_job_at_a_time():
         assert s.tables.take_grouped(grouped, index, key)
     assert done == [0, 2]
     assert s.tables.is_current and s.tables._linked == {0, 2}
+
+
+def test_a_session_of_several_files_starts_on_the_first():
+    s = _session(_table(), _table(seed=1), _table(seed=2))
+    assert s.layers[0].files == [0]
+    s.layers[0].set_files([0, 2])                  # chosen: kept when another joins
+    s.add_file(_table(seed=3), FileInfo("f3", "f3.h5", "smappy"), append=True)
+    assert s.layers[0].files == [0, 2]
+
+
+def test_a_saved_session_of_several_files_reopens_on_the_first(tmp_path):
+    s = _session(_table(), _table(seed=1))
+    s.layers[0].set_files(None)
+    path = tmp_path / "two.h5"
+    s.save(path)
+    again = Session()
+    from smappy.io.formats import load
+    locs, info = load(path)
+    again.add_file(locs, info)
+    assert again.file_names() == ["f0", "f1"]
+    assert again.layers[0].files == [0]

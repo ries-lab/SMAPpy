@@ -607,6 +607,9 @@ class Session:
             self._rois = None            # this file's own ROIs, read on first use
             self._id_regions = None      # and its own per-cluster results
             self.changed("rois")
+            if len(infos) > 1:
+                # a session of several files opens on the first (below)
+                self._on_files(range(1))
         else:
             merged = concat([self.locs, locs])
             merged.metadata = dict(self.locs.metadata)
@@ -618,6 +621,7 @@ class Session:
                 merged.columns.pop(column, None)
             self.set_locs(merged, undoable=True, keep_layers=True,
                           label=f"add {info.name}", text=str(info.path))
+            self._on_files(range(number))
         self.locs.metadata["files"] = [f.to_dict() for f in self.files]
         self.log("load", str(info.path), append=append)
         # a file opened is the table as saved; one added to it makes a table
@@ -652,6 +656,21 @@ class Session:
         if len(kept) != len(self.images):
             self.images = kept
             self.changed("images")
+
+    def _on_files(self, numbers) -> None:
+        """Layers that showed every file show ``numbers`` -- the files there
+        were before one was added, or the first of a session reopened.
+
+        A layer of a session of several files starts on one file, as in SMAP,
+        and ticks the others in the Render tab: shown together, every file is
+        filtered and linked into blinks before anything is drawn -- 86 s and
+        13 GB for ten files of 10 M, where one takes 6 s (`docs/performance.md`,
+        "Large tables") -- and files opened together are as often two cells
+        as one.  A layer that had chosen its files keeps them.
+        """
+        for layer in self.layers:
+            if not layer.is_image and layer.files is None:
+                layer.set_files(list(numbers))
 
     def file_names(self) -> List[str]:
         return [f.name for f in self.files]

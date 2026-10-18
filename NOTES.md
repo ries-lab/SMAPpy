@@ -1632,6 +1632,11 @@ for the table:
   added -- every reader looks them up by value (`IdLookup`, `searchsorted`),
   none by row.  A save links every file, as the file keeps all the ids.
 
+So that the default view pays for one file, a session of several files
+opens on the first, as in SMAP, and a file added keeps the layers on the
+files they showed (`Session._on_files`); the others are ticked in the Render
+tab.
+
 ## Open questions
 
 * Fitted x sits ~0.24 px from the peak-finder position, and the sign flips with
