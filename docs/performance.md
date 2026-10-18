@@ -362,15 +362,36 @@ nine columns where Statistics reads a few: 0.5 s of its 2 s.  A selection
 that indexes a column when it is first read would save that, about a
 quarter of a light plugin and less of a heavy one -- worth doing, not first.
 
-What would help, in order:
+What would help, in order -- the first two are done, below:
 
 * **Link only the files a layer shows, when it shows them**, cached per
   file -- linking already never crosses a file, so the per-file results are
-  the same numbers.  It turns 86 s on opening into 6-7 s per file looked
-  at, and the 13 GB peak into a 10^7 one.
+  the same numbers.
 * **Filter masks over a file's rows only.**  `add_file` appends, so a file
-  is one contiguous block of rows; a layer showing one file could compute
-  its bounds over that slice (a view, no copy: 0.0 ms above) and leave the
-  rest False, which makes a slider cost what it costs on the file alone.
-  It needs the rows to stay grouped by file, checked once per table change.
+  is one contiguous block of rows; a layer showing one file computes its
+  bounds over that block and leaves the rest False.
 * **A lazy selection** (`Selection.apply` indexing on first read).
+
+**Done (2026-10): filters over the files shown, linking file by file.**
+`LocFilter.restrict` tests a layer's bounds on the spans of the files it
+shows (`LocSet.file_rows`), and `Tables` links a table of several files one
+file at a time, only the files the layers showing blinks show (NOTES.md,
+"Several files in one table").  The same run again, 10 files of 10 M:
+
+| | before | after |
+|---|---|---|
+| show one file (first time: also finds each file's block, one pass) | 0.44 s | 0.23 s |
+| move one slider, AND -- and the kept rows' indices | 0.28 s (indices: 0.06 s more at render) | 0.08 s |
+| the layer shows one file's blinks | **86 s, peak 13.1 GB** (the whole table) | **6.0 s** (that file), peak unchanged at 8.8 GB |
+| grouped: plugin context, one file | 0.52 s | 0.07 s |
+| grouped: move one slider | -- | 0.05 s |
+| then every file's blinks | -- | 94 s for the other nine, peak 12.6 GB |
+
+The slider is 0.08 s rather than the 0.02 s of the file alone because the
+kept rows' indices are now compacted with the mask, span by span -- the
+renderer needs them, and found them before in a pass over every row.
+Linking every file one by one costs what linking the table cost: the gain
+is in not linking the files nobody looks at, and in keeping a file linked
+while the layers move.  A layer that shows every file -- every new layer
+does -- still links every file.  Opening (the spatial index, 19 s) and a
+full-field render of every file (20 s) are as they were.
