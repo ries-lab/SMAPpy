@@ -939,6 +939,8 @@ class RenderTab(QWidget):
         # merges a large table's blinks in the background (`gui.merging`):
         # the control window's, or this tab's own when it stands alone
         self.merger = merger_for(session, self)
+        # the layers (their states) already coloured by track (`_colour_by_track`)
+        self._tracks_coloured: set = set()
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         inner = QWidget()
@@ -1179,6 +1181,13 @@ class RenderTab(QWidget):
         more_form.addRow("precision factor", self.factor)
         more_form.addRow("gamma", self.gamma)
         more_form.addRow("", self.white)
+        self.lines_add = QCheckBox("lines add up")
+        self.lines_add.setToolTip(
+            "tracks: where lines overlap -- a track's joints, crossings -- they "
+            "add, as localizations do.  Off: a covered pixel is one line, so "
+            "the knots do not outshine the lines and set the contrast")
+        more_form.addRow("", self.lines_add)
+        self._more_form = more_form
         form.addRow(CollapsibleSection("more", more, expanded=False))
         layout.addWidget(CollapsibleSection("display", display, expanded=True, **HELP))
         # last and closed: the ordinary picture is x against y, and this is
@@ -1199,6 +1208,7 @@ class RenderTab(QWidget):
         self.mode.currentIndexChanged.connect(self._on_render_settings)
         self.track_column.currentIndexChanged.connect(self._on_render_settings)
         self.line_width.valueChanged.connect(self._on_render_settings)
+        self.lines_add.toggled.connect(self._on_render_settings)
         self.sigma.valueChanged.connect(self._on_render_settings)
         self.sigma_y.editingFinished.connect(self._on_render_settings)
         self.factor.valueChanged.connect(self._on_render_settings)
@@ -1269,7 +1279,7 @@ class RenderTab(QWidget):
         """Point every control at one layer, without firing their signals."""
         layer = self.session.layers[index]
         self.filter.layer_index = index
-        widgets = (self.mode, self.track_column, self.line_width,
+        widgets = (self.mode, self.track_column, self.line_width, self.lines_add,
                    self.sigma, self.sigma_y, self.factor, self.color, self.color_field,
                    self.lut, self.invert, self.invert_mode, self.white,
                    self.contrast, self.scale, self.maximum, self.gamma,
@@ -1327,6 +1337,7 @@ class RenderTab(QWidget):
         self.set_mode(settings.mode)
         self._fill_track_columns(layer)
         self.line_width.setValue(settings.line_width)
+        self.lines_add.setChecked(settings.lines_add)
         self._show_track_rows(settings.mode == "tracks" and not layer.is_image)
         self.sigma.setValue(settings.sigma)
         self.sigma_y.set(settings.sigma_y)
@@ -1360,8 +1371,11 @@ class RenderTab(QWidget):
         state.settings = dataclasses.replace(
             state.settings, mode=mode, sigma=self.sigma.value(), sigma_y=sigma_y,
             sigma_settings=sigmas, line_width=self.line_width.value(),
+            lines_add=self.lines_add.isChecked(),
             track_column=self._chosen_track_column(state.settings.track_column))
         self._show_track_rows(mode == "tracks")
+        if entering_tracks:
+            self._colour_by_track()
         if entering_tracks and self.layer.grouped:
             # a track is drawn through its localizations: merged blinks join a
             # slow particle's steps into one point and draw a coarser line.
@@ -1376,6 +1390,34 @@ class RenderTab(QWidget):
     def _show_track_rows(self, shown: bool) -> None:
         for widget in (self.track_column, self.line_width):
             self._display_form.setRowVisible(widget, shown)
+        self._more_form.setRowVisible(self.lines_add, shown)
+
+    def _colour_by_track(self) -> None:
+        """The first time a layer draws tracks, and only if it is not coloured
+        by a column already: each track its own colour, by its id on *turbo*.
+        One intensity LUT made every track the same colour, and which line
+        was which track could not be told where they cross.  Once per layer,
+        so a colouring chosen afterwards is not undone by a mode switch."""
+        state = self.layer.state
+        if state.settings.color_field is not None or id(state) in self._tracks_coloured:
+            return
+        self._tracks_coloured.add(id(state))
+        from ..tracking.columns import track_column
+        try:
+            column = track_column(self.layer.locs, state.settings.track_column)
+        except (KeyError, ValueError):
+            return                      # no tracks yet: the error says so
+        self._fill_color_fields(self.layer)
+        widgets = (self.color, self.color_field, self.lut)
+        for w in widgets:
+            w.blockSignals(True)
+        self.color.setCurrentIndex(self.color.findData("field"))
+        self.color_field.setCurrentText(column)
+        for w in widgets:
+            w.blockSignals(False)
+        # through the handlers, so the range and the LUT follow as on a click
+        self._on_color()
+        self.lut.setCurrentText("turbo")
 
     def _chosen_track_column(self, fallback: str) -> str:
         """The column the list says: "" for *auto*; ``fallback`` while the

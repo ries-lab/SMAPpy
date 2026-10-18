@@ -15,6 +15,7 @@ class RCCDrift(KeepsDrift, Plugin):
     # the correction moves every localization, and the estimate reads frames
     grouping = "ungrouped"
     Settings = RCCSettings
+    name = "RCC drift correction"
 
     def describe(self, ctx, settings) -> FormState:
         """What *within* and *dark frames* on auto take: the session's merge

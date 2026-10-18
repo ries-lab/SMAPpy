@@ -238,6 +238,7 @@ class Transform(Plugin):
                    "a named transformation, a transformation file, or the "
                    "drift of another file recorded at the same time.")
     Settings = TransformSettings
+    name = "Apply transform"
     changes_locs = True
     # every localization of the file moves, whatever the layer merges
     grouping = "ungrouped"

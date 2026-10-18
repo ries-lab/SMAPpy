@@ -54,6 +54,39 @@ class ROIHeader(QWidget):
         self.file_count.setStyleSheet("color: gray")
         layout.addWidget(self.file_count)
 
+        # -------------------------------------------------------- geometry
+        geometry = QWidget()
+        form = QFormLayout(geometry)
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setVerticalSpacing(2)
+        self.shape = QComboBox()
+        self.shape.addItems(["circle", "square", "track"])
+        self.shape.setToolTip("what a click in the ROI manager drafts: a circle or "
+                              "square there, or the track drawn nearest it.  Until "
+                              "one is chosen, a track whenever the layer draws tracks")
+        self.size = QDoubleSpinBox(minimum=1, maximum=1e6, decimals=0, suffix=" nm")
+        self.size.setToolTip("circle diameter, or the side of a square")
+        self.size.setKeyboardTracking(False)
+        self.shape.currentTextChanged.connect(self._on_shape)
+        self.size.valueChanged.connect(self._on_geometry)
+        self.preview = QDoubleSpinBox(minimum=0, maximum=1e6, decimals=0, suffix=" nm")
+        self.preview.setSpecialValueText("3 x ROI size")
+        self.preview.setToolTip("what the ROI image shows around the ROI")
+        self.preview.setKeyboardTracking(False)
+        self.preview.valueChanged.connect(self._on_geometry)
+        form.addRow("shape", self.shape)
+        form.addRow("size", self.size)
+        form.addRow("ROI view", self.preview)
+        self.from_region = QPushButton("Add the drawn region as an ROI")
+        self.from_region.setToolTip("turn the rectangle, line or polygon drawn in the "
+                                    "2D view into an analysis ROI")
+        self.from_region.clicked.connect(self._from_region)
+        form.addRow(self.from_region)
+        # first and open: what a click in the manager makes is the first thing
+        # a project needs, and it is not a step that runs, so not among them
+        layout.addWidget(CollapsibleSection("geometry", geometry, expanded=True, major=True))
+
+
         # ------------------------------------------------ per-region steps
         # The steps, how they run on the ROI selected in the manager, and
         # what they measured there, together: they were a window, two ticks
@@ -96,43 +129,14 @@ class ROIHeader(QWidget):
         # the table only once an ROI is selected, and as tall as its rows
         self.results.hide()
         slayout.addWidget(self.results)
-        section = CollapsibleSection("per-region steps", steps, expanded=True,
+        # folded until wanted: the steps' editor is tall, and the tab opens on
+        # the geometry and the plugins
+        section = CollapsibleSection("per-region steps", steps, expanded=False,
                                      major=True, helpable=True,
                                      help_tip="what the per-region steps are, and "
                                               "how they run")
         section.help_requested.connect(self._steps_help)
         layout.addWidget(section)
-
-        # -------------------------------------------------------- geometry
-        geometry = QWidget()
-        form = QFormLayout(geometry)
-        form.setContentsMargins(0, 0, 0, 0)
-        form.setVerticalSpacing(2)
-        self.shape = QComboBox()
-        self.shape.addItems(["circle", "square", "track"])
-        self.shape.setToolTip("what a click in the ROI manager drafts: a circle or "
-                              "square there, or the track drawn nearest it.  Until "
-                              "one is chosen, a track whenever the layer draws tracks")
-        self.size = QDoubleSpinBox(minimum=1, maximum=1e6, decimals=0, suffix=" nm")
-        self.size.setToolTip("circle diameter, or the side of a square")
-        self.size.setKeyboardTracking(False)
-        self.shape.currentTextChanged.connect(self._on_shape)
-        self.size.valueChanged.connect(self._on_geometry)
-        self.preview = QDoubleSpinBox(minimum=0, maximum=1e6, decimals=0, suffix=" nm")
-        self.preview.setSpecialValueText("3 x ROI size")
-        self.preview.setToolTip("what the ROI image shows around the ROI")
-        self.preview.setKeyboardTracking(False)
-        self.preview.valueChanged.connect(self._on_geometry)
-        form.addRow("shape", self.shape)
-        form.addRow("size", self.size)
-        form.addRow("ROI view", self.preview)
-        self.from_region = QPushButton("Add the drawn region as an ROI")
-        self.from_region.setToolTip("turn the rectangle, line or polygon drawn in the "
-                                    "2D view into an analysis ROI")
-        self.from_region.clicked.connect(self._from_region)
-        form.addRow(self.from_region)
-        # folded: set once per project
-        layout.addWidget(CollapsibleSection("geometry", geometry, expanded=False, major=True))
 
         session.on_change(self._on_session)
         self.refresh(files_changed=True)

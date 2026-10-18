@@ -125,13 +125,14 @@ def make(d) -> None:
            "localizations from the common fitting programs.",
            spot=[_menu_item(d, menu, "Open...")], point=_menu_item(d, menu, "Open..."),
            zoom=d.around(menu, 700))
-    d.shot("Add file... puts a second file into the same table, for instance "
+    d.shot("Open takes images too. When localizations are already open, it "
+           "asks whether the new file replaces them or is added, for instance "
            "the next field of view.",
-           spot=[_menu_item(d, menu, "Add file")], zoom=d.around(menu, 700))
+           spot=[_menu_item(d, menu, "Open...")], zoom=d.around(menu, 700))
     menu.close()
     file_tab = _show_tab(d, "File")
-    d.shot("The File tab holds what the menu does not: exporting an image, "
-           "and simulating data.",
+    d.shot("The File tab opens on Load, the same Open in one click. Below it, "
+           "saving images and simulating data.",
            spot=[_tab_button(d, "File")], point=_tab_button(d, "File"), click=True)
     section, panel = _open(d, file_tab, "Simulate structure")
     d.shot("To practise, Simulate makes a dataset with a known structure: "
@@ -170,9 +171,8 @@ def make(d) -> None:
     render.view.reset()
     d.settle()
     menu = _menu(d, "View")
-    d.shot("The View menu has Reset view too, next to the 3D view.",
-           spot=[_menu_item(d, menu, "Reset view"), _menu_item(d, menu, "3D view")],
-           zoom=d.around(menu, 700))
+    d.shot("The View menu opens the 3D view.",
+           spot=[_menu_item(d, menu, "3D view")], zoom=d.around(menu, 700))
     menu.close()
     d.settle()
 

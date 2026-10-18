@@ -5,7 +5,7 @@ about using it on purpose.  A built-in structure (nuclear pores) with a
 realistic labelling efficiency, the blinking in the terms one knows a dye by,
 then the same simulation as camera frames -- written as a recipe the fitter
 opens like an acquisition, camera included -- and the fit scored against the
-truth by Ground Truth.
+truth by Compare to ground truth.
 
 The storyboard checks what the words claim: that the fitter took its camera
 from the simulation, and that the isolated spots come back with errors the
@@ -153,10 +153,10 @@ def make(d) -> None:
 
     d.chapter("Against the truth")
     analysis = show_tab(d, "Analysis")
-    _, truth = open_section(d, analysis, "Ground Truth")
+    _, truth = open_section(d, analysis, "Compare to ground truth")
     isolated = field(truth, "isolated")
     type_into(truth, "min_photons", 300)
-    d.shot("Ground Truth works out where every spot really was and pairs them "
+    d.shot("Compare to ground truth works out where every spot really was and pairs them "
            "with the localizations, frame by frame.",
            spot=[truth.form], zoom=d.around(truth.form, 760))
     _run(d, truth)
@@ -196,7 +196,7 @@ def make(d) -> None:
            "photons, in the terms a dye is known by.</li>"
            "<li><b>Camera frames:</b> a recipe the fitter opens, camera "
            "included.</li>"
-           "<li><b>Ground Truth:</b> what was found, and whether the precision "
+           "<li><b>Compare to ground truth:</b> what was found, and whether the precision "
            "is honest.</li></ul>",
            say="That is simulation: a known truth, to learn on and to test "
                "against.")

@@ -182,6 +182,21 @@ def test_simulate_makes_a_dataset_to_try():
     assert {"x_nm", "y_nm", "z_nm", "frame", "photons"} <= set(session.locs.keys())
 
 
+def test_a_simulation_can_be_added_as_a_new_file():
+    session = Session()
+    plugin = plugins.get("File/Simulate/Blinking Structure")()
+    session.run(plugin, plugin.Settings(n_frames=200, seed=1))
+    first = len(session.locs)
+    session.run(plugin, plugin.Settings(n_frames=200, seed=2, append=True))
+    assert len(session.files) == 2 and len(session.locs) > first
+    tracks = plugins.get("File/Simulate/Tracks")()
+    session.run(tracks, tracks.Settings(n_frames=50, seed=3, append=True))
+    assert len(session.files) == 3
+    # off, the default, a simulation replaces what is open
+    session.run(tracks, tracks.Settings(n_frames=50, seed=3))
+    assert len(session.files) == 1
+
+
 def test_simulated_drift_records_the_truth():
     plugin = plugins.get("File/Simulate/Blinking Structure")()
     result = plugin.run(Context(), plugin.Settings(n_frames=200, seed=1, drift=True))

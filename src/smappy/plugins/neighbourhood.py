@@ -718,6 +718,7 @@ class Neighbourhood(Plugin):
     a statistic of a column over them, or the Voronoi density."""
 
     Settings = NeighbourhoodSettings
+    name = "Neighbourhood per localization"
     changes_locs = True
     version = "2"
 

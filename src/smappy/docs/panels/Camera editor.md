@@ -169,7 +169,7 @@ gain makes it a fraction of an electron.
 The time from one frame to the next -- the
 [frame time](plugin:Panels/Glossary): the exposure plus the time the camera
 needs between frames.  Everything that speaks of seconds reads it (*Time
-Course*, *Blinking*, the on-time of *Localization Statistics*).  A camera
+Course*, *Blinking statistics*, the on-time of *Localization Statistics*).  A camera
 that records its own cycle time (Micro-Manager's `ActualInterval-ms`, which
 a draft takes *from a tag*) needs nothing here; *fixed* suits a camera that
 always runs at one rate.  *Not set*, a file's frame time is the time-lapse

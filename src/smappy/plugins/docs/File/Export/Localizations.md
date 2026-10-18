@@ -45,7 +45,7 @@ beside it.
 numbers, everything else with 9 significant digits -- enough to give back
 a single-precision value exactly.  With smappy's names, the columns are
 written under their names here and frames count from 0, so
-[Auto](plugin:File/Load/Auto) reads the file back as it was.  With
+[Load from path](plugin:File/Load/Auto) reads the file back as it was.  With
 ThunderSTORM's names the usual columns are renamed and frames count from 1,
 as ThunderSTORM's own export does; the columns ThunderSTORM has no name for
 keep this program's:

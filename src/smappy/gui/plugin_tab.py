@@ -16,7 +16,7 @@ import traceback
 from typing import Dict, List, Optional
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import (QHBoxLayout, QLabel, QInputDialog, QMenu,
+from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QInputDialog, QMenu,
                                QPushButton, QToolButton, QVBoxLayout,
                                QWidget)
 
@@ -112,14 +112,31 @@ class PluginTab(QWidget):
         add.clicked.connect(self.add_plugin)
         self.add_button = add
         top.addWidget(add)
-        layout.addLayout(top)
         # the header scrolls with the sections: as a widget of its own above
         # the scroll it was given half the tab, however little it held
         self.inner = QWidget()
         column = QVBoxLayout(self.inner)
         column.setContentsMargins(0, 0, 0, 0)
         if header is not None:
+            # + where the plugins start, under a line: above the header it
+            # read as adding to the header, which is not a plugin
             column.addWidget(header)
+            line = QFrame()
+            line.setFrameShape(QFrame.HLine)
+            line.setFrameShadow(QFrame.Sunken)
+            column.addWidget(line)
+            # on the left, named: at the right it sat under the scroll bar
+            # beside a header as wide as the column
+            row = QHBoxLayout()
+            top.removeWidget(add)
+            row.addWidget(add)
+            label = QLabel("plugins")
+            label.setStyleSheet("color: gray")
+            row.addWidget(label)
+            row.addStretch(1)
+            column.addLayout(row)
+        else:
+            layout.addLayout(top)
         self.stack = QVBoxLayout()
         self.stack.setContentsMargins(0, 0, 0, 0)
         column.addLayout(self.stack, 1)

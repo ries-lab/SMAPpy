@@ -282,7 +282,7 @@ def _read(path: Path, found: Contents, chosen: Sequence[Measurement], valid_only
     from .formats import FileInfo
     if not chosen:
         raise ValueError(f"{path.name} holds no MINFLUX measurement"
-                         + (f" (it has {len(found.images)} images: File > Open image)"
+                         + (f" (it has {len(found.images)} images: File > Open)"
                             if found.images else ""))
     tables, metas = [], []
     for m in chosen:

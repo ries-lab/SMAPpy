@@ -2,7 +2,7 @@
 title: Render tab
 summary: The layers of the picture -- which localizations each one shows, and how it is drawn.
 widget: smappy.gui.render_tab.RenderTab
-covers: [smappy.session.Layer, smappy.session.default_bounds, smappy.filter.LocFilter, smappy.group.group, smappy.group.connect, smappy.group.combine, smappy.render.render_locs, smappy.render.render_sigmas, smappy.render.psf_sigmas, smappy.render.camera_pixelsize_nm, smappy.render.camera_grid, smappy.render.SigmaSettings, smappy.render.to_rgb, smappy.render.absolute_imax, smappy.render.DisplaySettings, smappy.render.RenderAxes, smappy.render.render_tracks, smappy.render.track_segments, smappy.render.render_segments, smappy.render.render_voronoi, smappy.render.VoronoiCells, smappy.render.voronoi_cells_for, smappy.lut.on_white, smappy.lut.invert_sum, smappy.lut.complement, smappy.images.load_images, smappy.images.assign_axes, smappy.images.ImageData.projection, smappy.layer_state.focus_z]
+covers: [smappy.session.Layer, smappy.session.default_bounds, smappy.filter.LocFilter, smappy.group.group, smappy.group.connect, smappy.group.combine, smappy.render.render_locs, smappy.render.render_sigmas, smappy.render.psf_sigmas, smappy.render.camera_pixelsize_nm, smappy.render.camera_grid, smappy.render.SigmaSettings, smappy.render.to_rgb, smappy.render.absolute_imax, smappy.render.DisplaySettings, smappy.render.RenderAxes, smappy.render.render_tracks, smappy.render.track_segments, smappy.render.render_segments, smappy.render.opaque_lines, smappy.render.render_voronoi, smappy.render.VoronoiCells, smappy.render.voronoi_cells_for, smappy.lut.on_white, smappy.lut.invert_sum, smappy.lut.complement, smappy.images.load_images, smappy.images.assign_axes, smappy.images.ImageData.projection, smappy.layer_state.focus_z]
 ---
 
 ## What it does
@@ -349,7 +349,11 @@ a line, and the quantile contrast, set by those blobs, dimmed every other
 track.)  A segment of no length -- a track along the line of sight in the 3D
 view -- is a round dot.  A segment weighs one
 (or the mean of its ends' weight column) and, coloured by a column, takes
-the mean of its two ends' values.  The view culls whole tracks by their
+the mean of its two ends' values.  Unless *lines add up* is ticked, a pixel's
+weight is then capped at one line's (the heaviest segment's, with a weight
+column) and its colour scaled with it: a joint of two segments, or a crossing
+of two tracks, is no brighter than the line, and the quantile contrast is
+set by the lines.  The view culls whole tracks by their
 bounding boxes rather than localizations by position, since a segment
 across the view can have both ends outside it.  The line width is in
 pixels of the picture, so an exported picture at a finer pixel size has
@@ -359,7 +363,7 @@ precisions.
 
 **The *Voronoi density* mode.**  The cells are those of every localization
 the layer's filter keeps, from the same Delaunay triangulation as
-[Neighbourhood](plugin:Analysis/Process/Neighbourhood)'s Voronoi density:
+[Neighbourhood per localization](plugin:Analysis/Process/Neighbourhood)'s Voronoi density:
 localizations at exactly the same position share a cell and are each
 counted, and a cell open at the edge of the field has no area.  A cell
 $i$ of area $A_i$ holding $n_i$ localizations has the density
@@ -670,7 +674,10 @@ the tracks are linked.  *Voronoi density* to see structures of very
 different densities at once, or to judge densities by eye; the picture of
 a layer with millions of localizations takes a while the first time.
 
-Choosing *tracks* unticks *merge blinks* on that layer: merging joins a
+The first time a layer is set to *tracks*, and if it is not coloured by a
+column already, it is coloured by its track id on the *turbo* LUT, so that
+each track has a colour of its own; choose *intensity* to draw them all in
+one.  Choosing *tracks* also unticks *merge blinks* on that layer: merging joins a
 slow particle's localizations in consecutive frames into one, and the line
 through the blinks is coarser than the track.  Tick it again to draw the
 blinks.
@@ -694,7 +701,7 @@ colour bar in the render window's top right corner: the LUT over the
 the column (*layer 2: z_nm*).  Each scale has its own bar, stacked one
 under the other; layers with the same column, LUT, inversion and range
 share one, labelled with all of them.  A picture saved or copied from the
-render window draws the same bars into it (*Export Image*).
+render window draws the same bars into it (*Save image*).
 
 ### colour range
 The values that get the two ends of the LUT.  Narrow it to spread the
@@ -773,6 +780,12 @@ brightness proportional to density.
 ### white background
 The picture on white paper, the hue kept: for figures and print.  It is set
 on every layer at once.
+
+### lines add up
+In *tracks* only, off by default.  Ticked, overlapping lines add as
+localizations do, so where tracks cross or a slow particle turns back on
+itself the picture is brighter -- a density of tracks.  Off, each line is
+drawn at its own brightness wherever it passes.
 
 ### axes
 Which column each axis of the picture is.  Set on all layers at once; closed,

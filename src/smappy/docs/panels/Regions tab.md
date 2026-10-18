@@ -23,7 +23,7 @@ shape and size.  Below the tab's own controls sit the ROI plugins pinned to
 it.  By default these are
 the one that finds ROIs -- [Segment regions](plugin:Analysis/Regions/Segment regions), by density peaks for
 any compact structure or a ring template for nuclear pores -- the ones that summarise the measurements --
-[Histograms](plugin:Analysis/Regions/Summarize/Histograms) and
+[Histograms of ROI results](plugin:Analysis/Regions/Summarize/Histograms) and
 [NPC labelling efficiency](plugin:Analysis/Regions/Summarize/NPC labelling efficiency)
 -- and [NPC Analysis](plugin:Analysis/Regions/Workflow/NPC Analysis), which finds
 the pores, measures them and fits their
@@ -136,11 +136,11 @@ show(axes[3], "drawn polygon", Polygon(outline, fill=False, lw=0.8))
 roi.polygon = None
 ```
 
-**3. Measuring.**  *per-region steps*, at the top of the tab, is a list of
+**3. Measuring.**  *per-region steps*, under *geometry*, is a list of
 steps that run once in every included ROI of every file -- plugins that measure a
 region and return a row of numbers for it, such as Localization Statistics,
 the same plugin as on the whole view.  One row per ROI, the rows together
-are the *results table*, which the summaries such as Histograms read.  The
+are the *results table*, which the summaries such as Histograms of ROI results read.  The
 list is a *block*, as in a [chain](plugin:Panels/Glossary) (also called a
 pipeline or workflow: plugins run one after another as one): it can repeat
 over the [regions](plugin:Panels/Glossary) of an id column instead (a region
@@ -213,7 +213,7 @@ Ctrl+R).  Under the button, the file chosen there and
 how many of its ROIs there are and are used.
 
 ### per-region steps
-Which steps run, in what order, with which settings: the same editor as any
+Folded when the tab opens; unfold it to choose and run the steps.  Which steps run, in what order, with which settings: the same editor as any
 chain's, opened on the one block.  *check* times them in a few ROIs, and
 Run measures what is out of date and carries the rest forward.  While it
 measures, Run is Stop: the ROI being measured is finished, the ones measured
@@ -245,8 +245,9 @@ runs on every selection, measured or not, because a figure cannot be stored.
 Closing that window unticks it.
 
 ### geometry
-What every ROI's outline is, unless it has a polygon of its own.  Folded
-when the tab opens: it is set once for a project.
+What every ROI's outline is, unless it has a polygon of its own.  First
+and open when the tab opens: it is what a click in the ROI manager makes.
+Under the two sections, a line, and the tab's plugins with + to add one.
 
 ### shape
 *circle* for round structures; *square* for structures that are square or

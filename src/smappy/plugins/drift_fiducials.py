@@ -33,6 +33,7 @@ class FiducialDrift(KeepsDrift, Plugin):
     # beads are tracks of localizations, and the correction moves every one
     grouping = "ungrouped"
     Settings = FiducialSettings
+    name = "Fiducials drift correction"
     version = "1"
 
     def run(self, ctx: Context, settings: FiducialSettings) -> Result:

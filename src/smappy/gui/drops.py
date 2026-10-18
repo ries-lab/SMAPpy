@@ -47,7 +47,7 @@ def local_paths(mime) -> List[Path]:
 
 def kind_of(path) -> Optional[str]:
     """`LOCS`, `IMAGE`, `STACK`, or None for something neither File > Open,
-    *Open image* nor a fitter could take.
+    *Open* nor a fitter could take.
 
     A file is asked of the localization readers first, by the same
     `reader_for` that *Load/Auto* uses -- the extension, then a look inside

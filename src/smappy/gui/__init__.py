@@ -29,7 +29,8 @@ def make_app(argv=None):
 
 def name_the_mac_app(name: str = "SMAPpy") -> None:
     """The name in bold at the left of a Mac's menu bar, which is the
-    bundle's: run from a script, that is the interpreter's ("Python3.12").
+    bundle's: run from a script, that is the interpreter's ("Python3.12");
+    and no full-screen item in the View menu.
 
     Set in the main bundle's info dictionary before the application starts,
     through the Objective-C runtime with ctypes, so that no PyObjC is needed.
@@ -66,5 +67,18 @@ def name_the_mac_app(name: str = "SMAPpy") -> None:
         info = send(bundle, b"infoDictionary")
         if info:
             send(info, b"setObject:forKey:", text(name), text("CFBundleName"))
+        # no "Enter Full Screen" in the View menu, which AppKit adds to any
+        # menu of that title: it filled the screen with the control window,
+        # a column meant to stay narrow beside the picture
+        # -- registered, for this run only, not written into the interpreter's
+        # own defaults, which every other Python program would read
+        number = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+                                  ctypes.c_bool)(("objc_msgSend", objc))(
+            objc.objc_getClass(b"NSNumber"), objc.sel_registerName(b"numberWithBool:"),
+            False)
+        values = send(objc.objc_getClass(b"NSDictionary"), b"dictionaryWithObject:forKey:",
+                      number, text("NSFullScreenMenuItemEverywhere"))
+        defaults = send(objc.objc_getClass(b"NSUserDefaults"), b"standardUserDefaults")
+        send(defaults, b"registerDefaults:", values)
     except Exception:
         pass

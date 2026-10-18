@@ -400,6 +400,7 @@ class Histograms(SiteAnalysisPlugin):
     """Distributions of what was measured per region, one histogram per column."""
 
     Settings = HistogramSettings
+    name = "Histograms of ROI results"
     changes_locs = False
     version = "1"
     auto_label = "all"

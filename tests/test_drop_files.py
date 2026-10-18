@@ -87,8 +87,11 @@ def test_an_hdf5_dropped_on_the_picture_opens_as_file_open_would(app, windows, t
                        np.sort(np.asarray(locs["x_nm"])))
 
 
-def test_two_tables_dropped_together_are_the_first_replaced_and_the_second_added(
-        app, windows, tmp_path):
+@pytest.mark.parametrize("answer, names", [
+    (False, ["a.hdf5", "b.hdf5"]),
+    (True, ["old.hdf5", "a.hdf5", "b.hdf5"])])
+def test_tables_dropped_on_open_ones_replace_them_or_join_them_as_answered(
+        app, windows, tmp_path, monkeypatch, answer, names):
     from smappy.io.formats import save
     from smappy.simulate import simulate
     session, control, _ = windows
@@ -97,11 +100,24 @@ def test_two_tables_dropped_together_are_the_first_replaced_and_the_second_added
     old = save(simulate(n_frames=300, seed=5), tmp_path / "old.hdf5")
     control.load_paths([str(old)])
     wait_for_loads(app, control)
+    asked = []
+    monkeypatch.setattr(control, "replace_or_add",
+                        lambda paths: asked.append(paths) or answer)
 
     assert drop(app, control, a, b)
     wait_for_loads(app, control)
 
-    assert session.file_names() == ["a.hdf5", "b.hdf5"]
+    assert len(asked) == 1 and [p.name for p in asked[0]] == ["a.hdf5", "b.hdf5"]
+    assert session.file_names() == names
+
+
+def test_nothing_is_asked_when_no_table_is_open(app, windows, tmp_path, monkeypatch):
+    from smappy.io.formats import save
+    from smappy.simulate import simulate
+    session, control, _ = windows
+    assert not len(session.locs)
+    path = save(simulate(n_frames=300, seed=3), tmp_path / "a.hdf5")
+    assert control.replace_or_add([path]) is False
 
 
 def _write_tif(path, frames=60):

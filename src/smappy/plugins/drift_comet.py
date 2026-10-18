@@ -20,6 +20,7 @@ class CometDrift(KeepsDrift, Plugin):
     # the correction moves every localization, and the estimate reads frames
     grouping = "ungrouped"
     Settings = DriftSettings
+    name = "COMET drift correction"
     # 2: "RCC first" and "two stage" run under the spline fit (the default)
     # rather than being skipped by it.  3: a transformation besides the shift
     # (off by default: the shift alone gives the numbers it gave)

@@ -7,7 +7,7 @@ covers: [smappy.session.Session.save, smappy.io.hdf5.save_localizations, smappy.
 
 Writes the localizations to an HDF5 file (`.hdf5` or `.h5`), together with
 the record of what was done to them, so that the file can be opened again
-here -- by File > Open or [Auto](plugin:File/Load/Auto) -- and still
+here -- by File > Open or [Load from path](plugin:File/Load/Auto) -- and still
 says how it was made.  HDF5 is
 an open format; any language can read the columns (in Python with `h5py`,
 in MATLAB with `h5read`).

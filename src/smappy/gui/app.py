@@ -56,6 +56,15 @@ class HandoffTask(QThread):
             self.failed.emit(message_of(e), traceback.format_exc())
 
 
+def open_filter() -> str:
+    """*File > Open*'s filter: the readers' tables and the images it takes."""
+    images = "*.tif *.tiff *.png"
+    tables, *rest = name_filter().split(";;")
+    every = tables[tables.index("(") + 1:-1]
+    return ";;".join([f"Localizations and images ({every} {images})", tables,
+                      f"Images ({images})"] + rest)
+
+
 class LoadTask(QThread):
     """Read a file off the GUI thread.
 
@@ -156,6 +165,11 @@ class ControlWindow(QMainWindow):
                   + ", ".join(sorted(set(missing))))
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
+        # more tabs than the column is wide: arrows to scroll through them,
+        # names whole.  Without, a Mac's style widened the window to fit them
+        # all, and the control column is meant to stay narrow
+        self.tabs.setUsesScrollButtons(True)
+        self.tabs.setElideMode(Qt.ElideNone)
         self.plugin_tabs: List[PluginTab] = []
         self.roi_tab: Optional[ROIHeader] = None
         self.build_tabs()
@@ -213,9 +227,11 @@ class ControlWindow(QMainWindow):
         self._ticker.timeout.connect(self._tick)
 
         menu = _add_menu(self.menuBar(), "File", self)
-        open_ = self._action(menu, "Open...", QKeySequence.Open, self.open)
-        add = self._action(menu, "Add file...", "Ctrl+Shift+O", lambda: self.open(append=True))
-        image = self._action(menu, "Open image...", None, self.open_image)
+        # one Open for tables, images and stacks, sorted as a drop is; whether
+        # a table replaces the open ones or joins them is asked when there are
+        # any -- an Add file... and an Open image... beside it were three
+        # entries for one thing, and the wrong one replaced a table
+        open_ = self._action(menu, "Open...", QKeySequence.Open, lambda: self.open())
         save = self._action(menu, "Save", QKeySequence.Save, self.save)
         save_as = self._action(menu, "Save as...", QKeySequence.SaveAs, self.save_as)
         self._action(menu, "Session name...", None, self.rename_session)
@@ -270,7 +286,7 @@ class ControlWindow(QMainWindow):
         self._offers: list = []            # sessions handed to new instances
         self._offer_timer = QTimer(self, interval=500)
         self._offer_timer.timeout.connect(self._check_offers)
-        self._load_locked = [open_, add, image, save, save_as, self.new_window_action,
+        self._load_locked = [open_, save, save_as, self.new_window_action,
                              self.undo_action,
                              self.redo_action, self.undo_menu.menuAction(),
                              self.redo_menu.menuAction()]
@@ -322,7 +338,7 @@ class ControlWindow(QMainWindow):
             lambda settings=None: self.open_calibration()
         # the File tab's Load line (`Plugin.window`): File > Open, or Add
         session.window_openers["open files"] = \
-            lambda settings=None: self.open(append=bool(getattr(settings, "append", False)))
+            lambda settings=None: self.open()
         # a fitter whose file's camera is not in the database offers this
         # (`Plugin.describe`), opened on the file that fitter is set to
         session.window_openers["camera editor"] = self.open_camera_editor
@@ -343,7 +359,8 @@ class ControlWindow(QMainWindow):
         help_.addSeparator()
         self._action(help_, "Save a bug report...", None, self.save_bug_report)
         self._action(help_, "Show the log folder", None, self.show_log_folder)
-        self._action(view, "Reset view", "Ctrl+0", render.view.reset)
+        # Reset view is the render window's button, Ctrl+0 its key from either
+        # window (`RenderToolBar`); a menu item as well said it twice
         self._action(view, "Show render window", None, render.show)
         if sys.platform == "darwin":
             # A Mac has one menu bar, the front window's: with the picture in
@@ -506,9 +523,17 @@ class ControlWindow(QMainWindow):
             if self.tabs.tabText(i) == wanted:
                 self.tabs.setCurrentIndex(i)
                 break
+        saved = self.workspace.layout.get("open", {})
         for tab, widget in zip(self.workspace.tabs, self._tab_widgets()):
-            opened = self.workspace.layout.get("open", {}).get(tab.name)
-            if opened and isinstance(widget, PluginTab):
+            if not isinstance(widget, PluginTab):
+                continue
+            opened = saved.get(tab.name)
+            if not opened and tab.name not in saved:
+                # a tab nobody has opened a section of opens on *Load*, if it
+                # has one: the program starts on File, one click from a file
+                opened = next((i.id for i in tab.instances
+                               if i.plugin == "File/Load/Load"), None)
+            if opened:
                 widget.open_section(opened)
 
     def _tab_widgets(self) -> List[QWidget]:
@@ -1118,8 +1143,10 @@ class ControlWindow(QMainWindow):
             return one(layers[0])
         return "; ".join(f"{l.name}: {one(l)}" for l in layers)
 
-    def open(self, append: bool = False) -> None:
-        """One or more files; the first replaces (unless appending), the rest join.
+    def open(self, append: Optional[bool] = None) -> None:
+        """*File > Open*: localization tables, images and stacks, sorted by
+        `open_dropped` as a drop is -- a table loads, an image is a layer, a
+        long stack goes to a fitter.
 
         The reading and the linking happen in a `LoadTask`, one file at a time,
         so the window stays alive and says what it is doing.  Anything that
@@ -1127,10 +1154,10 @@ class ControlWindow(QMainWindow):
         runs; everything else -- panning, the filters, the other windows --
         keeps working on the file that is already open.
         """
-        start = folders.start()
-        paths, _ = QFileDialog.getOpenFileNames(self, "Add localizations" if append
-                                                else "Open localizations", start, name_filter())
-        self.load_paths(paths, append=append)
+        paths, _ = QFileDialog.getOpenFileNames(self, "Open", folders.start(),
+                                                open_filter())
+        if paths:
+            self.open_dropped(paths, append=append)
 
     def load_paths(self, paths, append: bool = False, reset_view: bool = False) -> None:
         """Queue files for the loader.  ``reset_view`` frames the first one,
@@ -1310,13 +1337,13 @@ class ControlWindow(QMainWindow):
     def dropEvent(self, event) -> None:
         _drop(event, self.open_dropped)
 
-    def open_dropped(self, paths) -> None:
+    def open_dropped(self, paths, append: Optional[bool] = None) -> None:
         """Files dropped on either main window, sorted by `drops.kind_of`.
 
         Localization files go to `load_paths` together, which is *File >
         Open* with all of them chosen at once: the first replaces the table,
         the rest are added to it.  A short TIFF (`drops.MAX_IMAGE_FRAMES`
-        frames or fewer) or a PNG is an image layer, as *Open image* makes.  A
+        frames or fewer) or a PNG is an image layer, added to what is open.  A
         long stack goes into a fitter's *file* (`fit_file`); only one can, so
         the first.  Anything else is refused in
         the status bar -- a dialog for a stray file would be out of proportion.
@@ -1335,7 +1362,10 @@ class ControlWindow(QMainWindow):
                     f"still loading {self._loading_name}; drop "
                     f"{tables[0].name} again when it is done", 8000)
             else:
-                self.load_paths([str(p) for p in tables])
+                if append is None:
+                    append = self.replace_or_add(tables)
+                if append is not None:
+                    self.load_paths([str(p) for p in tables], append=append)
         # after the tables, which load on a thread: a table opened after the
         # image would replace the session the image was added to
         self._pending_images.extend(images)
@@ -1346,6 +1376,26 @@ class ControlWindow(QMainWindow):
             self.statusBar().showMessage(
                 f"cannot open {refused[0].name}: not a localization file or an "
                 f"image stack{more}", 8000)
+
+    def replace_or_add(self, paths) -> Optional[bool]:
+        """Whether tables opened now join the open ones (True), replace them
+        (False), or are not opened (None).  Asked only when a table is open:
+        with none there is nothing to choose between."""
+        if not len(self.session.locs):
+            return False
+        box = QMessageBox(self)
+        box.setWindowTitle("Open")
+        what = paths[0].name if len(paths) == 1 else f"{len(paths)} files"
+        box.setText(f"Replace the open localizations with {what}, or add "
+                    f"{'it' if len(paths) == 1 else 'them'} as "
+                    f"{'one more file' if len(paths) == 1 else 'more files'}?")
+        replace = box.addButton("Replace", QMessageBox.AcceptRole)
+        add = box.addButton("Add", QMessageBox.AcceptRole)
+        box.addButton(QMessageBox.Cancel)
+        box.setDefaultButton(replace)     # what Open did before it asked
+        box.exec()
+        clicked = box.clickedButton()
+        return True if clicked is add else False if clicked is replace else None
 
     def _fitter_for_file(self):
         """``(tab index, tab, instance)`` of the fitter a dropped stack goes to.
@@ -1403,14 +1453,6 @@ class ControlWindow(QMainWindow):
             f"{instance.title(panel.plugin.name)}: file set to {path.name}; "
             "Run fits it", 8000)
         return True
-
-    def open_image(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Open image", folders.start(),
-                                              "Images (*.tif *.tiff *.png)")
-        if not path:
-            return
-        folders.remember(path)
-        self.open_image_path(path)
 
     def _open_pending_images(self) -> None:
         images, self._pending_images = self._pending_images, []

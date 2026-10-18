@@ -10,7 +10,7 @@ from test_drift import SETTINGS, simulate
 
 def test_registry_has_comet_and_specs_cover_every_field():
     cls = plugins.get("Analysis/Drift/COMET")
-    assert cls.name == "COMET"
+    assert cls.name == "COMET drift correction"
     specs = cls.specs()
     assert set(specs) == {f.name for f in DriftSettings.__dataclass_fields__.values()}
     assert specs["segmentation_var"].info.advanced is False

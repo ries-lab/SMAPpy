@@ -362,6 +362,7 @@ class GroundTruth(Plugin):
     """A fit of a simulation against where the molecules really were."""
 
     Settings = GroundTruthSettings
+    name = "Compare to ground truth"
     changes_locs = False
     # the truth is matched frame by frame
     grouping = "ungrouped"

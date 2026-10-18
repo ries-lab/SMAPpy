@@ -404,7 +404,7 @@ def test_removing_and_reordering_from_the_tab_edits_the_workspace(window):
     first, second = tab.tab.instances[:2]
     tab.tab.move(first.id, 1)
     tab.rebuild()
-    assert [s.title for s in tab.sections][:2] == ["RCC", "COMET"]
+    assert [s.title for s in tab.sections][:2] == ["RCC drift correction", "COMET drift correction"]
     tab.tab.instances.remove(second)
     tab.rebuild()
     assert "RCC" not in [s.title for s in tab.sections]

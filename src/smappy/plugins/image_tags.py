@@ -130,6 +130,7 @@ class ImageTags(Plugin):
     against frame."""
 
     Settings = ImageTagsSettings
+    name = "Plot image tags"
     changes_locs = False
     # a rate of localizations per frame
     grouping = "ungrouped"

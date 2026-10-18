@@ -955,7 +955,12 @@ class RenderToolBar(QToolBar):
         self.line_width.valueChanged.connect(self._on_width)
         self.addWidget(self.line_width)
 
-        self.addAction(QAction("Reset view", self, triggered=view.reset))
+        # Ctrl+0 from either window: the View menu's item it was is gone
+        reset = QAction("Reset view", self, triggered=view.reset)
+        reset.setShortcut("Ctrl+0")
+        reset.setShortcutContext(Qt.ApplicationShortcut)
+        reset.setToolTip("show everything (Ctrl+0)")
+        self.addAction(reset)
         # the 3D window is a menu item away in the control window, and the
         # picture is where one decides to look at it in 3D; ControlWindow
         # connects it, since this toolbar does not know that window.  A

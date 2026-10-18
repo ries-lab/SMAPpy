@@ -325,6 +325,7 @@ class Blinking(Plugin):
     and the bursts at a dark time."""
 
     Settings = BlinkingSettings
+    name = "Blinking statistics"
     changes_locs = False
     per_region = True
     version = "1"

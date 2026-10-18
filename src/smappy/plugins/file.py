@@ -94,7 +94,7 @@ class LoadSettings:
                       help="the localization file to read")
     append: bool = param(False, label="add to the open files",
                          help="join the table as one more file instead of "
-                              "replacing everything; this is File > Add file")
+                              "replacing everything; Add in File > Open")
     format: str = param("", label="format", choices=_format_choices, advanced=True,
                         help="auto: from the file's name and, where that is not "
                              "enough, its contents")
@@ -133,22 +133,23 @@ def csv_args(csv: CsvSettings) -> Dict[str, Any]:
 
 @dataclass
 class OpenSettings:
-    append: bool = param(False, label="add",
-                         help="add the files to the open ones instead of "
-                              "replacing them")
+    """Nothing to set: whether the files replace the open ones or join them is
+    asked when there are open ones, which a tick set beforehand got wrong as
+    often as not."""
 
 
 @register("File/Load/Load")
 class Open(Plugin):
-    """Choose localization files and open them: the first line of the File tab."""
+    """Choose files and open them: the first line of the File tab."""
 
-    description = ("choose localization files in a dialog and open them, or "
-                   "add them to the open ones; any format File/Load/Auto reads")
+    description = ("choose files in a dialog and open them: localization tables "
+                   "in any format Load from path reads, images as image layers")
     Settings = OpenSettings
     changes_locs = False          # a launcher: the window loads, not `run`
-    version = "1"
+    version = "2"
     # the window's own File > Open: a csv no conversion knows asks for its
-    # columns there (`gui.dialogs.CsvMappingDialog`)
+    # columns there (`gui.dialogs.CsvMappingDialog`), and replace or add is
+    # asked there when a table is open
     window = "open files"
 
     def run(self, ctx: Context, settings: OpenSettings) -> Result:
@@ -161,6 +162,7 @@ class LoadAuto(Plugin):
     """Read a localization file of any known format into the session."""
 
     Settings = LoadSettings
+    name = "Load from path"
     changes_locs = True
     # 2: no *link blinks*; a table with a trace id is grouped by trace;
     # 3: the per-format loaders are a *format* choice here, and the csv
@@ -362,6 +364,7 @@ class ExportLocalizations(Plugin):
     or Picasso's HDF5."""
 
     Settings = ExportSettings
+    name = "Save localizations"
     changes_locs = False
     logged = True          # where a file went is not visible in the file
     version = "1"
@@ -478,6 +481,7 @@ class ExportImage(Plugin):
     the file."""
 
     Settings = ExportImageSettings
+    name = "Save image"
     changes_locs = False
     logged = True          # which picture came from this table, and how
     # 2: the colours scaled to 8 bits (the file was black); the layer's
@@ -698,6 +702,7 @@ class ExportStack(Plugin):
     step by step, as a TIFF stack, an MP4 or a GIF."""
 
     Settings = ExportStackSettings
+    name = "Save stack"
     changes_locs = False
     logged = True
     version = "1"
@@ -876,6 +881,15 @@ def _duration(seconds: float) -> str:
 
 # ----------------------------------------------------------------- simulate
 
+@dataclass
+class SimulateStructureSettings(SimulationSettings):
+    # here, not in `SimulationSettings`: what happens to the open files is the
+    # plugin's business, not the model's, and scripts build the model alone
+    append: bool = param(False, label="add as a new file",
+                         help="keep the open files and add the simulation as one "
+                              "more; off: it replaces them")
+
+
 @register("File/Simulate/Blinking Structure")
 class SimulateBlinks(Plugin):
     """A labelled structure, blinking: localizations to try, or camera frames
@@ -885,7 +899,7 @@ class SimulateBlinks(Plugin):
     # find the plugin; the name is what the panel says, and "Blinking
     # Structure" did not say that it simulates
     name = "Simulate structure"
-    Settings = SimulationSettings
+    Settings = SimulateStructureSettings
     changes_locs = True
     # 3: localizations down to 10 photons; free linkage, poses.  4: the
     # precision is Mortensen's maximum-likelihood one, not least squares'
@@ -922,7 +936,8 @@ class SimulateBlinks(Plugin):
                 f"({md['n_labels']} labels), {md['n_blinks']} blinks over "
                 f"{settings.n_frames} frames, off time {md['off_time_frames']:.0f} "
                 f"frames; {md['n_close']} too close together, {close}")
-        return Result(files=[(locs, info, None)], text=text, settings=settings)
+        return Result(files=[(locs, info, None)], text=text, settings=settings,
+                      append=getattr(settings, "append", False))
 
     def _camera(self, ctx, settings, truth, camera_truth) -> Result:
         from ..simulate.source import write_recipe
@@ -952,7 +967,7 @@ class SimulateBlinks(Plugin):
             files = [(locs, FileInfo(name=name, path=str(path), format="simulated",
                                      n=len(locs)), None)]
         return Result(files=files, text=text, data=data, written=str(path),
-                      settings=settings)
+                      settings=settings, append=getattr(settings, "append", False))
 
 
 @dataclass
@@ -1006,6 +1021,9 @@ class SimulateTracksSettings:
                                      "bleaches")
     seed: int = param(0, label="seed", min=0,
                       help="the same seed and settings give the same tracks")
+    append: bool = param(False, label="add as a new file",
+                         help="keep the open files and add the simulation as one "
+                              "more; off: it replaces them")
     diffusion: TrackDiffusionSettings = param(default_factory=TrackDiffusionSettings,
                                               label="diffusion")
     blinking: TrackBlinkingSettings = param(default_factory=TrackBlinkingSettings,
@@ -1073,4 +1091,5 @@ class SimulateTracks(Plugin):
         text = (f"{len(locs)} localizations of {md['n_tracks']} tracks over "
                 f"{settings.n_frames} frames ({settings.frame_time_ms:g} ms each); "
                 f"the truth in track_id_true and state_true")
-        return Result(files=[(locs, info, None)], text=text, settings=settings)
+        return Result(files=[(locs, info, None)], text=text, settings=settings,
+                      append=getattr(settings, "append", False))

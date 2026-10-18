@@ -131,7 +131,7 @@ class ImageData:
     @property
     def axes_unknown(self) -> bool:
         """Several planes, and the file did not say what they are: what
-        File > Open image asks about (`assign_axes`)."""
+        File > Open asks about (`assign_axes`)."""
         return bool(self.metadata.get("axes_unknown")) and self.n_frames > 1
 
     def plane_z(self, index) -> np.ndarray:
@@ -348,7 +348,7 @@ def load_image(path, pixelsize: Optional[float] = None, x0: float = 0.0,
 # The letters tifffile names a series' axes with that are neither the image
 # (Y, X), its colour samples (S), channels (C), z (Z) nor time (T): "I" and
 # "Q" are planes it cannot place, the rest are rare.  They are pooled into
-# one axis of unknown planes, which File > Open image asks about.
+# one axis of unknown planes, which File > Open asks about.
 _KNOWN_AXES = "TZCYXS"
 
 
@@ -422,7 +422,7 @@ def load_images(path, pixelsize: Optional[float] = None, x0: float = 0.0,
                      name=path.name, path=str(path), metadata=meta)
     if ni > 1:
         # pages nothing names (beside channels the file may name): one stack
-        # of unknown planes per channel, for File > Open image to ask about
+        # of unknown planes per channel, for File > Open to ask about
         planes = np.moveaxis(data, 2, 3)                      # T, Z, I, C, Y, X
         planes = planes.reshape(nt * nz * ni, nc, *data.shape[-2:])
         return _split(base, planes, "", None, None, unknown=True)

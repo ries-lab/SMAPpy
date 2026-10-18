@@ -56,6 +56,9 @@ class RegionSteps(QWidget):
         self.panel = ChainPanel(self.instance, session, chain_class(spec, path=PATH),
                                 root=(0,))
         self.panel.edit.setChecked(True)          # the steps are what it is for
+        # shorter than a chain's own list: it sits in the Regions tab above
+        # the plugins, and a few steps are the usual project
+        self.panel.steps.setMaximumHeight(100)
         self.panel.changed.connect(self._rewire)
         layout.addWidget(self.panel)
         self.status = QLabel("")

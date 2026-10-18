@@ -623,6 +623,11 @@ class RenderSettings:
     # auto, `tracking.columns`), and the lines' width in pixels of the picture
     track_column: str = ""
     line_width: float = 1.0
+    # mode="tracks": whether lines add up where they overlap.  Off, a pixel a
+    # line covers is one line whatever crosses it: the joints of a track and
+    # its crossings with others are no brighter than the line, and the
+    # quantile contrast is set by the lines rather than by their knots
+    lines_add: bool = False
 
 
 @dataclass
@@ -1015,10 +1020,31 @@ def render_tracks(locs: Localizations, fov: FieldOfView, settings: "RenderSettin
         colors = luts.colors(mid, display.lut, lo, hi, display.invert)
     out = render_segments(x[a], y[a], x[b], y[b], fov, settings.line_width, weights,
                           colors, n_threads, use_extension)
+    if not settings.lines_add:
+        top = 1.0 if weights is None or not len(weights) else float(np.nanmax(weights))
+        out = opaque_lines(out, top)
     drawn = np.zeros(len(locs), bool)          # the localizations the lines join
     drawn[a] = drawn[b] = True
     out.n_locs = int(drawn.sum())
     return out
+
+
+def opaque_lines(image: RenderedImage, top: float = 1.0) -> RenderedImage:
+    """Lines that cover rather than add: each pixel's weight capped at
+    ``top``, one line's (the heaviest segment's, with a weight field), and its
+    colour scaled with it, so the colour stays the mean of the lines there.
+
+    Done on the accumulated planes, after the kernel: an antialiased edge
+    keeps its fraction of a line, and where segments overlap -- a joint, a
+    crossing, a track that turns back on itself -- the pixel is simply full.
+    """
+    weight = image.weight
+    over = weight > top
+    if not over.any():
+        return image
+    scale = np.where(over, top / np.where(over, weight, 1.0), 1.0).astype(np.float32)
+    color = None if image.color is None else image.color * scale[..., None]
+    return replace(image, weight=weight * scale, color=color)
 
 
 def render_segments(xa, ya, xb, yb, fov: FieldOfView, width: float = 1.0,

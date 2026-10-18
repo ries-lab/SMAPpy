@@ -322,6 +322,7 @@ class Curves(SiteAnalysisPlugin):
     gives counts (Spatial statistics' pairs over expected pairs)."""
 
     Settings = CurvesSettings
+    name = "Mean curves over ROIs"
     changes_locs = False
     version = "1"
 

@@ -15,7 +15,7 @@ or with Ctrl+R:
 python -m smappy.gui.app localizations.h5
 ```
 
-The files are the ones the session has loaded, so *File → Open* and *Add file*
+The files are the ones the session has loaded, so *File → Open* (*Replace* or *Add*)
 are how sources arrive; a fitted or drift-corrected table can be used without
 saving it first.  Inputs are SMAPpy localization HDF5 files, SMAP `_sml.mat`,
 MINFLUX exports and csv, whatever the session can read.

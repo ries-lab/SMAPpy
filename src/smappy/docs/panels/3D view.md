@@ -348,7 +348,7 @@ the next time.
 ### Save
 *PNG as displayed...* saves the picture as it is on screen, whichever
 engine drew it.  *Save image...* opens
-[Export Image](plugin:File/Export/Image) set to this window: the projection
+[Save image](plugin:File/Export/Image) set to this window: the projection
 rendered again at a pixel size of your choice -- over the canvas, or the
 slab's box -- in colour or as the summed intensity in floating point for
 measuring, with a scale bar and colour bars, and the projection and the

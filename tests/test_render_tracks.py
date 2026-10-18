@@ -203,3 +203,55 @@ def test_a_line_is_as_bright_however_finely_it_is_cut_into_segments():
                                     use_extension=fast).weight
             across = image[:, 20:80].sum(axis=0)
             assert across == pytest.approx(1.0, abs=0.01)
+
+
+def test_crossing_tracks_are_no_brighter_than_a_line_unless_lines_add_up():
+    # two tracks crossing at (20.5, 15.5), and a joint of one with itself
+    locs = tracks_table([(5.5, 15.5), (35.5, 15.5), (20.5, 2.5), (20.5, 28.5)],
+                        [1, 1, 2, 2], [0, 1, 0, 1])
+    fov = FieldOfView(0, 0, 1.0, 40, 30)
+    covering = render_locs(locs, fov, TRACKS).weight
+    adding = render_locs(locs, fov, dataclasses.replace(TRACKS, lines_add=True)).weight
+    assert covering.max() == pytest.approx(1.0)
+    assert covering[15, 20] == pytest.approx(1.0)
+    assert adding[15, 20] == pytest.approx(2.0)
+    # away from the crossing the two are the same picture
+    assert covering[15, 10] == pytest.approx(adding[15, 10]) == pytest.approx(1.0)
+
+
+def test_covering_lines_keep_their_colour_where_they_overlap():
+    locs = tracks_table([(5.5, 15.5), (35.5, 15.5), (20.5, 2.5), (20.5, 28.5)],
+                        [1, 1, 2, 2], [0, 1, 0, 1])
+    fov = FieldOfView(0, 0, 1.0, 40, 30)
+    settings = dataclasses.replace(TRACKS, color_field="track_id", color_range=(1, 2))
+    image = render_locs(locs, fov, settings)
+    # the colour plane is colour times weight: capped together, the mean
+    # colour of the two lines stays where they cross
+    mean = image.color[15, 20] / image.weight[15, 20]
+    one, two = (image.color[15, 10] / image.weight[15, 10],
+                image.color[5, 20] / image.weight[5, 20])
+    assert np.allclose(mean, 0.5 * (one + two), atol=1e-5)
+
+
+def test_tracks_are_coloured_by_their_id_on_turbo_the_first_time_only():
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    from smappy.gui.render_tab import RenderTab
+    from smappy.session import Session
+    session = Session(tracks_table([(5, 5), (35, 5), (5, 25), (35, 25)],
+                                   [1, 1, 2, 2], [0, 1, 0, 1]))
+    tab = RenderTab(session)
+    state = session.layers[0].state
+    assert not tab._more_form.isRowVisible(tab.lines_add)
+    tab.set_mode("tracks")
+    assert state.settings.color_field == "track_id"
+    assert state.display.lut == "turbo"
+    assert tab._more_form.isRowVisible(tab.lines_add)
+    tab.lines_add.setChecked(True)
+    assert state.settings.lines_add
+    # one colour chosen by hand stays through a switch away and back
+    tab.color.setCurrentIndex(tab.color.findData(None))
+    tab.set_mode("precision")
+    tab.set_mode("tracks")
+    assert state.settings.color_field is None

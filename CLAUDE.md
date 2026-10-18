@@ -96,7 +96,7 @@ shape, so read the one closest to what you are writing:
 | rewrites the table and hands it back | `assign_colors.py` (`Result.locs`, a preview) |
 | a long computation with progress | `drift_comet.py`, `drift_rcc.py` |
 | measures drift from beads, a `Drift` the others' way | `drift_fiducials.py` (*Fiducials*: tracks of the bright localizations from *Link tracks*' linker, one linear fit of each bead's offset and COMET's spline in `smappy/fiducials.py`; `KeepsDrift` keeps the curve; beads simulated by `smappy.simulate.simulate_beads`) |
-| loads, saves, exports, simulates | `file.py` (one loader with an advanced *format* choice, no input table -- a format is a `Reader` / `Writer` in `io/formats.py`, every column of the file kept; *Load*, a launcher of File > Open; *Export localizations*, whose column list is `kind="columns"`; *Export Image*, the one renderer of the view -- `smappy.picture`, framed by the windows' `Session.view_frames`, which the render and 3D windows' *Save* call too; *Export Stack*, movies and z-stacks on the same renderer, `smappy.movie`; the simulator's model is `smappy.simulate`) |
+| loads, saves, exports, simulates | `file.py` (one loader with an advanced *format* choice, no input table -- a format is a `Reader` / `Writer` in `io/formats.py`, every column of the file kept; *Load*, a launcher of File > Open, which asks replace or add; *Save localizations* (`File/Export/Localizations`), whose column list is `kind="columns"`; *Save image* (`File/Export/Image`), the one renderer of the view -- `smappy.picture`, framed by the windows' `Session.view_frames`, which the render and 3D windows' *Save* call too; *Save stack*, movies and z-stacks on the same renderer, `smappy.movie`; the simulator's model is `smappy.simulate`) |
 | reads a container of several measurements and images | `io/msr.py` (Abberior `.msr`, read by *File/Load/Auto*'s *Abberior MSR* part: the OBF container `io/obf.py`, the MINFLUX archive and zarr `io/zarr_lite.py`, blosc/LZ4 `io/blosc.py`, both record layouts `io/minflux.py`; File > Open asks which parts, `gui/msr_import.py`, through a reader's `needs=("measurements",)`; a file per measurement in `Result.files`, images in `Result.image_layers`, each file's own metadata in `FileInfo.metadata`) |
 | finds, measures or summarises ROIs | `roi.py` (a segmenter derives from `SegmenterPlugin`, which gives it a Preview, *replace* (`replace_param()`) and a step of the ROI undo; `per_region = True`; analyse) |
 | finds ROIs by one of several methods, with presets | `segment.py` (*Segment regions*: one `SegmenterPlugin`, a *method* part each -- ring template (`npc.segment_npcs`), density peaks (`roi.density_peaks`), from an id column (`region_column.column_regions`); a *preset* is a YAML file in `data/segment_presets` or the config directory that fills the settings through `react`; each ROI's `origin["segment"]` names its method, so *replace* removes that method's only) |
@@ -163,7 +163,10 @@ class Thing(Plugin):
 * `version` -- bump it when a change moves the numbers: a chain records it,
   a batch re-runs files whose steps' versions changed, and the plugin's page
   must be re-read and brought along (see "The plugin's page" below).
-* `@register("Tab/Group/Name")` places it in the tree.  Without it the *folder*
+* `@register("Tab/Group/Name")` places it in the tree; a class's `name = "..."`
+  is what the GUI shows in its place (`COMET drift correction` at
+  `Analysis/Drift/COMET`), so a plugin is renamed without moving its path,
+  which saved chains, GUIs and batches name it by.  Without `@register` the *folder*
   decides the path (`<root>/Analysis/Drift/comet.py` -> `Analysis/Drift/COMET`),
   which is how a user drops a plugin in and it appears.
 * Discovery *parses* plugin files with `ast` and never imports them, so a

@@ -311,9 +311,9 @@ The menu and the plugins share one *reading* implementation,
 every loader plugin call.  `File -> Open` still drives it through `LoadTask`
 rather than through the plugin: the menu owns a multi-file queue, a progress
 line and the csv mapping dialog, none of which a panel expresses, and routing it
-through the plugin would add indirection without removing code.  What the tab
-adds is the option as a checkbox -- append -- beside the menu's separate
-*Add file* action.
+through the plugin would add indirection without removing code.  The tab's
+*Load* is a button that opens the same dialog; whether the files replace the
+open ones or are added is asked there when a table is open.
 
 A loader runs in the panel's worker thread and must not touch the session, so it
 returns its work as `Result.files` and `Session.apply` adds it on the thread

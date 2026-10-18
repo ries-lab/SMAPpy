@@ -172,7 +172,7 @@ image move and a table move are each one step of the undo.
 ## Parameters
 
 ### file
-A table of several files (*File > Add*) moves one file at a time by
+A table of several files (*File > Open*, *Add*) moves one file at a time by
 default: two cameras opened together are two files.
 
 ### channel

@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComb
                                QDoubleSpinBox,
                                QHBoxLayout, QHeaderView, QLabel, QListWidget,
                                QListWidgetItem, QMainWindow, QPushButton,
-                               QSizePolicy, QSplitter, QTableView, QVBoxLayout, QWidget)
+                               QScrollArea, QSizePolicy, QSplitter, QTableView, QVBoxLayout, QWidget)
 
 from ..regions import Region
 from ..render import FieldOfView
@@ -665,7 +665,15 @@ class ROIManagerWindow(QMainWindow):
         top.addWidget(file_column)
         top.addWidget(self.zoom_pane)
         bottom = QSplitter(Qt.Horizontal)
-        bottom.addWidget(lists)
+        # the lists scroll rather than grow: unfolded, *frames and z* and the
+        # other parts of *annotate* took their height from the overview above
+        # until it was a strip
+        lists_scroll = QScrollArea()
+        lists_scroll.setWidget(lists)
+        lists_scroll.setWidgetResizable(True)
+        lists_scroll.setFrameShape(QScrollArea.NoFrame)
+        lists_scroll.setMinimumWidth(lists.sizeHint().width())
+        bottom.addWidget(lists_scroll)
         bottom.addWidget(roi_side)
         whole = QSplitter(Qt.Vertical)
         whole.addWidget(top)
@@ -674,7 +682,12 @@ class ROIManagerWindow(QMainWindow):
             s.setSizes([500, 500])
         self.setCentralWidget(whole)
         self.status = self.statusBar()
-        self.resize(1100, 800)
+        # as large as the screen comfortably takes: the overview, the zoom and
+        # the ROI are three pictures, and 1100 x 800 left each one small
+        screen = QApplication.primaryScreen()
+        free = screen.availableGeometry() if screen is not None else None
+        self.resize(min(1400, int(free.width() * 0.9)) if free else 1100,
+                    min(1050, int(free.height() * 0.9)) if free else 800)
 
         self.file_pane.clicked.connect(self._file_clicked)
         self.zoom_pane.clicked.connect(self._zoom_clicked)
