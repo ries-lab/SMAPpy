@@ -36,6 +36,9 @@ are added in *File > Preferences*.
 
 ## How to make one
 
+The tutorial [Your own plugins](https://ries-lab.github.io/SMAPpy/own_plugins/)
+shows the whole way, from *New plugin...* to a plugin an assistant changed.
+
 **Start from the example.**  *Plugins > New plugin...* asks for a name and
 copies a working example plugin into your folder under that name.  It
 measures how far each localization is from its nearest neighbour, which is
@@ -60,8 +63,9 @@ settings and a `run` function that reads the localizations and hands back a
 text, numbers and figures.
 
 **Trying it.**  Open it from the Plugins menu and press Run.  When you or the
-assistant change the file, open it again: the new code is read.  If it does
-not appear, `smappy-plugins check` in a terminal says why -- a typing error,
+assistant change the file, open it from the Plugins menu again: the new code
+is read.  (A section already opened in a tab keeps the code it was opened
+with until SMAPpy is started again.)  If it does not appear, `smappy-plugins check` in a terminal says why -- a typing error,
 or a missing line the program requires.
 
 ## What is asked of your own plugins

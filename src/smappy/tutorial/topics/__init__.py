@@ -18,7 +18,7 @@ SERIES = (
     ("Getting started", ("quickstart", "layout"), ()),
     ("Fitting", ("fitting", "fitting_3d", "two_colour", "two_colour_3d"), ()),
     ("Rendering", ("rendering",), ()),
-    ("Plugins", ("plugins", "measuring", "drift_correction"), ()),
+    ("Plugins", ("plugins", "measuring", "drift_correction", "own_plugins"), ()),
     ("ROI manager", (), ("The ROI manager: finding and measuring many regions",)),
     ("Many files", ("batch",), ()),
     ("Simulation", ("simulation",), ()),

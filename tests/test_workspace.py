@@ -547,6 +547,15 @@ def test_new_plugin_puts_a_working_one_under_user_in_the_menu(window, monkeypatc
         user = [a.menu() for a in window.plugins_menu.actions()
                 if a.menu() and a.text() == "User"]
         assert [a.text() for a in user[0].actions()] == ["Pair distances"]
+        # changed on disk, it opens with the new code, not the window kept
+        first = window.open_plugin_window("User/Pair Distances")
+        file = config.user_plugin_dir() / "pair_distances.py"
+        file.write_text(file.read_text().replace('"""The distance', '"""Changed: the distance'))
+        import os, time
+        os.utime(file, (time.time() + 5, time.time() + 5))
+        second = window.open_plugin_window("User/Pair Distances")
+        assert second is not first
+        assert type(second.panel.plugin).__doc__.startswith("Changed")
     finally:
         monkeypatch.undo()
         config.load(reload=True)

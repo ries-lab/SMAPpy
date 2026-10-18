@@ -86,6 +86,7 @@ def test_a_new_plugin_from_the_template_loads_and_measures(own):
     found = plugins.discover(force=True)
     ref = found[f"{USER_GROUP}/Nearest Distance 2d"]     # the path: from the file name
     assert ref.name == "Nearest distance (2D)" and ref.per_region
+    assert ref.description.startswith("The distance from each localization")
     cls = ref.load()
     assert cls.changes_locs is False
     # points on a grid 10 nm apart: every nearest neighbour is 10 nm away

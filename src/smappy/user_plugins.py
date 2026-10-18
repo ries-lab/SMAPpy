@@ -117,8 +117,9 @@ def new(title: str, directory: Optional[Path] = None) -> Path:
     # shows anyway; saying it in the class keeps the user's own capitals
     shown = title.strip()
     shown = shown[:1].upper() + shown[1:]
-    text = text.replace(f'class {cls}(Plugin):\n',
-                        f'class {cls}(Plugin):\n    name = {shown!r}\n', 1)
+    # after the docstring, which has to stay the class's first statement
+    text = text.replace(f'    Settings = {cls}Settings\n',
+                        f'    name = {shown!r}\n    Settings = {cls}Settings\n', 1)
     text = text.replace(f'"""{_TEMPLATE_TITLE}: how far', f'"""{shown}: started from '
                         "SMAPpy's example, which measures how far", 1)
     path.write_text(text, encoding="utf-8")

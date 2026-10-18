@@ -962,9 +962,20 @@ class ControlWindow(QMainWindow):
         from .plugin_panel import PluginWindow
 
         window = self._plugin_windows.get(path)
+        try:
+            cls = registry.get(path)
+        except Exception as e:
+            QMessageBox.warning(self, "plugin", f"{path} could not be opened:\n{e}")
+            return None
+        if window is not None and type(window.panel.plugin) is not cls:
+            # the file changed and was imported again (a user's plugin being
+            # written): a window of the old class would run the old code
+            window.close()
+            window.deleteLater()
+            window = None
         if window is None:
             try:
-                window = PluginWindow(registry.get(path), self.session, self)
+                window = PluginWindow(cls, self.session, self)
             except Exception as e:
                 QMessageBox.warning(self, "plugin", f"{path} could not be opened:\n{e}")
                 return None

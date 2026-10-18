@@ -91,6 +91,10 @@ it was about.  Say who asked and when, so a later reader can weigh it.
 
 * (none yet)
 
+### own_plugins -- Your own plugins: an analysis described, then run
+
+* (none yet)
+
 ### batch -- Chains and batch runs over many files
 
 * (none yet)
