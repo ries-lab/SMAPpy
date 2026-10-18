@@ -311,3 +311,66 @@ Measured on simulated tables (`smappy.simulate`, tiled side by side; a
 3.3-4.0 s); 20 M at 200 a frame, 21.8 s for both.  Done once, in the
 background, a second or two of difference does not pay for an approximate
 grouping and 360 lines.
+
+## Large tables: 10 files of 10 M
+
+Does one table for all files cost a plugin that runs on one of them, and
+where does a table of 10^8 localizations spend its time?
+`scripts/bench_large_table.py` times the session's own paths: the layer's
+filter, a plugin's context and selection, the render, the linking.  A 2D
+fit's nine columns (3.6 GB at 10^8), blinks of about two frames, 50 000
+frames over a 40 um field per file; a 4-core Xeon at 2.1 GHz, 15 GB.
+Against it, the same file open alone -- what a table per file would give:
+
+| | 10 files, 10^8 | that file alone, 10^7 |
+|---|---|---|
+| open: table, spatial index, layer | 18.6 s (peak 6.4 GB) | 0.64 s (1.0 GB) |
+| the layer's filter from its bounds, and the AND | 0.23 + 0.12 s | 0.02 + 0.01 s |
+| show one file (`isin` over `filenumber`, AND) | 0.44 s | 0.08 s |
+| move one slider, AND | 0.28 s | 0.02 s |
+| plugin context | 0.1 ms | 0.1 ms |
+| `selection.apply`, 8.8 M rows, every column | 0.50 s | 0.27 s |
+| the same, three columns | 0.06 s | 0.05 s |
+| Localization Statistics on them | 2.0 s | 2.9 s |
+| render the file, full field 2000x2000 | 1.3 s | 1.1 s |
+| render it zoomed 10x | 0.16 s | 0.12 s |
+| render every file, full field / zoomed | 18.6 s / 0.42 s | -- |
+| link the file into blinks | 5.7 s | 7.4 s |
+| link the whole table (a layer that shows blinks) | **86 s, peak 13.1 GB** | 6.3 s |
+
+(The Statistics and linking rows differ between the columns by run-to-run
+noise on a shared machine, not by the table around them.)
+
+**A plugin pays for its selection, not for the table.**  The context is
+free, and the copy of the selected rows, the plugin and a zoomed render
+cost the same with the other nine files beside the one it reads.  What one
+table costs a plugin on one file is the filter: every bound and the file
+choice is a pass over all 10^8 rows, 0.3-0.4 s instead of 0.02-0.08 s,
+which makes a slider a few frames a second instead of live.
+
+**The table's size is paid elsewhere, and most of it would be paid per file
+too.**  Opening is the spatial index over every row (a `lexsort`, 18 s).
+Linking is per file already (`block_fields`), so the whole table costs ten
+files' linking, 86 s -- but all at once and before a layer that shows blinks
+draws anything, which it does by default, and at a peak of 13 GB against a
+3.6 GB table.  A full-field render of every file is every localization
+drawn, 18.6 s; the GUI's drag frames are thinned (*The preview point
+budget*), the final frame is not.
+
+**Copying every column is not where a plugin's time goes.**  `apply` copies
+nine columns where Statistics reads a few: 0.5 s of its 2 s.  A selection
+that indexes a column when it is first read would save that, about a
+quarter of a light plugin and less of a heavy one -- worth doing, not first.
+
+What would help, in order:
+
+* **Link only the files a layer shows, when it shows them**, cached per
+  file -- linking already never crosses a file, so the per-file results are
+  the same numbers.  It turns 86 s on opening into 6-7 s per file looked
+  at, and the 13 GB peak into a 10^7 one.
+* **Filter masks over a file's rows only.**  `add_file` appends, so a file
+  is one contiguous block of rows; a layer showing one file could compute
+  its bounds over that slice (a view, no copy: 0.0 ms above) and leave the
+  rest False, which makes a slider cost what it costs on the file alone.
+  It needs the rows to stay grouped by file, checked once per table change.
+* **A lazy selection** (`Selection.apply` indexing on first read).

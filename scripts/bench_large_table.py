@@ -114,8 +114,9 @@ def main():
     timed("  ... its mask (AND)", lambda: filt.mask)
     print(f"    filters on: {', '.join(filt._masks)}")
 
+    chosen = min(3, files - 1)          # the file a user looks at
     timed("show one file (set_files: isin over the table, AND)",
-          lambda: (layer.set_files([3]), state.filter_for(state.current).mask))
+          lambda: (layer.set_files([chosen]), state.filter_for(state.current).mask))
     timed("move a slider (photons >= 500) and AND", lambda: (
         layer.set_bound("photons", 500.0, None), state.filter_for(state.current).mask))
 
@@ -127,7 +128,7 @@ def main():
     timed("  the same, three columns (x, y, photons)",
           lambda: {c: np.asarray(ctx.locs[c])[rows] for c in ("x_nm", "y_nm", "photons")})
     timed("  np.flatnonzero(mask) alone", np.flatnonzero, sel.mask)
-    first, last = 3 * per_file, 4 * per_file
+    first, last = chosen * per_file, (chosen + 1) * per_file
     timed("  one file as a slice: a view of every column (no copy)",
           lambda: Localizations({k: v[first:last] for k, v in ctx.locs.columns.items()}))
 
@@ -164,7 +165,7 @@ def main():
         layer.show_grouped(True)
         timed(f"link the whole table ({n:,}): the layer shows blinks",
               lambda: state.current)
-        layer.set_files([3])
+        layer.set_files([chosen])
         ctx = timed("grouped: plugin context, one file", s.context, 0)
         print(f"    selection {len(ctx.selection):,} blinks of {len(ctx.locs):,}")
         timed("grouped: selection.apply", ctx.selection.apply, ctx.locs)
