@@ -55,6 +55,13 @@ window, or from *Help → Plugin documentation*. The same pages are online at
 [ries-lab.github.io/SMAPpy/help](https://ries-lab.github.io/SMAPpy/help/), and
 `python -m smappy.docs -o DIR` writes them as a static website.
 
+**Your own analysis.** When no plugin measures what you need, make one:
+describe it to an AI assistant started in your plugin folder (*Plugins → Show
+my plugin folder*), or start from the example with *Plugins → New plugin...*.
+A file saved there appears under *Plugins → User*. The help page
+[Your own plugins](https://ries-lab.github.io/SMAPpy/help/panels-your-own-plugins.html)
+explains how.
+
 **For developers.** [GUI.md](GUI.md) describes the architecture.
 [docs/](docs/) holds design notes on the plugin system and individual
 algorithms. [NOTES.md](NOTES.md) records design decisions and measurements.

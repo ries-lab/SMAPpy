@@ -8,6 +8,7 @@ include src/smappy/data/*.gui.yaml
 recursive-include src/smappy/data/icons *.svg *.png
 recursive-include src/smappy/data/csv_conversions *.yaml
 recursive-include src/smappy/data/segment_presets *.yaml
+recursive-include src/smappy/data/user_plugins *.in
 recursive-include src/smappy/plugins/docs *.md
 recursive-include src/smappy/docs/panels *.md
 recursive-include tests *.py

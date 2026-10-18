@@ -129,6 +129,7 @@ smappy-gui = "smappy.cli.gui:main"
 smappy-calibrate = "smappy.cli.calibrate:main"
 smappy-batch = "smappy.cli.batch:main"
 smappy-batch-gui = "smappy.gui.batch_window:main"
+smappy-plugins = "smappy.user_plugins:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -139,10 +140,11 @@ where = ["src"]
 "smappy._comet" = ["LICENSE.txt"]
 # the camera database: a file that is read at run time, so it has to be in the
 # wheel and not only in the checkout
-# and the simulator's built-in structures, likewise, and the window icon
+# and the simulator's built-in structures, likewise, and the window icon,
+# and what the user's plugin folder is given (`smappy.user_plugins`)
 "smappy" = ["data/*.json", "data/*.gui.yaml", "data/structures/*.yaml", "data/microscopes/*.yaml",
             "data/csv_conversions/*.yaml", "data/segment_presets/*.yaml",
-            "data/icons/*.svg", "data/icons/*.png"]
+            "data/icons/*.svg", "data/icons/*.png", "data/user_plugins/*.in"]
 # the plugins' pages, read by the Help window (`smappy.docs`), one folder per
 # level of the menu tree
 "smappy.plugins" = ["*.chain.yaml", "docs/*.md", "docs/*/*.md", "docs/*/*/*.md", "docs/*/*/*/*.md"]

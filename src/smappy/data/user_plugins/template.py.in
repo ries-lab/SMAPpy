@@ -1,0 +1,66 @@
+# Written by SMAPpy as an example to copy: Plugins > New plugin... (or
+# `smappy-plugins new NAME`) starts a plugin from it.  SMAPpy rewrites this
+# file when it is updated, and the plugin tree skips it because its name
+# starts with "_", so edit a copy, not this.
+"""Nearest neighbours: how far each localization is from the next one.
+
+An example of a plugin in your own folder.  Replace the algorithm and the
+settings with your own and keep the shape:
+
+* the work is a plain function of arrays (`nearest_neighbour_distances`),
+  which a script or a notebook can call without the program;
+* `run` reads the localizations the user is looking at, calls that function,
+  and hands back a text, numbers and a figure;
+* `per_region = True` and `Result.values` let it run once per ROI or
+  cluster as well (Regions tab, per-region steps).
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import numpy as np
+
+from smappy.plugins import Context, Plugin, Result, param
+
+
+def nearest_neighbour_distances(x, y, z=None):
+    """The distance from each point to its nearest other point, in the units
+    of the coordinates.  NaN for a single point."""
+    from scipy.spatial import cKDTree      # imported here: loads only when run
+    points = np.column_stack([x, y] if z is None else [x, y, z])
+    if len(points) < 2:
+        return np.full(len(points), np.nan)
+    distances, _ = cKDTree(points).query(points, k=2)
+    return distances[:, 1]
+
+
+@dataclass
+class NearestNeighboursSettings:
+    max_distance_nm: float = param(200.0, label="up to", unit="nm", min=1.0,
+                                   help="the histogram's range")
+    use_z: bool = param(False, label="in 3D", help="include z_nm in the distance")
+
+
+class NearestNeighbours(Plugin):
+    """The distance from each localization to its nearest neighbour."""
+    Settings = NearestNeighboursSettings
+    changes_locs = False        # it measures; True if run hands back a new table
+    per_region = True           # can run once per ROI: it hands back Result.values
+
+    def run(self, ctx: Context, settings: NearestNeighboursSettings) -> Result:
+        locs = ctx.selection.apply(ctx.locs)    # the filtered localizations in the ROI
+        if settings.use_z and "z_nm" not in locs:
+            raise ValueError("the table has no z_nm; it has " + ", ".join(sorted(locs.keys())))
+        z = locs["z_nm"] if settings.use_z else None
+        d = nearest_neighbour_distances(locs["x_nm"], locs["y_nm"], z)
+        median = float(np.nanmedian(d)) if len(d) > 1 else float("nan")
+
+        def draw(ax):
+            ax.hist(d[np.isfinite(d)], bins=50, range=(0, settings.max_distance_nm))
+            ax.axvline(median, color="k", lw=1)
+            ax.set_xlabel("nearest-neighbour distance (nm)")
+            ax.set_ylabel("localizations")
+
+        return Result(text=f"{len(d)} localizations, median distance {median:.1f} nm",
+                      values={"nn_median_nm": median, "n": len(d)},
+                      plot=draw, settings=settings)

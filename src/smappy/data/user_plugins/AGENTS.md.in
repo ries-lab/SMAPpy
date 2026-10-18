@@ -1,0 +1,201 @@
+<!-- Written by SMAPpy @@VERSION@@ and rewritten when SMAPpy is updated, so that
+it describes the SMAPpy that is installed.  Put your own notes in CLAUDE.md or
+NOTES.md, which SMAPpy never touches. -->
+
+# Writing a SMAPpy plugin in this folder
+
+This folder holds the user's own SMAPpy plugins.  SMAPpy is a Python program
+for single-molecule localization microscopy (SMLM); every analysis in it is a
+plugin, and a `.py` file saved here is one as soon as the GUI's Plugins menu is
+opened again -- no registration, no restart, no install.
+
+You (an AI assistant, or a person) are here to turn what the user describes --
+"the distance of each localization to the nearest one in the other channel",
+"how many localizations per cluster, as a histogram" -- into such a file.
+
+## What is asked of a plugin here, and what is not
+
+These are the user's plugins, so the rules are few:
+
+* **Required**: the shape below, and `changes_locs` (the program refuses a
+  plugin class without it).
+* **Recommended, not required**: a help page (`<file>.md` beside the
+  plugin), tests, a `version`.  Offer them; do not insist.  A use-once plugin
+  for one dataset needs neither.
+* A plugin that is to be **shipped with SMAPpy** (a pull request to
+  `ries-lab/SMAPpy`) has to follow the repository's rules -- its `CLAUDE.md`:
+  a page, tests on simulated data, the house style.  See "Sharing it" below.
+
+## Where files go
+
+* `thing.py` here -> the plugin tree's **User/Thing** (the file name, title
+  cased; `name = "..."` on the class overrides it).
+* `Analysis/Measure/thing.py` (any subfolders) -> **Analysis/Measure/Thing**,
+  beside the shipped plugins.  The folders are the tree.
+* One plugin class per file.  A file whose name starts with `_` is skipped
+  (`_template.py` is the example to copy).
+* A plugin at the same path as a shipped one replaces it -- on purpose, or
+  rename yours.
+* The plugin is opened from the GUI's **Plugins** menu (User > Thing) or
+  pinned to a tab with a tab's **+** button.
+
+## The shape
+
+```python
+from dataclasses import dataclass
+import numpy as np
+from smappy.plugins import Context, Plugin, Result, param
+
+def my_measure(x, y):                     # the algorithm: arrays in, numbers out
+    ...
+
+@dataclass
+class ThingSettings:                       # the form the GUI builds
+    radius_nm: float = param(50.0, label="radius", unit="nm", min=0.1,
+                             help="the tooltip")
+
+class Thing(Plugin):
+    """One line: what it does (the GUI shows it)."""
+    Settings = ThingSettings
+    changes_locs = False                   # True if run hands back a new table
+
+    def run(self, ctx: Context, settings: ThingSettings) -> Result:
+        locs = ctx.selection.apply(ctx.locs)   # what the user is looking at
+        value = my_measure(locs["x_nm"], locs["y_nm"])
+        return Result(text=f"...", plot=lambda ax: ax.hist(...),
+                      settings=settings)
+```
+
+`_template.py` in this folder is a complete, working example.  To start a new
+plugin from it: `smappy-plugins new "my thing"` (or Plugins > New plugin...
+in the GUI), which writes `my_thing.py` with the class renamed.
+
+Imports at the top of the file are fine for numpy and smappy; put heavy ones
+(scipy, sklearn, torch) inside the function that uses them, so the program
+starts fast.  Do not import Qt: the GUI builds the form from the settings.
+
+## The settings: `param(default, ...)`
+
+A dataclass field; the GUI makes a widget of it, by its type: `float`/`int`
+a number box, `bool` a tick, `str` with `choices=` a menu, `str` alone a
+line of text, `Optional[float] = param(None, ...)` a box that may be empty.
+
+| keyword | |
+| --- | --- |
+| `label` | what the form shows (short: the form is narrow) |
+| `unit` | shown beside the box: `"nm"`, `"frames"` |
+| `min`, `max` | bounds |
+| `help` | the tooltip, a short phrase |
+| `choices` | `("a", "b")` or `(("value", "label"), ...)` |
+| `advanced=True` | hidden under *more* |
+| `kind` | `"open_file"`, `"save_file"`, `"dir"` (a path with a browse button), `"text"` (a wide line) |
+
+A field whose type is another settings dataclass is a section of its own.
+
+## What `run` gets: the context
+
+* `ctx.locs` -- the table the current layer shows (one row per blink if the
+  layer merges blinks).  `ctx.selection` -- what the user is looking at
+  (the layer's filter, the ROI) as a boolean mask over it;
+  `ctx.selection.apply(ctx.locs)` is that subset.  Use it unless the plugin
+  is meant to see everything.
+* `ctx.table(i)` -- layer `i`'s `(locs, selection)`: for a plugin that
+  compares channels or layers.  `ctx.session.layers` lists them (`.name`,
+  `.visible`, `.is_image`); `ctx.session` is None in a script.
+* `ctx.report("text")` -- progress, shown in the panel;
+  `ctx.warn("text")` -- a warning that must not be missed.
+* `ctx.stopped` -- True when the user pressed Stop; check it in long loops.
+* `ctx.region` -- in a per-region run, the ROI's shape; `ctx.per_region`
+  says whether this is one.
+
+## The table: `Localizations`
+
+`locs["x_nm"]` is a numpy array; `"x_nm" in locs`; `locs.keys()`;
+`len(locs)`; `locs[mask]` a new table of those rows.  Never change `ctx.locs`
+in place.
+
+Columns are `<quantity>_<unit>`, uncertainties `<quantity>_err_<unit>`.  The
+common ones: `x_nm`, `y_nm`, `z_nm` (3D only), `frame`, `photons`,
+`background`, `xy_err_nm`, `z_err_nm`, `sigma_nm`, `logl_rel`, `channel`;
+after merging blinks `group_id` and `n_in_group`; after other plugins
+`cluster_id`, `n_in_cluster`, `track_id`.  Not every table has every column:
+check, and when one is missing raise a `ValueError` that names the columns
+the table does have.  A `ValueError` is shown to the user as the reason the
+run failed.
+
+## What `run` hands back: `Result`
+
+Every part is optional.
+
+| field | |
+| --- | --- |
+| `text` | a summary, shown in the panel |
+| `plot` | `draw(ax)`, a function drawing on one matplotlib axis -- make it a closure over the data |
+| `plots` | more figures, `{"name": draw}` |
+| `data` | any numbers or arrays, for a script |
+| `values` | `{"name": number}`: with `per_region = True`, one row per ROI in the region table |
+| `locs` | a **new** table that replaces the current one (then `changes_locs = True`) |
+| `settings` | the settings used -- always pass them |
+
+For several axes in one figure: `from smappy.plugins import Plot` and
+`plot=Plot(draw, panels=2)`, where `draw(fig)` makes them with
+`fig.subplots(1, 2)`.  Never set a figure's size or layout.
+
+A plugin that **adds a column**: copy the table and add it --
+
+```python
+new = Localizations(dict(locs.columns), dict(locs.metadata))   # from smappy.locs
+new.columns["my_value"] = values                                 # one per row of ctx.locs
+return Result(locs=new, settings=settings)
+```
+
+-- with `changes_locs = True` and `grouping = "ungrouped"` on the class (a new
+table is made from the localizations, not the merged blinks).
+
+## Class attributes worth knowing
+
+* `name = "Thing distance"` -- what the GUI shows, if not the file name.
+* `per_region = True` -- it hands back `Result.values`, so it can run once
+  per ROI or cluster.
+* `grouping = "ungrouped"` -- always the localizations, never merged blinks.
+* `follow_roi = True` -- for work taking tens of milliseconds: a tick that
+  re-runs it while the ROI is dragged.
+* `version = "2"` -- bump it when a change moves the numbers.
+
+## Checking it
+
+Without the GUI, on simulated data:
+
+```python
+from smappy.simulate import simulate
+from smappy.plugins.discovery import load_module
+module = load_module("thing.py")             # this folder's file
+locs = simulate(seed=1)                      # a simulated table
+result = module.Thing()(locs)                # runs it on all of it
+print(result.text)                           # Thing()(locs, radius_nm=30): other settings
+```
+
+`smappy-plugins check` (or `python -m smappy.user_plugins check`) imports
+every plugin in this folder and lists what fails: a syntax error, two plugin
+classes in one file, a missing `changes_locs`.
+
+## More to read
+
+* The shipped plugins are good examples, in `@@PACKAGE@@/plugins/`:
+  `histogram.py` (a measurement per layer), `statistics.py` (several
+  figures), `math_parser.py` (a new column), `remove_locs.py` (a filter).
+* The full reference -- every field of the context and the result, the
+  column names: `docs/plugin-reference.md` in the repository,
+  https://github.com/ries-lab/SMAPpy/blob/main/docs/plugin-reference.md
+* For a person: the help page *Your own plugins* (Help > Plugin
+  documentation).
+
+## Sharing it
+
+A plugin that others would use can be shipped with SMAPpy: open a pull
+request to https://github.com/ries-lab/SMAPpy that adds it under
+`src/smappy/plugins/` with `@register("Tab/Group/Name")`.  There it has to
+follow the repository's `CLAUDE.md`: a help page in
+`src/smappy/plugins/docs/`, tests on simulated data that check the numbers,
+and the house style.  Those rules are for what is shipped; nothing here needs
+them.

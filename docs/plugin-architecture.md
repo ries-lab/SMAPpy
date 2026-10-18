@@ -48,9 +48,39 @@ Roots scanned, in order, later winning on a collision:
 
 1. `smappy/plugins/**`, the shipped ones -- discovered the same way as the rest,
    not listed in code.
-2. Every folder in the user's preferences.  There is deliberately no implicit
-   `~/.smappy/plugins`: a plugin folder is something the user names, so that
-   what is loaded is always something they wrote down.
+2. The user's own folder, `<config dir>/plugins` (`config.user_plugin_dir`),
+   whether or not it is named anywhere.  A file at its top level lands under
+   `User/` (`User/Cluster Sizes`); one in subfolders takes its path from
+   them, as in any root.
+3. Every folder in the user's preferences.
+
+The second root is a reversal (2026-10-18).  There was deliberately no
+implicit folder, so that what is loaded is always something the user wrote
+down.  But the step that stopped people writing a plugin was the first one --
+where does the file go -- and the plugin people most need is the small one,
+written for one dataset by describing it to an AI assistant and deleted
+afterwards.  A folder inside the user's own configuration, not made until
+something asks for it, loads nothing the user did not put there.
+`smappy.user_plugins` makes it ready (*Plugins > Show my plugin folder*,
+`smappy-plugins`): an `AGENTS.md` that tells an assistant how a plugin is
+written, kept to the installed version, a `CLAUDE.md` that reads it and is
+otherwise the user's, and `_template.py`, a working plugin to copy (*Plugins >
+New plugin...*).
+
+**The rules differ by where a plugin lives.**  A shipped plugin has a page,
+tests and the house style (`CLAUDE.md`, the tests that enumerate the
+`builtin` root).  A plugin in a user's folder needs only to load: its page
+and tests are recommended, not required, and nothing enumerates them.  It
+meets the shipped rules when it is proposed for the distribution, by a pull
+request that moves it under `smappy/plugins`.  The one rule both share is the
+contract itself -- `changes_locs` is still refused when missing, because a
+wrong answer changes what a chain and a live fit do, not only what a page
+says.
+
+A standalone plugin file is imported again when it has changed since it was
+imported (`discovery.load_module`), and the Plugins menu and the chooser scan
+again each time they open, so a plugin being written is tried without a
+restart.
 
 Third-party *packages* (a `smappy.plugins` entry point) are not scanned.  If
 that is ever wanted it is one more root, not a new mechanism.

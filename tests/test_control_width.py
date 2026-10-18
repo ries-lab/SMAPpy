@@ -36,7 +36,7 @@ def _panel(cls):
 def test_every_plugin_panel_fits_the_control_column(app):
     from smappy.gui.widgets import CONTROL_WIDTH
     too_wide = {}
-    for path in sorted(plugins.refs()):
+    for path in sorted(p for p, r in plugins.refs().items() if r.root == "builtin"):
         cls = plugins.get(path)
         width = _panel(cls).minimumSizeHint().width()
         if width > CONTROL_WIDTH - SLACK:

@@ -556,6 +556,40 @@ class ControlWindow(QMainWindow):
         folder.mkdir(parents=True, exist_ok=True)
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
 
+    def show_user_plugins(self) -> None:
+        """The user's plugin folder, made ready (`user_plugins.ensure`)."""
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        from .. import user_plugins
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(user_plugins.ensure())))
+
+    def new_user_plugin(self) -> None:
+        """A plugin of the user's own, copied from the template, and its folder.
+
+        The folder is shown rather than the file opened: a ``.py`` opened by
+        the system is run, on some of them, not edited.
+        """
+        from PySide6.QtWidgets import QInputDialog, QMessageBox
+        from .. import plugins, user_plugins
+        title, ok = QInputDialog.getText(
+            self, "New plugin", "What the plugin is called (for example: cluster sizes):")
+        if not ok or not title.strip():
+            return
+        try:
+            path = user_plugins.new(title)
+        except (FileExistsError, ValueError) as error:
+            QMessageBox.warning(self, "New plugin", str(error))
+            return
+        plugins.discover(force=True)
+        QMessageBox.information(
+            self, "New plugin",
+            f"{path.name} is in your plugin folder, a working example to change "
+            "into what you need: by hand, or by describing it to an AI assistant "
+            "started in that folder.\n\nIt is in the Plugins menu under User, and "
+            "a tab's + pins it.  Help > Plugin documentation, \"Your own plugins\", "
+            "says more.")
+        self.show_user_plugins()
+
     def open_preferences(self) -> None:
         before = [(t.name, t.kind) for t in self.workspace.tabs]
         PreferencesDialog(self.workspace, self).exec()
@@ -859,6 +893,15 @@ class ControlWindow(QMainWindow):
         # a chain over many files: beside the plugins it runs, not in a Tools
         # menu of its own that held nothing else
         self._action(menu, "Batch...", None, self.open_batch)
+        # the user's own plugins (`smappy.user_plugins`): where they are
+        # written, by hand or by an assistant, and appear under User
+        self._action(menu, "New plugin...", None, self.new_user_plugin)
+        menu.actions()[-1].setToolTip("start a plugin of your own from an example, "
+                                      "in your plugin folder")
+        self._action(menu, "Show my plugin folder", None, self.show_user_plugins)
+        menu.actions()[-1].setToolTip("the folder whose plugins appear under User; "
+                                      "an AI assistant started there knows how to "
+                                      "write one (its AGENTS.md)")
         menu.addSeparator()
         groups = {"": menu}
 
@@ -870,6 +913,9 @@ class ControlWindow(QMainWindow):
             groups[path] = _add_menu(parent, leaf, parent)
             return groups[path]
 
+        # forced: a file saved into a plugin folder since the last opening is
+        # in the menu without a restart, and the scan parses, never imports
+        registry.discover(force=True)
         for path, ref in sorted(registry.refs().items()):
             action = group_for(ref.group).addAction(ref.name)
             action.setToolTip(ref.description or path)

@@ -89,19 +89,28 @@ class PluginRef:
 # --------------------------------------------------------------- importing
 
 _MODULES: Dict[Path, Any] = {}
+# when each standalone file was imported, by its modification time
+_STAMPS: Dict[Path, float] = {}
 
 
 def load_module(origin: Path):
-    """Import a plugin file, once per path.
+    """Import a plugin file, once per path -- or once per change, outside the
+    package.
 
     A file inside the ``smappy.plugins`` package is imported under its real
     dotted name, so its relative imports work; anything else is imported
-    standalone under a name derived from its location.
+    standalone under a name derived from its location, and imported again
+    when the file has changed since: a user's plugin is written a few lines
+    at a time, often by an assistant, and a restart between each try and the
+    next was most of the cost of trying.  What is already open keeps the
+    code it was made with; a panel or window opened after the change gets
+    the new one.
     """
     origin = Path(origin).resolve()
-    if origin in _MODULES:
-        return _MODULES[origin]
     dotted = _dotted_name(origin)
+    if origin in _MODULES:
+        if dotted or _stamp(origin) == _STAMPS.get(origin):
+            return _MODULES[origin]
     if dotted:
         module = importlib.import_module(dotted)
     else:
@@ -119,9 +128,18 @@ def load_module(origin: Path):
         # in sys.modules before exec, so a dataclass in it can be pickled and
         # `typing.get_type_hints` can resolve names against the module
         sys.modules[unique] = module
+        stamp = _stamp(origin)
         spec.loader.exec_module(module)
+        _STAMPS[origin] = stamp
     _MODULES[origin] = module
     return module
+
+
+def _stamp(origin: Path) -> float:
+    try:
+        return origin.stat().st_mtime
+    except OSError:
+        return -1.0
 
 
 def _dotted_name(origin: Path) -> Optional[str]:
@@ -276,6 +294,15 @@ def _refs_in_file(origin: Path, path_prefix: str, root: str
                                    "@register path, or split the file")]
 
 
+# The user's own folder (`config.user_plugin_dir`): its label among the
+# roots, and where a file at its top level lands.  A plugin saved straight
+# into it sits under "User" -- one place to find what one wrote, and no
+# "Thing" beside "Analysis" and "File" at the top of the tree -- while one in
+# a subfolder takes its place from the folders as in any root, so
+# ``Analysis/Measure/thing.py`` puts it beside the shipped measurements.
+USER_ROOT = "user"
+USER_GROUP = "User"
+
 CHAIN_SUFFIXES = (".chain.yaml", ".chain.yml")
 # where a chain in the chains folder lands when its file does not say
 CHAIN_GROUP = "Analysis/Chains"
@@ -327,7 +354,8 @@ def scan(roots: Sequence[Tuple[str, Path]],
     for label, directory, chains_only in walk:
         directory = Path(directory).expanduser()
         if not directory.is_dir():
-            if not chains_only:
+            # the user's folder is not made until something is put in it
+            if not chains_only and label != USER_ROOT:
                 problems.append(Diagnostic(directory, "plugin folder does not exist"))
             continue
         files = [] if chains_only else sorted(directory.rglob("*.py"))
@@ -338,6 +366,8 @@ def scan(roots: Sequence[Tuple[str, Path]],
             if any(_skip(part) for part in relative.parts[:-1]) or _skip(origin.name):
                 continue
             prefix = "/".join(relative.parts[:-1])
+            if not prefix and label == USER_ROOT:
+                prefix = USER_GROUP
             if origin.name.endswith(CHAIN_SUFFIXES):
                 found, trouble = _chain_ref(origin, prefix, label)
             else:

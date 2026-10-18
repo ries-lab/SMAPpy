@@ -1,9 +1,10 @@
 """Preferences: the folders scanned for plugins, the tabs, and whether
 quitting asks about unsaved changes.
 
-Both are things the user names on purpose.  There is no implicit plugin folder,
-and no tab appears because a stray directory exists -- but a plugin that no tab
-shows is still one click from being pinned, so nothing is unreachable.
+Both are things the user names on purpose.  One plugin folder is scanned
+without being named, the user's own (`config.user_plugin_dir`), and no tab
+appears because a stray directory exists -- but a plugin that no tab shows is
+still one click from being pinned, so nothing is unreachable.
 """
 from __future__ import annotations
 
@@ -34,7 +35,8 @@ def _buttons(*pairs) -> QHBoxLayout:
 
 
 class RootsPage(QWidget):
-    """The extra folders to scan.  The shipped ones are always scanned."""
+    """The extra folders to scan.  The shipped ones and the user's own folder
+    are always scanned."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -45,6 +47,11 @@ class RootsPage(QWidget):
         about.setWordWrap(True)
         about.setStyleSheet("color: gray")
         layout.addWidget(about)
+        own = QLabel(f"Always scanned, your own folder (Plugins > Show my plugin "
+                     f"folder): {config.user_plugin_dir()}")
+        own.setWordWrap(True)
+        own.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        layout.addWidget(own)
         self.list = QListWidget()
         self.list.addItems([str(p) for p in config.plugin_roots()])
         layout.addWidget(self.list, 1)

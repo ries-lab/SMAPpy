@@ -136,6 +136,23 @@ shape, so read the one closest to what you are writing:
 A chain of plugins that runs as one, and running one over many files
 (`smappy-batch`, the batch window): `docs/batch.md`.
 
+### Shipped plugins and the user's own
+
+Everything in this file about pages, tests, `version` and house style is for
+what is **shipped**: a plugin under `src/smappy/plugins/`.  A plugin in a
+user's own folder (`config.user_plugin_dir`, `<config dir>/plugins`, always
+scanned; a file at its top level lands under `User/`) needs only to load --
+a page and tests are recommended, never required, and no test enumerates
+it.  That folder is made ready by `smappy/user_plugins.py` (*Plugins > New
+plugin...*, *Show my plugin folder*, `smappy-plugins new|check`) with an
+`AGENTS.md` written from `src/smappy/data/user_plugins/AGENTS.md.in`: the
+self-contained guide an assistant working in that folder reads, kept to the
+installed version.  A change to the plugin API that it describes (the
+context, the result, `param`, the column names) updates that file too, and
+its human counterpart, the help page `docs/panels/Your own plugins.md`.  A
+user's plugin proposed for the distribution moves under `src/smappy/plugins/`
+with `@register` and then meets every rule here.
+
 A plugin is a settings dataclass plus a `run`:
 
 ```python
@@ -168,7 +185,9 @@ class Thing(Plugin):
   `Analysis/Drift/COMET`), so a plugin is renamed without moving its path,
   which saved chains, GUIs and batches name it by.  Without `@register` the *folder*
   decides the path (`<root>/Analysis/Drift/comet.py` -> `Analysis/Drift/COMET`),
-  which is how a user drops a plugin in and it appears.
+  which is how a user drops a plugin in and it appears.  A standalone file
+  (outside the package) is imported again when it changes, so a user's
+  plugin is tried without a restart.
 * Discovery *parses* plugin files with `ast` and never imports them, so a
   plugin that imports torch costs nothing until someone opens it.  Keep heavy
   imports inside functions (`from scipy.ndimage import ...`), as the shipped
@@ -290,6 +309,9 @@ or moved.  Before writing or editing a storyboard, read
 `src/smappy/tutorial/STYLE.md`: the reviewers' directions for how tutorials
 speak.
 
+`tests/test_user_plugins.py` checks the user's folder: where its files land,
+and that the template a new plugin starts from loads and runs.
+
 `tests/test_plugin_docs.py` checks every shipped plugin's page: that it
 exists, that its `version` is the plugin's, that every setting is explained, and that it
 renders with its maths and figures (the figures in the slow tier).
@@ -325,7 +347,8 @@ page links (`plugin:Panels/Glossary`) where it first explains one.
 page.
 
 **Writing it is part of the work, and it is yours.**  A session that adds a
-plugin writes its page in the same change.  A session that changes what a
+shipped plugin writes its page in the same change (for a user's own plugin a
+page is offered, not required).  A session that changes what a
 plugin computes -- the algorithm, a normalisation, a default that moves the
 numbers, anything that bumps `version` -- re-reads the page against the new
 code, rewrites what is no longer true, redraws what needs it, and sets the

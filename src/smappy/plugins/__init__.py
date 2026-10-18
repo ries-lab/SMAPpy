@@ -17,7 +17,7 @@ import numpy as np
 
 from ..locs import Localizations
 from ..params import _META, ParamInfo, param  # noqa: F401  (re-exported)
-from .discovery import Diagnostic, PluginRef, scan
+from .discovery import USER_GROUP, USER_ROOT, Diagnostic, PluginRef, scan
 
 def settings_hints(settings_cls: type) -> Dict[str, Any]:
     """`typing.get_type_hints`, naming the settings class when its annotations
@@ -1141,13 +1141,14 @@ def register(path: str):
 
 
 def roots() -> List[Tuple[str, Path]]:
-    """Where to look, in priority order: the shipped plugins, then the user's.
+    """Where to look, in priority order: the shipped plugins, the user's own
+    folder (`config.user_plugin_dir`), then the folders the preferences list.
 
     A later root wins a collision, so a user can shadow a shipped plugin by
     putting their own at the same path.
     """
     from .. import config
-    found = [("builtin", BUILTIN_ROOT)]
+    found = [("builtin", BUILTIN_ROOT), (USER_ROOT, config.user_plugin_dir())]
     for directory in config.plugin_roots():
         found.append((str(directory), directory))
     return found
@@ -1156,9 +1157,9 @@ def roots() -> List[Tuple[str, Path]]:
 def chains_dir() -> Path:
     """Where **Save chain** writes, and a folder of chains discovery reads.
 
-    The one folder read without the user naming it (`config.plugin_roots` is
-    deliberately explicit): a chain holds no code, so reading one runs nothing
-    the user did not write.
+    Read without the user naming it, as the user's plugin folder is
+    (`config.user_plugin_dir`); a chain holds no code, so reading one runs
+    nothing the user did not write.
     """
     from .. import config
     return config.config_dir() / "chains"

@@ -231,6 +231,9 @@ class PluginChooser(QDialog):
 def choose_plugin(parent=None, per_region: bool = False,
                   title: str = "Add a plugin", new_chain: bool = False) -> Optional[str]:
     """Show the chooser; the plugin path picked, or None (or `NEW_CHAIN`)."""
+    # scanned again, so a plugin saved into a folder since is offered: the
+    # scan parses the files and imports none
+    plugins.discover(force=True)
     dialog = PluginChooser(parent, per_region=per_region, title=title,
                            new_chain=new_chain)
     return dialog.path if dialog.exec() == QDialog.Accepted else None

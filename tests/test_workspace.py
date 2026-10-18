@@ -525,6 +525,34 @@ def test_the_plugins_menu_is_the_whole_tree_and_opens_a_window(window, monkeypat
     assert window._plugin_windows[STATS] is opened
 
 
+def test_new_plugin_puts_a_working_one_under_user_in_the_menu(window, monkeypatch, tmp_path):
+    """Plugins > New plugin...: a name asked, the template copied into the
+    user's folder, and the plugin in the menu at the next opening."""
+    from PySide6.QtGui import QDesktopServices
+    from PySide6.QtWidgets import QInputDialog, QMessageBox
+    from smappy import config
+    monkeypatch.setenv("SMAPPY_CONFIG_DIR", str(tmp_path / "config"))
+    config.load(reload=True)
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("pair distances", True))
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: None)
+    shown = []
+    monkeypatch.setattr(QDesktopServices, "openUrl", lambda url: shown.append(url))
+    try:
+        window._fill_plugins_menu()
+        new = [a for a in window.plugins_menu.actions() if a.text() == "New plugin..."]
+        new[0].trigger()
+        assert (config.user_plugin_dir() / "pair_distances.py").is_file()
+        assert shown and shown[0].toLocalFile() == str(config.user_plugin_dir())
+        window._fill_plugins_menu()
+        user = [a.menu() for a in window.plugins_menu.actions()
+                if a.menu() and a.text() == "User"]
+        assert [a.text() for a in user[0].actions()] == ["Pair distances"]
+    finally:
+        monkeypatch.undo()
+        config.load(reload=True)
+        plugins.discover(force=True)
+
+
 def test_a_plugin_that_cannot_be_opened_says_so_rather_than_raising(window, monkeypatch):
     from PySide6.QtWidgets import QMessageBox
 

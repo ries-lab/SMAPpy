@@ -1,0 +1,24 @@
+# My SMAPpy plugins
+
+This folder is SMAPpy's place for your own plugins.  A `.py` file here is a
+plugin as soon as the Plugins menu is opened again: it appears under
+**Plugins > User**, and a tab's **+** button pins it.
+
+* **Start one**: Plugins > New plugin... in SMAPpy, or `smappy-plugins new
+  "my analysis"` in a terminal.  Either copies `_template.py`, a working
+  example, under the new name.
+* **With an AI assistant**: open a terminal here and start it (`claude`, for
+  Claude Code), then describe what you want measured.  AGENTS.md (and
+  CLAUDE.md, which reads it) tells it how a SMAPpy plugin is written.  With a
+  chat assistant, paste AGENTS.md and your description into the chat and save
+  the answer here.
+* **Documentation and tests are up to you.**  A plugin used once for one
+  dataset needs neither; delete it when you are done.
+* **Sharing**: a plugin others would use can be shipped with SMAPpy, by a
+  pull request to https://github.com/ries-lab/SMAPpy.  Shipped plugins follow
+  that repository's rules (a help page, tests); AGENTS.md says what they are.
+
+Help > Plugin documentation > *Your own plugins* has the rest.
+
+SMAPpy writes AGENTS.md and `_template.py` and rewrites them when it is
+updated; everything else here is yours.

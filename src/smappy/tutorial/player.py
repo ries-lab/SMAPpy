@@ -303,7 +303,12 @@ __SECTIONS__
     <li class="tut"><a href="help/"><span class="name">Help pages</span>
     <span class="about">What every window and plugin does, how it works, and every
     setting, with the maths and figures &ndash; the pages the ? button opens in the
-    program.</span></a></li></ul></section>
+    program.</span></a></li>
+    <li class="tut"><a href="help/panels-your-own-plugins.html"><span class="name">Your own
+    analysis</span>
+    <span class="about">When no plugin measures what you need: describe it to an AI
+    assistant, or write it, and it becomes a plugin like the others &ndash; where it
+    lives, how to start one, and how to share it.</span></a></li></ul></section>
   <footer>Made from the program itself, and rebuilt when it changes.
   <a href="https://github.com/ries-lab/SMAPpy">SMAPpy on GitHub</a></footer>
 </div>

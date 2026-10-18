@@ -14,7 +14,9 @@ from smappy.plugins import Context
 
 
 def shipped():
-    return sorted(plugins.refs())
+    # the shipped ones only: a user's own plugins are theirs to get right, and
+    # this runs at collection, before the config is made the test's own
+    return sorted(p for p, r in plugins.refs().items() if r.root == "builtin")
 
 
 @pytest.mark.parametrize("path", shipped())

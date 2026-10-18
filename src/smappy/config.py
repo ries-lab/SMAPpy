@@ -81,12 +81,25 @@ def set(key: str, value: Any) -> None:      # noqa: A001 -- reads well as config
 
 # ------------------------------------------------------------- plugin roots
 
+def user_plugin_dir() -> Path:
+    """The user's own plugin folder, scanned whether or not it is listed.
+
+    One folder a plugin can be put in without first naming it in the
+    preferences, so that writing a small analysis -- by hand, or by describing
+    it to an AI -- is "save a file here" and nothing else
+    (`smappy.user_plugins`).  It was deliberately absent until 2026-10-18, on
+    the grounds that what is loaded should be something the user wrote down;
+    a folder inside the user's own configuration, empty until they put
+    something in it, is that, and it was the step every new plugin tripped on.
+    """
+    return config_dir() / "plugins"
+
+
 def plugin_roots() -> List[Path]:
     """Extra folders to scan for plugins, in the order the user listed them.
 
-    There is deliberately no implicit ``~/.smappy/plugins``: a plugin folder is
-    something the user names, so that what gets loaded is always something they
-    wrote down.
+    The user's own folder (`user_plugin_dir`) is scanned before these and is
+    not one of them.
     """
     raw = get("plugin_roots", []) or []
     if isinstance(raw, (str, Path)):
