@@ -39,7 +39,7 @@ track's localizations and none of the tracks crossing it.  Such an ROI is
 drawn as its track's line, selected by a click on the line, and reviewed,
 kept and annotated like any other.  While the layer is rendered as tracks,
 the track ROIs are marked in the picture rather than by a line of one
-colour over it, which would hide their own colours: each is drawn 2.5 times
+colour over it, which would hide their own colours: each is drawn twice
 as wide, in its colours when used and grey when not, and the selected or
 drafted one has a white rim besides.  The tracks that are no ROI are dimmed
 a little, to 80 %, so that they stay easy to pick from.  One track at a time is picked by hand

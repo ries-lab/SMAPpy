@@ -61,7 +61,7 @@ OUTLINE_LIMIT = 1000
 # Track ROIs in a picture of tracks (`emphasised`): their width in the
 # layer's line widths, the selected one's white rim in pixels each side, how
 # grey and how dark an unused one is, and how much the other tracks dim
-ROI_WIDTH = 2.5
+ROI_WIDTH = 2.0
 RIM_WIDTH = 1.5
 UNUSED_SATURATION = 0.15
 UNUSED_TONE = 0.55

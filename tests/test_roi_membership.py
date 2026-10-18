@@ -271,14 +271,14 @@ def test_track_rois_are_drawn_thicker_unused_ones_grey_the_selected_one_rimmed()
     state = session.layers[0].state
     state.settings = replace(state.settings, mode="tracks", color_field="frame")
     snapshot = state.snapshot()
-    fov = FieldOfView(-100, -100, 2.0, 100, 100)
+    fov = FieldOfView(-101, -100, 2.0, 100, 100)    # x = 0 through column 50's centre
     plain, _ = snapshot.image(fov)
     track = lambda tid: (lambda locs: np.flatnonzero(np.asarray(locs["track_id"]) == tid))
     lit = lambda rgb, rows, cols: (rgb[rows, cols].max(axis=-1) > 0.02).sum()
-    across_y = (30, slice(40, 60))         # across the y track, x = 0 on a pixel edge
+    across_y = (30, slice(40, 60))         # across the y track
 
     used = emphasised(snapshot, fov, [(track(2), "used")])
-    assert lit(plain, *across_y) == 2 and lit(used, *across_y) > 2     # thicker
+    assert lit(plain, *across_y) == 1 and lit(used, *across_y) == 3    # twice as wide
     assert np.allclose(used[30, 50], plain[30, 50], atol=0.05)         # its own colour
     # the x track, no ROI, is dimmed a little and no more
     assert np.allclose(used[50, 10], OTHERS_DIM * plain[50, 10], atol=0.02)
