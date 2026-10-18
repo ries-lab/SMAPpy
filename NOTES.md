@@ -1609,6 +1609,29 @@ channel registration pair within a file (`locs.frames_apart`).  Files that
 *are* one acquisition saved in pieces are made one by *Combine files*,
 frames and time continued, ids kept apart.
 
+What one table cost at 10^8 rows (`docs/performance.md`, "Large tables")
+was paid in two places, and both now pay for the files shown rather than
+for the table:
+
+* **The filter.**  Every bound and the file choice was a pass over every
+  row.  A file is one block of rows (`add_file` appends; `LocSet.file_rows`
+  finds the blocks in one pass and says None when a plugin has reordered
+  them), so a layer showing some files restricts its filter to their spans
+  (`LocFilter.restrict`): the ranges are tested there and the rest of the
+  mask is zeros nobody writes.  The masks stay as long as the table, so
+  nothing that combines them with an ROI or a slab changed.
+* **Linking.**  The grouped table was linked whole before a layer showing
+  blinks drew anything -- 86 s and 13 GB at 10^8.  `Tables` now links a
+  table of several files one file at a time, only the files the layers
+  showing blinks show, and keeps what it linked while the layers move
+  between files.  Linking never joined two files, so the blinks are the
+  same; the cost is that the grouped table is a different object each time
+  a file joins it, and that `group_id` on the localizations of a file not
+  linked yet is 0.  The ids run on from file to file, in the order the
+  files were linked, so they stay the grouped table's ids as files are
+  added -- every reader looks them up by value (`IdLookup`, `searchsorted`),
+  none by row.  A save links every file, as the file keeps all the ids.
+
 ## Open questions
 
 * Fitted x sits ~0.24 px from the peak-finder position, and the sign flips with
