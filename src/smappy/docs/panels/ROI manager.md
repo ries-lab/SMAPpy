@@ -38,8 +38,11 @@ to *its id alone*, makes an ROI of each id of a column -- each
 track's localizations and none of the tracks crossing it.  Such an ROI is
 drawn as its track's line, selected by a click on the line, and reviewed,
 kept and annotated like any other.  While the layer is rendered as tracks,
-the selected or drafted track is drawn again three times as wide in its own
-colours, rather than under a line of one colour that would hide them.  One track at a time is picked by hand
+the track ROIs are marked in the picture rather than by a line of one
+colour over it, which would hide their own colours: each is drawn 2.5 times
+as wide, in its colours when used and grey when not, and the selected or
+drafted one has a white rim besides.  The tracks that are no ROI are dimmed
+a little, to 80 %, so that they stay easy to pick from.  One track at a time is picked by hand
 with *shape* set to *track* in the Regions tab -- its default while the
 layer is rendered as tracks: a click in the zoom drafts the track drawn
 nearest it, and *Add* keeps it.  The list shows *all* ROIs, only the

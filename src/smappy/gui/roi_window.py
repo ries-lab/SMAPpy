@@ -58,7 +58,14 @@ RIM_PIXELS = 6.0              # how near the outline a click must be to select
 # a pane with more ROIs than this in view draws a dot at each centre instead
 # of its outline: past it the outlines are a tangle and cost a second a redraw
 OUTLINE_LIMIT = 1000
-EMPHASIS = 3.0                # the selected track's width, in the layer's line widths
+# Track ROIs in a picture of tracks (`emphasised`): their width in the
+# layer's line widths, the selected one's white rim in pixels each side, how
+# grey and how dark an unused one is, and how much the other tracks dim
+ROI_WIDTH = 2.5
+RIM_WIDTH = 1.5
+UNUSED_SATURATION = 0.15
+UNUSED_TONE = 0.55
+OTHERS_DIM = 0.8
 # the status line counts the ROIs waiting on the evaluation only up to this
 # many: counting means checking every one, the cost the list no longer pays
 COUNT_LIMIT = 2000
@@ -90,28 +97,62 @@ def _lowered(label: str) -> str:
     return label
 
 
-def emphasised(snapshot, fov, rows_of) -> np.ndarray:
-    """The picture, with the localizations ``rows_of(locs)`` picks drawn
-    again over it at `EMPHASIS` times the line width: how a selected track
-    stands out in a picture of tracks.  A line of one colour over it, the
-    way a shape's outline is drawn, hid the track's own colours -- which a
-    track coloured by time is looked at for."""
+def emphasised(snapshot, fov, marks) -> np.ndarray:
+    """The picture of tracks with the ROIs' tracks marked in it, not over it.
+
+    ``marks`` is ``[(rows_of, style)]``, drawn in that order: the rows
+    ``rows_of(locs)`` picks drawn again `ROI_WIDTH` times as wide -- in
+    their own colours when ``style`` is ``"used"``, greyish when
+    ``"unused"``, and with a white rim round them as well when the style
+    ends in ``" selected"``.  The
+    other tracks are dimmed a little (`OTHERS_DIM`), never much: they are
+    what the next track is picked from.  A line of one colour over a track,
+    the way a shape's outline is drawn, hid the track's own colours, which
+    a track coloured by time is looked at for."""
     from dataclasses import replace
     rgb, _ = snapshot.image(fov)
-    rows = np.asarray(rows_of(snapshot.locs), dtype=np.int64)
-    mask = np.zeros(len(snapshot.locs), bool)
-    mask[rows[rows < len(mask)]] = True
-    mask &= np.asarray(snapshot.mask, bool)
-    if not mask.any():
-        return rgb
-    settings = replace(snapshot.settings,
-                       line_width=snapshot.settings.line_width * EMPHASIS)
-    over, planes = replace(snapshot, mask=mask, known_indices=None, settings=settings,
-                           memo={}).image(fov)
-    drawn = planes.weight > 0
-    rgb = np.array(rgb, copy=True)
-    rgb[drawn] = over[drawn]
-    return rgb
+    rgb = np.asarray(rgb, float) * OTHERS_DIM
+    keep = np.asarray(snapshot.mask, bool)
+    width = snapshot.settings.line_width
+
+    def draw(rows, line_width):
+        mask = np.zeros(len(snapshot.locs), bool)
+        rows = np.asarray(rows, dtype=np.int64)
+        mask[rows[rows < len(mask)]] = True
+        mask &= keep
+        if not mask.any():
+            return None, None
+        settings = replace(snapshot.settings, line_width=line_width)
+        over, planes = replace(snapshot, mask=mask, known_indices=None,
+                               settings=settings, memo={}).image(fov)
+        weight = np.asarray(planes.weight, float)[..., None]
+        alpha = np.clip(weight, 0, 1)
+        if planes.color is not None:
+            # coloured by a column: each line's own colour at full strength,
+            # whatever the contrast -- the subset's contrast, set on these
+            # few lines alone, made them darker than in the picture
+            colour = np.asarray(planes.color, float) / np.maximum(weight, 1e-12)
+            return colour * alpha, alpha
+        return np.asarray(over, float), alpha
+
+    for rows_of, style in marks:
+        rows = rows_of(snapshot.locs)
+        if style.endswith("selected"):
+            _, alpha = draw(rows, width * ROI_WIDTH + 2 * RIM_WIDTH)
+            if alpha is not None:
+                rgb = rgb * (1 - alpha) + alpha
+        over, alpha = draw(rows, width * ROI_WIDTH)
+        if over is None:
+            continue
+        if style.startswith("unused"):
+            # grey at the colour's brightness: a mean would turn a pure red
+            # nearly black, and an unused track must stay as easy to see
+            grey = over.max(axis=-1, keepdims=True)
+            over = UNUSED_TONE * (grey + UNUSED_SATURATION * (over - grey))
+        # premultiplied: the coverage is in it already, laid over what the
+        # coverage leaves of the rest
+        rgb = rgb * (1 - alpha) + over
+    return np.clip(rgb, 0, 1).astype(np.float32)
 
 
 class ImagePane(QWidget):
@@ -210,8 +251,8 @@ class ImagePane(QWidget):
 
     def render(self, state, x0: float, x1: float, y0: float, y1: float,
                emphasis=None) -> None:
-        """The picture of ``x0..x1, y0..y1``; ``emphasis``, a function of a
-        table giving its rows, are drawn again over it (`emphasised`)."""
+        """The picture of ``x0..x1, y0..y1``; ``emphasis``, marks of track
+        ROIs to draw into it (`emphasised`)."""
         size = self.graphics.size()
         nx, ny = max(size.width(), 32), max(size.height(), 32)
         fov = FieldOfView.fit((x0, x1), (y0, y1), nx, ny)
@@ -722,7 +763,7 @@ class ROIManagerWindow(QMainWindow):
             return
         state = project.state(file_id)
         x0, y0, x1, y1 = state.index.bounds
-        self.file_pane.render(state, x0, x1, y0, y1)
+        self.file_pane.render(state, x0, x1, y0, y1, self._emphasis())
         rois = project.rois_of(file_id)
         preview = project.segment_preview
         if preview is not None and preview.get("file_id") == file_id:
@@ -858,11 +899,11 @@ class ROIManagerWindow(QMainWindow):
             pane.draw("centres")
             pane.draw("centres_excluded")
         groups = {"others": [], "excluded": [], "excluded_active": [], "roi": []}
-        emphasised = self._emphasis() is not None
+        marked = self._emphasis() is not None
         for roi in rois:
             active = roi.id == self.active
-            if active and emphasised:
-                continue               # drawn thicker in its own colours instead
+            if marked and project.draws_track(roi):
+                continue               # marked in the picture instead (`emphasised`)
             name = ("excluded_active" if active else "excluded") if not roi.use else (
                 "roi" if active else "others")
             groups[name].append(roi)
@@ -876,18 +917,34 @@ class ROIManagerWindow(QMainWindow):
         self._draw_lines(pane, [roi.lines for roi in rois])
 
     def _emphasis(self):
-        """The rows of the selected or drafted track, as a function of a
-        table, when the layer draws tracks: that track is then drawn again,
-        thicker, in its own colours (`emphasised`), rather than covered by
-        a line of one colour.  None otherwise."""
+        """The track ROIs of the file, and the drafted track, as marks to
+        draw into the picture (`emphasised`) when the layer draws tracks;
+        None otherwise, and then they are lines over it like any outline."""
         project = self.project
         render = getattr(project, "render", None)
         if render is None or render.mode != "tracks":
             return None
-        roi = self.draft_track if self.draft is not None else project.rois.get(self.active)
-        if roi is None or not project.draws_track(roi):
+        tracks = [r for r in project.rois_of(self.current_file()) if project.draws_track(r)]
+        draft = self.draft_track
+        selected = draft if draft is not None else project.rois.get(self.active)
+        if selected is not None and not project.draws_track(selected):
+            selected = None
+        if not tracks and selected is None:
             return None
-        return lambda locs: project.members(roi, locs)
+
+        def rows(chosen):
+            def of(locs):
+                found = [project.members(r, locs) for r in chosen]
+                return np.concatenate(found) if found else np.zeros(0, np.int64)
+            return of
+        others = [r for r in tracks if selected is None or r.id != selected.id]
+        marks = [(rows([r for r in others if not r.use]), "unused"),
+                 (rows([r for r in others if r.use]), "used")]
+        if selected is not None:
+            # the selected last, so its rim is never under another track
+            marks.append((rows([selected]),
+                          ("used" if selected.use else "unused") + " selected"))
+        return marks
 
     def _line_slot(self, name: str) -> int:
         """Which colour a line takes: its name's place in the project's."""
@@ -978,8 +1035,8 @@ class ROIManagerWindow(QMainWindow):
         used = drafted or roi is None or roi.use
         for name in ("draft", "roi", "excluded_active"):
             self.roi_pane.draw(name)
-        if emphasis is not None:
-            xs = ys = []
+        if emphasis is not None and of_id is not None:
+            xs = ys = []               # a track, marked in the picture instead
         self.roi_pane.draw("draft" if drafted else ("roi" if used else "excluded_active"), xs, ys)
         self._draw_lines(self.roi_pane, [lines], labels=True)
         self._fill_line_box(lines)
