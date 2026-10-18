@@ -58,6 +58,7 @@ RIM_PIXELS = 6.0              # how near the outline a click must be to select
 # a pane with more ROIs than this in view draws a dot at each centre instead
 # of its outline: past it the outlines are a tangle and cost a second a redraw
 OUTLINE_LIMIT = 1000
+EMPHASIS = 3.0                # the selected track's width, in the layer's line widths
 # the status line counts the ROIs waiting on the evaluation only up to this
 # many: counting means checking every one, the cost the list no longer pays
 COUNT_LIMIT = 2000
@@ -87,6 +88,30 @@ def _lowered(label: str) -> str:
     if len(label) > 1 and label[0].isupper() and label[1].islower():
         return label[0].lower() + label[1:]
     return label
+
+
+def emphasised(snapshot, fov, rows_of) -> np.ndarray:
+    """The picture, with the localizations ``rows_of(locs)`` picks drawn
+    again over it at `EMPHASIS` times the line width: how a selected track
+    stands out in a picture of tracks.  A line of one colour over it, the
+    way a shape's outline is drawn, hid the track's own colours -- which a
+    track coloured by time is looked at for."""
+    from dataclasses import replace
+    rgb, _ = snapshot.image(fov)
+    rows = np.asarray(rows_of(snapshot.locs), dtype=np.int64)
+    mask = np.zeros(len(snapshot.locs), bool)
+    mask[rows[rows < len(mask)]] = True
+    mask &= np.asarray(snapshot.mask, bool)
+    if not mask.any():
+        return rgb
+    settings = replace(snapshot.settings,
+                       line_width=snapshot.settings.line_width * EMPHASIS)
+    over, planes = replace(snapshot, mask=mask, known_indices=None, settings=settings,
+                           memo={}).image(fov)
+    drawn = planes.weight > 0
+    rgb = np.array(rgb, copy=True)
+    rgb[drawn] = over[drawn]
+    return rgb
 
 
 class ImagePane(QWidget):
@@ -183,11 +208,17 @@ class ImagePane(QWidget):
             return True
         return super().eventFilter(obj, event)
 
-    def render(self, state, x0: float, x1: float, y0: float, y1: float) -> None:
+    def render(self, state, x0: float, x1: float, y0: float, y1: float,
+               emphasis=None) -> None:
+        """The picture of ``x0..x1, y0..y1``; ``emphasis``, a function of a
+        table giving its rows, are drawn again over it (`emphasised`)."""
         size = self.graphics.size()
         nx, ny = max(size.width(), 32), max(size.height(), 32)
         fov = FieldOfView.fit((x0, x1), (y0, y1), nx, ny)
-        rgb, _ = state.image(fov)
+        if emphasis is None:
+            rgb, _ = state.image(fov)
+        else:
+            rgb = emphasised(state.snapshot(), fov, emphasis)
         self.image.setImage(np.ascontiguousarray(rgb), levels=[0, 1], autoLevels=False)
         self.image.setRect(QRectF(fov.x0, fov.y0, fov.x1 - fov.x0, fov.y1 - fov.y0))
         self.view.setRange(QRectF(fov.x0, fov.y0, fov.x1 - fov.x0, fov.y1 - fov.y0), padding=0)
@@ -710,11 +741,14 @@ class ROIManagerWindow(QMainWindow):
             centre = np.array([(x0 + x1) / 2, (y0 + y1) / 2])
             self.zoom_center = centre
         half = self.zoom_pane.width_nm / 2
+        emphasis = self._emphasis()
         self.zoom_pane.render(state, centre[0] - half, centre[0] + half,
-                              centre[1] - half, centre[1] + half)
+                              centre[1] - half, centre[1] + half, emphasis)
         self._draw_outlines(self.zoom_pane, rois, preview)
         if self.draft_track is not None:
-            self.zoom_pane.draw("draft", *project.outline(self.draft_track))
+            # drawn thicker in its own colours, or as a line where it can be
+            self.zoom_pane.draw("draft", *([[], []] if emphasis is not None
+                                           else project.outline(self.draft_track)))
         else:
             self.zoom_pane.draw("draft", *([[], []] if self.draft is None else
                                            Region.site(self.draft, project.shape,
@@ -824,8 +858,11 @@ class ROIManagerWindow(QMainWindow):
             pane.draw("centres")
             pane.draw("centres_excluded")
         groups = {"others": [], "excluded": [], "excluded_active": [], "roi": []}
+        emphasised = self._emphasis() is not None
         for roi in rois:
             active = roi.id == self.active
+            if active and emphasised:
+                continue               # drawn thicker in its own colours instead
             name = ("excluded_active" if active else "excluded") if not roi.use else (
                 "roi" if active else "others")
             groups[name].append(roi)
@@ -837,6 +874,20 @@ class ROIManagerWindow(QMainWindow):
                 ys.extend(list(oy) + [np.nan])
             pane.draw(name, xs, ys)
         self._draw_lines(pane, [roi.lines for roi in rois])
+
+    def _emphasis(self):
+        """The rows of the selected or drafted track, as a function of a
+        table, when the layer draws tracks: that track is then drawn again,
+        thicker, in its own colours (`emphasised`), rather than covered by
+        a line of one colour.  None otherwise."""
+        project = self.project
+        render = getattr(project, "render", None)
+        if render is None or render.mode != "tracks":
+            return None
+        roi = self.draft_track if self.draft is not None else project.rois.get(self.active)
+        if roi is None or not project.draws_track(roi):
+            return None
+        return lambda locs: project.members(roi, locs)
 
     def _line_slot(self, name: str) -> int:
         """Which colour a line takes: its name's place in the project's."""
@@ -915,8 +966,9 @@ class ROIManagerWindow(QMainWindow):
             width = project.preview_nm or max(2.4 * half, project.size_nm)
         half = width / 2
         self.roi_pane.width_nm = width
+        emphasis = self._emphasis()
         self.roi_pane.render(state, centre[0] - half, centre[0] + half,
-                             centre[1] - half, centre[1] + half)
+                             centre[1] - half, centre[1] + half, emphasis)
         polygon = self.draft_polygon if drafted else (roi.polygon if roi is not None else None)
         lines = self.draft_lines if drafted else (roi.lines if roi is not None else {})
         if of_id is None:
@@ -926,6 +978,8 @@ class ROIManagerWindow(QMainWindow):
         used = drafted or roi is None or roi.use
         for name in ("draft", "roi", "excluded_active"):
             self.roi_pane.draw(name)
+        if emphasis is not None:
+            xs = ys = []
         self.roi_pane.draw("draft" if drafted else ("roi" if used else "excluded_active"), xs, ys)
         self._draw_lines(self.roi_pane, [lines], labels=True)
         self._fill_line_box(lines)

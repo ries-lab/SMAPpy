@@ -243,8 +243,9 @@ def test_a_click_drafts_the_nearest_track_once_the_layer_draws_tracks(app):
     window.zoom_pane.render(project.state(file_id), -200, 200, -200, 200)
     window._zoom_clicked(3, 70)                 # off both lines, nearer y's
     assert window.draft_track.ids == {"track_id": 2}
-    xs, ys = window.zoom_pane.shapes["draft"].getData()
-    assert np.allclose(xs, 0) and len(ys) == 10           # drafted as its line
+    # drawn thicker in its own colours, not covered by a line of one colour
+    assert window.zoom_pane.shapes["draft"].getData()[0] is None or \
+        len(window.zoom_pane.shapes["draft"].getData()[0]) == 0
     window._add()
     roi = project.rois[window.active]
     assert roi.ids == {"track_id": 2} and not roi.spatial
@@ -258,6 +259,30 @@ def test_a_click_drafts_the_nearest_track_once_the_layer_draws_tracks(app):
     assert window.draft is not None and window.draft_track is None
     window.close()
     header.deleteLater()
+
+
+def test_a_selected_track_is_drawn_thicker_in_its_own_colours():
+    from dataclasses import replace
+    from smappy.gui.roi_window import EMPHASIS, emphasised
+    from smappy.render import FieldOfView
+    from smappy.session import Session
+    session = Session(crossing_tracks())
+    session.show_grouped(0, False)
+    state = session.layers[0].state
+    state.settings = replace(state.settings, mode="tracks", color_field="frame")
+    snapshot = state.snapshot()
+    fov = FieldOfView(-100, -100, 2.0, 100, 100)
+    plain, _ = snapshot.image(fov)
+    track_y = lambda locs: np.flatnonzero(np.asarray(locs["track_id"]) == 2)
+    bold = emphasised(snapshot, fov, track_y)
+    lit = lambda rgb, rows, cols: (rgb[rows, cols].max(axis=-1) > 0).sum()
+    # across the y track (x = 0, on a pixel edge): a line w pixels wide
+    # lights w + 1 there, so 2 at the layer's width and 4 at EMPHASIS times it
+    assert lit(plain, 30, slice(40, 60)) == 2
+    assert lit(bold, 30, slice(40, 60)) == EMPHASIS + 1
+    # the x track, not chosen, is as it was; and the colours stay the render's
+    assert np.array_equal(bold[50, :40], plain[50, :40])
+    assert np.allclose(bold[30, 50], plain[30, 50], atol=0.05)
 
 
 def test_the_frame_and_z_range_are_typed_or_dragged_and_undone(app):
