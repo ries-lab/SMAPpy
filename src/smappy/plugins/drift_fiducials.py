@@ -48,7 +48,7 @@ class FiducialDrift(KeepsDrift, Plugin):
                     f"the selection holds {len(files)} files; drift is of one "
                     f"acquisition: show one file in the layer and run it per file")
             # the curve is that file's: the others keep their positions
-            if len(files) and len(np.unique(numbers)) > 1:
+            if len(files) and numbers.min() != numbers.max():
                 rows = numbers == files[0]
         ctx.report(f"finding beads in {ctx.selection}")
         drift, beads, fit = estimate_drift_fiducials(locs, settings, select=mask)

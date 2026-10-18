@@ -33,8 +33,9 @@ def per_file(ctx: Context, estimate: Callable[[np.ndarray], Drift]
     mask = np.asarray(ctx.selection.mask, bool)
     files = (np.asarray(locs["filenumber"]) if "filenumber" in locs
              else np.zeros(len(locs), np.int64))
-    numbers = [int(k) for k in np.unique(files[mask])]
-    if len(np.unique(files)) <= 1:
+    # bincount and min/max rather than np.unique: a sort of every row
+    numbers = [int(k) for k in np.flatnonzero(np.bincount(files[mask]))]
+    if not len(files) or files.min() == files.max():
         drift = estimate(mask)
         return drift.apply(locs), [("", drift)]
     names = list(getattr(ctx.session, "file_names", lambda: [])() or [])
