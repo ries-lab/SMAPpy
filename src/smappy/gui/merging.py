@@ -115,6 +115,7 @@ class Merger(QObject):
         self._task: Optional[MergeTask] = None
         self._tables = None
         self._key = None
+        self._rows = 0
         self._failed_key = None           # not tried again for the same rows
         self._stage = ""
         self._text = ""
@@ -210,6 +211,7 @@ class Merger(QObject):
     def _start(self, job) -> None:
         tables = self.session.tables
         locs, settings, self._key = job
+        self._rows = len(locs)          # one file of several, or the table
         self._tables = tables
         tables.merging = True
         task = self._task = MergeTask(locs, settings)     # no parent: `_RUNNING`
@@ -256,7 +258,7 @@ class Merger(QObject):
                 tables.take_grouped(grouped, index, self._key)
             if kept:
                 seconds = self._elapsed.elapsed() / 1000
-                self.message.emit(f"{len(grouped):,} blinks from {len(tables.locs):,} "
+                self.message.emit(f"{len(grouped):,} blinks from {self._rows:,} "
                                   f"localizations ({seconds:.1f} s)", 8000)
             self.ensure()                 # the table or the settings moved: again
             if not self.busy:

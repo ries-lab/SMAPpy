@@ -34,6 +34,7 @@ and the one that goes first.
 from __future__ import annotations
 
 import copy
+import weakref
 from dataclasses import asdict, dataclass, field as dataclass_field
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
@@ -75,6 +76,30 @@ class LocSet:
         self.median_precision = 0.0
         self._precision_n = 0
         self._update_precision()
+        self._files = None              # (files, rows), found on first use
+
+    def _file_blocks(self):
+        if self._files is None:
+            self._files = file_blocks(self.locs["filenumber"] if "filenumber" in self.locs
+                                      else np.zeros(0, np.int32), len(self.locs))
+        return self._files
+
+    @property
+    def files(self) -> Optional[List[int]]:
+        """The file numbers in the table, in order; None for a table that
+        is still growing, whose files are not settled."""
+        if self.growing:
+            return None
+        return self._file_blocks()[0]
+
+    @property
+    def file_rows(self) -> Optional[Dict[int, Tuple[int, int]]]:
+        """Each file's rows as one ``(start, stop)``, or None when a file's
+        rows are not one block (or the table still grows).  `Session.add_file`
+        appends, so they are, unless a plugin reordered the rows."""
+        if self.growing:
+            return None
+        return self._file_blocks()[1]
 
     @property
     def growing(self) -> bool:
@@ -144,6 +169,42 @@ class LocSet:
         return len(self.locs)
 
 
+def file_blocks(numbers, n: int) -> Tuple[List[int], Optional[Dict[int, Tuple[int, int]]]]:
+    """The file numbers of a table's ``filenumber`` column and, when each
+    file's rows are one block, those blocks as ``{file: (start, stop)}``.
+
+    One pass over the column, for the places where a file of several is all
+    that is wanted -- a layer's filter, linking -- and a pass over every row
+    is what they would otherwise cost: the file choice was an `np.isin` over
+    the whole table, 0.44 s at 10^8 rows.  A table without the column is one
+    file, 0, of all its rows.
+    """
+    numbers = np.asarray(numbers)
+    if not len(numbers):
+        return ([0], {0: (0, n)}) if n else ([], {})
+    change = np.flatnonzero(numbers[1:] != numbers[:-1]) + 1
+    if len(change) > 100_000:             # interleaved: no blocks to speak of
+        return [int(v) for v in np.unique(numbers)], None
+    starts = np.r_[0, change]
+    stops = np.r_[change, len(numbers)]
+    values = [int(v) for v in numbers[starts]]
+    files = sorted(set(values))
+    if len(files) != len(values):
+        return files, None
+    return files, {v: (int(a), int(b)) for v, a, b in zip(values, starts, stops)}
+
+
+def merge_spans(spans) -> List[Tuple[int, int]]:
+    """``(start, stop)`` spans sorted, with the touching ones joined."""
+    out: List[Tuple[int, int]] = []
+    for a, b in sorted(spans):
+        if out and a <= out[-1][1]:
+            out[-1] = (out[-1][0], max(out[-1][1], b))
+        elif b > a:
+            out.append((a, b))
+    return out
+
+
 # How a table is linked: ``link(settings, attach_columns) -> grouped table``.
 Linker = Callable[[GroupSettings, bool], Localizations]
 
@@ -171,6 +232,22 @@ class Tables:
     blinks draws nothing meanwhile (`pending`), and the GUI links it in a
     worker (`link_job`, `take_grouped`).  A copy made with `sharing` (a
     chain's) links on read, into columns of its own.
+
+    **File by file.**  A table of several files is linked one file at a
+    time, and only the files wanted: those the layers showing blinks show
+    (`ViewState` registers itself here), or the ones a caller names
+    (``files=``).  Linking never joins two files (`GroupSettings.block_fields`),
+    so a file linked alone gives the blinks linking the whole table gives
+    it; what changes is that ten files of 10 M are not all linked before a
+    layer showing one of them draws -- 86 s and a 13 GB peak at 10^8 rows
+    (`docs/performance.md`, "Large tables") -- and that a file once linked
+    stays linked while the layers move between files.  The grouped table is
+    the files linked so far, a block each in the order they were linked, and
+    their `group_id` numbers run on from one file to the next, so the ids
+    written onto the localizations stay those of the grouped table's rows as
+    files are added.  The localizations of files not linked yet have
+    `group_id` 0.  A table of one file, one that still grows and one cut from
+    another (``link``) are linked whole, as before.
     """
 
     def __init__(self, locs: Localizations, settings: Optional[GroupSettings] = None,
@@ -197,9 +274,15 @@ class Tables:
         # the GUI's merge of these rows failed: the layers show the
         # localizations rather than nothing, and it is not tried again
         self.merge_failed = False
+        # file by file: the files linked under `_key`, and the next group id
+        self._linked: set = set()
+        self._next_id = 1
+        # the layers looking at these tables, for the files they want linked
+        self._views: "weakref.WeakSet" = weakref.WeakSet()
         if grouped is not None:
             self._grouped = LocSet(grouped)
             self._key = self._wanted()
+            self._linked = set(self.ungrouped.files or ())
 
     @classmethod
     def sharing(cls, other: "Tables") -> "Tables":
@@ -213,6 +296,9 @@ class Tables:
         made._ready = other._ready
         made._grouped = other._grouped
         made._key = other._key
+        made._linked = set(other._linked)
+        made._next_id = other._next_id
+        made._views = weakref.WeakSet()
         made.merging = False
         made.defer_from = None          # a copy is headless: it links on read
         made._pending = None
@@ -234,10 +320,38 @@ class Tables:
     def _wanted(self):
         return (len(self.locs), asdict(self.settings))
 
+    def _per_file(self) -> bool:
+        """Whether these rows are linked file by file (see the class)."""
+        if self.growing or self._link_with is not None or "filenumber" not in self.locs:
+            return False
+        files = self.ungrouped.files
+        return files is not None and len(files) > 1
+
+    def wanted_files(self, files=None) -> set:
+        """The files a grouped table must hold: ``files``, or those the
+        layers showing blinks show -- every file when one of them shows every
+        file, or when no layer shows blinks and a caller asks anyway."""
+        present = set(self.ungrouped.files or ())
+        if files is not None:
+            return set(int(f) for f in files) & present
+        shown = [v._files for v in list(self._views) if v.use_grouped]
+        if not shown or any(f is None for f in shown):
+            return present
+        wanted = set().union(*map(set, shown)) & present
+        # a layer showing no file that is there still draws a grouped table
+        return wanted or {min(present)}
+
+    def covers(self, files=None) -> bool:
+        """Whether the grouped table there is current and holds ``files``
+        (as `wanted_files` reads them)."""
+        if self._grouped is None or self._key != self._wanted():
+            return False
+        return not self._per_file() or self.wanted_files(files) <= self._linked
+
     @property
     def is_current(self) -> bool:
         """Whether the grouped table there is the one `grouped` would hand out."""
-        return self._grouped is not None and self._key == self._wanted()
+        return self.covers()
 
     def peek_grouped(self) -> Optional[LocSet]:
         """The grouped table linked last, current or not; None if never."""
@@ -260,49 +374,129 @@ class Tables:
             self._pending = LocSet(self.locs[np.zeros(0, np.int64)])
         return self._pending
 
-    def available(self) -> Optional[LocSet]:
+    def available(self, files=None) -> Optional[LocSet]:
         """The current grouped table for a reader that can do without it:
         linked now if it is not current and linking here is allowed, None
-        while it is deferred to the GUI's worker or the table still grows."""
-        if self.is_current:
+        while it is deferred to the GUI's worker or the table still grows.
+        ``files`` as `grouped` takes them."""
+        if self.covers(files):
             return self._grouped
-        if self.growing or self.deferred():
+        if self.growing or self.deferred(files):
             return None
-        return self.grouped()
+        return self.grouped(files=files)
 
-    def deferred(self) -> bool:
+    def deferred(self, files=None) -> bool:
         """Whether reading the grouped table must not link it now: a merge
         runs elsewhere, or the table is large enough for the GUI to link it
         in a worker (``defer_from``).  A table cut from another one is
         never deferred once that one is current -- cutting is cheap."""
-        if self.is_current:
+        if self.covers(files):
             return False
         if self._link_with is not None and self._ready is not None and self._ready():
             return False
         return self.merging or (self.defer_from is not None
                                 and len(self.locs) >= self.defer_from)
 
-    def grouped(self, progress=None) -> LocSet:
+    def grouped(self, progress=None, files=None) -> LocSet:
         """The grouped table for the rows and settings as they are now.
 
         Links -- the slow part -- when there is none or the key has moved.
         Linking writes `group_id` and `n_in_group` back onto the ungrouped
         table (`group.attach`), but not while the table is still growing: a
         block arriving from the fitter would not carry those columns, and
-        `extend` refuses a table whose columns do not match.
+        `extend` refuses a table whose columns do not match.  A table of
+        several files links the ``files`` wanted (`wanted_files`) that are
+        not linked yet, one at a time.
         """
-        if not self.is_current:
-            if self._shared:
-                self._unshare()
-            key = self._wanted()
-            if self._link_with is not None:
-                table = self._link_with(self.settings, not self.growing)
-            else:
-                table, _ = group(self.locs, self.settings,
-                                 attach_columns=not self.growing, progress=progress)
-            self._grouped = LocSet(table)
-            self._key = key
+        if self.covers(files):
+            return self._grouped
+        if self._shared:
+            self._unshare()
+        key = self._wanted()
+        if self._per_file():
+            if self._key != key:
+                self._forget_files()
+            missing = sorted(self.wanted_files(files) - self._linked)
+            pieces = []
+            for k, number in enumerate(missing):
+                if progress is not None:
+                    progress(f"file {number + 1} ({k + 1} of {len(missing)})", 0.0)
+                piece, rows = self._file_table(number)
+                table, index = group(piece, self.settings, attach_columns=False,
+                                     progress=progress)
+                pieces.append((number, rows, table, index))
+            self._add_files(pieces, key)
+            return self._grouped
+        if self._link_with is not None:
+            table = self._link_with(self.settings, not self.growing)
+        else:
+            table, _ = group(self.locs, self.settings,
+                             attach_columns=not self.growing, progress=progress)
+        self._grouped = LocSet(table)
+        self._key = key
         return self._grouped
+
+    def _file_table(self, number: int):
+        """File ``number``'s rows: a view of its block, or a copy of its rows
+        where they are not one; and where they are, for writing back."""
+        blocks = self.ungrouped.file_rows
+        if blocks is not None:
+            a, b = blocks[number]
+            rows = slice(a, b)
+            return Localizations({k: v[a:b] for k, v in self.locs.columns.items()},
+                                 dict(self.locs.metadata)), rows
+        rows = np.flatnonzero(np.asarray(self.locs["filenumber"]) == number)
+        return self.locs[rows], rows
+
+    def _forget_files(self) -> None:
+        """The settings moved: nothing linked before is current, and the ids
+        it wrote onto the localizations go with it."""
+        from .group import GROUP_COLUMNS
+        self._grouped = None
+        self._linked = set()
+        self._next_id = 1
+        for name in GROUP_COLUMNS:
+            self.locs.columns.pop(name, None)
+
+    def _add_files(self, pieces, key) -> None:
+        """Keep files linked on their own, as ``(number, rows, grouped,
+        group_index)``: their blinks after those already there, their ids
+        numbered on, and the ids written onto their localizations."""
+        from .mathparse import apply_recipes
+        if not pieces:
+            if self._grouped is None:       # nothing wanted is there: no blinks
+                self._grouped = LocSet(self.locs[np.zeros(0, np.int64)])
+            self._key = key
+            return
+        n = len(self.locs)
+        # new arrays, never written into: a render thread may be reading the
+        # ones there are (`ViewState.snapshot`)
+        gid = (np.array(self.locs["group_id"], np.int32) if "group_id" in self.locs
+               else np.zeros(n, np.int32))
+        tables = [] if self._grouped is None else [self._grouped.locs]
+        on = None
+        for number, rows, table, index in pieces:
+            base = self._next_id - 1
+            table.columns["group_id"] = (np.asarray(table["group_id"], np.int64)
+                                         + base).astype(np.int32)
+            index = np.asarray(index, np.int64)
+            gid[rows] = index + base
+            counts = np.asarray(table["n_in_group"])
+            if on is None:
+                on = (np.array(self.locs["n_in_group"], counts.dtype)
+                      if "n_in_group" in self.locs else np.zeros(n, counts.dtype))
+            on[rows] = counts[index - 1]
+            self._next_id += len(table)
+            self._linked.add(number)
+            tables.append(table)
+        self.locs.columns["group_id"] = gid
+        self.locs.columns["n_in_group"] = on
+        apply_recipes(self.locs)
+        from .locs import concat
+        merged = concat(tables) if len(tables) > 1 else tables[0]
+        merged.metadata = dict(tables[0].metadata)
+        self._grouped = LocSet(merged)
+        self._key = key
 
     def link_job(self) -> Optional[Tuple[Localizations, GroupSettings, tuple]]:
         """What linking these rows takes, for a worker thread:
@@ -310,9 +504,19 @@ class Tables:
         ``attach_columns=False`` and hand back to `take_grouped`.  None when
         there is nothing to do, or when the linking is not `group` (a
         `Tables` cut from another one).  A growing table is handed over as a
-        snapshot, so the worker reads rows the fit is not adding to."""
+        snapshot, so the worker reads rows the fit is not adding to.  A table
+        of several files hands over one file it wants linked, the first; the
+        merge asks again for the next."""
         if self.is_current or self._link_with is not None:
             return None
+        if self._per_file():
+            if self._key != self._wanted():
+                self._forget_files()
+            missing = sorted(self.wanted_files() - self._linked)
+            if not missing:
+                return None
+            piece, _rows = self._file_table(missing[0])
+            return piece, self.settings, self._wanted() + (missing[0],)
         locs = self.locs.snapshot() if self.growing else self.locs
         return locs, self.settings, (len(locs), asdict(self.settings))
 
@@ -324,9 +528,19 @@ class Tables:
         that a growing table keeps what was linked, as `peek_grouped` does.
         Writes `group_id` and `n_in_group` back, as `grouped` does."""
         from .group import attach
+        wanted = self._wanted()
+        if len(key) > 2:                    # one file of several
+            if key[:2] != wanted or not self._per_file():
+                return False
+            if self._key != wanted:
+                self._forget_files()
+            number = key[2]
+            if number not in self._linked:
+                _piece, rows = self._file_table(number)
+                self._add_files([(number, rows, grouped, group_index)], wanted)
+            return True
         if self.is_current:
             return True
-        wanted = self._wanted()
         if key[1] != wanted[1] or (key[0] != wanted[0] and not self.growing):
             return False
         if not self.growing:
@@ -366,6 +580,7 @@ class ViewState:
             tables = Tables(locs if locs is not None else Localizations({}, {}),
                             group_settings, grouped=grouped, live=live, extent=extent)
         self.tables = tables
+        tables._views.add(self)
         self.use_grouped = False
         # the user's setting: field -> (lo, hi), one dict for both tables
         self._ranges: Dict[str, Tuple[Optional[float], Optional[float]]] = {}
@@ -422,7 +637,25 @@ class ViewState:
         for locset, f in self._filters.values():
             self._files_mask(locset, f)
 
+    def _spans(self, locset: LocSet) -> Optional[List[Tuple[int, int]]]:
+        """The rows of the files shown, as spans, when they are blocks."""
+        if self._files is None or "filenumber" not in locset.locs:
+            return None
+        rows = locset.file_rows
+        if rows is None:
+            return None
+        return merge_spans(rows[k] for k in self._files if k in rows)
+
     def _files_mask(self, locset: LocSet, f: LocFilter) -> None:
+        """The file choice: spans of rows where each file is one block -- the
+        ranges are then tested on the files shown and no other row is read --
+        else a mask over every row."""
+        spans = self._spans(locset)
+        if spans is not None:
+            f.remove("files")
+            f.restrict(spans)
+            return
+        f.restrict(None)
         if self._files is None:
             f.remove("files")
         elif "filenumber" in locset.locs:
@@ -441,7 +674,8 @@ class ViewState:
         kind = "ungrouped" if locset is self.tables.ungrouped else "grouped"
         cached = self._filters.get(kind)
         if cached is None or cached[0] is not locset:
-            f = LocFilter(locset.locs)
+            # the spans first, so that each range is tested once, on them
+            f = LocFilter(locset.locs, spans=self._spans(locset))
             for field, (lo, hi) in self._ranges.items():
                 if field in locset.locs:
                     f.set(field, lo, hi)
@@ -474,6 +708,7 @@ class ViewState:
         """Look at another table, keeping the bounds the user set -- those its
         columns can take -- and the file choice."""
         self.tables = tables
+        tables._views.add(self)
         self._filters.clear()
         self._ranges = {f: b for f, b in self._ranges.items() if f in tables.locs}
 

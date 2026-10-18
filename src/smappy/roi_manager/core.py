@@ -1754,7 +1754,8 @@ class ROIProject:
             return session.tables
 
         def link(settings, attach_columns, number=source.number):
-            grouped = session.tables.grouped().locs
+            # this file linked, if it is not yet: a session links file by file
+            grouped = session.tables.grouped(files=[number]).locs
             if "filenumber" not in grouped:
                 return grouped
             return grouped[np.asarray(grouped["filenumber"]) == number]
@@ -1803,8 +1804,9 @@ class ROIProject:
         # otherwise offered only where it is current.  Before the rows are
         # cut: linking writes `group_id` onto the localizations, and a cut
         # taken first lacked it, so the blinks could not be traced back
-        locsets = {i: (session.tables.available() if lay.grouped else
-                       session.tables.peek_grouped() if session.tables.is_current
+        here = [source.number]          # the ROI's file, whatever the layers show
+        locsets = {i: (session.tables.available(files=here) if lay.grouped else
+                       session.tables.peek_grouped() if session.tables.covers(here)
                        else None)
                    for i, lay in enumerate(session.layers) if not lay.is_image}
         locs = session.locs[rows]

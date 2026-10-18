@@ -97,6 +97,7 @@ def test_a_layer_that_takes_over_a_grouped_table_takes_the_files_too():
     session.layers[1].set_files([1])
     session.layers[1].show_grouped(False)
     session.show_grouped(1, True)
+    there = session.layers[0].locs        # layer 0's blinks: every file linked
     grouped, selection = session.layers[1].grouped_selection(1)
-    assert grouped is session.layers[0].locs              # one grouped table
+    assert grouped is there is session.layers[0].locs     # one grouped table
     assert set(np.asarray(grouped["filenumber"])[selection.mask]) == {1}

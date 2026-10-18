@@ -159,16 +159,25 @@ def main():
     if not args.no_group:
         from smappy.group import GroupSettings, group
         one = Localizations({k: v[first:last] for k, v in locs.columns.items()}, {})
-        timed(f"link one file ({per_file:,}) into blinks", group, one,
+        timed(f"link one file ({per_file:,}) into blinks, alone", group, one,
               GroupSettings(dx=50.0, dt=1))
         del one
-        layer.show_grouped(True)
-        timed(f"link the whole table ({n:,}): the layer shows blinks",
-              lambda: state.current)
+        # a session links the files the layers showing blinks show, file by
+        # file (`Tables`): one file first, as a layer showing one would
         layer.set_files([chosen])
+        layer.show_grouped(True)
+        timed("the layer shows one file's blinks: that file linked",
+              lambda: state.filter_for(state.current).mask)
         ctx = timed("grouped: plugin context, one file", s.context, 0)
         print(f"    selection {len(ctx.selection):,} blinks of {len(ctx.locs):,}")
         timed("grouped: selection.apply", ctx.selection.apply, ctx.locs)
+        del ctx
+        timed("grouped: move a slider (photons >= 500) and AND", lambda: (
+            layer.set_bound("photons", 500.0, None),
+            state.filter_for(state.current).mask))
+        layer.set_files(None)
+        timed(f"the layer shows every file's blinks: the other {files - 1} linked",
+              lambda: state.filter_for(state.current).mask)
 
 
 if __name__ == "__main__":

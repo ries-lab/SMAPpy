@@ -204,3 +204,152 @@ def test_one_file_is_refused_with_nothing_to_combine():
     s = _session(_table())
     with pytest.raises(ValueError, match="nothing to combine"):
         combine(s.locs)
+
+
+# ------------------------------------------- a layer's filter over its files
+
+def test_a_filter_restricted_to_spans_keeps_what_a_mask_over_every_row_keeps():
+    from smappy.filter import LocFilter
+    t = _table(n=5000, photons=np.random.default_rng(3).random(5000).astype(np.float32))
+    spans = [(100, 900), (2000, 2600)]
+    inside = np.zeros(5000, bool)
+    for a, b in spans:
+        inside[a:b] = True
+    full = LocFilter(t, photons=(0.2, 0.7)).set_mask("rows", inside)
+    restricted = LocFilter(t, spans=spans, photons=(0.2, 0.7))
+    assert np.array_equal(restricted.mask, full.mask)
+    assert np.array_equal(restricted.indices, np.flatnonzero(full.mask))
+    assert len(restricted) == len(full)
+    restricted.set("x_nm", 100, 600)
+    full.set("x_nm", 100, 600)
+    assert np.array_equal(restricted.mask, full.mask)
+    assert restricted.counts()["x_nm"] == int((full._masks["x_nm"] & inside).sum())
+    assert np.array_equal(restricted.mask_without("photons"), full.mask_without("photons"))
+    restricted.restrict(None)                      # lifted: every row again
+    assert np.array_equal(restricted.mask, full.mask_without("rows"))
+
+
+def test_a_layer_showing_one_file_tests_its_bounds_on_that_files_rows_only():
+    s = _session(_table(n=300), _table(n=500, seed=1), _table(n=200, seed=2))
+    state = s.layers[0].state
+    s.layers[0].show_grouped(False)
+    s.layers[0].set_files([1])
+    f = state.filter_for(state.current)
+    assert f.spans == [(300, 800)]
+    files = np.asarray(s.locs["filenumber"])
+    s.layers[0].set_bound("photons", 0, None)
+    assert np.array_equal(f.mask, files == 1)
+    s.layers[0].set_files([0, 1])                  # touching files are one span
+    assert state.filter_for(state.current).spans == [(0, 800)]
+    s.layers[0].set_files(None)
+    assert state.filter_for(state.current).spans is None
+
+
+def test_files_whose_rows_are_not_blocks_are_chosen_by_a_mask():
+    from smappy.layer_state import ViewState
+    t = _table(n=400)
+    t.columns["filenumber"] = np.tile([0, 1], 200).astype(np.int32)
+    state = ViewState(t)
+    state.set_files([1])
+    f = state.filter_for(state.current)
+    assert f.spans is None
+    assert np.array_equal(f.mask, np.tile([False, True], 200))
+
+
+# ------------------------------------------------- linking file by file
+
+def _blinking(n_files=3, seed=0):
+    """Files of molecules seen in a few consecutive frames each."""
+    tables = []
+    for k in range(n_files):
+        rng = np.random.default_rng(seed + k)
+        m = 400
+        x, y = rng.random(m) * 5e3, rng.random(m) * 5e3
+        start = rng.integers(0, 500, m)
+        length = rng.integers(1, 4, m)
+        mol = np.repeat(np.arange(m), length)
+        frame = start[mol] + np.concatenate([np.arange(l) for l in length])
+        order = np.argsort(frame, kind="stable")
+        mol, frame = mol[order], frame[order]
+        tables.append(Localizations({
+            "x_nm": (x[mol] + rng.normal(0, 5, len(mol))).astype(np.float32),
+            "y_nm": (y[mol] + rng.normal(0, 5, len(mol))).astype(np.float32),
+            "frame": frame.astype(np.int32),
+            "photons": np.full(len(mol), 1000.0, np.float32),
+            "xy_err_nm": np.full(len(mol), 5.0, np.float32)}, {}))
+    return _session(*tables)
+
+
+def test_a_layer_showing_one_file_links_that_file_alone():
+    s = _blinking()
+    s.layers[0].set_files([1])
+    s.layers[0].show_grouped(True)
+    blinks = s.layers[0].locs
+    tables = s.tables
+    assert tables._linked == {1}
+    assert set(np.unique(np.asarray(blinks["filenumber"]))) == {1}
+    files = np.asarray(s.locs["filenumber"])
+    gid = np.asarray(s.locs["group_id"])
+    assert (gid[files != 1] == 0).all() and (gid[files == 1] > 0).all()
+    # switching back and forth links nothing again
+    s.layers[0].set_files([1])
+    assert s.layers[0].locs is blinks
+
+
+def test_files_linked_one_by_one_give_the_blinks_of_the_whole_table():
+    from smappy.group import group
+    s = _blinking()
+    whole, _ = group(Localizations(dict(s.locs.columns), {}), s.group_settings,
+                     attach_columns=False)
+    s.layers[0].set_files([2])
+    s.layers[0].show_grouped(True)
+    s.layers[0].locs
+    s.layers[0].set_files(None)                    # now every file
+    blinks = s.layers[0].locs
+    assert s.tables._linked == {0, 1, 2}
+    assert len(blinks) == len(whole)
+    for k in range(3):
+        mine = np.asarray(blinks["n_in_group"])[np.asarray(blinks["filenumber"]) == k]
+        theirs = np.asarray(whole["n_in_group"])[np.asarray(whole["filenumber"]) == k]
+        assert np.array_equal(np.sort(mine), np.sort(theirs))
+    # the ids on the localizations are the grouped table's own, all distinct
+    ids = np.asarray(blinks["group_id"])
+    assert len(np.unique(ids)) == len(ids)
+    row = {int(g): i for i, g in enumerate(ids)}
+    gid = np.asarray(s.locs["group_id"])
+    at = np.array([row[int(g)] for g in gid])
+    assert np.array_equal(np.asarray(blinks["filenumber"])[at], np.asarray(s.locs["filenumber"]))
+    assert np.array_equal(np.asarray(blinks["n_in_group"])[at], np.asarray(s.locs["n_in_group"]))
+
+
+def test_new_merge_settings_forget_the_files_linked_before():
+    from dataclasses import replace
+    s = _blinking()
+    s.layers[0].set_files([0])
+    s.layers[0].show_grouped(True)
+    s.layers[0].locs
+    s.set_group_settings(replace(s.group_settings, dt=3))
+    assert not s.tables.is_current
+    s.layers[0].locs
+    assert s.tables._linked == {0}
+    gid = np.asarray(s.locs["group_id"])
+    assert (gid[np.asarray(s.locs["filenumber"]) != 0] == 0).all()
+
+
+def test_a_worker_links_the_wanted_files_one_job_at_a_time():
+    from smappy.group import group
+    s = _blinking()
+    s.layers[0].set_files([0, 2])
+    s.layers[0].show_grouped(True)
+    done = []
+    while True:
+        job = s.tables.link_job()
+        if job is None:
+            break
+        locs, settings, key = job
+        done.append(key[2])
+        assert set(np.unique(np.asarray(locs["filenumber"]))) == {key[2]}
+        grouped, index = group(locs, settings, attach_columns=False)
+        assert s.tables.take_grouped(grouped, index, key)
+    assert done == [0, 2]
+    assert s.tables.is_current and s.tables._linked == {0, 2}

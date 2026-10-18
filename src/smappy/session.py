@@ -247,7 +247,8 @@ class Layer:
         linking it if it is not current (``progress(text, fraction)``) --
         or ``locset``, a grouped table already in hand."""
         if locset is None:
-            locset = self.state.tables.grouped(progress=progress)
+            # the files this layer shows, linked if they are not yet
+            locset = self.state.tables.grouped(progress=progress, files=self.state.files)
         f = self.state.filter_for(locset)
         mask = f.mask_without(*without) if without else f.mask
         return locset.locs, Selection(mask, layer=index, name=f"{self.name}, blinks merged")
@@ -890,8 +891,9 @@ class Session:
         if any(l.grouped for l in self.layers if not l.is_image):
             # a layer shows blinks: the file gets each localization's
             # `group_id` and `n_in_group`, merged now where that is allowed
-            # (not while the GUI merges a large table in its worker)
-            self.tables.available()
+            # (not while the GUI merges a large table in its worker) -- every
+            # file, not only those a layer shows: the file keeps all of them
+            self.tables.available(files=self.tables.ungrouped.files)
         metadata = without_results(self.file_metadata(), region_results, region_figures)
         # read before the file is started again: frames opened from it are
         # read from it a plane at a time (`StoredStack`)
