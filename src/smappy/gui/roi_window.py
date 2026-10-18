@@ -358,6 +358,10 @@ class ROIManagerWindow(QMainWindow):
         self.draft: Optional[np.ndarray] = None
         self.draft_polygon: Optional[list] = None
         self.draft_lines: dict = {}              # the draft's, as `ROI.lines`
+        # a drafted ROI of a track (`ROIProject.drafts_tracks`), an unnumbered
+        # `ROI` to draw it by; read through `draft_track`, so that whatever
+        # drops the draft drops it too
+        self._draft_track = None
         self._filling_lines = False              # the line list being refilled
         self.drawing: Optional[str] = None       # "polygon" or "line"
         self._points: list = []
@@ -709,8 +713,12 @@ class ROIManagerWindow(QMainWindow):
         self.zoom_pane.render(state, centre[0] - half, centre[0] + half,
                               centre[1] - half, centre[1] + half)
         self._draw_outlines(self.zoom_pane, rois, preview)
-        self.zoom_pane.draw("draft", *([[], []] if self.draft is None else
-                                       Region.site(self.draft, project.shape, project.size_nm).outline()))
+        if self.draft_track is not None:
+            self.zoom_pane.draw("draft", *project.outline(self.draft_track))
+        else:
+            self.zoom_pane.draw("draft", *([[], []] if self.draft is None else
+                                           Region.site(self.draft, project.shape,
+                                                       project.size_nm).outline()))
         # the frame the zoom covers, on the file image
         self.file_pane.draw("frame",
                             [centre[0] - half, centre[0] + half, centre[0] + half,
@@ -899,10 +907,11 @@ class ROIManagerWindow(QMainWindow):
             return
         drafted = self.draft is not None
         width = project.preview_width
-        if not drafted and not roi.spatial:
+        of_id = self.draft_track if drafted else (None if roi.spatial else roi)
+        if of_id is not None:
             # an ROI of an id is where its localizations are, as large as
             # they reach, and never smaller than a shape's preview
-            centre, half = project.extent(roi)
+            centre, half = project.extent(of_id)
             width = project.preview_nm or max(2.4 * half, project.size_nm)
         half = width / 2
         self.roi_pane.width_nm = width
@@ -910,10 +919,10 @@ class ROIManagerWindow(QMainWindow):
                              centre[1] - half, centre[1] + half)
         polygon = self.draft_polygon if drafted else (roi.polygon if roi is not None else None)
         lines = self.draft_lines if drafted else (roi.lines if roi is not None else {})
-        if drafted or roi.spatial:
+        if of_id is None:
             xs, ys = Region.site(centre, project.shape, project.size_nm, polygon).outline()
         else:
-            xs, ys = project.outline(roi)
+            xs, ys = project.outline(of_id)
         used = drafted or roi is None or roi.use
         for name in ("draft", "roi", "excluded_active"):
             self.roi_pane.draw(name)
@@ -921,6 +930,8 @@ class ROIManagerWindow(QMainWindow):
         self._draw_lines(self.roi_pane, [lines], labels=True)
         self._fill_line_box(lines)
         text = "ROI (draft)"
+        if self.draft_track is not None:
+            text = f"ROI (draft): {project.describe(self.draft_track)}"
         if not drafted:
             try:
                 text = f"ROI {roi.number}: {project.summary(roi)}"
@@ -994,7 +1005,41 @@ class ROIManagerWindow(QMainWindow):
             self.draft = None
             self.select(hit.id)
             return
+        if self.project.drafts_tracks:
+            self._draft_track_at(x, y, self.zoom_pane)
+            return
         self.draft = np.array([x, y])
+        self._draft_track = None
+        self.draft_polygon = None
+        self.draft_lines = {}
+        self.redraw()
+
+    @property
+    def draft_track(self):
+        """The drafted ROI of a track, or None (a shape, or no draft)."""
+        return self._draft_track if self.draft is not None else None
+
+    def _draft_track_at(self, x: float, y: float, pane) -> None:
+        """Draft an ROI of the track drawn nearest the click."""
+        from ..roi_manager.core import ROI
+        project, file_id = self.project, self.current_file()
+        reach = 3 * RIM_PIXELS * (pane.fov.pixelsize if pane.fov is not None else 1.0)
+        try:
+            ids = project.track_at(file_id, x, y, reach)
+        except ValueError as error:             # no track column
+            self.status.showMessage(str(error))
+            return
+        if ids is None:
+            self.status.showMessage("no track here: click on one, or choose a shape "
+                                    "under geometry in the Regions tab")
+            return
+        track = ROI(file_id, [float(x), float(y)], ids=ids, spatial=False,
+                    origin={"method": "manual", "draw": "track"})
+        xy = project.trace(track)
+        if len(xy):
+            track.center = [float(v) for v in xy.mean(axis=0)]
+        self.draft = np.asarray(track.center, float)
+        self._draft_track = track
         self.draft_polygon = None
         self.draft_lines = {}
         self.redraw()
@@ -1014,6 +1059,8 @@ class ROIManagerWindow(QMainWindow):
         hit = self._roi_at(x, y, self.roi_pane)
         if hit is not None and self.draft is None:
             self.select(hit.id)
+        elif self.draft_track is not None:
+            self._draft_track_at(x, y, self.roi_pane)
         elif self.draft is not None:
             self.draft = np.array([x, y])
             self.redraw()
@@ -1197,6 +1244,7 @@ class ROIManagerWindow(QMainWindow):
         roi = self._selected()
         if self.draft is not None or roi is None:
             self.draft = centre                    # a drafted ROI with this outline
+            self._draft_track = None
             self.draft_polygon = polygon
         else:
             with self._edit("Outline"):
@@ -1217,6 +1265,7 @@ class ROIManagerWindow(QMainWindow):
         roi = self._selected()
         if self.draft is not None or roi is None:
             if self.draft is None:
+                self._draft_track = None
                 self.draft = np.asarray(line, float).mean(axis=0)
             self.draft_lines = {**self.draft_lines, name: line}
         else:
@@ -1508,9 +1557,15 @@ class ROIManagerWindow(QMainWindow):
         file_id = self.current_file()
         if file_id is None or self.draft is None:
             return
+        track = self.draft_track
         with self.project.edit("Add ROI") as step:
-            roi = self.project.add_roi(file_id, [float(self.draft[0]), float(self.draft[1])],
-                                       polygon=self.draft_polygon)
+            if track is not None:
+                roi = self.project.add_roi(file_id, track.center, ids=track.ids,
+                                           spatial=False, origin=track.origin)
+            else:
+                roi = self.project.add_roi(file_id, [float(self.draft[0]),
+                                                     float(self.draft[1])],
+                                           polygon=self.draft_polygon)
             roi.lines = dict(self.draft_lines)
             step.label = f"Add ROI {self.project.numbers().get(roi.id)}"
         self.draft = self.draft_polygon = None

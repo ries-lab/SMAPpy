@@ -37,7 +37,10 @@ to *its id alone*, makes an ROI of each id of a column -- each
 [track](plugin:Panels/Glossary) of `track_id`, say -- which holds that
 track's localizations and none of the tracks crossing it.  Such an ROI is
 drawn as its track's line, selected by a click on the line, and reviewed,
-kept and annotated like any other.  The list shows *all* ROIs, only the
+kept and annotated like any other.  One track at a time is picked by hand
+with *shape* set to *track* in the Regions tab -- its default while the
+layer is rendered as tracks: a click in the zoom drafts the track drawn
+nearest it, and *Add* keeps it.  The list shows *all* ROIs, only the
 *shapes*, or only those *of an id*.
 
 Any ROI can also be cut in time and in depth: a frame range and a z range,

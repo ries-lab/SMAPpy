@@ -816,6 +816,51 @@ class ROIProject:
         return found
 
     # ------------------------------------------- what an ROI of an id looks like
+    @property
+    def drafts_tracks(self) -> bool:
+        """Does a click in the ROI manager draft an ROI of a track rather
+        than a shape?  As chosen (the geometry's *shape*, ``track``), and
+        until something is chosen, whenever the layer draws tracks: what is
+        on screen is then lines, and a circle round a line takes in every
+        track that crosses it.  A choice, not `shape`, which every ROI of a
+        shape is drawn with and a track has none of."""
+        chosen = self.navigation.get("draft")
+        if chosen is not None:
+            return chosen == "track"
+        render = getattr(self, "render", None)
+        return render is not None and render.mode == "tracks"
+
+    def track_at(self, file_id, x: float, y: float, reach: float) -> Optional[dict]:
+        """``{column: id}`` of the track whose line passes nearest (x, y),
+        among those with a localization within ``reach`` nm; None when there
+        is none.  The column is the one the layer draws tracks by, or the
+        first track column (`tracking.columns.track_column`, a ValueError
+        naming the integer columns when there is none).  Every localization
+        of the file counts, unfiltered, as an ROI of an id holds them
+        (`trace`)."""
+        from ..regions import polyline_distance
+        from ..tracking.columns import track_column
+        ungrouped = self.state(file_id).tables.ungrouped
+        locs = ungrouped.locs
+        render = getattr(self, "render", None)
+        column = track_column(locs, render.track_column if render is not None else "")
+        near = rows_in(locs, ungrouped.index, Region.site([x, y], "circle", 2 * reach))
+        ids = np.unique(np.asarray(locs[column])[near])
+        ids = ids[ids >= 0]                # -1: linked to nothing
+        lookup = self.lookup(locs, column)
+        frames = np.asarray(locs["frame"]) if "frame" in locs else None
+        best, best_d = None, np.inf
+        for value in ids:
+            rows = lookup.rows(value)
+            if frames is not None:
+                rows = rows[np.argsort(frames[rows], kind="stable")]
+            line = np.column_stack((np.asarray(locs["x_nm"], float)[rows],
+                                    np.asarray(locs["y_nm"], float)[rows]))
+            d = polyline_distance(line, x, y)
+            if d < best_d:
+                best, best_d = value, d
+        return None if best is None else {column: int(best)}
+
     def draws_track(self, roi) -> bool:
         """Is this ROI drawn as a track -- a line through its localizations
         in frame order -- rather than an outline?  Only an ROI of an id

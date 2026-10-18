@@ -254,6 +254,14 @@ when the corners do not matter.  A square of side $d$ is 27 % larger in area
 than a circle of diameter $d$, so its corners reach further towards a
 neighbour.
 
+*track* is not an outline: a click in the ROI manager then drafts an ROI of
+the [track](plugin:Panels/Glossary) whose line passes nearest it -- that
+track's localizations and none of those crossing it -- and *Add* keeps it.
+The tracks are those of the column the layer draws them by (the Render
+tab's *track id*), and every ROI that has an outline keeps it.  Until a
+shape is chosen here, *track* is what the list shows whenever the layer is
+rendered as *tracks*, and the shape otherwise.
+
 ### size
 The circle's diameter, or the square's side.  Start at about twice the
 structure's diameter: the default 300 nm fits a nuclear pore (about 110 nm)

@@ -221,6 +221,45 @@ def test_a_track_is_selected_by_a_click_on_its_line_in_the_manager(app):
     window.close()
 
 
+def test_a_click_drafts_the_nearest_track_once_the_layer_draws_tracks(app):
+    from dataclasses import replace
+    from smappy.gui.roi_tab import ROIHeader
+    from smappy.gui.roi_window import ROIManagerWindow
+    from smappy.session import Session
+    session = Session(crossing_tracks())
+    session.show_grouped(0, False)
+    project = session.rois
+    header = ROIHeader(session)
+    window = ROIManagerWindow(session)
+    window.set_measuring(False)
+    assert not project.drafts_tracks and header.shape.currentText() == "circle"
+    state = session.layers[0].state
+    state.settings = replace(state.settings, mode="tracks")
+    session.changed("layer")
+    assert project.drafts_tracks and header.shape.currentText() == "track"
+    assert not header.size.isEnabled()
+
+    file_id = next(iter(project.sources))
+    window.zoom_pane.render(project.state(file_id), -200, 200, -200, 200)
+    window._zoom_clicked(3, 70)                 # off both lines, nearer y's
+    assert window.draft_track.ids == {"track_id": 2}
+    xs, ys = window.zoom_pane.shapes["draft"].getData()
+    assert np.allclose(xs, 0) and len(ys) == 10           # drafted as its line
+    window._add()
+    roi = project.rois[window.active]
+    assert roi.ids == {"track_id": 2} and not roi.spatial
+    assert project.indices(roi).tolist() == list(range(10, 20))
+    window._zoom_clicked(900, 900)              # nothing there: no draft
+    assert window.draft is None
+
+    header.shape.setCurrentText("square")       # chosen: a shape, tracks or not
+    assert not project.drafts_tracks and project.shape == "square"
+    window._zoom_clicked(60, 3)
+    assert window.draft is not None and window.draft_track is None
+    window.close()
+    header.deleteLater()
+
+
 def test_the_frame_and_z_range_are_typed_or_dragged_and_undone(app):
     session, project, window = track_window()
     along_x = next(r for r in project.rois.values() if r.ids["track_id"] == 1)

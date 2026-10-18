@@ -109,11 +109,14 @@ class ROIHeader(QWidget):
         form.setContentsMargins(0, 0, 0, 0)
         form.setVerticalSpacing(2)
         self.shape = QComboBox()
-        self.shape.addItems(["circle", "square"])
+        self.shape.addItems(["circle", "square", "track"])
+        self.shape.setToolTip("what a click in the ROI manager drafts: a circle or "
+                              "square there, or the track drawn nearest it.  Until "
+                              "one is chosen, a track whenever the layer draws tracks")
         self.size = QDoubleSpinBox(minimum=1, maximum=1e6, decimals=0, suffix=" nm")
         self.size.setToolTip("circle diameter, or the side of a square")
         self.size.setKeyboardTracking(False)
-        self.shape.currentTextChanged.connect(self._on_geometry)
+        self.shape.currentTextChanged.connect(self._on_shape)
         self.size.valueChanged.connect(self._on_geometry)
         self.preview = QDoubleSpinBox(minimum=0, maximum=1e6, decimals=0, suffix=" nm")
         self.preview.setSpecialValueText("3 x ROI size")
@@ -162,6 +165,7 @@ class ROIHeader(QWidget):
             self.open_manager()
         elif what in ("layer", "regrouped"):
             self.project.sync()
+            self._show_shape()         # tracks drawn: a click picks a track
 
     # ------------------------------------------------------------- window
     def open_manager(self) -> None:
@@ -187,9 +191,9 @@ class ROIHeader(QWidget):
         self._loading = True
         self.preview.setValue(project.preview_nm)
         if files_changed:
-            self.shape.setCurrentText(project.shape)
             self.size.setValue(project.size_nm)
             self.preview.setValue(project.preview_nm)
+        self._show_shape()
         self.measure.setChecked(bool(project.navigation.get("re_evaluate", True)))
         self.plot.setChecked(bool(project.navigation.get("plot_evaluation", False)))
         self._loading = False
@@ -217,12 +221,32 @@ class ROIHeader(QWidget):
         self.summary.setText(f"{len(rows)} current results over all files"
                              if rows else "no current results")
 
+    def _show_shape(self) -> None:
+        """The shape a click drafts: the project's, or *track*."""
+        project = self.project
+        loading, self._loading = self._loading, True
+        self.shape.setCurrentText("track" if project.drafts_tracks else project.shape)
+        self.size.setEnabled(not project.drafts_tracks)
+        self._loading = loading
+
     # -------------------------------------------------------------- edits
+    def _on_shape(self, text: str) -> None:
+        """A shape chosen: what a click drafts from now on, whatever the
+        layer draws.  *track* leaves the shape of the ROIs that have one."""
+        if self._loading:
+            return
+        self.project.navigation["draft"] = "track" if text == "track" else "shape"
+        self.size.setEnabled(text != "track")
+        if text != "track":
+            self._on_geometry()
+
     def _on_geometry(self) -> None:
         if self._loading:
             return
         try:
-            self.project.set_geometry(self.size.value(), self.shape.currentText())
+            shape = self.shape.currentText()
+            self.project.set_geometry(self.size.value(),
+                                      None if shape == "track" else shape)
         except ValueError as e:
             QMessageBox.warning(self, "geometry", str(e))
             return
