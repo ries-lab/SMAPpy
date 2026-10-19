@@ -71,7 +71,20 @@ ones. Keep the Terminal window open while you work: closing it closes SMAPpy.
 Messages that appear in the Terminal while SMAPpy runs are normal.
 
 **Next time** you only need steps 1 and 4: open the Terminal, type
-`smappy-gui`, press **Return**.
+`smappy-gui`, press **Return**. Or make an icon for it once, as in step 5.
+
+### 5. Optional: an icon on the desktop
+
+To start SMAPpy with a double-click instead, paste this into the Terminal and
+press **Return**:
+
+```bash
+echo "$(command -v smappy-gui)" > ~/Desktop/SMAPpy.command && chmod +x ~/Desktop/SMAPpy.command
+```
+
+A file `SMAPpy.command` appears on your desktop. Double-clicking it opens a
+Terminal window and starts SMAPpy in it; as before, keep that window open
+while you work. You can drag the file into the Dock to have it there too.
 
 ## Windows
 
@@ -137,7 +150,21 @@ closing it closes SMAPpy. Messages that appear in PowerShell while SMAPpy runs
 are normal.
 
 **Next time** you only need steps 1 and 4: open PowerShell, type
-`smappy-gui`, press **Enter**.
+`smappy-gui`, press **Enter**. Or make an icon for it once, as in step 5.
+
+### 5. Optional: an icon on the desktop
+
+To start SMAPpy with a double-click instead, paste this into PowerShell and
+press **Enter**:
+
+```powershell
+$s = (New-Object -ComObject WScript.Shell).CreateShortcut("$([Environment]::GetFolderPath('Desktop'))\SMAPpy.lnk"); $s.TargetPath = (Get-Command smappy-gui).Source; $s.Save()
+```
+
+A shortcut `SMAPpy` appears on your desktop. Double-clicking it opens a black
+window and SMAPpy beside it; as before, keep the black window open while you
+work. Right-click the shortcut and choose *Pin to Start* or *Pin to taskbar*
+to have it there too (on Windows 11, under *Show more options*).
 
 ## Updating, and removing
 
