@@ -56,7 +56,7 @@ from typing import Optional
 
 import numpy as np
 
-from .drift import REFERENCES, Drift, _spline_basis
+from .drift import REFERENCES, Drift
 from .locs import Localizations
 from .params import param
 
@@ -167,9 +167,10 @@ def fit_drift(frame, positions, bead, n_frames: int,
     """One spline through every bead, each bead at its own fitted offset.
 
     ``positions`` is (n, n_axes) nm, ``bead`` a bead number per row (-1: not
-    a bead).  The drift is zero at frame 0.
+    a bead).  The drift is zero at frame 0.  The fit itself is
+    `beads.fit_offsets_and_spline`, on frames here and in seconds for MBM.
     """
-    from scipy import sparse
+    from .beads import fit_offsets_and_spline
 
     frame = np.asarray(frame, np.int64)
     positions = np.asarray(positions, float)
@@ -186,32 +187,10 @@ def fit_drift(frame, positions, bead, n_frames: int,
     n_axes = p.shape[1]
     n_coefficients = max(4, int(round(n_frames / knot_frames)) + 3)
     hi = max(n_frames - 1.0, 1.0)
-    basis = sparse.csr_matrix(_spline_basis(t, n_coefficients, 0.0, hi))
-    offsets = sparse.csr_matrix((np.ones(len(rows)), (np.arange(len(rows)), b)),
-                                shape=(len(rows), n_beads))
-    design = sparse.hstack([offsets, basis]).tocsr()
-    normal = (design.T @ design).toarray()
-    rhs = design.T @ p
-
-    # the curvature penalty, on the coefficients only
-    d2 = np.diff(np.eye(n_coefficients), 2, axis=0)
-    weight = _PENALTY * float(np.trace(normal[n_beads:, n_beads:])) / n_coefficients
-    normal[n_beads:, n_beads:] += weight * (d2.T @ d2)
-
-    # the reference: d(0) = 0, a Lagrange multiplier on the one degeneracy
-    at_zero = np.asarray(_spline_basis([0.0], n_coefficients, 0.0, hi).toarray())[0]
-    k = n_beads + n_coefficients
-    system = np.zeros((k + 1, k + 1))
-    system[:k, :k] = normal
-    system[k, n_beads:k] = at_zero
-    system[n_beads:k, k] = at_zero
-    right = np.vstack([rhs, np.zeros((1, n_axes))])
-    solution = np.linalg.lstsq(system, right, rcond=None)[0]
-    offsets_nm = solution[:n_beads]
-    coefficients = solution[n_beads:k]
-
-    full = _spline_basis(np.arange(n_frames), n_coefficients, 0.0, hi)
-    curve = np.asarray(full @ coefficients)
+    offsets_nm, spline = fit_offsets_and_spline(t, p, b, n_beads, 0.0, hi,
+                                                n_coefficients, reference=0.0,
+                                                penalty=_PENALTY)
+    curve = spline(np.arange(n_frames))
     drift = np.zeros((n_frames, 3))
     drift[:, :n_axes] = curve
     residuals = p - offsets_nm[b] - curve[t]

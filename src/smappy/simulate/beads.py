@@ -77,3 +77,56 @@ def with_beads(locs: Localizations, **beads) -> Localizations:
     order = np.argsort(np.asarray(out["frame"]), kind="stable")
     return Localizations({k: np.asarray(v)[order] for k, v in out.columns.items()},
                          dict(locs.metadata))
+
+
+def simulate_bead_tracks(times_s: np.ndarray, drift_nm: Optional[np.ndarray] = None, *,
+                         n_beads: int = 6, precision_nm: float = 1.0,
+                         z_precision_nm: float = 1.5, wander: Sequence[Tuple[int, float]] = (),
+                         jumps: Sequence[Tuple[int, float, float]] = (),
+                         noisy: Sequence[Tuple[int, float]] = (),
+                         field_nm: Tuple[float, float, float, float]
+                         = (-10000.0, -10000.0, 10000.0, 10000.0),
+                         seed: int = 0) -> Localizations:
+    """Beads measured at ``times_s`` -- the MBM beads of a MINFLUX
+    measurement, a point every couple of seconds -- moving with ``drift_nm``
+    ((n_times, 3) at those times).  And the ways a bead goes wrong, each
+    with its bead: ``wander`` (bead, nm) a slow motion of its own, a random
+    walk scaled to that rms; ``jumps`` (bead, time, nm) a step in x and y at
+    that time; ``noisy`` (bead, factor) its precision that many times worse.
+    ``tid`` is the bead (from 1), as `io.msr.bead_table` writes it, and
+    ``bead_true`` the same from 0; ``metadata["bad"]`` names the bad ones."""
+    rng = np.random.default_rng([seed, 11])
+    t = np.asarray(times_s, float)
+    n = len(t)
+    drift = np.zeros((n, 3)) if drift_nm is None else np.asarray(drift_nm, float)
+    x0, y0, x1, y1 = field_nm
+    where = np.column_stack([rng.uniform(x0, x1, n_beads), rng.uniform(y0, y1, n_beads),
+                             rng.uniform(-50.0, 50.0, n_beads)])
+    own = np.zeros((n_beads, n, 3))
+    for b, nm in wander:
+        walk = np.cumsum(rng.normal(0.0, 1.0, (n, 3)), axis=0)
+        walk -= walk.mean(axis=0)
+        walk[:, 2] *= 0.3
+        own[b] += walk * (nm / max(float(np.sqrt(np.mean(walk[:, :2] ** 2))), 1e-12))
+    for b, when, nm in jumps:
+        own[b, t >= when, :2] += nm / np.sqrt(2.0)
+    scale = np.ones(n_beads)
+    for b, factor in noisy:
+        scale[b] = factor
+    bead = np.repeat(np.arange(n_beads), n)
+    k = np.tile(np.arange(n), n_beads)
+    noise = rng.normal(0.0, 1.0, (len(k), 3)) * np.array(
+        [precision_nm, precision_nm, z_precision_nm]) * scale[bead][:, None]
+    xyz = where[bead] + drift[k] + own[bead, k] + noise
+    order = np.argsort(t[k], kind="stable")
+    columns = {"x_nm": xyz[order, 0], "y_nm": xyz[order, 1], "z_nm": xyz[order, 2],
+               "time_s": t[k][order], "tid": (bead[order] + 1).astype(np.int64),
+               "bead_true": bead[order].astype(np.int32),
+               "photons": np.full(len(k), 1e6),
+               "xy_err_nm": (precision_nm * scale[bead])[order]}
+    columns["frame"] = np.arange(len(k), dtype=np.int64)
+    bad = sorted({b for b, _ in wander} | {b for b, *_ in jumps} | {b for b, _ in noisy})
+    return Localizations(columns, {"units": "nm", "simulation": "smappy bead tracks",
+                                   "seed": seed, "bad": bad,
+                                   "drift_truth": {"times_s": t.tolist(),
+                                                   "drift_nm": drift.round(4).tolist()}})

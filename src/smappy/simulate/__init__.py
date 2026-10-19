@@ -26,7 +26,7 @@ In the package rather than in ``scripts/`` because it is also a plugin
 (``File/Simulate/Blinking Structure``): something to try the whole pipeline
 on without a microscope.
 """
-from .beads import simulate_beads, with_beads
+from .beads import simulate_bead_tracks, simulate_beads, with_beads
 from .camera import (ASTIGMATISM, ISOLATED_NM, astigmatic_sigmas, bead_stacks,
                      camera_frames, camera_truth, dual_bead_stacks, dual_camera_frames,
                      dual_transformation, render)
@@ -48,5 +48,5 @@ __all__ = [
     "LocalizationOutputSettings", "OpticsSettings", "SimulationSettings",
     "StructureSettings", "Labels", "Structure", "load_structure", "presets",
     "TrackSimulationSettings", "jump_nm", "simulate_tracks", "spacing_nm",
-    "simulate_beads", "with_beads",
+    "simulate_beads", "simulate_bead_tracks", "with_beads",
 ]

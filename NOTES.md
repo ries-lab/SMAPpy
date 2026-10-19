@@ -1644,6 +1644,21 @@ measurements, four beads each) and checked by
 * **`gri` is a slot, not a bead**: R0 is gri 61 in every measurement, and
   in two measurements of one file it was two beads 20 um apart.  The bead
   table therefore gives each (measurement, gri) its own `tid`.
+* **The 3D beads are noisy, and the mean passes it on**: in the 3D
+  measurement each bead scattered by ~10 nm from one point to the next
+  (2.5 nm in 2D), and Imspector's mean adds that, divided by two for four
+  beads, to every localization.  A spline through the beads
+  (`beads.select_beads`) with a knot every 8 s is Imspector's curve to 0.7
+  nm in x and y (0.2 nm in 2D) and smooths that noise away; a knot every
+  2 s, one per point, rings (2.6 nm).
+* **A bead is judged against the others, leaving it out**: with four beads
+  one in the fit pulls the curve a quarter of the way to itself.  Each
+  bead's metrics (noise, wander, jump) come from its residual about the fit
+  of the other used beads (`beads.select_beads`), the rule is the caller's
+  (`beads.MadRule` by default: above the median by k robust sigmas *and* by
+  a margin in nm, because four beads that agree have a tiny spread), and a
+  choice made by hand is never overruled.  None of the eight real beads was
+  rejected; the defaults are to be set from many files.
 * **The beads are a file of their own** in the one table (`msr.bead_table`),
   with only columns the localizations have, so padding costs nothing; it is
   paired with its measurement by the `.msr`'s path and the measurements'
