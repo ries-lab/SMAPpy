@@ -410,7 +410,22 @@ class PluginPanel(QWidget):
             except ValueError as e:
                 self.status.setText(str(e))
                 return
-        opener(settings)
+        opener(settings, **self._reply_to(opener, settings is self._notice_settings))
+
+    def _reply_to(self, opener, foreign: bool = False) -> dict:
+        """What a window that answers (an opener with ``replies`` set: the
+        bead selector) is opened with besides the settings: this panel's
+        plugin, and where to send settings changed in it -- into this form,
+        which a run, the workspace and a chain then take.  Not for settings
+        that are not the form's own (a chain's step's)."""
+        if not getattr(opener, "replies", False) or foreign:
+            return {}
+        return {"plugin": self.plugin, "reply": self.take_settings}
+
+    def take_settings(self, settings) -> None:
+        """Settings sent back by a window this panel opened (`_reply_to`)."""
+        self.form.set(settings)
+        self._describe()
 
     def _on_stream(self, event: str, payload) -> None:
         if event == "warning":
@@ -474,7 +489,7 @@ class PluginPanel(QWidget):
             self.status.setText(f"no {window} window in this program")
             return
         self.status.setText("")
-        opener(settings)
+        opener(settings, **self._reply_to(opener))
 
     def start_run(self, ask: bool = True, **context) -> bool:
         """Run with the form's settings; whether the run started.

@@ -637,7 +637,10 @@ class Notice:
     `window` names a window of the GUI's (`Session.window_openers`), opened
     with the form's settings, as `Plugin.window` does -- so the plugin says
     what is wrong and where it is put right without importing Qt.  A GUI with
-    no such window shows the line and no button.
+    no such window shows the line and no button.  A window that answers --
+    its opener has ``replies = True``, as the bead selector's does -- is
+    also given the plugin and a ``reply`` that sets the form, so a choice
+    made in it lands in the settings a run, a workspace and a chain keep.
 
     ``kind`` is how loudly: "warning" (orange, bold) for something that will
     go wrong or be guessed if left as it is -- a camera the database does not

@@ -369,6 +369,12 @@ class ControlWindow(QMainWindow):
         # the picture windows' *Save image...*: Export Image, set to the
         # window it was asked from (`plugins.file.image_settings_for`)
         session.window_openers["export image"] = self.open_export_image
+        # a plugin that chooses beads (`Plugin.bead_view`): its notice's
+        # *Select beads...*; the window answers into the panel that opened it
+        def open_bead_selector(settings=None, plugin=None, reply=None):
+            self.open_bead_selector(settings, plugin, reply)
+        open_bead_selector.replies = True
+        session.window_openers["bead selector"] = open_bead_selector
         help_ = _add_menu(self.menuBar(), "Help", self)
         self._action(help_, "Plugin documentation", None, self.show_plugin_docs)
         help_.addSeparator()
@@ -1102,6 +1108,23 @@ class ControlWindow(QMainWindow):
         self.render_window.raise_()
         self.render_window.activateWindow()
         self.render_window.view.start_drawing("line")
+
+    def open_bead_selector(self, settings=None, plugin=None, reply=None) -> None:
+        """The bead window (`gui.bead_window`) for ``plugin`` with ``settings``;
+        one, reused, so that it opens where it was left."""
+        if plugin is None or settings is None:
+            return
+        from .bead_window import BeadWindow
+        window = getattr(self, "bead_window", None)
+        if window is None:
+            self.bead_window = window = BeadWindow(
+                self.session, plugin, settings, reply,
+                centre=self.render_window.view.center_on, parent=self)
+            window.setWindowFlag(Qt.Window, True)
+        else:
+            window.open_for(plugin, settings, reply)
+        window.show()
+        window.raise_()
 
     def open_calibration(self, dual: Optional[bool] = None) -> None:
         """The calibration window: bead stacks in, a spline calibration out.

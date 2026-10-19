@@ -113,6 +113,12 @@ papers and in other software.
 * **fiducial** (also called a fiducial marker, or a bead): a bright, still
   particle on the coverslip -- a fluorescent microsphere, a gold particle --
   seen in nearly every frame, whose apparent movement is the drift.
+* **MINFLUX**: localization by a doughnut of light moved around each
+  molecule, to a few nanometres with few photons; Abberior's microscopes
+  record it with no camera, so a localization has a time and no frame.
+* **MBM** (beam-line monitoring): a MINFLUX microscope's few fixed beads,
+  measured every couple of seconds during the acquisition; Imspector
+  subtracts their mean displacement from every localization.
 * **vibration** (also called jitter, or mechanical noise): fast movement of
   the sample or the optics -- from the building, a fan, a pump -- that
   repeats many times a second, faster than drift.

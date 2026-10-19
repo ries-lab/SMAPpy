@@ -1659,6 +1659,11 @@ measurements, four beads each) and checked by
   a margin in nm, because four beads that agree have a tiny spread), and a
   choice made by hand is never overruled.  None of the eight real beads was
   rejected; the defaults are to be set from many files.
+* **The correction replaces Imspector's, never adds to it**
+  (`mbm.replace_correction`: `x = x_nc - d(t)`): the bead tracks are raw,
+  so a curve from them holds all Imspector corrected, and on top of `x_nm`
+  it would count twice.  Run again, it gives the same table.  An earlier
+  plan had a mode "on top of Imspector's"; it was dropped for this reason.
 * **The beads are a file of their own** in the one table (`msr.bead_table`),
   with only columns the localizations have, so padding costs nothing; it is
   paired with its measurement by the `.msr`'s path and the measurements'

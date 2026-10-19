@@ -368,3 +368,92 @@ def select_beads(t, positions, bead, names: Optional[Sequence[str]] = None, *,
     residuals = p - offsets[index] - full
     return BeadSet(ids, names, used, outlier, list(reasons), overrides, metrics, curve,
                    offsets, t, residuals, index, rounds)
+
+
+# -------------------------------------------------------------- for a window
+@dataclass
+class BeadView:
+    """What a bead list shows, from whichever plugin chose the beads.
+
+    The bead window (`gui.bead_window`) knows nothing of MBM or fiducials: a
+    plugin hands it this (`bead_view`), and takes back the choices made by
+    hand (`with_overrides`).  ``sources`` are what the beads can come from
+    -- a measurement each -- and ``source`` the one shown; ``axes`` names
+    the columns of the positions (x, y, z); ``columns`` are more per-bead
+    columns for the table (Imspector's own use of a bead); ``where_nm`` (n,
+    2) where each bead is, for the view to be centred on it; ``prefix`` is
+    what this source's bead names carry in the plugin's settings.
+    """
+    beads: BeadSet
+    axes: Tuple[str, ...]
+    sources: List[str]
+    source: int = 0
+    columns: Dict[str, List] = field(default_factory=dict)
+    where_nm: Optional[np.ndarray] = None
+    labels: Optional[List[str]] = None       # the names as the list shows them
+    title: str = ""
+
+
+def parse_overrides(text: str) -> Dict[str, bool]:
+    """``"R0 out, 2:R3 in"`` as ``{"R0": False, "2:R3": True}``."""
+    out: Dict[str, bool] = {}
+    for part in (text or "").split(","):
+        words = part.strip().rsplit(None, 1)
+        if len(words) == 2 and words[1].lower() in ("in", "out"):
+            out[words[0]] = words[1].lower() == "in"
+        elif part.strip():
+            raise ValueError(f"{part.strip()!r}: a bead by hand is 'name in' or "
+                             "'name out', separated by commas")
+    return out
+
+
+def format_overrides(overrides: Dict[str, bool]) -> str:
+    return ", ".join(f"{name} {'in' if v else 'out'}" for name, v in overrides.items())
+
+
+def draw_bead_tracks(figure, beads: BeadSet, axes: Sequence[str] = ("x", "y", "z"),
+                     selected: Optional[int] = None, labels: Optional[Sequence[str]] = None,
+                     time_unit: str = "s"):
+    """Every bead's track lined up on the consensus (left), and its
+    deviation from it (right), a row per axis.  Used beads grey, beads left
+    out red and dashed, ``selected`` drawn over them in colour.  Each bead's
+    lines carry its index as their gid and are pickable, for a window to
+    select a bead by clicking it.  Returns the axes, (rows, 2)."""
+    n_axes = beads.residuals.shape[1]
+    grid = np.atleast_2d(figure.subplots(n_axes, 2, sharex=True, squeeze=False))
+    order = np.argsort(beads.t, kind="stable")
+    t_all = beads.t[order]
+    curve = beads.curve(t_all)
+    labels = list(labels) if labels is not None else beads.names
+    # the selected bead last, so that it is drawn over the others
+    for b in [b for b in range(len(beads)) if b != selected] + \
+            ([selected] if selected is not None else []):
+        rows = order[beads.index[order] == b]
+        if not len(rows):
+            continue
+        t = beads.t[rows]
+        c = beads.curve(t)
+        if b == selected:
+            style = dict(color="C1", lw=1.8, zorder=5, label=labels[b])
+        elif beads.used[b]:
+            style = dict(color="0.55", lw=0.8, zorder=2)
+        else:
+            style = dict(color="C3", lw=0.8, ls="--", alpha=0.7, zorder=3)
+        for a in range(n_axes):
+            for col, values in ((0, c[:, a] + beads.residuals[rows, a]),
+                                (1, beads.residuals[rows, a])):
+                line, = grid[a, col].plot(t, values, picker=5, **style)
+                line.set_gid(str(b))
+    for a in range(n_axes):
+        grid[a, 0].plot(t_all, curve[:, a], color="k", lw=1.2, zorder=4)
+        grid[a, 1].axhline(0.0, color="k", lw=0.8, zorder=4)
+        name = axes[a] if a < len(axes) else str(a)
+        grid[a, 0].set_ylabel(f"{name} (nm)")
+        grid[a, 1].set_ylabel(f"{name} - drift (nm)")
+    grid[0, 0].set_title("beads on the drift (black)", fontsize="medium")
+    grid[0, 1].set_title("each bead's deviation", fontsize="medium")
+    for col in range(2):
+        grid[-1, col].set_xlabel(f"time ({time_unit})")
+    if selected is not None:
+        grid[0, 0].legend(loc="best", fontsize="small")
+    return grid
