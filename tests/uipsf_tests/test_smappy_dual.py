@@ -37,7 +37,7 @@ def _model():
     for c, wavelength in enumerate((670.0, 700.0)):
         optics = uipsf.Optics(NA=1.43, wavelength_nm=wavelength, n_imm=1.516, n_med=1.335,
                               pixel_size_nm=(PIXEL, PIXEL))
-        grid = uipsf.PupilGrid.build(optics, 64, dtype=torch.float64)
+        grid = uipsf.PupilGrid.build(optics, 64, device="cpu", dtype=torch.float64)    # float64: not on MPS
         psf = uipsf.VectorPSF(grid, uipsf.ZernikePupil(grid, n_max=4), (21, 21), upsample=3)
         channels.append(Channel(psf, transform=TRANSFORM if c else None))
     model = uipsf.ForwardModel(channels)
