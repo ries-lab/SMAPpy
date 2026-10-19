@@ -255,6 +255,7 @@ class ControlWindow(QMainWindow):
                  "the tabs, their plugins and their values, to a new file"),
                 ("Open...", self.load_gui,
                  "a saved workspace: its tabs and values replace these"),
+                ("Recent", None, None),
                 ("Reset", self.load_default_gui,
                  "the shipped workspace, now and at the next start"),
                 (None, None, None),
@@ -262,6 +263,12 @@ class ControlWindow(QMainWindow):
                  "the workspace a localization file was saved with")):
             if text is None:
                 self.workspace_menu.addSeparator()
+            elif slot is None:
+                # filled as it opens: a file saved in another window, or
+                # deleted since, is right without anything to keep in step
+                self.recent_gui_menu = _add_menu(self.workspace_menu, text, self)
+                self.recent_gui_menu.setToolTipsVisible(True)
+                self.recent_gui_menu.aboutToShow.connect(self._fill_recent_guis)
             else:
                 self._action(self.workspace_menu, text, None, slot).setToolTip(tip)
         self._action(menu, "Preferences...", QKeySequence.Preferences,
@@ -846,6 +853,21 @@ class ControlWindow(QMainWindow):
                 self, "Open workspace",
                 "loaded, without plugins that are not installed here:\n"
                 + "\n".join(sorted(set(missing))))
+
+    def _fill_recent_guis(self) -> None:
+        """The workspaces last saved or loaded, newest first, one click each."""
+        menu = self.recent_gui_menu
+        menu.clear()
+        paths = workspace_module.recent()
+        names = [workspace_module.display_name(p) for p in paths]
+        for path, name in zip(paths, names):
+            if names.count(name) > 1:          # two "my" in different folders
+                name = f"{name} ({path.parent.name})"
+            action = menu.addAction(name)
+            action.setToolTip(str(path))
+            action.triggered.connect(lambda _=False, p=path: self.load_gui_from(p))
+        if not paths:
+            menu.addAction("(none saved yet)").setEnabled(False)
 
     def load_default_gui(self) -> None:
         """The shipped GUI, and the shipped GUI at the next start too."""

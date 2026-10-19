@@ -279,9 +279,11 @@ Beyond the pipeline, the rest of the GUI state -- tabs, their instances and
 values, which section is open -- is saved:
 
 * in a **GUI file**, and only when someone asks: *File > Workspace > Save*
-  overwrites the loaded one, *Save as* writes a new one, *Open* reads one, and the
-  next start opens whichever was saved or loaded last (the shipped default when
-  none was, or it has gone).  Nothing is written behind the user's back: one
+  overwrites the loaded one (on the shipped default it asks for a file of
+  one's own), *Save as* writes a new one, *Open* reads one, *Recent* lists the
+  ones saved or loaded lately to read again in a click, and the next start
+  opens whichever was saved or loaded last (the shipped default when none
+  was, or it has gone).  Nothing is written behind the user's back: one
   installation serves a lab, and a value one person typed that the program
   remembered would silently become everyone's default.  The window's position
   is the one exception, kept in `window.yaml` beside the configuration, since

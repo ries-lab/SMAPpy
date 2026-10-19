@@ -37,6 +37,8 @@ VERSION = 1
 GUI_SUFFIX = ".gui.yaml"
 WINDOW_NAME = "window.yaml"          # the window's geometry, and nothing else
 REMEMBERED = "gui"                   # config key: the GUI last saved or loaded
+RECENT = "recent_guis"               # config key: GUI files saved or loaded, newest first
+RECENT_MAX = 8
 
 #: What a fresh install shows, and *Reset tabs to defaults*: a GUI file like
 #: any other, made by arranging the tabs and saving them.  A list rather than
@@ -241,8 +243,33 @@ def remembered() -> Optional[Path]:
 
 
 def remember(path: Optional[Path]) -> None:
-    """Open ``path`` at the next start; None goes back to the shipped default."""
-    config.set(REMEMBERED, str(Path(path).expanduser().resolve()) if path else None)
+    """Open ``path`` at the next start; None goes back to the shipped default.
+
+    A file is also put at the top of `recent`: what was saved or loaded is
+    remembered, never the tabs themselves, so no workspace is written that
+    nobody asked for.
+    """
+    resolved = str(Path(path).expanduser().resolve()) if path else None
+    config.set(REMEMBERED, resolved)
+    if resolved:
+        earlier = [p for p in config.get(RECENT) or [] if isinstance(p, str)]
+        config.set(RECENT, [resolved] + [p for p in earlier if p != resolved]
+                   [:RECENT_MAX - 1])
+
+
+def recent() -> List[Path]:
+    """The GUI files last saved or loaded, newest first, that are still there.
+
+    *File > Workspace > Recent* lists them, so going back to a lab's own
+    workspace is one click rather than a file dialog.
+    """
+    found = []
+    for raw in config.get(RECENT) or []:
+        if isinstance(raw, str):
+            path = Path(raw).expanduser()
+            if path.is_file():
+                found.append(path)
+    return found
 
 
 def load_startup() -> Workspace:

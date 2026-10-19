@@ -379,12 +379,30 @@ def test_the_workspace_is_a_submenu_of_file_and_reset_gives_the_default(window, 
     entries = [a.text() for a in file_menu.actions()]
     assert "Workspace" in entries and not any("GUI" in e for e in entries)
     actions = {a.text(): a for a in window.workspace_menu.actions() if a.text()}
-    assert list(actions) == ["Save", "Save as...", "Open...", "Reset",
+    assert list(actions) == ["Save", "Save as...", "Open...", "Recent", "Reset",
                              "From data file..."]
     set_comet_value(window, 31)
     window.save_gui_to(tmp_path / "mine.gui.yaml")
     actions["Reset"].trigger()
     assert window.workspace.path is None and comet_value(window) is None
+
+
+def test_recent_lists_the_workspaces_saved_or_loaded_and_opens_one_in_a_click(
+        window, tmp_path):
+    first = window.save_gui_to(tmp_path / "first.gui.yaml")
+    set_comet_value(window, 41)
+    second = window.save_gui_to(tmp_path / "second.gui.yaml")
+    window.load_gui_from(first)                  # loading puts it back on top
+    gone = window.save_gui_to(tmp_path / "gone.gui.yaml")
+    gone.unlink()
+    window.load_default_gui()                    # the default is not a file
+    window._fill_recent_guis()
+    entries = {a.text(): a for a in window.recent_gui_menu.actions()}
+    assert list(entries) == ["first", "second"]  # newest first, the gone one left out
+    entries["second"].trigger()
+    assert window.workspace.path == second and comet_value(window) == 41
+    # and it is what the next start opens; nothing was saved to get there
+    assert make_window().workspace.path == second.resolve()
 
 
 def test_a_remembered_gui_that_has_gone_gives_the_default(window, tmp_path):
