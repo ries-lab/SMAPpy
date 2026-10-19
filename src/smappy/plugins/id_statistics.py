@@ -182,19 +182,10 @@ class IdStatistics(Plugin):
 
     @staticmethod
     def _kept(ctx: Context) -> np.ndarray:
-        """The layer's own filter over ``ctx.locs``, without the drawn ROI:
-        what a block's regions are cut by, which the table's signature says."""
-        session = ctx.session
-        if session is not None:
-            i = ctx.layer
-            if session.layers[i].is_image:
-                i = session.first_locs_layer()
-            from ..region_runs import unmeasured
-            mask = np.asarray(session.layers[i].selection(i, unmeasured(ctx.locs)).mask,
-                              dtype=bool)
-            if len(mask) == len(ctx.locs):
-                return mask
-        return np.asarray(ctx.selection.mask, dtype=bool)
+        """The layer's own filter, without the drawn ROI: what a block's
+        regions are cut by, which the table's signature says."""
+        from ..region_runs import layer_mask
+        return layer_mask(ctx)
 
 
 def draw_histogram(ax, name: str, values) -> None:

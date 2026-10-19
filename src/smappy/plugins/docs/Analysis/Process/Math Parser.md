@@ -1,6 +1,6 @@
 ---
 version: "1"
-covers: [smappy.mathparse.parse, smappy.mathparse.names_in, smappy.mathparse.evaluate, smappy.mathparse.as_column, smappy.mathparse.remember, smappy.mathparse.apply_recipes, smappy.group.combine, smappy.plugins.math_parser.write_column, smappy.plugins.math_parser.check_field, smappy.plugins.math_parser.remember_expression, smappy.plugins.math_parser.MathRecipe, smappy.mathparse.reduces]
+covers: [smappy.mathparse.parse, smappy.mathparse.names_in, smappy.mathparse.evaluate, smappy.mathparse.as_column, smappy.mathparse.remember, smappy.mathparse.apply_recipes, smappy.group.combine, smappy.plugins.math_parser.write_column, smappy.plugins.math_parser.check_field, smappy.plugins.math_parser.remember_expression, smappy.plugins.math_parser.MathRecipe, smappy.mathparse.reduces, smappy.region_maths.evaluate, smappy.region_maths.compute, smappy.region_maths.alias, smappy.region_maths.refresh]
 ---
 
 ## What it does
@@ -107,7 +107,33 @@ for ax in (left, right):
     ax.tick_params(labelsize=7)
 ```
 
+**On regions.**  With *on* set to the ROIs or to an id column such as
+`cluster_id` or `tid`, the expression is over what was measured per
+[region](plugin:Panels/Glossary), one row per region instead of one per
+localization: `rel = id_statistics.n_locs / median(n_locs)` gives each
+cluster's size over the median cluster's.  Each evaluation of those regions
+is named by its label made one word -- *NPC Corners* is `npc_corners`, *Id
+statistics* `id_statistics` -- and a value as `npc_corners.n_corners`; the
+form lists the names there are.  A value only one evaluation has may be
+written bare.  The result goes into the regions' `maths`
+[region table](plugin:Panels/Glossary), where the summaries, the
+[region filter](plugin:Analysis/Regions/Filter regions) and *Regions to
+column* find it, and is computed again whenever what it reads is measured
+again.  *also onto the localizations* writes it onto each region's rows as
+well, to colour by it.
+
 ## In detail
+
+**On regions**, the evaluations meet by region id: a region one of them
+did not measure has NaN there, and a reduction (`median(n_locs)`) is over
+the regions.  An ROI's annotations are `annotations.use` (1 or 0) and its
+lines' lengths and angles; its keywords are text and cannot be computed
+with.  The expressions are kept with the `maths` table as recipes, in the
+order written, so a later one may read an earlier one (`maths.rel`); when
+an evaluation they read is measured again they are all evaluated again, and
+a region whose inputs are out of date gets no current row, as a block's
+would not.  The column written onto the localizations is a snapshot, as
+*Regions to column*'s is.
 
 **Which table.**  The localizations, whatever the layer shows: the
 column is computed for each localization, and *the selection* is the
@@ -223,6 +249,16 @@ property of the blink; a combining rule for a measurement per localization;
 
 ### recall
 Picking an entry also restores the *merged blinks* rule it was used with.
+
+### source
+Every source that has been measured is offered: the ROIs once an
+evaluation has run on them, an id column once a block or *Id statistics*
+has.  On regions, *apply to* and *merged blinks* do not apply.
+
+### to_locs
+Only for colouring by the value or using it per localization: to keep or
+drop regions by it, filter on `maths.<field>` in the region filter, which
+counts regions and writes no column per value.
 
 ## Output
 

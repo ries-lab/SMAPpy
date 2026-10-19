@@ -233,7 +233,10 @@ filter, colour by a field, merge blinks (a blink takes the mean, the highest
 of a `roi_id`), the file.
 
 Filtering is the region filter's, above: it needs no column per value and
-counts regions, not localizations.  A written column is a snapshot until
+counts regions, not localizations.  A number computed from region values
+-- a ratio of two evaluations, a value over the median -- is *Math parser*
+on a region source (`region_maths.py`): a recipe of the source's `maths`
+table, which the filter and the summaries read like any other.  A written column is a snapshot until
 written again.  The table remembers
 which columns came from regions (`metadata["region_columns"]`) and writes
 only over those, never over a column of the localizations' own; those

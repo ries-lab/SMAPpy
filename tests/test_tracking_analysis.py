@@ -142,3 +142,26 @@ def test_auto_takes_a_simulations_truth_when_nothing_is_linked():
                                     TrackingAnalysis.Settings(jumps=False))
     assert "(track_id_true)" in result.text
     assert result.values["msd_D_um2_per_s"] == pytest.approx(0.2, rel=0.08)
+
+
+def test_over_the_view_each_tracks_fit_is_kept_as_a_row_of_the_track_id():
+    """D and alpha per track, which the MSD fits for every track at once,
+    go back as a region table, current as a block's over the tracks."""
+    from smappy.region_results import Evaluation, is_current, rows
+    from smappy.session import Session
+    locs = simulate_tracks(n_frames=1500, density_um2=0.02, d_um2_s=(0.1,),
+                           track_frames=60, seed=5)
+    session = Session(locs)
+    session.show_grouped(0, False)
+    for layer in session.layers:
+        layer.remove_bound("z_nm")
+    settings = TrackingAnalysis.Settings(id_column="track_id_true", jumps=False)
+    result = session.run(TrackingAnalysis(), settings)
+    ev = Evaluation("track_id_true", "Tracking analysis")
+    ctx = session.context()
+    assert is_current(ctx, ev)
+    found = rows(ctx, ev)
+    per = result.data["msd"].per_track
+    assert len(found) == len(per.D_um2_per_s)
+    fitted = np.array([r["D_um2_per_s"] for r in found], float)
+    assert np.nanmedian(fitted) == pytest.approx(0.1, rel=0.3)

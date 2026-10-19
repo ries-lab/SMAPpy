@@ -19,9 +19,14 @@ from, rewritten rather than ported (`wave4_research.md`: partly broken):
   (`tracking.columns`).
 
 ``per_region``: in an ROI, or per track as a block over `track_id`, the
-values go to the region table.  Per-track D and alpha can be written onto
-the localizations (*write per track*), so the tracks can be coloured or
-filtered by them.
+values go to the region table.  Over the view the MSD's fit per track --
+computed for every track at once anyway -- goes back as a region table of
+the track id ("per track_id: Tracking analysis"), what a block over the
+tracks would give in one run, for the summaries and the region filter;
+only where the run saw the layer's own filter (no drawn ROI), since the
+table is signed as a block's (`region_runs.column_table`).  Per-track D and
+alpha can also be written onto the localizations (*write per track*), to
+colour the tracks by them.
 """
 from __future__ import annotations
 
@@ -30,7 +35,8 @@ from typing import Any, Dict, Optional
 
 import numpy as np
 
-from . import Context, FormState, Plot, Plugin, Result, Stopped, param, register
+from . import (Context, FormState, Plot, Plugin, Result, Stopped, param, register,
+               settings_values)
 from ..locs import Localizations
 
 
@@ -157,6 +163,7 @@ class TrackingAnalysis(Plugin):
         panels = []
         msd = jump = None
         out_locs = None
+        id_regions = {}
 
         if settings.msd:
             m = settings.msd_fit
@@ -186,6 +193,20 @@ class TrackingAnalysis(Plugin):
                 f"{values['track_alpha_median']:.3g}")
             if m.write_columns and not ctx.per_region:
                 out_locs = _with_track_values(locs, t, per)
+            if not ctx.per_region:
+                from ..region_runs import column_table, layer_mask
+                if np.array_equal(layer_mask(ctx), use):
+                    step = {"label": self.name, "plugin": self.path,
+                            "version": self.version,
+                            "parameters": settings_values(settings)}
+                    per_track = {"n_locs": msd.n_locs.astype(np.int64),
+                                 "D_um2_per_s": per.D_um2_per_s, "alpha": per.alpha,
+                                 "lags": per.lags.astype(float),
+                                 "reduced_error": per.x}
+                    id_regions = {column: {self.name: column_table(
+                        locs, column, self.name, msd.ids, per_track, step,
+                        layer=ctx.layer, session=ctx.session)}}
+                    lines.append(f"kept per track as 'per {column}: {self.name}'")
             panels += [lambda ax, msd=msd: draw_msd(ax, msd, t.dims),
                        lambda ax, msd=msd: draw_track_d(ax, msd)]
 
@@ -226,6 +247,7 @@ class TrackingAnalysis(Plugin):
         plot = (Plot(draw, panels=len(panels), size=(4.0 * len(panels), 3.6))
                 if panels else None)
         return Result(locs=out_locs, text="\n".join(lines), values=values,
+                      id_regions=id_regions,
                       arrays=arrays, plot=plot, settings=settings,
                       data={"msd": msd, "jumps": jump, "tracks": t},
                       title="tracking analysis")

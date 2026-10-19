@@ -72,6 +72,10 @@ class RegionTable:
         # -- so a reader can offer them as a level of their own; the values
         # themselves stay flat columns
         self.groups: Dict[str, Dict[str, str]] = {}
+        # values computed from the others by an expression, ``{field:
+        # expression}`` in order (`region_maths`): computed again when what
+        # they read is measured again
+        self.recipes: Dict[str, str] = {}
 
     @classmethod
     def from_columns(cls, label: str, ids, values: Dict[str, Any],
@@ -239,7 +243,7 @@ class RegionTable:
         else:
             wanted = set(map(str, region_ids))
             rows = [i for i, r in enumerate(self.ids) if _belongs(r, wanted)]
-        return {"label": self.label, "groups": self.groups,
+        return {"label": self.label, "groups": self.groups, "recipes": self.recipes,
                 "ids": [self.ids[i] for i in rows],
                 "steps": self.steps,
                 "step_of": [self.step_of[i] for i in rows],
@@ -258,6 +262,7 @@ class RegionTable:
         table._index = {r: n for n, r in enumerate(table.ids)}
         n = len(table.ids)
         table.groups = {str(g): dict(m) for g, m in (doc.get("groups") or {}).items()}
+        table.recipes = {str(f): str(e) for f, e in (doc.get("recipes") or {}).items()}
 
         def column(name, default):
             got = list(doc.get(name) or [])
@@ -291,6 +296,8 @@ class RegionTable:
             group.create_dataset("ids", data=np.array(self.ids, dtype=object), dtype=text)
         if self.groups:
             group.attrs["groups"] = json.dumps(self.groups)
+        if self.recipes:
+            group.attrs["recipes"] = json.dumps(self.recipes)
         group.create_dataset("step_of", data=np.asarray(self.step_of, dtype=np.int32))
         for name in ("signatures", "data", "errors"):
             column = getattr(self, name)
@@ -349,6 +356,7 @@ class RegionTable:
         n = len(table.ids)
         table.steps = json.loads(group.attrs.get("steps", "[]"))
         table.groups = json.loads(group.attrs.get("groups", "{}"))
+        table.recipes = json.loads(group.attrs.get("recipes", "{}"))
         table.step_of = [int(k) for k in group["step_of"][()]] if "step_of" in group \
             else [-1] * n
         for name in ("signatures", "data", "errors"):

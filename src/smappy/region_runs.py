@@ -428,6 +428,23 @@ def column_table(locs: Localizations, column: str, label: str, ids, values,
     return RegionTable.from_columns(label, ids, values, step, signature, data, groups)
 
 
+def layer_mask(ctx) -> np.ndarray:
+    """The layer's own filter over ``ctx.locs`` -- not the drawn ROI nor the
+    slab, and not what is written from regions (`unmeasured`): what a
+    block's regions are cut by, and so what a whole table handed back
+    (`column_table`) must have been measured on to be signed as a block's."""
+    session = ctx.session
+    if session is not None:
+        i = ctx.layer
+        if session.layers[i].is_image:
+            i = session.first_locs_layer()
+        mask = np.asarray(session.layers[i].selection(i, unmeasured(ctx.locs)).mask,
+                          dtype=bool)
+        if len(mask) == len(ctx.locs):
+            return mask
+    return np.asarray(ctx.selection.mask, dtype=bool)
+
+
 def _hash(a: np.ndarray) -> str:
     import hashlib
     return hashlib.sha256(memoryview(np.ascontiguousarray(a)).cast("B")).hexdigest()

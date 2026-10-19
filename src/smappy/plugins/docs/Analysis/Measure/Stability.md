@@ -251,6 +251,15 @@ its largest peak marked and *high-pass* dotted, the cumulative RMS with
 the precision dashed, and a table of the peaks, also in the text.  Up to
 8 traces are drawn over each other.
 
+With *each bead*, run on the view, the same numbers for every bead are
+also kept as a [region table](plugin:Panels/Glossary) of the id column
+("per track_id: Stability"): per axis `x_sd_nm`, `x_precision_nm`,
+`x_vibration_nm`, `x_peak_hz` and `x_peak_nm` (and y, z), with `n_points`.
+*Summarize/Histograms* then compares the beads, and the
+[region filter](plugin:Analysis/Regions/Filter regions) can leave out one
+that shakes more than the others.  Not when an ROI is drawn, since the table
+stands for every bead the layer shows.
+
 A stable instrument shows an SD at the precision, a vibration RMS of a
 nanometre or less, and a flat spectrum.  A vibration of several nm is
 worth finding: it blurs every localization.  If more than a fifth of the
