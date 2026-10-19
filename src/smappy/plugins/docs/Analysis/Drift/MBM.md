@@ -134,7 +134,8 @@ beads, with its own offset fitted over its points:
 * *wander* is $\sqrt{\mathrm{rms}^2 - \mathrm{noise}^2}$, the part of the
   residual that noise does not explain;
 * *jump* is the largest distance between the medians of five points before
-  and five points after any point;
+  and five points after any point (of a fiftieth of the bead's points, for
+  a bead with more than 250);
 * *seen* is the fraction of the beads' time span the bead covers.
 
 For each of noise, wander and jump, a bead is out when its value exceeds

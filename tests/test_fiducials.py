@@ -176,3 +176,73 @@ def test_referenced_to_the_last_frame_the_drift_is_zero_there():
     last, _, _ = estimate_drift_fiducials(locs, FiducialSettings(reference="last frame"))
     assert np.allclose(last.drift[-1], 0.0)
     assert np.allclose(last.drift, first.drift - first.drift[-1])
+
+
+# ------------------------------------------------------- which beads (v3)
+
+def _with_a_wandering_bead(seed=3, wander_nm=40.0):
+    """Beads in a blinking structure, one of which (bead_true 3) creeps away
+    by ``wander_nm`` in x over the acquisition."""
+    from smappy.simulate import simulate, with_beads
+    locs = simulate(n_frames=4000, seed=seed, drift=True)
+    truth = np.asarray(locs.metadata["drift_truth"])
+    locs = with_beads(locs, n_beads=5, seed=seed)
+    bead = np.asarray(locs["bead_true"])
+    frame = np.asarray(locs["frame"])
+    x = np.asarray(locs["x_nm"], float).copy()
+    x[bead == 3] += wander_nm * frame[bead == 3] / 4000
+    locs = Localizations({**locs.columns, "x_nm": x}, dict(locs.metadata))
+    return locs, truth - truth[0]
+
+
+def test_a_bead_that_creeps_away_is_left_out_and_the_drift_is_the_others():
+    from smappy.beads import RejectionSettings
+    from smappy.fiducials import FiducialSettings, estimate_drift_fiducials
+    locs, truth = _with_a_wandering_bead()
+    drift, beads, fit = estimate_drift_fiducials(locs)
+    chosen = fit.chosen
+    out = [chosen.names[b] for b in range(len(chosen)) if not chosen.used[b]]
+    assert len(out) == 1 and "wander" in chosen.reasons[chosen.names.index(out[0])]
+    # the bead left out is the one that crept: its rows are bead_true 3
+    true = np.asarray(locs["bead_true"])[beads.bead == chosen.names.index(out[0])]
+    assert set(np.unique(true)) == {3}
+    every, _, _ = estimate_drift_fiducials(
+        locs, FiducialSettings(rejection=RejectionSettings(k=1e9)))
+    error = lambda d: np.sqrt(np.mean((d.drift[:, 0] - truth[:, 0]) ** 2))
+    assert error(drift) < 0.5 * error(every)
+
+
+def test_a_bead_chosen_by_hand_stays_that_bead_however_the_beads_are_numbered():
+    from smappy.fiducials import FiducialSettings, find_and_choose
+    locs, _ = _with_a_wandering_bead(wander_nm=0.0)
+    found = find_and_choose(locs)
+    name = found.chosen.names[2]
+    x, y = found.where_nm[2]
+    # named a little off where it is (as after a drift correction), and
+    # found among fewer beads, numbered otherwise
+    nearby = f"x{(x + 120) / 1000:.1f}y{y / 1000:.1f}"
+    first = np.asarray(locs["bead_true"]) != np.asarray(locs["bead_true"])[found.beads.bead == 0][0]
+    again = find_and_choose(locs, FiducialSettings(beads=f"{nearby} out"), select=first)
+    b = int(np.argmin(np.hypot(*(again.where_nm - [x, y]).T)))
+    assert again.chosen.names[b] == name and not again.chosen.used[b]
+    assert again.chosen.state(b) == "out, by hand"
+    assert len(again.beads) == len(found.beads) - 1
+
+
+def test_the_fiducials_plugin_offers_the_bead_selector_and_takes_its_choice():
+    from smappy.plugins import Context
+    from smappy.plugins.drift_fiducials import FiducialDrift
+    from smappy.fiducials import FiducialSettings
+    locs, _ = _with_a_wandering_bead()
+    plugin = FiducialDrift()
+    ctx = Context(locs=locs)
+    notice = plugin.describe(ctx, FiducialSettings()).notice
+    assert notice.window == "bead selector" and notice.action == "Select beads..."
+    view = plugin.bead_view(ctx, FiducialSettings())
+    assert view.time_unit == "frame" and len(view.columns["frames"]) == len(view.beads)
+    out = int(np.flatnonzero(~view.beads.used)[0])
+    settings = plugin.with_overrides(FiducialSettings(), view, {view.beads.names[out]: True})
+    assert settings.beads == f"{view.beads.names[out]} in"
+    result = plugin.run(ctx, settings)
+    assert "left out" not in result.text
+    assert "1 left out" in plugin.run(ctx, FiducialSettings()).text

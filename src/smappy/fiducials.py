@@ -44,18 +44,26 @@ data weight per coefficient, `_PENALTY`) keeps the system solvable where no
 bead was seen at all -- the curve then runs straight across -- and where
 beads were seen it is a slight smoothing, far below their precision.
 
-**Kept simple for now, on purpose** (the design, wave 5 step 5c): every
-bead that passes is used, all with equal weight; rejecting a bead that
-disagrees with the others, or a robust fit, comes later.  The beads stay in
-the table, corrected like everything else.
+**Which beads** (version 3): the beads found are judged against each
+other as MBM's are (`beads.select_beads`): each bead's noise, wander and
+jump about the curve the *other* beads give, a bead out where one is well
+above the others', the fit repeated without it.  With every bead used the
+curve is the fit above, unchanged.  A bead is named by where it is, its
+median position in um (``x12.3y4.5``), not by a number: the linker numbers
+beads in the order it meets them, which a filter or *min photons* changes,
+and a bead chosen by hand (*by hand*, which the bead selector writes) must
+stay that bead.  A choice is matched to the nearest bead within 0.3 um
+(`_match`).  The beads stay in the table, corrected like everything else.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Optional
+import re
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional
 
 import numpy as np
 
+from .beads import BeadSet, MadRule, RejectionSettings, parse_overrides, select_beads
 from .drift import REFERENCES, Drift
 from .locs import Localizations
 from .params import param
@@ -88,6 +96,11 @@ class FiducialSettings:
                                     min=5,
                                     help="frames between the spline's "
                                          "coefficients")
+    rejection: RejectionSettings = param(default_factory=RejectionSettings,
+                                         label="rejection")
+    beads: str = param("", label="by hand",
+                       help="beads in or out whatever the rule says, by where they "
+                            "are: 'x12.3y4.5 out'; Select beads... writes it")
     use_z: Optional[bool] = param(None, label="correct z",
                                   help="auto: if the table has z")
     # `Drift.referenced`; "as estimated" is the fit's own gauge, d(0) = 0
@@ -153,6 +166,8 @@ class FiducialFit:
     residuals_nm: np.ndarray      # (n_used, n_axes)
     rows: np.ndarray              # the localizations used, indices into the input
     bead: np.ndarray              # their bead number
+    # every bead found, which were used and why (`beads.select_beads`)
+    chosen: Optional[BeadSet] = field(default=None, repr=False)
 
     @property
     def rms_nm(self) -> np.ndarray:
@@ -197,11 +212,61 @@ def fit_drift(frame, positions, bead, n_frames: int,
     return FiducialFit(drift, offsets_nm, residuals, rows, b)
 
 
-def estimate_drift_fiducials(locs: Localizations,
-                             settings: Optional[FiducialSettings] = None,
-                             select=None) -> "tuple[Drift, Beads, FiducialFit]":
-    """The drift of a table from its beads: the `Drift`, the beads found and
-    the fit.  ``select`` (a mask) is what may be a bead."""
+# a bead's name, from its median position in um: x12.3y-4.5
+_NAME = re.compile(r"^x(-?\d+(?:\.\d+)?)y(-?\d+(?:\.\d+)?)$")
+MATCH_UM = 0.3
+
+
+def bead_names(where_nm: np.ndarray) -> List[str]:
+    """Each bead by where it is, (n, 2) nm -> ``x12.3y4.5`` (um); a second
+    bead in the same 0.1 um gets a suffix."""
+    names: List[str] = []
+    for x, y in where_nm:
+        # + 0.0: a bead at y = -0.04 um is y0.0, not y-0.0
+        name = f"x{round(x / 1000, 1) + 0.0:.1f}y{round(y / 1000, 1) + 0.0:.1f}"
+        k, base = 2, name
+        while name in names:
+            name, k = f"{base}#{k}", k + 1
+        names.append(name)
+    return names
+
+
+def _match(overrides: Dict[str, bool], names: List[str], where_nm: np.ndarray
+           ) -> Dict[str, bool]:
+    """Choices by hand, onto the beads found now: by name, or else to the
+    nearest bead within `MATCH_UM` of the place the name says."""
+    out: Dict[str, bool] = {}
+    for key, use in overrides.items():
+        if key in names:
+            out[key] = use
+            continue
+        m = _NAME.match(key.split("#")[0])
+        if m is None or not len(where_nm):
+            continue
+        d = np.hypot(where_nm[:, 0] / 1000 - float(m.group(1)),
+                     where_nm[:, 1] / 1000 - float(m.group(2)))
+        if d.min() <= MATCH_UM:
+            out[names[int(np.argmin(d))]] = use
+    return out
+
+
+@dataclass
+class FoundBeads:
+    """What `find_and_choose` hands back: the beads found and judged, and
+    the arrays the fit was made from."""
+    beads: Beads
+    chosen: BeadSet
+    where_nm: np.ndarray
+    frame: np.ndarray
+    positions: np.ndarray
+    n_frames: int
+    axes: tuple
+
+
+def find_and_choose(locs: Localizations, settings: Optional[FiducialSettings] = None,
+                    select=None) -> FoundBeads:
+    """Find the beads (`find_beads`) and choose among them
+    (`beads.select_beads`, on frames, over the whole file)."""
     settings = settings or FiducialSettings()
     missing = [c for c in ("x_nm", "y_nm", "frame", "photons") if c not in locs]
     if missing:
@@ -228,17 +293,59 @@ def estimate_drift_fiducials(locs: Localizations,
             f"{settings.min_photons:g} photons lasts {settings.min_fraction:g} "
             f"of the {n_frames} frames; lower min photons or min length")
     positions = np.column_stack([x, y] + ([z] if use_z else []))
-    fit = fit_drift(frame, positions, beads.bead, n_frames,
-                    settings.spline_knot_frames)
-    drift = Drift(fit.drift_nm, settings, n_used=len(fit.rows),
+    rows = beads.bead >= 0
+    where = np.array([[np.median(x[beads.bead == b]), np.median(y[beads.bead == b])]
+                      for b in range(len(beads))])
+    names = bead_names(where)
+    r = settings.rejection
+    # the fiducial fit's own span and coefficients, so that with every bead
+    # used the curve is `fit_drift`'s to the last bit
+    chosen = select_beads(frame[rows], positions[rows], beads.bead[rows] + 1, names,
+                          knot=settings.spline_knot_frames,
+                          rule=MadRule(k=r.k, margin_nm=r.margin_nm),
+                          overrides=_match(parse_overrides(settings.beads), names, where),
+                          min_beads=min(r.min_beads, len(beads)),
+                          span=(0.0, max(n_frames - 1.0, 1.0)),
+                          n_coeffs=max(4, int(round(n_frames / settings.spline_knot_frames))
+                                       + 3))
+    return FoundBeads(beads, chosen, where, frame, positions, n_frames,
+                      ("x", "y", "z") if use_z else ("x", "y"))
+
+
+def estimate_drift_fiducials(locs: Localizations,
+                             settings: Optional[FiducialSettings] = None,
+                             select=None) -> "tuple[Drift, Beads, FiducialFit]":
+    """The drift of a table from its beads: the `Drift`, the beads found and
+    the fit of the beads used (``fit.chosen``: all of them, judged)."""
+    settings = settings or FiducialSettings()
+    found = find_and_choose(locs, settings, select)
+    chosen = found.chosen
+    n_axes = found.positions.shape[1]
+    curve = chosen.curve(np.arange(found.n_frames))
+    drift_nm = np.zeros((found.n_frames, 3))
+    drift_nm[:, :n_axes] = curve
+    bead = found.beads.bead
+    rows = np.flatnonzero((bead >= 0) & chosen.used[np.maximum(bead, 0)])
+    # `select_beads` kept the bead rows in input order: its residuals line up
+    every = np.flatnonzero(bead >= 0)
+    keep = np.isin(every, rows)
+    _, b = np.unique(bead[rows], return_inverse=True)
+    used_beads = np.flatnonzero(chosen.used)
+    fit = FiducialFit(drift_nm, chosen.offsets_nm[used_beads],
+                      chosen.residuals[keep], rows, b, chosen)
+    drift = Drift(drift_nm, settings, n_used=len(rows),
                   method="fiducials").referenced(settings.reference)
-    return drift, beads, fit
+    return drift, found.beads, fit
 
 
 def describe(drift: Drift, beads: Beads, fit: FiducialFit) -> str:
     """The text of a run: the curve, the beads, their scatter about it."""
     rms = ", ".join(f"{a} {v:.1f}" for a, v in zip("xyz", fit.rms_nm))
-    return (f"{drift}; {len(beads)} bead(s), {len(fit.rows)} localizations, "
+    left = ""
+    if fit.chosen is not None and not fit.chosen.used.all():
+        out = int((~fit.chosen.used).sum())
+        left = f" ({out} left out)"
+    return (f"{drift}; {len(beads)} bead(s){left}, {len(fit.rows)} localizations, "
             f"scatter about the curve {rms} nm")
 
 

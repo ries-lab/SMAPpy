@@ -1,6 +1,6 @@
 ---
-version: "2"
-covers: [smappy.fiducials.find_beads, smappy.fiducials.fit_drift, smappy.fiducials.estimate_drift_fiducials, smappy.tracking.link.link_tracks, smappy.drift._spline_basis, smappy.drift.Drift.apply, smappy.simulate.beads.simulate_beads]
+version: "3"
+covers: [smappy.fiducials.find_beads, smappy.fiducials.fit_drift, smappy.fiducials.estimate_drift_fiducials, smappy.fiducials.find_and_choose, smappy.fiducials.bead_names, smappy.beads.select_beads, smappy.beads.bead_metrics, smappy.beads.MadRule, smappy.beads.draw_bead_tracks, smappy.tracking.link.link_tracks, smappy.drift._spline_basis, smappy.drift.Drift.apply, smappy.simulate.beads.simulate_beads]
 ---
 
 ## What it does
@@ -93,7 +93,32 @@ A frame where one bead is missing is carried by the others, and a bead that
 starts late adds to the curve from its first frame on.  x, y and z are
 fitted separately.
 
-**5. Subtracted from everything.**  The curve is subtracted from every
+**5. Beads that disagree are left out.**  A bead that came loose, or a
+cluster of long-lived molecules taken for one, does not move with the
+others.  Each bead is compared with the curve the *other* beads give, by
+three numbers: its *noise* (scatter from one frame to the next), its
+*wander* (slow motion of its own) and its *jump* (largest sudden step).  A
+bead is left out when one of these is well above the other beads', and the
+curve is fitted again without it.  The same rule judges the MBM beads of
+[MBM drift correction](plugin:Analysis/Drift/MBM).  *Select beads...*
+under the settings opens the [bead selector](plugin:Panels/Bead selector),
+where each bead's track can be looked at and a bead included or excluded by
+hand.
+
+```figure Five beads, one of which creeps 40 nm away in x over the acquisition (red, dashed): against the curve the others give (black), its deviation (right) is a slope, and it is left out.
+from smappy.fiducials import estimate_drift_fiducials as _estimate
+from smappy.beads import draw_bead_tracks
+creep = with_beads(simulate(n_frames=2000, seed=3, drift=True), n_beads=5, seed=3)
+xs = np.asarray(creep["x_nm"], float).copy()
+mine = np.asarray(creep["bead_true"]) == 3
+xs[mine] += 40.0 * np.asarray(creep["frame"])[mine] / 2000
+creep = creep.__class__({**creep.columns, "x_nm": xs}, dict(creep.metadata))
+_, _, creep_fit = _estimate(creep)
+fig.set_size_inches(9, 5.4)
+draw_bead_tracks(fig, creep_fit.chosen, ("x", "y", "z"), time_unit="frame")
+```
+
+**6. Subtracted from everything.**  The curve is subtracted from every
 localization of the table: the beads, the structure, and what the filter
 hides.
 
@@ -138,9 +163,28 @@ $$\sum_i r_i^2 + \lambda \sum_k (c_{k+1} - 2 c_k + c_{k-1})^2, \qquad r_i = x_i 
 
 the first sum over every localization $i$ of every bead, $r_i$ its
 residual.  The problem is
-linear, so it is solved in one step, not iterated.  Every localization
-counts the same; outlier rejection and a weighting by precision are left
-for later.
+linear, so it is solved in one step.  Every localization of the beads
+used counts the same; a weighting by precision is left for later.
+
+**Which beads.**  Each bead's residual is taken about the fit of the
+*other* used beads, with its own offset fitted over its frames: with few
+beads, one inside the fit pulls the curve towards itself and hides part of
+its own error.  From it, *noise* is $1.4826\,\mathrm{MAD}(\Delta r) /
+\sqrt{2}$ (the differences between consecutive points, blind to slow
+motion), *wander* $\sqrt{\mathrm{rms}^2 - \mathrm{noise}^2}$, and *jump*
+the largest distance between the medians of the points before and after
+any point, over five points or a fiftieth of the bead's points, whichever
+is more.  For each of the three, a bead is out when it exceeds the used
+beads' median by more than *robust sigmas* times their robust standard
+deviation (1.4826 MAD) and by more than *margin*.  Rejecting and refitting
+repeat until the set of beads no longer changes, never below *min beads*.
+With every bead used, the curve is exactly the fit above.
+
+A bead is named by its median position in micrometres (`x12.3y4.5`), and a
+choice by hand (*by hand*) goes to the nearest bead within 0.3 µm of that
+place: the linker numbers the beads in the order it meets them, and a
+filter or *min photons* changes that order.  A bead whose track a gap
+broke in two is two beads at one place, the second named with `#2`.
 
 **The reference.**  A constant can move from every offset into the curve
 without changing the fit: only how the beads moved is measured, not where
@@ -205,6 +249,20 @@ longer gap is not lost if both parts are long enough.
 coefficient.  Smaller follows faster drift and is noisier; larger is
 smoother and cuts the corners of a quick drift.
 
+### rejection.k
+Larger keeps more beads.  With a handful of beads the spread is uncertain,
+and *margin* usually decides.
+
+### rejection.margin_nm
+A bead is never left out for being less than this worse than the others'
+median.  Set it about the beads' precision.
+
+### rejection.min_beads
+At least two are needed to tell which one moved.
+
+### beads
+Written by the bead selector; it can be typed too, as `x12.3y4.5 out`.
+
 ### use_z
 Off corrects x and y only, for a 3D table whose z drift is corrected
 otherwise, or not wanted.
@@ -218,12 +276,13 @@ otherwise, or not wanted.
 * **The drift curve**, x, y and z against frame, the same figure as COMET's
   and RCC's.  It is saved with the file and drawn again when it is reopened.
 * **The beads** figure: each bead's positions less its fitted offset, over
-  the curve.  The beads should lie on the curve, scattered about it by
-  their precision.  A bead that wanders off the others is not a fiducial --
-  it is loose, or a cluster of molecules -- and an ROI or filter that leaves
-  it out gives a better curve.
-* **The text** gives the range of the drift, the number of beads and of
-  their localizations, and the scatter of the beads about the curve, per
+  the curve (left), and its deviation from the curve (right), a row per
+  axis; the beads left out red and dashed.  The beads used should lie on
+  the curve, scattered about it by their precision.  A used bead whose
+  deviation has a slope or a step is not a fiducial -- it is loose, or a
+  cluster of molecules -- and is one to exclude in the bead selector.
+* **The text** gives the range of the drift, the number of beads (and how
+  many were left out) and of the localizations used, and the scatter of the beads about the curve, per
   axis.  That scatter should be close to the beads' own precision
   (`xy_err_nm`); clearly more means the curve is too stiff for the drift
   (a smaller *knot spacing*) or a bead disagrees with the others.
@@ -242,6 +301,8 @@ Based on SMAP's `Drift/driftcorrection_beads`
   together with one spline, so a bead that starts late or is interrupted
   lands where it belongs, and the curve is smooth rather than a running
   mean.
+* SMAP used every bead it found.  Here a bead that disagrees with the
+  others is left out, and any bead can be chosen by hand.
 * The beads are those of the selection; SMAP also offered the sites of the
   ROI manager.  SMAP saved the corrected file itself; here the correction
   is saved with the file like any other.

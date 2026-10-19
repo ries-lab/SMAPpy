@@ -239,5 +239,6 @@ class BeadWindow(QMainWindow):
         self.figure.clear()
         if self.view is not None:
             draw_bead_tracks(self.figure, self.view.beads, self.view.axes,
-                             selected=self.selected, labels=self._labels())
+                             selected=self.selected, labels=self._labels(),
+                             time_unit=self.view.time_unit)
         self.canvas.draw_idle()

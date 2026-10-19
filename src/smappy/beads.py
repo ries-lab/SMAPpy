@@ -30,7 +30,8 @@ of its own error.  From that residual, per bead (`bead_metrics`):
 * *wander* -- the slow part of its residual, ``sqrt(rms^2 - noise^2)``: a
   motion of its own;
 * *jump* -- the largest step between the medians of five points before and
-  five after: a bead lost and found again elsewhere;
+  five after (a fiftieth of the track, if more): a bead lost and found
+  again elsewhere;
 * *coverage* -- the fraction of the beads' time span it was seen in.
 
 **The rule** is the caller's (`Rule`); the default, `MadRule`, calls a
@@ -48,6 +49,8 @@ from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
+
+from .params import param
 
 # the second-difference penalty on the spline, relative to the mean data
 # weight per coefficient (`fiducials`, where it was measured): it bridges a
@@ -132,17 +135,18 @@ def fit_offsets_and_spline(t, positions, index, n_beads: int, lo: float, hi: flo
 
 def _step(r: np.ndarray, window: int = 5) -> float:
     """The largest step between the medians of ``window`` points before and
-    after any point of a residual track (n, n_axes), in nm."""
+    after any point of a residual track (n, n_axes), in nm -- ``window`` at
+    least, or a fiftieth of the track: over the 8000 frames of a fiducial
+    the largest of thousands of five-point differences is noise, not a step.
+    One sliding median, not a loop: 3 s on five such beads became 0.1."""
+    from numpy.lib.stride_tricks import sliding_window_view
     n = len(r)
-    w = min(window, n // 2)
+    w = min(max(window, n // 50), n // 2)
     if w < 2:
         return 0.0
-    best = 0.0
-    for i in range(w, n - w + 1):
-        before = np.median(r[i - w:i], axis=0)
-        after = np.median(r[i:i + w], axis=0)
-        best = max(best, float(np.sqrt(np.sum((after - before) ** 2))))
-    return best
+    medians = np.median(sliding_window_view(r, w, axis=0), axis=-1)   # (n-w+1, axes)
+    steps = medians[w:] - medians[:-w]
+    return float(np.sqrt(np.sum(steps ** 2, axis=1)).max()) if len(steps) else 0.0
 
 
 def bead_metrics(t, residuals, index, n_beads: int) -> Dict[str, np.ndarray]:
@@ -218,6 +222,19 @@ class MadRule:
         return out, ["; ".join(r) for r in reasons]
 
 
+@dataclass
+class RejectionSettings:
+    """`MadRule`'s numbers as a part of a plugin's settings."""
+    k: float = param(3.0, label="robust sigmas", min=0.0,
+                     help="a bead is out where its noise, wander or jump is this "
+                          "many robust standard deviations above the others'")
+    margin_nm: float = param(2.0, label="margin", unit="nm", min=0.0,
+                             help="and above the others' median by at least this")
+    min_beads: int = param(2, label="min beads", min=1, max=100,
+                           help="never fewer beads than this")
+
+
+
 # -------------------------------------------------------------------- choose
 @dataclass
 class BeadSet:
@@ -284,7 +301,9 @@ def _offset(p: np.ndarray, curve: np.ndarray) -> np.ndarray:
 def select_beads(t, positions, bead, names: Optional[Sequence[str]] = None, *,
                  knot: float = 10.0, rule: Optional[Rule] = None,
                  overrides: Optional[Dict[str, bool]] = None, min_beads: int = 2,
-                 max_rounds: int = 10, candidates=None) -> BeadSet:
+                 max_rounds: int = 10, candidates=None,
+                 span: Optional[Tuple[float, float]] = None,
+                 n_coeffs: Optional[int] = None) -> BeadSet:
     """Choose the beads and fit the drift they agree on.
 
     ``t`` (n,) times (s, or frames), ``positions`` (n, n_axes) nm, ``bead``
@@ -293,6 +312,9 @@ def select_beads(t, positions, bead, names: Optional[Sequence[str]] = None, *,
     the units of ``t``; ``rule`` default `MadRule()`; ``overrides`` by name,
     True to use a bead whatever the rule says, False never to; ``candidates``
     (bool per bead) the beads the rule may use at all, default every one.
+    ``span`` (lo, hi) is what the curve covers, zero at lo (default the
+    points' own), and ``n_coeffs`` its coefficients (default one per
+    ``knot`` and three): a caller with a fit of its own to stay equal to.
     """
     t = np.asarray(t, float)
     p = np.asarray(positions, float)
@@ -313,8 +335,8 @@ def select_beads(t, positions, bead, names: Optional[Sequence[str]] = None, *,
     forced_in = np.array([overrides.get(x) is True for x in names])
     forced_out = np.array([overrides.get(x) is False for x in names])
     allowed = np.ones(n, bool) if candidates is None else np.asarray(candidates, bool)
-    lo, hi = float(t.min()), float(t.max())
-    k = n_coefficients(lo, hi, knot)
+    lo, hi = (float(t.min()), float(t.max())) if span is None else map(float, span)
+    k = n_coefficients(lo, hi, knot) if n_coeffs is None else int(n_coeffs)
 
     def fit(use):
         rows = use[index]
@@ -392,6 +414,7 @@ class BeadView:
     where_nm: Optional[np.ndarray] = None
     labels: Optional[List[str]] = None       # the names as the list shows them
     title: str = ""
+    time_unit: str = "s"                      # of ``beads.t``: "s" or "frame"
 
 
 def parse_overrides(text: str) -> Dict[str, bool]:
@@ -453,7 +476,7 @@ def draw_bead_tracks(figure, beads: BeadSet, axes: Sequence[str] = ("x", "y", "z
     grid[0, 0].set_title("beads on the drift (black)", fontsize="medium")
     grid[0, 1].set_title("each bead's deviation", fontsize="medium")
     for col in range(2):
-        grid[-1, col].set_xlabel(f"time ({time_unit})")
+        grid[-1, col].set_xlabel("frame" if time_unit == "frame" else f"time ({time_unit})")
     if selected is not None:
         grid[0, 0].legend(loc="best", fontsize="small")
     return grid

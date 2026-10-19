@@ -34,23 +34,13 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
-from .beads import BeadSet, BeadView, MadRule, format_overrides, parse_overrides, select_beads
+from .beads import (BeadSet, BeadView, MadRule, RejectionSettings, format_overrides,
+                    parse_overrides, select_beads)
 from .drift import REFERENCES, Drift
 from .locs import Localizations
 from .params import param
 
 START = ("Imspector's beads", "all beads")
-
-
-@dataclass
-class RejectionSettings:
-    k: float = param(3.0, label="robust sigmas", min=0.0,
-                     help="a bead is out where its noise, wander or jump is this "
-                          "many robust standard deviations above the others'")
-    margin_nm: float = param(2.0, label="margin", unit="nm", min=0.0,
-                             help="and above the others' median by at least this")
-    min_beads: int = param(2, label="min beads", min=1, max=100,
-                           help="never fewer beads than this")
 
 
 @dataclass
