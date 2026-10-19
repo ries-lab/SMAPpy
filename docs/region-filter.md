@@ -158,10 +158,11 @@ without losing the conditions.
 
 The tree is as deep as the data.  The region table stays flat -- a column
 per number, `cfr_mean`, `cfr_max` -- and a plugin that hands back
-statistics of a quantity says so (`Result.value_groups = {"cfr": ("mean",
-"median", "max")}`, kept in the table's metadata); the tree splits there
+statistics of a quantity says so (`RegionTable.groups = {"cfr": {"mean":
+"cfr_mean", "max": "cfr_max"}}`, saved with the table); the tree splits there
 and nowhere else.  Guessing levels from underscores would split `n_corners`
-and `x_nm`.
+and `x_nm`.  (Built: the groups are the table's own, `RegionTable.groups`,
+saved with it, rather than a field of the result.)
 
 ## Maths on region values: *Math parser*
 
@@ -185,11 +186,12 @@ to column* stays as a small plugin on the same function, for chains.
 A block runs its plugin once per region in Python, so 10^5 traces are
 minutes.  Statistics per id need no loop: a sort by id and a `bincount`
 per quantity (`tracking.analysis.Tracks` already does this for tracks).  So
-plugins that compute every region at once hand back a whole table:
-`Result.region_tables = {source: {label: RegionTable}}`, which `Session.apply`
-stores in `Session.id_regions` (or `ROIProject.tables`) under the label a
-block would give it ("per tid: MINFLUX traces"), so that `region_results`,
-*results from* and the filter's tree find it however it was computed.
+plugins that compute every region at once hand back a whole table in
+`Result.id_regions` (`{column: {label: RegionTable}}`, which existed for
+chains), made by `region_runs.column_table`: signed as a block's run would
+sign it, so that `region_results`, *results from* and the filter's tree find
+it current however it was computed.  *Id statistics*
+(`plugins/id_statistics.py`, "per tid: Id statistics") is the first.
 
 The table itself, measured with four values per region and 20 localizations
 each (this container):
@@ -211,6 +213,11 @@ Fine at 10^5; at 10^6, two fixable things:
 So: a bulk writer from arrays (`RegionTable.from_columns(ids, values,
 step, signature)`), shared strings stored once, `split_ids` without the
 second sort, and a test at 10^6 regions.
+
+Built (steps 1-3): the file at 10^6 regions is 44 MB (the ids and four
+values; it was 236), written in 0.8 s and read in 1.8 s; `split_ids` is
+6.5 s, the stable sort of 2 x 10^7 ids that remains -- *Id statistics*
+does not use it, finding regions by a lookup table on the ids.
 
 ## What moves onto this
 
@@ -244,9 +251,10 @@ and the drift plugins read it.  To be discussed.
 0. This note, and the changes to `docs/regions.md` (below), agreed.  The
    feedback loop fixed, with a test.
 1. Region tables at scale: bulk writer, shared strings, `split_ids`, a test
-   at 10^6 regions.
-2. `Result.region_tables` and `Result.value_groups`.
-3. Statistics per id (`smappy/id_statistics.py` and a plugin): n, the
+   at 10^6 regions.  *Done.*
+2. Whole tables through `Result.id_regions` (`region_runs.column_table`)
+   and the groups of a value (`RegionTable.groups`).  *Done.*
+3. *Done* (*Id statistics*, `Analysis/Measure/Id statistics`).  Statistics per id (`smappy/id_statistics.py` and a plugin): n, the
    standard deviation per axis, extent, first and last time, duration, and
    mean, median and max of chosen columns.  MINFLUX traces first, clusters
    with the same plugin.
@@ -270,6 +278,7 @@ Steps 1-3 stand on their own and can be one change.
 * **"a snapshot until written again"**: no longer true of the flag, nor of
   values written by a recipe; true of *Regions to column*'s columns only.
 * **"Where results live"**: a plugin may hand back a whole table
-  (`Result.region_tables`), stored under the label a block would give it.
+  (`Result.id_regions`, `region_runs.column_table`), stored under the label
+  a block would give it.  *Done.*
 * **A new section, "Filtering regions"**: the combination rules above, and
   the feedback-loop rule.

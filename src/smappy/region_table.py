@@ -7,6 +7,13 @@ for 2000 ROIs, and 130 MB for the 10^5 clusters a clusterer finds.  Here the
 same results are a column per number, so they cost what the numbers do, and
 the file holds them as HDF5 datasets rather than as text.
 
+A table may be made whole, from arrays (`from_columns`), by a plugin that
+measures every region at once -- statistics per trace or per cluster are a
+`bincount` each, where a block's run per region is minutes at 10^5 regions.
+Such a table's rows share one step and one signature; the file writes a
+text column that is the same in every row once (`_UNIFORM`), which at 10^6
+regions was 220 MB of the 236 the file took.
+
 A table is one evaluation, by its name: the rows are the regions it measured,
 each with the values its step returned, the arrays it kept, the step that made
 it (plugin, version, parameters -- a row re-measured with other settings says
@@ -28,6 +35,8 @@ import numpy as np
 # the kind of each value column, for writing it as one dtype and reading the
 # values back as what they were
 KINDS = ("float", "int", "bool", "str")
+# the attribute prefix of a text column that is the same in every row
+_UNIFORM = "all_"
 
 
 def _kind(values: Iterable[Any]) -> str:
@@ -58,6 +67,42 @@ class RegionTable:
         # per row: what the step kept to draw its figure again (plain data),
         # or None (`Plugin.keep`)
         self.kept: List[Optional[Dict[str, Any]]] = []
+        # values that are statistics of one quantity, ``{group: {member:
+        # value name}}`` -- ``{"cfr": {"mean": "cfr_mean", "max": "cfr_max"}}``
+        # -- so a reader can offer them as a level of their own; the values
+        # themselves stay flat columns
+        self.groups: Dict[str, Dict[str, str]] = {}
+
+    @classmethod
+    def from_columns(cls, label: str, ids, values: Dict[str, Any],
+                     step: Optional[Dict[str, Any]] = None, signature: str = "",
+                     data: str = "", groups: Optional[Dict[str, Dict[str, str]]] = None
+                     ) -> "RegionTable":
+        """A table of every region at once: ``ids`` a region each, ``values``
+        an array per column in the same order (NaN where a region has no
+        value, as a step's NaN is kept), ``step`` the record of what made all
+        of them and ``signature`` / ``data`` what `set` takes per row."""
+        table = cls(label)
+        table.ids = [str(int(i)) if isinstance(i, (int, np.integer)) else str(i)
+                     for i in (ids.tolist() if isinstance(ids, np.ndarray) else ids)]
+        table._index = {r: n for n, r in enumerate(table.ids)}
+        n = len(table.ids)
+        if len(table._index) != n:
+            raise ValueError("a region appears twice among the ids")
+        if step is not None:
+            table.steps = [dict(step)]
+        table.step_of = [0 if step is not None else -1] * n
+        table.signatures = [str(signature or "")] * n
+        table.data = [str(data or "")] * n
+        table.errors = [""] * n
+        table.kept = [None] * n
+        for name, column in values.items():
+            column = np.asarray(column)
+            if column.shape != (n,):
+                raise ValueError(f"{name} has {column.shape} values for {n} regions")
+            table.values[name] = column.tolist()
+        table.groups = {g: dict(m) for g, m in (groups or {}).items()}
+        return table
 
     # ---------------------------------------------------------------- rows
     def __len__(self) -> int:
@@ -194,7 +239,8 @@ class RegionTable:
         else:
             wanted = set(map(str, region_ids))
             rows = [i for i, r in enumerate(self.ids) if _belongs(r, wanted)]
-        return {"label": self.label, "ids": [self.ids[i] for i in rows],
+        return {"label": self.label, "groups": self.groups,
+                "ids": [self.ids[i] for i in rows],
                 "steps": self.steps,
                 "step_of": [self.step_of[i] for i in rows],
                 "signatures": [self.signatures[i] for i in rows],
@@ -211,6 +257,7 @@ class RegionTable:
         table.ids = [str(i) for i in doc.get("ids") or []]
         table._index = {r: n for n, r in enumerate(table.ids)}
         n = len(table.ids)
+        table.groups = {str(g): dict(m) for g, m in (doc.get("groups") or {}).items()}
 
         def column(name, default):
             got = list(doc.get(name) or [])
@@ -242,10 +289,17 @@ class RegionTable:
                                                       dtype=np.int64))
         else:
             group.create_dataset("ids", data=np.array(self.ids, dtype=object), dtype=text)
+        if self.groups:
+            group.attrs["groups"] = json.dumps(self.groups)
         group.create_dataset("step_of", data=np.asarray(self.step_of, dtype=np.int32))
         for name in ("signatures", "data", "errors"):
             column = getattr(self, name)
-            if any(column):
+            if column and column.count(column[0]) == len(column):
+                # one value for every row (a table made whole): an attribute,
+                # 64 bytes where a dataset is ~100 per row
+                if column[0]:
+                    group.attrs[_UNIFORM + name] = column[0]
+            elif any(column):
                 group.create_dataset(name, data=np.array(column, dtype=object),
                                      dtype=text)
         if any(k is not None for k in self.kept):
@@ -263,13 +317,12 @@ class RegionTable:
                     name, data=np.array(["" if v is None else v for v in column],
                                         dtype=object), dtype=text)
             else:
-                ds = values.create_dataset(
-                    name, data=np.array([np.nan if v is None else float(v)
-                                         for v in column], dtype=float))
+                # None becomes NaN here, numpy's own conversion
+                ds = values.create_dataset(name, data=np.array(column, dtype=float))
             ds.attrs["kind"] = kind
-            gone = np.array([v is None for v in column], dtype=bool)
-            if gone.any():
-                missing.create_dataset(name, data=gone)
+            if None in column:
+                missing.create_dataset(name, data=np.array([v is None for v in column],
+                                                           dtype=bool))
         arrays = group.create_group("arrays")
         for name, column in self.arrays.items():
             flat = [np.asarray(a, dtype=float).ravel() if a is not None else np.zeros(0)
@@ -295,11 +348,14 @@ class RegionTable:
         table._index = {r: n for n, r in enumerate(table.ids)}
         n = len(table.ids)
         table.steps = json.loads(group.attrs.get("steps", "[]"))
+        table.groups = json.loads(group.attrs.get("groups", "{}"))
         table.step_of = [int(k) for k in group["step_of"][()]] if "step_of" in group \
             else [-1] * n
         for name in ("signatures", "data", "errors"):
             got = strings(name)
-            setattr(table, name, got if len(got) == n else [""] * n)
+            if len(got) != n:
+                got = [str(group.attrs.get(_UNIFORM + name, ""))] * n
+            setattr(table, name, got)
         kept = strings("kept")
         table.kept = ([json.loads(k) if k else None for k in kept] if len(kept) == n
                       else [None] * n)
@@ -308,9 +364,16 @@ class RegionTable:
             missing = (group["missing"][name][()] if "missing" in group
                        and name in group["missing"] else np.zeros(n, bool))
             raw = ds.asstr()[()] if kind == "str" else ds[()]
-            cast = {"int": int, "bool": bool, "str": str}.get(kind, float)
-            table.values[name] = [None if gone else cast(v)
-                                  for v, gone in zip(raw, missing)]
+            if kind in ("int", "bool"):
+                # a missing value is NaN on disk, which no integer holds
+                raw = np.where(missing, 0, raw).astype(np.int64 if kind == "int" else bool)
+            column = raw.tolist()               # Python values, in one pass
+            if kind == "str":
+                column = [str(v) for v in column]
+            if missing.any():
+                for i in np.flatnonzero(missing).tolist():
+                    column[i] = None
+            table.values[name] = column
         for name, sub in group.get("arrays", {}).items():
             values, offsets = sub["values"][()], sub["offsets"][()]
             present = sub["present"][()]

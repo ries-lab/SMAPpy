@@ -130,7 +130,7 @@ the result is made, where a misspelt key of `data` used to do nothing:
 | `rois` | the ROIs the run added to the ROI manager's project (`[]` when it found none; None when it adds none): the manager redraws and a preview is dropped |
 | `roi_preview` | a segmenter's proposals, drawn grey and not added (`Session.show_preview`) |
 | `roi_project` | the whole ROI project as a chain left it, loaded into the session's |
-| `id_regions` | what was measured per region of an id column, added to `Session.id_regions` |
+| `id_regions` | what was measured per region of an id column, `{column: {name: RegionTable}}`, added to `Session.id_regions`; a plugin that measures every region at once makes its table with `region_runs.column_table`, signed as a block's run would be, so it reads as current (`plugins/id_statistics.py`) |
 | `region_tables` | a block's tables per region, kept by a block around it as its region's children |
 | `evaluations` | `(name, plugin path)` of the evaluations the run left, so a later step of a chain reads them without asking |
 | `placements` | `{layer index: 3x3 affine}`, image layers moved (`ImageData.placement`, nm): *Transform*'s image target, one undo step and a log line like a table change |

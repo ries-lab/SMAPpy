@@ -116,6 +116,8 @@ papers and in other software.
 * **MINFLUX**: localization by a doughnut of light moved around each
   molecule, to a few nanometres with few photons; Abberior's microscopes
   record it with no camera, so a localization has a time and no frame.
+* **trace** (MINFLUX's `tid`): the localizations of one molecule measured
+  in a row, before the microscope moves on to the next.
 * **MBM** (beam-line monitoring): a MINFLUX microscope's few fixed beads,
   measured every couple of seconds during the acquisition; Imspector
   subtracts their mean displacement from every localization.
@@ -135,6 +137,11 @@ papers and in other software.
   -- drawn in the view, or found or drawn in the ROI manager.
 * **region**: a set of localizations measured together -- an ROI, or a
   cluster that an id column such as `cluster_id` names.
+* **id column**: a column of whole numbers that names regions, the
+  localizations sharing a value above 0 being one region -- `cluster_id`,
+  `tid`, `track_id`.
+* **region table**: what was measured in a set of regions, a row per region
+  and a column per number.
 * **per-region steps**: plugins run once in every region, what each measures
   kept as that region's row.
 * **cluster**: localizations that lie closer to each other than to the rest.

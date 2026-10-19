@@ -115,8 +115,9 @@ def split_ids(ids) -> Tuple[np.ndarray, List[np.ndarray]]:
     if not len(order):
         return np.zeros(0, ids.dtype), []
     cuts = np.flatnonzero(np.diff(ordered)) + 1
-    groups = np.split(order, cuts)
-    return ordered[np.r_[0, cuts]], [np.sort(g) for g in groups]
+    # the sort is stable, so each region's rows are already in table order:
+    # sorting them again cost 2 s of 9 at 10^6 regions
+    return ordered[np.r_[0, cuts]], np.split(order, cuts)
 
 
 class ColumnRegions:
@@ -405,6 +406,24 @@ def column_inputs(locs: Localizations, column: str, layer: int = 0,
         out["layers"] = [_layer_inputs(lay) for lay in session.layers
                          if not lay.is_image]
     return out
+
+
+def column_table(locs: Localizations, column: str, label: str, ids, values,
+                 step: Dict[str, Any], layer: int = 0, session=None,
+                 groups=None) -> RegionTable:
+    """A table of every region of ``column`` at once, signed as a block's run
+    of ``step`` would sign it (`evaluate_regions`): what a plugin that
+    measures all regions in one pass hands back (`Result.id_regions`), so
+    that `region_results` finds it current, and *results from* offers it,
+    however it was computed.  ``step`` is a record as `Step.as_record` makes
+    it; ``ids`` and ``values`` as `RegionTable.from_columns` takes them."""
+    import json
+    from .roi_manager.core import digest, json_text
+    inputs = column_inputs(locs, column, layer, session)
+    data = digest(json.loads(json_text(inputs)))
+    identity = {k: v for k, v in step.items() if k != "label"}
+    signature = digest({"inputs": inputs, "step": identity})
+    return RegionTable.from_columns(label, ids, values, step, signature, data, groups)
 
 
 def _hash(a: np.ndarray) -> str:
