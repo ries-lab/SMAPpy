@@ -16,6 +16,7 @@ from .filter import LocFilter
 from .group import GROUP_COLUMNS, GroupSettings
 from .images import ImageData, load_images
 from .locs import KEPT_BOUNDS, Localizations, concat
+from .region_runs import REGION_FILTER as REGION_FILTER_COLUMN
 from .metadata import frame_time_ms
 from .plugins import Context, Plugin, Result, Selection, refuse_grouped_table
 from .io.formats import FileInfo, load as load_any, own_metadata
@@ -354,6 +355,10 @@ class Session:
         # `cluster_id`): column -> evaluation name -> `RegionTable`.  Read
         # from the file on first use, as the ROI project is.
         self._id_regions = None
+        # the region filter's last answer and what it was of (`refresh_region_filter`)
+        from .region_filter import Outcome
+        self._region_outcome = (None, Outcome())
+        self._refreshing = False
         self.slab: Optional[Slab] = None          # the 3D view's volume
         self.slab_follows_roi = True              # the 2D ROI sets its footprint
         self.select_in_slab = False               # plugins see only the slab
@@ -452,6 +457,10 @@ class Session:
             self._listeners.remove(callback)
 
     def changed(self, what: str) -> None:
+        # the region filter's flag follows the table, the ROIs and their
+        # results before anyone draws them (`region_filter`)
+        if what in ("locs", "rois", "append"):
+            self.refresh_region_filter()
         # before anyone hears of the images, so a list of sources shows the
         # one a waiting layer has just taken
         filled = what == "images" and self._fill_empty_image_layers()
@@ -1408,6 +1417,102 @@ class Session:
             self._rois.sync()
         return self._rois
 
+    # ------------------------------------------------------ region filter
+    @property
+    def region_filter(self) -> list:
+        """The region filter's conditions (`region_filter.Condition`), as the
+        table carries them."""
+        from .region_filter import conditions
+        return conditions(self.locs)
+
+    def set_region_filter(self, found) -> None:
+        """Filter on ``found``, a list of conditions -- empty to filter on
+        nothing.  The flag is written and, the first time, a bound on it put
+        on every layer and kept with the table (`KEPT_BOUNDS`), so a saved
+        file opens filtered; with nothing left, both go.  Not a table change:
+        no undo step, as an ROI's edit makes none."""
+        from .region_filter import store
+        from .region_runs import REGION_FILTER
+        if not self.recording and not self._live:
+            # a chain's copy shares the table with the session it came from
+            # (`scratch`): the filter goes into a table of its own, and back
+            # to that session as the chain's result
+            self.set_locs(Localizations(dict(self.locs.columns), dict(self.locs.metadata)),
+                          undoable=False, keep_layers=True)
+        had = bool(self.region_filter)
+        store(self.locs, list(found))
+        self.refresh_region_filter(force=True)
+        kept = dict(self.locs.metadata.get(KEPT_BOUNDS) or {})
+        if found and not had:
+            kept[REGION_FILTER] = [0.5, None]
+            for layer in self.layers:
+                if not layer.is_image:
+                    layer.set_bound(REGION_FILTER, 0.5, None)
+        elif not found and had:
+            kept.pop(REGION_FILTER, None)
+            for layer in self.layers:
+                if not layer.is_image:
+                    layer.remove_bound(REGION_FILTER)
+        if kept:
+            self.locs.metadata[KEPT_BOUNDS] = kept
+        else:
+            self.locs.metadata.pop(KEPT_BOUNDS, None)
+        self.set_unsaved(True)
+        self.changed("region_filter")
+        self.changed("locs")
+
+    def region_filter_outcome(self):
+        """What the conditions give now (`region_filter.Outcome`): the
+        regions each source keeps, the counts, the warnings."""
+        self.refresh_region_filter()
+        return self._region_outcome[1]
+
+    def refresh_region_filter(self, force: bool = False) -> None:
+        """Write the flag again if anything it depends on moved -- the table,
+        the conditions, a region table, an ROI -- and only then: this runs on
+        every change of the table or the ROIs."""
+        from .region_filter import Outcome, conditions, evaluate, remember_ids, write
+        if getattr(self, "_refreshing", True):     # also: not yet made
+            return
+        found = conditions(self.locs)
+        if not found:
+            if self._region_outcome[1].flag is not None or REGION_FILTER_COLUMN in self.locs:
+                write(self, Outcome())
+            self._region_outcome = (None, Outcome())
+            return
+        key = self._region_filter_key(found)
+        if not force and self._region_outcome[0] == key:
+            return
+        self._refreshing = True
+        try:
+            outcome = evaluate(self, found)
+            write(self, outcome)
+            remember_ids(self, outcome)
+        finally:
+            self._refreshing = False
+        self._region_outcome = (self._region_filter_key(found), outcome)
+
+    def _region_filter_key(self, found):
+        """What the flag depends on, cheaply: the table, the conditions, the
+        tables they read and, for the ROIs, each one's place and results."""
+        import json
+        from .chain import BLOCK_ROIS
+        parts = [id(self.locs), len(self.locs), json.dumps([c.to_dict() for c in found])]
+        for c in found:
+            if c.source == BLOCK_ROIS:
+                project = self.rois
+                table = project.tables.get(c.label)
+                parts.append(("rois", c.label, id(table),
+                              None if table is None else tuple(table.signatures),
+                              tuple((r.id, r.use, tuple(r.center), id(r.polygon), r.file_id)
+                                    for r in project.rois.values())))
+            else:
+                table = (self.id_regions.get(c.source) or {}).get(c.label)
+                parts.append((c.source, c.label, id(table),
+                              None if table is None else (len(table), tuple(table.data[:1])),
+                              id(self.locs[c.source]) if c.source in self.locs else None))
+        return tuple(parts)
+
     @property
     def id_regions(self) -> Dict[str, Dict[str, Any]]:
         """What was measured per region of an id column: ``{column: {name:
@@ -1826,6 +1931,9 @@ class Session:
             for column, tables in result.id_regions.items():
                 self.id_regions.setdefault(column, {}).update(tables)
             self.changed("rois")
+        if result.region_filter is not None:
+            from .region_filter import Condition
+            self.set_region_filter([Condition.from_dict(c) for c in result.region_filter])
         elif result.rois is not None:
             # a segmenter added ROIs to the project it was handed; the
             # manager draws them, and what a preview proposed is now either

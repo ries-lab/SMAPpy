@@ -212,10 +212,11 @@ class ColumnRegions:
             return ({0: {"ungrouped": (locs, Selection.all(len(rows))),
                          "shows": "ungrouped"}}, rows, 0, None)
         pinned = {}
+        skip = unmeasured(self.locs)
         for i, lay in enumerate(self.session.layers):
             if lay.is_image:
                 continue
-            mask = np.asarray(lay.selection(i).mask, dtype=bool)
+            mask = np.asarray(lay.selection(i, skip).mask, dtype=bool)
             entry = {"ungrouped": (locs, Selection(mask[rows], layer=i,
                                                    name=f"{lay.name}, {name}"))}
             grouped = self._grouped_rows(i, lay, rows)
@@ -240,7 +241,8 @@ class ColumnRegions:
         if i not in self._grouped:
             gid = np.asarray(locset.locs["group_id"])
             order = np.argsort(gid, kind="stable")
-            mask = np.asarray(lay.state.filter_for(locset).mask, dtype=bool)
+            mask = np.asarray(lay.state.filter_for(locset).mask_without(
+                *unmeasured(self.locs)), dtype=bool)
             self._grouped[i] = (locset.locs, mask, (gid[order], order))
         table, mask, (sorted_ids, order) = self._grouped[i]
         wanted = np.unique(np.asarray(self.locs["group_id"])[rows])
@@ -399,7 +401,7 @@ def column_inputs(locs: Localizations, column: str, layer: int = 0,
     positions = [np.round(np.asarray(locs[c])[sample].astype(float), 3).tolist()
                  for c in ("x_nm", "y_nm") if c in locs]
     ids = np.ascontiguousarray(np.asarray(locs[column]))
-    written = set(locs.metadata.get(REGION_COLUMNS) or {})
+    written = set(unmeasured(locs))
     out = {"rows": n, "columns": sorted(c for c in locs.keys() if c not in written),
            "positions": positions, "column": column, "ids": _hash(ids), "layer": layer}
     if session is not None:
@@ -431,10 +433,27 @@ def _hash(a: np.ndarray) -> str:
     return hashlib.sha256(memoryview(np.ascontiguousarray(a)).cast("B")).hexdigest()
 
 
+#: the column the region filter writes (`region_filter.py`): which
+#: localizations are in a region that passes
+REGION_FILTER = "region_filter"
+
+
+def unmeasured(locs) -> Tuple[str, ...]:
+    """The fields whose bounds a region's measurement neither reads nor
+    counts among its inputs: `REGION_FILTER` and the columns written from
+    region results (`REGION_COLUMNS`).  A filter on a result, applied while
+    the result is measured again, would empty the regions that failed it --
+    their values NaN, and the next pass would drop them for good: the
+    filter rewriting what it filters on (`docs/region-filter.md`)."""
+    return tuple(sorted(set(locs.metadata.get(REGION_COLUMNS) or {}) | {REGION_FILTER}))
+
+
 def _layer_inputs(lay) -> Dict[str, Any]:
     """A layer's part of what a region's results depend on: its bounds, and
-    -- while it shows the grouped table -- the bounds that table can take."""
-    ranges = lay.ranges
+    -- while it shows the grouped table -- the bounds that table can take;
+    not those on what is written from region results (`unmeasured`)."""
+    skip = set(unmeasured(lay.state.tables.locs))
+    ranges = {f: b for f, b in lay.ranges.items() if f not in skip}
     grouped = lay.state.tables.peek_grouped() if lay.grouped else None
     return {"filters": {f: b for f, b in ranges.items() if f in lay.state.tables.locs},
             "grouped_filters": None if grouped is None else

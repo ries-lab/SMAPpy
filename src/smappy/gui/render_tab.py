@@ -145,6 +145,15 @@ class FilterWidget(QWidget):
         field_row.addWidget(self.field)
         self.count = QLabel("")
         field_row.addWidget(self.count, 1, Qt.AlignRight)
+        # the region filter on this layer or off (`region_filter`): on by
+        # default, so seeing everything is a click away without losing the
+        # conditions; shown only while there are some
+        self.regions = QToolButton(text="regions", checkable=True)
+        self.regions.setToolTip("this layer shows only the regions the Regions "
+                                "tab's region filter keeps; untick to see all")
+        self.regions.toggled.connect(self._on_regions)
+        self.regions.hide()
+        field_row.addWidget(self.regions)
         layout.addLayout(field_row)
 
         # for the file column: names to tick, not a histogram
@@ -366,11 +375,33 @@ class FilterWidget(QWidget):
             if n < len(f):
                 text += f", {n} in view"
         self.count.setText(text)
+        self._show_regions()
         bounded = set(f.ranges)
         for n, b in self.quick.items():
             b.setStyleSheet("font-weight: bold" if n in bounded and
                             f.ranges[n] != (None, None) else "")
         self._mark_bounded()
+
+    def _show_regions(self) -> None:
+        from ..region_runs import REGION_FILTER
+        filtered = (self.session is not None and self.layer is not None
+                    and bool(self.session.region_filter))
+        self.regions.setVisible(filtered)
+        if filtered:
+            self.regions.blockSignals(True)
+            self.regions.setChecked(REGION_FILTER in self.layer.ranges)
+            self.regions.blockSignals(False)
+
+    def _on_regions(self, on: bool) -> None:
+        from ..region_runs import REGION_FILTER
+        if self.layer is None:
+            return
+        if on:
+            self.layer.set_bound(REGION_FILTER, 0.5, None)
+        else:
+            self.layer.remove_bound(REGION_FILTER)
+        self._show_field()
+        self.changed.emit()
 
     # ------------------------------------------------------------ editing
     def _apply(self, lo: Optional[float], hi: Optional[float]) -> None:

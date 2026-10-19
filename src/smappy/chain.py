@@ -554,6 +554,7 @@ class ChainPlugin(Plugin):
         written = None
         images = None
         rois_before = _roi_signature(session)
+        filter_before = [c.to_dict() for c in session.region_filter]
         made: List[Tuple[str, str]] = []  # (name, evaluator) of the chain's evaluations
         stopped = False
         for key, step, cls in self.steps:
@@ -634,6 +635,11 @@ class ChainPlugin(Plugin):
                       roi_project=(session.roi_state()
                                    if _roi_signature(session) != rois_before else None),
                       id_regions=session.id_regions if session._id_regions else {},
+                      # the region filter a step set, which the chain's copy
+                      # keeps in a table of its own (`Session.set_region_filter`)
+                      region_filter=(None if [c.to_dict() for c in session.region_filter]
+                                     == filter_before
+                                     else [c.to_dict() for c in session.region_filter]),
                       settings=settings,
                       log={"steps": [{k: v for k, v in r.items() if k != "key"}
                                      for r in records]})

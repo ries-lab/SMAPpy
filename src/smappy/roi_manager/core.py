@@ -990,11 +990,13 @@ class ROIProject:
         layer (`_region_tables`), so a filter changed on any of them makes
         its numbers out of date."""
         state = self.state(roi.file_id)
+        from ..region_runs import _layer_inputs, unmeasured
+        skip = set(unmeasured(self.session.locs))
         out = {"source": self.sources[roi.file_id].fingerprint,
-               "geometry": self.geometry(roi), "filters": state.filter.ranges,
+               "geometry": self.geometry(roi),
+               "filters": {f: b for f, b in state.filter.ranges.items() if f not in skip},
                "grouped": self.grouped,
                "group_settings": asdict(self.group_settings) if self.grouped else None}
-        from ..region_runs import _layer_inputs
         out["layers"] = [_layer_inputs(lay) for lay in self.session.layers
                          if not lay.is_image]
         return out
@@ -1706,9 +1708,9 @@ class ROIProject:
         changes nothing it was measured on, and used to make the very
         evaluation it came from out of date.
         """
-        from ..region_runs import REGION_COLUMNS
+        from ..region_runs import unmeasured
         locs = self.session.locs
-        written = set(locs.metadata.get(REGION_COLUMNS) or {})
+        written = set(unmeasured(locs))
         names = sorted((set(locs.columns) - written) | set(BOOKKEEPING))
         if not len(locs):
             return digest([0, names])
@@ -1818,10 +1820,14 @@ class ROIProject:
         locs = session.locs[rows]
         tables = {}
         where = self.describe(roi)
+        # not the region filter, nor bounds on values written from regions:
+        # an ROI is measured whatever its results (`region_runs.unmeasured`)
+        from ..region_runs import unmeasured
+        skip = unmeasured(session.locs)
         for i, lay in enumerate(session.layers):
             if lay.is_image:
                 continue
-            mask = np.asarray(lay.selection(i).mask, dtype=bool)
+            mask = np.asarray(lay.selection(i, skip).mask, dtype=bool)
             entry = {"ungrouped": (locs, Selection(mask[rows], layer=i, roi=region,
                                                    name=f"{lay.name}, {where}"))}
             locset = locsets[i]
@@ -1829,7 +1835,8 @@ class ROIProject:
                 keep = self._file_mask(locset.locs, source.number)
                 g = self._blinks(roi, region, locset, keep, rows)
                 entry["grouped"] = (locset.locs[g], Selection(
-                    np.asarray(lay.state.filter_for(locset).mask, dtype=bool)[g],
+                    np.asarray(lay.state.filter_for(locset).mask_without(*skip),
+                               dtype=bool)[g],
                     layer=i, roi=region, name=f"{lay.name}, blinks merged, {where}"))
             tables[i] = entry
         layer = min(self.layer, len(session.layers) - 1)

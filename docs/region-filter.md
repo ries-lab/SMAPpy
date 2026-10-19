@@ -260,6 +260,17 @@ and the drift plugins read it.  To be discussed.
    with the same plugin.
 4. The region filter: session state and `region_filter`, the panel, the
    Render tab's button, the plugin for chains; *Filter ROIs* folded in.
+   *Done*, with step 0's feedback loop closed (`region_runs.unmeasured`).
+   As built: the conditions are kept in the table's metadata (`KEY`), not
+   in a separate session state, so a plugin's new table, an undo and a
+   saved file carry them; a plugin hands them back as
+   `Result.region_filter`, and a chain's copy keeps them in a table of its
+   own and forwards them.  The pass column is not written into the region
+   tables: `region_results.rows` asks the filter which regions pass, so a
+   table measured again is never out of step with it.  The regions of the
+   ROIs are every ROI, *use* among the annotations to filter on.  *Filter
+   ROIs* stays as it was -- it sets *use*, which ROIs are measured at all --
+   and its conditions on ROIs are now also the region filter's.
 5. *Math parser* on region sources, aliases, *to localization table*.
 6. Clients: Tracking analysis per track, Stability per bead, MINFLUX DCR per
    trace; beads once decided.

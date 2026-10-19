@@ -594,6 +594,14 @@ The upper bound; empty is none.
 ### clear
 Removes the bounds on the column shown.
 
+### regions
+Shown while the Regions tab's [region filter](plugin:Analysis/Regions/Filter regions)
+has conditions, and ticked: the layer shows only the localizations of the
+regions that pass them.  Untick it to see every localization of this layer
+again without losing the conditions; tick it to filter again.  It is the
+layer's bound on the `region_filter` column, which is why it is per layer --
+one layer filtered beside one that is not shows what the filter takes away.
+
 ### all
 Ticks every file.
 

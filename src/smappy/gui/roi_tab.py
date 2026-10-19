@@ -138,6 +138,14 @@ class ROIHeader(QWidget):
         section.help_requested.connect(self._steps_help)
         layout.addWidget(section)
 
+        # ------------------------------------------------- region filter
+        # what was measured per region, kept or dropped by its values; the
+        # flag every layer honours (`region_filter`)
+        from .region_filter_panel import RegionFilterPanel
+        self.region_filter = RegionFilterPanel(session)
+        layout.addWidget(CollapsibleSection("region filter", self.region_filter,
+                                            expanded=False, major=True))
+
         session.on_change(self._on_session)
         self.refresh(files_changed=True)
 

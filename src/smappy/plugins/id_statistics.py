@@ -189,7 +189,9 @@ class IdStatistics(Plugin):
             i = ctx.layer
             if session.layers[i].is_image:
                 i = session.first_locs_layer()
-            mask = np.asarray(session.layers[i].selection(i).mask, dtype=bool)
+            from ..region_runs import unmeasured
+            mask = np.asarray(session.layers[i].selection(i, unmeasured(ctx.locs)).mask,
+                              dtype=bool)
             if len(mask) == len(ctx.locs):
                 return mask
         return np.asarray(ctx.selection.mask, dtype=bool)
