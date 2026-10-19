@@ -22,11 +22,27 @@ measurement's archive, a few tens of ms per measurement, but decodes no
 records -- and `load` reads measurements into one table.  The GUI asks which
 (`gui.dialogs.MsrImportDialog`); headless, `load(path)` reads all of them,
 one after another in time (`merge`).
+
+**The beads.**  Imspector keeps each MBM bead's track, a point every couple
+of seconds, in ``zarr/grd/mbm/points``, and corrects the localizations by
+the mean displacement of the used beads: ``loc = lnc - mean_b (bead_b(t) -
+bead_b(t_0))``, interpolated to each localization's time.  Checked on a 3D
+measurement of four beads (2026-10): that reconstruction leaves 1.3 / 1.6 /
+0.08 nm rms in x / y / z of a correction that itself varies by 6 / 11 / 2.6
+nm.  Some files keep only the first points, before the measurement starts
+(seen on a file of 2026-06), and then ``loc - lnc`` is a constant.  So a
+bad bead moves every localization by its share of the mean, and correcting
+again needs the tracks: `bead_table` makes them a table of their own, a
+second file beside the measurement's (``load(..., beads=True)``), with no
+column the localizations do not have -- a bead's id is ``tid``, its
+brightness ``photons``, its precision ``xy_err_nm`` -- so that opening it
+beside them pads nothing.  The two are paired by `mbm_key`.
 """
 from __future__ import annotations
 
 import json
 import re
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -175,9 +191,20 @@ def _beads(files: Dict[str, bytes]) -> Dict[str, Any]:
         by_gri = zarr_lite.attrs(files, node).get("points_by_gri") or {}
         out["beads"] = [{"name": b.get("name"), "gri": b.get("gri"),
                          "used": bool(b.get("used")),
-                         "position_nm": [round(v * 1e9, 3) for v in b.get("position") or []]}
+                         "position_nm": [round(v * 1e9, 3) for v in b.get("position") or []],
+                         # Imspector's own view of the bead: its precision
+                         # (m), whether it is tracked, and how often it was lost
+                         "sigpos_nm": _nm(b.get("sigpos")),
+                         "state": b.get("state"), "times_failed": b.get("times_failed")}
                         for b in by_gri.values()]
     return out
+
+
+def _nm(metres) -> Optional[float]:
+    try:
+        return round(float(metres) * 1e9, 4)
+    except (TypeError, ValueError):
+        return None
 
 
 def _roi(files: Dict[str, bytes]) -> List[Dict[str, Any]]:
@@ -251,6 +278,117 @@ def merge(tables: Sequence[Localizations], metas: Sequence[Dict[str, Any]]) -> L
     return out
 
 
+def bead_table(metas: Sequence[Dict[str, Any]]) -> Optional[Localizations]:
+    """The MBM beads of measurements read together, a row per recorded point.
+
+    On the localizations' clock: each measurement's ``time_offset_s`` (`merge`)
+    is added, so a bead and the localizations it corrected share ``time_s``.
+    z gets the measurement's *z scale*, as the localizations do, and is left
+    out of a 2D measurement, whose beads' z Imspector does not track.  A
+    bead's id (``tid``, from 1) is renumbered per measurement: Imspector's
+    ``gri`` is a slot -- R0 is gri 61 in every measurement, and in two
+    measurements of one file it was two beads 20 um apart -- so one ``gri``
+    is not one bead.  ``frame`` is the rank in time, as in the localizations.
+    Each bead's name, slot, use and Imspector's numbers go in
+    ``metadata["mbm_beads"]``.  None if no measurement recorded a bead.
+    """
+    parts, beads, next_id = [], [], 1
+    three_d = any(m.get("dimensionality") == 3 for m in metas)
+    for k, meta in enumerate(metas):
+        mbm = meta.get("mbm") or {}
+        points = mbm.get("points") or {}
+        if not points.get("gri"):
+            continue
+        gri = np.asarray(points["gri"], np.int64)
+        known = {int(b["gri"]): b for b in mbm.get("beads") or [] if b.get("gri") is not None}
+        used = set(mbm.get("used") or [])
+        slots = np.unique(gri)
+        ids = next_id + np.searchsorted(slots, gri)
+        columns = {"x_nm": np.asarray(points["x_nm"], np.float64),
+                   "y_nm": np.asarray(points["y_nm"], np.float64),
+                   "time_s": (np.asarray(points["time_s"], np.float64)
+                              + float(meta.get("time_offset_s", 0.0))),
+                   "tid": ids.astype(np.int64),
+                   "photons": np.asarray(points.get("strength", np.full(len(gri), np.nan)),
+                                         np.float64)}
+        if three_d:
+            columns["z_nm"] = (np.asarray(points["z_nm"], np.float64)
+                               * float(meta.get("z_scale", 1.0)))
+        err = np.full(len(gri), np.nan)
+        for j, slot in enumerate(slots):
+            b = known.get(int(slot), {})
+            if b.get("sigpos_nm"):
+                err[gri == slot] = b["sigpos_nm"]
+            beads.append({"tid": int(next_id + j), "name": b.get("name"), "gri": int(slot),
+                          "used": (bool(b["used"]) if "used" in b
+                                   else (b.get("name") in used if b.get("name") else None)),
+                          "measurement": k, "label": meta.get("label"),
+                          "position_nm": b.get("position_nm"),
+                          "sigpos_nm": b.get("sigpos_nm"), "state": b.get("state"),
+                          "times_failed": b.get("times_failed")})
+        columns["xy_err_nm"] = err
+        if len(metas) > 1:
+            columns["measurement"] = np.full(len(gri), k, np.int16)
+        parts.append(Localizations(columns, {}))
+        next_id += len(slots)
+    if not parts:
+        return None
+    out = concat(parts) if len(parts) > 1 else parts[0]
+    order = np.argsort(out["time_s"], kind="stable")
+    columns = {c: np.asarray(v)[order] for c, v in out.columns.items()}
+    columns["frame"] = np.arange(len(order), dtype=np.int64)
+    return Localizations(columns, {"units": "nm", "mbm_beads": beads})
+
+
+def mbm_key(info) -> Optional[Tuple[str, Tuple[str, ...], bool]]:
+    """What pairs a measurement's localizations with its beads: the file's
+    path, the measurements' ids (``did``), and whether it is the beads.
+
+    Never the file's number or its name, which change as files are added,
+    removed or renamed; the path and the ids are what the two were read from.
+    None for a file that is neither.
+    """
+    meta = getattr(info, "metadata", None) or {}
+    of = meta.get("mbm_of")
+    if of:
+        return str(Path(of["path"])), tuple(of["measurements"]), True
+    measurements = (meta.get("minflux") or {}).get("measurements") \
+        if isinstance(meta.get("minflux"), dict) else None
+    if measurements:
+        return (str(Path(info.path)), tuple(m.get("did", "") for m in measurements), False)
+    return None
+
+
+def mbm_partner(files: Sequence[Any], number: int) -> Optional[int]:
+    """The number of the file paired with file ``number``: a measurement's
+    bead file, or a bead file's measurement; None if it is not open."""
+    key = mbm_key(files[number]) if 0 <= number < len(files) else None
+    if key is None:
+        return None
+    for k, other in enumerate(files):
+        theirs = mbm_key(other)
+        if k != number and theirs is not None and theirs[:2] == key[:2] \
+                and theirs[2] != key[2]:
+            return k
+    return None
+
+
+# What `_read` made of the last few loads: a bead file asked for after its
+# measurement (the GUI's queue opens them one after the other) takes the
+# offsets from here rather than decoding the records a second time.
+_METAS: "OrderedDict[tuple, List[Dict[str, Any]]]" = OrderedDict()
+
+
+def _metas_key(path: Path, chosen: Sequence[Measurement], valid_only: bool,
+               z_scale: float) -> tuple:
+    try:
+        stamp = path.stat().st_mtime_ns
+    except OSError:
+        stamp = None
+    return (str(path), stamp, tuple(m.did or m.number for m in chosen), valid_only,
+            float(z_scale))
+
+
 def select(found: Contents, measurements=None) -> List[Measurement]:
     """The measurements named: None or "" all; otherwise numbers (from 1),
     labels or dids, or a regular expression matched against the labels --
@@ -278,12 +416,21 @@ def select(found: Contents, measurements=None) -> List[Measurement]:
 
 
 def _read(path: Path, found: Contents, chosen: Sequence[Measurement], valid_only: bool,
-          z_scale: float, progress=None):
+          z_scale: float, progress=None, beads: bool = False):
     from .formats import FileInfo
     if not chosen:
         raise ValueError(f"{path.name} holds no MINFLUX measurement"
-                         + (f" (it has {len(found.images)} images: File > Open)"
+                         + (f" (it has {len(found.images)} images: File > Open image)"
                             if found.images else ""))
+    key = _metas_key(path, chosen, valid_only, z_scale)
+    if len(chosen) == 1:
+        name = f"{path.stem}: {chosen[0].label}" if len(found.measurements) > 1 else path.name
+    elif len(chosen) == len(found.measurements):
+        name = path.name
+    else:
+        name = f"{path.stem}: {len(chosen)} measurements"
+    if beads and key in _METAS:
+        return _bead_file(path, name, _METAS[key])
     tables, metas = [], []
     for m in chosen:
         if progress:
@@ -292,36 +439,59 @@ def _read(path: Path, found: Contents, chosen: Sequence[Measurement], valid_only
         tables.append(locs)
         metas.append(meta)
     locs = merge(tables, metas) if len(tables) > 1 else tables[0]
+    _METAS[key] = metas
+    while len(_METAS) > 8:
+        _METAS.popitem(last=False)
+    if beads:
+        return _bead_file(path, name, metas)
     locs.metadata = {**locs.metadata, "minflux": {"measurements": metas}}
-    if len(chosen) == 1:
-        name = f"{path.stem}: {chosen[0].label}" if len(found.measurements) > 1 else path.name
-    elif len(chosen) == len(found.measurements):
-        name = path.name
-    else:
-        name = f"{path.stem}: {len(chosen)} measurements"
     return locs, FileInfo(name, str(path), "Abberior MSR", pixelsize_nm=100.0,
                           metadata={"minflux": {"measurements": metas}})
 
 
+def _bead_file(path: Path, name: str, metas: Sequence[Dict[str, Any]]):
+    from .formats import FileInfo
+    table = bead_table(metas)
+    if table is None:
+        raise ValueError(f"{name}: no MBM beads recorded")
+    of = {"path": str(path), "measurements": [m.get("did", "") for m in metas],
+          "labels": [m.get("label") for m in metas]}
+    table.metadata.update({"source": str(path), "mbm_of": of})
+    return table, FileInfo(f"{name} (MBM beads)", str(path), "Abberior MSR",
+                           pixelsize_nm=100.0,
+                           metadata={"mbm_of": of, "mbm_beads": table.metadata["mbm_beads"]})
+
+
 def load(path, measurements=None, valid_only: bool = True, z_scale: float = 1.0,
-         progress=None):
+         progress=None, beads: bool = False):
     """The measurements chosen (`select`; all by default) as one table, and
-    its `FileInfo`.  Several are joined by `merge`."""
+    its `FileInfo`.  Several are joined by `merge`.  ``beads``: their MBM
+    beads instead (`bead_table`), as the file paired with that table."""
     path = Path(path)
     found = contents(path)
-    return _read(path, found, select(found, measurements), valid_only, z_scale, progress)
+    return _read(path, found, select(found, measurements), valid_only, z_scale, progress,
+                 beads)
 
 
 def read_files(path, measurements=None, merged: bool = False, valid_only: bool = True,
-               z_scale: float = 1.0, progress=None, found: Optional[Contents] = None):
+               z_scale: float = 1.0, progress=None, found: Optional[Contents] = None,
+               beads: bool = False):
     """The measurements chosen as ``(locs, info)`` pairs: one per measurement,
-    or one for all of them when ``merged``."""
+    or one for all of them when ``merged``.  ``beads``: each followed by its
+    MBM beads, where it recorded any."""
     path = Path(path)
     found = found or contents(path)
     chosen = select(found, measurements)
-    if merged or len(chosen) <= 1:
-        return [_read(path, found, chosen, valid_only, z_scale, progress)]
-    return [_read(path, found, [m], valid_only, z_scale, progress) for m in chosen]
+    groups = [chosen] if merged or len(chosen) <= 1 else [[m] for m in chosen]
+    out = []
+    for group in groups:
+        out.append(_read(path, found, group, valid_only, z_scale, progress))
+        if beads and any(m.n_beads for m in group):
+            try:
+                out.append(_read(path, found, group, valid_only, z_scale, progress, True))
+            except ValueError:                # the beads were named but never recorded
+                pass
+    return out
 
 
 def image(path, im: Image):

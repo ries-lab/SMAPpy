@@ -86,6 +86,9 @@ class MsrSettings:
     images: bool = param(True, label="images",
                          help="read the file's confocal and STED images, placed "
                               "in nm, for an image layer to show")
+    mbm_beads: bool = param(False, label="MBM beads as a file",
+                            help="each measurement's beam-monitoring bead tracks "
+                                 "as a file of their own beside it")
 
 
 @dataclass
@@ -213,12 +216,16 @@ class LoadAuto(Plugin):
         m = settings.msr
         found = msr.contents(path)
         files = msr.read_files(path, m.measurements or None, m.merge,
-                               not m.keep_invalid, m.z_scale, ctx.report, found)
+                               not m.keep_invalid, m.z_scale, ctx.report, found,
+                               beads=m.mbm_beads)
         images = [msr.image(path, im) for im in found.images
                   if not im.render] if m.images else []
-        n = sum(len(locs) for locs, _ in files)
+        beads = [info for _, info in files if "mbm_of" in info.metadata]
+        n = sum(len(locs) for locs, info in files if "mbm_of" not in info.metadata)
+        k = len(files) - len(beads)
         text = (f"{n} localizations from {path.name} (Abberior MSR): "
-                f"{len(files)} file{'s' * (len(files) != 1)}"
+                f"{k} file{'s' * (k != 1)}"
+                + (f", {len(beads)} of MBM beads" if beads else "")
                 + (f", {len(images)} images" if images else ""))
         return Result(files=[(locs, info, None) for locs, info in files],
                       image_sources=images, text=text, append=settings.append,

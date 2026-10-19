@@ -152,6 +152,12 @@ def measurement_stack(label, rec, date="2026-06-11T15:08:27+02:00", beads=False)
         pts["xyz"] = [[1e-6, 2e-6, 3e-8], [4e-6, 5e-6, 6e-8], [1.001e-6, 2e-6, 3e-8]]
         pts["tim"] = [1.0, 1.5, 2.0]
         files.update(zarr_array("zarr/grd/mbm/points", pts, dt, chunk=10, compressor="blosc"))
+        # Imspector's own record of each bead, by slot (gri)
+        files["zarr/grd/mbm/points/.zattrs"] = json.dumps({"points_by_gri": {
+            "61": {"gri": 61, "name": "R0", "used": 1, "position": [1e-6, 2e-6, 3e-8],
+                   "sigpos": 2e-9, "state": 1, "times_failed": 0},
+            "123": {"gri": 123, "name": "R1", "used": 0, "position": [4e-6, 5e-6, 6e-8],
+                    "sigpos": 3e-9, "state": 1, "times_failed": 2}}}).encode()
         files["zarr/mbm/.zattrs"] = json.dumps({"used": ["R0", "R1"]}).encode()
     blob = archive(files)
     side = int(np.ceil(np.sqrt(len(blob))))
@@ -181,6 +187,16 @@ def two(tmp_path):
                      measurement_stack("first", m2410_records(), beads=True),
                      render_stack("first"),
                      measurement_stack("second", m2410_records(t0=5.0),
+                                       date="2026-06-11T15:09:27+02:00")])
+    return path
+
+
+@pytest.fixture
+def beaded(tmp_path):
+    """Two measurements a minute apart, both with beads."""
+    path = tmp_path / "beads.msr"
+    write_obf(path, [measurement_stack("first", m2410_records(), beads=True),
+                     measurement_stack("second", m2410_records(t0=5.0), beads=True,
                                        date="2026-06-11T15:09:27+02:00")])
     return path
 
@@ -381,6 +397,108 @@ def test_real_msr_files_list_and_read_every_measurement():
             assert np.isfinite(locs["cfr"]).any(), (path.name, m.label)
         for im in found.images:
             assert msr.image(path, im).data.size
+
+
+def test_the_beads_are_a_table_on_the_localizations_clock_with_no_column_of_their_own(beaded):
+    locs, info = load(beaded)                              # both, merged
+    beads, binfo = load(beaded, beads=True)
+    # nothing the localizations lack, so a bead file beside them pads nothing
+    assert set(beads.columns) <= set(locs.columns)
+    assert "z_nm" not in beads                             # 2D: no bead z
+    metas = info.metadata["minflux"]["measurements"]
+    offset = metas[1]["time_offset_s"]
+    assert offset > 0
+    first, second = beads["measurement"] == 0, beads["measurement"] == 1
+    assert np.allclose(beads["time_s"][first], [1.0, 1.5, 2.0])
+    assert np.allclose(beads["time_s"][second], np.array([1.0, 1.5, 2.0]) + offset)
+    assert np.array_equal(beads["frame"], np.arange(len(beads)))
+    # R0 and R1 in each: one slot (gri) is not one bead, so an id each
+    assert list(beads["tid"][first]) == [1, 2, 1] and list(beads["tid"][second]) == [3, 4, 3]
+    assert np.allclose(beads["x_nm"][first], [1000, 4000, 1001])
+    assert np.allclose(beads["xy_err_nm"][first], [2.0, 3.0, 2.0])   # Imspector's sigpos
+    listed = binfo.metadata["mbm_beads"]
+    assert [(b["tid"], b["name"], b["used"], b["measurement"]) for b in listed] == \
+        [(1, "R0", True, 0), (2, "R1", False, 0), (3, "R0", True, 1), (4, "R1", False, 1)]
+    assert listed[1]["times_failed"] == 2 and binfo.name == "beads.msr (MBM beads)"
+
+
+def test_a_bead_file_stays_paired_with_its_measurement_through_a_save(beaded, tmp_path):
+    from smappy.session import Session
+    files = msr.read_files(beaded, beads=True)
+    assert [i.name for _, i in files] == ["beads: first", "beads: first (MBM beads)",
+                                          "beads: second", "beads: second (MBM beads)"]
+    session = Session()
+    for k, (locs, info) in enumerate(files):
+        session.add_file(locs, info, append=k > 0)
+    assert [msr.mbm_partner(session.files, k) for k in range(4)] == [1, 0, 3, 2]
+    saved = tmp_path / "beads.h5"
+    session.save(saved)
+    again = Session()
+    again.load(saved)
+    assert [msr.mbm_partner(again.files, k) for k in range(4)] == [1, 0, 3, 2]
+    # a measurement read without its beads has no partner, and a merged
+    # table's beads are the merged ones'
+    assert msr.mbm_partner([files[0][1], files[3][1]], 0) is None
+    merged = msr.read_files(beaded, merged=True, beads=True)
+    assert msr.mbm_partner([i for _, i in merged], 0) == 1
+
+
+def test_beads_named_but_never_recorded_add_no_file(two):
+    # the second measurement of `two` has no beads; asked for, it is skipped
+    files = msr.read_files(two, beads=True)
+    assert [i.name for _, i in files] == ["cell: first", "cell: first (MBM beads)",
+                                          "cell: second"]
+    with pytest.raises(ValueError, match="no MBM beads"):
+        load(two, measurements=[2], beads=True)
+
+
+@pytest.mark.skipif(not os.environ.get("SMAPPY_TEST_MSR"),
+                    reason="SMAPPY_TEST_MSR=dir of real .msr files")
+def test_imspectors_correction_is_the_mean_displacement_of_the_used_beads():
+    """Where a file kept the beads' tracks through the measurement, the mean
+    displacement of the used beads, interpolated to each localization's
+    time, is ``lnc - loc``: the sign, the clock and the z scale of the bead
+    table are the localizations'."""
+    checked = 0
+    for path in sorted(Path(os.environ["SMAPPY_TEST_MSR"]).glob("*.msr")):
+        for m in msr.contents(path).measurements:
+            if not m.n_beads:
+                continue
+            locs, info = load(path, measurements=[m.number + 1], z_scale=0.7)
+            beads, binfo = load(path, measurements=[m.number + 1], z_scale=0.7, beads=True)
+            t = locs["time_s"]
+            if "x_nc_nm" not in locs or beads["time_s"].max() < t.max() - 5:
+                continue                     # tracks kept only before the start
+            used = [b["tid"] for b in binfo.metadata["mbm_beads"] if b["used"]]
+            axes = [a for a in ("x", "y", "z") if f"{a}_nc_nm" in locs and f"{a}_nm" in beads]
+            for a in axes:
+                shift = []
+                for tid in used:
+                    rows = beads["tid"] == tid
+                    v = beads[f"{a}_nm"][rows]
+                    shift.append(np.interp(t, beads["time_s"][rows], v - v[0]))
+                left = locs[f"{a}_nc_nm"] - locs[f"{a}_nm"] - np.mean(shift, axis=0)
+                spread = np.std(locs[f"{a}_nc_nm"] - locs[f"{a}_nm"])
+                assert np.std(left) < max(0.35 * spread, 0.5), (path.name, m.label, a)
+            checked += 1
+    if not checked:
+        pytest.skip("no file kept its beads' tracks through a measurement")
+
+
+def test_the_open_dialog_offers_the_beads_as_the_next_file(two):
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication
+    from smappy.gui.msr_import import MsrImportDialog
+    app = QApplication.instance() or QApplication([])
+    dialog = MsrImportDialog(two)
+    assert not dialog.beads.isHidden() and not dialog.beads.isChecked()
+    dialog.beads.setChecked(True)
+    loads = dialog.choice()["loads"]
+    # only the first measurement recorded beads
+    assert [(a["measurements"], a.get("beads", False)) for a in loads] == \
+        [([1], False), ([1], True), ([2], False)]
+    dialog.merge.setChecked(True)
+    assert [a.get("beads", False) for a in dialog.choice()["loads"]] == [False, True]
 
 
 def test_the_open_dialog_queues_what_is_ticked_and_opens_its_images(two, monkeypatch):

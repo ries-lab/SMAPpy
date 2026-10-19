@@ -383,9 +383,9 @@ def _load_minflux(path: Path, valid_only: bool = True, z_scale: float = 1.0):
 
 
 def _load_msr(path: Path, measurements=None, valid_only: bool = True,
-              z_scale: float = 1.0):
+              z_scale: float = 1.0, beads: bool = False):
     from .msr import load as load_msr
-    return load_msr(path, measurements, valid_only, z_scale)
+    return load_msr(path, measurements, valid_only, z_scale, beads=beads)
 
 
 register(Reader("MINFLUX", (".npy", ".zip", ".json"), _load_minflux))

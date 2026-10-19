@@ -82,10 +82,18 @@ class MsrImportDialog(QDialog):
         self.keep_invalid = QCheckBox("keep invalid")
         self.keep_invalid.setToolTip("every final iteration, with vld and sta, "
                                      "not only the valid ones")
+        self.beads = QCheckBox("MBM beads as a file")
+        self.beads.setObjectName("msr mbm beads")
+        self.beads.setToolTip("each measurement's beam-monitoring bead tracks as a "
+                              "file of their own beside it, for the MBM drift "
+                              "correction and for looking at the beads")
         row = QHBoxLayout()
         row.addWidget(self.merge)
         row.addWidget(self.keep_invalid)
+        row.addWidget(self.beads)
         row.addStretch(1)
+        # shown for a file with beads, greyed while no ticked measurement has any
+        self.beads.setVisible(any(m.n_beads for m in self.found.measurements))
         options.addRow(row)
         self.z_scale = QDoubleSpinBox(minimum=0.01, maximum=10.0, value=1.0,
                                       decimals=3, singleStep=0.01)
@@ -135,6 +143,7 @@ class MsrImportDialog(QDialog):
         chosen = self._ticked(msr.Measurement)
         self.merge.setEnabled(len(chosen) > 1)
         self.z_scale.setEnabled(any(m.dimensionality == 3 for m in chosen))
+        self.beads.setEnabled(any(m.n_beads for m in chosen))
         self.buttons.button(QDialogButtonBox.Ok).setEnabled(
             bool(chosen or self._ticked(msr.Image)))
 
@@ -170,9 +179,15 @@ class MsrImportDialog(QDialog):
         chosen = self._ticked(msr.Measurement)
         args = {"valid_only": not self.keep_invalid.isChecked(),
                 "z_scale": self.z_scale.value() if self._any_3d else 1.0}
-        numbers = [m.number + 1 for m in chosen]
-        if self.merge.isChecked() and len(numbers) > 1:
-            loads = [{"measurements": numbers, **args}]
+        if self.merge.isChecked() and len(chosen) > 1:
+            groups = [chosen]
         else:
-            loads = [{"measurements": [k], **args} for k in numbers]
+            groups = [[m] for m in chosen]
+        loads = []
+        for group in groups:
+            loads.append({"measurements": [m.number + 1 for m in group], **args})
+            # the beads as the next file, read from what the load before
+            # left (`msr._METAS`) rather than decoding the records again
+            if self.beads.isChecked() and any(m.n_beads for m in group):
+                loads.append({**loads[-1], "beads": True})
         return {"loads": loads, "images": self._ticked(msr.Image)}

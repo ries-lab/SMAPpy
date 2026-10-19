@@ -1615,6 +1615,32 @@ opens on the first, as in SMAP, and a file added keeps the layers on the
 files they showed (`Session._on_files`); the others are ticked in the Render
 tab.
 
+## MINFLUX beam-line monitoring beads
+
+What Imspector does with its MBM beads, measured on a file of 2026-10 (two
+measurements, four beads each) and checked by
+`test_imspectors_correction_is_the_mean_displacement_of_the_used_beads`:
+
+* **The correction is the plain mean displacement of the used beads**,
+  each from its first point, interpolated linearly to every localization's
+  time and subtracted: ``loc = lnc - mean_b (bead_b(t) - bead_b(t_0))``.
+  It leaves 1.3 / 1.6 / 0.08 nm rms (x / y / z) of a correction varying by
+  6 / 11 / 2.6 nm; holding the last point instead, a delay of 1-2 s, a
+  weight of 1/sigpos^2 or the median all fit worse.  The 1-2 nm left in xy
+  is probably beads measured more often than they are saved.  So a bead
+  that wanders by 20 nm among four moves every localization by 5 nm, which
+  is why the tracks are worth reading at all.
+* **The tracks are `zarr/grd/mbm/points`**, a point every ~2 s per bead.  A
+  file of 2026-06 kept only the points from before each measurement started
+  (and its ``loc - lnc`` was a constant): a bead file can be just those.
+* **`gri` is a slot, not a bead**: R0 is gri 61 in every measurement, and
+  in two measurements of one file it was two beads 20 um apart.  The bead
+  table therefore gives each (measurement, gri) its own `tid`.
+* **The beads are a file of their own** in the one table (`msr.bead_table`),
+  with only columns the localizations have, so padding costs nothing; it is
+  paired with its measurement by the `.msr`'s path and the measurements'
+  `did`s (`msr.mbm_key`), never by file number or name.
+
 ## Open questions
 
 * Fitted x sits ~0.24 px from the peak-finder position, and the sign flips with

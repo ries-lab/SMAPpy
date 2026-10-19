@@ -1,6 +1,6 @@
 ---
 version: "6"
-covers: [smappy.io.formats.reader_for, smappy.io.formats._is_smappy, smappy.io.formats._has_saveloc, smappy.session.read_localizations, smappy.io.formats._load_smappy, smappy.io.hdf5.load_localizations, smappy.io.formats._load_sml, smappy.io.formats._load_minflux, smappy.io.minflux.records, smappy.io.minflux.from_json, smappy.io.minflux.table, smappy.io.minflux._fields, smappy.io.minflux._cfr_iteration, smappy.io.minflux._joined, smappy.io.minflux.crlb_xy, smappy.io.minflux.crlb_z, smappy.io.minflux.photon_split, smappy.io.minflux.pattern_sizes, smappy.io.minflux._bound, smappy.io.minflux.sequence, smappy.io.msr.contents, smappy.io.msr.load, smappy.io.msr.read_files, smappy.io.msr.read_measurement, smappy.io.msr.select, smappy.io.msr.merge, smappy.io.msr.image, smappy.io.obf.stacks, smappy.io.obf.read_stack, smappy.io.zarr_lite.archive_files, smappy.io.zarr_lite.read_array, smappy.io.blosc.decode, smappy.io.blosc.lz4_block, smappy.session._saved_files, smappy.group.by_trace, smappy.io.formats._load_csv, smappy.io.formats.guess_csv_mapping, smappy.io.formats.csv_columns, smappy.io.formats.column_name, smappy.io.conversions.conversion_for, smappy.io.picasso.load, smappy.io.picasso.read_info, smappy.io.decode.load]
+covers: [smappy.io.formats.reader_for, smappy.io.formats._is_smappy, smappy.io.formats._has_saveloc, smappy.session.read_localizations, smappy.io.formats._load_smappy, smappy.io.hdf5.load_localizations, smappy.io.formats._load_sml, smappy.io.formats._load_minflux, smappy.io.minflux.records, smappy.io.minflux.from_json, smappy.io.minflux.table, smappy.io.minflux._fields, smappy.io.minflux._cfr_iteration, smappy.io.minflux._joined, smappy.io.minflux.crlb_xy, smappy.io.minflux.crlb_z, smappy.io.minflux.photon_split, smappy.io.minflux.pattern_sizes, smappy.io.minflux._bound, smappy.io.minflux.sequence, smappy.io.msr.contents, smappy.io.msr.load, smappy.io.msr.read_files, smappy.io.msr.read_measurement, smappy.io.msr.select, smappy.io.msr.merge, smappy.io.msr.bead_table, smappy.io.msr.mbm_key, smappy.io.msr.mbm_partner, smappy.io.msr.image, smappy.io.obf.stacks, smappy.io.obf.read_stack, smappy.io.zarr_lite.archive_files, smappy.io.zarr_lite.read_array, smappy.io.blosc.decode, smappy.io.blosc.lz4_block, smappy.session._saved_files, smappy.group.by_trace, smappy.io.formats._load_csv, smappy.io.formats.guess_csv_mapping, smappy.io.formats.csv_columns, smappy.io.formats.column_name, smappy.io.conversions.conversion_for, smappy.io.picasso.load, smappy.io.picasso.read_info, smappy.io.decode.load]
 ---
 
 ## What it does
@@ -286,8 +286,8 @@ measurements opened.  A measurement is read as above, and keeps with it,
 in the file's metadata: its label, date, version and dimension, the counts,
 its **sequence** (every iteration's parameters: pattern, laser and power,
 photon limit, dwell time, ...), the lasers and detectors, the region it was
-taken in, and its **MBM beads** -- which were used, and their positions as
-recorded.  The measurements chosen are a file each; with *merge into one
+taken in, and its **MBM beads** -- which were used, their positions as
+recorded, and Imspector's precision for each.  The measurements chosen are a file each; with *merge into one
 file* they are one table, one after another in time: each one's `time_s`
 is moved by when it started after the first one did (to the second, from
 its date), its traces are numbered after the last one's so that every `tid`
@@ -299,7 +299,26 @@ the other.  They get no layer of their own -- an `.msr` holds a dozen -- so
 add an image layer and choose the image in it.  Like any image, one is saved
 with the session only once a layer shows it.  What Imspector drew
 of a measurement (its density and trace renders) is listed, and not opened
-unless ticked: the localizations draw it again.  Stacks Imspector writes in
+unless ticked: the localizations draw it again.
+
+**MBM beads.**  MBM -- beam-line monitoring -- tracks a few fixed beads
+during the measurement, a point every couple of seconds, and Imspector
+subtracts the beads' mean displacement from every localization (`x_nm` is
+corrected, `x_nc_nm` is not).  With *MBM beads as a file* the beads' tracks
+become a file of their own beside the measurement, on the same clock
+(`time_s`, moved with the measurement when merged), so that they can be
+drawn in a layer, measured like any tracks, and used to correct the drift
+again without a bead that went wrong.  The file has no column the
+localizations do not have: a bead's id is `tid`, its brightness `photons`,
+Imspector's precision for it `xy_err_nm`; z is scaled by *z scale* like the
+localizations'.  A bead keeps one id within its measurement and a new one
+in the next, even under the same name, since Imspector reuses its slots
+(R0, R1, ...) for whichever beads it finds.  Its name, whether Imspector
+used it and how often it lost it are kept with the file.  The bead file
+knows which measurement it belongs to by the `.msr`'s path and the
+measurements' ids, which survive saving the session and opening it again.
+Some files keep the beads only from before the measurement starts; their
+bead file has just those few points.  Stacks Imspector writes in
 chunks, for very large acquisitions, are not read yet, and say so.
 
 **Picasso.**  Picasso keeps its table as one dataset of records, `/locs`,
@@ -410,6 +429,12 @@ axial distance in water is measured too long.  Values of 0.7 to 0.8 are used
 for imaging in aqueous samples with oil objectives.  It has no effect on 2D
 measurements.
 
+### msr.mbm_beads
+In File > Open it is a tick in the dialog, shown when a measurement has
+beads.  The file is small -- a few hundred rows -- and is read from what
+opening the measurement already decoded.  Leave it off unless you will look
+at the beads or correct the drift with them.
+
 ### csv.mapping
 Needed only when the headers are not recognised and no saved conversion
 fits.  Each pair is *header in the file* = *column in the table*; the
@@ -427,8 +452,9 @@ channel -- by a frame.
 
 The table, added to the session as a file of its own, or joined to the open
 ones with *add to the open files* (a `filenumber` column tells them apart).
-An `.msr` gives a file per measurement (or one, merged), and its images for
-the image layers to choose from.  Each file keeps its own metadata -- its
+An `.msr` gives a file per measurement (or one, merged), each followed by
+its MBM beads' file where asked for, and its images for the image layers to
+choose from.  Each file keeps its own metadata -- its
 camera, its acquisition,
 a measurement's sequence and beads -- however many are open, and a session
 of several files saved and opened again opens as those files.
