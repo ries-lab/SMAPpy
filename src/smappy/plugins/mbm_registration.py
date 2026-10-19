@@ -56,8 +56,9 @@ class MBMRegistrationSettings:
                         help="the measurement that moves")
     fit: str = param("auto", label="fit", choices=FITS,
                      help="a translation, or with three beads or more a rotation too")
-    first: int = param(10, label="first points", min=1, max=1000,
-                       help="a bead's position: the median of its first points")
+    skip: int = param(30, label="skip", unit="points", min=0, max=1000,
+                      help="a bead's first points, left out: MINFLUX's creep at the "
+                           "start of a trace")
     tolerance_nm: float = param(200.0, label="tolerance", unit="nm", min=1.0,
                                 help="how far two beads' shifts may differ and agree")
     max_shift_nm: float = param(5000.0, label="largest shift", unit="nm", min=10.0,
@@ -106,7 +107,8 @@ class MBMRegistration(Plugin):
         return ""
 
     def run(self, ctx: Context, settings: MBMRegistrationSettings) -> Result:
-        from ..mbm_registration import register as fit_map, start_positions
+        from ..mbm import MBMSettings, choose
+        from ..mbm_registration import register as fit_map, settled_positions
         from ..transformation import Transformation
         found = {label: (k, m) for label, k, m in measurements(ctx)}
         if not found:
@@ -120,14 +122,17 @@ class MBMRegistration(Plugin):
             raise ValueError("the reference and the target are the same measurement")
 
         def positions(m):
-            axes = [a for a in ("x", "y", "z") if f"{a}_nm" in m.beads]
+            # the beads' drift, as MBM drift correction fits it: a bead's
+            # position is its offset about it, zero at the first bead point
+            chosen, axes = choose(m, MBMSettings())
             names = {b["tid"]: str(b["name"] or b["gri"]) for b in m.info}
             ids = sorted(names)
-            return start_positions(np.asarray(m.beads["time_s"]),
-                                   np.column_stack([np.asarray(m.beads[f"{a}_nm"])
-                                                    for a in axes]),
-                                   np.asarray(m.beads["tid"]),
-                                   [names[i] for i in ids], first=settings.first)
+            return settled_positions(np.asarray(m.beads["time_s"]),
+                                     np.column_stack([np.asarray(m.beads[f"{a}_nm"])
+                                                      for a in axes]),
+                                     np.asarray(m.beads["tid"]),
+                                     [names[i] for i in ids], curve=chosen.drift_nm,
+                                     skip=settings.skip)
         (_, ref_m), (target_file, tgt_m) = found[settings.reference], found[settings.target]
         reference, target = positions(ref_m), positions(tgt_m)
         rigid = None if settings.fit == "auto" else settings.fit == "rigid"

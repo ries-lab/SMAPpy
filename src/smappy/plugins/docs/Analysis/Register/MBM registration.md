@@ -1,6 +1,6 @@
 ---
 version: "1"
-covers: [smappy.mbm_registration.start_positions, smappy.mbm_registration.match, smappy.mbm_registration.kabsch_2d, smappy.mbm_registration.register, smappy.plugins.mbm_registration.MBMRegistration.run, smappy.plugins.mbm_registration.draw_registration]
+covers: [smappy.mbm_registration.settled_positions, smappy.mbm_registration.match, smappy.mbm_registration.kabsch_2d, smappy.mbm_registration.register, smappy.plugins.mbm_registration.MBMRegistration.run, smappy.plugins.mbm_registration.draw_registration]
 ---
 
 ## What it does
@@ -27,7 +27,7 @@ the frame of its beads at its start.
 
 ```figure-setup
 from smappy.simulate import simulate_bead_tracks
-from smappy.mbm_registration import register, start_positions
+from smappy.mbm_registration import register, settled_positions
 from smappy.plugins.mbm_registration import draw_registration
 
 times = np.arange(0.0, 200.0, 2.0)
@@ -42,15 +42,19 @@ seen = np.asarray(first["tid"]) <= 4
 moved = (rotation.T @ (xy[seen] - shift).T).T
 rng = np.random.default_rng(1)
 moved += rng.normal(0, 1.0, moved.shape)
-reference = start_positions(first["time_s"], xy, first["tid"])
-target = start_positions(first["time_s"][seen], moved, first["tid"][seen])
+reference = settled_positions(first["time_s"], xy, first["tid"])
+target = settled_positions(first["time_s"][seen], moved, first["tid"][seen])
 found = register(reference, target)
 ```
 
-**1. Each bead's position** in each measurement is the median of its first
-points (*first points*): Imspector corrects the localizations by how far the
-beads moved since the measurement began, so a measurement's frame is its
-beads at its start.
+**1. Each bead's position** in each measurement is where it was when the
+measurement began: a corrected measurement is in the instrument's frame at
+its start.  Not its first points, though: in MINFLUX a fixed emitter's
+first localizations -- a bead's too -- are biased, creeping into place over
+up to some 30 points.  So the first *skip* points of each bead are left
+out, the beads' drift (the curve *MBM drift correction* fits) is
+subtracted from the rest, and the median is taken: the bead's place at the
+start, measured where it had settled.
 
 **2. Which bead is which** is found from the positions, not the names:
 Imspector reuses its bead names and slots, and two beads 20 µm apart have
@@ -78,6 +82,14 @@ decomposition of the beads' cross-covariance about their centres, with the
 sign that excludes a mirror.  No scale is fitted: the beads lie on one
 coverslip seen through one objective.
 
+The frame is the one *MBM drift correction* corrects into, zero at the
+first bead point.  That point carries the beads' common creep, so the frame
+is offset by it as a constant -- the same for every localization of the
+measurement, so the registration of two measurements corrected that way is
+exact.  Imspector's own correction is referenced to its beads' first point
+too, but per bead and with its own choice of beads: for exact work run MBM
+drift correction on both measurements first.
+
 Matching: every reference and target bead within *largest shift* of each
 other is a candidate; the candidate shift with the most others within
 *tolerance* of it wins, their median is the shift, and pairs within
@@ -104,9 +116,10 @@ The one that moves; *Transform* then applies the map to its file.
 *auto* is right in nearly every case.  Force *translation* when three beads
 lie on a line, where a rotation is poorly determined.
 
-### first
-Larger averages more of a bead's noise but reaches further into its drift;
-10 points at Imspector's two-second interval is the first 20 s.
+### skip
+30 points at Imspector's two-second interval is the first minute.  Raise it
+if a bead's deviation in MBM drift correction's figure still settles after
+that; a bead with fewer points than the skip keeps its last third.
 
 ### tolerance_nm
 Above the beads' scatter and the expected error of the shift, below the
