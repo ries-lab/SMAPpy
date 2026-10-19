@@ -1693,6 +1693,18 @@ measurements, four beads each) and checked by
 
 ## Open questions
 
+* **Two colours from MINFLUX's DCR, untried on real data.**  *Assign
+  colours* reads `dcr` and `photons` as the two channels' photons
+  (`assign_colors.DCR_PAIR`) and was tested only on simulated binomial
+  splits.  Imspector's split includes the detectors' crosstalk and
+  background, so whether the shot-noise model holds -- and whether the
+  *probabilistic* method's posteriors mean what they say -- is to be checked
+  on a two-colour `.msr` when one is available (none was, 2026-10).  Compare
+  against minflux-viewer's per-trace EM on the same file.
+* **MBM registration, untried on real washes.**  `mbm_registration` matches
+  beads by a vote on their shifts, not by name (slots are reused), and was
+  tested on simulated beads; a real sequential measurement should be checked.
+
 * Fitted x sits ~0.24 px from the peak-finder position, and the sign flips with
   the mirror (-0.22 unmirrored, +0.26 mirrored) while y stays at -0.09.  A
   round trip (render the model, fit it back) is exact, so this is a property of

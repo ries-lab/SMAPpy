@@ -158,3 +158,35 @@ def test_the_notice_counts_the_beads_and_the_window_writes_a_choice_into_the_for
     assert panel.form.value().beads == ""
     window.close()
     app.processEvents()
+
+
+def test_with_its_bead_file_open_each_bead_is_a_row_of_a_region_table():
+    from smappy.region_results import Evaluation, is_current, rows
+    from smappy.session import Session
+    locs, meta, _ = measurement()
+    beads = bead_table([meta])
+    session = Session()
+    session.add_file(locs, FileInfo("m", "/data/m.msr", "Abberior MSR",
+                                    metadata={"minflux": {"measurements": [meta]}}))
+    session.add_file(beads, FileInfo("m (MBM beads)", "/data/m.msr", "Abberior MSR",
+                                     metadata={"mbm_of": {"path": "/data/m.msr",
+                                                          "measurements": ["d1"]},
+                                               "mbm_beads": beads.metadata["mbm_beads"]}),
+                     append=True)
+    for layer in session.layers:
+        layer.remove_bound("z_nm")
+        layer.set_files(None)
+    session.show_grouped(0, False)
+    ctx = session.context(grouping="ungrouped")
+    mask = np.asarray(session.locs["filenumber"]) == 0
+    ctx = Context(locs=ctx.locs, session=session, selection=ctx.selection.__class__(mask))
+    session.apply(MBMDrift(), MBMDrift().run(ctx, MBMSettings()))
+    out = session.locs
+    bead_rows = np.asarray(out["filenumber"]) == 1
+    assert (np.asarray(out["bead_id"])[bead_rows] > 0).all()
+    assert (np.asarray(out["bead_id"])[~bead_rows] == 0).all()
+    ev = Evaluation("bead_id", "MBM drift correction")
+    found = {r["name"]: r for r in rows(session.context(), ev)}
+    assert is_current(session.context(), ev)
+    assert set(found) == set(NAMES)
+    assert found["R2"]["used"] == 0 and found["R0"]["used"] == 1    # R2 jumps

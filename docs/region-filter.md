@@ -234,7 +234,7 @@ does not use it, finding regions by a lookup table on the ids.
 | `track_length` | as `n_in_cluster` |
 | `n_in_group` | stays: the grouping's, not a region analysis |
 
-### Beads: open
+### Beads: decided (2026-10)
 
 `beads.BeadSet` is a region table in all but name -- metrics per bead,
 pass/fail by a rule, choices by hand -- and its window is a region filter
@@ -244,7 +244,14 @@ changes with the selection), and a choice by hand is a setting of the
 plugin, by bead name, so that it survives the beads being numbered again.
 Options: the metrics become a region table that the filter can show while
 the selection stays in `select_beads`; or the selection moves to the filter
-and the drift plugins read it.  To be discussed.
+and the drift plugins read it.  **The first**: *Fiducials* and *MBM drift
+correction* name each bead's localizations (`bead_id`, `beads.with_bead_ids`)
+and hand back a region table of them (`beads.bead_values`: the metrics,
+used, state, name, offsets); the choice stays in `select_beads` and the
+bead selector.  A filter of fixed values cannot judge a bead against a curve
+that changes with the choice, and a drift correction makes its own bead
+table out of date, which would loop.  *MBM*'s table exists only with the
+bead file open, the beads being no localizations of the session otherwise.
 
 ## Order of work
 

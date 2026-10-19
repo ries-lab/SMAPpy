@@ -5,7 +5,11 @@ corrected from scratch.  The work is in `smappy.mbm` and `smappy.beads`
 The beads are read from each file's own metadata, so a chain or a batch
 needs no bead file; a bead file opened beside a measurement
 (`io.msr.bead_table`) is corrected with it, so that it shows what is left
-of each bead's motion.  The choices made by hand live in the settings (*by
+of each bead's motion, and its beads are then named in the table
+(`bead_id`, from the bead file's own ids) with what the bead selector shows
+of each kept as a region table of them ("per bead_id: MBM drift
+correction", `beads.bead_values`) -- only then, since without the bead file
+the beads are no localizations of the session.  The choices made by hand live in the settings (*by
 hand*), which the bead window (`gui.bead_window`, *Select beads...*) writes.
 """
 from __future__ import annotations
@@ -17,7 +21,7 @@ import numpy as np
 from ..mbm import (MBMSettings, Measurement, bead_view, choose, describe_choice,
                    drift_of, measurements_of, replace_correction, with_overrides)
 from ..metadata import file_metadata
-from . import Context, FormState, Notice, Plot, Plugin, Result, register
+from . import Context, FormState, Notice, Plot, Plugin, Result, register, settings_values
 from .drift_result import KeepsDrift, drift_result
 
 
@@ -74,6 +78,7 @@ class MBMDrift(KeepsDrift, Plugin):
         numbers = (np.asarray(locs["filenumber"]) if "filenumber" in locs else None)
         session_files = list(getattr(ctx.session, "files", None) or [])
         out, drifts, chosen_all, views = locs, [], [], []
+        tables = []          # (bead rows, their ids, the bead sets, the axes)
         for k, name, rows, ms in files:
             chosen = []
             for m in ms:
@@ -95,10 +100,30 @@ class MBMDrift(KeepsDrift, Plugin):
                 partner = mbm_partner(session_files, k)
                 if partner is not None:
                     out = drift.apply(out, rows=numbers == partner)
+                    tables.append((numbers == partner, chosen, views[-1][2]))
             drifts.append((name, drift))
             chosen_all += chosen
+        id_regions = {}
+        if tables:
+            from ..beads import BEAD_ID, bead_values, with_bead_ids
+            from ..region_runs import column_table
+            ids_all, values_all, groups = [], {}, {}
+            for rows, chosen, axes in tables:
+                out, offset = with_bead_ids(out, rows, np.asarray(out["tid"])[rows])
+                for s in chosen:
+                    values, groups = bead_values(s, axes)
+                    ids_all.append(np.asarray(s.ids) + offset)
+                    for key, v in values.items():
+                        values_all.setdefault(key, []).append(v)
+            values_all = {key: np.concatenate(v) for key, v in values_all.items()}
+            step = {"label": self.name, "plugin": self.path, "version": self.version,
+                    "parameters": settings_values(settings)}
+            id_regions = {BEAD_ID: {self.name: column_table(
+                out, BEAD_ID, self.name, np.concatenate(ids_all), values_all, step,
+                layer=ctx.layer, session=ctx.session, groups=groups)}}
         result = drift_result(out, drifts, settings, lambda d: d.plot,
                               beads=describe_choice(chosen_all))
+        result.id_regions = id_regions
         result.text = describe_choice(chosen_all) + "\n" + result.text
         from ..beads import draw_bead_tracks
         for label, s, axes in views:

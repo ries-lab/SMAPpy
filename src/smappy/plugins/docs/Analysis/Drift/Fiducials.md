@@ -1,6 +1,6 @@
 ---
 version: "3"
-covers: [smappy.fiducials.find_beads, smappy.fiducials.fit_drift, smappy.fiducials.estimate_drift_fiducials, smappy.fiducials.find_and_choose, smappy.fiducials.bead_names, smappy.fiducials.beads_in_regions, smappy.plugins.drift_fiducials.roi_regions, smappy.roi_manager.core.ROIProject.session_rows, smappy.beads.select_beads, smappy.beads.bead_metrics, smappy.beads.MadRule, smappy.beads.draw_bead_tracks, smappy.tracking.link.link_tracks, smappy.drift._spline_basis, smappy.drift.Drift.apply, smappy.simulate.beads.simulate_beads]
+covers: [smappy.fiducials.find_beads, smappy.fiducials.fit_drift, smappy.fiducials.estimate_drift_fiducials, smappy.fiducials.find_and_choose, smappy.fiducials.bead_names, smappy.fiducials.beads_in_regions, smappy.plugins.drift_fiducials.roi_regions, smappy.roi_manager.core.ROIProject.session_rows, smappy.beads.select_beads, smappy.beads.bead_metrics, smappy.beads.MadRule, smappy.beads.draw_bead_tracks, smappy.tracking.link.link_tracks, smappy.drift._spline_basis, smappy.drift.Drift.apply, smappy.simulate.beads.simulate_beads, smappy.beads.bead_values, smappy.beads.with_bead_ids]
 ---
 
 ## What it does
@@ -306,6 +306,14 @@ otherwise, or not wanted.
   axis.  That scatter should be close to the beads' own precision
   (`xy_err_nm`); clearly more means the curve is too stiff for the drift
   (a smaller *knot spacing*) or a bead disagrees with the others.
+
+* **The beads named**: each bead's localizations carry its number,
+  `bead_id` (0 for every other localization, and for a bead's localizations
+  too dim to be linked into its track), and what the bead selector shows of
+  each is kept as a [region table](plugin:Panels/Glossary) ("per bead_id:
+  Fiducials drift correction"): its name, `noise_nm`, `wander_nm`,
+  `jump_nm`, `coverage`, `n`, `used`, its `state` and its offset per axis.
+  Run on a second file, its beads are numbered after the first's.
 
 ## Differences from SMAP
 

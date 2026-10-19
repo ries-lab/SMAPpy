@@ -287,3 +287,30 @@ def test_beads_can_come_from_the_roi_managers_rois_one_bead_each():
     again = plugin.with_overrides(settings, view, {"ROI 2": False})
     assert again.beads == "ROI 2 out"
     assert plugin.bead_view(ctx, again).beads.state(1) == "out, by hand"
+
+
+def test_each_bead_is_named_in_the_table_and_kept_as_a_row():
+    """`bead_id` on each bead's localizations, and what the bead selector
+    shows of each as a region table of them, current as a block's."""
+    from smappy.region_results import Evaluation, is_current, rows
+    from smappy.session import Session
+    drift = smooth_drift()
+    locs = without_z(beads_with_trouble(drift))
+    session = Session(locs)
+    session.show_grouped(0, False)
+    session.run(FiducialDrift(), FiducialSettings())
+    ids = np.asarray(session.locs["bead_id"])
+    truth = np.asarray(session.locs["bead_true"])
+    for b in np.unique(truth):
+        # one id per simulated bead; its localizations too dim to be linked
+        # into its track have none (0)
+        named = ids[(truth == b) & (ids > 0)]
+        assert len(np.unique(named)) == 1 and len(named) > 0.5 * (truth == b).sum()
+    ev = Evaluation("bead_id", "Fiducials drift correction")
+    ctx = session.context()
+    assert is_current(ctx, ev)
+    found = rows(ctx, ev)
+    assert len(found) == len(np.unique(truth))
+    assert all(r["state"] in ("used", "not used") or r["state"].startswith("out")
+               for r in found)
+    assert {"noise_nm", "wander_nm", "jump_nm", "used", "name", "offset_x_nm"} <= set(found[0])

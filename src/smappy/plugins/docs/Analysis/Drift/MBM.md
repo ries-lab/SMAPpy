@@ -1,6 +1,6 @@
 ---
 version: "1"
-covers: [smappy.mbm.measurements_of, smappy.mbm.choose, smappy.mbm.drift_of, smappy.mbm.replace_correction, smappy.beads.select_beads, smappy.beads.fit_offsets_and_spline, smappy.beads.bead_metrics, smappy.beads.MadRule, smappy.beads.draw_bead_tracks, smappy.io.msr.bead_table, smappy.drift.Drift.at, smappy.simulate.beads.simulate_bead_tracks]
+covers: [smappy.mbm.measurements_of, smappy.mbm.choose, smappy.mbm.drift_of, smappy.mbm.replace_correction, smappy.beads.select_beads, smappy.beads.fit_offsets_and_spline, smappy.beads.bead_metrics, smappy.beads.MadRule, smappy.beads.draw_bead_tracks, smappy.io.msr.bead_table, smappy.drift.Drift.at, smappy.simulate.beads.simulate_bead_tracks, smappy.beads.bead_values]
 ---
 
 ## What it does
@@ -208,3 +208,12 @@ the drift.  The figures are the drift curve and, per measurement, the
 beads on it and each bead's deviation.  A good result has every used bead
 scattering evenly about zero on the right; a used bead whose deviation has
 a step or a slope is one to exclude by hand.
+
+With the bead file open beside its measurement, its beads are also named
+in the table (`bead_id`) and kept as a [region table](plugin:Panels/Glossary)
+("per bead_id: MBM drift correction"): per bead its name, `noise_nm`,
+`wander_nm`, `jump_nm`, `coverage`, `n`, whether it was `used` and its
+`state` as the bead list shows it, and its offset per axis.  The summaries
+and *Math parser* read them there.  The beads are still chosen here and in
+the bead selector, not by the region filter: a bead is judged against the
+curve of the others, which changes with the choice.

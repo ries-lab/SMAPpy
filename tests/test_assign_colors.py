@@ -391,3 +391,27 @@ def test_the_figure_draws(tmp_path):
             plot.draw_into(fig)
             fig.savefig(tmp_path / f"{mode}{plot.name}.png")
             plt.close(fig)
+
+
+def test_a_minflux_tables_detection_channel_ratio_is_its_photon_split():
+    """MINFLUX writes no photons per channel but dcr = N1 / (N1 + N2): the
+    same species come back from it as from the two counts (simulated: no
+    two-colour MINFLUX data has been tried)."""
+    from smappy.plugins.assign_colors import DCR_PAIR, channel_columns
+    locs, truth = simulate(n=8000, seed=11, errors=False)
+    n1 = np.asarray(locs["photons_ch0"])
+    total = np.asarray(locs["photons"])
+    minflux = Localizations({"x_nm": locs["x_nm"], "y_nm": locs["y_nm"],
+                             "frame": locs["frame"], "photons": total,
+                             "dcr": (n1 / np.maximum(total, 1)).astype(np.float32)},
+                            {"units": "nm"})
+    assert channel_columns(minflux) == DCR_PAIR
+    from_dcr, from_counts = ratios(minflux), ratios(locs, use_errors=False)
+    assert np.allclose(from_dcr.r, from_counts.r, atol=1e-6, equal_nan=True)
+    assert np.allclose(from_dcr.n_eff, from_counts.n_eff, equal_nan=True)
+    plugin = plugins.get("Analysis/Dual-colour/Assign colours")()
+    result = plugin(minflux, Selection.all(len(minflux)),
+                    AssignColorSettings(mode="probabilistic"))
+    channel = np.asarray(result.locs["channel"])
+    assigned = channel > 0
+    assert assigned.mean() > 0.9 and (channel[assigned] == truth[assigned]).mean() > 0.99

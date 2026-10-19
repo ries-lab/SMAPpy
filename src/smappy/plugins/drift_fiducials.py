@@ -27,7 +27,7 @@ import numpy as np
 from ..beads import BeadView, draw_bead_tracks, format_overrides, parse_overrides
 from ..fiducials import (SOURCES, FiducialSettings, describe, estimate_drift_fiducials,
                          find_and_choose)
-from . import Context, FormState, Notice, Plot, Plugin, Result, register
+from . import Context, FormState, Notice, Plot, Plugin, Result, register, settings_values
 from .drift_result import KeepsDrift
 
 
@@ -110,8 +110,22 @@ class FiducialDrift(KeepsDrift, Plugin):
                      f"localizations brighter than {settings.min_photons:g} photons")
         chosen = fit.chosen
         axes = ("x", "y", "z")[:fit.residuals_nm.shape[1]]
-        return Result(locs=drift.apply(locs, rows=rows),
-                      text=describe(drift, beads, fit),
+        out = drift.apply(locs, rows=rows)
+        # each bead's localizations named (`bead_id`), and what the selector
+        # shows of each kept as a region table of them
+        from ..beads import BEAD_ID, bead_values, with_bead_ids
+        from ..region_runs import column_table
+        mine = np.ones(len(locs), bool) if rows is None else np.asarray(rows, bool)
+        out, offset = with_bead_ids(out, mine, beads.bead[mine] + 1)
+        values, groups = bead_values(chosen, axes)
+        step = {"label": self.name, "plugin": self.path, "version": self.version,
+                "parameters": settings_values(settings)}
+        table = column_table(out, BEAD_ID, self.name, np.asarray(chosen.ids) + offset,
+                             values, step, layer=ctx.layer, session=ctx.session,
+                             groups=groups)
+        return Result(locs=out, id_regions={BEAD_ID: {self.name: table}},
+                      text=describe(drift, beads, fit)
+                      + f"\nkept per bead as 'per {BEAD_ID}: {self.name}'",
                       plot=drift.plot, settings=settings,
                       plots={"beads": Plot(
                           lambda figure: draw_bead_tracks(figure, chosen, axes,
