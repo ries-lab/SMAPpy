@@ -38,10 +38,10 @@ from ..params import Magnitude, ParamSpec
 class VectorPSF:
     def __init__(self, grid: PupilGrid, pupil, roi_shape: tuple[int, int], *, upsample: int = 1,
                  kind: str = "vector", analyser: str | None = "unpolarised", bead_radius_nm: float = 0.0,
-                 sigma_nm: tuple[float, float] = (0.0, 0.0)):
+                 sigma_nm: tuple[float, float] = (0.0, 0.0), fit_sigma: bool = True):
         """``roi_shape`` is (Y, X) camera pixels; ``kind`` "vector" or "scalar"; ``analyser``
         "unpolarised" (the default, also None), "x" or "y" (a channel behind a polariser); ``sigma_nm``
-        the blur's starting value.
+        the blur's starting value, or its value with ``fit_sigma=False``.
 
         Unpolarised is the default and is said so: v1 put every two-channel vector fit behind an x and
         a y polariser unless told otherwise, so biplane and ratiometric data were fitted with the
@@ -57,6 +57,8 @@ class VectorPSF:
         self.upsample = int(upsample)
         self.bead_radius_nm = float(bead_radius_nm)
         self.sigma_init = tuple(float(s) for s in sigma_nm)
+        # Fixable while it is unclear whether σ is physical or a sink for mismatch (plan §10, 3).
+        self.fit_sigma = bool(fit_sigma)
         px, py = grid.optics.pixel_size_nm
         self.spacing = (px / self.upsample, py / self.upsample)
         Y, X = self.roi_shape
@@ -76,7 +78,7 @@ class VectorPSF:
 
     def specs(self) -> list[ParamSpec]:
         return self.pupil.specs() + [ParamSpec("psf.sigma", (2,), init=torch.tensor(self.sigma_init),
-                                                   transform=Magnitude())]
+                                                   transform=Magnitude(), fixed=not self.fit_sigma)]
 
     def pupil_field(self, p: dict[str, torch.Tensor]) -> torch.Tensor:
         """The complex pupil without the fields, magnitude rescaled to the reference energy; [..., P, P]."""

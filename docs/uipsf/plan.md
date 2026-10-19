@@ -513,7 +513,7 @@ locs = uipsf.localize(cal, rois)
 data = uipsf.simulate(model, params, scenario)
 ```
 
-**Settings.** Plain dataclasses with metadata (label, unit, bounds, help), shaped so that SMAPpy can build its form from them the way it builds plugin forms from `param(...)`. uipsf does not import SMAPpy's `param`. The calibration window maps the metadata (§7). Presets are YAML (omegaconf) for the CLI and notebooks.
+**Settings.** Plain dataclasses with metadata (label, unit, bounds, help), shaped so that SMAPpy can build its form from them the way it builds plugin forms from `param(...)`. *Revised (§7.5): uipsf imports SMAPpy's `param`, which is GUI-free, so the window shows `BeadSettings` as it shows a plugin's settings.* Presets are YAML (omegaconf) for the CLI and notebooks.
 
 **Hooks for a GUI.**
 - Workflows take a `progress` callback and a `cancel` flag, which is checked between iterations.
@@ -886,7 +886,8 @@ upsampling; the first stage's order; the slice thinning (`max_dz_nm`).  Those th
 
 **Order of work:**
 1. uipsf: `BeadSettings` with form metadata (the model options above), `calibrate_beads`, σ fixed,
-   the symmetric magnitude, the figures (`diagnostics.figures`, drawing on a figure it is given).
+   the symmetric magnitude, the figures (`diagnostics.figures`, drawing on a figure it is given). *Done
+   (October 2026, `docs/uipsf/architecture.md`).*
 2. Remove the v1 bridge; remove uipsf's reader, finder, pairing and camera input, its tests moved onto
    smappy's.
 3. smappy, headless: split `collect_beads`; `calibrate/pupil.py`; tests from simulated beads to Spline

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import dataclasses
 import inspect
+import types
 import typing
 from dataclasses import MISSING, dataclass, field, fields, replace
 from pathlib import Path
@@ -31,8 +32,8 @@ def settings_hints(settings_cls: type) -> Dict[str, Any]:
 
 
 def _unwrap_optional(tp) -> Tuple[Any, bool]:
-    """``Optional[int]`` -> ``(int, True)``; anything else -> ``(tp, False)``."""
-    if typing.get_origin(tp) is typing.Union:
+    """``Optional[int]`` or ``int | None`` -> ``(int, True)``; anything else -> ``(tp, False)``."""
+    if typing.get_origin(tp) in (typing.Union, types.UnionType):
         args = [a for a in typing.get_args(tp) if a is not type(None)]
         if len(args) == 1:
             return args[0], True

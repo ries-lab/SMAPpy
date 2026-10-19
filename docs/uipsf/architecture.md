@@ -836,3 +836,32 @@ bead calibrations.  On Zenodo the stored geometry equals SMAPpy's field for fiel
 `benchmarks/uipsf/results/channels_speed.jsonl`): one Jacobian build 2.9 s for one channel, 6.5 s for two (116
 shared parameters against 53); a gradient 0.18 / 0.32 s; the default fit 10 / 32 s (15 / 22 iterations).
 So a channel costs what a single-channel model costs.
+
+## The calibration's entry point (`workflows/calibrate.py`, `diagnostics/figures.py`, plan §7.5)
+
+What SMAPpy's *PSF calibration* window will call; step 1 of §7.5's order of work.
+
+- **`BeadSettings`**: the choices shown in the form, as SMAPpy `param` fields (`smappy.plugins` imports no
+  Qt), so the window builds its form as it does a plugin's: *Zernike order* (auto: 6), *pupil magnitude*
+  (free; symmetric, the m = 0 modes, Noll 4, 11, 22 …; fixed, the apodisation only), *blur* (free or
+  fixed) and *blur σ* (its start, or its value), *bead diameter*, and under *more* the rejection's k
+  and the held-out fraction.  Choices, not flags, so an option added while plan §10, 2–3 is
+  investigated, or taken out once it is settled, is one line.  The instrument is not a setting: it
+  arrives as `Optics`.
+- **`bead_model(optics, settings, roi_shape, transforms, z_max_nm)`**: one channel per `Optics`, the pupil
+  sampled by `choose_pupil_size` for the stacks' z range.  A fixed blur is `VectorPSF(fit_sigma=False)`,
+  a fixed `psf.sigma` spec; the model file records it (`fit_sigma`, read as True from older files).
+- **`calibrate_beads(batch, optics, settings, transforms, geometry, start, …)`** builds that model and
+  runs `learn_beads`; the `Calibration` keeps the settings (`options`), and the model file writes them
+  (`/model` attribute `options`, `LearnedPSF.options`).
+- **A start from a previous model** (`start=`, a `LearnedPSF` or `Calibration`): `start_values` places its
+  coefficients by Noll index, so a model of another order or magnitude choice starts the new one; a free
+  blur, the channel transforms, shares and offsets carry over, a fixed blur keeps the settings' value.
+  In `learn_beads` it replaces stage 1: every bead is localised on that pupil (`scoring.localise`),
+  scored and judged from that fit, and stage 2 starts there.  On simulated beads (10 beads, 21 slices,
+  n_max 4 → 6) it reaches the truth to 0.002 rad in 1.9 s against 3.1 s from the data, on the CPU.
+- **Figures** (`diagnostics.figures`): `draw_pupil`, `draw_zernikes` (with CRLBs, beside a reference
+  model mode by mode), `draw_atlas`, `draw_beads`, each drawing on a figure it is given; `figures(cal,
+  reference)` gives them as {title: draw}, for tabs that draw lazily.  They read a `Calibration` or a
+  `LearnedPSF` alike through `zernikes` and `pupil_maps`.
+- Tests: `tests/uipsf_tests/test_calibrate.py`.

@@ -88,3 +88,19 @@ def test_a_settings_class_is_shown_the_same_by_every_plugin_that_shows_it():
                fitter["transform"].children["registration"].children.values())
     assert shown(param_specs(GaussianFit.Settings)) == \
         shown(GaussianFit.specs())
+
+
+def test_a_field_written_as_x_or_none_is_optional_as_one_written_optional_x():
+    from dataclasses import dataclass
+    from typing import Optional
+
+    from smappy.plugins import param, param_specs
+
+    @dataclass
+    class Both:
+        old: Optional[int] = param(None)
+        new: int | None = param(None)
+
+    specs = param_specs(Both)
+    assert (specs["old"].type, specs["old"].optional) == (int, True)
+    assert (specs["new"].type, specs["new"].optional) == (int, True)

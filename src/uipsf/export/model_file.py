@@ -87,7 +87,7 @@ def _describe_channel(ch: Channel) -> dict:
     return dict(name=ch.name, optics=dataclasses.asdict(psf.grid.optics), pupil_size=psf.grid.size, pupil=pup,
                 psf=dict(kind=psf.kind, analyser=psf.analyser, roi_shape=list(psf.roi_shape),
                          upsample=psf.upsample, bead_radius_nm=psf.bead_radius_nm,
-                         sigma_init_nm=list(psf.sigma_init)),
+                         sigma_init_nm=list(psf.sigma_init), fit_sigma=psf.fit_sigma),
                 transform=ch.transform.tolist(), share=ch.share, dz_nm=ch.dz_nm, fit_transform=ch.fit_transform)
 
 
@@ -122,7 +122,8 @@ def _build_channel(config: dict, device, dtype) -> Channel:
         pupil = PixelPupil(grid)
     s = config["psf"]
     psf = VectorPSF(grid, pupil, tuple(s["roi_shape"]), upsample=s["upsample"], kind=s["kind"],
-                    analyser=s["analyser"], bead_radius_nm=s["bead_radius_nm"], sigma_nm=tuple(s["sigma_init_nm"]))
+                    analyser=s["analyser"], bead_radius_nm=s["bead_radius_nm"], sigma_nm=tuple(s["sigma_init_nm"]),
+                    fit_sigma=s.get("fit_sigma", True))
     return Channel(psf, transform=config.get("transform"), share=config.get("share"), dz_nm=config.get("dz_nm"),
                    name=config.get("name"), fit_transform=config.get("fit_transform", True))
 
@@ -197,6 +198,7 @@ class LearnedPSF:
     diagnostics: dict = field(default_factory=dict)
     emitters: dict[str, np.ndarray] = field(default_factory=dict)
     geometry: dict | None = None                    # a split chip, as SMAPpy's dual calibration records it
+    options: dict = field(default_factory=dict)     # the choices it was learnt with (`BeadSettings`)
 
     def psf(self, xyz_nm, roi_px=None, depth_nm=None, include_bead=False, upsample=None,
             channel: int = 0) -> torch.Tensor:
@@ -269,6 +271,8 @@ def save_model(cal, path) -> None:
         m.attrs["config"] = _json(describe(cal.model))
         if getattr(cal, "geometry", None) is not None:
             m.attrs["geometry"] = _json(cal.geometry)
+        if getattr(cal, "options", None) is not None:
+            m.attrs["options"] = _json(cal.options)
         pg, cg = m.create_group("params"), m.create_group("crlb")
         for n, v in cal.shared().items():
             pg[n] = _np(v)
@@ -309,6 +313,7 @@ def load_model(path, device=None, dtype=torch.float32) -> LearnedPSF:
                              f"{VERSION}")
         config = _read(f["model"].attrs["config"])
         geometry = _read(f["model"].attrs["geometry"]) if "geometry" in f["model"].attrs else None
+        options = _read(f["model"].attrs["options"]) if "options" in f["model"].attrs else {}
         model = build(config, device=device, dtype=dtype)       # the fastest device unless given
         dev = model.psf.grid.rho.device
         shared = {n: torch.as_tensor(np.asarray(d), dtype=dtype, device=dev) for n, d in f["model/params"].items()}
@@ -326,4 +331,4 @@ def load_model(path, device=None, dtype=torch.float32) -> LearnedPSF:
                            heldout=_read(f["diagnostics"].attrs["heldout"]),
                            rejection=_read(ba["settings"]), heldout_beads=_read(ba["heldout"]))
     return LearnedPSF(model, shared, crlb, config, fit, beads, thresholds,
-                      diagnostics, emitters, geometry)
+                      diagnostics, emitters, geometry, options)

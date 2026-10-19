@@ -34,7 +34,7 @@ from ..noise import ShiftedPoisson
 from ..params import Params, ParamSpec
 from ..solve import FitResult, GaussNewtonLBFGS, LevenbergMarquardt, Problem
 from .rejection import BeadTable, RejectionSettings, decide, held_out
-from .scoring import BeadScores, merged, score_beads, shared_values
+from .scoring import BeadScores, localise, merged, score_beads, shared_values
 
 
 def _truncated(model, n_max):
@@ -150,6 +150,7 @@ class Calibration:
     atlas: object = None                   # diagnostics.Atlas of the used beads
     heldout_report: object = None          # diagnostics.HeldOutReport, when beads were held out
     geometry: dict | None = None           # a split chip as SMAPpy records it (`data.pairing.Pairs.geometry`)
+    options: object = None                 # the choices it was learnt with (`calibrate.BeadSettings`)
 
     def shared(self) -> dict:
         return shared_values(self.result.params)
@@ -164,7 +165,8 @@ class Calibration:
 def learn_beads(model, batch, noise=None, decisions: dict | None = None, warm_start: Calibration | None = None,
                 rejection: RejectionSettings | None = None, heldout: float = 0.0, first_order: int | None = 4,
                 solver=None, chunk_size: int | None = None, max_dz_nm: float | None = MAX_DZ_NM,
-                localiser=None, progress=None, cancel=None, geometry: dict | None = None) -> Calibration:
+                localiser=None, progress=None, cancel=None, geometry: dict | None = None,
+                start: dict | None = None) -> Calibration:
     """Learn a pupil from bead stacks with outliers rejected, every decision explained (plan §5.7).
 
     1. Stage 1 (modes up to ``first_order``) on every bead not held out or
@@ -187,6 +189,12 @@ def learn_beads(model, batch, noise=None, decisions: dict | None = None, warm_st
     since a calibration should use every good bead (decided October 2026).
     ``solver`` and ``max_dz_nm`` as in `fit_beads`.  ``geometry``, for channels split on one chip,
     is kept with the calibration and its model file (`data.pairing.Pairs.geometry`).
+
+    ``start``, shared values of a previous model of the same microscope (`workflows.calibrate.
+    start_values`), replaces stage 1: every bead is localised on that pupil (`scoring.localise`), scored
+    and judged from that fit, and stage 2 starts from it.  Stage 1 exists to place the beads before the
+    high modes are free (module docstring); a pupil already close to the truth places them better than
+    a truncated one, and its scores judge the beads on the whole model.
     """
     noise = noise if noise is not None else ShiftedPoisson()
     solver = solver if solver is not None else GaussNewtonLBFGS()
@@ -202,6 +210,16 @@ def learn_beads(model, batch, noise=None, decisions: dict | None = None, warm_st
         shared = warm_start.shared()
         scores = warm_start.scores
         fitted, fit = warm_start.beads.used, warm_start.result.params
+    elif start is not None:
+        held = held_out(batch.field_xy, E, heldout)
+        pool = [e for e in range(E) if e not in held and decisions.get(e) != "exclude"]
+        sub = batch.subset(torch.tensor(pool))
+        shape = {s.name: s.shape for s in model.specs(sub) if s.scope == "shared"}
+        shared = {n: torch.as_tensor(v, dtype=dtype, device=device) for n, v in start.items()
+                  if n in shape and tuple(torch.as_tensor(v).shape) == tuple(shape[n])}
+        loc, _ = localise(model, shared, sub, noise)
+        scores = merged(E, [(pool, score_beads(model, loc.params, sub, noise))])
+        fitted, fit = pool, loc.params
     else:
         held = held_out(batch.field_xy, E, heldout)
         pool = [e for e in range(E) if e not in held and decisions.get(e) != "exclude"]
