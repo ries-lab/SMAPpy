@@ -21,11 +21,16 @@ What differs from the bead average, and why:
   fit needs the counts as the camera recorded them, so each ROI is cut
   around the detection's whole pixel and converted to photons, nothing
   more.  The fit places each bead itself.
-* **Saturated pixels are masked, not the bead dropped.**  The brightness
-  pre-filter (*too dim*, *too bright*) is not applied either: uipsf judges
-  every bead by its fit (`workflows/rejection.py`).  For two channels the
-  dual pairing still uses brightness to vote for the offset between halves,
-  as the dual calibration does.
+* **Saturated pixels are masked, not the bead dropped.**  Of the bead
+  average's brightness verdict only *too dim* is applied, before learning:
+  on the Zenodo beads 22 of the 84 detections were faint specks, 0.13-0.27
+  of the median bead where every real one was 0.43 or more, whose fits are
+  noise and which uipsf's rejection then threw out one by one.  *Too bright*
+  is left to the fit (a doublet shows in its deviance; a bright single bead
+  is the best there is).  The verdict is relative to the other beads; a pair
+  of two channels is judged by its light in both together, so a ratiometric
+  pair's dim half does not drop it.  With *brightness range* on auto nothing
+  is dropped.
 * **The first slice is dropped** by default: on the Zenodo stacks it is 22 %
   brighter than the rest, shared by all beads (`docs/uipsf/architecture.md`,
   M3), and uiPSF v1 drops it too.  Stacks of different lengths are cut to
@@ -44,7 +49,8 @@ from typing import Optional
 import numpy as np
 
 from ..plugins import param
-from .core import CalibrationSettings, classify_brightness, find_stack_beads, saturation_of
+from .core import (CalibrationSettings, brightness_centre, classify_brightness, find_peaks, measure_peaks,
+                   saturation_of, select_beads)
 from .input import BeadStack, discover_acquisitions, read_bead_stacks
 
 KEEP = slice(1, None)            # every slice but the first (module docstring)
@@ -192,6 +198,17 @@ def _unit(h) -> np.ndarray:
     return h / h[2, 2]
 
 
+def _bright_enough(brightness, saturated, brightness_range) -> list:
+    """The indices not *too dim*: at least the median of the unsaturated ones divided by
+    √``brightness_range``, the bead average's lower bound (`core.classify_brightness`); all with no range."""
+    brightness = np.asarray(brightness, float)
+    unsaturated = ~np.asarray(saturated, bool)
+    if brightness_range is None or not unsaturated.any():
+        return list(range(len(brightness)))
+    lower = float(np.median(brightness[unsaturated])) / np.sqrt(brightness_range)
+    return [i for i, b in enumerate(brightness) if b >= lower]
+
+
 def _origin(st) -> np.ndarray:
     return np.array(st.roi[:2] if st.roi is not None else (0, 0), float)
 
@@ -211,24 +228,33 @@ def rois_at(stacks, centres, camera, roi_size: int, slices=KEEP, saturation_adu=
 
 
 def single_rois(stacks, camera, settings: CalibrationSettings | None = None, slices=KEEP) -> BeadROIs:
-    """One channel: the beads the bead average would find (`core.find_stack_beads`), a `settings.roi_size`
-    ROI each, with the same records: position, background, brightness and its verdict, saturation.  The
-    verdict is shown, not applied (module docstring)."""
+    """One channel: the beads the bead average would find (`core.find_stack_beads`) less the *too dim*
+    ones (module docstring), a `settings.roi_size` ROI each, with the same records: position,
+    background, brightness and its verdict, saturation."""
     settings = settings or CalibrationSettings()
     settings.validate()
     channels = {str(st.axes.get("channel", 0)) for st in stacks}
     if len(channels) > 1:
         raise ValueError("the acquisitions hold several channels; calibrate them one at a time")
-    found = []
-    for s, st in enumerate(stacks):
-        records, _ = find_stack_beads(st.images, settings, saturation_of(st.images, settings))
-        found += [dict(r, stack=s) for r in records]
+    candidates = []
+    for st in stacks:
+        images = np.asarray(st.images, np.float32)
+        yx, _, heights = find_peaks(images, settings)
+        candidates.append(measure_peaks(images, yx, settings, saturation_of(st.images, settings), heights))
+    found = select_beads(candidates, settings)                   # isolated, over all stacks at once
     if not found:
         raise ValueError("no isolated beads found: review detection and the bead box")
-    classify_brightness(found, settings)
-    rois = rois_at(stacks, [(r["stack"], r["x_px"], r["y_px"]) for r in found], camera, settings.roi_size, slices,
+    # specks out before the verdict, so a crowd of them cannot drag its median down to their level
+    _, speck = brightness_centre(found, settings.brightness_range)
+    beads = [r for r in found if speck is None or r["saturated"] or r["brightness_adu"] >= speck]
+    classify_brightness(beads, settings)
+    kept = [r for r in beads if r["brightness_reason"] != "too dim"]
+    if not kept:
+        raise ValueError("every bead found is too dim beside the others: review detection and brightness range")
+    rois = rois_at(stacks, [(r["stack"], r["x_px"], r["y_px"]) for r in kept], camera, settings.roi_size, slices,
                    settings.saturation_adu)
-    rois.records = [dict(r, id=i) for i, r in enumerate(found)]
+    rois.records = [dict(r, id=i) for i, r in enumerate(kept)]
+    rois.messages.append(f"{len(found) - len(kept)} of {len(found)} spots too dim beside the others: not beads")
     return rois
 
 
@@ -239,11 +265,23 @@ def dual_rois(stacks, camera, settings=None, slices=KEEP) -> BeadROIs:
     from .dual import DualColorSettings, collect_dual_beads, fit_dual_transform
     settings = settings or DualColorSettings()
     beads = collect_dual_beads(stacks, settings)
+    # the transform from every pair, as the dual calibration fits it; the pairs to learn from without the
+    # ones too dim, judged by the pair's light in both channels together: a ratiometric pair sends little
+    # to one channel, and judging each channel apart dropped real pairs for their dim half
     fitted = fit_dual_transform(beads.secondary_points, beads.main_points, beads.settings.registration)
+    keep = _bright_enough([sum(part["brightness_adu"] for part in r["channel_records"]) for r in beads.records],
+                          [any(part["saturated"] for part in r["channel_records"]) for r in beads.records],
+                          settings.brightness_range)
+    if not keep:
+        raise ValueError("every pair is too dim in a channel beside the others: review detection and brightness "
+                         "range")
+    pairs = [beads.records[i] for i in keep]
+    for i, r in zip(keep, pairs):
+        r["pair_brightness_adu"] = sum(part["brightness_adu"] for part in r["channel_records"])
     per_channel = []
     for ch in (0, 1):
         per_channel.append([(r["channel_records"][ch]["stack"],) + tuple(int(round(v)) for v in
-                            r["channel_records"][ch]["full_image_xy"]) for r in beads.records])
+                            r["channel_records"][ch]["full_image_xy"]) for r in pairs])
     cuts = [_cut(stacks, centres, settings.roi_size, slices, camera, settings.saturation_adu)
             for centres in per_channel]
     data = np.stack([c[0] for c in cuts], 1)
@@ -254,10 +292,12 @@ def dual_rois(stacks, camera, settings=None, slices=KEEP) -> BeadROIs:
     records = [{"id": i, "stack": m[0], "x_px": m[1], "y_px": m[2],
                 "channels": [{"x_px": m[1], "y_px": m[2]}, {"x_px": sc[1], "y_px": sc[2]}]}
                for i, (m, sc) in enumerate(zip(*per_channel))]
-    messages = [f"{int((~fitted.accepted).sum())} of {len(fitted.accepted)} pairs off the starting transform"]
+    messages = [f"{int((~fitted.accepted).sum())} of {len(fitted.accepted)} pairs off the starting transform",
+                f"{len(beads.records) - len(keep)} of {len(beads.records)} pairs too dim, both channels "
+                f"together: not used"]
     return BeadROIs(batch, noise, camera, pixel_size_nm(camera), records, beads.sources,
                     _unit(fitted.transformation), dict(beads.geometry),
-                    np.stack([beads.main_points, beads.secondary_points], 1), messages)
+                    np.stack([beads.main_points[keep], beads.secondary_points[keep]], 1), messages)
 
 
 def bead_rois(inputs, camera=None, dual: bool = False, settings=None, slices=KEEP, camera_settings=None,
@@ -537,3 +577,69 @@ def run_calibration(paths, dual: bool, optics: OpticsSettings, model: BeadSettin
         path = Path(save_to) if save_to else again or default_save_path(paths, dual)
         result.saved, _ = save(path, cal, result.calibration, overwrite=bool(save_to or again))
     return result
+
+
+# ------------------------------------------------------------------ fit quality: the beads, refitted
+
+def calibration_of(run: PupilRun):
+    """The run's spline (or dual) calibration: the saved one, else sampled now as saving would."""
+    if run.calibration is None:
+        rois = run.rois
+        dz, z_range = float(rois.batch.z_step_nm), float(rois.batch.z_nm.abs().max())
+        roi = int(rois.batch.data.shape[-1])
+        run.calibration = (dual_calibration(run.cal, dz, z_range, roi) if run.dual
+                           else spline_calibration(run.cal, dz, z_range, roi, camera=rois.camera))
+    return run.calibration
+
+
+def fit_quality(run: PupilRun, z_starts: int = 5, iterations: int = 75) -> dict:
+    """Every slice of every bead fitted with the run's spline by SMAPpy's Spline 3D fitter: what a
+    localisation of data with this calibration will see, as the bead average's fit quality
+    (`validation.fit_bead_diagnostics`) shows it, and SMAP's bead calibration before it.
+
+    All beads, used or not, so that a rejected bead's curve shows why.  The fit box is the bead box less
+    two pixels a side, for the spot's lateral shift; the read noise is added as the shifted Poisson does
+    (`uipsf.workflows.spline`).  Each slice is started from ``z_starts`` heights and the best likelihood
+    kept, so an ambiguous PSF shows as jumps.  The *centred* error removes each bead's own offset (its
+    height above the coverslip is not known), leaving the curve's distortion.  One channel; for two,
+    each channel is fitted with its own half of the calibration.
+    """
+    from ..psf import SplinePSF
+    calibration = calibration_of(run)
+    batch = run.rois.batch
+    data = batch.data.detach().cpu().double().numpy()                 # [E, C, K, Y, X] photons
+    E, C, K, Y, X = data.shape
+    s = batch.s
+    s = float(s) if not hasattr(s, "dim") or s.dim() == 0 else s.expand_as(batch.data).cpu().numpy()
+    data = np.maximum(data + s, 0)
+    nominal = batch.z_nm.detach().cpu().double().numpy()
+    nominal = np.broadcast_to(nominal, (E, K)) if nominal.ndim == 1 else nominal
+    channels = [calibration] if C == 1 else [calibration.main, calibration.secondary]
+    out = {"bead_id": np.repeat(np.arange(E), K), "frame": np.tile(np.arange(K), E),
+           "nominal_z_nm": nominal.reshape(-1)}
+    for c, spline in enumerate(channels):
+        rois = np.ascontiguousarray(data[:, c, :, 2:Y - 2, 2:X - 2].reshape(E * K, Y - 4, X - 4), np.float32)
+        best = None
+        for z in np.linspace(1, spline.shape[0] - 2, z_starts):
+            fit = SplinePSF(spline, z_start_nm=float(spline.z_index_to_nm(z))).fit(rois, iterations=iterations)
+            if best is None:
+                best = fit
+                continue
+            keep = np.isfinite(fit.logl) & (~np.isfinite(best.logl) | (fit.logl > best.logl))
+            for key in ("theta", "crlb", "logl", "iterations"):
+                getattr(best, key)[keep] = getattr(fit, key)[keep]
+        fitted = spline.z_index_to_nm(best.theta[:, 4])
+        valid = np.isfinite(best.logl) & np.isfinite(best.theta).all(axis=1)
+        fitted[~valid] = np.nan
+        error = fitted - out["nominal_z_nm"]
+        centred = error.copy()
+        for e in range(E):
+            use = (out["bead_id"] == e) & valid
+            if use.any():
+                centred[out["bead_id"] == e] -= np.nanmedian(error[use])
+        key = "" if c == 0 else "_secondary"
+        out.update({f"fitted_z_nm{key}": fitted, f"centred_error_nm{key}": centred,
+                    f"photons{key}": best.theta[:, 2], f"fit_valid{key}": valid,
+                    f"at_z_boundary{key}": (best.theta[:, 4] < 1) | (best.theta[:, 4] > spline.shape[0] - 2)})
+    out["state"] = np.repeat([row.state for row in run.cal.beads.rows], K)
+    return out

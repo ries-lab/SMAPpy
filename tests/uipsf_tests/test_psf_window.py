@@ -102,7 +102,8 @@ def test_the_window_shows_each_method_its_own_sections_only(stack_file, monkeypa
     assert not window.sections["beads"].isHidden() and window.quality_button.isVisibleTo(window)
     window.method_box.setCurrentText("pupil model (uiPSF)")
     assert not window.sections["microscope"].isHidden() and not window.sections["model"].isHidden()
-    assert not window.quality_button.isVisibleTo(window) and not window.browse_button.isVisibleTo(window)
+    assert window.quality_button.isVisibleTo(window) and not window.browse_button.isVisibleTo(window)
+    assert not window.install_button.isVisibleTo(window)                      # torch is here and recent
     window.close()
 
 
@@ -144,6 +145,17 @@ def test_the_pupil_model_learns_in_the_window_shows_its_figures_and_hands_the_ca
     assert window.bead_table.rowCount() == 10
     saved = window.run_result.saved
     assert handed == [(str(saved), False)] and window.use_button.isEnabled()
+    window.fit_quality()
+    wait()
+    assert window.tabs.tabText(window.tabs.currentIndex()) == "Fit quality"
+    quality = window.run_result.extra["quality"]
+    used = quality["state"] == "used"
+    assert np.nanmedian(np.abs(quality["centred_error_nm"][used])) < 15        # the spline fits its own beads
+    curves = [line for ax in window.pages[window.tabs.currentIndex()][0].axes for line in ax.get_lines()
+              if hasattr(line, "pair_ids")]
+    assert len(curves) == 2 * 10                                               # every bead, used or not
+    window.pick_pair(type("Pick", (), {"artist": curves[3], "ind": [0]})())    # a click on bead 3's curve
+    assert window.selected_beads() == [3]
     window.bead_table.selectRow(0)
     window.toggle_beads()
     assert window.marks == {0: "exclude"} and "exclude on Recalculate" in window.bead_table.item(0, 4).text()

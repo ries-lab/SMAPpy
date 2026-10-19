@@ -237,22 +237,40 @@ def saturation_of(images, settings):
     return float(np.iinfo(images.dtype).max) if np.issubdtype(images.dtype, np.integer) else None
 
 
-def find_stack_beads(images, settings, saturation=None):
-    """The isolated beads of one stack ([z, y, x], ADU) and what is recorded of each, with its projection.
+def find_peaks(images, settings):
+    """Every bright spot of one stack ([z, y, x]): its whole pixel (y, x), the stack's projection and each
+    spot's height (the smoothed projection at it, above the projection's median).
 
-    The *find* half of a bead calibration, shared by the bead average (`collect_beads`, which then cuts
-    normalised volumes) and the pupil model (`pupil.single_rois`, which cuts raw ROIs), so that both
-    start from the same beads and show the same table.  Each record: the bead's whole pixel, its
-    background (one median of the box's border over the whole stack, which keeps the axial change of
-    the tails), its brightness (the brightest plane's sum above that), its peak and whether it reaches
-    ``saturation``.  A bead with no light above its background is not a bead and is left out.
-    """
+    The maximum over z, smoothed by `detection_sigma_px`, above `detection_threshold_sigma` robust
+    standard deviations (1.4826 × MAD) of its median; local maxima over 3 × 3, their centres of mass.
+    No border or isolation here: `select_beads` decides those.  The height is local, so a spot beside a
+    bead is not credited with the bead's light, as a box around it would be."""
+    projection = np.max(images, axis=0)
+    filtered = ndimage.gaussian_filter(projection.astype(float), settings.detection_sigma_px)
+    background = np.median(filtered)
+    noise = 1.4826 * np.median(np.abs(filtered - background))
+    threshold = background + settings.detection_threshold_sigma * max(noise, np.finfo(float).eps)
+    peaks = (filtered == ndimage.maximum_filter(filtered, size=3)) & (filtered > threshold)
+    labels, n = ndimage.label(peaks)
+    centers = ndimage.center_of_mass(filtered, labels, np.arange(1, n + 1)) if n else []
+    yx = np.rint(centers).astype(int).reshape(-1, 2)
+    heights = filtered[yx[:, 0], yx[:, 1]] - background if len(yx) else np.zeros(0)
+    return yx, projection, heights
+
+
+def measure_peaks(images, yx, settings, saturation=None, heights=None):
+    """What a calibration records of each spot: its whole pixel, its background (one median of its box's
+    border over the whole stack, which keeps the axial change of the tails), its brightness (the
+    brightest plane's sum above that), its peak and whether it reaches ``saturation``, and whether its
+    box (`roi_size` + `padding`) lies inside the image (``inside``).  A box at the edge is clipped, so a
+    spot there is measured too: it may still be a neighbour that spoils a bead's isolation.  ``heights``
+    (`find_peaks`) are kept as ``height``, what isolation judges a neighbour by."""
     images = np.asarray(images, np.float32)
-    yx, projection = detect_beads(images, settings)
     radius = settings.roi_size//2 + settings.padding
+    Y, X = images.shape[1:]
     records = []
-    for y, x in yx:
-        volume = images[:, y-radius:y+radius+1, x-radius:x+radius+1]
+    for i, (y, x) in enumerate(yx):
+        volume = images[:, max(y-radius, 0):y+radius+1, max(x-radius, 0):x+radius+1]
         peak_adu = float(np.max(volume))
         border = np.concatenate((volume[:, 0], volume[:, -1],
                                  volume[:, 1:-1, 0], volume[:, 1:-1, -1]), axis=1)
@@ -260,19 +278,77 @@ def find_stack_beads(images, settings, saturation=None):
         # in the background/PSF tails instead of removing them plane-wise.
         background = float(np.median(border))
         brightness = float(np.max((volume - background).sum(axis=(1, 2))))
-        if brightness <= 0:
-            continue
         records.append({'x_px': int(x), 'y_px': int(y), 'brightness_adu': brightness,
                         'background_adu': background, 'peak_adu': peak_adu,
                         'saturation_adu': saturation,
-                        'saturated': bool(saturation is not None and peak_adu >= saturation)})
-    return records, projection
+                        'saturated': bool(saturation is not None and peak_adu >= saturation),
+                        'inside': bool(radius <= y < Y - radius and radius <= x < X - radius),
+                        'height': float('nan') if heights is None else float(heights[i])})
+    return records
+
+
+def brightness_centre(records, brightness_range, key='brightness_adu'):
+    """The typical bead's brightness and the bound below which a spot is a speck, (centre, lower);
+    (None, None) with no range or no unsaturated spot.
+
+    The centre is the median weighted by each spot's own light (``key``), so it sits among the beads
+    however many specks there are: a speck carries a tenth of a bead's light.  On Zenodo
+    `1ch_40nm_bead` detection at 6, 4 and 3 robust σ found 60, 144 and 332 specks beside 58 beads; the
+    plain median, even recomputed without the dim ones, fell among the specks at 3σ, this one stayed
+    at 13 000-22 000 ADU and kept all 58 beads.  The bound is centre/√range, the bead average's *too dim*
+    with this centre.  It decides only what is a speck (`select_beads`, `pupil.single_rois`); the bead
+    average's verdict keeps its plain median (`classify_brightness`)."""
+    values = np.asarray([r[key] for r in records], float)
+    pool = values[~np.asarray([r['saturated'] for r in records], bool) & (values > 0)]
+    if brightness_range is None or not len(pool):
+        return None, None
+    ordered = np.sort(pool)
+    cumulative = np.cumsum(ordered)
+    centre = float(ordered[np.searchsorted(cumulative, cumulative[-1] / 2)])
+    return centre, centre/np.sqrt(brightness_range)
+
+
+def select_beads(candidates, settings):
+    """The beads among every stack's spots (``candidates``: one `measure_peaks` list per stack): inside
+    the image, with light above their background, and isolated -- no other spot within
+    `min_distance_px` that is itself bright enough to be a bead or saturated.  A faint speck beside a
+    bead does not cost the bead (on Zenodo `2ch_40nm_bead` a lower detection threshold lost real pairs
+    to specks this way); bright dirt, a saturated blob or a neighbour beyond the border still does.
+    A neighbour is judged by its local ``height`` (`find_peaks`), not its box, which beside a bead
+    holds the bead's light too; the bound is the *too dim* one, over all stacks
+    (`brightness_centre`).  With no `brightness_range`, every neighbour counts.  Records come back with
+    their stack index."""
+    _, lower = brightness_centre([r for stack in candidates for r in stack], settings.brightness_range,
+                                 key='height')
+    kept = []
+    for si, records in enumerate(candidates):
+        if not records:
+            continue
+        yx = np.array([(r['y_px'], r['x_px']) for r in records])
+        counts = np.array([lower is None or r['saturated'] or not r['height'] < lower for r in records])
+        crowded = np.zeros(len(records), bool)
+        for a, b in cKDTree(yx).query_pairs(settings.min_distance_px):
+            crowded[a] |= counts[b]
+            crowded[b] |= counts[a]
+        kept += [dict(r, stack=si) for r, c in zip(records, crowded)
+                 if r['inside'] and not c and r['brightness_adu'] > 0]
+    return kept
+
+
+def find_stack_beads(images, settings, saturation=None):
+    """The beads of one stack and what is recorded of each, with its projection: `find_peaks`,
+    `measure_peaks` and `select_beads` on this stack alone.  A calibration of several stacks selects
+    over all of them at once (`collect_beads`, `pupil.single_rois`), so the bound is the same in each."""
+    yx, projection, heights = find_peaks(np.asarray(images, np.float32), settings)
+    records = select_beads([measure_peaks(images, yx, settings, saturation, heights)], settings)
+    return [{k: v for k, v in r.items() if k != 'stack'} for r in records], projection
 
 
 def classify_brightness(records, settings):
     """Each record's brightness verdict, in place: *saturated*, *too dim*, *too bright* (outside
     `brightness_range` about the unsaturated beads' median) or *accepted*.  The bead average drops
     what is not accepted; the pupil model only shows it, since it judges every bead by its fit."""
+    # the plain median, as ever: the verdict a user knows; `brightness_centre` only finds specks
     brightness = np.asarray([r['brightness_adu'] for r in records])
     unsaturated = np.asarray([not r['saturated'] for r in records], bool)
     if np.any(unsaturated) and settings.brightness_range is not None:
@@ -321,6 +397,7 @@ def collect_beads(inputs, settings=None, progress=None):
         batches = (read_bead_stacks(p, settings.dz_nm) for p in paths)
         em_states = [_em_on(p) for p in paths]
     volumes, records, projections, sources = [], [], [], []
+    candidates, cut = [], {}
     dz = None
     channels = set()
     radius = settings.roi_size // 2 + settings.padding
@@ -346,13 +423,22 @@ def collect_beads(inputs, settings=None, progress=None):
             si = len(sources)
             sources.append({'path': stack.source, 'axes': stack.axes,
                             'shape': list(images.shape), 'z_nm': z.tolist()})
-            found, projection = find_stack_beads(images, settings, saturation_of(camera_images, settings))
+            yx, projection, heights = find_peaks(images, settings)
             projections.append(projection)
-            for rec in found:
-                y, x = rec['y_px'], rec['x_px']
-                volume = images[:, y-radius:y+radius+1, x-radius:x+radius+1] - rec['background_adu']
-                records.append(dict(rec, id=len(records), stack=si))
-                volumes.append(volume / rec['brightness_adu'])
+            spots = measure_peaks(images, yx, settings, saturation_of(camera_images, settings), heights)
+            candidates.append(spots)
+            # cut now, the stack is released after this loop; which are beads is decided over all stacks
+            for spot in spots:
+                if spot['inside'] and spot['brightness_adu'] > 0:
+                    y, x = spot['y_px'], spot['x_px']
+                    cut[(si, x, y)] = ((images[:, y-radius:y+radius+1, x-radius:x+radius+1]
+                                        - spot['background_adu']) / spot['brightness_adu'])
+    for rec in select_beads(candidates, settings):
+        records.append(dict(rec, id=len(records)))
+        volumes.append(cut[(rec['stack'], rec['x_px'], rec['y_px'])])
+    del cut
+    if not records:
+        raise ValueError('no isolated beads found; review detection and the bead box')
     classify_brightness(records, settings)
     usable = sum(r['brightness_accepted'] for r in records)
     if usable < settings.min_beads:

@@ -121,16 +121,23 @@ def draw_atlas(fig, atlas, groups=("slice", "|z|", "radius", "field")) -> None:
     fig.suptitle(text, fontsize="small")
 
 
-def draw_beads(fig, cal) -> None:
-    """Every bead where it is on the chip, by its state in the bead table."""
+def draw_beads(fig, cal, selected=()) -> None:
+    """Every bead where it is on the chip, by its state in the bead table; the ``selected`` beads ringed.
+    Each point carries its bead (``pair_ids``, with the pick's index), so a window can select it."""
     ax = fig.subplots()
+    selected = set(selected)
     for state, colour in STATES.items():
         rows = [r for r in cal.beads.rows if r.state == state and r.field_xy is not None]
         if rows:
             xy = np.array([r.field_xy for r in rows], float)
-            ax.scatter(xy[:, 0], xy[:, 1], s=20, color=colour, label=f"{state} ({len(rows)})")
+            points = ax.scatter(xy[:, 0], xy[:, 1], s=20, color=colour, label=f"{state} ({len(rows)})", picker=5)
+            points.pair_ids = np.array([r.bead for r in rows])
             for r, (x, y) in zip(rows, xy, strict=True):
                 ax.annotate(str(r.bead), (x, y), fontsize="xx-small", xytext=(2, 2), textcoords="offset points")
+    ring = [r.field_xy for r in cal.beads.rows if r.bead in selected and r.field_xy is not None]
+    if ring:
+        ring = np.array(ring, float)
+        ax.scatter(ring[:, 0], ring[:, 1], s=140, facecolors="none", edgecolors="k", linewidths=1.5)
     ax.set_aspect("equal")
     ax.invert_yaxis()
     ax.set_xlabel("x (px)")

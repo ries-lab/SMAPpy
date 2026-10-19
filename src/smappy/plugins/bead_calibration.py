@@ -29,7 +29,8 @@ class BeadCalibration(Plugin):
     changes_locs = False
     Settings = BeadCalibrationSettings
     # 2: no *mode*: the window's own combo is the one place it is chosen
-    version = "2"
+    # 3: faint specks no longer cost a bead its isolation (`core.select_beads`): more beads are kept
+    version = "3"
     window = "bead calibration"
 
     def run(self, ctx: Context, settings: BeadCalibrationSettings) -> Result:

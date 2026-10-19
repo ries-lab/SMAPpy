@@ -1388,7 +1388,29 @@ in situ is v2's M5.  What it taught, for v2 and its window:
   same beads.  The pupil model's run is `calibrate.pupil.run_calibration`,
   headless.  Both save with *save model* beside the stacks under the bead
   calibration's name, never over another file (the bead calibration asked
-  for a path each time; *Save as...* still does).
+  for a path each time; *Save as...* still does).  The pupil model's fit
+  quality (`pupil.fit_quality`) fits every slice of every bead with the
+  saved spline by Spline 3D, as SMAP's bead calibration does: the check is
+  the fitter the data will meet, not uipsf's own localisation.  *Install
+  PyTorch* (`torch_install`) picks the build per machine; Windows with an
+  NVIDIA card gets PyTorch's CUDA 12.6 index, for older drivers.  The pupil model drops
+  the bead average's *too dim* beads before learning (a pair by its light in
+  both channels together): on the Zenodo beads 24 of 84 detections were
+  specks a fifth as bright as a bead, whose fits were noise; with them gone
+  the rejection, no longer skewed by them, caught the one bead whose fit
+  quality curve ran away.  An absolute SNR floor was tried and dropped: real
+  beads in a ratiometric pair's dim channel have an SNR of 15, specks up to 8.
+  Isolation, for both methods (`core.select_beads`): a neighbour within
+  *min distance* counts only if it is bright enough to be a bead (its local
+  height in the smoothed projection, not its box, which beside a bead holds
+  the bead's light) or saturated.  "Bright enough" is the typical bead,
+  the median weighted by each spot's own light, over √*brightness range*:
+  the plain median, even iterated, fell among the specks once a low
+  threshold found four times more of them than beads.  On Zenodo the
+  pupil model keeps 56, 60 and 62 beads at 6, 4 and 3 σ (before: 59, 35,
+  and the specks) and 88 pairs at each; the bead average accepts 55 at the
+  default 6 σ, where it accepted 36.  Its verdict keeps the plain median:
+  on three beads the weighted one moves too much.
   `BeadSettings` (the model's choices) lives in smappy, not uipsf: every
   `uipsf` import loads torch through the package, and the window must open
   without it to say how to install it.  Until the microscope database, the

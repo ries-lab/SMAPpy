@@ -37,9 +37,12 @@ AVERAGE_ONLY = ("max_xy_shift_px", "max_z_shift_nm", "alignment_range_nm", "regi
 
 @dataclass
 class Page:
-    """One result page: ``draw(figure, selected, excluded)`` draws it and may return a status line."""
+    """One result page: ``draw(figure, selected, excluded)`` draws it and may return a status line.
+    A page that shows no bead of its own (the pupil, shared by all beads) does not follow the table's
+    selection, and is not redrawn when it changes."""
     title: str
     draw: Callable
+    follows_selection: bool = True
 
 
 @dataclass
@@ -173,7 +176,7 @@ class PupilModel:
     columns = ("bead", "stack", "x, y (px)", "brightness", "state", "reason", "deviance", "photons",
                "xy offset (px)")
     marks_include = True
-    has_quality = False
+    has_quality = True
     has_stack = False
 
     def run(self, paths, dual, inputs, progress=None, cancel=None, previous: Optional[Run] = None,
@@ -186,22 +189,39 @@ class PupilModel:
         return Run(done, dual, done.saved)
 
     def save_as(self, run: Run, path) -> Path:
-        from .pupil import dual_calibration, save, spline_calibration
+        from .pupil import calibration_of, save
         done = run.result
-        if done.calibration is None:                  # learnt with *save model* off: sample it now
-            rois = done.rois
-            dz, z_range = float(rois.batch.z_step_nm), float(rois.batch.z_nm.abs().max())
-            roi = int(rois.batch.data.shape[-1])
-            done.calibration = (dual_calibration(done.cal, dz, z_range, roi) if run.dual
-                                else spline_calibration(done.cal, dz, z_range, roi, camera=rois.camera))
-        done.saved, _ = save(path, done.cal, done.calibration, overwrite=True)
+        done.saved, _ = save(path, done.cal, calibration_of(done), overwrite=True)  # sampled if not saved yet
         run.saved = done.saved
         return run.saved
 
+    def quality(self, run: Run):
+        """Every bead refitted with the calibration by Spline 3D (`pupil.fit_quality`), kept with the run."""
+        from .pupil import fit_quality
+        run.extra["quality"] = fit_quality(run.result)
+        return run
+
     def pages(self, run: Run) -> list:
-        from uipsf.diagnostics import figures
-        return [Page(title, lambda f, s, e, draw=draw: draw(f))
-                for title, draw in figures(run.result.cal, reference=run.result.start).items()]
+        from uipsf.diagnostics import draw_beads, figures
+
+        from . import plots
+        cal = run.result.cal
+        pages = [Page(title, lambda f, s, e, draw=draw: draw(f), follows_selection=False)
+                 for title, draw in figures(cal, reference=run.result.start).items() if title != "Beads"]
+
+        def quality(figure, selected, excluded):
+            found = run.extra.get("quality")
+            if found is None:
+                ax = figure.subplots()
+                ax.axis("off")
+                ax.text(0.5, 0.5, "Calculate fit quality to see it", ha="center", va="center")
+                return None
+            return plots.draw_pupil_fit_quality(figure, found, selected, excluded)
+
+        pages.append(Page("Fit quality", quality))
+        if any(r.field_xy is not None for r in cal.beads.rows):
+            pages.append(Page("Beads", lambda f, s, e: draw_beads(f, cal, s)))
+        return pages
 
     def rows(self, run: Run, marks: dict) -> list:
         table, records = run.result.cal.beads, run.result.rois.records

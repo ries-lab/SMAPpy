@@ -2,7 +2,7 @@
 title: Bead calibration
 summary: Turns z-stacks of fluorescent beads into the measured 3D PSF model the Spline 3D fitters use, and for a split camera into two models and the transformation between the halves.
 widget: smappy.calibrate.qt_gui.CalibrationWindow
-covers: [smappy.calibrate.core.detect_beads, smappy.calibrate.dual.detect_bead_layout, smappy.calibrate.dual.bead_registration, smappy.calibrate.transform.detect_layout, smappy.calibrate.core.collect_beads, smappy.calibrate.core.estimate_shift, smappy.calibrate.core.subvoxel_peak, smappy.calibrate.core.shift_volume, smappy.calibrate.core.robust_shape_error, smappy.calibrate.core.build_calibration, smappy.calibrate.core._single_model, smappy.calibrate.core.spline_coefficients, smappy.calibrate.core.positive_pair_models, smappy.calibrate.core.FOCAL_PLANES, smappy.calibrate.dual.collect_dual_beads, smappy.calibrate.dual.fit_dual_transform, smappy.calibrate.dual.robust_projective, smappy.calibrate.dual.refine_projective, smappy.calibrate.dual.build_dual_calibration, smappy.calibrate.validation.fit_bead_diagnostics, smappy.calibrate.validation.fit_paired_bead_diagnostics, smappy.calibrate.qt_gui.CalibrationWindow]
+covers: [smappy.calibrate.core.find_peaks, smappy.calibrate.core.measure_peaks, smappy.calibrate.core.select_beads, smappy.calibrate.core.brightness_centre, smappy.calibrate.core.detect_beads, smappy.calibrate.dual.detect_bead_layout, smappy.calibrate.dual.bead_registration, smappy.calibrate.transform.detect_layout, smappy.calibrate.core.collect_beads, smappy.calibrate.core.estimate_shift, smappy.calibrate.core.subvoxel_peak, smappy.calibrate.core.shift_volume, smappy.calibrate.core.robust_shape_error, smappy.calibrate.core.build_calibration, smappy.calibrate.core._single_model, smappy.calibrate.core.spline_coefficients, smappy.calibrate.core.positive_pair_models, smappy.calibrate.core.FOCAL_PLANES, smappy.calibrate.dual.collect_dual_beads, smappy.calibrate.dual.fit_dual_transform, smappy.calibrate.dual.robust_projective, smappy.calibrate.dual.refine_projective, smappy.calibrate.dual.build_dual_calibration, smappy.calibrate.validation.fit_bead_diagnostics, smappy.calibrate.validation.fit_paired_bead_diagnostics, smappy.calibrate.qt_gui.CalibrationWindow]
 ---
 
 ## What it does
@@ -64,7 +64,7 @@ own as `smappy-calibrate`.
 ```figure-setup
 import warnings
 from smappy.calibrate.core import (CalibrationSettings, build_calibration, collect_beads,
-                                   detect_beads, FOCAL_PLANES)
+                                   find_stack_beads, FOCAL_PLANES)
 from dataclasses import replace
 from smappy.calibrate.dual import DualColorSettings, bead_registration, calibrate_dual
 from smappy.calibrate.input import BeadStack
@@ -92,7 +92,11 @@ with warnings.catch_warnings():
 pixel (a maximum projection), smoothed, and every local maximum clearly above
 the background noise (*threshold*, in multiples of the noise) is a bead.  A
 bead too close to the image edge is dropped, and so are **both** beads of a
-pair closer than *min distance*: two overlapping PSFs are not one PSF.
+pair closer than *min distance*: two overlapping PSFs are not one PSF.  A
+faint speck does not count as a neighbour -- a spot whose height in the
+projection is below the typical bead's divided by the square root of
+*brightness range* -- so dust beside a bead does not cost the bead; bright
+dirt and anything saturated still do.
 
 **2. Cut them out.**  Around each bead a box of *bead box* pixels (plus a
 margin, *padding*, for the alignment to shift into) is cut from every plane.
@@ -108,7 +112,8 @@ clipped.
 fig.set_size_inches(7.5, 2.7)
 grid = fig.add_gridspec(1, 4, width_ratios=[1.5, 1, 1, 1])
 ax = fig.add_subplot(grid[0])
-found, projection = detect_beads(image, settings)
+records, projection = find_stack_beads(image, settings)
+found = [(r['y_px'], r['x_px']) for r in records]
 ax.imshow(projection, cmap="gray", vmax=np.percentile(projection, 99.8))
 half = settings.roi_size / 2
 for y, x in found:
@@ -281,6 +286,16 @@ $$P > \mathrm{median}(P) + t \cdot 1.4826\, \mathrm{median}\left|P - \mathrm{med
 $t$ the *threshold*: 1.4826 times the median absolute deviation estimates the
 noise's standard deviation without being pulled up by the beads.  The bead's
 position is the centre of mass of its maximum, rounded to a pixel.
+
+**Isolation.**  A neighbour within *min distance* counts if its height
+$h = P - \mathrm{median}(P)$ at its maximum is at least $h_\mathrm{c}/\sqrt{r}$,
+or it is saturated; $h_\mathrm{c}$ is the median of the heights of all spots of
+all stacks weighted by the heights themselves, and $r$ the *brightness
+range*.  Weighted so, $h_\mathrm{c}$ stays among the beads however many faint
+specks a low *threshold* finds: on the Zenodo example beads, 60 to 332 specks
+beside 58 beads.  The height, not the box's light, judges a neighbour: a box
+around a speck beside a bead holds the bead's light too.  With no *brightness
+range*, every neighbour counts.
 
 **Extraction.**  A box of $n + 2p$ pixels ($n$ the *bead box*, $p$ the
 *padding*) is cut from every plane; $b$, the median of its outermost pixels
@@ -486,7 +501,8 @@ detected; 6 is a good start for bright beads.
 ### min distance
 Larger than twice the half-width of a defocused bead's spot, or the tails
 of a neighbour end up in the model.  Beads closer than this are both
-dropped, so dense fields lose many beads.
+dropped, so dense fields lose many beads.  Faint specks do not count as
+neighbours (*brightness range* decides what is faint).
 
 ### smoothing z
 The width of the smoothing along z.  About one to two z steps is usual.

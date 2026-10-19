@@ -2,7 +2,7 @@
 title: PSF calibration
 summary: Makes the PSF calibration the Spline 3D fitters read from bead z-stacks, by one of two methods -- the bead average, or a physical model of the microscope's pupil and aberrations learnt with uiPSF v2 -- and shows what each found and how well it fits.
 widget: smappy.calibrate.psf_window.PSFCalibrationWindow
-covers: [smappy.calibrate.psf_methods.BeadAverage, smappy.calibrate.psf_methods.PupilModel, smappy.calibrate.pupil.run_calibration, smappy.calibrate.pupil.bead_rois, smappy.calibrate.pupil.single_rois, smappy.calibrate.pupil.dual_rois, smappy.calibrate.pupil.spline_calibration, smappy.calibrate.pupil.dual_calibration, smappy.calibrate.pupil.save, smappy.calibrate.pupil.OpticsSettings, smappy.calibrate.pupil.BeadSettings, smappy.calibrate.core.find_stack_beads, smappy.calibrate.psf_window.PSFCalibrationWindow]
+covers: [smappy.calibrate.pupil.fit_quality, smappy.calibrate.plots.draw_pupil_fit_quality, smappy.torch_install.command, smappy.calibrate.psf_methods.BeadAverage, smappy.calibrate.psf_methods.PupilModel, smappy.calibrate.pupil.run_calibration, smappy.calibrate.pupil.bead_rois, smappy.calibrate.pupil.single_rois, smappy.calibrate.pupil.dual_rois, smappy.calibrate.pupil.spline_calibration, smappy.calibrate.pupil.dual_calibration, smappy.calibrate.pupil.save, smappy.calibrate.pupil.OpticsSettings, smappy.calibrate.pupil.BeadSettings, smappy.calibrate.core.find_stack_beads, smappy.calibrate.psf_window.PSFCalibrationWindow]
 ---
 
 ## What it does
@@ -44,9 +44,11 @@ Use it to calibrate for fitting, and to look at the microscope: every run
 shows the aberrations with their uncertainties and where the model and the
 data disagree.  Untick *save model* to only look.
 
-The pupil model needs PyTorch, an optional part of SMAPpy
-(`pip install "smappy-smlm[uipsf]"`); without it the window says what to
-type, and the bead average works as ever.  It uses the
+The pupil model needs PyTorch, an optional part of SMAPpy.  Without it, or
+with one too old, *Install PyTorch* installs the right build for the computer
+(for Apple's GPU, an NVIDIA card or the CPU) into the Python running SMAPpy;
+the window also shows the command to type instead.  The bead average works
+without it.  It uses the
 GPU where PyTorch finds one (NVIDIA, or Apple's).
 
 ## How it works
@@ -55,9 +57,15 @@ This section and the next describe the pupil model; the bead average's are on
 the [bead calibration's page](plugin:Panels/Bead calibration).
 
 **Finding the beads** is the bead calibration's own: the same detection, the
-same settings under *bead detection*, the same verdict on each bead's
-brightness.  The verdict is only shown here; the model judges each bead by how
-well it fits.  The camera's numbers come from the camera database, as a fit of
+same settings under *beads*, the same verdict on each bead's brightness.  Of
+that verdict only *too dim* is applied here, before learning: a spot much
+fainter than the typical bead (below it divided by the square root of
+*brightness range*; the typical bead is the median weighted by each spot's
+light, so a crowd of specks does not pull it down) is a speck, not a bead,
+and its fit would be noise.  A pair of two channels is judged by its light
+in both together.  Specks do not cost a bead its isolation either, so a lower
+*threshold* finds more beads rather than fewer.  A *too bright* bead is kept and judged by its fit, which
+shows a doublet.  The camera's numbers come from the camera database, as a fit of
 the same files would take them.
 
 **Cutting** one box of raw pixels around each bead, converted to photons, with
@@ -76,6 +84,13 @@ continues from there.
 position stand out from the others by more than *rejection (k)* robust
 standard deviations is left out, and the model is learnt again without it.
 The table says which beads were used and why the others were not.
+
+**Checking.**  *Calculate fit quality* fits every slice of every bead with the
+saved spline by the [Spline 3D](plugin:Localize/Spline 3D) fitter itself, as
+the bead average's fit quality and SMAP's bead calibration do: what a
+localisation with this calibration will see.  Each bead becomes a curve of
+fitted z against frame; a bead whose curve jumps or bends away from the
+others is one to exclude, and clicking its curve selects it in the table.
 
 **Saving.**  With *save model*, the model is turned into a spline: the PSF of a
 point on the central pixel is computed on a grid through the stacks' z range,
@@ -115,6 +130,14 @@ each pixel integrated over 4 × 4 sub-samples, with z steps of *spline z step*
 range).  One channel: clipped at zero and scaled so that the brightest plane
 sums to 1.  Two channels: both sampled on one z grid and scaled together, so
 that each channel's share of the light is the learnt one.
+
+The fit quality fits every bead, used or not, so a rejected bead's curve
+shows why.  The fit box is the bead box less two pixels a side; the camera's
+read noise is added to the data as the learning's likelihood does; each slice
+is started from five heights and the best likelihood kept, so an ambiguous
+PSF shows as jumps.  The *centred error* removes each bead's own offset (its
+height on the coverslip is not known), leaving the curve's distortion.  For
+dual colour each channel is fitted with its own half of the calibration.
 
 ## Controls
 
@@ -216,8 +239,14 @@ Pupil model: stops the learning after the current iteration.  Nothing is
 saved.
 
 ### Calculate fit quality
-Bead average: fits the beads back with the fitter the data will meet, on the
-*Fit quality* page.
+Fits the beads back with the fitter the data will meet, on the *Fit quality*
+page: for the pupil model every slice with Spline 3D (*In detail*), for the
+bead average as the bead calibration does.
+
+### Install PyTorch
+Shown with the pupil model while PyTorch is missing or too old: installs it
+into the Python running SMAPpy, with pip's progress in the status line;
+pressed again, it stops.  The pupil model can be used as soon as it is done.
 
 ### Save as...
 Saves the calibration under another name, or one made with *save model* off.
@@ -254,8 +283,16 @@ diagnostics*, *Bead diagnostics*), explained on its page.  The pupil model's:
   Each group's mean deviance is about 1 where the model is right; a group
   marked in red differs by more than noise, and the title says what that
   usually points to (a stage scale, the blur, field-dependent aberrations).
+- **Fit quality**, after *Calculate fit quality*: each bead's fitted z against
+  the frame, and its centred error against the nominal z.  The used beads in
+  colour, the others grey and dashed, the ones selected in the table thick.
+  Click a curve to select its bead.  On good beads the curves lie on top of
+  one another and the error stays within a few tens of nanometres.
 - **Beads**: where the beads were on the chip, coloured by whether they were
-  used, rejected or excluded.
+  used, rejected or excluded, the selected ones ringed; a click selects one.
+
+*Pupil*, *Zernikes* and *Residual atlas* describe all beads together (one
+pupil per channel), so they do not follow the table's selection.
 
 For dual colour, *Pupil* and *Zernikes* come once per channel.
 

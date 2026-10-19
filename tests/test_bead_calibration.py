@@ -359,3 +359,33 @@ def test_a_name_that_already_says_the_date_or_the_microscope_does_not_repeat_it(
     other.mkdir(parents=True)
     (other/'beads.ome.tif').touch()
     assert calibration_save_defaults([other])[1].endswith('_Ulf_NPC_M7_3Dcal')
+
+
+def _beads_with_neighbours(neighbour_amplitude, saturate=False):
+    """Four beads; beside the first, 10 px away, a neighbour of the given amplitude."""
+    rng = np.random.default_rng(3)
+    images = np.full((41, 70, 120), 100., dtype=float)
+    bead = psf(41, 17)
+    for (y, x) in ((20, 20), (20, 60), (50, 20), (50, 60)):
+        images[:, y-8:y+9, x-8:x+9] += 4000*bead
+    images[:, 20-8:20+9, 100-8:100+9] += neighbour_amplitude*bead    # beside the bead at (20, 60)... far
+    images[:, 30-8:30+9, 26-8:26+9] += neighbour_amplitude*bead      # ...and 11.7 px from the one at (20, 20)
+    if saturate:
+        images[18:22, 30, 26] = np.iinfo(np.uint16).max
+    images = rng.poisson(images)
+    return BeadStack(images.astype(np.uint16), np.arange(41)*10.)
+
+
+@pytest.mark.parametrize("amplitude, saturate, kept", [(500, False, True),        # a speck: the bead stays
+                                                        (4000, False, False),      # a second bead: both go
+                                                        (500, True, False)])       # a saturated blob counts
+def test_a_faint_speck_does_not_cost_a_bead_its_isolation_but_bright_dirt_does(amplitude, saturate, kept):
+    settings = CalibrationSettings(roi_size=15, padding=4, max_xy_shift_px=2, min_distance_px=20, brightness_range=6)
+    beads = collect_beads(_beads_with_neighbours(amplitude, saturate), settings)
+    found = {(r['x_px'], r['y_px']) for r in beads.records}
+    assert ((20, 20) in found) is kept
+    assert (60, 20) in found and (20, 50) in found and (60, 50) in found
+    every = CalibrationSettings(roi_size=15, padding=4, max_xy_shift_px=2, min_distance_px=20,
+                                brightness_range=None)
+    assert (20, 20) not in {(r['x_px'], r['y_px']) for r in collect_beads(_beads_with_neighbours(amplitude, saturate),
+                                                                          every).records}   # no range: all count

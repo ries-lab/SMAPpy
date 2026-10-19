@@ -903,9 +903,10 @@ upsampling; the first stage's order; the slice thinning (`max_dz_nm`).  Those th
    (decided October 2026): one window for every PSF calibration**, a *method* choice between the bead
    average and the pupil model (entries in `calibrate/psf_methods.py`), and later a *source* choice (bead
    stacks or single molecules) for in situ, which fixes the method to the pupil model.  *Bead calibration*
-   is retired once this window does everything it does.  Not yet: *Calculate fit quality* for the pupil
-   model (SMAPpy's Spline 3D on its beads), pupil figures that follow the table's selection, and a button
-   that installs torch.*
+   is retired once this window does everything it does.  Since built: the pupil model's *Calculate fit quality* (every slice of every bead fitted with its spline
+   by Spline 3D, z against frame per bead, a click selects the bead), the *Beads* map following the
+   table's selection (the pupil, Zernikes and atlas describe all beads, so they do not), and *Install
+   PyTorch* (`smappy/torch_install.py`).*
 
 ---
 

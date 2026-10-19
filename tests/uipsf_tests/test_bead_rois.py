@@ -157,6 +157,10 @@ def test_the_pupil_model_and_the_bead_average_find_the_same_beads_and_judge_thei
     average = collect_beads(stacks, settings)
     pupil = single_rois(stacks, CAMERA, settings)
     keys = ("stack", "x_px", "y_px", "brightness_reason")
-    assert [tuple(r[k] for k in keys) for r in pupil.records] == [tuple(r[k] for k in keys) for r in average.records]
-    assert {r["brightness_reason"] for r in pupil.records} == {"accepted", "too dim"}
-    assert pupil.batch.n_emitters == len(pupil.records)                     # shown, not applied
+    found = [tuple(r[k] for k in keys) for r in average.records]
+    assert {f[3] for f in found} == {"accepted", "too dim"}                   # the same verdicts...
+    kept = [f for f in found if f[3] != "too dim"]
+    assert [tuple(r[k] for k in keys) for r in pupil.records] == kept         # ...and the faint spots dropped
+    assert pupil.batch.n_emitters == len(kept) == 10
+    loose = single_rois(stacks, CAMERA, CalibrationSettings(roi_size=15, min_distance_px=20, brightness_range=None))
+    assert loose.batch.n_emitters == 12                                       # with no range, nothing is

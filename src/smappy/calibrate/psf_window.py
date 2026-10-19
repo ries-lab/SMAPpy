@@ -17,13 +17,12 @@ the pupil model says how to install it, and the bead average works as ever.
 """
 from __future__ import annotations
 
-import sys
 import threading
 from dataclasses import fields
 from pathlib import Path
 from typing import List
 
-from PySide6.QtCore import QObject, Qt, QThread, Signal
+from PySide6.QtCore import QObject, QProcess, Qt, QThread, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QFileDialog, QHBoxLayout, QLabel,
                                QListWidget, QMainWindow, QMessageBox, QPushButton, QScrollArea, QSplitter,
@@ -41,12 +40,13 @@ from .qt_gui import _bead_specs
 
 
 def torch_missing():
-    """What to type to install torch, if it is missing; None when it is there."""
-    import importlib.util
-    if importlib.util.find_spec("torch") is not None:
+    """What the pupil model lacks, with the command that brings it; None when a usable torch is here."""
+    from .. import torch_install
+    problem = torch_install.problem()
+    if problem is None:
         return None
-    return (f"The pupil model needs PyTorch, which is not installed.  In a terminal:\n"
-            f"{sys.executable} -m pip install \"smappy-smlm[uipsf]\"\nthen open this window again.")
+    return (f"The pupil model needs PyTorch: {problem}.  Install PyTorch puts {torch_install.described()} "
+            f"into this Python; or, in a terminal:\n{' '.join(torch_install.command())}")
 
 
 class _Worker(QObject):
@@ -198,6 +198,12 @@ class PSFCalibrationWindow(QMainWindow):
         self.notice.setWordWrap(True)
         self.notice.setTextInteractionFlags(Qt.TextSelectableByMouse)
         layout.addWidget(self.notice)
+        self.install_button = QPushButton("Install PyTorch")
+        self.install_button.setToolTip("install PyTorch into the Python running SMAPpy; pip's progress shows "
+                                       "below, and pressing again stops it")
+        self.install_button.clicked.connect(self.install_torch)
+        layout.addWidget(self.install_button)
+        self._installer = None
 
         self.run_button = QPushButton("Detect + calibrate")
         self.run_button.clicked.connect(self.run)
@@ -242,7 +248,11 @@ class PSFCalibrationWindow(QMainWindow):
             form.setVisible(cls is wanted)
             form.set_shown({name: reads["averaging"] for name in AVERAGE_ONLY if name in shared})
         pupil = self.method.key == "pupil"
-        self.notice.setVisible(pupil and torch_missing() is not None)
+        missing = torch_missing()
+        self.notice.setText(missing or "")
+        self.notice.setVisible(pupil and missing is not None)
+        # shown only while torch is missing or too old: nothing to press once it is right
+        self.install_button.setVisible(pupil and (missing is not None or self._installer is not None))
         self.stop_button.setVisible(pupil)
         self.quality_button.setVisible(self.method.has_quality)
         self.browse_button.setVisible(self.method.has_stack)
@@ -464,8 +474,8 @@ class PSFCalibrationWindow(QMainWindow):
         canvas.draw_idle()
 
     def _selection_changed(self) -> None:
-        # the pupil model's pages do not show the selection: drawn once, they need no redraw
-        if self.method.key == "average":
+        index = self.tabs.currentIndex()
+        if 0 <= index < len(self.pages) and self.pages[index][2].follows_selection:
             self.redraw()
 
     def refresh_table(self) -> None:
@@ -509,7 +519,9 @@ class PSFCalibrationWindow(QMainWindow):
         ids = getattr(event.artist, "pair_ids", None)
         if ids is None or not len(ids):
             return
-        index = int(list(ids)[0])
+        # a scatter of several beads says which point was hit; a curve is one bead
+        hit = getattr(event, "ind", None)
+        index = int(ids[hit[0]] if hit is not None and len(hit) and len(ids) > 1 else list(ids)[0])
         if index < self.bead_table.rowCount():
             self.bead_table.selectRow(index)
 
@@ -527,6 +539,40 @@ class PSFCalibrationWindow(QMainWindow):
             self.stack_viewer.set_volumes(volumes, titles)
         self.stack_viewer.show()
         self.stack_viewer.raise_()
+
+    # ------------------------------------------------------- installing torch
+    def install_torch(self) -> None:
+        """pip, in a process of its own: the window stays usable, its output is the progress, and a second
+        press stops it.  torch was never imported here, so what pip installs is used without a restart."""
+        if self._installer is not None:
+            self._installer.kill()
+            return
+        from .. import torch_install
+        program, *arguments = torch_install.command()
+        process = QProcess(self)
+        process.setProcessChannelMode(QProcess.MergedChannels)
+        process.readyReadStandardOutput.connect(self._installer_output)
+        process.finished.connect(self._installer_finished)
+        self._installer = process
+        self.install_button.setText("Stop installing")
+        self.status_bar.showMessage("installing " + torch_install.described() + "...")
+        process.start(program, arguments)
+
+    def _installer_output(self) -> None:
+        lines = bytes(self._installer.readAllStandardOutput()).decode(errors="replace").strip().splitlines()
+        if lines:
+            self.status_bar.showMessage(lines[-1][:200])
+
+    def _installer_finished(self, code, _status=None) -> None:
+        import importlib
+        importlib.invalidate_caches()
+        self._installer.deleteLater()
+        self._installer = None
+        self.install_button.setText("Install PyTorch")
+        missing = torch_missing()
+        self.status_bar.showMessage("PyTorch is installed: the pupil model is ready" if missing is None
+                                    else f"pip stopped (exit code {code}); {missing.splitlines()[0]}")
+        self._show_method()
 
     # ------------------------------------------------------------- saving
     def save_as(self) -> None:
