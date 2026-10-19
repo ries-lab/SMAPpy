@@ -1,0 +1,45 @@
+name: uipsf
+# uipsf's fast tier on the three systems it supports, when uipsf changes.  No GPU here: the gpu tier is run
+# by hand.  smappy is installed from source, so its C++ extensions are compiled on each runner.
+on:
+  push:
+    paths:
+      - "src/uipsf/**"
+      - "tests/uipsf_tests/**"
+      - "benchmarks/uipsf/**"
+      - "scripts/uipsf/**"
+      - "tests/conftest.py"
+      - "pyproject.toml"
+      - ".github/workflows/uipsf.yml"
+  pull_request:
+    paths:
+      - "src/uipsf/**"
+      - "tests/uipsf_tests/**"
+      - "benchmarks/uipsf/**"
+      - "scripts/uipsf/**"
+      - "tests/conftest.py"
+      - "pyproject.toml"
+      - ".github/workflows/uipsf.yml"
+
+jobs:
+  cpu:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install PyTorch (CPU build on Linux and Windows; the macOS wheel is CPU + MPS anyway)
+        if: runner.os != 'macOS'
+        run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+      # Qt's libraries: smappy's tests' conftest and some smappy modules load them, though uipsf never does
+      - name: System libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1 libxkbcommon0
+      - run: pip install -e .[test,uipsf] ruff
+      - run: ruff check src/uipsf tests/uipsf_tests benchmarks/uipsf scripts/uipsf
+      - run: python -m pytest tests/uipsf_tests -q -n auto

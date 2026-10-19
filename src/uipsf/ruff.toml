@@ -1,0 +1,11 @@
+# uipsf's lint rules, for src/uipsf and (through `extend`) its tests, benchmarks and scripts.
+line-length = 120
+target-version = "py312"
+
+[lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["E741"]   # l, I and O are the physics' own names
+
+[lint.isort]
+known-first-party = ["uipsf", "uipsf_tests", "oracles", "mismatch", "outliers"]
+known-third-party = ["smappy"]     # as it was while uipsf was a repository of its own
