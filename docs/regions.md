@@ -166,7 +166,11 @@ Two stores, and both stay, because what differs is ownership:
   an id column (`Session.evaluate_regions`).  The regions change together --
   a new table, a new clustering -- so a table is current or not as a whole:
   one signature per step and table (`region_runs.column_inputs`), which is why
-  checking 10^5 clusters costs one digest.
+  checking 10^5 clusters costs one digest.  A plugin that measures every
+  region at once (*Id statistics*) hands its table back whole
+  (`Result.id_regions`), made by `region_runs.column_table`, which signs
+  it as a block's run would -- so it is current, and goes out of date, on
+  the same terms.
 
 An analysis reads neither store directly: **`region_results`** is the one
 interface.  An evaluation is `Evaluation(source, label)`, written "Corners"
