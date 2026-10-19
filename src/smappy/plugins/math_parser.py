@@ -31,6 +31,14 @@ and why it is parsed rather than ``eval``ed.  What is here is the rest:
 Departures from SMAP, beyond the parser: no ``.*`` (numpy is elementwise
 already), the reductions are available (``z_nm - median(z_nm)``), and the
 result is float32 like the rest of the table rather than double.
+
+**On regions** (*on*: the ROIs, or an id column) the expression is over
+what was measured per region, one row per region, and the result goes into
+the source's ``maths`` region table as a recipe computed again when its
+inputs are measured again (`smappy.region_maths`, which has the names: an
+evaluation by its alias, ``npc_corners.n_corners``); *also onto the
+localizations* writes it onto each region's rows as *Regions to column*
+does.  SMAP had no such thing.
 """
 from __future__ import annotations
 
@@ -45,8 +53,12 @@ from ..locs import Localizations
 from ..mathparse import (CONSTANTS, FUNCTIONS, GROUPED_CHOICES, RECOMPUTE,
                          ExpressionError, evaluate, names_in, recipes, reduces,
                          remember)
+from ..region_runs import VALUE_RULES
 from ..render import LATERAL_FIELDS
-from . import Context, ColumnRecipe, Plugin, Result, param, register
+from . import Context, ColumnRecipe, FormState, Notice, Plugin, Result, param, register
+
+#: *on*: the localizations
+LOCS = ""
 
 MAX_HISTORY = 20
 
@@ -178,8 +190,15 @@ def describe(field: str, values: np.ndarray) -> str:
             f"median {np.median(finite):.4g}")
 
 
+def _source_choices():
+    return [(LOCS, "localizations")]
+
+
 @dataclass
 class MathSettings:
+    source: str = param(LOCS, label="on", choices=_source_choices,
+                        help="the localizations, or the regions -- ROIs or an id "
+                             "column -- whose measured values the expression reads")
     field: str = param("within", label="new field",
                        help="the column the result is written to")
     expression: str = param("(xy_err_nm < 25) & (sigma_nm > 100)",
@@ -205,6 +224,13 @@ class MathSettings:
     recall: str = param("", label="history", choices=_recall_choices,
                         help="an expression used before; choosing one fills "
                              "the field, the expression and the merged-blinks rule")
+    to_locs: bool = param(False, label="also onto the localizations",
+                          help="on regions: write the value onto each region's "
+                               "localizations too, NaN outside")
+    overlap: str = param("last", label="where ROIs overlap", choices=VALUE_RULES,
+                         advanced=True,
+                         help="on ROIs, with also onto the localizations: the value "
+                              "of a localization in two ROIs")
 
 
 @register("Analysis/Process/Math Parser")
@@ -227,6 +253,49 @@ class MathParser(Plugin):
                         "expression": entry["expression"],
                         "grouped": entry.get("grouped", RECOMPUTE)}
         return None
+
+    def describe(self, ctx: Optional[Context], settings: MathSettings) -> FormState:
+        """The sources there are, which fields each reads, and on regions
+        the aliases the expression can name the evaluations by."""
+        on_regions = bool(settings.source)
+        state = FormState(active={"where": not on_regions, "grouped": not on_regions,
+                                  "to_locs": on_regions,
+                                  "overlap": on_regions and settings.to_locs})
+        if ctx is None or ctx.session is None:
+            return state
+        from ..chain import BLOCK_ROIS
+        from ..region_filter import sources
+        found = sources(ctx.session)
+        state.choices["source"] = [(LOCS, "localizations")] + [
+            (s, "ROIs" if s == BLOCK_ROIS else f"per {s}") for s in found]
+        if on_regions:
+            from ..region_maths import aliases
+            named = aliases(ctx.session, settings.source)
+            if named:
+                state.notice = Notice("names: " + "; ".join(
+                    f"{word}.<value> ({label})" for word, label in named.items()),
+                    kind="info")
+            else:
+                state.notice = Notice("nothing has been measured on these regions")
+        return state
+
+    def changes_locs_for(self, settings: MathSettings) -> bool:
+        return not settings.source or bool(settings.to_locs)
+
+    def _regions(self, ctx: Context, settings: MathSettings):
+        """On regions: the field, ``{field: expression}`` the maths table
+        will hold, and that table, computed."""
+        from ..region_maths import compute, recipes
+        if ctx.session is None:
+            raise ValueError("maths on regions needs a session: the results are "
+                             "kept there")
+        field = check_field(settings.field, ctx.locs)
+        expression = settings.expression.strip()
+        # a recipe reads only the recipes before it (`compute`), so one that
+        # reads itself is refused there, as a name not yet there
+        found = recipes(ctx.session, settings.source)
+        found[field] = expression           # a redefinition keeps its place
+        return field, found, compute(ctx.session, settings.source, found)
 
     def _compute(self, ctx: Context, settings: MathSettings):
         """The field's name, its values over the whole table, and the mask."""
@@ -262,13 +331,44 @@ class MathParser(Plugin):
         error.  So there is a way to see the numbers before the table has
         them.
         """
+        if settings.source:
+            field, _, table = self._regions(ctx, settings)
+            values = table.columns()[field]
+            return Result(text=f"would keep {describe(field, values)} over "
+                               f"{len(values)} regions", settings=settings)
         field, values, mask = self._compute(ctx, settings)
         shown = values if mask is None else np.asarray(values)[mask]
         where = "" if mask is None else f" over the selection ({len(shown)})"
         return Result(text=f"would write {describe(field, shown)}{where}",
                       settings=settings)
 
+    def _run_regions(self, ctx: Context, settings: MathSettings) -> Result:
+        from ..chain import BLOCK_ROIS
+        from ..region_maths import MATHS
+        from ..region_runs import write_values
+        field, _, table = self._regions(ctx, settings)
+        values = table.columns()[field]
+        where = "the ROIs" if settings.source == BLOCK_ROIS else f"per {settings.source}"
+        text = (f"{describe(field, values)} over {len(values)} regions ({where}), "
+                f"kept as {MATHS}.{field}")
+        locs = None
+        if settings.to_locs:
+            ids = list(table.ids)
+            if settings.source == BLOCK_ROIS:      # written by the ROIs' numbers
+                rois = ctx.session.rois.rois
+                ids = [str(rois[i].number) for i in ids]
+            locs, _ = write_values(ctx, ctx.locs, settings.source,
+                                   {field: dict(zip(ids, values.tolist()))},
+                                   rule=settings.overlap,
+                                   origin={"evaluation": MATHS})
+            text += "; written onto the localizations"
+        remember_expression(field, settings.expression, RECOMPUTE)
+        return Result(locs=locs, settings=settings, text=text,
+                      id_regions={settings.source: {MATHS: table}})
+
     def run(self, ctx: Context, settings: MathSettings) -> Result:
+        if settings.source:
+            return self._run_regions(ctx, settings)
         field, values, mask = self._compute(ctx, settings)
         locs = write_column(ctx.locs, field, values, mask)
 
@@ -316,7 +416,7 @@ class MathParser(Plugin):
         question about filters and an ROI that may change meanwhile -- and a
         field that reads itself is a change made once, not a recipe."""
         field = (settings.field or "").strip()
-        if settings.where != "all" or field in LATERAL_FIELDS:
+        if settings.source or settings.where != "all" or field in LATERAL_FIELDS:
             return False
         try:
             return field not in names_in(settings.expression)

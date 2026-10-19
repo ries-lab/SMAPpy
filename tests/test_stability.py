@@ -154,3 +154,34 @@ def test_the_form_shows_the_vibrations_part_only_while_it_is_ticked():
     s = Stability.Settings(vibrations=False)
     assert Stability().describe(None, s).shown["vibration"] is False
     assert Stability().describe(None, Stability.Settings()).shown["vibration"] is True
+
+
+def test_each_bead_is_kept_as_a_row_and_the_shaking_one_stands_out():
+    """With each bead, over the view, the numbers per bead go to a region
+    table of the id column, current as a block's would be."""
+    from smappy.region_results import Evaluation, is_current, rows
+    from smappy.session import Session
+    drift = shaking(3000, 23.0, 5.0)
+    locs = beads(np.zeros_like(drift), n_beads=3, seed=6)
+    still = np.asarray(locs["track_id"]) != 2
+    shaken = np.asarray(locs["x_nm"], float).copy()
+    frames = np.asarray(locs["frame"], int)
+    shaken[~still] += drift[frames[~still], 0]          # bead 2 alone shakes
+    locs = Localizations({**locs.columns, "x_nm": shaken}, dict(locs.metadata))
+    session = Session(locs)
+    session.show_grouped(0, False)
+    for layer in session.layers:
+        layer.remove_bound("z_nm")
+    session.run(Stability(), Stability.Settings())
+    ev = Evaluation("track_id", "Stability")
+    ctx = session.context()
+    assert is_current(ctx, ev)
+    got = {r["roi_id"]: r for r in rows(ctx, ev)}
+    assert set(got) == {"1", "2", "3"}
+    # a 5 nm sinusoid is 3.5 nm RMS; the still beads read their noise
+    assert got["2"]["x_vibration_nm"] == pytest.approx(5 / np.sqrt(2), rel=0.15)
+    assert got["2"]["x_vibration_nm"] > 2.5 * max(got["1"]["x_vibration_nm"],
+                                                  got["3"]["x_vibration_nm"])
+    assert got["2"]["x_peak_hz"] == pytest.approx(23.0, abs=0.5)
+    table = session.id_regions["track_id"]["Stability"]
+    assert table.groups["x"]["vibration"] == "x_vibration_nm"

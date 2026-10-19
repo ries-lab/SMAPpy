@@ -460,6 +460,10 @@ class Session:
         # the region filter's flag follows the table, the ROIs and their
         # results before anyone draws them (`region_filter`)
         if what in ("locs", "rois", "append"):
+            # and before it, the maths on region values that it may read
+            from .region_maths import refresh
+            if getattr(self, "_refreshing", True) is False:
+                refresh(self)
             self.refresh_region_filter()
         # before anyone hears of the images, so a list of sources shows the
         # one a waiting layer has just taken
@@ -1928,8 +1932,14 @@ class Session:
             self.rois.from_dict(result.roi_project)
             self.changed("rois")
         if result.id_regions:
+            from .chain import BLOCK_ROIS
             for column, tables in result.id_regions.items():
-                self.id_regions.setdefault(column, {}).update(tables)
+                if column == BLOCK_ROIS:         # the ROIs' own, a whole table
+                    for label, table in tables.items():
+                        self.rois.tables.pop(label, None)
+                        self.rois.tables[label] = table     # newest last
+                else:
+                    self.id_regions.setdefault(column, {}).update(tables)
             self.changed("rois")
         if result.region_filter is not None:
             from .region_filter import Condition

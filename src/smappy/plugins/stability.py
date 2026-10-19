@@ -19,6 +19,13 @@ bead as a block over ``track_id``.  Time is the file's frame time
 largest peak's frequency and amplitude, pooled over the region's traces
 (`stability.pooled`); the amplitude spectrum and the cumulative RMS of the
 first trace are its arrays.
+
+With *each bead*, over the view, the same numbers per bead go back as a
+region table of the id column ("per track_id: Stability", `per_bead`):
+what a block over the beads would give, in one run, for the summaries and
+the region filter -- a bead that vibrates more than the others is found
+there.  Only where the run saw the layer's own filter (no drawn ROI), since
+the table is signed as a block's (`region_runs.column_table`).
 """
 from __future__ import annotations
 
@@ -27,7 +34,8 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
-from . import Context, FormState, Plot, Plugin, Result, param, register
+from . import (Context, FormState, Plot, Plugin, Result, param, register,
+               settings_values)
 
 # traces drawn over each other in a figure; more is a tangle
 MAX_DRAWN = 8
@@ -235,10 +243,47 @@ class Stability(Plugin):
             key = next(iter(plots))
             main = plots.pop(key)
             main = Plot(main.draw, name="", panels=main.panels, size=main.size)
+        id_regions = {}
+        if settings.traces == "each" and not ctx.per_region:
+            from ..region_runs import column_table, layer_mask
+            if np.array_equal(layer_mask(ctx), use):
+                ids_, values_, groups = per_bead(results, axes)
+                step = {"label": self.name or "Stability", "plugin": self.path,
+                        "version": self.version, "parameters": settings_values(settings)}
+                id_regions = {column: {step["label"]: column_table(
+                    locs, column, step["label"], ids_, values_, step, layer=ctx.layer,
+                    session=ctx.session, groups=groups)}}
+                lines.append(f"kept per bead as 'per {column}: {step['label']}'")
         return Result(text="\n".join(lines), plot=main, plots=plots, values=values,
                       arrays=arrays, settings=settings, title="stability",
+                      id_regions=id_regions,
                       data={"traces": traces, "results": results, "dt_s": dt_s,
                             "peaks": peak_rows})
+
+
+def per_bead(results, axes):
+    """``(bead ids, {value: one per bead}, groups)`` of the traces of *each
+    bead*: per axis the SD, the precision, the vibration's RMS and the
+    largest peak, named ``x_sd_nm`` ... and grouped by axis."""
+    ids = np.array([int(r.trace.name) for r in results], dtype=np.int64)
+    values: Dict[str, np.ndarray] = {
+        "n_points": np.array([r.run.stop - r.run.start for r in results], np.int64)}
+    groups: Dict[str, Dict[str, str]] = {}
+    for a, name in enumerate(axes):
+        got = [r.axes[a] for r in results]
+        columns = {"sd": ("sd_nm", [x.sd_nm for x in got]),
+                   "precision": ("precision_nm", [x.precision_nm for x in got]),
+                   "vibration": ("vibration_nm", [x.vibration_nm for x in got]),
+                   "peak frequency": ("peak_hz", [x.peaks[0][0] if x.peaks else np.nan
+                                                  for x in got]),
+                   "peak amplitude": ("peak_nm", [x.peaks[0][1] if x.peaks else np.nan
+                                                  for x in got])}
+        groups[name] = {}
+        for member, (suffix, column) in columns.items():
+            key = f"{name}_{suffix}"
+            values[key] = np.asarray(column, dtype=float)
+            groups[name][member] = key
+    return ids, values, groups
 
 
 def _traces_label(key: str) -> str:

@@ -255,6 +255,16 @@ region, the values (`msd_D_um2_per_s`, `msd_alpha`,
 `track_D_median_um2_per_s`, `jump_D1_um2_per_s`, `jump_fraction1`, ...)
 and the pooled MSD curve (`lag_s`, `msd_nm2`).
 
+Run on the view, the fit of every track is also kept as a
+[region table](plugin:Panels/Glossary) of the track id ("per track_id:
+Tracking analysis"): `n_locs`, `D_um2_per_s`, `alpha`, `lags` and
+`reduced_error` (the localization error over D times the step), NaN for a
+track shorter than *minimum length*.  *Summarize/Histograms* shows their
+distributions, and the [region filter](plugin:Analysis/Regions/Filter regions)
+keeps the tracks of one population -- `alpha` below 0.7, say -- without a
+column per value; *write per track* is for colouring the tracks.  Not when
+an ROI is drawn, since the table stands for every track the layer shows.
+
 A good result: the MSD a straight line over its first points, α near 1
 for free diffusion, the states' curves following the jumps' histogram.  A
 pooled MSD that bends down is confinement or a mixture of slow and fast

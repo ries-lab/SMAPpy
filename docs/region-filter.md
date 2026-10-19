@@ -272,9 +272,22 @@ and the drift plugins read it.  To be discussed.
    ROIs* stays as it was -- it sets *use*, which ROIs are measured at all --
    and its conditions on ROIs are now also the region filter's.
 5. *Math parser* on region sources, aliases, *to localization table*.
+   *Done* (`smappy/region_maths.py`): an evaluation's alias is its label
+   made a word, a value bare where one evaluation has it; the results are
+   one `maths` table per source whose recipes (`RegionTable.recipes`) are
+   computed again, in order, when the tables they read change
+   (`region_maths.refresh`, from `Session.changed`), signed only where
+   their inputs are current.  A whole table from a plugin goes to the ROIs
+   too (`Result.id_regions` under `rois`).
 6. Clients: Tracking analysis per track, Stability per bead, MINFLUX DCR per
-   trace; beads once decided.
+   trace; beads once decided.  *Done* for the first two, each table made
+   only where the run saw the layer's own filter (`region_runs.layer_mask`);
+   DCR per trace is *Id statistics*' (`dcr` among its columns on *auto*),
+   two colours from it still to come.  Beads: still open.
 7. Pages, panel docs, `default.gui.yaml`, the shapes table in `CLAUDE.md`.
+   *Done*; `default.gui.yaml` unchanged -- the region filter is a section
+   of the Regions tab, *Filter regions* a step for chains, and pinning *Id
+   statistics* waits for it to be tried.
 
 Steps 1-3 stand on their own and can be one change.
 
