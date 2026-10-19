@@ -895,7 +895,8 @@ upsampling; the first stage's order; the slice thinning (`max_dz_nm`).  Those th
    `rois_at`) is the adapter, so step 3's headless part is half built; what is left of it is the split of
    `collect_beads` for the window's shared bead table, and the sampling into a spline.*
 3. smappy, headless: split `collect_beads`; `calibrate/pupil.py`; tests from simulated beads to Spline
-   3D (z, photons, the z sign against the bead average, the normalisation).
+   3D (z, photons, the z sign against the bead average, the normalisation).  *Done (October 2026,
+   `docs/uipsf/architecture.md`).*
 4. The microscope database and its editor, once the metadata of real files is in.
 5. The *PSF calibration* window and plugin, its page, `default.gui.yaml`.
 

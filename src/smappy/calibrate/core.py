@@ -229,6 +229,74 @@ def detect_beads(images, settings):
     return yx[good], projection
 
 
+def saturation_of(images, settings):
+    """The ADU at which a pixel counts as saturated: the setting, else the integer type's full scale."""
+    if settings.saturation_adu is not None:
+        return float(settings.saturation_adu)
+    images = np.asarray(images)
+    return float(np.iinfo(images.dtype).max) if np.issubdtype(images.dtype, np.integer) else None
+
+
+def find_stack_beads(images, settings, saturation=None):
+    """The isolated beads of one stack ([z, y, x], ADU) and what is recorded of each, with its projection.
+
+    The *find* half of a bead calibration, shared by the bead average (`collect_beads`, which then cuts
+    normalised volumes) and the pupil model (`pupil.single_rois`, which cuts raw ROIs), so that both
+    start from the same beads and show the same table.  Each record: the bead's whole pixel, its
+    background (one median of the box's border over the whole stack, which keeps the axial change of
+    the tails), its brightness (the brightest plane's sum above that), its peak and whether it reaches
+    ``saturation``.  A bead with no light above its background is not a bead and is left out.
+    """
+    images = np.asarray(images, np.float32)
+    yx, projection = detect_beads(images, settings)
+    radius = settings.roi_size//2 + settings.padding
+    records = []
+    for y, x in yx:
+        volume = images[:, y-radius:y+radius+1, x-radius:x+radius+1]
+        peak_adu = float(np.max(volume))
+        border = np.concatenate((volume[:, 0], volume[:, -1],
+                                 volume[:, 1:-1, 0], volume[:, 1:-1, -1]), axis=1)
+        # One scalar for the whole bead z-stack: preserve axial changes
+        # in the background/PSF tails instead of removing them plane-wise.
+        background = float(np.median(border))
+        brightness = float(np.max((volume - background).sum(axis=(1, 2))))
+        if brightness <= 0:
+            continue
+        records.append({'x_px': int(x), 'y_px': int(y), 'brightness_adu': brightness,
+                        'background_adu': background, 'peak_adu': peak_adu,
+                        'saturation_adu': saturation,
+                        'saturated': bool(saturation is not None and peak_adu >= saturation)})
+    return records, projection
+
+
+def classify_brightness(records, settings):
+    """Each record's brightness verdict, in place: *saturated*, *too dim*, *too bright* (outside
+    `brightness_range` about the unsaturated beads' median) or *accepted*.  The bead average drops
+    what is not accepted; the pupil model only shows it, since it judges every bead by its fit."""
+    brightness = np.asarray([r['brightness_adu'] for r in records])
+    unsaturated = np.asarray([not r['saturated'] for r in records], bool)
+    if np.any(unsaturated) and settings.brightness_range is not None:
+        center = float(np.median(brightness[unsaturated]))
+        half_range = np.sqrt(settings.brightness_range)
+        lower, upper = center/half_range, center*half_range
+    else:
+        lower, upper = None, None
+    for rec in records:
+        if rec['saturated']:
+            reason = 'saturated'
+        elif lower is not None and rec['brightness_adu'] < lower:
+            reason = 'too dim'
+        elif upper is not None and rec['brightness_adu'] > upper:
+            reason = 'too bright'
+        else:
+            reason = 'accepted'
+        rec['brightness_reason'] = reason
+        rec['brightness_accepted'] = reason == 'accepted'
+        rec['brightness_lower_adu'] = lower
+        rec['brightness_upper_adu'] = upper
+    return lower, upper
+
+
 def collect_beads(inputs, settings=None, progress=None):
     """Extract only bead volumes; full camera stacks are released acquisition by acquisition.
 
@@ -275,53 +343,17 @@ def collect_beads(inputs, settings=None, progress=None):
                 dz = stack.dz
             if not np.isclose(stack.dz, dz, rtol=.02, atol=.1):
                 raise ValueError('selected stacks have different z spacing; resample explicitly')
-            yx, projection = detect_beads(images, settings)
-            saturation = settings.saturation_adu
-            if saturation is None and np.issubdtype(camera_images.dtype, np.integer):
-                saturation = float(np.iinfo(camera_images.dtype).max)
             si = len(sources)
             sources.append({'path': stack.source, 'axes': stack.axes,
                             'shape': list(images.shape), 'z_nm': z.tolist()})
+            found, projection = find_stack_beads(images, settings, saturation_of(camera_images, settings))
             projections.append(projection)
-            for y, x in yx:
-                volume = images[:, y-radius:y+radius+1, x-radius:x+radius+1].copy()
-                peak_adu = float(np.max(volume))
-                saturated = saturation is not None and peak_adu >= saturation
-                border = np.concatenate((volume[:, 0], volume[:, -1],
-                                         volume[:, 1:-1, 0], volume[:, 1:-1, -1]), axis=1)
-                # One scalar for the whole bead z-stack: preserve axial changes
-                # in the background/PSF tails instead of removing them plane-wise.
-                background = float(np.median(border))
-                volume -= background
-                brightness = float(np.max(volume.sum(axis=(1, 2))))
-                if brightness <= 0:
-                    continue
-                records.append({'id': len(records), 'stack': si, 'x_px': int(x),
-                                'y_px': int(y), 'brightness_adu': brightness,
-                                'background_adu': background, 'peak_adu': peak_adu,
-                                'saturation_adu': saturation, 'saturated': bool(saturated)})
-                volumes.append(volume / brightness)
-    brightness = np.asarray([r['brightness_adu'] for r in records])
-    unsaturated = np.asarray([not r['saturated'] for r in records])
-    if np.any(unsaturated) and settings.brightness_range is not None:
-        center = float(np.median(brightness[unsaturated]))
-        half_range = np.sqrt(settings.brightness_range)
-        lower, upper = center/half_range, center*half_range
-    else:
-        lower, upper = None, None
-    for rec in records:
-        if rec['saturated']:
-            reason = 'saturated'
-        elif lower is not None and rec['brightness_adu'] < lower:
-            reason = 'too dim'
-        elif upper is not None and rec['brightness_adu'] > upper:
-            reason = 'too bright'
-        else:
-            reason = 'accepted'
-        rec['brightness_reason'] = reason
-        rec['brightness_accepted'] = reason == 'accepted'
-        rec['brightness_lower_adu'] = lower
-        rec['brightness_upper_adu'] = upper
+            for rec in found:
+                y, x = rec['y_px'], rec['x_px']
+                volume = images[:, y-radius:y+radius+1, x-radius:x+radius+1] - rec['background_adu']
+                records.append(dict(rec, id=len(records), stack=si))
+                volumes.append(volume / rec['brightness_adu'])
+    classify_brightness(records, settings)
     usable = sum(r['brightness_accepted'] for r in records)
     if usable < settings.min_beads:
         raise ValueError(f'only {usable} brightness-qualified isolated beads found; '

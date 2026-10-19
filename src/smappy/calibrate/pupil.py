@@ -43,7 +43,7 @@ from typing import Optional
 
 import numpy as np
 
-from .core import CalibrationSettings, detect_beads
+from .core import CalibrationSettings, classify_brightness, find_stack_beads, saturation_of
 from .input import BeadStack, discover_acquisitions, read_bead_stacks
 
 KEEP = slice(1, None)            # every slice but the first (module docstring)
@@ -170,19 +170,25 @@ def rois_at(stacks, centres, camera, roi_size: int, slices=KEEP, saturation_adu=
 
 
 def single_rois(stacks, camera, settings: CalibrationSettings | None = None, slices=KEEP) -> BeadROIs:
-    """One channel: every isolated bead `detect_beads` finds, a `settings.roi_size` ROI each."""
+    """One channel: the beads the bead average would find (`core.find_stack_beads`), a `settings.roi_size`
+    ROI each, with the same records: position, background, brightness and its verdict, saturation.  The
+    verdict is shown, not applied (module docstring)."""
     settings = settings or CalibrationSettings()
     settings.validate()
     channels = {str(st.axes.get("channel", 0)) for st in stacks}
     if len(channels) > 1:
         raise ValueError("the acquisitions hold several channels; calibrate them one at a time")
-    centres = []
+    found = []
     for s, st in enumerate(stacks):
-        yx, _ = detect_beads(np.asarray(st.images, np.float32), settings)
-        centres += [(s, int(x), int(y)) for y, x in yx]
-    if not centres:
+        records, _ = find_stack_beads(st.images, settings, saturation_of(st.images, settings))
+        found += [dict(r, stack=s) for r in records]
+    if not found:
         raise ValueError("no isolated beads found: review detection and the bead box")
-    return rois_at(stacks, centres, camera, settings.roi_size, slices, settings.saturation_adu)
+    classify_brightness(found, settings)
+    rois = rois_at(stacks, [(r["stack"], r["x_px"], r["y_px"]) for r in found], camera, settings.roi_size, slices,
+                   settings.saturation_adu)
+    rois.records = [dict(r, id=i) for i, r in enumerate(found)]
+    return rois
 
 
 def dual_rois(stacks, camera, settings=None, slices=KEEP) -> BeadROIs:
@@ -226,3 +232,132 @@ def bead_rois(inputs, camera=None, dual: bool = False, settings=None, slices=KEE
             raise ValueError("give the camera for stacks that are not files")
         camera = camera_for(discover_acquisitions(paths)[0], camera_settings)
     return (dual_rois if dual else single_rois)(stacks, camera, settings, slices)
+
+
+# ------------------------------------------------------------------ the spline from a learnt model
+
+#: each pixel of the spline's knots integrated over this many sub-samples per axis: 4 × 4 keeps the sampling's
+#: own error below the spline's (docs/uipsf/architecture.md, "How finely SMAPpy's spline must sample")
+UPSAMPLE = 4
+
+
+def z_grid(dz_nm: float, z_range_nm: float) -> tuple[np.ndarray, float]:
+    """(emitter z of each plane, z0): planes ``dz_nm`` apart through ±``z_range_nm``, in the spline's
+    convention z = −(index − z0)·dz, so plane 0 is the highest emitter, as in a bead stack."""
+    half = int(np.ceil(abs(z_range_nm) / dz_nm))
+    return -(np.arange(2 * half + 1) - half) * float(dz_nm), float(half)
+
+
+def sample(learned, dz_nm: float, z_range_nm: float, roi_size: int = 27, upsample: int = UPSAMPLE,
+           channel: int = 0) -> np.ndarray:
+    """The learnt PSF of ``channel`` as a voxel stack [z, y, x] for a point emitter on the central pixel,
+    each pixel integrated: what a bead average is, without its noise.  ``learned`` is a uipsf
+    `Calibration` or `LearnedPSF`; the bead's size is left out, the learnt blur kept, the channel's
+    photon share and defocus offset included (`uipsf.export.sample_psf`)."""
+    z, _ = z_grid(dz_nm, z_range_nm)
+    xyz = np.c_[np.zeros((len(z), 2)), z]
+    return learned.psf(xyz, roi_px=roi_size, upsample=upsample, channel=channel).double().numpy()
+
+
+def _zernikes(learned) -> list:
+    """Every channel's Zernikes, (Noll, coefficient, CRLB), for the calibration's record."""
+    from uipsf.diagnostics import zernikes
+    out = []
+    for c in range(learned.model.n_channels):
+        entry = {}
+        for which in ("phase", "magnitude"):
+            modes, values, crlb = zernikes(learned, which, c)
+            entry[which] = [[int(j), float(v), float(e)] for j, v, e in zip(modes, values, crlb, strict=True)]
+        out.append(entry)
+    return out
+
+
+def _record(learned, dz_nm, z_range_nm, roi_size, upsample) -> dict:
+    options = getattr(learned, "options", None)
+    if options is not None and not isinstance(options, dict):
+        from dataclasses import asdict
+        options = asdict(options)
+    return {"method": "uipsf2_pupil", "zernikes": _zernikes(learned), "options": options or {},
+            "sampling": {"dz_nm": float(dz_nm), "z_range_nm": float(z_range_nm), "roi_size": int(roi_size),
+                         "upsample": int(upsample)},
+            "z_convention": "emitter_nm = -(index-z0)*dz", "lateral_unit": "pixel",
+            "z_reference": "the model's focus: the emitter at z = 0"}
+
+
+def spline_calibration(learned, dz_nm: float, z_range_nm: float, roi_size: int = 27, upsample: int = UPSAMPLE,
+                       camera=None):
+    """smappy's `SplineCalibration` of a one-channel uipsf model, normalised as the bead average's
+    (`core._single_model`: clipped at zero, the brightest plane summing to one, no smoothing, since a
+    model has no noise to smooth), so that Spline 3D reads either alike.  ``camera`` records its EM
+    state and pixel size, as the bead average does."""
+    from ..io.calibration import SplineCalibration
+    from .core import spline_coefficients
+    if learned.model.n_channels != 1:
+        raise ValueError("a model of several channels makes a dual calibration (`dual_calibration`)")
+    _, z0 = z_grid(dz_nm, z_range_nm)
+    psf = np.maximum(sample(learned, dz_nm, z_range_nm, roi_size, upsample), 0)
+    psf /= float(psf.sum(axis=(1, 2)).max())
+    parameters = dict(_record(learned, dz_nm, z_range_nm, roi_size, upsample),
+                      normalization="maximum plane sum = 1")
+    psf = psf.astype(np.float32)
+    return SplineCalibration(spline_coefficients(psf), float(dz_nm), z0, x0=(roi_size - 1) / 2, psf=psf,
+                             em_on=None if camera is None else bool(camera.is_em),
+                             pixelsize_um=None if camera is None or camera.pixelsize_um is None
+                             else np.atleast_1d(np.asarray(camera.pixelsize_um, float)),
+                             parameters=parameters)
+
+
+def _transform(learned) -> np.ndarray:
+    if callable(getattr(learned, "transform", None)):
+        return np.asarray(learned.transform(1), float)
+    from uipsf.model.channels import unpack_transform
+    return _unit(unpack_transform(learned.shared()["ch1.transform"].detach().cpu().double()).numpy())
+
+
+def dual_calibration(learned, dz_nm: float, z_range_nm: float, roi_size: int = 27, upsample: int = UPSAMPLE):
+    """smappy's `DualColorCalibration` of a two-channel uipsf model: both channels sampled on one z grid
+    (a biplane offset is in the PSFs), normalised jointly by `positive_pair_models`, so each channel's
+    `photon_normalization` is its learnt photon share; the model's transform and the split it was
+    learnt on.  Spline 3D 2C reads it as one of its own (tests/uipsf_tests/test_smappy_dual.py)."""
+    from .core import positive_pair_models
+    from .dual import DualColorCalibration
+    if learned.model.n_channels != 2:
+        raise ValueError("a dual calibration needs a model of two channels")
+    if learned.geometry is None:
+        raise ValueError("the model does not say how the chip was split; learn it from dual_rois")
+    raw = np.stack([sample(learned, dz_nm, z_range_nm, roi_size, upsample, c) for c in range(2)])
+    settings = CalibrationSettings(roi_size=roi_size, smooth_z_nm=0.0, smooth_xy_px=0.0)
+    (main, secondary), _ = positive_pair_models(raw, dz_nm, settings)
+    record = _record(learned, dz_nm, z_range_nm, roi_size, upsample)
+    for model in (main, secondary):
+        model.parameters.update(record)
+    return DualColorCalibration(main, secondary, _transform(learned), dict(learned.geometry), dict(record))
+
+
+def model_path(path) -> Path:
+    """Where the model file goes beside a calibration: ``x_3dcal.h5`` -> ``x_3dcal.uipsf.h5``."""
+    path = Path(path)
+    return path.with_name(path.stem + ".uipsf.h5")
+
+
+def save(path, cal, calibration, overwrite: bool = False) -> tuple[Path, Path]:
+    """The spline (or dual) ``calibration`` at ``path`` and the uipsf ``cal`` (a `Calibration`) beside it
+    (`model_path`), which re-samples it on another grid without learning again; the calibration
+    records the model file's name.  Returns both paths."""
+    import uipsf
+
+    from ..io.calibration import save_spline_calibration
+    from .dual import DualColorCalibration, save_dual_color_calibration
+    path, beside = Path(path), model_path(path)
+    if beside.exists() and not overwrite:
+        raise FileExistsError(f"{beside} exists")
+    if isinstance(calibration, DualColorCalibration):
+        for m in (calibration.main, calibration.secondary):
+            m.parameters["model_file"] = beside.name
+        calibration.parameters["model_file"] = beside.name
+        save_dual_color_calibration(path, calibration, overwrite=overwrite)
+    else:
+        calibration.parameters["model_file"] = beside.name
+        save_spline_calibration(path, calibration, overwrite=overwrite)
+    uipsf.save_model(cal, beside)
+    return path, beside

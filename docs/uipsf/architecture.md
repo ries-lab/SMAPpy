@@ -877,3 +877,30 @@ What SMAPpy's *PSF calibration* window will call; step 1 of §7.5's order of wor
   around centres given by hand.  uipsf's own reader, finder, pairing and `noise.Camera` are removed.  End to
   end, simulated ADU stacks read this way give back the aberrations to 0.02 rad
   (`tests/uipsf_tests/test_bead_rois.py`).
+- **One *find* for both calibrations** (step 3): `core.find_stack_beads` (the beads of one stack and their
+  records: whole pixel, border background, brightness, peak, saturation) and `core.classify_brightness`
+  (*saturated*, *too dim*, *too bright*, *accepted*) are what `collect_beads` used inline; it calls them now,
+  and so does `pupil.single_rois`, so both calibrations list the same beads with the same verdicts.  The
+  bead average drops what is not *accepted*; the pupil model shows the verdict and judges by its fit.
+- **The spline from the model** (`pupil.spline_calibration`, `dual_calibration`, `save`): `sample` gives
+  the learnt PSF of a point emitter on the central pixel, each pixel integrated over 4 × 4, on
+  `z_grid(dz, range)` (z = −(index − z0)·dz, plane 0 the highest emitter), the learnt blur kept and the
+  bead's size left out.  One channel: clipped at zero, the brightest plane summing to one, no smoothing,
+  as `_single_model`.  Two: `positive_pair_models` with smoothing off, the model's transform and split,
+  so `photon_normalization` is each channel's learnt share.  `parameters` records `method = "uipsf2_pupil"`,
+  every channel's Zernikes with CRLBs, the settings, the sampling and, once saved, `model_file`.  `save`
+  writes `x_3dcal.h5` and the model file `x_3dcal.uipsf.h5` beside it; a loaded model file re-samples
+  without learning.  On 12 simulated astigmatic beads (`tests/uipsf_tests/test_pupil_spline.py`), Spline 3D
+  with the learnt model's spline fits frames of the true PSF with z bias 2.5 nm and spread 11.5 nm
+  (the bead average of the same stack: −3.6 and 12.5 nm, the same way up), photons within 1 % of the bead
+  average's.
+- **Two channels on Apple's GPU** failed in the solver, not the data: on MPS a Python number meeting a
+  0-d tensor under `vmap(jvp)` becomes a float64 tensor, which MPS refuses, and the photon share is a 0-d
+  parameter.  `params.Bounded` and `Softplus` now make their constants tensors of the parameter's dtype
+  (`test_device.py`).
+- **Zenodo through smappy's adapter** (19 October 2026, a Mac's GPU, `--no-probes` for 1ch): the results
+  stand as recorded before the port.  `1ch_40nm_bead`: 84 beads, 59 used and 25 rejected, 43 s with reading.
+  `2ch_40nm_bead`: 84 pairs, up–down mirrored, split 256; 70 used, 14 rejected; share 0.836, defocus offset
+  35.4 nm, blur (75.6, 61.0) and (57.9, 75.8) nm; the transform 0.025 px RMS from SMAPpy's; the Zernikes
+  against v1's, correlation 0.997 (main) and 0.9998 (secondary).  1.4 min on MPS, where it had failed
+  (above), against 28 min on 4 cloud cores.

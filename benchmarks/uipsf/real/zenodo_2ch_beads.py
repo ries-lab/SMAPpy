@@ -89,11 +89,11 @@ def v1_frame(grid, modes, channel):
     the camera's y: W_v1(u', v') = W(v', u'), and W(v', −u') for the secondary.  Found numerically on the
     pupil grid: the transformed basis T_i = Σ_j M_ij Z_j (exact, a signed permutation), so Σ c_i T_i has
     the coefficients Mᵀc."""
-    Z = zernike_basis(grid, modes).double()                                   # [M, P, P], rows v, columns u
+    Z = zernike_basis(grid, modes).cpu().double()               # [M, P, P], rows v, columns u (MPS: no float64)
     T = Z.transpose(-1, -2)                                                   # u ↔ v
     if channel == 1:
         T = T.flip(-1)                                                        # v1's u' = −(camera v)
-    inside = grid.aperture.double() > 0
+    inside = grid.aperture.cpu() > 0
     A, B = Z[:, inside], T[:, inside]
     M = torch.linalg.lstsq(A.T, B.T).solution.T.numpy()                      # T_i = Σ_j M_ij Z_j
     return M.T

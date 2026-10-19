@@ -147,3 +147,16 @@ def test_aberrations_come_back_through_smappys_reading_and_uipsfs_learning():
     assert len(found) == n and np.abs(found - np.array(sorted(centres))).max() <= 1   # an aberrated spot
     cal = calibrate_beads(rois.batch, optics, BeadSettings(zernike_order=4), noise=rois.noise, device="cpu")
     assert torch.allclose(cal.shared()["pupil.phase"][:4].cpu(), phase[:4], atol=0.02)
+
+
+def test_the_pupil_model_and_the_bead_average_find_the_same_beads_and_judge_their_brightness_alike():
+    from smappy.calibrate.core import collect_beads
+    spots = [(30, 30, 5000), (70, 30, 5200), (110, 30, 4800), (30, 80, 300), (70, 80, 5100), (110, 80, 5000)]
+    stacks = [_stack(spots), _stack(spots, seed=1)]
+    settings = CalibrationSettings(roi_size=15, min_distance_px=20)
+    average = collect_beads(stacks, settings)
+    pupil = single_rois(stacks, CAMERA, settings)
+    keys = ("stack", "x_px", "y_px", "brightness_reason")
+    assert [tuple(r[k] for k in keys) for r in pupil.records] == [tuple(r[k] for k in keys) for r in average.records]
+    assert {r["brightness_reason"] for r in pupil.records} == {"accepted", "too dim"}
+    assert pupil.batch.n_emitters == len(pupil.records)                     # shown, not applied

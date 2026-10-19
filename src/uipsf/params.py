@@ -22,6 +22,13 @@ import torch
 import torch.nn.functional as F
 
 
+def _like(value: float, x: torch.Tensor) -> torch.Tensor:
+    """``value`` as a tensor of ``x``'s dtype and device.  On MPS a Python number meeting a 0-d tensor under
+    ``vmap(jvp)`` (the solver's Jacobian columns) becomes a float64 tensor, which MPS refuses: two channels'
+    photon share, a 0-d parameter, failed so on torch 2.14 (tests/uipsf_tests/test_device.py)."""
+    return torch.as_tensor(value, dtype=x.dtype, device=x.device)
+
+
 class Transform:
     """Physical value = forward(unconstrained)."""
 
@@ -56,7 +63,7 @@ class Softplus(Transform):
         self.floor = floor
 
     def forward(self, x):
-        return F.softplus(x) + self.floor
+        return F.softplus(x) + _like(self.floor, x)
 
     def inverse(self, y):
         y = torch.as_tensor(y) - self.floor
@@ -80,7 +87,7 @@ class Bounded(Transform):
         self.lo, self.hi = lo, hi
 
     def forward(self, x):
-        return self.lo + (self.hi - self.lo) * torch.sigmoid(x)
+        return _like(self.lo, x) + _like(self.hi - self.lo, x) * torch.sigmoid(x)
 
     def inverse(self, y):
         t = (torch.as_tensor(y) - self.lo) / (self.hi - self.lo)
