@@ -15,7 +15,8 @@ Linux and Windows, so nothing needs to be compiled. The package is called
 
 **I need more help.** Never used a terminal or `pip`?
 [Installing SMAPpy, step by step](docs/install-step-by-step.md) walks through
-it on a Mac or Windows computer, from opening the terminal to starting the GUI.
+it on a Mac or Windows computer, from opening the terminal to starting the GUI,
+and says what to ask an AI assistant that can do it for you.
 
 With [uv](https://docs.astral.sh/uv/) you can install the GUI as a standalone
 tool, or run it without installing:

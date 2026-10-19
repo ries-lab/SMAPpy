@@ -10,7 +10,27 @@ small helper called **uv**, which downloads the right version of Python and
 installs SMAPpy into a place of its own, so it cannot interfere with anything
 else on your computer. After that, you start SMAPpy by typing one word.
 
-Follow the section for your computer: [Mac](#mac) or [Windows](#windows).
+Follow the section for your computer: [Mac](#mac) or [Windows](#windows). Or,
+if you use an AI assistant that can work on your computer, let it do the
+steps for you.
+
+## Let an AI assistant do it
+
+Some AI assistants can run commands on your computer: Claude Code (also in the
+*Code* tab of the Claude desktop app), OpenAI's Codex, Cursor and others. One
+of these can do every step below for you, including the desktop icon, and
+sort out what goes wrong on the way. A chat in a web browser cannot: it can
+only tell you what to type, which is what this page does.
+
+Give it this request:
+
+> Install SMAPpy on this computer, with a desktop icon, following the
+> section "For AI assistants" of
+> https://github.com/ries-lab/SMAPpy/blob/main/docs/install-step-by-step.md
+
+It will ask before running each command; the commands it should ask about
+are the ones in [For AI assistants](#for-ai-assistants) below. When it is
+done, double-click the new SMAPpy icon on your desktop.
 
 ## Mac
 
@@ -214,6 +234,56 @@ python -m pip install smappy-smlm
 
 (on a Mac, `python3` in place of `python`). If `smappy-gui` is then not found,
 `python -m smappy.cli.gui` starts it as well.
+
+## For AI assistants
+
+This section is for an AI assistant installing SMAPpy on the user's behalf.
+The user is likely not familiar with a terminal: explain briefly what each
+command does when you ask to run it, and at the end tell them how to start
+SMAPpy.
+
+Rules:
+
+* Install with uv as a uv tool, as below. Do not use the system Python,
+  `sudo`, an administrator prompt, conda, or `pip` into any existing
+  environment, unless the user asks for that.
+* If `uv` is already installed, do not install it again. If `uv tool list`
+  already shows `smappy-smlm`, run `uv tool upgrade smappy-smlm` instead of
+  installing.
+* Your shell will not see newly installed programs on its PATH. Call `uv` by
+  its full path after installing it (`~/.local/bin/uv` on macOS,
+  `$HOME\.local\bin\uv.exe` on Windows, unless the installer printed
+  another location), and find SMAPpy's programs with `uv tool dir --bin`.
+* Do not start the GUI to check the install: it blocks until the user closes
+  it. Use the checks below.
+
+Steps on **macOS** (zsh or bash):
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh             # skip if uv exists
+uv tool install --python 3.13 smappy-smlm
+uv tool update-shell                                         # so the user's new terminals find smappy-gui
+"$(uv tool dir)/smappy-smlm/bin/python" -c "import smappy, PySide6.QtWidgets; print('ok')"
+echo "\"$(uv tool dir --bin)/smappy-gui\"" > ~/Desktop/SMAPpy.command && chmod +x ~/Desktop/SMAPpy.command
+```
+
+Steps on **Windows** (PowerShell):
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"   # skip if uv exists
+uv tool install --python 3.13 smappy-smlm
+uv tool update-shell
+& "$(uv tool dir)\smappy-smlm\Scripts\python.exe" -c "import smappy, PySide6.QtWidgets; print('ok')"
+$s = (New-Object -ComObject WScript.Shell).CreateShortcut("$([Environment]::GetFolderPath('Desktop'))\SMAPpy.lnk"); $s.TargetPath = "$(uv tool dir --bin)\smappy-gui.exe"; $s.Save()
+```
+
+The check prints `ok`. If it fails on Windows with `DLL load failed`, the
+Microsoft Visual C++ Redistributable (x64) is missing; tell the user, since
+installing it needs them to confirm an administrator prompt. Make the desktop
+icon only if the user asked for one. For anything else that fails, the
+section [When something goes wrong](#when-something-goes-wrong) lists the
+known problems; otherwise report the error to the user, and suggest opening
+an issue at https://github.com/ries-lab/SMAPpy/issues.
 
 ## What next
 
