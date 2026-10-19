@@ -246,3 +246,44 @@ def test_the_fiducials_plugin_offers_the_bead_selector_and_takes_its_choice():
     result = plugin.run(ctx, settings)
     assert "left out" not in result.text
     assert "1 left out" in plugin.run(ctx, FiducialSettings()).text
+
+
+def test_beads_can_come_from_the_roi_managers_rois_one_bead_each():
+    from smappy.io.formats import FileInfo
+    from smappy.fiducials import FiducialSettings
+    from smappy.session import Session
+    locs = simulate(n_frames=3000, seed=5, drift=True)
+    truth = np.asarray(locs.metadata["drift_truth"])
+    truth = truth - truth[0]
+    locs = with_beads(locs, n_beads=5, seed=5)
+    session = Session()
+    session.add_file(locs, FileInfo(name="b", path="b", format="test", n=len(locs)))
+    project = session.rois
+    file_id = next(iter(project.sources))
+    bead = np.asarray(locs["bead_true"])
+    for b in range(4):                                  # four of the five
+        x = float(np.median(locs["x_nm"][bead == b]))
+        y = float(np.median(locs["y_nm"][bead == b]))
+        project.add_roi(file_id, [x, y], polygon=[[x - 300, y - 300], [x + 300, y - 300],
+                                                  [x + 300, y + 300], [x - 300, y + 300]])
+    project.add_roi(file_id, [-5000, -5000],            # round nothing
+                    polygon=[[-5300, -5300], [-4700, -5300], [-4700, -4700], [-5300, -4700]])
+    settings = FiducialSettings(source="ROI manager")
+    plugin = FiducialDrift()
+    ctx = session.context(grouping="ungrouped")
+    state = plugin.describe(ctx, settings)
+    assert "5 used ROIs" in state.notice.text and state.active["memory"] is False
+    view = plugin.bead_view(ctx, settings)
+    assert view.beads.names == ["ROI 1", "ROI 2", "ROI 3", "ROI 4"]
+    warnings = []
+    ctx = session.context(grouping="ungrouped")
+    ctx.warn = warnings.append
+    result = plugin.run(ctx, settings)
+    assert warnings and "ROI 5" in warnings[0]
+    drift = result.data["drift"]
+    error = np.sqrt(np.mean((drift.drift[:, :2] - truth[:, :2]) ** 2, axis=0))
+    assert np.all(error < 4.0)
+    # a choice by hand is the ROI's
+    again = plugin.with_overrides(settings, view, {"ROI 2": False})
+    assert again.beads == "ROI 2 out"
+    assert plugin.bead_view(ctx, again).beads.state(1) == "out, by hand"

@@ -1782,6 +1782,15 @@ class ROIProject:
             self._file_masks[key] = np.asarray(locs["filenumber"]) == number
         return self._file_masks[key]
 
+    def session_rows(self, roi) -> np.ndarray:
+        """The ROI's rows of the session's table, the localizations: found
+        through its file's own index, as every region context's are."""
+        source = self.sources[roi.file_id]
+        ungrouped = self.state(roi.file_id).tables.ungrouped
+        found = self.members(roi, ungrouped.locs, ungrouped.index)
+        in_file = self._file_mask(self.session.locs, source.number)
+        return found if in_file is None else np.flatnonzero(in_file)[found]
+
     def _region_tables(self, roi, region):
         """Every localization layer of the session, cut to the ROI.
 
@@ -1796,10 +1805,7 @@ class ROIProject:
         from ..plugins import Selection
         session = self.session
         source = self.sources[roi.file_id]
-        ungrouped = self.state(roi.file_id).tables.ungrouped
-        found = self.members(roi, ungrouped.locs, ungrouped.index)
-        in_file = self._file_mask(session.locs, source.number)
-        rows = found if in_file is None else np.flatnonzero(in_file)[found]
+        rows = self.session_rows(roi)
         # linked here if a layer shows blinks and nothing defers it;
         # otherwise offered only where it is current.  Before the rows are
         # cut: linking writes `group_id` onto the localizations, and a cut

@@ -25,10 +25,49 @@ from typing import Dict, Optional
 import numpy as np
 
 from ..beads import BeadView, draw_bead_tracks, format_overrides, parse_overrides
-from ..fiducials import (FiducialSettings, describe, estimate_drift_fiducials,
+from ..fiducials import (SOURCES, FiducialSettings, describe, estimate_drift_fiducials,
                          find_and_choose)
 from . import Context, FormState, Notice, Plot, Plugin, Result, register
 from .drift_result import KeepsDrift
+
+
+def _rois(ctx: Context):
+    """The ROI manager's project, or None."""
+    project = getattr(ctx, "rois", None)
+    if project is None and ctx.session is not None:
+        project = getattr(ctx.session, "rois", None)
+    return project
+
+
+def roi_regions(ctx: Context, file: Optional[int] = None):
+    """Each used ROI of file ``file`` (None: any) as ``("ROI n", rows)``,
+    rows of ``ctx.locs`` -- the session's localizations, which is what the
+    ROI manager's rows index."""
+    project = _rois(ctx)
+    if project is None or not project.rois:
+        raise ValueError("beads from the ROI manager, and it has no ROIs: draw "
+                         "one round each bead there, or let the plugin find them")
+    if ctx.session is None or len(ctx.session.locs) != len(ctx.locs):
+        raise ValueError("beads from the ROI manager need the session's table")
+    out = []
+    for i in project.ordered_ids():
+        roi = project.rois[i]
+        if not roi.use:
+            continue
+        if file is not None and project.sources[roi.file_id].number != file:
+            continue
+        out.append((f"ROI {roi.number}", np.asarray(project.session_rows(roi))))
+    if not out:
+        raise ValueError("no used ROI in this file: tick the bead ROIs' use, or "
+                         "let the plugin find the beads")
+    return out
+
+
+def _file(ctx: Context, mask) -> Optional[int]:
+    if "filenumber" not in ctx.locs:
+        return None
+    files = np.unique(np.asarray(ctx.locs["filenumber"])[mask])
+    return int(files[0]) if len(files) == 1 else None
 
 
 @register("Analysis/Drift/Fiducials")
@@ -58,8 +97,17 @@ class FiducialDrift(KeepsDrift, Plugin):
             # the curve is that file's: the others keep their positions
             if len(files) and numbers.min() != numbers.max():
                 rows = numbers == files[0]
-        ctx.report(f"finding beads in {ctx.selection}")
-        drift, beads, fit = estimate_drift_fiducials(locs, settings, select=mask)
+        regions = None
+        if settings.source == SOURCES[1]:
+            regions = roi_regions(ctx, _file(ctx, mask))
+            ctx.report(f"beads in {len(regions)} ROIs")
+        else:
+            ctx.report(f"finding beads in {ctx.selection}")
+        drift, beads, fit = estimate_drift_fiducials(locs, settings, select=mask,
+                                                     regions=regions)
+        if fit.empty:
+            ctx.warn(f"no bead in {', '.join(fit.empty)}: fewer than two "
+                     f"localizations brighter than {settings.min_photons:g} photons")
         chosen = fit.chosen
         axes = ("x", "y", "z")[:fit.residuals_nm.shape[1]]
         return Result(locs=drift.apply(locs, rows=rows),
@@ -77,18 +125,31 @@ class FiducialDrift(KeepsDrift, Plugin):
         """The button to the bead selector.  The beads are not counted here:
         finding them links every bright localization, too slow for each
         keystroke in the form."""
+        from_rois = settings.source == SOURCES[1]
+        # nothing is linked from ROIs: the linker's settings do not apply
+        active = {"min_fraction": not from_rois, "max_jump_nm": not from_rois,
+                  "memory": not from_rois}
         if ctx is None or ctx.locs is None or not len(ctx.locs):
-            return FormState()
+            return FormState(active=active)
         hand = parse_overrides(settings.beads) if settings.beads else {}
-        text = (f"{len(hand)} bead(s) chosen by hand" if hand
-                else "the beads are found and judged when run")
-        return FormState(notice=Notice(text, "Select beads...", "bead selector",
-                                       kind="info"))
+        if from_rois:
+            project = _rois(ctx)
+            n = sum(1 for r in project.rois.values() if r.use) if project else 0
+            text = f"a bead in each of the {n} used ROIs" if n else \
+                "the ROI manager has no used ROI"
+        else:
+            text = "the beads are found and judged when run"
+        if hand:
+            text += f"; {len(hand)} chosen by hand"
+        return FormState(active=active, notice=Notice(text, "Select beads...",
+                                                      "bead selector", kind="info"))
 
     # -- the bead window's interface (`gui.bead_window`)
     def bead_view(self, ctx: Context, settings: FiducialSettings, source: int = 0):
         mask = np.asarray(ctx.selection.mask, bool)
-        found = find_and_choose(ctx.locs, settings, select=mask)
+        regions = (roi_regions(ctx, _file(ctx, mask)) if settings.source == SOURCES[1]
+                   else None)
+        found = find_and_choose(ctx.locs, settings, select=mask, regions=regions)
         beads = found.beads
         return BeadView(found.chosen, found.axes, [str(ctx.selection)], 0,
                         {"frames": [f"{a}-{b}" for a, b in zip(beads.first, beads.last)]},

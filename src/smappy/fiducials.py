@@ -54,6 +54,13 @@ beads in the order it meets them, which a filter or *min photons* changes,
 and a bead chosen by hand (*by hand*, which the bead selector writes) must
 stay that bead.  A choice is matched to the nearest bead within 0.3 um
 (`_match`).  The beads stay in the table, corrected like everything else.
+
+**Beads from the ROI manager** (*beads from*, `beads_in_regions`): for the
+rare table where the beads were picked by hand as ROIs, each used ROI is a
+bead -- its localizations brighter than *min photons*, the brightest where
+a frame has several -- named after it (``ROI 5``, a number the ROI manager
+never gives again).  Nothing is linked, so *maximum jump*, *memory* and
+*min length* do not apply: the ROI says where the bead is.
 """
 from __future__ import annotations
 
@@ -77,8 +84,14 @@ from .params import param
 _PENALTY = 1e-3
 
 
+SOURCES = ("find them", "ROI manager")
+
+
 @dataclass
 class FiducialSettings:
+    source: str = param(SOURCES[0], label="beads from", choices=SOURCES,
+                        help="find the beads as bright, long tracks, or take each "
+                             "used ROI of the ROI manager as a bead")
     min_photons: float = param(5000.0, label="min photons", min=0,
                                help="localizations dimmer than this are not "
                                     "beads")
@@ -168,6 +181,7 @@ class FiducialFit:
     bead: np.ndarray              # their bead number
     # every bead found, which were used and why (`beads.select_beads`)
     chosen: Optional[BeadSet] = field(default=None, repr=False)
+    empty: List[str] = field(default_factory=list)   # ROIs that held no bead
 
     @property
     def rms_nm(self) -> np.ndarray:
@@ -210,6 +224,34 @@ def fit_drift(frame, positions, bead, n_frames: int,
     drift[:, :n_axes] = curve
     residuals = p - offsets_nm[b] - curve[t]
     return FiducialFit(drift, offsets_nm, residuals, rows, b)
+
+
+def beads_in_regions(frame, photons, regions: List[np.ndarray],
+                     min_photons: float = 5000.0) -> Beads:
+    """A bead per region (rows of the table): its localizations brighter
+    than ``min_photons``, one a frame -- the brightest, since a dye molecule
+    blinking in the ROI is the dimmer one.  A region left with fewer than
+    two is no bead and keeps its number with no rows."""
+    frame = np.asarray(frame, np.int64)
+    photons = np.asarray(photons, float)
+    bead = np.full(len(frame), -1, np.int64)
+    for k, rows in enumerate(regions):
+        rows = np.asarray(rows, np.int64)
+        rows = rows[photons[rows] >= min_photons]
+        if len(rows) < 2:
+            continue
+        # brightest first, then the first row of each frame is kept
+        rows = rows[np.lexsort((-photons[rows], frame[rows]))]
+        first = np.concatenate([[True], np.diff(frame[rows]) != 0])
+        bead[rows[first]] = k
+    n = len(regions)
+    used = bead >= 0
+    count = np.bincount(bead[used], minlength=n)
+    first = np.full(n, np.iinfo(np.int64).max)
+    last = np.full(n, -1)
+    np.minimum.at(first, bead[used], frame[used])
+    np.maximum.at(last, bead[used], frame[used])
+    return Beads(bead, first, last, count)
 
 
 # a bead's name, from its median position in um: x12.3y-4.5
@@ -261,12 +303,14 @@ class FoundBeads:
     positions: np.ndarray
     n_frames: int
     axes: tuple
+    empty: List[str] = field(default_factory=list)   # the ROIs that held no bead
 
 
 def find_and_choose(locs: Localizations, settings: Optional[FiducialSettings] = None,
-                    select=None) -> FoundBeads:
+                    select=None, regions=None) -> FoundBeads:
     """Find the beads (`find_beads`) and choose among them
-    (`beads.select_beads`, on frames, over the whole file)."""
+    (`beads.select_beads`, on frames, over the whole file).  ``regions``,
+    ``[(name, rows)]``: a bead per region instead (`beads_in_regions`)."""
     settings = settings or FiducialSettings()
     missing = [c for c in ("x_nm", "y_nm", "frame", "photons") if c not in locs]
     if missing:
@@ -282,21 +326,39 @@ def find_and_choose(locs: Localizations, settings: Optional[FiducialSettings] = 
     x = np.asarray(locs["x_nm"], float)
     y = np.asarray(locs["y_nm"], float)
     z = np.asarray(locs["z_nm"], float) if use_z else None
-    beads = find_beads(x, y, frame, locs["photons"], z, n_frames=n_frames,
-                       min_photons=settings.min_photons,
-                       min_fraction=settings.min_fraction,
-                       max_jump_nm=settings.max_jump_nm, memory=settings.memory,
-                       select=select)
-    if not len(beads):
-        raise ValueError(
-            f"no beads: no track of localizations brighter than "
-            f"{settings.min_photons:g} photons lasts {settings.min_fraction:g} "
-            f"of the {n_frames} frames; lower min photons or min length")
+    if regions is not None:
+        beads = beads_in_regions(frame, locs["photons"], [r for _, r in regions],
+                                 settings.min_photons)
+        empty = [name for (name, _), n in zip(regions, beads.count) if n < 2]
+        keep = [k for k in range(len(regions)) if beads.count[k] >= 2]
+        if not keep:
+            raise ValueError(
+                f"no beads: none of the {len(regions)} ROIs holds two "
+                f"localizations brighter than {settings.min_photons:g} photons")
+        # renumbered over the ROIs that hold a bead
+        renumber = np.full(len(regions), -1, np.int64)
+        renumber[keep] = np.arange(len(keep))
+        b = np.where(beads.bead >= 0, renumber[np.maximum(beads.bead, 0)], -1)
+        beads = Beads(b, beads.first[keep], beads.last[keep], beads.count[keep])
+        names = [regions[k][0] for k in keep]
+    else:
+        empty = []
+        beads = find_beads(x, y, frame, locs["photons"], z, n_frames=n_frames,
+                           min_photons=settings.min_photons,
+                           min_fraction=settings.min_fraction,
+                           max_jump_nm=settings.max_jump_nm, memory=settings.memory,
+                           select=select)
+        if not len(beads):
+            raise ValueError(
+                f"no beads: no track of localizations brighter than "
+                f"{settings.min_photons:g} photons lasts {settings.min_fraction:g} "
+                f"of the {n_frames} frames; lower min photons or min length")
+        names = None
     positions = np.column_stack([x, y] + ([z] if use_z else []))
     rows = beads.bead >= 0
     where = np.array([[np.median(x[beads.bead == b]), np.median(y[beads.bead == b])]
                       for b in range(len(beads))])
-    names = bead_names(where)
+    names = names or bead_names(where)
     r = settings.rejection
     # the fiducial fit's own span and coefficients, so that with every bead
     # used the curve is `fit_drift`'s to the last bit
@@ -309,16 +371,18 @@ def find_and_choose(locs: Localizations, settings: Optional[FiducialSettings] = 
                           n_coeffs=max(4, int(round(n_frames / settings.spline_knot_frames))
                                        + 3))
     return FoundBeads(beads, chosen, where, frame, positions, n_frames,
-                      ("x", "y", "z") if use_z else ("x", "y"))
+                      ("x", "y", "z") if use_z else ("x", "y"), empty)
 
 
 def estimate_drift_fiducials(locs: Localizations,
                              settings: Optional[FiducialSettings] = None,
-                             select=None) -> "tuple[Drift, Beads, FiducialFit]":
+                             select=None, regions=None
+                             ) -> "tuple[Drift, Beads, FiducialFit]":
     """The drift of a table from its beads: the `Drift`, the beads found and
-    the fit of the beads used (``fit.chosen``: all of them, judged)."""
+    the fit of the beads used (``fit.chosen``: all of them, judged).
+    ``regions``: the beads are these (`find_and_choose`)."""
     settings = settings or FiducialSettings()
-    found = find_and_choose(locs, settings, select)
+    found = find_and_choose(locs, settings, select, regions)
     chosen = found.chosen
     n_axes = found.positions.shape[1]
     curve = chosen.curve(np.arange(found.n_frames))
@@ -332,7 +396,7 @@ def estimate_drift_fiducials(locs: Localizations,
     _, b = np.unique(bead[rows], return_inverse=True)
     used_beads = np.flatnonzero(chosen.used)
     fit = FiducialFit(drift_nm, chosen.offsets_nm[used_beads],
-                      chosen.residuals[keep], rows, b, chosen)
+                      chosen.residuals[keep], rows, b, chosen, found.empty)
     drift = Drift(drift_nm, settings, n_used=len(rows),
                   method="fiducials").referenced(settings.reference)
     return drift, found.beads, fit

@@ -1,6 +1,6 @@
 ---
 version: "3"
-covers: [smappy.fiducials.find_beads, smappy.fiducials.fit_drift, smappy.fiducials.estimate_drift_fiducials, smappy.fiducials.find_and_choose, smappy.fiducials.bead_names, smappy.beads.select_beads, smappy.beads.bead_metrics, smappy.beads.MadRule, smappy.beads.draw_bead_tracks, smappy.tracking.link.link_tracks, smappy.drift._spline_basis, smappy.drift.Drift.apply, smappy.simulate.beads.simulate_beads]
+covers: [smappy.fiducials.find_beads, smappy.fiducials.fit_drift, smappy.fiducials.estimate_drift_fiducials, smappy.fiducials.find_and_choose, smappy.fiducials.bead_names, smappy.fiducials.beads_in_regions, smappy.plugins.drift_fiducials.roi_regions, smappy.roi_manager.core.ROIProject.session_rows, smappy.beads.select_beads, smappy.beads.bead_metrics, smappy.beads.MadRule, smappy.beads.draw_bead_tracks, smappy.tracking.link.link_tracks, smappy.drift._spline_basis, smappy.drift.Drift.apply, smappy.simulate.beads.simulate_beads]
 ---
 
 ## What it does
@@ -33,6 +33,11 @@ localizations that pass the layer's filter, inside the drawn
 ROI drawn around the beads, or a filter that keeps only the brightest
 localizations, tells the plugin where to look.  The selection must hold one
 file.
+
+Where the beads were already picked by hand in the
+[ROI manager](plugin:Panels/ROI manager) -- an ROI round each -- *beads
+from* *ROI manager* takes each used ROI of the file as one bead instead of
+finding them.
 
 ## How it works
 
@@ -186,6 +191,16 @@ place: the linker numbers the beads in the order it meets them, and a
 filter or *min photons* changes that order.  A bead whose track a gap
 broke in two is two beads at one place, the second named with `#2`.
 
+**Beads from the ROI manager.**  Each used ROI of the selection's file is
+one bead: its localizations brighter than *min photons*, the ROI's shape
+deciding which rows (the layer's filter and the drawn ROI play no part),
+and where a frame holds several, the brightest -- a dye molecule blinking
+inside the ROI is the dimmer one.  Nothing is linked, so *min length*,
+*maximum jump* and *memory* are greyed out.  An ROI with fewer than two such
+localizations is no bead, and the run says which.  A bead is named after
+its ROI (`ROI 5`), whose number the ROI manager never gives to another, so
+a choice by hand stays with it.
+
 **The reference.**  A constant can move from every offset into the curve
 without changing the fit: only how the beads moved is measured, not where
 the sample was.  The curve is fixed by setting it to zero at the first
@@ -220,6 +235,11 @@ wants a smaller *knot spacing* (50 frames brings it under 2 nm there); the
 *Output* says how to tell.
 
 ## Parameters
+
+### source
+*find them* suits nearly every file.  *ROI manager* is for the file whose
+beads the automatic search cannot tell from the structure -- dim beads
+among bright clusters -- and which were therefore marked by hand.
 
 ### min_photons
 Set it between the brightest dye localizations and the beads: the
@@ -303,8 +323,8 @@ Based on SMAP's `Drift/driftcorrection_beads`
   mean.
 * SMAP used every bead it found.  Here a bead that disagrees with the
   others is left out, and any bead can be chosen by hand.
-* The beads are those of the selection; SMAP also offered the sites of the
-  ROI manager.  SMAP saved the corrected file itself; here the correction
+* The beads are those of the selection, or, as SMAP also offered, the
+  used ROIs of the ROI manager.  SMAP saved the corrected file itself; here the correction
   is saved with the file like any other.
 
 ## References
