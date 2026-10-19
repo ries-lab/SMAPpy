@@ -2,7 +2,7 @@
 title: Regions tab
 summary: The shape every analysis ROI shares, and the way into the ROI manager and the steps that measure every ROI.
 widget: smappy.gui.roi_tab.ROIHeader
-covers: [smappy.roi_manager.core.ROIProject.set_geometry, smappy.roi_manager.core.ROIProject.indices, smappy.roi_manager.core.ROIProject.geometry, smappy.roi_manager.core.ROIProject.evaluate, smappy.roi_manager.core.ROIProject.latest, smappy.roi_manager.core.ROIProject.evaluations, smappy.regions.inside_polygon, smappy.roi_manager.core.ROIProject.sync, smappy.roi_manager.pipeline.default_block]
+covers: [smappy.roi_manager.core.ROIProject.set_geometry, smappy.roi_manager.core.ROIProject.indices, smappy.roi_manager.core.ROIProject.geometry, smappy.roi_manager.core.ROIProject.evaluate, smappy.roi_manager.core.ROIProject.latest, smappy.roi_manager.core.ROIProject.evaluations, smappy.regions.inside_polygon, smappy.roi_manager.core.ROIProject.sync, smappy.roi_manager.pipeline.default_block, smappy.gui.region_filter_panel.RegionFilterPanel]
 ---
 
 ## What it does
@@ -282,6 +282,35 @@ ROI.
 Draw a rectangle, a line or a polygon in the 2D view first.  Useful for
 structures that are not round, or a region the automatic finder would not
 propose; the outline is kept as it is.
+
+### region filter
+Keeps the localizations of the [regions](plugin:Panels/Glossary) whose
+results pass conditions -- ROIs with six corners or more, traces whose
+spread is below 10 nm, clusters of 20 localizations or more -- and drops
+the rest from every layer, view and plugin.  The conditions are the same
+as [Filter regions](plugin:Analysis/Regions/Filter regions) sets in a
+chain, whose page has the rules: a region must pass every condition on its
+source, a localization is kept if it is in any region that passes, and one
+in no region of a filtered source is dropped.  Folded when the tab opens.
+
+From the top: the conditions applied, each with how many regions it keeps
+of how many (click one to show its value, × to remove it); a warning where
+results are out of date; a search box and the tree of everything that can
+be filtered -- the ROIs and each id column, each evaluation, its values,
+and the statistics of one quantity (`cfr` › `median`) as a level of their
+own; and the chosen value's distribution over all the regions, with the
+range to keep, or for a keyword or a flag (an ROI's *use*) the texts to
+accept.  The Render tab's *regions* button turns the filter off in one
+layer.
+
+### clear all
+Removes every condition: every localization is shown again.
+
+### add
+Adds the chosen value with its range as a condition, or with the texts
+ticked; for a value that already has one it reads *update* and replaces
+it.  The range is the two numbers beside it, or the shaded band dragged on
+the histogram -- an end dragged to the edge is no bound.
 
 ## Differences from SMAP
 

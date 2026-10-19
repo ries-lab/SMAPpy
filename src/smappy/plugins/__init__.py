@@ -810,6 +810,10 @@ class Result:
     # A block's tables per region, which a block around it keeps as the
     # children of its own region (`region_runs.RegionScratch`).
     region_tables: Dict[str, Any] = field(default_factory=dict)
+    # The region filter's conditions after this run, as dicts
+    # (`region_filter.Condition.to_dict`), set on the session
+    # (`Session.set_region_filter`); None leaves them as they are.
+    region_filter: Optional[List[Dict[str, Any]]] = None
     # ``(name, plugin path)`` of the evaluations this run left on the
     # regions, so that a later step of a chain reads them without asking.
     evaluations: Sequence[Tuple[str, str]] = ()

@@ -132,6 +132,7 @@ the result is made, where a misspelt key of `data` used to do nothing:
 | `roi_project` | the whole ROI project as a chain left it, loaded into the session's |
 | `id_regions` | what was measured per region of an id column, `{column: {name: RegionTable}}`, added to `Session.id_regions`; a plugin that measures every region at once makes its table with `region_runs.column_table`, signed as a block's run would be, so it reads as current (`plugins/id_statistics.py`) |
 | `region_tables` | a block's tables per region, kept by a block around it as its region's children |
+| `region_filter` | the region filter's conditions after the run, as dicts (`region_filter.Condition.to_dict`), set by `Session.set_region_filter`; None leaves them (`plugins/region_filter.py`) |
 | `evaluations` | `(name, plugin path)` of the evaluations the run left, so a later step of a chain reads them without asking |
 | `placements` | `{layer index: 3x3 affine}`, image layers moved (`ImageData.placement`, nm): *Transform*'s image target, one undo step and a log line like a table change |
 | `image_layers` | new images (`ImageData`), each added as a source and an image layer after the others (`Session.add_image`): *Process image*'s result; not an undo step and not logged |
@@ -193,6 +194,7 @@ another choice.
 | `n_in_group` | **on-time in frames** (for a table with a trace id, `tid`, the localizations in the trace); grouping writes it onto both tables |
 | `group_id` | which group a localization was linked into, 1-based; on the grouped table, its own row |
 | `cluster_id`, `n_in_cluster` | which cluster, 1-based, 0 for none, and the localizations in it -- written by `Analysis/Regions/Find clusters` (`plugins/clusters.py`) |
+| `region_filter` | 1 for a localization in a region the region filter keeps, 0 for one it drops -- written by `Session.refresh_region_filter` from the conditions in the table's metadata; never read by a region's measurement (`region_runs.unmeasured`) |
 | `track_id`, `track_length` | which track, 1-based, 0 for none (and for a track below the minimum length), and the localizations in it -- written by `Analysis/Tracking/Link tracks` (`plugins/link_tracks.py`, or into its *output column*); a simulation's truth is `track_id_true`, MINFLUX's traces `tid`.  Nothing that reads tracks names one: each has a *track id*, on *auto* the first of `track_id`, `tid`, `track_id_true` the table has (`tracking.columns.track_column`).  Whole numbers when blinks merge -- a blink's largest id and length (`group.id_columns`), whether linked here or read from a file |
 | `track_D_um2_per_s`, `track_alpha` | a track's diffusion coefficient and anomalous exponent from its MSD, NaN for none -- written by `Analysis/Tracking/Tracking analysis` with *write per track* |
 | `sigma_nm`, `sigma_y_nm`, `logl_rel` | PSF width and fit quality |

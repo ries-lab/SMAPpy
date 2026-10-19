@@ -40,6 +40,7 @@ def test_the_region_plugins_are_registered_under_regions():
                           "Analysis/Regions/Regions to column",
                           "Analysis/Regions/Sort ROIs",
                           "Analysis/Regions/Filter ROIs",
+                          "Analysis/Regions/Filter regions",
                           "Analysis/Regions/Remove double ROIs",
                           "Analysis/Regions/Centre ROIs",
                           "Analysis/Regions/Average ROIs",

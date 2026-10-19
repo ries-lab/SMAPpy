@@ -184,10 +184,45 @@ one, and Histograms still counted three.  In the file the tables are HDF5
 groups under `/regions` and `/id_regions`; the saver can leave them, or only
 their figure data, out.
 
+## Filtering regions
+
+To keep the localizations of the regions whose results are good -- the
+pores with six corners, the traces with a small spread -- the results stay
+in their region tables and a **region filter** decides
+(`region_filter.py`; *Filter regions* in a chain, the Regions tab's *region
+filter* section by hand; `docs/region-filter.md` has the design).  Its
+conditions are each one value of one evaluation and a range, or the texts
+a keyword may be; they go with the table in its metadata, and their answer
+is one column, `region_filter` (1 in, 0 out), with a bound on it in every
+layer -- which the Render tab's *regions* button takes off one layer.
+The rules:
+
+* a region passes if it passes every condition on its source (the ROIs, or
+  one id column): of two overlapping pores, one with the corners and one
+  with the diameter, neither passes;
+* within a source a localization is in if it is in any passing region (OR):
+  the overlap of a good pore and a bad one stays;
+* different sources combine by AND;
+* a localization in no region of a filtered source is out;
+* a merged blink is in if any of its localizations is (grouped rule `any`).
+
+The flag is not a snapshot: it is written again whenever the table, the
+ROIs or their results change (`Session.refresh_region_filter`).  After a
+table change that keeps the ids (a drift correction) the results are out of
+date and still applied, with a warning; a changed id column (a new
+clustering) suspends that source's conditions.  The summaries read through
+`region_results.rows`, which keeps only the regions the filter passes.
+
+**A region is measured whatever the filter says.**  Neither `region_filter`
+nor a column written from region results is applied while a region is
+measured, nor counted among its results' inputs (`region_runs.unmeasured`):
+a filter on a result, applied while the result is measured again, would
+empty the regions that failed it and drop them for good.
+
 ## Region values as columns
 
-To filter or colour localizations by what was measured in their region --
-the pores with six corners, the clusters with a good precision -- each
+To colour localizations by what was measured in their region, to compute
+with it per localization, or to compare two filters in two layers, a
 region's number is written onto its rows as a column
 (`region_runs.write_values`): by *write values* on a block, at the end of
 every run so a chain keeps it current, or by *Regions to column* for results
@@ -197,16 +232,14 @@ first or the mean (*any* is for write back, and refused here).  Everything that 
 filter, colour by a field, merge blinks (a blink takes the mean, the highest
 of a `roi_id`), the file.
 
-This replaced a planned region table in the session with a filter of its
-own: that filter would belong to no layer, a second kind of table would need
-its own UI and its own link to the localizations, and filtering through it
-would be the column anyway.  The cost: a histogram of such a column counts
-localizations, not regions (*Summarize/Histograms* is the distribution over
-regions), and it is a snapshot until written again.  The table remembers
+Filtering is the region filter's, above: it needs no column per value and
+counts regions, not localizations.  A written column is a snapshot until
+written again.  The table remembers
 which columns came from regions (`metadata["region_columns"]`) and writes
 only over those, never over a column of the localizations' own; those
 columns are left out of both stores' data signatures, so writing them does
-not put the results they came from out of date.
+not put the results they came from out of date, and a bound on them does
+not narrow a region's measurement.
 
 ## Clusters
 
@@ -229,6 +262,7 @@ Analysis/Regions/Segment regions    ROIs: a ring template, density peaks, or an 
 Analysis/Regions/Find clusters      DBSCAN, Voronoi or HDBSCAN (cluster_id)
 Analysis/Regions/Summarize/...      Histograms, NPC labelling efficiency: read a region table
 Analysis/Regions/Regions to column  what was measured per region onto the table
+Analysis/Regions/Filter regions     keep the regions whose results pass: one flag, region_filter
 Analysis/Regions/Average ROIs       the used ROIs centred, turned and superimposed: a new file
 Analysis/Regions/Workflow/...       NPC Analysis, a shipped chain with a block
 ```

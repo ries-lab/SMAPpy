@@ -107,17 +107,24 @@ def rows(ctx, ev: Evaluation) -> List[Dict[str, Any]]:
     ``roi_id`` and its values beside it.  For the ROIs, the included ones
     whose row still describes them (`ROIProject.results`); for an id column,
     every region where the step did not fail, or none when the table is out
-    of date."""
+    of date.  Where the region filter has conditions on the source, only the
+    regions it keeps (`region_filter.passing_rows`): a summary counts what
+    the views show."""
+    from .region_filter import passing_rows
     if ev.on_rois:
-        return [] if ctx.rois is None else ctx.rois.results(labels=[ev.label])
-    if not is_current(ctx, ev):
+        out = [] if ctx.rois is None else ctx.rois.results(labels=[ev.label])
+    elif not is_current(ctx, ev):
         return []
-    found = table(ctx, ev)
-    out = []
-    for region_id in found.ids:
-        entry = found.entry(region_id)
-        if entry and "values" in entry:
-            out.append({"roi_id": region_id, "file_id": "", **entry["values"]})
+    else:
+        found = table(ctx, ev)
+        out = []
+        for region_id in found.ids:
+            entry = found.entry(region_id)
+            if entry and "values" in entry:
+                out.append({"roi_id": region_id, "file_id": "", **entry["values"]})
+    kept = passing_rows(ctx, ev.source)
+    if kept is not None:
+        out = [r for r in out if str(r["roi_id"]) in kept]
     return out
 
 
