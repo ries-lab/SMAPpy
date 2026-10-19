@@ -13,6 +13,10 @@ The GUI is included. Binary wheels are available for Python 3.12-3.14 on macOS,
 Linux and Windows, so nothing needs to be compiled. The package is called
 `smappy-smlm` on PyPI; in Python you `import smappy`.
 
+**I need more help.** Never used a terminal or `pip`?
+[Installing SMAPpy, step by step](docs/install-step-by-step.md) walks through
+it on a Mac or Windows computer, from opening the terminal to starting the GUI.
+
 With [uv](https://docs.astral.sh/uv/) you can install the GUI as a standalone
 tool, or run it without installing:
 
