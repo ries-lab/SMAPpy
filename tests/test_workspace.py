@@ -7,8 +7,7 @@ from smappy.workspace import Instance, Tab, Workspace, load
 COMET = "Analysis/Drift/COMET"
 RCC = "Analysis/Drift/RCC"
 STATS = "Analysis/Measure/Localization Statistics"
-FIND_CLUSTERS = "Analysis/Regions/Find clusters"
-ROI_COLUMN = "Analysis/Regions/Regions to column"
+SEGMENT = "Analysis/Regions/Segment regions"
 
 
 # ---------------------------------------------------------------- the model
@@ -44,13 +43,14 @@ def test_the_default_workspace_is_the_shipped_gui_file():
     ws = Workspace.default()
     assert [t.name for t in ws.tabs] == ["File", "Localize", "Render", "Analysis", "Regions"]
     analysis = next(t for t in ws.tabs if t.name == "Analysis")
-    assert {COMET, RCC, STATS, "Analysis/Measure/Histogram"} <= \
-        {i.plugin for i in analysis.instances}
+    assert [i.plugin for i in analysis.instances] == [
+        "Analysis/Measure/Line Profile", STATS, RCC, COMET,
+        "Analysis/Dual-colour/Assign colours"]
     assert next(t for t in ws.tabs if t.name == "Render").kind == "render"
     regions = next(t for t in ws.tabs if t.name == "Regions")
     assert regions.header == "roi"
     pinned = [i.plugin for i in regions.instances]
-    assert FIND_CLUSTERS in pinned and ROI_COLUMN in pinned
+    assert pinned == [SEGMENT, "Analysis/Regions/Summarize/Export table"]
     # every instance has an id of its own, given as it is read
     ids = [i.id for t in ws.tabs for i in t.instances]
     assert all(ids) and len(set(ids)) == len(ids)
@@ -230,7 +230,7 @@ def test_the_menus_have_no_second_way_into_what_a_tab_opens(window):
 def test_opening_a_section_is_what_imports_the_plugin(window):
     import sys
     tab = tab_named(window, "Analysis")
-    instance = tab.tab.instances[0]
+    instance = next(i for i in tab.tab.instances if i.plugin == COMET)
     assert tab.slots[instance.id].panel is None       # nothing built yet
     tab.open_section(instance.id)
     assert tab.slots[instance.id].panel is not None
@@ -259,7 +259,8 @@ def test_a_pin_that_is_not_installed_says_so_instead_of_crashing(window):
 
 def test_values_survive_being_saved_and_reopened(window, tmp_path):
     tab = tab_named(window, "Analysis")
-    instance = tab.tab.instances[0]
+    at = next(k for k, i in enumerate(tab.tab.instances) if i.plugin == COMET)
+    instance = tab.tab.instances[at]
     tab.open_section(instance.id)
     tab.slots[instance.id].panel.form.restore({"segmentation_var": 11})
     instance.label = "COMET (coarse)"
@@ -268,8 +269,8 @@ def test_values_survive_being_saved_and_reopened(window, tmp_path):
 
     reopened = load(path)
     back = next(t for t in reopened.tabs if t.name == "Analysis")
-    assert back.instances[0].label == "COMET (coarse)"
-    assert back.instances[0].values["segmentation_var"] == 11
+    assert back.instances[at].label == "COMET (coarse)"
+    assert back.instances[at].values["segmentation_var"] == 11
     assert reopened.layout["open"]["Analysis"] == instance.id
     # the screen's business, not the GUI's; and a GUI starts on File
     assert "geometry" not in reopened.layout
@@ -404,10 +405,10 @@ def test_removing_and_reordering_from_the_tab_edits_the_workspace(window):
     first, second = tab.tab.instances[:2]
     tab.tab.move(first.id, 1)
     tab.rebuild()
-    assert [s.title for s in tab.sections][:2] == ["RCC drift correction", "COMET drift correction"]
+    assert [s.title for s in tab.sections][:2] == ["Localization Statistics", "Line Profile"]
     tab.tab.instances.remove(second)
     tab.rebuild()
-    assert "RCC" not in [s.title for s in tab.sections]
+    assert "Localization Statistics" not in [s.title for s in tab.sections]
     assert second.id not in tab.slots            # its panel went with it
 
 

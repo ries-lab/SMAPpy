@@ -13,7 +13,8 @@ to read it, is the measuring tutorial's.
 """
 from __future__ import annotations
 
-from .common import field, open_section, place_beside, show_tab, tab_button, toolbar
+from .common import (field, open_section, pin, place_beside, show_tab, tab_button,
+                     toolbar)
 
 TITLE = "Plugins: running, plotting, following the ROI"
 DESCRIPTION = ("How every plugin works: finding it, its settings, Run and its "
@@ -156,6 +157,7 @@ def make(d) -> None:
         d.settle()
 
     d.chapter("What is kept")
+    pin(d, analysis, "Analysis/Process/History", "History")
     history_section, history = open_section(d, analysis, "History")
     history.run_button.click()
     d.settle()

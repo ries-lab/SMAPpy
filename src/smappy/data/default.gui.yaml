@@ -1,4 +1,5 @@
-# The GUI a fresh install opens, and File > Workspace > Reset tabs to defaults.
+# The GUI a fresh install opens, and File > Workspace > Reset.  Save on it asks
+# for a file of one's own (in the config folder): this one is never written.
 # The same format File > Workspace > Save writes: to change it, arrange the
 # tabs in the program, save the GUI, and put the tabs here.  A plugin named
 # here that is not installed is left out when it is read.
@@ -7,11 +8,9 @@ tabs:
 - name: File
   instances:
   - plugin: File/Load/Load
-  - plugin: File/Export/Image
-  - plugin: File/Export/Stack
   - plugin: File/Export/Localizations
+  - plugin: File/Export/Stack
   - plugin: File/Simulate/Blinking Structure
-  - plugin: File/Simulate/Tracks
 - name: Localize
   header: localize
   instances:
@@ -20,47 +19,17 @@ tabs:
   - plugin: Localize/Gaussian 2D 2C
   - plugin: Localize/Spline 3D
   - plugin: Localize/Spline 3D 2C
-  - plugin: Localize/uiPSF calibration
 - name: Render
   kind: render
 - name: Analysis
   instances:
-  - plugin: Analysis/Drift/COMET
-  - plugin: Analysis/Drift/RCC
-  - plugin: Analysis/Drift/Fiducials
-  - plugin: Analysis/Dual-colour/Assign colours
-  - plugin: Analysis/Measure/Ground Truth
   - plugin: Analysis/Measure/Line Profile
-  - plugin: Analysis/Measure/Localization Precision
   - plugin: Analysis/Measure/Localization Statistics
-  - plugin: Analysis/Measure/Histogram
-  - plugin: Analysis/Measure/Cluster shape
-  - plugin: Analysis/Measure/Circle fit
-  - plugin: Analysis/Measure/Spatial statistics
-  - plugin: Analysis/Measure/Stability
-  - plugin: Analysis/Measure/Time Course
-  - plugin: Analysis/Measure/Blinking
-  - plugin: Analysis/Process/History
-  - plugin: Analysis/Process/Image Tags
-  - plugin: Analysis/Process/Math Parser
-  - plugin: Analysis/Process/Neighbourhood
-  - plugin: Analysis/Process/Process image
-  - plugin: Analysis/Process/Remove Localizations
-  - plugin: Analysis/Process/Shuffle ids
-  - plugin: Analysis/Process/Transform
-  - plugin: Analysis/Register/Calibrate transform
-  - plugin: Analysis/Register/Register layers
-  - plugin: Analysis/Tracking/Link tracks
-  - plugin: Analysis/Tracking/Tracking analysis
+  - plugin: Analysis/Drift/RCC
+  - plugin: Analysis/Drift/COMET
+  - plugin: Analysis/Dual-colour/Assign colours
 - name: Regions
   header: roi
   instances:
-  - plugin: Analysis/Regions/Find clusters
   - plugin: Analysis/Regions/Segment regions
-  - plugin: Analysis/Regions/Centre ROIs
-  - plugin: Analysis/Regions/Regions to column
-  - plugin: Analysis/Regions/Summarize/Histograms
-  - plugin: Analysis/Regions/Summarize/Curves
   - plugin: Analysis/Regions/Summarize/Export table
-  - plugin: Analysis/Regions/Summarize/NPC labelling efficiency
-  - plugin: Analysis/Regions/Workflow/NPC Analysis

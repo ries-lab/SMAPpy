@@ -272,9 +272,8 @@ def test_the_file_tab_ships_with_load_first_and_what_the_file_menu_does_not_do(
     # menu's, and the tree still has it and the loader, for chains and the
     # batch
     assert pinned[0] == "File/Load/Load"
-    assert set(pinned) == {"File/Load/Load", "File/Export/Image", "File/Export/Stack",
-                           "File/Export/Localizations", "File/Simulate/Blinking Structure",
-                           "File/Simulate/Tracks"}
+    assert set(pinned) == {"File/Load/Load", "File/Export/Localizations",
+                           "File/Export/Stack", "File/Simulate/Blinking Structure"}
     assert "open files" in session.window_openers
     # the window is what supplies the state a save embeds, and it leaves
     # geometry out: machine-specific, and worthless as provenance

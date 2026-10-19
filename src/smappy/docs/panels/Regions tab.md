@@ -22,14 +22,15 @@ the ROI selected in the manager; and it holds what all ROIs share -- their
 shape and size.  Below the tab's own controls sit the ROI plugins pinned to
 it.  By default these are
 the one that finds ROIs -- [Segment regions](plugin:Analysis/Regions/Segment regions), by density peaks for
-any compact structure or a ring template for nuclear pores -- the ones that summarise the measurements --
-[Histograms of ROI results](plugin:Analysis/Regions/Summarize/Histograms) and
-[NPC labelling efficiency](plugin:Analysis/Regions/Summarize/NPC labelling efficiency)
--- and [NPC Analysis](plugin:Analysis/Regions/Workflow/NPC Analysis), which finds
+any compact structure or a ring template for nuclear pores -- and
+[Export table](plugin:Analysis/Regions/Summarize/Export table), which writes
+what was measured in every ROI to a file.  The summaries, such as
+[Histograms of ROI results](plugin:Analysis/Regions/Summarize/Histograms), and
+[NPC Analysis](plugin:Analysis/Regions/Workflow/NPC Analysis), which finds
 the pores, measures them and fits their
 [labelling efficiency](plugin:Panels/Glossary) (also called degree of
 labelling: the fraction of the target proteins that carry a detected label)
-in one run.
+in one run, are pinned with the tab's **+**.
 
 An ROI sees what the image shows: the localizations of its file that pass a
 layer's filter, with blinks merged if that layer merges them.  A

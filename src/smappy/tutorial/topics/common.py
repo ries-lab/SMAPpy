@@ -42,6 +42,23 @@ def section(plugin_tab, title: str):
                       + ", ".join(s.title for s in plugin_tab.sections))
 
 
+def pin(d, plugin_tab, path: str, title: str) -> None:
+    """Pin a plugin the shipped tabs leave out, as its + would.
+
+    The default tabs hold only the plugins most people start with, so a
+    tutorial that needs another shows where it comes from: the + of the tab.
+    """
+    if any(s.title.lower().startswith(title.lower()) for s in plugin_tab.sections):
+        return
+    from ...workspace import Instance
+    instance = Instance(plugin=path)
+    plugin_tab.tab.instances.append(instance)
+    plugin_tab.rebuild()
+    d.settle()
+    d.shot(f"{title} is not on this tab at first: the + at its top finds any "
+           "plugin and pins it here.", point=plugin_tab.add_button)
+
+
 def open_section(d, plugin_tab, title: str):
     """Expand a plugin's section and return it and its panel."""
     found = section(plugin_tab, title)

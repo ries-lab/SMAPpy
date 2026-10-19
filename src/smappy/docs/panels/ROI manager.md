@@ -29,7 +29,7 @@ The work goes in four steps:
    whole view, run once in each ROI.  Each step adds columns to the
    ROI's row.
 4. **Analyse** the table, for example with
-   [Histograms of ROI results](plugin:Analysis/Regions/Summarize/Histograms) in the Regions tab.
+   [Histograms of ROI results](plugin:Analysis/Regions/Summarize/Histograms), pinned to the Regions tab with its **+**.
 
 An ROI need not be a shape.  [Segment
 regions](plugin:Analysis/Regions/Segment regions)' *from an id column*, set

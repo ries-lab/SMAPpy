@@ -13,7 +13,7 @@ simulated data with nothing else wrong with it.
 """
 from __future__ import annotations
 
-from .common import (expand, field, figure_panels, open_section, place_beside,
+from .common import (expand, field, figure_panels, open_section, pin, place_beside,
                      show_tab, toolbar)
 
 TITLE = "Measuring: statistics, precision and line profiles"
@@ -79,6 +79,7 @@ def make(d) -> None:
     window.hide()
 
     d.chapter("Precision and resolution")
+    pin(d, analysis, "Analysis/Measure/Localization Precision", "Localization Precision")
     _, precision = open_section(d, analysis, "Localization Precision")
     d.card("Three measures of precision",
            "<p><b>CRLB</b>: what the fit believes, from the photons and the "

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from .common import (expand, field, figure_panels, open_section, place_beside,
+from .common import (expand, field, figure_panels, open_section, pin, place_beside,
                      section_of, show_tab, type_into)
 
 TITLE = "Simulating data: structures, blinking and camera frames"
@@ -153,6 +153,7 @@ def make(d) -> None:
 
     d.chapter("Against the truth")
     analysis = show_tab(d, "Analysis")
+    pin(d, analysis, "Analysis/Measure/Ground Truth", "Compare to ground truth")
     _, truth = open_section(d, analysis, "Compare to ground truth")
     isolated = field(truth, "isolated")
     type_into(truth, "min_photons", 300)
