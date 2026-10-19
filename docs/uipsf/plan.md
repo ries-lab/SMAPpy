@@ -709,7 +709,11 @@ told what to type, for this machine, where they are: the plugin's `describe` giv
   fifth of the size;
 
 with the interpreter's own path (`sys.executable -m pip`), so it lands in the Python that runs SMAPpy.
-Whether the notice also gets a button that installs it, with progress, is for the plugin's discussion.
+**For the future (noted October 2026): the plugin installs torch itself.** The notice gets a button that
+runs that command for the user: the right wheel for the machine (an NVIDIA card found, a Mac, neither),
+into `sys.executable`, on a worker thread with pip's output as progress, cancellable, and the plugin
+usable without a restart once it is done. The typed command stays in the notice as the fallback, for a
+read-only or managed Python and for a user who wants to choose. Built with the plugin, not before.
 
 **A standalone later** is SMAPpy without its GUI, plus uipsf. SMAPpy's non-GUI modules already import no Qt
 (checked October 2026: `smappy.io`, `camera_db`, `detect`, `psf`, `fit_rois` and `pipeline` load neither
@@ -782,7 +786,7 @@ The fitters and uipsf read the same entry. Its design is a step of its own, afte
 
 Open with it: one window with two outputs or two plugins over one learning call; what the analysis
 compares against (the previous model of the same microscope, from the instrument database below); which
-settings each shows by default; how the window offers the torch install.
+settings each shows by default; where the torch install's button sits (above, *For the future*).
 
 ---
 
