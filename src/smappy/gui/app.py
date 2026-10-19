@@ -315,6 +315,7 @@ class ControlWindow(QMainWindow):
         view = _add_menu(self.menuBar(), "View", self)
         self.view3d_window = None
         self.calibration_window = None
+        self.psf_calibration_window = None
         self._action(view, "3D view", "Ctrl+3", self.toggle_3d)
         render.toolbar.view3d_button.clicked.connect(self.toggle_3d)
         self.plugins_menu = _add_menu(self.menuBar(), "Plugins", self)
@@ -343,6 +344,9 @@ class ControlWindow(QMainWindow):
         # window asks single or dual itself, and opens as it was left
         session.window_openers["bead calibration"] = \
             lambda settings=None: self.open_calibration()
+        # *PSF calibration*: uipsf's pupil model, a window of its own (`calibrate.psf_window`)
+        session.window_openers["psf calibration"] = \
+            lambda settings=None: self.open_psf_calibration()
         # the File tab's Load line (`Plugin.window`): File > Open, or Add
         # *Load*'s two buttons (`plugins.file.Open`): each says what it does,
         # so neither asks, as File > Open does
@@ -1115,6 +1119,16 @@ class ControlWindow(QMainWindow):
                 "Dual colour" if dual else "Single channel")
         self.calibration_window.show()
         self.calibration_window.raise_()
+
+    def open_psf_calibration(self) -> None:
+        """The PSF calibration window, made once and opened as it was left; what it saves goes to the
+        fitter it belongs to, as the bead calibration's does."""
+        from ..calibrate.psf_window import PSFCalibrationWindow
+        if self.psf_calibration_window is None:
+            self.psf_calibration_window = PSFCalibrationWindow(parent=self)
+            self.psf_calibration_window.calibrated.connect(self.use_calibration)
+        self.psf_calibration_window.show()
+        self.psf_calibration_window.raise_()
 
     def use_calibration(self, path: str, dual: bool = False) -> None:
         """Put a fresh calibration into the fitter it belongs to.

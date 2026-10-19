@@ -797,8 +797,8 @@ settings each shows by default; where the torch install's button sits (above, *F
 
 Revision 6.  Replaces §7.1's *One window, a model choice* and answers §7.4's *To discuss*.
 
-**A new plugin, *PSF calibration*,** not a mode of the bead calibration: in situ (M5) learns from blinking
-molecules, not beads, so the name says what comes out.  It reuses the bead calibration's widgets and code
+**A new plugin, *PSF calibration*,** named for what comes out, since in situ (M5) learns from blinking
+molecules, not beads; it holds the bead average too, as a *method* (revised below, step 5).  It reuses the bead calibration's widgets and code
 (the file list, the stack view, the bead table with Space and *Recalculate*, the worker thread, *Calculate
 fit quality*), and keeps the shapes that make extensions entries rather than branches: a *source* (bead
 stacks now, a blinking movie with M5) and a model whose options are choices, not flags (below).  The
@@ -898,7 +898,14 @@ upsampling; the first stage's order; the slice thinning (`max_dz_nm`).  Those th
    3D (z, photons, the z sign against the bead average, the normalisation).  *Done (October 2026,
    `docs/uipsf/architecture.md`).*
 4. The microscope database and its editor, once the metadata of real files is in.
-5. The *PSF calibration* window and plugin, its page, `default.gui.yaml`.
+5. The *PSF calibration* window and plugin, its page, `default.gui.yaml`.  *Built (October 2026):
+   `calibrate/psf_window.py`, `plugins/psf_calibration.py`, the optics as a form until step 4.  **Revised
+   (decided October 2026): one window for every PSF calibration**, a *method* choice between the bead
+   average and the pupil model (entries in `calibrate/psf_methods.py`), and later a *source* choice (bead
+   stacks or single molecules) for in situ, which fixes the method to the pupil model.  *Bead calibration*
+   is retired once this window does everything it does.  Not yet: *Calculate fit quality* for the pupil
+   model (SMAPpy's Spline 3D on its beads), pupil figures that follow the table's selection, and a button
+   that installs torch.*
 
 ---
 

@@ -5,8 +5,9 @@ SMAPpy's *PSF calibration* window, the CLI and a notebook want to say
 "this microscope, these choices" and get a `Calibration`.  `BeadSettings`
 is those choices and `calibrate_beads` the call.
 
-**The settings are SMAPpy's `param` fields**, so the window builds its form
-from them as it does a plugin's; `smappy.plugins` imports no Qt, and uipsf
+**The settings are SMAPpy's** (`smappy.calibrate.pupil.BeadSettings`, `param`
+fields), so the window builds its form from them as it does a plugin's, and
+without torch: every `uipsf` import loads torch through the package.  uipsf
 may use smappy, never its GUI (src/uipsf/CLAUDE.md).
 
 **The model options are choices, not flags** (*magnitude*, *blur*): they
@@ -24,10 +25,10 @@ the new model fixes (a fixed blur) keeps the new settings' value.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 import torch
-from smappy.plugins import param  # GUI-free: the form's metadata, as a plugin's
+
+# The choices live in smappy, torch-free, so its window builds the form without torch installed.
+from smappy.calibrate.pupil import AUTO_ORDER, BLURS, MAGNITUDES, BeadSettings  # noqa: F401
 
 from ..model import Channel, ForwardModel, VectorPSF, ZernikePupil
 from ..model.channels import prefix
@@ -35,46 +36,6 @@ from ..optics import PupilGrid, choose_pupil_size
 from ..optics.zernike import noll_to_nm, zernike_modes
 from .beads import Calibration, learn_beads
 from .rejection import RejectionSettings
-
-#: the order a calibration learns up to unless told: n_max 6, with 8 the held-out check (plan §10)
-AUTO_ORDER = 6
-
-MAGNITUDES = (("free", "free"), ("symmetric", "symmetric"), ("fixed", "fixed (apodisation)"))
-BLURS = (("free", "free"), ("fixed", "fixed"))
-
-
-@dataclass
-class BeadSettings:
-    """The choices a bead calibration exposes; the instrument comes as `Optics`."""
-    zernike_order: int | None = param(
-        None, label="Zernike order", min=2, max=12,
-        help=f"the highest radial order of the pupil's modes; auto: {AUTO_ORDER}")
-    magnitude: str = param(
-        "free", label="pupil magnitude", choices=MAGNITUDES,
-        help="free: every mode up to the order; symmetric: the rotationally symmetric ones; "
-             "fixed: uniform, the apodisation only")
-    blur: str = param("free", label="blur", choices=BLURS,
-                      help="an extra Gaussian blur of the image, learnt or held at its value")
-    blur_nm: float = param(30.0, label="blur σ", unit="nm", min=0.0,
-                           help="its start when free, its value when fixed")
-    bead_diameter_nm: float = param(0.0, label="bead diameter", unit="nm", min=0.0,
-                                    help="the beads' size, taken out of the model; 0: point-like")
-    rejection_k: float = param(3.0, label="rejection (k)", min=1.0, advanced=True,
-                               help="robust standard deviations above the median at which a bead is "
-                                    "rejected")
-    heldout: float = param(0.0, label="held out", min=0.0, max=0.5, advanced=True,
-                           help="the fraction of beads kept out of learning and localised for the "
-                                "held-out report")
-
-    def __post_init__(self):
-        if self.magnitude not in dict(MAGNITUDES):
-            raise ValueError(f"magnitude must be one of {[k for k, _ in MAGNITUDES]}, got {self.magnitude!r}")
-        if self.blur not in dict(BLURS):
-            raise ValueError(f"blur must be one of {[k for k, _ in BLURS]}, got {self.blur!r}")
-
-    @property
-    def order(self) -> int:
-        return AUTO_ORDER if self.zernike_order is None else int(self.zernike_order)
 
 
 def magnitude_modes(n_max: int, kind: str) -> list[int]:

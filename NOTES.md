@@ -1367,6 +1367,26 @@ in situ is v2's M5.  What it taught, for v2 and its window:
   plan, conventions and what is built are in `docs/uipsf/`, its rules in
   `src/uipsf/CLAUDE.md`; the *PSF calibration* plugin that uses it is
   planned in `docs/uipsf/plan.md` §7.5.
+* **The PSF calibration window** (`Localize/PSF calibration`,
+  `calibrate/psf_window.py`): one window for a PSF calibration, by a
+  *method* -- the bead average or the pupil model -- each an entry in
+  `calibrate/psf_methods.py` that says which sections it reads, how it runs,
+  its pages, its table and how it saves; the window knows none of them.  In
+  situ will add a *source* choice and an entry, not a branch.  It replaces
+  *Bead calibration* once it does everything that one does; until then both
+  are shipped.  It calls rather than copies: the bead average's run, pages
+  and fit quality are the bead calibration's, and the pupil model finds
+  beads with its *find* half (`core.find_stack_beads`), so both list the
+  same beads.  The pupil model's run is `calibrate.pupil.run_calibration`,
+  headless.  Both save with *save model* beside the stacks under the bead
+  calibration's name, never over another file (the bead calibration asked
+  for a path each time; *Save as...* still does).
+  `BeadSettings` (the model's choices) lives in smappy, not uipsf: every
+  `uipsf` import loads torch through the package, and the window must open
+  without it to say how to install it.  Until the microscope database, the
+  optics are a form whose NA and wavelength have no default: 0 means "not
+  given" and a run refuses it (None would show as *auto*).  No *diagnosis*
+  mode: every run draws every figure, and *save model* off leaves no file.
 
 ## Tracking
 
